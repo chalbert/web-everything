@@ -1,0 +1,5 @@
+{
+  "term": "switch/case/default (view)",
+  "definition": "Multi-branch conditional rendering where one case is shown based on expression value. More declarative than multiple if statements.",
+  "usage": "Implemented by ViewSwitchDirective. Matches Angular ngSwitch, Solid Switch/Match. Use <code>view:switch</code> on parent, <code>view:case</code>/<code>view:default</code> on children."
+}

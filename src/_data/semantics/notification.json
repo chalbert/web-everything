@@ -1,0 +1,5 @@
+{
+  "term": "Notification",
+  "definition": "A transient, non-blocking, in-page message that appears, is accessibly announced, persists for a bounded time (or until dismissed), and is removed. The general concept — temporary, dismissable, queued, severity-weighted, announced — of which a <em>toast</em> or <em>snackbar</em> is one <em>presentation</em>. Distinct from the OS-level Web Notifications API (system notifications outside the tab), from a persistent background-task surface, and from an inline (in-flow) message banner.",
+  "usage": "Realized by the <a href=\"/blocks/notification/\">Notification block</a>, which implements the <a href=\"/intents/feedback/\">Feedback Intent</a>. Presentation styles (toast, snackbar, banner-position) belong to the implementation, not the standard."
+}

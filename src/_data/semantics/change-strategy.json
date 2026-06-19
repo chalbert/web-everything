@@ -1,0 +1,5 @@
+{
+  "term": "Change Strategy",
+  "definition": "A registered mechanism that turns a tracked target into a stream of Change Records, satisfying the <code>CustomChangeStrategy</code> contract (<code>track</code>, optional <code>diff</code>, optional <code>applyInverse</code>). Capability is feature-detected by which optional methods are present. Examples: native-signals, snapshot-diff, proxy, patch, crdt, event-sourced.",
+  "usage": "Change Tracking Protocol (Web States). The native store/signal subscription strategy is the zero-config default; library strategies are opt-in adapters behind the same contract."
+}

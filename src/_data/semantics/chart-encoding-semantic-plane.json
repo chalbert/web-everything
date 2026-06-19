@@ -1,0 +1,5 @@
+{
+  "term": "Chart Encoding (semantic plane)",
+  "definition": "The mapping from a data field to a visual channel in a <a href=\"/projects/webcharts/#vega-lite-l1\">Vega-Lite L1</a> chart — e.g. <code>color: { field: 'category' }</code> means <em>encode category by hue</em>, not <code>#3b82f6</code>. The encoding is semantic; the concrete palette, scale range, and animation are the presentation/theme plane, resolved separately. A field's <em>measurement type</em> (quantitative / temporal / ordinal / nominal) drives the default scale and the accessibility-derivable axis/legend labels.",
+  "usage": "The core distinction in the Web Charts semantic/presentation split (#572). Because color/size are semantic, the same chart spec re-themes for free and an a11y description is derivable from the encoding + measurement types — the conformance suite scores accessibility as a first-class axis (#570 slice d)."
+}

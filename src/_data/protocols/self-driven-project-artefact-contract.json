@@ -1,0 +1,8 @@
+{
+  "id": "self-driven-project-artefact-contract",
+  "name": "Self-Driven Project Artefact Contract",
+  "summary": "The binding everything-as-code declaration that wires a project's self-driven SDLC into one portable, no-lock-in artefact structure a third-party PM/CI tool could read and drive. It fixes a discoverable file/metadata structure for requirements + methodology artefacts, plus four composable meta-schemas — an autonomy-level registry (report-only → live-patch), a value/risk-ODD dimension registry (the tolerance dial that throttles the autonomy ceiling), a gate-definition schema, and a step schema — each shipping a default flavor, with one fully-defined default recipe a project extends (config-extends-platform-default). A capstone made OF WE standards: it owns only the autonomy vocabulary, the value/risk-ODD dial, and the binding contract, and composes the rest — webcompliance + webpolicy (gates), webworkflows (step orchestration), webaudit + webreporting (run evidence), webdecisions (the human-handoff record), and #100 requirement-as-code (requirements). The one new lock is this contract, and it is escapable — a foreign tool drives the same files. Recipes (how a given project is driven) are a configurable layer authored in Plateau, not standard surface; the WE backlog is one dogfooded recipe. Concept; first-cut spec in reports/2026-06-15-self-driven-project-artefact-contract-spec.md. Ratified by #690 under epic #666; framing from #665.",
+  "status": "concept",
+  "ownedByProject": "webprocess",
+  "anchor": "protocol-self-driven-project"
+}

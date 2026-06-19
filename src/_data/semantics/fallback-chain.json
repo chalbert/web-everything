@@ -1,0 +1,5 @@
+{
+  "term": "Fallback Chain",
+  "definition": "The ordered list of locales tried in turn when resolving a message key, produced by Locale Negotiation. Resolution stops at the first locale for which a Translation Provider returns a message.",
+  "usage": "Walked by the Localization Protocol's resolution pattern; the outermost fallback is typically the application's default locale."
+}

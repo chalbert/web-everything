@@ -1,0 +1,5 @@
+{
+  "term": "Trait Selection",
+  "definition": "The act of choosing which traits to compose and what dimension values they take when constructing a component. Local, total, and developer-owned — expressed as attributes on the substrate (e.g. <code>selection=\"model=single\"</code>) or as a list of <code>with*</code> factories in TypeScript. Distinct from Ambient Intent, which is the designer-owned behavioral-preference channel propagated via DI.",
+  "usage": "The structural-construction channel of the Droplist family. Structural dimensions (<code>model</code>, <code>editable</code>) never travel via Ambient Intent — they are always stated locally. Behavioral dimensions (<code>focusStrategy</code>, <code>collision</code>) may fall back to Ambient Intent when not stated."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Locale Negotiation",
+  "definition": "Expanding a requested locale into an ordered fallback chain of available locales (e.g. <code>fr-CA</code> → <code>fr</code> → <code>en</code>), so a missing translation degrades gracefully to a more general locale rather than failing.",
+  "usage": "Performed by the <code>LocaleNegotiation</code> interface; the Localization Protocol walks the resulting chain when resolving a key."
+}

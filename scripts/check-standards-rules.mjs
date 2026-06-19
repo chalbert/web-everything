@@ -582,7 +582,10 @@ export const FILE = {
 // Entities split one-file-per-id: the descriptor `file` must point at the per-entry spec, not the (now
 // virtual) monolith — so the autofix write-target is real AND the #1144 --scope/--local lane attribution
 // matches the file a lane actually dirties. Block #882, Intent + Research #1145.
-const PER_ID_SPEC_DIR = { Block: 'blocks', Intent: 'intents', Research: 'researchTopics' };
+const PER_ID_SPEC_DIR = {
+  Block: 'blocks', Intent: 'intents', Research: 'researchTopics',
+  Protocol: 'protocols', Demo: 'demos', Preset: 'assemblerPresets', // #1146
+};
 
 /** The per-block spec file a Block fixer edits (#882 — replaces the former single blocks.json row). */
 export const blockSpecFile = (id) => `src/_data/blocks/${id}.json`;
@@ -633,17 +636,18 @@ export function validateProtocol(proto, ctx) {
   const { projectById, intentById, readProjectPartial } = ctx;
   const errors = [];
   const err = (m, descriptor) => errors.push({ message: m, descriptor });
+  const file = fileFor('Protocol', proto.id); // per-protocol spec path (#1146) for descriptor attribution
   for (const f of ['id', 'name', 'summary', 'status', 'ownedByProject', 'anchor']) {
     if (!proto[f]) err(`Protocol "${proto.id || '<no id>'}" missing required field "${f}"`,
-      dMissingField('Protocol', proto.id, FILE.Protocol, f));
+      dMissingField('Protocol', proto.id, file, f));
   }
   for (const e of checkStatus('Protocol', proto.id, proto.status)) err(e.message, e.descriptor);
   if (proto.ownedByProject && !projectById.has(proto.ownedByProject))
     err(`Protocol "${proto.id}" ownedByProject "${proto.ownedByProject}" does not resolve in projects.json`,
-      dUnresolvedRef('Protocol', proto.id, FILE.Protocol, 'ownedByProject', proto.ownedByProject, 'projects.json'));
+      dUnresolvedRef('Protocol', proto.id, file, 'ownedByProject', proto.ownedByProject, 'projects.json'));
   if (proto.realizesIntent && !intentById.has(proto.realizesIntent))
     err(`Protocol "${proto.id}" realizesIntent "${proto.realizesIntent}" does not resolve in intents.json`,
-      dUnresolvedRef('Protocol', proto.id, FILE.Protocol, 'realizesIntent', proto.realizesIntent, 'intents.json'));
+      dUnresolvedRef('Protocol', proto.id, file, 'realizesIntent', proto.realizesIntent, 'intents.json'));
   if (proto.ownedByProject && proto.anchor) {
     const body = readProjectPartial(proto.ownedByProject);
     if (body === null || body === undefined)
@@ -665,51 +669,52 @@ export function validatePreset(preset, ctx) {
   const { projectById, blockIds, intentById } = ctx;
   const errors = [];
   const err = (m, descriptor) => errors.push({ message: m, descriptor });
+  const file = fileFor('Preset', preset.name); // per-preset spec path (#1146) for descriptor attribution
   for (const f of ['name', 'type', 'title', 'description', 'status', 'ownedByProject', 'files']) {
     if (preset[f] === undefined || preset[f] === null || preset[f] === '')
       err(`Preset "${preset.name || '<no name>'}" missing required field "${f}"`,
-        dMissingField('Preset', preset.name, FILE.Preset, f));
+        dMissingField('Preset', preset.name, file, f));
   }
   for (const e of checkStatus('Preset', preset.name, preset.status)) err(e.message, e.descriptor);
   if (preset.ownedByProject && !projectById.has(preset.ownedByProject))
     err(`Preset "${preset.name}" ownedByProject "${preset.ownedByProject}" does not resolve in projects.json`,
-      dUnresolvedRef('Preset', preset.name, FILE.Preset, 'ownedByProject', preset.ownedByProject, 'projects.json'));
+      dUnresolvedRef('Preset', preset.name, file, 'ownedByProject', preset.ownedByProject, 'projects.json'));
   for (const b of preset.composesBlocks || []) {
     if (!blockIds.has(b))
       err(`Preset "${preset.name}" composesBlocks "${b}" does not resolve in the blocks registry (src/_data/blocks/)`,
-        dUnresolvedRef('Preset', preset.name, FILE.Preset, 'composesBlocks', b, 'blocks registry'));
+        dUnresolvedRef('Preset', preset.name, file, 'composesBlocks', b, 'blocks registry'));
   }
   for (const i of preset.composesIntents || []) {
     if (!intentById.has(i))
       err(`Preset "${preset.name}" composesIntents "${i}" does not resolve in intents.json`,
-        dUnresolvedRef('Preset', preset.name, FILE.Preset, 'composesIntents', i, 'intents.json'));
+        dUnresolvedRef('Preset', preset.name, file, 'composesIntents', i, 'intents.json'));
   }
   // Optional CEM descriptor (#668) — coexists with the recipe, describing the composed-API surface. Rides
   // the #653 CEM protocol; when present it must be a minimal CEM declaration (kind + name).
   if (preset.cem !== undefined) {
     if (!preset.cem || typeof preset.cem !== 'object')
       err(`Preset "${preset.name}" cem must be a CEM declaration object`,
-        dMissingField('Preset', preset.name, FILE.Preset, 'cem'));
+        dMissingField('Preset', preset.name, file, 'cem'));
     else {
       if (!preset.cem.kind)
         err(`Preset "${preset.name}" cem missing "kind" (e.g. "class")`,
-          dMissingField('Preset', preset.name, FILE.Preset, 'cem.kind'));
+          dMissingField('Preset', preset.name, file, 'cem.kind'));
       if (!preset.cem.name)
         err(`Preset "${preset.name}" cem missing "name"`,
-          dMissingField('Preset', preset.name, FILE.Preset, 'cem.name'));
+          dMissingField('Preset', preset.name, file, 'cem.name'));
     }
   }
   if (Array.isArray(preset.files)) {
     if (preset.files.length === 0)
       err(`Preset "${preset.name}" has an empty files[] — a preset must ship at least one recipe file`,
-        dMissingField('Preset', preset.name, FILE.Preset, 'files'));
+        dMissingField('Preset', preset.name, file, 'files'));
     preset.files.forEach((file, idx) => {
       if (!file || !file.path)
         err(`Preset "${preset.name}" files[${idx}] missing "path"`,
-          dMissingField('Preset', preset.name, FILE.Preset, `files[${idx}].path`));
+          dMissingField('Preset', preset.name, file, `files[${idx}].path`));
       if (!file || !file.content)
         err(`Preset "${preset.name}" file "${file && file.path ? file.path : idx}" has empty content`,
-          dMissingField('Preset', preset.name, FILE.Preset, `files[${idx}].content`));
+          dMissingField('Preset', preset.name, file, `files[${idx}].content`));
     });
   }
   return { errors, warnings: [] };

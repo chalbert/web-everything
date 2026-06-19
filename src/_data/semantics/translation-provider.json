@@ -1,0 +1,5 @@
+{
+  "term": "Translation Provider",
+  "definition": "A registered source that resolves a message key for a locale to a Message Function, or declines with <code>null</code>. A native <code>Intl</code> MF2 formatter, lazy-namespace catalog, or library adapter (FormatJS, i18next, Lingui, Paraglide).",
+  "usage": "Satisfies the CustomTranslationProvider contract; registered in CustomTranslationProviderRegistry and resolved through the injector chain. First provider that resolves a key owns the message."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Change Strategy Registry",
+  "definition": "The <code>CustomChangeStrategyRegistry</code> resolved through the injector chain that selects the active Change Strategy per scope, so different subtrees of one app can track changes with different strategies simultaneously (e.g. a form on snapshot-diff, a collaborative document on a CRDT).",
+  "usage": "Change Tracking Protocol (Web States). Generalizes the validation <code>customValidation:change-detection</code> concern from one form to all observable state. Nearest-scope strategy wins."
+}

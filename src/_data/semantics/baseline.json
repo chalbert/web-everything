@@ -1,0 +1,5 @@
+{
+  "term": "Baseline",
+  "definition": "The pristine reference snapshot a diff or dirty strategy compares the current value against to derive change. Re-captured on a <code>baseline-set</code> event (initial load, save, server sync). For SSR, the serialized initial store state is the post-hydration baseline.",
+  "usage": "Change Tracking Protocol (Web States); reconciles with the Validation Intent's existing baseline notion behind <code>customValidation:dirty-check</code>."
+}

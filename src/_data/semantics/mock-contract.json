@@ -1,0 +1,5 @@
+{
+  "term": "Mock Contract",
+  "definition": "A portable, interaction-bearing artifact that defines how an HTTP service responds during development: consumer interactions whose response shape is anchored on OpenAPI and whose dev-time behavior (latency, fault, conditional, response-kind, auth) lives in a layer on top. Because it is data, not code, any conformant server can serve it and any drift-checker can verify it.",
+  "usage": "Standardized by the Mock Contract Protocol (Web Cases). The standard artifact of the mock & service-proxy dev-service — the server is a swappable provider. One contract, two uses: drive a mock and drift-check the real service."
+}

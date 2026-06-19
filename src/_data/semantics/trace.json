@@ -1,0 +1,5 @@
+{
+  "term": "Trace",
+  "definition": "A record of an execution path through the application. Composed of multiple 'Spans' (units of work).",
+  "usage": "Standardized by Web Traces."
+}

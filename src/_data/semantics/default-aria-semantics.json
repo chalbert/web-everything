@@ -1,0 +1,5 @@
+{
+  "term": "Default ARIA Semantics",
+  "definition": "The accessibility role/state an element exposes by default via ElementInternals (internals.role, internals.aria*), overridable per-instance by a role= or aria-* attribute.",
+  "usage": "Declared on a <component> with default-role=\"…\" (DC-13). Borrows the platform's ElementInternals ARIAMixin vocabulary."
+}

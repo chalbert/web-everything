@@ -1,0 +1,5 @@
+{
+  "term": "result-range label",
+  "definition": "A status label that names the visible slice of a paged collection — e.g. ‘showing 21–40 of 500’. Requires a known total, so it composes only over an offset/page resource protocol; a cursor protocol has no total and forces it off.",
+  "usage": "The <code>rangeLabel</code> dimension of the Collection Operations Intent, surfaced by the Pagination block's <code>withRangeLabel</code> trait. Recommended page-size options, defaults, and how the label degrades when the total is unavailable are unverified — owned by <a href=\"/backlog/060-pagination-range-labels-page-size/\">backlog #060</a>."
+}

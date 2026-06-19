@@ -1,0 +1,5 @@
+{
+  "term": "Reliability",
+  "definition": "Strategies for error recovery, retry policies, and maintaining a viable state during failure conditions.",
+  "usage": "Standardized by Reliability Intent."
+}

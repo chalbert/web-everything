@@ -1,0 +1,5 @@
+{
+  "term": "Contract Drift",
+  "definition": "Divergence between a recorded consumer interaction and the real service's current behavior — the provider stopped honouring an interaction a consumer depends on. Distinct from shape non-conformance: schema-validation proves a payload is well-formed, contract-verification proves the interaction still holds.",
+  "usage": "Detected by the Web Cases drift-check, which replays a Mock Contract's interactions against the live service. The dev-time half of proving the seams still hold."
+}

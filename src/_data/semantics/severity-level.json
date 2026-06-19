@@ -1,0 +1,5 @@
+{
+  "term": "Severity Level",
+  "definition": "The unified semantic axis shared by Validation (<code>level</code>), Feedback (<code>severity</code>), and Message (<code>tone</code>): error (failure), caution (critical advisory), warning (advisory), info (informational), success (confirmation).",
+  "usage": "Defined across intents. Allows validation messages, toasts, and alerts to speak the same language. Replaces the triplicated vocabulary (feedback.severity / message.tone / validation.level)."
+}

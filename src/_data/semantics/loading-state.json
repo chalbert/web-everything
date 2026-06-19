@@ -1,0 +1,5 @@
+{
+  "term": "Loading State",
+  "definition": "The visualization of pending operations, defining how the UI reacts (Blocking, Skeleton, Spinner) to latency.",
+  "usage": "Standardized by Loader Intent."
+}

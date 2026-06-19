@@ -1,0 +1,5 @@
+{
+  "term": "aria-sort",
+  "definition": "ARIA attribute on a column (or row) header indicating the table's current sort state: ascending, descending, none (sortable but not currently sorted), or other (a non-standard order). Only one header is sorted at a time.",
+  "usage": "The <a href=\"/blocks/data-table/\">Data Table block</a> projects the Collection Operations <code>sortDirection</code> onto it verbatim; the active sort key's <code>&lt;th&gt;</code> carries the direction, other sortable headers carry <code>none</code>."
+}

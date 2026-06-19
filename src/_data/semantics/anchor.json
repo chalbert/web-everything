@@ -1,0 +1,5 @@
+{
+  "term": "Anchor",
+  "definition": "The reference element a floating element positions itself relative to. Also called the anchor element.",
+  "usage": "Standardized by Anchor Intent (CSS Anchor Positioning <code>anchor-name</code>/<code>position-anchor</code>). The Anchored Element tethers to it."
+}

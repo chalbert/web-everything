@@ -1,0 +1,5 @@
+{
+  "term": "Selection Follows Focus",
+  "definition": "A pattern where moving focus to an item also activates or selects it (single-select listboxes, auto-activated tabs), as opposed to focus moving independently of selection (multi-select, menus, comboboxes), where selection commits on an explicit key.",
+  "usage": "The `selectionFollowsFocus` dimension of the Focus Delegation Intent; composes with the Selection Intent's commitment model."
+}

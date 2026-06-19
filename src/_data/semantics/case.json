@@ -1,0 +1,5 @@
+{
+  "term": "Case",
+  "definition": "A raw HTML file representing a specific usage scenario. Serves as the Single Source of Truth for documentation examples and E2E test fixtures.",
+  "usage": "Located in `src/cases/`."
+}

@@ -1,0 +1,8 @@
+{
+  "id": "render-strategy",
+  "name": "Render Strategy",
+  "summary": "Conformance reference for how a component's element tree updates over time. Defines the CustomRenderStrategy contract (readonly key + mount/update/dispose, RenderInput tagged union keyed by strategy id), a per-scope provider registry (nearest-scope wins), and the four registered strategies (declarative-static, vdom, fine-grained, imperative). Re-render is strategy-owned: the strategy subscribes to its own reactivity source, the host never calls update(). The sibling of Change Tracking: change strategies detect, render strategies commit. Technical contract, not a UX preference — a Protocol, not an Intent.",
+  "status": "draft",
+  "ownedByProject": "webcomponents",
+  "anchor": "protocol-render-strategy"
+}

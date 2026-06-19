@@ -1,0 +1,5 @@
+{
+  "term": "scroll restoration",
+  "definition": "Browser or custom control over scroll position after navigation. Navigation API provides native support.",
+  "usage": "Configure via <code>route:config scroll=\"auto|manual|none\"</code>. 'auto' uses browser behavior, 'manual' for custom control."
+}

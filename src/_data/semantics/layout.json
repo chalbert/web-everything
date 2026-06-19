@@ -1,0 +1,5 @@
+{
+  "term": "Layout",
+  "definition": "The application shell structure and region mechanics (Drawers, Rails, Panels) that define the macro-layout.",
+  "usage": "Standardized by Layout Intent."
+}

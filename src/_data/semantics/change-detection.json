@@ -1,0 +1,5 @@
+{
+  "term": "Change Detection",
+  "definition": "The concern that detects when a field value has changed: event listeners, signal subscriptions, polling, MutationObserver. Triggers value-input events.",
+  "usage": "A decomposed DI concern (<code>customValidation:change-detection</code>). The event-driven vs state-derived architectural choice collapses into this concern + inter-element-comms; the other 6 concerns are architecture-agnostic."
+}

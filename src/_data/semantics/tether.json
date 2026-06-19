@@ -1,0 +1,5 @@
+{
+  "term": "Tether",
+  "definition": "The live binding that keeps an anchored element positioned relative to its anchor as the page scrolls, resizes, or mutates.",
+  "usage": "Established by a Positioning Provider when <code>tracking: 'follow'</code>; returns a cleanup that detaches the tether."
+}

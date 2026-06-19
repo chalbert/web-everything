@@ -1,0 +1,5 @@
+{
+  "term": "inert",
+  "definition": "HTML attribute that makes element and descendants non-interactive. Removed from tab order and accessibility tree for interaction.",
+  "usage": "Standard. Use for preview states, disabled sections, or content behind modals."
+}

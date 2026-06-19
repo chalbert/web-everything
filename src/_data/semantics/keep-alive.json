@@ -1,0 +1,5 @@
+{
+  "term": "keep-alive",
+  "definition": "Feature that preserves component state when hidden instead of destroying it. Supports max cache limit with LRU eviction.",
+  "usage": "Inspired by Vue KeepAlive. Essential for tabs where users expect form state to persist."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Live Region",
+  "definition": "A DOM region whose updates are announced to assistive technology without moving focus, via `aria-live` (`polite`/`assertive`) or an implicit role (`status`, `alert`, `log`). The region must already exist (empty) when the page loads so the AT registers it; text is then written into it on events.",
+  "usage": "Standardized by the Live Region Status Intent. Announces loading, result counts, no-results, and errors. Distinct from the Message/Feedback intents, which own notification content and priority."
+}

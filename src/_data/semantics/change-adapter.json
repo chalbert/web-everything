@@ -1,0 +1,5 @@
+{
+  "term": "Change Adapter",
+  "definition": "A thin bridge that maps a third-party change source (Immer/Mutative patches, Yjs/Automerge ops, a JSON Patch stream) into the canonical Change Record contract, or between two strategies' formats. Because mappings are lossy, bridges are adapters rather than identities.",
+  "usage": "Change Tracking Protocol (Web States). Enables a signals graph → JSON-Patch stream → CRDT document pipeline with the Change Record as the hand-off."
+}

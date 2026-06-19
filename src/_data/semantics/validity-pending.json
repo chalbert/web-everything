@@ -1,0 +1,5 @@
+{
+  "term": "Validity Pending",
+  "definition": "An async validation state carrying a version/generation token. The token is the input's snapshot version at dispatch time; results from old versions are discarded (stale-resolve prevention).",
+  "usage": "Composes Loader Intent's pending lifecycle. Cross-cutting requirement for all async validation systems (RHF #1688, Final Form #420)."
+}

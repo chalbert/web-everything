@@ -1,0 +1,12 @@
+{
+  "id": "analytics-conformance-demo",
+  "name": "Analytics Conformance Demo",
+  "summary": "The runnable proof of the webanalytics CustomTracker contract+injector swap mechanic (#1012) — one call site issues the same identify()/track()/page()/group() calls while the resolved backend is swapped underneath via the CustomTrackerRegistry, so the application knows only the contract, never a vendor. Backends are in-demo recording stubs (a real GA4/Mixpanel/Segment needs network + credentials; the #1013 vendor adapters are the impl). A runtime-conformance section asserts the contract invariants live: no-op default, full routing, backend swap, Segment page arg order, per-call key routing, and unknown-backend throws.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runnable proof of the webanalytics <a href=\"/plugs/customtrackerregistry/\"><code>CustomTracker</code></a> contract+injector swap mechanic (<a href=\"/backlog/1012-webanalytics-canonical-customtracker-contract-registry-di-no/\">#1012</a>). One call site issues the same <code>identify()/track()/page()/group()</code> calls while the <strong>resolved backend is swapped underneath</strong> via the <code>CustomTrackerRegistry</code> — the application knows only the contract, never a vendor.</p><h3>Recording stubs, not real vendors</h3><p>Backends here are in-demo <strong>recording stubs</strong> — honest for a browser demo, since a real GA4/Mixpanel/Segment backend needs network + credentials (the <a href=\"/backlog/1013-webanalytics-reference-vendor-adapters-segment-mixpanel-ga4-/\">#1013</a> vendor adapters are the impl). Only the contract crosses the seam; the demo never imports a vendor SDK.</p><h3>Verified contract</h3><p>The runtime-conformance section asserts the live registry against its contract: the native-first no-op default, identify/track/page/group routing, the backend swap mechanic, the Segment <code>page(category, name)</code> arg order, per-call <code>trackerKey</code> routing, and that an unknown backend throws <code>UnknownTrackerError</code> rather than silently substituting.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/analytics-conformance-demo.html",
+  "projects": [
+    "webanalytics"
+  ]
+}

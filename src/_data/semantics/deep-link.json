@@ -1,0 +1,5 @@
+{
+  "term": "deep link",
+  "definition": "A URL that encodes enough application state (path + search params) to reconstruct a specific view directly — bookmarkable, shareable, and surviving a page refresh.",
+  "usage": "The <code>url</code> value of the Navigation Intent's <code>persistence</code> dimension. Contrast <code>memory</code> (ephemeral, in-memory state) and <code>session</code> (carried in History <code>state</code>, survives traversal but not a fresh share)."
+}

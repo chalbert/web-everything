@@ -1,0 +1,5 @@
+{
+  "term": "beforetoggle",
+  "definition": "A cancelable event fired before a visibility change. Call preventDefault() to cancel the transition.",
+  "usage": "Matches Popover API pattern. Fired by ViewEngine on all View blocks. Event detail contains <code>oldState</code> and <code>newState</code> ('hidden' or 'visible')."
+}

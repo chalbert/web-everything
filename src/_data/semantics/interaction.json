@@ -1,0 +1,5 @@
+{
+  "term": "Interaction",
+  "definition": "The handling of input modalities (pointer, touch, gamepad, keyboard) and the feedback loops required for each.",
+  "usage": "Standardized by Interaction Intent."
+}

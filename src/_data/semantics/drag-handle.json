@@ -1,0 +1,5 @@
+{
+  "term": "Drag Handle",
+  "definition": "A scoped affordance within an item that initiates a drag, as opposed to the whole item being draggable. Leaves the rest of the item interactive (links, buttons) while still allowing it to be moved.",
+  "usage": "The <code>handle</code> value of the Reorder Intent's <code>grab</code> dimension, surfaced by the Reorderable List block's <code>withDragHandle</code> trait. Marked in markup with <code>[data-reorder-handle]</code>."
+}

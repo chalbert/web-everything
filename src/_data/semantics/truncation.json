@@ -1,0 +1,5 @@
+{
+  "term": "Truncation",
+  "definition": "Visually cutting text that overflows its box (`clip`, `ellipsis`, or `fade`) while keeping the full string as the element's text content. Must not slice mid-grapheme, and must provide a recovery path (tooltip/title or expand) to read the full value.",
+  "usage": "The `truncation` dimension of the Typography Intent. Preserves WCAG 2.5.3 Label in Name because the accessible name stays the full text; front-load distinguishing words so they survive the cut."
+}

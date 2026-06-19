@@ -16,6 +16,8 @@ import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { loadBlocks } from '../lib/blocks-loader.cjs';
 import { loadIntents } from '../lib/intents-loader.cjs';
+import { loadProtocols } from '../lib/protocols-loader.cjs';
+import { loadDemos } from '../lib/demos-loader.cjs';
 import { buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -167,11 +169,11 @@ describe('validateBacklogItem — real backlog stays clean', () => {
   // size in the real backlog fails here instead of only surfacing on a manual live run.
   const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
   const intents = loadIntents(); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
-  const protocols = loadJson('protocols.json');
+  const protocols = loadProtocols(); // per-protocol specs src/_data/protocols/<id>.json, assembled (#1146)
   const projects = loadJson('projects.json');
   const plugs = loadJson('plugs.json');
   const adapters = loadJson('adapters.json');
-  const demos = loadJson('demos.json');
+  const demos = loadDemos(); // per-demo specs src/_data/demos/<id>.json, assembled (#1146)
   const capabilityIds = new Set(loadJson('capabilities.json').map((c) => c.id));
   const loadBacklog = require(join(ROOT, 'src/_data/backlog.js'));
   const backlog = typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog;

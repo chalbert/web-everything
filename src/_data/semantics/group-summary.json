@@ -1,0 +1,5 @@
+{
+  "term": "group summary",
+  "definition": "The aggregate value shown for each group when a collection is grouped — count, sum, average, minimum, or maximum — named after the SQL aggregate functions, the nearest cross-platform standard (the web has none).",
+  "usage": "The <code>groupSummary</code> dimension of the <a href=\"/intents/collection-operations/\">Collection Operations intent</a>; the <a href=\"/blocks/data-table/\">Data Table block</a> renders it in a <code>scope=\"rowgroup\"</code> summary row per group."
+}

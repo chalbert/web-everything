@@ -1,0 +1,5 @@
+{
+  "term": "Bidi",
+  "definition": "Bidirectional text handling — laying out content that mixes left-to-right and right-to-left scripts per the Unicode bidirectional algorithm. The reason layout flows by inline start/end rather than physical left/right.",
+  "usage": "Driven by the Locale Intent <code>direction</code> dimension via the <code>dir</code> attribute, <code>:dir()</code>, and CSS logical properties. <code>direction: auto</code> defers to the bidi algorithm."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Localization",
+  "definition": "Turning a single UI into many locales: composing messages from static text plus formatted values, resolving keys against catalogs, walking locale fallback chains, and adapting writing direction. Distinct from native value formatting, which the platform already provides via <code>Intl</code>.",
+  "usage": "The domain of Web Intl, specified by the Localization Protocol and declared by the Locale Intent."
+}

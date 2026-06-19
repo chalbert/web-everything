@@ -1,0 +1,5 @@
+{
+  "term": "Toggletip",
+  "definition": "A click- or tap-revealed, re-summonable hint. Unlike a <a href=\"/semantics/#term-tooltip\">Tooltip</a> it has no persistent describing relationship with its trigger, so its content is announced through a live region rather than <code>aria-describedby</code>. Triggered by activation (not hover/focus), it is a separate concern from the tooltip.",
+  "usage": "Cross-referenced by the <a href=\"/blocks/tooltip/\">Tooltip block</a> as an explicitly-out-of-scope sibling; announced via the <a href=\"/intents/live-region-status/\">Live Region Status</a> intent."
+}

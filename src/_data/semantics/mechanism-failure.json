@@ -1,0 +1,5 @@
+{
+  "term": "Mechanism Failure",
+  "definition": "An unexpected system or operation error — network unreachable, server crash, database timeout, computation failure. Distinguished from input invalidity (Validation domain): the user's data was correct; the mechanism broke.",
+  "usage": "Web Reliability, Reliability Intent. Determines which domain owns the error: mechanism failures → Reliability; input errors → Validation."
+}

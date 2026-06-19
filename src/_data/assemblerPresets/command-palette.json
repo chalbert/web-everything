@@ -1,0 +1,84 @@
+{
+  "name": "command-palette",
+  "type": "registry:block",
+  "title": "Command palette",
+  "description": "A ⌘K / Ctrl+K command palette: a modal dialog holding a type-ahead search input over a roving-focus command list. Baseline is a real <dialog> with a filterable <ul role=\"listbox\">; command-palette.js layers the global shortcut, incremental filtering, and ArrowUp/Down + Enter selection. A composed recipe — no custom element required to consume it.",
+  "ownedByProject": "webdocs",
+  "status": "active",
+  "composesBlocks": [
+    "dialog",
+    "input-family",
+    "menu",
+    "keyboard-shortcuts"
+  ],
+  "composesIntents": [
+    "command",
+    "modal",
+    "type-ahead",
+    "selection",
+    "navigation"
+  ],
+  "intentStrategies": {
+    "modal": "native-dialog"
+  },
+  "cem": {
+    "kind": "class",
+    "name": "CommandPalette",
+    "description": "Composed-API surface of the command-palette preset — a ⌘K modal command launcher. Describes the authoring surface (#668), never the internal command-palette.js wiring. Rides the #653 CEM protocol.",
+    "attributes": [
+      {
+        "name": "open",
+        "description": "Reflects the dialog open state; toggled by the global shortcut or the trigger button.",
+        "type": {
+          "text": "boolean"
+        }
+      },
+      {
+        "name": "aria-activedescendant",
+        "description": "Id of the currently-highlighted command option in the listbox.",
+        "type": {
+          "text": "string"
+        }
+      }
+    ],
+    "slots": [
+      {
+        "name": "",
+        "description": "Command options — each an <li role=\"option\"> with a label and optional shortcut hint."
+      }
+    ],
+    "x-webeverything": {
+      "composesBlocks": [
+        "dialog",
+        "input-family",
+        "menu",
+        "keyboard-shortcuts"
+      ],
+      "composesIntents": [
+        "command",
+        "modal",
+        "type-ahead",
+        "selection",
+        "navigation"
+      ],
+      "note": "A composition, not a registered custom element — the CEM coexists with the plain-markup recipe (#652 Fork 1 API-descriptor layer)."
+    }
+  },
+  "files": [
+    {
+      "path": "command-palette.html",
+      "type": "registry:markup",
+      "content": "<!-- Command palette (#856) — a ⌘K / Ctrl+K modal command launcher.\n     Baseline: a native <dialog> with a search <input> filtering a\n     role=\"listbox\" of commands. Enhanced (command-palette.js): global\n     shortcut to open, incremental filter, Arrow/Enter keyboard selection,\n     and aria-activedescendant tracking. -->\n<button type=\"button\" class=\"cmdk-trigger\" data-cmdk-open aria-keyshortcuts=\"Meta+K Control+K\">\n  <span class=\"cmdk-trigger-label\">Search commands…</span>\n  <kbd class=\"cmdk-trigger-kbd\">⌘K</kbd>\n</button>\n<dialog id=\"cmdk\" class=\"cmdk\" aria-label=\"Command palette\">\n  <div class=\"cmdk-box\">\n    <input\n      type=\"search\"\n      class=\"cmdk-input\"\n      role=\"combobox\"\n      aria-expanded=\"true\"\n      aria-controls=\"cmdk-list\"\n      aria-activedescendant=\"\"\n      placeholder=\"Type a command or search…\"\n      autocomplete=\"off\"\n      data-cmdk-input />\n    <ul id=\"cmdk-list\" class=\"cmdk-list\" role=\"listbox\" aria-label=\"Commands\">\n      <li id=\"cmdk-opt-0\" role=\"option\" class=\"cmdk-option\" data-value=\"Go to Intents\" aria-selected=\"true\">Go to Intents</li>\n      <li id=\"cmdk-opt-1\" role=\"option\" class=\"cmdk-option\" data-value=\"Go to Capabilities\">Go to Capabilities</li>\n      <li id=\"cmdk-opt-2\" role=\"option\" class=\"cmdk-option\" data-value=\"Go to Demos\">Go to Demos</li>\n      <li id=\"cmdk-opt-3\" role=\"option\" class=\"cmdk-option\" data-value=\"Go to Backlog\">Go to Backlog</li>\n    </ul>\n    <p class=\"cmdk-empty\" hidden>No matching commands.</p>\n  </div>\n</dialog>"
+    },
+    {
+      "path": "command-palette.css",
+      "type": "registry:style",
+      "content": ".cmdk-trigger {\n  display: inline-flex;\n  align-items: center;\n  gap: 0.75rem;\n  padding: 0.4rem 0.7rem;\n  font: inherit;\n  color: var(--color-text-muted);\n  background: rgba(0, 0, 0, 0.03);\n  border: 1px solid var(--color-border, #e2e8f0);\n  border-radius: 8px;\n  cursor: pointer;\n}\n.cmdk-trigger-kbd {\n  font-size: 0.75em;\n  padding: 0.05rem 0.35rem;\n  border: 1px solid var(--color-border, #e2e8f0);\n  border-radius: 4px;\n  background: #fff;\n}\n.cmdk::backdrop {\n  background: rgba(15, 23, 42, 0.35);\n  backdrop-filter: blur(2px);\n}\n.cmdk {\n  width: min(36rem, 92vw);\n  padding: 0;\n  border: 1px solid var(--color-border, #e2e8f0);\n  border-radius: 14px;\n  box-shadow: 0 24px 60px -16px rgba(15, 23, 42, 0.4);\n}\n.cmdk-box { padding: 0.6rem; }\n.cmdk-input {\n  width: 100%;\n  box-sizing: border-box;\n  padding: 0.6rem 0.7rem;\n  font-size: 1rem;\n  border: none;\n  border-bottom: 1px solid var(--color-border, #e2e8f0);\n  outline: none;\n}\n.cmdk-list {\n  list-style: none;\n  margin: 0.4rem 0 0;\n  padding: 0;\n  max-height: 18rem;\n  overflow-y: auto;\n}\n.cmdk-option {\n  padding: 0.5rem 0.7rem;\n  border-radius: 8px;\n  cursor: pointer;\n}\n.cmdk-option[aria-selected=\"true\"],\n.cmdk-option:hover {\n  background: rgba(0, 0, 0, 0.05);\n}\n.cmdk-empty {\n  padding: 0.7rem;\n  color: var(--color-text-muted);\n}\n@media (prefers-reduced-motion: reduce) {\n  .cmdk::backdrop { backdrop-filter: none; }\n}"
+    },
+    {
+      "path": "command-palette.js",
+      "type": "registry:script",
+      "content": "/* command-palette.js (#856) — progressive enhancement for the ⌘K command\n * palette. Baseline markup is a native <dialog> + filterable listbox; this\n * layers the global shortcut, incremental filtering, and roving keyboard\n * selection via aria-activedescendant.\n */\n(function () {\n  'use strict';\n  var dialog = document.getElementById('cmdk');\n  if (!dialog || typeof dialog.showModal !== 'function') return;\n  var input = dialog.querySelector('[data-cmdk-input]');\n  var list = dialog.querySelector('#cmdk-list');\n  var empty = dialog.querySelector('.cmdk-empty');\n  var triggers = document.querySelectorAll('[data-cmdk-open]');\n  var options = function () {\n    return Array.prototype.slice.call(list.querySelectorAll('.cmdk-option')).filter(function (o) {\n      return !o.hidden;\n    });\n  };\n\n  var open = function () { if (!dialog.open) { dialog.showModal(); input.value = ''; filter(''); input.focus(); } };\n  Array.prototype.forEach.call(triggers, function (t) { t.addEventListener('click', open); });\n  document.addEventListener('keydown', function (e) {\n    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); open(); }\n  });\n\n  var highlight = function (opt) {\n    options().forEach(function (o) { o.setAttribute('aria-selected', o === opt ? 'true' : 'false'); });\n    if (opt) { input.setAttribute('aria-activedescendant', opt.id); opt.scrollIntoView({ block: 'nearest' }); }\n  };\n  var filter = function (q) {\n    q = q.trim().toLowerCase();\n    var any = false;\n    Array.prototype.forEach.call(list.querySelectorAll('.cmdk-option'), function (o) {\n      var match = o.dataset.value.toLowerCase().indexOf(q) !== -1;\n      o.hidden = !match;\n      any = any || match;\n    });\n    if (empty) empty.hidden = any;\n    highlight(options()[0] || null);\n  };\n  input.addEventListener('input', function () { filter(input.value); });\n\n  input.addEventListener('keydown', function (e) {\n    var opts = options();\n    if (!opts.length) return;\n    var cur = opts.indexOf(opts.filter(function (o) { return o.getAttribute('aria-selected') === 'true'; })[0]);\n    if (e.key === 'ArrowDown') { e.preventDefault(); highlight(opts[Math.min(cur + 1, opts.length - 1)]); }\n    else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(opts[Math.max(cur - 1, 0)]); }\n    else if (e.key === 'Enter') {\n      e.preventDefault();\n      var sel = opts[cur] || opts[0];\n      if (sel) { dialog.close(); dialog.dispatchEvent(new CustomEvent('cmdk:select', { detail: { value: sel.dataset.value } })); }\n    }\n  });\n\n  list.addEventListener('click', function (e) {\n    var opt = e.target.closest('.cmdk-option');\n    if (!opt) return;\n    dialog.close();\n    dialog.dispatchEvent(new CustomEvent('cmdk:select', { detail: { value: opt.dataset.value } }));\n  });\n})();"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Module",
+  "definition": "A self-contained unit of functionality or UI that expects a specific host context.",
+  "usage": "Building block of Web Architecture."
+}

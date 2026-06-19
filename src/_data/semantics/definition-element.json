@@ -1,0 +1,5 @@
+{
+  "term": "Definition Element",
+  "definition": "The <code>&lt;component&gt;</code> element itself: a transient authoring element that reads a Component Definition, registers the custom element, then removes itself from the DOM leaving no wrapper node.",
+  "usage": "Web Components. Shares the self-removal lifecycle of a Transient Component, but its purpose is registration rather than rendering."
+}

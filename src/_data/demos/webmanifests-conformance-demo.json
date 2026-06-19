@@ -1,0 +1,12 @@
+{
+  "id": "webmanifests-conformance-demo",
+  "name": "Web Manifests Conformance Demo",
+  "summary": "The runnable proof of the changelog-manifest contract (#1057) in a real browser: a per-release manifest of per-module change entries — severity (major/minor/patch), type (added/changed/deprecated/removed/fixed/security), and a migration ref present iff a change is breaking and mechanically applicable. The contract is type-only (manifests/changelog-contract.ts); the manifest reader + integrity pipeline are impl in Frontier UI, so the demo supplies a sample manifest plus its own in-demo reader. A runtime-conformance section asserts each invariant live: the manifest declares its release + previous version, entriesFor(module) scopes to the module, bySeverity filters per the vocabulary, breaking changes are the major entries, a migration ref is present iff breaking + applicable, and every entry carries module/severity/type/summary.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runnable proof of the changelog-manifest contract (<a href=\"/backlog/1057-webmanifests-contract-changelog-manifest-types-in-webeveryth/\">#1057</a>). A per-release manifest of per-module change entries — <code>severity</code>, <code>type</code>, and a <code>migration</code> ref present iff a change is breaking <em>and</em> mechanically applicable.</p><h3>In-demo reader, not the FUI impl</h3><p>The contract is type-only (<code>manifests/changelog-contract.ts</code>); the manifest reader + integrity pipeline are impl in Frontier UI. So this demo supplies a sample manifest plus its <strong>own</strong> in-demo reader to prove the contract is realizable.</p><h3>Verified contract</h3><p>The runtime-conformance section asserts each invariant live: the manifest declares its release + the version it migrates from, <code>entriesFor(module)</code> scopes to the module, <code>bySeverity</code> filters per the major/minor/patch vocabulary, breaking changes are the major entries, a <code>migration</code> ref is present iff breaking + applicable, and every entry carries module/severity/type/summary.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webmanifests-conformance-demo.html",
+  "projects": [
+    "webmanifests"
+  ]
+}

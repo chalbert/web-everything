@@ -1,0 +1,5 @@
+{
+  "term": "Dropdown",
+  "definition": "One concrete member of the Droplist family — single-select, button-triggered, non-filtering. Structural identity: <code>selection=\"model=single\"</code> with type-ahead.",
+  "usage": "Standardized by the Dropdown block. A form-associated custom element so <code>&lt;form&gt;</code>/<code>FormData</code>/reset/validity work like the native <code>&lt;select&gt;</code> baseline."
+}

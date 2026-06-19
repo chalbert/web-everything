@@ -1,0 +1,4 @@
+{
+  "term": "Component",
+  "definition": "An encapsulated custom element with its own shadow DOM and lifecycle."
+}

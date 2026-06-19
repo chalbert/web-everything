@@ -1,0 +1,5 @@
+{
+  "term": "history disposition",
+  "definition": "What a navigation contributes to session history: <code>push</code> (new entry), <code>replace</code> (overwrite current), or <code>none</code> (no entry). Determines what the browser Back button does after the navigation.",
+  "usage": "The <code>history</code> dimension of the Navigation Intent. Maps to the Navigation API <code>navigate(url, { history })</code> option."
+}

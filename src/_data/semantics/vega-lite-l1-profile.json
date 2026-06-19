@@ -1,0 +1,5 @@
+{
+  "term": "Vega-Lite L1 Profile",
+  "definition": "The thin semantic core of the <a href=\"/projects/webcharts/\">Web Charts</a> standard: a chart declared as <code>data &rarr; mark &rarr; encoding</code> (Vega-Lite's vocabulary, borrowed) restricted to a minimal L1 subset — basic marks, position/color/size channels, and scales/axes/legends. Selections, transforms, and view composition are additive L2+ tiers a conformant L1 renderer may ignore. It describes <em>what the data means</em>, never how it is drawn.",
+  "usage": "Standardized by Web Charts (#105, scaffolded under #570). The semantic plane is kept strictly separate from the presentation/theme plane (which consumes <a href=\"/projects/webtheme/\">Web Theme</a> tokens), so one spec re-themes without edits. Authored as a profile schema on the <a href=\"/projects/webcharts/#vega-lite-l1\">webcharts project page</a> (#572)."
+}

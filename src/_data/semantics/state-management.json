@@ -1,0 +1,5 @@
+{
+  "term": "State Management",
+  "definition": "Standard primitives for observability, data binding, and reaction to data changes (Signals, Stores).",
+  "usage": "Implemented by Web States."
+}

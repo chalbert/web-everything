@@ -1,0 +1,5 @@
+{
+  "term": "Anti-Flicker Threshold",
+  "definition": "The paired entry-delay and minimum-hold contract that prevents a loading indicator from flashing on fast operations: the indicator is only shown once the wait passes an entry threshold (≈50ms), and once shown is held for a minimum duration (≈100ms) even if the operation resolves sooner. Both values are configurable defaults.",
+  "usage": "Standardized by Loader Intent (the <code>timing</code> entry threshold + the <code>holdFloor</code> minimum hold)."
+}

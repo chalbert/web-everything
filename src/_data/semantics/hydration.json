@@ -1,0 +1,5 @@
+{
+  "term": "Hydration",
+  "definition": "The process by which client-side JavaScript attaches interactivity to server-rendered HTML without re-rendering the DOM.",
+  "usage": "Described in each project's SSR Contract section."
+}

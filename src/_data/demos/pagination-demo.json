@@ -1,0 +1,13 @@
+{
+  "id": "pagination-demo",
+  "name": "Pagination Playground",
+  "summary": "The runnable home for the Pagination block — the blocks-layer realization of the Collection Operations `page` stage. Each card pairs a page-state with a contract (pageMode × advance, urlSync, rangeLabel), renders the controls, and runs the same a11y/SEO audit the CI conformance suite asserts. Backlog #036.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>A live surface for the <a href=\"/blocks/pagination/\">Pagination block</a>, which realizes the <code>page</code> stage of the <a href=\"/intents/collection-operations/\">Collection Operations</a> intent. For each shared fixture it shows the <strong>contract options</strong>, renders the controls through the reference renderer, shows the <strong>produced HTML</strong>, and runs the <strong>contract audit</strong> — a green badge means the rendered controls satisfy the verified accessibility/SEO contract.</p><h3>Verified contract</h3><p>The audit checks the <a href=\"https://www.w3.org/WAI/ARIA/apg/patterns/landmark-regions/\">WAI-ARIA APG</a> pattern — a <code>&lt;nav aria-label=\"pagination\"&gt;</code> landmark with <code>aria-current=\"page\"</code> — plus the SEO-safe self-canonical <code>?page=n</code> default, the result-range label's known-total requirement, and infinite scroll rendered as a <strong>scroll sentinel</strong> (append + auto), never a peer mode.</p><h3>No drift</h3><p>The renderer, the audit, and the fixtures are the <strong>one shared source</strong> the CI conformance suite runs, so the badges here and CI exercise the exact same code. The renderer is a deterministic <em>reference</em>; concrete strategies (a real URL-state provider, windowing) live in Frontier UI.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/pagination-demo.html",
+  "projects": [
+    "webblocks",
+    "webintents"
+  ]
+}

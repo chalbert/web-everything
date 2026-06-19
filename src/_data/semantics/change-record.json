@@ -1,0 +1,5 @@
+{
+  "term": "Change Record",
+  "definition": "The normalized representation of a single mutation that every change-tracking strategy maps into: <code>path</code> (RFC 6901 pointer), <code>op</code> (RFC 6902 vocabulary), optional <code>oldValue</code>/<code>newValue</code>, <code>source</code> (attribution), <code>timestamp</code>, and optional <code>version</code> causal token. A lossy lingua franca for observation — not a replacement for any strategy's native form.",
+  "usage": "Provisional interop target (research topic <code>change-tracking-observability</code>); shape to be finalized in the Change Tracking protocol. <code>oldValue</code> is carried because RFC 6902 ops are not self-inverting."
+}

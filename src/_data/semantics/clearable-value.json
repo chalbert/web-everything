@@ -1,0 +1,5 @@
+{
+  "term": "Clearable Value",
+  "definition": "An 'X' affordance that resets a field's value. Shown only when a value is present, carries the accessible name 'Clear', is keyboard-reachable, and returns focus to the field after clearing. Decoupled from Escape so clearing is a deliberate action, not an accidental side-effect of dismissing a popup.",
+  "usage": "The `clear` affordance of the Input Intent. Reused by search fields, comboboxes, tag inputs, and filters."
+}

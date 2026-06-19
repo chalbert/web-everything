@@ -1,0 +1,5 @@
+{
+  "term": "Implicit Template",
+  "definition": "The convention where a <component> definition's own children are its render source, with no nested <template> wrapper required. A lone direct-child <template> remains the explicit, inert form; both lower to identical output.",
+  "usage": "The <component> element's authoring default (DC-11). See the Component block."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Response-Kind",
+  "definition": "How a Mock Contract interaction is fulfilled: <code>mock</code> (serve the defined response), <code>proxy</code> (forward to the real backend), or <code>record</code> (proxy and capture the live response to seed a mock). Mixed per-interaction on one service.",
+  "usage": "The <code>kind</code> field of a Mock Contract interaction. Why the proxy is a mode of the one schema, not a sibling standard."
+}

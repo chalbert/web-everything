@@ -1,0 +1,5 @@
+{
+  "term": "Input",
+  "definition": "Standardization of data entry interfaces, including affordances, privacy masking, virtual keyboard types, and visual status rendering. Status renders the DisplayDecision from Validation Intent (see OP-21).",
+  "usage": "Standardized by Input Intent. The <code>status</code> dimension visually presents validity state from Validation Intent; there is one source of truth for field state."
+}

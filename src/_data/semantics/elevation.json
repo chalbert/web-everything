@@ -1,0 +1,5 @@
+{
+  "term": "Elevation",
+  "definition": "The simulated Z-axis depth of an element, typically conveyed via shadows or layering, indicating hierarchy.",
+  "usage": "Managed by Surface Intent."
+}

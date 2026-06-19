@@ -1,0 +1,5 @@
+{
+  "term": "guard",
+  "definition": "A predicate/policy attached to a <a href=\"#term-guarded-region\">region</a>, evaluated at a lifecycle event of that region, whose deny-branch resolves to a member-specific outcome. The route-navigation case (Angular <code>canActivate</code>/<code>canDeactivate</code>) is one member; the concept is scale-invariant across the document, routes, modals, and elements.",
+  "usage": "Standardized by the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a> (Web Guards), which fixes only the seam — region + event + predicate + <a href=\"#term-guard-provider\">guard provider</a> — and leaves each member's <a href=\"#term-deny-outcome\">deny-outcome</a> to that member. Surface vocabulary: <code>route:guard=\"requireAuth\"</code> (<a href=\"#term-entry-guard\">entry guard</a>), <code>route:guard:leave=\"confirmUnsaved\"</code> (<a href=\"#term-exit-guard\">exit guard</a>)."
+}

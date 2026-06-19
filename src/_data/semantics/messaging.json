@@ -1,0 +1,5 @@
+{
+  "term": "Messaging",
+  "definition": "The system for prioritizing and displaying communication to the user, from subtle toasts to blocking alerts.",
+  "usage": "Standardized by Message Intent."
+}

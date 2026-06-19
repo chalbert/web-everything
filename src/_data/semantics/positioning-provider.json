@@ -1,0 +1,5 @@
+{
+  "term": "Positioning Provider",
+  "definition": "A registered engine that computes placement for anchored elements, satisfying the CustomPositioner contract (native CSS Anchor, Floating UI adapter, etc.).",
+  "usage": "Registered in CustomPositioningRegistry and resolved through the injector chain. See Web Positioning."
+}

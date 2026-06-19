@@ -1,0 +1,13 @@
+{
+  "id": "loader-background-handoff-demo",
+  "name": "Loader → Background Task Handoff Playground",
+  "summary": "The producer half of the Background Task Surface handoff: a real Resource Loader running backgroundLoad() escalates a slow load into a live <background-tasks> rail when it crosses the debounce threshold. Each card drives the real pair (not a scripted mock) and a badge proves an invariant — slow loads escalate and resolve, fast loads never register, failures are sticky and retry re-runs the real load. Scenarios shared with the unit suite. Backlog #152.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The <strong>producer</strong> half of the <a href=\"/blocks/background-task-surface/\">Background Task Surface</a> handoff (#135 built the receiving surface; this wires the source). A real <a href=\"/blocks/resource-loader/\">Resource Loader</a> running <code>backgroundLoad()</code> escalates a slow load into a live <code>&lt;background-tasks&gt;</code> rail, where it is tracked off-view with progress, completion announcement, and per-task retry.</p><h3>Escalation:async trigger</h3><p>A load escalates exactly when it crosses the Loader's <strong>debounce threshold</strong> into <code>loading</code> — the moment the Loader already decided the work was slow enough to surface a pending UI, reused rather than inventing a new threshold. Fast loads that resolve first never enter <code>loading</code>, so they never reach the rail. Backgrounding is opt-in: call <code>backgroundLoad()</code> instead of <code>load()</code>.</p><h3>Verified contract</h3><p>An adapter projects the Loader's own events (<code>resource-state-change</code> / <code>resource-load-end</code> / <code>resource-load-error</code>) onto the surface's <code>getSnapshot</code> / <code>subscribe</code> / <code>retry</code> handle, registered via a bubbling <code>background-task-register</code> event. The cards prove: a slow load escalates to an active entry then resolves to success, a fast load never registers, and a failed load is sticky with a retry affordance that re-runs the real <code>loader.load()</code>.</p><h3>No drift</h3><p>The scenarios and the controllable-promise lever come from the <strong>same shared fixture module</strong> the unit suite imports, so the badges here and CI exercise the same behavior. This is the <strong>route-only baseline</strong>; the reload-durable tier is the separate <a href=\"/backlog/134-background-task-surface-reload-durable-tier/\">#134</a> Background Fetch adapter.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/loader-background-handoff-demo.html",
+  "projects": [
+    "webblocks",
+    "webintents"
+  ]
+}

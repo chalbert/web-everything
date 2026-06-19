@@ -1,0 +1,8 @@
+{
+  "id": "anchor-positioning",
+  "name": "Anchor Positioning",
+  "summary": "Single positioning provider that any component delegates to via the CustomPositioner contract. Native-first (CSS Anchor Positioning) with pluggable adapters (Floating UI) so components share one engine instead of bundling many.",
+  "status": "concept",
+  "ownedByProject": "webpositioning",
+  "anchor": "protocol-anchor-positioning"
+}

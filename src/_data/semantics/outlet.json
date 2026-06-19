@@ -1,0 +1,5 @@
+{
+  "term": "outlet",
+  "definition": "A named insertion point for routed or projected content. Enables router integration and parent-controlled content projection.",
+  "usage": "Term from React Router and Angular. Use <code>view:outlet=\"name\"</code> for named outlets."
+}

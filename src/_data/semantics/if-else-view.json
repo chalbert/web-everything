@@ -1,0 +1,5 @@
+{
+  "term": "if/else (view)",
+  "definition": "Conditional rendering that adds/removes content from DOM. Clean unmount with no state retention.",
+  "usage": "Implemented by ViewIfDirective. Use for expensive components, auth gates, or when cleanup is needed. Contrast with <code>view:show</code> (ViewShowBehavior) which toggles visibility only."
+}

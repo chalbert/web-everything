@@ -1,0 +1,5 @@
+{
+  "term": "Skeleton",
+  "definition": "A placeholder shaped like the content that will (or may) load, shown during an indeterminate wait. It sets the user's expectation of the incoming content's nature and limits layout shift when real content arrives; preferably subtly animated to indicate ongoing work. Distinct from a loader (an abstract activity animation such as a spinner) in that it mirrors the content's shape.",
+  "usage": "Standardized by Loader Intent (the <code>skeleton</code> value of the <code>indicator</code> dimension, typically over the <code>replacement</code> strategy)."
+}

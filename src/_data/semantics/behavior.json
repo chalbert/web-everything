@@ -1,0 +1,5 @@
+{
+  "term": "Behavior",
+  "definition": "A reusable functionality pattern attached to a component via composition rather than inheritance.",
+  "usage": "Implemented via Web Behaviors."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Placement",
+  "definition": "The preferred side and alignment of an anchored element relative to its anchor, on a 12-way grid (side × start/center/end) plus an automatic option.",
+  "usage": "The <code>placement</code> dimension of the Anchor Intent. Mirrors CSS <code>position-area</code> and Floating UI placement."
+}

@@ -3,18 +3,18 @@
 // requirement whose slots all resolve validates green; one naming a nonexistent registry term fails with a
 // slot-pointed finding. Mirrors the #714 worked example, grounded to terms that actually exist in the tree.
 import { describe, it, expect } from 'vitest';
-import { createRequire } from 'node:module';
 import {
   validateRequirement,
   type RequirementRecord,
   type RequirementRegistries,
 } from '../requirementValidator';
 import { intents as intentsData } from '../../src/_data/intents.data'; // per-intent specs assembled via Vite glob (#1145)
+import { loadSemantics } from '../../scripts/lib/semantics-loader.cjs'; // per-term specs assembled (#1146)
+import { loadProtocols } from '../../scripts/lib/protocols-loader.cjs'; // per-protocol specs assembled (#1146)
 
-const require = createRequire(import.meta.url);
 const intents = intentsData as unknown as RequirementRegistries['intents'];
-const semantics = require('../../src/_data/semantics.json') as RequirementRegistries['semantics'];
-const protocols = require('../../src/_data/protocols.json') as RequirementRegistries['protocols'];
+const semantics = loadSemantics() as unknown as RequirementRegistries['semantics'];
+const protocols = loadProtocols() as unknown as RequirementRegistries['protocols'];
 
 // The governance persona roster is plateau-app-owned (#141/#166) — injected here, never imported (#475).
 const personas = ['end-user', 'developer', 'designer', 'operator'] as const;

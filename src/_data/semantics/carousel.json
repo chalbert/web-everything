@@ -1,0 +1,5 @@
+{
+  "term": "Carousel",
+  "definition": "A set of equivalent slides presented one (or a few) at a time, advanced by controls, pagination markers, swipe, or optional autoplay. Native-first on a CSS scroll-snap container, with the emerging CSS carousel pseudo-elements (<code>::scroll-button()</code>, <code>::scroll-marker</code>) as native controls where shipped. Distinct from tabs (labelled panels) and from paginated data (Collection Operations).",
+  "usage": "Realized by the <a href=\"/blocks/carousel/\">Carousel block</a>; composes the Motion, Live-Region Status, and Navigation intents. Autoplay is opt-in and accessibility-gated (pause control, pause-on-hover/focus, honours prefers-reduced-motion) per WCAG 2.2.2 + the WAI-ARIA APG carousel pattern."
+}

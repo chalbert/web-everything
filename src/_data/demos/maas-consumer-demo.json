@@ -1,0 +1,13 @@
+{
+  "id": "maas-consumer-demo",
+  "name": "Module-as-a-Service Consumer",
+  "summary": "A consumer with no build step: a native import('/_maas/user-card.js?form=wc-class') returns a self-contained ES module that registers the element on evaluation — the server applied the adapter transform. Backlog #081 phase 2a.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The native-only seam of <a href=\"/backlog/081-module-as-a-service-provider/\">backlog #081</a>, phase 2a. This page is a consumer with <strong>no build step</strong>: it does a native <code>import('/_maas/user-card.js?form=wc-class')</code> and the returned ES module registers the element on evaluation. The server applied the adapter transform — nothing is bundled or transpiled on the consumer.</p><h3>Scope</h3><p>v1 serves the <code>wc-class</code> form (self-contained ESM). The <code>jsx</code> form needs the delegated transpile step (phase 2b) before it is import-able. Import-map / bare-specifier resolution starts to matter only once a served module imports another.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/maas-consumer-demo.html",
+  "projects": [
+    "webadapters",
+    "webcomponents"
+  ]
+}

@@ -32,6 +32,7 @@
 import { readFileSync, existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { loadDemos } from './lib/demos-loader.cjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -65,7 +66,7 @@ export function checkDemos() {
   const warnings = [];
   const err = (message, descriptor) => errors.push({ message, descriptor });
 
-  const registry = readJson('src/_data/demos.json', []);
+  const registry = loadDemos(); // per-demo specs src/_data/demos/<id>.json, assembled (#1146)
   const registeredIds = new Set((Array.isArray(registry) ? registry : []).map((d) => d.id));
   const viteCfg = readText('vite.config.mts');
 
@@ -162,7 +163,7 @@ async function probeLive(port) {
 const PRESERVE_MARKER = '## Demo-specific';
 
 function generateChecklist(id) {
-  const registry = readJson('src/_data/demos.json', []);
+  const registry = loadDemos(); // per-demo specs src/_data/demos/<id>.json, assembled (#1146)
   const meta = (Array.isArray(registry) ? registry : []).find((d) => d.id === id) || {};
   const conformance = readJson(`demos/${id}/conformance.json`, { standards: [] });
   const appSrc = readText(`demos/${id}/app.ts`);

@@ -1,0 +1,12 @@
+{
+  "id": "webtheme-tokens-demo",
+  "name": "Web Theme — Tokens, Schemes & High Contrast",
+  "summary": "The webtheme standard proven in a real browser: the DTCG token document compiles to native CSS at runtime (compileToCss → :root custom properties), and the derived scheme + accent ramp emit under color-scheme with a @media (prefers-contrast: more) high-contrast pair (compileSchemeCss). Sample components are styled only by the emitted variables; live controls switch scheme and high-contrast so the emitted CSS is visibly the thing doing the work — the in-browser conformance proof the #1097 completion sub-epic wanted.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>An in-browser conformance proof for <a href=\"/projects/webtheme/\">Web Theme</a>: the DTCG token document is compiled to native CSS at runtime — a <code>:root</code> custom-property block via <code>compileToCss</code>, plus a derived scheme + accent ramp under <code>color-scheme</code> and a <code>@media (prefers-contrast: more)</code> high-contrast pair via <code>compileSchemeCss</code>.</p><h3>The point</h3><p>Every surface on the page is styled <em>only</em> by the emitted custom properties. The live <strong>scheme</strong> and <strong>high-contrast</strong> toggles switch the same emitted CSS, so you can see the contrast-gated scheme pair and the white/black HC extremes do the work — not a hand-authored stylesheet.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webtheme-tokens-demo.html",
+  "projects": [
+    "webtheme"
+  ]
+}

@@ -12,7 +12,9 @@
  * this red. Needs the dev server on :3000 (see playwright.config.ts). Coverage plan #E.
  */
 import { test, expect, type Page, type ConsoleMessage } from '@playwright/test';
-import demos from '../../../src/_data/demos.json';
+import { loadDemos } from '../../../scripts/lib/demos-loader.cjs'; // per-demo specs src/_data/demos/<id>.json, assembled (#1146)
+
+const demos = loadDemos() as DemoEntry[];
 
 interface DemoEntry {
   id: string;

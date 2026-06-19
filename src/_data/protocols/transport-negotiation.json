@@ -1,0 +1,8 @@
+{
+  "id": "transport-negotiation",
+  "name": "Transport Negotiation",
+  "summary": "Conformance reference for OPEN-APP realtime server→client delivery — the live channel an open app holds (presence, live data, server-pushed updates). The lock is a CustomTransportProvider contract: connect(options) → a Connection that emits messages + lifecycle events (open/message/close/error) and can send(...) where the transport is bidirectional. The provider AUTO-NEGOTIATES the best available channel against a declared preference order — SSE and WebSocket native-first defaults, WebTransport capability-gated (Chrome/Edge only, no Safari — probed, never assumed, graceful degradation when absent), long-poll/poll as the degradation FLOOR that always works. Mirrors Socket.IO / SignalR / Centrifugo transport auto-negotiation — a consuming app declares realtime delivery and the provider resolves the transport; swapping SSE→WebSocket→a hub provider leaves the call sites untouched. Scoped to OPEN-APP delivery ONLY: closed-app push (service-worker wake, survives tab close) is non-fungible and lives in Web Notifications’ push-delivery protocol (#455, by-purpose) — you do not fall back from a live socket to a closed-app push, so the two are separate homes. The protocol fixes the provider contract + the connection/message/negotiation shapes; it does NOT own any UX render (a presence indicator or live-region update is a separate intent). Technical contract, not a UX preference — a Protocol, not an Intent.",
+  "status": "concept",
+  "ownedByProject": "webrealtime",
+  "anchor": "protocol-transport-negotiation"
+}

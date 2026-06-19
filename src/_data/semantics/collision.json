@@ -1,0 +1,5 @@
+{
+  "term": "Collision",
+  "definition": "Detection of viewport or clipping-ancestor overflow, and the fallback response that keeps an anchored element visible.",
+  "usage": "The <code>collision</code> dimension of the Anchor Intent: an ordered pipeline of <code>flip</code>/<code>shift</code>/<code>hide</code>/<code>none</code>."
+}

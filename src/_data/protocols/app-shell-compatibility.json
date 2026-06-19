@@ -1,0 +1,8 @@
+{
+  "id": "app-shell-compatibility",
+  "name": "App Shell Compatibility",
+  "summary": "Conformance reference for the flat coexistence manifest each micro-app authors so an app shell can decide — on navigation — whether the next page loads inside the same SPA (compatible) or needs a hard refresh (incompatible). Ruled by #104. The unit is the declared requirement, not the computed chart: a providers block (semver ranges per shared provider, npm-peerDependencies / MF-shared shaped, each singleton-vs-isolatable and mandatory-vs-optional) plus OSGi-Require-Capability-style namespaced claims for the DOM dimension no version-sharing tool models — globals (window.*), tagNames (customElements.define collisions), routes. Singleton providers force a range intersection across all active apps (OSGi uses); isolatable ones get per-app versions via import-map scopes. A second claimant on one namespaced key is a collision, detected separately from a version mismatch. Declare flat; the BCD-style 3-state support matrix and the live map are COMPUTED by the Plateau view (#502), never declared here. Gate strictness is a warn-by-default policy knob (block opt-in), per npm engine-strict / MF strictVersion. Sibling of changelog-manifest; consumed by the app shell runtime resolver and the compatibility map (#502) off one manifest — the MF2 mf-manifest.json one-seam-two-consumers lesson.",
+  "status": "concept",
+  "ownedByProject": "webmanifests",
+  "anchor": "protocol-app-shell-compatibility"
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Registry",
+  "definition": "A system for defining and looking up capabilities or components via a global or scoped lookup mechanism.",
+  "usage": "Implemented by Web Registries."
+}

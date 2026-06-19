@@ -1,0 +1,5 @@
+{
+  "term": "Render Input",
+  "definition": "The payload a Render Strategy realizes — a <code>RenderInput</code> tagged union keyed by strategy id, where each variant carries that strategy's own shape: a parsed template + binding map (declarative-static), a <code>render()</code> thunk returning a vtree (vdom), a reactive computation (fine-grained), or an imperative builder (imperative). One union keeps the registry signature non-generic (mirroring how <a href=\"#change-strategy\">Change Strategy</a> takes a wide <code>target</code> rather than <code>CustomChangeStrategy&lt;T&gt;</code>); the registered provider validates the variant it receives.",
+  "usage": "Render Strategy Protocol (Web Components). The <code>strategy</code> discriminant equals the provider's <code>readonly key</code>, so resolution and input validation share one id space."
+}

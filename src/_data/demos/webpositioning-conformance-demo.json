@@ -1,0 +1,12 @@
+{
+  "id": "webpositioning-conformance-demo",
+  "name": "Web Positioning Conformance Demo",
+  "summary": "The runnable proof of the PositioningStrategy contract (#1048) in a real browser: a surface declares intent — a Placement (bottom-start, top-end, …) plus collision flags (flip/shift/resize) — and a swappable strategy realizes it and returns a reversible PositioningTeardown. The contract is type-only (positioning/contract.ts); the native CSS-anchor strategy, JS fallback, and customPositioning swap registry are impl in Frontier UI, so the demo supplies its own in-demo JS placement strategy to prove the contract is realizable. A runtime-conformance section asserts each invariant live: place() returns a teardown, the strategy name reflects on data-positioning-strategy, a bottom placement sits below its trigger, an overflowing side flips, shift clamps within the viewport, and teardown is fully reversible.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runnable proof of the <code>PositioningStrategy</code> contract (<a href=\"/backlog/1048-webpositioning-contract-the-pure-contract-half-of-the-anchor/\">#1048</a>). A surface declares <strong>intent</strong> — a <code>Placement</code> plus collision flags (<code>flip</code>/<code>shift</code>/<code>resize</code>) — and a swappable strategy realizes it and returns a reversible <code>PositioningTeardown</code>.</p><h3>In-demo strategy, not the FUI impl</h3><p>The contract is type-only (<code>positioning/contract.ts</code>); the native CSS-anchor strategy, the JS fallback, and the <code>customPositioning</code> swap registry are impl and live in Frontier UI. So this demo supplies its <strong>own</strong> in-demo JS placement strategy — honest for a browser demo — to prove the contract is realizable.</p><h3>Verified contract</h3><p>The runtime-conformance section asserts each invariant live: <code>place()</code> returns a <code>PositioningTeardown</code>, the strategy name reflects on <code>data-positioning-strategy</code>, a bottom placement sits below its trigger, a side that overflows the viewport flips, <code>shift</code> clamps the surface within the viewport, and the teardown is fully reversible.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webpositioning-conformance-demo.html",
+  "projects": [
+    "webpositioning"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "id": "push-delivery",
+  "name": "Push Delivery",
+  "summary": "Conformance reference for CLOSED-APP push-notification delivery — the server→client transport that survives tab close. Native anchor: the Web Push API (a service-worker PushSubscription against a push service, authenticated with VAPID). The lock is a CustomPushProvider contract — subscribe(options) → PushSubscription, send(target, payload) → delivery receipt, unsubscribe(target) — so the native browser push path is the default and a multi-channel hub (web-push thin transport, or FCM/OneSignal/Novu orchestration) plugs in behind the same seam. Scoped to closed-app push ONLY: the open-app realtime family (WebSocket/SSE/WebTransport/long-poll) is non-fungible (a hard capability cliff — you don't fall back from a live socket to a closed-app push) and gets its own transport home (#455, by-purpose). A consuming project sees the render intents (system-notification, notification-marker), never the transport. The protocol fixes the provider contract + the subscription/payload/receipt shapes; it does NOT own the OS render surface (that's the system-notification render intent) nor permission state (the cross-cutting Permissions API tri-state). Technical contract, not a UX preference — a Protocol, not an Intent.",
+  "status": "concept",
+  "ownedByProject": "webnotifications",
+  "anchor": "protocol-push-delivery"
+}

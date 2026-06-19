@@ -1,0 +1,8 @@
+{
+  "id": "mock-contract",
+  "name": "Mock Contract",
+  "summary": "Portable, interaction-bearing mock/contract schema for the mock & service-proxy dev-service — the standard artifact, with the server as a swappable provider. Anchors the response shape on OpenAPI, then adds a WE behavior layer OpenAPI cannot express: latency, fault injection, first-that-matches conditional responses, a mock|proxy|record response-kind, and auth/fake-OAuth (stateless by default). The artifact carries consumer interactions (Pact/BDCT), not just a shape, so one contract serves two uses — drive a mock AND drift-check the real service in webcases — because schema-validation ≠ contract-verification. Data-defined so it is portable across providers: the protocol is the only lock.",
+  "status": "concept",
+  "ownedByProject": "webcases",
+  "anchor": "protocol-mock-contract"
+}

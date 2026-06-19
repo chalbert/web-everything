@@ -1,0 +1,5 @@
+{
+  "term": "entry guard",
+  "definition": "The Guard member that gates <em>entering</em> a region — <em>may I activate/enter this?</em> Predicate = authorization/precondition; <a href=\"#term-deny-outcome\">deny-outcome</a> = <code>hide | redirect | forbid (403) | cloak (404)</code>, where the 403-vs-404 choice (revealing whether the resource exists) is a security call made behind the <a href=\"#term-guard-provider\">guard provider</a>. The routing-and-rendering face of access control.",
+  "usage": "The access-control member (<a href=\"/backlog/178-access-control-authorization-gate/\">#178</a>) of the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a>. Prior art: Angular <code>canActivate</code>, Vue route enter, CASL <code>&lt;Can&gt;</code> (rendering)."
+}

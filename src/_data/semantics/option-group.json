@@ -1,0 +1,5 @@
+{
+  "term": "Option Group",
+  "definition": "A labeled subset of options within a selection control. Native: `<optgroup label>` (label required, no nesting). Custom: `role=\"group\"` + `aria-labelledby` referencing a visible heading; the heading is not a focusable option.",
+  "usage": "The `grouping` dimension of the Selection Intent. Mirrors how menus, command palettes, and faceted lists organize choices."
+}

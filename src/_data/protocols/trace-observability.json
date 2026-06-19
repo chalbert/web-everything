@@ -1,0 +1,8 @@
+{
+  "id": "trace-observability",
+  "name": "Trace Observability",
+  "summary": "Trace propagation and instrumentation contract aligning with W3C Trace Context and OpenTelemetry. Defines header propagation, optional trace-id meta embedding, and suggested client API shape (trace / effect).",
+  "status": "concept",
+  "ownedByProject": "webtraces",
+  "anchor": "protocol-trace-observability"
+}

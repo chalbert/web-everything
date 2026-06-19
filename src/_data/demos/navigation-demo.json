@@ -1,0 +1,8 @@
+{
+  "id": "navigation-demo",
+  "name": "Navigation Demo",
+  "description": "Accessible sidebar navigation with collapsible sections, keyboard navigation, and router integration.",
+  "path": "/demos/navigation-demo.html",
+  "status": "active",
+  "project": "navigation"
+}

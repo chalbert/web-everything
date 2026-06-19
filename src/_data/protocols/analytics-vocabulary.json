@@ -1,0 +1,8 @@
+{
+  "id": "analytics-vocabulary",
+  "name": "Analytics Event Vocabulary",
+  "summary": "Vendor-neutral analytics instrumentation contract using the Segment Spec vocabulary (Identify, Track, Page). One call site routes to any conformant backend (Segment, Mixpanel, GA4, custom).",
+  "status": "draft",
+  "ownedByProject": "webanalytics",
+  "anchor": "protocol-analytics-vocabulary"
+}

@@ -1,0 +1,5 @@
+{
+  "term": "guarded region",
+  "definition": "The scope a <a href=\"#term-guard\">guard</a> protects — scale-invariant across the document (the outermost region), a route, a modal, a panel, or a single element. A guard hooks a region's <em>cancelable</em> lifecycle event (a close button, route change, <code>beforeunload</code>), never raw DOM removal: imperative teardown that bypasses a guardable trigger cannot be caught.",
+  "usage": "Defined by the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a> (Web Guards) as the first element of its fixed seam (region + event + predicate + provider). Same intent applies whether the region is the whole document, a route, or a modal."
+}

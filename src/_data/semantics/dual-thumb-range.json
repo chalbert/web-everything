@@ -1,0 +1,5 @@
+{
+  "term": "Dual-Thumb Range",
+  "definition": "A from–to range modelled as two coordinated thumbs over a single track, each with its own <code>aria-valuenow/min/max</code>, kept ordered (the low thumb cannot cross the high thumb) and reported as a pair. The platform has no single dual-thumb range element, so it is the standard composition for 'from–to'.",
+  "usage": "The concrete realization of the <a href=\"/intents/selection/\">Selection Intent</a>'s <code>range</code> variant in the <a href=\"/blocks/slider/\">Slider block</a>: <code>constraints.min</code> / <code>constraints.max</code> become the two thumb bounds."
+}

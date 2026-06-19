@@ -1,0 +1,5 @@
+{
+  "term": "Recovery Outcome",
+  "definition": "The instruction a recovery handler returns to the consumer: <code>retry</code> (re-execute after optional delay), <code>queued</code> (stored for later replay), <code>fallback</code> (surface fallback content), or <code>abort</code> (propagate error immediately).",
+  "usage": "Web Reliability — <code>RecoveryResult.outcome</code>. Maps to Reliability Intent dimensions: retry → recovery.automatic/manual; fallback → fallback.skeleton/empty/previous; abort → tolerance.terminal."
+}

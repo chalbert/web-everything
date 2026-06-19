@@ -1,0 +1,5 @@
+{
+  "term": "Change Source",
+  "definition": "The origin of a mutation carried on a Change Record so cross-layer consumers can discriminate cause: <code>user</code> input, <code>program</code> mutation, <code>server-sync</code>, <code>replay</code>/<code>undo</code>, or <code>external</code>. May carry a W3C Trace Context <code>traceparent</code> linking the change to the initiating span.",
+  "usage": "The attribution axis of Change Tracking. Generalizes validation's <code>value-input</code> (user) vs <code>baseline-change</code> (program/server) distinction; mirrors the CloudEvents <code>source</code> envelope field."
+}

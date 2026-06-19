@@ -1,0 +1,5 @@
+{
+  "term": "ViewEngine",
+  "definition": "Shared utility providing hidden mode management, toggle events (beforetoggle/toggle), exclusive group coordination, and View Transitions integration.",
+  "usage": "Not a block itself. Imported by View blocks and higher-level components (Router uses it directly). Handles HOW to hide/show; blocks handle WHEN."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Reorderable List",
+  "definition": "A list whose item order is user-mutable by both pointer drag and keyboard, with live-region announcement and a pluggable commit strategy. Relocates items atomically with <code>Element.moveBefore()</code> so a moved item keeps its focus, animation, and connection state.",
+  "usage": "The <a href=\"/blocks/reorderable-list/\">Reorderable List</a> block; implements the <a href=\"/intents/reorder/\">Reorder Intent</a>. Pairs each item with <code>preserve-on-move</code> for the atomic relocation."
+}

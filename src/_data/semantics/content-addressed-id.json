@@ -1,0 +1,5 @@
+{
+  "term": "Content-Addressed Id",
+  "definition": "The version identity of a Module-as-a-Service served artifact: an opaque hash digest over <em>every</em> byte-determining input — the authored definition, the transform/compiler version, the request params (form/target/strategy), and the folded provenance. Same id ⇒ byte-identical artifact (cacheable forever); any input moving mints a new id. Omitting a byte-determining input is the one excluded (broken) rule — it serves drift.",
+  "usage": "The identity invariant of the <a href=\"/projects/webadapters/#protocol-maas-versioning\">MaaS Served-Artifact Versioning Protocol</a> (ratified in #088, realized by #389). The terminal rung of the pin ladder resolves to the content-addressed URL, the only rung served <code>immutable</code>."
+}

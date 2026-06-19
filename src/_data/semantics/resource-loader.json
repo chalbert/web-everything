@@ -1,0 +1,5 @@
+{
+  "term": "Resource Loader",
+  "definition": "A structural pattern used to handle asynchronous data fetching and state display in-place.",
+  "usage": "Part of Web Blocks."
+}

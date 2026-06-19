@@ -1,0 +1,5 @@
+{
+  "term": "Drawer",
+  "definition": "The edge-anchored, sliding concrete member of the dialog family — a panel entering from a viewport inline edge (navigation drawer, filter panel, detail pane). It extends the abstract dialog substrate (inheriting focus containment, dismissal, backdrop, scroll-lock, mode, top-layer) and only fixes the configuration to an edge: the Modal Intent's <code>placement: start | end</code> (RTL-aware), with slide motion and swipe-to-dismiss added. Sibling of the centered modal (center) and bottom sheet (bottom).",
+  "usage": "Realized by the <a href=\"/blocks/drawer/\">Drawer block</a>, a concrete member of the <a href=\"/blocks/dialog/\">dialog family</a> (<code>droplist : dropdown :: dialog : drawer</code>). It re-implements none of the dialog machinery — a drawer IS a dialog at an inline edge."
+}

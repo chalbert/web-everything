@@ -1,0 +1,5 @@
+{
+  "term": "Breakpoint",
+  "definition": "Viewport width thresholds that trigger layout changes. In Web Everything, these are tokenized to ensure consistency across JS and CSS.",
+  "usage": "Standardized by Breakpoint Intent."
+}

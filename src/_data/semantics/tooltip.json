@@ -1,0 +1,5 @@
+{
+  "term": "Tooltip",
+  "definition": "A small, transient, non-interactive surface that appears on hover or keyboard focus of a trigger and supplements it with an accessible description. Wired via <code>aria-describedby</code> (it describes; it does not name), never as the sole carrier of essential information, and never holding focusable content. Must satisfy WCAG 1.4.13 — hoverable, persistent, and dismissible.",
+  "usage": "Delivered by the <a href=\"/blocks/tooltip/\">Tooltip block</a>, composing the <a href=\"/intents/anchor/\">Anchor</a>, <a href=\"/intents/surface/\">Surface</a>, and <a href=\"/intents/typography/\">Typography</a> intents. Distinct from a Toggletip."
+}

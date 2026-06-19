@@ -1,0 +1,8 @@
+{
+  "id": "design-tokens",
+  "name": "Design Tokens (DTCG ↔ CSS)",
+  "summary": "Conformance reference for the design-token interchange + runtime mapping. The authoring/interchange format is W3C DTCG 2025.10 (adopted, not coined — the one legitimate Protocol here): a vendor-neutral JSON of { $type, $value } nodes with {group.token} aliasing, so tokens are portable across Style Dictionary, Tokens Studio, Figma, Terrazzo. The runtime tier is native CSS: each resolved token compiles to a custom property (--<group>-<token>), typed numerics register via @property, schemes resolve through light-dark()/color-scheme, contrast through prefers-contrast, and derived accent/state scales through relative color syntax (oklch(from …)) + color-mix() — validated against WCAG/APCA per step (the contrast-validation gate; curated scales are a brand-precision override, not the accessibility net). The standard ships a COMPLETE default token set; a consuming project overrides via DTCG `extends` rather than authoring from scratch. The taxonomy is 3-tier (primitive · semantic · component); the SEMANTIC tier is NOT defined here — it is owned by the Web Intents (density, surface, typography, motion, theme-color), whose refs resolve INTO a primitive token. NOT this protocol: the semantic role vocabulary (Web Intents) and the theme-color intent authoring (#010).",
+  "status": "draft",
+  "ownedByProject": "webtheme",
+  "anchor": "protocol-design-tokens"
+}

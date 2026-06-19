@@ -1,0 +1,5 @@
+{
+  "term": "Dialog (family substrate)",
+  "definition": "The abstract substrate every dialog-based surface conforms to — a top-layer surface that interrupts or overlays the page, owning the shared modal-surface machinery (focus containment, escape/outside/backdrop dismissal, scroll-lock, modal/non-modal mode, top-layer mount). Not a shippable widget; its concrete members are distinct configurations of the Modal Intent's <code>placement</code> over this one substrate: centered modal (center), drawer (start/end), bottom sheet (bottom). The droplist-family pattern applied to dialogs (<code>droplist : dropdown :: dialog : drawer</code>).",
+  "usage": "The <a href=\"/blocks/dialog/\">Dialog block</a> (abstract), realized on native <code>&lt;dialog&gt;</code> + the Popover API; implements the <a href=\"/intents/modal/\">Modal Intent</a> and composes Focus Containment, Surface, and Motion. Concrete members (<a href=\"/backlog/360-drawer-sheet-block/\">drawer</a> #360, sheet, modal) extend it rather than re-implementing the machinery."
+}

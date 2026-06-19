@@ -1,0 +1,19 @@
+{
+  "id": "auto-insurance",
+  "name": "Auto Insurance (exercise app B)",
+  "summary": "A full, complex personal-auto insurance app — the second flagship exercise app (#314/#318), in a modern-SaaS register. Slice S0 (foundation) is live: a 4,000-policy seeded book is rated + underwritten client-side (a per-policy premium breakdown and an underwriting decision-trace), rendered through the SAME shipped blocks the loan app drove — data-table, pagination, master-detail, decision-trace, status-indicator, lifecycle, audit, router — making insurance their second consumer (a cross-app conformance check). The quote wizard, coverage tree, and claims follow.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>Candidate <strong>B</strong> of the <a href=\"/backlog/314-flagship-exercise-apps/\">flagship exercise-apps</a> program — a <strong>personal-auto</strong> policy lifecycle (quote → bind → issue → endorse → renew → cancel) plus FNOL/claims, chosen for its deeply conditional questionnaires, coverage hierarchy, rating/underwriting rules, and roles. Approximated, not a compliant rating plan. Requirements: <a href=\"/reports/2026-06-12-exercise-app-auto-insurance-requirements/\">requirements report</a>. Tracked by epic <a href=\"/backlog/318-exercise-app-auto-insurance-lifecycle/\">#318</a>.</p><h3>Live now — S0 foundation</h3><p>The domain core: a rating engine (multiplicative factors → 6-month premium) and an underwriting rules engine that emits a per-policy <strong>decision-trace</strong>, a deterministic 4k-policy book seed, and two entity lifecycles (policy + claim). The harness rates the whole book client-side and renders the finding distribution plus a clickable per-policy detail.</p><h3>The point: a second consumer</h3><p>Insurance <strong>reuses</strong> the standards the loan app drove (lifecycle, status-indicator, audit, decision-trace, master-detail, data-table, pagination, selection, router) in a different domain and a different visual register — proving the platform reskins and the standards compose across apps. It will <strong>drive</strong> the next gap set: tree-select, configurator, file handling, view-transitions, permissions, persistence.</p>",
+  "status": "draft",
+  "fuiDemoFile": "auto-insurance.html",
+  "fuiDemoHeight": 680,
+  "projects": [
+    "weblifecycle",
+    "webaudit",
+    "webdecisions"
+  ],
+  "epic": {
+    "url": "/backlog/318-exercise-app-auto-insurance-lifecycle/",
+    "label": "#318 — Auto insurance (epic)"
+  }
+}

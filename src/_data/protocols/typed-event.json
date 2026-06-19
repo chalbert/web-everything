@@ -1,0 +1,8 @@
+{
+  "id": "typed-event",
+  "name": "Typed Event",
+  "summary": "Typed, self-describing event classes with provider-based scoping. Defines TypedEventClass plus listenForScoped / provider option so cross-team events discriminate via instanceof instead of fragile name matching.",
+  "status": "concept",
+  "ownedByProject": "webevents",
+  "anchor": "protocol-typed-event"
+}

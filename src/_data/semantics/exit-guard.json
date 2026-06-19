@@ -1,0 +1,5 @@
+{
+  "term": "exit guard",
+  "definition": "The Guard member that gates <em>tearing down</em> a region the user is in — <em>may I leave/dismiss this?</em> Predicate = loss-of-state (dirty form, unsaved editor, in-flight task); <a href=\"#term-deny-outcome\">deny-outcome</a> = a user-mediated <code>confirm</code> (stay/discard). Arms on the cancelable dismissal trigger at any scale: document (<code>beforeunload</code>), same-document route (Navigation API <code>intercept</code>), in-app dismissal (modal/panel close).",
+  "usage": "The exit-guard member (<a href=\"/backlog/273-exit-guard-intent-confirm-before-tearing-down-a-region-with-/\">#273</a>) of the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a>; successor of the navigation-guard intent (#129). Prior art: Angular <code>canDeactivate</code>, Vue <code>beforeRouteLeave</code>, React <code>useBlocker</code>, SvelteKit <code>beforeNavigate</code>."
+}

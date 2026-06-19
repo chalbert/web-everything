@@ -1,0 +1,5 @@
+{
+  "term": "Notification Region",
+  "definition": "The top-layer host element that displays notifications and is the live region for their announcements. Placed declaratively once per app; mounts to the platform top layer via the Popover API (<code>popover=\"manual\"</code>), falling back to a Web Portals mount. Reads the Feedback Intent's <code>placement</code> and <code>stackLimit</code> to position and bound the visible set.",
+  "usage": "The Component half of the <a href=\"/blocks/notification/\">Notification block</a>; its injectable controller is the imperative half (<code>show</code>/<code>dismiss</code>). Emits <code>notification-shown</code> / <code>notification-dismissed</code>."
+}

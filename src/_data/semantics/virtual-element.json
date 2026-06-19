@@ -1,0 +1,5 @@
+{
+  "term": "Virtual Element",
+  "definition": "An element implementation using markers (e.g., comments) to avoid introducing redundant container nodes in the DOM.",
+  "usage": "Used elsewhere to preserve CSS Grid/Flex relationships."
+}

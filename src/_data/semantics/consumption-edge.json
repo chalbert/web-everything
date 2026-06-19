@@ -1,0 +1,5 @@
+{
+  "term": "Consumption Edge",
+  "definition": "A directed <em>consumes</em> edge in the provider–consumer graph: a record that one consumer depends on one provider, surfaced by WE introspection at the DI seam (<code>Injector.consumptionEdges()</code>, opt-in via <code>Injector.trackConsumption</code>). Bidirectional by construction — the same edge answers both 'what do I depend on?' and 'who depends on me?', the latter being what makes impact analysis possible. Build-derived edges are <em>confirmed</em>; a runtime drift agent may add <em>potential</em> edges until a trace confirms them.",
+  "usage": "Part 1 of the <a href=\"/projects/webregistries/#protocol-provider-consumer-graph\">Provider–Consumer Graph Protocol</a> (#401), populated by the introspection extension in #400. The graph is build-time auto-derived (no live agent), the #092 most-permissive ingestion default."
+}

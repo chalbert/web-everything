@@ -1,0 +1,5 @@
+{
+  "term": "Keyboard Reorder",
+  "definition": "The keyboard-operable path for reordering — roving tabindex over items plus grab/move/drop keys plus a polite live-region announcement of each move. It is a mandatory part of the reorder contract, not an enhancement; the deprecated <code>aria-grabbed</code>/<code>aria-dropeffect</code> are not used.",
+  "usage": "The <code>keyboard</code> value of the Reorder Intent's <code>movement</code> dimension, surfaced by the Reorderable List block's <code>withKeyboardReorder</code> trait. Composes <a href=\"/intents/focus-delegation/\">Focus Delegation</a> and <a href=\"/intents/live-region-status/\">Live Region Status</a>."
+}

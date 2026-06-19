@@ -1,0 +1,5 @@
+{
+  "term": "Commit Policy",
+  "definition": "The validation-level dimension that defines data persistence rules: error rejects (blocks submission), warning/info commit, caution holds until user confirms.",
+  "usage": "Standardized by Validation Intent <code>level</code> dimension. Separates severity/tone from data-gating behavior."
+}

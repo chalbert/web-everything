@@ -1,0 +1,5 @@
+{
+  "term": "loader",
+  "definition": "Async function that fetches data before a route activates. Result available in route context.",
+  "usage": "Term from React Router 6+ and Remix. Used as <code>route:loader=\"loadUser\"</code>. Data accessible via <code>@route.data</code>."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "deny-outcome",
+  "definition": "What a <a href=\"#term-guard\">guard</a>'s deny-branch resolves to. Deny-outcome families are member-specific and deliberately <em>not</em> unified: an <a href=\"#term-exit-guard\">exit guard</a>'s is a user-mediated <code>confirm</code> (stay/discard); an <a href=\"#term-entry-guard\">entry guard</a>'s is <code>hide | redirect | forbid | cloak</code>. This divergence is exactly why guard members are siblings over one provider seam, not one merged intent.",
+  "usage": "Each member intent owns its deny-outcome; the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a> fixes the provider seam but says nothing about the deny branch."
+}

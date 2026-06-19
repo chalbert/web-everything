@@ -1,0 +1,5 @@
+{
+  "term": "view",
+  "definition": "A region of content whose visibility is managed. Framework-agnostic term covering show/hide, structural rendering, and command-driven toggling.",
+  "usage": "Foundation module providing ViewEngine (shared core), ViewBehavior (<code>view</code> attr), ViewShowBehavior (<code>view:show</code>), ViewIfDirective (<code>view:if</code>), ViewSwitchDirective (<code>view:switch</code>). Higher-level components (Tabs, Router) build on these."
+}

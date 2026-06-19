@@ -29,6 +29,10 @@ import { buildReport, source as reportSource, finding as reportFinding, section 
 import { loadBlocks } from './lib/blocks-loader.cjs';
 import { loadIntents } from './lib/intents-loader.cjs';
 import { loadResearch } from './lib/research-loader.cjs';
+import { loadProtocols } from './lib/protocols-loader.cjs';
+import { loadDemos } from './lib/demos-loader.cjs';
+import { loadSemantics } from './lib/semantics-loader.cjs';
+import { loadPresets } from './lib/presets-loader.cjs';
 import {
   BACKLOG_STATUSES, BACKLOG_TYPES, WORK_ITEMS, FIB, FILE, blockSpecFile,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated,
@@ -107,16 +111,16 @@ const BLOCK_TYPES = new Set(['Store', 'Parser', 'Behavior', 'Directive', 'Compon
 // ── Load specs ───────────────────────────────────────────────────────────────
 const blocks = arr(loadBlocks()); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
 const plugs = arr(readJson('plugs.json'));
-const semantics = arr(readJson('semantics.json'));
+const semantics = arr(loadSemantics()); // per-term specs src/_data/semantics/<slug>.json, assembled (#1146)
 const research = arr(loadResearch()); // per-topic specs src/_data/researchTopics/<id>.json, assembled (#1145)
-const protocols = arr(readJson('protocols.json'));
-const presets = arr((readJson('assemblerPresets.json') || {}).presets);
+const protocols = arr(loadProtocols()); // per-protocol specs src/_data/protocols/<id>.json, assembled (#1146)
+const presets = arr(loadPresets()); // per-preset specs src/_data/assemblerPresets/<name>.json, assembled (#1146)
 const designSystems = arr(readJson('designSystems.json'));
 const projects = arr(readJson('projects.json'));
 const intents = arr(loadIntents()); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
 const capabilities = arr(readJson('capabilities.json'));
 const adapters = arr(readJson('adapters.json'));
-const demos = arr(readJson('demos.json'));
+const demos = arr(loadDemos()); // per-demo specs src/_data/demos/<id>.json, assembled (#1146)
 const capabilityMatrix = readJson('capabilityMatrix.json') || {};
 // Backlog feeds off backlog/*.md via the shared data-file loader (single source).
 const loadBacklog = require(join(ROOT, 'src/_data/backlog.js'));

@@ -1,0 +1,12 @@
+{
+  "id": "conformance-autofix-demo",
+  "name": "Conformance Auto-Fix Playground",
+  "summary": "The interactive surface over the conformance auto-fix loop (#095/#196/#293): drive a failing conformance suite back to green, card by card. Each card runs the real autofix orchestrator — failure (check:standards) → proposed patch → diff → verify gate → accept/revert. The verify gate is the moat: a patch is kept only if its target failure cleared and it introduced no new error, else reverted automatically. AI is a swappable provider (a scripted no-key model fixer runs through the same registry a BYO-key client would), with a model-fix cost bound. Backlog #298.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>A live surface for <a href=\"/backlog/298-conformance-auto-fix-playground-interactive-propose-verify-a/\">backlog #298</a> — the interactive front end on the conformance <strong>auto-fix loop</strong>. It is the sibling of <a href=\"/demos/code-upgrader-demo.html\">the Code Upgrader</a>, one domain over: the upgrader lifts legacy code <em>onto</em> the standard; this drives a <strong>failing conformance suite back to green</strong>. Each card runs the whole loop: <strong>failure &rarr; proposed patch &rarr; diff &rarr; verify gate &rarr; accept / revert</strong>, driving the same <code>autofix</code> orchestrator the CLI and unit suite use over an in-memory world.</p><h3>The verify gate is the moat</h3><p>A proposed patch is <em>applied</em>, the suite <em>re-run</em>, and the patch kept only if its target failure cleared and it introduced no new error &mdash; else reverted automatically. A plausible-but-wrong fix is never shipped.</p><h3>AI is a swappable provider</h3><p>A fixer (failure &rarr; patch) drops into the same registry whether it is the deterministic <em>reference</em> fixer or a bring-your-own-key <em>model</em> fixer. The model cards run a <em>scripted</em> no-key client through the exact seam a real Anthropic client would use, gated by the same verify pass and the same model-fix cost bound.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/conformance-autofix-demo.html",
+  "projects": [
+    "webvalidation"
+  ]
+}

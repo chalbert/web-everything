@@ -1,0 +1,5 @@
+{
+  "term": "Roving Tabindex",
+  "definition": "A focus management pattern where `tabindex=\"0\"` moves to the currently active item, while others are set to `-1`.",
+  "usage": "Used in Composite Widgets. One of the two strategies of the Focus Delegation Intent (the other being Virtual Focus)."
+}

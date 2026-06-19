@@ -1,0 +1,5 @@
+{
+  "term": "show/hide (view)",
+  "definition": "Toggle visibility without removing from DOM. Element remains in accessibility tree and preserves state.",
+  "usage": "Implemented by ViewShowBehavior (<code>view:show</code>) for expression-bound visibility, or ViewBehavior (<code>view</code> attr) for command-driven toggling. Use for frequent toggles where state preservation matters."
+}

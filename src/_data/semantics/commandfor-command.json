@@ -1,0 +1,5 @@
+{
+  "term": "commandfor/command",
+  "definition": "Declarative trigger pattern from Invoker Commands API. Button references target by ID (commandfor) and specifies action (command). Custom commands use -- prefix.",
+  "usage": "Standard pattern (Baseline Jan 2026). Example: <code>&lt;button commandfor=\"panel-1\" command=\"--view-show\"&gt;</code>"
+}

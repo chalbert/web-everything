@@ -1,0 +1,5 @@
+{
+  "term": "Reward Early Punish Late",
+  "definition": "A display policy: until a field errors, show validation lazily (on blur). Once errored, flip to eager (on change) for immediate feedback. Revert to lazy on fix. A dynamic behavior (not a flat execution value) driven by interaction state.",
+  "usage": "Emerges naturally from Validation Intent's DisplayDecision gating by visibility intent. Research: Konjević, Smashing Magazine. Prevents annoying re-validation while encouraging rapid correction."
+}

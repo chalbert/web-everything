@@ -1,0 +1,5 @@
+{
+  "term": "Breadcrumb",
+  "definition": "A structured trail showing the user's location within a site or data hierarchy, as an ordered list of links from root to current page. Answers \"where am I?\" — distinct from a navigation menu (\"where can I go?\"), tabs (\"which panel?\"), or a stepper (\"how far through this process?\"). Realized as a <code>nav[aria-label]</code> landmark wrapping an ordered list, the current crumb a non-link carrying <code>aria-current=\"page\"</code>, with presentational (never announced) separators.",
+  "usage": "Realized by the <a href=\"/blocks/breadcrumb/\">Breadcrumb block</a>, which implements the <a href=\"/intents/navigation/\">Navigation Intent</a> and composes the Typography Intent for crumb-label truncation. Overflow collapses the middle behind an ellipsis disclosure, keeping root + current visible."
+}

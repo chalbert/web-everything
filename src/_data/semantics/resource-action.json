@@ -1,0 +1,5 @@
+{
+  "term": "Resource Action",
+  "definition": "A behavioral directive that attaches asynchronous mutation lifecycle management to UI triggers.",
+  "usage": "Part of Web Blocks."
+}

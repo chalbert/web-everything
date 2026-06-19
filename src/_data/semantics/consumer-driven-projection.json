@@ -1,0 +1,5 @@
+{
+  "term": "Consumer-Driven Projection",
+  "definition": "The net-new, consumer side of a provider↔consumer seam-contract: the consumer declares the subset of a protocol's dimensions/capabilities it actually depends on (<code>consumerRequires</code>), rather than the whole protocol. The provider side is <em>reused</em> from the existing protocol conformance contract (the provider declares its tier). Compatible ⇔ the consumer's required subset is contained in what the provider's tier supplies; a drift is any change removing a required member.",
+  "usage": "Part 2 of the <a href=\"/projects/webregistries/#protocol-provider-consumer-graph\">Provider–Consumer Graph Protocol</a> (#401, #092 Fork 2). The only new schema at the seam — it deliberately reuses <a href=\"/protocols/\">protocols.json</a> rather than coining a parallel Pact-style format. Feeds drift detection, impact analysis, and continuous verification on one definition."
+}

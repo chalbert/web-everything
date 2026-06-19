@@ -1,0 +1,5 @@
+{
+  "term": "Ambient Intent",
+  "definition": "A designer- or product-owned <em>behavioral</em> preference (focus strategy, collision handling, truncation) propagated down a DOM subtree via DI. Partial, overridable, and never structural — Ambient Intent cannot set <code>model</code> or <code>editable</code>; those are Trait Selection.",
+  "usage": "The behavioral-preference channel in the Droplist family and other composable systems. Set via <code>injector.set('customContexts:droplistIntent', { focusStrategy: 'virtual', … })</code>; resolved per-dimension as <code>explicit ⊕ ambient ⊕ default</code>. The Loader Intent's <code>loaderIntent</code> provider is the original precedent."
+}

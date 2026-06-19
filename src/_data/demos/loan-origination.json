@@ -1,0 +1,19 @@
+{
+  "id": "loan-origination",
+  "name": "Loan Origination (exercise app A)",
+  "summary": "A full, complex mortgage loan-origination app built to exercise the standard end-to-end (flagship exercise-app program, backlog #314/#317). Slice S0 (foundation) is live: 5,000 seeded applications run through a rules-as-data underwriting engine in ~19ms, with an AUS-style finding spread and a per-loan proof-of-compliance trace. Borrower 1003 wizard, document checklist, product/rate configurator, and the underwriter workbench follow.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>Candidate <strong>A</strong> of the <a href=\"/backlog/314-flagship-exercise-apps/\">flagship exercise-apps</a> program — a residential mortgage <strong>origination</strong> flow (application → clear-to-close) chosen because it stresses the whole standard: complex multi-step validation, codifiable business rules, identity/permissions, persistence, a product configurator, file handling, and a pipeline at scale. Structure is anchored on real industry shape (URLA/1003, DTI/LTV, AUS findings, TRID) but <strong>approximated, not a compliant LOS</strong>. Requirements: <a href=\"/reports/2026-06-11-exercise-app-loan-origination-requirements/\">requirements report</a>.</p><h3>Live now — S0 foundation</h3><p>The framework-agnostic domain core: a <strong>rules-as-data engine</strong> (JSON predicate DSL, versioned, AUS-style aggregation) that emits a per-rule <strong>proof-of-compliance trace</strong>, a product catalog + rate sheet with LLPA pricing, derived underwriting facts (DTI/LTV/reserves), a deterministic 5k-application seed, and a mock provider seam (credit/AUS/verification/e-sign/doc-classify). The harness generates and evaluates all 5,000 applications client-side and renders the finding distribution plus a clickable trace per loan.</p><h3>Built against the standard</h3><p>Hosted under <code>demos/loan-origination/</code> on the declarative-SPA shell so the app dogfoods the standard's own routing, loader, components, and intents as later slices land (S1 permissions → S2 lifecycle → S3 the 1003 wizard).</p>",
+  "status": "draft",
+  "fuiDemoFile": "loan-origination.html",
+  "fuiDemoHeight": 680,
+  "projects": [
+    "webvalidation",
+    "webintents",
+    "webblocks"
+  ],
+  "epic": {
+    "url": "/backlog/317-exercise-app-loan-origination/",
+    "label": "#317 — Loan origination (epic)"
+  }
+}

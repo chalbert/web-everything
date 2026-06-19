@@ -1,0 +1,5 @@
+{
+  "term": "Navigation API",
+  "definition": "Modern browser API (Baseline 2024) replacing History API. Provides navigation events, traversal info, and interception capabilities.",
+  "usage": "Primary navigation mechanism. Use <code>navigation.addEventListener('navigate', ...)</code> for route interception."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "aria-current",
+  "definition": "ARIA attribute indicating the current item within a set. For navigation, aria-current='page' identifies the current page link.",
+  "usage": "Set by RouteLinkBehavior on the link matching the current URL. Screen readers announce it as 'current page'."
+}

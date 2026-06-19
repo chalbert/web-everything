@@ -1,0 +1,5 @@
+{
+  "term": "Forgivable",
+  "definition": "Error tolerance level where the operation failed but the application state remains valid.",
+  "usage": "A core principle of Reliability Intent."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Windowing",
+  "definition": "Rendering only the visible window of a large collection (plus a small overscan) and recycling rows as the user scrolls, rather than placing every item in the DOM. Also called virtualization. Distinct from the Virtual Element (comment-marker) concept.",
+  "usage": "The `windowed` rendering mode of the Windowed Collection Intent. Requires Set Size / Position in Set to preserve accessibility, and must not unmount the focused item."
+}

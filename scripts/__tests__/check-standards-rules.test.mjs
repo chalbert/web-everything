@@ -18,6 +18,7 @@ import { createRequire } from 'node:module';
 import { loadBlocks } from '../lib/blocks-loader.cjs';
 import { loadIntents } from '../lib/intents-loader.cjs';
 import { loadResearch } from '../lib/research-loader.cjs';
+import { loadProtocols } from '../lib/protocols-loader.cjs';
 import {
   checkStatus, validateProtocol, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, isSegmentCovered, permalinkSegment,
@@ -360,7 +361,7 @@ describe('findUnquotedColonScalars — frontmatter quote-fix lint (#453)', () =>
 describe('real data stays clean (per family)', () => {
   const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
   const intents = loadIntents(); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
-  const protocols = loadJson('protocols.json');
+  const protocols = loadProtocols(); // per-protocol specs src/_data/protocols/<id>.json, assembled (#1146)
   const projects = loadJson('projects.json');
   const capabilities = loadJson('capabilities.json');
   const capabilityMatrix = JSON.parse(readFileSync(join(DATA, 'capabilityMatrix.json'), 'utf8'));

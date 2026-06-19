@@ -1,0 +1,5 @@
+{
+  "term": "name (exclusive groups)",
+  "definition": "Attribute that groups elements for mutual exclusivity. Only one element with the same name value can be active/visible at a time.",
+  "usage": "Standard pattern from HTML (radio buttons, <code>&lt;details name&gt;</code> accordion). Preferred over 'group' attribute."
+}

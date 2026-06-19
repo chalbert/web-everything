@@ -1,0 +1,12 @@
+{
+  "id": "jsx-directive-sugar-demo",
+  "name": "JSX Directive Sugar Playground",
+  "summary": "The <For each>/<Show when>/<Resource from> sugar layer (#070): each card renders the prettier components live, proving they build the same DOM as the canonical <template is=\"…\"> directive, and shows desugar() lowering them back. Fixture-driven, backed by the conformance suite.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The pretty <code>&lt;For each&gt;</code> / <code>&lt;Show when&gt;</code> / <code>&lt;Resource from&gt;</code> components are <strong>optional sugar</strong> for the canonical <code>&lt;template is=\"…\"&gt;</code> directives — an alternative <em>spelling</em> of the same directive, mapped through one registry (see the <a href=\"/adapters/jsx-adapter/\">JSX Adapter</a>). Each card authors the sugar, renders it live through the runtime directive components, checks the produced DOM equals the canonical directive's DOM, and shows <code>desugar()</code> lowering it to <code>&lt;template is&gt;</code> plus the <code>sugarize()</code> round-trip.</p><h3>One registry, three surfaces</h3><p>The desugar transform, the <code>sugarize</code> lift, and the runtime components all read the same directive registry, so a new directive is one entry and the spelling can never drift from the canonical form.</p><h3>Scope</h3><p>A <em>spelling</em> layer (Axis-1): <code>&lt;For&gt;</code> builds an inert <code>&lt;template is=\"for-each\"&gt;</code> exactly as the canonical spelling does. Actually expanding the loop is the parked rendering-strategy axis (Axis-2).</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/jsx-directive-sugar-demo.html",
+  "projects": [
+    "webadapters"
+  ]
+}

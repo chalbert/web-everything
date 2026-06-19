@@ -1,0 +1,5 @@
+{
+  "term": "Viewport Presence",
+  "definition": "Whether an element is currently within a reference frame (the viewport or a scrolling ancestor), surfaced as enter/leave transitions. The shared in/out-of-view trigger, owning the observe-vocabulary (reference / margin / coverage, mapping to IntersectionObserver root / rootMargin / threshold) but never the UX decision a consumer takes on it.",
+  "usage": "Standardized by the Viewport Presence Intent. Composed by Collection Operations <code>advance:auto</code>, Prefetch <code>eagerness:viewport</code>, and the visibility-gated trait so the IntersectionObserver trigger has one home, not three."
+}

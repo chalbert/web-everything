@@ -15,6 +15,7 @@ import { dirname, join } from 'node:path';
 import { loadBlocks } from './lib/blocks-loader.cjs';
 import { loadIntents } from './lib/intents-loader.cjs';
 import { loadResearch } from './lib/research-loader.cjs';
+import { loadSemantics } from './lib/semantics-loader.cjs';
 
 export const START = '<!-- AUTO-GENERATED:inventory — run `npm run gen:inventory`; do not edit by hand -->';
 export const END = '<!-- /AUTO-GENERATED:inventory -->';
@@ -39,7 +40,7 @@ export function renderInventory() {
   const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
   const plugs = arr(readJson('plugs'));
   const intents = arr(loadIntents()); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
-  const semantics = arr(readJson('semantics'));
+  const semantics = arr(loadSemantics()); // per-term specs src/_data/semantics/<slug>.json, assembled (#1146)
   const research = arr(loadResearch()); // per-topic specs src/_data/researchTopics/<id>.json, assembled (#1145)
   const projects = arr(readJson('projects'));
   const openResearch = research.filter((r) => r.status === 'open').length;

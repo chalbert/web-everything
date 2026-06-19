@@ -1,0 +1,8 @@
+{
+  "id": "policy-rule",
+  "name": "Policy Rule (DMN-aligned)",
+  "summary": "Conformance reference for the rule meta-schema of declarative domain policy — adopting OMG DMN as the vocabulary (standardize the meta-schema, not the rule list). A PolicyRuleSet { id, version, scope?, hitPolicy, inputs[], rules[] } expresses one decision: inputs[] name the data references (resolved against Web Contexts), each rule is a row of { when: inputEntry[], then: outputEntry[] } where an entry is a FEEL-style expression (Web Expressions evaluates it), and hitPolicy (UNIQUE/FIRST/PRIORITY/COLLECT) disambiguates multiple matches — DMN's decision-table model. Versioning is a contract rule: a ruleSet carries its version so a decision replays against the exact rules that produced it (the seam to the Decision Record / proof-of-compliance log). Scope binds a ruleSet per context/tenant. This is the AUTHORING vocabulary only: it does NOT define the proof format (the tamper-evident hash-chained decision log over Web Traces — the proof-of-compliance slice) nor the enforcement seam (the OPA PDP/PEP runtime split). The policy LANGUAGE behind a rule (DMN/FEEL vs Rego vs Cedar) is a downstream impl choice; the meta-schema is what WE fixes. NOT this protocol: Web Validation (input-field invalidity), and the engine + signed-proof machinery (#093 Forks 2–3).",
+  "status": "draft",
+  "ownedByProject": "webpolicy",
+  "anchor": "protocol-policy-rule"
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Form-Associated Custom Element",
+  "definition": "A custom element that participates in forms via static formAssociated + attachInternals() — gaining form/labels access, :disabled from a fieldset, and form-lifecycle callbacks.",
+  "usage": "Declared on a <component> with the form-associated attribute (DC-12). Value & validation wiring composes with Web Validation."
+}

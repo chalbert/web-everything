@@ -1,0 +1,9 @@
+{
+  "id": "lifecycle",
+  "name": "Lifecycle",
+  "summary": "Conformance reference for a domain entity's lifecycle. Fixes one seam — a declarative status set + transition map (each transition: from → to, an optional guard predicate, and the permitted actor/role), resolved by a swappable CustomLifecycleProvider registry — and nothing else. The transition map is the only lock: data-defined and portable, so a workflow engine (XState, a BPM server, a hand-rolled switch) plugs in behind the provider without touching the entity. Two concerns are explicitly NOT owned here: authorization (whether THIS actor may fire a transition is a guard predicate, delegated to the Web Guards CustomGuardProvider — async, server-authoritative, the front-end is a UX mirror) and persistence (the entity's storage is its own concern). Every transition emits an observable lifecycle event carrying { entity, from, to, actor, at } — the composition seam for audit-trail (#357) and reporting. The canonical presentation of the current state + available next transitions is the Status Indicator intent. Members stay open: a state may be terminal, a transition may be automatic (no actor) or guarded.",
+  "status": "draft",
+  "ownedByProject": "weblifecycle",
+  "realizesIntent": "status-indicator",
+  "anchor": "protocol-lifecycle"
+}

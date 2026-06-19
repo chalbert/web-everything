@@ -1,0 +1,5 @@
+{
+  "term": "Progressive Enhancement Baseline",
+  "definition": "The minimum functionality available when JavaScript is disabled or not yet loaded. Server-rendered content should be usable at this baseline.",
+  "usage": "Defined per project in SSR Contracts."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Dependency Injection",
+  "definition": "A design pattern where a component's dependencies are provided to it, rather than created by it. Enables loose coupling and easy testing.",
+  "usage": "Implemented by Web Injectors."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Directionality",
+  "definition": "The handling of text direction (LTR vs RTL) and its impact on layout, icons, and interaction logic.",
+  "usage": "Core consideration for internationalization."
+}

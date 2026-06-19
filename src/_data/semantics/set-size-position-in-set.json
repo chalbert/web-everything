@@ -1,0 +1,5 @@
+{
+  "term": "Set Size / Position in Set",
+  "definition": "The `aria-setsize` (total item count) and `aria-posinset` (1-based absolute index) attributes that let assistive technology announce an item's position in a collection — e.g. 'item 42 of 5000' — even when not all items are present in the DOM.",
+  "usage": "Required on every rendered item under Windowing; the index is the item's absolute position in the full collection, never its DOM order."
+}

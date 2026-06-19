@@ -1,0 +1,5 @@
+{
+  "term": "Selection",
+  "definition": "The behavior of choosing items from a set, defining cardinality (Single vs Multi) and required state.",
+  "usage": "Standardized by Selection Intent."
+}

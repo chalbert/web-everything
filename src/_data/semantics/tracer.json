@@ -1,0 +1,5 @@
+{
+  "term": "Tracer",
+  "definition": "An engine responsible for recording execution flow (Traces) and context. It can be injected into any scope.",
+  "usage": "Standardized by Web Traces."
+}

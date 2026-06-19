@@ -1,0 +1,5 @@
+{
+  "term": "Structural Diff",
+  "definition": "Change detection by comparing two immutable snapshots (baseline vs current) and deriving the set of Change Records between them. Sampled coverage — intermediate states between snapshots are invisible — but library-agnostic and trivially correct; the natural fallback when no interception is available.",
+  "usage": "A Change Strategy supplying the optional <code>diff(baseline, current)</code> method. Contrast with interception strategies (Proxy, signals) that capture every write as it happens."
+}

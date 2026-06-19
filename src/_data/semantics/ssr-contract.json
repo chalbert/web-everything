@@ -1,0 +1,5 @@
+{
+  "term": "SSR Contract",
+  "definition": "The specification of what server output MUST look like for a given Web Everything primitive, and what the client expects during hydration.",
+  "usage": "Each project defines its SSR Contract in a dedicated section on its project page."
+}

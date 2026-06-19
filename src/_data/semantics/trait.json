@@ -1,0 +1,5 @@
+{
+  "term": "Trait",
+  "definition": "A granular, composable capability mixed into a component class (e.g., `withSortable`).",
+  "usage": "Standardized by Web Traits."
+}

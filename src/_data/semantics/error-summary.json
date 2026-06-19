@@ -1,0 +1,5 @@
+{
+  "term": "Error Summary",
+  "definition": "A form-level aggregate list of all validation errors, displayed at the top (GOV.UK pattern). Ordered by DOM, linked to fields, focused on submit-blocked, with verbatim parity to inline messages.",
+  "usage": "Optional feature <code>validation.feature.error-summary</code> at Conformance Level 1+. Combines with inline messages for dual-model a11y and discoverability."
+}

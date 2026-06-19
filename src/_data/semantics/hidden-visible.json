@@ -1,0 +1,5 @@
+{
+  "term": "hidden/visible",
+  "definition": "Binary visibility states used in toggle events. Preferred over 'open/closed' or 'active/inactive' for consistency with Popover API.",
+  "usage": "Standard event detail shape: <code>{ oldState: 'hidden', newState: 'visible' }</code>"
+}

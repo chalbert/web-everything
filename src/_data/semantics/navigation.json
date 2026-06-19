@@ -1,0 +1,5 @@
+{
+  "term": "Navigation",
+  "definition": "The structure of application flow (Hierarchical, Lateral, Linear) and the mechanism for transitioning between views.",
+  "usage": "Standardized by Navigation Intent."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Tracing Type",
+  "definition": "A categorization tag for traces (e.g., 'Network', 'Render', 'UserInteraction') allowing different tracers to subscribe to specific domains.",
+  "usage": "Standardized by Web Traces."
+}

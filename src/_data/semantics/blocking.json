@@ -1,0 +1,5 @@
+{
+  "term": "Blocking",
+  "definition": "The UX state where user interaction is prevented to ensure data integrity during a critical process.",
+  "usage": "Defined in Loader Intent (Blocking Profile)."
+}

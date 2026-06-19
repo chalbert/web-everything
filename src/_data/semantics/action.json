@@ -1,0 +1,5 @@
+{
+  "term": "Action",
+  "definition": "The abstract concept of a user trigger that initiates a process or side-effect (e.g., 'Save', 'Delete'). It decouples the trigger (Button) from the handler.",
+  "usage": "Standardized by Action Intent."
+}

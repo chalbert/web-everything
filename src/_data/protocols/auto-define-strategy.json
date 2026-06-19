@@ -1,0 +1,8 @@
+{
+  "id": "auto-define-strategy",
+  "name": "Auto-Define Strategy",
+  "summary": "Conformance reference for how/when a custom element gets registered (customElements.define). Defines the AutoDefineStrategy contract (trigger, optional tag→module resolve, define + scope), an open registry that extends core CustomRegistry, and the idempotent defineElement(tag, ctor) helper plus static tagName as the tag↔class source of truth. The native baseline is explicit registration — the platform has no auto-registration — so every inferring strategy (on-first-use DOM-presence, build-time HTML parse, manifest/import-map, convention-URL, server-driven) is opt-in. The tool carries no default: the default-strategy selection comes from the platform config a project extends, shipped in flavors (strict-explicit, lazy-dom, build-parsed). Technical contract, not a UX preference — a Protocol, not an Intent.",
+  "status": "concept",
+  "ownedByProject": "webcomponents",
+  "anchor": "protocol-auto-define-strategy"
+}

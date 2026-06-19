@@ -1,0 +1,5 @@
+{
+  "term": "Virtual Focus",
+  "definition": "A focus management pattern where DOM focus stays on a controller element (e.g. a text input or listbox) while the visually active item is tracked via `aria-activedescendant`. Unlike real focus, the active item must be scrolled into view manually — browsers do not auto-scroll `aria-activedescendant` targets.",
+  "usage": "The `virtual` strategy of the Focus Delegation Intent; required for comboboxes where typing must continue uninterrupted. Complements Roving Tabindex."
+}

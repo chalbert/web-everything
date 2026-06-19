@@ -1,0 +1,9 @@
+{
+  "id": "localization",
+  "name": "Localization",
+  "summary": "Conformance reference for localization interop. Defines the CustomTranslationProvider contract, a provider registry with namespace + fallback-chain resolution, the MF2 message-function shape, and observable locale states — so message catalogs and locale strategies from different vendors are swappable and combinable. Native Intl is the default formatter; libraries plug in behind the registry. It also owns the translated-catalog conformance contract (the no-leakage standard-side half of #664's AI-assisted translation): a produced target catalog verifies that it (1) preserves every MF2 placeholder / selector / markup part from the source (no dropped {$count}, no broken .match arms), (2) covers the target locale's CLDR plural/gender categories, and (3) leaves no untranslated-but-claimed keys and no placeholder-arity drift. How a catalog was produced (on-device model, hosted API, human) is invisible to the standard — only the output is verified — so the AI production model stays a Plateau service the WE project consumes as a no-leakage client (#475/#488), never an @webeverything artifact.",
+  "status": "concept",
+  "ownedByProject": "webintl",
+  "realizesIntent": "locale",
+  "anchor": "protocol-localization"
+}

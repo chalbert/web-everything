@@ -1,0 +1,5 @@
+{
+  "term": "Prefetching",
+  "definition": "The strategy of loading resources before they are required, balanced against bandwidth and battery constraints.",
+  "usage": "Standardized by Prefetch Intent."
+}

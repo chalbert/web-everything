@@ -1,0 +1,5 @@
+{
+  "term": "content-visibility",
+  "definition": "CSS property for lazy rendering. 'hidden' skips rendering but keeps element in accessibility tree. 'auto' renders only when near viewport.",
+  "usage": "Standard (Baseline). Preferred for <code>view:show</code> as it provides best performance while maintaining accessibility."
+}

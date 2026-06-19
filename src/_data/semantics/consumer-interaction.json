@@ -1,0 +1,5 @@
+{
+  "term": "Consumer Interaction",
+  "definition": "A single consumer expectation in a Mock Contract: a request to match paired with the response the consumer depends on. Pact/BDCT terminology — it makes the artifact contract-bearing rather than shape-describing, since a real consumer's dependency on an interaction is what a contract verifies.",
+  "usage": "The unit of the Mock Contract Protocol's <code>interactions[]</code>. Drives a mock (serve the response) and a drift-check (replay against the real provider)."
+}

@@ -1,0 +1,8 @@
+{
+  "id": "editor-engine",
+  "name": "Editor Engine",
+  "summary": "Conformance reference for the rich-text editing engine of the Web Editing standard — the swap contract that lets any editing engine (native contenteditable+InputEvent, ProseMirror, Lexical, Slate, Quill) drive an editable surface behind one interface. An editor engine attaches to a host element and exposes the editing surface over a structured-node-tree internal pivot, emitting normalized InputEvent-shaped changes; the NATIVE-FIRST DEFAULT is contenteditable+InputEvent plus the editing-surface capabilities (contenteditable floor, editcontext upgrade — #628), with library adapters registered as alternative impls (the same impl-swap shape as CustomPositioner / CustomChartRenderer). The spec is the only lock: swapping the native default for a ProseMirror adapter leaves the document model untouched, because the engine reads/writes the structured pivot, never a vendor doc format. The protocol fixes the engine contract + the capability negotiation (which editing-surface tier is available); it does NOT own the toolbar/formatting UX (a separate intent, #630) nor the serializer registry (#631). Technical contract, not a UX preference — a Protocol, not an Intent. Graduated from #590 Fork 2 (ratified).",
+  "status": "concept",
+  "ownedByProject": "webediting",
+  "anchor": "protocol-editor-engine"
+}

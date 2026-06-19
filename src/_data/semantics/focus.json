@@ -1,0 +1,5 @@
+{
+  "term": "Focus",
+  "definition": "The orchestration of keyboard navigation and active element state. Includes trapping, restoring, and cycling focus.",
+  "usage": "Managed by Interaction Intent."
+}

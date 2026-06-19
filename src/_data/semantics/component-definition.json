@@ -1,0 +1,5 @@
+{
+  "term": "Component Definition",
+  "definition": "The <code>&lt;component name&gt;</code> declaration block — a name, a <code>&lt;template&gt;</code>, and shadow/registration options — that registers a Declarative Custom Element.",
+  "usage": "Authored once per element type. The deterministic build-time AST transform lowers each Component Definition to a class plus customElements.define()."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "injector-runtime",
+  "name": "Injector Runtime API",
+  "summary": "InjectableModule provides app-level services with lazy loading via register(), InjectorRoot bridges module→DOM, await consume() resolves like import through DI, dispose clears providers.",
+  "description": "<h2>Concept</h2><p>This demo validates the Injector Runtime API by exercising the full lifecycle: module-level provider registration (eager and lazy), cross-scope bridging to the DOM, async consumption via <code>await consume()</code>, and clean disposal.</p><h3>Key Features</h3><ul><li><strong>InjectableModule:</strong> Factory pattern for module-level dependency injection via <code>new InjectableModule(name, import.meta, setup)</code>.</li><li><strong>Cross-Scope Bridging:</strong> <code>InjectorRoot.attach(document, module.injector)</code> wires ModuleInjector as parent of HTMLInjector.</li><li><strong>Lazy Loading:</strong> <code>register(key, loader)</code> declares providers that are loaded on first <code>consume()</code>.</li><li><strong>Async Consumption:</strong> <code>await consume(key, querier)</code> works like <code>import()</code> but resolved through DI — returns the value directly.</li><li><strong>Provider Lifecycle:</strong> <code>dispose()</code> clears all providers, registrations, and in-flight loads.</li></ul>",
+  "status": "active",
+  "liveUrl": "http://localhost:3000/demos/injector-runtime-demo.html",
+  "projects": [
+    "webinjectors"
+  ]
+}

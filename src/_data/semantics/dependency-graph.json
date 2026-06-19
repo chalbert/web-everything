@@ -1,0 +1,5 @@
+{
+  "term": "Dependency Graph",
+  "definition": "A <code>dependsOn</code> relation at group scope: field B depends on field A. When A changes, B is revalidated reactively. Enables cross-field and conditional validation without imperative handlers.",
+  "usage": "Optional feature <code>validation.feature.cross-field</code>. Required for password-confirm, date ranges, required-if patterns. Fixes RHF #trigger and Angular updateValueAndValidity revalidation complexity."
+}

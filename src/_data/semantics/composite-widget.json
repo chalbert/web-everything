@@ -1,0 +1,5 @@
+{
+  "term": "Composite Widget",
+  "definition": "A UI component managing focus for its children (e.g., Listbox, Grid) via specific keyboard patterns like Roving Tabindex.",
+  "usage": "Standardized by Composite Widget Protocol."
+}

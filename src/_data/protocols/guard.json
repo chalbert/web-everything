@@ -1,0 +1,8 @@
+{
+  "id": "guard",
+  "name": "Guard",
+  "summary": "Conformance reference for guarding a region's lifecycle against a predicate. Fixes one seam — a predicate/policy attached to a region (document/route/modal/element), evaluated at a lifecycle event, resolved by a swappable CustomGuardProvider (default → project override → custom plug) — and nothing else. The provider contract is the only lock: async, server-authoritative (the front-end is a UX mirror, never enforcement), and revocable. Deny-outcomes are NOT unified — each member owns its own family (exit guard → user-mediated confirm; entry guard → hide|redirect|forbid|cloak, where the 403-vs-404 disclosure call lives behind the provider). Same registry+provider pattern as Anchor Positioning but a materially different (async/trust-crossing) contract shape. Members: exit guard (#273) and access control (#178).",
+  "status": "concept",
+  "ownedByProject": "webguards",
+  "anchor": "protocol-guard"
+}

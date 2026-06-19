@@ -1,0 +1,5 @@
+{
+  "term": "Dirty Check",
+  "definition": "The concern that determines whether current field value differs from its baseline (pristine state). Algorithms: strict ===, deep equal, normalized (trim/case), custom comparators.",
+  "usage": "A decomposed DI concern (<code>customValidation:dirty-check</code>). Swappable per control or app-wide. Required for interaction state tracking."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Locale Switching",
+  "definition": "Changing the application's active locale at runtime, and the delivery strategy governing how the change reaches the UI: synchronously from preloaded catalogs (<code>instant</code>), via an on-demand catalog fetch behind a loading state (<code>async</code>), or through a full per-locale document load (<code>reload</code>).",
+  "usage": "The <code>switching</code> dimension of the Translation Intent. Orthogonal to which locale is active (the Locale Intent). <code>async</code> composes with the Loader Intent; <code>reload</code> with URL-based locale routing."
+}

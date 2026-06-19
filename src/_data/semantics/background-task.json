@@ -1,0 +1,5 @@
+{
+  "term": "Background Task",
+  "definition": "A long-running operation that has gone async — handed off from an in-view loader past its escalation threshold to a persistent surface, where it continues while the user is free to navigate away.",
+  "usage": "Standardized by Background Task Intent. The receiving end of the Loader Intent's <code>escalation: async</code> handoff; hosted in an app-shell region (Layout Intent <code>dock</code>)."
+}

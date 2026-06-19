@@ -1,0 +1,5 @@
+{
+  "term": "Anchored Element",
+  "definition": "The floating element (tooltip, popover, menu) positioned relative to an anchor element. Maps to CSS Anchor Positioning's 'anchored element'.",
+  "usage": "Standardized by Anchor Intent; positioned by a Positioning Provider via the Web Positioning plug."
+}

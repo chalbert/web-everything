@@ -1,0 +1,5 @@
+{
+  "term": "Keyboard Shortcuts",
+  "definition": "A system for registering and handling key combinations that works with Shadow DOM and standard OS conventions.",
+  "usage": "Standardized by Web Blocks."
+}

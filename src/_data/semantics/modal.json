@@ -1,0 +1,5 @@
+{
+  "term": "Modal",
+  "definition": "A dialog or overlay that forces user interaction before returning to the main content. Defines stacking, scrolling, and dismissal behavior.",
+  "usage": "Standardized by Modal Intent."
+}

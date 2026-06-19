@@ -1,0 +1,12 @@
+{
+  "id": "webreliability-conformance-demo",
+  "name": "Web Reliability Conformance Demo",
+  "summary": "The runnable proof of the CustomRecoveryHandler contract (#1051) in a real browser: a handler inspects an error + its RecoveryContext and either declines (null — the next handler is tried) or owns the recovery with a RecoveryResult (retry / queued / fallback / abort). The contract is type-only (reliability/contract.ts); the HTTP-retry / circuit-breaker / offline-queue handlers and the customRecovery registry are impl in Frontier UI, so the demo supplies its own in-demo offline-retry handler. A runtime-conformance section asserts each invariant live: declines an unrecognized error, retries a transient error with backoff, queues an offline error for replay, aborts at the attempt cap, grows the backoff with attempts, and exposes a stable priority key.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runnable proof of the <code>CustomRecoveryHandler</code> contract (<a href=\"/backlog/1051-webreliability-contract-recovery-handler-registry-types-in-w/\">#1051</a>). A handler inspects an error + its <code>RecoveryContext</code> and either <strong>declines</strong> (<code>null</code> — the next handler is tried) or <strong>owns the recovery</strong> with a <code>RecoveryResult</code> (<code>retry</code>/<code>queued</code>/<code>fallback</code>/<code>abort</code>).</p><h3>In-demo handler, not the FUI impl</h3><p>The contract is type-only (<code>reliability/contract.ts</code>); the HTTP-retry / circuit-breaker / offline-queue handlers and the <code>customRecovery</code> registry are impl in Frontier UI. So this demo supplies its <strong>own</strong> in-demo offline-retry handler to prove the contract is realizable.</p><h3>Verified contract</h3><p>The runtime-conformance section asserts each invariant live: decline of an unrecognized error, retry-with-backoff for a transient error, offline queueing for replay, attempt-cap abort, exponential backoff growth, and a stable priority key.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webreliability-conformance-demo.html",
+  "projects": [
+    "webreliability"
+  ]
+}

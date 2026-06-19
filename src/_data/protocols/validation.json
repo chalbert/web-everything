@@ -1,0 +1,9 @@
+{
+  "id": "validation",
+  "name": "Validation",
+  "summary": "Conformance reference for form validation interop. Observable states/events per level (control/group/form/nested), three conformance tiers, DI-replaceable concerns. Implementations from different creators become swappable (L1) and combinable (L2).",
+  "status": "concept",
+  "ownedByProject": "webvalidation",
+  "realizesIntent": "validation",
+  "anchor": "protocol-validation"
+}

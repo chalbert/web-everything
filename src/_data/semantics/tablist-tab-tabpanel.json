@@ -1,0 +1,5 @@
+{
+  "term": "tablist/tab/tabpanel",
+  "definition": "ARIA roles for accessible tab interfaces. Container has role=tablist, triggers have role=tab, content has role=tabpanel.",
+  "usage": "Required by WAI-ARIA Tabs Pattern. Must include aria-selected, aria-controls, aria-labelledby."
+}

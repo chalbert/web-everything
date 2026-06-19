@@ -1,0 +1,12 @@
+{
+  "id": "webidentity-conformance-demo",
+  "name": "Web Identity Conformance Demo",
+  "summary": "The runnable proof of the CustomCredentialProvider contract (#1060) in a real browser: supports(family, member) gates what a provider serves and acquire(request) resolves to a CredentialResult (fulfilled / declined / unavailable) across passkey / federated / digital / password families. The contract is type-only (identity/contract.ts); the real passkey / FedCM / digital-credential providers (RP/IdP round-trips) are impl in Frontier UI, so the demo supplies its own in-demo capability-gated provider. A runtime-conformance section asserts each invariant live: supports() gates by family+member, acquire() fulfills a supported family, reports unavailable for an unsupported one, declines under silent mediation, names the resolved family, and subscribe() returns a revocable cleanup.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runnable proof of the <code>CustomCredentialProvider</code> contract (<a href=\"/backlog/1060-webidentity-contract-credential-management-types-in-webevery/\">#1060</a>). <code>supports(family, member)</code> gates what a provider serves and <code>acquire(request)</code> resolves to a <code>CredentialResult</code> (<code>fulfilled</code>/<code>declined</code>/<code>unavailable</code>).</p><h3>In-demo provider, not the FUI impl</h3><p>The contract is type-only (<code>identity/contract.ts</code>); the real passkey / FedCM / digital-credential providers (RP/IdP round-trips) are impl in Frontier UI. So this demo supplies its <strong>own</strong> capability-gated in-demo provider — honest for a browser demo with no RP — to prove the contract is realizable.</p><h3>Verified contract</h3><p>The runtime-conformance section asserts each invariant live: <code>supports()</code> gates by family+member, <code>acquire()</code> fulfills a supported family, reports <code>unavailable</code> for an unsupported family (never a silent substitute), declines under silent mediation, names the resolved family, and <code>subscribe()</code> returns a revocable cleanup.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webidentity-conformance-demo.html",
+  "projects": [
+    "webidentity"
+  ]
+}

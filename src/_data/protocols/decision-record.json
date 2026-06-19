@@ -1,0 +1,9 @@
+{
+  "id": "decision-record",
+  "name": "Decision Record",
+  "summary": "Conformance reference for an explainable, reproducible decision. Fixes one seam — the normalized DecisionRecord { subject, ruleSet {id, version}, criteria[], outcome, reasonCodes?, at? } where each DecisionCriterion is { id, label, input {name, value}, operator, threshold, outcome } — and nothing else. This is a SCHEMA-ONLY contract: the record shape IS the lock, there is no provider, because the decision ENGINE is out of scope (that is the proof-of-compliance concern, #093). Reproducibility is the contract rule: a record carries the ruleSet version it ran against, so the explanation replays. Any producer — an underwriting engine, an eligibility/pricing/moderation engine — emits the same record, so consumers interoperate: a DecisionRecord feeds audit-trail (one AuditEvent), Web Reporting (#350) as a source, and Web Compliance (#351) as evidence. The canonical criteria-table + outcome rendering and result announcement is the Decision Trace intent. NOT this protocol: the rule engine + signed-proof machinery (#093), Web Validation (form-field invalidity), and Web Traces (execution spans — a name collision only).",
+  "status": "draft",
+  "ownedByProject": "webdecisions",
+  "realizesIntent": "decision-trace",
+  "anchor": "protocol-decision-record"
+}

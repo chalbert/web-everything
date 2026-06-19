@@ -1,0 +1,5 @@
+{
+  "term": "Conformance Level",
+  "definition": "The tier at which a validation implementation conforms to the Validation Intent contract. Level 0: Intent-aware. Level 1: observable states and events (swappable). Level 2: canonical shapes and DI concerns (combinable).",
+  "usage": "Standardized by Validation Intent. Conformance is defined against observable contract, never computation strategy."
+}

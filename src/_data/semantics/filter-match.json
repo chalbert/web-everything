@@ -1,0 +1,5 @@
+{
+  "term": "filter match",
+  "definition": "How a set of active filter predicates combine: <code>all</code> (AND — a row must satisfy every predicate) or <code>any</code> (OR — a row satisfies at least one). The predicates themselves are call-site data, not part of the standard.",
+  "usage": "The <code>filterMatch</code> dimension of the <a href=\"/intents/collection-operations/\">Collection Operations intent</a>, realized by the Data Table block's filter stage."
+}

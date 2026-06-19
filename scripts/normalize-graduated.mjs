@@ -31,6 +31,8 @@ import { fileURLToPath } from 'node:url';
 import { readField, setFrontmatterField, quoteScalar } from './backlog/frontmatter.mjs';
 import { loadBlocks } from './lib/blocks-loader.cjs';
 import { loadIntents } from './lib/intents-loader.cjs';
+import { loadProtocols } from './lib/protocols-loader.cjs';
+import { loadDemos } from './lib/demos-loader.cjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BL = join(ROOT, 'backlog');
@@ -59,6 +61,13 @@ function loadRegistries() {
     if (kind === 'intent') {
       // Per-intent specs (#1145) — assembled; the `intents.json#<id>` graduatedTo anchor stays virtual.
       try { ids = new Set(loadIntents().map((i) => i.id).filter(Boolean)); } catch { /* none → empty */ }
+      reg.set(kind, ids);
+      continue;
+    }
+    if (kind === 'protocol' || kind === 'demo') {
+      // Per-entry specs (#1146) — assembled; the `<reg>.json#<id>` graduatedTo anchor stays virtual.
+      const load = kind === 'protocol' ? loadProtocols : loadDemos;
+      try { ids = new Set(load().map((x) => x.id).filter(Boolean)); } catch { /* none → empty */ }
       reg.set(kind, ids);
       continue;
     }

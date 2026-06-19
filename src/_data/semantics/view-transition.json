@@ -1,0 +1,5 @@
+{
+  "term": "view transition",
+  "definition": "An animated transition played as one view replaces another during navigation, driven by the View Transitions API. Its <em>direction</em> (forward vs back) is a navigation concern; its <em>feel</em> (easing, reduced-motion) is a motion concern.",
+  "usage": "The <code>transition</code> dimension of the Navigation Intent owns direction (<code>directional|fade|none</code>); the Motion intent's <code>physics</code> owns feel. Browser-initiated Back navigations carry no transition type, so direction is derived from history-traversal direction."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Change Patch",
+  "definition": "A serializable, optionally invertible set of Change Records aligned to JSON Patch (RFC 6902). Forward patches apply a change; inverse patches (carrying <code>oldValue</code>, since RFC 6902 ops are not self-inverting) revert it, enabling undo/replay. Immer and Mutative emit forward + inverse patch pairs.",
+  "usage": "The transport-friendly representation produced by patch and snapshot Change Strategies. The <code>change-reverted</code> event applies an inverse Change Patch."
+}

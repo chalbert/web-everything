@@ -1,0 +1,8 @@
+{
+  "id": "provider-consumer-graph",
+  "name": "Provider–Consumer Graph",
+  "summary": "Conformance reference for the introspectable dependency graph over WE providers and consumers — the open, self-hostable half of #092 (@webeverything-scoped, 'nothing to lock into'). Two parts. (1) GRAPH-MODEL SCHEMA: a directed multigraph of nodes (project | provider | protocol) and edges of kind 'provides' (a provider implements a protocol at a conformance tier, read from protocols.json) or 'consumes' (a dependency edge, read from Injector.consumptionEdges() — #400); edges carry a confidence ('confirmed' for build-derived, 'potential' until a runtime trace confirms). Consumption is bidirectional by construction (answers both 'what do I depend on' and 'who depends on me' → impact analysis). Build-time auto-derived from WE introspection is the source of truth (not hand-authored like Backstage's catalog-info.yaml); a runtime drift agent is a deferred enrichment (#092 Fork 1). (2) SEAM-CONTRACT: reuses the existing protocol conformance contract (provider declares its tier) plus the NET-NEW consumer-driven projection (consumer declares the dimension/capability subset it requires); compatible ⇔ consumerRequires ⊆ what the provider's tier supplies. NOT this protocol: the cross-repo aggregator, graph UI, and governance workflows (plateau-app licensed product) — this ships the schema + contract only. Technical contract, not a UX preference — a Protocol, not an Intent.",
+  "status": "concept",
+  "ownedByProject": "webregistries",
+  "anchor": "protocol-provider-consumer-graph"
+}

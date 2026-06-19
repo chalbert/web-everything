@@ -1,0 +1,5 @@
+{
+  "term": "Reorder Commit Strategy",
+  "definition": "The strategy that decides where a new order is written after a reorder — ephemeral (session only), localStorage, or written back to the source. Distinct from the validation <a href=\"/semantics/#term-commit-policy\">Commit Policy</a>, which governs when form field edits are written.",
+  "usage": "The <code>commit</code> dimension of the Reorder Intent, surfaced by the Reorderable List block's <code>withCommitStrategy</code> trait behind the cancelable <code>reorder-commit</code> event. Defaults to ephemeral."
+}

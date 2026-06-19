@@ -1,0 +1,5 @@
+{
+  "term": "Reorder",
+  "definition": "A user interaction that mutates the <em>order</em> of items in a collection while leaving the item set unchanged. Distinct from a computed sort (which derives order from a comparator) and from data transfer (which moves a payload between zones).",
+  "usage": "Standardized by the <a href=\"/intents/reorder/\">Reorder Intent</a> and realized by the <a href=\"/blocks/reorderable-list/\">Reorderable List</a> block. The manual counterpart to the <a href=\"/intents/collection-operations/\">Collection Operations</a> <code>sort</code> dimension — a list is hand-ordered or sorted, never both at once."
+}

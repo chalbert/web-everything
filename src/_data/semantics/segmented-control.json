@@ -1,0 +1,5 @@
+{
+  "term": "Segmented Control",
+  "definition": "A single-select choice rendered as a row of adjacent, always-visible buttons (the iOS/macOS segmented control or 'pill' toggle group). The <a href=\"/intents/selection/\">Selection Intent</a>'s <code>single</code> model in a horizontal, live-immediacy variant — exactly one option pressed, choosing commits immediately. Distinct from a multi-select toggle-button group and from Tabs (which disclose panels rather than set a value).",
+  "usage": "Delivered by the <a href=\"/blocks/segmented-control/\">Segmented Control block</a>, composing <a href=\"/intents/selection/\">Selection</a>, <a href=\"/intents/focus-delegation/\">Focus Delegation</a> (roving, horizontal), and the Typography / Density intents."
+}

@@ -1,0 +1,16 @@
+{
+  "id": "wizard-flow-demo",
+  "name": "Wizard / Flow Progress Playground",
+  "summary": "A runtime proof that the wizard Block (<wizard-flow>, #691), the Flow Progress intent, and the Web Workflows protocol compose end-to-end in a real browser. Mounts the Block against a real CustomWorkflowEngine 4-step checkout graph: the engine owns orchestration (transitions, history, completion), the Block renders position + per-step status with aria-current and a 'Step N of M' announcement. Slice B of #651; the same Block + graph are exercised by the wizard unit suite and wizard-flow-demo.spec.ts so the demo and CI can't drift.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runtime demo for the reference <a href=\"/blocks/wizard/\">wizard Block</a> (<code>&lt;wizard-flow&gt;</code>) — slice B of <a href=\"/backlog/651-reference-wizard-block-composing-the-flow-progress-intent-we/\">#651</a>. It proves the <strong>Web Workflows</strong> protocol, the <strong>Flow Progress</strong> intent, and the Block compose end-to-end in a browser.</p><h3>What it shows</h3><p>The Block is mounted against a real <code>CustomWorkflowEngine</code> graph (a 4-step checkout: cart &rarr; shipping &rarr; payment &rarr; review). The engine is the source of truth for position, history, and completion; the Block renders <em>where you are</em> and each step's status (<code>wait</code>/<code>process</code>/<code>finish</code>), driving <code>aria-current=\"step\"</code> and a polite \"Step N of M\" live announcement via the Stepper behavior it composes. Next advances through the engine; Back uses the engine's history; Next disables when the final step completes.</p><h3>No drift</h3><p>The same Block + graph are proven headlessly by the wizard unit suite and an e2e spec (<code>wizard-flow-demo.spec.ts</code>) that drives Next/Back against this page.</p>",
+  "status": "draft",
+  "path": "/demos/wizard-flow-demo.html",
+  "liveUrl": "http://localhost:3000/demos/wizard-flow-demo.html",
+  "projects": [
+    "webworkflows",
+    "webintents",
+    "webblocks"
+  ],
+  "epic": "651"
+}

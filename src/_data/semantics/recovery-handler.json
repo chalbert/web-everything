@@ -1,0 +1,5 @@
+{
+  "term": "Recovery Handler",
+  "definition": "A service registered in <code>CustomRecoveryHandlerRegistry</code> that decides whether and how to recover from a mechanism failure. Implements <code>tryRecover(error, context)</code> returning a <code>RecoveryResult</code> or <code>null</code> to decline. Handlers are tried in registration order; the first non-null result wins.",
+  "usage": "Web Reliability. Distinct from validation error handling — recovery handlers respond to system/operation failures (timeouts, server errors), not input invalidity."
+}

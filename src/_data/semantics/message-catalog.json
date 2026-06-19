@@ -1,0 +1,5 @@
+{
+  "term": "Message Catalog",
+  "definition": "A keyed set of message sources for one locale (and optionally one namespace). The data a Translation Provider reads to resolve a key into a Message Function.",
+  "usage": "Loaded eagerly or lazily by a Translation Provider. Authored as JSON / PO / XLIFF / ARB / Fluent and normalized at build time."
+}

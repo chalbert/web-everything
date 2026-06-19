@@ -1,0 +1,5 @@
+{
+  "term": "MessageFormat 2.0",
+  "definition": "The Unicode message-formatting syntax (UTS #35 Part 9, published 2024) for composing messages with variable interpolation and plural/gender selection. Forward-compatible with the TC39 <code>Intl.MessageFormat</code> proposal.",
+  "usage": "The default message syntax of the Localization Protocol; compiled by a MessageFormatter into a Message Function. Abbreviated MF2."
+}

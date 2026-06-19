@@ -1,0 +1,5 @@
+{
+  "term": "Render Strategy Registry",
+  "definition": "The <code>CustomRenderStrategyRegistry</code> resolved through the injector chain that selects the active Render Strategy per scope, so different subtrees of one app render with different strategies simultaneously (a static header on declarative-static, a live grid on fine-grained). Mirrors the resolution rule of <a href=\"#change-strategy-registry\">Change Strategy Registry</a> — nearest-scope wins.",
+  "usage": "Render Strategy Protocol (Web Components). The registry is open, not a fixed enum: a future platform target (DOM Parts / Template Instantiation) registers as another provider without touching the contract."
+}

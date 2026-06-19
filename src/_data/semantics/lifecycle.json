@@ -1,0 +1,5 @@
+{
+  "term": "Lifecycle",
+  "definition": "The standardized state machine (Idle -> Loading -> Success/Error) that drives the UI. It separates the 'Process' (Time) from the 'Outcome' (Data).",
+  "usage": "Resource Loaders and Actions must expose their lifecycle capabilities."
+}

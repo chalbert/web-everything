@@ -1,0 +1,5 @@
+{
+  "term": "Pin Ladder",
+  "definition": "The grammar by which a consumer pins a Module-as-a-Service artifact: a floating-tag → exact-semver → content-hash ladder, each rung resolving <em>down</em> to the immutable content-addressed URL (the npm <code>tag → version → tarball</code> shape). Floating and exact pins are revalidatable short-TTL redirects; the content-hash rung is terminal and never revalidates. WE supports pinning at any rung and mandates none.",
+  "usage": "Part 2 of the <a href=\"/projects/webadapters/#protocol-maas-versioning\">MaaS Served-Artifact Versioning Protocol</a>. Unit of version is dual — a human semver on the definition and the derived <a href=\"/glossary/#content-addressed-id\">content-addressed id</a> coexist (human contract vs. integrity contract)."
+}

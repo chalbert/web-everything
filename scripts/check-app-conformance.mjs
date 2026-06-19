@@ -31,6 +31,7 @@ import { dirname, join, relative, extname } from 'node:path';
 import { buildConformanceReport } from './lib/conformanceReport.mjs';
 import { loadBlocks } from './lib/blocks-loader.cjs';
 import { loadIntents } from './lib/intents-loader.cjs';
+import { loadProtocols } from './lib/protocols-loader.cjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -46,7 +47,7 @@ if (!existsSync(APP_DIR)) { console.error(`✗ app not found: ${APP_REL}`); proc
 const readJson = (p, dflt) => { try { return JSON.parse(readFileSync(join(ROOT, p), 'utf8')); } catch { return dflt; } };
 const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
 const intents = loadIntents(); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
-const protocols = readJson('src/_data/protocols.json', []);
+const protocols = loadProtocols(); // per-protocol specs src/_data/protocols/<id>.json, assembled (#1146)
 const byId = (arr, id) => arr.find((x) => x.id === id);
 const backlogIds = new Set(readdirSync(join(ROOT, 'backlog')).map((f) => (f.match(/^(\d{3})-/) || [])[1]).filter(Boolean));
 

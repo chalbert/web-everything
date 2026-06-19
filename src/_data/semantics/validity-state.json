@@ -1,0 +1,5 @@
+{
+  "term": "Validity State",
+  "definition": "The four parallel regions of a validation control's state: Validity (merged + version token), Interaction (dirty/touched/focused/submitted), Commit (committed/rejected/held), Display (silent/showing-{severity}).",
+  "usage": "Defined in Validation Intent per-level vocabulary. Each region is independently observable and transitions emit events."
+}

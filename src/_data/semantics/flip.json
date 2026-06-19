@@ -1,0 +1,5 @@
+{
+  "term": "Flip",
+  "definition": "A collision strategy that moves the anchored element to the opposite side of the anchor when the preferred placement overflows.",
+  "usage": "A value of the Anchor Intent <code>collision</code> pipeline. Maps to CSS <code>position-try</code> and Floating UI <code>flip()</code>."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Change Tracking",
+  "definition": "The observability concern of detecting, representing, and attributing mutations to state over time. A facet of observability in general — not limited to form dirty-state — that recurs across stores, signals, documents, collections, the DOM, and network sync, and that the field solves with plural strategies (snapshot diff, Proxy, signals, patches, CRDTs, event sourcing).",
+  "usage": "The framing term for the Change Tracking standard (research topic <code>change-tracking-observability</code>). Generalizes the validation <code>customValidation:dirty-check</code> and <code>customValidation:change-detection</code> concerns. Goal: configurable preferred strategy + interop between multiple strategies in one app."
+}

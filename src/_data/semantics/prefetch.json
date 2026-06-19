@@ -1,0 +1,5 @@
+{
+  "term": "prefetch",
+  "definition": "Strategy for loading route resources before navigation. Can load on hover, when visible, or eagerly.",
+  "usage": "Use <code>route:prefetch=\"hover\"</code> on links. Integrates with Speculation Rules API when available."
+}

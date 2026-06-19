@@ -1,0 +1,13 @@
+{
+  "id": "data-table-demo",
+  "name": "Data Table Playground",
+  "summary": "The runnable home for the Data Table block — the blocks-layer realization of the Collection Operations `filter` / `sort` / `group` stages. Each card pairs a row set with a contract (sort keys + Intl.Collator options, filterMatch, groupSummary), renders the table, and runs the same APG / Intl.Collator / SQL-aggregate audit the CI conformance suite asserts. Plus a live interactive card: click a header to cycle its sort, toggle the filter, and hear the change announced through a polite `aria-live` region. Backlog #112, #115.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>A live surface for the <a href=\"/blocks/data-table/\">Data Table block</a>, which realizes the <code>filter</code>, <code>sort</code>, and <code>group</code> stages of the <a href=\"/intents/collection-operations/\">Collection Operations</a> intent (the <code>page</code> stage is the companion <a href=\"/blocks/pagination/\">Pagination block</a> — compose, never merge). For each shared fixture it shows the <strong>contract options</strong>, renders the table through the reference renderer, shows the <strong>produced HTML</strong>, and runs the <strong>contract audit</strong> — a green badge means the rendered table satisfies the verified accessibility / comparison contract.</p><h3>Verified contract</h3><p>The audit checks the <a href=\"https://www.w3.org/WAI/ARIA/apg/patterns/table/\">WAI-ARIA APG Sortable Table</a> pattern — a native <code>&lt;table&gt;</code> with <code>&lt;th scope=\"col\"&gt;</code> headers, the active column projecting <code>aria-sort</code>, sortable-but-unsorted headers at <code>none</code> — plus <code>Intl.Collator</code> ordering (numeric / sensitivity), SQL <code>NULLS FIRST/LAST</code> empty placement, <code>filterMatch</code> AND/OR narrowing, and per-group SQL-named <code>groupSummary</code> aggregates.</p><h3>No drift</h3><p>The renderer, the audit, and the fixtures are the <strong>one shared source</strong> the CI conformance suite runs, so the badges here and CI exercise the exact same code. The renderer is a deterministic <em>reference</em>; concrete strategies (an alternate comparator, server-delegated ordering, virtualization) live in Frontier UI.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/data-table-demo.html",
+  "projects": [
+    "webblocks",
+    "webintents"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "for-each-demo",
+  "name": "For-Each Demo",
+  "summary": "Structural directive that stamps a <template> for each item in a collection, using comment markers and injector-based context for {{@item.name}} interpolation.",
+  "description": "<h2>Concept</h2><p>This demo showcases the for-each directive — a structural directive that iterates over collections and stamps template content for each item. Each stamped item receives its own injector context, so standard text interpolation with <code>{{@alias.path}}</code> works automatically.</p><h3>Key Features</h3><ul><li><strong>Comment Markers:</strong> Uses comment nodes (no wrapper element) to preserve CSS Grid/Flex parent-child relationships.</li><li><strong>\"items as item\" Syntax:</strong> PHP/Blade-style alias for the loop context.</li><li><strong>Injector Context:</strong> Each stamped item gets <code>customContexts:{alias}</code> on its root element's injector.</li><li><strong>Text Interpolation:</strong> Standard <code>{{@member.name}}</code> resolves through the injector chain.</li><li><strong>Multiple Elements Per Item:</strong> Templates can stamp &lt;dt&gt;/&lt;dd&gt; pairs for definition lists.</li></ul>",
+  "status": "active",
+  "liveUrl": "http://localhost:3000/demos/for-each-demo.html",
+  "projects": [
+    "webbehaviors",
+    "webinjectors",
+    "webexpressions"
+  ]
+}

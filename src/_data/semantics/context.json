@@ -1,0 +1,5 @@
+{
+  "term": "Context",
+  "definition": "A mechanism for hierarchical data flow and service provision across component trees, independent of the DOM structure.",
+  "usage": "Implemented by Web Contexts."
+}

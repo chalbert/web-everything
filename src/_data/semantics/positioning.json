@@ -1,0 +1,5 @@
+{
+  "term": "Positioning",
+  "definition": "Declarative strategies for placing elements relative to the viewport or other elements.",
+  "usage": "Standardized by Layout (regions) and the Anchor Intent (tethered surfaces). Element-relative anchoring is delegated to a Positioning Provider via the Web Positioning plug."
+}

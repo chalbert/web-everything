@@ -1,0 +1,8 @@
+{
+  "id": "update-policy",
+  "name": "Update Policy",
+  "summary": "Conformance reference for an app's declared auto-update policy — the committed, portable config that says when a new dep/standard version is adopted and how it is made safe (the WE analogue of renovate.json / dependabot.yml). The declared policy is the only lock; the orchestration runner that executes it is a swappable Plateau/reliability service (the deferred build), the same protocol-vs-runner split WE already ships in Guard and render-strategy. The gate is one graded axis, not a single mechanic: pre-merge — cool-off buffer (minimumReleaseAge) → confidence/severity classification read from the changelog-manifest's strictest-wins severity (#102) → auto-merge patch/minor-green, human-gate major + visual-diff; post-deploy — staged rollout → metric analysis → auto-rollback on regression. The 'auto low-risk-green / human major+visual' rule is the safe-default flavor a project config extends, not a baked constant. Breaking entries route through the changelog-manifest's migration linkage, run by the upgrader engine (#094); the WE-only edge is Platform-side pre-testing a version against its consumers' suites before release, via the provider-consumer graph (#092). Consumes the changelog-manifest (#102) and upgrader engine (#094); the runner is built in #497.",
+  "status": "concept",
+  "ownedByProject": "webmanifests",
+  "anchor": "protocol-update-policy"
+}

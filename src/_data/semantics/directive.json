@@ -1,0 +1,5 @@
+{
+  "term": "Directive",
+  "definition": "Structural markers (loops, conditionals) and comment logic that manipulate the DOM structure.",
+  "usage": "Implemented by Web Directives."
+}

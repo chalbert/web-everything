@@ -1,0 +1,8 @@
+{
+  "id": "custom-elements-manifest",
+  "name": "Custom Elements Manifest",
+  "summary": "Conformance reference for a block's machine-readable structural contract — the de-facto multi-vendor manifest (custom-elements.json, schema 2.1.0) describing a custom element's tag, attributes, properties, events, slots, CSS custom properties and parts. WE adopts the OPEN spec rather than minting a bespoke format (the single escapable lock): the same manifest is consumed unchanged by api-viewer, Storybook, the VS Code custom-data and JetBrains web-types tooling, so a project escapes WE without losing its component metadata. The manifest is DERIVED, never hand-authored: scripts/gen-cem.mjs projects the block-protocol fields a blocks.json entry already carries (events / exports, paired with implementsIntent / traits / webStandards) into the CEM shape — a block becomes a custom-element declaration only when it carries an explicit tagName, otherwise a plain class declaration (no tag is fabricated). WE-specific fields ride along under a namespaced x-webeverything extension so the core manifest stays spec-valid for external tooling. This is the one seam feeding many consumers — the props-table block, the Technical Configurator args panel, and autodocs (#627) — the structural half of the block protocol whose behavioral half is the block-description.njk (Open UI / WAI-ARIA APG). Ratified by #626 Fork 1; emitting a richer per-attribute manifest as blocks gain structured attribute/slot/CSS-API fields is a forward-compatible upgrade of the same pipeline.",
+  "status": "draft",
+  "ownedByProject": "webdocs",
+  "anchor": "protocol-custom-elements-manifest"
+}

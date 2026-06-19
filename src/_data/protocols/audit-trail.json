@@ -1,0 +1,9 @@
+{
+  "id": "audit-trail",
+  "name": "Audit Trail",
+  "summary": "Conformance reference for a domain entity's immutable operational history. Fixes one seam — a normalized AuditEvent { target, action, actor, at, before?, after?, correlationId? } appended through a swappable CustomAuditProvider registry — and nothing else. Append-only / immutability is the contract guarantee: a provider never mutates or deletes a recorded event. The before/after pair REUSES the Web States ChangeRecord shape (path/op/oldValue/newValue) rather than redefining one, and correlationId links related events or a Web Traces span. The provider is the only lock — an in-memory log, an event-sourced store, or an OSCAL-aligned backend satisfy the same `append()` / `queryByEntity()` / `subscribe?()` contract, so the audit store swaps without touching producers. Composition is the headline: an audit provider subscribes to a Web Lifecycle provider so every lifecycle transition becomes one AuditEvent automatically; permission decisions (Web Guards) and rule evaluations (decision-trace #355) feed the same log. The canonical per-entity timeline rendering + filtering is the Audit Timeline intent. NOT this protocol: Web States change-tracking (reactive, transient mutation observation) and Web Compliance's enforcement-evidence trail (the platform twin — same schema, different subject).",
+  "status": "draft",
+  "ownedByProject": "webaudit",
+  "realizesIntent": "audit-timeline",
+  "anchor": "protocol-audit-trail"
+}

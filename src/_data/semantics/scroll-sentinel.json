@@ -1,0 +1,5 @@
+{
+  "term": "scroll sentinel",
+  "definition": "A zero-height marker element placed at the boundary of a scrollable list. When it enters the viewport, an IntersectionObserver fires and the next slice is requested — the native-first grounding for auto-advance (infinite scroll) without scroll-position math.",
+  "usage": "The Pagination block wires <code>advance:auto</code> (the Collection Operations <code>advance</code> dimension) to a sentinel observed by <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/IntersectionObserver\">IntersectionObserver</a>. Rendering of the grown list delegates to Windowed Collection; the <code>loadingMore</code> lifecycle to Loader. Only meaningful with <code>pageMode:append</code> (append + auto = infinite scroll)."
+}

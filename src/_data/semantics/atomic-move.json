@@ -1,0 +1,5 @@
+{
+  "term": "Atomic Move",
+  "definition": "Relocating a connected DOM node via Element.moveBefore() without disconnecting it, preserving live state (focus, media playback, iframes, shadow tree). Custom elements opt in by defining connectedMoveCallback.",
+  "usage": "Declared on a <component> with the preserve-on-move attribute (DC-15). Mirrors the platform moveBefore()/connectedMoveCallback contract."
+}

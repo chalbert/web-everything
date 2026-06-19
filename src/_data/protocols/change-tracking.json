@@ -1,0 +1,8 @@
+{
+  "id": "change-tracking",
+  "name": "Change Tracking",
+  "summary": "Conformance reference for observing state mutation as a normalized Change Record (path/op/old/new/source/timestamp). Defines the CustomChangeStrategy contract, a strategy registry with per-scope selection, and observable change events — so snapshot-diff, Proxy, signals, Immer-patch, JSON Patch, and CRDT strategies become configurable and interoperable in one app. Generalizes the validation change-detection concern.",
+  "status": "concept",
+  "ownedByProject": "webstates",
+  "anchor": "protocol-change-tracking"
+}

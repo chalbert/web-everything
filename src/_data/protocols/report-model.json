@@ -1,0 +1,8 @@
+{
+  "id": "report-model",
+  "name": "Report Model",
+  "summary": "Conformance reference for a normalized report — the single pivot every producer targets and every renderer/adapter agrees on, so reports from different sources render through the same UI. A Report { id, title, sources[], sections[], generatedAt? } where: sources[] are the producing runs (id/name/kind/at); sections[] each carry findings[], scores[], and/or series[]; a Finding { id, severity, title, location?, ruleId, source } is one result keyed to a producing source; severity is an OPEN vocabulary over a named base set (error/warn/info/pass) producers extend (the Decision Record outcome-vocabulary pattern); a Score { id, label, value, max?, unit? } is a roll-up (coverage %, conformance points); a Series { id, label, points[{at,value}], unit? } is a trend/burndown over time. The schema IS the lock — like the Decision Record it is a SCHEMA-ONLY interchange contract (no provider on the model itself); ingest adapters (SARIF · JUnit · coverage → model) and export adapters (model → SARIF/JUnit) are the swappable bridge that earns the protocol — the multi-vendor format-interop story DMN/Decision lack. Renderers (findings table, coverage matrix, trend chart, score card) auto-render from the model the way the /protocols/ and /intents/ catalogs render their registries. NOT this protocol: the adapters themselves (the Web Adapters bridge), the v1 renderers (#432), and producer migration of the check:* reporters (#435) — this slice ships the schema contract only. Technical contract, not a UX preference — a Protocol, not an Intent.",
+  "status": "draft",
+  "ownedByProject": "webreporting",
+  "anchor": "protocol-report-model"
+}

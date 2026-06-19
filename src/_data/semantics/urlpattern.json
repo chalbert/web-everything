@@ -1,0 +1,5 @@
+{
+  "term": "URLPattern",
+  "definition": "Web standard API (Baseline 2025) for matching URLs against patterns with named groups and wildcards.",
+  "usage": "Use for route pattern matching. Syntax: <code>/users/:id</code> for named params, <code>*</code> for wildcards, <code>:param?</code> for optional."
+}

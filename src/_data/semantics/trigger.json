@@ -1,0 +1,5 @@
+{
+  "term": "trigger",
+  "definition": "An element that initiates an action on another element. In tabs: tab-trigger. In dropdowns: dropdown-trigger.",
+  "usage": "Common term across UI libraries. With Invoker Commands, triggers use <code>commandfor</code> attribute."
+}

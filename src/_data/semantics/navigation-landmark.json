@@ -1,0 +1,5 @@
+{
+  "term": "navigation landmark",
+  "definition": "A nav element that identifies a section containing navigation links. Use aria-label when multiple landmarks exist on the same page.",
+  "usage": "NavListBehavior attaches to nav elements. The HTML nav element creates an implicit navigation ARIA landmark."
+}

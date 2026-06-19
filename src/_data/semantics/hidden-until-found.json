@@ -1,0 +1,5 @@
+{
+  "term": "hidden=\"until-found\"",
+  "definition": "HTML attribute value that hides content but allows browser search (Ctrl+F) to find and reveal it.",
+  "usage": "Standard (Interop 2025). Excellent for accordions, FAQs, and searchable expandable content."
+}

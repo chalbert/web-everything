@@ -1,0 +1,5 @@
+{
+  "term": "route",
+  "definition": "A URL pattern to view mapping. Defines which content displays for a given URL path.",
+  "usage": "Standard term from all major routers. Pattern syntax follows URLPattern API: <code>/users/:id</code>, <code>/files/*</code>."
+}

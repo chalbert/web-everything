@@ -1,0 +1,5 @@
+{
+  "term": "Type-Ahead",
+  "definition": "A keyboard navigation pattern where typed characters accumulate into a buffer that moves focus to the first item whose label matches; the buffer resets after an idle timeout. Distinct from filtering — items are never removed.",
+  "usage": "Standardized by Type-Ahead Intent and the Type-Ahead block. Consumed by Droplist and composes with Composite Widget."
+}
