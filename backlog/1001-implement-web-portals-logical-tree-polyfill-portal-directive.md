@@ -2,34 +2,38 @@
 type: idea
 workItem: epic
 status: open
-blockedBy: ["1000"]
+blockedBy: []
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-19"
 relatedProject: webportals
 tags: [webportals, build]
 ---
 
 # Implement Web Portals — logical-tree polyfill + portal directive
 
-Build the webportals protocol once its shape is ratified (#1000). Surfaced by #993: the spec
-(`we:src/_includes/project-webportals.njk`) has zero implementation today.
+Umbrella for building the webportals protocol now that its shape is ratified (#1000). Surfaced by #993:
+the spec (`we:src/_includes/project-webportals.njk`) had zero implementation. **Unblocked 2026-06-19**
+(#1000 resolved), then **sliced into the five batchable children below.** This epic resolves only when
+all five resolve (no-open-slice guard) — it carries no direct build work itself.
 
-Anticipated slices (to be carved once #1000 ratifies — sizes/forks may shift with the ruling):
+## Carved slices (2026-06-19)
 
-- **Logical-tree polyfill (plugs layer / WE contract surface):** `Node.logicalParent` /
-  `logicalInjector` / `logicalAncestors()` / `isLogicalDescendantOf()`, with `getContext()` and the
-  injector chain resolving via logical ancestry rather than `parentNode`.
-- **Logical event propagation:** `bubblesLogical` on `EventInit`, `Event.logicalPath`,
-  `stopLogicalPropagation()` — bubbling through the logical tree (resolution per #1000 Q2).
-- **Portal directive (FUI impl):** the `CustomTemplateDirective` that relocates content to a target
-  while preserving logical relationships; deferred-target behaviour per #1000 Q4.
-- **SSR contract conformance:** server emits portal content at its logical position; client relocates on
-  hydration (per the spec §ssr-contract).
-- **Conformance demo:** a real-browser demo exercising overlay/modal/tooltip escape with preserved
-  context + logical event bubbling.
+| # | Slice | Size | Blocked by |
+|---|-------|------|-----------|
+| [#1148](1148-web-portals-logical-tree-polyfill-node-logicalparent-logical.md) | Logical-tree polyfill — `Node.logicalParent` / `logicalInjector` / `logicalAncestors()` / `isLogicalDescendantOf()`, logical-ancestry `getContext()` | 5 | — (ready) |
+| [#1149](1149-web-portals-logical-event-propagation-composedlogical-logica.md) | Logical event propagation — `composedLogical` + `composedLogicalPath()`, pre-retarget `logicalPath`, `stopLogicalPropagation()` | 5 | #1148 |
+| [#1150](1150-web-portals-portal-directive-portal-outlet-deferred-target-r.md) | Portal directive + `portal-outlet` + deferred target resolution (Fork-4 residual) | 8 | #1148, #1149 |
+| [#1151](1151-web-portals-ssr-contract-conformance-vectors-logical-positio.md) | SSR contract conformance vectors (logical-position emit + hydration relocate) | 3 | #1150 |
+| [#1152](1152-web-portals-conformance-demo-overlay-modal-tooltip-escape-lo.md) | Conformance demo — overlay/modal/tooltip escape + context + logical bubbling | 5 | #1150 |
 
-Blocked on #1000 — the contract shape (writable-vs-method `logicalParent`, shadow-retarget composition,
-focus-scope boundary) must settle before impl. Per WE=contracts: protocol → `@webeverything`, polyfill +
-directive runtime → FUI (impl/tooling is never a WE standard artifact).
+**Placement (corrected at carve).** This is *not* a webportals-specific WE-vs-FUI fork. The impl is a
+sibling plug to `webdirectives` / `webinjectors` / `webcontexts` and extends their classes
+(`CustomTemplateDirective`, `InjectorRoot`, the `Node.*.patch.ts` pattern), all of which live and run in
+`we:plugs/` today. So webportals is built in **`we:plugs/webportals/`** now (runnable + demoable on WE's
+dev server) and rides the **same plugs-platform-layer migration as every sibling** — the WE→FUI move
+governed by #170 / #449 / #606 (plugs = FUI-owned, WE consumes as a no-leakage client). The protocol/spec
+stays `@webeverything` (the ratified `.njk` + conformance vectors). The earlier "directive runtime → FUI"
+line is superseded: the directive is a plug like its siblings, not a webportals-specific FUI carve-out.
 
 ## Ratified contract shape (from #1000, 2026-06-19)
 
