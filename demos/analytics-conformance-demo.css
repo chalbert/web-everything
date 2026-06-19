@@ -1,0 +1,22 @@
+/* Analytics conformance demo (#1014) — chrome only; .badge/.summary/.play-card come from playground.css. */
+.an-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.6rem;
+  padding: 1rem 1.25rem;
+  margin-top: 1rem;
+}
+.an-card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+.an-check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+}
+.an-check-title {
+  font-size: 0.88rem;
+  color: #334155;
+}

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analytics Conformance Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/analytics-conformance-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Analytics Conformance Demo</h1>
+      <p>
+        The runnable proof of the webanalytics
+        <a href="/plugs/customtrackerregistry/"><code>CustomTracker</code></a> contract+injector swap
+        mechanic (<a href="/backlog/1012-webanalytics-canonical-customtracker-contract-registry-di-no/">#1012</a>).
+        One call site issues the same <code>identify()/track()/page()/group()</code> calls while the
+        <strong>resolved backend is swapped underneath</strong> via the <code>CustomTrackerRegistry</code>
+        — so the application knows only the contract, never a vendor (Segment / Mixpanel / GA4).
+      </p>
+      <p class="play-caveat">
+        Backends here are in-demo <strong>recording stubs</strong> — honest for a browser demo, since a real
+        GA4/Mixpanel/Segment backend needs network + credentials (the
+        <a href="/backlog/1013-webanalytics-reference-vendor-adapters-segment-mixpanel-ga4-/">#1013</a> vendor
+        adapters are the impl). The section below asserts each contract invariant against the live registry.
+      </p>
+    </header>
+
+    <div id="play-root">Loading demo&hellip;</div>
+  </main>
+
+  <!-- Unplugged: the demo imports the CustomTrackerRegistry as a plain library (no global patch). -->
+  <script type="module" src="/demos/analytics-conformance-demo.ts"></script>
+</body>
+</html>
