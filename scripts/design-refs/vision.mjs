@@ -140,9 +140,17 @@ export async function analyzeRich(provider, input) {
 // name. No provider implementation lives here.
 const registry = new Map();
 
+// A provider implements at least one capability method — `classifyCandidate` (Tier-1 verdict),
+// `analyzeForCodification` (#481), and/or `analyzeRich` (Tier-2 rich output, #1080). A Tier-2 in-browser
+// VLM (#1082) registers with only `analyzeRich`, so requiring `classifyCandidate` would wrongly bar it;
+// the seam requires that *some* capability is present and lets the pipeline pick the method it needs.
+const PROVIDER_CAPABILITIES = ['classifyCandidate', 'analyzeForCodification', 'analyzeRich'];
+
 export function registerVisionProvider(name, impl) {
-  if (!name || typeof impl?.classifyCandidate !== 'function') {
-    throw new Error(`registerVisionProvider(${name}): impl must have classifyCandidate()`);
+  if (!name || !PROVIDER_CAPABILITIES.some((m) => typeof impl?.[m] === 'function')) {
+    throw new Error(
+      `registerVisionProvider(${name}): impl must implement at least one of ${PROVIDER_CAPABILITIES.join('/')}()`,
+    );
   }
   registry.set(name, { name, ...impl });
 }
