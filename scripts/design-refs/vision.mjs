@@ -80,6 +80,60 @@ export async function analyzeForCodification(provider, input) {
   return { ...normalizeCodification(raw), provider: provider.name };
 }
 
+// ---- rich output (Tier-2, backlog #1080 / epic #1073) ----------------------
+// The THIRD method on the shared vision client — the Tier-2 rich-analysis envelope. Where
+// `classifyCandidate` returns one closed-set verdict and `analyzeForCodification` fills the reliable
+// facet vocabulary, a Tier-2 small VLM produces OPEN output a classifier cannot: a free-text
+// description, loose tags, and localized element regions. This is the contract a Tier-2 provider
+// (#1082) registers behind the same seam; the same no-leakage rule holds — only these outputs flow on,
+// never the model. A region is `{ label, box }` where `box` is an OPTIONAL normalized bounding box
+// `{ x, y, w, h }` in 0..1 (null when the model gave a label but no localization).
+
+// Coerce one value to a number in [0,1], or null if it isn't a finite number.
+function unitOrNull(v) {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : null;
+}
+
+// Normalise one region: a trimmed non-empty `label` (else the region is dropped by the caller) plus an
+// optional fully-specified `box` (all four of x/y/w/h must be valid unit numbers, else box is null).
+function normalizeRegion(raw) {
+  const label = typeof raw?.label === 'string' ? raw.label.trim() : '';
+  if (!label) return null;
+  const b = raw?.box;
+  const box = b && typeof b === 'object'
+    ? (() => {
+        const x = unitOrNull(b.x), y = unitOrNull(b.y), w = unitOrNull(b.w), h = unitOrNull(b.h);
+        return [x, y, w, h].every((n) => n !== null) ? { x, y, w, h } : null;
+      })()
+    : null;
+  return { label, box };
+}
+
+// Normalise a provider's rich result into a stable envelope: a trimmed `description` (or null), deduped
+// loose `tags`, and validated `regions`. `ungated` marks "no rich provider ran" (the null/manual path),
+// kept distinct so an un-analysed shot is never silently treated as model-analysed.
+export function normalizeRichOutput(raw) {
+  const description = typeof raw?.description === 'string' && raw.description.trim() ? raw.description.trim() : null;
+  const tags = Array.isArray(raw?.tags)
+    ? [...new Set(raw.tags.map((t) => (typeof t === 'string' ? t.trim() : '')).filter(Boolean))]
+    : [];
+  const regions = Array.isArray(raw?.regions)
+    ? raw.regions.map(normalizeRegion).filter(Boolean)
+    : [];
+  return { description, tags, regions, ungated: raw?.ungated === true };
+}
+
+// Validate + normalise a provider's rich response. A provider with no `analyzeRich` (or the null
+// `manual` provider) yields the `ungated` envelope, so the pass is a safe no-op offline / in CI and an
+// un-analysed shot is never mistaken for a Tier-2 result.
+export async function analyzeRich(provider, input) {
+  if (typeof provider?.analyzeRich !== 'function') {
+    return { ...normalizeRichOutput({ ungated: true }), provider: provider?.name ?? 'manual' };
+  }
+  const raw = await provider.analyzeRich(input);
+  return { ...normalizeRichOutput(raw), provider: provider.name };
+}
+
 // ---- provider registry (swap point) ----------------------------------------
 // A provider is `{ name, async classifyCandidate(input) => { verdict, reasons? } }` where input is
 // `{ url, pngBase64, dims, selectorState }`. Providers register by name; the pipeline selects one by
@@ -109,6 +163,9 @@ registerVisionProvider('manual', {
     return { verdict: UNGATED, reasons: ['no vision provider configured'] };
   },
   async analyzeForCodification() {
+    return { ungated: true };
+  },
+  async analyzeRich() {
     return { ungated: true };
   },
 });
