@@ -2,12 +2,9 @@
 type: decision
 workItem: task
 parent: "1088"
-status: resolved
+status: active
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-19"
-dateResolved: "2026-06-19"
-graduatedTo: none
-codifiedIn: "docs/agent/platform-decisions.md#native-first-baseline"
 relatedReport: reports/2026-06-19-custom-element-downgrade-semantics.md
 preparedDate: "2026-06-19"
 tags: [webregistries, custom-elements, polyfill, native-first]
@@ -33,26 +30,6 @@ this whole polyfill (the WICG *Scoped Custom Element Registry* proposal) adds a 
 teardown is already `removePatches()`'s job ([we:plugs/webregistries/index.ts:72-80](../plugs/webregistries/index.ts#L72)).
 So the real question is not "what should downgrade do?" but "should a faithful polyfill carry a method
 the platform deliberately omits?" — and the [native-first](/projects/webregistries/) answer is no.
-
-## Ruling — RATIFIED 2026-06-19 (~Med-high; native-first)
-
-**(B) — drop the method.** A polyfill's contract is the native surface, and native `CustomElementRegistry`
-omits `downgrade` on purpose: element upgrade is a one-way prototype swap (no primitive un-upgrades a live
-node) and the registry is append-only (no `undefine`). (A) revert-to-stand-ins and (C) un-scope-helper both
-fight those invariants and are rejected. `removePatches()` stays the sole, global-scoped teardown affordance;
-a real per-subtree teardown need (e.g. micro-frontend unmount) is designed *then* as a **named non-standard
-extension**, not reopened here.
-
-**Red-team:** the API-symmetry attack (`upgrade(root)` exists ⇒ `downgrade(root)` "expected") fails — the
-platform ships `upgrade` *without* `downgrade` precisely because upgrade is one-way; mirroring that asymmetry
-*is* the native-first position. No standard is created. Residual: a real micro-frontend-unmount requirement
-would revisit as a named non-standard extension (not a reopening of this call).
-
-**Codified:** [we:docs/agent/platform-decisions.md#native-first-baseline](../docs/agent/platform-decisions.md#native-first-baseline)
-(polyfill-surface-fidelity corollary). **Successor build** (now agent-ready): delete the `downgrade()` stub at
-[we:plugs/webregistries/CustomElementRegistry.ts](../plugs/webregistries/CustomElementRegistry.ts#L169) and the
-`'should have downgrade method'` assertion at
-[we:plugs/webregistries/__tests__/unit/CustomElementRegistry.test.ts:220](../plugs/webregistries/__tests__/unit/CustomElementRegistry.test.ts#L220).
 
 ### Recommended path at a glance
 
