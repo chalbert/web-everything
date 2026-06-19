@@ -110,7 +110,7 @@ export interface AttributeDefinition extends ConstructorDefinition<ImplementedAt
  *   }
  * }
  * 
- * registry.define('tooltip', TooltipAttribute);
+ * registry.define('my-tooltip', TooltipAttribute);
  * registry.upgrade(document.body);
  * ```
  */
@@ -175,7 +175,23 @@ export default class CustomAttributeRegistry extends HTMLRegistry<AttributeDefin
    * @param attribute - The CustomAttribute class
    * @param options - Configuration options
    */
+  /**
+   * Enforce the spec requirement that an attribute name carry a namespace separator (#1120, spec
+   * njk:83): a custom-attribute name must contain a `-` (`my-attr`) — or a `:` for the namespaced form
+   * (`nav:list`) — so it can't collide with a standard HTML attribute. Mirrors the `SyntaxError` native
+   * `customElements.define` throws for an invalid name. (Element names are hyphen-only because tags can't
+   * carry a colon; attributes can, and the colon-namespace is an established convention here.)
+   */
+  #assertValidName(name: string): void {
+    if (!name.includes('-') && !name.includes(':')) {
+      throw new SyntaxError(
+        `Failed to execute 'define' on 'CustomAttributeRegistry': "${name}" is not a valid custom attribute name — it must contain a hyphen (or a ':' namespace separator) to avoid colliding with standard HTML attributes`,
+      );
+    }
+  }
+
   define(name: string, attribute: ImplementedAttribute, { tagNames = [] }: CustomAttributeOptions = {}): void {
+    this.#assertValidName(name);
     const definition: AttributeDefinition = {
       constructor: attribute,
       connectedCallback: attribute.prototype.connectedCallback,
@@ -220,11 +236,12 @@ export default class CustomAttributeRegistry extends HTMLRegistry<AttributeDefin
    *
    * @example
    * ```typescript
-   * registry.defineLazy('sortable', () => import('./traits/sort.js'));
+   * registry.defineLazy('my-sortable', () => import('./traits/sort.js'));
    * registry.upgrade(document.body); // sort.js loads when `<… sortable>` first appears
    * ```
    */
   defineLazy(name: string, loader: LazyAttributeLoader, { tagNames = [] }: CustomAttributeOptions = {}): void {
+    this.#assertValidName(name);
     this.#lazyLoaders.set(name, {
       loader,
       tagNames: new Set(tagNames.map((tag) => tag.toLowerCase())),

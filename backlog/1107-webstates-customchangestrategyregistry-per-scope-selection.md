@@ -35,6 +35,6 @@ CustomStoreRegistry)", but a change strategy is a value *instance* keyed by `.ke
 `CustomValidityMergeRegistry` / `CustomValidatorResolutionRegistry`), with scope nesting via `extends`
 exactly as those do. Settled pattern, no decision made.
 
-Unit test `__tests__/unit/CustomChangeStrategyRegistry.test.ts` 7 green (define/active, first-active +
+Unit test `we:plugs/webstates/__tests__/unit/CustomChangeStrategyRegistry.test.ts` 7 green (define/active, first-active +
 override, native fallback, two scoped registries resolve nearest, setActive, observe, default factory). WE
 `check:standards` 0 errors.

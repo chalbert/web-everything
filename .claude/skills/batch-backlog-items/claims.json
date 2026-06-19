@@ -19,7 +19,8 @@
         "1046-repoint-plateau-app-from-we-plugs-to-frontierui-plugs",
         "1100-webregistries-plugged-mode-global-patching-api-applypatches-",
         "1101-customelementregistry-whendefined-real-promise",
-        "1102-customelementregistry-getstandinelement-extraction-define-du"
+        "1102-customelementregistry-getstandinelement-extraction-define-du",
+        "1120-webbehaviors-hyphen-in-name-validation-on-define-definelazy"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",

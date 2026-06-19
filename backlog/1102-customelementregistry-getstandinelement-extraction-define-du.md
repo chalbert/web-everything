@@ -28,7 +28,7 @@ Two changes to `we:plugs/webregistries/CustomElementRegistry.ts`:
 
 Unit test `we:plugs/webregistries/__tests__/unit/getStandInElement.test.ts` — 5 green (autonomous +
 customized-built-in stand-in bases, duplicate-name throw, duplicate-constructor throw, same ctor allowed in
-a different registry). Also fixed a stale sibling test in `CustomElementRegistry.test.ts` that asserted the
+a different registry). Also fixed a stale sibling test in `we:plugs/webregistries/__tests__/unit/CustomElementRegistry.test.ts` that asserted the
 old `whenDefined` reject-stub (replaced by #1101's real promise) — un-skipped the already-defined fast-path
 test and replaced the reject assertion with the pending→define resolution. Full webregistries suite 58
 green; WE `check:standards` 0 errors.

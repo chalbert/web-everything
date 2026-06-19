@@ -31,9 +31,9 @@ Shipped `we:plugs/webdirectives/CustomCommentRegistry.ts` — the `customComment
 - Name *matching* only extracts the leading token; the full `namespace:name` + options grammar is the
   parser registry's job (#1132, sibling) — deliberately not owned here.
 
-Contract note added to `CustomComment.ts`: registry-upgraded directives declare lifecycle hooks as
+Contract note added to `we:plugs/webdirectives/CustomComment.ts`: registry-upgraded directives declare lifecycle hooks as
 **prototype methods** (re-prototyping an existing node can't re-run a constructor, so arrow-function
 class fields don't survive — the native custom-element upgrade constraint). Unit test
-`__tests__/unit/CustomCommentRegistry.test.ts` 8 green (define/get, upgrade reprototype+connect,
+`we:plugs/webdirectives/__tests__/unit/CustomCommentRegistry.test.ts` 8 green (define/get, upgrade reprototype+connect,
 unregistered+closing-marker skipped, idempotent, comment-as-root, downgrade re-connect, whenDefined
 both paths). WE `check:standards` 0 errors.

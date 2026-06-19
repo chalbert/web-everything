@@ -31,6 +31,6 @@ degradation:
 - `createDefaultStorageStrategyRegistry()` registers IndexedDB active when the platform has it, else the
   localStorage floor becomes active — transparent degradation, no caller change.
 
-Unit test `__tests__/unit/CustomStorageStrategyRegistry.test.ts` 6 green (default degrades to localStorage
+Unit test `we:plugs/webstates/__tests__/unit/CustomStorageStrategyRegistry.test.ts` 6 green (default degrades to localStorage
 in happy-dom, operational IndexedDB→localStorage fall-through round-trips, all-fail rethrow, registry map
 API intact, nearest-scope override, empty-registry throw). WE `check:standards` 0 errors.

@@ -26,7 +26,7 @@
  * 
  * // Register and activate
  * const registry = new CustomAttributeRegistry();
- * registry.define('tooltip', TooltipAttribute);
+ * registry.define('my-tooltip', TooltipAttribute);
  * registry.upgrade(document.body);
  * 
  * // Use in HTML

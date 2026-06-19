@@ -9,7 +9,7 @@ import CustomAttribute from '../../CustomAttribute';
 
 describe('CustomAttributeRegistry', () => {
   class TooltipAttribute extends CustomAttribute {
-    static observedAttributes = ['tooltip'];
+    static observedAttributes = ['my-tooltip'];
     callbackLog: string[] = [];
 
     attachedCallback() {
@@ -75,38 +75,38 @@ describe('CustomAttributeRegistry', () => {
 
   describe('define()', () => {
     it('should register custom attribute', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      const definition = registry.getDefinition('tooltip');
+      const definition = registry.getDefinition('my-tooltip');
       expect(definition).toBeDefined();
       expect(definition?.constructor).toBe(TooltipAttribute);
     });
 
     it('should register with tag name restrictions', () => {
-      registry.define('clickable', ClickableAttribute, { tagNames: ['button', 'a'] });
+      registry.define('my-clickable', ClickableAttribute, { tagNames: ['button', 'a'] });
       
-      const definition = registry.getDefinition('clickable');
+      const definition = registry.getDefinition('my-clickable');
       expect(definition?.tagNames).toEqual(new Set(['button', 'a']));
     });
 
     it('should normalize tag names to lowercase', () => {
-      registry.define('clickable', ClickableAttribute, { tagNames: ['BUTTON', 'DIV'] });
+      registry.define('my-clickable', ClickableAttribute, { tagNames: ['BUTTON', 'DIV'] });
       
-      const definition = registry.getDefinition('clickable');
+      const definition = registry.getDefinition('my-clickable');
       expect(definition?.tagNames).toEqual(new Set(['button', 'div']));
     });
 
     it('should store observed attributes', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      const definition = registry.getDefinition('tooltip');
-      expect(definition?.observedAttributes).toEqual(new Set(['tooltip']));
+      const definition = registry.getDefinition('my-tooltip');
+      expect(definition?.observedAttributes).toEqual(new Set(['my-tooltip']));
     });
 
     it('should store lifecycle callbacks', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      const definition = registry.getDefinition('tooltip');
+      const definition = registry.getDefinition('my-tooltip');
       expect(definition?.connectedCallback).toBeDefined();
       expect(definition?.disconnectedCallback).toBeDefined();
     });
@@ -114,9 +114,9 @@ describe('CustomAttributeRegistry', () => {
 
   describe('upgrade()', () => {
     it('should activate attributes on existing elements', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      container.innerHTML = '<div tooltip="Help text"></div>';
+      container.innerHTML = '<div my-tooltip="Help text"></div>';
       const element = container.firstElementChild as HTMLElement;
       
       registry.upgrade(container);
@@ -126,9 +126,9 @@ describe('CustomAttributeRegistry', () => {
     });
 
     it('should call attachedCallback', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      container.innerHTML = '<div tooltip="Help"></div>';
+      container.innerHTML = '<div my-tooltip="Help"></div>';
       const element = container.firstElementChild as HTMLElement;
       
       registry.upgrade(container);
@@ -138,9 +138,9 @@ describe('CustomAttributeRegistry', () => {
     });
 
     it('should call connectedCallback for connected elements', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      container.innerHTML = '<div tooltip="Help"></div>';
+      container.innerHTML = '<div my-tooltip="Help"></div>';
       const element = container.firstElementChild as HTMLElement;
       
       registry.upgrade(container);
@@ -151,17 +151,17 @@ describe('CustomAttributeRegistry', () => {
     });
 
     it('should handle multiple elements', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
       container.innerHTML = `
-        <div tooltip="First"></div>
-        <span tooltip="Second"></span>
-        <p tooltip="Third"></p>
+        <div my-tooltip="First"></div>
+        <span my-tooltip="Second"></span>
+        <p my-tooltip="Third"></p>
       `;
       
       registry.upgrade(container);
       
-      const elements = container.querySelectorAll('[tooltip]');
+      const elements = container.querySelectorAll('[my-tooltip]');
       expect(elements).toHaveLength(3);
       
       elements.forEach((el) => {
@@ -171,11 +171,11 @@ describe('CustomAttributeRegistry', () => {
     });
 
     it('should respect tag name restrictions', () => {
-      registry.define('clickable', ClickableAttribute, { tagNames: ['button'] });
+      registry.define('my-clickable', ClickableAttribute, { tagNames: ['button'] });
       
       container.innerHTML = `
-        <button clickable>Button</button>
-        <div clickable>Div</div>
+        <button my-clickable>Button</button>
+        <div my-clickable>Div</div>
       `;
       
       registry.upgrade(container);
@@ -188,19 +188,19 @@ describe('CustomAttributeRegistry', () => {
     });
 
     it('should handle nested elements', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
       container.innerHTML = `
-        <div tooltip="Parent">
-          <span tooltip="Child">
-            <a tooltip="Nested"></a>
+        <div my-tooltip="Parent">
+          <span my-tooltip="Child">
+            <a my-tooltip="Nested"></a>
           </span>
         </div>
       `;
       
       registry.upgrade(container);
       
-      const tooltips = container.querySelectorAll('[tooltip]');
+      const tooltips = container.querySelectorAll('[my-tooltip]');
       expect(tooltips).toHaveLength(3);
       
       tooltips.forEach((el) => {
@@ -211,9 +211,9 @@ describe('CustomAttributeRegistry', () => {
 
   describe('downgrade()', () => {
     it('should deactivate attributes', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      container.innerHTML = '<div tooltip="Help"></div>';
+      container.innerHTML = '<div my-tooltip="Help"></div>';
       const element = container.firstElementChild as HTMLElement;
       
       registry.upgrade(container);
@@ -224,9 +224,9 @@ describe('CustomAttributeRegistry', () => {
     });
 
     it('should call detachedCallback', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      container.innerHTML = '<div tooltip="Help"></div>';
+      container.innerHTML = '<div my-tooltip="Help"></div>';
       const element = container.firstElementChild as HTMLElement;
       
       registry.upgrade(container);
@@ -238,9 +238,9 @@ describe('CustomAttributeRegistry', () => {
     });
 
     it('should call disconnectedCallback', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      container.innerHTML = '<div tooltip="Help"></div>';
+      container.innerHTML = '<div my-tooltip="Help"></div>';
       const element = container.firstElementChild as HTMLElement;
       
       registry.upgrade(container);
@@ -255,7 +255,7 @@ describe('CustomAttributeRegistry', () => {
 
   describe('MutationObserver behavior', () => {
     it('should observe attribute additions', async () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       registry.upgrade(container);
       
       const element = document.createElement('div');
@@ -264,7 +264,7 @@ describe('CustomAttributeRegistry', () => {
       // Wait for MutationObserver to process
       await new Promise(resolve => setTimeout(resolve, 10));
       
-      element.setAttribute('tooltip', 'Added');
+      element.setAttribute('my-tooltip', 'Added');
       
       await new Promise(resolve => setTimeout(resolve, 10));
       
@@ -273,14 +273,14 @@ describe('CustomAttributeRegistry', () => {
     });
 
     it('should observe attribute removals', async () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      container.innerHTML = '<div tooltip="Remove me"></div>';
+      container.innerHTML = '<div my-tooltip="Remove me"></div>';
       const element = container.firstElementChild as HTMLElement;
       
       registry.upgrade(container);
       
-      element.removeAttribute('tooltip');
+      element.removeAttribute('my-tooltip');
       
       await new Promise(resolve => setTimeout(resolve, 10));
       
@@ -289,27 +289,27 @@ describe('CustomAttributeRegistry', () => {
     });
 
     it('should observe attribute changes', async () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      container.innerHTML = '<div tooltip="Initial"></div>';
+      container.innerHTML = '<div my-tooltip="Initial"></div>';
       const element = container.firstElementChild as HTMLElement;
       
       registry.upgrade(container);
       const instance = registry.getInstance(element, TooltipAttribute) as TooltipAttribute;
       
-      element.setAttribute('tooltip', 'Changed');
+      element.setAttribute('my-tooltip', 'Changed');
       
       await new Promise(resolve => setTimeout(resolve, 10));
       
-      expect(instance.callbackLog).toContain('tooltip:Initial->Changed');
+      expect(instance.callbackLog).toContain('my-tooltip:Initial->Changed');
     });
 
     it('should observe element additions', async () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       registry.upgrade(container);
       
       const newElement = document.createElement('div');
-      newElement.setAttribute('tooltip', 'New');
+      newElement.setAttribute('my-tooltip', 'New');
       
       container.appendChild(newElement);
       
@@ -320,9 +320,9 @@ describe('CustomAttributeRegistry', () => {
     });
 
     it('should observe element removals', async () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      container.innerHTML = '<div tooltip="Remove me"></div>';
+      container.innerHTML = '<div my-tooltip="Remove me"></div>';
       const element = container.firstElementChild as HTMLElement;
       
       registry.upgrade(container);
@@ -338,9 +338,9 @@ describe('CustomAttributeRegistry', () => {
 
   describe('getInstance()', () => {
     it('should return attribute instance', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      container.innerHTML = '<div tooltip="Test"></div>';
+      container.innerHTML = '<div my-tooltip="Test"></div>';
       const element = container.firstElementChild as HTMLElement;
       
       registry.upgrade(container);
@@ -359,10 +359,10 @@ describe('CustomAttributeRegistry', () => {
 
   describe('getInstances()', () => {
     it('should return map of all attribute instances', () => {
-      registry.define('tooltip', TooltipAttribute);
-      registry.define('clickable', ClickableAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
+      registry.define('my-clickable', ClickableAttribute);
       
-      container.innerHTML = '<div tooltip="Test" clickable></div>';
+      container.innerHTML = '<div my-tooltip="Test" my-clickable></div>';
       const element = container.firstElementChild as HTMLElement;
       
       registry.upgrade(container);
@@ -382,7 +382,7 @@ describe('CustomAttributeRegistry', () => {
 
   describe('Edge cases', () => {
     it('should handle elements without attributes', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
       container.innerHTML = '<div></div><span></span>';
       
@@ -390,15 +390,15 @@ describe('CustomAttributeRegistry', () => {
     });
 
     it('should handle empty container', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
       expect(() => registry.upgrade(container)).not.toThrow();
     });
 
     it('should handle multiple upgrades', () => {
-      registry.define('tooltip', TooltipAttribute);
+      registry.define('my-tooltip', TooltipAttribute);
       
-      container.innerHTML = '<div tooltip="Test"></div>';
+      container.innerHTML = '<div my-tooltip="Test"></div>';
       
       registry.upgrade(container);
       registry.upgrade(container);

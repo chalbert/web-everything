@@ -44,20 +44,20 @@ describe('traitManifest / registerTraits', () => {
 
   it('is a no-op for an empty manifest', () => {
     expect(() => registerTraits(registry, {})).not.toThrow();
-    container.innerHTML = '<div sortable></div>';
+    container.innerHTML = '<div my-sortable></div>';
     expect(() => registry.upgrade(container)).not.toThrow();
   });
 
   it('registers each manifest entry as a lazily-loaded attribute', async () => {
     const sortableLoader = vi.fn(() => Promise.resolve(SortableTrait));
-    const manifest: TraitManifest = { sortable: sortableLoader };
+    const manifest: TraitManifest = { 'my-sortable': sortableLoader };
 
     registerTraits(registry, manifest);
 
     // Nothing loaded until the attribute appears.
     expect(sortableLoader).not.toHaveBeenCalled();
 
-    container.innerHTML = '<div sortable></div>';
+    container.innerHTML = '<div my-sortable></div>';
     const element = container.firstElementChild as HTMLElement;
     registry.upgrade(container);
     await tick();
@@ -71,9 +71,9 @@ describe('traitManifest / registerTraits', () => {
   it('only loads the traits whose attributes actually appear', async () => {
     const sortableLoader = vi.fn(() => Promise.resolve(SortableTrait));
     const exportLoader = vi.fn(() => Promise.resolve(ExportTrait));
-    registerTraits(registry, { sortable: sortableLoader, 'export-csv': exportLoader });
+    registerTraits(registry, { 'my-sortable': sortableLoader, 'export-csv': exportLoader });
 
-    container.innerHTML = '<div sortable></div>'; // no export-csv anywhere
+    container.innerHTML = '<div my-sortable></div>'; // no export-csv anywhere
     registry.upgrade(container);
     await tick();
 
@@ -82,10 +82,10 @@ describe('traitManifest / registerTraits', () => {
   });
 
   it('supports loaders returning a module with a default export', async () => {
-    const manifest: TraitManifest = { sortable: () => Promise.resolve({ default: SortableTrait }) };
+    const manifest: TraitManifest = { 'my-sortable': () => Promise.resolve({ default: SortableTrait }) };
     registerTraits(registry, manifest);
 
-    container.innerHTML = '<div sortable></div>';
+    container.innerHTML = '<div my-sortable></div>';
     const element = container.firstElementChild as HTMLElement;
     registry.upgrade(container);
     await tick();
@@ -103,10 +103,10 @@ describe('traitManifest / registerTraits', () => {
 
     it('define()s an eager entry up front — applied synchronously, no async tick', () => {
       registerTraits(registry, {
-        highlight: { delivery: 'eager', attribute: HighlightTrait as ImplementedAttribute },
+        'my-highlight': { delivery: 'eager', attribute: HighlightTrait as ImplementedAttribute },
       });
 
-      container.innerHTML = '<div highlight></div>';
+      container.innerHTML = '<div my-highlight></div>';
       const element = container.firstElementChild as HTMLElement;
       registry.upgrade(container);
 
@@ -119,11 +119,11 @@ describe('traitManifest / registerTraits', () => {
     it('does not invoke a loader for an eager entry (no on-demand import)', () => {
       const lazyLoader = vi.fn(() => Promise.resolve(SortableTrait));
       registerTraits(registry, {
-        highlight: { delivery: 'eager', attribute: HighlightTrait as ImplementedAttribute },
-        sortable: lazyLoader,
+        'my-highlight': { delivery: 'eager', attribute: HighlightTrait as ImplementedAttribute },
+        'my-sortable': lazyLoader,
       });
 
-      container.innerHTML = '<div highlight></div>'; // sortable absent
+      container.innerHTML = '<div my-highlight></div>'; // my-sortable absent
       registry.upgrade(container);
 
       expect(lazyLoader).not.toHaveBeenCalled();
@@ -132,11 +132,11 @@ describe('traitManifest / registerTraits', () => {
     it('mixes eager and lazy entries — eager sync, lazy after a tick', async () => {
       const lazyLoader = vi.fn(() => Promise.resolve(SortableTrait));
       registerTraits(registry, {
-        highlight: { delivery: 'eager', attribute: HighlightTrait as ImplementedAttribute },
-        sortable: lazyLoader,
+        'my-highlight': { delivery: 'eager', attribute: HighlightTrait as ImplementedAttribute },
+        'my-sortable': lazyLoader,
       });
 
-      container.innerHTML = '<div highlight></div><div sortable></div>';
+      container.innerHTML = '<div my-highlight></div><div my-sortable></div>';
       const [eager, lazy] = Array.from(container.children) as HTMLElement[];
       registry.upgrade(container);
 
@@ -152,12 +152,12 @@ describe('traitManifest / registerTraits', () => {
   describe('delivery: lazy with preload (#202 per-usage override)', () => {
     it('defineLazy()s an object-form lazy entry the same as the bare shorthand', async () => {
       const loader = vi.fn(() => Promise.resolve(SortableTrait));
-      registerTraits(registry, { sortable: { delivery: 'lazy', load: loader } });
+      registerTraits(registry, { 'my-sortable': { delivery: 'lazy', load: loader } });
 
       // No preload → nothing loads until the attribute appears.
       expect(loader).not.toHaveBeenCalled();
 
-      container.innerHTML = '<div sortable></div>';
+      container.innerHTML = '<div my-sortable></div>';
       const element = container.firstElementChild as HTMLElement;
       registry.upgrade(container);
       await tick();
@@ -168,7 +168,7 @@ describe('traitManifest / registerTraits', () => {
 
     it('warms the chunk at bootstrap when preload is set — before any element appears', async () => {
       const loader = vi.fn(() => Promise.resolve(SortableTrait));
-      registerTraits(registry, { sortable: { delivery: 'lazy', preload: true, load: loader } });
+      registerTraits(registry, { 'my-sortable': { delivery: 'lazy', preload: true, load: loader } });
 
       // preload fires immediately at register time — no DOM, no upgrade() yet.
       expect(loader).toHaveBeenCalledTimes(1);
@@ -176,12 +176,12 @@ describe('traitManifest / registerTraits', () => {
 
     it('applies a preloaded trait to an element that mounts later, with no extra load', async () => {
       const loader = vi.fn(() => Promise.resolve(SortableTrait));
-      registerTraits(registry, { sortable: { delivery: 'lazy', preload: true, load: loader } });
+      registerTraits(registry, { 'my-sortable': { delivery: 'lazy', preload: true, load: loader } });
       registry.upgrade(container);
       await tick(); // let the preload resolve and define()
 
       // Element appears only now — the class is already cached, applied with no reload.
-      container.innerHTML = '<div sortable></div>';
+      container.innerHTML = '<div my-sortable></div>';
       const element = container.firstElementChild as HTMLElement;
       await tick();
 
@@ -202,12 +202,12 @@ describe('CustomAttributeRegistry.preload (#202)', () => {
 
   it('runs a pending lazy loader immediately, without a DOM appearance', async () => {
     const loader = vi.fn(() => Promise.resolve(SortableTrait));
-    registry.defineLazy('sortable', loader);
+    registry.defineLazy('my-sortable', loader);
 
-    await registry.preload('sortable');
+    await registry.preload('my-sortable');
     expect(loader).toHaveBeenCalledTimes(1);
     // After preload, the class is defined (cached) — no longer "pending lazy".
-    expect(registry.getDefinition('sortable')?.constructor).toBe(SortableTrait);
+    expect(registry.getDefinition('my-sortable')?.constructor).toBe(SortableTrait);
   });
 
   it('is a no-op for an unknown / non-lazy name', async () => {
@@ -216,14 +216,14 @@ describe('CustomAttributeRegistry.preload (#202)', () => {
 
   it('dedups with a concurrent first-sighting load (one fetch total)', async () => {
     const loader = vi.fn(() => Promise.resolve(SortableTrait));
-    registry.defineLazy('sortable', loader);
+    registry.defineLazy('my-sortable', loader);
 
     const container = document.createElement('div');
-    container.innerHTML = '<div sortable></div>';
+    container.innerHTML = '<div my-sortable></div>';
     document.body.appendChild(container);
 
     // Kick a preload and an upgrade-driven sighting in the same turn.
-    const p = registry.preload('sortable');
+    const p = registry.preload('my-sortable');
     registry.upgrade(container);
     await p;
     await new Promise((r) => setTimeout(r, 10));

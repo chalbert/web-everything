@@ -7,7 +7,7 @@
 //   import { register, upgrade, CustomAttribute } from '@webeverything/plugs';
 //
 //   const attributes = new CustomAttributeRegistry();
-//   attributes.define('tooltip', TooltipAttribute);
+//   attributes.define('my-tooltip', TooltipAttribute);
 //   register(attributes);
 //   upgrade(document);
 
