@@ -148,3 +148,31 @@ describe('respects extends + compiles native CSS', () => {
     expect(css).toContain('@media (prefers-contrast: more)');
   });
 });
+
+describe('high-contrast scheme (prefers-contrast: more)', () => {
+  it('drives bg↔fg to the pure light-dark extremes', () => {
+    const { highContrast } = deriveSchemeRuntime(defaultTokens);
+    // bg = white in light / black in dark; fg = the inverse. Maximal separation by construction.
+    expect(highContrast.bg).toBe('light-dark(#ffffff, #000000)');
+    expect(highContrast.fg).toBe('light-dark(#000000, #ffffff)');
+  });
+
+  it('emits the HC pair as a prefers-contrast override that swaps --color-bg/--color-fg', () => {
+    const css = compileSchemeCss(deriveSchemeRuntime(defaultTokens));
+    const hc = css.slice(css.indexOf('@media (prefers-contrast: more)'));
+    expect(hc).toContain('--color-bg: light-dark(#ffffff, #000000);');
+    expect(hc).toContain('--color-fg: light-dark(#000000, #ffffff);');
+  });
+
+  it('clears the contrast policy at the maximum 21:1 ratio on both schemes', () => {
+    const white = parseColor('#ffffff');
+    const black = parseColor('#000000');
+    // Light scheme HC pair (white bg / black fg) and dark scheme HC pair (black bg / white fg) are both
+    // the WCAG ceiling — 21:1 — well above the 4.5 AA floor and the 7:1 AAA bar.
+    expect(wcagContrast(white, black)).toBeCloseTo(21, 1);
+    expect(wcagContrast(black, white)).toBeCloseTo(21, 1);
+    // APCA reads the same pair near its ±108 Lc ceiling (sign tracks polarity).
+    expect(Math.abs(apcaLc(black, white))).toBeGreaterThan(90);
+    expect(Math.abs(apcaLc(white, black))).toBeGreaterThan(90);
+  });
+});
