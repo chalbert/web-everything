@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Intl Conformance Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/webintl-conformance-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Web Intl Conformance Demo</h1>
+      <p>The runnable proof of the <code>CustomIntlProvider</code> contract (<a href="/backlog/1054-webintl-contract-intl-provider-types-in-webeverything/">#1054</a>): one provider hands back <code>Intl.Collator</code> / <code>DateTimeFormat</code> / <code>NumberFormat</code> / <code>RelativeTimeFormat</code> for a requested locale, so an app gets locale-aware collation, date, number, and relative-time formatting through one swappable seam.</p>
+      <p class="play-caveat">
+        The contract is type-only; the runtime provider/reader + swap registry are impl in Frontier UI. So
+        this demo supplies its <strong>own</strong> in-demo implementation — honest for a browser demo — to
+        prove the contract is realizable. The section below asserts each contract invariant live.
+      </p>
+    </header>
+
+    <div id="play-root">Loading demo&hellip;</div>
+  </main>
+
+  <script type="module" src="/demos/webintl-conformance-demo.ts"></script>
+</body>
+</html>
