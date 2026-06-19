@@ -217,7 +217,7 @@ the usual partial.
 
 | Slice | workItem·size | Scope | Grounding | Blocked by |
 |---|---|---|---|---|
-| **A — Governance spec home + schema reference** (the *type-system* area) | story·5 | Establish the block-standard governance doc home (expand `project-webblocks.njk` + a `docs/agent/block-standard.md` authoring guide) documenting the full block-spec JSON schema: every declarable field + meaning (the "type system" of a block spec). The foundational home the rest hang off. | `we:src/_includes/project-webblocks.njk:1`, `we:src/_data/blocks/*.json` (schema), `we:scripts/check-standards.mjs:136-148` | — |
+| **A — Governance spec home + schema reference** (the *type-system* area) | story·5 | Establish the block-standard governance doc home (expand `we:src/_includes/project-webblocks.njk` + a `we:docs/agent/block-standard.md` authoring guide) documenting the full block-spec JSON schema: every declarable field + meaning (the "type system" of a block spec). The foundational home the rest hang off. | `we:src/_includes/project-webblocks.njk:1`, `we:src/_data/blocks/*.json` (schema), `we:scripts/check-standards.mjs:136-148` | — |
 | **B — Status lifecycle governance** | story·3 | Document the block lifecycle `concept→draft→experimental→active` + graduation criteria, codifying existing enforced rules; add the missing doc + flag (don't decide) any gate-tightening as a follow-up. | `we:scripts/check-standards-rules.mjs:567`, `we:scripts/check-standards.mjs:140` | A |
 | **C — Protocol taxonomy governance** | story·3 | Define each `type` protocol category (Store/Parser/Behavior/Directive/Component/Module) + selection guidance; **reconcile the `Utility` drift** (add to `BLOCK_TYPES` or reclassify the one block). | `we:scripts/check-standards.mjs:94,147` | A |
 | **D — Composability rules governance** | story·3 | Document composition-field semantics (`composesIntents`/`composesBehaviors`/`composesWith`/`dependsOn`/`implementsIntent`/`consumesIntent`), codifying the #936 `composesBehaviors` gate and the `dependsOn` graph rules. | `we:scripts/check-standards.mjs:151-182` | A |
@@ -240,3 +240,56 @@ No area failed the rubric. The only "foundational-first" constraint is the A→{
 1. **#1040** stays `workItem: epic` (kind b — no story→epic conversion); it already carries no `size`. Refresh digest to umbrella framing ("Umbrella for block-standard governance; sliced into #A schema-home / #B lifecycle / #C taxonomy / #D composability").
 2. Scaffold **A** (`story·5`, `parent=1040`, no blocker), **B**/**C**/**D** (`story·3`, `parent=1040`, `blocked-by=<A's NNN>`).
 3. `npm run check:standards` green; backlog count **+4**.
+
+---
+
+# `/slice 1088` — webregistries completion (unsliced epic)
+
+**Date:** 2026-06-19
+**Scope:** focused split of epic [#1088](../backlog/1088-webregistries-completion-global-patching-api-remaining-regis.md) (`workItem: epic`, `parent: 1042`, unsliced, no `size`).
+**Grounding:** [we:plugs/webregistries/index.ts:48-90](../plugs/webregistries/index.ts#L48-L90) · [we:plugs/webregistries/CustomElementRegistry.ts:80,114,134,143](../plugs/webregistries/CustomElementRegistry.ts#L80) · spec [we:src/_includes/project-webregistries.njk:22-50](../src/_includes/project-webregistries.njk#L22-L50) · audit [we:audits/standards-surfacing-audit.md:241](../audits/standards-surfacing-audit.md#L241).
+
+## Verdict: partial split — **3 ready-now slices**; downgrade + the "registry types" claim do **not** slice
+
+The epic names three gap families. Tracing them to the tree:
+
+1. **Global-patching API** — genuine, self-contained → **Slice A**.
+2. **CustomElementRegistry completion** (`getStandInElement` / `whenDefined` / `downgrade` / `define()` validation) — splits *partly*: `whenDefined` → **Slice B**, `getStandInElement` + duplicate-define validation → **Slice C**; **`downgrade()` buries an open fork** (could-not-split).
+3. **"only 1 of ~10 registry types built"** — **largely a miscount**. The other registries in the spec list already exist, homed in their owning plugs *by design* (intentional layering, same pattern the audit calls "intentional" for webcomponents/webguards). Not webregistries work → could-not-split.
+
+### Could split
+
+| Slice | Title | Size | blockedBy | Independent / demoable state |
+|---|---|---|---|---|
+| **A** | webregistries plugged-mode global-patching API (`applyPatches`/`removePatches`/`isPatched`) | 3 | — | Implement the three [index.ts:48-90](../plugs/webregistries/index.ts#L48-L90) stubs: save originals, swap `window.CustomElementRegistry` + `window.customElements` to the scoped class, patch `Element.prototype.attachShadow` for scoped registries, and restore/detect. Mirrors the existing sibling patches (`applyWebInjectorsPatches`/`applyWebComponentsPatches`, [index.ts:60-63](../plugs/index.ts#L60)). **Demo:** a page that calls `applyPatches()` and resolves a scoped element on real DOM, or a unit test toggling `isPatched()`. |
+| **B** | `CustomElementRegistry.whenDefined()` real promise | 2 | — | Replace the reject-stub at [CustomElementRegistry.ts:143-152](../plugs/webregistries/CustomElementRegistry.ts#L143) with a pending-resolver map keyed by `name`, fired from `define()`. **Demo:** unit test — `whenDefined('x')` pending → `define('x', …)` → resolves with the ctor. |
+| **C** | `getStandInElement()` extraction + customized-built-in stand-ins + `define()` duplicate validation | 3 | — | Extract the inline stand-in creation ([CustomElementRegistry.ts:114-125](../plugs/webregistries/CustomElementRegistry.ts#L114)) into a `getStandInElement()` covering autonomous + customized-built-in bases, and implement the duplicate name/constructor guard ([:80](../plugs/webregistries/CustomElementRegistry.ts#L80)). **Demo:** unit tests for stand-in registration + duplicate-define throwing. |
+
+**DAG:**
+```
+A   (global patching)      — independent, ready now
+B   (whenDefined)          — independent, ready now
+C   (stand-in + validation)— independent, ready now
+```
+All three are independent and agent-ready now (rubric 4 ✓ — real independence, each lands incrementally and leaves a green-test demoable state). **Batching note:** B and C both edit `define()` (different concerns — B adds the resolver-fire, C adds validation + the stand-in extraction), so they should not run in the *same* concurrent batch slot; sequential or separate-session is clean.
+
+**Rubric pass (A/B/C):**
+- **(1) volume not a fork** — each is a TODO with a determinate native-API target (patching, `whenDefined`, stand-in/validation); no open multi-option call inside any of the three.
+- **(2) ≥2 nameable slices, real homes** — 3, each grounded at file:line above.
+- **(3) lands small** — 3/2/3, all ≤3, `task`.
+- **(4) clean DAG / independence** — no blockers; 3 parallel ready-now.
+- **(5) demoable state** — each ships green unit tests (the conformance demo for a runtime registry method); no half-protocol intermediate.
+
+## Could not split
+
+| Item | Failed condition | Unblocking action |
+|---|---|---|
+| **`downgrade()`** ([CustomElementRegistry.ts:134-137](../plugs/webregistries/CustomElementRegistry.ts#L134)) | **Buries its own fork** — the TODO literally asks *"What should downgrade do?"*. Native `CustomElementRegistry` has no `downgrade`; semantics are genuinely undecided (revert upgraded elements to stand-ins? no-op? a `removePatches()` helper?). A slice can't bury this. | File a small `type:decision` child of #1088 ("define `CustomElementRegistry.downgrade()` semantics"); once decided it becomes a ≤2 task. |
+| **"~10 registry types" (remaining)** | **Not webregistries' work — intentional layering / miscount.** Tracing the spec's "Proposed Standards" list: `CustomAttributeRegistry`→[webbehaviors](../plugs/webbehaviors/CustomAttributeRegistry.ts), `CustomContextRegistry`→[webcontexts](../plugs/webcontexts/CustomContextRegistry.ts), `CustomStoreRegistry`→[webstates](../plugs/webstates/CustomStoreRegistry.ts), parser registries→webexpressions/webbehaviors. All built, homed in their owning plugs by design. Genuine never-built residual: `CustomCommentRegistry`/`CustomCommentParserRegistry`→webdirectives' CustomComment subsystem (#1098); `CustomEventRegistry`→webevents (`project-webevents.njk` exists). None belong to webregistries. | Correct #1088's body to drop the "1 of ~10 registry types" claim (dissolve the phantom scope); coverage of the two genuine residuals tracks under #1098 / a webevents item, not here. |
+
+## Proposed mutation (on "go")
+
+1. **#1088** stays `workItem: epic`. **Correct its body**: drop "only 1 of ~10 registry types built" (intentional layering — registries are homed in their owning plugs), reframe as "complete the webregistries-owned surface: global patching + CustomElementRegistry methods". Note downgrade is carved to a decision child.
+2. Scaffold **A** (`task·3`, `parent=1088`, no blocker), **B** (`task·2`, `parent=1088`, no blocker), **C** (`task·3`, `parent=1088`, no blocker).
+3. Scaffold the **downgrade decision** as a `type:decision` child (`parent=1088`) capturing the open semantics fork.
+4. `npm run check:standards` green; backlog count **+4** (3 tasks + 1 decision).
