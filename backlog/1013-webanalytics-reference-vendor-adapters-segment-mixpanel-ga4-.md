@@ -20,3 +20,14 @@ Slice B of #1003 (locus: frontierui). AnalyticsBackend/CustomTracker impls resol
 > The adapters can't implement a contract FUI lacks. Prerequisite: replicate the #1012 contract into FUI
 > (byte-replication interim, like `fui:plugs/webvalidation/`, or the published package — the #700/#872
 > distribution seam) BEFORE building Segment/Mixpanel/GA4. Not batchable until then.
+
+> **WE-side seam landed (batch 2026-06-19-parallel-1149).** The `@webeverything/contracts/analytics`
+> distribution entry now exists — `we:contracts/analytics.ts` (type-only re-export of `we:analytics/contract.ts`,
+> mirroring `we:contracts/guard.ts`) + the `./analytics` subpath in `we:contracts/package.json`. This is the
+> FUI→WE arrow the vendor adapters import (`import type { CustomTracker } from '@webeverything/contracts/analytics'`).
+> **Still carried, not resolved**: the item's deliverable is the Segment/Mixpanel/GA4 impls, which are
+> `locus: frontierui` code that lands in the FUI repo (`fui:blocks/analytics/` or `fui:plugs/webanalytics/`)
+> — out of scope for a WE-worktree-only batch. Remaining FUI work when picked up: add the
+> `@webeverything/contracts/analytics` tsconfig/vite alias in FUI (sibling `we:contracts/analytics.ts`,
+> mirroring the existing `./guard` alias), then author the three adapters (vendor SDKs as optional peer/dev deps,
+> the #935 XState-adapter injected-dependency pattern — host supplies the SDK, FUI stays dep-free).

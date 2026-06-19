@@ -11,6 +11,7 @@
     "prepublishOnly": "node -e \"if(require('./package.json').version==='0.0.0'){console.error('Refusing to publish @webeverything/contracts at placeholder version 0.0.0 — bump the version first (npm version …), per #877.');process.exit(1)}\""
   },
   "exports": {
+    "./analytics": "./analytics.ts",
     "./guard": "./guard.ts",
     "./validity-merge": "./validity-merge.ts",
     "./validator-resolution": "./validator-resolution.ts",
