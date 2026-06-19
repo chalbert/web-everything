@@ -190,16 +190,19 @@ describe('CustomElementRegistry', () => {
   });
 
   describe('whenDefined()', () => {
-    it.skip('should resolve when element is already defined', async () => {
+    it('should resolve when element is already defined', async () => {
       class TestElement extends CustomElement {}
       registry.define('test-element', TestElement);
-      
+
       const result = await registry.whenDefined('test-element');
       expect(result).toBe(TestElement);
     });
 
-    it('should reject for unimplemented promise (temporary)', async () => {
-      await expect(registry.whenDefined('undefined-element')).rejects.toThrow();
+    it('should resolve a pending promise on a later define (#1101)', async () => {
+      class LateElement extends CustomElement {}
+      const pending = registry.whenDefined('late-element');
+      registry.define('late-element', LateElement);
+      await expect(pending).resolves.toBe(LateElement);
     });
   });
 

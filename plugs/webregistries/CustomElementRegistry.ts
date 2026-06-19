@@ -80,7 +80,22 @@ export default class CustomElementRegistry extends HTMLRegistry<ElementDefinitio
   #whenDefinedResolvers = new Map<string, ((ctor: ImplementedElement) => void)[]>();
 
   define(name: string, element: ImplementedElement, options?: ElementDefinitionOptions) {
-    // TODO: Validate that no element with same name or constructor exists on this registry
+    // Reject a duplicate name or constructor on THIS registry, mirroring native
+    // CustomElementRegistry.define() (#1102). The same constructor may live in *different* scoped
+    // registries, so this is a per-registry (own) check, not the global native-construction memo.
+    if (this.hasOwn(name)) {
+      throw new DOMException(
+        `Failed to execute 'define' on 'CustomElementRegistry': the name "${name}" has already been used with this registry`,
+        'NotSupportedError',
+      );
+    }
+    const existingName = this.getLocalNameOf(element);
+    if (existingName !== undefined) {
+      throw new DOMException(
+        `Failed to execute 'define' on 'CustomElementRegistry': the constructor has already been used with this registry (as "${existingName}")`,
+        'NotSupportedError',
+      );
+    }
 
     // For autonomous elements, register the real class natively under a private tag first so the
     // browser will permit constructing it (see ensureNativelyConstructible). Without this, the
@@ -121,11 +136,7 @@ export default class CustomElementRegistry extends HTMLRegistry<ElementDefinitio
     // Register stand-in element with native customElements if not already registered
     // This allows the browser to parse the custom element tag
     if (!originalCustomElements.get(name)) {
-      // TODO: Implement getStandInElement() function
-      // For now, register a simple class
-      const BaseClass = options?.extends ? (window as any)[`HTML${options.extends.charAt(0).toUpperCase() + options.extends.slice(1)}Element`] || HTMLElement : HTMLElement;
-      const StandInElement = class extends BaseClass {};
-      
+      const StandInElement = this.#getStandInElement(options);
       try {
         originalCustomElements.define(name, StandInElement, options);
       } catch (error) {
@@ -133,6 +144,20 @@ export default class CustomElementRegistry extends HTMLRegistry<ElementDefinitio
         console.warn(`Failed to define stand-in for ${name}:`, error);
       }
     }
+  }
+
+  /**
+   * Build the native stand-in element class the browser registers so it can PARSE a scoped custom-element
+   * tag (the real scoped class is resolved on construction/upgrade). An autonomous element stands in on
+   * `HTMLElement`; a customized built-in (`options.extends`) stands in on the matching `HTML*Element` base
+   * (e.g. `extends: 'button'` → `HTMLButtonElement`), falling back to `HTMLElement` when that base is absent.
+   */
+  #getStandInElement(options?: ElementDefinitionOptions): typeof HTMLElement {
+    const ext = options?.extends;
+    const BaseClass: typeof HTMLElement = ext
+      ? ((window as any)[`HTML${ext.charAt(0).toUpperCase()}${ext.slice(1)}Element`] as typeof HTMLElement) || HTMLElement
+      : HTMLElement;
+    return class extends BaseClass {};
   }
 
   // Concrete native signature — not `Parameters<typeof OriginalCustomElementRegistry…>`,
