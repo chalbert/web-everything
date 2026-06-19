@@ -32,9 +32,18 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
   carries the rule (e.g. `docs/agent/platform-decisions.md#constellation-placement`), **or** the
   sentinel `one-off` for a narrow call that establishes no reusable rule (the analogue of
   `graduatedTo: none`).
-- **`check:health` (`scripts/audit-backlog-health.mjs`) flag G6** surfaces every resolved decision
-  with no `codifiedIn` as a candidate to promote-or-mark. It is a candidate pool, not a hard gate —
-  the count is the uncodified backlog, and it should shrink, never grow silently.
+- **Hard gate at resolve.** `node scripts/backlog.mjs resolve <NNN>` **refuses a `type: decision`
+  that has no `codifiedIn`** — pass `--codified-to=<doc#anchor>` (the CLI stamps the field) or
+  `--codified-to=one-off`. You cannot resolve a decision and walk away from its rule; the orientation
+  is captured at the moment the deliberation is freshest, not in a later sweep.
+- **`check:health` (`scripts/audit-backlog-health.mjs`) flag G6** is now the catch-up pool for the
+  **legacy** decisions resolved *before* the gate existed. The count is the un-promoted backlog; it
+  should only ever shrink. (New decisions can't add to it — the gate blocks them.)
+- **Cite the rule, not the case.** When a work item leans on a settled orientation, link the **named
+  rule here** (`platform-decisions.md#<anchor>`), not the originating `#NNN`. The decision file holds
+  the lineage for an archaeologist; day-to-day work cites the statute so the rule, not the deliberation,
+  is what propagates. A bare `#NNN` reference to a *codified* decision is a smell — replace it with the
+  anchor.
 - The full per-decision codification status is the register at
   `audits/2026-06-18-decision-codification-register.md` (regenerate via the
   `decision-codification-sweep` workflow).

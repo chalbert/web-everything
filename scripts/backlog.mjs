@@ -15,7 +15,7 @@
  *
  * Usage:
  *   node scripts/backlog.mjs claim   <NNN> [--as=preparing]      # open    → active (or preparing, for /prepare) + dateStarted=today; prints rename slug
- *   node scripts/backlog.mjs resolve <NNN> [--graduated-to=X]    # active  → resolved + dateResolved=today (+ graduatedTo)
+ *   node scripts/backlog.mjs resolve <NNN> [--graduated-to=X] [--codified-to=Y]  # active → resolved + dateResolved=today (+ graduatedTo); a type:decision REQUIRES --codified-to=<doc#anchor|one-off> (#911 gate)
  *   node scripts/backlog.mjs release <NNN>                       # active|preparing → open (abandon/redirect; stamps untouched)
  *   node scripts/backlog.mjs scaffold --type=idea --workitem=story --size=3 --title="..." [--digest="..."] [--blocked-by=NNN,NNN] [--parent=NNN]
  *   node scripts/backlog.mjs reserve   <NNN...> --session=<slug>     # soft-hold planned items (#083 cross-session deprioritize)
@@ -82,7 +82,7 @@ function transition(v) {
   // ownership (a perpetually-dirty tree is the normal baseline), so claim never inspects it.
   const as = flag('as');
   if (v === 'claim' && as && as !== 'active' && as !== 'preparing') die(`--as="${as}" is not valid — use --as=preparing (a /prepare claim) or omit for a normal active claim`);
-  const res = applyTransition(before, v, { today: today(), graduatedTo: flag('graduated-to'), as });
+  const res = applyTransition(before, v, { today: today(), graduatedTo: flag('graduated-to'), codifiedTo: flag('codified-to'), as });
   if (res.error) die(`#${file.match(/^\d+/)[0]} — ${res.error}`);
   writeFileSync(abs, res.content);
   const id = file.replace(/\.md$/, '');
@@ -111,8 +111,9 @@ function transition(v) {
   }
   if (v === 'resolve') {
     const g = flag('graduated-to');
-    ok({ verb: v, id, file: rel, status: 'resolved', graduatedTo: g },
-      `${GRN}✓ resolved${RST} ${id} ${DIM}→ resolved (dateResolved ${today()}${g ? `, graduatedTo ${g}` : ''})${RST}${g ? '' : `\n${YEL}note:${RST} ${DIM}no --graduated-to set; if a resolved idea spawned no entity, set graduatedTo=none by hand${RST}`}`);
+    const c = flag('codified-to');
+    ok({ verb: v, id, file: rel, status: 'resolved', graduatedTo: g, codifiedIn: c },
+      `${GRN}✓ resolved${RST} ${id} ${DIM}→ resolved (dateResolved ${today()}${g ? `, graduatedTo ${g}` : ''}${c ? `, codifiedIn ${c}` : ''})${RST}${g ? '' : `\n${YEL}note:${RST} ${DIM}no --graduated-to set; if a resolved idea spawned no entity, set graduatedTo=none by hand${RST}`}`);
   }
   ok({ verb: v, id, file: rel, status: 'open' }, `${GRN}✓ released${RST} ${id} ${DIM}→ open${RST}`);
 }
@@ -272,7 +273,7 @@ switch (verb) {
   default:
     console.error(`${BLD}backlog.mjs${RST} — mechanical backlog-status CLI\n` +
       `  ${GRN}claim${RST} <NNN> [--as=preparing]   open → active (or preparing, /prepare) + dateStarted\n` +
-      `  ${GRN}resolve${RST} <NNN> [--graduated-to=X]   active → resolved + dateResolved\n` +
+      `  ${GRN}resolve${RST} <NNN> [--graduated-to=X] [--codified-to=Y]   active → resolved + dateResolved (decision REQUIRES --codified-to=<doc#anchor|one-off>)\n` +
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
       `  ${GRN}scaffold${RST} --type= --workitem= --size= --title= [--digest=] [--blocked-by=] [--parent=]\n` +
       `  ${GRN}calibrate${RST} --points= --context-pct= [--stop-reason=budget|context|empty-pool|fork|gate|outgrew|manual|abort]   fold a session into the batch point-budget estimate\n` +

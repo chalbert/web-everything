@@ -104,6 +104,27 @@ export function quoteScalar(value) {
 }
 
 /**
+ * Validate a `codifiedIn` value for the #911 resolve gate. Returns an error string to refuse the
+ * resolve, or `null` if the value is an acceptable statute pointer. Accepts the `one-off` sentinel
+ * (a narrow call that establishes no reusable rule, analogous to `graduatedTo: none`) or a guideline
+ * path — a `docs/…​.md` file, optionally with an `#anchor` into the named rule. A bare anchor, an
+ * empty string, or `undefined` is refused with the actionable next step.
+ * @param {string|undefined} value
+ * @returns {string|null}
+ */
+export function validateCodifiedIn(value) {
+  const v = (value ?? '').trim().replace(/^["']|["']$/g, '');
+  const HINT =
+    'a `type: decision` resolves only with `codifiedIn` (#911). Promote its rule to the statute layer ' +
+    '(docs/agent/platform-decisions.md#<anchor>, or the topical docs/agent/*.md it belongs to) and pass ' +
+    '`--codified-to=<path#anchor>`. For a narrow call that yields no reusable rule, pass `--codified-to=one-off`.';
+  if (!v) return `no codifiedIn — ${HINT}`;
+  if (v === 'one-off') return null;
+  if (/^docs\/[\w./-]+\.md(#[\w./-]+)?$/.test(v)) return null;
+  return `codifiedIn "${v}" is not a valid statute pointer — ${HINT}`;
+}
+
+/**
  * Apply a status transition + its stamps in one splice pass. Pure: caller supplies `today`.
  *
  *   claim:   open    → active    + dateStarted
@@ -118,12 +139,20 @@ export function quoteScalar(value) {
  * a non-`open`, in-flight state (drops from selection exactly like `active`) but reads distinctly on the
  * board; `release` returns either `active` or `preparing` to `open`.
  *
+ * **Codification gate (#911 discipline, hard-enforced here):** a `type: decision` cannot be resolved
+ * without a `codifiedIn` — the statute-layer pointer that promotes its reusable rule out of the
+ * case-law chain (or the sanctioned `one-off` sentinel for a narrow call). The CLI passes `codifiedTo`
+ * to stamp it inline; absent both an existing field and the flag, the resolve is refused. This is what
+ * turns G6 from a "candidate pool you sweep later" into a "you can't resolve a decision and walk away
+ * from the rule" invariant — the cheapest moment to capture orientation is at resolve, with the
+ * deliberation fresh.
+ *
  * @param {string} content
  * @param {'claim'|'resolve'|'release'} verb
- * @param {{ today: string, graduatedTo?: string, as?: 'active'|'preparing' }} opts
+ * @param {{ today: string, graduatedTo?: string, codifiedTo?: string, as?: 'active'|'preparing' }} opts
  * @returns {{ content: string } | { error: string }}
  */
-export function applyTransition(content, verb, { today, graduatedTo, as } = {}) {
+export function applyTransition(content, verb, { today, graduatedTo, codifiedTo, as } = {}) {
   const status = readField(content, 'status');
   const DATE_ANCHORS = ['dateOpened', 'dateStarted', 'dateResolved', 'status', 'blockedBy', 'size', 'workItem', 'type'];
 
@@ -136,9 +165,16 @@ export function applyTransition(content, verb, { today, graduatedTo, as } = {}) 
   }
   if (verb === 'resolve') {
     if (status !== 'active' && status !== 'open') return { error: `status is "${status}", expected "active" — only an in-flight item is resolved` };
+    // Codification gate (#911): a decision must carry its rule into the statute layer before it resolves.
+    if (readField(content, 'type') === 'decision') {
+      const existing = readField(content, 'codifiedIn');
+      const codErr = validateCodifiedIn(codifiedTo ?? existing);
+      if (codErr) return { error: codErr };
+    }
     let next = setFrontmatterField(content, 'status', 'resolved');
     next = setFrontmatterField(next, 'dateResolved', quoteDate(today), { after: DATE_ANCHORS });
     if (graduatedTo) next = setFrontmatterField(next, 'graduatedTo', quoteScalar(graduatedTo), { after: ['dateResolved', ...DATE_ANCHORS] });
+    if (codifiedTo) next = setFrontmatterField(next, 'codifiedIn', quoteScalar(codifiedTo), { after: ['graduatedTo', 'dateResolved', ...DATE_ANCHORS] });
     return next ? { content: next } : { error: 'could not splice frontmatter' };
   }
   if (verb === 'release') {

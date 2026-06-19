@@ -4,7 +4,7 @@
  * never touched, illegal transitions are refused, and stamps land next to their anchors.
  */
 import { describe, it, expect } from 'vitest';
-import { setFrontmatterField, readField, applyTransition, quoteScalar } from '../frontmatter.mjs';
+import { setFrontmatterField, readField, applyTransition, quoteScalar, validateCodifiedIn } from '../frontmatter.mjs';
 import { nextNum, slugify, renderItem } from '../scaffold.mjs';
 
 const ITEM = [
@@ -111,6 +111,63 @@ describe('applyTransition — legal from-status enforced', () => {
     const a = applyTransition(ITEM, 'claim', { today: '2026-06-10' }).content;
     const b = applyTransition(ITEM, 'claim', { today: '2026-06-10' }).content;
     expect(a).toBe(b);
+  });
+});
+
+describe('applyTransition — codification gate on type:decision (#911)', () => {
+  const DECISION = [
+    '---', 'type: decision', 'workItem: task', 'status: active',
+    'dateOpened: "2026-06-18"', '---', '', '# A cross-cutting ruling', '',
+  ].join('\n');
+
+  it('refuses to resolve a decision with no codifiedIn (existing or flag)', () => {
+    const r = applyTransition(DECISION, 'resolve', { today: '2026-06-18' });
+    expect(r.error).toMatch(/no codifiedIn/);
+    expect(r.content).toBeUndefined(); // never a half-written file
+  });
+
+  it('refuses a codifiedIn that is not a statute pointer', () => {
+    const r = applyTransition(DECISION, 'resolve', { today: '2026-06-18', codifiedTo: 'see the docs' });
+    expect(r.error).toMatch(/not a valid statute pointer/);
+  });
+
+  it('resolves with --codified-to a doc#anchor and stamps the field', () => {
+    const ptr = 'docs/agent/platform-decisions.md#constellation-placement';
+    const r = applyTransition(DECISION, 'resolve', { today: '2026-06-18', codifiedTo: ptr });
+    expect(r.error).toBeUndefined();
+    expect(readField(r.content, 'status')).toBe('resolved');
+    expect(readField(r.content, 'codifiedIn')).toBe(ptr);
+  });
+
+  it('resolves with the one-off sentinel (a narrow call, no reusable rule)', () => {
+    const r = applyTransition(DECISION, 'resolve', { today: '2026-06-18', codifiedTo: 'one-off' });
+    expect(r.error).toBeUndefined();
+    expect(readField(r.content, 'codifiedIn')).toBe('one-off');
+  });
+
+  it('resolves when codifiedIn already lives in frontmatter, no flag needed', () => {
+    const withField = setFrontmatterField(DECISION, 'codifiedIn', '"docs/agent/platform-decisions.md#naming"');
+    const r = applyTransition(withField, 'resolve', { today: '2026-06-18' });
+    expect(r.error).toBeUndefined();
+    expect(readField(r.content, 'status')).toBe('resolved');
+  });
+
+  it('does NOT gate non-decision items', () => {
+    const idea = setFrontmatterField(ITEM, 'status', 'active');
+    const r = applyTransition(idea, 'resolve', { today: '2026-06-18' });
+    expect(r.error).toBeUndefined();
+  });
+});
+
+describe('validateCodifiedIn', () => {
+  it('accepts one-off and doc paths with/without anchor; rejects empty/bare/anchor-only', () => {
+    expect(validateCodifiedIn('one-off')).toBeNull();
+    expect(validateCodifiedIn('docs/agent/platform-decisions.md#constellation-placement')).toBeNull();
+    expect(validateCodifiedIn('docs/agent/backlog-workflow.md')).toBeNull();
+    expect(validateCodifiedIn(undefined)).toMatch(/no codifiedIn/);
+    expect(validateCodifiedIn('')).toMatch(/no codifiedIn/);
+    expect(validateCodifiedIn('#anchor-only')).toMatch(/not a valid/);
+    expect(validateCodifiedIn('platform-decisions')).toMatch(/not a valid/);
   });
 });
 
