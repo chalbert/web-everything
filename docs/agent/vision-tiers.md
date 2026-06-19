@@ -4,10 +4,10 @@
 > The recurring mistake is using a heavy model where a tiny one suffices, or a tiny one where you
 > actually need "why/where". This doc draws those lines.
 >
-> **Status:** *working architecture* — the tier capabilities, limits, and the cascade pattern below
-> are settled; the **critique rubric** (what a design review measures) is still open (#1034), and
-> whether the richer tier is ever built on-device vs. stays hosted is a later call. Promote the
-> stable parts into [platform-decisions.md](platform-decisions.md) once #1033 ratifies.
+> **Status:** *working architecture* — the tier capabilities, limits, the cascade pattern, and the
+> **critique rubric** (§Design-critique rubric, ratified #1034) below are settled; whether the richer
+> tier is ever built on-device vs. stays hosted is a later call. Promote the stable parts into
+> [platform-decisions.md](platform-decisions.md) once #1033 ratifies.
 >
 > **Lineage:** #475 / #488 (the on-device ruling) · #490 (the build epic) · #1033 (the interactive
 > design-review loop) · report [`reports/2026-06-13-on-device-ui-vision-capability.md`](../../reports/2026-06-13-on-device-ui-vision-capability.md).
@@ -106,8 +106,49 @@ call, so hosted/Tier 2 only ever sees the frames that matter.
   ([`scripts/design-refs/vision.mjs`](../../scripts/design-refs/vision.mjs)); swapping tiers is a
   provider swap, not new plumbing.
 
+## Design-critique rubric (ratified #1034)
+
+The **third** vision vocabulary, beside the QC verdict taxonomy (#475, admission gate) and the
+codification facets (#396, descriptive tagging): this one **evaluates design quality**. It is the
+Plateau vision service's *output contract* — not a published `@webeverything` artifact — and rides the
+same `registerVisionProvider` seam. UICrit (UIST'24) is why it's not optional scaffolding: raw
+zero-shot VLM critique is ~13% valid; a rubric + few-shot grounding is what makes it usable.
+
+- **Grounding (#1034 Fork 1 → WE-grounded-layered).** Generic perceptual axes, each grounded
+  *best-effort* in the page's *declared* WE standard where one exists, generic fallback where none does.
+  Reading [`intents.json`](../../src/_data/intents.json) / design tokens (#364) as **input** is not
+  leakage — the standard never depends on vision.
+- **Compute split (#1034 Fork 2 → compose, don't own).** All axes are named + tier-tagged, but the
+  service **delegates** Tier-A deterministic checks (contrast/targets → the #763/#770 a11y gate; token
+  use → token-lint) and *consumes* their results; it owns only **Tier-C** perceptual judgment + the
+  **synthesis**. Re-deriving contrast from a screenshot is excluded (duplicates the gate, lower
+  fidelity, drift). Tier-B (AIM pixel metrics) is an optional later layer with no existing home.
+- **Output shape (#1034 Fork 3 → closed scored axes + open findings, versioned).** Per shot: a fixed
+  **closed** set of scored axes (1–5) **plus** an open-text list of localized findings
+  `{dimension, element-ref, problem, severity 0–4}` (Nielsen 0–4: cosmetic → catastrophe). Closed axes
+  keep #489/#490 training pairs comparable (same closed/open split as #475 `VERDICTS` / #396
+  `CODIFICATION_FACETS`); extensibility lives in the open findings; a deliberate **version bump** is the
+  escape hatch for the axis set.
+
+**Axis vocabulary** (8 closed axes; tier-tag → grounding; the list itself is config + versioned, not
+frozen constants):
+
+| # | Axis | Tier | Grounded in |
+|---|---|---|---|
+| 1 | Contrast & legibility | A | colour tokens + a11y gate (#763/#770) |
+| 2 | Spacing & rhythm | A→B | `density` intent + spacing tokens |
+| 3 | Alignment & structure | A→B | `layout` intent |
+| 4 | Typographic scale | A | `typography` intent + type tokens |
+| 5 | Consistency / token use | A | design tokens (#364) |
+| 6 | Grouping & proximity | B→C | `hierarchy` intent (Gestalt) |
+| 7 | Visual hierarchy & emphasis | C (B-assisted) | `typography` / `surface` intents |
+| 8 | Aesthetic polish / craft | C | generic (HIG "clarity"; no single WE standard) |
+
+The tier-tags route cheaply: Tier A (deterministic from DOM/CSS), Tier B (algorithmic-perceptual from
+pixels), Tier C (genuine VLM/human judgment). #1035's `/review-design` skill applies this rubric;
+#1036's correction surface persists rubric-scored critiques as labeled pairs.
+
 ## Open (still to discuss)
 
-- The **critique rubric** — what a design review measures, and how WE-standards-grounded (#1034).
 - Whether the richer critique runs **on-device (Tier 2)** or **stays hosted** — depends on whether the
   rubric must run free/everywhere (→ Tier-1-expressible) or can be device-gated/hosted (→ rich/generative).
