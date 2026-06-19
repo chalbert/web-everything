@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Theme — Tokens, Schemes & High Contrast — Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/webtheme-tokens-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <div class="demo-container">
+    <h1>Web Theme — Tokens, Schemes &amp; High Contrast</h1>
+    <p>
+      The DTCG token document compiles to native CSS at runtime: a <code>:root</code> custom-property block
+      (<code>compileToCss</code>), plus a derived scheme + accent ramp under <code>color-scheme</code> and a
+      <code>@media (prefers-contrast: more)</code> high-contrast pair (<code>compileSchemeCss</code>). Everything
+      below is styled <em>only</em> by those emitted variables — flip the controls to see the same emitted CSS
+      switch scheme and high-contrast live.
+    </p>
+
+    <div class="demo-controls">
+      <button id="toggle-scheme" type="button">Scheme: <strong id="scheme-label">light</strong></button>
+      <button id="toggle-hc" type="button">High contrast: <strong id="hc-label">off</strong></button>
+    </div>
+
+    <!-- Themed sample surface — all colors come from the emitted custom properties -->
+    <div class="themed" id="themed-surface">
+      <div class="sample-card">
+        <h2>Card surface</h2>
+        <p>Body text on <code>--color-bg</code> / <code>--color-fg</code>. This card reads correctly across
+          light, dark, and the high-contrast extremes because the scheme pair is contrast-gated.</p>
+        <div class="sample-actions">
+          <button class="btn btn-accent" type="button">Accent action</button>
+          <button class="btn btn-outline" type="button">Secondary</button>
+        </div>
+      </div>
+
+      <div class="accent-ramp" id="accent-ramp" aria-label="Derived accent ramp">
+        <!-- swatches injected from the derived runtime -->
+      </div>
+    </div>
+
+    <details class="emitted">
+      <summary>Emitted stylesheet (<code>compileToCss</code> + <code>compileSchemeCss</code>)</summary>
+      <pre id="emitted-css" data-test="emitted-css"></pre>
+    </details>
+  </div>
+
+  <script type="module">
+    import { defaultTokens } from '../webtheme/defaultTokens.ts';
+    import { compileToCss } from '../webtheme/compile.ts';
+    import { deriveSchemeRuntime, compileSchemeCss } from '../webtheme/schemes.ts';
+
+    // 1. Compile the token document + the derived scheme/accent runtime to native CSS.
+    const { css: tokensCss } = compileToCss(defaultTokens);
+    const runtime = deriveSchemeRuntime(defaultTokens);
+    const schemeCss = compileSchemeCss(runtime);
+
+    // The @media (prefers-contrast: more) block can't be toggled from JS, so additionally emit a class-gated
+    // HC variant mirroring the same extremes — that's what the in-page "High contrast" button flips.
+    const hcClassCss = [
+      `:root.force-hc {`,
+      `  --color-bg: ${runtime.highContrast.bg};`,
+      `  --color-fg: ${runtime.highContrast.fg};`,
+      `}`,
+    ].join('\n');
+
+    const fullCss = `${tokensCss}\n\n${schemeCss}\n${hcClassCss}\n`;
+
+    // 2. Inject the emitted CSS into the live document.
+    const styleEl = document.createElement('style');
+    styleEl.id = 'webtheme-emitted';
+    styleEl.textContent = fullCss;
+    document.head.appendChild(styleEl);
+    document.getElementById('emitted-css').textContent = fullCss;
+
+    // 3. Render the derived accent ramp as swatches.
+    const ramp = document.getElementById('accent-ramp');
+    for (const step of runtime.accent) {
+      const sw = document.createElement('div');
+      sw.className = 'swatch';
+      sw.style.background = `var(--color-${step.id})`;
+      sw.title = `${step.id} — ${step.css}`;
+      const tag = document.createElement('span');
+      tag.textContent = step.id.replace('accent-', '');
+      sw.appendChild(tag);
+      ramp.appendChild(sw);
+    }
+
+    // 4. Live controls.
+    const root = document.documentElement;
+    let scheme = 'light';
+    root.style.colorScheme = scheme;
+    document.getElementById('toggle-scheme').addEventListener('click', () => {
+      scheme = scheme === 'light' ? 'dark' : 'light';
+      root.style.colorScheme = scheme;
+      document.getElementById('scheme-label').textContent = scheme;
+    });
+
+    let hc = false;
+    document.getElementById('toggle-hc').addEventListener('click', () => {
+      hc = !hc;
+      root.classList.toggle('force-hc', hc);
+      document.getElementById('hc-label').textContent = hc ? 'on' : 'off';
+    });
+
+    // Signal demo ready for Playwright / check-demos.
+    window.demoReady = true;
+    console.log('[Demo] Web Theme tokens demo ready');
+  </script>
+</body>
+</html>

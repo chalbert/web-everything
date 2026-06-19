@@ -1,0 +1,70 @@
+/* Chrome (header / container) uses fixed neutrals so it stays legible regardless of the themed surface. */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #1a1a2e;
+  background: #f4f4f8;
+}
+
+.demo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.5rem;
+  background: #1a1a2e;
+  color: #fff;
+}
+.demo-header-brand { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; }
+.demo-header-brand svg { width: 22px; height: 22px; }
+.demo-header-back { color: #c7d2fe; text-decoration: none; font-size: 0.9rem; }
+.demo-header-back:hover { text-decoration: underline; }
+
+.demo-container { max-width: 880px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+.demo-container h1 { margin-top: 0; }
+.demo-container > p { color: #4b4b63; line-height: 1.55; }
+code { background: #e8e8f0; padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.88em; }
+
+.demo-controls { display: flex; gap: 0.75rem; margin: 1.5rem 0; }
+.demo-controls button {
+  font: inherit;
+  padding: 0.55rem 1rem;
+  border: 1px solid #c7c7d4;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+.demo-controls button:hover { border-color: #6366f1; }
+
+/* The themed surface — driven entirely by the emitted custom properties. */
+.themed {
+  border-radius: 12px;
+  padding: 1.5rem;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  border: 1px solid color-mix(in oklch, var(--color-fg) 18%, transparent);
+}
+.sample-card h2 { margin-top: 0; }
+.sample-card p { line-height: 1.55; opacity: 0.92; }
+.sample-actions { display: flex; gap: 0.75rem; margin-top: 1rem; }
+
+.btn { font: inherit; padding: 0.5rem 1.1rem; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+.btn-accent { background: var(--color-accent-9); color: var(--color-bg); }
+.btn-outline { background: transparent; color: var(--color-fg); border-color: var(--color-accent-9); }
+
+.accent-ramp { display: flex; gap: 0.4rem; margin-top: 1.5rem; }
+.swatch {
+  flex: 1;
+  aspect-ratio: 1.4;
+  border-radius: 6px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 0.25rem;
+  border: 1px solid color-mix(in oklch, var(--color-fg) 12%, transparent);
+}
+.swatch span { font-size: 0.7rem; background: rgba(255,255,255,0.78); color: #1a1a2e; padding: 0 0.3rem; border-radius: 3px; }
+
+.emitted { margin-top: 2rem; }
+.emitted summary { cursor: pointer; font-weight: 600; }
+.emitted pre { background: #1a1a2e; color: #e8e8f0; padding: 1rem; border-radius: 8px; overflow: auto; font-size: 0.82rem; line-height: 1.4; }
