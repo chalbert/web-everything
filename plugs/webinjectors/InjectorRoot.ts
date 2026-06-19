@@ -32,6 +32,7 @@ type CustomTextNodeRegistry = any;
 type CustomAttributeRegistry = any;
 type CustomStoreRegistry = any;
 type CustomElementsRegistry = any;
+type CustomTrackerRegistry = any;
 
 export interface InjectorRootOptions {
   extends?: InjectorRoot[];
@@ -55,6 +56,7 @@ export type ProviderTypeMap = {
   customAttributes: CustomAttributeRegistry;
   customStores: CustomStoreRegistry;
   customElements: CustomElementsRegistry;
+  customTrackers: CustomTrackerRegistry;
 } & Record<`customContexts:${string}`, CustomContext<any>>;
 
 export type AnyProviderType = CustomRegistry<any> | CustomContext<any>;
