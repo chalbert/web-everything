@@ -2,8 +2,10 @@
 type: idea
 workItem: epic
 parent: "1008"
-status: open
+status: resolved
 dateOpened: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: "project:webreporting"
 tags: []
 ---
 
