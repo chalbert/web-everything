@@ -3,8 +3,11 @@ type: idea
 workItem: story
 size: 2
 parent: "1073"
-status: open
+status: resolved
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: demos/tier2-vlm-demo.html
 tags: []
 ---
 
