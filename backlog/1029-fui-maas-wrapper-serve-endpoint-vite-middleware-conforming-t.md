@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 8
 parent: "912"
-status: open
+status: resolved
 blockedBy: ["1085"]
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: "fui:tools/maas/wrapperServeHandler.mjs"
 locus: frontierui
 relatedProject: webdocs
 tags: [webdocs, block-explorer, maas, polyglot]
@@ -42,3 +45,26 @@ this **HTTP/identity origin** (re-sized 13 → 8, `blockedBy` #1085), and the **
 (#1086, `blockedBy` this). #1029 is itself slice A of epic #912, so it stays a `story` (not converted to an
 epic) and the new slices are siblings under #912. See the
 [split analysis report](../reports/2026-06-19-backlog-split-analysis.md) → *#1029*.
+
+## Progress
+
+Shipped the FUI MaaS wrapper-serve origin (the HTTP/identity slice). FUI's **own** Fetch handler —
+never imports WE's reference `fetchHandler` (#855/#974); the byte-determining wire constants are
+byte-replicated from the type-only `we:blocks/renderers/module-service/servePathIR.ts` (#700/#872
+interim, like `fui:tools/gen-wrapper/wrapperFormCatalog.mjs`):
+
+- `fui:tools/maas/wrapperServeHandler.mjs` — `createWrapperServeHandler({ manifest | resolveDeclaration,
+  produce, producer, basePath })`: URL/pin parse, the #088 content-hash identity (folds the #1085
+  `PRODUCER_VERSION`), the floating→pin **302 ladder**, `ETag`/`If-None-Match`→304, `X-MaaS-Producer`/
+  `-Integrity`/`-Lossy`/`-Diagnostic`, immutable/floating `CACHE_POLICY`, and the 400/404/500 set. The
+  transform is **injected** — defaults to the #1085 `produceWrapperBytes` producer; the `form` param is
+  catalog-gated through `wrapperFormCatalog` (`react-wrapper`/`vue-wrapper`, retired `functional` alias
+  folds to react + flags lossy).
+- `fui:tools/maas/vite-plugin.mjs` — `maasWrapperServe()`: `configureServer` middleware at `/_maas/` +
+  the Fetch↔Node-stream adapter (the one Node-specific bridge). Wired into `fui:vite.config.mts` with a
+  lazy fs-backed CEM resolver (live the moment a manifest is generated; 404s cleanly when absent).
+- `fui:tools/maas/__tests__/wrapperServeHandler.test.mjs` — 10 green: the 302→200 ladder, ETag+SRI,
+  304, vue path, the lossy alias, and the full 400/404/500 error set (demo = `curl` the ladder).
+
+FUI `check:standards` 0 errors. The 6-vector contract conformance against `servePathIR.responses` is the
+sibling slice **#1086** (`blockedBy` this — now unblocked). Mirrors `we:tools/maas/vite-plugin.ts` shape.
