@@ -24,7 +24,7 @@ deferred):
   The `import()` code-splits React + slate-react out of the default bundle.
 - `fui:demos/rich-text-editor/__tests__/slate-engine.spec.ts` (2 e2e, green) — switch to slate → type →
   triple-click select → bold → assert `<strong>` in the pivot; + engineIsSwappable through-slate-back-to-native.
-- Updated `engine-switcher.spec.ts`'s engine-list assertion to `['native','quill','plain','slate']`.
+- Updated `fui:demos/rich-text-editor/__tests__/engine-switcher.spec.ts`'s engine-list assertion to `['native','quill','plain','slate']`.
 - **#960 Vite-restart hazard did NOT materialize:** Vite auto-optimizes React/slate-react on first import
   (one-time page reload, cached in `node_modules/.vite`) — no manual dev-server restart needed; re-run is
   stable. The demo depends on the slate package's `dist` (gitignored; produced by its `tsc` build script).
