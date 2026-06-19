@@ -1,7 +1,7 @@
 ---
 type: issue
 workItem: story
-size: 8
+size: 13
 parent: "170"
 status: open
 locus: frontierui
@@ -17,6 +17,15 @@ tags: [plugs, dedup, migration, frontierui, plateau-app]
 > Unblocks when #950 resolves (also coordinate with #726's test backfill before the WE-side delete).
 
 # Package `frontierui/plugs` as `@frontierui/plugs`, delete `webeverything/plugs`, repoint WE + plateau-app
+
+## Re-confirmed outgrew + re-sized 8 → 13 (batch-2026-06-18)
+
+Re-claimed in the same batch; the scoping below still holds and is now reflected in the size. Two hard
+reasons it is not a batch item: (1) **outgrew** — 61 WE runtime consumers + 152 files to delete +
+plateau-app (3rd repo) + the #726 test relocation is 13+, not 8; (2) **forbidden mid-batch toolchain
+restart** — wiring the `@frontierui/plugs` alias into WE's `we:tsconfig.json` + `we:vite.config.mts`
+forces a Vite dev-server restart, which a batch must never do to the user's running server. Released for a
+dedicated `/next 449` session. No design fork (settled by #606); purely execution-size + restart.
 
 ## Claimed + released — outgrew a batch slice (batch-2026-06-18)
 
