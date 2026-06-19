@@ -2,9 +2,11 @@
 type: decision
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-18"
 dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: none
 preparedDate: "2026-06-19"
 relatedReport: reports/2026-06-19-maas-serve-path-presets.md
 researchTopic: maas-serve-path-presets
@@ -60,9 +62,56 @@ current expansion. So the live forks are placement, composition, and (conditiona
 
 | Fork | Options (**bold** = recommended default) | Main alternative & why weaker | Confidence |
 |---|---|---|---|
-| **A — does WE's neutral contract name `preset`?** | **A1 — pure origin-side convenience, WE names nothing** · A2 — catalog-gated `preset` param in `servePathIR` | A2 freezes a mechanism into the `1.0.0` IR for a three-param surface that isn't yet unwieldy; minimize-lock-in + provisional posture favour the zero-surface path. **But the inversion is weaker than #974** — see the skeptic flag in Fork A. | ~60% |
+| **A — if WE names a preset surface, what is it?** *(recast — see Reframe below)* | A1 — origin-private convenience, WE names nothing (the *floor*, always available) · A2 — bare `preset` param, value-set origin-injected · **A3 — `preset` id resolves against the npm registry: a config-exporting package (eslint-config pattern) → presets portable across providers** | A1 can't be portable at all; A2 pays for a `1.0.0` IR addition without buying portability. A3 is the only option delivering cross-provider portability and is maximally WE-shaped — WE owns only the config-export *schema* (a contract), npm is the registry, package authors own the catalog → zero new lock-in. | ~75% (A3 over A2 as the eventual surface) |
 | **B — composition with explicit params** | **B1 — explicit params override the preset** · B2 — exclusive (conflict → 400) · B3 — strict merge (re-spec → 400) | B1 is most-permissive (restriction is the author's opt-in) and has CDN precedent (Cloudinary append, Cloudflare flexible variants); B2/B3 are coherent but trade ergonomics for a marginally cleaner identity story that the expand-then-hash invariant already gives B1 anyway. | ~70% |
-| C — carrier *(conditional on A2)* | **C1 — query param `?preset=<id>`** · C2 — route segment | C2 (Cloudflare/Cloudinary path-token precedent) fragments identity across path + `@pin` and breaks WE's deliberate identity/selection split; every other knob is a query param. Only bites under A2. | ~80% |
+| C — carrier *(now live & forced under A3)* | **C1 — query param `?preset=<id>`** · C2 — route segment | C2 (Cloudflare/Cloudinary path-token precedent) fragments identity across path + `@pin` and breaks WE's deliberate identity/selection split; every other knob is a query param. **A3 forces C1** — portability requires a stable, standard carrier. | ~80% |
+
+### Ruling (ratified 2026-06-18): A3 + B1 + C1, build gated on #978
+
+**A3** is the ratified WE direction (A1 = free floor, A2 collapsed); **B1** (explicit params override) and **C1**
+(`?preset=<id>` carrier, forced by A3) stand. **The build is gated on [#978](/backlog/978-maas-wrapper-serve-protocol-deferred-experience-review-collec/)
+real-case evidence — this settles a direction, not a now-build.** Skeptic pass (inline) cleared YAGNI /
+impl-is-not-a-standard / minimize-lock-in / npm-scope; it surfaced one refinement, now folded in:
+
+> **The portability lock is the config *schema*, not npm.** The schema is registry-**agnostic**; npm is the
+> native-first *default* registry, but a conforming provider MAY resolve the package config from JSR / a URL / any
+> registry. This sharpens minimize-lock-in (the only lock is an escapable schema) and avoids over-committing the
+> contract to one registry.
+
+Follow-up build captured as a blocked item (blockedBy #978).
+
+### Reframe (2026-06-18): a preset resolves against a *registry*, and WE has none to offer — so reuse npm
+
+The prepared Fork A asked "does WE's neutral contract name a `preset` *param*?" That under-frames it. A preset id is
+meaningless without a **registry to resolve it against**, and WE owns no registry. So the standard-worthy question is
+not "name a param" but **"against what registry does a preset id resolve, and is that resolution portable across
+providers?"** A2's "origin-injected value-set" still leaves every provider with a private, non-portable table — it
+names a seam without delivering the one thing portability needs.
+
+**A3 — preset id = an npm package whose main export is a serve-param config (eslint-config pattern).** WE owns only
+the **config-export schema** (a contract: a package's default export is a declarative `{form,target,strategy,…}`
+object); **npm is the registry** (native-first — we invent nothing) and **package authors own the catalog**. This is
+the only option that makes `?preset=maas-preset-react` mean the same thing at *any* conforming provider — the
+portability that matters when you consume a module from an *external* provider. Zero new lock-in (npm is the escapable
+registry; the schema is the only, escapable, lock). npm **versioning gives preset pinning for free** —
+`preset=pkg@1.2.0` (pinned) vs `preset=pkg` (floating) maps onto the existing pin ladder, strengthening invariant #2.
+
+Settled sub-knobs under A3:
+- **Declarative, not executable.** The exported config is static, JSON-serializable params — never runnable code.
+  Keeps server-side resolution safe and the preset genuinely portable. *Fixed.*
+- **Private/commercial precedence.** Provider-private presets live under a **reserved sigil** that cannot collide with
+  an npm name and **shadows** npm resolution (the commercial-MaaS private-preset case). WE defines the *precedence
+  rule*; it owns neither catalog. *Knob — refine under #978.*
+- **Provider support policy** (resolve any package vs whitelist) stays **origin-side** — WE names the resolution
+  contract, not the allow/deny policy (parallels the catalog invariant #3).
+
+**A1 is not a competing branch — it is the floor:** origin-private convenience needs no WE surface and ships today.
+A3 is the named *direction*; the **A3 contract build stays gated on [#978](/backlog/978-maas-wrapper-serve-protocol-deferred-experience-review-collec/)
+real-case evidence**, exactly as the provisional posture requires. This ruling settles a *direction*, not a now-build.
+
+Cascade: A3 makes **Fork C live and forces C1** (portability needs a stable carrier). **Fork B unchanged → B1.**
+Invariant #3 recasts: the registry is **npm (public, portable) + an optional origin-private overlay**, not an
+origin-only table — but WE still enumerates nothing (it has no oracle), so the spirit holds.
 
 ## Supported by default (forced invariants — not forks)
 
