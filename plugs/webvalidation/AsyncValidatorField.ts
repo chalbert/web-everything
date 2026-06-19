@@ -65,6 +65,8 @@ export default class AsyncValidatorField extends HTMLElement {
   #explicitTarget: AsyncSourceTarget | null = null;
   #controlEl: NativeControl | null = null;
   #autoId: string | null = null;
+  /** Monotonic run counter — the `version` carried by the #1111 validate-start/validate-end events. */
+  #runVersion = 0;
 
   /** A control edit supersedes any in-flight check and starts a fresh one (when a validator is set). */
   readonly #onControlInput = (): void => {
@@ -116,7 +118,25 @@ export default class AsyncValidatorField extends HTMLElement {
     if (!validator) {
       throw new Error('<async-validator-field>: no validator assigned — call .useValidator(fn) first');
     }
-    return this.#ensureRunner().validate(this.#fieldId(), input, validator);
+    // Stable-id observables (#1111): a run is initiated → `validate-start`; on completion → `validate-end`,
+    // where a superseded/aborted generation (the runner returned null) surfaces as a `stale` result.
+    const version = (this.#runVersion += 1);
+    this.#emitControl('validate-start', { source: 'async', version });
+    return this.#ensureRunner()
+      .validate(this.#fieldId(), input, validator)
+      .then((resolved) => {
+        this.#emitControl('validate-end', {
+          source: 'async',
+          version: resolved?.version ?? version,
+          result: resolved ? resolved.state : 'stale',
+        });
+        return resolved;
+      });
+  }
+
+  /** Dispatch a bubbling `validation.control.*` stable-id event (#1111, spec njk:184-196). */
+  #emitControl(name: string, detail: Record<string, unknown>): void {
+    this.dispatchEvent(new CustomEvent(`validation.control.${name}`, { detail, bubbles: true }));
   }
 
   /** The input moved on without starting a new check (e.g. the field was cleared) — supersede/abort in-flight. */

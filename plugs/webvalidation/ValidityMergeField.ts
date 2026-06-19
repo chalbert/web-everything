@@ -63,11 +63,27 @@ export default class ValidityMergeField extends HTMLElement {
   readonly #interaction = new InteractionStateTracker();
   #unsubInteraction: (() => void) | null = null;
 
+  /** Prior focus/validity, to fire the stable-id transition events (#1111) only on a real crossing. */
+  #prevFocused = false;
+  #prevValidity: string | null = null;
+
   /** A control `input`/`change`/`invalid` marks interaction and re-derives the `native` source. */
-  readonly #onControlEvent = (): void => {
+  readonly #onControlEvent = (event: Event): void => {
     this.#nativeInteracted = true;
+    // A value edit is the `validation.control.value-input` observable (a user/programmatic value change).
+    if (event.type === 'input' || event.type === 'change') {
+      this.#emitControl('value-input', { type: event.type });
+    }
     this.#deriveNative();
   };
+
+  /**
+   * Dispatch a `validation.control.*` stable-id event (#1111, spec njk:184-196). Bubbling so a form/host
+   * above can observe the whole field tree; the legacy `validity-merge` event is kept alongside.
+   */
+  #emitControl(name: string, detail: Record<string, unknown> = {}): void {
+    this.dispatchEvent(new CustomEvent(`validation.control.${name}`, { detail, bubbles: true }));
+  }
 
   constructor() {
     super();
@@ -191,6 +207,11 @@ export default class ValidityMergeField extends HTMLElement {
     this.setAttribute('data-dirty', String(dirty));
     this.setAttribute('data-touched', String(touched));
     this.setAttribute('data-focused', String(focused));
+    // Focus crossing → the `validation.control.focus` / `.blur` interaction-state observables.
+    if (focused !== this.#prevFocused) {
+      this.#emitControl(focused ? 'focus' : 'blur');
+      this.#prevFocused = focused;
+    }
   }
 
   /** Reflect merged validity as `data-validity` + `data-severity` (L1 observables, beyond-native). */
@@ -201,6 +222,15 @@ export default class ValidityMergeField extends HTMLElement {
     if (merged.state === 'invalid') this.setAttribute('data-severity', 'error');
     else if (merged.state === 'pending') this.setAttribute('data-severity', 'info');
     else this.removeAttribute('data-severity');
+
+    // Validity transition → the stable-id observables (#1111): `validity-changed` on any transition, plus
+    // `became-valid` / `became-invalid` when crossing the valid/invalid boundary.
+    if (validity !== this.#prevValidity) {
+      this.#emitControl('validity-changed', { merged });
+      if (validity === 'valid') this.#emitControl('became-valid', { merged });
+      else if (validity === 'invalid') this.#emitControl('became-invalid', { merged });
+      this.#prevValidity = validity;
+    }
   }
 
   /** Swap the active merge strategy by name (re-resolved through scope) and recompute. */
