@@ -176,3 +176,46 @@ describe('high-contrast scheme (prefers-contrast: more)', () => {
     expect(Math.abs(apcaLc(white, black))).toBeGreaterThan(90);
   });
 });
+
+describe('emitted-CSS golden (accent ramp + scheme + HC, regression-locked)', () => {
+  it('compileSchemeCss emits the full :root + prefers-contrast block byte-for-byte', () => {
+    // Golden snapshot of the whole emitted stylesheet: any change to decl set, accent-step ordering,
+    // var names, or the relative-color expressions breaks this loudly (not a silent drift).
+    const css = compileSchemeCss(deriveSchemeRuntime(defaultTokens));
+    expect(css).toMatchInlineSnapshot(`
+      ":root {
+        color-scheme: light dark;
+        --color-bg: light-dark(oklch(1 0 0), oklch(0.18 0.01 256));
+        --color-fg: light-dark(oklch(0.20 0 0), oklch(0.96 0 0));
+        --color-accent-1: oklch(from var(--color-accent) 0.98 c h);
+        --color-accent-3: oklch(from var(--color-accent) 0.92 c h);
+        --color-accent-6: oklch(from var(--color-accent) 0.74 c h);
+        --color-accent-9: oklch(from var(--color-accent) 0.55 c h);
+        --color-accent-11: oklch(from var(--color-accent) 0.45 c h);
+        --color-accent-12: oklch(from var(--color-accent) 0.32 c h);
+      }
+
+      @media (prefers-contrast: more) {
+        :root {
+          --color-bg: light-dark(#ffffff, #000000);
+          --color-fg: light-dark(#000000, #ffffff);
+        }
+      }
+      "
+    `);
+  });
+
+  it('pins the derived accent-9 literal so the contrast-gate math is regression-covered', () => {
+    const step9 = deriveSchemeRuntime(defaultTokens).accent.find((s) => s.id === 'accent-9')!;
+    // The CSS keeps the relative-color expression (seed-tracking); the computed sRGB literal is what the
+    // accessibility gate scores — pin it so recolorLightness() can't drift unnoticed.
+    expect(step9.css).toBe('oklch(from var(--color-accent) 0.55 c h)');
+    expect(step9.value).toMatchInlineSnapshot(`
+      {
+        "b": 0.843819396082191,
+        "g": 0.4328256503720998,
+        "r": 0.061252145880639576,
+      }
+    `);
+  });
+});
