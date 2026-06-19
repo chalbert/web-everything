@@ -289,6 +289,14 @@ export default class CustomTextNodeRegistry extends HTMLRegistry<TextNodeDefinit
               this.#removeTextNodesFromTree(removedNode);
             });
           }
+          // Handle added nodes (#1125): a subtree inserted after upgrade — innerHTML /
+          // insertAdjacentHTML / append into a connected tree — must run the add path so its
+          // `{{ }}` / `[[ ]]` text nodes interpolate, mirroring the removed-node teardown above.
+          if (mutation.addedNodes.length > 0) {
+            Array.from(mutation.addedNodes).forEach((addedNode) => {
+              this.#addTextNodesOnTree(addedNode);
+            });
+          }
         } else if (mutation.type === 'characterData' && mutation.target instanceof CustomTextNode) {
           // Text content changed on a custom text node
           this.#updateTextNode(mutation.target, mutation.oldValue);
