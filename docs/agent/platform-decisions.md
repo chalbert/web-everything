@@ -310,7 +310,15 @@ contract — and **polyfills are an opt-in enhancement layer the consumer adds**
 This is the standards-level statement of the native-first default (`AGENTS.md` hard rule 6 carries the
 day-to-day form; cite whichever fits).
 
-**Lineage:** #31 (polyfill baseline floor). Mirrors `AGENTS.md` rule 6 + the native-first authoring default.
+**Polyfill-surface fidelity (corollary).** When you *do* ship a polyfill, its contract **is** the native
+surface — it mirrors what the platform deliberately *omits*, not just what it provides. Don't add a method
+the platform refuses to (e.g. no `downgrade()` on a `CustomElementRegistry` polyfill: native upgrade is
+one-way and the registry is append-only with no `undefine`, so the symmetry the name implies doesn't
+exist). A real per-subtree/teardown need is designed *then* as a **named, explicitly non-standard
+extension** with documented semantics — never a mystery method whose name overpromises.
+
+**Lineage:** #31 (polyfill baseline floor); #1103 (polyfill-surface fidelity / `downgrade()` omission).
+Mirrors `AGENTS.md` rule 6 + the native-first authoring default.
 
 ### Shape a new contract's surface by platform idiom, not capability {#contract-surface-platform-idiom}
 
