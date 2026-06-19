@@ -24,61 +24,16 @@
  * Pure + dependency-free: the clock, the proof `hash`/`signer`, and the fact source are all injected.
  */
 import type { ProofChain, ProofRecordInput } from './proof';
+import type { Facts, PolicyRule, PolicyRuleSet, RuleEvaluator, Verdict } from './contract';
 
-// ── The #406 rule meta-schema (the cells the PDP evaluates) ──────────────────────
+// The #406 rule meta-schema (HitPolicy/InputEntry/OutputEntry/PolicyRule/PolicyRuleSet/Facts/
+// RuleEvaluator/Verdict) is the pure-contract half — it lives in `./contract.ts` (the future
+// `@webeverything/contracts/policy` entry, slice #1077). Re-exported here so importers reach the types
+// and the runtime (PDP/PEP) from one site; the split is at the file seam, not the public surface
+// (mirrors `guard/provider.ts`).
+export type * from './contract';
 
-/** DMN hit policy — how multiple matching rules combine into one verdict. */
-export type HitPolicy = 'UNIQUE' | 'FIRST' | 'PRIORITY' | 'COLLECT';
-
-/** One condition cell of a rule's `when`: an input reference, a comparator, and the value to compare. */
-export interface InputEntry {
-  /** Names one of the ruleset's `inputs` (the fact key). */
-  readonly input: string;
-  /** Comparator op — interpreted by the {@link RuleEvaluator}; the built-in covers eq/ne/lt/lte/gt/gte/in. */
-  readonly op: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'in' | string;
-  /** The value the fact is compared against (omitted ops like a bare truthiness check ignore it). */
-  readonly value?: unknown;
-}
-
-/** One output cell of a rule's `then`: a named result the verdict carries. */
-export interface OutputEntry {
-  readonly name: string;
-  readonly value: unknown;
-}
-
-/** A decision-table row: all `when` cells must match for the row to fire its `then` cells. */
-export interface PolicyRule {
-  readonly when: readonly InputEntry[];
-  readonly then: readonly OutputEntry[];
-  /** Used only by the PRIORITY hit policy — higher wins. */
-  readonly priority?: number;
-}
-
-/** A versioned ruleset expressing one decision — the #406 protocol shape. */
-export interface PolicyRuleSet {
-  readonly id: string;
-  readonly version: string;
-  /** Optional context/tenant scope this ruleset binds to. */
-  readonly scope?: string;
-  readonly hitPolicy: HitPolicy;
-  /** The fact keys the rules reference. */
-  readonly inputs: readonly string[];
-  readonly rules: readonly PolicyRule[];
-  /** The verdict outcome when NO rule matches (default `'not-applicable'`). */
-  readonly default?: string;
-}
-
-/** The facts a ruleset is evaluated against — resolved by the caller (e.g. from Web Contexts). */
-export type Facts = Readonly<Record<string, unknown>>;
-
-// ── Rule evaluator seam (policy language = build choice) ─────────────────────────
-
-/** Matches a rule's `when` cells against facts. Swappable so Rego/Cedar/DMN can each back the same PDP. */
-export interface RuleEvaluator {
-  readonly id: string;
-  /** True iff every `when` cell of the rule is satisfied by the facts. */
-  matches(rule: PolicyRule, facts: Facts): boolean;
-}
+// ── Rule evaluator — built-in impl (the swappable seam interface lives in ./contract) ─────────
 
 /** The built-in comparator evaluator — the baseline DMN-cell semantics (eq/ne/ordering/membership). */
 export const comparatorEvaluator: RuleEvaluator = {
@@ -100,19 +55,7 @@ export const comparatorEvaluator: RuleEvaluator = {
   },
 };
 
-// ── PDP — the decision point ─────────────────────────────────────────────────────
-
-/** The PDP's output: the combined verdict, the rules that fired, and the merged outputs. */
-export interface Verdict {
-  /** The decision (open vocabulary; the `then` `verdict` output, or the ruleset `default`). */
-  readonly verdict: string;
-  /** The rules that matched (after the hit policy is applied). */
-  readonly matched: readonly PolicyRule[];
-  /** Merged `then` outputs across the matched rules (later/earlier per hit policy). */
-  readonly outputs: Readonly<Record<string, unknown>>;
-  /** Human-readable explanation of how the verdict was reached. */
-  readonly reason: string;
-}
+// ── PDP — the decision point (the Verdict output type lives in ./contract) ───────
 
 /** Thrown when a ruleset violates its own hit-policy contract (e.g. UNIQUE matched more than one rule). */
 export class HitPolicyViolation extends Error {
