@@ -7,6 +7,7 @@ dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"
 dateResolved: "2026-06-16"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#we-fui-embed-boundary"
 preparedDate: "2026-06-16"
 relatedReport: reports/2026-06-16-812-runtime-block-composition-boundary.md
 tags: [blocks, demos, boundary, constellation, decision-prep]

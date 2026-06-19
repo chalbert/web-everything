@@ -8,6 +8,7 @@ dateOpened: "2026-06-06"
 blockedBy: ["125"]
 dateStarted: "2026-06-09"
 dateResolved: "2026-06-09"
+codifiedIn: "one-off"
 tags: [jsx, adapters, packaging, build-tooling, docs]
 relatedReport: reports/2026-06-06-adapter-real-project-integration.md
 relatedProject: webadapters

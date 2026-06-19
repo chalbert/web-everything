@@ -9,6 +9,7 @@ dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
 graduatedTo: none
+codifiedIn: "one-off"
 preparedDate: "2026-06-14"
 relatedReport: reports/2026-06-14-reference-retirement-convention.md
 relatedProject: webdocs

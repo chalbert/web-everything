@@ -7,6 +7,7 @@ dateOpened: "2026-06-03"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
 graduatedTo: none
+codifiedIn: "one-off"
 tags: [droplist, tree-select, hierarchical, block, traits]
 relatedProject: webblocks
 relatedReport: reports/2026-06-11-tree-select-hierarchical-selection.md

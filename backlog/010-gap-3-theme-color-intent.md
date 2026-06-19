@@ -6,6 +6,7 @@ status: resolved
 dateOpened: "2026-05-31"
 dateResolved: "2026-06-11"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#intents-ux-only"
 tags: [gap-analysis, intent, theme, color]
 relatedProject: webintents
 ---

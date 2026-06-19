@@ -11,6 +11,7 @@ dateOpened: "2026-06-18"
 dateStarted: "2026-06-18"
 dateResolved: "2026-06-18"
 graduatedTo: none
+codifiedIn: "one-off"
 tags: [block-explorer, plateau-embed, theme-creator, design-system, design-tokens, dtcg]
 ---
 

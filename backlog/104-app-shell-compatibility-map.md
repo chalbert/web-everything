@@ -8,6 +8,7 @@ dateOpened: "2026-06-06"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-06-11"
 tags: [app-shell, micro-frontend, micro-apps, meta-framework, compatibility-map, spa, routing, evergreen, dashboard, platform]
 relatedReport: reports/2026-06-11-app-shell-compatibility-map.md

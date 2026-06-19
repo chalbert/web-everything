@@ -7,6 +7,7 @@ dateOpened: "2026-06-18"
 dateStarted: "2026-06-18"
 dateResolved: "2026-06-18"
 graduatedTo: 952
+codifiedIn: "one-off"
 preparedDate: "2026-06-18"
 relatedReport: "reports/2026-06-18-gate-violation-attribution.md"
 tags: [backlog, gate, concurrency, batch, tooling, decision]

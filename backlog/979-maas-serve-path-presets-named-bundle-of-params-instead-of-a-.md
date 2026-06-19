@@ -7,6 +7,7 @@ dateOpened: "2026-06-18"
 dateStarted: "2026-06-19"
 dateResolved: "2026-06-19"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-06-19"
 relatedReport: reports/2026-06-19-maas-serve-path-presets.md
 researchTopic: maas-serve-path-presets

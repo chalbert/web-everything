@@ -6,6 +6,7 @@ status: resolved
 dateOpened: "2026-05-31"
 dateResolved: "2026-06-11"
 graduatedTo: intent:collection-operations
+codifiedIn: "docs/agent/platform-decisions.md#intents-ux-only"
 tags: [gap-analysis, intent, collections]
 relatedReport: reports/2026-06-03-collection-operations-intent.md
 ---

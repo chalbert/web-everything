@@ -9,6 +9,7 @@ dateOpened: "2026-06-11"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
 graduatedTo: none
+codifiedIn: "one-off"
 tags: [gap-analysis, competitive-analysis, repeatable, freshness, longitudinal, cadence, research]
 relatedProject: webdocs
 crossRef: { url: /research/, label: "/research/ topic index" }

@@ -7,6 +7,7 @@ dateOpened: "2026-06-06"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#project-protocol-bar"
 preparedDate: "2026-06-11"
 tags: [charts, dataviz, tool-not-lib, standard, json-schema, tool-agnostic, conformance, provider-registry, native-first]
 relatedReport: reports/2026-06-11-tool-agnostic-chart-config.md

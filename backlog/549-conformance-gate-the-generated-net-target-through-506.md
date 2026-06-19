@@ -9,6 +9,7 @@ dateOpened: "2026-06-14"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"
 graduatedTo: none
+codifiedIn: "one-off"
 preparedDate: "2026-06-14"
 relatedReport: reports/2026-06-14-maas-conformance-gate-policy.md
 tags: [module-as-a-service, polyglot, conformance, dotnet, csharp, ci-gate, generation-adapter]

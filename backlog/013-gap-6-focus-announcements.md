@@ -7,6 +7,7 @@ dateOpened: "2026-05-31"
 dateStarted: "2026-06-08"
 dateResolved: "2026-06-08"
 graduatedTo: intent:focus-containment
+codifiedIn: "docs/agent/platform-decisions.md#project-protocol-bar"
 tags: [gap-analysis, intent, protocol, a11y, focus]
 ---
 

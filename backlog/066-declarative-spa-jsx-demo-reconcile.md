@@ -4,6 +4,7 @@ workItem: task
 status: resolved
 dateOpened: "2026-06-06"
 dateResolved: "2026-06-08"
+codifiedIn: "one-off"
 tags: [jsx, adapters, demos]
 relatedReport: reports/2026-06-03-jsx-adapter-feature-mapping.md
 relatedProject: webadapters

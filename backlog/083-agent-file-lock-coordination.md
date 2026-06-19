@@ -7,6 +7,7 @@ dateOpened: "2026-06-06"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-14"
 graduatedTo: none
+codifiedIn: "one-off"
 preparedDate: "2026-06-11"
 relatedReport: reports/2026-06-11-agent-file-lock-coordination.md
 tags: [agent-coordination, file-locking, multi-agent, hooks, dev-workflow, concurrency]

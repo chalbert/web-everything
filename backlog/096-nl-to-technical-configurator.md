@@ -8,6 +8,7 @@ dateOpened: "2026-06-06"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#intents-ux-only"
 preparedDate: "2026-06-11"
 relatedReport: reports/2026-06-11-nl-to-technical-configurator.md
 tags: [monetization, business-model, ai-agnostic, technical-configurator, natural-language, provider-registry, decision-support, plateau, self-run-tool]

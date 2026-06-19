@@ -8,6 +8,7 @@ dateOpened: "2026-06-03"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#compose-dont-handroll"
 preparedDate: "2026-06-11"
 relatedReport: reports/2026-06-11-pagination-focus-announcement.md
 relatedProject: webintents

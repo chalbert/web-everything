@@ -7,6 +7,7 @@ dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#compose-dont-handroll"
 preparedDate: "2026-06-14"
 tags: [candidate-standard, intent, block, navigation, disclosure, decision]
 relatedReport: reports/2026-06-14-reveal-navigation-disclosure-pattern.md

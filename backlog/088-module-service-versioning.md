@@ -9,6 +9,7 @@ dateStarted: "2026-06-12"
 blockedBy: ["081"]
 dateResolved: "2026-06-12"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-06-11"
 tags: [module-as-a-service, versioning, content-addressing, immutability, cache-key, semver, adapters, plateau, esm]
 relatedProject: webadapters

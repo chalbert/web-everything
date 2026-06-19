@@ -6,6 +6,7 @@ dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"
 dateResolved: "2026-06-16"
 graduatedTo: none
+codifiedIn: "one-off"
 relatedReport: reports/2026-06-16-rendered-site-a11y-gating.md
 preparedDate: "2026-06-16"
 tags: [a11y, ci-gate, axe-core, playwright, devtools, decision]

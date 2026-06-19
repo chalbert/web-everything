@@ -8,6 +8,7 @@ dateOpened: "2026-06-16"
 dateStarted: "2026-06-17"
 dateResolved: "2026-06-17"
 graduatedTo: scripts/gen-cem.mjs
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-06-16"
 relatedReport: reports/2026-06-16-per-component-api-data-sourcing.md
 relatedProject: webdocs

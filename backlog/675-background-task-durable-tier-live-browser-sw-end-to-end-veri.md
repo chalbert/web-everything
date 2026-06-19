@@ -8,6 +8,7 @@ dateOpened: "2026-06-15"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"
 graduatedTo: none
+codifiedIn: "one-off"
 relatedProject: webintents
 tags: [background-task, durability, background-fetch, service-worker, verification, demo]
 ---

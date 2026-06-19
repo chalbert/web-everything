@@ -7,6 +7,7 @@ dateOpened: "2026-06-17"
 dateStarted: "2026-06-18"
 dateResolved: "2026-06-18"
 graduatedTo: none
+codifiedIn: "one-off"
 preparedDate: "2026-06-17"
 relatedReport: reports/2026-06-17-blocks-json-per-file-split.md
 tags: [blocks, blocks-json, architecture, 11ty, data-loader, concurrency]

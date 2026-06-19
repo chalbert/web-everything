@@ -7,6 +7,7 @@ dateOpened: "2026-06-08"
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-11"
 graduatedTo: "project:webtraits"
+codifiedIn: "one-off"
 tags: [webtraits, webbehaviors, activation-lifecycle, visibility, intersection-observer, native-first]
 relatedReport: reports/2026-06-02-lazy-traits-loading.md
 relatedProject: webtraits

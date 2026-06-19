@@ -8,6 +8,7 @@ dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-06-14"
 locus: plateau-app
 relatedReport: reports/2026-06-14-bot-pr-mechanics.md

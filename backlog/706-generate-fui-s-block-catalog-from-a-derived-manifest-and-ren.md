@@ -7,6 +7,7 @@ dateOpened: "2026-06-15"
 dateStarted: "2026-06-16"
 dateResolved: "2026-06-16"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-06-15"
 relatedProject: webdocs
 tags: [frontierui, webdocs, catalog, derived-manifest, cem, mechanism-fork]

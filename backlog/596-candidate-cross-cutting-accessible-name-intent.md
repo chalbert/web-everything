@@ -7,6 +7,7 @@ dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#intents-ux-only"
 preparedDate: "2026-06-14"
 relatedReport: reports/2026-06-14-cross-cutting-accessible-name-intent.md
 tags: []

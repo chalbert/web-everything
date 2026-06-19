@@ -11,4 +11,5 @@ tags:
 relatedReport: reports/2026-05-31-webintl-project.md
 relatedProject: webintl
 graduatedTo: project:webintl
+codifiedIn: "docs/agent/platform-decisions.md#project-protocol-bar"
 ---

@@ -6,6 +6,7 @@ status: resolved
 dateOpened: "2026-06-03"
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
+codifiedIn: "one-off"
 tags: [navigation, intent, persistence, deep-linking, vocabulary]
 relatedReport: reports/2026-06-03-navigation-intent-vocabulary.md
 relatedProject: webintents

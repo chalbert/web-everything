@@ -8,6 +8,7 @@ dateOpened: "2026-06-12"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
 graduatedTo: none
+codifiedIn: "one-off"
 preparedDate: "2026-06-14"
 tags: [webdocs, frontier-ui, primitives, self-host, product-build]
 relatedProject: webdocs

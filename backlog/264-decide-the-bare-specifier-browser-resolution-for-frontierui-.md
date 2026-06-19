@@ -8,6 +8,7 @@ dateOpened: "2026-06-10"
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
 graduatedTo: none
+codifiedIn: "one-off"
 crossRef: { url: /backlog/271-project-selectable-module-specifier-resolution-strategies/, label: "General resolution-strategy axis (#271)" }
 tags: []
 ---

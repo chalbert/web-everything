@@ -11,6 +11,7 @@ preparedDate: "2026-06-12"
 blockedBy: [455]
 dateResolved: "2026-06-13"
 graduatedTo: "project:webnotifications"
+codifiedIn: "docs/agent/platform-decisions.md#project-protocol-bar"
 ---
 
 # Decide the Notifications / Permissions domain — `webnotifications` (gap #13)

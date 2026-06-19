@@ -7,6 +7,7 @@ dateOpened: "2026-06-12"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#project-protocol-bar"
 tags: [gap-analysis, transport, realtime, push, protocol]
 relatedReport: reports/2026-06-11-webpermissions-project.md
 preparedDate: "2026-06-12"

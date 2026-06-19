@@ -6,6 +6,7 @@ status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-09"
 dateResolved: "2026-06-09"
+codifiedIn: "one-off"
 tags: [jsx, adapters, renderer, custom-elements]
 relatedReport: reports/2026-06-03-jsx-adapter-feature-mapping.md
 relatedProject: webadapters

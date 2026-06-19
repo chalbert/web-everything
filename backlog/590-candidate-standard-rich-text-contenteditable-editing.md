@@ -7,6 +7,7 @@ dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#project-protocol-bar"
 preparedDate: "2026-06-14"
 tags: [candidate-standard, rich-text, contenteditable, editing, intent, protocol, decision]
 relatedReport: reports/2026-06-14-rich-text-editing.md

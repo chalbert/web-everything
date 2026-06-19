@@ -7,6 +7,7 @@ dateOpened: "2026-06-15"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#no-leakage-client"
 preparedDate: "2026-06-15"
 relatedReport: reports/2026-06-15-managed-inbox-auth-capture.md
 tags: [tooling, screenshot, exercise-app, infra, boundary]

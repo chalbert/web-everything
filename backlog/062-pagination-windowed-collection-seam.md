@@ -9,6 +9,7 @@ relatedReport: reports/2026-06-03-pagination-standard-research.md
 relatedProject: webintents
 crossRef: { url: /intents/collection-operations/, label: collection-operations intent }
 graduatedTo: intent:collection-operations
+codifiedIn: "docs/agent/platform-decisions.md#intents-ux-only"
 ---
 
 # Draw the explicit seam between pagination and the existing infinite-scroll / virtualization research

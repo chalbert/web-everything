@@ -7,6 +7,7 @@ blockedBy: ["304"]
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
+codifiedIn: "docs/agent/platform-decisions.md#compose-dont-handroll"
 preparedDate: "2026-06-13"
 tags: [validation, decision, intents, cross-field, rule-language, cel]
 relatedProject: webvalidation

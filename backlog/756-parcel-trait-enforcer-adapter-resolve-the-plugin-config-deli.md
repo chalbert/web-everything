@@ -8,6 +8,7 @@ dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"
 dateResolved: "2026-06-16"
 graduatedTo: none
+codifiedIn: "one-off"
 preparedDate: "2026-06-16"
 relatedReport: reports/2026-06-16-parcel-trait-enforcer-config-delivery.md
 tags: [trait-enforcer, tree-shaking, bundler-adapter, parcel, decision-prep]

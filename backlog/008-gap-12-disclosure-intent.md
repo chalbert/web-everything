@@ -7,6 +7,7 @@ dateOpened: "2026-05-31"
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
 graduatedTo: "intent:disclosure"
+codifiedIn: "one-off"
 tags: [gap-analysis, intent, disclosure]
 ---
 

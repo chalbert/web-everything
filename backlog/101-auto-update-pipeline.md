@@ -9,6 +9,7 @@ dateOpened: "2026-06-06"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
 graduatedTo: "protocol:update-policy"
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-06-11"
 tags: [auto-update, evergreen, change-management, dependencies, risk-analysis, phased-rollout, reversion, pre-test, monitoring, ci]
 relatedReport: reports/2026-06-11-auto-update-pipeline.md

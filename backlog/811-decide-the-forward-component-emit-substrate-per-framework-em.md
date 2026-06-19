@@ -9,6 +9,7 @@ dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"
 dateResolved: "2026-06-16"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#we-fui-embed-boundary"
 preparedDate: "2026-06-16"
 relatedReport: reports/2026-06-16-forward-component-emit-substrate.md
 tags: [webdocs, adapters, polyglot, generation, component-emit]

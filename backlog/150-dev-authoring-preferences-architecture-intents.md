@@ -6,6 +6,7 @@ status: resolved
 dateOpened: "2026-06-07"
 dateStarted: "2026-06-09"
 dateResolved: "2026-06-09"
+codifiedIn: "docs/agent/platform-decisions.md#project-protocol-bar"
 tags: [dev-experience, authoring-preferences, architecture-rules, component-scoping, adapters, lowering, jsx-adapter, native-first]
 relatedReport: reports/2026-06-07-dev-authoring-preferences-architecture-intents.md
 crossRef: { url: /backlog/140-dev-surface-product-feature-matrix/, label: "Dev-surface feature matrix (#140)" }

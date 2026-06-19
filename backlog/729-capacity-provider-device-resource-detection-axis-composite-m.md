@@ -7,6 +7,7 @@ dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"
 dateResolved: "2026-06-16"
 graduatedTo: none
+codifiedIn: "one-off"
 preparedDate: "2026-06-15"
 relatedReport: reports/2026-06-15-device-capacity-provider.md
 tags: [capabilities, provider-seam, device-capacity, client-hints, composite, delegation]

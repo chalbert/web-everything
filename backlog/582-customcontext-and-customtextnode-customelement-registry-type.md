@@ -7,6 +7,7 @@ dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
 graduatedTo: none
+codifiedIn: "one-off"
 tags: [plugs, registry, typescript, generics, convergence]
 relatedReport: reports/2026-06-14-registry-generic-type-architecture.md
 preparedDate: "2026-06-14"

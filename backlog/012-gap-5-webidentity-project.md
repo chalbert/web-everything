@@ -7,6 +7,7 @@ dateOpened: "2026-05-31"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#project-protocol-bar"
 tags: [gap-analysis, project, protocol, identity, auth]
 relatedReport: reports/2026-06-11-webidentity-project.md
 preparedDate: "2026-06-11"

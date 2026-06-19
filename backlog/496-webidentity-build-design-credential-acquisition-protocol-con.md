@@ -7,6 +7,7 @@ dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
 graduatedTo: none
+codifiedIn: "one-off"
 preparedDate: "2026-06-13"
 relatedReport: reports/2026-06-13-credential-acquisition-protocol-build-design.md
 tags: [identity, auth, protocol, provider-seam, build-design]

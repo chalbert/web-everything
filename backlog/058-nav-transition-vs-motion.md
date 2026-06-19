@@ -7,6 +7,7 @@ dateOpened: "2026-06-03"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
 graduatedTo: none
+codifiedIn: "one-off"
 tags: [navigation, motion, intent, view-transitions, composition]
 relatedReport: reports/2026-06-03-navigation-intent-vocabulary.md
 relatedProject: webintents

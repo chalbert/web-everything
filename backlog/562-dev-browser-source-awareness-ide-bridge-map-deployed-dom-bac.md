@@ -8,6 +8,7 @@ dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-06-14"
 relatedReport: reports/2026-06-14-source-awareness-substrate.md
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "Dev-browser fix-loop (#141)" }

@@ -9,6 +9,7 @@ dateStarted: "2026-06-13"
 blockedBy: ["389"]
 dateResolved: "2026-06-13"
 graduatedTo: none
+codifiedIn: "one-off"
 tags: [module-as-a-service, caching, distribution, cdn, eager-lazy, self-hosted, edge, immutability, adapters, plateau, esm]
 relatedProject: webadapters
 crossRef: { url: /adapters/, label: Rendering Adapters }

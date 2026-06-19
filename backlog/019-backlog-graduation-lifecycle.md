@@ -6,6 +6,7 @@ status: resolved
 dateOpened: '2026-06-02'
 dateResolved: "2026-06-11"
 graduatedTo: none
+codifiedIn: "one-off"
 tags:
   - backlog
   - meta

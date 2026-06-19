@@ -7,6 +7,7 @@ dateOpened: "2026-06-12"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
 graduatedTo: none
+codifiedIn: "one-off"
 preparedDate: "2026-06-13"
 tags: [block, background-task, durability, background-fetch, navigation-guard, design-decision]
 relatedProject: webintents

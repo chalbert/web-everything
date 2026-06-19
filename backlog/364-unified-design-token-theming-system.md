@@ -8,6 +8,7 @@ dateOpened: "2026-06-12"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
 graduatedTo: "project:webtheme"
+codifiedIn: "docs/agent/platform-decisions.md#project-protocol-bar"
 preparedDate: "2026-06-12"
 relatedReport: reports/2026-06-12-design-token-theming-system.md
 tags: [gap-analysis, design-tokens, theming, native-first, color-scheme, intents, dtcg]

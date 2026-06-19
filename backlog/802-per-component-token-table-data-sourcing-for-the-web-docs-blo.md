@@ -8,6 +8,7 @@ dateOpened: "2026-06-16"
 dateStarted: "2026-06-17"
 dateResolved: "2026-06-17"
 graduatedTo: none
+codifiedIn: "one-off"
 preparedDate: "2026-06-16"
 relatedReport: reports/2026-06-16-component-token-table-sourcing.md
 relatedProject: webdocs

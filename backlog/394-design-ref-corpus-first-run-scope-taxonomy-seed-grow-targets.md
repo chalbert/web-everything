@@ -8,6 +8,7 @@ dateOpened: "2026-06-12"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
 graduatedTo: none
+codifiedIn: "one-off"
 preparedDate: "2026-06-12"
 relatedReport: reports/2026-06-12-design-ref-corpus-taxonomy-seed.md
 tags: [design-reference, corpus, taxonomy, classification]

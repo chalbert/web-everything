@@ -8,6 +8,7 @@ dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"
 dateResolved: "2026-06-16"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#intents-ux-only"
 relatedProject: webtheme
 relatedReport: reports/2026-06-16-design-system-bundle-prior-art.md
 preparedDate: "2026-06-16"

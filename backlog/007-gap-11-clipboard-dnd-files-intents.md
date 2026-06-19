@@ -7,6 +7,7 @@ dateOpened: "2026-05-31"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
 graduatedTo: none
+codifiedIn: "one-off"
 tags: [gap-analysis, intent, clipboard, drag-drop, files]
 ---
 

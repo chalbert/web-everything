@@ -6,6 +6,7 @@ status: resolved
 dateOpened: '2026-06-06'
 dateResolved: '2026-06-08'
 graduatedTo: "protocol:render-strategy"
+codifiedIn: "one-off"
 tags:
   - rendering
   - render-strategy

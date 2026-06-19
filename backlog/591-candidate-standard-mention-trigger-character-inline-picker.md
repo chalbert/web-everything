@@ -7,6 +7,7 @@ dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
 graduatedTo: none
+codifiedIn: "one-off"
 preparedDate: "2026-06-14"
 tags: [candidate-standard, intent, block, mention, decision]
 relatedReport: reports/2026-06-14-inline-trigger-mention-pattern.md
