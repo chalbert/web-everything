@@ -36,6 +36,15 @@ describe('Node.injectors.patch integration', () => {
       expect('injectors' in Node.prototype).toBe(false);
     });
 
+    it('preserves the Node.* static node-type constants when replacing the global Node (#960/#1011)', () => {
+      // Replacing `window.Node` must carry over the constructor's static constants — a third-party DOM
+      // library reading `Node.TEXT_NODE` (Parchment/Quill) breaks if they are dropped.
+      expect((Node as unknown as { ELEMENT_NODE: number }).ELEMENT_NODE).toBe(1);
+      expect((Node as unknown as { TEXT_NODE: number }).TEXT_NODE).toBe(3);
+      expect((Node as unknown as { COMMENT_NODE: number }).COMMENT_NODE).toBe(8);
+      expect((Node as unknown as { DOCUMENT_FRAGMENT_NODE: number }).DOCUMENT_FRAGMENT_NODE).toBe(11);
+    });
+
     it('should not apply patches twice', () => {
       const firstCheck = isNodeInjectorsPatched();
       applyNodeInjectorsPatches();

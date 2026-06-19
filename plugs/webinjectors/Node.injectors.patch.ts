@@ -65,6 +65,20 @@ export function applyNodeInjectorsPatches(): void {
   PatchedNode.prototype = OriginalNode.prototype;
   Object.setPrototypeOf(PatchedNode, Object.getPrototypeOf(OriginalNode));
 
+  // Carry over the Node constructor's STATIC own properties — chiefly the node-type constants
+  // (`TEXT_NODE` = 3, `ELEMENT_NODE` = 1, …) that live as own props on the original `Node` and are NOT
+  // reachable through `setPrototypeOf` above. Replacing the global `Node` without these silently drops
+  // them, breaking any third-party DOM library that reads `Node.TEXT_NODE` (the #960 Parchment/Quill
+  // regression class; invariant enforced by the #1011 patch-interaction harness). Function-internal own
+  // keys (`length`/`name`/`prototype`/`arguments`/`caller`) are already present on `PatchedNode` and must
+  // not be overwritten.
+  const FUNCTION_OWN_KEYS = new Set(['length', 'name', 'prototype', 'arguments', 'caller']);
+  for (const key of Object.getOwnPropertyNames(OriginalNode)) {
+    if (FUNCTION_OWN_KEYS.has(key)) continue;
+    const descriptor = Object.getOwnPropertyDescriptor(OriginalNode, key);
+    if (descriptor) Object.defineProperty(PatchedNode, key, descriptor);
+  }
+
   Object.defineProperty(window, 'Node', {
     ...baseDescriptor,
     value: PatchedNode,
