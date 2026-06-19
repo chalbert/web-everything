@@ -1,14 +1,14 @@
 ---
 type: issue
 workItem: story
-size: 13
+size: 5
 parent: "170"
 status: open
-locus: frontierui
-blockedBy: ["725", "950"]
+locus: webeverything
+blockedBy: ["1045"]
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-19"
-tags: [plugs, dedup, migration, frontierui, plateau-app]
+tags: [plugs, dedup, migration, webeverything]
 ---
 
 > **blockedBy `950` added 2026-06-18 (batch pre-flight).** This terminal dedup packages the FUI plugs
@@ -16,7 +16,22 @@ tags: [plugs, dedup, migration, frontierui, plateau-app]
 > `webguards` *into* that same FUI tree. Packaging/deleting it now is a direct two-session collision.
 > Unblocks when #950 resolves (also coordinate with #726's test backfill before the WE-side delete).
 
-# Package `frontierui/plugs` as `@frontierui/plugs`, delete `webeverything/plugs`, repoint WE + plateau-app
+# Repoint WE onto `@frontierui/plugs` (wire the alias + rewrite the 42 `../plugs/` imports)
+
+> **Sliced 2026-06-19 (`/split 449`).** This was a `size·13` story spanning three repos; the
+> [split analysis](reports/2026-06-18-backlog-split-analysis.md) carved it into 4 slices under the #170
+> plugs-dedup epic. **#449 is now re-scoped to its core (`story·5`): the WE-side repoint only.** The other
+> three are siblings: **[#1045](/backlog/1045-package-frontierui-plugs-as-frontierui-plugs-dual-exports-su/)**
+> (package `@frontierui/plugs` — foundational, blocks this), **[#1046](/backlog/1046-repoint-plateau-app-from-we-plugs-to-frontierui-plugs/)**
+> (repoint plateau-app), **[#1047](/backlog/1047-delete-webeverything-plugs-and-relocate-726-unplugged-tests-/)**
+> (delete `webeverything/plugs/` + relocate the #726 tests — blocked by this). DAG: #1045 → {#449, #1046}; #449 → #1047.
+>
+> **#449's scope now:** wire `@frontierui/plugs` (+ its subpath exports) into `we:tsconfig.json` +
+> `we:vite.config.mts` (the Vite-config edit that forces a dev-server restart → a focused `/next 449`
+> session, not a batch item), and rewrite WE's **42** relative `../plugs/` imports to the package.
+> The old `we:plugs/` dir stays present-but-dead after this slice (a valid intermediate); its deletion is
+> #1047. **Acceptance:** WE demos render against `@frontierui/plugs`; WE build + `check:standards` green;
+> `@webeverything` still never imports impl as a hard dep (this is a demo/client consumption seam, #239).
 
 ## Re-confirmed outgrew + re-sized 8 → 13 (batch-2026-06-18)
 

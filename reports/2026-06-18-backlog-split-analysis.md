@@ -1069,3 +1069,105 @@ re-sized story with A/B/C as siblings under #746 instead of nesting an epic unde
 size holding at 5 vs creeping to 8 once the full `maas-versioning` ladder is wired (the constants
 pre-exist in `we:servePathIR.ts`, so 5 is the honest estimate). A is batchable immediately; B after A; C
 after B.
+
+---
+
+# Focused run: `/split 449` — package `@frontierui/plugs`, delete `webeverything/plugs`, repoint WE + plateau-app
+
+## Candidate
+
+**#449** — *Package `frontierui/plugs` as `@frontierui/plugs`, delete `webeverything/plugs`, repoint WE +
+plateau-app* · `workItem: story` · `size: 13` · `parent: "170"` · `locus: frontierui` ·
+`blockedBy: ["725", "950"]` (**both resolved** — collision warnings now stale) · `status: open`.
+
+Re-sized 8→13 in batch-2026-06-18 on two grounds: execution volume (the dedup spans three repos) and a
+**forbidden mid-batch Vite restart** (wiring the package alias into WE's vite config restarts the user's
+dev server). Direction is settled by **#606** (plugs is FUI's; WE consumes it as a no-leakage client) — so
+the size is pure volume, no open fork. This pass traced the real surface in all three repos before drawing
+seams.
+
+## Work-investigation pass (read the real tree, three repos)
+
+| Claim | What the tree actually shows |
+|---|---|
+| FUI plugs is the canonical source | ✓ `fui:plugs/` exists (137 files), but **`fui:plugs/package.json` is MISSING** — Scope §1 (dual `.`/`/bootstrap` exports) is greenfield. |
+| WE has "61 runtime consumers" via aliases | **Corrected:** WE's per-package aliases (`@core`, `@webregistries`, … `@webexpressions`, `we:vite.config.mts:162-169`) have **0 importers** — every consumer imports via **relative `../plugs/` paths**: **42 `.ts` files** (`grep` confirmed). So repointing WE = wire one `@frontierui/plugs` alias + rewrite 42 relative imports, **not** retarget the 8 aliases. |
+| `webeverything/plugs/` to delete | ✓ **156 files** under `we:plugs/`. |
+| plateau-app composes via an alias | ✓ `plateau-app:tsconfig.json:16` (`@we/plugs/*` → `../webeverything/plugs/*`) + `plateau-app:vite.config.mts:120` (`@we/plugs` → `weRoot/plugs`) + `:126` (`virtual:trait-manifest` → `weRoot/plugs/webbehaviors/traitManifest`). Separate repo, own dev server (:4000) — **not** the WE server the batch-restart rule protects. |
+| Package must expose only `.`/`/bootstrap` | **Sharpened:** WE consumes plugs by **subpath** (`@core`=core, `@webregistries`=webregistries, … 8 subpaths). So the package's `exports` map (slice A) must expose those subpaths too, or WE's alias retargets them into the package — i.e. **A's export surface is shaped by what WE/plateau consume**, making A genuinely foundational. |
+| #726 carry-forward | ✓ #726 added unplugged tests at `we:plugs/webguards/__tests__/unit/webguards.unplugged.test.ts` + `we:plugs/webvalidation/__tests__/unit/webvalidation.unplugged.test.ts` and flipped `PLUG_UNPLUGGED_TEST_ENFORCED=true`. On delete these must relocate to the FUI canonical home → folds into the delete slice. (Scope §5's other 7 FU-only tests already live FUI-side — they stay.) |
+
+**Net:** the repoint+delete is **not** one atom. The FUI package (greenfield, no restart, isolated repo)
+peels off cleanly as the foundation; plateau-app is a third independent repo; and within WE the alias-wire
++ 42-import rewrite is a clean seam from the 156-file delete (the dead `plugs/` dir is harmless until
+deleted). Four groundable slices.
+
+## Could split — #449 → 4 slices
+
+**Edge case (parent exists):** #449 already sets `parent: "170"` (the plugs-runtime dedup epic — correct
+scope here, like the #725 run). So per *Executing a split* it is **not** converted to a nested epic. It
+stays a `story`, re-sized `13 → 5`, narrowed to its **core slice** (the WE alias-wire + 42-import
+repoint — the heart of "repoint WE to consume the package"). The other three become **siblings under
+#170**.
+
+| Slice | What it does | Home | `workItem`/`size` | blockedBy | Batchable now |
+|---|---|---|---|---|---|
+| **A** (new sibling) — package `@frontierui/plugs` | Add `fui:plugs/package.json`: `.` → unplugged library entry, `/bootstrap` → plugged POC entry, **plus the subpath exports WE/plateau consume** (`core`, `webregistries`, `webinjectors`, `webcomponents`, `webcontexts`, `webbehaviors`, `webstates`, `webexpressions`); keep FU-only `fui:globals.d.ts`/`we:virtual-trait-manifest.d.ts`/`we:webbehaviors/traitManifest.ts` off the public surface. FUI build + vitest + e2e green against the package entry. | `fui:plugs/` | `story·3` | — | ✅ (isolated FUI repo, no WE restart) |
+| **#449** (kept, re-scoped) — repoint WE onto the package | Wire `@frontierui/plugs` (+ its subpaths) into `we:tsconfig.json` + `we:vite.config.mts` (the restart-forcing edit); rewrite the **42** relative `../plugs/` imports → `@frontierui/plugs/*`; retarget the `virtual:trait-manifest` alias. Old `we:plugs/` stays present-but-dead → valid intermediate. WE build + check:standards green; demos render against the package. | `webeverything` | `story·5` | A | ❌ (forces WE Vite restart → `/next`) |
+| **C** (new sibling) — repoint plateau-app | Retarget `plateau-app:tsconfig.json:16` + `plateau-app:vite.config.mts:120,126` from `@we/plugs`/`weRoot/plugs` → `@frontierui/plugs`. plateau-app build green. Independent repo. | `plateau-app` | `story·2` | A | ⚠ (own :4000 server, not WE's — restarts plateau only) |
+| **D** (new sibling) — delete `we:plugs/` + relocate #726 tests | Delete the 156 files under `we:plugs/`; relocate the two #726 unplugged tests to the FUI canonical home (`fui:plugs/webguards/` + `fui:plugs/webvalidation/`, adjusting `guard/`→`blocks/guard/` + `validity-merge/`/`validator-resolution/` import paths); verify **no** `../plugs/` or `@we/plugs/*` survives in any repo. All gates green. | `webeverything` (+ FUI test move) | `task` | #449 | ❌ (same WE session as #449) |
+
+### Slice DAG
+
+```
+A (package @frontierui/plugs) ─┬─→ #449 (repoint WE) ──→ D (delete we:plugs/ + #726 tests)
+                               └─→ C (repoint plateau-app)
+```
+
+- **After A, two roots run in parallel** — #449 (WE repoint) ∥ C (plateau-app repoint) are independent
+  repos with disjoint files (rubric 4 ✓).
+- **Incremental delivery:** A ships a consumable package (FUI green, nothing else touched); #449 puts WE on
+  the package with the dead dir harmless; C puts plateau-app on the package; D is the bounded cleanup. Every
+  slice leaves a valid, demoable state (rubric 5 ✓).
+- **Batchability:** **A is batchable now** (isolated FUI, no WE-server restart — the real win of this
+  split). #449 + D are *not* batchable (they wire/teardown WE's Vite alias → restart → a focused `/next`
+  session). C restarts only plateau-app's own server, so it's batch-eligible **if** no plateau-app dev
+  server is running (flagged, not assumed).
+
+### Rubric check (all five hold)
+
+1. **Volume, not uncertainty** ✓ — #606 settled the direction (plugs is FUI's, WE is a no-leakage client);
+   no slice re-decides a seam.
+2. **≥2 nameable slices, real home** ✓ — 4 slices across FUI / WE / plateau-app, each `file:line`-grounded
+   above.
+3. **Slices land ≤5 / task** ✓ — A·3, #449·5, C·2, D·task. The heaviest (#449·5) is the alias-wire +
+   42-import rewrite — atomic (can't half-repoint) and mechanical over a pre-existing relative-import set.
+4. **Clean acyclic DAG, ≥2 independent** ✓ — A → {#449, C}; #449 ∥ C after A (disjoint repos); D is bounded
+   incremental cleanup.
+5. **No coherence loss; each demoable** ✓ — splitting #449's repoint from D's delete leaves the dead
+   `we:plugs/` present-but-unreferenced (valid), exactly the intermediate that lets #449 ship before the
+   156-file teardown.
+
+## Could not split
+
+None — #449 splits cleanly into A → {#449, C} → D.
+
+## Proposed mutation (gated on "go")
+
+- **#449 stays a `story`** (it has `parent: "170"`): re-size `13 → 5`, narrow scope/digest to the **WE
+  repoint core**, add `blockedBy: A`. **Not** converted to an epic (edge case — parent exists).
+- Scaffold **A** (`story·3`, `--parent=170`, `locus:frontierui`, no blocker), **C** (`story·2`,
+  `--parent=170`, `--blocked-by=A`, `locus:plateau-app`), **D** (`task`, `--parent=170`,
+  `--blocked-by=449`, `locus:webeverything`). Numbers allocated at scaffold; #449's `blockedBy` updated to
+  the new A number.
+- **Net flow: +3 items**; #449 stays a (re-sized) story under #170. Gate: `npm run check:standards` green +
+  backlog count +3.
+
+## Net
+
+**Could-split — 4 slices (A → {#449, C} → D), `+3` items.** Confidence **~85%**. The corrected mechanism
+(WE imports via 42 relative paths, **not** the 8 aliases) is the load-bearing finding; the residual is
+whether #449's repoint holds at `5` vs creeping to `8` once the 42-import rewrite + subpath-export wiring
+is underway (mechanical over a pre-existing import set, so `5` is honest), and whether slice C counts as
+batchable (depends on the user not running plateau-app's server). **A is batchable immediately** — the
+foundational win; #449 + D want one focused `/next 449` Vite-restart session; C rides either.
