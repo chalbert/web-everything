@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Notifications Conformance Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/conformance-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">Web Everything</div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+  <main class="play">
+    <header class="play-intro">
+      <h1>Web Notifications Conformance Demo</h1>
+      <p>The runnable proof of the push-delivery contract+provider swap seam (#1024, slice C). In-demo recording-stub providers conform to <code>CustomPushProvider</code> and are swapped behind one subscribe()/send()/unsubscribe() call site; a <code>DeliveryReceipt</code> carries the closed-set status.</p>
+      <p class="play-caveat">The runtime providers are impl in Frontier UI; this demo proves the contract with in-demo conforming stubs (the analytics-demo pattern) — only the contract crosses the seam, never a vendor.</p>
+    </header>
+    <div id="play-root">Loading demo&hellip;</div>
+  </main>
+  <script type="module" src="/demos/webnotifications-conformance-demo.ts"></script>
+</body>
+</html>
