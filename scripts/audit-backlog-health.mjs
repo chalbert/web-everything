@@ -39,9 +39,11 @@
  *                           in the case file. CANDIDATE: promote it to the statute layer (a guideline
  *                           with `codifiedIn` set) or mark `one-off`. Legacy catch-up only — the resolve
  *                           gate (backlog.mjs) blocks new decisions from landing here.
- *   G7  cite-the-case       a work item cites a CODIFIED decision's `#N` but not its statute anchor —
- *                           the reader is sent into a deliberation when a named rule exists. CANDIDATE:
- *                           re-point to `platform-decisions.md#<anchor>`; keep `#N` only for true lineage.
+ *   G7  cite-the-case       a LIVE (non-resolved) work item cites a CODIFIED decision's `#N` but not its
+ *                           statute anchor — the reader is sent into a deliberation when a named rule
+ *                           exists. Resolved items are frozen history (lineage cites are correct) and are
+ *                           NOT flagged. CANDIDATE: re-point to `platform-decisions.md#<anchor>`; keep `#N`
+ *                           only for true lineage ("supersedes #N").
  *   D1  dead-file-ref       a backticked code path (…/x.ts[:NN]) that doesn't exist — after
  *                           resolving slash-joined enumerations + bare suffixes against a dir
  *                           named in the same section, and suppressing paths prose marks as
@@ -392,10 +394,14 @@ for (const it of items.values()) {
   if (it.type === 'decision' && it.status === 'resolved' && !it.fm.codifiedIn)
     flags.G6.push({ id: it.id, title: title(it) });
 
-  // G7 cite-the-case-not-the-rule — this item cites a codified decision's `#N` but not its statute
+  // G7 cite-the-case-not-the-rule — a LIVE item cites a codified decision's `#N` but not its statute
   // anchor; re-point to platform-decisions.md#<anchor> so the rule, not the case, is what propagates.
-  const stale = citesCodifiedCase(it);
-  if (stale.length) flags.G7.push({ id: it.id, refs: stale.slice(0, 4), title: title(it) });
+  // Scoped to non-resolved items: "cite the rule" is *authoring* guidance, and a resolved item is frozen
+  // history whose lineage `#N` cites are correct archaeology (473/550 at the 2026-06-19 sweep were resolved).
+  if (it.status !== 'resolved') {
+    const stale = citesCodifiedCase(it);
+    if (stale.length) flags.G7.push({ id: it.id, refs: stale.slice(0, 4), title: title(it) });
+  }
   // D1 dead-file-ref — OPEN items only (resolved items' refs are historical by design).
   // deadFileRefs applies the #613 resolution gaps + prose suppression (absence / planned / generated).
   if (it.status !== 'resolved')
