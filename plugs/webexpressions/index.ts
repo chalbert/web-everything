@@ -34,6 +34,7 @@
  */
 
 import { registerCloneHandlers, unregisterCloneHandlers } from './cloneHandlers';
+import { patch as applyExplicitHTMLInsertionPatch, removePatch as removeExplicitHTMLInsertionPatch } from './ExplicitHTMLInsertion.patch';
 
 export { default as CustomTextNode } from './CustomTextNode';
 export { default as CustomTextNodeRegistry } from './CustomTextNodeRegistry';
@@ -43,6 +44,7 @@ export { default as UndeterminedTextNode } from './UndeterminedTextNode';
 export { default as CustomExpressionParser } from './CustomExpressionParser';
 export { default as CustomExpressionParserRegistry } from './CustomExpressionParserRegistry';
 export { registerCloneHandlers, unregisterCloneHandlers } from './cloneHandlers';
+export { patch as applyExplicitHTMLInsertionPatch, removePatch as removeExplicitHTMLInsertionPatch } from './ExplicitHTMLInsertion.patch';
 
 export type {
   CustomTextNodeOptions,
@@ -72,6 +74,8 @@ export type {
  */
 export function applyPatches(): void {
   registerCloneHandlers();
+  // #1126: trigger parity for the detached / self-replacing HTML-insertion APIs the observer can't see.
+  applyExplicitHTMLInsertionPatch();
   console.log('[webexpressions] Clone handlers registered');
 }
 
@@ -80,6 +84,7 @@ export function applyPatches(): void {
  */
 export function removePatches(): void {
   unregisterCloneHandlers();
+  removeExplicitHTMLInsertionPatch();
   console.log('[webexpressions] Clone handlers unregistered');
 }
 
