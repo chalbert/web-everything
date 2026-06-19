@@ -1,0 +1,75 @@
+<h2>Purpose</h2>
+<p>
+  Prep research for decision
+  <a href="/backlog/979-maas-serve-path-presets-named-bundle-of-params-instead-of-a-/">#979</a>
+  (Block Explorer epic <a href="/backlog/746-block-explorer/">#746</a>, project
+  <code>webadapters</code>). #979 proposes a server-named <strong>preset</strong> for the MaaS serve path:
+  as the param surface (<code>form</code>/<code>target</code>/<code>strategy</code> plus injected catalog
+  values) grows, a request names one preset id that expands to a fixed param set the origin holds, instead
+  of spelling out every param. This survey grounds the four deferred questions — where it lives, neutral vs
+  injected, composition with explicit params, content-hash identity — before the call.
+</p>
+
+<h2>Headline finding — a reconciliation, not a greenfield protocol</h2>
+<p>
+  The same shape <a href="/backlog/974-define-the-maas-wrapper-serve-protocol-cem-framework-wrapper/">#974</a>
+  just landed: this reconciles against the existing serve-path IR
+  (<code>blocks/renderers/module-service/servePathIR.ts</code>), and the recommended path mints
+  <strong>no new WE contract surface</strong>. Two of the four questions are <em>forced invariants</em>
+  settled by existing code:
+</p>
+<ul>
+  <li><strong>Identity hashes the expansion, not the preset id.</strong> <code>computeArtifactIdentity</code>
+    (<code>fetchHandler.ts:114-126</code>) hashes the <em>resolved</em>
+    <code>{ definitionHash, compilerVersion, params }</code>. A preset is an alias that expands to those
+    params <em>before</em> identity is computed. <code>protocols.json#maas-versioning</code> names omitting
+    a byte-determining input <em>"the one excluded (broken) option"</em> — and hashing the id string (so a
+    redefined preset keeps its id while its bytes change) is exactly that broken option. No fork.</li>
+  <li><strong>A preset is a floating alias.</strong> An unpinned <code>?preset=&lt;id&gt;</code> behaves
+    like any floating tag: <code>302</code> down the pin ladder (<code>CACHE_POLICY.floating</code>) to the
+    immutable hash of its current expansion. The terminal URL carries the <em>expanded</em> params +
+    <code>@pin</code>, never the preset id. Existing tag→hash machinery, reused unchanged.</li>
+  <li><strong>The preset value-set is an injected origin catalog</strong> — never enumerated by WE, exactly
+    like <code>form</code> (<code>servePathIR.ts:88-95</code>, neutrality rule <code>:21-24</code>). WE has
+    no oracle for what <code>react-modern</code> expands to.</li>
+</ul>
+
+<h2>Prior art — named server-held param bundles are a settled CDN pattern</h2>
+<table>
+  <thead><tr><th>System</th><th>Mechanism</th><th>Carrier</th><th>Composition</th></tr></thead>
+  <tbody>
+    <tr><td>Cloudflare Images <em>variants</em></td><td>named option set or comma-list of params</td><td>path segment</td><td><em>flexible variants</em> also accept inline params</td></tr>
+    <tr><td>Cloudinary <em>named transformations</em> (<code>t_&lt;name&gt;</code>)</td><td>codename for a saved param string</td><td>path segment (slash-chained)</td><td>chains + <code>raw_transformation</code> appends inline params</td></tr>
+    <tr><td>Akamai <em>image policies</em></td><td>named server-side param bundle by id</td><td>query/header policy id</td><td>policy + per-request overrides</td></tr>
+  </tbody>
+</table>
+<p>
+  Lessons: (1) the concept is validated — a short named token expanding to a held bundle is mainstream
+  (vocabulary: <em>variant</em> / <em>named transformation</em> / <em>policy</em>); (2) composition is real
+  and the modern default is override/append, with pure-exclusive also in the wild → Fork B is genuine; (3)
+  carrier is split in the wild (path vs query), but those systems put <em>all</em> knobs in the path. WE's
+  grammar deliberately splits identity (<code>&lt;name&gt;[@&lt;pin&gt;]</code>) from selection (query
+  params) and keeps value-sets out of the neutral contract, so a query param is the consistent carrier and a
+  route segment would fragment identity — Fork C's alternative is weak <em>for our grammar specifically</em>.
+</p>
+
+<h2>The one genuine fork — placement against the neutrality seam (mirrors #974)</h2>
+<p>
+  The only WE-owned question: does the bundling mechanism cross the <code>servePathIR</code> neutrality seam,
+  or stay an origin-side convenience? <strong>Recommended default (~60%): a pure origin-side convenience —
+  WE names nothing</strong> (parallel to #974's A1), so #979 yields no WE artifact. The skeptic flag is that
+  the inversion is <em>weaker</em> here than in #974: a preset has one oracle-free assertion WE
+  <em>could</em> own — <em>"<code>?preset=P</code> resolves to the same hash pin as P's spelled-out
+  expansion"</em> — which the framework axis lacked, so Fork A is closer to 50/50. The composition default
+  (~70%) is explicit-params-override (most-permissive; Cloudinary/Cloudflare precedent); the
+  carrier-if-named default (~80%) is a query param.
+</p>
+
+<h2>Posture — provisional, gated on real pain</h2>
+<p>
+  The live surface is just three params — not yet "unwieldy." Per #974/#978, settle the <em>shape</em> now
+  but gate the <em>neutral-surface</em> build on the #978 cases-log showing real param-list friction;
+  promotion to a WE-named <code>preset</code> param would be a deliberate <code>servePathIR</code>
+  <code>1.0.0 → 1.1.0</code> bump. Full grounding in
+  <code>reports/2026-06-19-maas-serve-path-presets.md</code>.
+</p>
