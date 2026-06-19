@@ -363,7 +363,10 @@ button.dispatchEvent(new MouseEvent('click', {
   <div class="content-box" style="margin-top: 1rem;">
     <h5 style="margin: 0 0 0.5rem 0; color: var(--color-primary);">Event Flow</h5>
     <p style="font-size: 0.85rem; margin: 0; color: var(--color-text-muted);">
-      When <code>bubblesLogical: true</code>, the event first bubbles through the DOM tree normally, then continues up the <code>logicalParent</code> chain from the portal root to the logical ancestors. Handlers can use <code>event.logicalPath</code> to inspect the full path.
+      When <code>bubblesLogical: true</code>, the event first bubbles through the DOM tree normally, then continues up the <code>logicalParent</code> chain from the portal root to the logical ancestors. Handlers can use <code>event.logicalPath</code> to inspect the full path. A fresh retarget runs at each logical hop whose host is the portal's <em>declaration</em> element (not its mount/outlet), so a listener's <code>event.target</code> stays inside its own logical tree; <code>stopLogicalPropagation()</code> halts the logical leg only.
+    </p>
+    <p style="font-size: 0.8rem; margin: 0.5rem 0 0 0; color: var(--color-text-muted);">
+      <strong>Status:</strong> implemented in <code>we:plugs/webportals/Event.logical.patch.ts</code> (slice #1149 of epic #1001) — <code>logicalPath</code>, <code>composedLogicalPath()</code>, <code>stopLogicalPropagation()</code>, and the <code>dispatchLogical</code> driver (the non-invasive <code>#606</code> surface).
     </p>
   </div>
 
