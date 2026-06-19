@@ -1,0 +1,12 @@
+{
+  "id": "keyboard-shortcuts-demo",
+  "name": "Keyboard Shortcuts Demo",
+  "summary": "The runnable proof of the keyboard-shortcuts block (#1139, #1041 audit §9): a chord-normalization module folds a raw KeyboardEvent into one canonical chord — folding the OS accelerator (Cmd on macOS, Ctrl elsewhere) onto a single Mod token — and a declarative shortcut registry fires the matching entry regardless of where focus sits, including across shadow boundaries. Graduates the block from draft to active.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runnable proof of the <a href=\"/blocks/keyboard-shortcuts/\"><code>keyboard-shortcuts</code></a> block (<a href=\"/backlog/1139-build-demo-the-keyboard-shortcuts-block-graduate-from-orphan/\">#1139</a>, owner for the orphan block of <a href=\"/backlog/1041-orphan-block-owners-audit/\">#1041</a> audit §9). Two pieces are exercised live.</p><h3>Chord-normalization module</h3><p>Folds a raw <code>KeyboardEvent</code> into one <strong>canonical chord string</strong> (e.g. <code>Mod+Shift+P</code>). It reads <code>.key</code>/<code>.code</code>, folds the OS accelerator (<code>metaKey</code> on macOS, <code>ctrlKey</code> elsewhere) onto a single logical <code>Mod</code> token so the same author-written chord resolves on both platforms, and orders modifiers deterministically so two events with the same intent serialize identically.</p><h3>Declarative shortcut registry</h3><p>An author registers <code>{ chord, run }</code> entries; one document-level dispatcher normalizes any incoming event and fires the matching entry. Because <code>composedPath()</code> lets the dispatcher see through shadow roots, a chord resolves <strong>regardless of where focus sits</strong> — including inside a shadow boundary.</p><h3>In-demo implementation</h3><p>The demo supplies its own in-demo implementation of both pieces — honest for a browser demo — to prove the block is realizable and graduate it from <code>draft</code> to <code>active</code>. The runtime-conformance section asserts each invariant live (accelerator folding, deterministic modifier order, case-insensitive printable keys, named-key survival, author aliases, dispatch hit/miss, and focus-location independence); a live registry below it lets you try the chords on the real page.</p>",
+  "status": "active",
+  "liveUrl": "http://localhost:3000/demos/keyboard-shortcuts-demo.html",
+  "projects": [
+    "webevents"
+  ]
+}

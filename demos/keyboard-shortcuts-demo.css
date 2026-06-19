@@ -1,0 +1,61 @@
+/* Keyboard-shortcuts demo (#1139) — chrome only; .badge/.summary/.play-card come from playground.css. */
+.ks-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.6rem;
+  padding: 1rem 1.25rem;
+  margin-top: 1rem;
+}
+.ks-card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+.ks-check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+}
+.ks-check-title {
+  font-size: 0.88rem;
+  color: #334155;
+}
+.ks-hint {
+  font-size: 0.88rem;
+  color: #475569;
+  margin: 0 0 0.75rem;
+}
+.ks-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.ks-table th,
+.ks-table td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+.ks-table th {
+  color: #64748b;
+  font-weight: 600;
+}
+.ks-table kbd {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.3rem;
+  padding: 0.1rem 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+}
+.ks-log {
+  margin-top: 0.85rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  min-height: 4rem;
+  white-space: pre-wrap;
+}
