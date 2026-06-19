@@ -244,6 +244,30 @@ after #932/#934 — it removes the *temptation*; the gate catches what slips *no
 **Lineage:** #933 (ratified 2026-06-18) · incidents #870 #931 · precedent #436/#437 (conventions
 fold into compliance), #840/#844/#477 (warn-first rollout).
 
+### A composition artifact is owned by its *new* substance; referenced parts stay home {#composition-artifact-ownership}
+
+When a new artifact is a **composition of capabilities that already exist** across the constellation (a
+record that *binds* an existing snapshot + journal + trace + identity into one consumable thing), do
+**not** mint a new project or duplicate any part's format. The artifact is a **thin envelope that
+references** the existing protocols; each referenced **payload schema stays owned by its existing
+project**. Ownership of the *envelope* goes to the project of the artifact's **new substance** — the
+one capability the composition actually adds (e.g. an *ordered timeline* of spans → the tracing
+project) — **not** to the project that owns the heaviest referenced payload, and never to a brand-new
+"consumer-composition" project (that fragments the constellation for no interop gain —
+[minimize-lock-in](#constellation-placement)). When a fork asks "which project owns this composite?",
+the answer is: locate the single new substance, own it there, reference the rest.
+
+Corollary (determinism/observation records): when such a record must *replay*, anchor the determinism
+guarantee on the **recorded state-diff journal** (re-apply diffs, run no app code) — bounded explicitly
+to *journaled* state, with a snapshot↔journal consistency precondition and an off-journal-state-out-of-scope
+boundary. Action/event **re-fold through handlers is not the determinism anchor** (it assumes handler
+purity the platform can't guarantee); it is a valid *optional* behavioral-replay mode, and event-identity
+is load-bearing only there and for **correlation**, never for journaled-state determinism.
+
+**Lineage:** #992 (trace/replay substrate — envelope owned by webtraces, journal stays webstates,
+determinism anchor = state-diff A; ratified 2026-06-19). Kin to [constellation-placement](#constellation-placement),
+[compose-dont-handroll](#compose-dont-handroll), [surface-contract-not-computation](#surface-contract-not-computation).
+
 ### Mandate the surface contract, not the computation {#surface-contract-not-computation}
 
 A WE standard normatively pins the **observable surface contract** — the hand-off shape, the regions,

@@ -1,8 +1,11 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: none
+codifiedIn: one-off
 tags: []
 ---
 
