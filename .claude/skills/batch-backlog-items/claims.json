@@ -181,7 +181,8 @@
     {
       "session": "batch-2026-06-19",
       "ids": [
-        "1029-fui-maas-wrapper-serve-endpoint-vite-middleware-conforming-t"
+        "1029-fui-maas-wrapper-serve-endpoint-vite-middleware-conforming-t",
+        "1131-webdirectives-customcommentregistry-extends-core-htmlregistr"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",

@@ -33,6 +33,9 @@ export default abstract class CustomComment extends Comment {
     this.options = options;
   }
 
+  // NB: a subclass upgraded by `CustomCommentRegistry` (#1131) must declare these as PROTOTYPE METHODS,
+  // not arrow-function class fields — `upgrade` re-prototypes an existing comment node and cannot re-run
+  // a constructor, so only prototype-reachable members survive (the native custom-element constraint).
   /** Called when the directive comment is connected to the document (invoked by the registry). */
   connectedCallback?: () => void;
   /** Called when the directive comment is disconnected from the document. */
