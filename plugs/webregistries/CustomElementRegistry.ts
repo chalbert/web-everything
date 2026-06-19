@@ -166,10 +166,11 @@ export default class CustomElementRegistry extends HTMLRegistry<ElementDefinitio
     OriginalCustomElementRegistry.prototype.upgrade.apply(this, [root]);
   }
 
-  downgrade() {
-    // TODO: What should downgrade do?
-    // Placeholder for future implementation
-  }
+  // No downgrade(): a faithful polyfill mirrors the native surface, and native
+  // CustomElementRegistry has no downgrade — the custom-element state machine is
+  // monotonic (upgrade is a one-way prototype swap) and the registry is append-only.
+  // Global teardown is removePatches()'s job (index.ts). Ratified #1103 (native-first,
+  // we:docs/agent/platform-decisions.md#native-first-baseline).
 
   /**
    * Returns a promise that resolves when the custom element with the given name is defined.
