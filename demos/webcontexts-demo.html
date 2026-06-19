@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Contexts — Declarative Contexts & Claim-Based Lookup Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/webcontexts-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Web Contexts — declarative contexts &amp; claim-based lookup</h1>
+      <p>
+        Exercises the <a href="/projects/webcontexts/">Web Contexts</a> standard in a real browser: a
+        declarative <code>&lt;script type="context"&gt;</code> registration, hierarchical resolution
+        through the <a href="/projects/webinjectors/">injector tree</a>, and the
+        <strong>strict vs. flexible</strong> lookup modes (#1117). A child and a parent scope each hold a
+        context of the <em>same</em> type; the child's context only <code>claim()</code>s
+        <code>user.*</code> queries.
+      </p>
+      <p class="play-caveat">
+        Toggle the lookup mode and the query below. <strong>strict</strong> always resolves to the
+        closest context (the child), ignoring <code>claim()</code>. <strong>flexible</strong> (the
+        Most-Flexible-Default, #911) consults <code>claim()</code> and walks up the chain when a context
+        declines — so a query the child declines defers to the claiming parent. The badge proves each
+        invariant.
+      </p>
+    </header>
+
+    <section class="ctl-bar" aria-label="Lookup controls">
+      <label>Mode
+        <select id="mode-select">
+          <option value="flexible">flexible (default)</option>
+          <option value="strict">strict</option>
+        </select>
+      </label>
+      <label>Query expression
+        <select id="query-select">
+          <option value="user.name">user.name (child claims)</option>
+          <option value="app.theme">app.theme (child declines)</option>
+        </select>
+      </label>
+      <span id="resolved-readout" class="readout">resolving&hellip;</span>
+    </section>
+
+    <div id="play-root">Loading demo&hellip;</div>
+  </main>
+
+  <!-- Unplugged: the demo applies the webcontexts + webinjectors patches itself; no app bootstrap. -->
+  <script type="module" src="/demos/webcontexts-demo.ts"></script>
+</body>
+</html>

@@ -188,15 +188,32 @@ export default class CustomTextNodeRegistry extends HTMLRegistry<TextNodeDefinit
    * Get available text node parsers from global registry
    * Parsers can split text content into multiple text nodes
    */
-  #getTextNodeParsers(): Array<{ parse: (text: string) => Text[] }> {
+  #getTextNodeParsers(): Array<{ parse: (text: string) => Text[]; excludedElements?: string[] }> {
     const parserRegistry = (window as any).customTextNodeParsers;
     return parserRegistry?.values() || [];
   }
 
   /**
+   * Whether `node`'s ancestor chain (up to the document root) contains an element whose lower-cased
+   * `localName` is in `excludedElements` (#1123). Used to skip a parser inside `<code>`/`<pre>`/etc., so
+   * the expression text renders literally. The original text node's own parent is included in the walk.
+   */
+  #isInsideExcludedElement(node: Node, excludedElements: string[] | undefined): boolean {
+    if (!excludedElements || excludedElements.length === 0) return false;
+    const excluded = new Set(excludedElements.map((name) => name.toLowerCase()));
+    let current: (Node & { parentElement?: Element | null }) | null = node;
+    let ancestor = current?.parentElement ?? null;
+    while (ancestor) {
+      if (excluded.has(ancestor.localName.toLowerCase())) return true;
+      ancestor = ancestor.parentElement;
+    }
+    return false;
+  }
+
+  /**
    * Parse a text node using all available parsers
    * Each parser can split the text into multiple nodes
-   * 
+   *
    * @param text - The text node to parse
    * @returns Array of parsed text nodes (or original if no parsing)
    */
@@ -204,6 +221,12 @@ export default class CustomTextNodeRegistry extends HTMLRegistry<TextNodeDefinit
     const parsers = this.#getTextNodeParsers();
 
     return parsers.reduce<Text[]>((result, parser) => {
+      // #1123: skip THIS parser entirely for a text node inside one of its excludedElements — the text is
+      // left as-is (so other parsers, with different exclusions, still get a chance at it).
+      if (this.#isInsideExcludedElement(text, parser.excludedElements)) {
+        return result;
+      }
+
       const nodes: Text[] = [];
 
       result.forEach((currentText) => {

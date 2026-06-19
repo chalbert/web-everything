@@ -24,3 +24,6 @@ export {
   default as CustomCommentParserRegistry,
   createDefaultCommentParserRegistry,
 } from './CustomCommentParserRegistry';
+
+export { collectSlotTemplates, DEFAULT_SLOT } from './multiTemplate';
+export type { SlotTemplateMap } from './multiTemplate';

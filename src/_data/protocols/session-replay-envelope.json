@@ -1,0 +1,8 @@
+{
+  "id": "session-replay-envelope",
+  "name": "Session-Replay Envelope",
+  "summary": "Thin binding/ordering contract for local session replay (#992): an ordered session of Web Traces spans plus correlated references to the Web Contexts snapshot (starting state), the Web States ChangeRecord journal (the determinism anchor — re-applied, executing no application JS), and Web Events-identified actions (correlation only). Redefines none of the four referenced schemas. Carries a snapshot↔journal consistency precondition (a drifted snapshot is refused/flagged, never applied blind) and an explicit off-journal-state-out-of-scope boundary, with an optional behavioral-replay escape hatch where event identity is load-bearing.",
+  "status": "draft",
+  "ownedByProject": "webtraces",
+  "anchor": "protocol-session-replay-envelope"
+}

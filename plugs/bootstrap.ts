@@ -34,6 +34,8 @@ import {
   ValidityMergeField,
   createDefaultValidatorResolutionRegistry,
   AsyncValidatorField,
+  createDefaultCommitmentPolicyRegistry,
+  ValidationErrorSummary,
 } from './webvalidation';
 import { CustomGuardRegistry, createDefaultGuardRegistry } from './webguards';
 
@@ -231,9 +233,20 @@ const validatorResolution = createDefaultValidatorResolutionRegistry();
 window.customValidatorResolution = validatorResolution;
 documentInjector?.set('customValidatorResolution', validatorResolution);
 
+// Setup the commitment-policy registry (#1113): the commit-timing/staleness policy the tree shares,
+// resolved per-scope through the injector chain. Pre-loaded with full (eager default) + deferred.
+const commitmentPolicy = createDefaultCommitmentPolicyRegistry();
+window.customCommitmentPolicy = commitmentPolicy;
+documentInjector?.set('customCommitmentPolicy', commitmentPolicy);
+
 // Define the async driver that feeds a <validity-merge-field>'s `async` source.
 if (!customElements.get('async-validator-field')) {
   customElements.define('async-validator-field', AsyncValidatorField);
+}
+
+// Define the GOV.UK error-summary element (#1114): aggregates field errors DOM-ordered, role=alert.
+if (!customElements.get('validation-error-summary')) {
+  customElements.define('validation-error-summary', ValidationErrorSummary);
 }
 
 // Setup guard registry (#289): the swappable guard-provider policy the tree shares, resolved per-scope

@@ -22,6 +22,15 @@ export { createDefaultValidatorResolutionRegistry } from './CustomValidatorResol
 export { default as AsyncValidatorField } from './AsyncValidatorField';
 export type { AsyncSourceTarget } from './AsyncValidatorField';
 
+// The live commitment-policy plug (#1113) — the runtime counterpart to the commitment-policy/ model
+// (#1112), injector-chain-resolvable like its merge/resolution siblings.
+export { default as CustomCommitmentPolicyRegistry } from './CustomCommitmentPolicyRegistry';
+export { createDefaultCommitmentPolicyRegistry } from './CustomCommitmentPolicyRegistry';
+
+// The GOV.UK error-summary element (#1114) — aggregates field errors DOM-ordered, role=alert, links to
+// fields, focuses on submit-blocked. Aggregation is the pure error-summary/ model.
+export { default as ValidationErrorSummary } from './ValidationErrorSummary';
+
 // Re-export the resolution-plane vocabulary (#214) from one entry point, mirroring the merge re-exports.
 export {
   type CustomValidatorResolution,

@@ -1,0 +1,13 @@
+{
+  "id": "webcontexts-demo",
+  "name": "Web Contexts Playground",
+  "summary": "Exercises the Web Contexts standard in a real browser: a declarative <script type=\"context\"> registration, hierarchical resolution through the injector tree, and the strict vs. flexible (claim-based) lookup modes — with a live toggle and a conformance badge per invariant.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>This playground exercises the <a href=\"/projects/webcontexts/\">Web Contexts</a> standard. A parent scope and a child scope each hold a context of the same type (<code>profile</code>) resolved through the <a href=\"/projects/webinjectors/\">injector tree</a>; the child's context only <code>claim()</code>s <code>user.*</code> queries.</p><h3>What it proves</h3><p>It demonstrates three surfaces and badges each invariant: (1) declarative registration via <code>&lt;script type=\"context\"&gt;</code> recognised by a scoped <code>CustomContextRegistry</code>; (2) <strong>strict</strong> lookup always resolving to the closest context (the child, <code>claim()</code> ignored); and (3) <strong>flexible</strong> lookup (the Most-Flexible-Default, #911) consulting <code>claim()</code> and deferring up-chain to the claiming parent when the child declines. A live mode/query toggle re-resolves and shows which context wins.</p><h3>Scope</h3><p>POC playground — applies the webcontexts + webinjectors patches itself (unplugged, non-invasive) and resolves contexts directly; no app shell. Tier 1: declarative declaration, hierarchical resolution, claim-based strict/flexible modes (#1117).</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webcontexts-demo.html",
+  "projects": [
+    "webcontexts",
+    "webinjectors"
+  ]
+}

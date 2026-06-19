@@ -1,0 +1,12 @@
+{
+  "id": "webresources-conformance-demo",
+  "name": "Web Resources Conformance Demo",
+  "summary": "The runnable proof of the webresources pagination + delivery-transport contract (#1027, slice C). An in-demo CustomResourceClient returns a cold Consumable (nothing runs until subscribed), and the #061 pairing constraint is proven live: the offset strategy exposes a total (drives jump-to-page) while the cursor strategy omits it (write-stable, next/previous only). Concrete REST/GraphQL/WS clients + the customResources registry are impl in Frontier UI — only the contract crosses the seam.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runnable proof of the pagination + delivery-transport contract (<a href=\"/backlog/1027-webresources-impl-epic/\">#1027</a>, slice C). An in-demo <code>CustomResourceClient</code> returns a cold <code>Consumable</code> (cold = nothing runs until subscribed).</p><h3>Verified contract (#061)</h3><p>The load-bearing pairing constraint runs live: <code>offset</code>/<code>page</code> expose a <code>total</code> (jump-to-page) while <code>cursor</code> omits it (write-stable, <code>next()</code>/<code>previous()</code> only) — the discriminated union made observable. Concrete clients + the registry are impl in Frontier UI — only the contract crosses the seam.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webresources-conformance-demo.html",
+  "projects": [
+    "webresources"
+  ]
+}

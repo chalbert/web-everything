@@ -1,0 +1,6 @@
+/* Shared styling for the runtime conformance demos (#1066/#1069/#1076/#1079). */
+.conformance-summary { font-weight: 600; margin: 0 0 0.75rem; }
+.conformance-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.35rem; }
+.conformance-list li { padding: 0.5rem 0.75rem; border-radius: 8px; font: 0.92rem/1.4 ui-monospace, monospace; }
+.conformance-list li.pass { background: rgba(34, 197, 94, 0.1); color: #166534; }
+.conformance-list li.fail { background: rgba(239, 68, 68, 0.12); color: #991b1b; }

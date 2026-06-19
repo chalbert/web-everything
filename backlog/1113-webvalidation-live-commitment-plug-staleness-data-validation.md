@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 3
 parent: "1090"
-status: open
+status: resolved
 blockedBy: ["1112", "1110"]
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: plugs/webvalidation/CustomCommitmentPolicyRegistry.ts
 tags: []
 ---
 

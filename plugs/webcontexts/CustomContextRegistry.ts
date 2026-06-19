@@ -8,6 +8,7 @@ import HTMLRegistry from '../core/HTMLRegistry';
 import type { BaseDefinition } from '../core/HTMLRegistry';
 import type { RootNode } from '../core/types';
 import CustomContext, { type ImplementedContext } from './CustomContext';
+import InjectorRoot from '../webinjectors/InjectorRoot';
 
 export interface CustomContextRegistryOptions {
   extends?: CustomContextRegistry[];
@@ -122,8 +123,21 @@ export default class CustomContextRegistry extends HTMLRegistry<
 
     if (definition) {
       const Context = definition.constructor;
-      const contextInstance = new Context();
-      contextInstance.attach(element);
+      // SSR reconstruction (#1116, spec njk:222-247): the <script type="context"> body is the server-
+      // serialized context state (JSON, the same format webstates SSR uses). Parse it and seed the
+      // reconstructed context's initial value, so a hydrated context starts at the server's value rather
+      // than the class default. A blank/whitespace-only body or unparseable JSON falls back to the class
+      // default (no throw — progressive enhancement: a malformed block must not break hydration).
+      const initialValue = this.#parseContextScript(contextScript);
+      const contextInstance = initialValue !== undefined ? new Context(initialValue) : new Context();
+      // Resolve the injector root of the host so attach() can bind the context into the injector chain
+      // even during SSR reconstruction (the host may not be `isConnected` yet); pass it as the future
+      // root, mirroring the runtime declarative path. Swallow an attach rejection from an unwired chain so
+      // a partial DI setup cannot break hydration (the value is already reconstructed regardless).
+      const futureRoot = InjectorRoot.getInjectorRootOf(element);
+      Promise.resolve(contextInstance.attach(element, futureRoot)).catch(() => {
+        /* attach DI binding is best-effort during hydration; value reconstruction already applied */
+      });
 
       if (!this.#registrations.has(element)) {
         this.#registrations.set(element, new Map());
@@ -136,6 +150,23 @@ export default class CustomContextRegistry extends HTMLRegistry<
       if (element.isConnected) {
         contextInstance.connectedCallback?.();
       }
+    }
+  }
+
+  /**
+   * Parse the serialized state from a `<script type="context">` body (#1116). Returns the parsed value,
+   * or `undefined` for an empty/whitespace-only body or unparseable JSON (the caller then falls back to
+   * the class default — a malformed SSR block must never break hydration, per the progressive-enhancement
+   * baseline in the spec).
+   */
+  #parseContextScript(contextScript: HTMLScriptElement): any {
+    const raw = contextScript.textContent?.trim();
+    if (!raw) return undefined;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      console.warn(`[webcontexts] <script type="context"> body for "${contextScript.getAttribute('context')}" is not valid JSON — using the context default`);
+      return undefined;
     }
   }
 

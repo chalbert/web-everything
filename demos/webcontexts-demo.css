@@ -1,0 +1,62 @@
+/* Web Contexts demo — controls + scope visuals on top of the shared playground.css harness. */
+
+.ctl-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  margin: 1rem 0 1.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--play-border, #e2e8f0);
+  border-radius: 8px;
+  background: var(--play-card-bg, #f8fafc);
+}
+.ctl-bar label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #475569;
+}
+.ctl-bar select {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+}
+.readout {
+  margin-left: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  background: #eef2ff;
+  color: #3730a3;
+}
+.readout.is-child {
+  background: #ecfdf5;
+  color: #065f46;
+}
+.readout.is-parent {
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+.ex-inv {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  color: #6366f1;
+  margin: 0.35rem 0;
+}
+.ex-detail {
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+/* Hide the live scoped tree the demo builds in <body> — it carries no visual content, only resolution. */
+.scope {
+  display: none;
+}

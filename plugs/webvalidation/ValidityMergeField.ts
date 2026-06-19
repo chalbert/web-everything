@@ -25,12 +25,15 @@ import { ValiditySourceOrchestrator as Orchestrator } from '../../validity-merge
 import type { MergedValidity } from '../../validity-merge/provider.js';
 import InjectorRoot from '../webinjectors/InjectorRoot';
 import CustomValidityMergeRegistry from './CustomValidityMergeRegistry';
+import CustomCommitmentPolicyRegistry from './CustomCommitmentPolicyRegistry';
+import type { CommitmentPolicy } from '../../commitment-policy/index.js';
 import { applyMergedValidity } from './applyMergedValidity';
 import { InteractionStateTracker } from '../../interaction-state/model';
 
 declare global {
   interface Window {
     customValidityMerge?: CustomValidityMergeRegistry;
+    customCommitmentPolicy?: CustomCommitmentPolicyRegistry;
   }
 }
 
@@ -41,12 +44,19 @@ function resolveRegistry(node: Node): CustomValidityMergeRegistry | undefined {
   return typeof window !== 'undefined' ? window.customValidityMerge : undefined;
 }
 
+/** Resolve the commitment-policy registry per-scope (#1113), mirroring {@link resolveRegistry}. */
+function resolveCommitmentRegistry(node: Node): CustomCommitmentPolicyRegistry | undefined {
+  const scoped = InjectorRoot.getProviderOf(node, 'customCommitmentPolicy');
+  if (scoped instanceof CustomCommitmentPolicyRegistry) return scoped;
+  return typeof window !== 'undefined' ? window.customCommitmentPolicy : undefined;
+}
+
 /** The inner form control whose `ValidityState` feeds the auto-derived `native` source (#218). */
 type NativeControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 
 export default class ValidityMergeField extends HTMLElement {
   static formAssociated = true;
-  static observedAttributes = ['strategy'];
+  static observedAttributes = ['strategy', 'commitment'];
 
   readonly #internals: ElementInternals;
   #orchestrator: ValiditySourceOrchestrator | null = null;
@@ -67,15 +77,54 @@ export default class ValidityMergeField extends HTMLElement {
   #prevFocused = false;
   #prevValidity: string | null = null;
 
+  /** The resolved commitment policy (#1113) — `full` (eager) or `deferred` (buffered), per-scope. */
+  #commitment: CommitmentPolicy | null = null;
+  /** This field's stable id for the policy's per-field staleness bookkeeping. */
+  readonly #fieldId = `vmf-${Math.random().toString(36).slice(2)}`;
+
   /** A control `input`/`change`/`invalid` marks interaction and re-derives the `native` source. */
   readonly #onControlEvent = (event: Event): void => {
     this.#nativeInteracted = true;
     // A value edit is the `validation.control.value-input` observable (a user/programmatic value change).
     if (event.type === 'input' || event.type === 'change') {
       this.#emitControl('value-input', { type: event.type });
+      // Commitment staleness (#1113): an `input` bumps the generation and marks the displayed validation
+      // `stale` (a new value the result hasn't caught up to); a `change` (a commit event) marks it
+      // `current` again — reflected as data-validation-generation/-sync/-timestamp.
+      if (this.#commitment && event.type === 'input') {
+        const control = this.#findControl();
+        this.#commitment.onValueInput(this.#fieldId, control?.value);
+        // The auto-derive that immediately follows must NOT mark the field current — for a deferred
+        // policy the displayed validation only catches up on a real validation feed (setSource), not on
+        // the synchronous native re-derive triggered by the same keystroke.
+        this.#suppressCommitReconcile = true;
+        this.#reflectStaleness();
+      }
     }
     this.#deriveNative();
+    this.#suppressCommitReconcile = false;
   };
+
+  /** Guards the one synchronous auto-derive after an `input` from prematurely marking the field current. */
+  #suppressCommitReconcile = false;
+
+  /**
+   * Mark the commitment field `current` (validation has caught up to the value) by driving the policy's
+   * settled decision (`validationPending:false` → reconcile). Called when a real validation result settles.
+   */
+  #markCommitmentCurrent(merged: MergedValidity): void {
+    if (!this.#commitment) return;
+    const control = this.#findControl();
+    this.#commitment.shouldCommit(this.#fieldId, control?.value, {
+      fieldId: this.#fieldId,
+      event: 'input',
+      value: control?.value,
+      validity: merged,
+      interaction: this.#interaction.state,
+      submitted: this.#interaction.state.submitted,
+      validationPending: false,
+    });
+  }
 
   /**
    * Dispatch a `validation.control.*` stable-id event (#1111, spec njk:184-196). Bubbling so a form/host
@@ -97,6 +146,7 @@ export default class ValidityMergeField extends HTMLElement {
 
   connectedCallback(): void {
     this.#resolveOrchestrator();
+    this.#resolveCommitment();
     this.#syncControlListeners();
     this.#deriveNative();
   }
@@ -107,6 +157,37 @@ export default class ValidityMergeField extends HTMLElement {
 
   attributeChangedCallback(name: string): void {
     if (name === 'strategy') this.#resolveOrchestrator();
+    if (name === 'commitment') this.#resolveCommitment();
+  }
+
+  /**
+   * Resolve (or re-resolve) the commitment policy from scope (#1113): the `commitment="deferred|full"`
+   * attribute names it, falling back to the registry default (`full`). Reflects `data-committed` (the
+   * resolved policy key) and seeds the staleness observables. A no-op when no commitment registry is in
+   * scope (the field still works as a pure validity-merge control).
+   */
+  #resolveCommitment(): void {
+    const registry = resolveCommitmentRegistry(this);
+    if (!registry) {
+      this.#commitment = null;
+      return;
+    }
+    const key = this.getAttribute('commitment') || undefined;
+    this.#commitment = registry.resolve(key);
+    this.setAttribute('data-committed', this.#commitment.key);
+    this.#reflectStaleness();
+  }
+
+  /**
+   * Reflect the commitment staleness observables (#1113, spec njk:198-206): `data-validation-sync`
+   * (current|stale), `data-validation-generation` (opaque integer, bumps on input), and
+   * `data-validation-timestamp` (ISO of last validation completion).
+   */
+  #reflectStaleness(): void {
+    if (!this.#commitment) return;
+    this.setAttribute('data-validation-sync', this.#commitment.getValidationSync(this.#fieldId));
+    this.setAttribute('data-validation-generation', String(this.#commitment.getValidationGeneration(this.#fieldId)));
+    this.setAttribute('data-validation-timestamp', this.#commitment.getValidationTimestamp(this.#fieldId));
   }
 
   /** Resolve (or re-resolve) the strategy from scope and rebuild the orchestrator, preserving sources. */
@@ -218,6 +299,15 @@ export default class ValidityMergeField extends HTMLElement {
   #reflectValidity(merged: MergedValidity): void {
     const validity = merged.state === 'idle' ? 'unknown' : merged.state; // unknown | pending | valid | invalid
     this.setAttribute('data-validity', validity);
+
+    // Commitment staleness (#1113): a settled validity (valid/invalid) from a real validation feed means
+    // the displayed result has caught up → mark the field `current`. Suppressed for the synchronous
+    // auto-derive that follows an `input` keystroke (a deferred field stays stale until a real feed).
+    if (this.#commitment && !this.#suppressCommitReconcile && (merged.state === 'valid' || merged.state === 'invalid')) {
+      this.#markCommitmentCurrent(merged);
+      this.#reflectStaleness();
+    }
+
     // No per-message severity in the contract yet (#1112); derive the coarse signal from state.
     if (merged.state === 'invalid') this.setAttribute('data-severity', 'error');
     else if (merged.state === 'pending') this.setAttribute('data-severity', 'info');

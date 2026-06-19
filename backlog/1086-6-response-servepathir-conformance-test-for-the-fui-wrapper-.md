@@ -2,9 +2,12 @@
 type: idea
 workItem: task
 parent: "912"
-status: open
+status: resolved
 blockedBy: ["1029"]
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: blocks/renderers/module-service/__tests__/servePathConformance.test.ts
 tags: []
 ---
 

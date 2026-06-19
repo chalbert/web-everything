@@ -1,0 +1,24 @@
+---
+type: idea
+workItem: story
+size: 3
+parent: "1104"
+status: open
+blockedBy: ["1135"]
+dateOpened: "2026-06-19"
+tags: []
+---
+
+# Public deploy: WE site live behind a splash + shared entry code
+
+Deploy the we: Eleventy docs build to the host chosen in #1135, behind a public splash page and a single shared entry code (typed once, remembered — not a login). The keystone slice of #1104: it stands the site up on the public internet under a controlled gate and leaves a valid demoable state (a live, gated site). Every later phase escalates from here.
+
+## Deployable artifacts built (2026-06-19, batch-parallel serial lane) — deploy push is the residual
+
+The committed, **credential-free half** is built per the #1135 ratification (Cloudflare Pages + an edge-function gate):
+
+- `we:functions/_middleware.js` — the phase-1 Pages Function gate (shared code → signed HttpOnly cookie → 302; splash form otherwise). The `code === SECRET` seam phase 3 extends to a KV lookup. Unit-tested at `we:functions/__tests__/gate.test.ts` (splash, accept, reject, signed-cookie passthrough, forged-cookie rejection — 5 tests).
+- `we:wrangler.toml` — Pages config (`pages_build_output_dir = "_site"`).
+- `we:functions/README.md` — the deploy runbook.
+
+**Residual (carried, NOT done in this lane):** the credentialed `wrangler pages deploy _site` + `wrangler pages secret put GATE_CODE / GATE_COOKIE_SECRET`. This needs a Cloudflare-authenticated session and is outside a commit-only automated branch (repo policy is never-push). Run the runbook in `we:functions/README.md` from a credentialed session to stand the gated site up live (the keystone state). Item stays **open** until that push lands.

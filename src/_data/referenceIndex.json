@@ -9,14 +9,14 @@
     "intents"
   ],
   "summary": {
-    "uniqueUrls": 1182,
-    "totalOccurrences": 1460,
+    "uniqueUrls": 1231,
+    "totalOccurrences": 1548,
     "byHome": {
       "corpus": 51,
       "references": 28,
-      "blocks": 93,
+      "blocks": 179,
       "capability": 1266,
-      "intents": 22
+      "intents": 24
     }
   },
   "references": [
@@ -3697,8 +3697,8 @@
     {
       "url": "https://developer.mozilla.org/en-US/blog/html-details-exclusive-accordions",
       "home": "blocks",
-      "sourceId": "view",
-      "label": "View · exclusiveAccordion",
+      "sourceId": "tabs",
+      "label": "Tabs · exclusiveGroups",
       "homes": [
         "blocks"
       ],
@@ -3717,28 +3717,48 @@
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current",
       "home": "blocks",
-      "sourceId": "stepper",
-      "label": "Stepper · ariaCurrentStep",
+      "sourceId": "disclosure-nav",
+      "label": "Disclosure Nav · ariaCurrent",
       "homes": [
         "blocks"
       ],
-      "occurrences": 4
+      "occurrences": 7
     },
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-disabled",
       "home": "blocks",
-      "sourceId": "resource-action",
-      "label": "Resource Action · ariaDisabled",
+      "sourceId": "action-button",
+      "label": "Action Button · ariaDisabled",
       "homes": [
         "blocks"
       ],
       "occurrences": 2
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-label",
+      "home": "blocks",
+      "sourceId": "button",
+      "label": "Button · accessibleName",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live",
       "home": "blocks",
       "sourceId": "action-button",
       "label": "Action Button · ariaLive",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-sort",
+      "home": "blocks",
+      "sourceId": "props-table",
+      "label": "Props Table · ariaSort",
       "homes": [
         "blocks"
       ],
@@ -3755,6 +3775,46 @@
       "occurrences": 1
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-current",
+      "home": "blocks",
+      "sourceId": "breadcrumb",
+      "label": "Breadcrumb · ariaCurrent",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 2
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-live",
+      "home": "blocks",
+      "sourceId": "notification",
+      "label": "Notification · ariaLive",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-pressed",
+      "home": "blocks",
+      "sourceId": "reaction",
+      "label": "Reaction · ariaApgKeyboard",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-selected",
+      "home": "blocks",
+      "sourceId": "selection",
+      "label": "Selection · ariaSort",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-sort",
       "home": "blocks",
       "sourceId": "data-table",
@@ -3764,6 +3824,36 @@
         "intents"
       ],
       "occurrences": 2
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/status_role",
+      "home": "blocks",
+      "sourceId": "status-indicator",
+      "label": "Status Indicator · ariaStatusRegion",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/switch_role",
+      "home": "blocks",
+      "sourceId": "toggle-switch",
+      "label": "Toggle / Switch · ariaApgKeyboard",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/button_role",
+      "home": "blocks",
+      "sourceId": "button",
+      "label": "Button · ariaPressed",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
     },
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/heading_role",
@@ -3827,10 +3917,40 @@
       "occurrences": 1
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel",
+      "home": "blocks",
+      "sourceId": "draft-persistence",
+      "label": "Draft Persistence · broadcastChannel",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Cache",
       "home": "blocks",
       "sourceId": "resource-loader",
       "label": "Resource Loader · cacheAPI",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API",
+      "home": "blocks",
+      "sourceId": "code-view",
+      "label": "Code View · clipboard",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/ClipboardEvent",
+      "home": "blocks",
+      "sourceId": "data-transfer",
+      "label": "Data Transfer Zone · clipboardEvent",
       "homes": [
         "blocks"
       ],
@@ -3867,10 +3987,40 @@
       "occurrences": 1
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/CSS_Custom_Highlight_API",
+      "home": "blocks",
+      "sourceId": "code-view",
+      "label": "Code View · cssCustomHighlight",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 2
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent",
       "home": "blocks",
       "sourceId": "background-task-surface",
       "label": "Background Task Surface · customEvent",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 4
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer",
+      "home": "blocks",
+      "sourceId": "data-transfer",
+      "label": "Data Transfer Zone · dataTransfer",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/EditContext",
+      "home": "blocks",
+      "sourceId": "rich-text-editor",
+      "label": "Rich Text Editor · editContext",
       "homes": [
         "blocks"
       ],
@@ -3907,10 +4057,20 @@
       "occurrences": 1
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener",
+      "home": "blocks",
+      "sourceId": "handler-expression-parser",
+      "label": "Handler Expression Parser · customEvent",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API",
       "home": "blocks",
-      "sourceId": "resource-loader",
-      "label": "Resource Loader · fetchAPI",
+      "sourceId": "resource-action",
+      "label": "Resource Action · fetchAPI",
       "homes": [
         "blocks"
       ],
@@ -3940,8 +4100,38 @@
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API",
       "home": "blocks",
-      "sourceId": "reorderable-list",
-      "label": "Reorderable List · htmlDragAndDrop",
+      "sourceId": "data-transfer",
+      "label": "Data Transfer Zone · dragAndDrop",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 2
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/HTMLDialogElement",
+      "home": "blocks",
+      "sourceId": "dialog",
+      "label": "Dialog · dialog",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 2
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API",
+      "home": "blocks",
+      "sourceId": "draft-persistence",
+      "label": "Draft Persistence · indexedDB",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/InputEvent",
+      "home": "blocks",
+      "sourceId": "rich-text-editor",
+      "label": "Rich Text Editor · contentEditable",
       "homes": [
         "blocks"
       ],
@@ -3960,8 +4150,8 @@
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/IntersectionObserver",
       "home": "blocks",
-      "sourceId": "prefetch-behavior",
-      "label": "Prefetch Behavior · intersectionObserver",
+      "sourceId": "pagination",
+      "label": "Pagination · intersectionObserver",
       "homes": [
         "blocks"
       ],
@@ -3970,8 +4160,8 @@
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API",
       "home": "blocks",
-      "sourceId": "resource-action",
-      "label": "Resource Action · invokerCommands",
+      "sourceId": "action-button",
+      "label": "Action Button · invokerCommands",
       "homes": [
         "blocks",
         "intents"
@@ -3981,18 +4171,18 @@
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key",
       "home": "blocks",
-      "sourceId": "type-ahead",
-      "label": "Type-Ahead · keyboardEventKey",
+      "sourceId": "keyboard-shortcuts",
+      "label": "Keyboard Shortcuts · keyboardEventKey",
       "homes": [
         "blocks"
       ],
-      "occurrences": 1
+      "occurrences": 2
     },
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API",
       "home": "blocks",
-      "sourceId": "stepper",
-      "label": "Stepper · navigationAPI",
+      "sourceId": "pagination",
+      "label": "Pagination · navigationApi",
       "homes": [
         "blocks",
         "intents"
@@ -4058,13 +4248,53 @@
         "references",
         "blocks"
       ],
-      "occurrences": 2
+      "occurrences": 3
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/queueMicrotask",
+      "home": "blocks",
+      "sourceId": "simple-store",
+      "label": "SimpleStore · queueMicrotask",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/ResizeObserver",
+      "home": "blocks",
+      "sourceId": "flex-row",
+      "label": "FlexRow · resizeObserver",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
     },
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Speculation_Rules_API",
       "home": "blocks",
-      "sourceId": "router",
-      "label": "Router · speculationRulesAPI",
+      "sourceId": "prefetch-behavior",
+      "label": "Prefetch Behavior · speculationRules",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 2
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/StorageManager/persist",
+      "home": "blocks",
+      "sourceId": "draft-persistence",
+      "label": "Draft Persistence · storagePersist",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API",
+      "home": "blocks",
+      "sourceId": "trusted-html",
+      "label": "Trusted HTML · trustedTypes",
       "homes": [
         "blocks"
       ],
@@ -4083,12 +4313,22 @@
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/View_Transitions_API",
       "home": "blocks",
-      "sourceId": "view",
-      "label": "View · viewTransitionsAPI",
+      "sourceId": "router",
+      "label": "Router · viewTransitionsAPI",
       "homes": [
         "blocks"
       ],
       "occurrences": 2
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_custom_elements",
+      "home": "blocks",
+      "sourceId": "story-canvas",
+      "label": "Story Canvas · customElements",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
     },
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Web_Components/Using_custom_elements",
@@ -4102,10 +4342,30 @@
       "occurrences": 3
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_shadow_DOM",
+      "home": "blocks",
+      "sourceId": "story-canvas",
+      "label": "Story Canvas · shadowDom",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event",
       "home": "blocks",
       "sourceId": "background-task-surface",
       "label": "Background Task Surface · beforeunload",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage",
+      "home": "blocks",
+      "sourceId": "draft-persistence",
+      "label": "Draft Persistence · webStorage",
       "homes": [
         "blocks"
       ],
@@ -4152,6 +4412,26 @@
       "occurrences": 1
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_containment/Container_queries",
+      "home": "blocks",
+      "sourceId": "breakpoint-observer",
+      "label": "Breakpoint Observer · containerQueries",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 2
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/flex-wrap",
+      "home": "blocks",
+      "sourceId": "flex-row",
+      "label": "FlexRow · flexWrap",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Anchor_positioning",
       "home": "references",
       "sourceId": "UI & Interaction",
@@ -4172,6 +4452,16 @@
       "occurrences": 1
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/position",
+      "home": "blocks",
+      "sourceId": "app-shell",
+      "label": "App Shell · positionSticky",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/content-visibility",
       "home": "blocks",
       "sourceId": "view",
@@ -4186,6 +4476,16 @@
       "home": "blocks",
       "sourceId": "prefetch-behavior",
       "label": "Prefetch Behavior · linkRelPrefetch",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Constraint_validation",
+      "home": "blocks",
+      "sourceId": "input-family",
+      "label": "Input Family · constraintValidation",
       "homes": [
         "blocks"
       ],
@@ -4216,6 +4516,36 @@
       "home": "blocks",
       "sourceId": "transient-component",
       "label": "Transient Component · headingElements",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe",
+      "home": "blocks",
+      "sourceId": "story-canvas",
+      "label": "Story Canvas · iframeIsolation",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/input/file",
+      "home": "blocks",
+      "sourceId": "data-transfer",
+      "label": "Data Transfer Zone · fileInput",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/main",
+      "home": "blocks",
+      "sourceId": "app-shell",
+      "label": "App Shell · landmarkRoles",
       "homes": [
         "blocks"
       ],
@@ -4303,6 +4633,96 @@
       "occurrences": 2
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/Heading_Elements",
+      "home": "blocks",
+      "sourceId": "decision-trace",
+      "label": "Decision Trace · headingElements",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/checkbox",
+      "home": "blocks",
+      "sourceId": "checkbox",
+      "label": "Checkbox · constraintValidation",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/date",
+      "home": "blocks",
+      "sourceId": "date-picker",
+      "label": "Date Picker · ariaApgKeyboard",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 2
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/datetime-local",
+      "home": "blocks",
+      "sourceId": "datetime-picker",
+      "label": "Datetime Picker · ariaApgKeyboard",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/time",
+      "home": "blocks",
+      "sourceId": "time-picker",
+      "label": "Time Picker · ariaApgKeyboard",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/select",
+      "home": "blocks",
+      "sourceId": "dropdown",
+      "label": "Dropdown · htmlSelectTypeAhead",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/template",
+      "home": "blocks",
+      "sourceId": "for-each",
+      "label": "For Each · htmlTemplate",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/time",
+      "home": "blocks",
+      "sourceId": "audit-timeline",
+      "label": "Audit Timeline · headingElements",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 2
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/contenteditable",
+      "home": "blocks",
+      "sourceId": "inline-trigger",
+      "label": "Inline Trigger · contentEditable",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/hidden",
       "home": "blocks",
       "sourceId": "view",
@@ -4315,12 +4735,12 @@
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/inert",
       "home": "blocks",
-      "sourceId": "view",
-      "label": "View · inertAttribute",
+      "sourceId": "drawer",
+      "label": "Drawer · inertAttribute",
       "homes": [
         "blocks"
       ],
-      "occurrences": 1
+      "occurrences": 2
     },
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control",
@@ -4335,23 +4755,23 @@
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted",
       "home": "blocks",
-      "sourceId": "data-table",
-      "label": "Data Table · arrayToSorted",
+      "sourceId": "collection-operations",
+      "label": "Collection Operations Coordinator · arrayToSorted",
       "homes": [
         "blocks"
       ],
-      "occurrences": 1
+      "occurrences": 2
     },
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator",
       "home": "blocks",
-      "sourceId": "data-table",
-      "label": "Data Table · intlCollator",
+      "sourceId": "collection-operations",
+      "label": "Collection Operations Coordinator · intlCollator",
       "homes": [
         "blocks",
         "intents"
       ],
-      "occurrences": 2
+      "occurrences": 3
     },
     {
       "url": "https://developers.google.com/search/docs/specialty/ecommerce/pagination-and-incremental-page-loading",
@@ -4765,14 +5185,24 @@
       "occurrences": 1
     },
     {
-      "url": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md",
+      "url": "https://github.com/webcomponents/custom-elements-manifest",
       "home": "blocks",
-      "sourceId": "view",
-      "label": "View · domParts",
+      "sourceId": "props-table",
+      "label": "Props Table · customElementsManifest",
       "homes": [
         "blocks"
       ],
       "occurrences": 1
+    },
+    {
+      "url": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md",
+      "home": "blocks",
+      "sourceId": "double-curly-bracket-parser",
+      "label": "DoubleCurlyBracketParser · domParts",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 4
     },
     {
       "url": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/Scoped-Custom-Element-Registries.md",
@@ -11501,12 +11931,42 @@
       "occurrences": 1
     },
     {
+      "url": "https://www.unicode.org/reports/tr51",
+      "home": "intents",
+      "sourceId": "expressive-symbol",
+      "label": "Expressive Symbol Intent",
+      "homes": [
+        "intents"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://www.w3.org/TR/accname-1.2",
+      "home": "intents",
+      "sourceId": "accessible-name",
+      "label": "Accessible Name Intent",
+      "homes": [
+        "intents"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://www.w3.org/TR/permissions",
       "home": "intents",
       "sourceId": "permission",
       "label": "Permission Intent",
       "homes": [
         "intents"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://www.w3.org/TR/scxml",
+      "home": "blocks",
+      "sourceId": "workflow-engine",
+      "label": "Workflow Engine · scxml",
+      "homes": [
+        "blocks"
       ],
       "occurrences": 1
     },
@@ -11555,13 +12015,14 @@
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/breadcrumb",
-      "home": "capability",
-      "sourceId": "wai-aria-apg",
-      "label": "Breadcrumb Pattern",
+      "home": "blocks",
+      "sourceId": "breadcrumb",
+      "label": "Breadcrumb · navigationLandmark",
       "homes": [
+        "blocks",
         "capability"
       ],
-      "occurrences": 1
+      "occurrences": 2
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/button",
@@ -11575,13 +12036,14 @@
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/carousel",
-      "home": "capability",
-      "sourceId": "wai-aria-apg",
-      "label": "Carousel (Slide Show or Image Rotator) Pattern",
+      "home": "blocks",
+      "sourceId": "carousel",
+      "label": "Carousel · ariaApgKeyboard",
       "homes": [
+        "blocks",
         "capability"
       ],
-      "occurrences": 1
+      "occurrences": 2
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/checkbox",
@@ -11595,23 +12057,35 @@
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/combobox",
-      "home": "capability",
-      "sourceId": "wai-aria-apg",
-      "label": "Combobox Pattern",
+      "home": "blocks",
+      "sourceId": "autocomplete",
+      "label": "Autocomplete · ariaCombobox",
       "homes": [
+        "blocks",
         "capability"
       ],
-      "occurrences": 1
+      "occurrences": 3
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal",
-      "home": "capability",
-      "sourceId": "wai-aria-apg",
-      "label": "Dialog (Modal) Pattern",
+      "home": "blocks",
+      "sourceId": "dialog",
+      "label": "Dialog · ariaApgKeyboard",
       "homes": [
+        "blocks",
         "capability"
       ],
-      "occurrences": 4
+      "occurrences": 5
+    },
+    {
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/examples/datepicker-dialog",
+      "home": "blocks",
+      "sourceId": "temporal",
+      "label": "Temporal · ariaApgKeyboard",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/disclosure",
@@ -11627,12 +12101,12 @@
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation",
       "home": "blocks",
-      "sourceId": "nav-list",
-      "label": "Navigation · disclosureNavigation",
+      "sourceId": "disclosure-nav",
+      "label": "Disclosure Nav · disclosureNavigation",
       "homes": [
         "blocks"
       ],
-      "occurrences": 1
+      "occurrences": 3
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/feed",
@@ -11688,13 +12162,24 @@
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox",
-      "home": "capability",
-      "sourceId": "wai-aria-apg",
-      "label": "Listbox Pattern",
+      "home": "blocks",
+      "sourceId": "dropdown",
+      "label": "Dropdown · ariaListbox",
       "homes": [
+        "blocks",
         "capability"
       ],
-      "occurrences": 3
+      "occurrences": 6
+    },
+    {
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/menu-button",
+      "home": "blocks",
+      "sourceId": "menu",
+      "label": "Menu · ariaApgKeyboard",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/menubar",
@@ -11708,13 +12193,14 @@
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/radio",
-      "home": "capability",
-      "sourceId": "wai-aria-apg",
-      "label": "Radio Group Pattern",
+      "home": "blocks",
+      "sourceId": "radio-group",
+      "label": "Radio Group · rovingTabindex",
       "homes": [
+        "blocks",
         "capability"
       ],
-      "occurrences": 1
+      "occurrences": 3
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/slider",
@@ -11728,13 +12214,14 @@
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/slider-multithumb",
-      "home": "capability",
-      "sourceId": "wai-aria-apg",
-      "label": "Slider (Multi-Thumb) Pattern",
+      "home": "blocks",
+      "sourceId": "slider",
+      "label": "Slider · ariaApgKeyboard",
       "homes": [
+        "blocks",
         "capability"
       ],
-      "occurrences": 1
+      "occurrences": 2
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/spinbutton",
@@ -11789,24 +12276,26 @@
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/tooltip",
-      "home": "capability",
-      "sourceId": "wai-aria-apg",
-      "label": "Tooltip Pattern",
+      "home": "blocks",
+      "sourceId": "tooltip",
+      "label": "Tooltip · ariaApgTooltip",
       "homes": [
+        "blocks",
         "capability"
       ],
-      "occurrences": 1
+      "occurrences": 2
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/treeview",
-      "home": "capability",
-      "sourceId": "wai-aria-apg",
-      "label": "Tree View Pattern",
+      "home": "blocks",
+      "sourceId": "tree-select",
+      "label": "Tree Select · ariaTreeview",
       "homes": [
+        "blocks",
         "capability",
         "intents"
       ],
-      "occurrences": 2
+      "occurrences": 3
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/windowsplitter",
@@ -11832,12 +12321,12 @@
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface#kbd_roving_tabindex",
       "home": "blocks",
-      "sourceId": "nav-list",
-      "label": "Navigation · rovingTabindex",
+      "sourceId": "composite-widget",
+      "label": "Composite Widget · rovingTabindex",
       "homes": [
         "blocks"
       ],
-      "occurrences": 2
+      "occurrences": 3
     },
     {
       "url": "https://www.w3.org/WAI/tutorials/forms/multi-page",
@@ -11847,7 +12336,7 @@
       "homes": [
         "blocks"
       ],
-      "occurrences": 1
+      "occurrences": 2
     },
     {
       "url": "https://www.w3.org/WAI/tutorials/forms/validation",
@@ -11856,6 +12345,16 @@
       "label": "Validation Intent",
       "homes": [
         "intents"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://www.w3.org/WAI/WCAG21/Techniques/general/G1",
+      "home": "blocks",
+      "sourceId": "app-shell",
+      "label": "App Shell · skipLink",
+      "homes": [
+        "blocks"
       ],
       "occurrences": 1
     },

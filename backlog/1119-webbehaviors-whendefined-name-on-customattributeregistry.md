@@ -3,8 +3,11 @@ type: idea
 workItem: story
 size: 3
 parent: "1095"
-status: open
+status: resolved
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: plugs/webbehaviors/CustomAttributeRegistry.ts
 tags: []
 ---
 

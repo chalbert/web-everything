@@ -99,8 +99,133 @@ and autodocs consume it directly.
 - every block has a `block-descriptions/<id>.njk` (else a missing-description finding).
 - export-shape / member-surface drift between the declared CEM surface and the resolved impl (#927/#910).
 
+## Status lifecycle governance (#1092)
+
+A block's `status` moves along one ordered axis — **`concept → draft → experimental → active`** (the
+`LIFECYCLE` enum at `we:scripts/check-standards-rules.mjs:567`, shared by the script and the entity
+validators via `checkStatus` at `:598`). The stages mean:
+
+| Stage | What it asserts | Typical evidence |
+|---|---|---|
+| `concept` | The block is *named and scoped* — a placeholder protocol with a summary, possibly nothing else. | A spec file with id/name/summary/type; no impl, often no full CEM surface. |
+| `draft` | The contract surface is *being authored* — attributes/properties/events are taking shape but not stable. | A fuller CEM surface; the impl may be in progress in FUI. |
+| `experimental` | The contract is *usable but unstable* — it may change without a deprecation. Safe to demo, not to depend on. | A working `@frontierui/blocks/<id>` impl; demos; surface still moving. |
+| `active` | The contract is *stable and implemented*. This is the only stage the gate ties to an impl. | **`implementedBy` is required** (gate-enforced at `we:scripts/check-standards.mjs:155`). |
+
+**Graduation criteria (concept→active).** Promote a block only when (1) its CEM surface is settled (no
+expected attribute/property churn), (2) a real `@frontierui/blocks/<id>` impl exists and is named by
+`implementedBy`, (3) the export-shape / member-surface gate (#927/#910) is clean against that impl, and
+(4) a description `block-descriptions/<id>.njk` exists. Demotion is legal (an `active` block whose contract
+must change reverts to `experimental`), recorded like any reversal (lineage, not erasure).
+
+**Deprecated synonyms.** `implemented`/`stable`/`done` → `active`; `planned` → `concept`; `wip` → `draft`
+(`STATUS_SYNONYMS`, `:598`) — a synonym is auto-fixable to its canonical target; any other value is a hard
+status error (the validator never *warns* on status — it errors).
+
+**Currently enforced (this section codifies, does not change):** `status ∈ LIFECYCLE` (error on a bad
+value), and `status:active ⇒ implementedBy` — emitted today as a **warning**
+(`we:scripts/check-standards.mjs:155`). Whether to tighten that warning to an **error**, or add a
+*graduation-demo* gate (an `active` block must ship a runnable conformance demo), is a real
+gate-tightening call — **flagged here for a separate `type:decision` follow-up, not decided in this doc.**
+
+## Type taxonomy governance (#1093)
+
+A block's `type` is one of six protocol categories (`BLOCK_TYPES` at
+`we:scripts/check-standards.mjs:94`, enforced at `:162`). Pick by *what platform seam the block realizes*:
+
+| `type` | Meaning | Pick it when | Base class / surface |
+|---|---|---|---|
+| `Component` | A custom element — an author-facing tag with a CEM surface. | The block *is* a tag the author writes (`<we-foo>`). | registers `element`/`tagName` (`we-*`); has attributes/properties/events/slots. |
+| `Module` | A foundation that groups a shared engine + specialized sub-blocks; not itself one tag. | The block is a *family root* others build on (e.g. `view`: a render engine + behaviors + directives). | `exports` a shared engine; sub-entities carry their own `type`. |
+| `Behavior` | A customized built-in / attribute behavior attached to an existing element. | The block enhances any element via an attribute (`CustomAttribute`). | `extendsClass: CustomAttribute`. |
+| `Directive` | A template/comment directive that transforms markup at stamp time. | The block is a `<template is=…>` / `<!-- … -->` directive. | `extendsClass: CustomTemplateDirective` (or `CustomComment`). |
+| `Store` | A reactive state container. | The block holds observable state others bind to. | `extendsClass: CustomStore`. |
+| `Parser` | A registry-backed parser member (comment/expression/text-node). | The block contributes a parsing strategy to a registry. | `registryName`/`defaultParserName`. |
+
+**Selection guidance.** If the author writes a *tag* → `Component`. If it attaches via an *attribute* →
+`Behavior`. If it transforms *markup* (template/comment) → `Directive`. If it holds *state* → `Store`. If
+it contributes a *parsing strategy* → `Parser`. If it is a *family root* bundling an engine + several of
+the above → `Module`.
+
+**Drift reconciliation (the `Utility` case).** Every *block-level* `type` in `we:src/_data/blocks/*.json`
+is already inside `BLOCK_TYPES` — there is no out-of-set block type today (the gate is clean). The
+`type: "Utility"` that appears in the tree is an **export/sub-entity** field of the `view` Module (its
+shared render *Engine* — a plain utility class, not a custom-element kind), `we:src/_data/blocks/view.json`.
+That is a legitimate, distinct axis: the six-member `BLOCK_TYPES` enum governs the **block's** kind, while a
+**sub-entity** may name a non-element role (`Utility` = a shared engine) that the block-type enum
+deliberately does not cover. So the reconciliation is *clarification, not reclassification*: `Utility` stays
+as an export role, `BLOCK_TYPES` stays six-membered, and the `:162` check correctly applies only to the
+block-level `type`. (If a future *block-level* `Utility` is ever wanted, that is a `BLOCK_TYPES` change —
+again a separate `type:decision`, not this doc.)
+
+## Composability governance (#1094)
+
+A block declares its place in the composition graph through **six fields**, split across two axes: the
+**intent axis** (how a block relates to *intents* — `implementsIntent` / `composesIntents` /
+`consumesIntent`) and the **block-graph axis** (how a block relates to *other blocks* — `dependsOn` /
+`composesWith`), with `composesBehaviors` (the behavior axis) the third. The rules below say what each
+means, when to pick which, and which are gate-enforced.
+
+### The intent axis — implements vs. composes vs. consumes
+
+These three are **mutually distinct** and a block typically uses exactly one `implementsIntent`, plus any
+number of the other two. The discriminator is **ownership of the runtime**:
+
+| Field | Cardinality | Meaning | Pick it when |
+|---|---|---|---|
+| `implementsIntent` | **one** | The block **is** the runtime of that intent — it owns the impl that satisfies the intent's contract. | This block is the canonical realization of the intent (a `data-table` *implements* the table intent). |
+| `composesIntents` | many | The block **delegates to** other intents it does not implement — it wires them together but each is realized elsewhere. | The block orchestrates sub-intents whose runtimes are other blocks (a `form` *composes* the validation + reliability intents). |
+| `consumesIntent` | one | The block **reads** an intent from scope (the injector chain) rather than declaring or owning it — an ambient dependency resolved at runtime. | The block needs an intent a *provider up-scope* supplies (a row block *consumes* the selection intent from its enclosing grid). |
+
+**The discipline (compose, don't re-implement — #933 / platform-decisions.md#compose-dont-handroll):** a
+block must not re-implement an intent another block already `implementsIntent`. If you need its behavior,
+`composesIntents` (delegate) or `consumesIntent` (read from scope) — never hand-roll. `implementsIntent`
+is a claim of *ownership*; two blocks claiming `implementsIntent` for the same intent is a conflict the
+taxonomy (#1093) resolves, not a duplication.
+
+### The behavior axis — `composesBehaviors` (GATE-ENFORCED)
+
+`traits[]` records the named behaviors a block **provides** (`withSortableHeader`, `withRovingFocus`);
+`composesBehaviors[]` records the behaviors a block **consumes**. This is the only composition field the
+validator **errors** on (`we:scripts/check-standards.mjs`, the #936 / #933-Fork-2 gate):
+
+- The **de-facto behavior registry** is the union of every block's provided `traits[].name`. Each
+  `composesBehaviors` entry (a string or `{name}` object) **must resolve** to a name some block provides —
+  a declared composition cannot name a behavior no block exposes (the "compose, don't hand-roll" signal:
+  if nothing provides it, you are about to hand-roll it).
+- `composesBehaviors` must be an **array** (of names or `{name}` objects); a non-array is an error, and an
+  entry with no resolvable `name` is an error.
+- The legacy field name **`composesTraits` is reserved and rejected** — it collides with *The Map* (the
+  trait manifest, `we:src/_data/traits.json`). Authors must use `composesBehaviors`. The gate errors on
+  any block still carrying `composesTraits`.
+
+Rule of thumb: a covered interaction (disclosure → `nav:section`, roving focus → `nav:list`) **MUST**
+`composesBehaviors` the existing trait, never re-wire it by hand — and the providing block declares the
+trait in `traits[]` so the registry sees it. The gate makes a hand-rolled behavior a build failure.
+
+### The block-graph axis — `dependsOn` vs. `composesWith`
+
+These relate a block to **other blocks** (or intents), and the distinction is **hard vs. soft**:
+
+| Field | Strength | Meaning | Graph rule |
+|---|---|---|---|
+| `dependsOn` | **hard** | The block **does not function** without the referenced block/intent present — a structural prerequisite. | Forms a **directed dependency graph**: it must stay **acyclic** (no block may transitively `dependsOn` itself), and a `status: active` block should not `dependsOn` a `concept`/`draft` block (a shipped block resting on an unbuilt one). Each id should resolve to a known block or intent. |
+| `composesWith` | **soft** | The block **pairs well with** another but stands alone without it — an advisory "these go together" relation. | Non-load-bearing; **symmetric in spirit** (if A pairs with B, B pairs with A) but not gate-enforced. Used for catalog cross-linking and authoring guidance, never for resolution. |
+
+**Why the split (Bias-toward-Separation):** keeping a hard prerequisite (`dependsOn`) distinct from an
+advisory affinity (`composesWith`) means tooling can build a real prerequisite graph (ordering,
+availability checks) without an advisory pairing polluting it. Collapsing them would make every "pairs
+well" note look like a hard edge.
+
+> **Current gate coverage (honest scope).** Of the six fields, **only `composesBehaviors`/`composesTraits`
+> is validator-enforced today.** The intent-axis discipline and the `dependsOn` acyclicity / status-floor
+> rules above are **authoring governance** documented here (and reviewed at authoring time), not yet
+> machine-checked. A future slice may add a `dependsOn`-cycle / unresolved-ref gate and an
+> `implementsIntent`-uniqueness gate; until then this section is the source of truth for the rules.
+
 ## What this home does *not* cover
 
-The deeper governance prose for each area is authored in its own sliced item, hanging off this schema
-reference: **lifecycle** semantics + transitions (#1092), **taxonomy** of the six types + when to pick
-which (#1093), and **composability** rules — implements-vs-composes, trait/dimension discipline (#1094).
+The three governance areas this schema reference sliced out — **lifecycle** (#1092), **taxonomy** (#1093),
+and **composability** (#1094) — are now all authored in the sections above. Deeper future enforcement (the
+unresolved-ref / acyclicity / implements-uniqueness gates noted above) is tracked as its own follow-up
+slice, not in this doc.

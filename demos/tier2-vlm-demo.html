@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tier-2 In-Browser VLM (Florence-2) — Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/tier2-vlm-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">Web Everything</div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="vlm-demo">
+    <h1>Tier-2 In-Browser VLM — Florence-2 via Transformers.js</h1>
+    <p class="lede">
+      Runs the <strong>#1082 <code>transformers-vlm</code></strong> provider entirely in your browser on
+      <strong>WebGPU</strong> (ONNX Runtime Web) and renders the <strong>#1080 rich envelope</strong>
+      (<code>description</code> / <code>tags</code> / <code>regions</code> overlay) for a chosen screenshot.
+      Only the model <em>outputs</em> cross the design-refs provider seam — never the model (#475 no-leakage).
+    </p>
+
+    <div class="gate-notice" id="gate-notice" role="status">
+      <strong>Opt-in, device-gated.</strong> This page downloads a ~2&nbsp;GB Florence-2 model and requires a
+      WebGPU-capable desktop browser plus <code>@huggingface/transformers</code> installed
+      (<code>npm i @huggingface/transformers</code>). It never runs by default or on mobile — pick a
+      screenshot and press <em>Analyze</em> to opt in. CI/batch can&rsquo;t run it (hence #1142 is split from
+      the verified provider core #1082, whose pure mappers are unit-tested without the model).
+    </div>
+
+    <section class="controls">
+      <label class="file-pick">
+        Choose a screenshot (PNG/JPG):
+        <input type="file" id="file" accept="image/png,image/jpeg">
+      </label>
+      <button id="analyze" disabled>Analyze</button>
+      <span id="status" class="status"></span>
+    </section>
+
+    <section class="result">
+      <div class="image-pane">
+        <div class="image-wrap" id="image-wrap">
+          <img id="shot" alt="chosen screenshot" hidden>
+          <svg id="overlay" class="overlay" hidden preserveAspectRatio="none"></svg>
+        </div>
+      </div>
+      <aside class="envelope" id="envelope" hidden>
+        <h2>Rich envelope</h2>
+        <h3>Description</h3>
+        <p id="description" class="description">—</p>
+        <h3>Tags</h3>
+        <ul id="tags" class="tags"></ul>
+        <h3>Regions</h3>
+        <ol id="regions" class="regions"></ol>
+        <p class="provider-line">provider: <code id="provider-name">—</code></p>
+      </aside>
+    </section>
+  </main>
+
+  <script type="module">
+    // Minimal Node `process` shim so the provider's `process.env.DESIGN_REFS_VLM_MODEL` read is safe in the
+    // browser (the provider was authored for the Node design-refs pipeline; in-browser it falls to its
+    // default model). Define before importing the provider.
+    globalThis.process = globalThis.process ?? { env: {} };
+
+    // The provider self-registers under 'transformers-vlm' on import; the vision module owns the seam.
+    import { getVisionProvider, analyzeRich } from '/scripts/design-refs/vision.mjs';
+    import '/scripts/design-refs/providers/transformers-vlm.mjs';
+
+    const fileInput = document.getElementById('file');
+    const analyzeBtn = document.getElementById('analyze');
+    const statusEl = document.getElementById('status');
+    const shot = document.getElementById('shot');
+    const overlay = document.getElementById('overlay');
+    const envelopeEl = document.getElementById('envelope');
+
+    let pngBase64 = null;
+    let dims = null;
+
+    /** Read a chosen image File as { pngBase64, dims } via a canvas (normalizes JPEG→PNG, gets real dims). */
+    function readImage(file) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          canvas.getContext('2d').drawImage(img, 0, 0);
+          const dataUrl = canvas.toDataURL('image/png');
+          resolve({
+            dataUrl,
+            pngBase64: dataUrl.slice(dataUrl.indexOf(',') + 1),
+            dims: { width: img.naturalWidth, height: img.naturalHeight },
+          });
+        };
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      const read = await readImage(file);
+      pngBase64 = read.pngBase64;
+      dims = read.dims;
+      shot.src = read.dataUrl;
+      shot.hidden = false;
+      analyzeBtn.disabled = false;
+      statusEl.textContent = `${dims.width}×${dims.height}`;
+    });
+
+    /** Draw the #1080 region boxes over the image. Regions are normalized {x,y,w,h} in 0..1. */
+    function drawRegions(regions) {
+      overlay.setAttribute('viewBox', '0 0 100 100');
+      overlay.innerHTML = '';
+      for (const r of regions) {
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('x', String(r.x * 100));
+        rect.setAttribute('y', String(r.y * 100));
+        rect.setAttribute('width', String(r.w * 100));
+        rect.setAttribute('height', String(r.h * 100));
+        rect.setAttribute('class', 'region-box');
+        overlay.appendChild(rect);
+      }
+      overlay.hidden = regions.length === 0;
+    }
+
+    function renderEnvelope(env) {
+      document.getElementById('description').textContent = env.description ?? '(no description)';
+      const tagsEl = document.getElementById('tags');
+      tagsEl.innerHTML = '';
+      for (const t of env.tags) {
+        const li = document.createElement('li');
+        li.textContent = t;
+        tagsEl.appendChild(li);
+      }
+      const regionsEl = document.getElementById('regions');
+      regionsEl.innerHTML = '';
+      for (const r of env.regions) {
+        const li = document.createElement('li');
+        li.textContent = `${r.label ?? 'region'} — [${r.x.toFixed(2)}, ${r.y.toFixed(2)}, ${r.w.toFixed(2)}, ${r.h.toFixed(2)}]`;
+        regionsEl.appendChild(li);
+      }
+      document.getElementById('provider-name').textContent = env.provider ?? '—';
+      drawRegions(env.regions);
+      envelopeEl.hidden = false;
+    }
+
+    analyzeBtn.addEventListener('click', async () => {
+      if (!pngBase64) return;
+      analyzeBtn.disabled = true;
+      statusEl.textContent = 'Loading model + analyzing (first run downloads ~2 GB)…';
+      try {
+        const provider = getVisionProvider('transformers-vlm');
+        if (!provider) throw new Error('transformers-vlm provider did not register.');
+        const env = await analyzeRich(provider, { pngBase64, dims });
+        renderEnvelope(env);
+        statusEl.textContent = 'Done.';
+      } catch (e) {
+        statusEl.textContent = `Error: ${e?.message ?? e}`;
+      } finally {
+        analyzeBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

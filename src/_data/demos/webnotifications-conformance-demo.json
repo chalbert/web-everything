@@ -1,0 +1,12 @@
+{
+  "id": "webnotifications-conformance-demo",
+  "name": "Web Notifications Conformance Demo",
+  "summary": "The runnable proof of the webnotifications push-delivery contract+provider swap seam (#1024, slice C). In-demo recording-stub providers conform to CustomPushProvider and are swapped behind one subscribe()/send()/unsubscribe() call site, so the app issues the same calls while the resolved provider changes underneath; a DeliveryReceipt carries the closed-set status. The runtime providers (native Web Push, FCM/OneSignal/Novu hubs) are impl in Frontier UI — only the contract crosses the seam.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runnable proof of the push-delivery contract+provider swap seam (<a href=\"/backlog/1024-webnotifications-impl-epic/\">#1024</a>, slice C). In-demo <strong>recording-stub</strong> providers conform to <code>CustomPushProvider</code> and are swapped behind one <code>subscribe()/send()/unsubscribe()</code> call site.</p><h3>Verified contract</h3><p>The app never names a vendor: the same calls deliver while the resolved provider changes, a <code>DeliveryReceipt</code> carries the closed-set status, and both providers satisfy the identical interface. The runtime providers are impl in Frontier UI — only the contract crosses the seam.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webnotifications-conformance-demo.html",
+  "projects": [
+    "webnotifications"
+  ]
+}
