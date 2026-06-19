@@ -20,7 +20,15 @@ not split* with the unblocking action, and move on.
 1. **Build the candidate set** — two kinds: (a) oversized stories (`workItem: story`, `size` > 8 / `13`)
    and (b) unsliced epics (`workItem: epic` with no children — no item names them as `parent`). An epic is
    already decided to decompose, so it skips the should-we-split question (rubric (1)) and seeds slices
-   from its body — but still verifies them against the real tree in step 2. Unblocked stories come from
+   from its body — but still verifies them against the real tree in step 2. **Slice granularity:** an
+   epic's slices are *normally* stories/tasks, **but** a **roadmap / "epic of epics"** (every natural child
+   is itself a multi-story scope — a registry of N independently-fundable standards/subsystems, each "an
+   impl epic") slices into **sub-epics**, carved one level down — each then a future `/slice` candidate
+   (slicing is recursive). Tell: each child is *clearly* epic-sized, not a `≤5` story band. For sub-epic
+   slices, rubric (3)/(5) take the epic form ((3′)/(5′) in *backlog-workflow.md → The split-safety
+   rubric*): each is a coherent independently-ownable scope carrying its **resolved design lineage** as
+   seed (not a demoable leaf); design-gated / true-GAP rows stay could-not-split-here behind their upstream
+   decision, so a roadmap epic typically yields a **partial** sub-epic split. Unblocked stories come from
    `npm run check:readiness -- --select` (`--json` → `selection.tierA`/`selection.tierB`, filter
    `workItem==='story' && size>8`). Blocked stories and epics aren't in that projection, so do a one-pass
    frontmatter scan of `backlog/*.md` (`workItem: story` + `size` ≥ 13, **or** `workItem: epic` with no
@@ -65,7 +73,9 @@ A single "go" authorizes the splits you presented. Per approved item, mechanical
    `check:standards` errors), refresh the digest only if needed, and go straight to scaffolding its child
    slices.
 2. **Scaffold each slice:** `node scripts/backlog.mjs scaffold --type=… --workitem=story|task
-   [--size=…] --title="…" --parent=<NNN> [--blocked-by=<NNN>,…] --digest="…"`. `--parent` rolls it under
+   [--size=…] --title="…" --parent=<NNN> [--blocked-by=<NNN>,…] --digest="…"`. **Sub-epic slice** (roadmap
+   mode): scaffold `--workitem=epic` with **no `--size`**, and seed its body with the row's design lineage
+   so it's a real future `/slice` candidate, not an empty shell. `--parent` rolls it under
    the epic; `--blocked-by` lays the DAG edges; write a real per-slice digest (it's the loader's
    `summary`).
 3. **Gate:** `npm run check:standards` green (it errors on a storied epic that kept a `size`, an

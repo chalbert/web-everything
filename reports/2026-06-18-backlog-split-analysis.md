@@ -1171,3 +1171,81 @@ whether #449's repoint holds at `5` vs creeping to `8` once the 42-import rewrit
 is underway (mechanical over a pre-existing import set, so `5` is honest), and whether slice C counts as
 batchable (depends on the user not running plateau-app's server). **A is batchable immediately** — the
 foundational win; #449 + D want one focused `/next 449` Vite-restart session; C rides either.
+
+---
+
+# Paced sub-epic slicing — batch 1 of N (`/slice` the #1008 sub-epics, 3 at a time)
+
+User opted to slice the #1008 implementation sub-epics into their contract→provider→demo trios (the
+#1003 webanalytics precedent), **3 epics per batch, stop and wait between batches**. Each greenfield
+epic → A (contract → @webeverything, story·3) + B (provider/runtime → FUI, story·5, blockedBy A) +
+C (conformance demo, story·3, blockedBy A); B ∥ C after A.
+
+## Batch 1 — #1018, #1019, #1020 (sliced)
+
+| Epic | A contract | B provider | C demo | Notes |
+|---|---|---|---|---|
+| #1018 webpositioning | #1048 | #1049 (finish/surface over FUI runtime) | #1050 | B is finish-scope, not greenfield |
+| #1019 webreliability | #1051 | #1052 (registry runtime) | #1053 | **error-recovery slice still HELD** behind decision #1032 — not scaffolded |
+| #1020 webintl | #1054 | #1055 (Intl.* runtime) | #1056 | native-first default |
+
+- **+9 stories opened**; 3 epic bodies updated (next-step → sliced-into). Gate green on all (the lone
+  repo error is pre-existing report locus-prefix debt from concurrent runs, not these items).
+- Each trio: B and C are independent roots after A → batchable once A lands.
+
+## Remaining (paced, awaiting go)
+
+- **Batch 2:** #1021 webmanifests, #1022 webidentity, **#1023 webreporting (INVESTIGATE-FIRST — substantial
+  impl exists; may resolve or yield one small finish slice, not a blind trio)**.
+- **Batch 3:** #1024 webnotifications, #1025 webrealtime, #1026 webprocess.
+- **Batch 4:** #1027 webresources, #1028 webpolicy. (+ #1019 error-recovery slice once #1032 ratifies; webtraces stays deferred to #992.)
+
+## Batch 2 — #1021, #1022, #1023 (sliced)
+
+| Epic | A contract | B provider | C demo | Notes |
+|---|---|---|---|---|
+| #1021 webmanifests | #1057 | #1058 (reader runtime) | #1059 | trio |
+| #1022 webidentity | #1060 | #1061 (Credential Mgmt API runtime) | #1062 | native-first |
+| #1023 webreporting | — | — | **#1063 (single finish slice)** | **investigated → mostly built**: contract shipped, renderers #432 + producer-migration #435 resolved, ingest/export adapters complete; only gaps = no conformance demo + stale `status:concept`. One slice: demo + concept→poc relabel. |
+
+- **+7 stories** (#1021/#1022 trios = 6; #1023 single = 1). 3 epic bodies updated.
+- **#1023 is NOT a build trio** — the investigate-first call paid off: it's a finish/relabel, not a from-scratch build (the audit's "finish renderers+adapters" framing was stale; #432/#435 already landed them).
+- Gate green on all batch-2 items (lone repo error is a concurrent session's #1033, not these).
+
+## Remaining (paced, awaiting go)
+
+- **Batch 3:** #1024 webnotifications, #1025 webrealtime, #1026 webprocess.
+- **Batch 4:** #1027 webresources, #1028 webpolicy (+ #1019 error-recovery slice once #1032 ratifies; webtraces stays deferred to #992).
+
+## Batch 3 — #1024, #1025, #1026 (sliced)
+
+| Epic | A contract | B provider | C demo |
+|---|---|---|---|
+| #1024 webnotifications | #1064 | #1065 (push-delivery runtime) | #1066 |
+| #1025 webrealtime | #1067 | #1068 (WS/SSE/WebTransport runtime) | #1069 |
+| #1026 webprocess | #1070 | #1071 (artefact contract runtime) | #1072 |
+
+- **+9 stories.** 3 epic bodies updated to sliced-into. Gate fully green (0 errors).
+
+## Remaining (paced, awaiting go)
+
+- **Batch 4 (final):** #1027 webresources, #1028 webpolicy (+ #1019 error-recovery slice once #1032 ratifies; webtraces stays deferred to #992).
+
+## Batch 4 (final) — #1027, #1028 (sliced)
+
+| Epic | A contract | B provider | C demo |
+|---|---|---|---|
+| #1027 webresources | #1074 | #1075 (pagination + delivery-transport runtime) | #1076 |
+| #1028 webpolicy | #1077 | #1078 (DMN engine + proof-of-compliance runtime) | #1079 |
+
+- **+6 stories.** 2 epic bodies updated. Gate green (0 errors).
+
+## Full #1008 slice run — totals
+
+10 of the 11 sub-epics sliced (webtraces never carved — deferred to #992):
+
+- **9 greenfield/finish epics → contract/provider/demo trios** (#1018, #1020–#1022, #1024–#1028) = **27 stories** (one each: #1018's B is finish-scope).
+- **#1019 webreliability → registry trio** (3 stories); its **error-recovery slice held** behind decision #1032.
+- **#1023 webreporting → ONE finish slice** (#1063) — investigate-first found it mostly built (contract + #432 renderers + #435 producer-migration + ingest/export adapters all landed); only a conformance demo + concept→poc relabel remain.
+- **Net opened across the whole #1008 program:** 11 sub-epics + 1 decision (#1032) + 31 slice stories.
+- Every trio: B and C are independent roots after A → batchable once each A lands. The A-contract slices (all `story·3`, no blocker) are the immediately-batchable front.
