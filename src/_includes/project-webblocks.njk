@@ -50,6 +50,33 @@
     <p id="no-results" style="display: none; text-align: center; color: #475569; padding: 2rem;">No blocks match your filters.</p>
 </section>
 
+<section id="governance" class="section-card">
+    <h3 id="block-standard-governance">Block Standard — governance &amp; schema</h3>
+    <p>
+        A <strong>block</strong> is a declarative, registry-rendered UI standard: a <strong>contract</strong>
+        (what it exposes and which intents it realizes) that a Frontier&nbsp;UI implementation satisfies. The
+        spec is <strong>data, not code</strong> — a JSON file under <code>src/_data/blocks/&lt;id&gt;.json</code>
+        plus a prose description; WE owns the contract, the impl is <code>@frontierui/blocks/*</code>.
+    </p>
+    <p>
+        The full <strong>block-spec schema reference</strong> — every declarable field
+        (<code>id</code>/<code>name</code>/<code>status</code>/<code>type</code>/<code>exports</code>/
+        <code>attributes</code>/<code>properties</code>/<code>events</code>/<code>slots</code>/
+        <code>cssParts</code>/<code>traits</code>/<code>implementsIntent</code>/<code>composesIntents</code>/
+        <code>intentDimensions</code>/<code>dependsOn</code>/…) and its meaning, plus the authoring guide and
+        the validation rules the gate enforces — is the governance home for the Web Blocks umbrella
+        (<a href="/backlog/1040-webblocks-protocol-surface-governance-umbrella-79-block-stan/">#1040</a>):
+        <strong><code>docs/agent/block-standard.md</code></strong>.
+    </p>
+    <p style="font-size: 0.9rem; color: var(--color-text-muted);">
+        The per-area governance sections hang off that schema home: <strong>lifecycle</strong>
+        (<a href="/backlog/1092-block-status-lifecycle-governance/">#1092</a>), <strong>taxonomy</strong> of the
+        six block types (<a href="/backlog/1093-block-protocol-taxonomy-governance/">#1093</a>), and
+        <strong>composability</strong> — implements-vs-composes, trait/dimension discipline
+        (<a href="/backlog/1094-block-composability-rules-governance/">#1094</a>).
+    </p>
+</section>
+
 <style>
 .filter-btn.active {
     background: #3b82f6 !important;
