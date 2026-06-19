@@ -1,0 +1,72 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    A <a href="/projects/webbehaviors/">Web Behaviors</a> <code>CustomAttribute</code> exposes the
+    element it is attached to under <strong>two conflicting names</strong>. The shipped spec
+    (<code>project-webbehaviors.njk</code>) names the property <code>ownerElement</code>; the
+    implementation (<code>plugs/webbehaviors/CustomAttribute.ts</code>) names it <code>target</code>.
+    This survey grounds decision
+    <a href="/backlog/1121-webbehaviors-canonical-host-element-property-name-ownereleme/">#1121</a>
+    (epic #1095, parent #1042): which name is canonical? It is not arbitrary — <code>CustomAttribute</code>
+    <strong>chains its prototype to <code>Attr.prototype</code></strong>, so each instance <em>is-a</em>
+    <code>Attr</code> at runtime, and the platform already has a name for "the element an
+    <code>Attr</code> belongs to."
+</p>
+
+<h3>Recommendation (to ratify in #1121)</h3>
+<ol>
+    <li><strong>Make <code>ownerElement</code> canonical; align the impl to the spec</strong>
+        (Fork&nbsp;1, ~90%). <a href="https://developer.mozilla.org/en-US/docs/Web/API/Attr/ownerElement"><code>Attr.ownerElement</code></a>
+        is the read-only native property returning "the Element the attribute belongs to." Because
+        <code>CustomAttribute</code> chains to <code>Attr.prototype</code>, this is not an analogy — it is
+        <em>the</em> native property. The excluded branch (keep, or amend the spec to, <code>target</code>)
+        discards that exact alignment and imports event-dispatch connotation onto a persistent ownership
+        relation.</li>
+    <li><strong>Scope the rename to <code>CustomAttribute</code> and its <code>Attr</code>-derived
+        subclasses only</strong> (Fork&nbsp;2, ~80%). The non-attribute host-attached plugs —
+        <code>Injector</code> and <code>CustomContext</code> — carry their own parallel <code>target</code>
+        and are a <em>separate</em> call: not being attributes, their native-aligned name is
+        <code>host</code>, not <code>ownerElement</code>. File that under #1042; do not fold it in here.</li>
+    <li><strong>Stage the rename via a deprecated <code>target</code> alias getter</strong> for one cycle
+        if the ~30-reference blast radius warrants it, removed in a mechanical follow-up. This is a rollout
+        tactic, not a competing canonical name — the platform never exposes two permanent names for one
+        property.</li>
+</ol>
+
+<h3>How the platform names a back-reference to its host</h3>
+<p>
+    The web platform does <strong>not</strong> use one name for "the element this thing is attached to."
+    It names the back-reference by the <strong>relationship's semantics</strong>:
+</p>
+<table>
+    <thead>
+        <tr><th>Relationship</th><th>Property</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>attribute → its element</td><td><code>ownerElement</code></td><td><code>Attr.ownerElement</code>, read-only — the native name for an attribute's host</td></tr>
+        <tr><td>shadow root → its host</td><td><code>host</code></td><td><code>ShadowRoot.host</code></td></tr>
+        <tr><td>node → its document</td><td><code>ownerDocument</code></td><td><code>Node.ownerDocument</code></td></tr>
+        <tr><td>event → dispatch element</td><td><code>target</code> / <code>currentTarget</code></td><td>transient, per-dispatch — <em>not</em> ownership</td></tr>
+        <tr><td>mutation → affected node</td><td><code>target</code></td><td><code>MutationRecord.target</code></td></tr>
+    </tbody>
+</table>
+<p>
+    <code>target</code> is the <strong>dispatch-semantics</strong> word — it names "the node a transient
+    dispatch or observation is currently about." An attribute's relationship to its element is
+    <em>persistent ownership</em>, which is exactly what <code>ownerElement</code> encodes; and a behaviour
+    reading <code>e.target</code> inside its own listener would collide with a <code>this.target</code>
+    host property. For non-attribute host-attached objects (controllers, directives) the ecosystem word is
+    consistently <strong><code>host</code></strong>, never <code>target</code>:
+    <a href="https://lit.dev/docs/api/controllers/">Lit <code>ReactiveControllerHost</code></a>,
+    <code>ShadowRoot.host</code>, Angular's host element / <code>@HostBinding</code> (its
+    <code>ElementRef.nativeElement</code> is only the DOM handle), Stimulus <code>this.element</code>.
+</p>
+
+<h3>Classification</h3>
+<p>
+    This is a spec-vocabulary call inside one project (<code>webbehaviors</code>): align the published
+    contract's host-property name with native <code>Attr</code> semantics. It is not a new protocol or
+    intent — it finalizes a name. Full grounding, blast-radius inventory, and the per-fork synthesis are in
+    <code>reports/2026-06-19-host-element-backreference-naming.md</code>.
+</p>
+{% endraw %}

@@ -1,0 +1,119 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for the manifest token-bridge decision
+  (<a href="/backlog/930-decide-the-plateau-creator-manifest-fui-workbench-stage-toke/">#930</a>), carved out of
+  the <a href="/backlog/751-embedded-theme-design-system-creator-plateau/">#751</a> "Your theme" embed capstone
+  under the Block Explorer epic <a href="/backlog/746-block-explorer-interactive-fui-block-workbench/">#746</a>.
+  <a href="/backlog/887-decide-the-plateau-creator-to-fui-switcher-manifest-transpor/">#887</a> ratified the
+  <em>transport</em> (an origin-validated <code>postMessage</code> carrying the resolved/inline #747 manifest) but
+  explicitly left the message's <strong>field list / fidelity</strong> a build detail. That detail is a genuine
+  <strong>semantic-alignment fork</strong>: the Plateau creator authors an <strong>open DTCG token set</strong>
+  while the FUI workbench stage renders through <strong>5 fixed <code>--wb-*</code> custom properties</strong>.
+  How does the receiver bridge the two vocabularies?
+</p>
+
+<h2>The two vocabularies (verified against the trees, 2026-06-18)</h2>
+<ul>
+  <li>
+    <strong>Producer — the Plateau creator, open DTCG.</strong> The #747 manifest
+    (<code>plateau-app/src/design-system-creator/manifest.ts:18</code>) carries an <strong>open, flat
+    <code>themeTokens</code> map</strong> ("In WE this is a DTCG ref; the creator authors the values inline"); the
+    <strong>#889 import adapter</strong> (<code>importAdapter.ts</code>) ingests <em>arbitrary</em> DTCG trees and
+    Figma variable exports, so <code>themeTokens</code> is unbounded. Plus <code>intentDefaults</code> keyed by
+    <code>surface/density/motion/typography/theme-color</code> and a free-form <code>traitDefaults</code> slot.
+  </li>
+  <li>
+    <strong>Consumer — the FUI workbench stage, 5 fixed props.</strong> The stage block reads exactly five custom
+    properties (<code>frontierui/workbench/designSystems.ts</code> <code>DesignSystemTokens</code>):
+    <code>--wb-accent</code>, <code>--wb-radius</code>, <code>--wb-pad</code>, <code>--wb-font</code>,
+    <code>--wb-shadow</code>. Presets are authored inline in <code>--wb-*</code> shape and applied by
+    <code>applyDesignSystem(preset)</code> at <code>frontierui/workbench/mount.ts:277</code>.
+  </li>
+  <li>
+    <strong>The gap is not a 1:1 rename.</strong> The producer side is an <em>open</em> set with intent/trait enums
+    that <strong>don't even match</strong> the consumer's (creator <code>surface: flat|raised|sunken</code> vs FUI
+    <code>surface: lift|solid</code>; creator radius trait <code>sharp|soft|round</code> vs FUI
+    <code>lg|sm|none</code>). Open→finite forbids a pass-through; enum drift forbids a pure rename. <strong>Some
+    mapping/selection layer is structurally required</strong> — only <em>where</em> it lives and <em>which
+    vocabulary the block ultimately reads</em> are open.
+  </li>
+</ul>
+
+<h2>Prior art — bridging open token sets onto finite render targets</h2>
+<p>
+  The design-token ecosystem converged on a <strong>tiered model</strong> (primitive → semantic → component) and an
+  explicit <strong>transform/filter</strong> step at every render boundary — the directly-applicable prior art:
+</p>
+<table>
+  <thead>
+    <tr><th>Family</th><th>What it is</th><th>Prior art</th><th>Bearing on #930</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Tiered tokens</td>
+      <td>Open primitive/semantic tiers feed a small curated <strong>component-token</strong> tier components read.</td>
+      <td>Material 3 token tiers (reference→system→component); the near-universal DTCG 3-tier convention.</td>
+      <td>The 5 <code>--wb-*</code> props <strong>are the demo's component-token tier</strong>; DTCG is its primitive/semantic tiers. A cross-tier alias step is the norm.</td>
+    </tr>
+    <tr>
+      <td>Transform + filter</td>
+      <td>A build step transforms values and <strong>filters to the subset</strong> a given output consumes; per-platform lossiness is expected.</td>
+      <td>Style Dictionary <code>transforms</code>/<code>filters</code>, SD-Transforms, Theo.</td>
+      <td>Selecting the handful of DTCG tokens the finite stage can express <strong>is</strong> the standard filter step — the receiver is a per-target transform.</td>
+    </tr>
+    <tr>
+      <td>Semantic remap for theming</td>
+      <td>Components read stable semantic/component slots; theming swaps what they resolve to, never component code.</td>
+      <td>Material 3 semantic token remapping (light/dark/dynamic without touching component logic).</td>
+      <td>A stable <code>--wb-*</code> slot set whose <em>sources</em> are remapped is how a curated demo stays legible across swapped systems.</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  Every mature system places a <strong>semantic→component mapping</strong> between an open source and the finite
+  slots a target consumes, and treats lossiness there as routine. That is option <strong>A</strong>. None pushes the
+  component-token vocabulary <em>up</em> into the authoring tool (option C — collapsing the tiered model + breaking
+  the #889 open-token import), and none makes a curated demo read the raw open set without a selecting transform
+  (option B still needs the filter — "consume DTCG directly" mostly <em>renames</em> the slots, it doesn't remove
+  the mapping).
+</p>
+
+<h2>The fork and the recommendation</h2>
+<p>
+  <strong>One genuine fork — the bridge shape — options A/B/C.</strong> Fork-existence: the demo block's CSS reads
+  exactly one custom-property vocabulary, so it cannot canonically read both <code>--wb-*</code> (A) and
+  DTCG-canonical names (B); and C (constrain the producer to <code>--wb-*</code>) is the structurally excluded
+  branch (breaks #889's open import + leaks a FUI render-detail up into the Plateau authoring tool).
+</p>
+<ul>
+  <li>
+    <strong>A (recommended) — a DTCG→<code>--wb-*</code> mapping/transform in the FUI receiver.</strong> Reads the
+    <em>whole</em> resolved #747 manifest (themeTokens + intentDefaults + traitDefaults), selects/aliases the
+    well-known sources into the 5 slots with declared fallbacks, builds a <code>DesignSystemPreset</code>, calls the
+    existing <code>applyDesignSystem()</code>. Lossy by design (the standard filter step). Keeps the producer
+    maximally permissive, keeps the curated demo legible, the <code>--wb-*</code> names never cross the WE boundary.
+    <strong>A merit win, not a cost win</strong> — a mapping is unavoidable (open→finite), and the 5 curated slots
+    are the point of the demo, so B's "faithfulness" is largely illusory for materially more work.
+  </li>
+  <li>
+    <strong>B — the stage consumes DTCG directly.</strong> Rewire the block CSS + every preset to read
+    DTCG-canonical names. Larger, and the block still has finite hooks so a selecting transform is <em>still</em>
+    needed (B mostly renames slots). The right move <em>only if</em> the stage becomes a production theming engine —
+    a deferred "stage matures" revisit.
+  </li>
+  <li>
+    <strong>C — constrain the creator to the <code>--wb-*</code> shape.</strong> Excluded on merit: forces the
+    author to emit FUI's private render props, breaks the #889 DTCG/Figma import, inverts the dependency.
+  </li>
+</ul>
+<p>
+  <strong>Recommendation: A, ~80%.</strong> The residual ~20% is the mapping table's exact entries (the
+  <code>--wb-font</code>/<code>--wb-shadow</code> sources + enum-value reconciliation) — <em>less</em> lossy than
+  #751's claim assumed, since intent/trait defaults give every slot a source (<code>--wb-pad</code> ←
+  <code>density</code>, <code>--wb-shadow</code> ← <code>surface</code>, <code>--wb-radius</code> ←
+  <code>radius</code> trait, <code>--wb-font</code> ← a <code>type.*</code> family token), with the
+  <code>extends</code> base as fallback. That table is a build detail of A, not a separate fork. Full grounding in
+  <code>reports/2026-06-18-930-creator-manifest-wb-token-bridge.md</code>.
+</p>
+{% endraw %}

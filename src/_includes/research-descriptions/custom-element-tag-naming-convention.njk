@@ -1,0 +1,134 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for the custom-element <code>tagName</code> naming decision
+  (<a href="/backlog/841-decide-the-we-contract-custom-element-tag-naming-convention-/">#841</a>) — the
+  sibling carved out of the <a href="/backlog/822-enrich-block-cem-with-tagname-attributes-properties-slots-so/">#822</a>
+  ruling, under the Block Explorer epic
+  (<a href="/backlog/746/">#746</a>). #822 settled that the custom-element surface
+  (<code>tagName</code> + attributes/properties/slots) is a <strong>WE-owned contract</strong> and FUI is one
+  implementation that conforms (impl-is-not-a-standard + the <a href="/backlog/463/">#463</a>
+  polyglot/forward-adapter vision). It deliberately left the one genuine remaining call to this item:
+  <strong>what <code>tagName</code> value WE specifies</strong>. The decision binds <strong>only</strong> the
+  global-registration modes (static-HTML / global <code>customElements.define</code> / impl-swap); deep
+  compile-time / JSX consumption never materializes a runtime global tag, so naming there stays totally
+  flexible (most-flexible-default, an invariant #822 already fixed).
+</p>
+
+<h2>The tree as it actually is</h2>
+<p>
+  <code>src/_data/blocks.json</code> (75 blocks) carries <strong>zero</strong> <code>tagName</code> fields
+  today, and <code>scripts/gen-cem.mjs</code> emits a CEM custom-element declaration
+  (<code>customElement: true</code> + <code>tagName</code>) <strong>only</strong> when a block carries an
+  explicit <code>tagName</code> — it <strong>never fabricates</strong> one
+  (<a href="https://github.com/">gen-cem.mjs:68-80</a>: <em>"no tag is ever fabricated — <code>registryName</code>
+  is a DI registry class name, NOT a custom-element tag"</em>). So <code>gen:cem</code> emits 0 custom-element
+  declarations until these values are authored.
+</p>
+<p>
+  The load-bearing finding: <strong>most <code>type:Component</code> blocks are not custom elements at all.</strong>
+  Surveying the FUI tree, <strong>only 5 custom <em>elements</em></strong> register via
+  <code>customElements.define</code> — <code>auto-heading</code> (block <code>transient-component</code>),
+  <code>auto-complete</code> (<code>autocomplete</code>), <code>route-view</code> + <code>route-outlet</code>
+  (both from the single <code>router</code> block), and <code>background-tasks</code>
+  (<code>background-task-surface</code>). Every other <code>type:Component</code> block registers as a
+  <em>behavior / attribute / function</em> (<code>tabs</code>→attributes, <code>stepper</code>→<code>registerStepper</code>,
+  <code>tree-select</code>→<code>registerTreeSelect</code>, <code>master-detail</code>→<code>MasterDetailBehavior</code>),
+  and everything FUI registers via <code>attributes.define</code> (<code>type-ahead</code>, <code>for-each</code>,
+  <code>nav:list</code>, <code>grid:cell-edit</code>, …) is a custom <em>attribute</em>, scoped out by #822.
+</p>
+<p>Two structural facts fall out, and both reshape the original fork:</p>
+<ul>
+  <li>
+    <strong>Element-ness is sparse and cannot be inferred from <code>type:Component</code>.</strong> Auto-deriving
+    a tag for every Component would fabricate fictional <code>&lt;tabs&gt;</code> / <code>&lt;stepper&gt;</code>
+    elements FUI never registers — violating <code>gen-cem</code>'s never-fabricate invariant. Element-ness must
+    be <strong>authored / opt-in</strong>.
+  </li>
+  <li>
+    <strong>A block is not 1:1 with a tag.</strong> <code>router</code> (one block) registers <strong>two</strong>
+    elements; <code>autocomplete</code>→<code>auto-complete</code> and
+    <code>transient-component</code>→<code>auto-heading</code> show tag ≠ id. A pure prefix+id derivation is
+    structurally impossible, and the value must be <strong>overridable</strong>; the data model must allow a block
+    to declare 0, 1, or N tags.
+  </li>
+</ul>
+<p>
+  FUI's 5 tags are all <strong>bare kebab-case with no vendor prefix</strong> — there is <strong>no
+  <code>fui-</code> prefix anywhere</strong>. #822's hypothetical <code>fui-&lt;id&gt;</code> is contrary to both
+  FUI's real practice and the constellation: a <code>fui-</code> prefix would brand the WE-owned contract tag with
+  the implementation's name (a category error). And <strong>24 single-word component ids</strong>
+  (<code>dropdown</code>, <code>menu</code>, <code>dialog</code>, <code>drawer</code>, <code>checkbox</code>, …)
+  are <strong>invalid as bare custom-element tags</strong> — the WHATWG "valid custom element name" production
+  requires a hyphen — so a <strong>uniform prefix mechanically guarantees validity</strong> across the catalog
+  without per-entry renaming.
+</p>
+
+<h2>Prior art — how the ecosystem names custom-element tags</h2>
+<p>
+  The web platform mandates only the <em>shape</em> of a valid name (hyphen-required, lowercase-start, a
+  reserved-hyphenated-name denylist: <code>annotation-xml</code>, <code>color-profile</code>,
+  <code>font-face</code>, <code>missing-glyph</code>, …) and imposes <strong>no</strong> prefix policy and
+  <strong>no</strong> id→tag mapping. WAI-ARIA APG / MDN govern roles and behavior, not element identifiers. So
+  the convention is a project policy, and the prior art is the component-library ecosystem, which has converged
+  hard on <strong>one short vendor/namespace prefix per library</strong> — to guarantee the hyphen and avoid
+  global-registry collisions:
+</p>
+<ul>
+  <li>Shoelace / Web Awesome <code>sl-</code> / <code>wa-</code> · Material Web <code>md-</code> · Adobe Spectrum <code>sp-</code></li>
+  <li>Microsoft Fluent <code>fluent-</code> · Ionic <code>ion-</code> · Salesforce Lightning <code>lightning-</code> / <code>c-</code></li>
+</ul>
+<p>Two further platform facts pin the model:</p>
+<ul>
+  <li>
+    <strong>Custom Elements Manifest</strong> (the format WE ratified as a protocol,
+    <a href="/backlog/626/">#626</a>) resolves a tag from the <code>customElements.define('x-foo', …)</code> call
+    string, <strong>never</strong> from filename/dirname, and models a module emitting <strong>many</strong>
+    declarations — matching the <code>router</code>→2-elements reality and confirming the tag is an authored value
+    distinct from the block id.
+  </li>
+  <li>
+    <strong>Scoped custom-element registries</strong> (the <code>ElementInternals</code> / scoped-registry
+    proposal) let a tag bind locally rather than globally — the platform analog of #822's "deep JSX consumption
+    dissolves the runtime global tag." The convention governs the <strong>global</strong> mode; scoped / compile
+    consumption is the always-free path.
+  </li>
+</ul>
+<p>
+  <strong>Verdict:</strong> a short uniform prefix + the component's kebab name is the dominant, predictable,
+  collision-safe scheme; the prefix is a per-library namespace. For WE the namespace is the <strong>standard</strong>
+  (<code>we-</code>, aligning with the <code>@webeverything</code> npm scope), not the impl (<code>fui-</code>). The
+  id→tag map is authored — opt-in element-ness, override for multi-element/irregular blocks — exactly as CEM models
+  it. WE's existing convention authority (<code>docs/agent/conventions.md</code>, machine-checked by
+  <code>check:standards</code>) is the home for the new clause, and the prefix is a
+  <strong>Config-Extends-Platform-Default</strong> setting (platform default <code>we-</code>; a design-system
+  project per <a href="/backlog/746/">#746</a> overrides).
+</p>
+
+<h2>What the research reshaped</h2>
+<p>
+  The item arrived (from #822's carve-out) as a single either/or — <em>derivable convention vs per-entry value</em>.
+  The survey splits it into two orthogonal forks plus a configurable dimension the framing omitted:
+</p>
+<ul>
+  <li>
+    <strong>Fork 1 (new, forced) — element-ness opt-in.</strong> Auto-deriving a tag from <code>type:Component</code>
+    is <strong>broken</strong> (fabrication), so element-ness is authored. Default: opt-in.
+  </li>
+  <li>
+    <strong>Fork 2 (original, sharpened) — value-default posture.</strong> Regular derivable convention
+    <code>&lt;prefix&gt;-&lt;id&gt;</code> with FUI's 5 names migrating to conform (default, ~75%) vs per-entry
+    authored ratifying FUI's existing names.
+  </li>
+  <li>
+    <strong>Supported by default (not a fork) — configurable prefix.</strong> Platform default <code>we-</code>;
+    design-system projects override; <code>fui-</code> excluded. The convention binds only global-registration
+    modes; compile-time/JSX + DI-override stay totally flexible.
+  </li>
+</ul>
+
+<p>
+  Full grounding and the file:line refs in
+  <code>reports/2026-06-17-custom-element-tag-naming-convention.md</code>.
+</p>
+{% endraw %}

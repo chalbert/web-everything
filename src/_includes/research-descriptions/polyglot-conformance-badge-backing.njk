@@ -1,0 +1,81 @@
+<h2>The Question</h2>
+<p>
+  The Block Explorer <strong>polyglot panel</strong> renders one tab per genWrapper target
+  (<code>react</code> / <code>vue</code>) showing the generated wrapper source. Slice (c) —
+  <a href="/backlog/913-polyglot-panel-per-target-conformance-badges-from-the-determ/">#913</a>, under epic
+  <a href="/backlog/746-block-explorer/">#746</a>, sibling of the behavioral badge
+  <a href="/backlog/967-polyglot-panel-behavioral-wrapper-conformance-badge-fui-side/">#967</a> — wants a
+  pass/fail <strong>conformance badge</strong> on each tab. The card was filed assuming an
+  <em>already-committed deterministic <a href="/backlog/506-cross-language-conformance-gate/">#506</a>
+  verdict</em> backs it. This survey grounds the decision: <strong>what deterministic verdict, if any, can
+  back a per-target conformance badge — or should the badge just be the behavioral one (#967)?</strong>
+</p>
+
+<h2>Grounding in the real tree (verified)</h2>
+<ul>
+  <li>The panel's target tabs are <code>react</code>/<code>vue</code> only (the genWrapper consume targets);
+    genWrapper is a pure <code>(decl, target) =&gt; string</code> emitting <strong>source only</strong> — no
+    diagnostics, no <code>lossy</code> flag, no conformance metadata, and <strong>no committed source
+    golden</strong> (its tests are substring assertions, not snapshots).</li>
+  <li>The committed #506 golden is the <strong>MaaS serve-origin</strong> gate — 14 <code>X-MaaS-*</code>
+    HTTP vectors comparing a reference-JS origin vs a generated <code>.NET</code> origin.
+    <strong>Zero react/vue content</strong> — a different generator/axis, not a per-target wrapper verdict.</li>
+  <li>The <strong>only</strong> react/vue conformance artifact is <strong>behavioral</strong>: a runner that
+    executes five contract vectors over a <em>live mounted</em> wrapper subject (dispatches real DOM events,
+    reads resulting attribute/property state) — exactly #967's scope, which depends on the
+    <a href="/backlog/912-polyglot-live-test-sandbox/">#912</a> live sandbox for a mounted subject.</li>
+</ul>
+
+<h2>Prior art surveyed</h2>
+<ol>
+  <li><strong><a href="https://custom-elements-everywhere.com/">custom-elements-everywhere.com</a></strong>
+    — the canonical per-framework conformance badge. Its methodology is <strong>behavioral</strong>: Karma
+    tests in real browsers checking that a framework can display a custom element, bind data, pass children,
+    and listen for DOM events. React's famous "100% as of v19" badge is a <em>runtime behavioral</em>
+    result, not a source snapshot. The industry's "wrapper/interop conformance badge" is behavioral by
+    definition. (<a href="https://github.com/webcomponents/custom-elements-everywhere">repo</a>)</li>
+  <li><strong><a href="https://stenciljs.com/docs/output-targets">Stencil output targets</a></strong> — the
+    closest analog (CEM&nbsp;&rarr; react/vue wrappers). Ecosystem testing wisdom is explicit that
+    snapshot-of-generated-source and behavioral assertions cover <strong>different risks</strong> and are
+    complementary: a source golden catches generator <em>drift</em>; only behavioral assertions verify the
+    wrapper actually forwards props/events.</li>
+  <li><strong>Snapshot / golden testing generally</strong> is a <em>regression</em> signal ("output
+    unchanged unless intentionally changed"), <strong>not</strong> a behavior/conformance guarantee.</li>
+</ol>
+
+<h2>Synthesis handed to #913</h2>
+<p>
+  Separating <em>what each candidate badge truthfully claims</em> from <em>how much it costs to build</em>
+  (the latter is prioritization, not a fork branch):
+</p>
+<ul>
+  <li><strong>A — deterministic wrapper-source golden.</strong> A generator-<em>regression</em> signal,
+    honest only if labelled "source-stable"; behind a <em>conformance</em> label it over-claims a guarantee
+    it does not verify — the same honesty flaw as C. A legitimate independent artifact, but not the
+    conformance badge.</li>
+  <li><strong>B — collapse #913's deterministic-conformance badge into #967's behavioral one.
+    ✅ recommended (~75–80%).</strong> The only signal that is genuinely <em>per-target conformance</em> is
+    behavioral, confirmed by the tree (the sole react/vue conformance artifact is behavioral) and by prior
+    art 1.
+    <a href="/backlog/954-split-polyglot-conformance-badge-deterministic-vs-behavioral/">#954</a> Fork&nbsp;2
+    split deterministic-vs-behavioral on the premise that a deterministic verdict <em>existed</em>; that
+    premise is false, so the two re-merge.</li>
+  <li><strong>C — cheap genWrapper <em>health</em> signal</strong> (emit-success / no-lossy /
+    no-diagnostics). genWrapper emits no such metadata today (a bare string), so C has nothing to read
+    without first building it; and "generated cleanly" ≠ conformant. Weakest.</li>
+</ul>
+<p>
+  <strong>Classification.</strong> The badge is FUI workbench product UI (<code>locus: frontierui</code>
+  already set); the conformance vectors are a WE-owned contract; the live-subject runner is impl&nbsp;&rarr;
+  FUI (<em>impl-is-not-a-standard</em>; <a href="/backlog/817-placement-test/">#817</a> "a running handler is
+  impl"). Under B only the vectors cross the WE&nbsp;&rarr;&nbsp;FUI seam, honoring
+  <a href="/backlog/700-contract-distribution/">#700</a> — matching #967's existing locus and
+  <code>blockedBy</code>.
+</p>
+<p>
+  <strong>Residual for the decider:</strong> whether a sandbox-independent deterministic tier is wanted
+  enough to keep a <em>relabelled</em> "source-stable" badge (A, honestly framed) as a <em>second</em> badge
+  alongside the behavioral one (the Stencil "both cover different risks" lesson) — vs. #913 being redundant
+  with #967 and a source-golden filed separately as a generator-regression test. Not a cost question; a
+  question of whether two distinct truthful signals both earn a badge.
+</p>

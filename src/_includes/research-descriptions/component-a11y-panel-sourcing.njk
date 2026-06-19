@@ -1,0 +1,87 @@
+<h3>The Question</h3>
+<p>
+    A per-component page (<code>/blocks/{id}/</code>) should be able to show an
+    <strong>accessibility panel</strong> — what a11y the component delivers and against which standards. This
+    is the third of three panel-data sourcing calls carved from
+    <a href="/backlog/727-web-docs-blocks-uniform-live-example-slot-on-every-per-compo/">#727</a>
+    (siblings: the <a href="/blocks/props-table/">props-table</a> API sourcing
+    <a href="/backlog/801-per-component-api-data-sourcing-for-the-web-docs-props-table/">#801</a> and the
+    token table <a href="/backlog/802-per-component-token-table-data-sourcing-for-the-web-docs-blo/">#802</a>),
+    under the Web Docs feature-pipeline epic
+    <a href="/backlog/623-web-docs-feature-pipeline-inventory-workbench-tools-derive-i/">#623</a>. The item
+    framed the origin as one choice between <em>intent/trait-derived metadata</em>, <em>per-demo axe
+    results</em>, or <em>authored notes</em>. This survey grounds the panel against prior art per design-first
+    step&nbsp;1 — and finds those three are not competing options at all.
+</p>
+
+<h3>What the tree already has</h3>
+<ul>
+    <li><strong>Authored a11y metadata already exists — and is unrendered.</strong>
+        <code>src/_data/blocks.json</code> carries an optional <code>webStandards</code> field on
+        <strong>28 of 74</strong> blocks (first at <code>blocks.json:25</code>), shaped
+        <code>{&lt;concern&gt;: {usage, reference}}</code> — e.g. <code>wizard.webStandards.ariaCurrentStep</code>
+        = an <code>aria-current</code> usage note + an MDN link. Across all entries the <code>reference</code>
+        points at the <em>contract</em> (95 MDN + 12 W3C/WAI incl. APG). <code>src/block-pages.njk</code> renders
+        <strong>none</strong> of it — the realization layer is authored but has no panel.</li>
+    <li><strong>Intents carry no a11y field.</strong> <code>src/_data/intents.json</code> (56 intents) has no
+        <code>a11y</code>/<code>aria</code>/<code>wcag</code> slot — an intent-derived contract would be a
+        <em>new schema</em>, not a projection of an existing one.</li>
+    <li><strong>Axe is route-level, not per-component.</strong>
+        <a href="/backlog/770-rendered-site-a11y-gate-axe-lane-route-allowlist-we-docs/">#770</a> ships
+        <code>tests/a11y/rendered-site-a11y.spec.ts</code> + <code>route-allowlist.ts</code>; its
+        <code>GATED_ROUTES</code> include the <code>/blocks/</code> index but <strong>not</strong>
+        <code>/blocks/{id}/</code>, and store no per-component metadata.</li>
+    <li><strong>The documented component renders inside a cross-origin FUI iframe.</strong> The
+        <code>fuiDemo</code> shortcode (<code>.eleventy.js:38</code>) embeds a FUI-hosted demo via
+        <code>&lt;iframe sandbox="allow-scripts allow-same-origin"&gt;</code>. Per
+        <a href="/backlog/732-decide-the-overlay-escape-mechanism-for-the-fui-demo-iframe-/">#732</a>, axe run
+        from the WE lane <em>cannot traverse into the cross-origin frame</em> — it would audit the WE
+        doc-page chrome, not the FUI component. FUI owns the impl <em>and</em> its rendered display.</li>
+</ul>
+
+<h3>Prior art</h3>
+<ul>
+    <li><strong>WAI-ARIA APG</strong> — the canonical implementation-agnostic <em>contract</em>: per-pattern
+        "Keyboard Interaction" + "Roles, States, and Properties". Reusable across every component that
+        implements the pattern.</li>
+    <li><strong>IBM Carbon</strong> — the only surveyed system that <em>visibly separates three layers</em>:
+        authored "Accessibility considerations", a "Resources" link to the APG pattern, and a dated
+        <strong>AVT</strong> test status (AVT1 automated / AVT2 keyboard / AVT3 screen-reader) plus a
+        per-component status matrix. The model to copy.</li>
+    <li><strong>Storybook <code>@storybook/addon-a11y</code></strong> — runtime-only live axe-core,
+        <em>not persisted</em>; a dev-time linter (its docs note axe covers "up to 57% of WCAG"). Not a
+        published claim.</li>
+    <li><strong>Material 3 / Fluent 2 / GOV.UK</strong> — hand-authored prose (guidance / user research), no
+        verification surfaced inline. <strong>Adobe React Aria</strong> — authored
+        implementation-<em>realization</em> prose.</li>
+</ul>
+
+<h3>The pivotal finding</h3>
+<p>
+    The item's three "origins" are not competing alternatives for one slot — they are the
+    <strong>three layers</strong> Carbon keeps separate: the <strong>contract</strong> (what the pattern
+    requires → the <em>intent</em> layer), the <strong>realization</strong> (how this block delivers it →
+    the block's <code>webStandards</code>, which already exists), and the <strong>verification</strong>
+    (axe/AVT results → conformance, and for FUI blocks that is FUI-owned data). Merging them implies a
+    sufficiency claim axe can't back — automated checks are a <em>separate, dated attestation</em>, never
+    authored prose and never proof of accessibility.
+</p>
+
+<h3>Recommendation (to ratify in #803)</h3>
+<ol>
+    <li><strong>Realization SoT = the existing block <code>webStandards</code> field</strong> — render it; do
+        not mint a new a11y schema or a parallel feed. It already exists on 28/74 blocks and is exactly what a
+        <em>per-component</em> panel shows.</li>
+    <li><strong>Contract = link out, don't mint now</strong> — surface each concern's existing
+        <code>reference</code> (MDN/APG/WAI) as the contract link (Carbon's "Resources" model); defer a
+        structured intent-layer a11y contract to its own item, triggered by a second consumer.</li>
+    <li><strong>Verification = none in v1; route-level #770 stands</strong> — no per-component axe badge; a
+        future signal arrives only as a FUI-published no-leakage output (#475). A per-block axe lane on
+        <code>/blocks/{id}/</code> is <em>broken</em> — it can't traverse the cross-origin <code>fuiDemo</code>
+        iframe.</li>
+</ol>
+
+<p class="text-sm text-gray-600">
+    Full grounding, classification pass, and red-team notes in
+    <code>reports/2026-06-16-component-a11y-panel-sourcing.md</code>.
+</p>

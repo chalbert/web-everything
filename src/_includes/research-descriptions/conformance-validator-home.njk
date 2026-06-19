@@ -1,0 +1,104 @@
+<h2>The Question</h2>
+<p>
+  Surfaced by <a href="/backlog/779-temporal-trait-impl-locus-we-blocks-vs-frontierui-blocks/">#779</a>:
+  implementers building WE-compatible libraries will eventually need a generic service to validate their
+  schema/manifest against the WE contract. The artifact <strong>forks by risk</strong>. The conformance
+  <strong>vectors</strong> (declarative input&nbsp;→&nbsp;expected-behavior data) are a WE artifact — data
+  can't "fail to deliver." The runnable <strong>validator</strong> that loads them and checks a library is
+  <strong>not</strong> WE (the user flagged a reputational risk: a big runnable tool that slips reads as
+  "WE is broken," and moving only the npm scope doesn't fix it — ownership carries the reputation) and
+  <strong>not</strong> FUI (it's generic across implementers, FUI is one). This survey grounds
+  <a href="/backlog/895-home-for-a-generic-we-conformance-schema-validation-service-/">#895</a>:
+  <strong>where does the runnable validator live</strong> — an independent open devtool repo, a Plateau-suite
+  open-core offering, or hosted by WE itself?
+</p>
+
+<h2>What the survey found</h2>
+<p>
+  The dominant pattern across real conformance tooling is a <strong>two-layer split nobody violates</strong>:
+  the standards body owns the <em>vectors/suite</em> as neutral data in its own repo, and the
+  <em>runnable validator is decoupled from the body</em>, almost always as OSS. Where a runnable tool ships,
+  the field splits into two live shapes — both anchored on a <em>complete open floor</em> — plus a third
+  (body-hosted) that re-attaches validator bugs to the standard and is the one to avoid for a young standard.
+</p>
+
+<h3>1 · Who owns the conformance suite vs the runnable validator</h3>
+<table>
+  <thead><tr><th>Precedent</th><th>Suite/spec owner</th><th>Validator owner &amp; model</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><a href="https://github.com/web-platform-tests/wpt">W3C Web Platform Tests</a></td>
+      <td>Cross-vendor neutral Core Team, no single owner</td>
+      <td>Each vendor runs WPT in its own harness; <a href="https://github.com/web-platform-tests/wpt.fyi">wpt.fyi</a> is a separate neutral aggregator</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/tc39/test262">TC39 test262</a></td>
+      <td>Ecma / TC39 — the body owns the suite</td>
+      <td><strong>No official runner</strong>; "no preference" to any runner — volunteer harnesses per engine</td>
+    </tr>
+    <tr>
+      <td><a href="https://validator.w3.org/nu/">Nu Html Checker / validator.nu</a></td>
+      <td>HTML spec = WHATWG/W3C</td>
+      <td>Open-source code, <strong>hosted free by W3C</strong> — standards-body-hosted (<em>the model to avoid here</em>)</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/json-schema-org/JSON-Schema-Test-Suite">JSON Schema</a></td>
+      <td>Spec org owns the JSON test vectors</td>
+      <td><strong>Fully independent community OSS</strong> (<a href="https://ajv.js.org/">Ajv</a> + dozens); body ships no runner</td>
+    </tr>
+    <tr>
+      <td><a href="https://stoplight.io/open-source/spectral">Spectral (Stoplight)</a></td>
+      <td>OpenAPI spec = OAI; rulesets community-authored</td>
+      <td><strong>Vendor open-core:</strong> Apache-2.0 CLI (complete, standalone) + hosted Stoplight platform</td>
+    </tr>
+    <tr>
+      <td><a href="https://tools.openapis.org/categories/description-validators.html">OpenAPI validators</a></td>
+      <td>Spec = OpenAPI Initiative</td>
+      <td><strong>Entirely third-party</strong>: Spectral, IBM, Redocly, Vacuum, Zally… no official validator</td>
+    </tr>
+    <tr>
+      <td><a href="https://www.deque.com/axe/axe-core/">axe-core / Deque</a></td>
+      <td>A11y rules derive from WCAG; axe rules are Deque's</td>
+      <td><strong>Vendor open-core:</strong> MPL-2.0 engine (free, powers Lighthouse) + commercial axe DevTools Pro / Monitor</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>2 · The reputational firewall</h3>
+<p>
+  The decoupling <em>is</em> the firewall: when the runner isn't the body's artifact, a runner bug is
+  unambiguously the runner's and the spec stays clean (test262's "no preference given by Ecma to any runner"
+  is the canonical statement). The standards-body-hosted model (Nu Html Checker) deliberately makes the body
+  wear the validator's bugs — tolerable only because HTML is mature, the checker is a single canonical
+  artifact, and the code is self-hostable. For a young standard it's the model to avoid, which restates the
+  user's "not WE" concern from the survey side.
+</p>
+
+<h2>What survives</h2>
+<p>
+  <strong>One forced invariant set + one genuine fork.</strong> Invariants: (a) vectors → WE as a separate
+  <code>@webeverything/…</code> data package (the neutral SoT, in WE's repo); the validator is (b)
+  <strong>not</strong> WE-hosted and (c) <strong>not</strong> FUI; and (d) whatever its home, the open CLI must
+  be a <em>complete standalone conformance floor</em> (the Spectral/axe-core test — runs with zero
+  account/license; any hosted tier adds hosting/reporting/collaboration only). The fork is the validator's
+  <strong>home</strong>: a <strong>Plateau-suite open-core offering</strong> (free CLI floor + optional hosted
+  Plateau service) vs an <strong>independent open devtool repo</strong>.
+</p>
+<p>
+  <strong>Recommended default: Plateau open-core (~75%).</strong> Pure independent OSS is the <em>strongest</em>
+  decoupling but presumes a community materializes to build + maintain the runner — which a pre-community,
+  solo-dev standard won't get, leaving vectors with no runner. Vendor open-core <em>guarantees</em> a runner
+  exists without re-coupling reputation to WE — provided the two structural invariants hold — and aligns with
+  the constellation's product layering (<a href="/backlog/091-managed-offering-constellation-layering/">#091</a>
+  served-product → plateau-app; <a href="/backlog/475-vision-is-a-plateau-service/">#475</a> impl capability =
+  Plateau service WE consumes) and the open-core line drawn on the <em>cost/hosting</em> axis, never
+  open-vs-proprietary. <strong>Residual (~25%):</strong> in a single-constellation setup, if Plateau is
+  perceived as the de-facto owner of WE, a validator bug can still splash onto the standard despite the formal
+  split; mitigation is the two invariants applied structurally (permissive license, self-hostable, forkable;
+  vectors in the WE repo). If a genuine multi-implementer community ever forms, an independent
+  neutral-governance repo becomes the correct override.
+</p>
+<p>
+  Full grounding (with the per-precedent reputational notes) in
+  <code>reports/2026-06-18-conformance-validator-home.md</code>.
+</p>

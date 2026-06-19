@@ -1,0 +1,106 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    Phase 2 of epic <a href="/backlog/1104-publish-the-website-publicly-gated-controlled-rollout/">#1104</a>
+    measures the live, gated Web Everything site (a private beta). Decision
+    <a href="/backlog/1136-choose-analytics-approach-for-the-public-we-site/">#1136</a> picks <em>how</em>:
+    dogfood WE's own <code>webanalytics</code> standard, use a privacy-respecting third party, or both
+    sequenced. Minimum signal the epic asks for: <strong>page views, referrers, and which spec/standard
+    pages get read</strong> — privacy-respecting and controlled.
+</p>
+
+<h2>Recommendation (to ratify in #1136)</h2>
+<ol>
+    <li><strong>Ratify the end-state &rarr; dogfood <code>webanalytics</code></strong> — the live site as
+        conformance proof for our own standard (the ratified dogfood-the-site goal,
+        <a href="/backlog/777-dogfood-the-we-docs-website-on-fui-components-rework-the-sit/">#777</a>). The
+        excluded branch is "third-party permanently, never dogfood." This is a <em>ratify</em>, not a weigh.</li>
+    <li><strong>Interim bridge &rarr; host-native privacy analytics (Cloudflare Web Analytics)</strong>
+        (~med-high, <em>contingent on #1135 &rarr; Cloudflare Pages</em>). Free, cookieless, no PII, no
+        consent banner, zero ops, no extra third party, nothing to rip out. Fallback if the chosen host has
+        none: a <strong>self-hosted open tool</strong> (Plausible CE / Umami / GoatCounter). The bridge
+        swaps out once the dogfood collector ships, behind the same #1138 instrumentation seam.</li>
+</ol>
+<p>
+    Soft, explicitly-revisitable, low-stakes (operational infrastructure for the project's own site, not a
+    WE standard). The decision <em>creates no standard</em> — <code>webanalytics</code>' layering is already
+    settled (#1012).
+</p>
+
+<h2>Finding 1 — the dogfood collector does not exist yet</h2>
+<p>
+    <code>webanalytics</code> is <code>status: draft</code>. The <strong>contract</strong> shipped and is
+    conformance-tested (#1012): <code>we:analytics/contract.ts</code> (the <code>CustomTracker</code>
+    interface), <code>we:analytics/provider.ts:30-41</code> (the <code>NoopTracker</code> default — every
+    call <em>silently dropped</em>), <code>we:plugs/webanalytics/CustomTrackerRegistry.ts</code> (DI
+    registry), and a green in-browser conformance demo. But there is <strong>no runnable collector</strong>:
+    the reference vendor adapters (Segment/Mixpanel/GA4) are <a href="/backlog/1013-webanalytics-reference-vendor-adapters-segment-mixpanel-ga4-/">#1013</a>
+    &mdash; <em>open</em>, <code>locus: frontierui</code>, and blocked-in-fact (the contract is not yet
+    replicated into FUI). So a live site instrumented today against the default registry reports
+    <strong>nothing</strong>. Dogfooding live = <em>building a collector first</em> — a build, not a wiring
+    task — while the early-adopter signal window is open <em>now</em>.
+</p>
+
+<h2>Finding 2 — the host coupling</h2>
+<p>
+    The sibling host decision <a href="/backlog/1135-choose-static-host-phase-1-gate-mechanism-for-the-public-we-/">#1135</a>
+    (<a href="/research/static-host-phase1-gate/">/research/static-host-phase1-gate</a>) recommends
+    <strong>Cloudflare Pages</strong> (~80%). <strong>Cloudflare Web Analytics</strong> ships free with
+    Pages, is cookieless, sets no client state, needs no consent banner, and delivers exactly the minimum
+    signal with <em>zero extra third party</em> (you are already on Cloudflare) and <em>nothing to rip
+    out</em>. So the cheapest privacy-respecting interim is contingent on the host: CF Pages &rarr; "toggle
+    it on"; a host with no native privacy analytics &rarr; self-host an open tool.
+</p>
+
+<h2>Finding 3 — prior-art survey (all cookieless / no-PII / no-consent)</h2>
+<table>
+    <thead>
+        <tr><th>Tool</th><th>Model</th><th>Cost</th><th>Ops</th><th>Data ownership</th><th>Note</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>Cloudflare Web Analytics</strong></td><td>host-native</td><td>free (with Pages)</td><td>~zero (toggle)</td><td>CF holds aggregates</td><td>dominant if on CF Pages</td></tr>
+        <tr><td>Plausible CE</td><td>self-host (AGPL)</td><td>free + a small server</td><td>container + DB</td><td>full, raw export</td><td>canonical privacy reference</td></tr>
+        <tr><td>Umami</td><td>self-host (MIT)</td><td>free + a small server</td><td>container + Postgres</td><td>full, SQL access</td><td>lighter than Plausible</td></tr>
+        <tr><td>GoatCounter</td><td>self-host / free hosted (non-commercial)</td><td>free</td><td>one Go binary + SQLite</td><td>full</td><td>lowest self-host footprint</td></tr>
+        <tr><td>Server-log (GoAccess)</td><td>parse access logs</td><td>free</td><td>a report job</td><td>full</td><td>no client script; coarse</td></tr>
+        <tr><td>Plausible Cloud / Fathom</td><td>hosted SaaS</td><td><strong>paid</strong></td><td>zero</td><td>vendor holds it</td><td>paid third-party processor &mdash; no gain over the free tiers here</td></tr>
+        <tr><td>GA4</td><td>hosted SaaS</td><td>free</td><td>low</td><td>Google + ad-network coupling</td><td><strong>excluded</strong> &mdash; not privacy-respecting</td></tr>
+    </tbody>
+</table>
+<p>
+    Privacy is already held by every viable option, so the decisive axis is <strong>operational burden +
+    data ownership + throwaway-on-swap</strong>, not features. Host-native wins on burden and throwaway;
+    self-hosted open tools win on raw-data ownership at an ops cost; hosted SaaS adds a paid processor for
+    nothing the free tiers don't give.
+</p>
+
+<h2>Finding 4 — the three options collapse to one ratify + one fork</h2>
+<p>
+    "Dogfood as the end-state" is the ratified #777 goal (a <em>ratify</em>, excluded branch =
+    third-party-forever). "Dogfood now vs third-party now" is <em>prioritization wearing a fork's
+    clothing</em> — both end at dogfooding and differ only on <em>when</em> to pay the collector-build cost
+    (Finding 1), so it is backlog ordering (the build = #1013 + a WE-site adapter), not a design branch.
+    "Both, sequenced" is therefore the <em>resolved shape</em>, not a third option. What genuinely remains
+    — a case-(b) either/or that cannot coexist as "the phase-2 approach" — is <strong>which interim
+    bridge</strong>.
+</p>
+
+<h2>Red-team of the default</h2>
+<p>
+    <em>"You're coupling analytics to an unratified host pick."</em> The ruling is host-native-privacy-first
+    with a self-hosted-open fallback — that survives any host; only the concrete product tracks #1135 (itself
+    ~80% CF Pages, soft/revisitable). <em>"Self-hosting gives raw-data ownership the dogfood loop wants —
+    start there."</em> True, but that buys an ops surface for a throwaway interim; the real ownership story
+    is the dogfood collector, and CF Web Analytics gives the minimum signal at zero ops / zero rip-out.
+    Both attacks fail against the ruling.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+    <li><a href="/backlog/1136-choose-analytics-approach-for-the-public-we-site/">#1136</a> — this decision.</li>
+    <li><a href="/backlog/1104-publish-the-website-publicly-gated-controlled-rollout/">#1104</a> — epic (phase 2 = analytics).</li>
+    <li><a href="/backlog/1135-choose-static-host-phase-1-gate-mechanism-for-the-public-we-/">#1135</a> — coupled host pick.</li>
+    <li><a href="/backlog/1003-implement-web-analytics-customtracker-contract-reference-ada/">#1003</a> / #1012 (contract) / #1013 (vendor adapters) — the <code>webanalytics</code> slices.</li>
+    <li><a href="/backlog/777-dogfood-the-we-docs-website-on-fui-components-rework-the-sit/">#777</a> — the dogfood-the-site goal.</li>
+</ul>
+{% endraw %}

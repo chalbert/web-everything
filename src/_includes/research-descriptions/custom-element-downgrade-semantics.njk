@@ -1,0 +1,116 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The scoped <code>CustomElementRegistry</code> polyfill in
+  <a href="/projects/webregistries/">webregistries</a> carries a stub method whose body is literally a
+  question: <code>downgrade() { /* TODO: What should downgrade do? */ }</code>
+  (<code>plugs/webregistries/CustomElementRegistry.ts:134-137</code>). Native
+  <code>CustomElementRegistry</code> has <strong>no</strong> <code>downgrade</code> — so unlike every
+  other method on this polyfill (<code>define</code>, <code>get</code>, <code>upgrade</code>,
+  <code>whenDefined</code>), there is no native behaviour to mirror. This topic surveys the platform to
+  answer: should the method do something, and if so what — or should a faithful polyfill simply not carry
+  it?
+</p>
+
+<h2>Finding — the platform deliberately omits a downgrade, on purpose, twice over</h2>
+<p>
+  The survey returns a single, consistent answer across the spec, MDN, and the scoped-registry proposal:
+  the custom-elements machinery is <strong>monotonic by design</strong> in two independent ways, and a
+  <code>downgrade</code> fights both.
+</p>
+<ul>
+  <li>
+    <strong>Element upgrade is a one-way prototype swap.</strong> Upgrading mutates an existing element
+    in place — its prototype is set to the registered class and lifecycle callbacks fire. The HTML
+    custom-element-state machine moves <em>undefined → uncustomized/failed → custom</em> and has
+    <strong>no transition back to uncustomized</strong>. There is no platform primitive that
+    un-upgrades an element; the only way to "remove" custom behaviour from a live node is to discard the
+    node and create a fresh one, which destroys identity and state.
+  </li>
+  <li>
+    <strong>The registry is append-only.</strong> Native <code>CustomElementRegistry</code> exposes
+    <code>define</code>, <code>get</code>, <code>getName</code>, <code>whenDefined</code>, and
+    <code>upgrade</code> — and notably <strong>no <code>undefine</code></strong>. Once a tag name is
+    defined it cannot be removed or redefined. A registry that cannot forget a definition cannot
+    coherently "downgrade" the elements that definition governs.
+  </li>
+</ul>
+<p>
+  The <a href="https://github.com/WICG/webcomponents/blob/gh-pages/proposals/Scoped-Custom-Element-Registries.md">WICG
+  Scoped Custom Element Registry proposal</a> — the standards-track basis for this whole polyfill —
+  adds a <code>CustomElementRegistry</code> constructor and <code>ShadowRoot</code> binding but
+  <strong>no teardown, un-scope, or downgrade</strong> operation. It explicitly defers any such
+  flexibility: "More flexibility can be analyzed post MVP; for now, a user-land abstraction can help."
+  The only place the word "downgrade" appears in the WHATWG discussions is the cross-document
+  <em>adoption</em> debate (<a href="https://github.com/whatwg/html/issues/6480">whatwg/html#6480</a>),
+  and even there the resolution <em>preserves</em> object identity for elements with an
+  <code>adoptedCallback</code> rather than tearing them down — it is not a public teardown API.
+</p>
+
+<h2>Web-standards alignment table</h2>
+<table>
+  <thead>
+    <tr><th>Native surface</th><th>Reverse operation?</th><th>Implication for <code>downgrade()</code></th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>customElements.upgrade(root)</code> — promote elements in a subtree</td>
+      <td><strong>None.</strong> Upgrade is one-way; no spec primitive un-upgrades.</td>
+      <td>A symmetric <code>downgrade(root)</code> has nothing to call; the asymmetry is intentional.</td>
+    </tr>
+    <tr>
+      <td><code>customElements.define(name, ctor)</code> — register a tag</td>
+      <td><strong>None.</strong> No <code>undefine</code>; redefining a name throws.</td>
+      <td>The registry cannot forget a definition, so it cannot un-scope elements either.</td>
+    </tr>
+    <tr>
+      <td>Custom-element state machine</td>
+      <td>Monotonic: <em>undefined → custom</em>, no edge back to uncustomized.</td>
+      <td>"Revert to a stand-in" would mean re-setting a live node's prototype — a non-standard internal hack with no downgrade lifecycle.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>What the three proposed options actually are</h2>
+<ul>
+  <li>
+    <strong>A — revert upgraded elements in a subtree back to their stand-ins.</strong> There is no
+    platform primitive for this. It would require manually <code>setPrototypeOf</code>-ing live nodes
+    back to a stand-in class, running no "downgrade callback" (none exists), and silently breaking the
+    elements' identity/state contract. It mirrors no native behaviour and contradicts the one-way
+    upgrade invariant.
+  </li>
+  <li>
+    <strong>B — drop the method (mirror the platform's deliberate omission).</strong> A polyfill's
+    contract is the native surface; native has no <code>downgrade</code> by design, so a faithful
+    polyfill should not carry it. Teardown of the <em>global</em> patch is already
+    <code>removePatches()</code>'s job (<code>plugs/webregistries/index.ts:72-80</code>).
+  </li>
+  <li>
+    <strong>C — a <code>removePatches()</code>-time helper that un-scopes a root.</strong> Redundant
+    and equally un-backed: <code>removePatches()</code> already restores the native global registry, and
+    even it cannot un-define the native stand-ins it registered (native <code>define</code> is
+    append-only). A per-root "un-scope" would inherit option A's impossibility for any element already
+    upgraded.
+  </li>
+</ul>
+
+<h2>Recommendation — drop the method (option B)</h2>
+<p>
+  Mirror the platform's deliberate omission. Custom-element upgrade is one-way and the registry is
+  append-only; both options that <em>do</em> something (A, C) fight those invariants and would ship a
+  non-standard mutation API with no native equivalent — exactly the kind of lock-in WE refuses
+  (<a href="/projects/webregistries/">native-first</a>). Remove <code>downgrade()</code> and let
+  <code>removePatches()</code> remain the sole, global-scoped teardown affordance. If a concrete
+  per-subtree teardown need ever surfaces (e.g. a micro-frontend unmount), design it then as a
+  <strong>named, explicitly non-standard extension</strong> with documented identity/state semantics —
+  not a mystery method whose name implies a symmetry the platform refuses to provide.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/projects/webregistries/">webregistries</a> — the project this method lives in.</li>
+  <li>Backlog <a href="/backlog/1103-define-customelementregistry-downgrade-semantics/">#1103</a> — the decision this research prepares.</li>
+  <li>Backlog <a href="/backlog/1088-webregistries-completion-global-patching-api-remaining-regis/">#1088</a> — the completion sub-epic this was carved from; <code>removePatches()</code> (the global teardown) is slice A there.</li>
+</ul>
+{% endraw %}

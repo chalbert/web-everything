@@ -14,7 +14,9 @@ tags: [design-reference, corpus, vision, swappable-provider, no-leakage]
 
 # Interim reference vision provider module for the design-ref capture gate
 
-The #480 vision-gate seam ships vendor-free: it resolves a provider by name from an external module (DESIGN_REFS_VISION_PROVIDER_MODULE) and ships only the null manual provider, so the gate's decision logic is built and unit-tested with a mock but cannot yet run end-to-end against live targets. Author the interim reference provider module — a thin no-leakage client that calls a vision model directly (per the #475 interim ruling, until the Plateau vision service lands) and self-registers via registerVisionProvider — returning the 6-verdict taxonomy {app,obstructed,marketing,error,blank,non-app}. Keep it OUT of the design-refs core (separate module, bring-your-own key) so no vendor name leaks into the WE repo tooling. Acceptance: run collect against the two known-bad targets (Photopea splash, Grafana stale deep-link) and confirm Photopea quarantines and Grafana admits/recovers.
+The #480 vision-gate seam ships vendor-free: it resolves a provider by name from an external module (DESIGN_REFS_VISION_PROVIDER_MODULE) and ships only the null manual provider, so the gate's decision logic is built and unit-tested with a mock but cannot yet run end-to-end against live targets. Author the interim reference provider module — a thin no-leakage client that calls a vision model directly (per the #475 interim ruling, until the Plateau vision service lands) and self-registers via registerVisionProvider — returning the 6-verdict taxonomy {app,obstructed,marketing,error,blank,non-app}.
+
+Keep it OUT of the design-refs core (separate module, bring-your-own key) so no vendor name leaks into the WE repo tooling. Acceptance: run collect against the two known-bad targets (Photopea splash, Grafana stale deep-link) and confirm Photopea quarantines and Grafana admits/recovers.
 
 ## Progress
 

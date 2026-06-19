@@ -1,0 +1,128 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    <a href="/backlog/747-design-system-equals-theme-plus-intents-bundle-manifest-catalog/">#747</a>
+    ratified <em>what a design system is</em> — a config-flavor manifest
+    (<code>{ extends, themeTokens, intentDefaults?, traitDefaults? }</code>).
+    <a href="/backlog/775-design-system-creator-assembler-open-core-layering-simple-fu/">#775</a> must
+    settle the <strong>open-core tiering of the tool that authors it</strong>: a <em>simple</em> assembler
+    embedded natively in FUI (free) and the <em>full</em> creator offered as a Plateau product
+    (<a href="/backlog/751-embedded-theme-design-system-creator-plateau/">#751</a>, the upsell). The
+    two-tier split is settled by construction (<a href="/backlog/091-web-docs-as-a-service-plateau/">#091</a>'s
+    constellation decomposition); the open question is <strong>exactly where the free/paid line sits — which
+    knobs are free</strong>. This survey gathers how comparable design-system / token / theme-builder tools
+    draw that line, per design-first step&nbsp;1, so the call reuses the market's vocabulary rather than
+    coining a tiering cold.
+</p>
+
+<h2>Recommendation (forks in #775)</h2>
+<ol>
+    <li><strong>Partitioning principle = the capability-cost line.</strong> Free = any deterministic,
+        fixed-cost, locally-runnable authoring that produces a self-hostable #747 manifest; paid = variable
+        per-call cost (vision/AI) <em>or</em> hosted persistence / collaboration / managed-vendor
+        integration. This is the market's universal line <em>and</em> the composition of #091 (self-host
+        floor), <a href="/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/">#475</a> +
+        the linear-cost rule (no uncapped per-call cost in the free floor), and minimize-lock-in (the free
+        floor speaks the open format). <em>High confidence — a composition of existing rulings, not a new
+        judgment.</em></li>
+    <li><strong>DTCG import free; proprietary-Figma ingest paid.</strong> The free FUI floor imports
+        <strong>DTCG</strong> (the open standard #747 already references — free everywhere in the market);
+        <strong>Figma ingest is a paid Plateau capability</strong> (a managed proprietary-vendor integration
+        needing API auth — the canonical Tokens&nbsp;Studio Pro line). <em>Med-high confidence.</em></li>
+</ol>
+
+<h2>Finding 1 — every theme/token tool draws the <em>same</em> free/paid line</h2>
+<table>
+    <thead>
+        <tr><th>Tool</th><th>Free</th><th>Paid</th><th>Line</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><a href="https://tokens.studio/pricing">Tokens Studio</a> (closest analog)</td>
+            <td>manual authoring, edit, git sync, export</td>
+            <td>multi-file sync, connect to Figma Styles, advanced theme mgmt, branch switcher, composition
+                tokens, collaboration</td>
+            <td>manual + open export free; <strong>managed integration + multi-file + collaboration paid</strong></td>
+        </tr>
+        <tr>
+            <td><a href="https://m3.material.io/blog/material-theme-builder">Material Theme Builder</a></td>
+            <td>full authoring, <strong>DTCG/DSP import + export</strong>, Style Dictionary codegen</td>
+            <td>— (free)</td>
+            <td>deterministic authoring + standard-format import is entirely free</td>
+        </tr>
+        <tr>
+            <td><a href="https://styledictionary.com/reference/utils/dtcg/">Style Dictionary</a></td>
+            <td>OSS — DTCG-compatible transform/build</td>
+            <td>— (free)</td>
+            <td>deterministic token transformation is a free primitive</td>
+        </tr>
+        <tr>
+            <td><a href="https://www.figma.com/community/plugin/1329812760871373657/codia-ai-design-screenshot-to-editable-figma-design">Codia</a> / AI screenshot→tokens</td>
+            <td>5 trial credits</td>
+            <td><strong>~$49 per image, metered per-call</strong></td>
+            <td><strong>AI/vision is per-call metered — never the free floor</strong></td>
+        </tr>
+        <tr>
+            <td><a href="https://www.capterra.com/p/266448/Supernova/">Supernova</a> / zeroheight / Knapsack</td>
+            <td>free/starter tier</td>
+            <td>$20–$399/mo — hosted persistence, collaboration, governance, seats</td>
+            <td>manual/local free; <strong>hosting + team + governance paid</strong></td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>Finding 2 — the line is tri-partite, and every tool agrees on all three</h2>
+<ol>
+    <li><strong>Manual, deterministic, locally-runnable authoring → FREE.</strong> Pick/edit tokens, set
+        values, export to a standard format. Material Theme Builder gates nothing here; Tokens Studio's free
+        tier <em>is</em> this.</li>
+    <li><strong>Per-call variable-cost automation (AI/vision) → PAID, metered.</strong> Screenshot→theme and
+        AI generation are always metered per-call (Codia's $49/image). No tool offers unbounded AI on a flat
+        free tier.</li>
+    <li><strong>Managed integration + hosted persistence + collaboration → PAID.</strong> Figma-Styles sync,
+        multi-file/branching, cloud save, sharing, team/governance — the Tokens Studio Pro line and the whole
+        of the zeroheight/Supernova/Knapsack paid tiers.</li>
+</ol>
+
+<h2>Finding 3 — open-standard import is free; proprietary-vendor integration is paid</h2>
+<p>
+    The split inside "import" is instructive: <strong>DTCG import is free everywhere</strong> (Material Theme
+    Builder imports DTCG/DSP free; Style Dictionary is OSS) — it is parsing an open standard you already own.
+    <strong>Figma-Styles connection is the canonical Pro feature</strong> in Tokens Studio — a proprietary
+    vendor <em>managed integration</em> needing API auth, not a file parse. So the free/paid line inside
+    ingest runs along <strong>open-standard format (free) vs proprietary-vendor managed integration
+    (paid)</strong> — not "any import = paid."
+</p>
+
+<h2>Finding 4 — mapped onto WE's rulings, the line is almost entirely <em>forced</em></h2>
+<ul>
+    <li><strong>The two-tier split is forced by #091</strong> — FUI ships the free self-host floor; the
+        complete product is a plateau-app open-core offering. A free FUI-native assembler + a full Plateau
+        creator (#751) <em>is</em> that pattern, not a fork.</li>
+    <li><strong>Manual authoring must be free</strong> — the #747 manifest is a WE <em>standard</em> artifact;
+        hand-authoring it must be in the free tier or the self-host promise breaks (#751 already frames it as
+        localStorage, no sign-in).</li>
+    <li><strong>Vision/screenshot→theme is forced PAID</strong> by
+        <a href="/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/">#475</a>
+        (vision is a no-leakage Plateau service, never a WE capability) + the linear-cost rule (no uncapped
+        per-call cost in the free floor) — confirmed by the universally-metered market.</li>
+    <li><strong>Cloud persist/share/collaboration is forced PAID</strong> by #751's sign-in-to-persist upsell
+        and the universal market line.</li>
+</ul>
+<p>
+    Three of the four boundary segments are forced. The only genuinely-open call is the <em>principle</em>
+    governing future knobs (Fork 1) and the one knob it most contests — deterministic format import,
+    DTCG&nbsp;vs proprietary Figma (Fork 2).
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+    <li>Decision: <a href="/backlog/775-design-system-creator-assembler-open-core-layering-simple-fu/">#775 — design-system creator/assembler open-core layering</a></li>
+    <li>Format the creator emits: <a href="/backlog/747-design-system-equals-theme-plus-intents-bundle-manifest-catalog/">#747 — design system = theme + intents bundle</a> (resolved)</li>
+    <li>The full Plateau creator (paid tier): <a href="/backlog/751-embedded-theme-design-system-creator-plateau/">#751 — embedded theme/design-system creator</a></li>
+    <li>Open-core principle: <a href="/backlog/091-web-docs-as-a-service-plateau/">#091 — Web Docs as a Service</a> (self-host floor, open-core by usage)</li>
+    <li>Vision = no-leakage Plateau service: <a href="/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/">#475</a>; reused pipeline <a href="/backlog/086-mockup-to-standard-code-tool/">#086</a></li>
+    <li>Tiering-mechanics precedent: <a href="/research/web-docs-open-core-tiering/">Web Docs Open-Core Tiering</a> (<a href="/backlog/428-web-docs-open-core-tiering-mechanics-metered-unit-threshold-/">#428</a>)</li>
+    <li>Epic: <a href="/backlog/746-block-explorer-interactive-fui-block-workbench/">#746 — Block Explorer</a></li>
+</ul>
+{% endraw %}

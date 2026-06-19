@@ -10,7 +10,7 @@ relatedProject: webdocs
 dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"
 dateResolved: "2026-06-16"
-graduatedTo: "plateau-app: src/technical-configurator/cost-preview.ts"
+graduatedTo: "plateau-app/src/technical-configurator/cost-preview.ts"
 tags: [webdocs, technical-configurator, plateau-embed, cost-preview, chunks]
 ---
 

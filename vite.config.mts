@@ -1,7 +1,6 @@
 import { defineConfig, Plugin } from 'vite';
 import { devPanel } from './tools/dev-panel/vite-plugin';
 import { moduleService } from './tools/maas/vite-plugin';
-import { traitEnforcer } from './tools/trait-enforcer/vite-plugin';
 
 /**
  * Vite plugin that automatically injects Web Everything patches into demo HTML files.
@@ -87,13 +86,11 @@ export default defineConfig({
     moduleService(),
     routerDemoFallback(),
     webEverythingPatches(),
-    // The Enforcer (#170 final leg / #484): generates the real `virtual:trait-manifest` at build
-    // time — a code-split chunk per scanned lazy trait, a hoisted static import per eager one. The
-    // traitMap is empty until a trait is authored, so today it emits an empty manifest (same as the
-    // former alias fallback) — but via real generation, so a trait dropped into the Map ships a chunk
-    // with no further wiring. Scans demos/ + src/ HTML for `<el trait>` usage. vitest keeps the
-    // empty-alias fallback (this plugin is Vite-only); tsc keeps the ambient plugs/virtual-trait-manifest.d.ts.
-    traitEnforcer({ traitMap: {} }),
+    // The Enforcer (the build-time trait-manifest generator) relocated to FUI with the rest of the
+    // trait-enforcer plugins (#894 / ratified #905) — WE iframe-embeds FUI demos and authors no trait
+    // modules, so its traitMap is empty by design and the plugin earned no place in WE's build. The
+    // empty `virtual:trait-manifest` is now served by the `resolve.alias` below (the byte-identical
+    // fallback vitest already used). WE keeps only the neutral #716 contract it owns.
   ],
   root: './',
   server: {
@@ -157,9 +154,11 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      // `virtual:trait-manifest` is now provided by the traitEnforcer plugin above (#484) — no alias
-      // here, since resolve.alias would shadow the plugin's resolveId and the Enforcer would never run.
-      // (vitest.config.ts keeps the empty-alias fallback: the plugin is Vite-only, absent under vitest.)
+      // The Enforcer relocated to FUI (#894), so `virtual:trait-manifest` is no longer provided by a
+      // plugin here. Alias it to the empty static manifest — the byte-identical fallback vitest.config.ts
+      // already uses (#116/#448) — so bootstrap's `import 'virtual:trait-manifest'` still resolves and the
+      // manifest stays empty (WE authors no trait modules, docs-rendering boundary).
+      'virtual:trait-manifest': '/plugs/webbehaviors/traitManifest',
       '@core': '/plugs/core',
       '@webregistries': '/plugs/webregistries',
       '@webinjectors': '/plugs/webinjectors',

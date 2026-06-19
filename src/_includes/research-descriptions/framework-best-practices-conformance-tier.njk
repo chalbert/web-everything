@@ -1,0 +1,131 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  <a href="/backlog/913-polyglot-panel-per-target-conformance-badges-from-the-determ/">#913</a>'s resolution
+  ratified a <strong>graded, multi-dimensional</strong> conformance model for the Block Explorer polyglot
+  panel (epic <a href="/backlog/746-block-explorer/">#746</a>): three honestly-labelled tiers, each catching
+  a different failure class —
+</p>
+<ol>
+  <li><strong>Surface-contract</strong> (deterministic, no sandbox; the generated wrapper exposes the
+    props/events/slots/HTML the CEM declares) &rarr;
+    <a href="/backlog/975-surface-contract-conformance-tier-deterministic-generated-wr/">#975</a></li>
+  <li><strong>Framework best-practices</strong> (idiomatic React/Vue — <em>this lint axis, absent from the
+    original survey</em>) &rarr;
+    <a href="/backlog/976-framework-best-practices-conformance-tier-idiomatic-react-vu/">#976</a></li>
+  <li><strong>Behavioral identity</strong> (live mount, fire events, assert state vs vectors) &rarr;
+    <a href="/backlog/967-polyglot-panel-behavioral-wrapper-conformance-badge-fui-side/">#967</a></li>
+</ol>
+<p>
+  The question for tier 2: <strong>what does "idiomatic-framework conformance" check, how does WE own the
+  criteria, and what verdict does the badge render</strong> — given that idiom-linting is unlike behavioral
+  conformance (it is <em>static source-pattern matching</em>, deeply tied to AST tooling) and idioms
+  <em>change over time</em> (React 19 deprecated <code>forwardRef</code>)?
+</p>
+
+<h2>Grounding in the real tree (verified)</h2>
+<p>The genWrapper emitters are the subject of the lint axis — both verified in
+  <code>fui:tools/gen-wrapper/genWrapper.mjs</code>:</p>
+<ul>
+  <li><strong>React emitter</strong> (<code>reactWrapper</code>, lines 74&ndash;144): event-prop naming is
+    already idiomatic &mdash; <code>eventHandlerName</code> (line 38) maps <code>change</code> &rarr;
+    <code>onChange</code>. <strong>But it exposes no host ref</strong>: it creates its <em>own</em> internal
+    <code>useRef</code> (line 130) and never forwards it &mdash; so neither the pre-19 <code>forwardRef</code>
+    idiom nor the React-19 <code>ref</code>-as-prop idiom is satisfied. The <code>useEffect</code> has
+    <strong>no dependency array</strong> (lines 132&ndash;137), re-running every render. These are exactly
+    the idiom gaps tier 2 targets.</li>
+  <li><strong>Vue emitter</strong> (<code>vueWrapper</code>, lines 147&ndash;193): mostly idiomatic &mdash;
+    <code>defineComponent</code>, typed <code>props</code> (<code>{ type: String, required: false }</code>,
+    line 156), explicit <code>emits: [...]</code> array (line 181). Misses <strong>emit validators</strong>
+    (the array form satisfies <code>vue/require-explicit-emits</code> but not
+    <code>vue/require-emit-validator</code>); <code>vuePropCtor</code> (lines 64&ndash;71) is best-effort
+    (defaults to <code>String</code>).</li>
+  <li><strong>WE already ingests linters into a neutral pivot:</strong>
+    <code>we:scripts/validation-normalize/adapters/eslint.mjs</code> + <code>oxlint.mjs</code> normalize
+    incumbent linter configs into a neutral form (the adapter-as-normalization-hub pattern) &mdash; evidence
+    WE treats linters as <em>ingestable incumbents over a neutral contract</em>, never as the standard
+    itself.</li>
+</ul>
+
+<h2>Prior art surveyed</h2>
+<ol>
+  <li><strong><a href="https://react.dev/blog/2024/12/05/react-19">React 19 deprecates
+    <code>forwardRef</code></a>.</strong> <code>ref</code> is now a regular prop on function components;
+    <code>forwardRef</code> still works for back-compat but is no longer the idiom. <strong>A hardcoded
+    "must use <code>forwardRef</code>" criterion would be <em>wrong</em> against React 19</strong> &mdash;
+    proof that idioms shift, so the criteria contract must be versioned/extensible and the verdict advisory,
+    not a frozen MUST-gate. React 19 also added first-class custom-element support.</li>
+  <li><strong><a href="https://eslint.vuejs.org/">eslint-plugin-vue</a></strong> is the authoritative Vue
+    idiom source: <code>vue/require-prop-types</code> (props specify at least a type),
+    <code>vue/require-explicit-emits</code> (declare emitted events &mdash; matters because Vue 3
+    attribute-fallthrough makes undeclared <code>v-on</code> listeners fall through as native listeners),
+    <code>vue/require-emit-validator</code> (typed emit declarations). The genWrapper Vue output passes the
+    first two, misses the third.</li>
+  <li><strong>eslint-plugin-react / typescript-eslint</strong> are the React-side idiom authorities
+    (hooks-deps, event-handler naming, ref handling). These are <strong>ESLint-AST-coupled</strong> &mdash;
+    idiom checks are fundamentally static source-pattern matching, <em>unlike</em>
+    <a href="/research/behavioral-conformance-vectors-kit/">behavioral conformance (#899)</a> which is
+    observable runtime behavior and engine-neutral by nature.</li>
+  <li><strong>Severity model</strong> &mdash; WCAG (A/AA/AAA), ARIA-AT priority tiers, ESLint
+    (error/warn/off). The established pattern for SHOULD-level / best-practice criteria is a
+    <strong>severity-graded, non-blocking</strong> signal, not a binary pass/fail gate. Idioms are
+    SHOULD-level (legitimate alternatives exist), so the conformance literature consistently grades rather
+    than gates them.</li>
+  <li><strong><a href="https://custom-elements-everywhere.com/">custom-elements-everywhere.com</a></strong>
+    scores frameworks <em>behaviorally</em>, not by lint &mdash; confirming the idiom tier is a genuinely
+    <em>separate</em> axis from #967's behavioral one, catching a different (style/maintainability) failure
+    class.</li>
+</ol>
+
+<h2>Synthesis handed to #976</h2>
+<p><strong>Forced invariants (inherited &mdash; ratify, not weigh):</strong></p>
+<ul>
+  <li><strong>Ownership decomposition</strong> &mdash; criteria/catalog &rarr; WE, lint runner &rarr; FUI,
+    hosted multi-implementer exerciser &rarr; Plateau. Inherited verbatim from #913's resolution +
+    <a href="/backlog/899-behavioral-conformance-vectors-in-browser-implementer-valida/">#899</a> + the
+    <a href="/projects/">constellation-placement</a> statute. Not re-decided.</li>
+  <li><strong>Honesty rule</strong> &mdash; the badge is labelled precisely "best-practices"/"idiomatic",
+    never a bare "conformance". Inherited from #913.</li>
+  <li><strong>Distinct tier</strong> &mdash; idiom quality &ne; surface contract (#975) &ne; behavior
+    (#967). Ratified by #913.</li>
+</ul>
+<p><strong>Supported by default (not decisions):</strong></p>
+<ul>
+  <li><strong>The criteria <em>set</em> is an open registry</strong> (Config-Extends-Platform-Default, not a
+    "which rules" fork): a default-less core + a platform-flavor default {React: host-ref exposure,
+    event-prop <code>on*</code> naming, hooks-deps; Vue: <code>require-prop-types</code>,
+    <code>require-explicit-emits</code>, <code>require-emit-validator</code>}. Projects extend/override.</li>
+  <li><strong>The lint <em>engine</em> (ESLint + eslint-plugin-react/vue vs. a bespoke AST checker) is a FUI
+    impl choice</strong> &mdash; WE mandates nothing (mandate-nothing). "Reuse an existing linter?" is FUI's
+    call; "reuse is cheaper" is <em>prioritization</em>, never a fork branch.</li>
+</ul>
+<p><strong>Two genuine forks (the real residual):</strong></p>
+<ul>
+  <li><strong>Fork 1 &mdash; shape of the WE criteria contract:</strong> an engine-neutral criterion
+    <em>catalog</em> (<strong>recommended, ~70%</strong>; named idioms + rationale + per-framework
+    applicability + severity + machine-readable id, with FUI mapping each id to a concrete check) vs. an
+    executable ESLint ruleset as the WE standard (bakes a JS-only AST engine into a contract &rarr; lock-in,
+    cuts <a href="/backlog/855-decide-the-we-fui-wrapper-handoff-mechanism-for-the-polyglot/">#855</a> /
+    <a href="/backlog/817-constellation-placement-of-guard-validity-merge-validator-re/">#817</a>). Residual:
+    if a neutral catalog proves too vague to drive a real checker without AST encoding, the ESLint-ruleset
+    branch's concreteness wins &mdash; high-leverage, flag for skeptic.</li>
+  <li><strong>Fork 2 &mdash; verdict nature:</strong> an advisory severity-graded score
+    (<strong>recommended, ~75%</strong>; idioms are SHOULD-level, a binary "fails idiom = non-conformant"
+    over-claims and ossifies against idiom drift &mdash; React 19) vs. a binary pass/fail gate symmetric with
+    the two MUST-tiers (#975/#967). A graded score degrades trivially to binary; the reverse doesn't.</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/backlog/976-framework-best-practices-conformance-tier-idiomatic-react-vu/">#976</a> &mdash;
+    the decision this survey prepares.</li>
+  <li><a href="/backlog/913-polyglot-panel-per-target-conformance-badges-from-the-determ/">#913</a> &mdash;
+    ratified the graded three-tier model and spawned #975/#976.</li>
+  <li><a href="/research/polyglot-conformance-badge-backing/">polyglot-conformance-badge-backing</a> &mdash;
+    the #913 prep survey that established the graded model.</li>
+  <li><a href="/research/behavioral-conformance-vectors-kit/">behavioral-conformance-vectors-kit</a> &mdash;
+    #899; the engine-neutral behavioral-vectors precedent Fork 1 echoes (meaning&rarr;WE, runner&rarr;FUI).</li>
+  <li><a href="/research/we-fui-wrapper-handoff/">we-fui-wrapper-handoff</a> &mdash; #855; "only the contract
+    crosses the WE&rarr;FUI seam, code never does" &mdash; the principle behind Fork 1's default.</li>
+</ul>
+{% endraw %}

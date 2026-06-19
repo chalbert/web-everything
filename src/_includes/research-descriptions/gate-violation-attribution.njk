@@ -1,0 +1,74 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+  Multiple agent sessions share <strong>one working tree</strong> in this repo. The whole-repo gate
+  (<code>check:standards</code>) exits non-zero on <em>any</em> error and has no notion of <em>whose</em>
+  change a violation belongs to — so a concurrent session's in-flight file reds <em>your</em> gate run,
+  even though the breakage isn't yours. The standing rule says to step over a purely-external red, but
+  the triage is manual today (<code>git status</code> + grep the error lines). This survey grounds
+  <a href="/backlog/949-make-the-backlog-gate-attribute-violations-so-a-concurrent-s/">backlog&nbsp;#949</a>:
+  how should the gate attribute violations to their owning work so that only <em>your</em> set blocks you?
+</p>
+
+<h3>Prior art surveyed</h3>
+<ul>
+  <li>
+    <strong>Nx <code>affected</code>.</strong> Git computes changed files against a <em>base ref</em>
+    (default the main branch), the project graph expands them to affected projects, and tasks run only on
+    that subset; base/head are explicit (<code>--base=main~1 --head=HEAD</code>) with a <code>--files</code>
+    override. The canonical "scope CI to the changeset" pattern — but it assumes a <em>single actor against
+    a clean base ref</em>.
+  </li>
+  <li>
+    <strong>reviewdog <code>-filter-mode</code>.</strong> <code>added</code> (default; added/modified
+    lines only), <code>diff_context</code>, <code>file</code> (whole file for any changed file), and
+    <code>nofilter</code>. The linter still scans everything; findings are <em>filtered</em> to the diff
+    before they fail or comment. <code>file</code> mode is the granularity #949 wants — a finding in a file
+    you touched is yours.
+  </li>
+  <li>
+    <strong>Android Lint baseline / betterer.</strong> Snapshot current violations into a baseline file;
+    later runs report <em>only new</em> issues. A <em>temporal</em> ratchet over legacy debt — separates
+    old-vs-new in time, globally, not mine-vs-theirs by owner.
+  </li>
+  <li>
+    <strong>lint-staged.</strong> Run linters only over git-staged paths — the per-commit changed set.
+    Single-actor, clean-base assumption again.
+  </li>
+  <li>
+    <strong>CODEOWNERS.</strong> A declared <em>path&nbsp;→&nbsp;owner</em> map — the "manifest" family of
+    attribution: explicit and durable, but declared rather than derived, so it drifts from reality.
+  </li>
+  <li>
+    <strong>git worktrees / per-branch isolation.</strong> Give each actor its own checkout against a
+    clean base; then naive whole-repo gating already sees only that actor's work. The structural
+    alternative that makes the single-actor tooling above simply apply.
+  </li>
+</ul>
+
+<h3>The load-bearing mismatch</h3>
+<p>
+  Every "changed-files" tool above assumes <strong>one actor working against a clean base ref</strong>, so
+  <code>git diff</code> vs <code>HEAD</code> <em>is</em> "my change." Our problem is the inverse:
+  <strong>N actors sharing one dirty working tree with no per-actor branch</strong>, where
+  <code>git diff</code> vs <code>HEAD</code> yields the <em>union</em> of everyone's edits — exactly the
+  over-attribution we're undoing. Recovering "mine specifically" needs extra per-session state that
+  single-actor tooling never carries (a per-session baseline snapshot, a declared manifest, or a session
+  file-claim registry) — <em>or</em> the structural fix of isolating each session into its own worktree so
+  a clean base re-appears.
+</p>
+
+<h3>What this hands the decision</h3>
+<p>
+  Three forks. <strong>Fork&nbsp;1 (strategy):</strong> attribute in-gate vs isolate sessions into git
+  worktrees — recommend in-gate attribution (preserves the shared-tree + running-dev-server + commit-to-
+  <code>main</code> workflow; isolation is the heavier escalation). <strong>Fork&nbsp;2 (signal):</strong>
+  a per-session git baseline snapshot taken at <code>claim</code> (derived, not declared, fails safe) vs a
+  declared frontmatter manifest vs a session file-claim registry extending <code>reservations.json</code>.
+  <strong>Fork&nbsp;3 (behavior):</strong> a <code>--scope</code> filter mode (exit non-zero only on
+  in-scope errors, default whole-repo run unchanged) vs a baseline ratchet (wrong axis — temporal, not
+  by-owner) vs annotate-only (doesn't change the exit, so doesn't meet the ask). <code>check:health</code>
+  reuses the scope mode keyed directly on item-id since its findings already carry one. Full grounding in
+  <code>reports/2026-06-18-gate-violation-attribution.md</code>.
+</p>
+{% endraw %}

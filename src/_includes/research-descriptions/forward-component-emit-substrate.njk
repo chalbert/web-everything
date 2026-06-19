@@ -1,0 +1,108 @@
+<h2>The Question</h2>
+<p>
+  The polyglot adapter panel (<a href="/backlog/753-polyglot-adapter-panel/">#753</a>), under the Block
+  Explorer epic (<a href="/backlog/746-block-explorer-interactive-fui-block-workbench/">#746</a>), wants to
+  <strong>generate this block across React / Vue / Svelte / Angular / native WC and live-test each</strong>.
+  <a href="/backlog/810-verify-build-the-generation-adapter-per-framework-component-/">#810</a> verified the
+  tree: the forward per-framework <strong>component</strong> emitters do not exist, and no existing neutral
+  substrate forward-emits to them. This survey grounds
+  <a href="/backlog/811-decide-the-forward-component-emit-substrate-per-framework-em/">#811</a>:
+  <strong>what backs forward component emit?</strong> The item entered prep with one fork (extend the ingest
+  <code>ComponentIR</code> · HTML-canonical adapters · a new forward IR) and the note that prior art across
+  the five frameworks wasn't surveyed yet. Per design-first step&nbsp;1, this surveys the leading
+  multi-framework component tooling so the forks reuse shipping prior art instead of a cold guess.
+</p>
+
+<h2>What the survey found</h2>
+<p>
+  The prior art splits into <strong>two families</strong>, and the item's three options all live in only one
+  of them.
+</p>
+
+<h3>1 · The two families of "forward component emit"</h3>
+<table>
+  <thead><tr><th>Family</th><th>Reference tool</th><th>What it emits</th><th>Single source of truth</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Transpile to native source</strong></td>
+      <td><a href="https://github.com/BuilderIO/mitosis">Mitosis</a> (Builder.io)</td>
+      <td>Idiomatic React / Vue / Svelte / Angular / Solid / Qwik <em>component source</em> (+ WC/Lit/Stencil targets)</td>
+      <td>A <strong>JSON IR purpose-built for emit</strong> (static, serializable) — parsed from a static JSX subset</td>
+    </tr>
+    <tr>
+      <td><strong>WC&nbsp;+ generated wrappers</strong></td>
+      <td><a href="https://github.com/stenciljs/output-targets">Stencil output targets</a>, <a href="https://www.npmjs.com/package/@lit-labs/gen-wrapper-react">Lit Labs gen-wrapper-*</a></td>
+      <td>One web component + <em>thin per-framework wrapper</em> components (interop shims)</td>
+      <td>The <strong>web component itself</strong>; wrappers are generated off its <a href="/protocols/#protocol-custom-elements-manifest">Custom Elements Manifest</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>2 · Mitosis: neutral IR → N frameworks is real — and its IR is emit-shaped, not ingest-shaped</h3>
+<p>
+  Mitosis is the existence proof that a neutral IR forward-emits idiomatic source to every target. Two
+  load-bearing details. (a) Its <code>MitosisComponent</code> IR is <strong>purpose-built for emit</strong>
+  — a deliberately static, serializable JSON shape; Mitosis did <em>not</em> reuse an analysis/ingest
+  representation, it built an emit-shaped one. That is direct evidence <strong>for Option C over Option
+  A</strong>: the WE upgrader <code>ComponentIR</code> is explicitly scoped for <em>lossy ingest of a
+  tractable subset</em> ("flag, don't fake"), the wrong shape to carry styling/events/slots/reactivity for
+  faithful forward output. (b) WC is just one target among ~15 — a transpiler treats native WC as a peer
+  output. The per-framework <strong>template compilers</strong> (Vue SFC, Svelte, Angular) confirm Option B's
+  con concretely: the template half of an HTML→framework adapter is tractable, but binding/event idioms
+  (<code>v-model</code>, Svelte <code>bind:</code>, Angular <code>[()]</code>) are real grammars a flat HTML
+  tree under-specifies — so HTML-canonical adapters would re-grow exactly the dialect knowledge Mitosis's IR
+  already encodes.
+</p>
+
+<h3>3 · Stencil &amp; Lit Labs: the leaders ship WC + CEM-driven wrappers, not transpilation</h3>
+<p>
+  <a href="https://stenciljs.com/docs/vue">Stencil output targets</a>
+  (<code>@stencil/react-output-target</code> / <code>-vue</code> / <code>-angular</code>) author once as a
+  web component and <strong>auto-generate framework wrapper components</strong> that smooth properties vs
+  attributes, custom events, and types — one runtime, wrappers not reimplementations.
+  <a href="https://www.npmjs.com/package/@lit-labs/gen-wrapper-vue">Lit Labs</a>
+  (<code>gen-wrapper-react/vue/angular</code> + <code>gen-manifest</code>) generates those wrappers
+  <strong>from the Custom Elements Manifest</strong>. Both converged: the web component is the source of
+  truth; the per-framework artifact is a wrapper keyed off CEM.
+</p>
+
+<h3>4 · The platform shift: React 19 = 100% on Custom Elements Everywhere</h3>
+<p>
+  <a href="https://custom-elements-everywhere.com">Custom Elements Everywhere</a> now scores
+  <strong>React 19 at 100%</strong> — full custom-element support (props flow to properties, custom DOM
+  events work without <code>ref</code> plumbing); Vue, Svelte and Angular have long scored ~100%. React was
+  the lone historical laggard (the 2017 props-vs-attributes issue), now closed. So <strong>as of 2026 a
+  native web component drops cleanly into all five frameworks with no per-framework artifact at all</strong>
+  for common usage. Since the block already <em>is</em> a WC (#810), the conformance claim the panel wants to
+  demonstrate is already true for plain WC consumption — the value-add of any generated artifact is either
+  ergonomic wrappers or full idiomatic source.
+</p>
+
+<h2>What it means for the forks</h2>
+<ul>
+  <li><strong>A new top-level fork the item missed — the emit <em>model</em>.</strong> WC-core + generated
+    wrappers vs full native-source transpilation. If wrappers, the entire neutral <em>component</em> IR
+    question (A/B/C) <strong>dissolves</strong>: you need the block's CEM (an already-ratified WE protocol,
+    derived via <code>scripts/gen-cem.mjs</code>) + a wrapper generator + a FUI-hosted live demo — no
+    component IR at all.</li>
+  <li><strong>A/B/C survive only <em>inside</em> the transpile branch, and the default flips to C.</strong>
+    Mitosis built an emit-purpose IR rather than reuse a lossy ingest rep; B must re-grow per-framework
+    binding dialects and the existing <code>htmlToJsx</code> is React/JSX-only and tree-level. So within
+    transpile, the default moves from the item's B to <strong>C</strong>.</li>
+  <li><strong>Recommended default: WC-core + CEM-driven wrappers</strong> — the block is already a WC, all
+    five frameworks consume WCs cleanly (React 19 = 100% CEE), the wrapper generators are shipping prior art
+    keyed off the CEM WE already ratified (<a href="/backlog/626-map-workbench-features-to-we-standards-which-intents-blocks-/">#626</a>),
+    and it is far the smallest build. Transpilation (the Mitosis path) is the maximalist "idiomatic source
+    per framework" option, filed as a later enhancement.</li>
+  <li><strong>Classification.</strong> Substrate/generation is a WE forward-adapter artifact (the
+    #463/#505/#507 polyglot family); the live render is FUI's (docs-rendering boundary — WE embeds a
+    FUI-hosted <code>fuiDemo</code> iframe, never renders FUI block code); the conformance badge is the #506
+    deterministic gate. Per-framework emitters are author-time <strong>devtools providers</strong> (the
+    explicit-input <code>CustomAnalyzerRegistry</code> shape), not a runtime DI registry. Option W mints no
+    new protocol; it reuses <code>custom-elements-manifest</code>.</li>
+</ul>
+
+<p>
+  Full grounding in <code>reports/2026-06-16-forward-component-emit-substrate.md</code>.
+</p>
+</content>

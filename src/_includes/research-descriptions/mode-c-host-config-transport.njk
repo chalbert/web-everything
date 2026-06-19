@@ -1,0 +1,77 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for the config-transport decision
+  (<a href="/backlog/881-decide-the-we-fui-mode-c-host-config-transport-for-dogfooded/">#881</a>) that gates the
+  WE-docs chrome migration
+  (<a href="/backlog/865-migrate-we-docs-site-chrome-to-fui-components-header-nav-foo/">#865</a>), under the
+  dogfooding epic <a href="/backlog/777-dogfood-the-we-docs-website-on-fui-components-rework-the-sit/">#777</a>.
+  Mode C (<a href="/backlog/786-mode-c-fui-embed-sdk-gains-a-shadow-dom-in-document-render-m/">#786</a>) mounts a
+  FUI component in WE's own DOM behind a shadow root with <strong>no config channel</strong> — the SDK calls
+  <code>mod.mountInDocument(root)</code> with only the <code>ShadowRoot</code>. The dogfooded chrome needs WE to
+  supply its <strong>nav tree / brand / footer</strong> — WE-owned information architecture (content) — to FUI's
+  <code>app-shell</code> / <code>sectioned-nav</code> / <code>button</code> blocks
+  (<a href="/backlog/870-build-the-must-build-fui-chrome-blocks-app-shell-sectioned-d/">#870</a>), which expose
+  <code>mount*(root, config)</code> factories. The
+  <a href="/backlog/765-relax-the-we-fui-isolation-boundary-for-an-in-document-di-mo/">#765</a> docs-rendering
+  boundary forbids baking WE's IA into a FUI module, so host config must cross <strong>WE→FUI at mount time</strong>
+  — a reusable cross-repo convention every future mode-C host inherits.
+</p>
+
+<h2>The load-bearing grounding wrinkle</h2>
+<p>
+  <code>AppShellConfig</code> takes <strong>live DOM <code>Node</code>s</strong> (<code>nav?: Node</code>,
+  <code>footer?: Node</code>, <code>headerControls?: Node[]</code>), but mode C has <strong>no host→module JS
+  handoff point</strong>: the SDK imports the module and calls <code>mountInDocument(root)</code>; the host never
+  gets a factory reference. The only host-reachable handle inside the module is <code>root.host</code> plus whatever
+  the host left in the DOM. So <strong>any transport riding the existing SDK is inherently DOM-mediated and must
+  carry a serializable projection</strong>; the generic FUI module deserializes it and rebuilds the
+  <code>Node</code> tree via the sub-block factories before calling <code>mountAppShell</code>. The decision
+  therefore defines a <strong>JSON-serializable <code>ChromeConfig</code></strong> schema, not a pass-through of
+  <code>AppShellConfig</code>.
+</p>
+
+<h2>Four prior-art families</h2>
+<table>
+  <thead>
+    <tr><th>Family</th><th>What it is</th><th>Prior art</th><th>Verdict for #881</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>data-*</code> attribute JSON</td>
+      <td>Host writes config on the mount point; module reads <code>root.host.dataset</code>.</td>
+      <td>Stripe Elements, Cloudflare Turnstile, analytics embeds — the dominant third-party-widget convention.</td>
+      <td><strong>Option A.</strong> Decoupled, standards-compliant, degrades cleanly. Con: deep JSON inflates via HTML entity-encoding.</td>
+    </tr>
+    <tr>
+      <td><code>&lt;script type="application/json"&gt;</code> sidecar</td>
+      <td>Host emits a config script inside the mount point; module parses its text.</td>
+      <td>JSON-LD, Inertia <code>data-page</code>-vs-script-tag, many web-component init recipes.</td>
+      <td><strong>Refines Option A.</strong> No entity-encoding overhead, reads naturally for a deep nav tree — the recommended carrier, not a rival channel.</td>
+    </tr>
+    <tr>
+      <td>JS property / typed argument</td>
+      <td>Pass a typed config object via a factory / property.</td>
+      <td>The web-component-native way to hand over complex objects.</td>
+      <td><strong>Option B.</strong> What a contract change (<code>mountInDocument(root, hostConfig?)</code>) buys — but needs a JS handoff mode C lacks, so it touches the #786 contract + SDK + every consumer. A clean later promotion.</td>
+    </tr>
+    <tr>
+      <td>Light-DOM declarative HTML</td>
+      <td>Host emits real <code>&lt;a&gt;</code> / footer markup as children; module reads/enhances it.</td>
+      <td>The "HTML web component" pattern.</td>
+      <td>Variant only — doubles as the no-JS SSR baseline, but #865 keeps <code>base.njk</code> as that baseline and scopes PE fallback out.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Net effect on the decision</h2>
+<p>
+  The survey <strong>confirms Option A and dissolves its sole residual</strong> (deep config in a string
+  attribute) by adopting the <code>&lt;script type="application/json"&gt;</code> sidecar as the carrier — rather
+  than reshaping the fork. It adds one load-bearing constraint the prepared item now records: define a
+  serializable <code>ChromeConfig</code> projection the generic module maps to <code>AppShellConfig</code> by
+  building the sub-block <code>Node</code>s. Fork 2 (mount granularity) is unmoved — <code>app-shell</code> is the
+  composing block and static chrome has no independent-lifecycle need, so one mount point / one config blob holds.
+  Full grounding in <code>reports/2026-06-17-881-mode-c-host-config-transport.md</code>.
+</p>
+{% endraw %}

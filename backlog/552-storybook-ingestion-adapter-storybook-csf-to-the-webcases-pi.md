@@ -17,7 +17,9 @@ crossRef: { url: /backlog/426-incumbent-ingestion-adapters-storybook-mintlify-to
 
 # Storybook ingestion adapter — Storybook (CSF) to the webcases pivot
 
-The Storybook ingestion adapter build — successor to the #426 decision (Fork 2 = A). A plain per-source provider module { source, ingest } in FUI's webdocs/adapters/ (the we:eslint.mjs/oxlint.mjs pattern, no registry/DI): ingest maps Storybook CSF Meta/Story exports to { id, title, description, code } keyed by block id and emits WebCases directly, bypassing parseWebCase (its <!-- WEB CASE --> convention is WE-specific). Bottom-up normalization-hub shim so a customer can onboard existing Storybook component docs. Blocked on #550 (the webdocs cluster must land in FUI first so the adapter co-locates with the generator and the WebCases type). Independent of the Mintlify adapter (#429); further incumbents (Docusaurus, …) drop in as more size-3 siblings under #398.
+The Storybook ingestion adapter build — successor to the #426 decision (Fork 2 = A). A plain per-source provider module { source, ingest } in FUI's webdocs/adapters/ (the we:eslint.mjs/oxlint.mjs pattern, no registry/DI): ingest maps Storybook CSF Meta/Story exports to { id, title, description, code } keyed by block id and emits WebCases directly, bypassing parseWebCase (its <!-- WEB CASE --> convention is WE-specific). Bottom-up normalization-hub shim so a customer can onboard existing Storybook component docs.
+
+Blocked on #550 (the webdocs cluster must land in FUI first so the adapter co-locates with the generator and the WebCases type). Independent of the Mintlify adapter (#429); further incumbents (Docusaurus, …) drop in as more size-3 siblings under #398.
 
 ## Progress
 

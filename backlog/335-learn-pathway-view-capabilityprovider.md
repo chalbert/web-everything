@@ -7,6 +7,7 @@ locus: plateau-app
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
+graduatedTo: "plateau-app/src/development-guide/learn-pathway.ts (read-only view over the Technical Configurator seedProvider; interim configurator-native render, webdocs migration tracked in #336)"
 tags: [development-guide, learn-pathway, capability-provider, configurator, docs, diataxis]
 ---
 

@@ -1,0 +1,116 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for the consumption-path decision
+  (<a href="/backlog/812-how-we-apps-straddle-demos-consume-the-9-moved-block-impl-fa/">#812</a>) that gates the
+  <a href="/backlog/697-delete-we-s-vendored-blocks-and-repoint-we-imports-build-to/">#697</a> blocks-deletion
+  cutover. Once #697 deletes WE's nine vendored block-impl families, the WE artifacts that <strong>compose</strong>
+  those families <em>as building blocks</em> — the two exercise apps and the loader→background-task handoff demo —
+  have no sanctioned runtime: they can't iframe (a full app isn't one embeddable block), can't
+  <code>import '@frontierui/blocks'</code> (the
+  <a href="/backlog/707-reconcile-604-s-we-renders-real-fui-blocks-framing-with-the-/">#707</a> boundary; no
+  <code>frontierui</code> vite alias), and
+  <a href="/backlog/765-relax-the-we-fui-isolation-boundary-for-an-in-document-di-mo/">#765</a>'s in-document mount
+  only mounts a <em>rendered</em> FUI thing. One proposed option (#812 option&nbsp;c) was to
+  <strong>extend #765's SDK to hand the app composable block <em>classes/factories</em></strong> at runtime. This
+  survey asks the decisive prior-art question: <strong>can a UI implementation be consumed by a separately-owned
+  host as composable component classes at runtime, across a trust boundary, without that collapsing into a runtime
+  import?</strong>
+</p>
+
+<h2>The decisive finding — classes cross the boundary; only opaque units survive it</h2>
+<p>
+  Across every runtime-integration pattern, the dividing line is <strong>class vs. element/mount</strong>.
+  Boundary-<em>preserving</em> patterns hand the host an <strong>opaque unit</strong> — a rendered iframe, a custom
+  element (the DOM is the contract), or a global render-function whose <em>signature</em> is the contract. The host
+  composes <em>around</em> it, never <em>with its internals</em>. Boundary-<em>collapsing</em> patterns hand over the
+  <strong>class/module</strong> — and those are runtime imports by another name, with identical trust blast radius.
+  A class the host can instantiate, subclass and wire runs <strong>in the host's realm, with the host's privileges,
+  sharing the host's dependency graph</strong> — which is exactly what <code>import '@frontierui/blocks'</code>
+  produces. The build step is incidental; what defines the boundary is <em>which realm the code runs in</em>.
+</p>
+
+<h2>Framework comparison</h2>
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>What the host receives</th><th>Boundary?</th><th>Lesson for #812</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Webpack 5 Module Federation / Angular Native Federation</td>
+      <td>The <strong>real module/class</strong> (<code>import('remote/Button')</code> → live JS object)</td>
+      <td><strong>No</strong> — requires negotiated <code>singleton</code> shared deps + compatible semver across
+        both builds; positioned for cooperating apps of <em>one</em> owner</td>
+      <td>Proves runtime class-federation is real <em>only</em> by re-establishing a shared-runtime contract — i.e.
+        the coupling is the boundary collapse</td>
+    </tr>
+    <tr>
+      <td>Import maps + ESM CDN (esm.sh / Skypack)</td>
+      <td>A class fetched + evaluated in the host realm</td>
+      <td><strong>No</strong> — third-party code gets full DOM access, no SBOM/sandbox; trust-identical to a
+        build-time import</td>
+      <td>Removing the build step removes nothing about trust</td>
+    </tr>
+    <tr>
+      <td>Web components as the federation unit</td>
+      <td>An <strong>HTML element</strong> (<code>document.createElement(type)</code>); shadow DOM scopes style+DOM</td>
+      <td><strong>Yes</strong> — but isolates <em>rendering/DOM/CSS</em>, not composition logic; the host can pass
+        props + listen for events only</td>
+      <td>This is the &ldquo;managed mount&rdquo; model — exactly #765's in-document mount. It cannot give an app block
+        classes to wire.</td>
+    </tr>
+    <tr>
+      <td>Micro-frontend taxonomy (Geers / Fowler)</td>
+      <td>Iframe DOM, custom element, or a global render-function signature</td>
+      <td><strong>Yes</strong> — runtime approaches deliberately avoid handing over code artifacts
+        (&ldquo;let's not re-introduce all of that coupling at the release stage&rdquo;)</td>
+      <td>None of the boundary-preserving runtime patterns hand the host a composable class; the one that does (MF)
+        is the <em>coupled</em>, single-org pattern</td>
+    </tr>
+    <tr>
+      <td>Cross-trust SDKs (Stripe Elements, Intercom)</td>
+      <td>A <strong>managed iframe mount</strong> served from the vendor's own origin</td>
+      <td><strong>Yes</strong> — Stripe Elements mounts per-field iframes; &ldquo;never read by your website&rdquo;
+        (handing out a composable card class would <em>expand</em> PCI scope)</td>
+      <td>Every real across-trust-boundary SDK refuses to expose composable classes</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Web-standards alignment</h2>
+<p>
+  The platform primitives agree. <a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_shadow_DOM">Shadow
+  DOM</a> scopes style and DOM but is <em>not</em> a JS sandbox; the
+  <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/iframe">iframe</a> +
+  <code>sandbox</code> is the one true origin/realm boundary; <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/script/type/importmap">import
+  maps</a> move loading to runtime but not trust; and
+  <a href="https://developer.mozilla.org/en-US/docs/Web/API/CustomElementRegistry/define"><code>customElements.define</code></a>
+  is a one-shot global registration — the basis of the name-collision constraint a class-sharing scheme would have to
+  solve. In all of them the <em>element/mount</em> is the unit that crosses; the <em>class</em> is the unit that doesn't.
+</p>
+
+<h2>Recommendation / impact on the decision</h2>
+<p>
+  <strong>Option (c) — &ldquo;extend #765 to compose FUI block classes at runtime&rdquo; — is struck.</strong> It is not
+  a principled third path; it is the <a href="/backlog/707-reconcile-604-s-we-renders-real-fui-blocks-framing-with-the-/">#707</a>-forbidden
+  import with extra ceremony (a verdict #791 already reached for source imports: &ldquo;#765's relax is runtime SDK
+  only — never the #700 source import&rdquo;). #765's in-document mount of a <em>pre-rendered</em> component behind a
+  shadow root is the correct, prior-art-aligned shape (the web-components / managed-mount pattern), and it
+  structurally cannot give an app composable classes. So the WE artifacts that genuinely need block <em>classes</em>
+  to wire behaviors — the two exercise apps — must live where those classes live: <strong>FUI</strong>
+  (#812 Fork&nbsp;1, option a). The loader→background handoff demo, whose producer half exercises a WE-standard
+  concern, decouples onto the escalation <em>contract</em> rather than co-running the moved impl (#812 Fork&nbsp;2,
+  option d).
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Decision: <a href="/backlog/812-how-we-apps-straddle-demos-consume-the-9-moved-block-impl-fa/">#812</a> ·
+    cutover it gates: <a href="/backlog/697-delete-we-s-vendored-blocks-and-repoint-we-imports-build-to/">#697</a></li>
+  <li>The boundary rulings: <a href="/backlog/707-reconcile-604-s-we-renders-real-fui-blocks-framing-with-the-/">#707</a>
+    (no WE→FUI import) · <a href="/backlog/791-reconcile-658-697-delete-and-repoint-with-the-604-iframe-bou/">#791</a>
+    (reference-vs-impl partition) · <a href="/backlog/765-relax-the-we-fui-isolation-boundary-for-an-in-document-di-mo/">#765</a>
+    (in-document mount = rendered, runtime-SDK only) — and its
+    <a href="/research/we-fui-in-document-mount/">in-document-mount research</a></li>
+</ul>
+{% endraw %}

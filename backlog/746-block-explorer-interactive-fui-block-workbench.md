@@ -12,6 +12,8 @@ tags: [webdocs, block-explorer, workbench, theming, traits, adapters, plateau-em
 
 Turn each FUI block "do" page into a live, inspectable, re-themeable, polyglot **workbench** — the interactive layer on top of the per-component surface (#727: FUI render + props/token/a11y panels). Where #727 *shows* a block, the Explorer lets you *manipulate* it: browse every piece it's made of, swap design systems and activate traits live, open embedded Plateau configurators (theme + technical) as lead-gen seams, and generate/test the component across frameworks. Per the constellation it lives in **FUI**; WE embeds it via the #701 `fuiDemo` iframe; the configurator panels are **Plateau embeds**.
 
+> **Builds on #970.** This workbench is the *rich manipulation layer*; the base — every FUI block detail page actually hosting its own live demo (slot + authored demos + completeness gate) — is the **#970** epic. #746 assumes that base render surface exists; effectively `blockedBy` **#971** (the per-block demo slot).
+
 ## Why a new epic and not folded into #623/#727
 
 #623 is the *discovery→standards→catalog* feeder (what the docs surface is *made of*); #727 is its *per-component live surface* (render + static panels). This epic is the **interactive workbench** that sits on #727: live switching, embedded Plateau tools, polyglot generation. Keeping it separate respects bias-toward-separation — #727 can ship the static per-component view without waiting on the live-switching machinery, and the workbench builds on it incrementally.

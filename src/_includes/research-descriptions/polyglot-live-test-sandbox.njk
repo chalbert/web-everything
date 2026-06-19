@@ -1,0 +1,137 @@
+<h2>The Question</h2>
+<p>
+  The polyglot panel's live-test slice (<a href="/backlog/912-polyglot-panel-live-test-sandbox-execute-the-generated-wrapp/">#912</a>),
+  under the Block Explorer epic (<a href="/backlog/746-block-explorer-interactive-fui-block-workbench/">#746</a>),
+  wants to <strong>execute</strong> — not merely show — the per-framework wrapper that
+  <code>generateWrapper(cem, target)</code> emits, and render it live with runtime-error surfacing.
+  Tracing the real output (<code>fui:tools/gen-wrapper/genWrapper.mjs:119</code>) the React wrapper is
+  literally <code>import React … return React.createElement('&lt;fui-tag&gt;', { ref, …attrs }, children)</code>
+  — so a live preview needs three things the workbench does <strong>not</strong> have today: in-browser
+  TS+JSX transpile, a React/Vue <strong>runtime</strong> reachable from the preview, and the
+  <strong>real custom element defined where the wrapper runs</strong>. The workbench registers blocks via
+  bundler-resolved dynamic imports (<code>fui:workbench/registry.ts:149</code> —
+  <code>import('../blocks/droplist/AutoComplete')</code>), which expose <strong>no stable per-block module
+  URL</strong> to re-import elsewhere. This survey grounds
+  <a href="/backlog/955-decide-the-polyglot-live-test-sandbox-strategy-framework-run/">#955</a>:
+  <strong>what strategy backs the live-test sandbox?</strong>
+</p>
+
+<h2>What the survey found</h2>
+<p>
+  The transpiler choice (esbuild-wasm vs Babel-standalone) is a confirmed <em>impl detail</em>. The two
+  real axes are <strong>element isolation</strong> and <strong>framework-runtime source</strong> — and
+  the closest analog already answers both.
+</p>
+
+<table>
+  <thead><tr><th>Tool</th><th>Isolation</th><th>Transpile</th><th>Runtime source</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><a href="https://github.com/google/playground-elements">Lit Playground</a> (the closest analog — web-components-first, live-executes)</td>
+      <td><strong>iframe <code>srcdoc</code></strong> — own execution context; console captured by monkey-patching <code>console.*</code> + <code>postMessage</code> to parent</td>
+      <td>in-browser TS compiler</td>
+      <td>rewrites bare imports to <strong>CDN URLs</strong> (<code>import 'lit'</code> → <code>unpkg/esm.sh</code>)</td>
+    </tr>
+    <tr>
+      <td><a href="https://sandpack.codesandbox.io/">CodeSandbox Sandpack</a></td>
+      <td>iframe bundler</td>
+      <td>in-iframe bundler</td>
+      <td>CDN / bundled</td>
+    </tr>
+    <tr>
+      <td><a href="https://webcontainers.io/">StackBlitz WebContainers</a></td>
+      <td>iframe + service worker</td>
+      <td>full Node-in-browser</td>
+      <td>npm install in-browser (maximalist)</td>
+    </tr>
+    <tr>
+      <td><a href="https://esm.sh/">esm.sh</a> / <code>esm.sh/tsx</code></td>
+      <td>n/a (a CDN)</td>
+      <td>edge-compiled TSX (1&nbsp;KB loader)</td>
+      <td>bare-specifier import maps → <code>esm.sh/react@19</code></td>
+    </tr>
+    <tr>
+      <td><a href="https://esbuild.github.io/api/">esbuild-wasm</a></td>
+      <td>n/a</td>
+      <td><code>esbuild.transform()</code> in a Web Worker (<code>initialize()</code> + WASM url); <strong>also does module resolution + bundling</strong></td>
+      <td>n/a</td>
+    </tr>
+    <tr>
+      <td><a href="https://babeljs.io/docs/babel-standalone/">@babel/standalone</a></td>
+      <td>n/a</td>
+      <td>auto-compiles <code>type=text/babel</code> scripts; <strong>no module resolution</strong></td>
+      <td>n/a</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Load-bearing platform facts (these ground the defaults)</h3>
+<ul>
+  <li><strong>Import maps are document-scoped and resolve-once.</strong> A fresh <code>&lt;iframe srcdoc&gt;</code>
+    gets a fresh import map per preview; a same-document mount cannot re-resolve frameworks across
+    previews/targets.</li>
+  <li><strong><code>customElements.define</code> throws on re-definition.</strong> A same-document sandbox
+    can only reuse the workbench's already-registered element; an iframe gets a clean registry.</li>
+  <li><strong>Executed wrapper code is framework code, not host DOM.</strong> A thrown error in a
+    same-document run can break the workbench shell; an iframe contains it.</li>
+</ul>
+
+<h2>How it reshapes the forks</h2>
+<p>
+  <strong>Fork A — element isolation.</strong> The Lit Playground precedent (also web-components-first,
+  also live-executing) plus bias-toward-separation move the best-end-state default from the item's
+  interim <em>A2 (same-document)</em> to <strong>A1 (iframe <code>srcdoc</code> + own import-map)</strong>.
+  The genuine counterweight keeping A2 live: A1 must get the element <em>defined inside the frame</em>,
+  which needs a stable per-block module URL the registry doesn't expose today — a real build cost in
+  #912. But that is build <em>effort</em> (filed to the build, per <em>fork-is-not-a-prioritization-tool</em>),
+  not a merit defect, so the fork rules A1 on merit.
+</p>
+<p>
+  <strong>Fork B — framework-runtime source.</strong> The invariant: the runtime must
+  <strong>never enter FUI's shipped bundle</strong> (bundling react/vue into <code>@frontierui</code> is
+  the flawed, excluded branch — a web-components lib shipping framework runtimes). Among the
+  framework-free options the item defaulted to CDN import-map (esm.sh); but the item <em>also</em>
+  requires an e2e plan that doesn't depend on external network ("vendor the runtimes or stub"). If
+  vendoring must exist for CI anyway, CDN means maintaining <strong>two paths</strong> (CDN dev +
+  vendored CI). A single <strong>locally-vendored devDependency served into the sandbox iframe</strong>
+  serves dev + CI from one path, stays framework-free (a devDep is not the shipped bundle), and — paired
+  with the already-local esbuild-wasm — makes the whole sandbox offline + deterministic.
+</p>
+<p>
+  The two forks are <strong>coupled</strong>: B's framework-free isolation is cleanest when the runtime
+  loads <em>inside the iframe</em> (A1), not the workbench document (A2). <strong>A1 + local-vendored</strong>
+  is the coherent combined strategy that mirrors Lit Playground (iframe + import-map) while honoring FUI's
+  framework-free principle and the offline-CI requirement.
+</p>
+
+<h2>Classification</h2>
+<ul>
+  <li><strong>Layer:</strong> a FUI-owned devtool inside the workbench (<code>fui:workbench/</code>,
+    <code>locus: frontierui</code>) — not a WE standard (<em>impl-is-not-a-standard</em>; #809 the
+    workbench is FUI-owned). Nothing crosses into <code>@webeverything</code>.</li>
+  <li><strong>Protocol vs impl:</strong> no new protocol — it consumes only the already-ratified
+    <a href="/protocols/#protocol-custom-elements-manifest">Custom Elements Manifest</a> (#626) the
+    wrapper is generated from, plus the #506 verdict / #891 runner for the downstream badge (#913).</li>
+  <li><strong>DI seam?</strong> No runtime-DI seam — author/dev-time execution, not a registry the
+    running standard consults.</li>
+  <li><strong>Most-permissive default:</strong> the transpiler stays swappable impl (esbuild-wasm
+    recommended for module resolution); the isolation + runtime-source axes are ruled to best end-state
+    above.</li>
+</ul>
+
+<h2>Recommendation handed to #955</h2>
+<ul>
+  <li><strong>Fork A → A1 (iframe <code>srcdoc</code> isolation).</strong> ~70%. Residual: needs a stable
+    per-block module URL the registry doesn't expose; the #815 "one document, no channel" workbench
+    philosophy is A2's principled counter — flag for the decider's skeptic pass.</li>
+  <li><strong>Fork B → local-vendored devDependency served into the sandbox iframe.</strong> ~75%.
+    Residual: esm.sh CDN is genuinely less wiring and is what Lit Playground ships. Bundling into FUI
+    stays the ruled-out flawed branch either way.</li>
+  <li><strong>Supported by default (not forks):</strong> transpiler = esbuild-wasm in a Web Worker;
+    console/error surfacing via the Lit-Playground <code>postMessage</code> monkey-patch; the e2e plan
+    reuses the same vendored runtime (no external network), resolving the item's e2e ask.</li>
+</ul>
+
+<p>
+  Full grounding in <code>reports/2026-06-18-polyglot-live-test-sandbox.md</code>.
+</p>

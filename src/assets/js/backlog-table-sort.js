@@ -55,6 +55,12 @@
   var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
   var readyChips = Array.prototype.slice.call(document.querySelectorAll('[data-pready]'));
   var typeChips = Array.prototype.slice.call(document.querySelectorAll('[data-ptype]'));
+  // `splittable` is an ORTHOGONAL facet, not a readiness value — a split candidate (story · size > 8) is
+  // ALSO agent-ready or not-ready, so it can't live in the mutually-exclusive readiness group. It's a
+  // single ON/OFF toggle (default OFF) that AND-composes with the other filters: when on, narrow to rows
+  // carrying `data-splittable`. `splitSummary` is the big "N to split" pill — a one-click shortcut to it.
+  var splitChip = document.querySelector('[data-psplit]');
+  var splitSummary = document.querySelector('[data-psplitfilter]');
   var search = document.querySelector('[data-ptable-search]');
   var countEl = document.querySelector('[data-ptable-count]');
   if (!readyChips.length && !typeChips.length && !search) return;
@@ -67,20 +73,25 @@
   // matching every other backlog filter (graph toggle, tab, home chips).
   var READY_KEY = 'we-backlog-priority-ready';
   var TYPE_KEY = 'we-backlog-priority-type';
+  var SPLIT_KEY = 'we-backlog-priority-split';
   var SEARCH_KEY = 'we-backlog-priority-search';
   function pressedVals(chips, attr) {
     return chips.filter(function (c) { return c.getAttribute('aria-pressed') !== 'false'; })
                 .map(function (c) { return c.getAttribute(attr); });
   }
+  function splitOn() { return splitChip && splitChip.getAttribute('aria-pressed') === 'true'; }
   function syncVisual() {
     readyChips.concat(typeChips).forEach(function (c) {
       c.classList.toggle('is-active', c.getAttribute('aria-pressed') !== 'false');
     });
+    // The split toggle defaults OFF, so (unlike the groups above) is-active tracks pressed === 'true'.
+    if (splitChip) splitChip.classList.toggle('is-active', splitOn());
   }
   function save() {
     try {
       localStorage.setItem(READY_KEY, JSON.stringify(pressedVals(readyChips, 'data-pready')));
       localStorage.setItem(TYPE_KEY, JSON.stringify(pressedVals(typeChips, 'data-ptype')));
+      localStorage.setItem(SPLIT_KEY, splitOn() ? '1' : '0');
       localStorage.setItem(SEARCH_KEY, (search && search.value) || '');
     } catch (e) { /* ignore */ }
   }
@@ -92,6 +103,8 @@
       if (Array.isArray(r)) readyChips.forEach(function (c) { c.setAttribute('aria-pressed', r.indexOf(c.getAttribute('data-pready')) >= 0 ? 'true' : 'false'); });
       var t = JSON.parse(localStorage.getItem(TYPE_KEY));
       if (Array.isArray(t)) typeChips.forEach(function (c) { c.setAttribute('aria-pressed', t.indexOf(c.getAttribute('data-ptype')) >= 0 ? 'true' : 'false'); });
+      var s = localStorage.getItem(SPLIT_KEY);
+      if (splitChip && s != null) splitChip.setAttribute('aria-pressed', s === '1' ? 'true' : 'false');
       var q = localStorage.getItem(SEARCH_KEY);
       if (search && typeof q === 'string') search.value = q;
     } catch (e) { /* ignore */ }
@@ -119,6 +132,7 @@
       // unconditional filter bypass. Free-text search narrows it like any other row.
       var ok = (!reads || reads[r.getAttribute('data-readiness')])
             && (!types || types[r.getAttribute('data-type')])
+            && (!splitOn() || r.getAttribute('data-splittable') === 'true')
             && (!q || (r.getAttribute('data-search') || '').indexOf(q) >= 0);
       r.style.display = ok ? '' : 'none';
       if (ok) shown++;
@@ -135,10 +149,12 @@
   var summaryChips = Array.prototype.slice.call(document.querySelectorAll('[data-pfilter]'));
   function clearSummary() {
     summaryChips.forEach(function (s) { s.setAttribute('aria-pressed', 'false'); s.style.boxShadow = ''; });
+    if (splitSummary) { splitSummary.setAttribute('aria-pressed', 'false'); splitSummary.style.boxShadow = ''; }
   }
   function resetAllChips() {
     readyChips.forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });
     typeChips.forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });
+    if (splitChip) splitChip.setAttribute('aria-pressed', 'false');   // split defaults OFF (no constraint)
     if (search) search.value = '';
   }
 
@@ -151,7 +167,24 @@
   }
   readyChips.forEach(bindToggle);
   typeChips.forEach(bindToggle);
+  if (splitChip) bindToggle(splitChip);   // same flip-and-apply as the group chips; its is-active is OFF-default
   if (search) search.addEventListener('input', function () { clearSummary(); apply(); });
+
+  // The "N to split" summary pill — a one-click shortcut: reset the groups to "all", then turn the split
+  // toggle on so the table isolates exactly the split candidates (any tier). Clicking it again clears.
+  if (splitSummary) {
+    splitSummary.addEventListener('click', function () {
+      var wasActive = splitSummary.getAttribute('aria-pressed') === 'true';
+      clearSummary();
+      resetAllChips();
+      if (!wasActive) {
+        if (splitChip) splitChip.setAttribute('aria-pressed', 'true');
+        splitSummary.setAttribute('aria-pressed', 'true');
+        splitSummary.style.boxShadow = '0 0 0 2px #334155';
+      }
+      apply();
+    });
+  }
 
   summaryChips.forEach(function (chip) {
     chip.addEventListener('click', function () {
@@ -162,6 +195,7 @@
       } else {
         var cats = (chip.getAttribute('data-pfilter') || '').split(',');
         typeChips.forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });   // readiness-only shortcut
+        if (splitChip) splitChip.setAttribute('aria-pressed', 'false');   // a readiness shortcut is a fresh view — drop the split facet
         if (search) search.value = '';
         readyChips.forEach(function (c) {
           c.setAttribute('aria-pressed', cats.indexOf(c.getAttribute('data-pready')) >= 0 ? 'true' : 'false');

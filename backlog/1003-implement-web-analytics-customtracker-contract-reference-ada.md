@@ -17,7 +17,20 @@ Surfaced by #994. webanalytics is `status:draft` with a settled design — the s
 ecosystem is the next deliverable." So **no design decision is outstanding** — this is a pure build.
 Confirmed zero impl (no `analytics` contract/adapter under `plugs/` or `blocks/`).
 
-Anticipated slices:
+**Umbrella — sliced 2026-06-18 (`/slice 1003`, partial split).** Decomposed into three batchable
+slices that carry webanalytics to graduation, with the composition seam deferred behind its unbuilt
+dependencies (see `we:reports/2026-06-18-backlog-split-analysis.md`):
+
+- **#1012** (`story·3`, webeverything) — canonical `CustomTracker` contract + `CustomTrackerRegistry`
+  + DI wiring + no-op default + conformance vector (foundational).
+- **#1013** (`story·3`, frontierui) — reference vendor adapters (Segment/Mixpanel/GA4); `blockedBy #1012`.
+- **#1014** (`story·3`, webeverything) — conformance demo (swap the resolved backend, recording stubs);
+  `blockedBy #1012`. Independent of #1013.
+- **Deferred — composition seams (Web Traces / Web Events).** Could-not-split: `webtraces`/`webevents`
+  are spec-only njk with no `plugs/` runtime impl to correlate trace-IDs against or subscribe to. Land
+  those plug impls first, then re-slice (or file as a `blockedBy` follow-up). Off the graduation gate.
+
+Anticipated slices (original decomposition, now superseded by the slices above):
 
 - **Canonicalize the contract shape (first, tiny).** The spec's `AnalyticsBackend` interface lists
   `identify`/`track`/`page`; the `we:src/_data/analytics.json` `CustomTracker` adds `group(groupId, traits?)` for B2B

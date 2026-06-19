@@ -3,7 +3,7 @@ type: idea
 workItem: story
 size: 3
 parent: "1073"
-status: open
+status: parked
 blockedBy: ["1082"]
 dateOpened: "2026-06-19"
 tags: []

@@ -1,0 +1,127 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for the Parcel trait-Enforcer decision
+  (<a href="/backlog/756-parcel-trait-enforcer-adapter-resolve-the-plugin-config-deli/">#756</a>) — the
+  fifth bundler in the trait-tree-shaking epic
+  (<a href="/backlog/715/">#715</a>). The four shipped adapters share <strong>one factory shape</strong>,
+  <code>traitEnforcerX(options)</code> taking a JS <code>traitMap</code>, and <strong>one core</strong>,
+  <code>buildTraitManifestSource</code> (<code>tools/trait-enforcer/vite-plugin.ts:274-282</code>), wrapped
+  per bundler (Vite/Rollup <code>load</code> hook, esbuild <code>contents</code>, webpack
+  <code>data:</code> URI). <a href="/backlog/744/">#744</a> <strong>carved Parcel out</strong> because its
+  plugin model is <strong>declarative</strong> — a Resolver is referenced <em>by name</em> in
+  <code>.parcelrc</code> and instantiated by Parcel, so (the reasoning went) the Map can't be a JS factory
+  argument. #756 is the fork over <em>how the Map reaches the resolver</em>.
+</p>
+
+<h2>What the survey found</h2>
+
+<h3>1 · The virtual-module mechanism is sound</h3>
+<p>
+  A Parcel <code>Resolver</code>'s <code>resolve()</code> returns a <code>ResolveResult</code> whose
+  <strong><code>code</code></strong> field is exactly a virtual module —
+  <em>"the code of the resolved asset; if provided, this is used rather than reading the file from
+  disk."</em> So the Parcel adapter is a Resolver that, for the virtual id, returns
+  <code>{ filePath: virtualId, code: buildTraitManifestSource(options) }</code>, reusing the shared core
+  unchanged (the <code>() =&gt; import(spec)</code> thunks then code-split like every other bundler).
+  Resolvers run as a <strong>pipeline</strong> — return <code>null</code> to pass to the next — so the
+  adapter only handles its own id. This is a forced invariant, not a fork.
+</p>
+
+<h3>2 · A named <code>.parcelrc</code> plugin gets config via <code>loadConfig</code>, not JS args</h3>
+<p>
+  <code>.parcelrc</code> registers plugins <strong>by name</strong> in arrays and carries
+  <strong>no inline plugin options</strong>. The idiomatic way a named plugin reads project config is the
+  <code>loadConfig</code> hook calling <code>config.getConfig([files], { packageKey })</code> — it searches
+  <em>up the directory tree</em> for the named files (JSON5 default, also JS/TOML) and a
+  <code>package.json</code> key, exactly as the Sass transformer does:
+  <code>getConfig(['.sassrc', '.sassrc.js'], { packageKey: 'sass' })</code>. Docs stress using Parcel's
+  loader so the cache invalidates correctly; avoid reading files directly. Plugin naming convention is
+  <code>parcel-resolver-&lt;tool&gt;</code> (or scoped).
+</p>
+
+<h3>3 · The load-bearing finding — v2.9.0 relative-path plugins let the factory survive</h3>
+<p>
+  Since <strong>Parcel v2.9.0</strong>, a plugin can be referenced in <code>.parcelrc</code> as a
+  <strong>relative path</strong> to a local JS file — <em>"they don't need their own
+  <code>package.json</code>; you can reference a JavaScript file directly."</em> This <strong>overturns
+  #744's premise.</strong> A project can author a tiny local resolver that imports a WE factory and passes
+  the Map as a JS argument captured in a closure:
+</p>
+<pre><code>// parcel-resolver-trait-enforcer.js  (project-local, relative-path in .parcelrc)
+import { traitEnforcerParcel } from '@frontierui/trait-enforcer/parcel';
+export default traitEnforcerParcel({ traitMap: { sortable: '…', 'export-csv': '…' } });</code></pre>
+<p>
+  where <code>traitEnforcerParcel(options)</code> returns a <code>Resolver</code> that returns
+  <code>{ filePath: virtualId, code: buildTraitManifestSource(options) }</code> for the virtual id. This
+  <strong>preserves the cross-bundler <code>traitEnforcerX(options)</code> symmetry</strong> — all five
+  adapters take <code>options.traitMap</code> as a JS arg — with no new config format and no published
+  package. So the genuine fork is <em>not</em> "the Map can't be a JS arg" but
+  <strong>declarative-config vs local-wrapper</strong>.
+</p>
+
+<h2>The reshaped decision shape</h2>
+<p>
+  The single muddled "factory options vs <code>.parcelrc</code> + config file" question becomes
+  <strong>one real call</strong> plus invariants that aren't decisions:
+</p>
+<table>
+  <thead>
+    <tr><th>Element</th><th>Recommended</th><th>Main alternative</th><th>Confidence</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Virtual module mechanism</td>
+      <td><code>resolve()</code> returns <code>{ filePath, code }</code> from the shared core</td>
+      <td>— (forced invariant)</td>
+      <td>High</td>
+    </tr>
+    <tr>
+      <td><code>.parcelrc</code> registration</td>
+      <td>Hand-authored + documented (like all four adapters)</td>
+      <td>— (forced invariant)</td>
+      <td>High</td>
+    </tr>
+    <tr>
+      <td><strong>How the trait Map reaches the resolver</strong></td>
+      <td><strong>B — local wrapper preserving the factory</strong> (v2.9.0 relative-path)</td>
+      <td>A — idiomatic <code>.trait-enforcerrc</code> / packageKey via <code>loadConfig</code></td>
+      <td>Med-high</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  <strong>B</strong> keeps the epic's "one Map, every bundler" symmetry, introduces no new project-facing
+  config format (in line with <em>minimize-lock-in / refuse project-facing formats</em>), and matches how
+  every other adapter is consumed (the project wires it into build-config JS). Its one caveat — the Map
+  isn't loaded through Parcel's cache-aware <code>loadConfig</code> — is covered by an
+  <code>invalidateOnStartup</code> declaration, since the Map is build-time static.
+  <strong>A</strong> is the principled main alternative (most native-Parcel, cache-correct) but mints a new
+  config-file schema and breaks the JS-factory symmetry. <strong>C — WE-generated config</strong> is
+  rejected (WE writing project-owned files violates minimize-lock-in).
+</p>
+
+<h3>Dep scope correction</h3>
+<p>
+  A real Parcel build (for the #722 conformance rows) needs the full
+  <code>@parcel/config-default</code> stack plus <code>@parcel/plugin</code> — <strong>not</strong> just
+  <code>@parcel/core</code> as #744 assumed. The conformance test references the resolver by
+  <strong>relative path</strong> (v2.9.0), so no published package is needed to verify.
+</p>
+
+<h2>Web-standards alignment</h2>
+<p>
+  The adapter borrows Parcel's own plugin vocabulary (Resolver, <code>resolve()</code> /
+  <code>loadConfig</code>, <code>ResolveResult.code</code>, <code>invalidateOnStartup</code>) rather than
+  coining a bespoke wiring, in keeping with WE's native-first / minimize-lock-in principles. WE owns the
+  neutral trait-manifest contract and the shared core; the bundler integration stays Parcel-native.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Epic <a href="/backlog/715/">#715</a> — the trait-tree-shaking epic this completes.</li>
+  <li>Decision <a href="/backlog/756-parcel-trait-enforcer-adapter-resolve-the-plugin-config-deli/">#756</a> — the prepared decision this grounds.</li>
+  <li><a href="/backlog/744/">#744</a> — shipped the webpack adapter; carved Parcel here.</li>
+  <li><a href="/backlog/722/">#722</a> — the cross-bundler conformance suite the Parcel rows complete.</li>
+</ul>
+{% endraw %}

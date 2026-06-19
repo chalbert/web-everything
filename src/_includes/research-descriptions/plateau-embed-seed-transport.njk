@@ -1,0 +1,181 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for the Plateau↔WE embed/seed transport decision
+  (<a href="/backlog/788-plateau-we-embed-seed-transport-contract-how-we-embeds-a-pla/">#788</a>) — the
+  blocking fork of the embedded technical-configurator story
+  (<a href="/backlog/752/">#752</a>) under the Block Explorer epic
+  (<a href="/backlog/746/">#746</a>). The question: <strong>how does a WE/FUI docs surface embed a Plateau
+  Technical Configurator view <em>seeded with a block's four technical dimensions</em></strong> — render
+  strategy (<a href="/backlog/079/">#079</a>), transport (<a href="/backlog/455/">#455</a>), trait
+  lazy-load (<a href="/backlog/448/">#448</a>), chunk split (<a href="/backlog/719/">#719</a>) — plus a
+  deep-link to the full configurator and a cost-preview readback?
+</p>
+
+<h2>The seam as it stands today</h2>
+<ul>
+  <li>
+    <strong>Plateau has no inbound seed channel.</strong> <code>mountTechnicalConfigurator(root)</code>
+    takes only a host element (<code>plateau-app/src/technical-configurator/configurator.ts:581</code>);
+    state loads from <code>localStorage</code> <em>only</em> (<code>loadState()</code>,
+    <code>:81-94</code>; <code>STORAGE_KEY</code> at <code>:70</code>), and the SPA route-stamps the mount
+    with <strong>zero URL-param reading</strong> (<code>plateau-app/src/main.ts:327-337</code>).
+  </li>
+  <li>
+    <strong>The only WE embed precedent is a pure-URL iframe.</strong> The
+    <a href="/backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo/">#701</a>
+    <code>fuiDemo</code> shortcode (<code>.eleventy.js:38-50</code>) renders a sandboxed
+    (<code>sandbox="allow-scripts allow-same-origin"</code>), <code>loading=lazy</code> <code>&lt;iframe&gt;</code>
+    pointing at a parameterized base (<code>FUI_DEMO_BASE</code>, <code>:37</code>) — <strong>no seed, no
+    postMessage</strong>.
+  </li>
+  <li>
+    <strong>The constellation boundary is already ruled.</strong> WE/FUI never import cross-repo runtime
+    code: #700 (DC-7) ruled out the WE→FUI module-import path and #701 chose the iframe instead;
+    npm-scope-mirrors-layer keeps the standard/impl scopes from importing Plateau (the <em>product</em>
+    layer), and #475 already treats Plateau as a service consumed across a process boundary.
+  </li>
+</ul>
+
+<h2>What the embed-kit prior art does</h2>
+<p>
+  Two mechanisms parameterize a cross-origin embed, and the leaders split cleanly <strong>by job</strong>:
+</p>
+<table>
+  <thead>
+    <tr><th>Mechanism</th><th>Job</th><th>Who uses it</th><th>Properties</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>URL query / hash params</strong> in <code>iframe.src</code></td>
+      <td><strong>Seed</strong> the initial view; shareable / deep-linkable</td>
+      <td>Google Maps Embed API (<code>/maps/embed/v1/MODE?key=…&amp;PARAMETERS</code>), CodeSandbox &amp;
+        StackBlitz embed options, oEmbed</td>
+      <td>Stateless, bookmarkable, no handshake, degrades to a plain link; bounded by URL length, one-way</td>
+    </tr>
+    <tr>
+      <td><code>window.postMessage</code></td>
+      <td><strong>Live control / readback</strong> after load</td>
+      <td>Figma Embed Kit 2.0, YouTube IFrame API, StackBlitz SDK VM interface</td>
+      <td>Bidirectional, any payload size, enables readback + auto-resize; needs a <strong>ready
+        handshake</strong> + strict <code>targetOrigin</code>/<code>event.origin</code> checks; not
+        shareable</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  The load-bearing finding: <strong>these are not rivals — the real-world default is to layer them.</strong>
+  Google Maps needs no live control, so it is URL-only; Figma drives a live prototype, so it is
+  postMessage-led. But <strong>StackBlitz and CodeSandbox ship both</strong>: URL params seed the embed
+  (and give a shareable link), and an SDK over <code>postMessage</code> adds live control on top — the URL
+  is the <strong>canonical state</strong>, postMessage the additive channel. The WHATWG cross-document
+  messaging spec and MDN stress, for that channel: a message posted to a just-navigated document
+  <em>misses its recipient</em> unless the child posts a "ready" message first (the handshake), and the
+  sender must pass a specific <code>targetOrigin</code> (never <code>*</code>) while the receiver verifies
+  <code>event.origin</code> and payload shape. The handshake race is the recurring footgun — and the main
+  reason a URL seed (no timing) is preferred for the <em>initial</em> state.
+</p>
+
+<h2>How this reshapes the decision</h2>
+<p>
+  The item's original three branches do not survive the <em>fork-existence test</em> as a 3-way choice:
+</p>
+<ul>
+  <li>
+    <strong>Shared component</strong> (extract a package both repos import) — <strong>excluded, broken.</strong>
+    Violates npm-scope-mirrors-layer and re-opens the cross-repo-import path #700 (DC-7) already ruled out
+    for the <em>closer</em> FUI↔WE boundary; Plateau sits one layer further out. A forced invariant, not a
+    weigh.
+  </li>
+  <li>
+    <strong>Deep-link only</strong> — <strong>a companion, not a rival.</strong> #752 wants <em>both</em>
+    the in-page mini-configurator and a deep-link to the full one; "no embed" deletes the story's value,
+    but the deep-link itself is supported by default (every embed gets an "Open full configurator ↗" link,
+    like #701's "Open in Frontier UI ↗").
+  </li>
+  <li>
+    <strong>Iframe embed</strong> — the surviving approach, now a <strong>forced invariant</strong>.
+  </li>
+</ul>
+<p>
+  So the card's real question — its own title, "embed/seed <strong>transport</strong> contract" — is the
+  one genuine fork: within the iframe, how does the seed cross the boundary?
+</p>
+<table>
+  <thead>
+    <tr><th>Element</th><th>Recommended</th><th>Main alternative</th><th>Confidence</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Embed mechanism</td>
+      <td>iframe (#701 <code>fuiDemo</code> pattern)</td>
+      <td>— (forced invariant; shared-component excluded by the boundary)</td>
+      <td>High</td>
+    </tr>
+    <tr>
+      <td>Deep-link to the full configurator</td>
+      <td>supported by default ("Open full configurator ↗")</td>
+      <td>— (companion, not a fork)</td>
+      <td>High</td>
+    </tr>
+    <tr>
+      <td><strong>Seed transport</strong></td>
+      <td><strong>A — URL query/hash params canonical + optional postMessage for readback/auto-resize</strong></td>
+      <td>B — postMessage handshake as the canonical seed</td>
+      <td>Med-high</td>
+    </tr>
+    <tr>
+      <td>Contract owner</td>
+      <td>Plateau owns the route + documented param vocabulary; the embedder writes the URL</td>
+      <td>— (forced; the surface owner owns its contract)</td>
+      <td>High</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  <strong>A</strong> is the StackBlitz/CodeSandbox layered model: the URL seed is shareable and
+  deep-linkable <em>for free</em> (the "open the full configurator pre-seeded" link is the <em>same</em>
+  param vocabulary), matches the #701 iframe precedent and the
+  <a href="/backlog/754/">#754</a> permalink serialization, and has no handshake; postMessage rides along
+  only for what a URL can't do (readback, auto-resize). <strong>B</strong> is richer and bidirectional from
+  day one (the Figma model) but loses the shareable URL, has a ready-handshake race, and <em>still</em>
+  needs a URL vocabulary for the deep-link — strictly more work for the same outcome, worse on merit, not
+  broken.
+</p>
+
+<h2>Classification (the 7-question pass)</h2>
+<p>
+  <strong>(1) Layer</strong> — a <strong>documented integration contract</strong> authored in WE (locus
+  <code>webeverything</code>): a small seed-param vocabulary; the reader is Plateau (product), the writer
+  the WE/FUI docs shortcode. <strong>(2) Protocol?</strong> — <strong>no</strong>: two parties, no
+  swappable-vendor story → a bilateral contract owned at the Plateau route, not a minted
+  <code>protocols.json</code> entry (minting one is lock-in for zero interop gain). <strong>(3) Intent
+  dimension?</strong> — no; a transport/seed is a technical concern, never a UX intent (intent-UX-only /
+  technical→Configurator). <strong>(4) Fixed mechanic?</strong> — the seed <em>vocabulary</em> is fixed;
+  the seed <em>values</em> are per-block data. <strong>(5) DI-injectable?</strong> — the Plateau base URL
+  is env-parameterized like <code>FUI_DEMO_BASE</code> (dev <code>localhost:4000</code> vs prod host).
+  <strong>(6) Most-permissive default?</strong> — URL-param seed (shareable, deep-linkable, degrades to a
+  plain anchor; a superset of B's reachable outcomes). <strong>(7) Seam between intents?</strong> — it is a
+  seam between <em>repos/layers</em> (WE-docs / FUI ↔ Plateau); the owner is the side that exposes the
+  surface — Plateau owns the route, the embedder conforms. A thin documented vocabulary, not a shared
+  runtime package (separation bias).
+</p>
+
+<h2>Reuse note — design the seam once</h2>
+<p>
+  The same contract serves <a href="/backlog/751/">#751</a> (embedded theme/design-system creator — also a
+  Plateau embed) and shares its URL grammar with <a href="/backlog/754/">#754</a> (permalink/export). The
+  seed vocabulary should be the same URL-state grammar #754 reads back, so "deep-link pre-seeded" and
+  "permalink to this view" are one mechanism, not two.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Decision <a href="/backlog/788-plateau-we-embed-seed-transport-contract-how-we-embeds-a-pla/">#788</a> — the prepared decision this grounds.</li>
+  <li>Story <a href="/backlog/752/">#752</a> — the embedded technical configurator, <code>blockedBy</code> #788.</li>
+  <li>Epic <a href="/backlog/746/">#746</a> — the Block Explorer workbench.</li>
+  <li>Precedent <a href="/backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo/">#701</a> — the <code>fuiDemo</code> iframe embed.</li>
+  <li><a href="/backlog/754/">#754</a> — permalink/export sharing this seam's URL serialization.</li>
+</ul>
+{% endraw %}
+</content>

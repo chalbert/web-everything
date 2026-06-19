@@ -1,0 +1,75 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+  The principle is settled — <em>compose an existing Web&nbsp;Everything trait/behavior/contract for any
+  capability a standard already covers; never hand-roll what a registered trait provides</em>. What is
+  <strong>not</strong> settled is the <strong>enforcement mechanism</strong> that makes hand-rolling
+  structurally hard rather than a matter of reviewer vigilance. Two FUI chrome blocks re-implemented the
+  W3C&nbsp;APG Disclosure&nbsp;Navigation pattern with raw <code>addEventListener</code> — the pattern that
+  <em>already exists</em> as the registered <code>nav:section</code>/<code>nav:list</code> traits —
+  <code>sectioned-nav</code> (<a href="/backlog/870-build-the-must-build-fui-chrome-blocks-app-shell-sectioned-d/">#870</a>),
+  then <code>disclosure-nav</code> (<a href="/backlog/931-dogfooded-fui-docs-chrome-renders-broken-fix-it-to-a-correct/">#931</a>),
+  and nothing caught either. This survey grounds the enforcement-mechanism fork in
+  <a href="/backlog/933-reinforce-the-work-method-enforce-composing-existing-traits-/">backlog&nbsp;#933</a>.
+</p>
+
+<h3>Prior art surveyed</h3>
+<ul>
+  <li>
+    <strong>W3C&nbsp;WAI-ARIA APG — Disclosure &amp; Disclosure Navigation.</strong> The interaction the
+    traits implement is a <em>named standard pattern</em> (a <code>button aria-expanded/aria-controls</code>
+    toggling a region; Escape collapses). This is why hand-rolling it is a <em>conformance defect</em>, not a
+    style choice — a registered trait <em>is</em> the conformant implementation. Grounds the deny-list's
+    pattern→trait entries.
+  </li>
+  <li>
+    <strong>ESLint <code>no-restricted-syntax</code> / <code>jsx-a11y</code>.</strong> The canonical
+    "flag a source AST pattern in CI" precedent. Lessons: source rules ship <em>warn-first</em> then
+    escalate (the #840/#844 staging), and the durable ones are <em>narrow and curated</em> — open-ended
+    heuristics are false-positive factories that get disabled.
+  </li>
+  <li>
+    <strong>Architectural fitness functions — ArchUnit, dependency-cruiser, ts-arch.</strong> Encode a
+    layering/composition invariant as an automated test. The rule is anchored on <em>declared structure</em>
+    (a manifest / annotation), not on guessing intent from arbitrary code; the strongest setups
+    <em>combine</em> a declaration check with a small targeted ban-list.
+  </li>
+  <li>
+    <strong>axe-core (rendered) vs static lint.</strong> The #931 cautionary tale: axe passed (0
+    violations) because a hand-rolled disclosure can still be a11y-clean. A <em>rendered</em> conformance
+    check cannot catch "didn't compose the trait" — only <em>source + declaration</em> can. Pins the gate to
+    the static <code>check:standards</code> path, beside <code>validateBlockImplConformance</code>.
+  </li>
+</ul>
+
+<h3>What survives — invariant + two forks</h3>
+<p>
+  The original A/B/C framing was partly a fork-existence miss. <strong>A (advisory pre-flight only) is the
+  excluded branch</strong> — it is <em>what already existed</em> and failed twice, so a mechanical gate is a
+  forced invariant; the checklist stays as a complement. <strong>C (declarative-only by construction) is not
+  a rival</strong> — it is sequenced after the mode-C registry-boot decision
+  (<a href="/backlog/932-decide-whether-mode-c-boots-the-we-webbehaviors-trait-regist/">#932</a> /
+  #934), removing the temptation at source over time. <strong>B (mechanical gate) is forced</strong>, and it
+  carries the two genuine open calls:
+</p>
+<ol>
+  <li>
+    <strong>Fork&nbsp;1 — the gate's detection teeth (recommended: declaration + curated deny-list,
+    ~75%).</strong> Resolve declared composed-traits against the manifest <em>and</em> run a curated
+    "pattern→trait" deny-list (disclosure→<code>nav:section</code>, roving-tabindex→<code>nav:list</code>),
+    warn-first. Reject open-ended <code>addEventListener</code> sniffing (false-positive factory); reject
+    declaration-only (misses a block that declares nothing and hand-rolls — the exact #931/#870 mode).
+  </li>
+  <li>
+    <strong>Fork&nbsp;2 — where a block declares the traits it <em>composes</em> (recommended: a new
+    explicit field, ~80%).</strong> A new block-protocol field for <em>consumed</em> traits, projected into
+    CEM <code>x-webeverything</code> and asserted to resolve against <code>traits.json</code>. Reject reusing
+    the existing <code>traits</code> field (it means traits a block <em>provides</em> — semantic overload);
+    reject the name <code>composesTraits</code> (already rejected 2026-06-06 for The Map materialization — a
+    name-collision footgun).
+  </li>
+</ol>
+<p>
+  Full grounding in <code>reports/2026-06-18-933-enforce-compose-traits-over-hand-roll.md</code>.
+</p>
+{% endraw %}

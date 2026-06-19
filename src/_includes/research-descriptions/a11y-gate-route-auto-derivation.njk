@@ -1,0 +1,127 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    <a href="/backlog/774-auto-derive-the-a11y-gate-route-set-from-the-11ty-collection/">#774</a> asks whether to
+    replace the <strong>hand-maintained</strong> a11y-gate route allowlist
+    (<code>tests/a11y/route-allowlist.ts</code>, built in
+    <a href="/backlog/770-rendered-site-a11y-gate-axe-lane-route-allowlist-we-docs/">#770</a>) with
+    <strong>auto-derivation from the 11ty collection / sitemap</strong>, so every published page is gated without a
+    hand-edit. <a href="/backlog/763-gate-ui-best-practices-on-website-changes-rendered-site-a11y/">#763</a>
+    deferred this as its Fork-3 alternative; <a href="/backlog/793-remediate-we-docs-a11y-violations-flip-the-rendered-site-gat/">#793</a>
+    sharpened it by flipping 9 of 10 routes to build-blocking <code>enforce: true</code> — which
+    auto-derivation must not silently un-earn. Two coupled, non-mechanical questions block any code:
+    <strong>scope</strong> (what does &ldquo;every published page&rdquo; resolve to?) and <strong>mechanism</strong>
+    (there is <em>no</em> sitemap today — <code>/sitemap.xml</code> 404s — so what artifact does the test read?).
+</p>
+
+<h2>Recommendation (to ratify in #774)</h2>
+<ol>
+    <li><strong>Scope — index surfaces + one representative detail page per collection-template.</strong>
+        Gate every catalog index (<code>/</code>, <code>/intents/</code>, <code>/blocks/</code>, &hellip;)
+        <em>plus</em> one sampled detail page per <code>*-pages.njk</code> template (~26 extra loads). Detail pages
+        share a template, so one sample catches the dominant <strong>template-level</strong> regression class — at
+        ~1% of the cost of running axe over all 2,129 pages, without the homepage-only blind spot.</li>
+    <li><strong>Mechanism — author a <code>sitemap.njk</code> over <code>collections.all</code>; the gate parses it.</strong>
+        The 11ty-native, prior-art-blessed path (pa11y-ci's <code>--sitemap</code> is exactly this), and it fills a
+        real SEO gap. Beats globbing <code>_site/**</code> (Lighthouse CI's documented nested-dir limitation, and
+        <code>eleventy --serve</code> doesn't even write <code>_site</code>) and reconstructing permalinks from
+        <code>_data</code> (re-implements logic that lives in 26 templates &rarr; drift).</li>
+    <li><strong>Forced invariant (not a fork) — preserve #793's earned enforce posture.</strong> Keep an explicit
+        <code>ENFORCED_ROUTES</code> set seeded with the 9 already-enforced routes; newly auto-derived routes enter
+        <strong>warn-only</strong> (most-permissive default), promoted per-route as each goes green. &ldquo;Reset all
+        to warn&rdquo; is a broken branch (it regresses #793), so this is an invariant, not a choice.</li>
+</ol>
+
+<h2>Scope — what &ldquo;every published page&rdquo; should mean</h2>
+<table>
+    <thead>
+        <tr><th>Option</th><th>What gets gated</th><th>Cost / behaviour</th><th>Verdict</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>A — all pages</strong></td>
+            <td>Literally every route (~2,129 <code>index.html</code>, ~790 under <code>/backlog/</code>).</td>
+            <td>Matches the item's wording; maximally self-maintaining — but minutes of axe per CI run and scans
+                churn-y in-progress detail pages.</td>
+            <td>Discouraged extreme — a11y practice explicitly says not to test every page on a large site.</td>
+        </tr>
+        <tr>
+            <td><strong>C — index + per-template sample</strong> <em>(recommended)</em></td>
+            <td>All catalog index surfaces + one representative detail page per <code>*-pages.njk</code> collection.</td>
+            <td>Bounded (~26 extra loads), self-maintaining as new collections appear; catches shared-template
+                regressions (the dominant class).</td>
+            <td>The prior-art middle — &ldquo;representative samples across all page types and templates.&rdquo;</td>
+        </tr>
+        <tr>
+            <td><strong>B — index surfaces only</strong></td>
+            <td>The current 10-route class (<code>/intents/</code>, <code>/blocks/</code>, &hellip;), auto-discovered.</td>
+            <td>Fast and stable, but no detail page is ever gated.</td>
+            <td>The &ldquo;homepage-only misses issues&rdquo; anti-pattern; narrower than &ldquo;every page.&rdquo;</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>Mechanism — what artifact the gate reads</h2>
+<table>
+    <thead>
+        <tr><th>Mechanism</th><th>How it works</th><th>Couples the gate to&hellip;</th><th>Fit</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Author <code>sitemap.njk</code>, parse it</strong> <em>(recommended)</em></td>
+            <td>A template iterates <code>collections.all</code> → <code>/sitemap.xml</code>; the Playwright gate
+                fetches and parses it (same origin it already hits).</td>
+            <td>A published, standard artifact (sitemaps.org) — 11ty's own page knowledge.</td>
+            <td>Best — pa11y-ci's <code>--sitemap</code> is exactly this; doubles as the missing SEO sitemap.</td>
+        </tr>
+        <tr>
+            <td>Glob <code>_site/**/index.html</code></td>
+            <td>Enumerate built HTML on disk after a full build.</td>
+            <td>The build output dir (and a full build must run first).</td>
+            <td>Weak — <code>eleventy --serve</code> serves from memory (no <code>_site</code>), and LHCI's
+                <code>staticDistDir</code> shows the nested-dir glob is fiddly (issue&nbsp;#95: root-only).</td>
+        </tr>
+        <tr>
+            <td>Reconstruct from <code>_data</code></td>
+            <td>Import the JSON collections, rebuild URLs from the permalink patterns.</td>
+            <td>26 templates' permalink logic, re-implemented in the test.</td>
+            <td>Brittle — duplicates logic that lives in the templates; drifts when a permalink changes.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>Why one detail page per template suffices</h2>
+<p>
+    Every detail page is generated by a single paginating template over a <code>_data</code> collection —
+    <code>src/intent-pages.njk</code> (<code>permalink: "intents/{{ intent.id }}/"</code>) renders <em>all</em>
+    intents, <code>block-pages.njk</code> all blocks, and so on across 26 templates. So an axe violation on a detail
+    page is almost always a <strong>template</strong> bug shared by every page of that type, which one sampled page
+    catches; the residual (a content-specific violation in one item's markdown) is rare and lower-value to gate.
+    That is the structural reason scope-C gives ~95% of scope-A's coverage at ~1% of its cost.
+</p>
+
+<h2>Classification</h2>
+<p>
+    A <strong>devtools quality gate</strong> (kin to <code>check:standards</code> and the existing a11y lane) — the
+    same classification <a href="/backlog/763-gate-ui-best-practices-on-website-changes-rendered-site-a11y/">#763</a>
+    recorded. Zero consumer lock-in; <strong>no protocol minted</strong> (a sitemap is the sitemaps.org artifact and
+    axe <em>is</em> the WCAG engine — both consumed, not re-specified). Mirrored <strong>per-repo</strong>: FUI's gate
+    (<a href="/backlog/771-mirror-the-rendered-site-a11y-gate-into-frontier-ui-3001/">#771</a>) would derive from its
+    own sitemap, following the duplicated-dev-panel pattern.
+</p>
+
+<h2>Sources</h2>
+<ul>
+    <li><a href="https://github.com/pa11y/pa11y-ci/blob/main/README.md">pa11y-ci — <code>--sitemap</code> / <code>--sitemap-find</code> / <code>--sitemap-exclude</code></a></li>
+    <li><a href="https://googlechrome.github.io/lighthouse-ci/docs/configuration.html">Lighthouse CI — <code>staticDistDir</code>, <code>autodiscoverUrlBlocklist</code></a> · <a href="https://github.com/GoogleChrome/lighthouse-ci/issues/95">issue #95 — only root-level files collected</a></li>
+    <li><a href="https://blog.pope.tech/2024/02/26/improve-effectiveness-and-accuracy-of-web-accessibility-testing-with-sampling/">Pope Tech — improve a11y testing accuracy with sampling</a> · <a href="https://testparty.ai/blog/automated-accessibility-testing-guide">TestParty — automated a11y testing</a></li>
+    <li><a href="https://www.sitemaps.org/protocol.html">sitemaps.org — sitemap protocol</a></li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+    <li>Decision: <a href="/backlog/774-auto-derive-the-a11y-gate-route-set-from-the-11ty-collection/">#774 — auto-derive the a11y gate route set</a> (this prep).</li>
+    <li>Parent gate decision: <a href="/backlog/763-gate-ui-best-practices-on-website-changes-rendered-site-a11y/">#763</a>; built in <a href="/backlog/770-rendered-site-a11y-gate-axe-lane-route-allowlist-we-docs/">#770</a>, enforce-flipped in <a href="/backlog/793-remediate-we-docs-a11y-violations-flip-the-rendered-site-gat/">#793</a>.</li>
+    <li>Per-repo mirror: <a href="/backlog/771-mirror-the-rendered-site-a11y-gate-into-frontier-ui-3001/">#771</a> (FUI).</li>
+</ul>
+{% endraw %}

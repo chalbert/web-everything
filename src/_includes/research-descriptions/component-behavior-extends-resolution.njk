@@ -1,0 +1,100 @@
+<h2>The Question</h2>
+<p>
+  DC-5 (<a href="/backlog/044-component-scripting-hook/">#044</a>, ratified 2026-06-08) settled the
+  <strong>policy</strong> for enhancing a declarative
+  <a href="/blocks/component/"><code>&lt;component&gt;</code></a>: a tier-2
+  <code>behavior</code>/<code>extends</code> attribute associates a <em>registered</em> class or trait —
+  never an inline <code>&lt;script&gt;</code> (the XSS-gadget surface stays closed). It did
+  <strong>not</strong> settle the <strong>mechanism</strong>. Decision
+  <a href="/backlog/852-behavior-extends-tier-2-enhancement-hook-on-component-dc-5-r/">#852</a> (carved from
+  epic <a href="/backlog/076-component-declarative-wc-apis/">#076</a>) asks: <strong>how does a registry-key
+  <code>behavior</code>/<code>extends</code> resolve to a class/trait and get applied to the generated
+  element</strong> — without breaching the wc-class lowering's load-bearing invariants (a
+  <strong>self-contained ESM with no import-map seam</strong> and a <strong>fixed member order</strong> for
+  byte-determinism, <code>declarativeComponent.ts:152-208</code>)? This survey runs design-first step&nbsp;1
+  over the native proposal and the leading HTML-first systems — and it splits one fork into two.
+</p>
+
+<h2>What the survey found</h2>
+
+<h3>1 · The platform leaves this exactly open — and names both spellings</h3>
+<p>
+  WICG <a href="https://github.com/WICG/webcomponents/issues/1009">declarative-custom-elements&nbsp;#1009</a>
+  — the proposal DC-5 built on — lists the open questions verbatim: <em>"Can a declarative custom element be
+  enhanced with script? How is that script associated with the element? <strong>Must the script be inline,
+  or can it be bundled? Can the script be loaded late?</strong>"</em> and <em>"What is the base class …
+  <strong>directly extend <code>HTMLElement</code>, or … another class with shared behavior?</strong>"</em>
+  Two takeaways: the platform itself frames the <strong>inline-vs-bundled-vs-loaded-late</strong> axis (which
+  <em>is</em> WE's build-time-vs-runtime question) and has not picked — so WE is genuinely greenfield; and it
+  names <strong>both</strong> an <code>extends</code>-a-base-class and a shared-<code>behavior</code> shape,
+  validating DC-5's two spellings.
+</p>
+
+<h3>2 · Two shipping poles map onto WE's existing twin</h3>
+<table>
+  <thead><tr><th>System</th><th>How behavior associates</th><th>Resolution time</th><th>WE option</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><a href="https://enhance.dev/docs/learn/concepts/html">Enhance</a></td>
+      <td>HTML-first custom elements <strong>expanded</strong> build/server-side; interactivity via a
+        <em>separate</em> hydration script</td>
+      <td>build-time inline expansion</td>
+      <td><strong>A</strong> (build-time inline)</td>
+    </tr>
+    <tr>
+      <td><a href="https://stimulus.hotwired.dev/reference/controllers">Stimulus</a></td>
+      <td><code>data-controller="name"</code> resolved against a controller <strong>registry</strong> at
+        runtime (<a href="https://www.npmjs.com/package/stimulus-controller-resolver">custom resolver</a>
+        maps name→class)</td>
+      <td>runtime registry lookup</td>
+      <td><strong>B</strong> (runtime global registry)</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  These are not competing winners — they are the two <em>delivery modes</em> WE already ships as a twin:
+  <code>generateClassSource</code> (the <strong>built</strong>, self-contained form, Enhance-like) and
+  <code>defineFromDefinition</code> (the <strong>unbuilt runtime</strong> form, which has no build step to
+  inline into). The honest framing is <em>per-delivery-mode</em>, not one global default.
+</p>
+
+<h3>3 · The <code>behavior</code> application shape is a settled idiom</h3>
+<p>
+  A trait/mixin applies as a <strong>subclass-factory mixin</strong> <code>Behavior(Base)</code> — a function
+  from a class to a subclass — the <a href="https://github.com/tc39/proposal-mixins">TC39 proposal-mixins</a>
+  definition and the shipping <a href="https://lit.dev/docs/composition/mixins/">Lit mixins</a> idiom
+  (<code>class X extends Behavior(LitElement)</code>). <code>extends</code> is the simpler
+  <code>class X extends Base</code>. The only WE-specific constraint: whichever the build inserts preserves
+  the fixed member order.
+</p>
+
+<h2>How it grounds against the WE tree</h2>
+<p>
+  The built form's no-import-seam invariant is explicit
+  (<code>declarativeComponent.ts:204-207</code> — kept inline "so the wc-class form stays a SELF-CONTAINED ESM
+  … unlike the functional form"). The functional twin
+  (<a href="/blocks/component/"><code>functionalComponent.ts</code></a>) <em>does</em> carry an import seam
+  (<code>import jsx, { defineElement } from JSX_RUNTIME_SPECIFIER</code>) — the precedent for a
+  non-self-contained served form, and the reason an <strong>import seam (option C) is the named-broken branch</strong>
+  for the static-HTML form: it would strip the property that makes that form copy-pasteable. For the
+  <em>unbuilt</em> form, no build exists to inline into, so resolution must be at runtime — and
+  <a href="/plugs/"><code>webinjectors</code></a>
+  (<code>Injector.ts:146-152</code>) already does lazy <code>register</code>/<code>consume</code> with
+  hierarchical resolution and dedup; the running element consults it at definition time, so it is a
+  legitimate runtime-DI seam, not a cargo-cult global. The custom-attribute registry
+  (<code>CustomAttributeRegistry</code>) is the <em>wrong unit</em> (attributes, not element class/trait
+  mixins) — no precedent to mirror there.
+</p>
+
+<h2>How it reshapes the decision</h2>
+<p>
+  One fork becomes <strong>two</strong>, and the sub-call dissolves. <strong>Fork&nbsp;1</strong>
+  (built/static-HTML form): <strong>build-time inline (A, default ~85%)</strong> — C excluded by the
+  no-import-seam invariant, B a needless runtime global + ordering hazard. <strong>Fork&nbsp;2</strong>
+  (unbuilt-runtime form's seam): <strong>reuse the webinjectors DI registry (default ~70%)</strong> over a new
+  dedicated global registry or an import seam. <strong>Dissolved (supported by default):</strong>
+  <code>extends</code> and <code>behavior</code> both ship (DC-5 + WICG #1009 name both), as two composable
+  emit shapes (<code>extends Base</code> / <code>Behavior(Base)</code>) — not a pick-one; and registry-key-only
+  (never inline code) is the ratified DC-5 floor. Full grounding in
+  <code>reports/2026-06-17-component-behavior-extends-resolution.md</code>.
+</p>

@@ -4,98 +4,98 @@
   "targetFraction": 0.6,
   "samples": [
     {
-      "date": "2026-06-14",
-      "points": 9,
-      "contextPct": 15,
-      "impliedCapacity": 60,
-      "stopReason": "gate",
-      "excluded": true
-    },
-    {
-      "date": "2026-06-15",
-      "points": 35,
-      "contextPct": 43,
-      "impliedCapacity": 81,
-      "stopReason": "fork",
-      "excluded": true
-    },
-    {
-      "date": "2026-06-15",
-      "points": 29,
-      "contextPct": 29,
-      "impliedCapacity": 100,
-      "stopReason": "gate",
-      "excluded": true
-    },
-    {
-      "date": "2026-06-15",
-      "points": 34,
-      "contextPct": 46,
-      "impliedCapacity": 74,
-      "stopReason": "empty-pool",
-      "excluded": true
-    },
-    {
-      "date": "2026-06-15",
-      "points": 42,
-      "contextPct": 38,
-      "impliedCapacity": 111,
-      "stopReason": "fork",
-      "excluded": true
-    },
-    {
-      "date": "2026-06-15",
-      "points": 19,
-      "contextPct": 29,
-      "impliedCapacity": 66,
-      "stopReason": "empty-pool",
-      "excluded": true
-    },
-    {
-      "date": "2026-06-15",
-      "points": 36,
-      "contextPct": 48,
-      "impliedCapacity": 75,
-      "stopReason": "fork",
-      "excluded": true
-    },
-    {
-      "date": "2026-06-15",
+      "date": "2026-06-18",
       "points": 25,
-      "contextPct": 45,
+      "contextPct": 51,
+      "impliedCapacity": 49,
+      "stopReason": "empty-pool",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-18",
+      "points": 20,
+      "contextPct": 41,
+      "impliedCapacity": 49,
+      "stopReason": "fork",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-18",
+      "points": 12,
+      "contextPct": 28,
+      "impliedCapacity": 43,
+      "stopReason": "fork",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-18",
+      "points": 2,
+      "contextPct": 16,
+      "impliedCapacity": 13,
+      "stopReason": "fork",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-18",
+      "points": 12,
+      "contextPct": 28,
+      "impliedCapacity": 43,
+      "stopReason": "outgrew",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-19",
+      "points": 7,
+      "contextPct": 20,
+      "impliedCapacity": 35,
+      "stopReason": "empty-pool",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-19",
+      "points": 43,
+      "contextPct": 43,
+      "impliedCapacity": 100,
+      "stopReason": "empty-pool",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-19",
+      "points": 15,
+      "contextPct": 27,
       "impliedCapacity": 56,
       "stopReason": "empty-pool",
       "excluded": true
     },
     {
-      "date": "2026-06-15",
-      "points": 8,
-      "contextPct": 19,
-      "impliedCapacity": 42,
+      "date": "2026-06-19",
+      "points": 42,
+      "contextPct": 39,
+      "impliedCapacity": 108,
       "stopReason": "empty-pool",
       "excluded": true
     },
     {
-      "date": "2026-06-15",
-      "points": 20,
-      "contextPct": 34,
-      "impliedCapacity": 59,
-      "stopReason": "fork",
-      "excluded": true
-    },
-    {
-      "date": "2026-06-16",
-      "points": 40,
-      "contextPct": 43,
-      "impliedCapacity": 93,
+      "date": "2026-06-19",
+      "points": 78,
+      "contextPct": 53,
+      "impliedCapacity": 147,
       "stopReason": "empty-pool",
       "excluded": true
     },
     {
-      "date": "2026-06-16",
-      "points": 39,
-      "contextPct": 19,
-      "impliedCapacity": 205,
+      "date": "2026-06-19",
+      "points": 63,
+      "contextPct": 56,
+      "impliedCapacity": 112,
+      "stopReason": "empty-pool",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-19",
+      "points": 61,
+      "contextPct": 22,
+      "impliedCapacity": 277,
       "stopReason": "empty-pool",
       "excluded": true
     }

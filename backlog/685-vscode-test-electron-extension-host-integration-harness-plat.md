@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-15"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"
-graduatedTo: "plateau-app src/dev-browser/ide-bridge/vscode-extension/__host-tests__/ (@vscode/test-electron runner + test:extension-host script)"
+graduatedTo: "plateau-app/src/dev-browser/ide-bridge/vscode-extension/__host-tests__/ (@vscode/test-electron runner + test:extension-host script)"
 locus: plateau-app
 tags: [dev-browser, ide-bridge, vscode-extension, testing, harness, verification, plateau-app]
 ---

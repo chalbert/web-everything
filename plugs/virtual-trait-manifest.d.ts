@@ -1,11 +1,9 @@
 /**
- * Ambient type for `virtual:trait-manifest` — the Enforcer-generated trait
- * manifest module (see `tools/trait-enforcer/vite-plugin.ts`).
- *
- * `tools/trait-enforcer/virtual.d.ts` declares the same module for editor/demo
- * use, but `tools/` is outside the `build:plugs` tsc project (`include:
- * plugs/**`, `blocks/**`). `bootstrap.ts` statically imports the manifest, so the
- * declaration must live *inside* the project — hence this file. See backlog #116.
+ * Ambient type for `virtual:trait-manifest`. The build-time Enforcer that generated this module
+ * relocated to FUI (#894 / #905); under WE's build it now resolves to the empty static manifest via the
+ * `resolve.alias` in `vite.config.mts` (and `vitest.config.ts`). `bootstrap.ts` still statically imports
+ * the module, so tsc needs this ambient declaration *inside* the `build:plugs` project (`include:
+ * plugs/**`, `blocks/**`) — the alias target alone doesn't satisfy the type checker. See backlog #116.
  */
 declare module 'virtual:trait-manifest' {
   import type { TraitManifest } from './webbehaviors/traitManifest';

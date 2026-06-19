@@ -1,0 +1,49 @@
+<h3 id="overview">Overview</h3>
+<p>
+    Horizontal <a href="https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/">APG
+    Disclosure Navigation</a> header: a row of section heads, each a
+    <code>&lt;button aria-expanded aria-controls&gt;</code> disclosing an absolutely-positioned dropdown
+    panel of links below it. Below the 940px breakpoint the row collapses to an inline accordion. It is the
+    horizontal-popup counterpart of the vertical <a href="/blocks/sectioned-nav/">sectioned-nav</a> — the same
+    disclosure pattern, the other orientation — and it reproduces the WE-docs site nav.
+</p>
+<p>
+    Reveal is CSS on <code>:hover</code>; the keyboard/click path is wired imperatively (the mode&nbsp;C
+    convention — no behavior registry in-document): click / <kbd>Enter</kbd> / <kbd>Space</kbd> toggles a
+    section (opening one closes its siblings), <kbd>Escape</kbd> collapses the open section and returns focus
+    to its head, and an outside click or focus dismisses any open panel. The link for the current page carries
+    <code>aria-current="page"</code>.
+</p>
+<p>
+    Built for <a href="/backlog/931-dogfooded-fui-docs-chrome-renders-broken-fix-it-to-a-correct/">#931</a>
+    so the WE-docs chrome dogfood (<a href="/backlog/865-migrate-we-docs-site-chrome-to-fui-components-header-nav-foo/">#865</a>)
+    renders a compact horizontal header — mounted in the header bar of the
+    <a href="/blocks/app-shell/">app-shell</a> via the in-document (mode&nbsp;C) embed path.
+</p>
+
+<h3 id="usage">Usage</h3>
+{% highlight "typescript" %}
+import { mountDisclosureNav } from '@frontierui/blocks/disclosure-nav';
+
+mountDisclosureNav(shadowRoot, {
+  ariaLabel: 'Main',
+  sections: [
+    { id: 'standards', label: 'Standards', links: [
+      { href: '/intents/', label: 'Intents' },
+      { href: '/blocks/', label: 'Blocks', current: true },
+      { href: '/protocols/', label: 'Protocols' },
+    ] },
+    { id: 'explore', label: 'Explore', links: [
+      { href: '/demos/', label: 'Demos' },
+      { href: '/backlog/', label: 'Backlog' },
+    ] },
+  ],
+});
+{% endhighlight %}
+
+<h3 id="exports">Exports</h3>
+<ul>
+    <li><code>createDisclosureNav(config)</code> — builds the <code>&lt;nav&gt;</code> element and wires the disclosure behavior</li>
+    <li><code>mountDisclosureNav(root, config)</code> — mounts into a shadow root, returns a teardown fn</li>
+    <li><code>mountInDocument(root)</code> — the mode-C contract entry point (default config)</li>
+</ul>

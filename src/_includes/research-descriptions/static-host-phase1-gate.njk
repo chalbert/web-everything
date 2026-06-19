@@ -1,0 +1,98 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    Epic <a href="/backlog/1104-publish-the-website-publicly-gated-controlled-rollout/">#1104</a> stands
+    the Web Everything website up on the public internet, <strong>gated</strong>, opening one notch at a
+    time. Today the site has <strong>no public deployment</strong> — the <code>we:</code> Eleventy build
+    (<code>build:docs</code> &rarr; <code>eleventy</code>, output <code>_site/</code>) runs only on
+    localhost. The first slice, decision
+    <a href="/backlog/1135-choose-static-host-phase-1-gate-mechanism-for-the-public-we-/">#1135</a>, picks
+    two coupled things: the <strong>static host</strong>, and where the <strong>phase-1 shared-code
+    gate</strong> lives. The gate is explicitly <em>not a security boundary</em> — phase 1 only keeps
+    anonymous/casual traffic out; it protects nothing secret.
+</p>
+
+<h2>Recommendation (to ratify in #1135)</h2>
+<ol>
+    <li><strong>Host &rarr; Cloudflare Pages</strong> (Fork&nbsp;1, ~80%). Free tier (unlimited
+        bandwidth/requests, 500 builds/mo), git-push deploy of a static <code>_site/</code>, and —
+        decisively — the <em>entire later roadmap lives on one platform</em>: Pages Functions for the
+        gate, Workers KV for phase-3 per-person codes, Workers email for phase-4, Cloudflare Access for
+        phase-5 login. No re-platform at any notch.</li>
+    <li><strong>Gate &rarr; edge function (Pages Function)</strong> (Fork&nbsp;2, ~80%). A ~20-line
+        function checks the shared code against a server-side secret, sets a signed HttpOnly cookie, and
+        redirects in. Free, serverless (no always-on surface), and it is the <em>exact seam</em> phase 3
+        extends from <code>code === SECRET</code> to a KV per-person lookup. Host-native access control is
+        <strong>rejected for phase 1</strong> — Cloudflare Access is email-<em>identity</em> auth (the
+        phase-5 tool), not a shared code.</li>
+</ol>
+<p>
+    Soft, explicitly-revisitable, low-stakes (operational infrastructure for the project's own site, not a
+    WE standard). The pick optimises <strong>roadmap</strong> burden, not phase-1 burden.
+</p>
+
+<h2>Finding 1 — the choice is the roadmap, not phase 1</h2>
+<p>
+    #1104 is a <em>graduated</em> escalation: phase 1 shared code &rarr; phase 2 analytics &rarr; phase 3
+    <strong>per-person codes</strong> (needs a code store) &rarr; phase 4 <strong>emailed codes</strong>
+    (transactional email + audience list) &rarr; phase 5 <strong>maybe real login</strong>. Three of the
+    five phases need server-side state/compute. So the right phase-1 host is the one whose substrate carries
+    the later phases without re-platforming — picking "cheapest for phase 1" (a Netlify password checkbox,
+    or a client-side gate) is a local optimum that re-opens this exact decision at phase 3.
+</p>
+
+<h2>Finding 2 — host comparison</h2>
+<table>
+    <thead>
+        <tr><th>Host</th><th>Free static</th><th>Git deploy</th><th>Native shared-code gate</th><th>Carries phases 3&ndash;5?</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>Cloudflare Pages</strong></td><td>✅ unlimited bw/req, 500 builds/mo</td><td>✅</td><td>⚠️ Access = identity, not a code &rarr; use a Pages Function</td><td>✅ Functions + KV + email + Access, all free, one platform</td></tr>
+        <tr><td>Netlify</td><td>✅ (100GB bw)</td><td>✅</td><td>✅ site password — but <strong>Pro plan only</strong> (free <code>_headers</code> Basic Auth fallback)</td><td>⚠️ Functions/Blobs exist but a second story per phase; password is a per-person dead-end</td></tr>
+        <tr><td>Vercel</td><td>✅</td><td>✅</td><td>⚠️ password = paid; app-server-oriented posture</td><td>⚠️ Functions/KV exist; overkill</td></tr>
+        <tr><td>GitHub Pages</td><td>✅</td><td>✅</td><td>❌ none</td><td>❌ would need an added edge layer anyway</td></tr>
+    </tbody>
+</table>
+
+<h2>Finding 3 — gate mechanism comparison</h2>
+<table>
+    <thead>
+        <tr><th>Mechanism</th><th>Phase-1 fit</th><th>Cost / code</th><th>Carries to phase 3?</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Host-native access control</td><td>⚠️ CF Access = identity not a code; Netlify password = a code but paid</td><td>least code (if paid)</td><td>❌ Access ≠ codes; password ≠ per-person</td></tr>
+        <tr><td><strong>Edge function (Pages Function / Worker)</strong></td><td>✅ exact: checks code, sets cookie</td><td>~20 lines, free</td><td>✅ swaps <code>=== SECRET</code> for a KV lookup</td></tr>
+        <tr><td>Client-side JS gate</td><td>✅ for "keep the public out"</td><td>cheapest</td><td>❌ content ships to client; not real for per-person</td></tr>
+    </tbody>
+</table>
+<p>
+    The client-side gate is acceptable <em>only</em> for phase 1 and explicitly not beyond — per-person
+    codes in phase 3 need a server-side check.
+</p>
+
+<h2>Finding 4 — free-tier ceilings are ample</h2>
+<p>
+    Cloudflare Pages Functions: 100k requests/day free. Workers KV: 100k reads/day, 1k writes/day, 1GB
+    free — ample for an invite-list code store (writes are rare). Cloudflare Access: free for up to 50
+    users. A gated, word-of-mouth site is nowhere near any of these ceilings; the serverless model also
+    means <em>no always-on surface</em>, matching the solo-founder "minimal always-on" constraint
+    (cf. <a href="/backlog/181-commercialization-infrastructure/">#181</a>/#182's one always-on endpoint).
+</p>
+
+<h2>Red-team of the default</h2>
+<p>
+    The attack: "you're picking the <em>most</em> infrastructure for the <em>least</em> requirement — phase
+    1 needs one password, and Netlify gives that as a checkbox." The rebuttal: the requirement is the
+    <strong>roadmap</strong>, not phase 1. Three of five #1104 phases need server-side state/compute;
+    Netlify's password is a local optimum that re-opens the platform decision at phase 3. Cloudflare Pages
+    pays a near-zero phase-1 cost (a ~20-line function) to never re-platform. The default is soft and
+    revisitable if the roadmap stalls at phase 1.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+    <li>Epic <a href="/backlog/1104-publish-the-website-publicly-gated-controlled-rollout/">#1104</a> — publish the website publicly, controlled gated rollout</li>
+    <li>Story <a href="/backlog/1137-public-deploy-we-site-live-behind-a-splash-shared-entry-code/">#1137</a> — public deploy (blocked on #1135)</li>
+    <li><a href="/backlog/181-commercialization-infrastructure/">#181</a>/#182 — commercialization infra (converges only at phase 5)</li>
+</ul>
+{% endraw %}

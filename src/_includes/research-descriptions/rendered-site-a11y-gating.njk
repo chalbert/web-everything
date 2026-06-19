@@ -1,0 +1,118 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    <a href="/backlog/763-gate-ui-best-practices-on-website-changes-rendered-site-a11y/">#763</a> asks how to
+    gate UI best-practices when the FUI (<code>:3001</code>) and WE-docs (<code>:8080</code>) sites change.
+    <code>check:standards</code> validates spec/data/backlog consistency but runs <strong>no a11y/UI rule</strong>
+    and — per the known gotcha — <strong>does not run the 11ty build</strong>, so rendered-page issues are
+    green-invisible.
+    <a href="/backlog/762-site-navs-lack-a-current-page-active-state-fui-header-we-doc/">#762</a> (neither site
+    nav carries an <code>aria-current</code> current-page indicator, shipped silently) is the worked example of
+    the gap. This survey gathers the a11y-gating prior art per design-first step&nbsp;1 so the tool, harness,
+    posture, and route-set choices reuse established tooling instead of coining a bespoke gate.
+</p>
+
+<h2>Recommendation (to ratify in #763)</h2>
+<ol>
+    <li><strong>Tool — <code>@axe-core/playwright</code></strong> into the existing Playwright project. axe-core
+        is the embeddable WCAG rule engine; <code>AxeBuilder</code> scopes by <code>.include()/.exclude()</code>
+        and filters by <code>.withTags(['wcag2a','wcag2aa','wcag21a','wcag21aa'])</code>, failing the build on any
+        violation. It reuses the repo's already-wired harness (no new server/runner).</li>
+    <li><strong>Posture — warn&nbsp;→&nbsp;enforce ratchet.</strong> Advisory over a small curated route set first,
+        then build-blocking once green — the same warn-only-then-enforce shape as research-freshness
+        (<a href="/backlog/477-research-freshness-staleness-derivation-warn-only-check-read/">#477</a>).</li>
+    <li><strong>Route set — a hand-maintained allowlist, mirrored per-repo.</strong> An explicit reviewed list of
+        gated URLs, one copy per repo (WE-docs, FUI) — mirroring the existing §9 Vite-proxy-allowlist precedent
+        in <code>check-standards.mjs</code> and the duplicated dev-panel pattern.</li>
+    <li><strong>Supported by default (not forks):</strong> a cheap <strong>static template lint</strong> in
+        <code>check:standards</code> for the structural rules axe can't assert without a browser (nav links missing
+        <code>aria-current</code> wiring), <strong>and</strong> a <strong>DoD website-change checklist</strong>
+        folded into both repos. Both complement the axe gate; neither competes with it.</li>
+</ol>
+
+<h2>The three tool families — distinct jobs</h2>
+<table>
+    <thead>
+        <tr><th>Tool</th><th>What it is</th><th>Route-list model</th><th>Fit as the rendered-site gate</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>axe-core</strong> (<code>@axe-core/playwright</code>)</td>
+            <td>The embeddable WCAG rule engine. AxeBuilder: <code>.include()/.exclude()</code>,
+                <code>.withTags(...)</code>, per-rule violations, fail-build on any.</td>
+            <td>None of its own — you drive URLs from the host test (here, Playwright specs over the running
+                servers).</td>
+            <td><strong>Primary gate.</strong> Reuses the existing Playwright lane — zero new harness.</td>
+        </tr>
+        <tr>
+            <td><strong>Pa11y / pa11y-ci</strong></td>
+            <td>CLI wrapper that runs axe-core and/or HTML_CodeSniffer. Pa11y&nbsp;9.1 (2026) bundles axe-core 4.11.</td>
+            <td>Native — a <code>.pa11yci</code> JSON with <code>urls[]</code> (the route-list model baked in).</td>
+            <td>A second standalone runner to maintain alongside Playwright. Redundant here.</td>
+        </tr>
+        <tr>
+            <td><strong>Lighthouse CI</strong></td>
+            <td>Broad audit — performance + best-practices + SEO + a11y. Score-gate model (e.g. <code>0.9+</code>),
+                GitHub Action.</td>
+            <td><code>lhci</code> <code>collect.url[]</code>.</td>
+            <td>Coarse a11y (a single aggregate score, not per-rule WCAG). Good <em>supplement</em>, weak primary
+                a11y gate.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>The load-bearing finding — the harness cost is already paid</h2>
+<p>
+    The item framed option B (axe over the built sites) as costing "a browser run + maintaining the route list,
+    and requires actually building the sites (the step the gate skips today)." Two of those are already covered:
+    <code>playwright.config.ts</code>'s <code>webServer</code> boots <code>npm run dev</code> (Vite <code>:3000</code>
+    proxying <code>/backlog/</code> and the catalog routes to 11ty <code>:8080</code>) and <strong>reuses an
+    already-running instance locally</strong> (never killing the user's server). So axe can hit the <em>served</em>
+    WE-docs pages with no separate build step — the exact step <code>check:standards</code> skips. FUI
+    <code>:3001</code> is a separate server in the <code>frontierui</code> repo, which is why the gate mirrors
+    per-repo rather than centralizing.
+</p>
+<p>
+    <code>check:standards</code> itself <strong>cannot</strong> be the rendered-site gate: it deliberately skips the
+    11ty build and runs no browser. It <em>can</em> host the static structural lint (option A — a fast rule over
+    <code>src/*.njk</code>, like the existing §9 proxy-allowlist cross-check), but the real coverage (contrast, focus
+    order, computed current-state) must live in the Playwright/integration lane.
+</p>
+
+<h2>Classification — a devtools quality gate, not a standard artifact</h2>
+<p>
+    Running the per-fork classification: this is a <strong>devtools quality gate</strong> (kin to
+    <code>check:standards</code> itself), <em>not</em> a Block / Intent / Protocol / Capability shipped to consumers
+    — zero consumer lock-in, and no protocol is minted (axe-core <em>is</em> the WCAG conformance engine, consumed
+    rather than re-specified — reaching for a "WE a11y protocol" would be lock-in for no interop gain). The
+    most-permissive-default principle maps to the <strong>warn→enforce ratchet</strong>: a gate starts advisory and
+    is tightened by author opt-in, never hard-red on day one. The standing separate-and-decouple bias keeps the
+    static lint, the axe runner, and the DoD checklist as three composable pieces rather than one monolithic gate.
+</p>
+<p>
+    Applying the fork-existence test dissolves the apparent A/B/C three-way: A (static lint) and C (DoD checklist)
+    are <strong>not rivals</strong> to B (axe) — the item itself states "A and B are not mutually exclusive." They
+    coexist, so they are <em>supported by default</em>, not decisions. What remains a genuine call is the gating
+    <strong>tool</strong>, plus two sub-decisions the original collapsed: blocking <strong>posture</strong> and the
+    gated <strong>route set</strong>.
+</p>
+
+<h2>Web-standards &amp; reference-system alignment</h2>
+<p>
+    axe-core's tag filters map directly onto WCAG success criteria (<code>wcag2a</code>, <code>wcag2aa</code>,
+    <code>wcag21aa</code>); the present-instance fix (<a href="/backlog/762-site-navs-lack-a-current-page-active-state-fui-header-we-doc/">#762</a>)
+    targets WCAG 2.4.8 (Location) + the
+    <a href="https://www.w3.org/WAI/ARIA/apg/">ARIA APG</a> current-page pattern (<code>aria-current="page"</code>),
+    using a border/weight cue rather than colour alone (WCAG 1.4.1). The leading reference design systems
+    (<a href="https://design-system.service.gov.uk/">GOV.UK</a>, Carbon, Fluent, Material) all run automated a11y
+    over their own component sites in CI — the same dogfood posture #762's fix already takes by reusing the repo's
+    own <code>nav-list</code> spec.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+    <li>Decision: <a href="/backlog/763-gate-ui-best-practices-on-website-changes-rendered-site-a11y/">#763 — Gate UI best practices on website changes</a> (this prep).</li>
+    <li>Present instance to fix: <a href="/backlog/762-site-navs-lack-a-current-page-active-state-fui-header-we-doc/">#762 — site navs lack a current-page active state</a>.</li>
+    <li>Posture precedent: <a href="/backlog/477-research-freshness-staleness-derivation-warn-only-check-read/">#477 — warn-only freshness derivation</a>.</li>
+</ul>
+{% endraw %}

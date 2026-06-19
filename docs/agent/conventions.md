@@ -48,9 +48,21 @@ readability; the full repo name is also accepted (the gate normalizes either):
 | frontierui | `frontierui:` | `fui:` |
 | plateau-app | `plateau-app:` | `plateau:` |
 
-Exempt from the prefix (WE-relative by construction): fenced code blocks, npm package specifiers
-(`@frontierui/blocks`), URLs, and the frontmatter `relatedReport`/`graduatedTo`/`crossRef` fields. Enforced by
-`check:standards` (warn-level via #884, hard after the one-pass corpus migration in #885).
+Exempt from the prefix (WE-relative by construction): **fenced** code blocks (triple-backtick ``` ``` ```),
+npm package specifiers (`@frontierui/blocks`), URLs, and the frontmatter
+`relatedReport`/`graduatedTo`/`crossRef` fields. Enforced by `check:standards` (warn-level via #884, hard
+after the one-pass corpus migration in #885).
+
+> **The two reintroduction traps — read these, they account for nearly every recurring `#885` failure:**
+> 1. **Inline code spans are *not* exempt — only *fenced* blocks are.** Wrapping a path in single backticks
+>    does **not** waive the prefix: write `` `we:CustomComment.ts` `` (locus *inside* the backticks), never
+>    `` `CustomComment.ts` ``. The detector flags inline-code paths exactly like bare prose ones; "it's in
+>    backticks" is the most common false assumption behind a red gate.
+> 2. **Bare single-segment filenames still need a locus.** `CustomComment.ts`, `provider.ts`,
+>    `__tests__/unit/Foo.test.ts` — a path with no directory feels "obviously local," but the same filename
+>    can exist in FUI, so the prefix is required: `` `we:__tests__/unit/Foo.test.ts` ``. Any token matching
+>    `*.ts|*.json|*.njk|*.html|*.mjs` outside a fenced block needs a `we:`/`fui:`/`plateau:` prefix — no
+>    exceptions for short names.
 
 ## Glossary Philosophy (`src/_data/semantics.json`)
 - **Term first**: identify the abstract concept (`Action`, `Layout`), not the project artifact (`Action Intent`).

@@ -2,10 +2,12 @@
 type: issue
 workItem: story
 size: 13
-status: open
+status: resolved
 blockedBy: ["905"]
 dateOpened: "2026-06-18"
 dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
+graduatedTo: none
 tags: []
 ---
 
@@ -59,3 +61,40 @@ file relocation; it is a **cross-repo divergent-implementation reconciliation** 
 That divergent-impl reconciliation + dual-repo build-config surgery + dual-repo verification is a focused
 single-item job (≈13), not a batchable·5 — re-sized and released to `open` rather than risk a careless
 overwrite breaking FUI's scanner. Scope/ruling unchanged (#905-A); only the size/batchability is corrected.
+
+## Resolved 2026-06-18 — relocation executed (#905-A), dual-repo green
+
+The cross-repo divergent-impl reconciliation landed exactly to scope #905-A. What moved/changed:
+
+- **Converged FUI's plugin onto the WE contract SoT.** `fui:tools/trait-enforcer/vite-plugin.ts`
+  is now WE's contract-driven version (derives `DEFAULT_DELIVERY`/scan-pattern templates/`SCAN_FLAGS` from
+  the #716 contract) replacing FUI's 295-line inline-typed fork. Behavior is byte-identical (the regex
+  templates matched), so FUI's existing `fui:trait-enforcer.test.ts` (30) + `fui:chunk-isolation.build.test.ts` (3)
+  pass unchanged. NB: the plugin reaches the contract via a **sibling-relative** path, not the
+  `@webeverything/*` alias — a vite plugin is imported by `fui:vite.config.mts` at config-load (a Node/esbuild
+  context) where `resolve.alias` does not apply (verified: aliasing it broke FUI's config load).
+- **Moved the 4 sibling plugins + composedTraitSet** (`fui:rollup-plugin.ts`, `fui:webpack-plugin.ts`,
+  `fui:esbuild-plugin.ts`, `fui:parcel-plugin.ts`, `fui:composedTraitSet.ts`) to FUI verbatim (they import the
+  local `fui:vite-plugin.ts` core; composedTraitSet's type-only contract import uses the
+  `@webeverything/trait-manifest-contract` alias).
+- **Moved the bundler/conformance tests** (`fui:multi-bundler.test.ts`, `fui:cross-bundler-conformance.test.ts`,
+  `fui:parcel-build-harness.ts`, `fui:composedTraitSet.test.ts`) to FUI, repointing their contract import to the
+  alias. The reference-impl-conforms-to-contract arm (which needs the now-FUI plugin) split off WE's
+  `we:traitManifestContract.test.ts` into FUI's new `fui:contract-conformance.test.ts`; WE keeps the contract's
+  self-consistency arm. FUI trait-enforcer suite: **59 passing**.
+- **Installed FUI devDeps** `@parcel/core` + `@parcel/plugin` + `@parcel/config-default` (`^2.16.4`) — the
+  parcel plugin + its real-build tests need them; rollup/webpack/esbuild were already present transitively.
+- **Wired** `@webeverything/trait-manifest-contract` in `fui:tsconfig.json` (paths, for the type-only
+  imports) + `fui:vitest.config.ts` (alias, for `fui:contract-conformance.test.ts`'s runtime const imports).
+- **KEPT in WE:** `we:tools/trait-enforcer/traitManifestContract.ts` (the neutral #716 SoT, consumed by the
+  WE-side MaaS `we:blocks/renderers/module-service/traitServePath.ts`) + its self-consistency test, and the whole
+  `we:plugs/webbehaviors/` protocol surface (the `trait` attr · `registerTraits` · `CustomAttributeRegistry`) — untouched.
+- **WE config surgery:** dropped `traitEnforcer()` + its import from `we:vite.config.mts`, restored the empty
+  `virtual:trait-manifest` → `/plugs/webbehaviors/traitManifest` `resolve.alias` (the byte-identical
+  fallback vitest already used); `we:plugs/bootstrap.ts` resolves, manifest stays empty by design. Refreshed the
+  stale comment in `we:plugs/virtual-trait-manifest.d.ts`.
+
+**Verification:** WE — config loads, `check:standards` 0 new errors (the open errors are pre-existing, from a
+concurrent session's untracked #930/#932 files + a concurrently-stale `we:AGENTS.md` inventory), full vitest 3047
+passing. FUI — config loads, `check:standards` 0 errors, full vitest 1846 passing. `graduatedTo: none` (a code
+relocation, no new WE entity).

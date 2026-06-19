@@ -1,0 +1,124 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for the manifest-transport decision
+  (<a href="/backlog/887-decide-the-plateau-creator-to-fui-switcher-manifest-transpor/">#887</a>) that gates the
+  <a href="/backlog/751-embedded-theme-design-system-creator-plateau/">#751</a> "Your theme" embed capstone,
+  under the Block Explorer epic <a href="/backlog/746-block-explorer-interactive-fui-block-workbench/">#746</a>.
+  The #751 capstone wants a <strong>"Your theme" button</strong> on the FUI block workbench that opens the
+  <strong>embedded Plateau design-system creator</strong> (an iframe — Plateau owns the creator, FUI/WE embed
+  it) and feeds the author's freshly-authored
+  <a href="/backlog/747-design-system-equals-theme-plus-intents-bundle-manifest-catalog/">#747</a> manifest to
+  the live <a href="/backlog/749-live-theme-design-system-switcher/">#749</a> switcher so the created theme
+  applies to the <em>real</em> block immediately. The creator (Plateau, cross-origin) and the switcher (FUI,
+  <code>frontierui/workbench/mount.ts</code>) live in <strong>different cross-origin iframes</strong>. So
+  <strong>how</strong> does a <em>runtime-authored</em> manifest cross the Plateau→FUI seam, and should the FUI
+  switcher consume an externally-supplied manifest at all (vs only its fixed FUI-resident gallery)?
+</p>
+
+<h2>The cross-origin, runtime-authored cousin of #881</h2>
+<p>
+  This is the explicit cousin of
+  <a href="/backlog/881-decide-the-we-fui-mode-c-host-config-transport-for-dogfooded/">#881</a>
+  (<a href="/research/mode-c-host-config-transport/">that topic</a>). #881 ruled the
+  <strong>same-origin, static</strong> case (WE hands server-emitted nav/brand/footer to a FUI mode-C mount in
+  WE's own DOM) and landed on <strong>DOM-mediated data on the mount point</strong> — because same-origin DOM is
+  readable and the config is build-time. #887 flips <strong>both</strong> distinguishing properties, so the rhyme
+  resolves <em>oppositely</em> on the channel:
+</p>
+<table>
+  <thead>
+    <tr><th></th><th>#881 (resolved)</th><th>#887 (this card)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Origin relationship</td><td><strong>same-origin</strong> (FUI in WE's DOM)</td><td><strong>cross-origin</strong> (Plateau iframe ↔ FUI iframe)</td></tr>
+    <tr><td>When config exists</td><td><strong>static</strong>, server-emitted at build</td><td><strong>runtime</strong>, user-authored in the creator</td></tr>
+    <tr><td>Resolved channel</td><td>DOM data on the mount point (no message)</td><td><strong><code>postMessage</code></strong> (cross-frame DOM reads are blocked by the same-origin policy)</td></tr>
+  </tbody>
+</table>
+
+<h2>Grounding the real trees</h2>
+<ul>
+  <li>
+    <strong>An origin-validated <code>postMessage</code> channel already exists in the FUI embed SDK.</strong>
+    <code>frontierui/embed/embed-host.ts</code> installs a message router that <strong>rejects any message whose
+    <code>event.origin</code> ≠ the frame's validated origin</strong> (<code>embed-host.ts:142</code>), matches
+    <code>event.source</code> to a live <code>contentWindow</code>, and sends host→guest via
+    <code>postToGuest</code> targeted at the validated origin; <code>embed-guest.ts</code> posts to its embedder's
+    origin and origin-gates inbound. The wire contract (<code>embed/contract.ts</code>) is a versioned
+    <code>EmbedEnvelope</code> (<code>channel:'fui-embed'</code>, <code>v:1</code>), a
+    <code>GuestMessage | HostMessage</code> union, an <code>isEmbedMessage</code> guard, and an
+    <code>envelope()</code> helper — already an extensible origin-validated message bus
+    (<code>ready</code>/<code>resize</code>/<code>overlay-open</code>/<code>overlay-close</code>/<code>init</code>).
+    Adding an <code>apply-design-system</code> message type is a <strong>contract addition, not a new channel</strong>
+    — #887-A is <em>not</em> greenfield.
+  </li>
+  <li>
+    <strong>The switcher's apply path is one already-factored function.</strong>
+    <code>frontierui/workbench/mount.ts:277</code> <code>applyDesignSystem(preset)</code> sets the manifest's
+    <code>themeTokens</code> as custom properties, sets <code>data-intent-*</code>/<code>data-trait-*</code>, and
+    re-renders the same block with no code change; the gallery wires each chip to it. Consuming an external manifest =
+    build a <code>DesignSystemPreset</code> from the incoming payload and call the <em>existing</em>
+    <code>applyDesignSystem()</code> — the injection point is already there.
+  </li>
+  <li>
+    <strong>The transported manifest must be the resolved/inline #747 form, not a DTCG-path manifest.</strong>
+    The workbench's presets (<code>frontierui/workbench/designSystems.ts</code>) carry <code>themeTokens</code>
+    resolved inline as a <code>{ '--custom-prop': value }</code> map — <em>because the workbench has no WE↔FUI
+    channel, it consumes the #747 manifest shape with its own preset data</em>. The WE catalog form
+    (<code>src/_data/designSystems.json</code>) uses a <code>manifest</code> path ref. Cross-origin, the FUI switcher
+    <strong>cannot dereference a <code>themeTokens</code> path</strong> on a Plateau/WE origin (no channel + CORS),
+    so the creator must serialize the <strong>fully-resolved</strong> manifest (token values inlined) — #887's
+    analogue of #881's serializable-<code>ChromeConfig</code> constraint.
+  </li>
+  <li>
+    <strong>Topology is constrained by #809 (no WE↔FUI channel).</strong> The FUI workbench hosts the Plateau
+    creator as a <strong>nested child iframe</strong> (the sanctioned #746 "embedded Plateau configurators"
+    pattern), making creator→switcher a <strong>direct Plateau↔FUI parent-child message</strong>. The sibling-iframe
+    alternative (the WE docs page hosting both and relaying between them) reconstitutes exactly the WE↔FUI channel
+    #809 forbids — <strong>excluded, not weighed</strong>.
+  </li>
+</ul>
+
+<h2>Prior-art families for a cross-iframe runtime handoff</h2>
+<table>
+  <thead>
+    <tr><th>Family</th><th>What it is</th><th>Prior art</th><th>Verdict for #887</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>postMessage</code> (runtime push)</td>
+      <td>Creator posts a serializable payload to the host frame on "apply"; host validates origin and renders.</td>
+      <td>Stripe Elements, Figma / CodeSandbox / StackBlitz embeds, Storybook manager↔preview — the dominant embedded-editor → live-preview pattern.</td>
+      <td><strong>Option A.</strong> Ephemeral, no backend, origin-validated, reuses the existing FUI channel — the live-apply channel.</td>
+    </tr>
+    <tr>
+      <td>Persist-to-backend + fetch-by-id</td>
+      <td>Creator POSTs the manifest to a hosted service, consumer fetches by id (CORS).</td>
+      <td>Tokens Studio Pro sync, zeroheight / Supernova hosted libraries.</td>
+      <td><strong>Option B.</strong> The share/persist pattern — and per #775 the <em>paid</em> tier. A structural defect as the <em>live-apply</em> channel (drags a free loop behind hosted infra + a round-trip).</td>
+    </tr>
+    <tr>
+      <td>URL / navigation handoff</td>
+      <td>Encode the manifest in a URL param, navigate the consumer to it.</td>
+      <td>WE's own #754 permalink round-trip.</td>
+      <td><strong>Option C.</strong> #754 encodes a manifest <em>ref</em>, not inline tokens, and a reload-per-tweak destroys live authoring. A share / deep-link mechanism, not a live channel.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Net effect on the decision</h2>
+<p>
+  The survey <strong>confirms the <code>postMessage</code> channel and dissolves any "is this greenfield?"
+  doubt</strong> — FUI already ships an origin-validated, versioned message bus
+  (<code>embed-host.ts</code>/<code>embed-guest.ts</code>/<code>contract.ts</code>) and a one-call switcher
+  injection point (<code>mount.ts:277</code>). It also pins the load-bearing constraint the build inherits: the
+  payload that crosses the wire is the <strong>fully-resolved #747 manifest</strong> (inline token values), not a
+  path ref. Handed to #887: <strong>Fork 1</strong> (live-apply transport) → <strong>A — origin-validated
+  <code>postMessage</code></strong> over the existing FUI channel + an <code>apply-design-system</code> message;
+  B (persist+fetch) is the paid share path, C (URL/#754) breaks live iteration. Forced invariants (not forks):
+  Plateau→FUI direct + WE never brokers (#809); the switcher consumes the runtime manifest (fixed-gallery-only is
+  the broken branch); the wire shape is the resolved/inline manifest. Full grounding in
+  <code>reports/2026-06-17-887-plateau-creator-fui-switcher-transport.md</code>.
+</p>
+{% endraw %}

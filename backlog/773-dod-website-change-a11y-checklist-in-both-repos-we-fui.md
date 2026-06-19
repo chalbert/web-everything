@@ -7,7 +7,7 @@ blockedBy: ["763"]
 dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"
 dateResolved: "2026-06-16"
-graduatedTo: AGENTS.md
+graduatedTo: "./AGENTS.md (DoD a11y checklist; mirrored in ../frontierui/AGENTS.md)"
 tags: []
 ---
 

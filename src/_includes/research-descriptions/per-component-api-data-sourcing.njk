@@ -1,0 +1,112 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for decision
+  (<a href="/backlog/801-per-component-api-data-sourcing-for-the-web-docs-props-table/">#801</a>) — a slice of
+  the Web Docs feature pipeline epic (<a href="/backlog/623/">#623</a>). The props-table renderer
+  (<a href="/blocks/props-table/">block:props-table</a>, <a href="/backlog/654/">#654</a>) and the Custom
+  Elements Manifest protocol + emit pipeline (<code>scripts/gen-cem.mjs</code>, <a href="/backlog/653/">#653</a>)
+  already ship, but <code>gen-cem</code> projects only <strong>events / exports / tagName</strong> — the emitted
+  <code>custom-elements.json</code> carries <strong>0 attributes, 0 slots, 0 CSS custom-properties</strong> for
+  all 74 blocks. So #801 must decide where the structured per-component API data the table is meant to show
+  originates: <strong>hand-authored <code>blocks.json</code> fields</strong> (a WE-side declared contract) vs an
+  <strong>FUI-side CE-manifest analyzer</strong> over FUI block source, shipped to WE as data.
+</p>
+
+<h2>The source question was already ruled — at the dimension level (#706)</h2>
+<p>
+  <a href="/backlog/706/">#706</a> faced the same authored-vs-impl-scan question for FUI's own block catalog and
+  <strong>dissolved it into invariant + dimension</strong>: derivation-source is a <strong>supported
+  dimension</strong> (<code>authored | impl-scan | hybrid</code>, all emitting the same CEM contract), with
+  <strong>WE shipping the authored→CEM path (<a href="/backlog/626/">#626</a> / <code>gen-cem</code>) as the
+  default/reference source</strong> and impl-scan as opt-in. <a href="/backlog/785/">#785</a> documented this as
+  a Web-Docs standard dimension. So #801 is the <em>application</em> of that ruling to WE's own props-table, and
+  #706 has already named the default: <strong>authored</strong>.
+</p>
+
+<h2>The constellation boundary excludes the FUI-analyzer-as-WE's-SoT branch</h2>
+<p>
+  For WE's <em>own</em> reference docs, an FUI-emitted <code>custom-elements.json</code> consumed as WE's
+  canonical props-table data is <strong>excluded by the docs-rendering boundary</strong>: <code>@webeverything</code>
+  never imports or consumes FUI artifacts as canonical (FUI owns impl <em>and</em> its rendered display; WE
+  renders its <em>own</em> standard pages). It also inverts contract-first — WE <em>declares</em> a block's
+  public API and FUI <em>implements</em> it, so sourcing the declared API <em>from</em> the impl makes the impl
+  the source of truth for the standard. WE already authors the public contract WE-side today: <code>blocks.json</code>
+  declares <code>events</code> (e.g. <code>type-ahead</code>'s three events with full <code>detail</code>/
+  <code>taxonomy</code>) that <code>gen-cem</code> projects — attributes / slots / CSS custom-properties / CSS
+  parts are the same nature of declared-contract data.
+</p>
+
+<h2>Prior art — and the finding that reshapes the call</h2>
+<p>
+  Surveyed the Custom Elements Manifest spec + analyzer (the de-facto multi-vendor format <code>gen-cem</code>
+  already targets) and how the leading web-component design systems source these fields. The decisive finding:
+</p>
+<ul>
+  <li>
+    <strong>The analyzer cannot auto-derive slots, CSS custom-properties, or CSS parts.</strong> Per the
+    <a href="https://custom-elements-manifest.open-wc.org/analyzer/getting-started/">analyzer getting-started
+    docs</a>: <em>"<code>@custom-elements-manifest/analyzer</code> is able to figure out most of your component's
+    API by itself, but for some things it needs a little help, including <strong>CSS Shadow Parts, CSS Custom
+    Properties and Slots</strong>, which you can document using JSDoc."</em> Shoelace (Lit) does exactly this —
+    it <em>manually adds JSDoc</em> (<code>@slot</code>/<code>@csspart</code>/<code>@cssproperty</code>) and the
+    analyzer scrapes them (<a href="https://github.com/shoelace-style/shoelace/blob/next/custom-elements-manifest.config.js">CEM
+    config</a>).
+  </li>
+  <li>
+    <strong>What the analyzer <em>does</em> auto-derive</strong> is the surface mapped to real code constructs:
+    attributes, public/reflected properties, methods, and (with a library plugin) events.
+  </li>
+</ul>
+<p>
+  <strong>Bearing on the call:</strong> the slots / CSS-API / parts surface — four of the six props-table
+  columns — is <strong>hand-authored either way</strong>, so the FUI-analyzer branch's headline advantage
+  ("zero authoring; the impl is the single SoT") is <em>false for exactly the fields the table most needs</em>.
+  The choice is not "author vs derive" but <strong>which repo's file the authored contract lives in</strong> —
+  and the boundary answers that: WE-side. The only class the analyzer genuinely automates is the
+  <strong>programmatic JS surface</strong> (non-reflected fields/methods) — which is the impl-volatile,
+  FUI-owned surface. This <em>dissolves</em> the headline source-fork and <em>sharpens</em> a different one:
+  how much of the member surface WE should author as declared contract.
+</p>
+
+<h2>The decision, after the fork-existence test</h2>
+<p>
+  Two <strong>forced invariants</strong> (ratify, not weigh): <strong>I1 — source = authored WE-side
+  <code>blocks.json</code> → <code>gen-cem</code> → CEM</strong> (the #626/#706 default, consistent with the
+  authored <code>events</code>; the FUI-analyzer-as-WE's-SoT alternative is broken for WE's own docs — boundary
+  violation + delivers no authoring saving); <strong>I2 — field shapes mirror the CEM 2.1.0 member kinds</strong>
+  (<code>attributes</code>/<code>members</code>/<code>slots</code>/<code>cssProperties</code>/<code>cssParts</code>),
+  the renderer's existing projection, no bespoke schema (#654's <code>consumesCemNotBespoke</code>). The
+  FUI analyzer is not deleted — it stays the #706 <strong>opt-in impl-scan dimension</strong> and the engine of
+  a future <strong>conformance gate</strong> (analyzer-emitted CEM checked against WE's declared CEM, failing on
+  drift — the #463 conformance-gate posture).
+</p>
+<p>
+  That leaves <strong>one genuine on-merit fork — the scope of the authored contract</strong>:
+</p>
+<ul>
+  <li>
+    <strong>A — full CEM member set</strong>, including programmatic JS members/methods. One source covers the
+    whole table, but pulls FUI's impl-volatile programmatic surface into the WE standard's declared contract
+    (max drift; duplicates the one class the analyzer could derive).
+  </li>
+  <li>
+    <strong>B — platform-facing contract surface only (recommended).</strong> Author the declarative surface
+    (<code>attributes</code>, reflected properties, <code>events</code>, <code>slots</code>,
+    <code>cssProperties</code>, <code>cssParts</code>); defer non-reflected programmatic JS members/methods to
+    the #706 opt-in impl-scan. The authored surface is exactly the non-derivable, contract-bearing surface; the
+    programmatic surface stays FUI's, reachable via the opt-in scan.
+  </li>
+</ul>
+<p>
+  <strong>Recommended: B</strong> [confidence: med-high]. The platform-facing surface <em>is</em> the standard's
+  contract and must be hand-authored regardless; the programmatic JS surface is impl-volatile, FUI-owned, and
+  the only class an analyzer adds value for — so it belongs to the opt-in impl-scan, not WE's authored
+  reference. The empty-member-kind graceful-omit the renderer already does means a partial "properties" column
+  degrades cleanly.
+</p>
+
+<p>
+  <em>Full grounding in <code>reports/2026-06-16-per-component-api-data-sourcing.md</code>.</em>
+</p>
+{% endraw %}

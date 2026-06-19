@@ -7,7 +7,7 @@ blockedBy: ["038"]
 dateOpened: "2026-06-15"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"
-graduatedTo: .eleventy.js
+graduatedTo: "./.eleventy.js (fuiDemo iframe shortcode)"
 tags: []
 ---
 

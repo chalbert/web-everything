@@ -21,7 +21,9 @@ tags: [packaging, npm-scope, we-fui-boundary, contract-export]
 `@webeverything/validation-generation`), each a `we:package.json` + curated `exports` at its existing
 root dir (1a). FUI **resolves them via local tsconfig `paths` + vite `alias` into the sibling
 `../webeverything` dir, keyed on the full `@webeverything/*` specifier — no registry publish** (2a);
-publishing is a later, separately-prioritized build triggered by the first external consumer. The
+publishing is a later, separately-prioritized build triggered by the first external consumer.
+
+The
 `exports` map **lists only the WE-resident contract modules and excludes impl by omission** (3a) —
 capability-manifest whole; validation-generation `provider`/`registry`/`fieldError`/`cel` +
 `service`-wire-types-only; no `crossField`/`adapters/*`/`service`-handler entry, so Node `exports`

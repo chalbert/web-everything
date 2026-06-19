@@ -14,7 +14,9 @@ tags: [intents, traits, technical-configurator, build-time, delivery, resolver]
 
 # Intent profile to trait build-time resolver — bundle the traits the active intent profile implies
 
-The principled indirect path established while ratifying #747-Fork-4: a design system never names a trait directly; instead its intent defaults reach traits through a resolver that maps the active intent profile to trait build-time inclusion/delivery. The concept is already stated (we:block-pages.njk:85 'only the traits matching the active intent profile are bundled'; we:router.njk:896 'Loader Intent selects the loading UX trait') but no resolver exists as code. Keeps intents UX-only (no impl refs — ratified) and traits technical: the mapping lives in a Technical-Configurator-style resolver layer, not in the intent or the trait. Scope: build-time inclusion/delivery (which traits ship, eager/lazy); runtime activation gates (inert/visibility) stay DOM-driven.
+The principled indirect path established while ratifying #747-Fork-4: a design system never names a trait directly; instead its intent defaults reach traits through a resolver that maps the active intent profile to trait build-time inclusion/delivery. The concept is already stated (we:block-pages.njk:85 'only the traits matching the active intent profile are bundled'; we:router.njk:896 'Loader Intent selects the loading UX trait') but no resolver exists as code. Keeps intents UX-only (no impl refs — ratified) and traits technical: the mapping lives in a Technical-Configurator-style resolver layer, not in the intent or the trait.
+
+Scope: build-time inclusion/delivery (which traits ship, eager/lazy); runtime activation gates (inert/visibility) stay DOM-driven.
 
 ## Progress (resolved 2026-06-16) — locus: webeverything
 

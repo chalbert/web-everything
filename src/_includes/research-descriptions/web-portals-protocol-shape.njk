@@ -1,0 +1,150 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  The <a href="/projects/webportals/">Web Portals</a> spec is a mature draft for a declarative-HTML portal
+  protocol — the native-HTML equivalent of React <code>createPortal</code> / Vue <code>&lt;Teleport&gt;</code> —
+  built on <a href="/projects/webinjectors/">Web Injectors</a> as the logical-tree backbone. It proposes
+  <code>Node.logicalParent</code>, logical event propagation (<code>bubblesLogical</code>/<code>logicalPath</code>),
+  a portal directive, and an SSR contract. The spec carries <strong>four open questions</strong> that gate
+  implementation, and <a href="/backlog/1000-ratify-the-web-portals-protocol-resolve-the-4-spec-open-ques/">#1000</a>
+  exists to ratify the protocol shape. Per design-first step&nbsp;1, this survey grounds each question in
+  platform prior art (WHATWG DOM, MDN, React/Vue/Angular/Solid) plus the WE intent catalog, so the
+  decision is fast ratification rather than cold research.
+</p>
+<ol>
+  <li><code>logicalParent</code> — a writable property, or set via a method?</li>
+  <li><code>bubblesLogical</code> × Shadow DOM event retargeting — is <code>logicalPath</code> computed pre- or post-retarget, and what does <code>composed</code> mean across a logical hop?</li>
+  <li>Focus scopes — fold into the portal directive, or keep separate?</li>
+  <li>Deferred target resolution — error, queue-until-present, or no-op when the target doesn't exist yet?</li>
+</ol>
+
+<h2>Q1 — <code>logicalParent</code>: writable property vs. method</h2>
+<p>
+  The spec currently shows a writable JS property (<code>logicalParent: Node | null</code>). The platform
+  prior art points the other way: <strong>no DOM structural relationship is exposed as a writable
+  property.</strong>
+</p>
+<div class="comparison-table-wrapper">
+<table class="comparison-table">
+  <thead><tr><th>Platform API</th><th>Shape</th><th>Writable?</th><th>Validation</th></tr></thead>
+  <tbody>
+    <tr><td><code>Node.parentNode</code></td><td>property</td><td>read-only</td><td>n/a (structure isn't assigned)</td></tr>
+    <tr><td><code>Node.assignedSlot</code></td><td>property</td><td>read-only</td><td>computed</td></tr>
+    <tr><td><code>appendChild()</code> / <code>insertBefore()</code></td><td><strong>method</strong></td><td>re-callable (moves)</td><td><code>HierarchyRequestError</code> on cycle</td></tr>
+    <tr><td><code>HTMLSlotElement.assign()</code></td><td><strong>method</strong></td><td>re-callable</td><td>requires manual slotting mode</td></tr>
+    <tr><td><code>Element.attachShadow()</code></td><td><strong>method</strong></td><td>once-only</td><td><code>NotSupportedError</code> on 2nd call</td></tr>
+    <tr><td><code>HTMLElement.attachInternals()</code></td><td><strong>method</strong></td><td>once-only</td><td>throws if called twice</td></tr>
+  </tbody>
+</table>
+</div>
+<p>
+  Reparenting is done by <strong>methods</strong> that throw <code>HierarchyRequestError</code>
+  (<a href="https://dom.spec.whatwg.org/#concept-node-ensure-pre-insertion-validity">DOM pre-insertion
+  validity</a>, the host-including-inclusive-ancestor test) on a cycle; read-only properties only read back
+  the computed relationship. Framework logical parents (React <code>createPortal</code>, Vue
+  <code>&lt;Teleport to&gt;</code>, Angular CDK Portal) are all set <strong>declaratively by render
+  position</strong>, never an imperative property write.
+</p>
+<p>
+  <strong>Recommendation (~85%):</strong> declarative-first — a reflected IDREF attribute
+  <code>logicalparent="id"</code> as the front door (matches <code>slot</code>, <code>for</code>,
+  <code>form</code>, <code>popovertarget</code>), an imperative <code>setLogicalParent(node)</code> method as
+  the escape hatch, and a read-only <code>logicalParent</code> getter. Reject the writable property: it has
+  no platform precedent and no validation hook for cycle detection / invalidation-on-reparent. Cycle story:
+  reuse <code>HierarchyRequestError</code> on the <em>logical</em> graph; re-pointing detaches the prior
+  logical parent (move semantics) and fires a <code>logicalparentchange</code> notification (mirrors
+  <code>slotchange</code>). The research <em>added</em> the declarative-attribute surface the spec omitted —
+  the fork is no longer "property vs method" but "writable property vs declarative-attribute + method."
+</p>
+
+<h2>Q2 — logical bubbling vs. Shadow DOM retargeting &amp; <code>composed</code></h2>
+<p>Key WHATWG DOM facts the protocol must compose with:</p>
+<ul>
+  <li>The event <a href="https://dom.spec.whatwg.org/#concept-event-path">path is assembled up front</a> in a single upward walk <strong>before any listener runs</strong>; each path entry stores a <em>shadow-adjusted target</em> computed at build time — not lazily.</li>
+  <li><a href="https://dom.spec.whatwg.org/#retarget">Retargeting</a> adjusts <code>event.target</code> per shadow root: a listener sees the host outside the shadow, the real node inside the same root. <a href="https://developer.mozilla.org/en-US/docs/Web/API/Event/composedPath"><code>composedPath()</code></a> truncates at closed boundaries.</li>
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Event/composed"><code>composed: true</code></a> means the event crosses the <strong>target's shadow boundary</strong> into light DOM (still needs <code>bubbles</code> to bubble). Composed built-ins: <code>click</code>, <code>focus</code>/<code>blur</code>, <code>input</code>, <code>keydown</code>, mouse/touch. Not composed: most author <code>new Event()</code>, <code>change</code>, <code>submit</code>.</li>
+  <li>React synthetic events bubble through the <strong>React tree, not the DOM</strong> — the closest prior art to <code>bubblesLogical</code>, but confined to React's synthetic layer (native capture listeners still see the DOM path).</li>
+</ul>
+<p>
+  <strong>Recommendation (~80%):</strong> compute <code>logicalPath</code> <strong>pre-retarget</strong>, as
+  a parallel pass walking the logical parent chain, and run a <strong>fresh retarget at each logical
+  hop</strong> (host = the portal's logical mount point) rather than reusing the DOM's already-shadow-adjusted
+  <code>target</code> (adjusted to the wrong boundary). Do <strong>not</strong> overload native
+  <code>composed</code> — logical-boundary crossing is a different concern from shadow-boundary crossing;
+  conflating them breaks <code>composedPath()</code> truncation semantics. Add a separate opt-in flag
+  (<code>composedLogical</code>, default <code>false</code> — encapsulation-preserving) and expose logical
+  entries via a separate <code>composedLogicalPath()</code> accessor, not inside native
+  <code>composedPath()</code>. Residual ~20%: the exact retarget host at a hop (mount element vs. declaration
+  element) needs a worked nested-portal example before ratification.
+</p>
+
+<h2>Q3 — focus scopes: fold into the portal, or keep separate?</h2>
+<p>
+  <strong>This is already settled by the WE intent catalog.</strong> The
+  <a href="/intents/focus-containment/">Focus Containment Intent</a> already owns "confining keyboard focus
+  to an active surface, making the rest of the page <code>inert</code>, where focus lands when it opens, and
+  where it returns when it closes." The <a href="/intents/modal/">Modal</a>, <a href="/intents/anchor/">Anchor</a>,
+  and <a href="/intents/autofocus-on-activation/">Autofocus-on-Activation</a> intents each explicitly
+  <em>compose</em> it "rather than redefine it." Its platform substrate — the
+  <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/inert"><code>inert</code></a>
+  attribute, <a href="https://developer.mozilla.org/en-US/docs/Web/API/HTMLDialogElement/showModal"><code>&lt;dialog&gt;.showModal()</code></a>
+  (auto-inerts the page + top layer + <code>:modal</code>), and the
+  <a href="https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/">WAI-ARIA APG modal pattern</a> — confirms
+  focus containment is <strong>orthogonal</strong> to portaling: you can trap without a portal (in-place
+  wizard step, in-place <code>&lt;dialog&gt;</code>) and portal without a trap (toast, tooltip, non-modal
+  popover, autocomplete listbox).
+</p>
+<p>
+  <strong>Recommendation (~90%):</strong> keep focus containment a separate composable concern; the portal
+  <strong>composes</strong> the Focus Containment Intent, never owns it. The spec's primitive #4
+  (<code>focusscope</code> attribute + <code>createFocusScope()</code>) is a <strong>duplication that should
+  be struck</strong> from the Web Portals spec. Folding focus into the portal directive would contradict a
+  shipped seam and the bias-toward-separation principle.
+</p>
+
+<h2>Q4 — deferred target resolution (target not in DOM yet)</h2>
+<div class="comparison-table-wrapper">
+<table class="comparison-table">
+  <thead><tr><th>Framework</th><th>API</th><th>Missing-target behavior</th><th>Defer</th></tr></thead>
+  <tbody>
+    <tr><td>Vue 3.5</td><td><code>&lt;Teleport to&gt;</code></td><td><strong>errors</strong> if absent at mount</td><td><code>defer</code> prop — resolves after the current render cycle (still errors a tick later)</td></tr>
+    <tr><td>React</td><td><code>createPortal(child, node)</code></td><td>container must exist; <code>null</code> throws</td><td>none — guard <code>node &amp;&amp; createPortal()</code></td></tr>
+    <tr><td>Angular CDK</td><td><code>Portal.attach(outlet)</code></td><td>caller controls timing (host built first)</td><td>host-first by construction</td></tr>
+    <tr><td>SolidJS</td><td><code>&lt;Portal mount&gt;</code></td><td>defaults to <code>document.body</code> (always present)</td><td>—</td></tr>
+  </tbody>
+</table>
+</div>
+<p>
+  No mainstream framework queues open-endedly; Vue's <code>defer</code> is deliberately one-tick-scoped.
+  But native HTML has no single "mount tick" — the parser streams and source order is author-controlled — so
+  a hard error is brittle, while a silent no-op hides typos.
+</p>
+<p>
+  <strong>Recommendation (~75%):</strong> deferred-by-default — attach immediately if the target is present,
+  else observe (scoped <code>MutationObserver</code>) and attach when it appears; after a bounded window emit
+  a <strong>console warning naming the unresolved target</strong> (kills the "typo hangs silently forever"
+  objection); offer a <code>required</code> attribute for fail-fast (hard error). This makes the forgiving
+  behavior the default (the most-permissive value; the restriction is the author's opt-in) rather than
+  opt-in like Vue. Residual ~25%: the diagnostic trigger — "parser-complete" is clean on initial load but
+  fuzzy for SPA/streamed injection, so the bounded window is likely a per-portal configurable timeout; pin
+  it before ratification.
+</p>
+
+<h2>Classification &amp; boundary</h2>
+<p>
+  Q1, Q2, and Q4 are <strong>Protocol</strong> contract-shape calls — the <code>@webeverything</code>
+  artifact per the spec's boundary note; the polyfill/runtime impl is FUI
+  (<a href="/backlog/1001-implement-web-portals-logical-tree-polyfill-portal-directive/">#1001</a>). Q3 classifies as an
+  <strong>Intent</strong> concern that <em>already exists</em>, so its "decision" is really <em>delete the
+  duplicate primitive and compose the existing intent</em> — a forced invariant, not a weigh. WICG Portals
+  is a different concept (seamless page-navigation transitions) and does not supersede this proposal.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/projects/webportals/">Web Portals</a> — the spec under ratification</li>
+  <li><a href="/projects/webinjectors/">Web Injectors</a> · <a href="/projects/webcontexts/">Web Contexts</a> · <a href="/projects/webdirectives/">Web Directives</a> — the substrate it composes</li>
+  <li><a href="/intents/focus-containment/">Focus Containment Intent</a> — owns the trap/<code>inert</code>/restore contract (Q3)</li>
+  <li><a href="/backlog/1000-ratify-the-web-portals-protocol-resolve-the-4-spec-open-ques/">#1000</a> — the decision this prepares · <a href="/backlog/1001-implement-web-portals-logical-tree-polyfill-portal-directive/">#1001</a> — the gated build</li>
+</ul>
+{% endraw %}

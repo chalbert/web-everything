@@ -7,6 +7,7 @@ status: resolved
 dateOpened: "2026-06-15"
 dateStarted: "2026-06-16"
 dateResolved: "2026-06-16"
+graduatedTo: "src/block-pages.njk (uniform fuiDemo live-example slot, data-driven from blocks.json fuiDemo field; props/token/a11y panels carved to #801/#802/#803)"
 tags: []
 ---
 

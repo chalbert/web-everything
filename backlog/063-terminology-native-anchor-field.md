@@ -19,7 +19,9 @@ crossRef: { url: /research/collection-operations/, label: collection-operations 
 crux: "anchor" has one canonical owner — the **Anchor Intent** is literally CSS Anchor Positioning
 (`anchor-positioning`, tethered tooltips/popovers/menus), the platform's own term, so renaming *it*
 would coin away from the platform. The triage label was the metaphorical squatter ("the native API a
-standard grounds in"). Freed the canonical owner by renaming the label. Executed as a mechanical prose
+standard grounds in"). Freed the canonical owner by renaming the label.
+
+Executed as a mechanical prose
 edit: `**Native anchor**` → `**Native grounding**` across the 10 gap files (006–013, 015, 016) plus
 358's inline `Native anchor:`. Scope refinement vs. the original framing: 360 has no triage field (its
 "anchor" uses are "edge-anchored", unrelated) and was left untouched; the camelCase `nativeAnchor` JSON

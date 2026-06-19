@@ -13,7 +13,9 @@ tags: []
 
 # Reference wizard Block — interactive custom element composing Flow Progress over CustomWorkflowEngine (webworkflows)
 
-Slice A of #651. Build the new wizard Block (NEW blocks/wizard/) as a custom element wiring customWorkflowEngine.resolve().start(graph) → a Flow-Progress UX: compose StepperBehavior (we:blocks/stepper/StepperBehavior.ts) for current position + aria-current=step + Step N of M; map the engine's onTransition to per-step status (wait/process/finish/error); back/undo via the instance back(); default to the wizard register; reuse navigation's structure:linear/guard/history. composesIntents over flow-progress (we:src/_data/intents.json#flow-progress, #634). Ship with a unit/render test. Demoable: the element drives a graph with per-step status, aria-current, back/undo, proven by its test, droppable on any page. #650 (engine) resolved → unblocked. Watch-item: if it re-estimates >3, sub-slice A1 element+stepper / A2 status+back/undo. Runtime browser proof is sibling slice B.
+Slice A of #651. Build the new wizard Block (NEW blocks/wizard/) as a custom element wiring customWorkflowEngine.resolve().start(graph) → a Flow-Progress UX: compose StepperBehavior (we:blocks/stepper/StepperBehavior.ts) for current position + aria-current=step + Step N of M; map the engine's onTransition to per-step status (wait/process/finish/error); back/undo via the instance back(); default to the wizard register; reuse navigation's structure:linear/guard/history. composesIntents over flow-progress (we:src/_data/intents.json#flow-progress, #634). Ship with a unit/render test.
+
+Demoable: the element drives a graph with per-step status, aria-current, back/undo, proven by its test, droppable on any page. #650 (engine) resolved → unblocked. Watch-item: if it re-estimates >3, sub-slice A1 element+stepper / A2 status+back/undo. Runtime browser proof is sibling slice B.
 
 ## Progress
 

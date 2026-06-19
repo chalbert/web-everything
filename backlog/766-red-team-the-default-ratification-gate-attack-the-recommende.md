@@ -11,7 +11,9 @@ tags: []
 
 # Red-team-the-default ratification gate — attack the recommended branch before resolving a decision
 
-The decision stress-test is strong on mechanics (tier/size/blockedBy, check:health, D3) but weak on principle: a prepared, '✓ ready to ratify' default gets a completeness skim, not an attack — the same agent preps and ratifies with one blind spot, and the stamp is an unverified self-assertion. #730's C1 default violated impl-is-not-a-standard yet passed every gate; a human caught it. Fix: a red-team-the-default pass on the ratification path — before resolving, the agent argues the OPPOSITE of its bold default and tries to name the principle it violates (attack fails → ratify, attack lands → amend), generalizing the #730 verify-grounding-claims bullet to the whole class.
+The decision stress-test is strong on mechanics (tier/size/blockedBy, check:health, D3) but weak on principle: a prepared, '✓ ready to ratify' default gets a completeness skim, not an attack — the same agent preps and ratifies with one blind spot, and the stamp is an unverified self-assertion. #730's C1 default violated impl-is-not-a-standard yet passed every gate; a human caught it.
+
+Fix: a red-team-the-default pass on the ratification path — before resolving, the agent argues the OPPOSITE of its bold default and tries to name the principle it violates (attack fails → ratify, attack lands → amend), generalizing the #730 verify-grounding-claims bullet to the whole class.
 
 ## The gap (why the current gate misses this)
 

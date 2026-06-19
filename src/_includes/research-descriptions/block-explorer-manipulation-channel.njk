@@ -1,0 +1,87 @@
+<h2>Purpose</h2>
+<p>
+  Prep research for decision
+  <a href="/backlog/809-block-explorer-workbench-render-locus-manipulation-channel-f/">#809</a> — how the
+  Block&nbsp;Explorer (<a href="/backlog/746-block-explorer-the-interactive-fui-block-workbench-live-them/">#746</a>)
+  <em>manipulates and inspects a live rendered block</em>, and who owns the control chrome. Where the
+  <a href="/research/component-workbench-landscape/">component-workbench landscape</a> (#624) catalogued
+  <em>which</em> Storybook-like tools exist and their business models, this is the orthogonal
+  <strong>technical channel</strong> question the four manipulating slices
+  (<a href="/backlog/749-live-theme-design-system-switcher-swap-design-systems-live-a/">#749</a> theme switch,
+  <a href="/backlog/750-live-trait-activation-panel-toggle-activate-traits-live-and-/">#750</a> trait toggle,
+  <a href="/backlog/755-block-explorer-inspection-devtools-why-this-token-source-ari/">#755</a> inspection devtools,
+  <a href="/backlog/806-block-anatomy-interactive-exploded-view-and-toggle-a-piece-o/">#806</a> exploded view)
+  turn on. Full grounding in
+  <code>reports/2026-06-16-block-explorer-manipulation-channel.md</code>.
+</p>
+
+<h2>The question</h2>
+<p>
+  <a href="/backlog/727-web-docs-blocks-uniform-live-example-slot-on-every-per-compo/">#727</a> shipped the
+  per-component live render as a sandboxed <code>fuiDemo</code> <strong>iframe</strong> (FUI-hosted,
+  <em>cross-origin</em> to WE). All four manipulating slices reach <em>into</em> that running block — set its
+  theme, flip its attributes, read its computed styles / ARIA tree / shadow DOM. The cross-origin iframe forbids
+  that reach. Two axes are open: the manipulation <strong>channel</strong> (in-document host-side vs an iframe
+  message protocol) and the control-UI <strong>locus</strong> (FUI-owned workbench vs WE docs chrome).
+</p>
+
+<h2>Prior art surveyed</h2>
+<table>
+  <thead><tr><th>Reference</th><th>Channel model</th><th>What it proves for #809</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Storybook</strong> (manager↔preview)</td>
+      <td>Render in an <strong>iframe</strong>; sync over a <strong>postMessage channel</strong>
+        (<code>@storybook/channels</code>); Controls serialize <em>args</em> one-way into the preview.</td>
+      <td>The iframe-protocol precedent — proves a message channel works for <em>pushing inputs in</em>
+        (theme/trait), but it never reads the preview's computed styles / ARIA / shadow DOM, i.e. it is
+        <strong>silent on inspection</strong>.</td>
+    </tr>
+    <tr>
+      <td><strong>api-viewer</strong> (open-wc)</td>
+      <td>Mounts a real component instance <strong>in the same document</strong>; a Knobs panel toggles
+        properties / attributes / slots and panels surface CSS Custom Properties + CSS Shadow Parts —
+        <strong>no message protocol at all</strong>.</td>
+      <td>A <em>shipping</em> reference design for the in-document (mode-C) channel — the full live workbench,
+        host-side, is real not speculative.</td>
+    </tr>
+    <tr>
+      <td><strong>The platform</strong></td>
+      <td>CSS custom properties <strong>pierce the shadow boundary</strong>; <code>getComputedStyle()</code>
+        returns resolved values; shadow roots are walkable from the host. The <strong>same-origin policy</strong>
+        blocks all DOM/computed-style reads across a cross-origin iframe.</td>
+      <td>Host-side theming and inspection are <em>free</em> in-document; across the cross-origin
+        <code>fuiDemo</code> iframe they are <strong>blocked</strong> — only a cooperating guest can marshal each
+        datum, and computed-style/ARIA/token-trace barely survive the wire.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Load-bearing findings handed to #809</h2>
+<ul>
+  <li>
+    <strong>Fork 1 — channel.</strong> Mode C (in-document, <em>already built</em> in #786 on the #807 embed SDK,
+    sanctioned by #765 for the trusted WE↔FUI pair) gives all four subsets host-side with <strong>zero new
+    protocol</strong>; the iframe-message branch handles theme/trait <em>push</em> (Storybook proves it) but is
+    <strong>broken for the inspection subset</strong> the cross-origin wall forbids. <code>api-viewer</code> is
+    the shipping proof that the host-side workbench is real → recommend <strong>A (mode C)</strong>.
+  </li>
+  <li>
+    <strong>Fork 2 — locus.</strong> Both references separate the tool's <em>control chrome</em> from the
+    <em>documented component</em>. Mapped onto the constellation: the rendered block is FUI's impl (the mode-C
+    SDK renders it — <strong>impl→FUI untouched</strong>, #765), while the control/devtools chrome that drives and
+    introspects it is <strong>WE documentation tooling</strong> — the #755 inspectors introspect WE standards
+    (intent→ARIA, token provenance, the #092 provider↔consumer graph), squarely the standard's domain. So the
+    workbench tooling is WE-owned (slices stay WE-locus); #746's "lives in FUI" is reconciled as <em>the block
+    rendering lives in FUI</em>, and the chrome's UI primitives may later render from FUI components under the
+    separate dogfooding epic #777.
+  </li>
+</ul>
+
+<h2>Re-running this survey</h2>
+<p>
+  Re-check the two reference designs on a refresh: Storybook's manager/preview split + channel API (does it gain
+  host-side inspection?) and <code>api-viewer</code>'s in-document playground (still maintained? CEM coverage?).
+  The platform invariants — custom-property shadow piercing, <code>getComputedStyle</code> resolution, the
+  same-origin wall — are stable web standards and only move if the browser model does.
+</p>

@@ -1,0 +1,85 @@
+<h3>The Question</h3>
+<p>
+    Decision <a href="/backlog/799-where-does-rendered-site-regression-tooling-home-we-specs-vs/">#799</a>
+    (child of epic <a href="/backlog/800-rendered-site-regression-tooling-unified-harness-over-the-li/">#800</a>)
+    asks where the rendered-docs-site regression checks live — Playwright specs in the WE repo (simplest,
+    runs in WE CI today) vs a unified harness homed in <strong>plateau-app</strong> as a service WE CI
+    consumes (the managed-offering constellation pattern). The slices: a11y
+    (<a href="/backlog/770-rendered-site-a11y-gate-axe-lane-route-allowlist-we-docs/">#770</a>, shipped —
+    <code>tests/a11y/rendered-site-a11y.spec.ts</code>), content/data-binding correctness
+    (<a href="/backlog/796-rendered-backlog-page-content-smoke-test-playwright-assert-t/">#796</a>), and a
+    later visual-regression slice.
+</p>
+
+<h3>Standing test — the binary dissolves</h3>
+<p>
+    Per the <a href="/backlog/091-web-docs-as-a-service-plateau/">#091</a> Web-Docs-as-a-Service ruling, a
+    managed Plateau offering is <em>not a monolith needing a home decision</em> — it decomposes across the
+    constellation (standard → WE; open primitives + adapters → FUI; complete served product → plateau-app;
+    open-core by usage). The prior-art survey confirms the same split from a second direction, so the
+    "WE specs vs plateau service" framing is a false dichotomy: the residual calls are <em>who owns the
+    gate signal</em> and <em>how the one slice that needs hosting (visual) is built</em>, not "which repo."
+</p>
+
+<h3>The universal seam — CI owns the gate; a service owns storage + review</h3>
+<p>
+    Across the 2025–2026 landscape, one seam holds: <strong>always in-repo/in-CI</strong> = the
+    spec/contract, the runner invocation, and the pass/fail <strong>gate decision</strong>;
+    <strong>graduates to a hosted service only</strong> when the artifact is (a) a large binary needing
+    branch-aware promotion, (b) environment-sensitive enough to need centralized rendering, or (c) a
+    human-judgment approval. <strong>Visual regression</strong> trips all three — baselines are large
+    binaries, pixels vary by OS/font/GPU (Argos: "screenshots from CI, not developer laptops"), and a diff
+    is a judgment call needing an approval UI wired back to Git. So it is the one category that genuinely
+    wants a service: <em>hosted SaaS</em> — Chromatic, Percy (BrowserStack), Applitools, Argos
+    (also OSS/self-hostable); <em>BYO-storage</em> — reg-suit (your S3 + GitHub PR comment);
+    <em>fully in-repo</em> — BackstopJS, Playwright <code>toHaveScreenshot</code> (baselines committed to git).
+</p>
+<p>
+    <strong>a11y</strong> (<code>@axe-core/playwright</code>, Pa11y, Lighthouse CI) needs no baseline and no
+    service — violations are deterministic pass/fail in-repo. Lighthouse CI is the textbook split:
+    <code>@lhci/cli</code>'s <code>assert</code> gates entirely in CI with no server; the optional
+    <code>@lhci/server</code> adds <em>only</em> historical trend dashboards, off the gate's critical path.
+    WE's shipped #770 gate already embodies this (axe in the Playwright lane, zero storage).
+    <strong>Content / data-binding correctness</strong> has no SaaS category at all — the pattern is
+    Playwright assertions comparing extracted DOM text to the <em>projection</em> of the source data
+    (Testing-Library's "test what the user sees" + the Pact consumer-driven-contract analogue), never
+    hard-coded fixtures (the invariant #796 already mandates).
+</p>
+
+<h3>Classification against the constellation</h3>
+<ul>
+    <li><strong>Contract</strong> (route allowlist <code>tests/a11y/route-allowlist.ts</code>,
+        loader-projection extraction) → <strong>WE</strong> — WE-docs-specific config; the surface under test.</li>
+    <li><strong>Portable harness primitives</strong> (runner glue, axe wrapper, projection-extraction utils)
+        → <strong>FUI</strong> open primitive — extracted only when a 2nd consumer or the visual slice forces
+        it (timing is prioritization, a separate build — <em>not</em> a fork).</li>
+    <li><strong>Served surface</strong> (visual baseline store + diff-review UI + historical dashboard) →
+        <strong>plateau-app</strong> product, open-core — the one piece the seam says must be hosted.</li>
+    <li><strong>Gate signal</strong> (the red/green that blocks a WE build) → <strong>WE CI</strong>.</li>
+</ul>
+<p>
+    a11y (#770) + content (#796) therefore ship <strong>now</strong> as WE-repo Playwright specs — their
+    layer is WE-resident and they are deterministic pass/fail needing no service. This is not "WE wins the
+    home"; it's the contract + gate layers (which <em>are</em> WE-resident) shipping first, with the
+    FUI/plateau layers materializing when the visual slice forces them.
+</p>
+
+<h3>Recommendation (forks open in #799)</h3>
+<ol>
+    <li><strong>Ratify the decomposition</strong> (forced by #091 + the universal seam) — no monolithic home;
+        slices ship where their layer lives; build portably (assert against the loader projection, never
+        fixtures).</li>
+    <li><strong>Fork 1 — gate ownership: WE CI invokes the harness and owns red/green</strong> (high
+        confidence). plateau-app supplies primitives + (later) the baseline/dashboard service the spec calls
+        into, but does not own WE's build gate — matching the seam and the user's own "a service the WE CI
+        calls" phrasing. Rejected: plateau running checks against deployed WE-docs and reporting back (couples
+        the build gate to a deployed service).</li>
+    <li><strong>Fork 2 — visual slice (deferred): owned plateau-app visual-regression service</strong>
+        (med-high) — per minimize-lock-in (served product is always plateau-app) + linear-cost-with-revenue
+        (no uncapped per-snapshot SaaS fee) + #091. Rejected as end-state: third-party SaaS
+        (lock-in + per-snapshot cost). Interim only: committed baselines via Playwright
+        <code>toHaveScreenshot</code>.</li>
+</ol>
+<p>
+    Full grounding in <code>reports/2026-06-16-rendered-site-regression-tooling-home.md</code>.
+</p>

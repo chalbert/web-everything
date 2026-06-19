@@ -34,7 +34,9 @@ a prior-art survey published as [`/research/we-fui-in-document-mount/`](/researc
 (report [`we:2026-06-16-we-fui-in-document-mount.md`](../reports/2026-06-16-we-fui-in-document-mount.md)). The
 constellation states an **absolute** docs-rendering boundary — *"WE never imports or renders FUI block code
 in its own document"* (`we:docs/agent/demo-workflow.md:31`); WE surfaces a FUI block only by embedding its
-FUI-hosted demo through the sandboxed `fuiDemo` iframe (`we:.eleventy.js:38`). [#732](/backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r/)
+FUI-hosted demo through the sandboxed `fuiDemo` iframe (`we:.eleventy.js:38`).
+
+[#732](/backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r/)
 ruled overlay escape is solved *host-side over the iframe* (modes A / B1 / B2 of a FUI-owned embed SDK) and
 recorded a fourth mode — **C, an in-document / DI mount** — as *"no longer never: a future trust-gated
 option for the WE↔FUI pair only,"* deferred here. This item carries **one genuine fork** with a **bold**

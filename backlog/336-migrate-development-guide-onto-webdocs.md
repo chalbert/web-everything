@@ -6,7 +6,7 @@ blockedBy: ["398"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"
-graduatedTo: plateau-app src/development-guide/learn-pathway.ts (rendered via @frontierui/webdocs-ui SSR from seedProvider) + learn-pathway.test.ts
+graduatedTo: plateau-app/src/development-guide/learn-pathway.ts (rendered via @frontierui/webdocs-ui SSR from seedProvider) + learn-pathway.test.ts
 tags: [development-guide, learn-pathway, webdocs, migration, docs]
 ---
 

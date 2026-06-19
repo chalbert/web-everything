@@ -12,7 +12,9 @@ tags: []
 
 # Force the fork-existence test at prep/DoR — per-fork justification before stamping preparedDate
 
-The fork-existence test (we:backlog-workflow.md L264) is only skimmed at prep: #811's prep asserted Fork 1 = 'coherent, mutually-exclusive end-states… a real fork' with no justification of which branch is flawed or why they can't coexist, and a skeptic + the user caught it only at decision time. Sibling to #766 (red-team-the-default) but on the PREP path. Fix: every declared `## Fork N` must carry a one-line fork-existence justification — name the flawed/excluded branch, or why the coherent branches genuinely can't coexist — else dissolve to 'Supported by default' before stamping preparedDate. Edit the Fork-readiness pass (we:backlog-workflow.md) + the prepare-decision-item skill. Optional follow-on: a check-readiness lint flagging a prepared decision whose forks lack the justification line.
+The fork-existence test (we:backlog-workflow.md L264) is only skimmed at prep: #811's prep asserted Fork 1 = 'coherent, mutually-exclusive end-states… a real fork' with no justification of which branch is flawed or why they can't coexist, and a skeptic + the user caught it only at decision time. Sibling to #766 (red-team-the-default) but on the PREP path.
+
+Fix: every declared `## Fork N` must carry a one-line fork-existence justification — name the flawed/excluded branch, or why the coherent branches genuinely can't coexist — else dissolve to 'Supported by default' before stamping preparedDate. Edit the Fork-readiness pass (we:backlog-workflow.md) + the prepare-decision-item skill. Optional follow-on: a check-readiness lint flagging a prepared decision whose forks lack the justification line.
 
 ## Progress
 

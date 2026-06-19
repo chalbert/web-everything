@@ -8,7 +8,7 @@ blockedBy: ["674"]
 dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"
 dateResolved: "2026-06-16"
-graduatedTo: "plateau-app: src/control-plane/trip-planner.ts"
+graduatedTo: "plateau-app/src/control-plane/trip-planner.ts"
 tags: []
 ---
 

@@ -11,8 +11,14 @@
  *   - determinism: same state → identical output every run.
  */
 import { describe, it, expect } from 'vitest';
+import { createRequire } from 'node:module';
 import { computeReadiness, computeSelection, computeBatchPack, buildReadinessReport, spliceStaleEdges } from '../engine.mjs';
 import { toSarif, toJUnit } from '../../../blocks/adapters/report/exportReport';
+
+// Reuse the loader's REAL tier rubric instead of re-deriving it here — a hand-copy silently drifts
+// from the source (it once missed the decision-with-open-blocker demotion). The rubric itself is
+// unit-pinned in src/_data/__tests__/tier.test.ts; here we just need fixtures shaped like the loader.
+const { deriveTier } = createRequire(import.meta.url)('../../../src/_data/backlog.js');
 
 /**
  * Build a loader-shaped item, resolving `blockedBy` into the lightweight `blockers` the real loader
@@ -25,9 +31,7 @@ function makeItems(specs) {
       const b = byNum.get(String(n));
       return { id: `${n}-x`, num: String(n), slug: 'x', title: `#${n}`, status: b ? b.status : 'open' };
     });
-    const tier = s.status !== 'open' ? undefined
-      : ((s.type === 'issue' || s.type === 'idea') && blockers.every((b) => b.status === 'resolved')) ? 'A'
-      : s.type === 'decision' ? 'B' : 'C';
+    const tier = deriveTier({ status: s.status, type: s.type, blockers, projectPending: s.projectPending });
     // Mirror the loader's #254 derivations so computeSelection consumes the same fields it would in prod.
     const batchable = tier === 'A'
       && (s.workItem === 'task' || (s.workItem === 'story' && typeof s.size === 'number' && s.size <= 8));

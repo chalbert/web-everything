@@ -10,3 +10,7 @@ test-results/
 
 # Parcel build cache (trait-enforcer #787 conformance harness)
 .parcel-cache/
+
+# Build sourcemaps (emitted alongside compiled output, never committed)
+*.js.map
+*.d.ts.map

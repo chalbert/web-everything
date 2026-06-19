@@ -21,7 +21,9 @@ tags: [webcomponents, component, declarative, enhancement]
 2026-06-08) settled the **policy**: tier-1 is declarative-only; a tier-2 `behavior`/`extends` attribute
 associates a **registered** class or trait for progressive enhancement — **no inline `<script>`** inside
 the definition (the script-gadget XSS surface stays closed). That part is settled and is **not** reopened
-below. The open call DC-5 did **not** settle is the **resolution mechanism** — how a registry-key
+below.
+
+The open call DC-5 did **not** settle is the **resolution mechanism** — how a registry-key
 `behavior`/`extends` resolves to a class/trait and is applied to the generated element. The forks below are
 grounded in a prior-art survey published as the
 [`component-behavior-extends-resolution`](/research/#component-behavior-extends-resolution) research topic

@@ -19,9 +19,9 @@ Add fui:plugs/package.json: '.' = unplugged library entry, '/bootstrap' = plugge
 ## Progress
 
 Added `fui:plugs/package.json` (`@frontierui/plugs`, source-distributed `.ts`): `.` → unplugged
-`index.ts`, `/unplugged`, `/bootstrap` → plugged POC, plus the 8 subpath exports WE/plateau consume
+`fui:plugs/index.ts`, `/unplugged`, `/bootstrap` → plugged POC, plus the 8 subpath exports WE/plateau consume
 (core, webregistries, webinjectors, webcomponents, webcontexts, webbehaviors, webstates, webexpressions).
-FU-only `globals.d.ts` / `virtual-trait-manifest.d.ts` / `webbehaviors/traitManifest.ts` kept off the
+FU-only `fui:plugs/globals.d.ts` / `fui:plugs/virtual-trait-manifest.d.ts` / `fui:plugs/webbehaviors/traitManifest.ts` kept off the
 public surface (excluded from both `exports` and `files`). Verified: FUI vitest 763 pass, FUI
 `check:standards` 0 errors, all 11 export targets resolve. The manifest is inert (no consumer imports the
 package name yet — cross-repo alias wiring is a later #449 slice), so build/e2e behavior is unchanged by

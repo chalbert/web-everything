@@ -81,9 +81,60 @@
     </tbody>
 </table>
 
-<h3>Open Questions</h3>
+<h3>Resilience Composition — How Multiple Concerns Cooperate</h3>
+<p>
+    The single-handler libraries above each ship <em>one</em> retry mechanism, so they never answer the
+    question the <a href="/projects/webreliability/">Web Reliability</a> protocol must:
+    when a circuit breaker, a retry, and an offline queue all apply to one operation, how do they
+    <strong>compose</strong>? The canonical prior art lives outside the JS data-fetching world — in the
+    two most authoritative resilience libraries — and both give the same answer.
+</p>
+<table>
+    <tr><th>Library</th><th>Composition model</th><th>What it establishes</th></tr>
+    <tr>
+        <td><strong>Polly</strong> <code>PolicyWrap</code> (.NET)</td>
+        <td>Combines Retry / CircuitBreaker / Timeout / Fallback / Bulkhead into one executable policy, innermost→outermost, left-to-right, in an <strong>author-chosen order</strong>.</td>
+        <td>Composition is an <strong>explicit, ordered wrap</strong> — never implicit. And the order is load-bearing: Polly's own guidance is <code>CircuitBreaker</code>-wraps-<code>Retry</code> for short/no delays (don't let close-spaced tries trip the breaker), but <code>WaitAndRetry</code>-wraps-<code>CircuitBreaker</code> for long delays (circuit state can change during the wait). <strong>Both orderings are correct in different timing regimes.</strong></td>
+    </tr>
+    <tr>
+        <td><strong>resilience4j</strong> (Java)</td>
+        <td>Higher-order <strong>decorators</strong> (<code>CircuitBreaker</code>, <code>Retry</code>, <code>RateLimiter</code>, <code>Bulkhead</code>) stacked over a functional interface; you stack more than one, order explicit.</td>
+        <td>Same shape — cooperation = the author <strong>explicitly stacks</strong> decorators. No framework auto-orchestrates resilience concerns into a fixed order.</td>
+    </tr>
+</table>
+<p>
+    <strong>Design consequence:</strong> a baked protocol-level orchestration would have to pick
+    breaker-wraps-retry <em>or</em> retry-wraps-breaker — and Polly proves both are right in different
+    regimes, so baking either is wrong. WE's analogue is therefore a <strong>composite handler</strong>
+    the app authors and orders (a handler that holds and sequences sub-handlers), with the protocol
+    staying single-dispatch (first-that-accepts). This reinforces the existing
+    <em>registry-not-chain</em> decision rather than reopening it.
+</p>
+
+<h3>Recovery-State Surfacing — Phase, Not Just Status</h3>
+<p>
+    The protocol's other under-surveyed seam is how the active recovery state reaches the UI. The prior
+    art shows the recovery <em>phase</em> is a vocabulary distinct from the data status, normalized at
+    the library, not invented per call site.
+</p>
+<table>
+    <tr><th>Source</th><th>Surfacing model</th><th>What it establishes</th></tr>
+    <tr>
+        <td><strong>TanStack Query</strong></td>
+        <td>Splits <code>status</code> (<code>pending</code>/<code>error</code>/<code>success</code> — the <em>data</em>) from <code>fetchStatus</code> (<code>fetching</code>/<code>paused</code>/<code>idle</code> — the <em>recovery/network phase</em>), plus a derived <code>isPaused</code>.</td>
+        <td>The industry already separates "what is the data" from "what is recovery doing now." An offline-and-waiting query is <code>success</code>+<code>paused</code>, not a new error. Precedent for a recovery-<strong>phase</strong> vocabulary kept separate from the data/loader status.</td>
+    </tr>
+    <tr>
+        <td><strong>Circuit-breaker canon</strong></td>
+        <td>Three states <code>CLOSED → OPEN → HALF-OPEN</code> (probing).</td>
+        <td>"Circuit open" is a recovery <em>phase</em>, not a terminal failure — the operation isn't being attempted now but may recover on the next probe. The UX must distinguish it from <code>failed</code>, so the page's current <code>recovering</code>/<code>fallback</code>/<code>failed</code> needs a finer phase discriminator.</td>
+    </tr>
+</table>
+
+<h3>Open Questions (resolved into decision <a href="/backlog/1032-design-the-protocol-level-error-recovery-seam-for-webreliabi/">#1032</a>)</h3>
 <ul>
-    <li>Should <code>RecoveryContext</code> carry the operation's <em>category</em> (e.g. <code>'http' | 'database' | 'compute'</code>) so handlers can quickly filter without inspecting the error object?</li>
-    <li>Is a <code>maxAttempts</code> field in context useful, or should handlers track their own attempt caps?</li>
-    <li>Should jitter be a protocol-level utility, or strictly a handler concern?</li>
+    <li><strong>Classification:</strong> does the contract carry a normalized failure <em>disposition</em> (<code>transient</code>/<code>terminal</code>/<code>deferred</code>) the UX reads, or stay fully handler-private? (Supersedes the earlier "operation category in <code>RecoveryContext</code>" framing — the disposition is the <em>output</em> of classification, not the raw logic.)</li>
+    <li><strong>Surfacing:</strong> a normalized recovery-<em>phase</em> discriminator (<code>retrying</code>/<code>queued</code>/<code>awaiting-manual</code>/<code>circuit-open</code>) on the in-flight state, or leave the active-recovery vocabulary to each consumer?</li>
+    <li><strong>Composition:</strong> strict single-dispatch + author-composed composite handler (the Polly/resilience4j model), or a protocol-level cooperative continuation model?</li>
+    <li>Settled by the original survey: backoff math + jitter stay handler-owned; the contract carries only the opaque resolved <code>delay</code>.</li>
 </ul>

@@ -1,0 +1,88 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    <a href="/backlog/882-split-the-monolithic-blocks-json-into-one-file-per-block-spe/">#882</a> asks whether to
+    split the 4657-line <code>src/_data/blocks.json</code> — the per-block <strong>structural</strong> contract
+    (75 blocks) — into <strong>one file per block</strong>, assembled by a <code>src/_data/blocks.js</code> glob
+    loader, or keep the monolith. This <strong>ratifies a shipped internal pattern</strong>, not a greenfield
+    standard: the repo already runs glob-and-assemble <strong>12&times;</strong> via <code>_data/*.js</code>
+    loaders, and the canonical proof is the 866-item backlog — one <code>backlog/&lt;NNN-slug&gt;.md</code> per
+    item, <strong>no <code>backlog.json</code></strong>, assembled by <code>src/_data/backlog.js</code>.
+    <code>blocks.json</code> is the lone per-item surface that never followed the pattern — and its <em>own</em>
+    behavioral half already did (<code>src/_includes/block-descriptions/&lt;id&gt;.njk</code>, 80 files).
+</p>
+
+<h2>Reader / writer inventory (read the tree, not the plan)</h2>
+<p>The assembled <code>blocks</code> array is consumed two ways:</p>
+<ul>
+    <li><strong>As the 11ty <code>blocks</code> <code>_data</code> global</strong> — every template and
+        loader-fed validator reads the <em>array</em> (<code>src/blocks.njk</code>,
+        <code>src/block-pages.njk</code>, <code>src/index.njk</code>, <code>src/presets.njk</code>, &hellip;). A
+        <code>blocks.js</code> loader emitting the same array shape leaves all of these <strong>untouched</strong>.</li>
+    <li><strong>By direct file read</strong> in standalone scripts that need the glob:
+        <code>scripts/gen-cem.mjs:37</code> (the only hard <code>readFileSync</code>),
+        <code>scripts/check-standards.mjs:91</code>, <code>scripts/check-app-conformance.mjs:45</code>,
+        <code>scripts/gen-reference-index.mjs:34</code>.</li>
+</ul>
+<p>Two <strong>migration wrinkles</strong> the item's original plan didn't name, both surfaced by reading the tree:</p>
+<ul>
+    <li><strong>autofix write-target.</strong> <code>scripts/check-standards-rules.mjs:572</code>
+        (<code>FILE.Block = 'src/_data/blocks.json'</code>) and <code>:92</code> (<code>buildGraduatedKinds</code>
+        &rarr; <code>block.file</code>) are the descriptor <code>file</code> pointers the autofix engine
+        (<code>scripts/autofix/engine.mjs</code>) <strong>writes</strong> when patching a block's status. After
+        the split they must resolve <strong>per-block</strong> (<code>_data/blocks/&lt;id&gt;.json</code>) so a
+        fixer patches the right small file — net-positive (tiny file, not the 4657-line monolith) but a required
+        repoint.</li>
+    <li><strong><code>graduatedTo</code> anchor grammar.</strong> <code>scripts/normalize-graduated.mjs:39</code>
+        (<code>['block','blocks.json']</code>) and the <code>FILE_ANCHOR</code> regex at <code>:75</code> define
+        the canonical <code>blocks.json#&lt;id&gt;</code> anchor used across the backlog's <code>graduatedTo</code>
+        fields — a <strong>stable cross-backlog contract</strong>. After the split, <code>blocks.json#&lt;id&gt;</code>
+        must keep resolving as a <strong>virtual</strong> anchor (grammar stays, physical file goes) or every
+        <code>graduatedTo</code> value migrates. Keep the virtual anchor.</li>
+</ul>
+
+<h2>External prior art — comparable monolith&rarr;per-file calls</h2>
+<ul>
+    <li><strong>Nx migrated <em>away</em> from the monolith for this exact reason.</strong> Nx shipped a migration
+        (<code>15-7-0-split-configuration-into-project-json-files</code>) that <strong>deletes</strong> the
+        workspace-wide <code>angular.json</code>/<code>workspace.json</code> and replaces it with per-project
+        <code>project.json</code> files — explicitly because the monolith &ldquo;can be a source of <strong>merge
+        conflicts</strong>&rdquo; for medium/large workspaces, and per-file gives &ldquo;less possibility of merge
+        conflicts.&rdquo; The consumed artifact (Nx's resolved project graph) is <em>computed</em> from the
+        per-file inputs — exactly the <code>blocks</code> assembled array. A major ecosystem made the identical
+        call for #882's identical #1 driver (concurrent-edit conflicts) and chose per-file.</li>
+    <li><strong>Style Dictionary — glob-and-deep-merge is the norm.</strong> It takes an <strong>array of file-path
+        globs</strong> (<code>tokens/**/*.json</code>) and <strong>deep-merges</strong> them into one dictionary.
+        Two load-bearing details: file/dir structure has <strong>no effect</strong> on the consumed object (layout
+        decoupled from assembled shape — validates the loader), and the merge is <strong>order-dependent</strong>
+        (&ldquo;later files take precedence&rdquo;), so the glob loader <strong>must impose a deterministic
+        sort</strong> rather than trust <code>readdirSync</code> order.</li>
+    <li><strong>Adjacent.</strong> Storybook <strong>CSF</strong> is one story file per component;
+        <strong>custom-elements-manifest</strong> aggregates to one <code>custom-elements.json</code> per package
+        but only because it is <em>generated</em>, not hand-authored — aggregation is fine for a build artifact,
+        not for a hand-edited source of truth like <code>blocks.json</code>.</li>
+</ul>
+
+<h2>Recommendation (to ratify in #882)</h2>
+<ol>
+    <li><strong>Fork 1 (granularity) &mdash; A: per-file, assembled by <code>src/_data/blocks.js</code>.</strong>
+        Confidence ~88% (the Nx precedent raised it from ~85%). Mirrors <code>backlog.js</code> exactly; kills the
+        concurrent-edit conflict, restores diff locality, makes the structural spec consistent with its already
+        per-block behavioral half. Residual is the migration + the two wrinkles, all mechanical.</li>
+    <li><strong>Fork 2 (layout) &mdash; B1: flat <code>src/_data/blocks/&lt;id&gt;.json</code>.</strong>
+        Confidence ~70%. Smallest, reversible-toward-B2 move (the loader globs <code>_data/blocks/*.json</code>);
+        B2 (co-located <code>blocks/&lt;id&gt;/{spec.json,description.njk}</code>) is the cleaner-ownership
+        end-state but a much larger move (relocates 80 njk + retargets include resolution) — defer as a separate
+        call.</li>
+    <li><strong>Loader invariant (not a fork) &mdash; deterministic assembly.</strong> The glob loader sorts by
+        <code>id</code> so the assembled array is stable regardless of <code>readdirSync</code> order, and
+        cross-block validation (unique <code>id</code>, intent refs, preset <code>composesBlocks</code>) keeps
+        running on the assembled array — same as today.</li>
+</ol>
+
+<p>
+    Full grounding in
+    <code>reports/2026-06-17-blocks-json-per-file-split.md</code>. Orthogonal to
+    <a href="/backlog/841-/">#841</a>; #657 pinned the field set (the contract), not file granularity (the open gap).
+</p>
+{% endraw %}

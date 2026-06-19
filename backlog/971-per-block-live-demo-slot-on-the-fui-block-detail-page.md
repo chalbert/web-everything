@@ -29,5 +29,5 @@ Add a 'Try it live' demo slot to fui:src/block-pages.njk, driven by an optional 
   temporal→datetime-picker, rich-text-editor→`rich-text-editor/` (subdir demo, served at `/demos/rich-text-editor/`).
   Ambiguous candidates (view, type-ahead, app-shell, sectioned-nav, disclosure-nav, the bracket parsers) were
   **left to #972** rather than mis-wired — a wrong iframe is a broken demo.
-- **Verified on live :3001:** data-grid renders the slot + iframe (`/demos/data-grid-demo.html` → 200);
+- **Verified on live :3001:** data-grid renders the slot + iframe (`fui:demos/data-grid-demo.html` → 200);
   wizard (unwired) renders no slot; rich-text-editor resolves the subdir path (→ 200). FUI check:standards green.

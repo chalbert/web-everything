@@ -11,7 +11,7 @@ relatedReport: reports/2026-06-15-backlog-split-analysis.md
 dateOpened: "2026-06-15"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"
-graduatedTo: plateau-app src/component-assembler/ (read-only assembler surface, /component-assembler route)
+graduatedTo: plateau-app/src/component-assembler/ (read-only assembler surface, /component-assembler route)
 tags: [devtools, composition, assembler, workbench, served-surface, plateau-app]
 ---
 

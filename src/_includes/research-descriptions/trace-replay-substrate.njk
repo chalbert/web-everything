@@ -1,0 +1,141 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    <a href="/projects/webtraces/">Web Traces</a> and <a href="/projects/webevents/">Web Events</a> are
+    <code>concept</code> projects with no design item.
+    <a href="/backlog/140-dev-surface-product-feature-matrix/">#140</a> identifies a single
+    <strong>trace/replay artifact</strong> — <em>a declared state snapshot + an ordered action trace</em> —
+    as the substrate that unblocks three of its developer-surface features at once: the
+    <strong>state explorer</strong> (6), <strong>dev error-repro</strong> (9), and
+    <strong>in-context bug report</strong> (10) — "Build once." This survey grounds decision
+    <a href="/backlog/992-design-the-trace-replay-substrate-webtraces-webevents-the-14/">#992</a>: what
+    <em>is</em> that artifact, and the keystone question it names —
+    <strong>is Web Events' injector-scoped event identity load-bearing for replay
+    <em>determinism</em>?</strong>
+</p>
+
+<h2>Recommendation (to ratify in #992)</h2>
+<ol>
+    <li><strong>Anchor replay determinism on the state-transition journal, not on action re-dispatch</strong>
+        (Fork&nbsp;1, high). The artifact replays by re-applying recorded
+        <a href="/projects/webstates/">Web States</a> <code>ChangeRecord</code>s to the snapshot, executing
+        <em>no application JavaScript</em> — deterministic by construction (the rrweb model), needing no
+        purity assumption. So <strong>event identity is NOT load-bearing for determinism</strong>; it
+        <em>is</em> load-bearing for <strong>correlation</strong> (which action caused which diffs).</li>
+    <li><strong>Web Traces owns the session-replay envelope protocol</strong> (Fork&nbsp;2, med-high),
+        composing the four already-specified parts by reference — it is already OTel/W3C-Trace-Context
+        aligned, and a replay record <em>is</em> an ordered trace + a correlated snapshot. No new
+        <code>webreplay</code> project.</li>
+    <li><strong>Everything else is supported by default</strong> — the snapshot, journal, action identity
+        and span timeline are <em>already specified</em>; the only new contract is the thin envelope that
+        binds them. Reinventing a state-diff format is excluded (it would duplicate <code>ChangeRecord</code>
+        and <code>AuditEvent</code>).</li>
+</ol>
+
+<h2>Finding 1 — the record's parts already exist; the substrate is a composition</h2>
+<p>
+    The survey's first result is that almost nothing here is greenfield. A replay record decomposes into
+    parts each <em>already</em> specified in the tree:
+</p>
+<table>
+    <thead><tr><th>Part</th><th>Already specified by</th><th>Where</th></tr></thead>
+    <tbody>
+        <tr><td>State <strong>snapshot</strong></td><td>Web Contexts SSR serialization
+            (<code>&lt;script type="context"&gt;</code>, JSON format shared with Web States SSR)</td>
+            <td><code>project-webcontexts.njk:225-245</code>; plug <code>plugs/webcontexts/</code></td></tr>
+        <tr><td>State-transition <strong>journal</strong> (the deterministic layer)</td>
+            <td>Web States <code>ChangeRecord {path,op,oldValue,newValue,source,timestamp,version}</code> +
+            <code>CustomChangeStrategy</code></td><td><code>project-webstates.njk:136</code>, <code>:167</code></td></tr>
+        <tr><td>State&harr;trace <strong>correlation</strong> (already wired)</td>
+            <td>Web States <code>ChangeSource.traceparent</code> — optional W3C Trace Context link to the
+            initiating span</td><td><code>project-webstates.njk:149</code></td></tr>
+        <tr><td>Action <strong>identity</strong></td><td>Web Events <code>listenForScoped</code> —
+            injector-resolved typed event class, <code>instanceof</code>-discriminated</td>
+            <td><code>project-webevents.njk:14</code>, <code>:75</code>, <code>:164</code></td></tr>
+        <tr><td>Span / trace <strong>timeline</strong></td><td>Web Traces <code>trace-observability</code>
+            protocol — OTel/W3C-aligned spans, <code>trace()</code> / <code>effect()</code></td>
+            <td><code>project-webtraces.njk:69-101</code>; <code>protocols.json:37-43</code></td></tr>
+        <tr><td>Immutable history (don't duplicate)</td><td>Web Audit <code>AuditEvent</code> already
+            <em>reuses</em> the <code>ChangeRecord</code> shape; <code>correlationId</code> links a span</td>
+            <td><code>protocols.json:154</code></td></tr>
+    </tbody>
+</table>
+<p>
+    Crucially, <strong>Web States already carries <code>traceparent</code> on every change</strong> — the
+    state&harr;trace seam #992 worries about is <em>already drawn</em>. The one genuinely new contract is the
+    <strong>session-replay envelope</strong>: <code>snapshot ref + ordered span list + change-journal +
+    correlation ids</code>.
+</p>
+
+<h2>Finding 2 — three replay paradigms, and which fits a self-describing app</h2>
+<p>
+    The web survey (Redux DevTools, rrweb, Replay.io, event sourcing) returns <strong>three</strong>
+    distinct ways to make replay deterministic — which reshapes #992's binary "is identity load-bearing"
+    question into an A/B/C choice of <em>determinism anchor</em>:
+</p>
+<table>
+    <thead><tr><th>Paradigm</th><th>How it replays</th><th>Determinism</th><th>Maps to</th></tr></thead>
+    <tbody>
+        <tr><td><strong>A. State-diff re-application</strong> (rrweb)</td>
+            <td>Snapshot + timestamped deltas; re-apply each delta in order, <em>execute no app JS</em></td>
+            <td>By construction — "rrweb doesn't execute any JavaScript during replay"</td>
+            <td>Web States <code>ChangeRecord</code> journal</td></tr>
+        <tr><td><strong>B. Action re-fold</strong> (Redux / event sourcing)</td>
+            <td>Record actions; re-run them through the reducer/handlers</td>
+            <td>Only if handlers are <em>pure</em>; event identity load-bearing (re-dispatch to right handler)</td>
+            <td>Web Events identity + reducers</td></tr>
+        <tr><td><strong>C. Runtime re-execution</strong> (Replay.io)</td>
+            <td>Record all non-determinism (network, events, thread interleaving); re-execute</td>
+            <td>Gold-standard, but a recording runtime — heavyweight</td>
+            <td>(out of scope)</td></tr>
+    </tbody>
+</table>
+<p>
+    <strong>C is ruled out by scope:</strong> #140 frames feature&nbsp;9 as a "lightweight <em>local,
+    semantic</em> repro (declared state + action trace), not a sampled DOM video … <em>Not a Sentry
+    competitor</em>." Between A and B: a self-describing Web Everything app <em>already emits</em> its state
+    transitions as <code>ChangeRecord</code>s with <code>traceparent</code> — so <strong>A is deterministic
+    for free, with no purity assumption</strong>. B's value is <em>comprehension</em>, which the action
+    trace supplies as an annotation layer <em>over</em> the journal, not as the replay mechanism.
+</p>
+
+<h2>Finding 3 — the answer to the named fork</h2>
+<p>
+    <strong>Is Web Events event-identity load-bearing for replay determinism? No for determinism, yes for
+    correlation.</strong> Determinism is anchored on the <code>ChangeRecord</code> journal (paradigm A):
+    re-applying recorded diffs is deterministic without re-running handlers, so replay never depends on
+    resolving an event's injector-scoped class. Event identity <em>is</em> load-bearing for the
+    <strong>correlation / comprehension</strong> layer — it is how a Web Traces span labels <em>which</em>
+    action (told apart from same-named cross-team collisions, the exact problem
+    <code>listenForScoped</code> solves) produced the journal entries underneath it. The artifact carries
+    <strong>both</strong> layers; only the journal is the determinism anchor.
+</p>
+
+<h2>Architecture proposal (per-fork classification)</h2>
+<ul>
+    <li><strong>Layer:</strong> the envelope is a <strong>Protocol</strong> — a conformance record that
+        multiple independent consumers (state explorer, error-repro, bug-report exporter, third-party
+        devtools) read. Not a Block (no engine minted), not an Intent (no UX "what").</li>
+    <li><strong>Protocol vs intent dimension:</strong> genuinely a protocol — the multi-consumer interop
+        story is exactly what a protocol exists for.</li>
+    <li><strong>Home:</strong> Web Traces — already "execution flow + distributed tracing," OTel/W3C-aligned.
+        A new <code>webreplay</code> project fragments for no interop gain.</li>
+    <li><strong>Separate-and-decouple:</strong> honored by <em>referencing</em> the four protocols rather
+        than absorbing a state-diff format into Web Traces. The envelope stays thin.</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+    <li>Decision: <a href="/backlog/992-design-the-trace-replay-substrate-webtraces-webevents-the-14/">#992</a>
+        (parent <a href="/backlog/991-standards-concept-to-built-surfacing-audit-close-the-gap-bet/">#991</a>
+        surfacing audit).</li>
+    <li>Demand: <a href="/backlog/140-dev-surface-product-feature-matrix/">#140</a> features 6 / 9 / 10;
+        provider-consumer graph <a href="/backlog/092-provider-consumer-graph-platform-manager/">#092</a>,
+        introspection edges <a href="/backlog/400-verify-extend-we-introspection-to-emit-provider-consumer-edg/">#400</a>.</li>
+    <li>Composed projects: <a href="/projects/webtraces/">Web Traces</a>,
+        <a href="/projects/webstates/">Web States</a>, <a href="/projects/webcontexts/">Web Contexts</a>,
+        <a href="/projects/webevents/">Web Events</a>; adjacent <a href="/projects/webaudit/">Web Audit</a>.</li>
+    <li>Full grounding: <code>reports/2026-06-19-trace-replay-substrate.md</code>.</li>
+</ul>
+{% endraw %}
+</content>

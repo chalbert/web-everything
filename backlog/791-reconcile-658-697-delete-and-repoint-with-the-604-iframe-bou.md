@@ -22,7 +22,9 @@ tags: [blocks, demos, boundary, reconciliation, constellation]
 - **Fork 1 — end-state: C.** Migrate block-impl demos to FUI; WE keeps **only**
   standard/reference-runtime demos; WE docs **iframe-embed** the FUI-hosted ones. **Zero WE→FUI
   import** — no `frontierui` vite alias is added, `@frontierui/blocks` never enters WE's
-  `node_modules`. A (dev-only import) and B (keep a `blocks/` copy as substrate) rejected: A
+  `node_modules`.
+
+  A (dev-only import) and B (keep a `blocks/` copy as substrate) rejected: A
   reintroduces the WE→FUI import seam #700/#701/#705/#707 struck 4×; B re-opens #641's resolved
   blocks=application-impl classification and the #170 drift hazard #658 set out to kill. The
   red-team (A's "the boundary binds only published artifacts + the rendered site, not dev harnesses")

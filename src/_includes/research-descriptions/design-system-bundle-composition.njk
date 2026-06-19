@@ -1,0 +1,119 @@
+<h2>The Question</h2>
+<p>
+  The Block Explorer (<a href="/backlog/746-block-explorer-interactive-fui-block-workbench/">#746</a>) wants
+  a gallery of popular-system presets — Material-like, Fluent-like, Carbon-like — that a viewer switches
+  between live to watch the same block adapt. But a design system isn't <em>just</em> a theme: it bundles a
+  token set with intent defaults and, optionally, trait defaults. This survey grounds
+  <a href="/backlog/747-design-system-equals-theme-plus-intents-bundle-manifest-catalog/">#747</a>:
+  <strong>what does a named, switchable "design system" unit actually contain, and is it a config flavor or a
+  first-class entity?</strong> It builds on the resolved token model
+  (<a href="/backlog/364-unified-design-token-theming-system/">#364</a>): <code>webtheme</code> owns
+  primitive + component <strong>tokens</strong> (DTCG-authored), and the intents
+  (<a href="/intents/density/">density</a>, <a href="/intents/surface/">surface</a>,
+  <a href="/intents/typography/">typography</a>, <a href="/intents/motion/">motion</a>) own the semantic
+  tier. Per design-first step&nbsp;1, it surveys the leading systems + the token-format standards so the forks
+  reuse platform vocabulary instead of coining a bespoke bundle.
+</p>
+
+<h2>What the survey found</h2>
+
+<h3>1 · Where each leading system lands — tokens-only → +density → +behavior</h3>
+<table>
+  <thead><tr><th>System</th><th>The switchable unit</th><th>Behavior in the bundle?</th><th>Position</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><a href="https://carbondesignsystem.com/elements/themes/overview/">Carbon</a> (white/g10/g90/g100)</td>
+      <td><strong>color tokens only</strong></td>
+      <td>None — motion/spacing/type are <em>separate</em> <code>@carbon/motion</code>, <code>@carbon/layout</code>, <code>@carbon/type</code> globals a theme switch never touches</td>
+      <td>(a) tokens-only</td>
+    </tr>
+    <tr>
+      <td><a href="https://www.designtokens.org/TR/drafts/format/">DTCG</a> (official format module)</td>
+      <td>named value overrides</td>
+      <td>None <em>possible</em> by spec</td>
+      <td>(a) tokens-only</td>
+    </tr>
+    <tr>
+      <td><a href="https://styledictionary.com/reference/config/">Style Dictionary</a></td>
+      <td>value sets + transforms/filters</td>
+      <td>None</td>
+      <td>(a) tokens-only</td>
+    </tr>
+    <tr>
+      <td><a href="https://material-web.dev/theming/material-theming/">Material Design 3</a></td>
+      <td>color (+ typescale/shape) values over <code>md-sys-*</code></td>
+      <td>None — "maintaining existing interaction patterns"; motion is a <em>system-wide scheme</em>, not per-brand</td>
+      <td>(a)/(b) values-only</td>
+    </tr>
+    <tr>
+      <td><a href="https://fluent2.microsoft.design/design-tokens">Fluent UI v9</a></td>
+      <td>one flat <code>Theme</code> token bag that <em>includes</em> motion duration/curve tokens</td>
+      <td>Motion <em>values</em> yes; density/interaction <strong>no</strong> (density is a per-component <code>size</code> prop)</td>
+      <td>(b) tokens + motion values</td>
+    </tr>
+    <tr>
+      <td><a href="https://www.radix-ui.com/themes/docs/theme/overview">Radix Themes</a> (<code>&lt;Theme&gt;</code>)</td>
+      <td>color + <strong><code>radius</code> + <code>scaling</code> + <code>panelBackground</code></strong></td>
+      <td><strong>Yes — shape, density, surface treatment bundled &amp; inherited</strong></td>
+      <td>(c) tokens + <em>visual</em> behavior</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>2 · The consensus is (a)/(b), not (c)</h3>
+<p>
+  Switching a theme swaps token <strong>values</strong>, never component <em>behavior</em>, in every system
+  except Radix. MD3 says so explicitly; Fluent v9's static Griffel compilation enforces it; Carbon's theme is
+  color-only by definition. Motion and density are usually <strong>orthogonal axes, not theme members</strong>
+  — Carbon makes them separate packages, MD3 makes motion a system-wide scheme, Fluent keeps density out of
+  the theme entirely. <strong>Radix is the lone bundler of behavior — and only <em>visual</em> behavior</strong>
+  (radius = shape, scaling = density, panelBackground = surface treatment); even Radix never switches
+  interaction logic, state machine, or focus order. There is <strong>zero prior art</strong> for bundling
+  interaction behavior into a switchable theme. A consistent tiering appears everywhere
+  (<strong>reference/global → semantic/alias → component</strong>); the semantic tier is universally "the
+  layer a theme overrides," and behavior, where present, attaches to the <em>component</em> layer (Radix props,
+  Fluent <code>size</code>, MD3 state machines), not the token layer.
+</p>
+
+<h3>3 · The token-interchange standards cap the bundle at named values</h3>
+<p>
+  The <strong>official DTCG Format Module has no <code>$themes</code> / theming construct</strong> — a token is
+  exclusively a named value + metadata. The <code>$themes</code>/<code>$metadata</code> multi-theme convention
+  is a <a href="https://docs.tokens.studio/manage-themes/themes-overview">Tokens Studio</a> vendor extension,
+  <em>not</em> DTCG (confirmed by <a href="https://github.com/tokens-studio/sd-transforms">sd-transforms</a>).
+  Style Dictionary models multi-theme as a <em>build-config emergent</em> (config matrices + filters +
+  <code>themeable</code> transforms), never a behavioral mechanism. So a unit that must be DTCG-expressible
+  (forward-adapter / portability reach) <strong>cannot carry behavioral defaults — those must live in a
+  WE-owned sidecar that <em>references</em> the token bundle</strong>.
+</p>
+
+<h3>4 · This is already WE's architecture</h3>
+<p>
+  WE <em>is</em> the "tokens in the standard format + defaults in a WE-owned sidecar" shape the prior art
+  points to. <code>webtheme</code> owns primitive + component tokens as DTCG&nbsp;2025.10 with an
+  <code>extends</code> deep-merge over a platform default (<code>webtheme/tokens.ts</code>); the intents own
+  the semantic tier — <em>"a token never re-coins a role name"</em>; <code>extends</code>-over-platform-default
+  is the established config machinery (<code>plugs/core/CustomRegistry.ts</code>); catalogs auto-render from a
+  registry (the <a href="/protocols/">/protocols/</a> + <a href="/intents/">/intents/</a> precedent); and
+  traits already separate presentational from behavioral activation knobs. A WE design-system manifest that
+  <em>references</em> a DTCG token doc keeps tokens portable and intent/trait defaults in the WE layer.
+</p>
+
+<h2>What it means for the forks</h2>
+<ul>
+  <li><strong>Content determines entity — decide content first.</strong> Value-only bundles behave like config
+    (Carbon, Style Dictionary, DTCG = flavors); bundles carrying semantic + behavioral identity behave like
+    first-class entities (Fluent factory, Radix component). Flavor-vs-entity <em>follows</em> the
+    tokens-only-vs-tokens+behavior call.</li>
+  <li><strong>A new fork the original framing missed: the <em>scope</em> of trait defaults.</strong> Visual
+    behavior (radius/density/motion-feel) has one precedent (Radix); interaction behavior has none. The
+    novelty/risk concentrates here, so it deserves its own fork.</li>
+  <li><strong>The DTCG ceiling validates the sidecar shape</strong> — manifest references DTCG tokens, doesn't
+    embed them.</li>
+  <li><strong>A switchable gallery still needs a registry to render from</strong> (catalog-auto-render rule),
+    so the bundle being "just a manifest" and a <code>/design-systems/</code> catalog surface resolve together.</li>
+</ul>
+
+<p>
+  Full grounding in <code>reports/2026-06-16-design-system-bundle-prior-art.md</code>.
+</p>

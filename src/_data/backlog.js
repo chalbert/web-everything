@@ -89,6 +89,24 @@ function deriveProjectReadiness(items, projectStatus) {
   });
 }
 
+// Derived agent-readiness tier — a DETERMINISTIC pure function of structured fields only (type +
+// resolved prerequisites + projectPending), extracted so it can be unit-pinned independently of a full
+// loader run (the sibling of `deriveProjectReadiness`; see src/_data/__tests__/tier.test.ts). The prose
+// rationale lives at the call site below. `blockers` is the lightweight `[{ status }]` array the loader
+// attaches; `projectPending` is `deriveProjectReadiness`'s D3-readiness demotion (#608).
+//   A — agent-ready:    open issue/idea, every blocker resolved, project not pending.
+//   B — one nod away:   open decision, every blocker resolved (a still-blocked decision can't be
+//                        ratified yet — its prerequisite ruling is open — so it is NOT B).
+//   C — needs design:   any other open item (blocked issue/idea/decision, or a pending-project build).
+//   undefined — non-open items carry no tier (readiness is moot once claimed/done/shelved).
+function deriveTier(item) {
+  if (item.status !== 'open') return undefined;
+  const blockersClear = item.blockers.every((b) => b.status === 'resolved');
+  if ((item.type === 'issue' || item.type === 'idea') && blockersClear && !item.projectPending) return 'A';
+  if (item.type === 'decision' && blockersClear) return 'B';
+  return 'C';
+}
+
 // Strip inline markdown so a line makes a clean one-line summary.
 const stripInline = (s) => s
   .replace(/`([^`]+)`/g, '$1')
@@ -242,18 +260,12 @@ module.exports = function backlog() {
       .map(({ id, num, slug, title, status }) => ({ id, num, slug, title, status }));
 
     // Derived agent-readiness tier — a DETERMINISTIC pure function of structured frontmatter only
-    // (type + resolved prerequisites), so it's identical across rebuilds, no LLM in the path. It
-    // mirrors the four-signal rubric in docs/agent/backlog-workflow.md but ONLY its structurally
-    // decidable core: the two prose signals (body verbs, whether the `relatedReport` is a settled
-    // plan) are deliberately not read here, which is why the tier is an agent-ready *hint*, not a
-    // guarantee — the LLM selection pass still refines it. Only `open` items carry a tier; for
-    // active/resolved/parked items readiness is moot (already claimed, done, or shelved), so they
-    // get none (and thus no chip / no tier-filter effect).
-    //   A — agent-ready:  issue/idea with every blocker resolved (nothing structural blocks a start).
-    //   B — one nod away: a `decision` (it typically already states a recommendation, but that nuance
-    //                      is prose, so the structural proxy is just the type) — ratify, then build.
-    //   C — needs design / not ready: everything else open — an issue/idea with an unresolved
-    //                      blocker.
+    // (type + resolved prerequisites + projectPending), so it's identical across rebuilds, no LLM in
+    // the path. It mirrors the four-signal rubric in docs/agent/backlog-workflow.md but ONLY its
+    // structurally decidable core: the two prose signals (body verbs, whether the `relatedReport` is a
+    // settled plan) are deliberately not read here, which is why the tier is an agent-ready *hint*, not
+    // a guarantee — the LLM selection pass still refines it. The rubric itself lives in `deriveTier`
+    // (above), extracted so it can be unit-pinned; see its doc-comment for the A/B/C definitions.
     // D3-readiness (#608): the build's standard must exist first. `projectPending` ⇒ the
     // `relatedProject` is a `concept` project with zero shipped (resolved) surface — not mere
     // status-drift (a concept label over real work, see #617), but a project that genuinely isn't
@@ -263,12 +275,7 @@ module.exports = function backlog() {
     item.relatedProjectStatus = projectReadiness[idx].relatedProjectStatus;
     item.projectPending = projectReadiness[idx].projectPending;
 
-    item.tier = item.status !== 'open' ? undefined
-      : ((item.type === 'issue' || item.type === 'idea')
-          && item.blockers.every((b) => b.status === 'resolved')
-          && !item.projectPending) ? 'A'
-      : item.type === 'decision' ? 'B'
-      : 'C';
+    item.tier = deriveTier(item);
 
     // Batchable (deterministic) — the candidate set a POINTS-BUDGETED batch may pack
     // (docs/agent/backlog-workflow.md → "Running a batch"): a Tier-A item small enough to chain — a
@@ -291,6 +298,16 @@ module.exports = function backlog() {
     // an epic is never batchable, a task/story is never sliceable. A `story·≥13` stays plain agent-ready
     // (real buildable work, just beyond the batch pool) — only epics peel off.
     item.sliceable = item.tier === 'A' && item.workItem === 'epic';
+
+    // Splittable (deterministic) — an open `story` too big to chain (`size` > 8, i.e. the 13 band) is the
+    // `/split` skill's story-class candidate: real buildable work, but better cut into ≤5 slices first
+    // (docs/agent/backlog-workflow.md → "Splitting"). The exact complement of `batchable`'s size gate
+    // among sized stories. Unlike a `sliceable` epic — which literally can't be built and so is PULLED OUT
+    // of the agent-ready pool — an oversized story IS buildable as-is, so `splittable` is an ORTHOGONAL
+    // flag layered ON TOP of its tier (it stays in the agent-ready/not-ready bucket), not a tier of its own.
+    // Independent of `tier`: a still-blocked (Tier C) oversized story is just as worth splitting.
+    item.splittable = item.status === 'open' && item.workItem === 'story'
+      && typeof item.size === 'number' && item.size > 8;
 
     // Batch COST (deterministic) — the context-budget weight used to pack a POINTS-BUDGETED batch
     // (docs/agent/backlog-workflow.md → "Running a batch"). Distinct from burndown `size`: a `task`
@@ -427,6 +444,10 @@ module.exports = function backlog() {
   // Prioritisation chips so a container epic is shown as slice-work, not as a buildable Tier-A item.
   items.countAgentReady = items.filter((it) => it.tier === 'A' && !it.sliceable).length;
   items.countSliceable = items.filter((it) => it.sliceable === true).length;
+  // Oversized stories (story · size > 8) flagged as `/split` candidates — surfaced on the agent-ready chip
+  // ("· N to split") as an orthogonal tally, NOT a separate readiness bucket (an oversized story is real
+  // buildable work; see the `splittable` note above). Includes Tier-C blocked oversized stories too.
+  items.countSplittable = items.filter((it) => it.splittable === true).length;
   // Of the ready-to-slice epics, how many actually need a human/agent action (slice or resolve) versus
   // are just tracking open children. The chip leads with this so the screen never reads as "N epic
   // to-dos" when most are passive rollups.
@@ -483,6 +504,9 @@ module.exports = function backlog() {
 // Named export of the pure D3-readiness derivation (#621) for direct regression testing — Eleventy only
 // ever invokes the default function export, so attaching this property is inert to the build.
 module.exports.deriveProjectReadiness = deriveProjectReadiness;
+// Named export of the pure tier rubric for direct regression testing (the decision-with-open-blocker
+// demotion); inert to the Eleventy build, which only invokes the default function export.
+module.exports.deriveTier = deriveTier;
 // Named export of the title/summary/details derivation (#745) for direct regression testing — Eleventy
 // only ever invokes the default function export, so attaching this property is inert to the build.
 module.exports.derive = derive;

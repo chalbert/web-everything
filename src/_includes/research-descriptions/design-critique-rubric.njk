@@ -1,0 +1,132 @@
+<h2>Purpose</h2>
+<p>
+  This is the prior-art grounding for the <strong>design-critique rubric</strong>
+  (<a href="/backlog/1034-design-critique-rubric-what-a-page-review-measures-and-how-w/">backlog #1034</a>,
+  under the interactive design-review epic
+  <a href="/backlog/1033-interactive-design-review-loop-analyse-a-page-get-a-critique/">#1033</a>):
+  <em>what an automated review of a rendered page measures, and how far it can be grounded in the page's
+  declared Web&nbsp;Everything standards.</em> The vision pipeline already ships two closed vocabularies and
+  <strong>neither evaluates design quality</strong> — this is the third rubric. Session report:
+  <code>reports/2026-06-19-design-critique-rubric.md</code>.
+</p>
+
+<h2>The gap — three rubrics, only one of them evaluative</h2>
+<table>
+  <thead><tr><th>Rubric</th><th>Question it answers</th><th>Where it lives</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>QC verdict taxonomy</strong> (#475)</td>
+      <td><em>Admission:</em> is this even a real app surface? <code>app · obstructed · marketing · error · blank · non-app</code></td>
+      <td><code>scripts/design-refs/vision.mjs:18</code></td>
+    </tr>
+    <tr>
+      <td><strong>Codification facets</strong> (#396)</td>
+      <td><em>Tagging:</em> what kind of surface, in which register/style? <code>surface · productRegister · visualStyle · theme · layout</code></td>
+      <td><code>scripts/design-refs/vision.mjs:55</code></td>
+    </tr>
+    <tr>
+      <td><strong>Design critique</strong> (#1034, this topic)</td>
+      <td><em>Evaluation:</em> is this page well-designed — hierarchy, spacing, contrast, typography, consistency, alignment — and does it conform to the standards it declares?</td>
+      <td>the missing piece</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Established heuristic frameworks</h2>
+<table>
+  <thead><tr><th>Source</th><th>What it gives</th><th>What we borrow</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Nielsen's 10 usability heuristics</strong> (1994) + the <strong>0–4 severity</strong> scale</td>
+      <td>Broad usability rules; only #8 (aesthetic-and-minimalist) and #4 (consistency) are <em>visual</em>. Severity = cosmetic → catastrophe, a function of frequency × impact × persistence.</td>
+      <td>The <strong>severity scale</strong>, not the heuristic list (it's a usability, not a visual, rubric).</td>
+    </tr>
+    <tr>
+      <td><strong>CRAP</strong> (Contrast / Repetition / Alignment / Proximity) + extensions (hierarchy, balance, whitespace, type scale)</td>
+      <td>The compact <em>visual</em> vocabulary most "does this look designed" critiques actually use.</td>
+      <td>The backbone of the scored axes.</td>
+    </tr>
+    <tr>
+      <td><strong>Gestalt</strong> (proximity, similarity, closure, common-region, figure-ground, focal point)</td>
+      <td>Perceptual grounding for grouping/structure judgments.</td>
+      <td>Backs the grouping &amp; proximity axis.</td>
+    </tr>
+    <tr>
+      <td><strong>Material 3 / Apple HIG / Fluent 2</strong></td>
+      <td>Qualitative principles (clarity, consistency, hierarchy) <em>plus hard accessibility floors</em>: WCAG AA 4.5:1 contrast, 44–48px touch targets. None ships a scored critique form.</td>
+      <td>The deterministic <em>thresholds</em>; the vendor gap is exactly what a scored rubric fills.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>The load-bearing finding — the split is three tiers, not two</h2>
+<p>
+  Mature evaluation tools partition design-quality signals into three tiers, and a rubric whose dimensions
+  are <strong>tagged with their tier</strong> can route cheaply (DOM checks → pixel metrics → VLM):
+</p>
+<ul>
+  <li><strong>Tier A — deterministic from DOM/CSS</strong> (no vision): WCAG contrast ratios, spacing on a
+    grid (8pt), type-scale ratios, touch-target sizes, design-token usage vs hard-coded values. The
+    Lighthouse / <code>axe-core</code> surface — axe catches ~57% of WCAG issues at 100% precision and
+    explicitly returns <em>"incomplete"</em> for what it can't be sure of.</li>
+  <li><strong>Tier B — algorithmic-perceptual from pixels</strong> (vision <em>algorithms</em>, still
+    deterministic, no LLM): the <strong>Aalto Interface Metrics</strong> (AIM, UIST'18) surface — visual
+    clutter (feature congestion / subband entropy), colourfulness, symmetry, balance, grid-quality,
+    figure-ground contrast, saliency, across four named categories (colour perception · perceptual fluency
+    · visual guidance · accessibility).</li>
+  <li><strong>Tier C — genuine perceptual judgment</strong> (needs a VLM or human): "hierarchy feels off",
+    emphasis landing on the wrong element, overall polish/craft, crowding-in-context.</li>
+</ul>
+
+<h2>Output shape &amp; the VLM-trust finding</h2>
+<p>
+  <strong>UICrit</strong> (UIST'24) is the most directly relevant prior art: a human dataset of 3,059
+  natural-language critiques over 983 Rico screens, scored on three 10-point dimensions
+  (aesthetics / usability / overall), each critique carrying a <strong>bounding box + target scope</strong>
+  (element / group / whole-screen / <em>missing</em>-element), post-hoc bucketed into ~5 categories
+  (layout / colour-contrast / button-usability / learnability / text-readability). The proven output shape:
+  <strong>a small closed set of scored dimensions + open-text localized findings tagged to a dimension,
+  each with a severity.</strong> UICrit also found <strong>raw zero-shot VLM critique is poor</strong>
+  (~13% of Gemini's comments valid), few-shot from a rubric lifts it ~55%, and <strong>humans still beat
+  every automated method</strong> — so the rubric is what makes the Tier-C call trustworthy, and the
+  human-correction loop (<a href="/backlog/1036-plateau-review-surface-view-a-page-critique-comment-correct-/">#1036</a>)
+  is load-bearing, not a nicety.
+</p>
+
+<h2>Closed axes, open findings — diverging from the house default</h2>
+<p>
+  Scoring systems keep their axis set <strong>closed and small</strong> (AIM 4, Lighthouse 5, Nielsen 10)
+  so scores stay comparable across pages and over time, and push all extensibility into the open-text
+  findings underneath. This resolves the controlled-vocabulary / folksonomy split the <em>opposite</em> way
+  from the corpus taxonomy's <a href="/research/design-ref-taxonomy/">grow-the-registry ruling</a> (#394) —
+  deliberately, because the distillation corpus (#489/#490) needs comparable training pairs, which axis
+  drift would destroy. A version bump is the escape hatch.
+</p>
+
+<h2>How "WE-grounded" works</h2>
+<p>
+  WE's differentiator is that its design standards are <strong>machine-readable</strong>, so the Tier-A
+  checks aren't generic guesses — they're exact against what the page <em>declares</em>. The semantic-tier
+  intents (<code>src/_data/intents.json</code>) map almost one-to-one onto critique dimensions:
+  <code>typography</code> ("abstracting visual hierarchy from semantic HTML") grounds the type-scale and
+  hierarchy axes; <code>density</code> ("spatial relationships, touch targets") grounds spacing;
+  <code>layout</code> ("shell structure and regions") grounds alignment; <code>surface</code> ("Z-axis
+  depth, material") grounds figure-ground; and the rendered-site a11y gate (#763/#770) already computes
+  WCAG contrast deterministically, so the rubric <em>references</em> it rather than re-deriving it.
+  Reading the standard as input is not <a href="/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/">#475</a>-leakage —
+  leakage is the standard <em>depending on</em> vision, which this never does.
+</p>
+
+<h2>What this feeds</h2>
+<p>
+  Three prepared forks in #1034: <strong>(F1)</strong> grounding model → <em>WE-grounded-layered</em>
+  (generic-only discards WE's moat; conformance-only ignores that conformance ≠ good design — both flawed);
+  <strong>(F2)</strong> own-vs-compose the deterministic checks → <em>compose</em> the existing a11y /
+  token gates, own only the Tier-C judgment + synthesis (bias toward separation; don't re-implement
+  #763/#770); <strong>(F3)</strong> output shape → <em>closed scored axes (1–5) + open localized findings
+  (severity 0–4)</em>, versioned axis set. The proposed default vocabulary is 8 closed axes
+  (contrast · spacing · alignment · type-scale · consistency · grouping · visual-hierarchy · polish), each
+  tier-tagged and grounding-mapped. The rubric is <strong>not</strong> a <code>@webeverything</code>
+  artifact — it's the output contract of the Plateau vision service (#475: vision is never a standard),
+  riding the one <code>registerVisionProvider</code> seam (<code>scripts/design-refs/vision.mjs:143</code>).
+</p>

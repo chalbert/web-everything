@@ -12,7 +12,9 @@ tags: []
 
 # Dev-server staleness detector: build-id over HTTP + stale banner
 
-The dev docs server (Eleventy :8080) can crash or rebuild-fail while the browser keeps showing the last-built HTML, so authors silently read stale docs (the recurring cache/stale-tab/crash confusion — #610). Add a freshness signal: Eleventy writes a we:build-id.json (timestamp + git sha) each build and stamps the same id into a base-layout meta tag; a tiny injected client script polls we:build-id.json every few seconds and shows a red 'STALE — server down or page outdated' banner when the id drifts or the fetch fails. Expose the same check as an agent-usable HTTP probe (GET we:build-id.json, compare) so verification doesn't depend on a human noticing. Cheap: localhost GET is ms; validate one token, not full content. Pairs with the npm-run-dev self-heal change (drop --kill-others + concurrently restart flags) already applied.
+The dev docs server (Eleventy :8080) can crash or rebuild-fail while the browser keeps showing the last-built HTML, so authors silently read stale docs (the recurring cache/stale-tab/crash confusion — #610). Add a freshness signal: Eleventy writes a we:build-id.json (timestamp + git sha) each build and stamps the same id into a base-layout meta tag; a tiny injected client script polls we:build-id.json every few seconds and shows a red 'STALE — server down or page outdated' banner when the id drifts or the fetch fails.
+
+Expose the same check as an agent-usable HTTP probe (GET we:build-id.json, compare) so verification doesn't depend on a human noticing. Cheap: localhost GET is ms; validate one token, not full content. Pairs with the npm-run-dev self-heal change (drop --kill-others + concurrently restart flags) already applied.
 
 ## Progress (2026-06-17, batch-2026-06-17) — built
 

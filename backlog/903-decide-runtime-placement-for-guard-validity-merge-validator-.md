@@ -17,7 +17,9 @@ tags: [constellation, plugs, port, frontierui, standard-impl-boundary]
 #893 pre-flight (batch-2026-06-17) found #817 B1's *stated premise* false. #817 B1 ruled the runtime half
 of `guard/`, `validity-merge/`, `validator-resolution/` ports to FUI, justified by *"these three planes
 have no `we:check.ts`-style WE-side gate, so nothing WE-side consumes the runtime."* But WE's own plugs
-import the **runtime values** of all three planes. This decision re-checks whether that false premise
+import the **runtime values** of all three planes.
+
+This decision re-checks whether that false premise
 overturns the **placement** (keep runtime WE) or only the **execution** (placement stands; the carve must
 co-land with the plug port). It is placement-of-shipped-code — no web survey; the grounding is the
 per-consumer trace in [the prep report](../reports/2026-06-18-903-guard-validity-validator-runtime-placement-recheck.md)

@@ -13,7 +13,9 @@ tags: [trait-enforcer, tree-shaking, bundler-adapter, parcel]
 
 # Parcel trait Enforcer adapter — build it (both delivery modes, complete the 5-bundler conformance matrix)
 
-Build the fifth trait-enforcer bundler adapter, graduating ratified decision #756. Ship `traitEnforcerParcel(options?)` in we:tools/trait-enforcer/parcel-plugin.ts mirroring the four siblings, emitting the shared buildTraitManifestSource core via a Parcel Resolver returning { filePath, code }. Support BOTH config-delivery modes from one factory: B — Map as JS arg (options.traitMap, local wrapper referenced by relative path, Parcel >=2.9.0, the documented default); A — declarative via loadConfig reading .trait-enforcerrc / packageKey 'traitEnforcer' when no options. Add dev-deps @parcel/core + @parcel/config-default + @parcel/plugin. DoD: both Parcel rows in the #722 cross-bundler-conformance suite (Part A manifest byte-identity, Part B chunk isolation) completing the five-bundler matrix, plus a real-build chunk-isolation test mirroring the webpack case in we:multi-bundler.test.ts. Test references the resolver by relative path so needs no published package.
+Build the fifth trait-enforcer bundler adapter, graduating ratified decision #756. Ship `traitEnforcerParcel(options?)` in we:tools/trait-enforcer/parcel-plugin.ts mirroring the four siblings, emitting the shared buildTraitManifestSource core via a Parcel Resolver returning { filePath, code }. Support BOTH config-delivery modes from one factory: B — Map as JS arg (options.traitMap, local wrapper referenced by relative path, Parcel >=2.9.0, the documented default); A — declarative via loadConfig reading .trait-enforcerrc / packageKey 'traitEnforcer' when no options.
+
+Add dev-deps @parcel/core + @parcel/config-default + @parcel/plugin. DoD: both Parcel rows in the #722 cross-bundler-conformance suite (Part A manifest byte-identity, Part B chunk isolation) completing the five-bundler matrix, plus a real-build chunk-isolation test mirroring the webpack case in we:multi-bundler.test.ts. Test references the resolver by relative path so needs no published package.
 
 ## What to build
 
