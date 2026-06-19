@@ -1,0 +1,56 @@
+/* Web Reporting conformance demo (#1063) — chrome only; .badge/.summary/.play-card come from playground.css. */
+.rp-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.6rem;
+  padding: 1rem 1.25rem;
+  margin-top: 1rem;
+}
+.rp-card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+.rp-check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+}
+.rp-check-title {
+  font-size: 0.88rem;
+  color: #334155;
+}
+
+/* Live-render section — the ingested reports through the shared renderers. */
+.rp-render {
+  margin-top: 1rem;
+}
+.rp-render h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  color: #475569;
+}
+.rp-render table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.rp-render th,
+.rp-render td {
+  border: 1px solid #e2e8f0;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+.rp-render thead th {
+  background: #f8fafc;
+  font-weight: 600;
+}
+.rp-render .report-detail {
+  display: block;
+  color: #64748b;
+  font-size: 0.8rem;
+}
+.rp-render code {
+  font-size: 0.8rem;
+}

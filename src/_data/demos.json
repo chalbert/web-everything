@@ -355,5 +355,17 @@
     "projects": [
       "webanalytics"
     ]
+  },
+  {
+    "id": "webreporting-conformance-demo",
+    "name": "Web Reporting Conformance Demo",
+    "summary": "The runnable proof of the webreporting report-model protocol (#431) end-to-end: three unrelated producer formats — SARIF, JUnit, and an Istanbul coverage summary — each ingest into one normalized Report pivot, then render through the same v1 renderers (findings table, coverage matrix). The core claim is the lossy-normalization-hub: the Report schema is the pivot the project never ships as a format, so a single set of renderers displays every tool's output (no bespoke viewer per producer). The export adapters (toSarif/toJUnit) close the loop — an export-then-ingest round-trips on the base vocabulary. A runtime-conformance section asserts each invariant against the live impl (#432 renderers, #433 ingest, #434 export).",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>The runnable proof of the <a href=\"/projects/webreporting/\">Web Reporting</a> report-model protocol end-to-end: ingest a foreign producer's output (<strong>SARIF</strong> / <strong>JUnit</strong> / Istanbul <strong>coverage</strong>) &rarr; the normalized <code>Report</code> pivot &rarr; the shared v1 renderers (findings table, coverage matrix).</p><h3>The normalization hub</h3><p>The <code>Report</code> schema is the <strong>pivot the project never ships as a format</strong> &mdash; each foreign tool's output is ingested <em>into</em> it, so one set of renderers displays them all rather than a bespoke viewer per producer. The export adapters (<code>toSarif</code> / <code>toJUnit</code>) close the loop: an export-then-ingest round-trips on the base vocabulary.</p><h3>Verified contract</h3><p>The runtime-conformance section asserts the live impl: SARIF level&rarr;severity + location mapping, JUnit failure/pass severities, coverage <code>file/metric</code> scores pivoting into the matrix, the shared renderers producing accessible tables, and the export round-trip preserving findings.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/webreporting-conformance-demo.html",
+    "projects": [
+      "webreporting"
+    ]
   }
 ]
