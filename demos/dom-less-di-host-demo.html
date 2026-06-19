@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DOM-less DI Host (display:contents) Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/dom-less-di-host-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>DOM-less DI Host — <code>display: contents</code></h1>
+      <p>
+        Confirms the layout-neutral provider-element pattern from the
+        <a href="/research/dom-less-composition/">DOM-Less Composition</a> research: a
+        <code>&lt;di-scope&gt;</code> element that joins the
+        <a href="/projects/webinjectors/">injector tree</a> to scope dependency injection, but renders
+        <code>display: contents</code> so it adds <strong>no layout box</strong> — a flex/grid ancestor
+        treats its children as its own.
+      </p>
+      <p class="play-caveat">
+        The trick: <code>display: contents</code> keeps the element in the <strong>DOM tree</strong> (the
+        injector chain walks DOM ancestors, so a descendant still resolves the provider declared on the
+        scope) while removing its <strong>box</strong> from layout. DOM-present, layout-absent. The
+        control check proves it is load-bearing: a plain <code>&lt;div&gt;</code> wrapper breaks the same
+        flex row.
+      </p>
+    </header>
+
+    <div id="play-root">Loading demo&hellip;</div>
+  </main>
+
+  <!-- Unplugged: the demo imports InjectorRoot as a plain library (no global patch). -->
+  <script type="module" src="/demos/dom-less-di-host-demo.ts"></script>
+</body>
+</html>

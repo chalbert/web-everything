@@ -379,5 +379,17 @@
     "projects": [
       "webreporting"
     ]
+  },
+  {
+    "id": "dom-less-di-host-demo",
+    "name": "DOM-less DI Host (display:contents)",
+    "summary": "Confirms the layout-neutral provider-element pattern from the DOM-Less Composition research: a <di-scope> custom element that joins the injector tree to scope dependency injection but renders display:contents, so it adds no layout box — a flex/grid ancestor treats its children as its own. display:contents keeps the element in the DOM tree (the injector chain walks DOM ancestors, so a descendant still resolves the provider declared on the scope) while removing its box from layout: DOM-present, layout-absent. A conformance section asserts both halves live (computed display:contents, scoped provider resolves inside but not outside, children share the flex row equally) plus a control proving a plain <div> wrapper breaks the same row.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>Confirms the layout-neutral provider-element pattern from the <a href=\"/research/dom-less-composition/\">DOM-Less Composition</a> research: a <code>&lt;di-scope&gt;</code> element that joins the <a href=\"/projects/webinjectors/\">injector tree</a> to scope dependency injection, but renders <code>display: contents</code> so it adds <strong>no layout box</strong>.</p><h3>DOM-present, layout-absent</h3><p><code>display: contents</code> keeps the element in the <strong>DOM tree</strong> — the injector chain walks DOM ancestors, so a descendant still resolves the provider declared on the scope — while removing its <strong>box</strong> from layout, so a flex/grid ancestor lays out the scope's children as if they were its own.</p><h3>Verified, with a control</h3><p>The conformance section asserts the computed <code>display:contents</code>, that a descendant resolves the scoped provider while an element outside does not (isolation), and that the four flex items share the row equally across the scope boundary. A control proves the pattern is load-bearing: a plain <code>&lt;div&gt;</code> wrapper pulls its children out of the same flex row.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/dom-less-di-host-demo.html",
+    "projects": [
+      "webinjectors"
+    ]
   }
 ]

@@ -1,0 +1,62 @@
+/* DOM-less DI-host demo (#1044) — chrome only; .badge/.summary/.play-card come from playground.css. */
+.dl-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.6rem;
+  padding: 1rem 1.25rem;
+  margin-top: 1rem;
+}
+.dl-card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+.dl-check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+}
+.dl-check-title {
+  font-size: 0.88rem;
+  color: #334155;
+}
+
+/* The measured fixtures run off-canvas — present in layout (so widths resolve), out of view. */
+.measure-sink {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  width: 400px;
+}
+
+/* Flex row + items used by both the checks and the visual section. */
+.flx-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.flx-item {
+  flex: 1;
+  padding: 0.6rem 0.4rem;
+  text-align: center;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 0.4rem;
+  font-size: 0.82rem;
+  color: #3730a3;
+}
+/* The control: a normal block wrapper that pollutes the flex layout. */
+.block-wrap {
+  display: block;
+  border: 1px dashed #fca5a5;
+  border-radius: 0.4rem;
+  padding: 0.25rem;
+}
+
+.demo-row {
+  margin: 0.5rem 0 1rem;
+}
+.dl-label {
+  font-size: 0.85rem;
+  color: #475569;
+  margin: 0.75rem 0 0.25rem;
+}
