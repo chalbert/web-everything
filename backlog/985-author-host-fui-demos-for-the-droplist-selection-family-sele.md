@@ -18,7 +18,7 @@ Author runtime demos for selection, tree-select and type-ahead (the droplist fam
 
 ## Progress — done in batch-2026-06-18
 
-Authored `fui:demos/droplist-selection-demo.html` (reuses `demos/playground.css`), three live sections
+Authored `fui:demos/droplist-selection-demo.html` (reuses `fui:demos/playground.css`), three live sections
 over plain ARIA markup:
 - **selection** — `new SelectionBehavior(listbox, { itemSelector: '[role=option]', model: 'multiple', onChange })`;
   click rows to multi-select, live read-out of selected labels.

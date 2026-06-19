@@ -18,7 +18,7 @@ Author runtime demos for sectioned-nav and disclosure-nav (APG disclosure naviga
 
 ## Progress — done in batch-2026-06-18
 
-Authored `fui:demos/disclosure-sectioned-nav-demo.html` (reuses `demos/playground.css`): mounts both APG
+Authored `fui:demos/disclosure-sectioned-nav-demo.html` (reuses `fui:demos/playground.css`): mounts both APG
 disclosure-navigation blocks, each in its own shadow root via the block's `mount*(shadowRoot, config)` API
 with a shared 3-section sample config —
 - **disclosure-nav** — `mountDisclosureNav` (horizontal header, sibling-exclusive dropdown panels via the

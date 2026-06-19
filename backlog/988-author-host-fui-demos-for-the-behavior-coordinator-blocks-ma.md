@@ -18,7 +18,7 @@ Author runtime demos for master-detail, resource-loader and data-transfer in fui
 
 ## Progress — done in batch-2026-06-18
 
-Authored `fui:demos/behavior-coordinators-demo.html` (reuses `demos/playground.css`), three live sections:
+Authored `fui:demos/behavior-coordinators-demo.html` (reuses `fui:demos/playground.css`), three live sections:
 - **master-detail** — `new MasterDetailBehavior(masterList, { detailEl, itemSelector, keyOf, renderDetail })`;
   selecting a master row renders that person's detail into the labelled region.
 - **resource-loader** — `new ResourceLoader({ target }).load(async (signal) => …)`; a button drives the

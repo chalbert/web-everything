@@ -18,7 +18,7 @@ Author runtime demos for transient-component, app-shell and button in fui:demos/
 
 ## Progress — done in batch-2026-06-18
 
-Authored `fui:demos/webcomponents-chrome-demo.html` (reuses `demos/playground.css`), three live sections:
+Authored `fui:demos/webcomponents-chrome-demo.html` (reuses `fui:demos/playground.css`), three live sections:
 - **transient-component** — `registerTransient('auto-heading')`; nested `<section><auto-heading>` resolve to
   real `<h3>/<h4>/<h5>` by document depth (live read-out of the resolved tags).
 - **button** — `createButton({...})` factory: default (click), `toggle` (aria-pressed flip), and `icon`/`href`
