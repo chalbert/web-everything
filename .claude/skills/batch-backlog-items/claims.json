@@ -185,7 +185,8 @@
         "1131-webdirectives-customcommentregistry-extends-core-htmlregistr",
         "449-wire-the-we-plugs-alias-in-frontier-ui-and-delete-the-vendor",
         "1082-in-browser-transformers-js-webgpu-tier-2-provider",
-        "1107-webstates-customchangestrategyregistry-per-scope-selection"
+        "1107-webstates-customchangestrategyregistry-per-scope-selection",
+        "1108-webstates-customstoragestrategyregistry-indexeddb-to-localst"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",

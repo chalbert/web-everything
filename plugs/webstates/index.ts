@@ -28,6 +28,12 @@ export {
 } from './CustomChangeStrategyRegistry';
 export type { CustomChangeStrategyRegistryOptions } from './CustomChangeStrategyRegistry';
 
+export {
+  default as CustomStorageStrategyRegistry,
+  createDefaultStorageStrategyRegistry,
+} from './CustomStorageStrategyRegistry';
+export type { CustomStorageStrategyRegistryOptions } from './CustomStorageStrategyRegistry';
+
 export { NativeChangeStrategy, nativeChangeStrategy } from './CustomChangeStrategy';
 export type {
   ChangeRecord,
