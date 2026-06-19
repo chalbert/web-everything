@@ -1,4 +1,11 @@
 import { defineConfig } from 'vitest/config';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+// #449 (per #606): WE consumes the plug platform layer as the `@frontierui/plugs` package — dev-time
+// resolved to the sibling Frontier UI source (mirrors vite.config.mts). The rewritten block tests
+// import `@frontierui/plugs/*`, so the vitest runner needs the same alias.
+const fuiPlugsRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../frontierui/plugs');
 
 export default defineConfig({
   // Mirror vite.config.mts so .tsx files (the shared mapping fixtures + conformance suites)
@@ -84,6 +91,10 @@ export default defineConfig({
       '@webcomponents': '/plugs/webcomponents',
       '@webcontexts': '/plugs/webcontexts',
       '@webbehaviors': '/plugs/webbehaviors',
+
+      // #449: the block runtime + its tests import the plug layer via `@frontierui/plugs/*` (FUI owns
+      // the impl, WE consumes it as a no-leakage client) — resolve to the sibling FUI source.
+      '@frontierui/plugs': fuiPlugsRoot,
     },
   },
 });

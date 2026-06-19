@@ -8,7 +8,16 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      // #449 (per #606): plugs is FUI's impl; WE consumes it as a no-leakage client via the
+      // `@frontierui/plugs` package, dev-time-resolved to the sibling FUI source (mirrors FUI's
+      // proven `@webeverything/*` → `../webeverything` sibling-alias). Deep-subpath form so block
+      // runtime imports (e.g. `@frontierui/plugs/webbehaviors/CustomAttribute`) resolve directly.
+      "@frontierui/plugs": ["../frontierui/plugs/index.ts"],
+      "@frontierui/plugs/*": ["../frontierui/plugs/*"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["src/plateau"]

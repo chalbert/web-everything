@@ -9,9 +9,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import ForEachBehavior from '../../for-each/ForEachBehavior';
-import InjectorRoot from '../../../plugs/webinjectors/InjectorRoot';
-import CustomAttributeRegistry from '../../../plugs/webbehaviors/CustomAttributeRegistry';
-import { CustomExpressionParserRegistry, CustomTextNodeParserRegistry, CustomTextNodeRegistry } from '../../../plugs/webexpressions';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
+import CustomAttributeRegistry from '@frontierui/plugs/webbehaviors/CustomAttributeRegistry';
+import { CustomExpressionParserRegistry, CustomTextNodeParserRegistry, CustomTextNodeRegistry } from '@frontierui/plugs/webexpressions';
 import { ValueParser } from '../../parsers/value/ValueParser';
 import { PipeParser } from '../../parsers/pipe/PipeParser';
 import { DoubleCurlyBracketParser } from '../../parsers/text-node/double-curly/DoubleCurlyBracketParser';

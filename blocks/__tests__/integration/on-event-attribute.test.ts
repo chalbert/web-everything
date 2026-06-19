@@ -20,10 +20,10 @@ import { ValueParser } from '../../parsers/value/ValueParser';
 import { PipeParser } from '../../parsers/pipe/PipeParser';
 
 // Import plugs
-import CustomAttribute from '../../../plugs/webbehaviors/CustomAttribute';
-import CustomAttributeRegistry from '../../../plugs/webbehaviors/CustomAttributeRegistry';
-import { CustomExpressionParserRegistry } from '../../../plugs/webexpressions';
-import InjectorRoot from '../../../plugs/webinjectors/InjectorRoot';
+import CustomAttribute from '@frontierui/plugs/webbehaviors/CustomAttribute';
+import CustomAttributeRegistry from '@frontierui/plugs/webbehaviors/CustomAttributeRegistry';
+import { CustomExpressionParserRegistry } from '@frontierui/plugs/webexpressions';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
 
 describe('on-event attribute integration', () => {
   let injectorRoot: InjectorRoot;

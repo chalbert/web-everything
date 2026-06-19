@@ -4,9 +4,9 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import ForEachBehavior from '../../../for-each/ForEachBehavior';
-import CustomAttribute from '../../../../plugs/webbehaviors/CustomAttribute';
-import InjectorRoot from '../../../../plugs/webinjectors/InjectorRoot';
-import HTMLInjector from '../../../../plugs/webinjectors/HTMLInjector';
+import CustomAttribute from '@frontierui/plugs/webbehaviors/CustomAttribute';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
+import HTMLInjector from '@frontierui/plugs/webinjectors/HTMLInjector';
 
 describe('ForEachBehavior', () => {
   let injectorRoot: InjectorRoot;

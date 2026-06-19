@@ -36,7 +36,7 @@ import CustomStore, {
   type StoreListener,
   type StoreUnsubscribe,
   type StoreOptions,
-} from '../../../plugs/webstates/CustomStore';
+} from '@frontierui/plugs/webstates/CustomStore';
 
 /**
  * Options for creating a SimpleStore instance

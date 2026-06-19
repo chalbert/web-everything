@@ -12,7 +12,7 @@
  *
  * @module blocks/renderers/auto-define
  */
-import CustomRegistry, { type CustomRegistryOptions } from '../../../plugs/core/CustomRegistry';
+import CustomRegistry, { type CustomRegistryOptions } from '@frontierui/plugs/core/CustomRegistry';
 import {
   type AutoDefineStrategy,
   explicitAutoDefine,

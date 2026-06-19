@@ -1,6 +1,15 @@
 import { defineConfig, Plugin } from 'vite';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { devPanel } from './tools/dev-panel/vite-plugin';
 import { moduleService } from './tools/maas/vite-plugin';
+
+// #449 (per #606): plugs is FUI's impl; WE consumes it as a no-leakage client via the
+// `@frontierui/plugs` package, dev-time-resolved to the sibling Frontier UI source (mirrors FUI's
+// proven `weRoot = resolve(__dirname, '../webeverything')` sibling-alias). Release builds use the
+// published package (#877-style). `__dirname` is this config file's directory = the WE repo root.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const fuiPlugsRoot = resolve(__dirname, '../frontierui/plugs');
 
 /**
  * Vite plugin that automatically injects Web Everything patches into demo HTML files.
@@ -167,6 +176,12 @@ export default defineConfig({
       '@webbehaviors': '/plugs/webbehaviors',
       '@webstates': '/plugs/webstates',
       '@webexpressions': '/plugs/webexpressions',
+
+      // #449 (per #606): WE's block runtime imports the plug platform layer as the `@frontierui/plugs`
+      // package — FUI owns the impl, WE consumes it as a no-leakage client. Dev-time-resolved to the
+      // sibling FUI source (Vite object aliases prefix-match, so this also resolves the deep subpaths
+      // `@frontierui/plugs/webbehaviors/CustomAttribute` etc.). Release builds use the published package.
+      '@frontierui/plugs': fuiPlugsRoot,
     },
   },
 });

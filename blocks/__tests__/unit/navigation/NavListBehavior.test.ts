@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import NavListBehavior from '../../../navigation/NavListBehavior';
-import CustomAttribute from '../../../../plugs/webbehaviors/CustomAttribute';
+import CustomAttribute from '@frontierui/plugs/webbehaviors/CustomAttribute';
 
 describe('NavListBehavior', () => {
   beforeEach(() => {

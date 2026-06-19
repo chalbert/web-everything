@@ -31,8 +31,8 @@
  * ```
  */
 
-import CustomAttribute from '../../plugs/webbehaviors/CustomAttribute';
-import InjectorRoot from '../../plugs/webinjectors/InjectorRoot';
+import CustomAttribute from '@frontierui/plugs/webbehaviors/CustomAttribute';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
 
 /** Regex to parse "expression as alias" — alias is optional */
 const AS_REGEX = /^(.+?)\s+as\s+(\w+)$/;

@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import AutoHeading from '../../transient/AutoHeading';
-import InjectorRoot from '../../../plugs/webinjectors/InjectorRoot';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
 
 // Register once
 if (!customElements.get('auto-heading')) {

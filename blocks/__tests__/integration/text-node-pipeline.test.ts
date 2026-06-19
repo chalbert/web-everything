@@ -14,10 +14,10 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import CustomExpressionParserRegistry from '../../../plugs/webexpressions/CustomExpressionParserRegistry';
-import CustomTextNodeParserRegistry from '../../../plugs/webexpressions/CustomTextNodeParserRegistry';
-import UndeterminedTextNode from '../../../plugs/webexpressions/UndeterminedTextNode';
-import type { ResolvedValues } from '../../../plugs/webexpressions';
+import CustomExpressionParserRegistry from '@frontierui/plugs/webexpressions/CustomExpressionParserRegistry';
+import CustomTextNodeParserRegistry from '@frontierui/plugs/webexpressions/CustomTextNodeParserRegistry';
+import UndeterminedTextNode from '@frontierui/plugs/webexpressions/UndeterminedTextNode';
+import type { ResolvedValues } from '@frontierui/plugs/webexpressions';
 import { ValueParser } from '../../parsers/value/ValueParser';
 import { PipeParser } from '../../parsers/pipe/PipeParser';
 import DoubleCurlyBracketParser from '../../parsers/text-node/double-curly/DoubleCurlyBracketParser';

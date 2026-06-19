@@ -20,7 +20,7 @@
  * ```
  */
 
-import CustomAttribute from '../../plugs/webbehaviors/CustomAttribute';
+import CustomAttribute from '@frontierui/plugs/webbehaviors/CustomAttribute';
 
 /** Orientation of the navigation list */
 export type NavListOrientation = 'vertical' | 'horizontal';

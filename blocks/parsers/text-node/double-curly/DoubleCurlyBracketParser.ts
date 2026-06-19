@@ -14,7 +14,7 @@
  * ```
  */
 
-import CustomTextNodeParser from '../../../../plugs/webexpressions/CustomTextNodeParser';
+import CustomTextNodeParser from '@frontierui/plugs/webexpressions/CustomTextNodeParser';
 
 export default class DoubleCurlyBracketParser extends CustomTextNodeParser {
   openingIdentifier = '{{';

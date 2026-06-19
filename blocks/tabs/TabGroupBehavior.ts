@@ -19,7 +19,7 @@
  * ```
  */
 
-import CustomAttribute from '../../plugs/webbehaviors/CustomAttribute';
+import CustomAttribute from '@frontierui/plugs/webbehaviors/CustomAttribute';
 import ViewEngine from '../view/ViewEngine';
 import type { ViewHiddenMode } from '../view/ViewEngine';
 
