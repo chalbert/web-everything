@@ -381,6 +381,54 @@
     ]
   },
   {
+    "id": "webreliability-conformance-demo",
+    "name": "Web Reliability Conformance Demo",
+    "summary": "The runnable proof of the CustomRecoveryHandler contract (#1051) in a real browser: a handler inspects an error + its RecoveryContext and either declines (null — the next handler is tried) or owns the recovery with a RecoveryResult (retry / queued / fallback / abort). The contract is type-only (reliability/contract.ts); the HTTP-retry / circuit-breaker / offline-queue handlers and the customRecovery registry are impl in Frontier UI, so the demo supplies its own in-demo offline-retry handler. A runtime-conformance section asserts each invariant live: declines an unrecognized error, retries a transient error with backoff, queues an offline error for replay, aborts at the attempt cap, grows the backoff with attempts, and exposes a stable priority key.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>The runnable proof of the <code>CustomRecoveryHandler</code> contract (<a href=\"/backlog/1051-webreliability-contract-recovery-handler-registry-types-in-w/\">#1051</a>). A handler inspects an error + its <code>RecoveryContext</code> and either <strong>declines</strong> (<code>null</code> — the next handler is tried) or <strong>owns the recovery</strong> with a <code>RecoveryResult</code> (<code>retry</code>/<code>queued</code>/<code>fallback</code>/<code>abort</code>).</p><h3>In-demo handler, not the FUI impl</h3><p>The contract is type-only (<code>reliability/contract.ts</code>); the HTTP-retry / circuit-breaker / offline-queue handlers and the <code>customRecovery</code> registry are impl in Frontier UI. So this demo supplies its <strong>own</strong> in-demo offline-retry handler to prove the contract is realizable.</p><h3>Verified contract</h3><p>The runtime-conformance section asserts each invariant live: decline of an unrecognized error, retry-with-backoff for a transient error, offline queueing for replay, attempt-cap abort, exponential backoff growth, and a stable priority key.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/webreliability-conformance-demo.html",
+    "projects": [
+      "webreliability"
+    ]
+  },
+  {
+    "id": "webintl-conformance-demo",
+    "name": "Web Intl Conformance Demo",
+    "summary": "The runnable proof of the CustomIntlProvider contract (#1054) in a real browser: one provider hands back Intl.Collator / DateTimeFormat / NumberFormat / RelativeTimeFormat for a requested locale, so an app gets locale-aware collation, date, number, and relative-time formatting through one swappable seam. The contract is type-only (intl/contract.ts); the Intl.* runtime provider + customIntl swap registry are impl in Frontier UI, so the demo supplies its own in-demo provider (a thin pass-through to the platform Intl.* constructors). A runtime-conformance section asserts each invariant live across locales: locale-aware collation, accent-insensitive compare, localized date + currency formatting, relative-time formatting, and a fresh formatter per call.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>The runnable proof of the <code>CustomIntlProvider</code> contract (<a href=\"/backlog/1054-webintl-contract-intl-provider-types-in-webeverything/\">#1054</a>). One provider hands back <code>Intl.Collator</code> / <code>DateTimeFormat</code> / <code>NumberFormat</code> / <code>RelativeTimeFormat</code> for a requested locale, so an app gets locale-aware formatting through one swappable seam.</p><h3>In-demo provider, not the FUI impl</h3><p>The contract is type-only (<code>intl/contract.ts</code>); the <code>Intl.*</code> runtime provider + the <code>customIntl</code> swap registry are impl in Frontier UI. So this demo supplies its <strong>own</strong> in-demo provider — a thin pass-through to the platform <code>Intl.*</code> constructors — to prove the contract is realizable.</p><h3>Verified contract</h3><p>The runtime-conformance section asserts each invariant live: locale-aware collation (German <code>ä</code>), accent-insensitive compare, localized long-month + currency formatting, relative-time formatting, and a fresh formatter per call.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/webintl-conformance-demo.html",
+    "projects": [
+      "webintl"
+    ]
+  },
+  {
+    "id": "webmanifests-conformance-demo",
+    "name": "Web Manifests Conformance Demo",
+    "summary": "The runnable proof of the changelog-manifest contract (#1057) in a real browser: a per-release manifest of per-module change entries — severity (major/minor/patch), type (added/changed/deprecated/removed/fixed/security), and a migration ref present iff a change is breaking and mechanically applicable. The contract is type-only (manifests/changelog-contract.ts); the manifest reader + integrity pipeline are impl in Frontier UI, so the demo supplies a sample manifest plus its own in-demo reader. A runtime-conformance section asserts each invariant live: the manifest declares its release + previous version, entriesFor(module) scopes to the module, bySeverity filters per the vocabulary, breaking changes are the major entries, a migration ref is present iff breaking + applicable, and every entry carries module/severity/type/summary.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>The runnable proof of the changelog-manifest contract (<a href=\"/backlog/1057-webmanifests-contract-changelog-manifest-types-in-webeveryth/\">#1057</a>). A per-release manifest of per-module change entries — <code>severity</code>, <code>type</code>, and a <code>migration</code> ref present iff a change is breaking <em>and</em> mechanically applicable.</p><h3>In-demo reader, not the FUI impl</h3><p>The contract is type-only (<code>manifests/changelog-contract.ts</code>); the manifest reader + integrity pipeline are impl in Frontier UI. So this demo supplies a sample manifest plus its <strong>own</strong> in-demo reader to prove the contract is realizable.</p><h3>Verified contract</h3><p>The runtime-conformance section asserts each invariant live: the manifest declares its release + the version it migrates from, <code>entriesFor(module)</code> scopes to the module, <code>bySeverity</code> filters per the major/minor/patch vocabulary, breaking changes are the major entries, a <code>migration</code> ref is present iff breaking + applicable, and every entry carries module/severity/type/summary.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/webmanifests-conformance-demo.html",
+    "projects": [
+      "webmanifests"
+    ]
+  },
+  {
+    "id": "webidentity-conformance-demo",
+    "name": "Web Identity Conformance Demo",
+    "summary": "The runnable proof of the CustomCredentialProvider contract (#1060) in a real browser: supports(family, member) gates what a provider serves and acquire(request) resolves to a CredentialResult (fulfilled / declined / unavailable) across passkey / federated / digital / password families. The contract is type-only (identity/contract.ts); the real passkey / FedCM / digital-credential providers (RP/IdP round-trips) are impl in Frontier UI, so the demo supplies its own in-demo capability-gated provider. A runtime-conformance section asserts each invariant live: supports() gates by family+member, acquire() fulfills a supported family, reports unavailable for an unsupported one, declines under silent mediation, names the resolved family, and subscribe() returns a revocable cleanup.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>The runnable proof of the <code>CustomCredentialProvider</code> contract (<a href=\"/backlog/1060-webidentity-contract-credential-management-types-in-webevery/\">#1060</a>). <code>supports(family, member)</code> gates what a provider serves and <code>acquire(request)</code> resolves to a <code>CredentialResult</code> (<code>fulfilled</code>/<code>declined</code>/<code>unavailable</code>).</p><h3>In-demo provider, not the FUI impl</h3><p>The contract is type-only (<code>identity/contract.ts</code>); the real passkey / FedCM / digital-credential providers (RP/IdP round-trips) are impl in Frontier UI. So this demo supplies its <strong>own</strong> capability-gated in-demo provider — honest for a browser demo with no RP — to prove the contract is realizable.</p><h3>Verified contract</h3><p>The runtime-conformance section asserts each invariant live: <code>supports()</code> gates by family+member, <code>acquire()</code> fulfills a supported family, reports <code>unavailable</code> for an unsupported family (never a silent substitute), declines under silent mediation, names the resolved family, and <code>subscribe()</code> returns a revocable cleanup.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/webidentity-conformance-demo.html",
+    "projects": [
+      "webidentity"
+    ]
+  },
+  {
     "id": "webreporting-conformance-demo",
     "name": "Web Reporting Conformance Demo",
     "summary": "The runnable proof of the webreporting report-model protocol (#431) end-to-end: three unrelated producer formats — SARIF, JUnit, and an Istanbul coverage summary — each ingest into one normalized Report pivot, then render through the same v1 renderers (findings table, coverage matrix). The core claim is the lossy-normalization-hub: the Report schema is the pivot the project never ships as a format, so a single set of renderers displays every tool's output (no bespoke viewer per producer). The export adapters (toSarif/toJUnit) close the loop — an export-then-ingest round-trips on the base vocabulary. A runtime-conformance section asserts each invariant against the live impl (#432 renderers, #433 ingest, #434 export).",

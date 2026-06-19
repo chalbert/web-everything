@@ -23,7 +23,8 @@
         "1120-webbehaviors-hyphen-in-name-validation-on-define-definelazy",
         "1124-webexpressions-cloak-removal-after-upgrade",
         "1035-review-design-claude-skill-screenshot-a-page-return-a-struct",
-        "1050-webpositioning-conformance-demo"
+        "1050-webpositioning-conformance-demo",
+        "1053-webreliability-conformance-demo"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",
