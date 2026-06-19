@@ -17,7 +17,8 @@
         "1125-webexpressions-observer-upgrades-addednodes-dynamic-insertio",
         "1132-webdirectives-default-customcommentparser-customcommentparse",
         "1046-repoint-plateau-app-from-we-plugs-to-frontierui-plugs",
-        "1100-webregistries-plugged-mode-global-patching-api-applypatches-"
+        "1100-webregistries-plugged-mode-global-patching-api-applypatches-",
+        "1101-customelementregistry-whendefined-real-promise"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",

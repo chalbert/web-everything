@@ -76,6 +76,9 @@ export interface ElementDefinition extends ConstructorDefinition<ImplementedElem
 export default class CustomElementRegistry extends HTMLRegistry<ElementDefinition, ImplementedElement> {
   localName = 'customElements';
 
+  /** Pending `whenDefined(name)` resolvers, settled the moment that name is `define`d (#1101). */
+  #whenDefinedResolvers = new Map<string, ((ctor: ImplementedElement) => void)[]>();
+
   define(name: string, element: ImplementedElement, options?: ElementDefinitionOptions) {
     // TODO: Validate that no element with same name or constructor exists on this registry
 
@@ -107,6 +110,13 @@ export default class CustomElementRegistry extends HTMLRegistry<ElementDefinitio
     };
 
     this.set(name, definition);
+
+    // Resolve any pending whenDefined(name) promises now the name is registered (#1101).
+    const pending = this.#whenDefinedResolvers.get(name);
+    if (pending) {
+      this.#whenDefinedResolvers.delete(name);
+      pending.forEach((resolve) => resolve(element));
+    }
 
     // Register stand-in element with native customElements if not already registered
     // This allows the browser to parse the custom element tag
@@ -141,13 +151,17 @@ export default class CustomElementRegistry extends HTMLRegistry<ElementDefinitio
    * Compatible with native CustomElementRegistry.whenDefined()
    */
   whenDefined(name: string): Promise<ImplementedElement> {
+    // Fast path: already defined here (or up the extends chain).
     if (this.has(name)) {
       return Promise.resolve(this.get(name)!);
     }
 
-    // TODO: Implement proper promise that resolves when element is defined
-    return new Promise((resolve, reject) => {
-      reject(new Error(`whenDefined() not fully implemented yet for: ${name}`));
+    // Otherwise resolve on the next matching define(name, …) — a real pending promise keyed by name,
+    // mirroring native CustomElementRegistry.whenDefined() (#1101).
+    return new Promise((resolve) => {
+      const list = this.#whenDefinedResolvers.get(name) ?? [];
+      list.push(resolve);
+      this.#whenDefinedResolvers.set(name, list);
     });
   }
 
