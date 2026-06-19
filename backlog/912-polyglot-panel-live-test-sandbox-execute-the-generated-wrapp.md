@@ -20,12 +20,18 @@ values) all resolved, no design fork remains; the build decomposes into three sl
 incremental-delivery chain (each leaves a valid demoable state). Home `fui:`. locus:frontierui. See
 the [split analysis report](../reports/2026-06-18-backlog-split-analysis.md) → *`/split 912`*.
 
-**Children (DAG: A → B → C):**
-- **A** — FUI `/_maas/` wrapper-serve endpoint (`story·5`, no blocker): Vite `configureServer` middleware
-  conforming to `servePathIR` + `maas-versioning`, running `fui:tools/gen-wrapper/genWrapper.mjs` + esbuild; own conformance test.
-- **B** — Workbench same-document live-test mount + react/vue devDeps (`story·5`, blockedBy A): `import('/_maas/…?form=react-wrapper')`,
+**Children (DAG: A0 → A → {A-test, B → C}):** A (#1029) was re-split via `/split 1029` (2026-06-19,
+was `story·13`) into a producer prereq + the endpoint + a conformance follow-on — see the
+[split report](../reports/2026-06-19-backlog-split-analysis.md) → *#1029*.
+- **A0** — FUI wrapper-bytes producer (#1085, `story·3`, no blocker): the injected `resolve` seam (FUI
+  analog of `serveCompiled`) — resolve a block's CEM → `genWrapper(decl, react|vue)` → esbuild JSX→ESM.
+- **A** — FUI `/_maas/` wrapper-serve endpoint (#1029, `story·8`, blockedBy A0): Vite `configureServer`
+  middleware + handler conforming to the type-only `servePathIR` + `maas-versioning` (own handler, not
+  WE's runtime `fetchHandler`).
+- **A-test** — 6-response `servePathIR` conformance test (#1086, `task·3`, blockedBy A).
+- **B** — Workbench same-document live-test mount + react/vue devDeps (#1030, `story·5`, blockedBy A): `import('/_maas/…?form=react-wrapper')`,
   same-doc mount (#955-A2), error-surfacing, wired to inspector/event/anatomy.
-- **C** — Playwright e2e for the live-test panel (`task·2`, blockedBy B).
+- **C** — Playwright e2e for the live-test panel (#1031, `task·2`, blockedBy B).
 
 ---
 
