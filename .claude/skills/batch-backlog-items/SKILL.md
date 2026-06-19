@@ -10,10 +10,13 @@ Trigger + pointer — the method lives in
 which builds on **"Selecting the next item to work on"**, **"Working an item"**, and **"Closing out a
 completed item"**). Don't restate the rubric here; if the method changes, edit that doc.
 
-Invoked as `/batch [P]` or `/batch-next [P] [NNN-slug]`: a bare number `P` overrides the **points
-budget** (not an item count; default = the calibrated `capacityPoints × targetFraction`); a `NNN`/`NNN-slug`
-**seeds** the chain's first item (skip its selection). The **execute phase runs parallel by default** (see
-*Parallel lanes* below); pass **`--serial`** to force the inline serial loop. **Open `backlog-workflow.md` only for an edge case**
+Invoked as `/batch [P]`, `/batch-next [P] [NNN-slug]`, or `/workflow [P] [NNN-slug]`: a bare number `P`
+overrides the **points budget** (not an item count; default = the calibrated `capacityPoints × targetFraction`);
+a `NNN`/`NNN-slug` **seeds** the chain's first item (skip its selection). **The command picks the execute
+model:** `/batch` + `/batch-next` run the **linear / serial inline loop** (the default); **`/workflow` runs the
+parallel orchestrator** (provably-disjoint lanes on the `Workflow` tool — see *Parallel lanes* below). The
+`--parallel` / `--serial` flags are explicit per-invocation overrides on either command. **Open
+`backlog-workflow.md` only for an edge case**
 (empty pool → surface one decision; a stop-rule judgment call); the happy path is the loop below. A batch
 reuses the single-item arc **unchanged** (per-item `open → active` + `dateStarted` before code, `## Progress`
 synced, `resolved` after the full gate); it adds only the loop, the stop rule, and the ledger, and drops only
@@ -139,24 +142,35 @@ Throughput order: **`--parallel`** (independent, concurrent) > **serial pack** (
 unattended in one session instead of as one-item handoffs. Full method: *backlog-workflow.md → Linear
 & semi-linear cascade*.
 
-## Parallel lanes — DEFAULT execution (opt out with `--serial`) (reliability first, speed second)
+## Parallel lanes — the `/workflow` orchestrator (opt-in; `/batch` stays linear) (reliability first, speed second)
 
-**Parallel is the default execute model; `--serial` forces the old inline serial loop.** This was flipped
-on once the orchestrator gained its safety rails (#1147 + the integration-branch landing below); it stays
-**reversible** — if real runs misbehave (the close-skill audit is the watch), flip back to opt-in. The
-guarantee is unchanged: parallel can only ever *speed up a clean batch or fall back to serial* — it must
-never trade correctness for throughput. **Every uncertainty still resolves toward serial:** a wrong "these
-don't collide" call risks a merge; a wrong "these collide" call just costs some speed. So the probe forces
-any low-confidence item into the serial lane, and when no provably-disjoint pair exists the whole batch
-**degenerates to serial** (correct, not a failure). Use `--serial` to skip the orchestrator entirely
-(e.g. a tiny pack, or while debugging the batch itself).
+**`/workflow` (or `--parallel`) runs the parallel execute model; `/batch` runs the inline serial loop (the
+default).** Parallel was once the default (#1147) but has been **re-split into its own command** so the choice
+is explicit per invocation — `/batch` for linear, `/workflow` for parallel (this is the documented "flip back
+to opt-in" path the *Reversible default* note below always reserved). It stays **reversible** — the close-skill
+audit is the watch. The guarantee is unchanged: parallel can only ever *speed up a clean batch or fall back to
+serial* — it must never trade correctness for throughput. **Every uncertainty still resolves toward serial:** a
+wrong "these don't collide" call risks a merge; a wrong "these collide" call just costs some speed. So the
+probe forces any low-confidence item into the serial lane, and when no provably-disjoint pair exists the whole
+batch **degenerates to serial** (correct, not a failure). Use `/batch` (or `--serial`) to skip the orchestrator
+entirely (e.g. a tiny pack, or while debugging the batch itself).
 
-The non-negotiables (in priority order):
+**Progress feedback (per item).** The orchestrator runs in the background (the `Workflow` tool), so its
+progress streams to **`/workflows`**, not the main chat — the script emits a `log` line at every seam: each
+**probe** as it lands (with its concurrent/serial verdict), the **partition roster**, **each item the instant
+its agent resolves** (✓/~ + gate + status), and every **merge / replay / derived-regen** step. Granularity is
+**per-item**: every item is its own `agent()` call (concurrent items each in their own worktree; serial-lane
+items one-at-a-time on the branch), so you get a line per item, not per multi-item lane. Watch `/workflows`
+for live progress; the main chat shows the final ledger on completion.
+
+The non-negotiables (in priority order). *(A "lane" below is now **per item**: each concurrent item runs alone
+in its own worktree, and the serial lane is worked one item at a time — so "lane of N" reads as "N independent
+items." The guarantees are unchanged; only the granularity got finer.)*
 
 1. **Serial is the safe baseline, always reachable.** Any item that can't be *proven* independent runs
-   in the serial chain, and `--serial` forces the whole batch onto it. Parallelism is the default *only as
-   a layer on top of* that baseline — it never replaces it: the serial lane is always where uncertainty
-   lands, so "default parallel" can only ever speed up a provably-clean partition, never weaken the floor.
+   in the serial chain, and `/batch` (or `--serial`) forces the whole batch onto it. Parallelism (`/workflow`)
+   is a layer *on top of* that baseline — it never replaces it: the serial lane is always where uncertainty
+   lands, so even an all-`/workflow` run can only speed up a provably-clean partition, never weaken the floor.
 2. **Partition only on provable independence.** Two items may share a parallel **lane boundary** only
    if their **declared file paths are disjoint** *and* neither sits on the other's `blockedBy` edge
    (a DAG edge forces same-lane-after, never concurrent). Overlapping or ambiguous file sets → **same
@@ -175,14 +189,14 @@ The non-negotiables (in priority order):
    fallback reads as a fallback, never as "ran in parallel" when it didn't.
 
 When the ready pool has no provably-disjoint pair (everything touches the same subsystem),
-`--parallel` **degenerates to the serial batch** — that's correct, not a failure. The speed win only
+`/workflow` **degenerates to the serial batch** — that's correct, not a failure. The speed win only
 materializes when the batchable list genuinely spans independent subsystems; reliability is identical
 either way. Full design + rationale: backlog **#083 agent-file-lock-coordination**.
 
 ### Execute phase runs on the Workflow tool (#1147)
 
 The **main loop still does the conversational part unchanged** — pack, plan, the single "go", the reserve,
-and the close-out/calibration. It then hands the **execute phase** (the default; skipped under `--serial`)
+and the close-out/calibration. Under `/workflow` (or `--parallel`) it then hands the **execute phase**
 to the `Workflow` tool, which enforces the five non-negotiables above deterministically:
 
 ```
@@ -194,12 +208,16 @@ const r = Workflow({
 
 The script (read its header for the full contract): per-item **effect-probe** (frontmatter files are a
 lower bound, so an agent predicts the real touch-set; low-confidence → forced serial) → pure-JS **partition**
-into a serial fallback lane + provably-disjoint parallel lanes → `parallel()` **lane agents in
-`isolation:'worktree'`** that gate locally with `check:standards --local --files=…` (#1144) → a serial
-**integrate** loop that merges clean lanes one at a time **onto a throwaway integration branch**, runs the
-**full** gate per merge, and **replays a conflicted/red lane serially** (the JS loop's single thread is the
-merge mutex) → regenerates **derived artifacts once**. It returns `{ integrationBranch, ledger,
-multiLaneFiles, conflictsReplayed, … }`.
+into a **serial lane** (probe-uncertain, monolith-touching, or anything sharing files / a `blockedBy` edge
+with another item) + a **concurrent set of provably-independent items** (each disjoint from *every* other
+item) → `parallel()` **one agent per concurrent item in `isolation:'worktree'`** (per-item granularity — each
+item logs as it lands) that gates locally with `check:standards --local --files=…` (#1144) → a serial
+**integrate** loop that works the serial lane first (one agent per item on the branch), then merges each
+clean worktree one at a time **onto a throwaway integration branch**, runs the **full** gate per merge, and
+**replays a conflicted/red item serially** (the JS loop's single thread is the merge mutex) → regenerates
+**derived artifacts once**. It returns `{ integrationBranch, ledger, concurrentItems, serialItems,
+multiLaneFiles, conflictsReplayed, … }`. **One agent per item** is what gives `/workflows` a progress line as
+each item resolves (the earlier model bundled several items into one lane agent and reported once).
 
 **The main agent does the landing** (not the workflow — the workflow NEVER writes the live branch). After a
 green return, merge the integration branch onto the working branch in ONE op, then delete it:
@@ -224,8 +242,10 @@ merges clean, **no integrator-applied manifest** (and `multiLaneFiles` is usuall
 artifacts** (`AGENTS.md`, `referenceIndex.json`, regenerated once by the integrator) and rare edits to a
 still-**monolithic** low-churn registry (projects/capabilities/adapters/capabilityMatrix/designSystems).
 
-> **Reversible default.** Parallel is on by default but the machinery has **not** yet been proven by a real
-> multi-lane run (#1153). The first real parallel batches are the live validation — the **closing-session
-> skill audits each one** (lanes, conflicts replayed, `multiLaneFiles`, derived regen, final gate). If they
-> degrade or a multi-lane file turns out wrong, flip back to opt-in (re-title this section, default to
-> `--serial`) — that's the agreed reevaluation path, not a failure.
+> **Opt-in, reversible.** Parallel is reached via `/workflow` (or `--parallel`); `/batch` stays linear. The
+> machinery has **not** yet been proven by a real multi-lane run (#1153) — the first real parallel batches are
+> the live validation, and the **closing-session skill audits each one** (lanes, conflicts replayed,
+> `multiLaneFiles`, derived regen, final gate). The command split *is* the agreed opt-in stance: linear is the
+> safe default you reach for, parallel is the explicit `/workflow` choice. (Earlier this was a `--parallel`-off
+> default flipped to default-on under #1147; it has now been re-split into `/workflow` so the choice is
+> explicit rather than a flag — superseding that default-on stance, same reversible machinery underneath.)

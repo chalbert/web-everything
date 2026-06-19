@@ -1,46 +1,47 @@
 export const meta = {
   name: 'batch-parallel-execute',
-  description: 'Execute an opt-in /batch --parallel: probe → partition into provably-disjoint lanes → work lanes concurrently in isolated worktrees → merge serially with a full gate per merge → regenerate derived artifacts once. Returns a ledger.',
-  whenToUse: 'Invoked by the batch-backlog-items skill ONLY for /batch --parallel, after the main loop has done the conversational pack/plan/one-"go". Not for the default serial batch.',
+  description: 'Execute a /workflow (parallel) batch: probe → partition into provably-independent items (own worktree, concurrent) + an entangled/uncertain serial lane → work each item as its OWN agent → merge worktrees serially with a full gate per merge → regenerate derived artifacts once. Per-item progress. Returns a ledger.',
+  whenToUse: 'Invoked by the batch-backlog-items skill ONLY for /workflow (or --parallel), after the main loop has done the conversational pack/plan/one-"go". Not for the default serial /batch.',
   phases: [
     { title: 'Probe', detail: 'predict each item\'s real touch-set (frontmatter files are a lower bound)' },
-    { title: 'Lanes', detail: 'one agent per provably-disjoint lane, in its own git worktree' },
-    { title: 'Integrate', detail: 'merge clean lanes one at a time, full gate per merge, replay a conflicted lane serially' },
+    { title: 'Items', detail: 'one agent per provably-independent item, each in its own git worktree, concurrent' },
+    { title: 'Integrate', detail: 'serial lane first, then merge worktrees one at a time, full gate per merge, replay a conflicted item serially' },
   ],
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// /batch --parallel execute phase (backlog #1147, epic #1143).
+// /workflow (parallel) execute phase (backlog #1147, epic #1143; per-item refactor).
 //
 // WHY THIS IS SAFE — the design contract (mirrors the SKILL.md "Parallel lanes" non-negotiables):
-//   1. Serial is the safe baseline. Anything not PROVABLY independent runs in one serial lane.
-//   2. Partition only on provable independence: two items share a lane unless their predicted touch-sets
-//      are disjoint AND neither is on the other's blockedBy edge.
-//   3. Each lane keeps the full serial arc (claim → work → per-lane gate) in its OWN git worktree.
-//   4. Git is the conflict detector: merge clean lanes ONE AT A TIME; a conflict ⇒ the partition was wrong,
-//      so abort that lane and replay its items serially on the merged result. Never force-merge.
-//   5. No silent speculation: every partition + every replay is logged.
+//   1. Serial is the safe baseline. Anything not PROVABLY independent runs in the serial lane.
+//   2. Partition only on provable independence: an item runs concurrently ONLY if its predicted touch-set is
+//      disjoint from EVERY other item's AND it is on no blockedBy edge with another item. Anything else → serial.
+//   3. Each item is its OWN agent — concurrent items in their OWN git worktree, serial items one-at-a-time on
+//      the integration branch. Per-item full single-item arc (claim → work → gate).
+//   4. Git is the conflict detector: merge worktrees ONE AT A TIME; a conflict ⇒ the partition was wrong, so
+//      abort that item's merge and replay it serially on the merged result. Never force-merge.
+//   5. No silent speculation: every partition decision + every replay is logged (per item).
+//
+// PER-ITEM GRANULARITY (vs the old per-lane model): every item is a distinct agent() call, so /workflows shows
+// a log line as each item lands — not one line per multi-item lane. Independent items each get their own
+// worktree (so they're pairwise-disjoint and merge clean — no replay among them); the only residual conflict
+// risk is a concurrent item vs the serial lane, which the merge-one-at-a-time + replay step still catches.
 //
 // WHAT THE REGISTRY SPLIT (#1145/#1146) CHANGED: shared registries are now per-entry files
-// (src/_data/<reg>/<id>.json), so a lane adding/editing a registry entry just writes its OWN new/edited
-// file — disjoint across lanes, merges clean, NO integrator-applied manifest. The effects-manifest is now
-// NARROW: it covers only the residual shared mutations a lane must NOT commit itself —
-//   • DERIVED artifacts that are regenerated (AGENTS.md inventory, src/_data/referenceIndex.json): two
-//     lanes regenerating them collide, so lanes leave them alone and the integrator regenerates ONCE.
+// (src/_data/<reg>/<id>.json), so an item adding/editing a registry entry just writes its OWN file — disjoint,
+// merges clean, NO integrator-applied manifest. The effects-manifest is NARROW: it covers only the residual
+// shared mutations an item must NOT commit itself —
+//   • DERIVED artifacts that are regenerated (AGENTS.md, src/_data/referenceIndex.json): two items
+//     regenerating them collide, so items leave them alone and the integrator regenerates ONCE.
 //   • Rare edits to a still-MONOLITHIC low-churn registry (projects/capabilities/adapters/capabilityMatrix/
-//     designSystems): the integrator applies these serially after merge.
+//     designSystems): an item that must touch one is forced into the serial lane (probe flags touchesMonolith).
 //
-// This script runs in the Workflow JS sandbox: no fs, no child_process, no Date/Math.random. ALL
-// side effects (git, backlog.mjs, npm gates) happen INSIDE agents via Bash; the script only does control
-// flow (partition, the budget loop, sequencing).
+// This script runs in the Workflow JS sandbox: no fs, no child_process, no Date/Math.random. ALL side effects
+// (git, backlog.mjs, npm gates) happen INSIDE agents via Bash; the script only does control flow.
 //
 // args (passed by the main loop after the conversational pack/plan/"go"):
-//   {
-//     batchSlug:   'batch-<date>-<NNN>-<NNN>…',   // the session label (already reserved by the main loop)
-//     budgetPoints: <number>,                      // the points budget (sole stop driver)
-//     items: [ { num, slug, file, locus, cost, declaredFiles: [..], blockedBy: [..] }, … ]  // the packed Tier-A items
-//   }
-// Returns: { ledger: [ { num, status, cost, lane, drop? } … ], lanes, conflictsReplayed, derivedRegenerated }
+//   { batchSlug, budgetPoints, items: [ { num, slug, file, locus, cost, declaredFiles: [..], blockedBy: [..] } … ] }
+// Returns: { integrationBranch, ledger, concurrentItems, serialItems, conflictsReplayed, multiLaneFiles, … }
 // ─────────────────────────────────────────────────────────────────────────────
 
 const a = args || {};
@@ -50,13 +51,13 @@ const budgetPoints = Number.isFinite(a.budgetPoints) ? a.budgetPoints : Infinity
 
 if (items.length === 0) {
   log('No packed items passed — nothing to execute.');
-  return { ledger: [], lanes: 0, conflictsReplayed: 0, derivedRegenerated: false };
+  return { ledger: [], concurrentItems: 0, serialItems: 0, conflictsReplayed: 0, derivedRegenerated: false };
 }
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
-// A per-item effect probe: the REAL touch-set predicted from the body, not just the frontmatter (which is
-// a lower bound — work spills past the declared files). `confident` gates a guess down to "must serialize".
+// A per-item effect probe: the REAL touch-set predicted from the body, not just the frontmatter (a lower
+// bound — work spills past the declared files). `confident` gates a guess down to "must serialize".
 const PROBE_SCHEMA = {
   type: 'object',
   required: ['num', 'predictedFiles', 'confident'],
@@ -69,70 +70,83 @@ const PROBE_SCHEMA = {
     },
     touchesMonolith: {
       type: 'array', items: { type: 'string' },
-      description: 'still-monolithic shared files it must edit (e.g. src/_data/projects.json) — these force the integrator path, list them explicitly. Per-entry registry files (src/_data/<reg>/<id>.json) are NOT monolithic — never list them.',
+      description: 'still-monolithic shared files it must edit (e.g. src/_data/projects.json) — these force the serial lane, list them explicitly.',
     },
-    confident: { type: 'boolean', description: 'TRUE when every predicted file is one this item OWNS (its own impl/code, its own demo page, its own backlog/NNN.md, its own per-entry registry entries, its own test file). FALSE *only* when work plausibly spills into a SHARED surface another item could also touch: a still-monolithic registry, shared runtime (plugs/bootstrap.ts), a shared *.njk include, shared test specs, build config (tsconfig/vite/package.json), or a broad cross-file refactor. Routine uncertainty about the exact file COUNT is NOT a reason for false; only genuine shared-surface risk is. Per-entry registry writes do NOT lower confidence. False forces the serial lane.' },
+    confident: { type: 'boolean', description: 'false if the touch-set is uncertain — the item is then forced into the serial lane (safe default).' },
   },
 };
 
-// The registry-effects manifest a lane returns — NARROW (see header). Lanes never commit derived artifacts
-// or splice monolithic registries; they report what the integrator must do after the merge.
-const LANE_RESULT_SCHEMA = {
+// What each ITEM agent returns (concurrent-worktree item OR serial-lane item). NARROW effects manifest (see
+// header): items never commit derived artifacts or splice monolithic registries; they report what the
+// integrator must do after the merge.
+const ITEM_RESULT_SCHEMA = {
   type: 'object',
-  required: ['lane', 'worked', 'laneGate'],
+  required: ['num', 'status', 'gate'],
   additionalProperties: false,
   properties: {
-    lane: { type: 'string' },
-    worked: {
-      type: 'array',
-      items: {
-        type: 'object',
-        required: ['num', 'status'],
-        additionalProperties: true,
-        properties: {
-          num: { type: 'string' },
-          status: { type: 'string', enum: ['resolved', 'carried', 'dropped'] },
-          cost: { type: 'number' },
-          drop: { type: 'string', description: 'drop-reason if not resolved (taken/blocked-in-fact/not-batchable/outgrew)' },
-        },
-      },
-    },
-    branch: { type: 'string', description: 'the git branch/worktree ref holding this lane\'s commits, for the integrator to merge.' },
+    num: { type: 'string' },
+    status: { type: 'string', enum: ['resolved', 'carried', 'dropped'] },
+    cost: { type: 'number' },
+    drop: { type: 'string', description: 'drop-reason if not resolved (taken/blocked-in-fact/not-batchable/outgrew)' },
+    branch: { type: 'string', description: 'the git branch/worktree ref holding this item\'s commit, for the integrator to merge (worktree items only; omit for serial-lane items already on the integration branch).' },
     changedFiles: {
       type: 'array', items: { type: 'string' },
-      description: 'EVERY repo-relative file this lane actually changed (git diff --name-only against the base). Used to surface files touched by more than one lane — the residual silent-merge risk a human should eyeball.',
+      description: 'EVERY repo-relative file this item actually changed (git diff --name-only vs base). Used to surface files touched by more than one item — the residual silent-merge risk a human should eyeball.',
     },
     derivedArtifacts: {
       type: 'array', items: { type: 'string' },
-      description: 'derived files this lane WOULD have regenerated but deliberately did NOT (AGENTS.md, src/_data/referenceIndex.json) — the integrator regenerates once.',
+      description: 'derived files this item WOULD have regenerated but deliberately did NOT (AGENTS.md, src/_data/referenceIndex.json) — the integrator regenerates once.',
     },
     monolithEdits: {
       type: 'array',
       items: {
-        type: 'object',
-        required: ['file', 'summary'],
-        additionalProperties: true,
+        type: 'object', required: ['file', 'summary'], additionalProperties: true,
         properties: { file: { type: 'string' }, summary: { type: 'string', description: 'the exact entry/change to re-apply on the integrated tree' } },
       },
-      description: 'edits to still-monolithic shared registries the lane is NOT committing — the integrator applies them serially.',
+      description: 'edits to still-monolithic shared registries the item is NOT committing — the integrator applies them serially.',
     },
-    laneGate: { type: 'string', enum: ['green', 'red'], description: 'result of the per-lane LOCAL gate (check:standards --local --files=<lane files>).' },
+    gate: { type: 'string', enum: ['green', 'red'], description: 'result of this item\'s gate (per-item LOCAL gate for worktree items, whole-repo check:standards for serial-lane items).' },
     notes: { type: 'string' },
   },
 };
 
 const INTEGRATE_SCHEMA = {
   type: 'object',
-  required: ['lane', 'merged', 'gate'],
+  required: ['num', 'merged', 'gate'],
   additionalProperties: true,
   properties: {
-    lane: { type: 'string' },
-    merged: { type: 'boolean', description: 'true if the lane merged clean into the integration branch.' },
+    num: { type: 'string' },
+    merged: { type: 'boolean', description: 'true if the item\'s worktree branch merged clean into the integration branch.' },
     conflicted: { type: 'boolean', description: 'true if git reported a merge conflict (partition was wrong → replay serially).' },
     gate: { type: 'string', enum: ['green', 'red'], description: 'full check:standards on the merged tree.' },
     notes: { type: 'string' },
   },
 };
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function filesOf(entry) {
+  const p = entry.probe;
+  const base = new Set([`backlog/${entry.file}`]);
+  if (p && Array.isArray(p.predictedFiles)) for (const f of p.predictedFiles) base.add(f);
+  if (Array.isArray(entry.declaredFiles)) for (const f of entry.declaredFiles) base.add(f);
+  return base;
+}
+function disjoint(setA, setB) {
+  for (const f of setA) if (setB.has(f)) return false;
+  return true;
+}
+function mustSerialize(entry) {
+  const p = entry.probe;
+  return !p || p.confident === false || (Array.isArray(p.touchesMonolith) && p.touchesMonolith.length > 0);
+}
+function blockEdge(x, y) {
+  const xbb = new Set((x.blockedBy || []).map(String));
+  const ybb = new Set((y.blockedBy || []).map(String));
+  return xbb.has(String(y.num)) || ybb.has(String(x.num));
+}
+function conflicts(x, y) {
+  return !disjoint(filesOf(x), filesOf(y)) || blockEdge(x, y);
+}
 
 // ── Phase 1 — Probe each item's real touch-set (parallel), then partition (pure JS) ──────────────
 phase('Probe');
@@ -147,134 +161,96 @@ const probes = await parallel(items.map((it) => () =>
       `its impl/code files, its own we:backlog/${it.num}.md, and any per-entry registry file it would add`,
       `(src/_data/<registry>/<id>.json — registries are one-file-per-entry since #1145/#1146).`,
       `Frontmatter declares: ${JSON.stringify(it.declaredFiles || [])} — treat that as a LOWER BOUND only.`,
-      `Per-entry registry files (src/_data/<registry>/<id>.json) are DISJOINT by construction (#1145/#1146):`,
-      `writing your OWN new/edited entry never collides with another lane, so do NOT list them in touchesMonolith`,
-      `and they do NOT lower your confidence. List in touchesMonolith ONLY still-monolithic shared files`,
-      `(projects/capabilities/adapters/capabilityMatrix/designSystems registries, plugs/bootstrap.ts, build config).`,
-      `Set confident=TRUE when every file you'll touch is one this item clearly OWNS — its own impl/code, its own`,
-      `demo page, its own we:backlog/${it.num}.md, its own per-entry registry entries, its own test file.`,
-      `Set confident=FALSE *only* when the work plausibly SPILLS into a shared surface another item could also`,
-      `touch (a monolithic registry, plugs/bootstrap.ts, a shared *.njk include, a shared test spec, tsconfig/vite/`,
-      `package.json, or a broad cross-file refactor). Routine uncertainty about the exact file COUNT is NOT a reason`,
-      `for false — only genuine shared-surface risk is; default disjoint-looking work to TRUE. Return ONLY the structured object.`,
+      `List still-monolithic shared files it must edit separately in touchesMonolith.`,
+      `Set confident=false if you are at all unsure of the touch-set — a missed file corrupts a merge, so`,
+      `uncertainty must fall back to serial. Return ONLY the structured object.`,
     ].join(' '),
     { label: `probe:${it.num}`, phase: 'Probe', schema: PROBE_SCHEMA, effort: 'low' },
   ).then((p) => {
-    // Per-probe heartbeat — fires as each probe lands, so /workflows shows incremental scoping progress
-    // (parallel() is a barrier, but these .then callbacks run the moment each agent resolves).
+    // Per-probe heartbeat — fires as each probe lands (parallel() is a barrier, but these .then callbacks
+    // run the moment each agent resolves), so /workflows shows incremental scoping progress.
     probedCount++;
     const fileN = p && Array.isArray(p.predictedFiles) ? p.predictedFiles.length : 0;
     const verdict = !p ? 'no result → serial' : p.confident === false ? 'low-confidence → serial' :
-      (p.touchesMonolith && p.touchesMonolith.length) ? 'touches monolith → serial' : `${fileN} file(s), parallel-eligible`;
+      (p.touchesMonolith && p.touchesMonolith.length) ? 'touches monolith → serial' : `${fileN} file(s), candidate for concurrent`;
     log(`  probe ${probedCount}/${items.length}: #${it.num} — ${verdict}`);
     return { ...it, probe: p };
   }).catch(() => { probedCount++; log(`  probe ${probedCount}/${items.length}: #${it.num} — probe FAILED → serial`); return { ...it, probe: null }; }),
 ));
 
-// Greedy partition into lanes. Lane 0 is the SERIAL fallback lane: every item that can't be PROVEN
-// independent (probe failed, low-confidence, touches a monolith, or shares a file / blockedBy edge with an
-// already-placed item) lands here and runs one-after-another. Other lanes are provably-disjoint singletons-
-// or-clusters that can run concurrently.
-const numToItem = new Map(items.map((it) => [String(it.num), it]));
-const lanes = [[]]; // lanes[0] = serial fallback
-const laneFiles = [new Set()];
+// Partition into a CONCURRENT set (each item provably independent of every other → its own worktree, run
+// concurrently) and a SERIAL lane (everything else: probe-uncertain, touches a monolith, or shares files /
+// a blockedBy edge with another item → run one-at-a-time on the integration branch). An item is concurrent
+// ONLY if it conflicts with NO other candidate — so the concurrent set is pairwise-disjoint by construction
+// and its worktrees merge clean (no replay among them).
+const probed = probes.filter(Boolean);
+const serialFromProbe = probed.filter(mustSerialize);
+const candidates = probed.filter((e) => !mustSerialize(e));
+const concurrent = [];
+const entangled = [];
+for (const item of candidates) {
+  const clashes = candidates.some((o) => o !== item && conflicts(item, o));
+  (clashes ? entangled : concurrent).push(item);
+}
+const serialItems = [...serialFromProbe, ...entangled];
 
-function filesOf(entry) {
-  const p = entry.probe;
-  const base = new Set([`backlog/${entry.file}`]);
-  if (p && Array.isArray(p.predictedFiles)) for (const f of p.predictedFiles) base.add(f);
-  if (Array.isArray(entry.declaredFiles)) for (const f of entry.declaredFiles) base.add(f);
-  return base;
+log(`Partition: ${concurrent.length} independent item(s) → own worktree, concurrent; ${serialItems.length} item(s) → serial lane (sequential on the integration branch). ` +
+    (concurrent.length === 0 ? 'No provably-independent item → this degenerates to a serial batch (correct, not a failure).' : ''));
+for (const e of concurrent) {
+  log(`  concurrent: #${e.num} (${e.slug}) — disjoint files: ${[...filesOf(e)].slice(0, 4).join(', ')}…`);
 }
-function disjoint(setA, setB) {
-  for (const f of setA) if (setB.has(f)) return false;
-  return true;
-}
-function onBlockEdge(entry, laneItems) {
-  const bb = new Set((entry.blockedBy || []).map(String));
-  for (const li of laneItems) {
-    if (bb.has(String(li.num))) return true;
-    if ((li.blockedBy || []).map(String).includes(String(entry.num))) return true;
-  }
-  return false;
-}
-
-for (const entry of probes.filter(Boolean)) {
-  const f = filesOf(entry);
-  const mustSerialize = !entry.probe || entry.probe.confident === false ||
-    (entry.probe.touchesMonolith && entry.probe.touchesMonolith.length > 0);
-  if (mustSerialize) { lanes[0].push(entry); for (const x of f) laneFiles[0].add(x); continue; }
-  // try to place in an existing PARALLEL lane (index ≥ 1) it is disjoint with; else open a new lane.
-  let placed = false;
-  for (let i = 1; i < lanes.length; i++) {
-    if (disjoint(f, laneFiles[i]) && !onBlockEdge(entry, lanes[i])) {
-      lanes[i].push(entry); for (const x of f) laneFiles[i].add(x); placed = true; break;
-    }
-  }
-  if (!placed) { lanes.push([entry]); laneFiles.push(new Set(f)); }
+for (const e of serialItems) {
+  const why = !e.probe ? 'probe failed' : e.probe.confident === false ? 'low-confidence touch-set' :
+    (e.probe.touchesMonolith && e.probe.touchesMonolith.length) ? 'touches a monolithic registry' : 'shares files / a blockedBy edge with another item';
+  log(`  serial: #${e.num} (${e.slug}) — ${why}`);
 }
 
-const parallelLanes = lanes.slice(1).filter((l) => l.length > 0);
-const serialLane = lanes[0];
-log(`Partition: ${parallelLanes.length} parallel lane(s) + ${serialLane.length} item(s) in the serial fallback lane. ` +
-    (parallelLanes.length === 0 ? 'No provably-disjoint pair → this degenerates to a serial batch (correct, not a failure).' : ''));
-for (let i = 0; i < parallelLanes.length; i++) {
-  log(`  lane ${i + 1}: ${parallelLanes[i].map((e) => '#' + e.num).join(', ')} — disjoint files: ${[...filesOf(parallelLanes[i][0])].slice(0, 4).join(', ')}…`);
-}
+// ── Phase 2 — Work each independent item concurrently, ONE agent per item in its OWN worktree ────
+phase('Items');
 
-// ── Phase 2 — Work each parallel lane concurrently in its OWN worktree (barrier) ─────────────────
-phase('Lanes');
-
-function laneAgentPrompt(laneId, laneItems) {
+function itemWorktreePrompt(it) {
   return [
-    `You are PARALLEL batch lane "${laneId}" running in your OWN isolated git worktree. Work these items`,
-    `one-after-another, full single-item arc each: ${laneItems.map((e) => `#${e.num} (${e.slug})`).join(' → ')}.`,
-    `Follow the batch-backlog-items SKILL.md / docs/agent/backlog-workflow.md arc per item:`,
-    `claim (node scripts/backlog.mjs claim <NNN>) → work, editing ONLY this lane's own files: impl/code,`,
-    `the item's own we:backlog/<NNN>.md, and any per-entry registry file (src/_data/<reg>/<id>.json).`,
+    `You are PARALLEL batch item #${it.num} ("${it.slug}") running ALONE in your OWN isolated git worktree.`,
+    `Work EXACTLY this one item, full single-item arc (batch-backlog-items SKILL.md / docs/agent/backlog-workflow.md):`,
+    `claim (node scripts/backlog.mjs claim ${it.num}) → work, editing ONLY this item's own files: impl/code,`,
+    `its own we:backlog/${it.file}, and any per-entry registry file (src/_data/<reg>/<id>.json).`,
     ``,
     `HARD RULES (the parallel-safety contract):`,
     `• Do NOT edit any other item's files, and do NOT splice a still-monolithic shared registry`,
-    `  (projects/capabilities/adapters/capabilityMatrix/designSystems). If an item genuinely needs that,`,
-    `  STOP that item, mark it dropped:"outgrew", and report it in monolithEdits for the integrator.`,
+    `  (projects/capabilities/adapters/capabilityMatrix/designSystems). If this item genuinely needs that,`,
+    `  STOP, mark status:"dropped" drop:"outgrew", and report it in monolithEdits for the integrator.`,
     `• Do NOT regenerate or stage derived artifacts: AGENTS.md, src/_data/referenceIndex.json. If your work`,
     `  changes the inventory, just LIST them in derivedArtifacts — the integrator regenerates once.`,
-    `• Gate per item with the LOCAL per-lane gate: npm run check:standards -- --local --files=<this item's`,
-    `  changed files> (#1144). A red on YOUR files is a stop for that item (mark carried/dropped).`,
-    `• Commit each resolved item's own files inside this worktree (git add <explicit paths>; never -A; never`,
-    `  push). Resolve only after its local gate is green.`,
+    `• Gate with the LOCAL per-item gate: npm run check:standards -- --local --files=<this item's changed`,
+    `  files> (#1144). A red on YOUR files → status carried/dropped and gate:"red".`,
+    `• Commit this item's own files inside this worktree (git add <explicit paths>; never -A; never push).`,
+    `  Resolve only after its local gate is green.`,
     ``,
-    `Report: the branch ref holding your commits, each item's status, the full list of files you changed`,
-    `(changedFiles = git diff --name-only against the base — used to flag files touched by >1 lane),`,
-    `derivedArtifacts you deferred, and any monolithEdits. Return ONLY the structured object.`,
+    `Report: num, status, cost, the branch ref holding your commit, changedFiles (git diff --name-only vs`,
+    `the base — used to flag files touched by >1 item), derivedArtifacts you deferred, any monolithEdits, and`,
+    `gate green/red. Return ONLY the structured object.`,
   ].join('\n');
 }
 
-if (parallelLanes.length > 0) {
-  log(`Working ${parallelLanes.length} lane(s) concurrently in isolated worktrees — each lane result is logged the instant it lands…`);
+if (concurrent.length > 0) {
+  log(`Working ${concurrent.length} independent item(s) concurrently, each in its own worktree — each item is logged the instant it lands…`);
 }
-let lanesDone = 0;
-const laneResults = await parallel(parallelLanes.map((laneItems, idx) => () =>
-  agent(laneAgentPrompt(`L${idx + 1}`, laneItems), {
-    label: `lane:L${idx + 1}`,
-    phase: 'Lanes',
-    schema: LANE_RESULT_SCHEMA,
-    isolation: 'worktree',
-  }).then((r) => {
-    // Per-lane heartbeat — surfaces each lane's outcome as it returns (not only after the barrier).
-    lanesDone++;
-    const worked = r && Array.isArray(r.worked) ? r.worked : [];
-    const ok = worked.filter((w) => w.status === 'resolved').length;
-    log(`  lane L${idx + 1} done (${lanesDone}/${parallelLanes.length}): gate ${r ? r.laneGate : 'n/a'}, ${ok}/${worked.length} resolved [${laneItems.map((e) => '#' + e.num).join(', ')}]`);
-    return r;
-  }).catch(() => { lanesDone++; log(`  lane L${idx + 1} died (${lanesDone}/${parallelLanes.length}) → will replay serially [${laneItems.map((e) => '#' + e.num).join(', ')}]`); return null; }),
+let itemsDone = 0;
+const concurrentResults = await parallel(concurrent.map((it) => () =>
+  agent(itemWorktreePrompt(it), { label: `item:#${it.num}`, phase: 'Items', schema: ITEM_RESULT_SCHEMA, isolation: 'worktree' })
+    .then((r) => {
+      // Per-ITEM heartbeat — fires the moment each item's agent resolves (not after the barrier).
+      itemsDone++;
+      log(`  ${r && r.status === 'resolved' ? '✓' : '~'} #${it.num} (${itemsDone}/${concurrent.length}): ${r ? r.status + ', gate ' + r.gate : 'no result → replay'} [${it.slug}]`);
+      return r ? { ...r, num: r.num || String(it.num), _item: it } : null;
+    })
+    .catch(() => { itemsDone++; log(`  ✗ #${it.num} (${itemsDone}/${concurrent.length}) died → will replay serially [${it.slug}]`); return null; }),
 ));
 
-// ── Phase 3 — Integrate: merge clean lanes ONE AT A TIME, full gate per merge, replay on conflict ─
-// SAFETY (#1147 refinement): ALL of this happens on a throwaway INTEGRATION BRANCH off HEAD — the
-// workflow NEVER writes the user's live working branch. It returns the integration branch ref; the main
-// agent does the single landing merge after the workflow returns green (smallest possible write-window on
-// the shared branch, a natural abort point, and any concurrent-session divergence handled by ONE merge).
+// ── Phase 3 — Integrate: serial lane FIRST, then merge worktrees one at a time, replay on conflict ─
+// SAFETY (#1147): ALL of this happens on a throwaway INTEGRATION BRANCH off HEAD — the workflow NEVER writes
+// the user's live working branch. It returns the integration branch ref; the main agent does the single
+// landing merge after a green return (smallest write-window on the shared branch, a natural abort point).
 phase('Integrate');
 
 const ledger = [];
@@ -289,84 +265,88 @@ await agent(
   { label: 'integrate:setup', phase: 'Integrate' },
 ).catch(() => null);
 
-// 3a. The serial fallback lane runs FIRST, on the INTEGRATION branch (no worktree) — the safe baseline the
-// parallel lanes merge on top of. Delegated to one agent that works it as an ordinary serial batch segment.
-if (serialLane.length > 0) {
-  log(`Serial fallback lane: working ${serialLane.length} item(s) on the integration branch…`);
-  const serial = await agent(
-    [
-      `You are the SERIAL segment of a parallel batch (slug ${batchSlug}), working on the integration branch`,
-      `"${integrationBranch}" (already checked out; no worktree). Work these items one-after-another, full`,
-      `single-item arc each, gating + committing per item exactly like a normal serial batch:`,
-      `${serialLane.map((e) => `#${e.num} (${e.slug})`).join(' → ')}.`,
-      `These were placed here because they could not be PROVEN independent. Use the full whole-repo gate`,
-      `(npm run check:standards) before each resolve. Commit per item on this branch (never push). Return the`,
-      `structured lane result (include changedFiles).`,
-    ].join(' '),
-    { label: 'serial-lane', phase: 'Integrate', schema: LANE_RESULT_SCHEMA },
-  ).catch(() => null);
-  if (serial && Array.isArray(serial.worked)) {
-    for (const w of serial.worked) ledger.push({ ...w, lane: 'serial' });
+// 3a. The serial lane runs FIRST, on the INTEGRATION branch (no worktree), ONE item per agent so each lands
+// its own progress line. These items could not be PROVEN independent, so they're the safe baseline the
+// concurrent worktrees merge on top of.
+if (serialItems.length > 0) {
+  log(`Serial lane: working ${serialItems.length} item(s) sequentially on the integration branch…`);
+  let sIdx = 0;
+  for (const it of serialItems) {
+    sIdx++;
+    const r = await agent(
+      [
+        `You are the SERIAL segment of a parallel batch (slug ${batchSlug}), working item #${it.num}`,
+        `("${it.slug}") on the integration branch "${integrationBranch}" (already checked out; no worktree).`,
+        `It is here because it could not be PROVEN independent (uncertain touch-set, touches a monolithic`,
+        `registry, or shares files / a blockedBy edge with another item). Work the FULL single-item arc:`,
+        `claim → work → FULL whole-repo gate (npm run check:standards) → commit this item's files on this`,
+        `branch (never push). Resolve only after green. Return the structured ITEM result (include changedFiles).`,
+      ].join(' '),
+      { label: `serial:#${it.num}`, phase: 'Integrate', schema: ITEM_RESULT_SCHEMA },
+    ).catch(() => null);
+    log(`  serial ${sIdx}/${serialItems.length}: #${it.num} — ${r ? r.status + ' (gate ' + r.gate + ')' : 'no result'}`);
+    if (r) ledger.push({ num: r.num || String(it.num), status: r.status, cost: r.cost, drop: r.drop, lane: 'serial', changedFiles: r.changedFiles, derivedArtifacts: r.derivedArtifacts });
   }
 }
 
-// 3b. Merge each parallel lane in turn. The JS loop is single-threaded, so integrations are naturally
-// serialized (the mutex the SKILL requires). A conflicted or red lane is replayed serially on the merged
-// result — never force-merged.
-if (laneResults.length > 0) log(`Integrating ${laneResults.length} lane(s) one at a time, full gate per merge…`);
-for (let i = 0; i < laneResults.length; i++) {
-  const lr = laneResults[i];
-  const laneId = `L${i + 1}`;
-  if (!lr) { log(`lane ${laneId} produced no result (died/skipped) — replaying its items serially.`); }
+// 3b. Merge each concurrent item's worktree in turn. The JS loop is single-threaded, so merges are naturally
+// serialized (the mutex the SKILL requires). The concurrent set is pairwise-disjoint, so these merge clean;
+// the only residual conflict risk is vs the serial lane — a conflicted or red item is replayed serially on
+// the merged result, never force-merged.
+if (concurrentResults.length > 0) log(`Integrating ${concurrentResults.length} item worktree(s) one at a time, full gate per merge…`);
+for (let i = 0; i < concurrentResults.length; i++) {
+  const cr = concurrentResults[i];
+  const it = concurrent[i];
+  if (!cr) { log(`#${it.num} produced no result (died/skipped) — replaying serially.`); }
+  if (cr && cr.gate === 'red') { log(`#${it.num} gate RED in its worktree — not merging; replaying serially on the integrated tree.`); }
 
-  if (lr && lr.laneGate === 'red') {
-    log(`lane ${laneId} gate RED in its worktree — not merging; replaying its items serially on the integrated tree.`);
-  }
-
-  const mergeable = lr && lr.laneGate === 'green' && lr.branch;
+  const mergeable = cr && cr.gate === 'green' && cr.branch;
   let integrated = null;
   if (mergeable) {
-    log(`  merging lane ${laneId} (${i + 1}/${laneResults.length})…`);
+    log(`  merging #${it.num} (${i + 1}/${concurrentResults.length})…`);
     integrated = await agent(
       [
-        `Integrate parallel batch lane ${laneId} (branch "${lr.branch}") into the current integration branch.`,
-        `Merge it ONE lane at a time: attempt the merge; if git reports a CONFLICT, ABORT the merge`,
-        `(git merge --abort) and report conflicted:true — DO NOT force it. On a clean merge, run the FULL gate`,
-        `(npm run check:standards) on the merged tree and report gate green/red. Never push.`,
+        `Integrate parallel batch item #${it.num} (branch "${cr.branch}") into the current integration branch.`,
+        `Merge it: attempt the merge; if git reports a CONFLICT, ABORT the merge (git merge --abort) and report`,
+        `conflicted:true — DO NOT force it. On a clean merge, run the FULL gate (npm run check:standards) on the`,
+        `merged tree and report gate green/red. Never push. Return { num:"${it.num}", merged, conflicted, gate, notes }.`,
       ].join(' '),
-      { label: `integrate:${laneId}`, phase: 'Integrate', schema: INTEGRATE_SCHEMA },
+      { label: `integrate:#${it.num}`, phase: 'Integrate', schema: INTEGRATE_SCHEMA },
     ).catch(() => null);
   }
 
   const needsReplay = !mergeable || !integrated || integrated.conflicted || !integrated.merged || integrated.gate === 'red';
   if (needsReplay) {
     conflictsReplayed++;
-    log(`lane ${laneId} could not land clean (${!mergeable ? 'lane red/no-branch' : integrated && integrated.conflicted ? 'merge conflict' : 'post-merge gate red'}) — replaying its items serially.`);
+    const reason = !mergeable ? 'item red/no-branch' : integrated && integrated.conflicted ? 'merge conflict' : 'post-merge gate red';
+    log(`#${it.num} could not land clean (${reason}) — replaying it serially.`);
     const replay = await agent(
       [
-        `Replay parallel batch lane ${laneId}'s items SERIALLY on the current integration branch (its worktree`,
-        `merge was aborted/failed). Items: ${parallelLanes[i].map((e) => `#${e.num} (${e.slug})`).join(' → ')}.`,
-        `Work each as an ordinary serial item (claim if not already active, redo the edits on THIS tree, full`,
-        `whole-repo gate, commit per item). Return the structured lane result.`,
+        `Replay parallel batch item #${it.num} ("${it.slug}") SERIALLY on the current integration branch (its`,
+        `worktree merge was aborted/failed). Work it as an ordinary serial item: claim if not already active,`,
+        `redo the edits on THIS tree, FULL whole-repo gate (npm run check:standards), commit (never push).`,
+        `Return the structured ITEM result (include changedFiles).`,
       ].join(' '),
-      { label: `replay:${laneId}`, phase: 'Integrate', schema: LANE_RESULT_SCHEMA },
+      { label: `replay:#${it.num}`, phase: 'Integrate', schema: ITEM_RESULT_SCHEMA },
     ).catch(() => null);
-    const src = replay || lr;
-    if (src && Array.isArray(src.worked)) for (const w of src.worked) ledger.push({ ...w, lane: `${laneId}-replayed` });
+    const src = replay || cr;
+    if (src) ledger.push({ num: src.num || String(it.num), status: src.status, cost: src.cost, drop: src.drop, lane: `#${it.num}-replayed`, changedFiles: src.changedFiles, derivedArtifacts: src.derivedArtifacts });
+    log(`  replay #${it.num}: ${replay ? replay.status + ' (gate ' + replay.gate + ')' : 'no result'}`);
   } else {
-    for (const w of (lr.worked || [])) ledger.push({ ...w, lane: laneId });
+    ledger.push({ num: cr.num || String(it.num), status: cr.status, cost: cr.cost, drop: cr.drop, lane: `#${it.num}`, changedFiles: cr.changedFiles, derivedArtifacts: cr.derivedArtifacts });
   }
 }
 
 // 3c. Regenerate derived artifacts ONCE on the fully-merged tree, then a final whole-repo gate.
 const derived = new Set();
-for (const lr of laneResults) if (lr && Array.isArray(lr.derivedArtifacts)) for (const d of lr.derivedArtifacts) derived.add(d);
+for (const l of ledger) if (l && Array.isArray(l.derivedArtifacts)) for (const d of l.derivedArtifacts) derived.add(d);
+for (const cr of concurrentResults) if (cr && Array.isArray(cr.derivedArtifacts)) for (const d of cr.derivedArtifacts) derived.add(d);
 let derivedRegenerated = false;
 if (derived.size > 0) {
   log(`Regenerating ${derived.size} derived artifact(s) once on the merged tree: ${[...derived].join(', ')}`);
   const regen = await agent(
     [
-      `On the current integration branch, regenerate the derived artifacts the lanes deferred:`,
+      `On the current integration branch, regenerate the derived artifacts the items deferred:`,
       `${[...derived].join(', ')}. Run the canonical generators (e.g. npm run gen:inventory for AGENTS.md,`,
       `npm run gen:reference-index for src/_data/referenceIndex.json), then run the FULL gate`,
       `(npm run check:standards) and commit the regenerated artifacts in ONE commit. Report gate green/red.`,
@@ -378,33 +358,32 @@ if (derived.size > 0) {
   if (regen && regen.gate === 'red') log('Derived-artifact regen left the gate RED — surface this at close-out; do not mark the batch clean.');
 }
 
-// 3d. Surface files touched by MORE THAN ONE lane — the residual silent-merge risk (a clean merge that's
-// semantically wrong). git already flags textual conflicts; this flags the files where two lanes' changes
-// COULD interact even when the merge was clean, so the close-skill audit (and a human) can eyeball them.
-// After #1145/#1146 this list is usually empty (per-entry registries make lane changesets disjoint).
-const fileLaneCount = new Map();
-const allLaneResults = [...laneResults, /* serial lane is on-branch, its files can't cross-lane-conflict */];
-for (const lr of allLaneResults) {
-  if (!lr || !Array.isArray(lr.changedFiles)) continue;
-  for (const f of new Set(lr.changedFiles)) fileLaneCount.set(f, (fileLaneCount.get(f) || 0) + 1);
+// 3d. Surface files touched by MORE THAN ONE item — the residual silent-merge risk (a clean merge that's
+// semantically wrong). The concurrent set is disjoint by construction, so this flags only a concurrent item
+// that overlaps a serial-lane item. After #1145/#1146 it is usually empty (per-entry registries keep
+// changesets disjoint).
+const fileItemCount = new Map();
+for (const l of ledger) {
+  if (!l || !Array.isArray(l.changedFiles)) continue;
+  for (const f of new Set(l.changedFiles)) fileItemCount.set(f, (fileItemCount.get(f) || 0) + 1);
 }
-const multiLaneFiles = [...fileLaneCount.entries()].filter(([, n]) => n > 1).map(([f]) => f);
+const multiLaneFiles = [...fileItemCount.entries()].filter(([, n]) => n > 1).map(([f]) => f);
 if (multiLaneFiles.length > 0) {
-  log(`⚠ ${multiLaneFiles.length} file(s) were changed by more than one lane — eyeball for a silent clean-but-wrong merge: ${multiLaneFiles.join(', ')}`);
+  log(`⚠ ${multiLaneFiles.length} file(s) were changed by more than one item — eyeball for a silent clean-but-wrong merge: ${multiLaneFiles.join(', ')}`);
 }
 
 const resolved = ledger.filter((l) => l.status === 'resolved');
 const spent = resolved.reduce((s, l) => s + (Number(l.cost) || 0), 0);
-log(`Parallel batch assembled on ${integrationBranch}: ${resolved.length}/${ledger.length} resolved, ${conflictsReplayed} lane(s) replayed serially, ${multiLaneFiles.length} multi-lane file(s), ${spent}/${budgetPoints} points. The MAIN AGENT now lands ${integrationBranch} onto the live branch.`);
+log(`Parallel batch assembled on ${integrationBranch}: ${resolved.length}/${ledger.length} resolved, ${conflictsReplayed} item(s) replayed serially, ${multiLaneFiles.length} multi-item file(s), ${spent}/${budgetPoints} points. The MAIN AGENT now lands ${integrationBranch} onto the live branch.`);
 
 return {
   // The workflow never touched the live branch. The main agent lands this (single merge) after a green return.
   integrationBranch,
   ledger,
-  lanes: parallelLanes.length,
-  serialItems: serialLane.length,
+  concurrentItems: concurrent.length,
+  serialItems: serialItems.length,
   conflictsReplayed,
-  multiLaneFiles,       // files touched by >1 lane — the close-skill audit surfaces these for a human glance
+  multiLaneFiles,       // files touched by >1 item — the close-skill audit surfaces these for a human glance
   derivedRegenerated,
   pointsSpent: spent,
   budgetPoints,
