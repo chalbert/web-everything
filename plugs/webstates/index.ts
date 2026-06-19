@@ -21,3 +21,11 @@ export type {
   CustomStoreRegistryOptions,
   StoreDefinition,
 } from './CustomStoreRegistry';
+
+export { NativeChangeStrategy, nativeChangeStrategy } from './CustomChangeStrategy';
+export type {
+  ChangeRecord,
+  ChangeSource,
+  CustomChangeStrategy,
+  Disposable,
+} from './CustomChangeStrategy';
