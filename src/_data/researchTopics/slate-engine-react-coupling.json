@@ -1,0 +1,27 @@
+{
+  "id": "slate-engine-react-coupling",
+  "title": "Slate editor engine — may a React-coupled library engine live in FUI's opt-in engine set, and how?",
+  "status": "open",
+  "summary": "Prep research for decision #963 (slice of the rich-text-editor engine-adapters epic #940, behind the CustomEditorEngine seam #923 shipped at fui:blocks/rich-text-editor/editorEngine.ts:34 — attach(ctx)->handle, HTML pivot). #940 registers four real library engines; three (Quill/Lexical/ProseMirror) are clean parallel slices, Slate is held out because its editing surface slate-react is React-based, so a Slate engine pulls React into FUI even as an optional dep (same concern as #955 Fork B, the polyglot live-test sandbox). SURVEYED the four libraries' real architectures: Slate is the ONLY one whose view layer mandates a framework — Quill is vanilla (Parchment/Delta), ProseMirror is vanilla (prosemirror-view EditorView, powers Tiptap/Remirror/BlockNote), Lexical is framework-agnostic with @lexical/headless (DOM-less) and @lexical/react as ONE optional binding; Slate's `slate` core is framework-agnostic but slate-react is the only mature view (the docs split the core so 'other view layers like React Native or Vue.js' are POSSIBLE in future — not shipped; no official non-React view). The non-React Slate views that exist (svelte-slate by nathanfaucett, slate-vue) are community, pull a DIFFERENT framework (Svelte/Vue), and lag core — so 'non-React render' never means no-framework, it means a different less-maintained one. CONSEQUENCE for option A (headless core + custom non-React render): the seam already ships NativeContentEditableEngine (hand-written contenteditable view); 'Slate core + custom FUI view' = re-writing slate-react's view layer (selection sync, IME, decorations) — the hardest part of Slate and exactly what makes Slate Slate. The product would be 'the native engine but storing state in Slate's JSON model' — it discards the reason anyone picks Slate, so A doesn't DELIVER a Slate engine (fails the goal, not just costlier; the Svelte/Vue-view variant is strictly worse than React on every axis). A is the flawed branch — dissolved. With A gone the call reduces to ONE axis: the scope of FUI's framework-free principle. B (ship Slate via slate-react, React optional peerDep) vs C (drop Slate) — and C is principled only if the rule forbids React in ANY @frontierui artifact; else 'drop Slate' is a prioritization call (defer the build), not a fork branch (not-a-prioritization rule). Floor-only reading (recommended): the #940 epic's own words — 'libraries stay peer/optional deps so the native FLOOR is dependency-free'; #955 protects FUI's default/shipped bundle ('React/Vue load only inside the dev-tool sandbox, never in FUI's shipped bundle'); an opt-in, tree-shakeable engine=slate adapter bringing its own React peerDep is fine (libraries are opt-in enhancements, most-permissive default); #955's broken branch B2 was BUNDLING React into FUI's core for every consumer — materially different from an engine that tree-shakes away unless explicitly imported. No-React-anywhere reading: any React in a published @frontierui artifact dilutes the framework-free identity + adds a peer-dep matrix (React 18/19, ReactDOM, slate-react coupling) -> Slate excluded. Lexical (modern nested-JSON, React-ecosystem origin, genuinely headless core) already covers Slate's niche WITHOUT the React mandate, making Slate's marginal coverage small — but that's a prioritization input (build-now?), not an end-state exclusion. SYNTHESIS handed to #963: one genuine fork = the scope of the framework-free principle, outcomes B (permit opt-in React engine) vs C (forbid->drop); recommended default B/floor-only ~70% (med-high); residual = the stricter no-React-in-@frontierui identity reading the decider (owns the framework-free stance) may pull at ratify — the red-team attack to brief. Classification: engine adapters are FUI impl behind the WE editor-engine protocol #629 (no WE standard artifact changes); engine set is a swappable dimension not a fixed mechanic; opt-in Slate is the permissive default. Full grounding in reports/2026-06-18-slate-engine-react-coupling.md.",
+  "dateOpened": "2026-06-18",
+  "lastReviewed": "2026-06-18",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webediting",
+    "rich-text-editor",
+    "editor-engine",
+    "slate",
+    "slate-react",
+    "lexical",
+    "prosemirror",
+    "quill",
+    "framework-free",
+    "optional-peer-dep",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "rich-text-editor"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "frontierui"
+}

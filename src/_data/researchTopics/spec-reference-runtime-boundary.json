@@ -1,0 +1,23 @@
+{
+  "id": "spec-reference-runtime-boundary",
+  "title": "Spec vs. reference runtime vs. polyfill — who owns the executable substrate of a standard",
+  "status": "open",
+  "summary": "Grounds decision #606: does the `plugs/` runtime (registries + browser-API patches that make WE standards runnable — `plugs/webregistries/`, `plugs/webinjectors/`, `plugs/bootstrap.ts`) belong in the standard layer (Web Everything), the impl layer (Frontier UI), or its own published package? The prior-art survey reduces the call to ONE archetype question: which of three real ecosystem patterns is `plugs/`? (1) POLYFILL — spec != runtime, the runtime lives OUTSIDE the spec: Web Components polyfills ship as @webcomponents/webcomponentsjs in a separate repo, core-js is a third-party ECMAScript polyfill TC39 does NOT publish (TC39 ships the spec + the test262 conformance suite, tests not runtime) -> pushes plugs out of WE. (2) REFERENCE IMPLEMENTATION — a canonical executable embodiment kept WITH the spec to make it demonstrable/testable: CommonMark ships the spec AND cmark under one org; dart-sass is the canonical Sass impl; CPython is the reference PEPs realize against -> keeps the runtime with the standard. (3) SHARED SUBSTRATE PACKAGE — a primitive factored into its own package consumed by MANY higher layers: React's scheduler/react-reconciler shared by react-dom/react-native; @lit/reactive-element under LitElement -> earned by PLURALITY of consumers. The two are not mutually exclusive (TC39 ships tests-not-runtime; CommonMark ships both), so 'specs ship no runtime' is a tendency of mature multi-vendor standards, not a law binding a young standard whose reference runtime IS its demonstration vehicle. Load-bearing classification: WE's plugs are a REFERENCE IMPLEMENTATION (the runtime that makes the standard runnable in a browser; demos exercise the standard itself) — Frontier UI's blocks/ are the application implementations on top, correctly outside the standard. The #239 reading in the item was incomplete: #239 re-scoped jsx-runtime to @frontierui DESPITE no @frontierui import, purely because 'it IS implementation' — so #239's principle is standard-artifact-vs-implementation, NOT published-vs-unpublished; the unpublished-alias argument is a red herring, and a reference impl is a standard artifact #239 does not push out. Recommendation: A (WE owns the reference runtime) on the corrected reference-impl justification; C (carve a standalone webplugs package) is the named escape hatch the separation bias triggers the moment a SECOND independent impl consumes plugs (today FU is the only impl consumer; plateau-app consumes the same alias as a product, not an impl, so the split is not yet earned); B (FU owns it) rejected — no archetype supports the impl layer owning the standard's own reference runtime, and it inverts the demo model. One fork at DoR, confidence med-high. Full grounding in reports/2026-06-14-plugs-runtime-ownership-boundary.md.",
+  "dateOpened": "2026-06-14",
+  "lastReviewed": "2026-06-14",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "plugs",
+    "runtime",
+    "polyfill",
+    "reference-implementation",
+    "standard-vs-impl",
+    "constellation",
+    "packaging",
+    "architecture",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webregistries"
+}

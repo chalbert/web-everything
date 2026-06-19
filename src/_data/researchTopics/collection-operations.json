@@ -1,0 +1,23 @@
+{
+  "id": "collection-operations",
+  "title": "Collection Operations: Filter / Sort / Page / Group",
+  "status": "open",
+  "summary": "Resolving gap #10 — the data operations on collections (filter, sort, page, group) that no current intent owns. type-ahead is focus-movement, windowed-collection is rendering-which-items, loader is async fetch; none transform the dataset. Surveys the native semantics anchors that DO exist (aria-sort's ascending/descending/none/other state model, Intl.Collator for locale-aware comparison, the stable Array.prototype.sort comparator, the Open UI <th sortable> proposal) versus the absence of any native operation API, and the headless-table precedent (TanStack Table, AG Grid, MUI DataGrid) that models the four ops as an ordered, composable row-model pipeline (filter → sort → group → paginate). Decided 2026-06-03: a single, UX-only Collection Operations Intent whose dimensions are the four pipeline stages with a configurable order and sort given a structured sub-shape (key(s), direction, collation/case/numeric preference, empty-value placement); ambient defaults (collation/locale preference, page size) ride the intent DI channel, structural choices (sortable columns, multi-sort) ride trait selection. The intent carries no technical references — the technical sorting strategies (default sort, Intl.Collator, numeric comparator, decorate-sort-undecorate, server delegation) with their advantages/disadvantages are materialised as a Sorting Strategy domain in Plateau's Technical Configurator; server-side execution is documented as front-end-out-of-scope.",
+  "dateOpened": "2026-06-03",
+  "tags": [
+    "collections",
+    "intent",
+    "sorting",
+    "filtering",
+    "pagination",
+    "grouping",
+    "collation",
+    "gap-analysis",
+    "vocabulary"
+  ],
+  "relatedBlocks": [
+    "droplist"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

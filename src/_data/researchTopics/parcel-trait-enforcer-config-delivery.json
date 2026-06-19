@@ -1,0 +1,23 @@
+{
+  "id": "parcel-trait-enforcer-config-delivery",
+  "title": "Parcel trait Enforcer adapter — config delivery to a declarative (named) plugin",
+  "status": "open",
+  "summary": "Prep research for decision #756 (5th-bundler child of the trait-tree-shaking epic #715). The four shipped trait Enforcer adapters share one factory shape — traitEnforcerX(options) taking a JS traitMap — and one core, buildTraitManifestSource (vite-plugin.ts:274-282), wrapped per bundler (Vite/Rollup load hook, esbuild contents, webpack data: URI). #744 carved Parcel out because its plugin model is DECLARATIVE: a Resolver is referenced BY NAME in .parcelrc and instantiated by Parcel, so (the reasoning went) the Map can't be a JS factory argument. The survey confirms the mechanism is sound — a Parcel Resolver's resolve() returns a ResolveResult whose `code` field IS a virtual module ('used rather than reading the file from disk'), so the adapter returns { filePath: virtualId, code: buildTraitManifestSource(opts) }, reusing the core unchanged; resolvers run as a null-passes-on pipeline. A named .parcelrc plugin carries NO inline options and reads config the idiomatic way via loadConfig→getConfig([files],{packageKey}) — searches up the tree for JSON5/JS/TOML files + a package.json key (Sass: getConfig(['.sassrc','.sassrc.js'],{packageKey:'sass'})). The LOAD-BEARING finding overturns #744's premise: since Parcel v2.9.0, plugins may be referenced as a RELATIVE PATH to a local JS file (no package.json needed), so a project can author a tiny local resolver that imports a WE factory and passes the Map as a JS arg captured in a closure — PRESERVING the cross-bundler traitEnforcerX(options) symmetry with no new config format and no published package. So the genuine fork is not 'the Map can't be a JS arg' but declarative-config vs local-wrapper. Reshaped to ONE real call (Map delivery: A idiomatic .trait-enforcerrc/packageKey via loadConfig — most native-Parcel, cache-correct, but mints a project-facing format and breaks factory symmetry; B local wrapper preserving the factory via v2.9.0 relative-path — recommended, keeps symmetry, no new format, consistent with how all four adapters are consumed, invalidateOnStartup covers the static Map; C WE-generated config — rejected, minimize-lock-in) plus two forced invariants (virtual-module-via-{filePath,code}; hand-authored+documented .parcelrc registration). Dep scope: real build needs the full @parcel/config-default stack + @parcel/plugin, not just @parcel/core (#744's assumption corrected). Recommended B [med-high]. Full grounding in reports/2026-06-16-parcel-trait-enforcer-config-delivery.md.",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "trait-enforcer",
+    "tree-shaking",
+    "bundler-adapter",
+    "parcel",
+    "parcelrc",
+    "resolver-plugin",
+    "virtual-module",
+    "cross-bundler",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}

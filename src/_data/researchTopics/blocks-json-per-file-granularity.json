@@ -1,0 +1,25 @@
+{
+  "id": "blocks-json-per-file-granularity",
+  "title": "Monolith-vs-per-file for hand-authored structured specs — how comparable tooling stores per-component/per-project config",
+  "summary": "Prep research for decision #882 (split the 4657-line src/_data/blocks.json — the per-block structural contract, 75 blocks — into one file per block assembled by a src/_data/blocks.js glob loader). This RATIFIES A SHIPPED INTERNAL PATTERN, not a greenfield standard: the repo already runs glob-and-assemble 12× via _data/*.js loaders, and the canonical proof is the 866-item backlog (one backlog/<NNN-slug>.md per item, NO backlog.json, assembled by src/_data/backlog.js). blocks.json is the lone per-item surface that never followed — and its OWN behavioral half already did (src/_includes/block-descriptions/<id>.njk, 80 files). So the survey is light on browser standards and heavy on (a) the real reader inventory and (b) how comparable ecosystems made the same monolith->per-file call. READER INVENTORY (the assembled `blocks` array is consumed two ways): (1) as the 11ty `blocks` _data global by every template/loader-fed validator that reads the ARRAY (src/blocks.njk, block-pages.njk, index.njk, presets.njk, …) — a blocks.js loader emitting the same array shape leaves all of these UNTOUCHED; (2) by direct file read in standalone scripts that need the glob — gen-cem.mjs:37 (the only hard readFileSync), check-standards.mjs:91, check-app-conformance.mjs:45, gen-reference-index.mjs:34. TWO MIGRATION WRINKLES surfaced by reading the tree (absent from the item's original plan): (i) autofix WRITE-TARGET — check-standards-rules.mjs:572 (FILE.Block='src/_data/blocks.json') and :92 (buildGraduatedKinds block.file) are the descriptor `file` pointers the autofix engine WRITES when patching a block's status; splitting means these must resolve per-block (_data/blocks/<id>.json) so a fixer patches the right small file (net-positive but a required repoint); (ii) graduatedTo ANCHOR GRAMMAR — normalize-graduated.mjs:39 (['block','blocks.json']) + the FILE_ANCHOR regex at :75 define the canonical blocks.json#<id> anchor used across the backlog's graduatedTo fields, a stable cross-backlog contract; after the split blocks.json#<id> must keep resolving as a VIRTUAL anchor (grammar stays, file goes) or every graduatedTo value migrates — keep the virtual anchor. EXTERNAL PRIOR ART, two on-point precedents: (1) NX MIGRATED AWAY FROM THE MONOLITH FOR THIS EXACT REASON — it shipped 15-7-0-split-configuration-into-project-json-files which DELETES the workspace-wide angular.json/workspace.json and replaces it with per-project project.json files, explicitly because the monolith 'can be a source of merge conflicts' for medium/large workspaces and per-file gives 'less possibility of merge conflicts'; the consumed artifact (Nx's resolved project graph) is COMPUTED from the per-file inputs, exactly like the #882 assembled `blocks` array — a major ecosystem made the identical call for #882's identical #1 driver (concurrent-edit conflicts) and chose per-file. (2) STYLE DICTIONARY — takes an ARRAY OF FILE-PATH GLOBS and DEEP-MERGES them into one dictionary ('split the files however you want'); two load-bearing details — file/dir structure has NO effect on the consumed object (layout decoupled from assembled shape, validates the loader), and the merge is ORDER-DEPENDENT ('later files take precedence') so the glob loader MUST impose a DETERMINISTIC SORT, not trust readdirSync order. Adjacent: Storybook CSF = one story file per component; custom-elements-manifest aggregates to one custom-elements.json per package but only because it is GENERATED, not hand-authored (aggregation OK for a build artifact, not for a hand-edited source of truth like blocks.json). DID THE SURVEY RESHAPE THE FORKS? No fork added/dissolved (direction was strongly internally precedented), but it (a) HARDENED the default via an external precedent that made the identical call for the identical reason (Nx, raising Fork-1 confidence ~85%->~88%), (b) added a DETERMINISM requirement to the loader (Style Dictionary merge-order caveat), (c) surfaced the two migration constraints above. HANDED TO #882: Fork 1 (granularity) A=per-file (default, ~88%); Fork 2 (layout) B1=flat src/_data/blocks/<id>.json (default ~70%, reversible toward B2 co-located bundle later). Classification: webdocs build/authoring-surface concern, mints NO protocol/intent (#657 pinned the field set = the contract; #882 is purely file granularity), fixed mechanic not a per-block dimension, separation bias favors per-file. Full grounding in reports/2026-06-17-blocks-json-per-file-split.md.",
+  "tags": [
+    "webdocs",
+    "blocks-json",
+    "architecture",
+    "data-loader",
+    "11ty",
+    "concurrency",
+    "monolith-vs-per-file",
+    "glob-assemble",
+    "nx",
+    "style-dictionary",
+    "decision-prep"
+  ],
+  "relatedProject": "webdocs",
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "status": "open",
+  "dateOpened": "2026-06-17",
+  "lastReviewed": "2026-06-17",
+  "reviewHorizon": "P12M"
+}

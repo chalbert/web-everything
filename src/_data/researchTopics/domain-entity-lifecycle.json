@@ -1,0 +1,23 @@
+{
+  "id": "domain-entity-lifecycle",
+  "title": "Domain-entity lifecycle — the transition map is a portable interchange, so the placement is Project + Protocol",
+  "status": "open",
+  "summary": "Grounds decision #616 (G3 governance finding from the #607 audit, slip->drift): retroactively ratify the placement #353 minted inline — a new WE project (weblifecycle, projects.json:253) owning a draft protocol (lifecycle, protocols.json:143) — which #353's own body left as an open question ('Project + Protocol, or an intent?') and which shipped ungoverned because the carve-rule landed in the same commit. Ratify-shipped-code, not greenfield. The placement test is internal precedent, codified verbatim by #409 (master-detail): the four exercise-app standards each became a Project+Protocol 'because each had a real contract — a provider seam (CustomLifecycleProvider, CustomAuditProvider) or an interchange schema (DecisionRecord)'; master-detail had none, so it stayed a plain intent ('not every gap is a project'). #467 applied the same lens to responsive layout. Run against lifecycle, the test passes on BOTH disjuncts: a swappable CustomLifecycleProvider registry AND a portable, data-defined transition map (status set + each transition: from->to + optional guard predicate + permitted actor/role) that an engine plugs in behind without touching the entity; every transition emits an observable { entity, from, to, actor, at } event — the composition seam for audit-trail (#357) and reporting. #409 already NAMED lifecycle as a legitimate Project+Protocol; #616 only supplies the missing explicit ratification. Prior-art survey confirms (does not reshape) the design: (1) a transition map IS a recognized interchange — W3C standardized statechart serialization as SCXML (2015): an engine parses the structure and 'lets the calling code decide what guards mean and what actions do', exactly the protocol's transition-map-is-the-only-lock split, portable across engines (Apache Commons SCXML/Java, SCION/web); (2) the swappable-engine premise is real — XState adheres to SCXML, BPM servers and hand-rolled switches are the other end of the swap; (3) the domain-entity framing is the textbook FSM use case ('the lifecycle of one thing in response to events' — permit application, claim, contract); (4) actor/role-on-transition is standard practice; (5) the boundary against process orchestration is principled — an FSM is in one state at a time while BPMN allows many, so a single-status domain lifecycle is a narrower, distinct concern. Classification: technical contract -> Protocol owned by a Project (UX half is the separate status-indicator intent, realizesIntent); CustomLifecycleProvider is a runtime-DI seam; authorization -> Web Guards, persistence -> entity's own concern, audit -> composes via the event (bias-to-separation honoured); separate from webstates (reactive primitives, projects.json:58 — a different altitude with a distinct contract shape). Two forks at DoR, both defaulting to ratify-as-shipped: (1) standalone project vs fold into webstates -> standalone (high); (2) Protocol vs intent for the contract -> Protocol (high). No reversal of #353. Full grounding in reports/2026-06-14-domain-entity-lifecycle-placement.md.",
+  "dateOpened": "2026-06-14",
+  "tags": [
+    "lifecycle",
+    "state-machine",
+    "statechart",
+    "scxml",
+    "xstate",
+    "workflow",
+    "transition-map",
+    "domain-entity",
+    "protocol",
+    "placement",
+    "candidate-standard"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "weblifecycle"
+}

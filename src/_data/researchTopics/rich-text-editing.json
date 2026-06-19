@@ -1,0 +1,25 @@
+{
+  "id": "rich-text-editing",
+  "title": "Rich-text / contenteditable editing — decompose the editor; the document model is the only Protocol",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #590 (whitespace surfaced by #370 Fork 4): WE has no rich-text/contenteditable/WYSIWYG editing standard — only the input intent and type-ahead cover single-line text + search. The load-bearing finding: the web ships NO monolithic editor — it ships orthogonal primitives (the editing SURFACE: contenteditable Baseline 2015 + EditContext Chromium-only 2024; the OPERATION VOCABULARY: InputEvent.inputType formatBold/insertOrderedList/… verbatim, with execCommand deprecated; SANITIZATION: HTML Sanitizer setHTML, emerging; DECORATIONS: CSS Custom Highlight API) and leaves the DOCUMENT MODEL to incompatible vendor engines (ProseMirror schema · Lexical nodes · Slate tree · Quill Delta/Parchment · ADF · roosterjs). Every serious library is layered (headless engine vs UI); no general design system (MD3/Carbon/Fluent) ships a first-class editor at all. So WE standardizes rich-text editing as SEPARATE composable standards along a substrate→engine→formatting→serialization seam (separation bias; the #370 provider→consumer precedent) — NOT one component. Layer map: editing surface → Capability (contenteditable floor + EditContext capability-upgrade, auto-negotiated like webrealtime transport); document model → Protocol + adapters (CustomEditorEngine contract + registry, native-first contenteditable+InputEvent default, library adapters — the ONLY axis with a genuine swappable-vendor story, so the only one that earns a Protocol; mirrors CustomPositioningRegistry); editor → Block; formatting toolbar → Intent (text-formatting, composes droplist/popover); operation vocabulary → reuse InputEvent.inputType (native-first, no new vocab); serialization → Config-extends-platform-default registry (CustomSerializerRegistry, default-less core, HTML flavor default); paste/sanitization → standalone Plug (CustomSanitizerRegistry: native setHTML + DOMPurify adapter, composed on paste); decorations → CSS Custom Highlight API by default; collaboration → out of scope, cross-ref webrealtime (non-fungible, like #370 cross-ref'd sync-transport). 7 forks, near-ratification except Fork 2 (document-model Protocol, med) and the internal pivot model shape (tree vs flat-Delta, low/divergent — the #64-Fork-4 analogue). Report: reports/2026-06-14-rich-text-editing.md.",
+  "dateOpened": "2026-06-14",
+  "tags": [
+    "rich-text",
+    "contenteditable",
+    "editcontext",
+    "wysiwyg",
+    "document-model",
+    "prosemirror",
+    "lexical",
+    "input-events",
+    "sanitizer",
+    "protocol",
+    "intent",
+    "capability",
+    "candidate-standard"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

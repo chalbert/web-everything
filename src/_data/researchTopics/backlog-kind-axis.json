@@ -1,0 +1,22 @@
+{
+  "id": "backlog-kind-axis",
+  "title": "Backlog taxonomy — one `kind` axis vs separate `type` + `workItem`",
+  "status": "open",
+  "summary": "Grounds backlog decision #466 — whether to collapse the backlog's two near-redundant nature/sizing axes (`type`: idea/issue/decision + `workItem`: story/epic/task) into a single `kind` enum. Surveys how mature trackers separate the orthogonal concerns of nature, hierarchy-role, and effort: GitHub Issues (GA March 2025) converged on ONE org-level issue-type axis (Feature/Bug/Task) and explicitly told teams to migrate bug/feature *labels* INTO types — never a parallel required nature field; Jira runs ONE issue-type enum that folds hierarchy-role (Epic) and nature (Bug) together, with story points as a fully separate estimation field; Linear/GitLab likewise keep exactly one structural type axis plus a separate weight/estimate and free-form labels. None run WE's current double-statement (a buildable item is both `type:idea` AND `workItem:story`). The cross-tool invariant: collapse the correlated nature+role pair into one structural `kind` axis, keep the genuinely-orthogonal `size` separate, and demote any residual fix-vs-feature flavour to an optional label/tag rather than a required field. This confirms and strengthens #466's Fork-A lean (unify) from 'lean' to 'strong', and dissolves the would-be fix/feature sub-fork — the existing `tags` array already absorbs it with zero new machinery. Internal backlog tooling; no project-facing standard or lock-in.",
+  "dateOpened": "2026-06-13",
+  "lastReviewed": "2026-06-13",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "backlog",
+    "taxonomy",
+    "tooling",
+    "convention",
+    "issue-tracker",
+    "data-model"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "supersedes": [
+    "design-ref-vision"
+  ]
+}

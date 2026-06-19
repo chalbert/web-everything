@@ -1,0 +1,36 @@
+{
+  "id": "type-ahead",
+  "name": "Type-Ahead Intent",
+  "status": "draft",
+  "summary": "Protocol for keyboard type-ahead navigation: typed characters move focus to the matching item, with a buffer that resets after an idle timeout. Distinct from filtering.",
+  "dimensions": {
+    "matching": {
+      "description": "How typed characters map to items",
+      "values": [
+        "prefix",
+        "cycle",
+        "prefix-then-cycle"
+      ]
+    },
+    "reset": {
+      "description": "When the accumulated character buffer clears",
+      "values": [
+        "debounced",
+        "custom"
+      ]
+    },
+    "wrap": {
+      "description": "Focus behavior at the ends of the collection",
+      "values": [
+        "wrap",
+        "clamp"
+      ]
+    }
+  },
+  "description": "<h3>Matching Strategy</h3><p class=\"text-sm text-gray-600 mb-2\">How typed characters are mapped to an item. Type-ahead <strong>moves focus</strong> to an existing item — it never removes or hides items (that is filtering, see <code>aria-autocomplete=\"list\"</code> on a combobox).</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>prefix</code>: Characters accumulate into a buffer; focus moves to the first item whose label starts with the buffer.</li><li><code>cycle</code>: A repeated single character cycles focus through items whose label starts with that character.</li><li><code>prefix-then-cycle</code>: <strong>Recommended default</strong>. Matches WAI-ARIA APG and native <code>&lt;select&gt;</code> — characters typed in rapid succession accumulate into a prefix, while a lone repeated key cycles among same-initial items.</li></ul><h3>Reset Timing</h3><p class=\"text-sm text-gray-600 mb-2\">When the character buffer is discarded so the next keystroke starts a fresh search.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>debounced</code>: Buffer clears after an idle timeout (defaults to <strong>500ms</strong>, the APG / native <code>&lt;select&gt;</code> convention).</li><li><code>custom</code>: Application-defined timeout via <code>resetMs</code>.</li></ul><h3>Wrap Behavior</h3><p class=\"text-sm text-gray-600 mb-2\">What happens when matching passes the last item.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>wrap</code>: Search wraps around to the start of the collection (default).</li><li><code>clamp</code>: Search stops at the ends without wrapping.</li></ul><h3>Label Source</h3><p class=\"text-sm text-gray-600 mb-2\">The text each item is matched against. Defaults, in order: <code>aria-label</code>, the element referenced by <code>aria-labelledby</code>, then <code>textContent</code>. Applications may override via a <code>label</code> resolver.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type TypeAheadMatching = 'prefix' | 'cycle' | 'prefix-then-cycle';\n\ninterface TypeAheadIntent {\n    // How typed characters map to items\n    matching: TypeAheadMatching;\n    // Idle ms before the buffer resets (default 500)\n    resetMs: number;\n    // Wrap focus past the ends of the collection (default true)\n    wrap: boolean;\n    // Override how an item's searchable label is derived\n    label?: (item: Element) =&gt; string;\n}</code></pre>",
+  "events": [
+    "typeahead-match",
+    "typeahead-nomatch",
+    "typeahead-reset"
+  ]
+}

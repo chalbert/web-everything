@@ -1,0 +1,94 @@
+{
+  "id": "focus-containment",
+  "name": "Focus Containment Intent",
+  "requiresCapabilities": [
+    "dialog"
+  ],
+  "status": "draft",
+  "summary": "Protocol for overlay focus — confining keyboard focus to an active surface, making the rest of the page inert, where focus lands when it opens, and where it returns when it closes.",
+  "dimensions": {
+    "trap": {
+      "description": "Whether keyboard focus is confined to the surface while it is open",
+      "values": [
+        "trap",
+        "none"
+      ]
+    },
+    "background": {
+      "description": "How the rest of the page behaves while the surface is open",
+      "values": [
+        "inert",
+        "interactive"
+      ]
+    },
+    "initialFocus": {
+      "description": "Where focus lands when the surface opens",
+      "values": [
+        "first-tabbable",
+        "container",
+        "explicit"
+      ]
+    },
+    "restore": {
+      "description": "Where focus returns when the surface closes",
+      "values": [
+        "restore",
+        "none",
+        "explicit"
+      ]
+    }
+  },
+  "description": "<h3>Containment vs. delegation</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns where focus is allowed to <em>go</em> while an overlay is open — trapping it inside the surface and sealing off the rest of the page. It is distinct from the <a href=\"/intents/focus-delegation/\">Focus Delegation Intent</a>, which owns how focus <em>moves between items</em> once it is inside a widget. A trapped dialog still delegates focus internally; the two compose.</p><h3>Trap</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>trap</code>: <kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> cycle within the surface and never reach the page behind it. The accessibility requirement for any modal surface.</li><li><code>none</code>: Focus may leave the surface by tabbing — correct for modeless popovers, non-modal drawers, and toolbars that sit in the page flow.</li></ul><h3>Background</h3><p class=\"text-sm text-gray-600 mb-2\">How the rest of the document is treated while the surface is open. Prefer the native <code>inert</code> attribute on the background over manually juggling <code>tabindex</code>.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>inert</code>: The background is marked <code>inert</code> — unfocusable, unclickable, and hidden from assistive tech. The native mechanism behind a true modal. <code>&lt;dialog&gt;.showModal()</code> applies this automatically to everything outside the dialog.</li><li><code>interactive</code>: The background stays live and operable — a modeless surface that contains focus only while focus happens to be inside it.</li></ul><h3>Initial focus</h3><p class=\"text-sm text-gray-600 mb-2\">Where focus lands when the surface opens is the <a href=\"/intents/autofocus-on-activation/\">Autofocus-on-Activation</a> landing question — Focus Containment composes that atom rather than owning a private copy of it. The values below are the <em>overlay profile</em> of that contract (the atom's <code>target</code> is this dimension's <code>explicit</code>); the atom holds the general landing vocabulary, this dimension the overlay-appropriate defaults.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>first-tabbable</code>: Focus the first tabbable element inside the surface. The safe default for forms.</li><li><code>container</code>: Focus the surface container itself (it takes <code>tabindex=\"-1\"</code>) — use when there is no obvious first control, or the first control would be a destructive button.</li><li><code>explicit</code>: Focus a designated element (e.g. a Close button on a confirmation dialog, or the primary input).</li></ul><h3>Restore</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>restore</code>: Return focus to the element that opened the surface when it closes. The default — losing the user's place is disorienting.</li><li><code>none</code>: Do not move focus on close — when the trigger is gone or the next focus target is elsewhere by design.</li><li><code>explicit</code>: Send focus to a designated element on close (e.g. a newly revealed region the surface was gating).</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">A surface adopts containment when it opens. The <a href=\"/intents/modal/\">Modal Intent</a> composes this for its focus management rather than redefining trap/restore inline; the <a href=\"/intents/anchor/\">Anchor Intent</a> composes it for modal-mode popovers and menus; the <a href=\"/intents/focus-delegation/\">Focus Delegation Intent</a> governs movement <em>within</em> the contained region. Focus <em>indication</em> (<code>:focus-visible</code> styling) is a separate visual concern and is not owned here.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Trap = 'trap' | 'none';\ntype Background = 'inert' | 'interactive';\ntype InitialFocus = 'first-tabbable' | 'container' | 'explicit';\ntype Restore = 'restore' | 'none' | 'explicit';\n\ninterface FocusContainmentIntent {\n    // Confine focus to the surface?\n    trap: Trap;\n    // Seal off the rest of the page (native inert) vs. leave it live\n    background: Background;\n    // Where focus lands on open\n    initialFocus: InitialFocus;\n    // Where focus returns on close\n    restore: Restore;\n    // Selector, when initialFocus or restore is 'explicit'\n    target?: string;\n}</code></pre>",
+  "designSystemResearch": [
+    {
+      "system": "WAI-ARIA APG",
+      "components": [
+        "Dialog (Modal) pattern",
+        "Managing focus",
+        "inert"
+      ],
+      "keyInsight": "Defines the modal-dialog contract: trap focus inside, render the rest inert, set initial focus on open, and restore focus to the trigger on close. We adopt all four as the dimensions of this intent.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/"
+    },
+    {
+      "system": "HTML / native",
+      "components": [
+        "<dialog>.showModal()",
+        "inert attribute",
+        "autofocus"
+      ],
+      "keyInsight": "showModal() natively traps focus and inert-s everything outside the dialog; inert is the platform mechanism for sealing the background. The native-first baseline — reach for a JS focus trap only when <dialog> is ruled out.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Global_attributes/inert"
+    },
+    {
+      "system": "Radix UI",
+      "components": [
+        "FocusScope",
+        "trapped",
+        "onMountAutoFocus",
+        "onUnmountAutoFocus"
+      ],
+      "keyInsight": "Headless focus-scope primitive whose trapped / mount-focus / unmount-focus props map directly to our trap, initialFocus, and restore dimensions — validating containment as a standalone, composable concern.",
+      "reference": "https://www.radix-ui.com/primitives"
+    },
+    {
+      "system": "React Aria",
+      "components": [
+        "FocusScope",
+        "contain",
+        "restoreFocus",
+        "autoFocus"
+      ],
+      "keyInsight": "Exposes containment as contain + restoreFocus + autoFocus on one scope, separate from collection navigation — confirms decoupling containment from focus delegation.",
+      "reference": "https://react-spectrum.adobe.com/react-aria/"
+    }
+  ],
+  "researchGaps": [
+    "Nested/stacked traps — when a dialog opens another, define how the inner trap nests over the outer and how restore unwinds the stack (relates to the Modal Intent's stackable/recede/advance lifecycle).",
+    "Focus-trap edge guards vs. native inert — when <dialog> is unavailable, decide whether the recommended fallback is sentinel tabbable guards or programmatic wrap, and how it interacts with browser/AT virtual cursors."
+  ],
+  "events": [
+    "contain",
+    "release"
+  ]
+}

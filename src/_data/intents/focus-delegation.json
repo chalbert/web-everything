@@ -1,0 +1,101 @@
+{
+  "id": "focus-delegation",
+  "name": "Focus Delegation Intent",
+  "requiresCapabilities": [
+    "cross-root-aria"
+  ],
+  "status": "draft",
+  "summary": "Protocol for composite-widget focus — roving tabindex vs. virtual focus (active descendant), arrow-key navigation within a widget, and whether selection follows focus.",
+  "dimensions": {
+    "strategy": {
+      "description": "How the active item is tracked as focus moves through the widget",
+      "values": [
+        "roving",
+        "virtual",
+        "native"
+      ]
+    },
+    "orientation": {
+      "description": "The axis the arrow keys traverse",
+      "values": [
+        "vertical",
+        "horizontal",
+        "both"
+      ]
+    },
+    "selectionFollowsFocus": {
+      "description": "Whether moving focus to an item also activates or selects it",
+      "values": [
+        "follows",
+        "independent"
+      ]
+    }
+  },
+  "description": "<h3>Tab vs. Arrows</h3><p class=\"text-sm text-gray-600 mb-2\">A composite widget exposes <strong>one</strong> tab stop: <kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> move <em>between</em> widgets, while the arrow keys move <em>within</em> — options, rows, and cells are reached by arrows, never by Tab.</p><h3>Strategy</h3><p class=\"text-sm text-gray-600 mb-2\">How the active item is tracked as focus moves.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>roving</code>: Real DOM focus moves between items — the active item has <code>tabindex=\"0\"</code>, all others <code>-1</code>. Use when the items themselves are the interactive targets (menus, toolbars, radio groups, tabs).</li><li><code>virtual</code>: DOM focus stays on a controller element (a text input or the listbox) while the visually active item is tracked via <code>aria-activedescendant</code>. Required when typing must continue uninterrupted (comboboxes). The active item <strong>must be scrolled into view</strong> on each move — browsers do not auto-scroll <code>aria-activedescendant</code> targets the way they do real focus.</li><li><code>native</code>: Browser-managed focus with no JavaScript — a radio group or a native <code>&lt;select&gt;</code>. The native-first baseline; reach for <code>roving</code>/<code>virtual</code> only when a custom widget rules native out.</li></ul><h3>Orientation</h3><p class=\"text-sm text-gray-600 mb-2\"><code>vertical</code> binds <kbd>Up</kbd>/<kbd>Down</kbd>, <code>horizontal</code> binds <kbd>Left</kbd>/<kbd>Right</kbd>, and <code>both</code> enables two-dimensional movement (menubars, grids). <kbd>Home</kbd>/<kbd>End</kbd> jump to the first/last item regardless of orientation. Movement <strong>clamps</strong> at the ends by default; a widget may opt into <strong>wrapping</strong> (last &rarr; first).</p><h3>Selection follows focus</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>follows</code>: Moving focus immediately activates/selects the item — single-select listboxes and auto-activated tabs. Fast, but unsafe when activation is expensive or destructive.</li><li><code>independent</code>: Focus moves without committing; selection happens on an explicit key (<kbd>Space</kbd>/<kbd>Enter</kbd>). Correct for multi-select, menus, and comboboxes.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns only <em>focus movement</em>. It composes with the <a href=\"/intents/selection/\">Selection Intent</a> (what gets chosen and when it commits), the <a href=\"/intents/type-ahead/\">Type-Ahead Intent</a> (seeking an item by typing within the same focus model), the <a href=\"/intents/anchor/\">Anchor Intent</a> (a menu or listbox surface adopts a focus strategy when it opens), and the <a href=\"/intents/interaction/\">Interaction Intent</a> (input modality — pointer, touch, or spatial navigation).</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type FocusStrategy = 'roving' | 'virtual' | 'native';\ntype Orientation = 'vertical' | 'horizontal' | 'both';\n\ninterface FocusDelegationIntent {\n    // How the active item is tracked\n    strategy: FocusStrategy;\n    // Axis the arrow keys traverse\n    orientation: Orientation;\n    // Does moving focus also select?\n    selectionFollowsFocus: boolean;\n    // Wrap around at the ends, or clamp (default)\n    wrap?: boolean;\n}</code></pre>",
+  "designSystemResearch": [
+    {
+      "system": "WAI-ARIA APG",
+      "components": [
+        "Roving tabindex",
+        "aria-activedescendant",
+        "Developing a Keyboard Interface",
+        "Managing focus"
+      ],
+      "keyInsight": "Defines the two focus-management techniques (roving tabindex and aria-activedescendant) and the arrows-within / Tab-between rule. We adopt both verbatim as the strategy axis and the core invariant.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/"
+    },
+    {
+      "system": "Radix UI",
+      "components": [
+        "RovingFocusGroup",
+        "orientation",
+        "loop",
+        "dir"
+      ],
+      "keyInsight": "Headless roving-focus primitive; its orientation and loop options map directly to our orientation dimension and wrap option, validating focus delegation as a standalone, composable concern.",
+      "reference": "https://www.radix-ui.com/primitives"
+    },
+    {
+      "system": "React Aria",
+      "components": [
+        "useSelectableCollection",
+        "selectionBehavior",
+        "shouldFocusWrap",
+        "FocusScope"
+      ],
+      "keyInsight": "Implements both strategies behind one hook and exposes selection-follows-focus via selectionBehavior. Confirms decoupling focus movement from selection commitment.",
+      "reference": "https://react-spectrum.adobe.com/react-aria/"
+    },
+    {
+      "system": "Material Design 3",
+      "components": [
+        "Menus",
+        "Tabs",
+        "Lists"
+      ],
+      "keyInsight": "Single-tab-stop composite widgets with arrow navigation; tabs auto-activate (selection follows focus) while menus do not — informs the selectionFollowsFocus split.",
+      "reference": "https://m3.material.io/"
+    }
+  ],
+  "uxResearch": [
+    {
+      "title": "Cross-cutting paradigms in the dropdown family",
+      "source": "Web Everything dropdown UX research (2026-06-01)",
+      "findings": [
+        "Focus delegation is the keystone paradigm a dropdown composes — reused by listbox, menu, tree, grid, toolbar, and tabs.",
+        "Virtual focus requires manually scrolling the aria-activedescendant target into view; browsers do not do it automatically.",
+        "Select-only comboboxes keep DOM focus on the control and never let arrow navigation alone change the value (selection independent of focus)."
+      ],
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/combobox/examples/combobox-select-only/"
+    }
+  ],
+  "researchGaps": [
+    "Spatial / D-pad navigation overlaps the Interaction Intent's gamepad modality (focus trapping within active regions) — decide whether spatial navigation is a strategy here or stays owned by Interaction.",
+    "Reconcile selectionFollowsFocus with the Selection Intent's immediacy axis (live vs. buffered) — related but distinct commitment moments.",
+    "Two-dimensional grid mechanics (row/column wrap, cell vs. widget focus, ragged rows) need a deeper contract than the orientation:both value currently implies."
+  ],
+  "events": [
+    "focusmove",
+    "activechange"
+  ]
+}

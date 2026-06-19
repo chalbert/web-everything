@@ -1,0 +1,58 @@
+{
+  "id": "navigation",
+  "name": "Navigation Intent",
+  "status": "draft",
+  "summary": "UX vocabulary for in-app navigation: information-architecture structure (hierarchical/lateral/linear) plus the orthogonal behaviors a view change carries — history contribution, scroll landing, transition direction, leave-guarding, and URL persistence. Composes prefetch (eagerness), motion (animation feel), and the autofocus-on-activation contract (where initial focus lands after the view swaps — landing only, no trap).",
+  "dimensions": {
+    "structure": {
+      "description": "The information-architecture model: how views are organized and how users traverse between them",
+      "values": [
+        "hierarchical",
+        "lateral",
+        "linear"
+      ]
+    },
+    "history": {
+      "description": "What this navigation contributes to the session history — i.e. what the browser Back button does afterward",
+      "values": [
+        "push",
+        "replace",
+        "none"
+      ]
+    },
+    "scroll": {
+      "description": "Where the viewport lands after the view swaps",
+      "values": [
+        "auto",
+        "top",
+        "preserve",
+        "manual"
+      ]
+    },
+    "transition": {
+      "description": "The directionality of the view transition (forward vs back). Animation feel — easing, reduced-motion — defers to the Motion intent",
+      "values": [
+        "directional",
+        "fade",
+        "none"
+      ]
+    },
+    "guard": {
+      "description": "Whether leaving the current view can be interrupted (e.g. unsaved changes)",
+      "values": [
+        "free",
+        "confirm",
+        "blocked"
+      ]
+    },
+    "persistence": {
+      "description": "Whether this navigation state is reflected in a deep-linkable, shareable URL or held ephemerally. Grounded in the WHATWG split between the URL (path/search) and the History API state object: url = the URL (survives refresh + share), session = History state (survives traversal but not a fresh share), memory = neither (in-memory only). Unlike history/scroll this rests on that convention rather than a single platform enum; the three-way set is kept because session is a distinct user-perceivable outcome (a wizard step that survives Back/Forward but isn't shareable), subject to review if no block exercises session within two implementing blocks (#057).",
+      "values": [
+        "url",
+        "memory",
+        "session"
+      ]
+    }
+  },
+  "description": "<p class=\"text-sm text-gray-600\">The Navigation Intent is the UX vocabulary for moving between views. <code>structure</code> declares the information-architecture shape; the remaining dimensions declare the orthogonal behaviors a single view change carries. Any structure can pair with any behavior — a <code>lateral</code> tab set may still want a deep-linkable URL, a <code>linear</code> wizard may guard against leaving mid-step.</p><h3>Structure Model</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>hierarchical</code>: Parent/child stack — manages history and back-navigation (Router). Active item marked <code>aria-current=\"page\"</code>.</li><li><code>lateral</code>: Peer switching (Tabs, Bottom Nav). Active item marked <code>aria-current=\"page\"</code>.</li><li><code>linear</code>: Sequential steps (Wizard). Locked progression; current step marked <code>aria-current=\"step\"</code>.</li></ul><p class=\"text-sm text-gray-600\">The correct <code>aria-current</code> token is <em>derived from</em> <code>structure</code> (page for hierarchical/lateral, step for linear) — it is part of the structure contract, not a separate choice.</p><h3>History Contribution</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>push</code>: New history entry — Back returns to the prior view.</li><li><code>replace</code>: Overwrite the current entry — Back skips this view (typical for wizard steps).</li><li><code>none</code>: Transient change that never enters the back stack.</li></ul><h3>Scroll Landing</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>auto</code>: Platform default — restore on back/forward, honor a URL fragment, else top.</li><li><code>top</code>: Always reset to the top on a forward navigation.</li><li><code>preserve</code>: Keep the current scroll position (correct for in-place tab/filter swaps).</li><li><code>manual</code>: The view drives scroll itself.</li></ul><h3>Transition Direction</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>directional</code>: Forward navigations animate forward, Back animates back (derived from history-traversal direction — browser-initiated Back carries no transition type).</li><li><code>fade</code>: Non-directional crossfade.</li><li><code>none</code>: No transition.</li></ul><p class=\"text-sm text-gray-600\">Direction is owned here; the <em>feel</em> of the animation (natural/immediate/reduced, honoring <code>prefers-reduced-motion</code>) is owned by the <a href=\"/intents/motion/\">Motion intent</a>.</p><h3>Leave Guard</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>free</code>: Navigation always proceeds.</li><li><code>confirm</code>: Intercept and prompt (\"unsaved changes — leave?\"); the user may proceed. The prompt UI composes with the <a href=\"/intents/modal/\">Modal intent</a>.</li><li><code>blocked</code>: Navigation is prevented until a condition clears.</li></ul><h3>URL Persistence</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>url</code>: State lives in the path/search — bookmarkable, shareable, survives refresh.</li><li><code>session</code>: State rides session history — survives traversal but not a fresh share.</li><li><code>memory</code>: In-memory only — lost on refresh or share.</li></ul><h3>Composition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Prefetch:</strong> speculative loading of the next view is the <a href=\"/intents/prefetch/\">Prefetch intent</a>'s <code>eagerness</code> axis — Navigation composes it, does not own it.</li><li><strong>Focus reset:</strong> where focus lands after a view swap is the <a href=\"/intents/autofocus-on-activation/\">Autofocus-on-Activation intent</a> — initial focus per a closed set (WAI-ARIA APG default: the new view's main heading via <code>tabindex=\"-1\"</code> + <code>.focus()</code>), borrowing the platform <code>autofocus</code> / dialog-focusing vocabulary. It is the same atom <a href=\"/intents/focus-containment/\">Focus Containment</a> names as \"where focus lands when it opens\" — Navigation composes that atom (landing only, no trap); it is <em>not</em> a Focus Delegation axis (a view swap has no delegator).</li><li><strong>Loader:</strong> pending-state UX during a navigation defers to the <a href=\"/intents/loader/\">Loader intent</a>.</li></ul>"
+}

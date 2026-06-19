@@ -1,0 +1,20 @@
+{
+  "id": "webdocs-primitive-form",
+  "title": "Web Docs self-host primitive form — rendering contract, islands, FUI authoring path",
+  "status": "open",
+  "summary": "Form grounding for backlog #425 (the FUI self-host Web Docs primitives, under the #091/#398 Web Docs product line). #091/#398 settled the home (FUI ships the primitives) and the what, not the form. Reading the tree corrects the stale 'block vs JSX vs package' framing: @frontierui/jsx-runtime is an HTML-mirror JSX factory that builds light DOM and IS FUI's content path — but it has no server render-to-string anywhere, while a docs product's load-bearing need is static HTML (host-anywhere, SEO, no-JS readable). So the real axis is the RENDERING CONTRACT. Prior art names the answer: islands architecture (server-render static HTML by default, hydrate only interactive islands — Astro/Fresh/Qwik; docs sites are its canonical zero-JS use case), with Declarative Shadow DOM as the native server-render mechanism for custom elements. FUI's behavior blocks (droplist/tabs/navigation/for-each) are already light-DOM islands by construction, and jsx-runtime builds light DOM, so the static skeleton needs NO DSD. Recommendation: author primitives as JSX on jsx-runtime + a new server string-emit (the only real gap — carve as a separable FUI-core prerequisite build), compose existing behavior blocks as light-DOM islands (hydrate-optional, degrades to static HTML), packaged as a single published @frontierui/webdocs-ui. Rejected: client-runtime SPA (weak self-host floor) and a Nunjucks/server-template form (second paradigm + engine lock-in). One open judgment call: hydrate-optional vs pure-static for interactive panels — defaulted to hydrate-optional, confidence medium.",
+  "dateOpened": "2026-06-14",
+  "tags": [
+    "webdocs",
+    "frontier-ui",
+    "primitives",
+    "islands",
+    "ssr",
+    "static-first",
+    "self-host",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

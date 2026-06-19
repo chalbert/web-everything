@@ -30,6 +30,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readField, setFrontmatterField, quoteScalar } from './backlog/frontmatter.mjs';
 import { loadBlocks } from './lib/blocks-loader.cjs';
+import { loadIntents } from './lib/intents-loader.cjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BL = join(ROOT, 'backlog');
@@ -52,6 +53,12 @@ function loadRegistries() {
     if (kind === 'block') {
       // Per-block specs (#882) — assembled, not a single file; the `blocks.json` anchor stays virtual.
       try { ids = new Set(loadBlocks().map((b) => b.id).filter(Boolean)); } catch { /* none → empty */ }
+      reg.set(kind, ids);
+      continue;
+    }
+    if (kind === 'intent') {
+      // Per-intent specs (#1145) — assembled; the `intents.json#<id>` graduatedTo anchor stays virtual.
+      try { ids = new Set(loadIntents().map((i) => i.id).filter(Boolean)); } catch { /* none → empty */ }
       reg.set(kind, ids);
       continue;
     }

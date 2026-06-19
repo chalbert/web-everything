@@ -1,0 +1,37 @@
+{
+  "id": "background-task",
+  "name": "Background Task Intent",
+  "status": "draft",
+  "summary": "Protocol defining the persistent surface that hosts long-running work after it goes async — the home a Loader hands a task to past its escalation threshold. Covers task registration that outlives the originating view, aggregation of concurrent tasks with per-task progress and retry, and the navigation-away / before-unload guard. Distinct from the Feedback Intent (transient toasts) and the Loader Intent (in-view pending state).",
+  "dimensions": {
+    "aggregation": {
+      "description": "How concurrent backgrounded tasks are presented in the surface",
+      "values": [
+        "single",
+        "batch"
+      ]
+    },
+    "persistence": {
+      "description": "How long a completed task's entry remains in the surface",
+      "values": [
+        "transient",
+        "sticky"
+      ]
+    },
+    "navigationGuard": {
+      "description": "Whether an in-flight task warns the user before they navigate away or close",
+      "values": [
+        "none",
+        "warn"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">The <a href=\"/intents/loader/\">Loader Intent</a>'s <code>escalation: async</code> value says that past a longer platform-defined duration a still-running task should <strong>go async</strong>: a persistent status surface stays present, the user is free to navigate away, and a window prompt warns before they close or leave (the task continues in the background). The Loader declares <em>that this should happen</em>; the Background Task Intent defines <strong>the surface that hosts those backgrounded tasks</strong> — the receiving end of that handoff.</p><p class=\"text-sm text-gray-600 mb-2\">It is a distinct UX surface, not a loader. It <strong>outlives the originating view</strong>, aggregates multiple concurrent tasks, shows per-task progress, and mediates the navigation-away warning. It is <strong>not</strong> the <a href=\"/intents/feedback/\">Feedback Intent</a> (transient, fire-and-forget toasts) and <strong>not</strong> the <a href=\"/intents/loader/\">Loader Intent</a> (in-view pending state that dies with its view).</p><p class=\"text-sm text-gray-600 mb-2\"><strong>Platform anchor:</strong> the browser's <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/Background_Fetch_API\">Background Fetch API</a> models exactly this shape — long transfers that survive navigation, with browser-provided progress UI — but this intent's scope is broader than fetches (any long task), so it borrows the vocabulary without requiring a service worker.</p><h3>Aggregation</h3><p class=\"text-sm text-gray-600 mb-2\">How concurrent backgrounded tasks present in the surface.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>single</code>: One task at a time. The surface shows a single progress entry.</li><li><code>batch</code>: Multiple concurrent tasks, each with its own progress and retry — one task's failure does not abort the others (unless they are dependent). Mirrors the Loader Intent's determinate guidance for parallel uploads.</li></ul><h3>Persistence</h3><p class=\"text-sm text-gray-600 mb-2\">How long a completed task's entry remains in the surface.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>transient</code>: The entry auto-clears once the task resolves successfully (optionally emitting a <a href=\"/intents/feedback/\">Feedback</a> toast on completion).</li><li><code>sticky</code>: The entry stays until explicitly dismissed. The default for <code>error</code> entries, so a task that failed while the user was on another view is still reviewable and retryable when they return.</li></ul><h3>Navigation Guard</h3><p class=\"text-sm text-gray-600 mb-2\">Whether an in-flight task arms the close / route-leave warning.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>none</code>: No prompt; the task continues silently in the background and the user leaves freely.</li><li><code>warn</code>: While any task is <code>active</code>, leaving the app fires the <code>beforeunload</code> prompt and an in-app route change shows a confirm dialog. Cleared automatically when the last in-flight task resolves.</li></ul><p class=\"text-sm text-gray-600 mb-2\"><em>Note:</em> the &ldquo;warn before you leave with work still in flight&rdquo; behavior is the same paradigm as &ldquo;warn before discarding unsaved form edits.&rdquo; That cross-cutting guard is tracked for harvest as its own composable intent; this intent will compose it rather than redefine it.</p><h3>Composition (cross-reference, do not duplicate)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong><a href=\"/intents/loader/\">Loader</a></strong>: the upstream source. A task arrives here via Loader's <code>escalation: async</code>. Per-task progress reuses Loader's <code>determinate</code>/<code>indeterminate</code> indicator, version/generation token, and lifecycle states — it is the same state machine, hosted off-view.</li><li><strong><a href=\"/intents/reliability/\">Reliability</a></strong>: owns timeout and failure policy. Retry of an individual failed task delegates here; this surface only exposes the affordance.</li><li><strong><a href=\"/intents/layout/\">Layout</a></strong>: the surface is an app-shell region (a <code>dock</code>). Placement and region mechanics defer to the Layout Intent.</li><li><strong><a href=\"/intents/feedback/\">Feedback</a></strong>: downstream. A completed task may emit a transient toast; Feedback does not track ongoing state, this intent does.</li></ul><h3>Lifecycle</h3><p class=\"text-sm text-gray-600 mb-2\">A task entry in the surface moves through:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>registered</code>: A task has been handed off (escalated async) and now has an entry.</li><li><code>active</code>: Work in progress; arms the navigation guard and shows progress.</li><li><code>success</code>: Resolved; entry behaves per <code>persistence</code>.</li><li><code>error</code>: Failed; entry stays (<code>sticky</code>) and exposes retry (via Reliability).</li><li><code>dismissed</code>: Removed from the surface by the user or by auto-clear.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type TaskAggregation = 'single' | 'batch';\ntype TaskPersistence = 'transient' | 'sticky';\ntype TaskNavigationGuard = 'none' | 'warn';\ntype BackgroundTaskState = 'registered' | 'active' | 'success' | 'error' | 'dismissed';\n\ninterface BackgroundTaskIntent {\n    // How concurrent tasks present in the surface\n    aggregation: TaskAggregation;\n    // How a completed entry persists\n    persistence: TaskPersistence;\n    // Whether in-flight work warns on navigate-away / close\n    navigationGuard: TaskNavigationGuard;\n}\n\ninterface BackgroundTask {\n    id: string;\n    label: string;            // sentence case, -ing verb, ≤ 3 words (Loader label conventions)\n    state: BackgroundTaskState;\n    // Per-task progress mirrors the Loader Intent\n    progress: 'determinate' | 'indeterminate';\n    value?: number;           // 0–100 when determinate\n    retry?: () =&gt; void;       // present on error; delegates to Reliability\n}</code></pre>",
+  "events": [
+    "registered",
+    "active",
+    "success",
+    "error",
+    "dismissed"
+  ]
+}

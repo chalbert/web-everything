@@ -1,0 +1,24 @@
+{
+  "id": "customizable-fetcher",
+  "title": "Customizable Fetcher & Cache for Resource Loader",
+  "status": "open",
+  "summary": "Documenting how the resource-loader's transport (fetch by default) and cache should be injectable via the injector system, enabling projects to swap in axios, GraphQL clients, or custom cache implementations.",
+  "dateOpened": "2026-02-23",
+  "tags": [
+    "fetch",
+    "transport",
+    "cache",
+    "middleware",
+    "adapter",
+    "injector"
+  ],
+  "relatedBlocks": [
+    "resource-loader",
+    "resource-action"
+  ],
+  "relatedPlugs": [
+    "webresources",
+    "webinjectors"
+  ],
+  "relatedProject": "webresources"
+}

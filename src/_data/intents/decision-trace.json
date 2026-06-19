@@ -1,0 +1,33 @@
+{
+  "id": "decision-trace",
+  "name": "Decision Trace Intent",
+  "status": "draft",
+  "summary": "Canonical explanation of why a rules/criteria evaluation reached its outcome — a criteria trace table (each criterion's input, operator, threshold, contributed outcome) plus the aggregated outcome and its reason codes. The visual member of the Web Decisions protocol; it renders a DecisionRecord and composes the Status Indicator intent for the outcome.",
+  "dimensions": {
+    "layout": {
+      "description": "How the criteria are laid out",
+      "values": [
+        "table",
+        "list"
+      ]
+    },
+    "emphasis": {
+      "description": "Which criteria are shown",
+      "values": [
+        "all-criteria",
+        "deciding"
+      ]
+    },
+    "disclosure": {
+      "description": "Whether criterion detail is shown inline or behind an expander",
+      "values": [
+        "inline",
+        "expandable"
+      ]
+    }
+  },
+  "description": "<h3>What Decision Trace Is</h3><p class=\"text-sm text-gray-600 mb-2\">The canonical answer to <strong>\"why did the system decide this?\"</strong> &mdash; the underwriting finding, the eligibility determination, the pricing tier, the moderation call. It is the visual member of the <a href=\"/projects/webdecisions/\">Web Decisions</a> protocol: it renders a <code>DecisionRecord</code> as a criteria trace table (each criterion's input, operator, threshold, and contributed outcome) plus the aggregated outcome and reason codes.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>It owns the explanation display, not the rules.</strong> Which criteria exist and how they evaluate belong to the decision engine (proof-of-compliance, <a href=\"/backlog/093-business-rule-manager-proof-of-compliance/\">#093</a>); this intent only standardizes how the result is shown and announced. The outcome (and each criterion's outcome) is shown via the <a href=\"/intents/status-indicator/\">Status Indicator</a> intent &mdash; one consistent status token, not a bespoke colour.</p><h3>Layout</h3><p class=\"text-sm text-gray-600 mb-2\"><code>table</code> is the dense five-column trace; <code>list</code> is a stacked, narrow-column form.</p><h3>Emphasis</h3><p class=\"text-sm text-gray-600 mb-2\"><code>all-criteria</code> shows every rule evaluated; <code>deciding</code> shows only the criteria that drove a non-pass outcome &mdash; the \"why not approved\" subset.</p><h3>Disclosure</h3><p class=\"text-sm text-gray-600 mb-2\"><code>inline</code> shows criterion detail in the row; <code>expandable</code> collapses it behind a per-row expander for long traces.</p>",
+  "events": [
+    "criterion-expand"
+  ]
+}

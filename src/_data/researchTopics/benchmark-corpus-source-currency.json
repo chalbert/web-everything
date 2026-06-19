@@ -1,0 +1,20 @@
+{
+  "id": "benchmark-corpus-source-currency",
+  "title": "Benchmark-corpus source currency — the FAST decommission & how the corpus retires a dead source",
+  "status": "open",
+  "summary": "Grounds decision #546 — the corpus source `fast` whose docsUrl went dead during #531. Research turned a 'fix the URL vs drop it' framing into a near-forced retirement plus a reusable convention. Three findings: (1) fast.design's per-component docs are genuinely gone, not moved — /docs/<1.x|2.x|3.x>/components/* 404, the historical /docs/components/<name>/ 404s, and even the path the live repo README points at (/docs/2.x/) 404s; (2) the FAST GitHub repo is NOT archived (pushed 2026-06-12, ~9.6k★) but packages/ now holds only fast-element, fast-html, fast-router, fast-build, fast-test-harness — the fast-foundation/fast-components library was REMOVED, so FAST is now a low-level web-component authoring toolkit (an element base class + templating + router), shipping none of the 96 benchmarked component/pattern/token capabilities; (3) FAST's former components were folded into Fluent UI Web Components (microsoft/fluentui) = the corpus's existing `fluent-2` source, so re-benchmarking FAST would double-count Fluent. Wayback has a complete 2024-01-28 snapshot of /docs/components/<name>/, so an archive walk is technically possible but would cite frozen URLs for a deleted component set (violates the corpus currency criterion). Under benchmarkCorpus.json's own inclusionRule, `fast` now fails docs-quality + currency-as-a-component-set and no longer occupies the web-component axis (which stays covered by shoelace/spectrum-web-components/lion). `fast` has 0 rows in benchmarkCapabilityPresence.json, so retirement breaks no presence-row reference. Recommends: retire `fast` (not repoint-to-archive, not keep-as-tooling), and mark it retired with a reason (retired/retiredDate/retiredReason) rather than delete the entry — preserving the audit trail under the #192 longitudinal-freshness model and establishing the corpus's first source-retirement convention.",
+  "dateOpened": "2026-06-14",
+  "tags": [
+    "gap-analysis",
+    "benchmark",
+    "corpus",
+    "currency",
+    "fast",
+    "web-components",
+    "longitudinal",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

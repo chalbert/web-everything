@@ -1,0 +1,24 @@
+{
+  "id": "change-tracking-observability",
+  "title": "Change Tracking as Observability",
+  "status": "open",
+  "summary": "Cataloging every client-side change-tracking strategy — snapshot+diff, dirty-checking, Proxy interception (Vue 3/MobX/Valtio), signals/observers (TC39 Signals, SolidJS), Immer/Mutative structural-sharing patches, JSON Patch (RFC 6902), JSON Merge Patch (RFC 7386), event sourcing, CRDTs (Yjs/Automerge), Operational Transformation, MutationObserver, accessor tracking, polling — as a facet of observability rather than a form concern. Defines the classification axes (granularity, eagerness, representation, attribution, reversibility, transport, soundness, cost), sketches a provisional canonical change record and an interop/configuration layer that lets one app pick a preferred strategy and bridge several at once, and generalizes the validation customValidation:change-detection concern. Grounded in primary sources (RFC 6902/7386, TC39 Signals, Shapiro et al. CRDT survey, W3C Trace Context) via an adversarially-verified deep-research pass.",
+  "dateOpened": "2026-05-31",
+  "tags": [
+    "change-tracking",
+    "observability",
+    "diff",
+    "json-patch",
+    "crdt",
+    "signals",
+    "proxy",
+    "event-sourcing",
+    "attribution",
+    "interop"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [
+    "customstoreregistry"
+  ],
+  "relatedProject": "webstates"
+}

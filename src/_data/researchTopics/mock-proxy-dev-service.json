@@ -1,0 +1,22 @@
+{
+  "id": "mock-proxy-dev-service",
+  "title": "Mock & Service-Proxy Dev Service",
+  "status": "open",
+  "summary": "Prior-art survey grounding backlog #107: a dev-time HTTP mock + service-proxy standard whose hard rule is that mocks never live in deployable code — a real local server transparently mocks/proxies APIs via config + console. Surveying MSW, Mockoon, Prism, WireMock, Pact and OpenAPI, the field splits code-defined (MSW, non-portable by design) from data-defined (the only kind that yields a portable artifact), so the schema is the standard and the server is a swappable provider — OpenAPI-anchored shape plus a WE behavior layer for latency/fault/conditional and a mock|proxy|record response-kind. Every survivor leads self-run with a hosted broker as the commercial upsell, so ship the tier-1 self-run tool first. 'One contract, two uses' (Pact/BDCT) holds only if the artifact carries consumer interactions, not just a shape — verified in webcases.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "mocks",
+    "proxy",
+    "dev-server",
+    "contract-testing",
+    "http",
+    "openapi",
+    "pact",
+    "self-run-tool",
+    "tooling",
+    "gap-analysis"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcases"
+}

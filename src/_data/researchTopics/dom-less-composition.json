@@ -1,0 +1,25 @@
+{
+  "id": "dom-less-composition",
+  "title": "DOM-Less Composition Patterns",
+  "status": "open",
+  "summary": "Researching every programming pattern and runtime solution that enables React-like component wrapping without adding DOM elements — from comment-based markers to display:contents, transient elements, and functional components.",
+  "dateOpened": "2026-02-23",
+  "tags": [
+    "composition",
+    "dom",
+    "fragments",
+    "transient",
+    "layout"
+  ],
+  "relatedBlocks": [
+    "transient-component",
+    "view",
+    "renderer"
+  ],
+  "relatedPlugs": [
+    "webinjectors",
+    "webcomponents",
+    "webdirectives"
+  ],
+  "relatedProject": "webcomponents"
+}

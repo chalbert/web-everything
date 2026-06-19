@@ -1,0 +1,23 @@
+{
+  "id": "web-identity-project",
+  "title": "Web Identity Project",
+  "status": "open",
+  "summary": "Web-platform and library prior art grounding backlog #012's project/protocol/intent/defer call for identity & auth. The platform already unified identity behind one browser-mediated dispatcher — navigator.credentials.get() — routing to passwords (PasswordCredential), passkeys/WebAuthn (PublicKeyCredential), federated FedCM (IdentityCredential), and Digital Credentials (mDoc) through one call and mediation enum. That is structurally a protocol with a provider/predicate seam (mirroring Guard), not a monolithic project: a webidentity project owning one credential-acquisition protocol with families as swappable CustomCredentialProviders. Authentication is back-end-authoritative — WE standardizes only the UX-only surface (mediation, credential-request declaration, auth-state predicate that feeds #178's Guard access-gate). Verbose ceremonies (SimpleWebAuthn/Hanko) are swappable adapters. Recommends authoring the thin mediation intent now, deferring the full protocol + Configurator domain. Distinct from #009 permissions.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "identity",
+    "auth",
+    "credential-management",
+    "webauthn",
+    "passkeys",
+    "fedcm",
+    "digital-credentials",
+    "protocol",
+    "guard",
+    "gap-analysis",
+    "vocabulary"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webguards"
+}

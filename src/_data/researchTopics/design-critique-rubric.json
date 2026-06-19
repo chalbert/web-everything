@@ -1,0 +1,24 @@
+{
+  "id": "design-critique-rubric",
+  "title": "Design-critique rubric — what a page review measures, and how WE-grounded",
+  "status": "open",
+  "summary": "Prep research for decision #1034 (epic #1033, the interactive design-review loop): defining the THIRD vision rubric — design critique — distinct from the two already shipped (the QC verdict taxonomy #475 at scripts/design-refs/vision.mjs:18, an admission gate; the codification facets #396 at vision.mjs:55, descriptive tagging). Neither measures design QUALITY. SURVEY (Nielsen's 10 heuristics + 0–4 severity, CRAP, Gestalt, Material 3 / Apple HIG / Fluent 2, Aalto Interface Metrics (AIM, UIST'18), Rico, UICrit (UIST'24), Lighthouse, axe-core, WCAG). Four load-bearing findings: (1) the deterministic-vs-perceptual split is THREE tiers, not two — Tier A deterministic-from-DOM/CSS (WCAG contrast, grid spacing, type scale, touch targets, token usage; axe catches ~57% of WCAG at 100% precision, marks the rest 'incomplete'), Tier B algorithmic-perceptual-from-pixels (AIM: visual clutter/feature-congestion, colourfulness, symmetry, balance, grid-quality, figure-ground, saliency — deterministic vision algorithms, no LLM), Tier C genuine judgment (hierarchy feels off, polish, emphasis — needs VLM/human). (2) Output shape mature tools converge on: a small CLOSED set of scored dimensions + open-text LOCALIZED findings (element bbox + scope) tagged to a dimension, each with a severity — exactly UICrit's structure (3 scored dims 10-pt + 3,059 free-text critiques w/ bounding boxes, post-hoc bucketed into ~5 categories) and Nielsen's 0–4 severity. (3) Raw zero-shot VLM critique is poor (~13% valid for Gemini), few-shot from a rubric lifts it ~55%, humans still win — so the rubric IS what makes the Tier-C call trustworthy and the #1036 human-correction loop is load-bearing. (4) Scoring systems keep the axis set CLOSED and small (AIM 4 / Lighthouse 5 / Nielsen 10) for cross-page comparability, pushing extensibility into the open findings — the opposite of #394's grow-the-registry ruling, because comparable training pairs (#489/#490) require axis stability. WE-grounding: the semantic intents (intents.json — typography/density/surface/layout/hierarchy) map ~1:1 onto critique dimensions, so Tier-A checks become exact against the page's DECLARED standards (type ladder vs declared scale; gaps vs declared spacing; contrast via the a11y gate #763/#770) rather than generic guesses; reading the standard as input is not #475-leakage. CLASSIFICATION: the rubric is NOT a @webeverything artifact — it's the output contract of the Plateau vision service (#475 'vision is never a standard'), living beside its siblings in design-refs and riding the one registerVisionProvider seam (vision.mjs:143). Three prepared forks: (F1) grounding model → WE-grounded-layered (generic-only and conformance-only both flawed); (F2) own-vs-compose the deterministic checks → COMPOSE the existing gates, own only Tier-C + synthesis; (F3) output shape → closed scored axes (1–5) + open localized findings (severity 0–4), versioned axis set. Proposed default vocabulary: 8 closed axes (contrast/spacing/alignment/type-scale/consistency/grouping/visual-hierarchy/polish), each tier-tagged + grounding-mapped. Full grounding in reports/2026-06-19-design-critique-rubric.md.",
+  "dateOpened": "2026-06-19",
+  "lastReviewed": "2026-06-19",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "design-reference",
+    "vision",
+    "design-critique",
+    "rubric",
+    "heuristic-evaluation",
+    "vlm-as-judge",
+    "computational-aesthetics",
+    "accessibility",
+    "controlled-vocabulary",
+    "plateau"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

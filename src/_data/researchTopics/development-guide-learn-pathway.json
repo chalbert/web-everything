@@ -1,0 +1,22 @@
+{
+  "id": "development-guide-learn-pathway",
+  "title": "Development Guide & Learn Pathway",
+  "status": "open",
+  "summary": "Documentation-architecture prior-art survey (Diátaxis, MDN's framework-docs policy, Rails Doctrine, Vue/MDN learning-path UIs) grounding backlog #109's shape forks for an opinionated development guide surfaced as the Technical Configurator's learn pathway — deliberately neither the neutral standard (Web Everything) nor the reference impl (Frontier UI). Diátaxis maps the constellation cleanly: standard = Reference, configurator = How-to, guide = Explanation+Tutorial. Resolves to one guide surface in two registers (decision-support + philosophy/handbook); the Configurator's existing Domain type IS the single source, so the learn view is a read-only second view over the same CapabilityProvider (no drift, no second authoring path); render via webdocs (#091) from that source; free browse is the floor with a curated prev/next path as a thin ordering layer. No off-the-shelf decision-guide surface exists — it's a genuine composition of established parts.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "development-guide",
+    "opinionated",
+    "technical-configurator",
+    "learn-pathway",
+    "plateau-app",
+    "diataxis",
+    "decision-support",
+    "one-source-many-views",
+    "webdocs",
+    "documentation"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "conformance-validator-home",
+  "title": "Home for a generic WE-conformance / schema-validation service — vectors (WE data) vs the runnable validator (Plateau open-core vs independent)",
+  "status": "open",
+  "summary": "Prep research for decision #895 (surfaced by #779). Implementers building WE-compatible libraries will need a generic service to validate their schema/manifest against the WE contract. The artifact forks by risk: the conformance VECTORS (declarative input->expected-behavior data) are a WE artifact (data, can't 'fail to deliver'); the runnable VALIDATOR that loads them and checks a library is NOT WE (a buggy runnable tool reads as 'WE is broken' — ownership carries the reputation, npm scope doesn't fix it) and NOT FUI (generic across implementers, FUI is one). Survey of real conformance tooling found a two-layer split nobody violates: the body owns the vectors/suite as neutral data in its own repo (test262, JSON-Schema test suite, WPT), and the runnable validator is decoupled from the body, almost always OSS. Where a runnable tool ships, three shapes: (i) independent/community OSS (JSON-Schema/Ajv, OpenAPI validators — strongest decoupling but presumes a community materializes to build+maintain a runner); (ii) vendor OPEN-CORE = complete open CLI floor + optional hosted SaaS (Spectral/Stoplight, axe-core/Deque — guarantees a runner exists, keeps the firewall iff the OSS floor is a complete standalone conformance check and vectors stay in the body's repo); (iii) standards-body-HOSTED (Nu Html Checker / validator.nu — re-attaches validator bugs to the body, safe only for a mature single-canonical-artifact spec; the model to AVOID for a young standard, restating the user's 'not WE' concern from the survey side). WHAT SURVIVES: forced invariants (vectors->WE @webeverything data pkg; validator not-WE-hosted + not-FUI; open CLI must be a complete standalone floor — the Spectral/axe-core test) + ONE genuine fork: validator home = Plateau-suite open-core (free CLI floor + optional hosted Plateau service) vs independent open devtool repo. Recommended default Plateau open-core ~75%: pure independent OSS is purest decoupling but a solo-dev pre-community standard won't get a community runner (vectors left with no runner); open-core guarantees a runner without re-coupling reputation, aligns with constellation layering (#091 served-product->plateau-app, #475 impl capability=Plateau service) + open-core monetization (#089-#093,#398) with the free/paid line on the cost/hosting axis (free local CLI vs hosted), never open-vs-proprietary. Residual ~25%: single-constellation perception risk — if Plateau reads as de-facto WE owner a validator bug can still splash onto WE despite the formal split; mitigation = the two invariants applied structurally (permissive license, self-hostable, forkable; vectors in WE repo). Independent neutral-governance repo is the correct override IF a genuine multi-implementer community forms. Full grounding in reports/2026-06-18-conformance-validator-home.md.",
+  "dateOpened": "2026-06-18",
+  "lastReviewed": "2026-06-18",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "conformance",
+    "validator",
+    "schema-validation",
+    "vectors",
+    "open-core",
+    "plateau",
+    "monetization",
+    "reputational-risk",
+    "test262",
+    "wpt",
+    "json-schema",
+    "spectral",
+    "axe-core",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

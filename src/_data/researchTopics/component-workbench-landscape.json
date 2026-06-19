@@ -1,0 +1,22 @@
+{
+  "id": "component-workbench-landscape",
+  "title": "Component-workbench / docs-tool landscape — Storybook and its peers",
+  "status": "open",
+  "summary": "The consolidated inventory of Storybook-like tools that document component libraries (backlog #624, first stage of the Web Docs feature-pipeline epic #623). Until now only Storybook + Mintlify were named (as ingest targets in #426); this enumerates the whole landscape across five axes so the feature-surface sweep (#625) and the derive-to-WE-standards decision (#626) have a complete, reproducible source list. The five axes: (1) local OSS workbenches — Storybook (category anchor; v9 folded test/a11y/visual into core), Histoire (Vite-native, pre-v1 one-maintainer caution), Ladle (reads CSF directly), React Styleguidist + Pattern Lab (both retiring; their ideas — docs-from-source, Atomic Design taxonomy — survive the tools). (2) docs platforms — Docusaurus, Nextra, Starlight (native-first, near-zero JS — the philosophical model for a WE-native surface) vs hosted Mintlify, GitBook, ReadMe. (3) hosted design-system catalogs — Zeroheight, Supernova, Knapsack, Bit; Backlight RETIRED (divRIOTS shut it 1 Jun 2025 — signal that the fully-hosted browser design-system-IDE model did not endure). (4) visual-test/publish — Chromatic, Percy, Applitools vs OSS self-hostable Lost Pixel. (5) machine-readable inventory formats — Custom Elements Manifest (CEM), CSF3, web-types, api-viewer, react-docgen. Two load-bearing priors handed to #626: (a) CEM is the format Web Docs should EMIT — web-component-native declarative JSON already consumed by Storybook-for-web-components, api-viewer (a single zero-build web component that renders CEM as live docs+playground — the closest analog to a WE-native docs element), and IDEs; CSF3/react-docgen are ingest sources, not emit targets; (b) the open-core seam is market-validated — every commercial tier (Chromatic, Zeroheight, Mintlify-hosted) has an OSS/self-hostable counterpart (Lost Pixel, Docusaurus/Starlight, Storybook), exactly the free-OSS-workbench + paid-hosted-conveniences shape #398 plans. This corpus is complementary to benchmarkCorpus.json: that is the design systems Web Docs renders, this is the tools Web Docs competes with and ingests from. Registry in src/_data/workbenchTools.json; full grounding in reports/2026-06-14-component-workbench-landscape.md.",
+  "dateOpened": "2026-06-14",
+  "lastReviewed": "2026-06-14",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "storybook",
+    "inventory",
+    "landscape",
+    "benchmark",
+    "registry",
+    "custom-elements-manifest",
+    "open-core"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "webdocs-incumbent-ingestion-adapters",
+  "title": "Web Docs incumbent-ingestion adapters — Storybook (CSF) & Mintlify to the webcases pivot",
+  "status": "open",
+  "summary": "Prior-art survey + architecture prep for decision #426 (the adapter home/import fork that governs every webdocs ingestion adapter — #426 Storybook, #429 Mintlify, future Docusaurus), under epic #398 (Web Docs product). A webdocs ingestion adapter is a bottom-up normalization-hub shim (the #150 lossy-pivot direction): read an existing component-docs source and emit the webcases pivot the #424 generator consumes — WebCase = {id,title,description,code}, WebCases = Record<blockId, WebCase[]> (webdocs/generator.ts:27-46). Storybook (CSF 3): one Meta default export + N named Story exports per *.stories.* module; id ← story export key / @storybook/csf toId(); title ← story name or startCase(exportKey); description ← JSDoc above the story / parameters.docs.description.story; code ← verbatim story source or parameters.docs.source.code (the runtime 'dynamic' snippet is framework-specific, post-render — prefer the literal). Lossy/no-equivalent: args/argTypes control matrices, play interaction tests, decorators (so code isn't self-contained), multi-framework renderings. Reuse @storybook/csf-tools (readCsf/loadCsf → CsfFile.parse(), Storybook's own indexer) + @storybook/csf (toId, storyNameFromExport); .mdx docs via @mdx-js/mdx + remark-mdx. Mintlify: docs.json nav config + *.mdx pages with YAML frontmatter; id ← MDX path/slug, group ← navigation.groups[].group; title/description ← frontmatter; code ← fenced blocks / <CodeGroup> / <RequestExample>. Lossy: interactive OpenAPI playground, component embeds (<Card>/<Tabs>/<Steps>), nav hierarchy, multi-language CodeGroup sets, prose body. Reuse gray-matter + @mdx-js/mdx + remark + unist-util-visit; JSON.parse for docs.json. Cross-cutting: both sources are page/module-grained not case-grained (CSF fans out one-case-per-story naturally; Mintlify needs a per-page-vs-per-snippet granularity choice); the lossy cells ARE the normalization-hub's comparative value — flag, never silently drop. Two forks brought to DoR: (Fork 1, adapter home) co-locate in webeverything/webdocs/adapters/ next to the pivot [recommended — matches the in-repo ingest precedent scripts/validation-normalize/adapters/eslint.mjs, both adapter families live in webeverything, FUI has no @we/webdocs reach: tsconfig.json:20-26 / vite.config.mts:126-132] vs adapters in FUI which first requires exposing the pivot [honors the literal 'adapters→FUI' line of the #091 layering ruling but splits the generator's input-shim across a repo boundary]; (Fork 2, contract shape) a plain per-source provider module {source, ingest} → WebCases [recommended — author-time devtools provider seam per the runtime-DI-vs-provider rule, NOT a CustomXRegistry] vs a CustomWebcasesAdapterRegistry [cargo-cult: no runtime consultation]. Full grounding in reports/2026-06-13-webdocs-ingestion-adapter-home.md.",
+  "dateOpened": "2026-06-13",
+  "tags": [
+    "webdocs",
+    "frontier-ui",
+    "adapters",
+    "ingestion",
+    "storybook",
+    "mintlify",
+    "normalization-hub",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

@@ -9,9 +9,10 @@ import {
   type RequirementRecord,
   type RequirementRegistries,
 } from '../requirementValidator';
+import { intents as intentsData } from '../../src/_data/intents.data'; // per-intent specs assembled via Vite glob (#1145)
 
 const require = createRequire(import.meta.url);
-const intents = require('../../src/_data/intents.json') as RequirementRegistries['intents'];
+const intents = intentsData as unknown as RequirementRegistries['intents'];
 const semantics = require('../../src/_data/semantics.json') as RequirementRegistries['semantics'];
 const protocols = require('../../src/_data/protocols.json') as RequirementRegistries['protocols'];
 

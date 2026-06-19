@@ -1,0 +1,23 @@
+{
+  "id": "fui-catalog-family-denominator",
+  "title": "FUI catalog-block-family denominator + dir→WE-spec mapping rule",
+  "summary": "Prep research for decision #783 (slice b of the FUI block-catalog completeness epic #731, executing the #706 ruling). #706 ratified a fixed invariant — every implemented frontierui/blocks/ family must resolve to ≥1 manifest entry, gated like WE's check-demos forces every demo folder to be registered — but left the load-bearing word FAMILY undefined: the gate's DENOMINATOR (which blocks/ dirs are catalog families vs infra), the dir→WE-spec MAPPING rule, and what to do with no-spec dirs. Verified the tree: blocks/ has 24 dirs; FUI's impl manifest (src/_data/blocks.json, 23 entries, filled by the resolved #737) already carries a sourcePath on every entry pointing at the dir it realizes (blocks.json:10 'blocks/stores/simple'). With renderers/ (index.ts:11 re-exports the published @frontierui/jsx-runtime #265 + data-grid-internal helpers), traits/ (FUI trait impls governed by the SEPARATE traits.json gate, check-standards.mjs:95-116), and __tests__/ set aside, all 21 remaining top-level dirs already map — so a top-level-dir denominator is GREEN TODAY with zero new entries; the disease #706 named (16 whole families unpublished) is cured by #737, the gate keeps it cured. Most of #783 is NOT a decision once classified: (1) MAPPING = sourcePath-anchored, not name-matched — forced invariant handling name-mismatch (stores→simple-store, navigation→nav-list, transient→transient-component, text-nodes→interpolation-text-node, audit→audit-trail) and multi-block (parsers→3 specs) BY CONSTRUCTION; a dir-name==id rule is broken; (2) INFRA exclude-set {__tests__, traits, renderers} — forced (tests; double-governed traits; a published-package re-export); (3) no-WE-spec DIRS are exactly the three infra dirs → exclude. PRIOR ART (CEM analyzer, Storybook, Nx) converges: discovery keys off an explicit MARKER with the unit's name DECOUPLED from its directory path (CEM resolves tag names from customElements.define(), never dirname; Storybook globs *.stories.* files; Nx keys off project.json marker files), infra excluded by absence-of-marker not a denylist — strongly confirming the sourcePath mapping invariant and steelmanning the registration-name granularity branch. The ONE genuine on-merit fork: denominator GRANULARITY — A flat top-level dir + explicit infra exclude-set (recommended: mirrors check-demos which #706 cited, pure-filesystem/implementer-agnostic, deterministic, green today; blind to same-dir sibling drift like nav:section) vs B registered-name (catches nav:section, but couples the WE-standard-owned invariant to FUI's registration convention + reintroduces an internal-exclusion list for the call/pipe/value sub-parsers). Recommend A [med-high]. Rejected sub-option: leaf-dir recursion (reintroduces the internal-exclusion problem AND still misses same-dir siblings). Captured follow-up (not a fork branch): nav:section (NavSectionBehavior, a registered W3C-APG Disclosure Navigation behavior) has no WE spec — file a build to author it, independent of the gate. Layer: a build-time devtools/check, no runtime/DI/Protocol; the invariant is WE-standard-owned, the denominator code is FUI's instantiation (#784). Full grounding in reports/2026-06-16-fui-catalog-family-denominator.md.",
+  "status": "open",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "frontierui",
+    "webdocs",
+    "catalog",
+    "completeness-gate",
+    "derived-manifest",
+    "denominator",
+    "dir-mapping",
+    "custom-elements-manifest",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

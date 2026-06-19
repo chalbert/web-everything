@@ -10,13 +10,13 @@
 const fs = require('fs');
 const path = require('path');
 const { loadBlocks } = require('../../scripts/lib/blocks-loader.cjs');
+const { loadIntents } = require('../../scripts/lib/intents-loader.cjs');
 
 const ROOT = path.join(__dirname, '../..');
-const readJson = (rel) => JSON.parse(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
 
 module.exports = () => {
   const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
-  const intents = readJson('src/_data/intents.json');
+  const intents = loadIntents(); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
   const byId = (arr, id) => arr.find((x) => x.id === id);
 
   const resolve = (id) => {

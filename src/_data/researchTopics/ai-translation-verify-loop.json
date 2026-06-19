@@ -1,0 +1,23 @@
+{
+  "id": "ai-translation-verify-loop",
+  "title": "AI-assisted translation — the \"AI proposes, the standard verifies\" loop for webintl",
+  "status": "open",
+  "summary": "Grounds #664: an AI-assisted translation capability that turns a source-locale MF2 message catalog into target-locale catalogs, applying the settled vision-is-a-service ruling (#475) and the linear-cost on-device-floor pricing pattern (#488). The capability is a PLATEAU SERVICE the WE project consumes through a thin swappable client seam — NOT an @webeverything artifact — because translation is an implementation capability, not a standard (no-leakage: only the produced catalog reaches the standard). The one durable @webeverything edge is the VERIFICATION, now codified in the localization protocol contract: a produced catalog is provably-conformant (preserves every MF2 placeholder/selector/markup part, covers the target locale's CLDR plural/gender categories, no untranslated-but-claimed keys, no placeholder-arity drift). This is the #089 white-space loop — incumbents (Lokalise/Phrase/DeepL) produce plausible translations; ours produces provably-conformant ones because webintl gives a machine-checkable target. The pricing model is NOT re-opened: on-device (browser Translator/Language-Detector API + small open MT — NLLB-200/MADLAD-400/Opus-MT) is the bundled default/floor, hosted-API + BYO-key is the metered bridge for low-resource pairs and quality-sensitive copy, with per-locale-pair graduation benchmarks (#488 cadence). Three translation-specific open questions remain (research, not blocking forks): (1) which locale-pairs clear the on-device conformance bar today vs need the hosted bridge; (2) whether the (source, target, verdict) corpus becomes a distillation dataset for an on-device fine-tune the way the #488 vision verdict cache does; (3) catalog- vs message-level invocation and how MF2 markup parts survive a non-MF2-aware model (pre/post placeholder-masking in the client seam). The executable conformance harness is a deferred build that lands when the localization protocol graduates from `concept`.",
+  "dateOpened": "2026-06-15",
+  "lastReviewed": "2026-06-15",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "translation",
+    "localization",
+    "webintl",
+    "plateau-service",
+    "no-leakage",
+    "on-device",
+    "byo-key",
+    "ai-proposes-standard-verifies",
+    "mf2"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintl"
+}

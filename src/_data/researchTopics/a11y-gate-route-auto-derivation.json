@@ -1,0 +1,26 @@
+{
+  "id": "a11y-gate-route-auto-derivation",
+  "title": "Auto-deriving the rendered-site a11y gate's route set — sitemap vs build-dir glob vs collection reconstruction, and which pages to gate",
+  "status": "open",
+  "summary": "Prep research for decision #774: replace the hand-maintained a11y-gate route allowlist (tests/a11y/route-allowlist.ts, #770) with auto-derivation from the 11ty collection/sitemap so every published page is gated without a hand-edit. Two coupled non-mechanical questions block any code — SCOPE (what does 'every published page' resolve to?) and MECHANISM (no sitemap exists today — /sitemap.xml 404s — so what artifact does the Playwright gate read?). Grounding: pages come from pagination over _data collections, ONE template per collection (src/intent-pages.njk:6 permalink intents/{id}/, block-pages.njk:6, backlog-pages.njk:6, research-topic-pages.njk:6 — 26 paginating templates); a full build emits 2,129 index.html files (~790 under /backlog/). Load-bearing tree fact: a violation on a detail page is almost always a SHARED-TEMPLATE bug (all ~N intents share intent-pages.njk), so one sampled detail page per template catches it. `eleventy --serve` serves from memory and does NOT populate _site (only `build:docs = eleventy` writes it), so a _site/** glob would need an extra build step the dev-server-reusing Playwright lane doesn't run. Prior art reshaped the forks: (1) a11y practice explicitly recommends AGAINST testing every page on a large site AND against homepage-only — 'focus on templates and critical paths', 'representative samples across all page types and templates' (Pope Tech, TestParty) — which makes scope-A (all 2,129) the discouraged extreme and scope-B (index-only) the homepage-only anti-pattern, and surfaces a THIRD scope the item didn't name: index surfaces + one representative detail page per collection-template (recommended default). (2) pa11y-ci's `--sitemap` (with --sitemap-find/replace/exclude) is THE canonical auto-derivation from a sitemap; Lighthouse CI's staticDistDir globs a build dir but has a documented limitation — only ROOT-level files are collected, nested subdirs skipped (LHCI issue #95) — exactly our nested /intents/{id}/ case; so authoring a sitemap.njk over collections.all (also a real SEO win) is the prior-art-blessed mechanism, beating glob (nested-dir limitation) and _data-reconstruction (re-implements permalink logic that lives in 26 templates → drift). (3) preserve-#793's-9-enforced-routes is a FORCED INVARIANT not a fork — 'reset all to warn' is broken; keep an explicit ENFORCED_ROUTES set seeded with the 9, new derived routes enter warn-only (most-permissive). Classification: devtools quality gate (kin to check:standards), zero lock-in, no protocol minted (sitemap is the sitemaps.org artifact, axe IS the WCAG engine — both consumed not re-specified), mirrored per-repo (FUI #771 derives from its own sitemap). Recommended: scope = index + per-template sample; mechanism = sitemap.njk parsed by the gate; enforce preserved via seeded ENFORCED_ROUTES. Full grounding in reports/2026-06-16-a11y-gate-route-auto-derivation.md.",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "accessibility",
+    "a11y",
+    "ci-gate",
+    "axe-core",
+    "playwright",
+    "pa11y",
+    "lighthouse-ci",
+    "sitemap",
+    "eleventy",
+    "wcag",
+    "devtools",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}

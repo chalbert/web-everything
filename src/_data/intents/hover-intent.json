@@ -1,0 +1,31 @@
+{
+  "id": "hover-intent",
+  "name": "Hover Intent",
+  "requiresCapabilities": [],
+  "status": "draft",
+  "summary": "A standalone trigger-transition concern (ratified #609 Fork 2A): open/close a revealed surface on hover with INTENT — tolerate diagonal trigger→panel travel and don't open on an incidental pass-through. UX-only and orthogonal to the anchor intent's placement/dismissal; composed by reveal-nav, menu submenus, and hovercards. The technical mechanic (delay vs CSS safe-area vs JS pointer polygon) is NOT here — it's a Technical Configurator card.",
+  "dimensions": {
+    "openIntent": {
+      "description": "How deliberate a hover must be to open — deliberate ignores an incidental pass-through (the sensible default); eager opens the moment the pointer enters",
+      "values": [
+        "deliberate",
+        "eager"
+      ]
+    },
+    "travelForgiveness": {
+      "description": "Whether the pointer may cut diagonally from the trigger across to the panel without closing it — forgiving tolerates the diagonal corridor (default); strict closes on any pointer-leave",
+      "values": [
+        "forgiving",
+        "strict"
+      ]
+    },
+    "touch": {
+      "description": "The touch fallback, since hover has no touch equivalent — tap-toggle (first tap opens, the most-permissive default) or none (hover-only, pointer devices)",
+      "values": [
+        "tap-toggle",
+        "none"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">A small, standalone <strong>trigger-transition</strong> concern ratified in <a href=\"/backlog/609-candidate-standard-reveal-navigation-menus-mega-menu-hover-d/\">#609</a> (Fork 2A): opening and closing a revealed surface on hover <em>with intent</em> — <strong>tolerate diagonal travel</strong> from the trigger to the panel, and <strong>don't open on an incidental pass-through</strong>. It is <strong>orthogonal to the <a href=\"/intents/anchor/\">anchor</a> intent</strong> (placement + dismissal) — a reveal composes both: anchor positions the panel, hover-intent decides <em>when</em> the hover counts. Composed by reveal-nav, menu submenus, and hovercards.</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>openIntent</code>: <code>deliberate</code> (ignore an incidental pass-through — the sensible default) vs <code>eager</code> (open on enter).</li><li><code>travelForgiveness</code>: <code>forgiving</code> (tolerate the diagonal trigger&rarr;panel corridor — default) vs <code>strict</code> (close on pointer-leave).</li><li><code>touch</code>: <code>tap-toggle</code> (the most-permissive touch fallback — first tap opens) vs <code>none</code>.</li></ul><h3>UX-only &rarr; the mechanic is a Configurator card</h3><p class=\"text-sm text-gray-600 mb-2\">The <em>how</em> — delay-only timers vs a CSS safe-area bridge vs a JS pointer-direction safe-triangle polygon — is a technical strategy, <strong>not</strong> part of this intent. It is authored as a <strong>Technical Configurator</strong> domain (open-delay / close-delay / safe-area strategy / touch) in plateau-app, per intent-UX-only&rarr;configurator. Grounded in the reveal-nav design sweep (<a href=\"/research/design-sweep-navigation-menus/\">/research/design-sweep-navigation-menus/</a>).</p>"
+}

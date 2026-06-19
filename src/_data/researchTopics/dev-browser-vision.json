@@ -1,0 +1,21 @@
+{
+  "id": "dev-browser-vision",
+  "title": "Dev-browser Vision",
+  "status": "open",
+  "summary": "Market-landscape and repo-machinery survey grounding backlog #141's four open design forks for a Chromium-based developer browser whose tooling lights up only on a standard-conformant app, depth scaling with conformance. The novel move is gating on a vendor-neutral standard rather than a framework (React/Vue/Redux DevTools are the only precedent, framework-gated). Fork 1: gate on a capability manifest and degrade per-feature (reuse the capabilityMatrix vocabulary), not all-or-nothing. Fork 2: reuse the existing verify-gated conformance-autofix loop generalized to a running app — autonomy is a configured ladder defaulting to open-PR-for-review, and live-patching a deployed app is session-only, revertible, authorization-gated. Fork 3: yes a commercial license (free panel funnel → paid browser, cost-flat open-core), deferred to first-sale. Fork 4: a distinct shell embedding plateau-app's existing configurator/profile panels, not a fork of it. The sequencing fork (extension/panel first) is already ruled.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "dev-browser",
+    "chromium",
+    "introspection",
+    "conformance",
+    "capability-manifest",
+    "autofix",
+    "monetization",
+    "local-first",
+    "plateau",
+    "vision"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

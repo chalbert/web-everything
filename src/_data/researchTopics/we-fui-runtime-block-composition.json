@@ -1,0 +1,26 @@
+{
+  "id": "we-fui-runtime-block-composition",
+  "title": "Runtime Block Composition Across the WE↔FUI Boundary",
+  "summary": "Prior-art survey grounding #812 (the consumption-path decision that gates the #697 blocks-deletion cutover): can a UI implementation (FUI) be consumed by a separately-owned host (WE) at RUNTIME as composable component classes/factories — not just pre-rendered embedded widgets — across a trust boundary, without that collapsing into a runtime import? Surveyed Webpack 5 Module Federation, Angular Native Federation, import-maps/ESM-CDN, web-components-as-federation-unit, the Geers/Fowler micro-frontend taxonomy, and real cross-trust SDKs (Stripe Elements, Intercom). Decisive finding (high confidence): the dividing line across every pattern is class vs. element/mount — boundary-PRESERVING runtime patterns hand the host an opaque unit (iframe / custom element / render-function signature) and the host composes around it; boundary-COLLAPSING patterns hand over the class/module (Module Federation, ESM-CDN), which is a runtime import by another name with identical trust blast radius (the code runs in the host's realm with the host's privileges, sharing its dep graph). So #812's option (c) — 'extend #765's SDK to hand the app composable FUI block classes at runtime' — is struck: it is the #707-forbidden import with extra ceremony, not a principled third path. #765's in-document mount of a PRE-RENDERED component behind a shadow root is the correct, prior-art-aligned managed-mount shape and structurally cannot give an app composable classes — so the exercise apps that need classes to wire behaviors must live in FUI (#812 Fork 1, option a), and the loader→background handoff demo decouples onto the escalation contract (#812 Fork 2, option d). Full grounding in reports/2026-06-16-812-runtime-block-composition-boundary.md.",
+  "status": "open",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "constellation",
+    "boundary",
+    "blocks",
+    "micro-frontends",
+    "module-federation",
+    "web-components",
+    "trust-boundary",
+    "runtime-composition",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "background-task-surface",
+    "resource-loader"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

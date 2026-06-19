@@ -1,0 +1,23 @@
+{
+  "id": "per-component-api-data-sourcing",
+  "title": "Per-component API data sourcing for the Web Docs props table (authored vs FUI CEM analyzer)",
+  "summary": "Decision prep for #801 (slice of Web Docs feature pipeline epic #623). The props-table renderer (block:props-table #654) and the CEM protocol + emit pipeline (scripts/gen-cem.mjs #653) already ship, but gen-cem.mjs:43-93 projects only events/exports/tagName and custom-elements.json carries 0 attributes/slots/cssProperties for all 74 blocks — so the table has no data for four of its six member kinds. #801 frames the call as a boundary fork: A hand-authored blocks.json fields (WE-side declared contract, projected by gen-cem) vs B an FUI-side CE-manifest analyzer over FUI block source shipped to WE as data. GOVERNING PRECEDENT: #706 (resolved) already dissolved the same authored-vs-impl-scan question into invariant+dimension — derivation-source is a SUPPORTED DIMENSION (authored | impl-scan | hybrid, all emitting the same CEM contract) with WE shipping authored->CEM (#626/gen-cem) as the default/reference source, impl-scan opt-in (#785 documented it). So #801 is the application of that ruling to WE’s own props-table; the default is already named = authored. BOUNDARY: for WE’s own reference docs, B (an FUI build artifact consumed as WE’s canonical SoT) is EXCLUDED by the docs-rendering boundary (@webeverything never consumes FUI artifacts as canonical; WE renders its own standard pages) and inverts contract-first (WE declares, FUI implements). WE already authors the public contract WE-side: blocks.json declares events (type-ahead’s 3 events w/ detail/taxonomy) that gen-cem projects — attributes/slots/cssProperties/cssParts are the same nature. DECISIVE PRIOR ART: the CEM analyzer CANNOT auto-derive slots, CSS custom-properties, or CSS parts — those are hand-authored as JSDoc in source regardless (analyzer getting-started: it figures out most of the API but needs JSDoc help for CSS Shadow Parts, CSS Custom Properties and Slots; Shoelace/Lit manually add @slot/@csspart/@cssproperty and the analyzer scrapes them). So four of the six props-table columns are hand-authored either way — B’s headline advantage (zero authoring, single impl SoT) is false for exactly the fields the table needs; the only question is which repo’s file the authored contract lives in, and the boundary answers WE-side. The only class the analyzer genuinely automates is the programmatic JS surface (non-reflected fields/methods) — the impl-volatile, FUI-owned surface. After the fork-existence test: TWO FORCED INVARIANTS — I1 source = authored WE-side blocks.json -> gen-cem -> CEM (alt broken for WE docs); I2 field shapes mirror CEM 2.1.0 member kinds, no bespoke schema (#654 consumesCemNotBespoke). The FUI analyzer survives as the #706 opt-in impl-scan dimension + the engine of a conformance gate (analyzer CEM checked vs WE-declared CEM, failing on drift — #463 posture). ONE GENUINE ON-MERIT FORK: scope of the authored contract — A full CEM member set incl. programmatic JS members/methods (pulls FUI’s impl-volatile surface into the WE standard) vs B platform-facing contract surface only (attributes, reflected properties, events, slots, cssProperties, cssParts; defer non-reflected JS members/methods to the #706 opt-in impl-scan). Recommend B [med-high] — the platform-facing surface IS the standard’s contract and must be authored regardless; the programmatic surface is FUI’s and the only class an analyzer adds value for. Captured follow-ups (builds, not forks): extend gen-cem + props-table page-integration; backfill authored member fields; conformance gate. Layer: no new runtime/DI/Protocol/Block/Intent — authored data on the existing custom-elements-manifest protocol (#653), projected by the existing gen-cem devtool. Full grounding in reports/2026-06-16-per-component-api-data-sourcing.md.",
+  "status": "open",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "frontierui",
+    "custom-elements-manifest",
+    "props-table",
+    "derivation-source",
+    "boundary",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "props-table"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

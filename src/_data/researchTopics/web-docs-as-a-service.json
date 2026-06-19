@@ -1,0 +1,21 @@
+{
+  "id": "web-docs-as-a-service",
+  "title": "Web Docs as a Service",
+  "status": "open",
+  "summary": "Docs-as-a-service prior-art survey (Mintlify, Docusaurus, ReadMe, GitBook, Storybook+Chromatic, plus conformance/coverage dashboards) grounding backlog #091's three follow-ons before any code. The market splits ingestion two ways — docs-as-code (source of truth stays in the customer's repo) vs platform-first (vendor becomes the source of record, the lock-in WE refuses). WE is structurally docs-as-code: a customer's webmanifest+webcases are the source, so Plateau resolves and serves but never owns content (the Mintlify model). The conformance differentiator already exists on disk — reuse the /protocols/ index + capabilityMatrix + continuous-verification machinery as one pipeline, not a parallel bolt-on dashboard. Home: a managed offering under the Plateau umbrella, resolved in lockstep with Module-as-a-Service (#081), graduating to its own project only when a second consumer demands it. The open premise holds only if the webdocs generator stays self-hostable: paid = licensed hosting, not the generator.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "monetization",
+    "webdocs",
+    "plateau",
+    "docs-as-code",
+    "conformance",
+    "hosting",
+    "open-core",
+    "documentation",
+    "mintlify"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

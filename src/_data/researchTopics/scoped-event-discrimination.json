@@ -1,0 +1,26 @@
+{
+  "id": "scoped-event-discrimination",
+  "title": "Scoped Event Discrimination for Resource Loaders",
+  "status": "open",
+  "summary": "Analyzing how listenForScoped discriminates between concurrent resource loaders in the same scope, the relationship between loader events and tracing, and how trace context flows through resource requests.",
+  "dateOpened": "2026-02-23",
+  "tags": [
+    "events",
+    "scoping",
+    "resource-loader",
+    "tracing",
+    "instanceof",
+    "discrimination"
+  ],
+  "relatedBlocks": [
+    "resource-loader",
+    "resource-action",
+    "broadcast",
+    "router"
+  ],
+  "relatedPlugs": [
+    "webevents",
+    "webresources"
+  ],
+  "relatedProject": "webevents"
+}

@@ -1,0 +1,26 @@
+{
+  "id": "ejectable-composition-recipes",
+  "title": "Ejectable composition recipes — what a build-your-own-component assembler emits, and where it lives",
+  "status": "open",
+  "summary": "Prior-art survey grounding the assembler-shape decision #652 (under epic #646), the ergonomic home #609 named for pure-composition meta-components (nav-list + disclosure + anchor + hover-intent wired together, which earn no block). The question: what format a preset emits on eject, and where the tool sits relative to the #623-627 Web Docs catalog pipeline. The decisive precedent is shadcn/ui's distribution model — 'not a component library, a code-distribution platform': you copy plain source INTO your repo and own it (no runtime dependency), and a thin registry-item.json wrapper ({name, type:'registry:block', files:[{path,content}], registryDependencies}) is merely the CLI transport that CARRIES the code, never a replacement for it. Webstudio/Webflow/Builder.io corroborate (visual builders that export clean, host-anywhere HTML/CSS/JS to dodge lock-in); Lit/Web Components reinforce the no-runtime-framework invariant. The load-bearing reshaping: #652 Fork 1's framing of 'plain markup vs CEM-aligned descriptor vs bespoke recipe JSON' is a FALSE trichotomy — those three live on three orthogonal layers that COEXIST, not rival payloads. (1) The ejectable payload (what the author owns) = plain markup + WE declarative wiring — forced invariant under #609's constraints, the only option that is literally 'the standard, ejected'. (2) The API descriptor (optional export of the result) = CEM, already ratified-recommended as WE's component-API-metadata protocol by #626 — it describes the composed meta-component's API surface, never its internal wiring. (3) The distribution wrapper (how presets are stored/shared, the INPUT side) = a registry-item-shaped manifest carrying the payload — the same artifact that answers Fork 2's shared-registry question. So Fork 1 collapses to a forced invariant (plain markup+wiring) + support-all additional emit targets; the only genuinely rejected branch is a bespoke project-facing recipe JSON handed to the author INSTEAD of markup (the lock-in minimize-lock-in refuses, and shadcn shows it is unnecessary). Classification: the assembler is devtools (author-time tool, not a running-app seam) so zero lock-in / no protocol; the preset store is a registry it reads, sibling to workbenchFeatures.json/workbenchTools.json (one-capability-many-consumers); bias-toward-separation keeps the authoring tool distinct from the catalog/served-product surface (#627). Full grounding in reports/2026-06-15-assembler-recipe-emit-prior-art.md.",
+  "dateOpened": "2026-06-15",
+  "lastReviewed": "2026-06-15",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "devtools",
+    "composition",
+    "assembler",
+    "eject",
+    "shadcn",
+    "custom-elements-manifest",
+    "zero-lock-in",
+    "prior-art",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "nav-list"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

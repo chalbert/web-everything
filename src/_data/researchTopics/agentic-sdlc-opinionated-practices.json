@@ -1,0 +1,22 @@
+{
+  "id": "agentic-sdlc-opinionated-practices",
+  "title": "Agentic-SDLC opinionated practices — each as a configurable dimension, not a mandate",
+  "status": "open",
+  "summary": "Grounds the composable/configurable thesis of the self-driven-project methodology (#690/#672/#703): a competitive survey of how the field runs agentic/autonomous software delivery, with every opinionated practice extracted and classified per the WE fork-existence + dimension-vs-fixed-mechanic tests into a configurable dimension (default = most-flexible), a fixed invariant, or a recipe-level house-style knob. Web-verified sources: ASDLC.io (micro-commits + merge-to-main human-accountability boundary), Tessl (spec-centric framework + Spec Registry), CodeRabbit (AI-review-in-loop with YAML custom rules), Swarmia (DORA/SPACE metrics + working agreements), and arXiv 2509.06216 (Hassan et al., SE 3.0 foundational pillars, ACE/AEE, Merge-Readiness/Consultation packs); GitOps/OpenGitOps, OSCAL, SPDX and arXiv 2510.19692 summarized from prior knowledge as candidate. The structural finding: almost nothing is a fixed invariant (only the everything-as-code foundation — declarative + version-controlled, the OpenGitOps floor — and gate-checks-outcome-not-authoring-order resist a knob); MOST field-mandated practices are not new dimensions but map onto WE's two existing axes — the autonomy-level ladder (#141/#690: merge boundaries, mandatory review, consultation packs, PR-vs-direct) or a value/risk-ODD tolerance (coverage/quality/metrics thresholds) — which is the strongest confirmation of #690's two-layer framing. The few genuinely-new dimensions are small (commit-granularity, branching-model, test-timing, squash/merge), each defaulting most-flexible; house-style items (commit-msg format, conventional commits) are recipe knobs. Feeds #672 Layer 1's autonomy-level registry + value/risk-ODD dimension registry + default-recipe knob values. No classification here is a blocking fork — they are defaults to ratify in #672.",
+  "dateOpened": "2026-06-15",
+  "lastReviewed": "2026-06-15",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "self-driven-project",
+    "agentic-sdlc",
+    "configurable-dimensions",
+    "most-flexible-default",
+    "autonomy-levels",
+    "everything-as-code",
+    "recipes",
+    "odd",
+    "no-lock-in"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

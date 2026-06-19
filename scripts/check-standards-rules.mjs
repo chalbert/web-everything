@@ -579,11 +579,16 @@ export const FILE = {
   DesignSystem: 'src/_data/designSystems.json',
 };
 
+// Entities split one-file-per-id: the descriptor `file` must point at the per-entry spec, not the (now
+// virtual) monolith — so the autofix write-target is real AND the #1144 --scope/--local lane attribution
+// matches the file a lane actually dirties. Block #882, Intent + Research #1145.
+const PER_ID_SPEC_DIR = { Block: 'blocks', Intent: 'intents', Research: 'researchTopics' };
+
 /** The per-block spec file a Block fixer edits (#882 — replaces the former single blocks.json row). */
 export const blockSpecFile = (id) => `src/_data/blocks/${id}.json`;
 
-/** Resolve the descriptor `file` write-target for an entity kind: per-id for Block, the registry otherwise. */
-export const fileFor = (kind, id) => (kind === 'Block' ? blockSpecFile(id) : FILE[kind]);
+/** Resolve the descriptor `file` write-target for an entity kind: per-id for split entities, the registry otherwise. */
+export const fileFor = (kind, id) => (PER_ID_SPEC_DIR[kind] ? `src/_data/${PER_ID_SPEC_DIR[kind]}/${id}.json` : FILE[kind]);
 
 // A spec entity with no matching description .njk — the model writes the prose; `file` is the path to create.
 export const dMissingDescription = (entity, id, file) =>
@@ -795,7 +800,7 @@ export function validateIntent(intent, ctx) {
   for (const f of ['id', 'name', 'summary', 'status', 'dimensions']) {
     if (intent[f] === undefined || intent[f] === null || intent[f] === '')
       err(`Intent "${intent.id || '<no id>'}" missing required field "${f}"`,
-        dMissingField('Intent', intent.id, FILE.Intent, f));
+        dMissingField('Intent', intent.id, fileFor('Intent', intent.id), f));
   }
   for (const e of checkStatus('Intent', intent.id, intent.status)) err(e.message, e.descriptor);
   const dimCount = intent.dimensions && typeof intent.dimensions === 'object'
@@ -810,7 +815,7 @@ export function validateIntent(intent, ctx) {
       for (const capId of intent.requiresCapabilities)
         if (!capabilityIds.has(capId))
           err(`Intent "${intent.id}" requires unknown capability "${capId}" — not in capabilities.json`,
-            dUnresolvedRef('Intent', intent.id, FILE.Intent, 'requiresCapabilities', capId, 'capabilities.json'));
+            dUnresolvedRef('Intent', intent.id, fileFor('Intent', intent.id), 'requiresCapabilities', capId, 'capabilities.json'));
     }
   }
   return { errors, warnings };

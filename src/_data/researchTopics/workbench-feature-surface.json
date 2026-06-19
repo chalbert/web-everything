@@ -1,0 +1,22 @@
+{
+  "id": "workbench-feature-surface",
+  "title": "Workbench feature surface — capability × tool matrix for Web Docs",
+  "status": "open",
+  "summary": "The cross-tabbed feature surface (capability × tool) over the workbench/docs-tool landscape from #624 — stage 2 of the Web Docs feature-pipeline epic #623, raw material the derivation decision #626 classifies. Registry: src/_data/workbenchFeatures.json (20 features in 7 groups: render, authoring, controls, testing, theming, discovery, distribution). Each feature records which landscape tools ship it, ubiquity (table-stakes→niche), a one-line 'what a WE-native version would need', and the load-bearing weStatus column that pre-classifies it for #626: reuse-existing / extend-existing / new-surface / out-of-scope. The decisive finding: roughly two thirds of the surface already maps to standards WE has. REUSE-EXISTING — viewport→breakpoint intent, theming + token-tables→webtheme(+data-table), a11y panel→webcompliance, navigation/IA→nav-list/tree-select/breadcrumb, i18n→webintl, analytics→webanalytics, access-control/metered→access-control+web-identity (this is what powers #398 open-core tiering), extensibility→webplugs/webregistries. EXTEND-EXISTING — args/controls→Technical Configurator fed by CEM, stories/states + interaction-tests→webcases overlap, long-form docs→webediting authoring, doc versioning→upgrader/webadapters. GENUINELY NEW surface (the small core #626 must actually design) — the component-isolation renderer, CEM-driven autodocs (the #624 emit prior; api-viewer is the zero-build proof), full-text search index, source/code view. OUT-OF-SCOPE for the standard — visual regression (a CI/hosted service → #398 hosted tier, Chromatic-paid vs Lost-Pixel-OSS) and the Figma design↔code bridge (design-tool integration; its fully-hosted form, Backlight, already failed). Net: #626 is mostly a dedupe-and-compose exercise, not a greenfield mint. Full grounding in reports/2026-06-14-component-workbench-landscape.md (landscape) + this matrix.",
+  "dateOpened": "2026-06-14",
+  "lastReviewed": "2026-06-14",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "feature-inventory",
+    "matrix",
+    "capabilities",
+    "storybook",
+    "custom-elements-manifest",
+    "open-core",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

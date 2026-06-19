@@ -1,0 +1,23 @@
+{
+  "id": "collection-operations-coordinator",
+  "title": "Collection-operations coordinator — home & shape (block vs composition vs headless instance)",
+  "status": "open",
+  "summary": "Prep prior-art survey for decision #452 (unblocks build #369; surfaced by app A #317). Builds on the settled collection-operations intent: data-table already owns filter/sort/group (applyPipeline) and pagination owns page (PageState), but nothing owns the WHOLE filter→sort→group→page pipeline over one collection, so data-table's click-to-sort sorts only the current page (#369's bug). The item framed one fork — standalone block vs documented composition — but the survey reshapes it into two axes. Home: TanStack Table (row-model pipeline ending in a pagination row model), AG Grid (RowModel + a PaginationProxy slicing the tail), and MUI X DataGrid (internal pagination after filter/sort) all run page LAST over the whole set and all own coordination in ONE place; nobody ships docs-only — confirming a standalone primitive over documented composition. Shape (the reshaping finding): the dominant home is a headless INSTANCE (TanStack 'table instance', AG Grid 'row model') that owns the pipeline and delegates rendering — neither a rendered block (MUI's fused monolith is the opposite of WE's compose-don't-merge) nor docs-only. That maps onto WE's existing DataTableBehavior/PaginationBehavior convention, so the coordinator is a headless CollectionOperationsBehavior + optional <collection-operations> element wrapper, no markup of its own. Page stage stays owned by pagination's PageState (compose, never merge); client-vs-server execution is UX-only (Technical Configurator), not a fork. No net-new vocabulary.",
+  "dateOpened": "2026-06-13",
+  "tags": [
+    "collection-operations",
+    "coordinator",
+    "data-table",
+    "pagination",
+    "composition",
+    "headless",
+    "pipeline",
+    "gap-analysis"
+  ],
+  "relatedBlocks": [
+    "data-table",
+    "pagination"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webblocks"
+}

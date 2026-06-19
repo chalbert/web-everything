@@ -1,0 +1,23 @@
+{
+  "id": "expressive-symbols-reactions",
+  "title": "Expressive symbols & reactions — emoji rendering, picker surface, sticker, reaction interaction",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #370 (a web-platform standard for emoji / sticker / reaction — genuine whitespace beside the icon intent, which covers UI iconography only). The survey (web platform standards + the benchmark design systems) says decompose into SEPARATE standards rather than one family, matching the only system that ships all of this first-class: Atlassian splits @atlaskit/emoji (glyph + EmojiPicker) from @atlaskit/reactions, where reactions imports the emoji provider but is never merged in. Four paradigms: (1) expressive-glyph rendering — a new intent sibling to icon (meaningful role=img+aria-label vs decorative aria-hidden; Unicode variation selectors VS15/VS16 + emoji modifier base / skin tone + ZWJ sequences; native-font-vs-image-set render strategy); (2) picker surface — composed, not a new primitive: a searchable popover grid over the existing droplist/autocomplete blocks specifying the browse-grid to search-listbox transform; (3) sticker — folded into glyph rendering as a custom-image-glyph mode (only Apple HIG models it first-class); (4) reaction interaction — a block + intent that consumes glyph rendering: aria-pressed toggle + aggregate count + who-reacted roster + optimistic update (Atlassian ReactionSummary contract baseline), set policy defaulting to a constrained quick-set with an allowAllEmojis escape hatch (most-shipped and most-permissive; GitHub's locked-8 is the rigid extreme), count changes announced via live-region-status. Nothing here is a protocol — no swappable-vendor interop story. Report: reports/2026-06-12-expressive-symbols-reactions.md.",
+  "dateOpened": "2026-06-12",
+  "tags": [
+    "emoji",
+    "sticker",
+    "reaction",
+    "icon",
+    "intent",
+    "accessibility",
+    "unicode",
+    "candidate-standard"
+  ],
+  "relatedBlocks": [
+    "droplist",
+    "autocomplete"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

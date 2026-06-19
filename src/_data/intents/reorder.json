@@ -1,0 +1,51 @@
+{
+  "id": "reorder",
+  "name": "Reorder Intent",
+  "status": "draft",
+  "summary": "UX-only protocol for user-mutable order of a collection — grab (whole or handle), move by pointer or keyboard, commit ephemerally or persistently, announced via live region. Manual order, distinct from Collection Operations' computed sort. Keyboard parity is part of the contract, not an add-on.",
+  "dimensions": {
+    "grab": {
+      "description": "What the user grabs to initiate a move",
+      "values": [
+        "whole",
+        "handle"
+      ]
+    },
+    "movement": {
+      "description": "Input modalities for moving an item. Keyboard is non-optional — 'both' is the conformance baseline",
+      "values": [
+        "pointer",
+        "keyboard",
+        "both"
+      ]
+    },
+    "commit": {
+      "description": "Whether the new order is written somewhere durable or lives only for the session",
+      "values": [
+        "ephemeral",
+        "persisted"
+      ]
+    },
+    "announce": {
+      "description": "How each move and the final commit are announced to assistive tech",
+      "values": [
+        "none",
+        "live-region"
+      ]
+    },
+    "scope": {
+      "description": "Reorder within one list, or move items between sibling lists",
+      "values": [
+        "within-list",
+        "cross-list"
+      ]
+    }
+  },
+  "description": "<h3>What Reorder Is</h3><p class=\"text-sm text-gray-600 mb-2\">Reorder makes the <strong>order</strong> of items in a collection user-mutable. The item set is unchanged — only their sequence changes. This is <em>manual</em> order, distinct from the <a href=\"/intents/collection-operations/\">Collection Operations</a> <code>sort</code> dimension, which produces a <em>computed</em> order from a comparator. The two are mutually exclusive answers to \"what determines order\": a list is sorted <em>or</em> hand-ordered, not both at once.</p><p class=\"text-sm text-gray-600 mb-2\">Reorder is one of two families under \"drag and drop\". The other — moving a <em>payload</em> (item, file) into a zone that validates what it accepts (data transfer) — is tracked separately under <a href=\"/backlog/007-gap-11-clipboard-dnd-files-intents/\">gap-11</a>.</p><h3>Grab</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>whole</code>: <strong>Default</strong>. The entire item is the grab affordance.</li><li><code>handle</code>: Only a scoped handle within the item initiates a move, leaving the rest of the item interactive (links, buttons).</li></ul><h3>Movement</h3><p class=\"text-sm text-gray-600 mb-2\">Reorder must be operable by pointer <em>and</em> keyboard. Keyboard parity is part of the contract, not an enhancement — a pointer-only reorder is non-conforming.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>pointer</code>: Drag via Pointer Events (mouse, touch, pen), unified through pointer capture.</li><li><code>keyboard</code>: Roving tabindex over items, grab/move/drop keys, with live-region announcement.</li><li><code>both</code>: <strong>Recommended baseline</strong>. Both paths present and equivalent.</li></ul><h3>Commit</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>ephemeral</code>: <strong>Default</strong>. The new order lives for the session only.</li><li><code>persisted</code>: The new order is written somewhere durable (localStorage, or written back to the source via an event the host handles).</li></ul><h3>Announce</h3><p class=\"text-sm text-gray-600 mb-2\">The deprecated <code>aria-grabbed</code>/<code>aria-dropeffect</code> attributes are <strong>not</strong> used. Announcement is via a live region instead.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>live-region</code>: <strong>Default</strong>. Each move and the final commit are announced (e.g. \"Moved item 3 to position 1 of 8\"), composing with the <a href=\"/intents/live-region-status/\">Live Region Status</a> intent.</li><li><code>none</code>: No announcement (only valid when no keyboard/AT path is exposed — discouraged).</li></ul><h3>Scope</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>within-list</code>: <strong>Default</strong>. Items reorder inside a single list.</li><li><code>cross-list</code>: Items move between sibling lists that share a group key.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600\">Reorder composes with <a href=\"/intents/interaction/\">Interaction</a> (pointer/touch modality), <a href=\"/intents/focus-delegation/\">Focus Delegation</a> (roving tabindex for the keyboard path), and <a href=\"/intents/live-region-status/\">Live Region Status</a> (announcement). A reorderable item card pairs with the <code>preserve-on-move</code> capability so an atomic <code>Element.moveBefore()</code> relocation keeps the item's focus, animation, and connection state.</p>",
+  "events": [
+    "reorder-start",
+    "reorder-move",
+    "reorder-commit",
+    "reorder-cancel"
+  ]
+}

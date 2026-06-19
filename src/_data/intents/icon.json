@@ -1,0 +1,33 @@
+{
+  "id": "icon",
+  "name": "Icon Intent",
+  "status": "draft",
+  "summary": "Protocol defining iconography standards including sizing scales, weight, and positioning strategies.",
+  "dimensions": {
+    "size": {
+      "description": "The visual size of the icon",
+      "values": [
+        "sm",
+        "md",
+        "lg",
+        "xl"
+      ]
+    },
+    "weight": {
+      "description": "Stroke weight for variable icons",
+      "values": [
+        "light",
+        "regular",
+        "bold"
+      ]
+    },
+    "style": {
+      "description": "Render style of the icon",
+      "values": [
+        "outlined",
+        "filled"
+      ]
+    }
+  },
+  "description": "<h3>Sizing Scale</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>sm</code>: Small (e.g., 16px). For inline text or tight density.</li><li><code>md</code>: Medium (e.g., 20px). Standard usage.</li><li><code>lg</code>: Large (e.g., 24px). Feature icons or comfortable buttons.</li><li><code>xl</code>: Extra Large (e.g., 32px+). Hero or empty states.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type IconSize = 'sm' | 'md' | 'lg' | 'xl' | string;\n\ninterface IconIntent {\n    // The visual size identifier\n    size: IconSize;\n    // Name of the icon asset/glyph\n    name: string;\n    // Stroke weight (if variable)\n    weight?: 'light' | 'regular' | 'bold';\n    // Render style\n    style?: 'outlined' | 'filled';\n}</code></pre>"
+}

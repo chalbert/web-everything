@@ -1,0 +1,25 @@
+{
+  "id": "scoped-registry-declarative-spelling",
+  "title": "Declarative scoped-registration spelling on <component> — how a definition targets a non-global CustomElementRegistry, native-aligned",
+  "status": "open",
+  "summary": "Prep research for decision #854 (carved from epic #076): how a <component> declares it registers into a scoped CustomElementRegistry instead of the global one. The runtime is already fixed (#228); only the author-facing spelling is open. The item entered prep presuming a scope=\"<registry-id>\" string attribute. The survey of the native proposal RESHAPED the framing and FLIPS that default. Findings: (1) Scoped Custom Element Registries MERGED into the WHATWG DOM/HTML Living Standard 2025-04-14 (whatwg/dom#1341; revamp whatwg/html#10854) — a registry is `new CustomElementRegistry()`, a JS OBJECT with no name/id; bound to a subtree at attachShadow({ mode, customElementRegistry }) (option is customElementRegistry, NOT registry), read via shadowRoot.customElementRegistry, late-bound via registry.initialize(root); no option ⇒ global. Shipped Chrome/Edge 146 + Safari 26; Firefox in progress (bug #1874414, Interop 2026) — 2-of-3 engines, not yet Baseline. (2) A declarative form EXISTS — shadowrootcustomelementregistry on <template shadowrootmode> (Chrome blog; serialization whatwg/html#11892) — but it is PRESENCE-ONLY/boolean: it marks a DSD root's registry as null (awaiting init), and CANNOT name a registry; you bind one from JS afterwards. The platform shipped a declarative form and DELIBERATELY declined to put a registry id in markup — directly contradicting the presumed string scope=. (3) NO library uses a string-id scope: @open-wc/scoped-elements (static scopedElements={tag:Class}), Lit @lit-labs/scoped-registry-mixin (static elementDefinitions), and the @webcomponents polyfill all key on a registry OBJECT reachable via the host class. (4) Native splits TWO concerns the item's scope= fused: CONSUMPTION (which registry markup inside resolves against — has a declarative boolean + attachShadow({customElementRegistry})) vs DEFINITION PLACEMENT (which registry a definition lands in — imperative registry.define() ONLY, no declarative form). <component> is a definition element, so its scope question is the placement concern — exactly the one with no native declarative spelling; a string scope=\"<id>\" would reintroduce a global string namespace (the thing scoping removes), match no library, and not survive a native DSD round-trip. Tree grounding: WE's runtime is already object-keyed (plugs/webregistries/CustomElementRegistry.ts new CustomElementRegistry({extends:[...]}); #228 ensureNativelyConstructible private tags); #242 reserved a RegistryScope token + define(tag,ctor,scope?) for imperative scoped placement (its optional id:string is a tension to reconcile — treat as a WE-only label, the object is the real key); declarativeComponent.ts:162 currently emits a GLOBAL define; component.njk:105/:149 pre-commit to a Tier-2 scope attribute (a presumption to reconcile). RESHAPE: 3 bullets collapse to ONE genuine fork (the author surface); native alignment is the deciding criterion (not a fork); lowering is a consequence (seam-ready via #242). Recommended default REVERSES the title: a presence-only BOOLEAN marker forwarding the native shadowrootcustomelementregistry/customElementRegistry path with the registry OBJECT bound imperatively via the #242 seam — NOT a string attribute (~80%; residual: whether ergonomics justify a human-readable string handle as opt-in sugar layered on top). Full grounding in reports/2026-06-17-854-scope-declarative-scoped-registration-spelling.md.",
+  "dateOpened": "2026-06-17",
+  "lastReviewed": "2026-06-17",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webcomponents",
+    "component",
+    "declarative",
+    "scoped-registry",
+    "custom-elements",
+    "attachshadow",
+    "shadowrootcustomelementregistry",
+    "native-first",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "component"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

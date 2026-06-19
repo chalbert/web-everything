@@ -1,0 +1,22 @@
+{
+  "id": "tool-agnostic-chart-config",
+  "title": "Tool-agnostic Chart Config",
+  "status": "open",
+  "summary": "Prior-art survey grounding backlog #105: a tool-agnostic, standard JSON describing a chart (data, encodings, axes, interactions, styling intent), rendered by any conforming tool and scored on its support. Vega-Lite is the only pure-JSON, schema-published grammar of graphics (Observable Plot is a JS API; Plotly/ECharts are JSON-with-callbacks), so the recommendation is profile it rather than greenfield. The real ask is the comparison layer — the constellation's provider/registry + conformance pattern (a CustomChartRenderer registry, native-first SVG default, pluggable Vega/Plotly/ECharts adapters) like Anchor Positioning and Localization. Accessibility is first-class spec content plus a weighted conformance axis (WAI-ARIA Graphics roles, a spec-derived data-table, Vega-Lite's description channel). No webcharts project exists today, so a standalone project is net-new scaffolding — the genuine open fork.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "charts",
+    "dataviz",
+    "vega-lite",
+    "grammar-of-graphics",
+    "json-schema",
+    "conformance",
+    "provider-registry",
+    "native-first",
+    "accessibility",
+    "gap-analysis"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webblocks"
+}

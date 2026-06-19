@@ -1,0 +1,35 @@
+{
+  "id": "breakpoint",
+  "name": "Breakpoint Intent",
+  "status": "draft",
+  "summary": "Protocol defining display adaptation strategies, abstracting viewport tiers and container queries.",
+  "dimensions": {
+    "strategy": {
+      "description": "How layout rules accumulate as the viewport changes",
+      "values": [
+        "mobile-first",
+        "desktop-first",
+        "strict-range"
+      ]
+    },
+    "steps": {
+      "description": "Named tiers describing the user's display context",
+      "values": [
+        "compact",
+        "medium",
+        "expanded"
+      ]
+    },
+    "scope": {
+      "description": "The reference frame the steps are measured against",
+      "values": [
+        "viewport",
+        "container"
+      ]
+    }
+  },
+  "description": "<h3>Adaptation Strategy</h3><p class=\"text-sm text-gray-600 mb-2\">How layout rules accumulate or subtract as the viewport changes. This determines the mental model for authoring responsive layouts.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>mobile-first</code>: Start small, add complexity as space grows. Standard approach (Tailwind, Bootstrap).</li><li><code>desktop-first</code>: Start large, remove features as space shrinks. Legacy approach.</li><li><code>strict-range</code>: Each size tier is an isolated bucket — no accumulation. Used by Material Design 3.</li></ul><h3>Semantic Steps</h3><p class=\"text-sm text-gray-600 mb-2\">Named tiers that describe the user's display context, independent of specific pixel values. The implementing block maps these to concrete media/container queries.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>compact</code>: Phones in portrait. Single-column layouts, stacked navigation.</li><li><code>medium</code>: Tablets or phones in landscape. Two-column layouts, rail navigation.</li><li><code>expanded</code>: Desktops or large tablets. Multi-column layouts, persistent navigation.</li><li><code>[custom]</code>: Application-defined tiers (e.g., <code>ultrawide</code> for multi-pane dashboards).</li></ul><h3>Logical Groups</h3><p class=\"text-sm text-gray-600 mb-2\">Aliases that combine steps for convenience. Allows components to query \"am I in a small context?\" without knowing specific tier names.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>small</code>: Groups <code>compact</code> (equivalent to \"mobile\").</li><li><code>large</code>: Groups <code>expanded</code> and above (equivalent to \"desktop\").</li></ul><h3>Reference Scope</h3><p class=\"text-sm text-gray-600 mb-2\">The frame the semantic steps are measured against. The mental model and <code>change</code> event are identical for both; only the reference frame differs — mirroring how CSS <code>@container</code> deliberately reuses <code>@media</code> syntax.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>viewport</code> (default): Steps resolve against the viewport via <code>@media</code> queries — classic responsive design.</li><li><code>container</code>: Steps resolve against an element's own container via <code>@container</code> size queries (Baseline 2023: <code>container-type: inline-size</code>, <code>cqi</code>/<code>cqw</code> units), with <code>ResizeObserver</code> as the imperative fallback substrate. Lets a component adapt to the space it is placed in, regardless of viewport.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type AdaptationStrategy = 'mobile-first' | 'desktop-first' | 'strict-range';\ntype ReferenceScope = 'viewport' | 'container';\n\ninterface BreakpointIntent {\n    // How layout rules accumulate\n    strategy: AdaptationStrategy;\n    // Ordered list of semantic step names (smallest to largest)\n    steps: string[];\n    // The frame the steps are measured against (default: 'viewport')\n    scope?: ReferenceScope;\n    // Logical groups that alias one or more steps\n    aliases?: Record&lt;string, string[]&gt;;\n}</code></pre>",
+  "events": [
+    "change"
+  ]
+}

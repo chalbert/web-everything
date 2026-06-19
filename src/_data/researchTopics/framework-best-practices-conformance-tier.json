@@ -1,0 +1,27 @@
+{
+  "id": "framework-best-practices-conformance-tier",
+  "title": "Framework best-practices conformance tier — idiomatic React/Vue lint axis for generated wrappers",
+  "status": "open",
+  "summary": "Prep research for decision #976 (the third graded-conformance tier ratified by #913, under Block Explorer epic #746). #913 ratified a graded model of three honestly-labelled tiers — surface-contract (#975, deterministic), framework best-practices (#976, this lint axis, absent from the original survey), behavioral identity (#967, live mount). This survey grounds tier 2: what 'idiomatic-framework conformance' checks, how WE owns the criteria, and what verdict the badge renders. Grounded in the genWrapper emitters (fui:tools/gen-wrapper/genWrapper.mjs): the React emitter forwards no host ref (keeps its own internal useRef, never exposing it — failing both the pre-19 forwardRef idiom and the React-19 ref-as-prop idiom) and has a depless useEffect; the Vue emitter is mostly idiomatic (defineComponent, typed props, explicit emits array) but misses emit validators. Prior art: React 19 DEPRECATED forwardRef (ref is now a regular prop) — proving idioms shift, so a hardcoded 'must use forwardRef' criterion would be wrong; eslint-plugin-vue (require-prop-types / require-explicit-emits / require-emit-validator) is the Vue idiom authority; eslint-plugin-react / typescript-eslint are ESLint-AST-coupled (idiom checks are static source-pattern matching, unlike #899's engine-neutral behavioral conformance); WCAG A/AA/AAA + ARIA-AT priorities + ESLint error/warn/off establish severity-grading as the pattern for SHOULD-level criteria; custom-elements-everywhere scores behaviorally not by lint (confirming this is a separate axis). Ownership is inherited (criteria->WE, runner->FUI, hosted exerciser->Plateau per #913/#899/constellation-placement) and the honesty rule is inherited (label 'best-practices'/'idiomatic', never 'conformance') — both forced invariants. The criteria SET collapses to a Config-Extends-Platform-Default open registry, and the lint ENGINE choice is FUI impl (mandate-nothing; 'reuse a linter?' is FUI's call, 'cheaper' is prioritization not a fork). The two genuine residual forks: (1) shape of the WE criteria contract — engine-neutral criterion catalog (recommended ~70%, FUI maps each id to a concrete check) vs. an executable ESLint ruleset as the WE standard (bakes a JS-only AST engine into a contract -> lock-in, cuts #855/#817); (2) verdict nature — advisory severity-graded score (recommended ~75%; idioms are SHOULD-level, a binary 'fails idiom = non-conformant' over-claims and ossifies against idiom drift) vs. a binary pass/fail gate symmetric with the two MUST-tiers.",
+  "dateOpened": "2026-06-18",
+  "lastReviewed": "2026-06-18",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "block-explorer",
+    "polyglot",
+    "conformance",
+    "genwrapper",
+    "lint",
+    "idiomatic",
+    "best-practices",
+    "react",
+    "vue",
+    "eslint",
+    "frontierui",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "frontierui"
+}

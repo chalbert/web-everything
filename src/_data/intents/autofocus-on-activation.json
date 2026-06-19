@@ -1,0 +1,49 @@
+{
+  "id": "autofocus-on-activation",
+  "name": "Autofocus-on-Activation Intent",
+  "status": "concept",
+  "summary": "Where initial keyboard/AT focus lands when a surface becomes active — a route swap, tab change, or overlay open — by a closed set (heading | target | preserve | auto). The shared landing atom that Focus Containment and Navigation compose.",
+  "dimensions": {
+    "landing": {
+      "description": "Where initial keyboard/AT focus lands when the surface becomes active",
+      "values": [
+        "heading",
+        "target",
+        "preserve",
+        "auto"
+      ]
+    }
+  },
+  "description": "<h3>The landing question</h3><p class=\"text-sm text-gray-600 mb-2\">When a surface becomes active — a route swap, a tab change, a modal/overlay opening — initial keyboard/AT focus must land somewhere by a closed set. This intent owns that one question and nothing else: <em>a surface just became active, where does initial focus land?</em> It is the accessibility twin of the <a href=\"/intents/navigation/\">Navigation</a> <code>scroll</code> dimension (where the viewport lands); both are latent behaviors of rendering a new surface.</p><h3>Landing</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>heading</code> (default): the new surface's main heading, made programmatically focusable (<code>tabindex=\"-1\"</code> + <code>.focus()</code>). The WAI-ARIA APG answer and the overwhelmingly correct default.</li><li><code>target</code>: an author-named element inside the surface (e.g. the first field of a wizard step), referenced by id/ref.</li><li><code>preserve</code>: leave focus where it is — correct for in-place swaps that do not relocate the user (a filter re-render, an in-place tab panel).</li><li><code>auto</code>: platform default — honor a URL fragment or a descendant <code>autofocus</code> attribute, else fall back to <code>heading</code>, aligned with the native dialog-focusing steps so native behavior is not overridden gratuitously.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">The same landing question fires on every surface activation, so neither composer owns a private copy of the value set:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><a href=\"/intents/focus-containment/\">Focus Containment</a> = this atom (landing) <strong>+</strong> trap <strong>+</strong> restore-on-close; its <code>initialFocus</code> dimension is the overlay profile of this landing contract.</li><li><a href=\"/intents/navigation/\">Navigation</a> composes the landing only — a forward navigation does not make the rest of the page inert.</li></ul><p class=\"text-sm text-gray-600 mb-2\">It is <em>not</em> a <a href=\"/intents/focus-delegation/\">Focus Delegation</a> axis: roving within a live widget presupposes a delegator, and a view swap has none. Ruling carried from #056 / #287.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Landing = 'heading' | 'target' | 'preserve' | 'auto';\n\ninterface AutofocusOnActivationIntent {\n    // Where initial keyboard/AT focus lands when the surface becomes active\n    landing: Landing;\n    // Element reference (id/selector), when landing is 'target'\n    target?: string;\n}</code></pre>",
+  "designSystemResearch": [
+    {
+      "system": "WAI-ARIA APG",
+      "components": [
+        "Managing focus",
+        "Dialog (Modal) pattern",
+        "Fundamental keyboard navigation"
+      ],
+      "keyInsight": "On activating a new view/surface, set focus deliberately — the APG default is the new surface's main heading made focusable (tabindex=-1 + focus()). This is the heading default this intent adopts.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/"
+    },
+    {
+      "system": "HTML / native",
+      "components": [
+        "autofocus attribute",
+        "<dialog> focusing steps",
+        "URL fragment navigation"
+      ],
+      "keyInsight": "The platform already lands focus via a descendant autofocus attribute, the dialog-focusing steps, and fragment targets — the auto value defers to these before falling back to heading (native-first).",
+      "reference": "https://html.spec.whatwg.org/multipage/interaction.html#the-autofocus-attribute"
+    },
+    {
+      "system": "React Aria / Radix",
+      "components": [
+        "FocusScope autoFocus",
+        "onMountAutoFocus"
+      ],
+      "keyInsight": "Headless libraries expose initial-focus as a standalone mount-time concern separate from trap/restore — validating landing as a composable atom rather than a property baked into the modal.",
+      "reference": "https://react-spectrum.adobe.com/react-aria/FocusScope.html"
+    }
+  ]
+}

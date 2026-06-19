@@ -1,0 +1,24 @@
+{
+  "id": "rendered-site-regression-tooling-home",
+  "title": "Rendered-site regression tooling — in-repo specs vs a hosted service (a11y · content · visual)",
+  "status": "open",
+  "summary": "Prep research for decision #799 (child of epic #800): where rendered-docs-site regression checks live — Playwright specs in the WE repo vs a unified harness homed in plateau-app as a service WE CI consumes. The standing test dissolves the binary: per the #091 Web-Docs-as-a-Service ruling, a managed offering is not a monolith needing a home — it decomposes across the constellation, and the 2025–2026 prior art shows exactly one universal seam that confirms the same split: CI owns the pass/fail GATE; a hosted service owns only baseline STORAGE + the diff-REVIEW UI + historical dashboards. Visual regression is the one category that trips the three conditions for needing that service — (a) baselines are large binaries needing branch-aware promotion, (b) pixels are environment-sensitive so a centralized render runner is needed (Argos: 'screenshots from CI, not laptops'), (c) a diff is a human-judgment approval. Hosted SaaS: Chromatic, Percy, Applitools, Argos (also OSS/self-hostable). BYO-storage: reg-suit (your S3 + GitHub PR comment). Fully in-repo: BackstopJS, Playwright toHaveScreenshot (baselines in git). a11y (axe-core/playwright, Pa11y, Lighthouse CI) needs NO baseline or service — deterministic pass/fail in-repo; Lighthouse CI is the textbook split (`@lhci/cli` assert gates with no server; the optional `@lhci/server` adds ONLY historical trends, off the critical path). WE's shipped #770 a11y gate already embodies this (axe in the Playwright lane, no storage). Content/data-binding correctness has no SaaS category — the pattern is Playwright assertions comparing extracted DOM text to the PROJECTION of the source data (Testing-Library 'test what the user sees' + Pact consumer-driven-contract analogue), never hard-coded fixtures (#796 already mandates this). Classification against the constellation: contract (route allowlist tests/a11y/route-allowlist.ts, loader-projection extraction) → WE; portable harness primitives (runner glue, axe wrapper, projection-extraction utils) → FUI open primitive (extracted only when a 2nd consumer / the visual slice forces it — timing is prioritization, a separate build, not a fork); served surface (visual baseline store + review UI + dashboard) → plateau-app product, open-core. So a11y (#770) + content (#796) ship NOW as WE-repo Playwright specs (their layer is WE-resident, deterministic, no service); the FUI/plateau layers materialize when the visual slice forces them. Two residual forks: (1) who owns the gate signal — A WE CI invokes the harness and owns red/green [recommended, matches the seam + the user's 'a service the WE CI calls' phrasing] vs B plateau runs checks against deployed WE-docs and reports back [rejected as the gate model, couples WE's build gate to a deployed service]; (2) the deferred visual slice — A owned plateau-app visual-regression service [recommended per minimize-lock-in + linear-cost-with-revenue + #091] vs B third-party SaaS [rejected: lock-in + per-snapshot cost] vs C committed baselines [interim bootstrap only]. Full grounding in reports/2026-06-16-rendered-site-regression-tooling-home.md.",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "rendered-site",
+    "regression-testing",
+    "visual-regression",
+    "a11y",
+    "playwright",
+    "constellation",
+    "managed-offering",
+    "ci-gate",
+    "hosted-service",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

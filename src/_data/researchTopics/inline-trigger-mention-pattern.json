@@ -1,0 +1,23 @@
+{
+  "id": "inline-trigger-mention-pattern",
+  "title": "Mention / trigger-character inline picker — the @/:/#// surface that opens a picker mid-text",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #591 (whitespace surfaced by #370 Fork 4): WE has input/autocomplete/type-ahead (inputs + whole-field search-listbox) but no mention / trigger-character pattern — the surface that watches an editable region, detects a boundary-anchored trigger char (@/:/#//), extracts the query, anchors a popover to the CARET, routes results through a listbox, and on selection inserts back into the text (the in-editor :-emoji picker #592 is one instance). Two genuine forks; the rest collapses to support-all. Home & shape → a new BLOCK + INTENT (not a mode of autocomplete, not intent-only): every surveyed system ships the trigger-detection engine as runnable code (ProseMirror/Tiptap Suggestion utility — char/allowSpaces/startOfLine/allowedPrefixes/minQueryLength; GitHub <text-expander> keys + text-expander-change/value events; Lexical useBasicTypeaheadTriggerMatch minLength/maxLength), composing the general picker surface #588 for results. Scope (the divergent fork) → DETECTION-ONLY / insertion-agnostic: emit the resolved selection {key, query, range, item} and let the consumer commit it — the GitHub <text-expander> model — vs ProseMirror's Suggestion.command which couples insertion into the editor doc. Detection-only decouples it from any document model, so it works in input/textarea/contenteditable uniformly and composes the rich-text standard #590 for atom/token insertion WITHOUT being blocked on it. Everything else is supported by default: open trigger-set config registry (@/:/#// are conventions, project extends); boundary/query dimensions with most-permissive defaults; caret anchoring composes the anchor intent via a virtual element (virtual-elements topic; Range.getBoundingClientRect in contenteditable, mirror-div in input/textarea). Invariants: virtual focus (aria-activedescendant, DOM focus stays in text — APG editable-combobox-with-list-autocomplete; roving tabindex is broken), suspend detection during IME composition, not a protocol (no vendor-swap interop). No native HTML primitive (datalist is whole-field; combobox role is the closest vocabulary). Report: reports/2026-06-14-inline-trigger-mention-pattern.md.",
+  "dateOpened": "2026-06-14",
+  "tags": [
+    "mention",
+    "trigger-character",
+    "autocomplete",
+    "combobox",
+    "contenteditable",
+    "anchor",
+    "accessibility",
+    "candidate-standard"
+  ],
+  "relatedBlocks": [
+    "autocomplete",
+    "type-ahead"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

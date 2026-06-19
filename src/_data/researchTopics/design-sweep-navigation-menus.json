@@ -1,0 +1,26 @@
+{
+  "id": "design-sweep-navigation-menus",
+  "title": "Reveal navigation menus — how leading sites do top-level dropdown / mega-menu / hover-disclosure (closed & open states)",
+  "status": "open",
+  "summary": "Live-navigation competitive sweep grounding the reveal-nav candidate standard #609. Drove headless Chromium to 8 public sites (Stripe, Vercel, GitHub, MDN, Apple, USWDS, GOV.UK, AWS), capturing the closed bar + opened panel and each trigger's a11y facts + reveal method. Recurring invariants: disclosure semantics (every trigger is a <button aria-expanded> toggling a panel of plain links — none use role=menu, per WAI-ARIA APG), overlay-no-reflow, aria-controls trigger->panel, Esc/outside-click dismissal + focus-return, sectioned mega columns. The central genuine fork handed to #609 is reveal trigger HOVER vs CLICK: both coherent, so a configurable dimension with click as the most-permissive default (touch-safe) and hover an author opt-in that MUST carry a tap-to-toggle fallback; panel width/anchor (full-width mega vs trigger-anchored dropdown) and density are open config dimensions, not forks. USWDS is the accessible-disclosure reference baseline; GOV.UK deliberately ships no desktop hover mega. Full matrix + handoff in reports/2026-06-14-design-sweep-navigation-menus.md.",
+  "dateOpened": "2026-06-14",
+  "lastReviewed": "2026-06-14",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "navigation",
+    "reveal-nav",
+    "mega-menu",
+    "disclosure",
+    "hover-intent",
+    "aria-apg",
+    "prior-art",
+    "design-sweep",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "nav-list",
+    "menu"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webblocks"
+}

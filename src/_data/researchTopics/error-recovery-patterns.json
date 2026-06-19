@@ -1,0 +1,28 @@
+{
+  "id": "error-recovery-patterns",
+  "title": "Error Recovery & Retry Patterns",
+  "status": "open",
+  "summary": "Framework and library patterns for retry strategies, circuit breakers, offline queuing, and HTTP error classification. Covers TanStack Query, axios-retry, urql retryExchange, SWR, and Apollo RetryLink — analyzing their retry configuration models, backoff algorithms, and offline handling. Grounds the Web Reliability standard's design decisions: why first-that-accepts over a chain object, why null-means-decline, and which patterns are HTTP-specific vs. universally applicable. Extended (2026-06-19) for decision #1032 — the protocol-level error-recovery seam — with the two angles the single-handler JS survey missed: resilience COMPOSITION (Polly PolicyWrap + resilience4j decorators, where multi-concern cooperation is an explicit author-ordered wrap and the order itself is load-bearing — breaker-wraps-retry vs retry-wraps-breaker — so a baked protocol order is wrong; supports a composite-handler answer over protocol orchestration), and recovery-state SURFACING (TanStack's status-vs-fetchStatus split and the circuit-breaker closed/open/half-open canon, establishing a recovery-phase vocabulary normalized at the library, distinct from the data status).",
+  "dateOpened": "2026-05-30",
+  "relatedReport": "reports/2026-06-19-error-recovery-protocol-seam.md",
+  "tags": [
+    "reliability",
+    "retry",
+    "circuit-breaker",
+    "offline",
+    "backoff",
+    "http",
+    "recovery",
+    "composition",
+    "polly",
+    "resilience4j"
+  ],
+  "relatedBlocks": [
+    "error-recovery"
+  ],
+  "relatedPlugs": [
+    "customrecoveryhandlerregistry",
+    "customrecoveryhandler"
+  ],
+  "relatedProject": "webreliability"
+}

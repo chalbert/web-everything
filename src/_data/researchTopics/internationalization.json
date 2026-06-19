@@ -1,0 +1,23 @@
+{
+  "id": "internationalization",
+  "title": "Internationalization & Translation",
+  "status": "open",
+  "summary": "Surveying what major frameworks provide for i18n and translation that is not yet part of web standards — from message formatting and locale negotiation to compile-time translations and type-safe keys.",
+  "dateOpened": "2026-02-23",
+  "tags": [
+    "i18n",
+    "translation",
+    "locale",
+    "messageformat",
+    "rtl"
+  ],
+  "relatedBlocks": [
+    "expression-parser",
+    "router"
+  ],
+  "relatedPlugs": [
+    "customtranslationprovider",
+    "customtranslationproviderregistry"
+  ],
+  "relatedProject": "webintl"
+}

@@ -13,6 +13,8 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadBlocks } from './lib/blocks-loader.cjs';
+import { loadIntents } from './lib/intents-loader.cjs';
+import { loadResearch } from './lib/research-loader.cjs';
 
 export const START = '<!-- AUTO-GENERATED:inventory — run `npm run gen:inventory`; do not edit by hand -->';
 export const END = '<!-- /AUTO-GENERATED:inventory -->';
@@ -36,9 +38,9 @@ const byStatus = (list) => {
 export function renderInventory() {
   const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
   const plugs = arr(readJson('plugs'));
-  const intents = arr(readJson('intents'));
+  const intents = arr(loadIntents()); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
   const semantics = arr(readJson('semantics'));
-  const research = arr(readJson('researchTopics'));
+  const research = arr(loadResearch()); // per-topic specs src/_data/researchTopics/<id>.json, assembled (#1145)
   const projects = arr(readJson('projects'));
   const openResearch = research.filter((r) => r.status === 'open').length;
   const projectIds = projects.map((p) => p.id).filter(Boolean).sort().join(', ');

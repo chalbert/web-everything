@@ -1,0 +1,45 @@
+{
+  "id": "action",
+  "name": "Action Intent",
+  "requiresCapabilities": [
+    "invokers"
+  ],
+  "status": "draft",
+  "summary": "Protocol defining the semantic hierarchy (levels) of interactive elements to establish visual priority.",
+  "dimensions": {
+    "level": {
+      "description": "The semantic weight determining visual prominence",
+      "values": [
+        "primary",
+        "secondary",
+        "tertiary",
+        "destructive"
+      ]
+    },
+    "busy": {
+      "description": "What the user experiences when the action is pending",
+      "values": [
+        "disabled",
+        "interactive"
+      ]
+    },
+    "groupOrdering": {
+      "description": "How actions are ordered in a group",
+      "values": [
+        "dom",
+        "reverse",
+        "platform"
+      ]
+    },
+    "groupSizing": {
+      "description": "How actions are sized in a group",
+      "values": [
+        "auto",
+        "stretch",
+        "uniform"
+      ]
+    }
+  },
+  "description": "<h3>Action Levels</h3><p class=\"text-sm text-gray-600 mb-2\">The semantic weight of an action, determining its visual prominence. Every design system converges on this hierarchy.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>primary</code>: Principal call to action. Highest visual weight (Material FAB, Fluent Solid).</li><li><code>secondary</code>: Alternative actions. Moderate visual weight (Outlined, Tonal).</li><li><code>tertiary</code>: Supplemental actions. Minimal visual weight (Text, Ghost).</li><li><code>destructive</code>: Negative actions. Implies danger semantics (typically red).</li></ul><h3>Grouping & Alignment</h3><p class=\"text-sm text-gray-600 mb-2\">Spatial relationships for collections of actions (Dialog footers, Toolbars, Form actions).</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>ordering</code>: <strong>Platform-aware</strong> (macOS: Primary Last, Windows: Primary First) vs <strong>DOM order</strong> (as authored).</li><li><code>sizing</code>: <strong>Stretch</strong> (full-width, common on mobile) vs <strong>Auto</strong> (content-sized, common on desktop).</li><li><code>placement</code>: <strong>End</strong> (Dialogs), <strong>Start</strong> (Forms), <strong>Split</strong> (primary and secondary at opposite ends).</li></ul><h3>Busy State</h3><p class=\"text-sm text-gray-600 mb-2\">What the user experiences when an action is pending. The implementing block handles the CSS and layout details.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>interaction</code>: Whether the action is <strong>disabled</strong> or remains <strong>interactive</strong> during the pending state.</li><li><code>indicator</code>: Whether a loading indicator appears, and its position relative to the label (<code>start</code>, <code>end</code>, <code>center</code>, <code>overlay</code>).</li><li><code>label</code>: Whether the label changes (e.g., \"Save\" → \"Saving...\"), hides, or remains as-is.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type ActionLevel = 'primary' | 'secondary' | 'tertiary' | 'destructive' | string;\ntype IndicatorPosition = 'start' | 'end' | 'center' | 'overlay';\n\ninterface ActionBusy {\n    // Is the action disabled while busy?\n    interaction: 'disabled' | 'interactive';\n    // Where to show a loading indicator (if any)\n    indicator?: IndicatorPosition;\n    // Temporary label during pending state\n    label?: string;\n}\n\ninterface ActionGroupIntent {\n    alignment: 'start' | 'end' | 'center' | 'justify' | 'split';\n    ordering: 'dom' | 'reverse' | 'platform';\n    sizing: 'auto' | 'stretch' | 'uniform';\n}\n\ninterface ActionIntent {\n    // The semantic weight\n    level: ActionLevel;\n    // What the user experiences when the action is pending\n    busy?: ActionBusy;\n    // Icon configuration (references Icon Intent)\n    icon?: { position?: 'start' | 'end' };\n    // Grouping Context (for Collections)\n    group?: ActionGroupIntent;\n}</code></pre>",
+  "events": []
+}

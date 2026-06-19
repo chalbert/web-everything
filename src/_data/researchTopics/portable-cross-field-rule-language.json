@@ -1,0 +1,20 @@
+{
+  "id": "portable-cross-field-rule-language",
+  "title": "Portable Cross-Field Rule Expression — CEL vs shape-only for Mode-1 validation generation",
+  "status": "open",
+  "summary": "Prep prior-art survey for decision #465 (webvalidation, under epic #085). The shipped v1 validation-generation vocabulary is shape-only — 13 closed intents (required/type/min/max/pattern/format/step/min-items/max-items/enum/custom) in validation-generation/provider.ts:39-58 — each statically emittable to every Mode-1 target (HTML, Zod, Pydantic, JSON Schema). Cross-field and conditional logic ('endDate after startDate', 'require X when Y=z') was deferred because the Mode-1 fidelities diverge: protovalidate carries portable CEL rules, JSON-Schema-codegen is shape-only, Standard Schema is interface-only. The fork: define/adopt a portable rule-expression layer so cross-field emits statically to all Mode-1 targets, or stay shape-only and treat cross-field as Mode-2-only (server-authoritative, already settled at RFC 9457 problem+json via Laravel-Precognition-style evaluation in the 2026-06-06 report). Survey findings: (1) CEL (Google Common Expression Language) is the proven multi-language portable rule layer — non-Turing-complete, linear-time, cross-field via '&&' (this.min<=this.max); official runtimes in Go/C++/Java/Python (cel-expr-python open-sourced Mar 2026) plus community JS/TS evaluators (cel-js, @marcbachmann/cel-js zero-dep + tree-shakeable). protovalidate proves it at v1.0 scale across 5 languages with NO codegen. (2) JSONLogic is a lighter JSON-AST alternative with broad language coverage but weaker typing/ecosystem and verbose syntax. (3) JSON-Schema conditionals (if/then/else, dependentRequired) survive shape-schema codegen but can't express value-comparison cross-field ('endDate > startDate') — dependentRequired only covers property-presence, and nested if/then/else under allOf gets 'very messy'. (4) CUE is config-altitude, not a per-field rule fit. Architectural crux: adopting a portable layer means CustomValidationAdapter (provider.ts:135-147) must carry an expression compiler — emit() (provider.ts:146) would translate a neutral rule into each target's idiom — whereas today the contract is shape-only and the only predicate escape hatch is the non-portable 'custom' intent (provider.ts:57). cross-field/conditional already exist as OPTIONAL capability features in the manifest (capability-manifest/provider.ts:48-50, 'absence is reportable, never a silent no-op') so the declared-compliance + flag-lossy seam is already in place. Recommendation carried into #465: keep the v1 adapter contract shape-only-required with cross-field an opt-in adapter capability; Mode-2 is the default authoritative home for cross-field now; a portable Mode-1 cross-field layer is a deferred opt-in that, IF/when built, ADOPTS CEL (reuse the proven external interop language — never mint a WE rule format, which would be lock-in for no interop gain) rather than inventing an AST or settling for JSON-Schema-conditionals-only. The transpile-to-native vs embed-a-runtime choice is an adapter implementation detail (representation-neutral contract), not a standards fork.",
+  "dateOpened": "2026-06-13",
+  "tags": [
+    "validation",
+    "cross-field",
+    "rule-language",
+    "cel",
+    "jsonlogic",
+    "json-schema",
+    "mode-1-generation",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webvalidation"
+}

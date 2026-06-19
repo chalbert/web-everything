@@ -1,0 +1,46 @@
+{
+  "id": "disclosure",
+  "name": "Disclosure Intent",
+  "requiresCapabilities": [
+    "details",
+    "details-name",
+    "hidden-until-found"
+  ],
+  "status": "draft",
+  "summary": "Show/hide of a content region via a toggle control — expand/collapse, exclusive accordion grouping, and find-in-page reveal. Built on the native <details>/<summary> substrate.",
+  "dimensions": {
+    "surface": {
+      "description": "Where the disclosed panel renders (#609 Fork 1A). in-flow expands the panel in document flow (the accordion baseline — pushes siblings down); anchored lifts it to an out-of-flow surface anchored to its trigger (the reveal-nav / mega-menu / dropdown recipe — composes the anchor intent with strategy=escape, type=menu, so it overlays without reflow).",
+      "values": [
+        "in-flow",
+        "anchored"
+      ]
+    },
+    "defaultState": {
+      "description": "Initial expanded state of the region",
+      "values": [
+        "open",
+        "closed"
+      ]
+    },
+    "multiplicity": {
+      "description": "How grouped panels behave: exclusively (one open at a time) or independently",
+      "values": [
+        "exclusive",
+        "independent"
+      ]
+    },
+    "findable": {
+      "description": "Whether collapsed content is still revealed by browser find-in-page",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  },
+  "description": "<h3>What Disclosure Is</h3><p class=\"text-sm text-gray-600 mb-2\">Disclosure makes a content region's <strong>visibility</strong> user-toggleable through a labelled control — the show/hide widget the <a href=\"https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/\">WAI-ARIA APG Disclosure pattern</a> names. Expand/collapse panels, accordions, and \"read more\" sections are all disclosure. The native substrate is <code>&lt;details&gt;</code>/<code>&lt;summary&gt;</code>: the summary is the toggle (exposing <code>aria-expanded</code>), the rest of the element is the region, and the <code>open</code> attribute is the state. No JavaScript is required for the base behavior.</p><h3>Default State</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>closed</code>: <strong>Default</strong>. Region starts collapsed (bare <code>&lt;details&gt;</code>).</li><li><code>open</code>: Region starts expanded (<code>&lt;details open&gt;</code>).</li></ul><p class=\"text-sm text-gray-600 mb-2\">The values mirror the platform exactly: a <code>ToggleEvent</code>'s <code>newState</code> is literally the string <code>\"open\"</code> or <code>\"closed\"</code>.</p><h3>Multiplicity</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>independent</code>: <strong>Default</strong>. Each panel toggles on its own; any number can be open at once (ungrouped <code>&lt;details&gt;</code>).</li><li><code>exclusive</code>: Panels sharing a group key form an <em>exclusive accordion</em> — opening one closes its siblings. The native mechanism is a shared <code>&lt;details name=\"…\"&gt;</code>; <code>exclusive</code> is the HTML spec's own term for this grouping.</li></ul><h3>Findable</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>false</code>: <strong>Default</strong>. Collapsed content is removed from rendering and not searchable.</li><li><code>true</code>: Collapsed content is hidden with <code>hidden=\"until-found\"</code>, so browser find-in-page still matches it and auto-expands the region (firing <code>beforematch</code>).</li></ul><h3>Animated Reveal — Composed, Not Redefined</h3><p class=\"text-sm text-gray-600 mb-2\">Disclosure stays about <em>state</em>, not animation. An animated expand/collapse is supplied by composing the <a href=\"/intents/motion/\">Motion Intent</a> rather than re-specifying timing here — mirroring how the <a href=\"/intents/modal/\">Modal Intent</a> composes <a href=\"/intents/focus-containment/\">Focus Containment</a> instead of redefining focus. The native height animation is pure CSS over the <code>::details-content</code> pseudo-element using <code>interpolate-size: allow-keywords</code> and <code>transition-behavior: allow-discrete</code>, which is exactly Motion's territory.</p><h3>Composition</h3><p class=\"text-sm text-gray-600\">Disclosure composes with <a href=\"/intents/motion/\">Motion</a> (animated reveal, honoring <code>prefers-reduced-motion</code>) and, for the toggle control's modality, <a href=\"/intents/interaction/\">Interaction</a>. It does not own focus management — the summary is a normal focusable control.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type DisclosureState = 'open' | 'closed';\ntype Multiplicity = 'exclusive' | 'independent';\n\ninterface DisclosureIntent {\n    // Initial expanded state (maps to the `open` attribute)\n    defaultState: DisclosureState;\n    // Exclusive accordion grouping (maps to &lt;details name&gt;) vs independent\n    multiplicity: Multiplicity;\n    // Reveal collapsed content to find-in-page (maps to hidden=until-found)\n    findable: boolean;\n    // Optional animated reveal — see the Motion Intent\n    motion?: MotionIntent;\n}</code></pre>",
+  "events": [
+    "toggle",
+    "beforetoggle"
+  ]
+}

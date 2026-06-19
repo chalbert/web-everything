@@ -1,0 +1,21 @@
+{
+  "id": "governance-persona-charter-schema",
+  "title": "Governance Persona Roster + Charter Schema",
+  "status": "open",
+  "summary": "Governance and access-control prior art grounding backlog #166: the platform's stakeholder personas (developer, designer, manager, translator, analyst/QA, security, legal) already ship as a charter schema rendering at plateau-app /profiles, and four model questions are unsettled. The schema exists, so the forks reshape it, not design it. RACI/RASCI decision-rights is the right vocabulary (one Accountable per gate, no system permissions) and RBAC is a category error — the personas govern who reviews/approves, not who may act. Defaults: canonical built-ins + clone-to-derive custom personas (the SaaS RBAC template guardrail); built-ins free, custom/shareable personas the paid affordance (composing #141's local-free/server-paid cost-flat rule); a shared data home both lenses read — product data, not a WE standard entity; and widen the descriptive blocksDeployment boolean to the four governance gate types (Advisory/Validating/Blocking/Escalating) so enforcement can arrive later without a schema break.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "personas",
+    "profiles",
+    "governance",
+    "raci",
+    "rbac",
+    "charter",
+    "gate-types",
+    "plateau",
+    "dev-browser",
+    "vision"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

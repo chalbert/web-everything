@@ -1,0 +1,20 @@
+{
+  "id": "provider-consumer-graph",
+  "title": "Provider↔consumer relationship graph & governance — ingestion, seam-contracts, and the WE/Plateau split",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #092 (the control plane that makes Plateau an enterprise web platform manager). Two ingestion models are mature industry patterns with a documented complementary consensus: build-time/declared (Backstage catalog-info.yaml spec.providesApis/consumesApis; CycloneDX SBOM) — complete and auditable but lost-at-runtime and hand-authored-drift; and runtime-agent (OpenTelemetry service-graph connector) — only-accurate-from-real-traffic but stale-fast. The field recommends both: static discovery validated by runtime, edges marked potential until trace-confirmed. The WE-specific reframe: WE introspectable registries/injectors/contexts/events ARE the graph, so the build-time manifest is auto-derived (no hand-authored catalog-info.yaml bottleneck) — making build-first staging natural. Seam-contracts map to consumer-driven contract testing (Pact broker as the safe-to-deploy-together source of truth; drift detection reactive to proactive), reused from WE protocol conformance contracts recorded bidirectionally. Home splits per the constellation: graph-model and contracts are the WE open standard, aggregation and UI and governance are the Plateau licensed product. Report: reports/2026-06-12-provider-consumer-graph.md.",
+  "dateOpened": "2026-06-12",
+  "tags": [
+    "plateau",
+    "platform-manager",
+    "provider-consumer",
+    "graph",
+    "governance",
+    "contract-testing",
+    "introspection",
+    "native-first"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcontexts"
+}

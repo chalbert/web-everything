@@ -1,0 +1,25 @@
+{
+  "id": "design-system-bundle-composition",
+  "title": "Design-system bundle composition — what a switchable \"design system\" actually contains",
+  "status": "open",
+  "summary": "Prep research for decision #747 (keystone of the Block Explorer epic #746): how WE represents a named, switchable \"design system\" preset (Material-like / Fluent-like / Carbon-like) the explorer swaps live, and where it is documented. Builds on the resolved token model #364 (webtheme owns primitive+component DTCG tokens; the intents own the semantic tier). Surveyed the leading systems + the token-format standards. The dominant pattern is values-only: switching a theme swaps token VALUES, never component behavior — Carbon (color-only; motion/spacing/type are separate @carbon/* globals), MD3 ('maintaining existing interaction patterns'; motion is a system-wide scheme, not per-brand), Fluent v9 (flat Theme bag that includes motion tokens but no density/interaction — density is a per-component size prop). Radix Themes is the LONE bundler of behavior, and only VISUAL behavior (radius=shape, scaling=density, panelBackground=surface treatment) — never interaction logic; there is ZERO prior art for bundling interaction behavior into a switchable theme. The token-interchange standards cap the unit at named values: the official DTCG Format Module has NO $themes construct (that is a Tokens Studio vendor extension, not DTCG), and Style Dictionary models multi-theme as a build-config emergent — so a unit that must be DTCG-expressible cannot carry behavioral defaults; those live in a WE-owned sidecar referencing the tokens. This is exactly WE's existing shape (webtheme DTCG tokens + intents semantic tier). Two reshapings handed to #747: (1) content determines entity — value-only bundles are config flavors (Carbon/Style Dictionary/DTCG), bundles carrying semantic+behavioral identity are first-class entities (Fluent factory, Radix component) — so decide content before flavor-vs-entity; (2) a NEW fork the original framing missed — the SCOPE of trait defaults (presentational-only, Radix-precedented, vs interaction-behavior, no prior art). Full grounding in reports/2026-06-16-design-system-bundle-prior-art.md.",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webtheme",
+    "design-system",
+    "design-tokens",
+    "theming",
+    "intents",
+    "dtcg",
+    "radix",
+    "material",
+    "fluent",
+    "carbon",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webtheme"
+}

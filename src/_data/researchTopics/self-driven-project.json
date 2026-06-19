@@ -1,0 +1,27 @@
+{
+  "id": "self-driven-project",
+  "title": "Self-Driven Project — SAE-style autonomy levels for the whole SDLC, the value/risk-as-ODD dial, and tool-agnostic everything-as-code",
+  "status": "open",
+  "summary": "Prior-art survey grounding the framing decision #665 (epic #666): the self-driving-car model applied to the whole software lifecycle — a human sets the goal + a tolerance/risk envelope, the system drives the steps gated/transparent/reversible, escalating only on tolerance breach. THREE findings reshape the forks. (1) SAE-levels-for-the-SDLC is ALREADY published convergently — ASDLC.io (L1 Assistive→L5 Full, borrowing SAE's own 'Conditional/High/Full' names), Dash0's six levels (with an explicit L3.5 'Selective Auto-Merge'), Tessl, and arXiv 2509.06216 which explicitly calls for 'a hierarchical framework analogous to the SAE Levels'. So the mapping is legitimate prior art to CITE, not originate; the ASDLC/Dash0 ladders number by a review/merge-gating axis (propose→human-review→auto-review→auto-merge→live) that lines up with the repo's own dev-browser ladder (#141: report-only→propose→live-verify→open-PR), whereas Swarmia numbers by agent-topology (single→swarm) and is NOT comparable. Notably NONE of the published ladders has an L0 'report-only' floor — that is a genuine addition. (2) The GENUINELY NOVEL contribution (not found in any surveyed standard/framework): partitioning EVERY lifecycle activity into value-creation vs risk-mitigation and using the risk side — described by named quality dimensions — as the per-activity AI-autonomy DIAL (the dimensions act as the SAE Operational Design Domain / tolerance envelope governing how far the AI drives each step). The substrate it stands on is precedented and citable: the dimensions map to ISO/IEC 25010:2023 (revised 8→9 characteristics, adding 'safety'; usability→interaction-capability, portability→flexibility; ISO calls them 'quality requirements', not NFRs), and the dimension list is best modeled as an OPEN, extensible registry with a default flavor (Config-Extends-Platform-Default) — strong precedent in FURPS+ (the '+' is literally an extension slot), SEI/ATAM (open quality-attribute scenarios, a set that grows edition to edition) and arc42 (a 184-quality default catalog tailored into a per-project quality tree); ISO's top level is fixed-per-revision but applied by selection/tailoring. (3) The methodology must be codified SEPARATELY from any tool we ship, as tool-agnostic everything-as-code, so a third-party project-management/CI tool could read and drive the SAME artefacts (no lock-in; our tools are non-blocking consumers). This is well-precedented as a pattern — GitOps names it ('declarative desired state in Git', OpenGitOps Principles v1.0.0: declarative/versioned-immutable/pulled/continuously-reconciled), and per-category neutral schemas prove the play (SARIF/OASIS for findings, SPDX/ISO-5962 & CycloneDX/OWASP for SBOM, OpenTelemetry/OPA/CloudEvents/CNCF, OSCAL/NIST for compliance-as-code) — but work-tracking/project-management data is a genuine WHITE SPACE: there is no adopted open work-item interchange standard (portability is lossy CSV, non-portable even GitLab CE↔EE), and the repo's own backlog-as-version-controlled-Markdown is docs-as-code applied to that gap. Naming caveats: 'self-driving' is strongly Oracle's (self-driving database) so lean on 'self-driven' and avoid 'self-driving database/infra/SDLC'; 'agentic SDLC' is the crowded generic category; and 'Project' already names a WE standard entity (projects.json), so the brand overloads an existing term — a sub-decision in #665 Fork 3. Classification rulings the survey settles: the autonomy ladder is a configured level (already ratified for the dev-loop in #141, default open-PR) not a new fork; the tool-agnostic artefact contract legitimately IS a Protocol (the one place a third-party tool must swap in — minimize-lock-in's single escapable lock); the dimensions are an open registry not a closed five; the non-technical control plane is plateau-app product. Full grounding in reports/2026-06-15-self-driven-project-prior-art.md.",
+  "dateOpened": "2026-06-15",
+  "lastReviewed": "2026-06-15",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "self-driven-project",
+    "autonomy",
+    "sae-levels",
+    "agentic-sdlc",
+    "coding-by-intention",
+    "everything-as-code",
+    "gitops",
+    "iso-25010",
+    "value-risk",
+    "no-lock-in",
+    "methodology",
+    "prior-art",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "none"
+}

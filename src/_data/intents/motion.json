@@ -1,0 +1,17 @@
+{
+  "id": "motion",
+  "name": "Motion Intent",
+  "status": "concept",
+  "summary": "Protocol defining the application's physics, latency tolerance, and transition behavior.",
+  "dimensions": {
+    "physics": {
+      "description": "The animation model governing transitions and micro-interactions",
+      "values": [
+        "natural",
+        "immediate",
+        "reduced"
+      ]
+    }
+  },
+  "description": "<h3>Physics Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>natural</code>: Mass-based physics (springs), context-aware transitions.</li><li><code>immediate</code>: <strong>&lt; 16ms</strong> latency. Disables decorative motion for high-performance workflows.</li><li><code>reduced</code>: Semantic motion only (e.g. layout shifts), disabling parallax/scaling. Respects <code>prefers-reduced-motion</code>.</li></ul>"
+}

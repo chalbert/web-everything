@@ -1,0 +1,24 @@
+{
+  "id": "design-system-creator-open-core-tiering",
+  "title": "Design-System Creator/Assembler Open-Core Tiering",
+  "summary": "Open-core tiering prior-art survey grounding #775 — where the free/paid line sits for the design-system creator that emits a #747 manifest, after #091 settled the two-tier split (simple FUI-native free assembler + full Plateau creator #751). Surveyed how comparable theme/token/design-system tools tier: Tokens Studio (closest analog — free = manual authoring + edit + git sync + export; Pro = connect-to-Figma-Styles, multi-file sync, branch switcher, composition tokens, collaboration), Material Theme Builder (free, including DTCG/DSP import+export + Style Dictionary codegen), Style Dictionary (free OSS DTCG transform), Codia/AI screenshot→tokens (~$49/image, per-call metered), and the DS platforms Supernova/zeroheight/Knapsack (free starter; $20-$399/mo for hosted persistence + collaboration + governance + seats). The line is tri-partite and universal: (1) manual deterministic locally-runnable authoring → FREE; (2) per-call variable-cost automation (AI/vision) → PAID, metered; (3) managed integration + hosted persistence + collaboration → PAID. Inside import the split is open-standard format (DTCG — free everywhere) vs proprietary-vendor managed integration (Figma-Styles — the canonical Pro feature). Mapped onto WE's rulings the line is almost entirely FORCED: the two-tier split by #091 (self-host floor + open-core by usage), manual authoring free by the self-host floor (the #747 manifest is a WE standard artifact), vision PAID by #475 (no-leakage Plateau service) + the linear-cost rule, persist/share/collab PAID by #751's sign-in upsell. The only genuinely-open calls: Fork 1 the partitioning PRINCIPLE (recommend the capability-cost line: free = deterministic/fixed-cost/locally-runnable producing a self-hostable manifest; paid = per-call cost OR hosted/collaboration/managed-integration; rejected = manual-only-free and quota-gating the floor) and Fork 2 the one knob the principle most contests, deterministic format import (recommend DTCG import free, proprietary Figma ingest paid as a managed Plateau integration). Full grounding in reports/2026-06-16-design-system-creator-open-core-tiering.md.",
+  "status": "open",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "monetization",
+    "open-core",
+    "pricing",
+    "design-system",
+    "theme-creator",
+    "design-tokens",
+    "dtcg",
+    "plateau-embed",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

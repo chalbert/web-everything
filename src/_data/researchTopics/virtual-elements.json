@@ -1,0 +1,26 @@
+{
+  "id": "virtual-elements",
+  "title": "Virtual Elements: Directives or Components?",
+  "status": "open",
+  "summary": "Analyzing whether virtual elements (comment-based DOM-less markers) belong in Web Directives or Web Components, how they relate to transient elements, and when JSX makes transient syntax redundant.",
+  "dateOpened": "2026-02-23",
+  "tags": [
+    "virtual-elements",
+    "comments",
+    "directives",
+    "transient",
+    "jsx",
+    "dom-parts"
+  ],
+  "relatedBlocks": [
+    "transient-component",
+    "for-each",
+    "resource-loader",
+    "view"
+  ],
+  "relatedPlugs": [
+    "webdirectives",
+    "webcomponents"
+  ],
+  "relatedProject": "webdirectives"
+}

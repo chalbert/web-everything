@@ -1,0 +1,23 @@
+{
+  "id": "custom-element-tag-naming-convention",
+  "title": "Custom-element tagName naming convention — what value WE specifies for the #822 WE-owned contract",
+  "status": "open",
+  "summary": "Prep research for decision #841 (gating the tagName-value half of the #822 build, under Block Explorer epic #746). #822 ruled the custom-element surface is a WE-owned CONTRACT (FUI conforms); #841 decides what tagName VALUE WE specifies. The survey of the real tree RESHAPED the framing. Findings: (1) blocks.json carries ZERO tagName today and gen-cem.mjs NEVER fabricates a tag (scripts/gen-cem.mjs:68-80). (2) Element-ness is sparse — of 75 blocks, only 5 custom ELEMENTS register in FUI via customElements.define (auto-heading, auto-complete, route-view, route-outlet, background-tasks); most type:Component blocks register as behaviors/attributes/functions (tabs/stepper/tree-select/master-detail), so a tag CANNOT be inferred from type:Component without fabricating fictional elements. (3) A block is NOT 1:1 with a tag — router registers TWO elements (route-view + route-outlet); autocomplete→auto-complete and transient-component→auto-heading show tag≠id, so a pure prefix+id derivation is structurally impossible and the value must be overridable. (4) FUI's 5 tags are bare kebab with NO prefix; there is no fui- prefix anywhere, and fui-<id> would brand the WE-owned contract with the impl name (category error). (5) 24 single-word ids (dropdown/menu/dialog/…) are INVALID as bare custom-element tags (WHATWG requires a hyphen), so a uniform prefix mechanically guarantees validity catalog-wide. Prior art: WHATWG mandates only name SHAPE (hyphen-required, reserved-name denylist), no prefix/id-map policy; the component-library ecosystem strongly converges on one short vendor/namespace prefix per library (sl-, md-, sp-, fluent-, ion-, lightning-/c-) to guarantee the hyphen and avoid global-registry collisions; CEM resolves the tag from the define() call string, never from filename, and models a module emitting MANY declarations (matching router→2 elements); scoped custom-element registries are the platform analog of #822 deep-JSX-dissolves-the-global-tag. This splits the original single fork into: Fork 1 — element-ness is OPT-IN/authored (default), since auto-derive-from-Component is BROKEN (fabrication); Fork 2 — value-default posture: regular derivable convention <prefix>-<id> with FUI 5 names migrating to conform (default, ~75%) vs per-entry authored ratifying FUI existing names; plus a Supported-by-default configurable prefix (platform default we-, design-system projects #746 override; fui- excluded). The convention binds ONLY global-registration modes; compile-time/JSX + DI-override stay totally flexible (invariant from #822). Full grounding in reports/2026-06-17-custom-element-tag-naming-convention.md.",
+  "dateOpened": "2026-06-17",
+  "lastReviewed": "2026-06-17",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "cem",
+    "blocks",
+    "naming",
+    "custom-elements",
+    "tagname",
+    "registration",
+    "custom-elements-manifest",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

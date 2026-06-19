@@ -1,0 +1,41 @@
+{
+  "id": "permission",
+  "name": "Permission Intent",
+  "status": "draft",
+  "summary": "Cross-cutting presentation of the W3C Permissions API tri-state (granted | denied | prompt) — the current status, its change events, and the request / re-prompt-recovery affordance — spanning camera, microphone, geolocation, clipboard, and notifications. State, not render: it standardizes how a permission state is surfaced and re-requested, never the feature it gates. Ratified in #009 Fork A.",
+  "dimensions": {
+    "state": {
+      "description": "The permission status, borrowed verbatim from the W3C Permissions API tokens (PermissionState). The intent never coins its own values.",
+      "values": [
+        "granted",
+        "denied",
+        "prompt"
+      ]
+    },
+    "affordance": {
+      "description": "How the UI lets the user act on the state. Programmatic re-prompt is blocked by browsers once a permission is denied — recovery routes the user to browser/OS settings rather than firing the prompt again.",
+      "values": [
+        "display",
+        "request",
+        "recover"
+      ]
+    },
+    "feature": {
+      "description": "Which capability the permission gates — an OPEN vocabulary keyed off the W3C PermissionName descriptors, extended as new powerful features ship. Deliberately not notification-specific.",
+      "values": [
+        "camera",
+        "microphone",
+        "geolocation",
+        "clipboard-read",
+        "clipboard-write",
+        "notifications",
+        "persistent-storage",
+        "midi"
+      ]
+    }
+  },
+  "description": "<h3>What Permission Is</h3><p class=\"text-sm text-gray-600 mb-2\">A small <strong>cross-cutting</strong> intent owning the <a href=\"https://www.w3.org/TR/permissions/\">W3C Permissions API</a> tri-state &mdash; <code>granted</code>, <code>denied</code>, <code>prompt</code> &mdash; for any powerful feature (camera, microphone, geolocation, clipboard, notifications&hellip;), not one feature in particular. It standardizes <strong>how a permission&rsquo;s state is shown, requested, and recovered</strong>, so the &ldquo;enable camera&rdquo; / &ldquo;allow notifications&rdquo; affordance stops being hand-rolled per screen.</p><h3>State, not render</h3><p class=\"text-sm text-gray-600 mb-2\">This is a <strong>state</strong> axis, explicitly <em>not</em> folded into <a href=\"/intents/feedback/\">feedback</a> (a <em>render</em> axis &mdash; transient toasts): the breadth is far wider and the concern is orthogonal. A consumer composes permission state with whatever render surface it likes.</p><h3>State</h3><p class=\"text-sm text-gray-600 mb-2\">The tri-state is borrowed <strong>verbatim</strong> from the platform; the intent coins nothing. <code>prompt</code> = not yet decided (a request may surface the browser UI); <code>granted</code> / <code>denied</code> = the user has decided.</p><h3>Affordance</h3><p class=\"text-sm text-gray-600 mb-2\"><code>display</code> reflects the current state; <code>request</code> offers to trigger the browser prompt (only meaningful from <code>prompt</code>); <code>recover</code> handles the <code>denied</code> reality &mdash; browsers <strong>block a programmatic re-prompt</strong> once denied, so recovery guides the user to browser/OS settings rather than firing the request again.</p><h3>Feature</h3><p class=\"text-sm text-gray-600 mb-2\">An <strong>open vocabulary</strong> keyed off the W3C <code>PermissionName</code> descriptors &mdash; extended as new powerful features ship, never enumerated closed.</p><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Composed by <a href=\"/projects/webnotifications/\">Web Notifications</a> (gating the &ldquo;enable notifications&rdquo; affordance) and by any camera/geolocation/clipboard consumer. The <code>change</code> event mirrors <code>PermissionStatus.onchange</code>.</p>",
+  "events": [
+    "change"
+  ]
+}

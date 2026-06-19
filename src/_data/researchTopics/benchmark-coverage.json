@@ -1,0 +1,18 @@
+{
+  "id": "benchmark-coverage",
+  "title": "Benchmark coverage & gap detection — what Web Everything is missing",
+  "status": "open",
+  "summary": "Phase 3 of the competitive coverage gap-analysis program (backlog #347): each extracted capability joined to a Web Everything entity (block/intent/plug/protocol/project) and labelled covered / partial / missing / native-covered, weighed native-first. Of 96 capabilities: 52 covered, 9 native-covered, 24 partial, 11 missing. After deduping against the backlog — 9 already tracked, incl. #028 file-upload, #018 async-pagination, #064 tree-select, #010 theme-color, #022 drag-and-drop, and (found at phase-4 file time) #173/#300 menu/menubar/context-menu, #299 command-palette, #008 accordion/disclosure — 7 fileable gaps remained, ranked, led by a toast/notification block, a date/time picker block, and a unified design-token/theming system. Phase 4 (#348) filed them as candidate items #358–#364. Data: src/_data/benchmarkCoverage.json.",
+  "dateOpened": "2026-06-12",
+  "tags": [
+    "gap-analysis",
+    "competitive-analysis",
+    "coverage",
+    "gap-detection",
+    "native-first",
+    "triage"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

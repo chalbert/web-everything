@@ -1,0 +1,25 @@
+{
+  "id": "component-a11y-panel-sourcing",
+  "title": "Per-component a11y-panel content + data sourcing for the Web Docs /blocks/ pages",
+  "summary": "Decision prep for #803 (the third of three panel-data sourcing calls split from #727, under the Web Docs feature-pipeline epic #623; siblings #801 props-table API and #802 token table). Decide what a per-component accessibility panel on /blocks/{id}/ surfaces and where its data comes from. Verified the tree: authored a11y/standards metadata ALREADY exists and is UNRENDERED — src/_data/blocks.json carries an optional webStandards field on 28 of 74 blocks (first at blocks.json:25), shaped {<concern>: {usage, reference}} (e.g. wizard.webStandards.ariaCurrentStep = aria-current usage + an MDN link); across all entries the reference field points at the CONTRACT (95 MDN + 12 W3C/WAI incl. APG + a few Open-UI/WHATWG), and src/block-pages.njk renders NONE of it (grep webStandards -> 0). intents.json (56 intents) has NO a11y/aria/wcag field, so an intent-derived contract is a NEW schema, not a projection. #770 (resolved) ships a ROUTE-level axe gate (tests/a11y/rendered-site-a11y.spec.ts + route-allowlist.ts) whose GATED_ROUTES include the /blocks/ index but NOT /blocks/{id}/, and store no per-component metadata. The block the panel documents renders inside a cross-origin FUI iframe (the fuiDemo shortcode, .eleventy.js:38, sandbox=allow-scripts allow-same-origin, FUI-hosted) — per #732 axe run from the WE lane CANNOT traverse into the cross-origin frame, and FUI owns the impl AND its rendered display (the no-leakage boundary, #701/#700/#732). PRIOR ART (design-first step 1): WAI-ARIA APG = the canonical implementation-agnostic CONTRACT (keyboard-interaction + roles/states/properties); IBM Carbon = the only surveyed system that visibly SEPARATES three layers (authored 'Accessibility considerations' + a 'Resources' link to the APG pattern + dated AVT automated/keyboard/screen-reader test status + a per-component status matrix); Storybook addon-a11y = runtime-only live axe-core, NOT persisted, a dev-time linter (docs: axe covers up to 57% of WCAG); Material 3 / Fluent 2 / GOV.UK = hand-authored prose with no verification surfaced; Adobe React Aria = authored implementation-REALIZATION prose. SYNTHESIS: the item's three 'options' (intent-derived / per-demo axe / authored notes) are a pass-0 miss — they are not competing alternatives but the THREE LAYERS (contract -> intent, realization -> block webStandards, verification -> conformance/FUI), and Carbon keeps all three SEPARATE; merging them implies a sufficiency claim axe can't back (treat automated results as a separate DATED attestation, never authored prose, never proof). THREE prepared forks: (1) realization SoT — recommend extend & render the existing block webStandards field (already on 28/74, impl-specific = exactly what a per-component panel shows) over minting a new a11y schema or parallel feed; (2) contract layer — recommend LINK OUT via each concern's existing reference (Carbon 'Resources' model) and DEFER a structured intent-layer a11y contract to its own item (triggered by a 2nd consumer), vs minting intent a11y now; (3) verification — recommend NONE in v1 (route-level #770 stands; a future per-component signal arrives only as FUI-published no-leakage output, #475), broken branch = a per-block axe lane on /blocks/{id}/ (can't traverse the cross-origin fuiDemo iframe; audits WE chrome, not the component). Panel shape: an 'Accessibility & Web Standards' section = one row per webStandards concern -> usage prose + a 'Reference' link to the contract. Red-team flags: Fork 1 leans on webStandards being a REALIZATION record (spot-check the usage prose is impl-specific, not pattern-generic); Fork 3 leans on the #732 cross-origin finding + #475 no-leakage still governing (if FUI already publishes per-component axe output, the 'none in v1' default weakens). Layer: build-time docs render of an existing authored block field; no new protocol/intent/DI. Full grounding in reports/2026-06-16-component-a11y-panel-sourcing.md.",
+  "status": "open",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "accessibility",
+    "a11y",
+    "wcag",
+    "wai-aria",
+    "axe-core",
+    "blocks",
+    "panel-sourcing",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "wizard"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

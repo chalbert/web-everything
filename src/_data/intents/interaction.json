@@ -1,0 +1,17 @@
+{
+  "id": "interaction",
+  "name": "Interaction Intent",
+  "status": "concept",
+  "summary": "Protocol defining the input modality (pointer, touch, spatial) that shapes interaction patterns.",
+  "dimensions": {
+    "modality": {
+      "description": "The primary input method determining interaction patterns",
+      "values": [
+        "pointer",
+        "touch",
+        "gamepad"
+      ]
+    }
+  },
+  "description": "<h3>Input Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>pointer</code>: Fine-grained control. Hover menus enabled, scrollbars visible.</li><li><code>touch</code>: Coarse control. <strong>Swipe actions</strong> replace hover menus. Hit testing padding applied.</li><li><code>gamepad</code>: Spatial Navigation (D-Pad). Focus is trapped within active regions (Sunsetting <code>tab-index</code> logic).</li></ul><p class=\"text-sm text-gray-600 mb-2\">This intent owns the input <em>modality</em> only. The composite-widget focus contract — roving tabindex vs. virtual focus, arrows-within / Tab-between, and selection-follows-focus — is owned by the <a href=\"/intents/focus-delegation/\">Focus Delegation Intent</a>.</p>"
+}

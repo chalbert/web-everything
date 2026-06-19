@@ -1,0 +1,17 @@
+{
+  "id": "layout",
+  "name": "Layout Intent",
+  "status": "concept",
+  "summary": "Protocol defining the application shell structure and region mechanics (Drawers, Rails, Panels).",
+  "dimensions": {
+    "behavior": {
+      "description": "How regions interact with the main content area",
+      "values": [
+        "push",
+        "overlay",
+        "rail"
+      ]
+    }
+  },
+  "description": "<h3>Region Behavior</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>push</code>: Region consumes space, shifting the main content (Desktop).</li><li><code>overlay</code>: Region floats above content with a backdrop (Mobile).</li><li><code>rail</code>: Region collapses to a thin strip (Icons) rather than disappearing.</li></ul><h3>Anatomy</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>shell</code>: The global viewport container.</li><li><code>pane</code>: A resizable subdivision of the shell.</li><li><code>dock</code>: A sticky region (Header/Footer).</li></ul>"
+}

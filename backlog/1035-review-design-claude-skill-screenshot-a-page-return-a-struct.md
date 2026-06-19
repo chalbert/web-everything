@@ -25,7 +25,7 @@ vision-capable in-session, **no** API key / SDK / `registerVisionProvider` seam 
 (8 closed axes 1–5 + tier-tags + open localized findings `{dimension, elementRef, problem, severity 0–4}`).
 
 Thin per skill-authoring discipline: it **points** at
-[`docs/agent/vision-tiers.md → Design-critique rubric (ratified #1034)`](../../docs/agent/vision-tiers.md)
+[`we:docs/agent/vision-tiers.md → Design-critique rubric (ratified #1034)`](../../docs/agent/vision-tiers.md)
 rather than restating the axes. The loop defers Tier-A axes (contrast/targets → #763/#770 a11y gate; token
 use → token-lint) per the rubric compute-split (#1034 Fork 2) and owns only the Tier-C judgment + synthesis;
 output is advisory (the persisted-label/correction loop is #1036). Sequencing/rubric dep resolved — #1034

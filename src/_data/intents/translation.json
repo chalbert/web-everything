@@ -1,0 +1,17 @@
+{
+  "id": "translation",
+  "name": "Translation Intent",
+  "status": "concept",
+  "summary": "Protocol defining how a locale change is delivered to the UI from a UX standpoint — instant (all catalogs preloaded, synchronous switch), async (lazy-load the target catalog behind a loading state), or reload (full per-locale document load). Orthogonal to the Locale Intent: locale declares which locale; translation declares how switching to it feels.",
+  "dimensions": {
+    "switching": {
+      "description": "How a locale change manifests in the UI, trading bundle/payload size against switch latency and client-state preservation",
+      "values": [
+        "instant",
+        "async",
+        "reload"
+      ]
+    }
+  },
+  "description": "<h3>Switching Strategy</h3><p class=\"text-sm text-gray-600 mb-2\">How changing the active locale is <em>delivered</em> to the user. This is a UX and runtime-cost decision, independent of <em>which</em> locale is active (that is the <a href=\"/intents/locale/\">Locale Intent</a>). The implementing block decides the mechanism; this axis declares the experience the application wants.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>instant</code>: All candidate catalogs are <strong>preloaded</strong> (bundled or prefetched) before the switch. Changing locale is synchronous — no network round-trip, no loading state, no navigation; client state is preserved. Best for a small number of locales or compact catalogs. <strong>Cost:</strong> upfront payload grows with every supported locale.</li><li><code>async</code>: The target locale's catalog is <strong>lazy-loaded on demand</strong> when the user switches. A loading state bridges the fetch and the UI updates in place when it resolves; client state is preserved. Smallest initial payload. <strong>Cost:</strong> a network round-trip on first switch to a locale — design the loading affordance via the <a href=\"/intents/loader/\">Loader Intent</a>.</li><li><code>reload</code>: The switch is delivered by a <strong>full document load</strong> — navigating to a per-locale URL (<code>/fr/…</code>) or a per-locale build (SSR / static). There is no in-place reactive update; the new locale arrives with a fresh document. Best for SEO/SSR and compile-time per-locale builds. <strong>Cost:</strong> a full navigation that discards transient client state.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Each strategy leans on a neighbouring standard rather than re-solving it:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>instant</code> → preload the candidate catalogs ahead of need; eagerness composes with the <a href=\"/intents/prefetch/\">Prefetch Intent</a>.</li><li><code>async</code> → the catalog fetch surfaces a pending state via the <a href=\"/intents/loader/\">Loader Intent</a>.</li><li><code>reload</code> → the per-locale document is delivered by URL-based locale routing (Router).</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type TranslationSwitching = 'instant' | 'async' | 'reload';\n\ninterface TranslationIntent {\n    // How a locale change is delivered to the UI\n    switching: TranslationSwitching;\n}</code></pre>"
+}

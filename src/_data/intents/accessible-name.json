@@ -1,0 +1,52 @@
+{
+  "id": "accessible-name",
+  "name": "Accessible Name Intent",
+  "status": "draft",
+  "summary": "Cross-cutting policy for an element's accessible name — whether it carries meaning at all, and where its label comes from. Owns the declarative naming decision only; name computation is deferred to the platform W3C AccName 1.2 algorithm (not re-specified, not a protocol). Two axes: naming (meaningful | decorative) and labelSource (explicit | referenced | derived-fallback). Most-permissive default: meaningful + derived-fallback, where the fallback is never empty (CLDR short name for emoji, alt for images); custom imagery with no inherent text requires an explicit label. icon/glyph/media/image/avatar compose this rather than each redefining naming.",
+  "dimensions": {
+    "naming": {
+      "description": "Whether the element contributes an accessible name at all, or is purely decorative",
+      "values": [
+        "meaningful",
+        "decorative"
+      ]
+    },
+    "labelSource": {
+      "description": "Where the accessible name comes from when the element is meaningful",
+      "values": [
+        "explicit",
+        "referenced",
+        "derived-fallback"
+      ]
+    }
+  },
+  "description": "<h3>Naming</h3><p class=\"text-sm text-gray-600 mb-2\">Whether the element carries meaning for assistive technology, or is purely presentational.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>meaningful</code> (default): the element contributes an accessible name. The most-permissive default — naming is assumed unless the author opts out.</li><li><code>decorative</code>: the element is presentational and is removed from the accessibility tree (<code>aria-hidden=\"true\"</code> / empty <code>alt=\"\"</code>). An explicit author opt-in, never inferred.</li></ul><h3>Label Source</h3><p class=\"text-sm text-gray-600 mb-2\">Where a <code>meaningful</code> element's name comes from. This intent decides the <em>source</em>; it does <strong>not</strong> restate how the browser resolves the name.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>explicit</code>: an author-supplied string (e.g. <code>aria-label</code> or a visible text label).</li><li><code>referenced</code>: the name is taken from other element(s) by id via <code>aria-labelledby</code>.</li><li><code>derived-fallback</code> (default): no author label — the name is derived from the element's own content, and <strong>the fallback is never empty</strong>: the CLDR short name for an emoji (per <a href=\"/backlog/587-author-the-expressive-symbol-rendering-intent-substrate/\">#587</a>), the <code>alt</code> text for an image. A custom image/sticker with no inherent text has no fallback ⇒ a label is <strong>required</strong>, not defaulted.</li></ul><h3>Most-permissive default</h3><p class=\"text-sm text-gray-600 mb-2\"><code>meaningful</code> + <code>derived-fallback</code>: an element is named, from its own content, with no author effort — and degrades to a CLDR/alt fallback rather than an empty name. The restrictive cases (<code>decorative</code>, an explicit <code>required</code> label) are author opt-ins.</p><h3>Computation is the platform's job</h3><p class=\"text-sm text-gray-600 mb-2\">This intent deliberately does <strong>not</strong> re-specify the AccName precedence (<code>aria-labelledby</code> &gt; <code>aria-label</code> &gt; native &gt; <code>title</code>) — that is the browser's <a href=\"https://www.w3.org/TR/accname-1.2/\">W3C Accessible Name and Description Computation 1.2</a> algorithm (native-first, minimize-lock-in). It is a UX naming <em>policy</em>, not a technical interchange contract: no <code>adapters.json</code> entry, no Technical Configurator card.</p><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Symbol- and media-bearing intents compose this instead of each redefining naming: <a href=\"/backlog/587-author-the-expressive-symbol-rendering-intent-substrate/\">icon/glyph/media/image/avatar (#587)</a>. #587's interim accessible-name dimension graduates to composing this intent now that it is minted.</p>",
+  "designSystemResearch": [
+    {
+      "system": "W3C WAI",
+      "components": [
+        "AccName 1.2",
+        "aria-label",
+        "aria-labelledby"
+      ],
+      "keyInsight": "The accessible-name computation (aria-labelledby > aria-label > native > title) is a standardized platform algorithm. A standard should declare the naming policy and defer computation to it rather than re-implementing precedence.",
+      "reference": "https://www.w3.org/TR/accname-1.2/"
+    },
+    {
+      "system": "ARIA Authoring Practices Guide",
+      "components": [
+        "Providing Accessible Names and Descriptions"
+      ],
+      "keyInsight": "Decorative elements should be hidden from the accessibility tree (aria-hidden / empty alt); meaningful elements must always resolve to a non-empty name. The decorative-vs-meaningful split is the primary authoring decision.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/practices/names-and-descriptions/"
+    },
+    {
+      "system": "Unicode CLDR",
+      "components": [
+        "Emoji short names (annotations)"
+      ],
+      "keyInsight": "Emoji carry a localized CLDR short name (e.g. '😀' → 'grinning face') usable as a never-empty derived fallback, so a bare emoji is never announced as an unnamed glyph.",
+      "reference": "https://unicode.org/emoji/charts/emoji-list.html"
+    }
+  ]
+}

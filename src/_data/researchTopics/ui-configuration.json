@@ -1,0 +1,28 @@
+{
+  "id": "ui-configuration",
+  "title": "UI Configuration & Visual Variation",
+  "status": "open",
+  "summary": "Exploring how an HTML-first, standards-based component library can handle visual variations of the same core component — injecting icons, badges, popovers, or different visual treatments — without rebuilding accessibility logic. Catalogs strategies from React composition to web component slots and headless UI patterns.",
+  "dateOpened": "2026-02-23",
+  "tags": [
+    "configuration",
+    "composition",
+    "slots",
+    "css-parts",
+    "design-tokens",
+    "headless",
+    "customization"
+  ],
+  "relatedBlocks": [
+    "nav-list",
+    "tabs",
+    "view",
+    "renderer"
+  ],
+  "relatedPlugs": [
+    "webbehaviors",
+    "webinjectors",
+    "webcontexts"
+  ],
+  "relatedProject": "webblocks"
+}

@@ -1,0 +1,32 @@
+{
+  "id": "component-behavior-extends-resolution",
+  "title": "behavior/extends resolution mechanism on <component> — how a registry-key tier-2 hook resolves to a class/trait",
+  "status": "open",
+  "summary": "Prep research for decision #852 (carved from epic #076; DC-5/#044 ratified the POLICY 2026-06-08 — a tier-2 behavior/extends attribute associates a REGISTERED class/trait, never inline <script>, keeping the XSS-gadget surface closed). DC-5 left the MECHANISM open: how a registry-key resolves to a class/trait and applies to the generated element without breaching the wc-class lowering's invariants (a self-contained ESM with NO import-map seam + a fixed member order for byte-determinism, declarativeComponent.ts:152-208). The item entered prep with ONE fork (resolution time+seam: A build-time inline / B runtime-global / C import, default A ~70%) plus an extends-vs-behavior sub-call; the in-tree CustomAttributeRegistry is the wrong unit (attributes, not element class/trait mixins) so there was no precedent to mirror. The survey splits the fork in two. WICG declarative-custom-elements #1009 (the proposal DC-5 built on) lists the open questions VERBATIM — 'Must the script be inline, or can it be bundled? Can it be loaded late?' (= WE's build-time-vs-runtime axis, unpicked, so WE is genuinely greenfield) and 'base class: extend HTMLElement, or another class with shared behavior?' (names BOTH spellings, validating extends + behavior). Two shipping poles map onto WE's EXISTING twin: Enhance (HTML-first custom elements expanded build/server-side + separate hydration script = option A, build-time inline) and Stimulus (data-controller resolved against a runtime controller registry, custom-resolver name->class = option B, runtime lookup) — these aren't competing winners, they're the two delivery modes WE already ships (generateClassSource built/self-contained form ~ Enhance; defineFromDefinition unbuilt-runtime form ~ Stimulus, no build to inline into). The behavior application shape is a settled idiom: a subclass-factory mixin Behavior(Base) (TC39 proposal-mixins; Lit mixins), extends is the simpler class X extends Base. RESHAPE: Fork 1 (built/static-HTML form) = build-time inline (A, default ~85%) — import seam C is the named-broken branch (breaks the no-import-seam invariant that makes the form copy-pasteable static HTML, declarativeComponent.ts:204-207; the functional twin's import seam is the contrast), B a needless runtime global + ordering hazard. Fork 2 (unbuilt-runtime form's seam, where build-time inlining is IMPOSSIBLE) = reuse the webinjectors DI registry register/consume (default ~70%, Injector.ts:146-152 already does lazy hierarchical resolution + dedup; the running element consults it at definition time, a legitimate runtime-DI seam, not a cargo-cult global) over a new dedicated global registry or an import seam. DISSOLVED (supported by default, not forks): extends AND behavior both ship as two composable emit shapes (extends Base / Behavior(Base)); registry-key-only/never-inline-code is the ratified DC-5 XSS floor. Full grounding in reports/2026-06-17-component-behavior-extends-resolution.md.",
+  "dateOpened": "2026-06-17",
+  "lastReviewed": "2026-06-17",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webcomponents",
+    "component",
+    "declarative",
+    "enhancement",
+    "behavior",
+    "extends",
+    "mixin",
+    "wicg-1009",
+    "enhance",
+    "stimulus",
+    "tc39-mixins",
+    "webinjectors",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "component"
+  ],
+  "relatedPlugs": [
+    "webbehaviors",
+    "webinjectors"
+  ],
+  "relatedProject": "webcomponents"
+}

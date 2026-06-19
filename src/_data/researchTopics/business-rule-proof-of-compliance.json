@@ -1,0 +1,21 @@
+{
+  "id": "business-rule-proof-of-compliance",
+  "title": "Business-rule manager with proof of compliance — rule meta-schema, proof/trust model, enforcement seam",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #093 (a Plateau offering to author/version/govern/enforce business rules declaratively and emit an auditable proof they were applied). Two open standards answer different forks: DMN (OMG Decision Model and Notation) is the business-friendly rule meta-schema (decision tables + FEEL expression language) for authoring; OPA/Rego is the policy-as-code enforcement architecture (Policy Decision Point evaluates, Policy Enforcement Point enforces, decision logs record every verdict and why, replayable). Separate-and-decouple plus the standardize-the-meta-schema doctrine point at a new project adopting DMN rather than extending webvalidation (input invalidity is a different concern from domain policy). Proof-of-compliance is a known tamper-evidence ladder: hash chain (SHA-256 each record links the previous) to Merkle tree (O(log n) inclusion proofs) to transparency log (anchor the root externally), with blockchain as the heavy overkill end; the proof content is OPA-style decision logs anchored to webtraces spans, framed as OSCAL-aligned machine-readable compliance artifacts. Enforcement is the OPA PDP/PEP split observed at a trace point, runtime as the baseline proof-emitting venue. The divergent call is how far up the tamper-evidence ladder to go. Report: reports/2026-06-12-business-rule-proof-of-compliance.md.",
+  "dateOpened": "2026-06-12",
+  "tags": [
+    "plateau",
+    "business-rules",
+    "compliance",
+    "proof-of-compliance",
+    "policy-as-code",
+    "dmn",
+    "opa",
+    "tamper-evident",
+    "webtraces"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webvalidation"
+}

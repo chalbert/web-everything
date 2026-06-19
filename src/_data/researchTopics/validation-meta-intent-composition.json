@@ -1,0 +1,19 @@
+{
+  "id": "validation-meta-intent-composition",
+  "title": "Validation as Composition of Meta-Intents",
+  "status": "open",
+  "summary": "Discovering that validation's core concerns (async lifecycle, severity vocabulary, error handling) are universal patterns already in the repo (Loader, Feedback, Message, Reliability). Validation composes these shared metas rather than redefining them—a pattern applicable to any standard with optional features.",
+  "dateOpened": "2026-05-30",
+  "tags": [
+    "validation",
+    "composition",
+    "meta-intents",
+    "interop",
+    "design-pattern"
+  ],
+  "relatedBlocks": [
+    "validation"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

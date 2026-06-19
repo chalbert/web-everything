@@ -1,0 +1,189 @@
+{
+  "id": "collection-operations",
+  "name": "Collection Operations Intent",
+  "status": "concept",
+  "summary": "UX-only protocol for the four data operations on a collection — filter, sort, group, page — composed as a configurable pipeline (default filter → sort → group → page). Sort's vocabulary mirrors the platform verbatim: direction follows aria-sort (ascending/descending), text comparison follows Intl.Collator (sensitivity/numeric/caseFirst/ignorePunctuation); group aggregates follow SQL naming. Models the front-end only — comparator implementation and client/server execution are technical concerns handled outside the intent. INITIAL vocabulary, pending owner review.",
+  "dimensions": {
+    "pipelineOrder": {
+      "description": "Which data operations run and in what order. Configurable; default filter → sort → group → page (sort the filtered set, group the sorted set, page the grouped set). Each stage is optional and independent.",
+      "values": [
+        "filter",
+        "sort",
+        "group",
+        "page"
+      ]
+    },
+    "sortDirection": {
+      "description": "Sort direction for a key — named to match the native aria-sort attribute the active header projects. An empty sort projects aria-sort=\"none\".",
+      "values": [
+        "ascending",
+        "descending"
+      ]
+    },
+    "sortKeys": {
+      "description": "Whether sort keys may be stacked — ties on the first key break on the next (shift-click multi-column sort).",
+      "values": [
+        "single",
+        "multiple"
+      ]
+    },
+    "textSensitivity": {
+      "description": "Which character differences affect text order. Adopts the Intl.Collator sensitivity option verbatim.",
+      "values": [
+        "base",
+        "accent",
+        "case",
+        "variant"
+      ]
+    },
+    "numericOrdering": {
+      "description": "Natural numeric order so embedded numbers compare by value (img2 before img10). Adopts the Intl.Collator numeric option.",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    "caseFirst": {
+      "description": "Which case sorts first. Adopts the Intl.Collator caseFirst option.",
+      "values": [
+        "upper",
+        "lower",
+        "false"
+      ]
+    },
+    "ignorePunctuation": {
+      "description": "Whether punctuation is ignored when comparing. Adopts the Intl.Collator ignorePunctuation option.",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    "emptyPlacement": {
+      "description": "Where empty / missing values land in the order. Mirrors SQL NULLS FIRST / NULLS LAST — the web platform has no native term.",
+      "values": [
+        "first",
+        "last"
+      ]
+    },
+    "filterMatch": {
+      "description": "How active filter predicates combine — AND or OR. The predicates themselves are call-site data, not part of the intent.",
+      "values": [
+        "all",
+        "any"
+      ]
+    },
+    "groupSummary": {
+      "description": "The aggregate shown per group, named after the SQL aggregate functions (the nearest cross-platform standard).",
+      "values": [
+        "count",
+        "sum",
+        "average",
+        "minimum",
+        "maximum"
+      ]
+    },
+    "pageMode": {
+      "description": "The navigation model — does advancing replace the slice or grow the list. paged = discrete numbered / prev-next page links that replace the visible slice (the only model that supports jump-to-page and a known total); append = each new slice accumulates onto a growing list. Orthogonal to the advance trigger below: 'infinite scroll' is not a third mode, it is append + advance:auto.",
+      "values": [
+        "paged",
+        "append"
+      ]
+    },
+    "advance": {
+      "description": "How the next slice is requested — orthogonal to pageMode. manual = an explicit user action (clicking a page link or a Load-more button); auto = the next slice fetches automatically at the scroll boundary, via the native IntersectionObserver sentinel. Default manual: auto-advance is the opt-in that turns append into infinite scroll, and it carries the documented infinite-scroll harms (unreachable footer, no stopping point), so it is never the default — on a full-page collection. Bounded-surface members override this: the dropdown/autocomplete family pins advance:auto as its default because a listbox popover has no footer to strand and every surveyed combobox auto-loads at the scroll boundary (autocomplete member, ratified #018 Fork 2); a clicked \"Load more\" row remains the manual opt-in and the keyboard/screen-reader fallback. paged + auto is undefined (you do not auto-replace on scroll).",
+      "values": [
+        "manual",
+        "auto"
+      ]
+    },
+    "urlSync": {
+      "description": "Whether the active page is reflected in a shareable, back-button-restorable URL (e.g. ?page=n). Native-first: the History API (pushState/popstate/scrollRestoration) is the baseline; the Navigation API is a progressive enhancement; for server-rendered paged links, cross-document View Transitions animate page-to-page with zero JS. Load-bearing: append modes (especially advance:auto) are only advisable when this is on, else the footer and back button break.",
+      "values": [
+        "none",
+        "query-param"
+      ]
+    },
+    "rangeLabel": {
+      "description": "Whether to surface the slice as a 'showing 21–40 of 500' range label. Format is {from}–{to} of {total} {noun} (en-dash, numbers via Intl.NumberFormat). Requires a known total, so it composes fully only over an offset/page resource protocol; under a cursor protocol (no total) it degrades — drop the total and show 'showing 21–40' (with next driven by hasNextPage), or '…of more than {to}' when a floor is known. Never 'of many'. A11y mandate: render the label in a role=status + aria-atomic=true live region so the new range is announced after a page change (W3C ARIA22, sufficient for WCAG 2.1 SC 4.1.3). The label sits outside the pagination nav landmark.",
+      "values": [
+        "none",
+        "range"
+      ]
+    },
+    "pageSize": {
+      "description": "Whether the user can change the items-per-page. fixed = a single app-set page size; selectable = a page-size selector (a native labeled <select>, e.g. 'Items per page'). When selectable, default to persisting the user's choice across sessions (NN/g: respect the stated preference as the next default); the storage mechanism (URL query param / localStorage / server profile) is app-owned. The size value itself is call-site data (page.size); there is no canonical option ladder — 10/25/50/100 is a defensible default, but NN/g research favours one sensible default (10 or 20) and at most two options. Cap large sizes / 'All' (~100) for performance and lower the ceiling on mobile.",
+      "values": [
+        "fixed",
+        "selectable"
+      ]
+    }
+  },
+  "description": "<h3>The Pipeline</h3><p class=\"text-sm text-gray-600 mb-2\">Four data operations compose as an ordered pipeline over a collection. Each stage is optional and independent; the order is <strong>configurable</strong>, defaulting to <code>filter → sort → group → page</code> (you sort the filtered set, group the sorted set, page the grouped set). This intent is <strong>UX-only</strong> — it expresses <em>what the user wants</em>, never how it is computed. The vocabulary below is an <strong>initial pass</strong> pending review; where the platform already has a word for a concept, this intent borrows it verbatim rather than inventing one.</p><h3>Sort — direction &amp; comparison</h3><p class=\"text-sm text-gray-600 mb-2\">Direction names match the native <a href=\"https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-sort\"><code>aria-sort</code></a> attribute the active header projects (an empty sort is <code>aria-sort=\"none\"</code>). The text-comparison preferences adopt the <a href=\"https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator\"><code>Intl.Collator</code></a> option vocabulary verbatim.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>sortDirection</code> — <code>ascending</code> | <code>descending</code> (aria-sort).</li><li><code>sortKeys</code> — <code>single</code> | <code>multiple</code>: may sort keys be stacked.</li><li><code>textSensitivity</code> — <code>base</code> | <code>accent</code> | <code>case</code> | <code>variant</code> (Intl.Collator <code>sensitivity</code>).</li><li><code>numericOrdering</code> — natural numeric order so <code>img2</code> precedes <code>img10</code> (Intl.Collator <code>numeric</code>).</li><li><code>caseFirst</code> — <code>upper</code> | <code>lower</code> | <code>false</code> (Intl.Collator <code>caseFirst</code>).</li><li><code>ignorePunctuation</code> (Intl.Collator <code>ignorePunctuation</code>).</li><li><code>emptyPlacement</code> — <code>first</code> | <code>last</code>: where empty / missing values land (mirrors SQL <code>NULLS FIRST</code>/<code>NULLS LAST</code>; the web has no native term).</li></ul><h3>Filter, Group &amp; Page</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>filterMatch</code> — <code>all</code> | <code>any</code>: combine active predicates with AND or OR; the predicates are call-site data.</li><li><code>groupSummary</code> — <code>count</code> | <code>sum</code> | <code>average</code> | <code>minimum</code> | <code>maximum</code>: named after the SQL aggregate functions.</li><li><code>pageMode</code> — <code>paged</code> | <code>append</code>: navigation model. <code>paged</code> replaces the slice (numbered / prev-next, the only model with jump-to-page and a known total); <code>append</code> grows the list.</li><li><code>advance</code> — <code>manual</code> | <code>auto</code>: trigger, orthogonal to pageMode. <code>manual</code> (default) is a click; <code>auto</code> fetches at the scroll boundary via IntersectionObserver. <strong>Infinite scroll = <code>append</code> + <code>auto</code></strong> — a derived opt-in, not a third mode; rendering delegates to Windowed Collection, lifecycle to Loader. <code>paged</code> + <code>auto</code> is undefined.</li><li><code>urlSync</code> — <code>none</code> | <code>query-param</code>: whether the active page is a shareable, back-button-restorable URL. <code>append</code> modes are only advisable with <code>query-param</code> on.</li><li><code>rangeLabel</code> — <code>none</code> | <code>range</code>: show ‘showing 21–40 of 500’ ({from}–{to} of {total}, en-dash, <code>Intl.NumberFormat</code>). Needs a known total → composes fully only over an offset/page protocol; under cursor it degrades to ‘showing 21–40’ (or ‘…of more than {to}’), never ‘of many’. A11y: render in a <code>role=&quot;status&quot;</code> + <code>aria-atomic</code> live region (W3C ARIA22 → WCAG 4.1.3); sits outside the pagination nav.</li><li><code>pageSize</code> — <code>fixed</code> | <code>selectable</code>: may the user change items-per-page (a labeled native <code>&lt;select&gt;</code>). When <code>selectable</code>, persist the choice across sessions by default (NN/g); the size value is call-site data and the option ladder is app-owned — 10/25/50/100 is a defensible default, though NN/g research favours one sensible default and few options. Cap large sizes / ‘All’ and lower the mobile ceiling.</li></ul><h3>Page — native primitives, SEO &amp; a11y</h3><p class=\"text-sm text-gray-600 mb-2\">The pagination dimensions stay <strong>UX-only</strong>; the offset/page-vs-cursor <em>protocol</em> lives in the <a href=\"/resources/pagination/\">Custom Pagination</a> resource, not here. A cross-layer constraint binds them: jump-to-page and <code>rangeLabel</code> require a total, so they pair only with an offset/page protocol — a cursor protocol forces <code>append</code> or prev-next. <strong>URL state</strong> aligns to native primitives: the <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/History/pushState\">History API</a> (<code>pushState</code>/<code>popstate</code>/<code>scrollRestoration</code>) as baseline, the <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API\">Navigation API</a> as enhancement, and CSS <a href=\"https://developer.chrome.com/docs/web-platform/view-transitions/cross-document\"><code>@view-transition</code></a> for zero-JS server-rendered transitions. <strong>SEO</strong>: the indexable default is server-rendered, self-canonical <code>?page=n</code> links — Googlebot does not fire the user-action JS behind <code>append</code>/<code>advance:auto</code>, and <code>rel=next/prev</code> is deprecated (Google, 2019), so never emit it as primary machinery. <strong>A11y</strong>: paged controls live in a <code>&lt;nav aria-label=\"pagination\"&gt;</code> landmark with <code>aria-current=\"page\"</code> on the active link (WAI-ARIA APG); focus &amp; announcement after a page change are <a href=\"/backlog/059-pagination-focus-announcement/\">still open</a>. See the <a href=\"/research/collection-operations/\">collection-operations research</a> and the 2026-06-03 pagination research report for the full pattern decision framework.</p><h3>UX-only — where the technical choices live</h3><p class=\"text-sm text-gray-600 mb-2\">Deliberately <strong>not</strong> in this intent: the comparator <em>implementation</em> (default <code>Array.prototype.sort</code> vs <code>Intl.Collator</code> vs a numeric comparator vs decorate-sort-undecorate), and <em>where</em> the work runs. This standard models the <strong>front-end</strong> only; delegating to a backend <code>ORDER BY</code> / sort query is app-owned and out of scope. Those technical strategies, with their trade-offs, are catalogued in the <a href=\"/research/collection-operations/\">collection-operations research</a> and Plateau's Technical Configurator (Sorting Strategy domain).</p><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns only the data operations; neighbours own the rest:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><a href=\"/intents/windowed-collection/\">Windowed Collection</a> — renders the visible window; this selects/orders the set. Compose, never merge.</li><li><a href=\"/intents/locale/\">Locale</a> — supplies the default collation locale, so a French app sorts French by default.</li><li><a href=\"/intents/loader/\">Loader</a> — <code>append</code> paging surfaces its <code>loadingMore</code> state (and at the <code>advance:auto</code> scroll sentinel).</li><li><a href=\"/intents/selection/\">Selection</a> — co-resident on the same grids; an orthogonal axis.</li><li><a href=\"/intents/action/\">Action</a> — its <code>groupOrdering</code> is prior art for a declarative ordering dimension.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SortDirection = 'ascending' | 'descending';            // aria-sort\ntype Sensitivity = 'base' | 'accent' | 'case' | 'variant';  // Intl.Collator\ntype CaseFirst = 'upper' | 'lower' | 'false';               // Intl.Collator\ntype EmptyPlacement = 'first' | 'last';                     // SQL NULLS FIRST/LAST\ntype Operation = 'filter' | 'sort' | 'group' | 'page';\n\ninterface SortKey {\n    field: string;\n    direction: SortDirection;\n    // Comparison preferences mirror Intl.Collator option names verbatim\n    sensitivity?: Sensitivity;\n    numeric?: boolean;            // natural numeric order: img2 before img10\n    caseFirst?: CaseFirst;\n    ignorePunctuation?: boolean;\n    emptyPlacement?: EmptyPlacement;\n}\n\ninterface CollectionOperationsIntent {\n    // Stages applied in order; configurable, default below\n    order: Operation[];           // default ['filter','sort','group','page']\n    sort?: { by: SortKey[]; keys: 'single' | 'multiple' };\n    filter?: { match: 'all' | 'any' };\n    group?: { summary: Array&lt;'count' | 'sum' | 'average' | 'minimum' | 'maximum'&gt; };\n    page?: { mode: 'paged' | 'append'; size?: number;\n             pageSize?: 'fixed' | 'selectable';  // user-changeable items-per-page; persist when selectable\n             advance?: 'manual' | 'auto';        // default manual; append+auto = infinite scroll\n             urlSync?: 'none' | 'query-param';   // History API ?page=n\n             rangeLabel?: 'none' | 'range' };     // 'showing 21-40 of 500' — offset/page only; role=status\n}</code></pre>",
+  "events": [
+    "sortchange",
+    "filterchange",
+    "groupchange",
+    "pagechange"
+  ],
+  "designSystemResearch": [
+    {
+      "system": "WAI-ARIA",
+      "components": [
+        "aria-sort",
+        "ascending / descending / none / other"
+      ],
+      "keyInsight": "aria-sort standardizes the sort STATE vocabulary on a column header (one header at a time); this intent's sortDirection projects onto it directly.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-sort"
+    },
+    {
+      "system": "ECMA-402 Intl.Collator",
+      "components": [
+        "sensitivity",
+        "numeric",
+        "caseFirst",
+        "ignorePunctuation"
+      ],
+      "keyInsight": "The standard locale-aware comparison engine; this intent adopts its option names verbatim so the UX preference is expressed in the platform's own vocabulary rather than a bespoke one.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator"
+    },
+    {
+      "system": "TanStack Table",
+      "components": [
+        "row-model pipeline",
+        "filter → sort → group → paginate"
+      ],
+      "keyInsight": "Models the four operations as ordered, optional, composable row-model transformers — the architectural precedent for a configurable pipeline of independent stages.",
+      "reference": "https://tanstack.com/table/latest/docs/guide/row-models"
+    },
+    {
+      "system": "History API / Navigation API / View Transitions",
+      "components": [
+        "pushState",
+        "popstate",
+        "scrollRestoration",
+        "@view-transition"
+      ],
+      "keyInsight": "The page dimension's urlSync aligns to native URL-state primitives rather than a router library: History API (Baseline 2020) is the baseline for ?page=n + back/forward + scroll restoration, the Navigation API (Baseline 2026) is the SPA-grade enhancement, and cross-document View Transitions animate server-rendered paged navigation with zero JS.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API"
+    },
+    {
+      "system": "Google Search Central + WAI-ARIA APG",
+      "components": [
+        "self-canonical ?page=n",
+        "nav landmark",
+        "aria-current=page"
+      ],
+      "keyInsight": "SEO and a11y constrain paged pagination's defaults: each page needs a unique self-canonical URL of server-rendered links (Googlebot does not fire load-more JS; rel=next/prev deprecated 2019), and controls belong in a labeled nav landmark with aria-current='page'.",
+      "reference": "https://developers.google.com/search/docs/specialty/ecommerce/pagination-and-incremental-page-loading"
+    }
+  ],
+  "researchGaps": [
+    "Pagination focus & announcement — what receives focus and what is announced after a page change is unspecified (the verified a11y part is only the nav landmark + aria-current). Tracked at /backlog/059-pagination-focus-announcement/.",
+    "Pagination range labels & page-size selectors — 'showing 21–40 of 500' and page-size options have no verified best-practice (sizes, defaults, persistence). Tracked at /backlog/060-pagination-range-labels-page-size/.",
+    "Per-dimension UX vocabulary completeness — this is an initial pass. Validate the value lists against a real grid/list corpus and provide a custom escape hatch for non-standard preferences (open-system stance), since the bar is 'describe any UX preference'.",
+    "Pipeline-order validity — order is configurable; are some orders (e.g. page-before-filter) nonsensical and rejected, or is it free-form?",
+    "Server boundary residual — execution is front-end only; should the standard still recommend a canonical sort/filter serialization so apps converge, even though it does not own the wire format?",
+    "Shared comparison primitive — does sort order + dirty-check equality + locale collation share one primitive (Web Intl)? Tracked in the technical layer / the Configurator's Sorting Strategy domain, not in this UX intent.",
+    "Provisional surface details — the event names (sortchange/filterchange/groupchange/pagechange) are placeholders with no native precedent, and the boolean-valued dimensions (numericOrdering, ignorePunctuation) render as true/false to mirror Intl.Collator. Confirm or rename during owner review."
+  ]
+}

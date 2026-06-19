@@ -1,0 +1,48 @@
+{
+  "id": "web-identity",
+  "name": "Web Identity Intent",
+  "status": "concept",
+  "summary": "Thin, UX-only seam for credential mediation, a credential-request surface, and an auth-state signal (signed-in/out + identity descriptor). Composes the Loader intent (mediation in-flight) and the Feedback intent (auth-state change), anchored on the navigator.credentials.get mediation model and the typed credential union. No provider, ceremony, or protocol surface — those stay in the deferred webidentity project (#483).",
+  "dimensions": {
+    "mediation": {
+      "description": "How insistently the user is involved before a credential is returned. Mirrors the Credential Management API's mediation enum (navigator.credentials.get({ mediation })) one-to-one.",
+      "values": [
+        "silent",
+        "optional",
+        "conditional",
+        "required"
+      ]
+    },
+    "authState": {
+      "description": "The auth-state signal the seam emits. A declarative reflection of whether an identity is present — the consumer renders signed-in vs signed-out chrome from it, never from ad-hoc local state.",
+      "values": [
+        "unknown",
+        "signed-out",
+        "pending",
+        "signed-in"
+      ]
+    },
+    "credential": {
+      "description": "The typed credential descriptor presented by the request surface. The UX-level projection of the native Credential union — which sign-in affordance to show — carrying no ceremony or protocol detail.",
+      "values": [
+        "password",
+        "federated",
+        "public-key",
+        "identity"
+      ]
+    },
+    "requestSurface": {
+      "description": "How the credential request is presented to the user. UX-only; the underlying get() call is identical across surfaces.",
+      "values": [
+        "inline",
+        "dialog",
+        "redirect"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">A <strong>thin, UX-only</strong> identity seam — three declarative affordances and nothing more:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Credential mediation</strong>: a declarative <code>mediation</code> hint that maps to <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/CredentialsContainer/get\"><code>navigator.credentials.get({ mediation })</code></a> — <code>silent</code> auto-resolves, <code>conditional</code> backs passkey autofill, <code>required</code> always prompts.</li><li><strong>Credential-request surface</strong>: where the sign-in affordance is presented (<code>inline</code> / <code>dialog</code> / <code>redirect</code>) for a <code>credential</code> of a given type.</li><li><strong>Auth-state signal</strong>: a reflected <code>authState</code> (signed-in/out + an identity descriptor) the consumer reads instead of inventing local session state.</li></ul><h3>Native anchor</h3><p class=\"text-sm text-gray-600 mb-2\">Anchored on the platform <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/Credential_Management_API\">Credential Management</a> model: the <code>mediation</code> dimension is the native enum verbatim, and <code>credential</code> is the UX projection of the typed <code>Credential</code> union (<code>PasswordCredential</code>, <code>FederatedCredential</code>, <code>PublicKeyCredential</code>, plus the emerging identity descriptor). The intent deliberately stops at the <em>request</em>; it never models the provider, the ceremony, or any wire protocol.</p><h3>Thin by design — what it is NOT</h3><p class=\"text-sm text-gray-600 mb-2\">This is the UX-only seam graduated from <a href=\"/backlog/012\">#012</a>'s Fork 2-A. It carries <strong>no</strong> provider registry, no FedCM/WebAuthn ceremony surface, and no protocol — the full <code>webidentity</code> project + protocol stay deferred (<a href=\"/backlog/483\">#483</a>). Consumers that need a ceremony compose the native API directly; this intent only standardizes the declarative request + state shape.</p><h3>Composition (cross-reference, do not duplicate)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong><a href=\"/intents/loader/\">Loader</a></strong>: the <code>pending</code> auth-state and a non-<code>silent</code> mediation are an in-flight operation — drive the Loader intent for the spinner/skeleton, do not re-invent progress here.</li><li><strong><a href=\"/intents/feedback/\">Feedback</a></strong>: an <code>authState</code> transition (signed-in / signed-out) is announced through the Feedback intent, not a bespoke toast.</li></ul><h3>Near-term consumers</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li>The live Guard presence-gate (<a href=\"/backlog/272\">#272</a>) reads <code>authState</code> to gate a viewport.</li><li>The loan-app permission phase (<a href=\"/backlog/379\">#379</a>) anchors its sign-in state to this shape instead of a local one.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Mediation = 'silent' | 'optional' | 'conditional' | 'required';\ntype AuthState = 'unknown' | 'signed-out' | 'pending' | 'signed-in';\ntype CredentialType = 'password' | 'federated' | 'public-key' | 'identity';\ntype RequestSurface = 'inline' | 'dialog' | 'redirect';\n\ninterface IdentityDescriptor {\n    // Opaque, UX-level identity label (name / handle / avatar) — never the raw credential\n    label: string;\n    avatarUrl?: string;\n}\n\ninterface WebIdentityIntent {\n    // Declarative mediation hint -&gt; navigator.credentials.get({ mediation })\n    mediation: Mediation;\n    // Which credential affordance the request surface presents\n    credential: CredentialType;\n    // How the request is surfaced\n    requestSurface: RequestSurface;\n}\n\ninterface WebIdentitySignal {\n    // Reflected auth-state the consumer renders from\n    readonly state: AuthState;\n    // Present only when state === 'signed-in'\n    readonly identity?: IdentityDescriptor;\n}</code></pre>",
+  "events": [
+    "request",
+    "statechange"
+  ]
+}

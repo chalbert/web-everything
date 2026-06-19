@@ -1,0 +1,23 @@
+{
+  "id": "pagination-focus-announcement",
+  "title": "Pagination: Focus & Announcement After a Page Change",
+  "status": "open",
+  "summary": "WAI-ARIA APG / NN-g / screen-reader-practice pass grounding backlog #059: when the user moves to a new page, where does focus land and what is announced? The load-bearing finding is that neither half is net-new vocabulary — both are already-owned intents the pagination block composes. Focus is the focus-after-view-swap question owned by Autofocus-on-Activation (landing: heading|target|preserve|auto, default heading; the APG answer), which Navigation already composes; the WebAIM thread shows no industry consensus, so it stays a configurable dimension. Announcement is the shipped clause-joined polite-status pattern (role=status + aria-atomic, W3C ARIA22 / WCAG 4.1.3) owned by Live Region Status — always announce \"Page 2 of 10\", a fixed mechanic, not a toggle. The platform offers no native focus/announce after a non-reload page change, so the only build is thin renderer wiring — zero new intents, zero protocols.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "pagination",
+    "a11y",
+    "focus",
+    "announcements",
+    "live-region",
+    "apg",
+    "autofocus-on-activation",
+    "collection-ops",
+    "composition"
+  ],
+  "relatedBlocks": [
+    "pagination"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

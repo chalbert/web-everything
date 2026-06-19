@@ -1,0 +1,20 @@
+{
+  "id": "auto-update-runner-topology",
+  "title": "Auto-update runner execution topology — build a runner vs. compose existing engines",
+  "status": "open",
+  "summary": "Prior-art survey + architecture prep for decision #497 (the runner that executes the already-shipped update-policy protocol from #101). Distinct ground from the #101 auto-update-pipeline survey: that covered the policy + gate model; this covers HOW the runner is built and WHERE it executes. Four findings reshape the pre-flight's 'no build home' framing. (1) The ecosystem has converged on CI-native execution, not a bespoke vendor-operated service: Dependabot consolidated its compute onto GitHub Actions (GitHub/self-hosted runners + Kubernetes ARC, GA 2025-05); Renovate ships the same runner three ways from one codebase (Mend-hosted app, self-hosted app, self-hosted GitHub Action) off one renovate.json — so the runner is a portable package + committed CI templates that run in the consumer's own CI, with a hosted convenience tier layered on, needing no new repo and mapping onto open-core-by-usage + the solo-founder self-run>service ranking. (2) Pre-merge and post-deploy execute in DIFFERENT homes by nature — pre-merge is a CI-time concern (Renovate/Dependabot), post-deploy staged rollout is a deploy-time in-cluster controller (Argo Rollouts CRD-driven metric promotion/rollback; Flagger webhook hooks) — so 'where the runner lives' was never one answer. (3) The commoditized core (trigger/scan/cool-off/test/auto-merge/metric-rollback) is off-the-shelf; the one net-new WE edge no incumbent offers is pre-testing a provider version against its CONSUMERS' suites before release via the #092 provider-consumer graph. (4) A pure compile-to-renovate.json adapter is lossy — it drops the WE-specific semantics (changelog-manifest strictest-wins severity #102, migration linkage via the upgrader engine #094, the unified pre+post gate axis, the #092 pre-test). Synthesis: a thin WE orchestrator that OWNS the update-policy gate evaluation + the #092 pre-test edge, and DRIVES incumbent engines (Renovate/Dependabot pre-merge, Argo/Flagger post-deploy) as swappable execution primitives — compose for the solved parts, own the WE-specific parts. Constellation layering ratifies by precedent (#091/#092 Fork 3): protocol→WE (shipped), reusable orchestration→FUI, operated surface→plateau-app, no-leakage held. Report: reports/2026-06-13-auto-update-runner-execution-topology.md.",
+  "dateOpened": "2026-06-13",
+  "tags": [
+    "auto-update",
+    "evergreen",
+    "runner",
+    "execution-topology",
+    "native-first",
+    "ci",
+    "progressive-delivery",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webreliability"
+}

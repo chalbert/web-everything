@@ -1,0 +1,33 @@
+{
+  "id": "reliability",
+  "name": "Reliability Intent",
+  "status": "draft",
+  "summary": "Protocol defining error recovery strategies, retry policies, and outcome handling for mechanism failures (system/operation errors). Distinct from input-invalidity (validation domain): Reliability handles operation failures (timeout, crash, network); Validation handles input errors (field wrong, value out of range).",
+  "dimensions": {
+    "tolerance": {
+      "description": "How severely the user is affected by failure",
+      "values": [
+        "forgivable",
+        "degraded",
+        "terminal"
+      ]
+    },
+    "recovery": {
+      "description": "What the user experiences during system recovery",
+      "values": [
+        "automatic",
+        "manual",
+        "none"
+      ]
+    },
+    "fallback": {
+      "description": "What replaces the failed content",
+      "values": [
+        "skeleton",
+        "empty",
+        "previous"
+      ]
+    }
+  },
+  "description": "<h3>Scope: Mechanism Failure (not Input Invalidity)</h3><p class=\"text-sm text-gray-600 mb-2\"><strong>Reliability is strictly for operation/system failure,</strong> not validation errors:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Input-invalidity</strong> (Validation domain): \"The user's email is malformed\" or \"These passwords don't match\". This is an expected outcome; the field is wrong, and the user must fix it. Validation owns this.</li><li><strong>Mechanism failure</strong> (Reliability domain): \"The uniqueness check timed out\" or \"The server is unreachable\" or \"The async validator crashed\". This is an unexpected system problem. Reliability owns this.</li></ul><p class=\"text-sm text-gray-600 mb-2\"><strong>Boundary with Loader:</strong> a wait that is merely <em>taking too long but still running</em> is a <a href=\"/intents/loader/\">Loader Intent</a> concern (its <code>escalation</code> dimension: warn, then go-async). Reliability takes over only once that wait <em>times out or fails</em> — it owns the timeout default (configurable per operation class) and what the user experiences during recovery.</p><p class=\"text-sm text-gray-600 mb-2\">A validation scenario that includes async (e.g., checking if an email is already registered) may emit a Reliability error if the check itself fails (server down), but a Validation error if the email is taken. The distinction prevents conflating the two error families.</p><h3>Failure Tolerance</h3><p class=\"text-sm text-gray-600 mb-2\">How severely the user is affected when an operation fails. This determines the visual response and the user's ability to continue.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>forgivable</code>: Operation failed but the user can continue. Communicated silently (logged) or with minimal disruption (toast). App state remains valid.</li><li><code>degraded</code>: Partial failure. The UI renders with missing data or fallback content. The user can still interact but the experience is incomplete.</li><li><code>terminal</code>: Broken state. The component cannot render meaningfully. Requires replacement with an error boundary or a full-page error state.</li></ul><h3>Recovery Experience</h3><p class=\"text-sm text-gray-600 mb-2\">What the user experiences while the system attempts to recover from a failure. The implementing block decides the technical retry strategy (timing, backoff algorithm).</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>automatic</code>: The system retries silently. The user sees a loading state but takes no action.</li><li><code>manual</code>: The user is presented with a \"Retry\" affordance and decides when to try again.</li><li><code>none</code>: No recovery is attempted. The failure state is final.</li></ul><h3>Fallback Content</h3><p class=\"text-sm text-gray-600 mb-2\">What the user sees in place of the failed content.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>skeleton</code>: Structural placeholder, implying the content may load later.</li><li><code>empty</code>: Explicit empty state with messaging (e.g., \"No data available\").</li><li><code>previous</code>: Stale data from the last successful load, marked as outdated.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type FailureTolerance = 'forgivable' | 'degraded' | 'terminal';\ntype RecoveryExperience = 'automatic' | 'manual' | 'none';\ntype FallbackContent = 'skeleton' | 'empty' | 'previous';\n\ninterface ReliabilityIntent {\n    // How severely the user is affected\n    tolerance: FailureTolerance;\n    // What the user experiences during recovery\n    recovery: RecoveryExperience;\n    // What replaces the failed content\n    fallback?: FallbackContent;\n}</code></pre>"
+}

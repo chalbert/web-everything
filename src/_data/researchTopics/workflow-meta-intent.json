@@ -1,0 +1,26 @@
+{
+  "id": "workflow-meta-intent",
+  "title": "Workflow as a meta-intent — process orchestration is the sibling weblifecycle deliberately excluded; placement is Project + Protocol + Intent",
+  "status": "open",
+  "summary": "Grounds decision #634 — should WE recognize a workflow (a 'meta-intent'): smaller UX intents arranged in directed progression toward one goal (checkout = collect-address -> pay -> confirm), with threaded state, a completion criterion, and a current position? Greenfield call, no workflow concept exists today. The survey establishes: (1) a workflow is a missing THIRD composition mode beyond block-owned simultaneous (composesIntents) and cross-cutting (accessible-name) — directed/temporal composition whose atoms are intents; (2) the coherence invariant that distinguishes a workflow from co-located steps recurs across every system surveyed — threaded state + directed progression + a single completion criterion + one current position — mechanical enough to gate on; (3) the platform has NO native multi-step primitive: <form> is single-step, the WAI-ARIA APG has no wizard pattern, only aria-current='step' is native step vocabulary, so a flow is hand-assembled from Navigation API + View Transitions + form-associated CEs today; (4) the strongest meta-schema is the statechart (XState <-> W3C SCXML, the same engine family #616 cited) whose 7-operator kernel (sequence, branch/guard, nest, parallel, completion/final, threaded context, current-position) maps one-to-one onto a workflow, and whose serialized graph is a portable interchange — the transition-map-is-the-only-lock split that classifies the orchestration machinery as a Protocol; (5) workflow is the deliberate SIBLING of #616's domain-entity lifecycle, not its twin — #616's own survey drew the boundary ('an FSM is in one state at a time, whereas BPMN allows a workflow to be in many ... weblifecycle should not absorb a process-engine scope'), and they differ in subject (persisted entity vs ephemeral user traversal), cardinality (one state vs many), event (audit trail vs back/undo over a session) and persistence — so siblings over a shared SCXML transition-map form, per bias-to-separation; (6) the 'several valid ways' (wizard/stepper, single-page, conversational, board) are all coherent, so they are a configurable REGISTER dimension, not a fork — market keeps state-threading (RHF FormProvider, Formik) and visual sequencing (MUI Stepper, Ant Steps, Carbon ProgressIndicator) as separate seams, with Ant's wait/process/finish/error the cleanest status enum (avoid the name 'stepper' — collides with the numeric NumberField); (7) cross-system operator universality (statecharts/BPMN/GitHub Actions/Temporal/UI steppers) tiers cleanly — Tier 1 core (sequence, branch, nest, context, completion, position), Tier 2 common (parallel fork/join, back/undo, gate/wait-for-event), Tier 3 niche (fan-out, history, retry, compensation/saga, inclusive-OR). Classification by the #409 placement test: workflow passes on BOTH disjuncts (a swappable CustomWorkflowEngine registry AND a portable orchestration graph), so it decomposes like lifecycle — orchestration machinery = Protocol owned by a Project, UX (position/status/register) = Intent (UX-only, reusing navigation's structure:linear/guard/history), concrete wizard = Block composing step-intents. Two forks at DoR: (1) Placement -> Project+Protocol+Intent decomposition (high); (2) Operator scope -> Tier-1 core + Tier-2 optional, defer Tier-3, open meta-schema (med-high). Both follow the #085 'standardize the meta-schema, not the list' posture. Full grounding in reports/2026-06-14-workflow-meta-intent.md.",
+  "dateOpened": "2026-06-14",
+  "tags": [
+    "workflow",
+    "meta-intent",
+    "composition",
+    "intent",
+    "protocol",
+    "statechart",
+    "scxml",
+    "xstate",
+    "bpmn",
+    "orchestration",
+    "wizard",
+    "stepper",
+    "placement",
+    "candidate-standard"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "weblifecycle"
+}

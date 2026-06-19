@@ -1,0 +1,20 @@
+{
+  "id": "deployed-live-patch-safety",
+  "title": "Deployed-app live-patch safety — isolation, authorization, revertibility, audit",
+  "status": "open",
+  "summary": "Safety design for the dev browser’s riskiest capability (backlog #410, carved from the dev-browser vision #141 Fork 2): an AI applying a fix to a *running deployed* app. Surveys established practice across the four concerns #141 named. The central finding reframes the capability: Chrome DevTools ‘Local Overrides’ is an exact precedent for a session-scoped, server-untouched patch — modified files served only in the viewer’s own browser session, active only while it runs — so the dev browser can patch the live *view* of a deployed app (the demo value) without ever mutating the deployed artifact; the PR stays the only path to a real change. The heavy alternatives (server-side canary; kernel-style live-fleet hot-patch via kpatch/Ksplice, where kpatch can’t even revert without a reboot) are contained or rejected. Authorization follows break-glass + just-in-time privileged access (per-patch, expiring, alerting, optional two-party); lifetime is session-scoped with a hard TTL + kill switch; audit reuses the app’s own introspectable trace substrate with SOC2 minimum fields. A product capability, not a standard — and the one case where the usual most-permissive default is inverted to most-restrictive-safe.",
+  "dateOpened": "2026-06-12",
+  "tags": [
+    "dev-browser",
+    "live-patch",
+    "safety",
+    "deployed-app",
+    "break-glass",
+    "audit",
+    "local-overrides",
+    "capability-gating"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webtooling"
+}

@@ -1,0 +1,24 @@
+{
+  "id": "resource-directive-async-contract",
+  "title": "Resource Directive — Async Contract",
+  "status": "open",
+  "summary": "Web-platform and library prior-art survey (SolidJS createResource/Suspense/ErrorBoundary, React 19 use()/useTransition, TanStack Query/Router) grounding backlog #124's four forks for the <Resource> directive — net-new with no defined behavior, currently pure spelling, unlike <For>/<Show> which the lowering compiler already round-trips. Loading and error are universally separate composable boundaries, so <Resource> owns named loading/error slots whose names ARE Loader Intent lifecycle states (resolve through the Loader Intent + Resource Loader block, no new state machine). The suspend-on-read accessor (use()/createResource) is the lowering target, lifting to a use()-style suspending read with Suspense/ErrorBoundary boundaries and a lossy diagnostic. Pagination is a Loader loadingMore + Windowed Collection composition, deferred to #018. There is no native <resource> element. Net: <Resource> is a declarative composition of the Loader Intent — no new intent, no parallel async model.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "jsx",
+    "adapters",
+    "directives",
+    "resource",
+    "async",
+    "loader",
+    "suspense",
+    "lowering-compiler",
+    "intent",
+    "composition"
+  ],
+  "relatedBlocks": [
+    "resource-loader"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webadapters"
+}

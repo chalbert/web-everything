@@ -6,7 +6,7 @@
  */
 import capabilitiesData from '../src/_data/capabilities.json';
 import matrixData from '../src/_data/capabilityMatrix.json';
-import intentsData from '../src/_data/intents.json';
+import { intents as intentsData } from '../src/_data/intents.data'; // per-intent specs assembled via Vite glob (#1145)
 import {
   StaticMatrixProvider,
   intentMapFromIntents,

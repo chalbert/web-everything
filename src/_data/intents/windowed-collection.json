@@ -1,0 +1,82 @@
+{
+  "id": "windowed-collection",
+  "name": "Windowed Collection Intent",
+  "status": "draft",
+  "summary": "Protocol for rendering only the visible window of a large collection (virtualization) while preserving set-size and position semantics and keeping keyboard focus valid.",
+  "dimensions": {
+    "rendering": {
+      "description": "Whether all items are in the DOM or only a visible window",
+      "values": [
+        "full",
+        "windowed"
+      ]
+    },
+    "itemSize": {
+      "description": "Whether row sizes are known ahead of time",
+      "values": [
+        "fixed",
+        "variable"
+      ]
+    },
+    "dataSource": {
+      "description": "Whether the full item count is known or fetched progressively",
+      "values": [
+        "bounded",
+        "infinite"
+      ]
+    }
+  },
+  "description": "<h3>Rendering</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>full</code>: All items live in the DOM. Correct for short lists — simplest and most accessible.</li><li><code>windowed</code>: Only the visible window (plus a small overscan) is rendered; rows recycle as the user scrolls. Reach for it only when the item count is large enough to hurt layout/memory — not by default.</li></ul><h3>Set-Size Semantics</h3><p class=\"text-sm text-gray-600 mb-2\">Because a windowed list's DOM no longer reflects the true collection, every rendered item <strong>must</strong> carry <code>aria-setsize</code> (the full count) and <code>aria-posinset</code> (its absolute index + 1, <em>not</em> its DOM position) so assistive tech announces \"item 42 of 5000\". Never derive position from DOM order.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>Indeterminate totals (progressive load).</strong> While the full count is unknown — <code>infinite</code> data source, cursor pagination, before the last page lands — every rendered item carries <code>aria-setsize=\"-1\"</code>, the platform <em>size-unknown</em> sentinel, switching to the real count once the total is known. During batch row insertion the list container sets <code>aria-busy=\"true\"</code>, flipped to <code>false</code> on completion. This follows the WAI-ARIA APG <a href=\"https://www.w3.org/WAI/ARIA/apg/patterns/feed/\">Feed pattern</a> for indeterminate sets rather than fabricating an estimated total (which would misreport a count as fact). Ratified in #018 (Fork 4).</p><h3>Focus Persistence</h3><p class=\"text-sm text-gray-600 mb-2\">The currently focused or active item <strong>must not be unmounted</strong> when scrolled out of the window, or DOM focus and <code>aria-activedescendant</code> references break. This composes the <a href=\"/intents/focus-delegation/\">Focus Delegation Intent</a>: under <code>virtual</code> focus the active item must also be scrolled back into view on keyboard navigation.</p><h3>Item Size</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>fixed</code>: Uniform row height — scroll offsets are pure arithmetic; cheapest and most stable.</li><li><code>variable</code>: Measured/estimated heights — requires a measurement cache and can cause scroll-anchor shifts.</li></ul><h3>Data Source</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>bounded</code>: The full count is known; the window maps into a complete dataset.</li><li><code>infinite</code>: Items are fetched progressively (infinite scroll / load-more). Composes the <a href=\"/intents/loader/\">Loader Intent</a> <code>loadingMore</code> state — render an announced progress row at the list end rather than a blocking overlay.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns only <em>which items are realised in the DOM</em>. Selection, focus movement, and async fetching are delegated to the <a href=\"/intents/selection/\">Selection</a>, <a href=\"/intents/focus-delegation/\">Focus Delegation</a>, and <a href=\"/intents/loader/\">Loader</a> intents respectively.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Rendering = 'full' | 'windowed';\ntype ItemSize = 'fixed' | 'variable';\ntype DataSource = 'bounded' | 'infinite';\n\ninterface WindowedCollectionIntent {\n    // All items vs. visible window\n    rendering: Rendering;\n    // Known vs. measured row heights\n    itemSize?: ItemSize;\n    // Known count vs. progressive fetch\n    dataSource?: DataSource;\n    // Extra rows rendered beyond the viewport\n    overscan?: number;\n}</code></pre>",
+  "events": [
+    "rangechange",
+    "loadmore"
+  ],
+  "designSystemResearch": [
+    {
+      "system": "WAI-ARIA APG",
+      "components": [
+        "aria-setsize",
+        "aria-posinset",
+        "Scrollable Listbox example"
+      ],
+      "keyInsight": "setsize/posinset let assistive tech report position and total when not all items are in the DOM — the core accessibility contract for virtualization.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/examples/listbox-scrollable/"
+    },
+    {
+      "system": "React Aria",
+      "components": [
+        "Virtualizer",
+        "persisted focused row",
+        "aria-rowindex"
+      ],
+      "keyInsight": "Persists the focused element in the DOM even when scrolled out of view and supplies positional ARIA so screen-reader context is not lost.",
+      "reference": "https://react-spectrum.adobe.com/react-aria/"
+    },
+    {
+      "system": "TanStack Virtual / react-window",
+      "components": [
+        "fixed / variable size",
+        "overscan",
+        "measureElement"
+      ],
+      "keyInsight": "Headless windowing engines; fixed vs. variable sizing and overscan are the primary tuning axes, which we expose as dimensions rather than reimplement.",
+      "reference": "https://tanstack.com/virtual/latest"
+    }
+  ],
+  "uxResearch": [
+    {
+      "title": "Virtualization accessibility caveats",
+      "source": "Web Everything dropdown UX research (2026-06-01)",
+      "findings": [
+        "Set aria-setsize/aria-posinset on every rendered option using the absolute index, not DOM order.",
+        "Never unmount the focused/active option while it is scrolled out of the window.",
+        "Infinite scroll should expose a load-more progress row with an aria-label."
+      ],
+      "reference": "https://github.com/bvaughn/react-window/issues/808"
+    }
+  ],
+  "researchGaps": [
+    "Threshold guidance — at what item count does windowing pay off versus its accessibility and scroll-anchor cost? Provide a heuristic rather than 'always virtualize'.",
+    "Find-in-page (Ctrl+F) and full-text search break when matching items are not realised in the DOM — define a fallback (render-on-search or a search index)."
+  ]
+}

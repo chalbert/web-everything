@@ -1,0 +1,70 @@
+{
+  "id": "data-transfer",
+  "name": "Data-Transfer Intent",
+  "status": "concept",
+  "summary": "The typed-payload + accepts contract behind the native DataTransfer object shared by clipboard and drag events: a payload (text, rich content, files, app items) entering a zone that declares what it accepts, plus the copy/cut/paste copy-out half. Drop-target and file-source compose it.",
+  "dimensions": {
+    "flow": {
+      "description": "Direction of transfer across the zone — into it, out of it, or both",
+      "values": [
+        "receive",
+        "emit",
+        "both"
+      ]
+    },
+    "payload": {
+      "description": "The typed content category the DataTransfer carries; a zone's accepts list is expressed over these",
+      "values": [
+        "text",
+        "rich",
+        "files",
+        "items"
+      ]
+    },
+    "acceptance": {
+      "description": "How a receiving zone constrains an incoming payload",
+      "values": [
+        "declared",
+        "any"
+      ]
+    }
+  },
+  "description": "<h3>One object, two surfaces</h3><p class=\"text-sm text-gray-600 mb-2\">The browser moves a payload through a single native object — <code>DataTransfer</code> — exposed as <code>event.clipboardData</code> on clipboard events and <code>event.dataTransfer</code> on drag events. This intent names the recurring contract that rides on it: a <em>typed payload</em> entering a <em>zone that declares what it accepts</em>, plus the programmatic copy-out half (<code>navigator.clipboard</code>, <code>ClipboardItem</code>). It is UX vocabulary only — the native objects and any provider sit behind it.</p><h3>Flow</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>receive</code>: payload moves <em>in</em> — a paste or a drop onto the zone.</li><li><code>emit</code>: payload moves <em>out</em> — a copy or cut from the zone (the half neither drop-target nor file-source owns).</li><li><code>both</code>: the zone accepts and offers — e.g. an editor region that pastes in and copies out.</li></ul><h3>Payload</h3><p class=\"text-sm text-gray-600 mb-2\">The typed categories a transfer carries; a zone's <code>accepts</code> list is a subset of these, mirroring the multiple MIME entries a single <code>DataTransfer</code> exposes.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>text</code>: plain string (<code>text/plain</code>).</li><li><code>rich</code>: structured/markup content (<code>text/html</code>, <code>text/uri-list</code>, and other format strings).</li><li><code>files</code>: one or more <code>File</code> objects (<code>DataTransfer.files</code> / a pasted/dropped file).</li><li><code>items</code>: application-defined data carried under a custom format string (a dragged row, a card, an app entity).</li></ul><h3>Acceptance</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>declared</code>: the zone publishes an allow-list of payload categories; a payload outside it is rejected (and the rejection is surfaced, not silently dropped). The validation contract the neighbours share.</li><li><code>any</code>: the zone takes whatever arrives and sorts it out itself.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">This intent is composed, not used bare — it is the substrate its consumers share so the <code>accepts</code> contract is defined once:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Drop-target</strong> (the drag-and-drop trait family, #022) <em>is</em> a <code>receive</code> zone with a <code>declared</code> accepts list — it composes this rather than re-deriving payload/accepts validation.</li><li><a href=\"/intents/file-revision/\">File Revision</a>'s <code>file-source</code> paste/drop providers consume it for the clipboard-paste and drop ingestion paths.</li><li>The clipboard <code>emit</code> (copy/cut) surface rides here as the copy-out half — grounded in <code>navigator.clipboard.write</code> / <code>ClipboardItem</code> — which neither neighbour previously owned.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Flow = 'receive' | 'emit' | 'both';\ntype Payload = 'text' | 'rich' | 'files' | 'items';\ntype Acceptance = 'declared' | 'any';\n\ninterface DataTransferIntent {\n    // Into the zone (paste/drop), out of it (copy/cut), or both\n    flow: Flow;\n    // Typed categories the transfer may carry\n    payload: Payload[];\n    // Whether a receiving zone validates against a declared accepts list\n    acceptance: Acceptance;\n    // The declared allow-list, when acceptance is 'declared'\n    accepts?: Payload[];\n}</code></pre>",
+  "designSystemResearch": [
+    {
+      "system": "HTML / native",
+      "components": [
+        "DataTransfer",
+        "event.clipboardData",
+        "event.dataTransfer",
+        "DataTransferItemList"
+      ],
+      "keyInsight": "Clipboard and drag-and-drop share one DataTransfer object exposing typed entries by format string plus a files list — the single substrate this intent names, so the typed-payload + accepts contract is defined once across both surfaces.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer"
+    },
+    {
+      "system": "Async Clipboard API",
+      "components": [
+        "navigator.clipboard.read/write",
+        "ClipboardItem"
+      ],
+      "keyInsight": "The programmatic copy-out/paste-in half — ClipboardItem carries multiple typed representations, matching the payload categories — is the emit flow that drop-target and file-source do not own.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API"
+    },
+    {
+      "system": "HTML Drag and Drop API",
+      "components": [
+        "dragover/drop",
+        "dropEffect",
+        "effectAllowed"
+      ],
+      "keyInsight": "A drop zone signals acceptance via dragover/dropEffect against the dragged types — the receive + declared-accepts behavior, validating what it takes before the drop, that this intent factors out of the drop-target trait.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API"
+    }
+  ],
+  "events": [
+    "receive",
+    "emit",
+    "reject"
+  ]
+}

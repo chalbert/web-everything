@@ -1,0 +1,24 @@
+{
+  "id": "plateau-outstanding-todos",
+  "title": "Plateau Migration: Outstanding TODOs Across All Modules",
+  "status": "open",
+  "summary": "Comprehensive catalog of all TODO, stub, and placeholder code remaining from the plateau migration across every module — webregistries, webinjectors, webcontexts, webcomponents, and core utilities. Tracks what's genuinely incomplete vs outdated comments, and identifies the highest-impact items for completion.",
+  "dateOpened": "2026-02-24",
+  "tags": [
+    "migration",
+    "todo",
+    "stubs",
+    "plateau",
+    "gap-analysis",
+    "registries",
+    "patching"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [
+    "webregistries",
+    "webinjectors",
+    "webcontexts",
+    "webcomponents"
+  ],
+  "relatedProject": "webinjectors"
+}

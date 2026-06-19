@@ -1,0 +1,22 @@
+{
+  "id": "access-control-authorization-gate",
+  "title": "Access Control — Authorization Gate",
+  "status": "open",
+  "summary": "Web-platform and library prior-art survey (CASL isomorphic <Can>, Angular CanActivate, React Router loaders, Vue navigation guards, OPA/PDP, LaunchDarkly entitlements, the RFC 9110 403-vs-404 existence-hiding rule) grounding backlog #178's member-design forks. The home is ruled — access control is the entry member of the Guard protocol (the entry mirror of the exit guard), built on its predicate-provider seam, not its own project. Authorization is universally factored into two surfaces fed by one ability source: a routing entry guard and a render-time element gate — so the member exposes both off one authz provider. The UX names the deny-outcome family (hide|redirect|forbid|cloak) but the forbid(403)-vs-cloak(404) existence-hiding call lives behind the provider (a security decision). Feature flags are an authority kind resolved through the same seam, not separate machinery. The trust boundary (front-end = UX mirror, back-end authoritative) is restated, not re-decided. The Navigation API is the route-guard substrate; there is no native authorization primitive.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "access-control",
+    "authorization",
+    "feature-flags",
+    "route-guard",
+    "guard-protocol",
+    "casl",
+    "opa",
+    "rfc-9110",
+    "trust-boundary",
+    "navigation-api"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webguards"
+}

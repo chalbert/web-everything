@@ -1,0 +1,23 @@
+{
+  "id": "adapter-driven-source-form",
+  "title": "Adapter-driven source form — a framework adapter emits its native dialect",
+  "status": "open",
+  "summary": "Codifies #663 (under the generation-adapter epic #507): the assembler/MaaS generation origin must NOT privilege HTML/declarative as THE source form — emitted source dialect is a capability the active framework adapter resolves. A plain-WC adapter emits HTML (declarative `<component>`), a React adapter emits TSX, a Vue adapter emits SFC; the MaaS FORMS catalog (blocks/renderers/module-service/moduleService.ts — declarative/wc-class/html/jsx/functional) becomes the open, multi-dialect set those adapters resolve rather than a closed enum that treats `html` as the privileged source. Two settled principles ground it: native-first (no framework adapter selected ⇒ plain WC → HTML, the web-platform-standard form; a framework dialect is the adapter author's opt-in, never the floor) and adapter-as-normalization-hub (the adapter owns the per-dialect transform). The card's one open dimension — a single canonical dialect per adapter vs one component served in MULTIPLE dialects with the adapter supplying the transform per dialect — resolves toward the MULTI-dialect framing per the most-flexible-default rule: the serve path already serves many forms off one definition, so exposing the whole axis (one component, many adapter-resolved dialects) is the most permissive end-state and the restriction would be the author's opt-in, not the floor. This feeds the assembler emit-format decision (#652/#646): #652 should treat the emitted recipe's dialect as adapter-driven, not bake HTML/JSX. Seam codified in the ServeForm doc-comment in moduleService.ts.",
+  "dateOpened": "2026-06-15",
+  "lastReviewed": "2026-06-15",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "generation-adapter",
+    "framework-adapter",
+    "assembler",
+    "source-form",
+    "react",
+    "tsx",
+    "native-first",
+    "adapter-as-normalization-hub",
+    "most-flexible-default"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

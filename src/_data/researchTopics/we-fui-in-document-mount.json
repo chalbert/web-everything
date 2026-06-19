@@ -1,0 +1,25 @@
+{
+  "id": "we-fui-in-document-mount",
+  "title": "WE↔FUI in-document mount — relaxing the isolation boundary for the trusted pair",
+  "summary": "Prep research for decision #765 (carved from the overlay-escape ruling #732, child of the embed epic #728). The constellation states an ABSOLUTE docs-rendering boundary — 'WE never imports or renders FUI block code in its own document' (docs/agent/demo-workflow.md:31); WE surfaces a FUI block only by embedding its FUI-hosted demo through the sandboxed fuiDemo iframe (.eleventy.js:38). #732 ruled overlay escape is solved host-side over the iframe (modes A/B1/B2 of a FUI-owned embed SDK) and recorded a fourth mode — C, an in-document/DI mount that drops the iframe and mounts the FUI component directly in WE's host DOM — as 'no longer never: a future trust-gated option for the WE↔FUI pair only', deferred to #765. The DECISIVE finding is iframe-impossible fidelity: a <dialog> (or popover) INSIDE A SHADOW ROOT can showModal()/showPopover() and promote to the HOST document's top layer, painting above all page content — true even for a closed shadow root (Open UI Popover explainer); the top layer ignores DOM position, makes the page inert, ::backdrop covers the viewport (MDN Popover API). An iframe structurally cannot (its top layer is its own document's — the #732 constraint). So C gets NATIVE, page-covering overlays with ZERO coordination, where A/B1/B2 simulate escape host-side via postMessage. Shadow DOM scopes style+DOM but is NOT a JS/security sandbox (one shared global scope; closed is 'not a strong security mechanism'; inheritable props + custom properties pierce in BY DESIGN — the theming channel) — structural encapsulation, not a trust boundary, which is exactly why it fits a TRUSTED pair. Every in-document composition model (single-spa, Module Federation, Web Components) mounts into one shared runtime presuming same-org trust; embed vendors iframe the UNTRUSTED surface (Stripe card fields for origin isolation) and script the trusted orchestration ('isolation buys safety, tight integration buys UX', Appmixer). Iframe isolation exists FOR cross-org untrusted content (arxiv) — so WE's 'never' is a cross-organization rule, and WE↔FUI is one constellation/same author/complete trust, making the exception principled not a hole. Residual risk the 'keep absolute' branch weighs: inheritable-CSS bleed (by design), shared globals + duplicate runtime, one-shot customElements.define tag collisions, first-party supply-chain surface CSP can't sandbox — against which C buys FIDELITY ONLY (A/B1/B2 already cover escape). Classification: #765 is an architecture/governance ruling spawning no entity; the mount is impl→FUI (a render mode of the embed SDK, runtime bundle not the #700 source import). Fork-existence test: both branches coherent, but the constellation states a POLICY/INVARIANT — 'never' is either absolute or carries the C exception, can't be both — so it's a genuine either/or, ONE real fork. Recommended RELAX, narrowly gated: sanction C as a future trust-gated, WE↔FUI-only, runtime-SDK, Shadow-DOM-isolated, opt-in (iframe-default) render mode, impl FUI-owned [med-high — punctures a stated absolute invariant for a fidelity-only gain]; guard conditions are forced invariants, light-DOM the broken sub-branch (Shadow DOM forced). Full grounding in reports/2026-06-16-we-fui-in-document-mount.md.",
+  "status": "open",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "embedding",
+    "isolation-boundary",
+    "shadow-dom",
+    "micro-frontend",
+    "in-document-mount",
+    "top-layer",
+    "constellation",
+    "trust",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "dialog"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}

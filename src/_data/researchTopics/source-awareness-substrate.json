@@ -1,0 +1,19 @@
+{
+  "id": "source-awareness-substrate",
+  "title": "Source-Awareness Substrate & IDE Bridge",
+  "status": "open",
+  "summary": "Prior-art survey grounding backlog #562 — how a dev browser maps a rendered DOM node back to the source construct that produced it, on a DEPLOYED (possibly minified, source-maps-stripped) app, then acts on the repo (jump to file:line, open a PR, drive the IDE). The central finding: the substrate is two orthogonal provider chains, not one mechanism — a node→source RESOLVER chain and an IDE-BRIDGE chain — and any resolver composes with any bridge. Resolver precedence: build-emitted string-literal data-* source anchor (Sentry's @sentry/babel-plugin-component-annotate is the live precedent — the ONLY family that survives a stripped prod build; least-leaky variant is an opaque-id + sidecar manifest, a design sweet spot no shipped product occupies) → framework debug metadata (__source/_debugSource, LocatorJS, click-to-react-component — dev-only, and React 19 removed _debugSource) → source maps (ECMA-426; JS-position granularity, usually stripped). Bridge precedence: VS Code extension with a localhost server (true two-way: WorkspaceEdit patches + active-project enumeration, needs install) → File System Access API (zero-install/zero-server deployed-tab patch-write, Chromium-only) → vscode://file deep link (jump-only, universal) → dev-server launch-editor (localhost dev only). Cold-deployed degrades to inert without a build-emitted anchor — so the anchor is the keystone. WE reframe: WE apps are already introspectable, so the anchor is a self-description extension contract the app emits and the dev-browser consumes (no-leakage seam) — standard owns the contract, Plateau dev-browser owns the resolver/bridge.",
+  "dateOpened": "2026-06-14",
+  "tags": [
+    "dev-browser",
+    "source-awareness",
+    "source-map",
+    "ide-bridge",
+    "file-system-access",
+    "deployed-app",
+    "introspection",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

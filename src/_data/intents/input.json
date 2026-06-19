@@ -1,0 +1,38 @@
+{
+  "id": "input",
+  "name": "Input Intent",
+  "requiresCapabilities": [
+    "face",
+    "showpicker",
+    "field-sizing"
+  ],
+  "status": "draft",
+  "summary": "Protocol for text entry standardization including affordances, privacy masking, and visual variants.",
+  "dimensions": {
+    "variant": {
+      "description": "Visual style of the input",
+      "values": [
+        "outlined",
+        "filled",
+        "borderless"
+      ]
+    },
+    "affordances": {
+      "description": "Interaction helpers shown with the input",
+      "values": [
+        "clear",
+        "reveal",
+        "copy"
+      ]
+    },
+    "status": {
+      "description": "Interaction state of the input",
+      "values": [
+        "enabled",
+        "disabled",
+        "readonly"
+      ]
+    }
+  },
+  "description": "<h3>Visual Variants</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>outlined</code>: High contrast (Material default). Defined boundary.</li><li><code>filled</code>: High emphasis background (Fluent/Material).</li><li><code>borderless</code>: Minimalist (iOS List style).</li></ul><h3>Affordances</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>clear</code>: 'X' button to reset the value — the <strong>Clearable value</strong> paradigm. Shown only when a value is present; carries an explicit accessible name (\"Clear\"); is keyboard-reachable; and returns focus to the input after clearing. Keep it decoupled from <kbd>Esc</kbd> — in a combobox <kbd>Esc</kbd> closes the popup, while clearing is a separate, opt-in action — so users don't lose data accidentally. Reused by search fields, comboboxes, tag inputs, and filters.</li><li><code>reveal</code>: Eye icon for passwords.</li><li><code>copy</code>: Clipboard action.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type InputVariant = 'outlined' | 'filled' | 'borderless';\ntype InputAffordance = 'clear' | 'reveal' | 'copy';\n\ninterface InputIntent {\n    // Visual style\n    variant: InputVariant;\n    // Privacy masking (dots)\n    masking: boolean;\n    // Interaction helpers\n    affordances: InputAffordance[];\n    // State\n    status: 'enabled' | 'disabled' | 'readonly';\n}</code></pre>"
+}

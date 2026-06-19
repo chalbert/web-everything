@@ -1,0 +1,83 @@
+{
+  "id": "live-region-status",
+  "name": "Live Region Status Intent",
+  "status": "draft",
+  "summary": "Protocol for announcing transient status to assistive technology via a live region — urgency, the semantic container (status, alert, log), and what is announced (loading, result counts, no-results, errors). One shared region; sources announce by event and the announcer resolves a single winner by precedence (error > loading > count) with a short debounce.",
+  "dimensions": {
+    "urgency": {
+      "description": "How forcefully an update interrupts the user (maps to aria-live)",
+      "values": [
+        "polite",
+        "assertive"
+      ]
+    },
+    "role": {
+      "description": "The semantic live-region container",
+      "values": [
+        "status",
+        "alert",
+        "log"
+      ]
+    },
+    "relevance": {
+      "description": "Whether the whole message or only new additions are announced",
+      "values": [
+        "atomic",
+        "additions"
+      ]
+    }
+  },
+  "description": "<h3>Urgency</h3><p class=\"text-sm text-gray-600 mb-2\">How forcefully an update interrupts, mapping to <code>aria-live</code>.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>polite</code>: Announced when the user is idle, without interrupting (advisory status — loading, result counts). The safe default.</li><li><code>assertive</code>: Announced immediately, interrupting the current utterance. Reserve for time-critical messages (a submitted form's error); overuse is hostile.</li></ul><h3>Role</h3><p class=\"text-sm text-gray-600 mb-2\">The semantic container. <strong>The region must already exist (empty) in the DOM when the page loads</strong> so assistive tech registers it; populate its text on events rather than inserting the node on demand.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>status</code>: <code>role=\"status\"</code> — implicit <code>aria-live=\"polite\"</code> + <code>aria-atomic=\"true\"</code>. Advisory status.</li><li><code>alert</code>: <code>role=\"alert\"</code> — implicit <code>aria-live=\"assertive\"</code>. Errors and urgent conditions.</li><li><code>log</code>: <code>role=\"log\"</code> — sequential additions where order matters (chat, console).</li></ul><h3>Relevance</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>atomic</code>: The entire region is re-announced on change (<code>aria-atomic=\"true\"</code>) — for a single replaced message like \"3 results available\".</li><li><code>additions</code>: Only newly added content is announced (<code>aria-relevant=\"additions\"</code>) — for append-only logs.</li></ul><h3>What to Announce</h3><p class=\"text-sm text-gray-600 mb-2\">Surface state in <em>text</em>, never a spinner or colour alone:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li>Loading/searching: \"Loading…\" / \"Searching…\" (compose the <a href=\"/intents/loader/\">Loader Intent</a> for label conventions).</li><li>Result counts: \"{n} results available\", and \"{label} {i} of {n}\" as focus moves through options.</li><li>Empty: an explicit \"No results found\".</li><li>Errors: the validation message text (compose the <a href=\"/intents/validation/\">Validation Intent</a>).</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns only the <em>announcement channel</em>. The content it announces is owned by neighbouring intents: <a href=\"/intents/loader/\">Loader</a> (pending text), <a href=\"/intents/validation/\">Validation</a> (errors), and <a href=\"/intents/selection/\">Selection</a> / combobox (counts). Do not move focus to the live region.</p><h3>Precedence &amp; coalescing</h3><p class=\"text-sm text-gray-600 mb-2\">When several sources can write the one region, the announcer resolves a <strong>single winner</strong> rather than letting them clobber each other, and <strong>debounces</strong> so rapid updates don't flood assistive tech.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Precedence by kind</strong> — a fixed, extensible order decides the slot when updates land together: <code>error &gt; loading &gt; count</code>. Errors win, but stay <em>polite</em> and take the slot by precedence rather than escalating to a separate <code>assertive</code> region.</li><li><strong>Debounce</strong> — coalesce bursts within a short settle window (~150&nbsp;ms) so successive messages announce once, not per keystroke.</li></ul><h3>Through-the-DOM coordination</h3><p class=\"text-sm text-gray-600 mb-2\">Sources never reference the announcer or an <code>aria-live</code> node directly — they coordinate through the DOM, so any number of independent surfaces compose with no wiring between them:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Input by event, not handle</strong> — a source dispatches <code>new CustomEvent('statuschange', { bubbles: true, detail: { kind, message } })</code>; the announcer listens on the host. No source holds a reference to the region.</li><li><strong>One region, adopted by reference</strong> — resolve an existing <code>status=&lt;id&gt;</code> node first, else create one <code>role=\"status\"</code> (implicit polite). Two sources <strong>must share one region</strong> — the no-double-announce invariant, proven by test.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Urgency = 'polite' | 'assertive';\ntype LiveRole = 'status' | 'alert' | 'log';\ntype Relevance = 'atomic' | 'additions';\n\ninterface LiveRegionStatusIntent {\n    // aria-live level\n    urgency: Urgency;\n    // Semantic container (sets the default urgency)\n    role: LiveRole;\n    // Whole message vs. only additions\n    relevance?: Relevance;\n}\n\ntype StatusKind = 'error' | 'loading' | 'count' | string;\n\ninterface StatusChangeDetail {\n    kind: StatusKind;   // resolves precedence: error > loading > count\n    message: string;    // the text announced\n}\n\n// Sources announce by event, never by reference:\n//   host.dispatchEvent(new CustomEvent('statuschange', {\n//     bubbles: true, detail: { kind, message },\n//   }));\n// The announcer owns the single region, precedence, and a ~150ms debounce.</code></pre><h3>Reference implementation</h3><p class=\"text-sm text-gray-600 mb-2\">First implemented as the droplist announcer — <code>frontierui:blocks/droplist/LiveStatus.ts</code> — which owns the one shared region (stamping <code>data-live-status</code> to claim it), bridges <code>filter-request</code>&nbsp;&rarr;&nbsp;loading and <code>filter-resolved</code>&nbsp;&rarr;&nbsp;ready/empty, and exposes a generic <code>statuschange</code> event / <code>announce()</code> entry for any source. The one-region / no-double-announce invariant is proven in the droplist behavior tests.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>Cross-cutting consumers</strong> — the same announce-transient-status pattern recurs across surfaces that should compose this intent instead of hand-rolling live regions: <a href=\"/backlog/013-gap-6-focus-announcements/\">#013 focus announcements</a>, <a href=\"/backlog/056-nav-focus-reset-home/\">#056 nav focus reset</a>, <a href=\"/backlog/059-pagination-focus-announcement/\">#059 pagination announce</a>, and <a href=\"/backlog/115-data-table-interactivity-announcements/\">#115 data-table announcements</a>.</p>",
+  "events": [
+    "statuschange",
+    "announce",
+    "clear"
+  ],
+  "designSystemResearch": [
+    {
+      "system": "WAI-ARIA / MDN",
+      "components": [
+        "aria-live",
+        "role=status",
+        "role=alert",
+        "role=log",
+        "aria-atomic",
+        "aria-relevant"
+      ],
+      "keyInsight": "role=status implies polite + atomic; role=alert implies assertive. The region must pre-exist empty for AT to register it. We adopt the role→urgency default mapping as the contract.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/status_role"
+    },
+    {
+      "system": "Orange Digital Accessibility",
+      "components": [
+        "Autocomplete announcements"
+      ],
+      "keyInsight": "The live region must exist on load; announce '{n} results available' politely. Assertive floods the user during rapid typing.",
+      "reference": "https://a11y-guidelines.orange.com/en/articles/autocomplete-component/"
+    },
+    {
+      "system": "React Aria",
+      "components": [
+        "LiveAnnouncer",
+        "useComboBox announcements"
+      ],
+      "keyInsight": "A centralized localized announcer for focus/filter/selection reuses one managed region across messages, rather than scattering aria-live nodes.",
+      "reference": "https://react-spectrum.adobe.com/react-aria/"
+    }
+  ],
+  "uxResearch": [
+    {
+      "title": "Announcing async combobox states",
+      "source": "Web Everything dropdown UX research (2026-06-01)",
+      "findings": [
+        "No-results and result counts must be announced as text, not just shown visually.",
+        "Loading vs. empty need distinct, localizable strings.",
+        "Keep aria-expanded honest while a loading or empty popup is shown."
+      ],
+      "reference": "https://mui.com/material-ui/api/autocomplete/"
+    }
+  ],
+  "researchGaps": [
+    "Reconcile with the Feedback and Message intents (toasts/alerts) which also convey severity — is live-region delivery a shared transport those compose, or a distinct channel?"
+  ]
+}

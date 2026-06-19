@@ -1,0 +1,22 @@
+{
+  "id": "persona-preset-primitive",
+  "title": "Persona as a First-Class Preset Primitive",
+  "status": "open",
+  "summary": "Prior-art grounding backlog #564: is persona a single first-class primitive of which the governance roster (#166) and the agile-role operating model (#563) are both projections? A persona is a named preset over composable concepts (preferences + surfaces-lit-up), not a closed RBAC group. VS Code Profiles is the mainstream preset-over-composables pattern (clone-to-derive, temporary, shareable); CrewAI role/goal/backstory agent personas are the agile-role lens, already named in industry — but both are patterns, not a shared schema. Even Persona-Based Access Control (PBAC) keeps a persona a lens mapped onto permissions, never authorization itself. The on-disk Profile (schema.ts:101) is a governance charter with no preferences/surfaces field, so unifying would be a costly refactor against a second lens that has no runtime. Defaults: name the shared pattern not a unified schema (bias toward separation); lens-only forever (access stays #178); name the role-switching primitive as a #563 methodology concept.",
+  "dateOpened": "2026-06-14",
+  "tags": [
+    "personas",
+    "preset",
+    "profiles",
+    "agile",
+    "methodology",
+    "rbac",
+    "pbac",
+    "governance",
+    "plateau",
+    "vision"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "plateau"
+}

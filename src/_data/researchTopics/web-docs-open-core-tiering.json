@@ -1,0 +1,21 @@
+{
+  "id": "web-docs-open-core-tiering",
+  "title": "Web Docs Open-Core Tiering Mechanics",
+  "status": "open",
+  "summary": "Pricing/metering prior-art survey (Chromatic, Mintlify, ReadMe, GitBook, Netlify, Vercel) grounding backlog #428's open-core mechanics — the metered unit, the free/paid threshold, and the billing surface — after #091 ratified the open-core-by-usage principle. The market meters on four distinct units, and the choice is the product's pricing identity: per-seat (Mintlify/GitBook — penalizes teams; Netlify is fleeing it), per-site/project (GitBook/ReadMe — simple but underprices), per-value-action (Chromatic's snapshot — meter the unit that delivers the value, graceful pause at the free ceiling), and pure infra credits (Netlify/Vercel — commoditized, captures no differentiator). Web Docs' differentiator is that the docs prove conformance, so the value-action to meter is the conformance-verified regeneration — the Chromatic-snapshot analog — reusing #089 idea-1's continuous-verification machinery as the meter. The threshold is a principle (free clears the self-host floor and onboards a real OSS/solo project; paid begins at ongoing production value), numbers deferred to the #427 build with real usage. The billing surface is a ratify, not a fork: #183's Lemon Squeezy MoR now supports usage-based/metered subscriptions, so the metered hosted model fits the chosen rail with no reopen.",
+  "dateOpened": "2026-06-12",
+  "tags": [
+    "monetization",
+    "open-core",
+    "pricing",
+    "metered-billing",
+    "webdocs",
+    "plateau",
+    "chromatic",
+    "lemon-squeezy",
+    "solo-founder"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

@@ -1,0 +1,25 @@
+{
+  "id": "iframe-overlay-escape",
+  "title": "Embedded-demo overlay escape — how an iframed demo's modal covers the host page",
+  "status": "open",
+  "summary": "Prep research for decision #732 (a carved fork of the embed-mechanism epic #728). The fuiDemo shortcode (.eleventy.js:38) embeds a FUI-hosted demo in a sandboxed, fixed-height iframe (sandbox='allow-scripts allow-same-origin', style='height:${h}px'; .fui-demo wrapper has overflow:hidden, style.css:1657). A demo's modal/popover/toast can't escape that box to cover the host docs page. The load-bearing finding is a PLATFORM CONSTRAINT, not an effort tradeoff: the top layer (<dialog> showModal / ::backdrop, the Popover API) is PER-DOCUMENT, so an iframe document's top layer is confined to the iframe's box — by security design, no iframe content can paint outside its frame. This is exactly the crux of the WE Dialog block (blocks.json:3286), whose thesis is 'native-first top-layer mount via <dialog> showModal + ::backdrop, never a position:fixed re-implementation' — so the Dialog family (modal/drawer/sheet) is the first #604 block that visibly breaks inside fuiDemo, the concrete trigger #732 asks for. Prior art reshaped the forks: the resize concern (auto-size the frame to content) is a SOLVED, de-facto-standard protocol — iframe-resizer (davidjbradshaw, v5; child posts content size via postMessage, parent resizes, MutationObserver/ResizeObserver-driven, child-initiated to bypass cross-origin) and oEmbed's real-world height-postMessage pattern (Twitter/Instagram ignore the spec's fixed height and post height instead) — so WE should REUSE that message shape, never mint a WE resize protocol (minimize-lock-in). The overlay-escape concern splits into TWO host-side flavors the original item collapsed into one 'B': B1 — host PROMOTES the existing frame to a fixed full-viewport layer (the Intercom messenger model: host toggles position:fixed;inset:0 on the frame; the demo paints its own backdrop, now covering everything; one boolean open/close message) vs B2 — host renders the backdrop/positioning NATIVELY (demo posts overlay intent+geometry; host paints its own <dialog>/popover, syncs geometry + focus-trap handoff). Net classification: auto-resize rides along as a baseline (strictly better than fixed pixel heights across themes/viewports) once any channel exists; origin-validated postMessage is a forced invariant (the payment-skimmer overlay/postMessage-spoof attack surface, per The Hacker News 2025); the overlay message contract stays shortcode-local/unregistered until a SECOND embed consumer appears (per #728's own slicing ruling — component.njk:235 is the only consumer today), then registers as a webembed-style protocol. The genuine call is the escape mechanism: recommended A-contained baseline + B1-promote on opt-in [med — B1 vs B2 is where judgment lives], B2 rejected as over-built for a 'see it run' demo, C (defer to the #700-gated DI mount) unavailable today. Full grounding in reports/2026-06-16-iframe-overlay-escape.md.",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "embedding",
+    "iframe",
+    "overlay",
+    "postmessage",
+    "iframe-resizer",
+    "oembed",
+    "top-layer",
+    "dialog",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "dialog"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}

@@ -1,0 +1,25 @@
+{
+  "id": "component-token-table-sourcing",
+  "title": "Per-component token-table data sourcing for the Web Docs /blocks/ panels",
+  "summary": "Decision prep for #802 (one of three panel-data calls split from #727, under the Web Docs feature-pipeline epic #623). A per-component /blocks/{id}/ page should show a token table; #727 traced the build premise false and carved this to its own decision: where the per-component token data comes from, how a block maps to a component-token group, and what the table shows. NOT greenfield — the token model (#403/#404) and CEM protocol (#653/#626 Fork 1) both shipped. Verified the tree: webtheme/defaultTokens.ts:90-117 has a component tier but only button/card (2 of 69 blocks), each aliasing a primitive, and those keys are NOT block ids (closest is action-button; there is no card block) — it names generic archetypes, not WE blocks. webtheme/tokens.ts:78-140 already exposes flattenTokens()/resolveTokens() yielding each token alias target + resolved literal (the three columns a table wants); compile.ts emits the #403 example --button-radius: var(--radius-md). The pivotal finding: the CEM WE already emits (custom-elements.json via scripts/gen-cem.mjs, #653) has a first-class per-component cssProperties slot the props-table already claims to render (block-descriptions/props-table.njk:17), but gen-cem.mjs:71-82 emits NONE today and 0 blocks carry token data — the renderer slot exists, wired into the same manifest the props table consumes, simply unpopulated. PRIOR ART converges: Material 3 (ref/sys/comp tiers; component tokens alias a system token and the docs show the alias chain), Adobe Spectrum (component tokens reference alias/global tiers), the CEM cssProperties slot (de-facto multi-vendor home — api-viewer/Storybook autodocs/VS Code custom-data — the same one-manifest-many-consumers principle #626 Fork 1 ratified for the props table), and Storybook design-token addons + Style Dictionary (both key off an explicit marker, never dir/name convention, and treat the token REFERENCE as first-class with the resolved value alongside). THREE prepared forks: (1) DATA SOURCE — recommend CEM cssProperties projected by gen-cem.mjs over a parallel src/_data token feed (applies the one-manifest ruling to tokens); coherent-but-excluded alternative = a standalone token JSON. (2) block-to-token MAPPING locus — recommend an explicit optional componentTokens field on the blocks.json entry (mirrors the #727 fuiDemo precedent, keeps webtheme/ pure), broken branch = id name-convention (button != action-button). (3) table SCOPE — recommend override + alias + resolved literal (M3/Spectrum-aligned superset; data already in ResolvedToken). Red-team flags: Fork 1 default leans on #626 Fork 1 being load-bearing (the parallel-JSON branch is functional, only excluded by the one-manifest principle); sparse 2/69 coverage is a PRIORITIZATION concern (when to build), not the sourcing decision. Layer: build-time docs projection riding the existing DTCG/CEM protocols, no new protocol/intent/DI. Full grounding in reports/2026-06-16-component-token-table-sourcing.md.",
+  "status": "open",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "webtheme",
+    "design-tokens",
+    "dtcg",
+    "custom-elements-manifest",
+    "component-tokens",
+    "blocks",
+    "panel-sourcing",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "props-table"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

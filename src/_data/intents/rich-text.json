@@ -1,0 +1,41 @@
+{
+  "id": "rich-text",
+  "name": "Rich-Text Surface",
+  "requiresCapabilities": [
+    "contenteditable",
+    "editcontext",
+    "sanitizer-api",
+    "highlight-api"
+  ],
+  "status": "draft",
+  "summary": "The editable rich-text surface UX (ratified #590, webediting #618): an editable / read-only surface that hosts flowed, formatted content. Negotiates the editing-surface capabilities (contenteditable floor + editcontext upgrade, #590 Fork 3), sanitizes incoming content to its allowed schema (Sanitizer API), and decorates ranges without mutating the model (Highlight API). The controls that drive it are a separate axis — see text-formatting. The engine that backs it is a Technical Configurator / Editor Engine protocol concern, not part of this UX intent.",
+  "dimensions": {
+    "mode": {
+      "description": "Whether the surface accepts input. editable = the surface is editable (the default); read-only = the same content model is rendered without an editing affordance (a published view of authored content).",
+      "values": [
+        "editable",
+        "read-only"
+      ]
+    },
+    "flow": {
+      "description": "The content shape the surface permits. multiline = block-flowed content with paragraphs and block elements (the most-permissive default); singleline = a constrained single line of inline-formatted text (no block breaks) — e.g. a styled title field.",
+      "values": [
+        "multiline",
+        "singleline"
+      ]
+    },
+    "paste": {
+      "description": "How externally-pasted content is admitted, borrowing Sanitizer API vocabulary. sanitized = clean incoming HTML to the surface’s allowed schema (the safe default); plain-text = strip all formatting to text; raw = admit as-is (author-trusted source only).",
+      "values": [
+        "sanitized",
+        "plain-text",
+        "raw"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">The <strong>editable rich-text surface</strong> UX ratified in <a href=\"/backlog/590-graduate-rich-text-editing-the-webediting-project/\">#590</a> for the <a href=\"/backlog/618-graduate-the-rich-text-editing-standard-webediting-project-s/\">webediting</a> project: a surface that hosts flowed, formatted content and can be <code>editable</code> or <code>read-only</code>. The <em>controls</em> that drive formatting are a <strong>separate axis</strong> — see <a href=\"/intents/text-formatting/\">text-formatting</a> — because a formatting toolbar recurs without an editor.</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>mode</code>: <code>editable</code> (default) vs <code>read-only</code> (the same model rendered without an editing affordance).</li><li><code>flow</code>: <code>multiline</code> (block-flowed paragraphs — the most-permissive default) vs <code>singleline</code> (one constrained line, inline formatting only).</li><li><code>paste</code>: <code>sanitized</code> (clean to the allowed schema via the <a href=\"/capabilities/sanitizer-api/\">Sanitizer API</a> — the safe default) vs <code>plain-text</code> (strip to text) vs <code>raw</code>.</li></ul><h3>Capabilities It Negotiates</h3><p class=\"text-sm text-gray-600 mb-2\">The surface <code>requiresCapabilities</code> the four editing-surface capabilities (<a href=\"/backlog/628-webediting-capabilities-contenteditable-editcontext-sanitiz/\">#628</a>): a <a href=\"/capabilities/contenteditable/\">contenteditable</a> floor, an <a href=\"/capabilities/editcontext/\">EditContext</a> upgrade (<a href=\"/backlog/590-graduate-rich-text-editing-the-webediting-project/\">#590</a> Fork 3), the <a href=\"/capabilities/sanitizer-api/\">Sanitizer API</a> for paste, and the <a href=\"/capabilities/highlight-api/\">Highlight API</a> to decorate ranges (spellcheck / collaboration cursors) without mutating the model.</p><h3>UX-only &rarr; the engine is a protocol</h3><p class=\"text-sm text-gray-600 mb-2\">The <em>engine</em> that maintains the content model, applies operations, and serializes — is the <strong>Editor Engine protocol</strong> / a Technical Configurator concern, not part of this UX intent.</p>",
+  "events": [
+    "richtext-input",
+    "richtext-selectionchange"
+  ]
+}

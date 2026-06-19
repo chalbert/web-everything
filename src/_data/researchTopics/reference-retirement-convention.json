@@ -1,0 +1,21 @@
+{
+  "id": "reference-retirement-convention",
+  "title": "General reference-retirement convention — generalize the corpus `retired` shape across all reference homes",
+  "status": "open",
+  "summary": "Grounds decision #584 (under epic #583, the reference-health dogfood layer): generalize #546's corpus `retired`/`retiredDate`/`retiredReason` (keep-not-delete) shape across every place the project cites an EXTERNAL reference. Inventory finds two clusters — structured JSON homes with external URLs that are the convention's real target (benchmarkCorpus.json `docsUrl`/`repoUrl`, the only home that already has `retired`; references.json `links[].url`; blocks.json/intents.json `designSystemResearch[].reference`; benchmarkCapabilityPresence.json `rows[].url`) and freeform prose homes (reports/*.md, research-descriptions/*.njk) where no field-set is enforceable. researchTopics.json already carries the REPLACEMENT half of the model (`supersededBy` + `lastReviewed`/`reviewHorizon`, #192/#441/#477/#478); crossRef cites only internal links; adapters/protocols cite no external URLs yet. Validation today is one rule (warn on a `verified` presence row lacking `url`, check-standards-rules.mjs:740); no JSON Schema files exist — validation is imperative. Prior-art survey is decisive on two points: (1) the retirement vocabulary is document-type-agnostic — W3C applies the same lifecycle states to a REC, a Note, a decision; IETF the same headers to every RFC — so homes differ in CONTAINER not in the retirement CONCEPT (argues uniform shape over per-home). (2) Death and supersession are distinct, linkable states, not one axis — W3C separates superseded (newer recommended, old still valid) from obsolete (no longer used) from rescinded (withdrawn); IETF mirrors with bidirectional Obsoletes:/Updates: headers PLUS a separate Historic status; PEP `Superseded-By:`, ADR `Supersedes/SupersededBy` carry only the replacement pointer; JSON Schema/OpenAPI `deprecated:true` is the minimal keep-not-delete annotation. This dissolves the original 'how does it mesh with #192's supersedes chain?' fork into a concrete choice: two orthogonal markers (a `retired` triplet for death + reuse #192's `supersededBy` pointer for replacement — a ref can be both, as FAST is) vs one richer W3C-style `status` enum. Classification: data governance not a WE standard (the platform setting is #583 layer 2); 7-question layer pass N/A; binding principles are native-first vocabulary reuse, reproducibility under #192 (keep-not-delete), bias-toward-separation (orthogonal markers), most-permissive default (opt-in metadata). Four forks at DoR: uniform shape; one documented convention + one shared validator helper; two orthogonal markers reusing supersededBy; structured homes now with freeform extraction deferred to #597. Full grounding in reports/2026-06-14-reference-retirement-convention.md.",
+  "dateOpened": "2026-06-14",
+  "lastReviewed": "2026-06-14",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "references",
+    "retirement",
+    "convention",
+    "monitoring",
+    "freshness",
+    "data-governance",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

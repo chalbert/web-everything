@@ -1,0 +1,25 @@
+{
+  "id": "temporal",
+  "name": "Temporal Intent",
+  "status": "active",
+  "summary": "Protocol abstracting date/time selection paradigms across mouse, touch, and keyboard modalities.",
+  "dimensions": {
+    "presentation": {
+      "description": "The visual paradigm for date/time selection",
+      "values": [
+        "media",
+        "linear",
+        "input"
+      ]
+    },
+    "granularity": {
+      "description": "The selection scope",
+      "values": [
+        "point",
+        "range",
+        "multi"
+      ]
+    }
+  },
+  "description": "<h3>Presentation Paradigms</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>media</code>: Spatial surfaces. Wall calendars (Grid) or Analog Clocks.</li><li><code>linear</code>: Sequential lists. Scrolling Wheels (iOS) or Listboxes.</li><li><code>input</code>: Text-based. Masked inputs or simple native fallbacks.</li></ul><h3>Granularity</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>point</code>: Single instance (Date/Time).</li><li><code>range</code>: Span between two points.</li><li><code>multi</code>: Disconnected sets of points.</li></ul>"
+}

@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { loadBlocks } from '../lib/blocks-loader.cjs';
+import { loadIntents } from '../lib/intents-loader.cjs';
+import { loadResearch } from '../lib/research-loader.cjs';
 import {
   checkStatus, validateProtocol, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, isSegmentCovered, permalinkSegment,
@@ -357,12 +359,12 @@ describe('findUnquotedColonScalars — frontmatter quote-fix lint (#453)', () =>
 // here instead of only surfacing on a manual `npm run check:standards` run.
 describe('real data stays clean (per family)', () => {
   const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
-  const intents = loadJson('intents.json');
+  const intents = loadIntents(); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
   const protocols = loadJson('protocols.json');
   const projects = loadJson('projects.json');
   const capabilities = loadJson('capabilities.json');
   const capabilityMatrix = JSON.parse(readFileSync(join(DATA, 'capabilityMatrix.json'), 'utf8'));
-  const research = loadJson('researchTopics.json');
+  const research = loadResearch(); // per-topic specs src/_data/researchTopics/<id>.json, assembled (#1145)
   const loadBacklog = require(join(ROOT, 'src/_data/backlog.js'));
   const backlog = typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog;
 

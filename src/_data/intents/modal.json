@@ -1,0 +1,61 @@
+{
+  "id": "modal",
+  "name": "Modal Intent",
+  "requiresCapabilities": [
+    "dialog",
+    "dialog-closedby"
+  ],
+  "status": "draft",
+  "summary": "Protocol defining dialog behavior including stacking, scrolling, sizing, and dismissal strategies.",
+  "dimensions": {
+    "placement": {
+      "description": "Visual position of the modal surface",
+      "values": [
+        "center",
+        "top",
+        "bottom",
+        "start",
+        "end",
+        "fill"
+      ]
+    },
+    "mode": {
+      "description": "Whether the modal blocks background interaction",
+      "values": [
+        "modal",
+        "modeless"
+      ]
+    },
+    "backdrop": {
+      "description": "Visual treatment behind the modal",
+      "values": [
+        "dimmed",
+        "transparent",
+        "blur"
+      ]
+    },
+    "dismissal": {
+      "description": "How the modal can be closed",
+      "values": [
+        "light",
+        "explicit",
+        "none",
+        "gesture"
+      ]
+    },
+    "scrolling": {
+      "description": "How content scrolling is handled",
+      "values": [
+        "contained",
+        "viewport"
+      ]
+    }
+  },
+  "description": "<h3>Placement & Docking</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>center</code>: Standard dialog.</li><li><code>top/bottom</code>: Sheet/Drawer behavior (Mobile standard).</li><li><code>start/end</code>: Sidebar/Panel behavior.</li><li><code>fill</code>: Full-screen override.</li></ul><h3>Focus Management</h3><p class=\"text-sm text-gray-600 mb-2\">A modal surface composes the <a href=\"/intents/focus-containment/\">Focus Containment Intent</a> for focus behavior — trapping focus inside, marking the background <code>inert</code>, setting initial focus, and restoring focus to the trigger on close — rather than redefining it here. A <code>mode: modal</code> surface defaults to <code>trap</code> + <code>inert</code>; <code>mode: modeless</code> defaults to <code>none</code> + <code>interactive</code>.</p><h3>Lifecycle Events</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>enter</code>: Modal opens and becomes active.</li><li><code>exit</code>: Modal closes.</li><li><code>recede</code>: Modal moves to background (when a new stacked modal opens).</li><li><code>advance</code>: Modal moves to foreground (when the top stacked modal closes).</li></ul><h3>Design System Alignment</h3><div class=\"comparison-table-wrapper\"><table class=\"comparison-table\"><thead><tr><th>System</th><th>Component</th><th>Placement</th><th>Backdrop</th><th>Dismissal</th></tr></thead><tbody><tr><td>Material 3</td><td>Basic Dialog</td><td><code>center</code></td><td><code>dimmed</code></td><td><code>light</code></td></tr><tr><td>Material 3</td><td>Full-screen</td><td><code>fill</code></td><td><code>transparent</code></td><td><code>explicit</code></td></tr><tr><td>Carbon</td><td>Modal</td><td><code>top</code></td><td><code>dimmed</code></td><td><code>explicit</code></td></tr><tr><td>Apple HIG</td><td>Sheet</td><td><code>bottom</code></td><td><code>dimmed</code></td><td><code>light</code></td></tr><tr><td>Radix UI</td><td>Dialog</td><td><code>center</code></td><td><code>dimmed</code></td><td><code>light</code></td></tr></tbody></table></div><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Dismissal = 'light' | 'explicit' | 'none';\ntype Placement = 'center' | 'top' | 'bottom' | 'start' | 'end' | 'fill';\ntype Backdrop = 'dimmed' | 'transparent' | 'blur';\n\ninterface ModalIntent {\n    // Role (ARIA)\n    role: 'dialog' | 'alertdialog';\n    // Visual placement\n    placement: Placement;\n    // Interaction Mode (Blocks background?)\n    mode: 'modal' | 'modeless';\n    // Mobile Snap Points (Sheet)\n    detents?: { initial: 'medium' | 'large' | 'full'; stops: string[] };\n    // Backdrop visual\n    backdrop: Backdrop;\n    // How the modal can be closed\n    dismissal: Dismissal | 'gesture';\n    // Focus Management — see the Focus Containment Intent\n    focus: FocusContainmentIntent;\n    // Allow other modals on top?\n    stackable: boolean;\n    // Scroll strategy\n    scrolling: 'contained' | 'viewport';\n    // Responsive sizing map\n    size: 'auto' | 'fullscreen' | Record&lt;string, string&gt;;\n    // Motion bindings\n    animations?: Partial<Record<'enter' | 'exit' | 'recede' | 'advance', string>>;\n}</code></pre>",
+  "events": [
+    "enter",
+    "exit",
+    "recede",
+    "advance"
+  ]
+}

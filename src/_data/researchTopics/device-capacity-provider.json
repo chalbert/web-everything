@@ -1,0 +1,22 @@
+{
+  "id": "device-capacity-provider",
+  "title": "Device-capacity provider — detection-axis + composite multi-source routing",
+  "status": "open",
+  "summary": "Prep research for decision #729 (an extension of the capability-provider epic #203). The provider seam models platform-FEATURE capability (Baseline/web-features tiers) and picks ONE provider per scope by venue; #729 asks it to (1) add a device-CAPACITY axis (hardwareConcurrency, deviceMemory, network/saveData, battery, GPU tier) and (2) combine providers so different checks route to different sources — delegating detection to existing solutions (WE standardizes the contract+routing, never the algorithm). The survey reshapes the item from two forks to THREE. Signal landscape with one load-bearing finding — availability is NOT uniform across venues: hardwareConcurrency + GPU-tier are runtime-only (no request header carries them), while deviceMemory (Sec-CH-Device-Memory) and Save-Data also resolve at the edge — so the capacity axis should REUSE the existing Venue dimension + the undefined-means-unknown degrade contract, an argument FOR a sibling provider on the same machinery. Battery is excluded not forked (deprecated, removed by Firefox, never in Safari, fingerprinting vector, ~76% Chromium-only) — the fork-existence test in action. Combinator prior-art: Google Chrome Labs react-adaptive-hooks (+ Addy Osmani's adaptive-loading pattern, svelte-adaptive-sensors port) combine exactly hardwareConcurrency+deviceMemory+effectiveType+saveData; WE's capacity provider is the platform-neutral, framework-free version. Every combinator consumes COARSE BUCKETS at the call site (effectiveType '4g', GPU tier 0–3) derived from a raw measurement — which is the new Fork 2 (expose both raw scalar AND derived bucket; default both). Only GPU-tier warrants a maintained dependency: detect-gpu (pmndrs — WebGL benchmark→tier 0–3, handles Apple privacy-masked renderer strings); CPU/RAM/network are thin native reads, battery excluded — delegation met with ONE lib. Recommended: Fork 1 separate CapacityProvider [high], Fork 2 both scalar+bucket [med-high], Fork 3 CompositeProvider routing by check-domain [high]. Full grounding in reports/2026-06-15-device-capacity-provider.md.",
+  "dateOpened": "2026-06-15",
+  "lastReviewed": "2026-06-15",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "capabilities",
+    "provider-seam",
+    "device-capacity",
+    "client-hints",
+    "adaptive-loading",
+    "detect-gpu",
+    "composite",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}

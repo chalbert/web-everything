@@ -1,0 +1,27 @@
+{
+  "id": "we-fui-wrapper-handoff",
+  "title": "WE→FUI wrapper-handoff mechanism — how the FUI panel obtains + live-tests WE-generated framework wrappers",
+  "status": "open",
+  "summary": "Prep research for decision #855 (the cross-repo seam blocking the polyglot adapter panel #753, under Block Explorer epic #746). #821 shipped a WE-owned consume-mode wrapper generator (scripts/gen-wrapper/genWrapper.mjs): a pure generateWrapper(declaration, target) => wrapperSourceString over a block’s Custom Elements Manifest. The panel that DISPLAYS + LIVE-TESTS that source is FUI (locus:frontierui, per the docs-rendering boundary — WE never renders FUI block code). Open seam: how the FUI panel obtains + live-tests the WE-generated wrapper across the repo boundary. Item filed three options cold — (A) a build-time published artifact, (B) a bundle the fuiDemo iframe (#701) loads, (C) a sandbox that generates on demand. Two tree facts shrink it first: the generator is already a pure, importable, no-DOM/no-FUI function the codebase explicitly intends FUI to import directly (#821 cli.mjs note), and consume-mode output is a PURE FUNCTION OF THE CEM (deterministic, no per-user input) so on-demand generation produces output that never varies — the freshness case for (C) evaporates. TOPIC 1 (distribution): the dominant pattern is unambiguous and one-directional — wrappers are a BUILD-TIME ARTIFACT OF THE SOURCE LIBRARY, published as a package the consumer reads; on-demand/runtime generation in the consumer has NO production precedent. Stencil output targets generate in the component library’s build (internal metadata, not CEM) and publish an npm package; Lit Labs gen-wrapper-react/-vue/-angular generate at the element library’s build FROM the custom-elements.json (CEM-driven — the exact shape of #821) and publish; @lit/react createComponent is the lone RUNTIME path but is hand-wired per element, not CEM codegen. This settles A vs C and dissolves B: (A) build-time is the universal precedent; (C) on-demand has no precedent and no benefit for deterministic output; (B) only describes WHERE the bundle sits, an impl detail of the chosen handoff, not a distinct mechanism. TOPIC 2 (live-test sandbox): the render is FUI’s regardless of handoff (embedded via #701 fuiDemo iframe), so the sandbox tech is FUI impl WE does not mandate — guidance only: esm.sh + import maps is the lightest credible multi-framework path (React TSX AND Vue SFC, no COOP/COEP isolation tax inside an embedded iframe); Sandpack is the turnkey source-string-in middle ground; esbuild-wasm fits only a React-only commitment (no Vue SFC); WebContainers is overkill + pays a cross-origin-isolation embedding tax. WHAT SURVIVES: one forced invariant (build-time handoff A, FUI-owned sandbox) + one genuine fork — what crosses the WE→FUI boundary: A1 WE publishes the derived wrapper artifact as a versioned @webeverything/* package (matches Stencil/Lit publish-a-wrapper-package; con: a third published thing that is only a pure function of two already-published WE things) vs A2 WE publishes the generator + CEM contract (@webeverything/gen-wrapper + the ratified CEM #626) and the FUI demo build derives wrappers itself (single source of truth, fresh by construction, matches the #821 authoring intent; con: WE codegen runs inside FUI’s build, less faithful to the Stencil/Lit generate-at-source locus). Recommended default A2 (med-high): the generator already exists as a pure importable function the codebase intends FUI to call; residual = prior-art fidelity (Stencil/Lit generate at the source and publish the wrapper), so A1 is added later if WE wants a sole-generation execution site or a cacheable pre-built artifact — not excluded, just not the probe default. Sequencing (not a fork): blocks.json carries no tagName today so the CEM emits 0 declarations (#822) — the panel build #753 is gated on BOTH this decision and #822; #855 settles the mechanism only. Full grounding in reports/2026-06-17-we-fui-wrapper-handoff.md.",
+  "dateOpened": "2026-06-17",
+  "lastReviewed": "2026-06-17",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "block-explorer",
+    "polyglot",
+    "wrapper",
+    "handoff",
+    "cem",
+    "custom-elements-manifest",
+    "stencil",
+    "lit-labs",
+    "output-target",
+    "sandbox",
+    "esm-sh",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

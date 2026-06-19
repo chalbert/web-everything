@@ -1,0 +1,24 @@
+{
+  "id": "dropdown-async-pagination",
+  "title": "Dropdown Async Pagination",
+  "status": "open",
+  "summary": "Prior-art survey (pagination literature, the WAI-ARIA APG Feed pattern, React Aria useAsyncList, open MUI/Fluent/SAP/Radix feature-requests) grounding backlog #018's async-pagination forks for the dropdown family. The load-bearing finding: the item is largely overtaken by work landed since it was filed — cursor-vs-offset already lives in the Custom Pagination protocol, and windowing+async is a composition of Windowed Collection (dataSource:infinite) over Loader (filtering/loadingMore), which the autocomplete member already declares. So no net-new contract; the dropdown composes the three existing standards. The genuinely-open residue is three family-specific gaps: wire Collection Operations advance:manual|auto onto autocomplete (default auto + manual fallback), keep the family forward-only (load-earlier is a Feed concern), and adopt the Feed aria-setsize=\"-1\" + aria-busy rule for the unknown-total case. No native async combobox pagination exists.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "dropdown",
+    "async",
+    "pagination",
+    "cursor",
+    "windowed-collection",
+    "loader",
+    "feed-pattern",
+    "aria-setsize",
+    "apg",
+    "composition"
+  ],
+  "relatedBlocks": [
+    "droplist"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

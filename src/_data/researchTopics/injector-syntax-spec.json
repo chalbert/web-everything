@@ -1,0 +1,25 @@
+{
+  "id": "injector-syntax-spec",
+  "title": "Injector Syntax: Draft Specification",
+  "status": "open",
+  "summary": "Formal draft specification for the injector syntax system — provide, consume, and injector block declarations. Defines three conformance tiers (Runtime API, TypeScript API, DSL), maps every DSL construct to an unplugged runtime equivalent, addresses both module-scope and DOM-scope injection, and documents tooling requirements for esbuild, TypeScript, Chrome DevTools, and transpiler plugins.",
+  "dateOpened": "2026-02-24",
+  "tags": [
+    "injector",
+    "syntax",
+    "spec",
+    "provide",
+    "consume",
+    "dsl",
+    "tooling",
+    "module-injector",
+    "consumable"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [
+    "webinjectors",
+    "webcontexts",
+    "webstates"
+  ],
+  "relatedProject": "webinjectors"
+}

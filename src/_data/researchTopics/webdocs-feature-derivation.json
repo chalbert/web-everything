@@ -1,0 +1,21 @@
+{
+  "id": "webdocs-feature-derivation",
+  "title": "Web Docs feature derivation — placing the workbench surface against WE standards",
+  "status": "open",
+  "summary": "Prep research for decision #626 (stage 3 of the Web Docs feature-pipeline epic #623): classify each of the 20 features in the #625 matrix (src/_data/workbenchFeatures.json) against the live registry — reuse / extend / mint, and at what layer. Applying the fork-existence test (mandate nothing; a fork is real only when branches are mutually-exclusive end-states) collapses the surface to ~11 ratify-as-classified reuse/extend/out-of-scope placements, a small block-mint set (props-table / story-canvas / code-view, forced by 'runnable code → Block'), and just TWO genuine forks. Fork 1 — the component-metadata interchange: adopt Custom Elements Manifest (CEM; custom-elements.json, schema 2.1.0, consumed by api-viewer + Storybook + VS Code custom-data + linters off one manifest) as a new WE PROTOCOL [recommended — it is a manifest many independent vendors interoperate on, WE's exact litmus for a protocol (classification Q2), and WE already hosts this shape in the changelog-manifest protocol (protocols.json:94); reuses platform vocabulary, inherits the consumer ecosystem] vs mint a bespoke WE manifest format vs tooling-only with no registered entity. Note: WE has NO formats registry, so the matrix's format:* refs are dangling — the entity-kind is a real open call. Fork 2 — docs examples ↔ webcases: docs 'examples/stories' (and interaction-tests) ARE the webcases fixture artifact [recommended — one fixture serves conformance + docs, and the #426 ingestion adapters already land CSF stories in the webcases pivot WebCase={id,title,description,code}] vs a sibling docs-only 'examples' concept (honours separation bias but duplicates the fixture). Research reshaped the matrix: api-viewer proves component-isolation + autodocs + args are ONE capability fed by one CEM (not three new builds); Pagefind (static WASM build-time index, no SaaS) reframes 'search' from a mint to reuse-input-blocks + a build step; long-form docs reuse the 11ty/markdown pipeline + a block-embed directive, NOT the unregistered webediting project. Full grounding in reports/2026-06-14-webdocs-feature-derivation.md.",
+  "dateOpened": "2026-06-14",
+  "lastReviewed": "2026-06-14",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "derivation",
+    "placement",
+    "custom-elements-manifest",
+    "webcases",
+    "protocol",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

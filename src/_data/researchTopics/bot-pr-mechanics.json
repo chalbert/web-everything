@@ -1,0 +1,20 @@
+{
+  "id": "bot-pr-mechanics",
+  "title": "Bot-PR mechanics — how the fix-loop opens a pull request",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #578 (Cluster A of #562) — the VCS-interaction surface the #141 fix-loop's last step (report → propose → verify → OPEN A PR) assumes. #562 surfaced eight axes; this survey collapses them to ONE forced invariant + TWO genuine on-merit forks, the rest support-all-coherent (same shape #562 used for its provider registries). Invariant (ratify, not weigh): generated code is NOT privileged — a generated fix runs the identical review + code-compliance gates as a human PR (lint, tests, type-check, static analysis/quality gate, branch protection, required review), no bypass; the autofix verify gate (scripts/autofix/engine.mjs:229-247) is necessary-but-not-sufficient; auto-merge reachable only after every gate is green (the #141/#410 autonomy ladder). 2025 agent-PR consensus (GitHub Copilot coding agent runs the same branch-protection + required-checks gates; separate analysis from execution with a human approval gate) confirms it as a ratify. Fork 1 — forge auth, bot identity & commit signing: GitHub Apps beat PATs for unattended automation (short-lived ~1h installation tokens, fine-grained perms, org-owned, built-in bot identity, API commits auto-signed), but a browser/extension can't safely hold an App private key, so the genuine either/or is the CREDENTIAL SOURCE: (A) reuse the IDE-bridge's existing git auth [default v1 — the #576/#577 bridge is already authenticated, zero new credential surface, user identity] · (B) a GitHub-App backend broker [hosted/org-bot tier — Plateau backend mints short-lived tokens, bot identity, auto-signed] · (C) user OAuth/PAT in the browser [rejected as primary — long-lived credential exposure]. Identity+signing RIDE the auth choice (not a separate fork); couples to #410's authorization dial. Fork 2 — PR evidence payload: mint a STANDARD-OWNED conformance-evidence manifest (emitted by the app's self-description/trace substrate, reusing capabilityMatrix.json:1 vocabulary — the same app-emits/tool-consumes shape as #575's anchor contract; Plateau renders it into the PR; runtime-agnostic so polyglot fix-loops emit the same manifest = forward-adapter reach; a CONTRACT not a Protocol — no swappable-vendor interop) [recommended] vs freeform Plateau PR markdown only [no contract, re-invented per impl]; composes with (not duplicates) #410 Fork 4-A's audit record. Support-all-coherent (NOT decisions): forge-agnosticism = a forge provider registry (open-PR abstracted per forge — GitHub/GitLab/Gitea/Forgejo/Bitbucket; every provider used, precedence+degradation only — exactly #562's bridge-registry ruling; prior art: Renovate Platform interface lib/modules/platform/types.ts, Woodpecker forge.Forge, git-pkgs/forge, go-git-providers; v1 ships GitHub first = prioritization not a fork); git-flow/PR-strategy policy dials (draft-vs-ready, target branch, one-per-PR vs batched, rebase/squash/merge, auto-merge — defaults live in the compliance layer #579, read not invented by the bot); conflict/concurrency (rebase-on-stale, detect-and-skip racing fixes), revert/rollback (normal revert PR via the same gates, autonomy-gated per #410), monorepo/multi-repo targeting (derived from the resolver — repo is wherever the resolved file:line lives; cross-repo → independent PR per repo, atomic cross-repo merge rejected).",
+  "dateOpened": "2026-06-14",
+  "tags": [
+    "dev-browser",
+    "fix-loop",
+    "git-integration",
+    "pull-request",
+    "forge",
+    "github-app",
+    "conformance-evidence",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcompliance"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "nl-to-technical-configurator",
+  "title": "NL → Technical Configurator",
+  "status": "open",
+  "summary": "Prior-art survey grounding backlog #096: an AI front-end to the Technical Configurator where a developer describes behavior in plain language and the AI selects and wires the right strategy from the registries. The survey settles four forks. Surface: panel-first (an NL box inside the configurator that populates the requirements state exactly as a preset does), reusing the ranking, verdict badges and decision-record emitter; CLI and editor command are follow-ons. Provider contract: a surface-agnostic describe(nl, domain) → Requirements that translates intent only, leaving strategy selection to the deterministic compat engine. Grounding: a per-domain JSON schema derived from the seed run under constrained decoding, so the model cannot emit off-vocabulary axes/values. Failure: partial fill that degrades into the panel's manual mode. The registry the output is constrained to is the moat, not the model.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "technical-configurator",
+    "natural-language",
+    "structured-output",
+    "constrained-decoding",
+    "ai-agnostic",
+    "provider-registry",
+    "decision-support",
+    "byo-key",
+    "self-run-tool",
+    "monetization"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webregistries"
+}

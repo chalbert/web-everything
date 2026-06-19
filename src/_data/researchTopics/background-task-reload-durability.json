@@ -1,0 +1,22 @@
+{
+  "id": "background-task-reload-durability",
+  "title": "Background Task reload-durability — durable execution vs durable state (scope & guard)",
+  "status": "open",
+  "summary": "Prep platform-substrate survey for decision #450 (unblocks the durability:reload tier build #134). The Background Task Surface ships a route-only baseline (navigationGuard arms a beforeunload + Navigation-API confirm); durability:reload is the opt-in tier that promises work surviving a full reload. Two coupled forks gate it: (1) scope beyond fetches, (2) does durability:reload relax navigationGuard:warn. The survey settles fork 1 by reshaping it: there is NO native API that runs arbitrary client-side computation in the background across a reload — Background Fetch continues only predetermined transfers while page+SW are closed (Chromium-only); service workers are event-driven and killed at ~30s idle / 5min per event; Background/Periodic Sync are best-effort network-defer; Web Locks die with their context. The only non-fetch option is checkpoint→IndexedDB→resume-on-return (classic checkpoint-restart), which is a categorically WEAKER, different guarantee: durable EXECUTION (work continues while away, Background Fetch) vs durable STATE (work pauses; only a save-point survives; the user resumes on return). Conflating both under durability:reload would overclaim. Recommendation: ship durability:reload as transfer-backed durable execution now; non-fetch compute becomes a distinct future durability:resumable (checkpointed) value, not a rival definition. Fork 2: relax navigationGuard:warn by default when durability:reload is armed, and re-arm the guard on degradation to route-only (work no longer survives). No invented jargon; durable-execution/durable-state framing + checkpoint/state-rehydration vocabulary.",
+  "dateOpened": "2026-06-13",
+  "tags": [
+    "background-task",
+    "durability",
+    "background-fetch",
+    "service-worker",
+    "navigation-guard",
+    "checkpoint-resume",
+    "platform-substrate",
+    "gap-analysis"
+  ],
+  "relatedBlocks": [
+    "background-task-surface"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

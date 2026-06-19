@@ -1,0 +1,19 @@
+{
+  "id": "benchmark-capabilities",
+  "title": "Benchmark capability matrix — extracted components, patterns, tokens & standards",
+  "status": "open",
+  "summary": "Phase 2 of the competitive coverage gap-analysis program (backlog #346): the normalized capability matrix extracted from the benchmark corpus, deduped across sources into stable capability ids spanning four kinds — components, patterns, tokens, and standards. Each row carries a coarse cross-corpus ubiquity signal, standout implementations (notableIn), and a nativeAnchorHint (the native API/element it plausibly maps to) so phase 3's gap detection stays native-first. First pass keyed for diffability; exact per-source presence + deep doc URLs are deferred to a per-source fan-out. Data: src/_data/benchmarkCapabilities.json. Phase 3 (mapping & gap detection, #347) joins each row to a Web Everything entity and labels covered/partial/missing.",
+  "dateOpened": "2026-06-12",
+  "tags": [
+    "gap-analysis",
+    "competitive-analysis",
+    "extraction",
+    "capability-matrix",
+    "components",
+    "patterns",
+    "native-first"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

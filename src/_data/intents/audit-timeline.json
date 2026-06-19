@@ -1,0 +1,34 @@
+{
+  "id": "audit-timeline",
+  "name": "Audit Timeline Intent",
+  "status": "draft",
+  "summary": "Canonical per-entity history rendering — a chronological feed of who did what, when, and before→after — with filtering. The visual member of the Web Audit protocol; it reads the same audit provider and renders the AuditEvent stream for one entity.",
+  "dimensions": {
+    "density": {
+      "description": "Vertical rhythm of the feed",
+      "values": [
+        "compact",
+        "comfortable"
+      ]
+    },
+    "grouping": {
+      "description": "How entries are partitioned",
+      "values": [
+        "flat",
+        "by-day",
+        "by-actor"
+      ]
+    },
+    "detail": {
+      "description": "How much of each event is shown inline",
+      "values": [
+        "summary",
+        "expanded"
+      ]
+    }
+  },
+  "description": "<h3>What Audit Timeline Is</h3><p class=\"text-sm text-gray-600 mb-2\">The canonical presentation of <strong>an entity's immutable history</strong> &mdash; the loan's transitions, the conditions cleared, the documents accepted or rejected, the decision issued &mdash; as a chronological, filterable feed. It is the visual member of the <a href=\"/projects/webaudit/\">Web Audit</a> protocol: it reads the same audit provider (<code>queryByEntity</code>) and renders the <code>AuditEvent</code> stream; it does not own the log.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>It owns the display, not the record.</strong> Append-only semantics, actor attribution, and before/after belong to the protocol; this intent standardizes only how that history is shown and scanned &mdash; so an audit log stops being a bespoke table per screen.</p><h3>Density</h3><p class=\"text-sm text-gray-600 mb-2\"><code>compact</code> for a dense side panel; <code>comfortable</code> for a full-page history.</p><h3>Grouping</h3><p class=\"text-sm text-gray-600 mb-2\"><code>flat</code> is a single stream; <code>by-day</code> partitions under date headers; <code>by-actor</code> groups consecutive events by who performed them.</p><h3>Detail</h3><p class=\"text-sm text-gray-600 mb-2\"><code>summary</code> shows actor + action + time per row; <code>expanded</code> also reveals the before&rarr;after change set (the Web States <code>ChangeRecord</code> pairs).</p>",
+  "events": [
+    "filter-change"
+  ]
+}

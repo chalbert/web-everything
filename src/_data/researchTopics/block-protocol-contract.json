@@ -1,0 +1,23 @@
+{
+  "id": "block-protocol-contract",
+  "title": "What is a block protocol — the runtime-agnostic contract for a UI block, decoupled from its implementation",
+  "status": "open",
+  "summary": "Grounds decision #641 (the blocks analogue of the #606 plugs ruling). WE's top-level blocks/ are byte-identical vendored copies of frontierui/blocks/ (e.g. navigation/NavListBehavior.ts diff-clean) — the same copy-paste hazard #170 flagged for plugs. #606 already settled the impl-home axis: implementation -> @frontierui (FUI owns the canonical code), WE keeps the CONTRACTS and consumes the impl as a #604 client; #606 explicitly names 'block protocols' among the contracts WE keeps. So #641's novel question is narrowly: WHAT IS a block protocol — what artifact in WE expresses a block's contract? Prior-art survey of how the ecosystem expresses a component/block contract decoupled from impl: (1) Custom Elements Manifest (CEM, custom-elements.json, community schema v2.1.0) — machine-readable JSON describing attributes/properties/events/slots/CSS-parts/custom-props/methods, the STRUCTURAL API contract, with a live analyzer + LSP + MCP + broad consumer ecosystem (IDEs, docs, catalogs, wrapper generators); shipped by Shoelace/Web Awesome, Carbon, Spectrum, Fluent. (2) Open UI (W3C CG) + WAI-ARIA APG — the BEHAVIORAL contract: anatomy -> parts -> states -> behaviors + role/state/keyboard tables + conformance tests, impl-independent and the platform's own way of specifying controls. (3) TS interface / .d.ts — weakest standards-alignment, language-specific, treated by the ecosystem as an INPUT the CEM analyzer reads, not the portable contract. The W3C UI Specification Schema CG (chartered Aug 2025 to define an implementation-agnostic JSON meta-model aligned to Open UI vocabulary) is direct evidence the JSON-meta-model target is recognized — but it CLOSED 21 May 2026, a cautionary signal about standing up a brand-new schema vs extending CEM. WE already has the contract surface today: src/_data/blocks.json entries (implementsIntent, exports, events, traits, sourcePath, webStandards, designDecisions) + src/_includes/block-descriptions/{id}.njk prose — a JSON descriptor + behavioral spec pair that maps cleanly onto (1)+(2). Load-bearing finding: a block protocol = the existing blocks.json entry (formalized as a CEM-aligned structural contract) + its block-description (the Open UI/APG behavioral spec), with sourcePath repointed from WE-owned vendored code to the canonical @frontierui/blocks impl. Three forks at DoR: (1) what the contract artifact IS, (2) impl-home + dedup mechanics (direct #606 analogue), (3) may a block protocol exist without a FUI impl (the WE-only families wrinkle). Full grounding in reports/2026-06-14-block-protocol-impl-boundary.md.",
+  "dateOpened": "2026-06-14",
+  "lastReviewed": "2026-06-14",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "blocks",
+    "block-protocol",
+    "custom-elements-manifest",
+    "open-ui",
+    "aria-apg",
+    "standard-vs-impl",
+    "constellation",
+    "contract",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "frontierui"
+}

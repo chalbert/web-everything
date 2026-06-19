@@ -1,0 +1,26 @@
+{
+  "id": "privacy-respecting-site-analytics",
+  "title": "Privacy-respecting analytics for the public WE site — dogfood end-state + an interim bridge",
+  "status": "open",
+  "summary": "Decision-prep for #1136 (phase 2 of epic #1104, publish the WE site publicly behind a graduated gate). Minimum signal: page views, referrers, which spec/standard pages get read — privacy-respecting and controlled. LOAD-BEARING FINDING: WE's own webanalytics standard is status:draft — the CustomTracker contract shipped and is conformance-tested (#1012: we:analytics/contract.ts, the NoopTracker default at provider.ts:30-41 that silently drops every call, the CustomTrackerRegistry DI), but there is NO runnable collector: the reference vendor adapters (#1013) are open, locus FUI, and blocked-in-fact (the contract is not yet replicated into FUI). So a live site instrumented today reports nothing — dogfooding live = building a collector first, a build not a wiring task. STANDING-TEST COLLAPSE: the item's three options are one ratify + one fork. 'Dogfood as the end-state' is the ratified dogfood-the-site goal (#777) — a ratify, excluded branch = third-party-forever. 'Dogfood now vs third-party now' is prioritization wearing a fork's clothing (both end at dogfooding; differ only on when to pay the collector cost) — backlog ordering, not a design branch. 'Both, sequenced' IS the resolved shape. The genuine case-(b) either/or is WHICH INTERIM BRIDGE. HOST COUPLING: #1135 (/research/static-host-phase1-gate) recommends Cloudflare Pages (~80%), making Cloudflare Web Analytics (free, cookieless, no PII, no consent, zero-ops, nothing to rip out) the dominant interim if on CF Pages. PRIOR ART (all cookieless/no-PII): CF Web Analytics (host-native), Plausible CE / Umami / GoatCounter (self-host, raw-data ownership at an ops cost), server-log GoAccess; hosted SaaS (Plausible Cloud/Fathom) = a paid third-party processor for no gain; GA4 excluded (not privacy-respecting). Privacy is held by all viable options, so the decisive axis is operational burden + data ownership + throwaway-on-swap. RECOMMENDATION: ratify dogfood end-state; interim = host-native privacy analytics (CF Web Analytics), contingent on #1135 → CF Pages, fallback self-hosted open tool; rejected: hosted SaaS, and no-interim/wait. Soft, revisitable, low-stakes; creates no standard. Full grounding in reports/2026-06-19-1136-analytics-approach.md.",
+  "dateOpened": "2026-06-19",
+  "lastReviewed": "2026-06-19",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "analytics",
+    "webanalytics",
+    "privacy",
+    "cookieless",
+    "dogfooding",
+    "cloudflare-web-analytics",
+    "plausible",
+    "deployment",
+    "controlled-rollout",
+    "solo-founder",
+    "webdocs",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webanalytics"
+}

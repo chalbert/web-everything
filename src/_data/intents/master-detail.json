@@ -1,0 +1,41 @@
+{
+  "id": "master-detail",
+  "name": "Master-Detail Intent",
+  "status": "draft",
+  "summary": "Coordination between a collection (the master list) and a coupled detail region: which item is selected, how focus and announcement flow, whether the selection deep-links, and the empty/loading states. A standalone UX-coordination intent that COMPOSES existing intents — selection, layout, loader, live-region-status, focus-delegation, navigation — rather than introducing a new contract.",
+  "dimensions": {
+    "detailScope": {
+      "description": "Where the detail for the selected item lives",
+      "values": [
+        "panel",
+        "inline",
+        "route"
+      ]
+    },
+    "focusFlow": {
+      "description": "On select, whether focus stays on the list or moves to the detail",
+      "values": [
+        "retain",
+        "advance"
+      ]
+    },
+    "selectionSync": {
+      "description": "Whether the selected item is reflected in the URL (composes the router)",
+      "values": [
+        "none",
+        "deep-link"
+      ]
+    },
+    "emptyState": {
+      "description": "What the detail region shows when nothing is selected",
+      "values": [
+        "placeholder",
+        "collapse"
+      ]
+    }
+  },
+  "description": "<h3>What Master-Detail Is</h3><p class=\"text-sm text-gray-600 mb-2\">The foundational enterprise layout where a list <strong>drives a coupled detail region</strong> &mdash; an inbox, a pipeline, an admin table. Selecting a row updates the detail, with the keyboard, focus, and a11y wiring that makes the pairing usable. It recurs everywhere, so the coordination is worth naming.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>It is composition, not a new contract.</strong> Master-Detail has no provider and no schema of its own; it <em>composes</em> intents that already exist: <a href=\"/intents/selection/\">selection</a> (which item is picked), <a href=\"/intents/layout/\">layout</a> (the region), <a href=\"/intents/loader/\">loader</a> (pending detail), <a href=\"/intents/live-region-status/\">live-region-status</a> (announce the change), <a href=\"/intents/focus-delegation/\">focus-delegation</a> (the focus flow), and <a href=\"/intents/navigation/\">navigation</a> (deep-linking the selection). The reference <code>master-detail</code> block coordinates them over the shipping selection block.</p><h3>Detail scope</h3><p class=\"text-sm text-gray-600 mb-2\"><code>panel</code> couples a side/detail region; <code>inline</code> expands the detail within the list row; <code>route</code> deep-links the detail as a sub-route.</p><h3>Focus flow</h3><p class=\"text-sm text-gray-600 mb-2\"><code>retain</code> keeps focus on the list for fast keyboard scanning; <code>advance</code> moves focus into the detail (e.g. a form to act on).</p><h3>Selection sync</h3><p class=\"text-sm text-gray-600 mb-2\"><code>none</code>, or <code>deep-link</code> to reflect the selected item in the URL so it is shareable and back/forward works (composes the router).</p><h3>Empty state</h3><p class=\"text-sm text-gray-600 mb-2\"><code>placeholder</code> shows a prompt when nothing is selected; <code>collapse</code> hides the region.</p>",
+  "events": [
+    "detail-change"
+  ]
+}

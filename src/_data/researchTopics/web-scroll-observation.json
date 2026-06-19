@@ -1,0 +1,22 @@
+{
+  "id": "web-scroll-observation",
+  "title": "Scroll / Observation",
+  "status": "open",
+  "summary": "Web-platform prior art grounding backlog #014's 'project vs intent vs neither' call for the scroll surface. The platform ships no 'scroll domain' — just independent primitives sharing a scrollbar: IntersectionObserver (the in-view trigger), scroll-driven animations (animation-timeline — a motion concern), scroll-snap (layout), content-visibility (the virtualization floor), History.scrollRestoration (navigation), scrollend. So scroll earns neither a project nor a monolithic intent; decompose onto native seams that mostly already have homes. The one reusable residue is a thin viewport-presence mechanism intent owning the observe-vocabulary (root/rootMargin/threshold/enter-leave) that three existing IntersectionObserver consumers compose — Collection Operations' advance:auto, Prefetch's eagerness:viewport, and visibility-gated trait activation. advance:auto stays a Collection Operations dimension and composes that trigger, resolving the dated seam with one home for the trigger, three for the intent.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "scroll",
+    "observation",
+    "intersection-observer",
+    "viewport-presence",
+    "infinite-scroll",
+    "virtualization",
+    "content-visibility",
+    "scroll-restoration",
+    "gap-analysis",
+    "vocabulary"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webblocks"
+}

@@ -1,0 +1,26 @@
+{
+  "id": "maas-wrapper-serve-protocol",
+  "title": "MaaS wrapper-serve protocol — does the CEM->framework-wrapper ESM serve contract need defining, or does servePathIR already cover it?",
+  "status": "open",
+  "summary": "Prep research for decision #974 (blocks the live-test sandbox #912; Block Explorer epic #746, locus frontierui). #974 was filed to DEFINE the MaaS wrapper-serve protocol — the CEM->framework-wrapper ESM serve contract a browser sandbox consumes via plain import() — on the premise that 'that protocol is not yet defined.' THE PREMISE IS FALSE (the #792/webexpressions 'assumed-greenfield, already-built' trap): the MaaS serve-path IR (blocks/renderers/module-service/servePathIR.ts, ratified #505/#463) is a language-neutral zero-import source of truth that ALREADY defines the URL grammar (<name>[@<pin>].js), the form/target/strategy params, content-hash identity, immutable/floating cache, ETag/SRI headers, and the 400/404/500 error set — and a React 'functional component + element wrapper' form ALREADY ships (moduleService.ts ServeForm = declarative|wc-class|html|jsx|functional, the functional blurb is literally 'A React-style functional component + element wrapper; transpiled to ESM'). EVERY #974 sub-question maps to an existing artifact: request (block id+framework[+CEM hash]) = SERVE_PATH.route + params (name=block id, pin=CEM hash, framework=the one fork); response (ESM+content-type+cache/version headers) = MEDIA_TYPES/CACHE_POLICY/MAAS_HEADERS (X-MaaS-Producer/-Integrity/-Lossy); bare react/vue import resolution = #081 native-import contract (spec-clean ESM + import-map, no consumer build) + #955 Fork B (FUI bundler/devDep resolves runtime); error/404 = SERVE_PATH.responses (400 unknown form, 404 no component/non-MaaS path/stale pin, 500 transform threw). So #974 collapses from 'design a protocol' to one genuine fork + four FORCED-INVARIANT reconciliations. Forced invariants: (1) conform to/extend the existing servePathIR, do NOT mint a parallel MaaS contract (duplicating the #505 SoT serves drift between two contracts); (2) identity folds the genWrapper PRODUCER VERSION, not CEM-hash-only — protocols.json#maas-versioning makes the version id a content hash over EVERY byte-determining input (definition+transform/compiler version+params+provenance) and names omission 'the one excluded (broken) option'; #974's '[+ CEM hash]' parenthetical is under-specified, correct it; (3) cache = CACHE_POLICY (immutable on hash-pin, 302 on floating); (4) errors = the existing response set + bare-specifier ESM with consumer-side import-map resolution. The FUI endpoint is its OWN runtime conforming to the WE contract (runtime never crosses the WE->FUI seam — #855/#817; FUI cannot import WE fetchHandler runtime), with genWrapper (FUI tooling, #855; pure (decl,target)=>wrapperSource, TARGETS=[react,vue], consume-mode renders the real element) injected as the transform-provider via the existing inject-a-provider seam. THE ONE GENUINE FORK — framework-axis representation: A1 overload the catalog-gated form param (react-wrapper/vue-wrapper as injected FUI catalog values, ZERO neutral-contract change — the IR explicitly declares form values an injected implementation catalog, not the neutral contract) vs A2 add a distinct neutral 'framework' param to servePathIR (framework is orthogonal to form [wrapper vs full-rewrite #818 vs wc-class] and to the ES target; encoding it in form collapses two axes into one enum — the form x framework explosion react-wrapper/vue-wrapper/react-full/vue-full/svelte-wrapper). RECOMMENDED DEFAULT A2 (~65%) on merit (cost is prioritization #465): distinct axes, A2 cleans up the accidentally React-only 'functional' form (form=wrapper, framework=react), matches WE's separate-and-expose-the-whole-axis bias; adds the PARAM (neutral) not the VALUES (still injected). RESIDUAL/red-team: A1 is fully coherent and cheaper, the IR author deliberately kept value-sets out of the neutral contract (over-engineering/YAGNI risk for two frameworks), the 'functional' precedent shows framework-in-form works — HIGH-LEVERAGE, flag for the deciding agent's skeptic pass; the fork's answer also decides whether #974 yields any WE artifact at all (A1->none, A2->one IR param + #506/#507 follow-through). Prior art is ALREADY-RESEARCHED ground (web survey linked not re-run): polyglot-maas-origin #463 (esm.sh-style ESM-over-HTTP serve mechanics), we-fui-wrapper-handoff #855 (@lit/react / Stencil output targets / Lit-Labs gen-wrapper — wrappers are a build-time, CEM-pure artifact, none generate on-demand in the consumer), forward-component-emit-substrate #811 ('Option W mints no new protocol, reuses custom-elements-manifest'), polyglot-live-test-sandbox #955 (the FUI endpoint that is this protocol first caller). Full grounding in reports/2026-06-18-maas-wrapper-serve-protocol.md.",
+  "dateOpened": "2026-06-18",
+  "lastReviewed": "2026-06-18",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "maas",
+    "module-as-a-service",
+    "webdocs",
+    "block-explorer",
+    "polyglot",
+    "serve-path-ir",
+    "content-hash",
+    "esm",
+    "genwrapper",
+    "protocol",
+    "frontierui",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webadapters"
+}

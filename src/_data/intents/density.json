@@ -1,0 +1,17 @@
+{
+  "id": "density",
+  "name": "Density Intent",
+  "status": "concept",
+  "summary": "Protocol defining spatial relationships, touch targets, and information quantity.",
+  "dimensions": {
+    "level": {
+      "description": "The spatial density profile controlling touch targets, spacing, and information quantity",
+      "values": [
+        "comfortable",
+        "compact",
+        "wafer"
+      ]
+    }
+  },
+  "description": "<h3>Spatial Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>comfortable</code>: <strong>44px+</strong> touch targets. Whitespace is used for grouping (Consumer standard).</li><li><code>compact</code>: <strong>32px</strong> targets. High information density, border-based grouping (Enterprise standard).</li><li><code>wafer</code>: <strong>24px</strong> targets. Maximum data visibility for complex tooling/IDE interfaces.</li></ul>"
+}

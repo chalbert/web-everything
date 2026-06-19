@@ -1,0 +1,26 @@
+{
+  "id": "web-portals-protocol-shape",
+  "title": "Web Portals protocol shape — the 4 open questions (logicalParent surface · logical bubbling vs shadow retargeting · focus scopes · deferred targets)",
+  "status": "open",
+  "summary": "Prep research for decision #1000: ratifying the shape of the declarative-HTML Web Portals protocol (React-createPortal / Vue-Teleport equivalent, built on Web Injectors as the logical tree). The spec (src/_includes/project-webportals.njk, status:concept) carries 4 open questions gating the #1001 polyfill build. SURVEY (WHATWG DOM, MDN, React/Vue/Angular/Solid, WAI-ARIA APG + the WE intent catalog): (Q1) logicalParent writable-property vs method — the platform NEVER exposes structure as a writable property: parentNode/assignedSlot are read-only, and every set-a-relationship op (appendChild, attachShadow, attachInternals, slot.assign) is a method that throws HierarchyRequestError on a cycle; framework logical parents are set declaratively by render position. Recommend a reflected IDREF attribute logicalparent=\"id\" (matches slot/for/form/popovertarget) + setLogicalParent() method + read-only getter; reject the spec's writable property (~85%). The survey ADDED the declarative-attribute surface the spec omitted. (Q2) bubblesLogical × shadow retargeting — DOM builds the event path up-front at dispatch, each entry storing a shadow-adjusted target; composed means crossing the TARGET's shadow boundary; React synthetic events bubble the React tree not the DOM. Recommend computing logicalPath pre-retarget with a fresh retarget at each logical hop, a SEPARATE opt-in composedLogical flag (default false) + composedLogicalPath() accessor — do NOT overload native composed (~80%; residual: retarget host at a hop needs a nested example). (Q3) focus scopes — SETTLED by shipped architecture: the Focus Containment Intent (intents.json:290) already owns trap+inert+initialFocus+restore, and Modal/Anchor/Autofocus-on-Activation intents all COMPOSE it; the spec's primitive #4 (focusscope attr + createFocusScope) is a duplication to STRIKE; focus is orthogonal to portaling (~90%). (Q4) deferred targets — no framework queues open-endedly (Vue 3.5 defer is one-tick-scoped and still errors; React null throws; Solid defaults to document.body). Native HTML has no single mount tick, so recommend deferred-by-default: attach-if-present else observe-and-attach, a bounded console warning naming the unresolved target, a required attribute for fail-fast (~75%; residual: diagnostic trigger). CLASSIFICATION: Q1/Q2/Q4 are Protocol contract-shape calls (the @webeverything artifact per the boundary note; polyfill impl = FUI #1001); Q3 is an existing Intent so its call is delete-the-duplicate-and-compose. Full grounding in reports/2026-06-19-web-portals-protocol-shape.md.",
+  "dateOpened": "2026-06-19",
+  "lastReviewed": "2026-06-19",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webportals",
+    "portals",
+    "teleport",
+    "createPortal",
+    "logical-tree",
+    "shadow-dom",
+    "event-retargeting",
+    "composed",
+    "focus-containment",
+    "inert",
+    "deferred-target",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webportals"
+}

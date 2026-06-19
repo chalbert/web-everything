@@ -1,0 +1,22 @@
+{
+  "id": "host-element-backreference-naming",
+  "title": "Host-element back-reference naming — ownerElement vs target vs host across the plugs platform",
+  "status": "open",
+  "summary": "Prep research for decision #1121 (epic #1095, parent #1042): the canonical name for the element a webbehaviors CustomAttribute is attached to. The spec (src/_includes/project-webbehaviors.njk:40,52,56,64,88) already names it ownerElement; the impl (plugs/webbehaviors/CustomAttribute.ts:131,156,206,366) names it target. The class chains its prototype to Attr.prototype (CustomAttribute.ts:196-200) so each instance IS-A Attr at runtime. SURVEY (MDN/WHATWG DOM + Lit/Angular/Stimulus/Vue): the platform does NOT use one name for 'the element this is attached to' — it names the back-reference by the RELATIONSHIP's semantics. (1) attribute -> element is ownerElement (Attr.ownerElement, read-only, 'the Element the attribute belongs to') — so for CustomAttribute ownerElement is not an analogy, it is THE native property. (2) shadow root -> host is .host; node -> document is ownerDocument. (3) target is the DISPATCH word: Event.target / currentTarget / MutationRecord.target all name 'the node a transient dispatch/observation is about', the wrong connotation for a persistent ownership relation — and it collides with the real Event.target a behaviour reads in its own listeners. (4) For NON-attribute host-attached things the ecosystem word is consistently host, never target: Lit ReactiveControllerHost, ShadowRoot.host, Angular host element/@HostBinding (ElementRef.nativeElement is only the DOM handle), Stimulus this.element. BLAST RADIUS: renaming CustomAttribute.target -> ownerElement touches only CustomAttribute + its Attr-derived subclasses (UndeterminedAttribute, ScopedRegistryAttribute.ts:43) + ~12 test refs + ~16 demo refs + a few docs njk; it does NOT touch the PARALLEL target on Injector (webinjectors/Injector.ts:69 public target) or CustomContext (webcontexts/CustomContext.ts:79 #target) — separate class families, the sibling decision. SYNTHESIS handed to #1121: Fork 1 — canonical name ownerElement (default, ~90%); the excluded branch (keep/amend-to target, the item's option C) discards the exact native name for an Attr and imports event-dispatch connotation. Fork 2 — scope to CustomAttribute only (default, ~80%) vs unify the whole plugs host-element convention; the platform names host refs BY semantics (ownerElement for Attr, host for ShadowRoot) so forcing one name across Attr and non-Attr plugs is the weaker branch — Injector/CustomContext are a separate call that should land on host, filed under #1042. The 'alias getter' (option B) is a rollout TACTIC (deprecated target alias for one cycle to stage the rename), not a competing canonical name — identical end-state, so prioritization not a fork. Full grounding in reports/2026-06-19-host-element-backreference-naming.md.",
+  "dateOpened": "2026-06-19",
+  "lastReviewed": "2026-06-19",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webbehaviors",
+    "custom-attributes",
+    "naming-convention",
+    "ownerElement",
+    "Attr",
+    "host-element",
+    "dom-vocabulary",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webbehaviors"
+}

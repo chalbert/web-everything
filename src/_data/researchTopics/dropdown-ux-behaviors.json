@@ -1,0 +1,23 @@
+{
+  "id": "dropdown-ux-behaviors",
+  "title": "Dropdown UX Behaviors",
+  "status": "resolved",
+  "summary": "Foundational best-practice survey of the full dropdown family (native <select>, custom listbox/select, filterable combobox, menu-button) across the WAI-ARIA APG, WCAG, CSS WG/MDN, and top UX authorities (NN/g, Carbon, USWDS, Baymard, React Aria, MUI). Its load-bearing finding: almost none of a dropdown's hard parts are about dropdowns — anchored positioning, dismissal-and-focus-return, focus delegation, type-ahead, the selection model, live-region status, windowed rendering, async lifecycle, validation, clearability, truncation, and grouping are general capabilities a dropdown merely composes. The survey extracted 13 cross-cutting paradigms, all materialized as intents (3 new, 5 extended, 5 pre-existing) plus the droplist composition manifest. It is the parent research of the droplist family — its one noted-but-unspecified item (async pagination beyond load-more) spun out as #018 / the Dropdown Async Pagination topic.",
+  "dateOpened": "2026-06-01",
+  "tags": [
+    "droplist",
+    "dropdown",
+    "combobox",
+    "listbox",
+    "apg",
+    "cross-cutting-paradigms",
+    "composition",
+    "selection",
+    "focus-delegation",
+    "harvest"
+  ],
+  "relatedBlocks": [
+    "droplist"
+  ],
+  "relatedPlugs": []
+}

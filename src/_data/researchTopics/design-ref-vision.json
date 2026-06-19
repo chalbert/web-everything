@@ -1,0 +1,23 @@
+{
+  "id": "design-ref-vision",
+  "title": "Design-reference vision pipeline — capture-time QC gate + codification (one swappable provider)",
+  "status": "superseded",
+  "summary": "Grounds the two vision items on the design-reference corpus (backlog #475 capture-QC gate, #396 codification) on one swappable vision provider used at two points. The phase-1 pipeline (#382) admits screenshots through a deterministic, hand-authored readySelector gate that doesn't generalise and can't tell a clean app surface from a marketing splash / modal-obstructed view / stale error panel (Photopea & Grafana slipped through). The survey of UI vision prior art finds an asymmetry that decides the architecture: coarse screen classification is a mature, reliable VLM capability (ScreenAI's element-type+location annotation, Ferret-UI's widget classification beating GPT-4V), while full screenshot→structure recovery is still hard (Design2Code NAACL-2025 SOTA: Claude-4-Sonnet 76.3, open VLMs <45, poor layout fidelity). So the cheap admit/remediate/quarantine verdict (#475) is safe to automate as a VLM-as-judge returning a structured verdict against fixed criteria, while the rich tag+paradigm-harvest pass (#396) stays human-in-the-loop with the neutral structure as the editable review surface (the #086 ruling). Both are analysis calls, so they share ONE customVisionProvider registry (the #086 customMockupAnalyzerRegistry pattern) with two methods — not two integrations; obstructed-surface remediation reuses DuckDuckGo's Playwright-native autoconsent rather than inventing overlay dismissal; verdicts cache by content hash for idempotent re-runs. Internal research-corpus tooling, zero project-facing lock-in; deterministic selectors stay a free fast-path.",
+  "dateOpened": "2026-06-13",
+  "tags": [
+    "design-reference",
+    "corpus",
+    "vision",
+    "vlm-as-judge",
+    "capture-gate",
+    "quality-control",
+    "codification",
+    "swappable-provider"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs",
+  "supersededBy": [
+    "backlog-kind-axis"
+  ]
+}

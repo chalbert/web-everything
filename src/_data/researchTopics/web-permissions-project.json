@@ -1,0 +1,22 @@
+{
+  "id": "web-permissions-project",
+  "title": "Web Permissions / Notifications / Push",
+  "status": "open",
+  "summary": "Web-platform prior art grounding backlog #009's 'project vs intent vs fold into Feedback' call. The platform's seams force a three-way decomposition the item collapsed: the Permissions API is a cross-cutting state layer (granted | denied | prompt, spanning camera/geolocation/clipboard/notifications) — an own permission intent, not a notification render; the Notifications API is a system-level render surface (sibling to in-app Feedback and in-session Background Task) — a distinct system-notification intent; and the Push API is a server-authoritative VAPID transport/orchestration whose swappable-provider shape matches the Guard protocol — a push protocol with a CustomPushProvider lock under a narrowed project. Permissions-Policy is a deployment gate for webmanifests, not UX. Net: resolves to all three on different axes; nothing folds into Feedback.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "permissions",
+    "notifications",
+    "push",
+    "intent",
+    "protocol",
+    "feedback",
+    "background-task",
+    "guard",
+    "gap-analysis",
+    "vocabulary"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webmanifests"
+}

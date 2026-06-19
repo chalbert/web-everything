@@ -1,0 +1,22 @@
+{
+  "id": "accessible-name-intent",
+  "title": "Cross-cutting accessible-name intent — one naming policy across glyphs, icons, media, images",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #596 (surfaced by #370 Fork 3): WE has one a11y intent — live-region-status — but it owns ANNOUNCEMENT (aria-live), not NAMING; there is no accessible-name intent (no reusable role=img/aria-label/aria-labelledby policy). Should naming be a CROSS-CUTTING intent composed across icon/expressive-symbol/media/image/avatar, or stay a PER-INTENT dimension each owns itself (the way #587 currently owns its accessible-name axis and validation owns aria-invalid/aria-describedby)? Two findings reshape it. (1) Name COMPUTATION is already a platform standard: W3C AccName 1.2 defines a fixed precedence aria-labelledby > aria-label > native (img alt/label/text) > title; the accessible name is read-only computed state — you provide inputs, the browser computes — so there is NO swappable-vendor runtime behavior and the concern is NOT a protocol (re-minting AccName = lock-in for zero interop gain; native-first). (2) The only cross-cutting naming primitive in the prior art is a thin wrapper — Radix AccessibleIcon (label + visually-hidden text + aria-hidden on the glyph); Material 3 / Carbon / Fluent use per-component label props. So the concern genuinely recurs AND its field solution is a thin policy, not a mechanism. Recommendation: MINT a cross-cutting accessible-name intent (Fork 1, med-high — separate-and-decouple: the policy recurs unchanged across icon/glyph/media/image/avatar) that OWNS only the declarative policy axes — naming (meaningful|decorative) + labelSource (explicit|referenced|derived-fallback, never empty: CLDR short name for emoji, alt for images, never raw codepoint/filename; sticker/custom-image has no fallback so label is required) — and DEFERS name computation to the platform AccName algorithm (Fork 2, high). Most-permissive default: meaningful + derived fallback, decorative is opt-in (matches #587). Everything else is support-all: orthogonal to live-region-status (naming != announcement); #587 keeps its interim dimension and graduates to COMPOSING this intent once minted (migration note, not a blocker); WCAG 2.5.3 Label-in-Name constrains the policy. Report: reports/2026-06-14-cross-cutting-accessible-name-intent.md.",
+  "dateOpened": "2026-06-14",
+  "tags": [
+    "accessibility",
+    "accessible-name",
+    "accname",
+    "aria-label",
+    "aria-labelledby",
+    "intent",
+    "icon",
+    "candidate-standard"
+  ],
+  "relatedBlocks": [
+    "icon"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

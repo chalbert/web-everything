@@ -1,0 +1,24 @@
+{
+  "id": "navigation-intent-vocabulary",
+  "title": "Navigation Intent Vocabulary: Five Orthogonal Dimensions",
+  "status": "open",
+  "summary": "The Navigation Intent was the thinnest in the catalog — a single structure axis (hierarchical/lateral/linear) — while the Router block already shipped scroll, history, transition, and leave-guard behaviors with no UX vocabulary to name them. This research holds the intent to the standard intent bar (user-perceivable, closed 2–4 value set, orthogonal to structure, web-standards grounded) and adds four dimensions plus one softer fifth: history (push/replace/none, Navigation API navigate({history})), scroll (auto/top/preserve/manual, NavigateEvent.intercept({scroll}) + History.scrollRestoration), transition (directional/fade/none — direction only, deferring feel to the motion intent because browser-initiated Back carries no View-Transition type), guard (free/confirm/blocked, Navigation intercept/preventDefault + beforeunload), and persistence (url/memory/session, the WHATWG URL-vs-History-state split — the deep-linkability choice most relevant to tabs and wizards). Establishes the composition boundary: prefetch eagerness stays in the prefetch intent, animation feel stays in motion, focus-on-route-change is referenced (APG: move to main heading) not owned and overlaps focus-delegation, and aria-current is derived from structure rather than a separable axis. Nested routing, base path, router mode, 404 fallback, and cross-document execution are classed implementation/config, not UX dimensions. Every added dimension maps 1:1 to an existing Router attribute — the intent was lagging the block, not requesting new implementation.",
+  "dateOpened": "2026-06-03",
+  "tags": [
+    "navigation",
+    "routing",
+    "intent",
+    "scroll-restoration",
+    "history",
+    "view-transitions",
+    "navigation-guards",
+    "deep-linking",
+    "vocabulary",
+    "gap-analysis"
+  ],
+  "relatedBlocks": [
+    "router"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

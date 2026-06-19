@@ -1,0 +1,177 @@
+{
+  "id": "validation",
+  "name": "Validation Intent",
+  "requiresCapabilities": [
+    "face",
+    "user-pseudos",
+    "request-submit"
+  ],
+  "status": "draft",
+  "summary": "Interop contract for form validation: observable states and events across control/group/form/nested levels. Defines per-severity commit policies and per-level vocabulary to enable swappable and combinable validation implementations. Composes Loader (async), unified severity vocabulary (Feedback/Message), and Reliability (mechanism failure) intents.",
+  "dimensions": {
+    "context": {
+      "description": "Where validation messages are displayed / which element commits the state",
+      "values": [
+        "control",
+        "group",
+        "form",
+        "root"
+      ]
+    },
+    "level": {
+      "description": "Severity + commit policy. Part of unified vocabulary (error/warning/info/success) plus validation-specific caution. error→rejected/blocks-submit, warning/info→committed, caution→held-until-confirm.",
+      "values": [
+        "error",
+        "warning",
+        "caution",
+        "info"
+      ]
+    },
+    "execution": {
+      "description": "When validity is computed: on user input (change), blur, or form submission only",
+      "values": [
+        "change",
+        "blur",
+        "submit"
+      ]
+    },
+    "visibility": {
+      "description": "When messages are displayed to user: immediate, when field dirty, after touch, or after submission attempt",
+      "values": [
+        "immediate",
+        "dirty",
+        "touched",
+        "submitted"
+      ]
+    },
+    "commitment": {
+      "description": "When invalid values enter form state: immediately on input (full), or buffered locally until blur/submit (deferred)",
+      "values": [
+        "full",
+        "deferred"
+      ]
+    }
+  },
+  "description": "<h3>Meta-Intent Composition</h3>\n<p class=\"text-sm text-gray-600 mb-2\"><strong>Validation is not standalone — it composes three shared meta-intents:</strong></p>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><strong>Loader Intent (async lifecycle):</strong> Async validators emit pending states. Pending aggregates up the form hierarchy to gate submission.</li>\n  <li><strong>Unified severity vocabulary:</strong> <code>level</code> shares the semantic axis (error/warning/info/success + caution) with Feedback (<code>severity</code>) and Message (<code>tone</code>). One severity vocabulary across all messaging ensures consistent tone.</li>\n  <li><strong>Reliability Intent (mechanism failure):</strong> Validation owns input invalidity (user must fix the data). Reliability owns mechanism failure (validator crashed, server unreachable). The split prevents conflating input errors with operation failures.</li>\n</ul>\n\n<h3>Message Context (Dimension: context)</h3>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><code>control</code>: Inline message anchored to a single input field.</li>\n  <li><code>group</code>: Message anchored to a fieldset, composite control, or field array. Error attaches to first errored member by DOM order.</li>\n  <li><code>form</code>: Aggregate error summary at top of form, ordered by DOM. Links jump to errored fields. Focus moves to summary on submit-blocked.</li>\n  <li><code>root</code>: Global message (system-wide validation, not field-bound). Never sets <code>aria-invalid</code> on individual fields.</li>\n</ul>\n\n<h3>Severity & Commit Policy (Dimension: level)</h3>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><code>error</code>: Substantive. <strong>Blocks form submission.</strong> Sets <code>aria-invalid=true</code>. Only error-level can block.</li>\n  <li><code>warning</code>: Advisory. <strong>Submission allowed.</strong> No <code>aria-invalid</code> (user-advisory only).</li>\n  <li><code>caution</code>: Critical advisory. <strong>Submission paused</strong> until user confirms override (e.g., \"Continue anyway?\").</li>\n  <li><code>info</code>: Educational / helper text. <strong>Submission allowed.</strong> Complements the primary message.</li>\n  <li><code>[custom]</code>: App-defined levels (e.g., <code>audit</code>). App specifies commit behavior.</li>\n</ul>\n\n<h3>Interaction States (Observable at every level)</h3>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><strong>Dirty vs Pristine:</strong> Did the value change from baseline?</li>\n  <li><strong>Touched vs Untouched:</strong> Has the user focused the control?</li>\n  <li><strong>Submitted:</strong> Has the form submission attempt started?</li>\n  <li><strong>Pending:</strong> Is an async validator in flight?</li>\n</ul>\n\n<h3>Message Display Gating (Dimension: visibility)</h3>\n<p class=\"text-sm text-gray-600 mb-2\">When are validation messages shown to the user?</p>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><code>immediate</code>: Show messages as soon as validity changes (eager).</li>\n  <li><code>dirty</code>: Show only after the value has changed from baseline.</li>\n  <li><code>touched</code>: Show only after the user has focused the control.</li>\n  <li><code>submitted</code>: Show only after a form submission attempt.</li>\n</ul>\n<p class=\"text-sm text-gray-600 mt-2\"><strong>Dynamic policy:</strong> Once a field errors, validation may flip to eager (on-change) until fixed, then revert to lazy (on-blur). This \"reward early, punish late\" pattern prevents annoying re-validation while encouraging rapid correction.</p>\n\n<h3>Data Commitment (Dimension: commitment)</h3>\n<p class=\"text-sm text-gray-600 mb-2\">When do invalid values enter form state? (UX consequence for autosave, downstream safety, user input preservation)</p>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><code>full</code>: Values written to form state on every input, valid or invalid. Autosave gates on validation result. User input always persists (even broken dates). Downstream code must handle invalid states defensively.</li>\n  <li><code>deferred</code>: Invalid values buffered locally; only committed to form state on blur, submit, or explicit event. Autosave works safely (only valid data reaches it). Trade-off: user loses buffered input on page refresh before commit.</li>\n</ul>\n<p class=\"text-sm text-gray-600 mt-2\"><strong>Granular per-field/per-event/per-severity:</strong> Commitment is not form-wide. A form can have email deferring on input but committing on blur; errors prevent commit while warnings commit; custom strategies gate commit on severity or field-specific rules. Registry-based (see <a href=\"/specs/validation/\">Validation Block</a>) — <code>full</code> and <code>deferred</code> are built-in; teams register custom strategies (optimistic, staged, severity-gated, reconcile) via <code>CustomCommitmentPolicyRegistry</code>.</p>\n\n<h3>Per-Level Contract</h3>\n\n<h4>Control (Single Field)</h4>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><strong>Observable:</strong> Is it valid? Is it pending? Is it dirty/touched? What message (if any) should show?</li>\n  <li><strong>Events:</strong> User changed value, user blurred, validation started/ended, became valid/invalid, message appeared/disappeared.</li>\n  <li><strong>A11y:</strong> <code>aria-invalid</code> (error only), <code>aria-describedby</code> (message anchor), <code>:user-invalid/:user-valid</code> (visibility gate).</li>\n</ul>\n\n<h4>Group (Fieldset or Composite Control)</h4>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><strong>Observable:</strong> Is the group valid (all members valid)? If invalid, which member errored first?</li>\n  <li><strong>Dependency:</strong> If one field depends on another (requiredIf), changing the dependency revalidates dependents.</li>\n  <li><strong>Completion:</strong> How many members are complete vs. empty (useful for multi-step forms).</li>\n</ul>\n\n<h4>Form (Full Document)</h4>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><strong>Submission lifecycle:</strong> idle → validating (await pending) → blocked (show errors) OR submitting (valid) → submitted/failed.</li>\n  <li><strong>Error summary:</strong> DOM-ordered list of all errors. Links anchor to errored controls. Focus moves to summary on submit-blocked (GOV.UK pattern).</li>\n  <li><strong>Rollup:</strong> Is the form submittable (not invalid AND not pending)?</li>\n  <li><strong>Server errors:</strong> Errors from the server (authentication fail, business rule violation) are injected by field path. They do not wipe on user edit.</li>\n</ul>\n\n<h4>Nested Form (Multi-Step, Field Arrays, Wizard)</h4>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><strong>Bubbling:</strong> Does child invalidity block parent submission? (participating) Or do children validate in isolation? (isolated)</li>\n  <li><strong>Field arrays:</strong> Errors track rows by stable key (not index). Reorder preserves error association.</li>\n  <li><strong>Wizard steps:</strong> Current step must be valid to advance. Previous steps remain valid (back-nav preserves values and baseline).</li>\n</ul>\n\n<h3>Optional Features (Capability Bundles)</h3>\n<p class=\"text-sm text-gray-600 mb-2\">Not all validation systems support all features. Apps declare which features they use:</p>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><code>async</code>: Async validators (server-side checks, network calls).</li>\n  <li><code>cross-field</code>: One field's validity depends on another field's value (e.g., password confirmation).</li>\n  <li><code>conditional</code>: Fields appear/disappear based on values. Validation rules change dynamically.</li>\n  <li><code>field-array</code>: Repeating sections (e.g., multiple addresses). Add/remove/reorder rows.</li>\n  <li><code>wizard</code>: Multi-step form with per-step validation gates.</li>\n  <li><code>error-summary</code>: Form-level error summary with focus-on-submit-blocked (GOV.UK pattern).</li>\n  <li><code>severity</code>: Warning/caution/info beyond binary error/valid.</li>\n  <li><code>schema</code>: Vendor-neutral schema input (Standard Schema, Zod, Valibot, etc.).</li>\n  <li><code>server-reconciliation</code>: Server errors merged with client errors by field path.</li>\n</ul>\n\n<h3>Web Standards Alignment</h3>\n<table class=\"text-sm border-collapse border border-gray-300 mt-2\">\n  <tr class=\"bg-gray-100\">\n    <th class=\"border border-gray-300 px-2 py-1\">Standard</th>\n    <th class=\"border border-gray-300 px-2 py-1\">How We Use It</th>\n  </tr>\n  <tr>\n    <td class=\"border border-gray-300 px-2 py-1\"><a href=\"https://developer.mozilla.org/en-US/docs/Web/HTML/Guides/Constraint_validation\">Constraint Validation API</a></td>\n    <td class=\"border border-gray-300 px-2 py-1\">Native validity gating and <code>aria-invalid</code> anchoring via <code>ElementInternals.setValidity()</code>.</td>\n  </tr>\n  <tr>\n    <td class=\"border border-gray-300 px-2 py-1\"><a href=\"https://www.w3.org/WAI/tutorials/forms/validation/\">ARIA Form Validation</a></td>\n    <td class=\"border border-gray-300 px-2 py-1\"><code>aria-invalid</code> (error level only), <code>aria-describedby/aria-errormessage</code> (message anchoring), <code>aria-live</code> (error summary updates), <code>role=alert</code> (error summary role).</td>\n  </tr>\n  <tr>\n    <td class=\"border border-gray-300 px-2 py-1\"><a href=\"https://developer.mozilla.org/en-US/docs/Web/CSS/:user-invalid\">:user-invalid / :user-valid</a></td>\n    <td class=\"border border-gray-300 px-2 py-1\">Native display gate. Styles apply only after user touch/submit. Maps to <code>visibility</code> dimension. Baseline Oct 2023.</td>\n  </tr>\n</table>\n",
+  "events": [
+    "value-input",
+    "value-commit",
+    "focus",
+    "blur",
+    "validate-start",
+    "validate-end",
+    "validity-changed",
+    "became-valid",
+    "became-invalid",
+    "message-enter",
+    "message-exit",
+    "message-pulse",
+    "commit-state-changed",
+    "baseline-change",
+    "submit-attempt",
+    "submit-blocked",
+    "submit-allowed",
+    "focus-moved-to-summary"
+  ],
+  "designSystemResearch": [
+    {
+      "system": "GOV.UK",
+      "components": [
+        "Error summary",
+        "Inline error messages",
+        "Form validation pattern"
+      ],
+      "keyInsight": "Dual model: submit-only timing (discourages live/blur), error summary at top with focus-to-summary + anchor links, inline messages with verbatim parity. Gold standard for placement + a11y.",
+      "reference": "https://design-system.service.gov.uk/patterns/validation/"
+    },
+    {
+      "system": "Ant Design",
+      "components": [
+        "Form.Item",
+        "validateStatus",
+        "validateTrigger"
+      ],
+      "keyInsight": "Comprehensive enum: validateStatus ∈ {success, warning, error, validating}. validateTrigger per-field override (change/blur/submit). validateFirst (short-circuit).",
+      "reference": "https://ant.design/components/form/"
+    },
+    {
+      "system": "IBM Carbon",
+      "components": [
+        "Form",
+        "TextInput (invalid state)",
+        "Inline loading"
+      ],
+      "keyInsight": "On-blur default + helper-text→error-message swap. Progress-indicator step error state. Four-state Inline Loading (inactive→active→success→error).",
+      "reference": "https://carbondesignsystem.com/patterns/forms/"
+    },
+    {
+      "system": "Material Design 3",
+      "components": [
+        "TextField (error state)",
+        "Form validation"
+      ],
+      "keyInsight": "Error replaces helper text. Warm error hue. Native setValidity() support via custom elements.",
+      "reference": "https://m3.material.io/components/text-fields/overview"
+    },
+    {
+      "system": "Web Platform (HTML5 + ARIA)",
+      "components": [
+        "Constraint Validation API",
+        "ElementInternals.setValidity()",
+        ":invalid/:user-invalid"
+      ],
+      "keyInsight": "Native binary validity (only error level). setValidity() carries an anchor element for focus. :user-invalid gates display to touched|submitted. Beyond-native: pending, severity, cross-field.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Guides/Constraint_validation"
+    }
+  ],
+  "uxResearch": [
+    {
+      "title": "Reward early, punish late",
+      "source": "Smashing Magazine / Konjević",
+      "findings": [
+        "Once a field errors, switch from lazy to eager validation (on change instead of blur).",
+        "On fix, clear the error message immediately.",
+        "Revert to lazy (on blur) once the field is clean again.",
+        "This dynamic flip prevents annoying re-validation while encouraging rapid correction."
+      ],
+      "reference": "https://medium.com/wdstack/inline-validation-in-forms-designing-the-experience-123fb34088ce"
+    },
+    {
+      "title": "Live validation harm",
+      "source": "USWDS (deprecated inline component)",
+      "findings": [
+        "Live/blur validation can raise error rates and user frustration.",
+        "GOV.UK actively discourages it; ship submit-only as the safe default.",
+        "If a design requires live, it must be opt-in and carefully tested for UX impact."
+      ]
+    },
+    {
+      "title": "Async generation/version token requirement",
+      "source": "React Hook Form, Final Form, Vuelidate issue trackers",
+      "findings": [
+        "Every \"stale resolve clobbers newer error\" bug stems from missing generation tokens.",
+        "Results from async validators dispatched for old input versions must be dropped.",
+        "RHF #1688, Final Form #420, Vuelidate #364 all trace to this."
+      ]
+    },
+    {
+      "title": "Validity merge order (deterministic precedence)",
+      "source": "Form library issue trackers",
+      "findings": [
+        "Concurrent sources (sync, async, manual, schema) must have a declared merge order.",
+        "Without it: \"server error wiped on blur\", \"schema overwrites manual error\", \"root toggles isValid\" bugs.",
+        "Formik #706, RHF #9982 trace to undefined precedence."
+      ]
+    }
+  ],
+  "researchGaps": [
+    "Reward-early/punish-late is a dynamic flip (not a flat execution value). Interaction state gates display, not compute timing.",
+    "Native validity is strictly binary (error only). Warning/caution/info are beyond-native, advisory-only, never block submission.",
+    "visibility:dirty has no native pseudo-class. Must be tracked explicitly in interaction state.",
+    "Async needs version token + aggregation + submit-await. Native CVAPI has none.",
+    "Concurrent source merge order must be normalized (cross-cutting requirement across all libraries).",
+    "Root/global error must block submit without corrupting per-field validity (the RHF \"isValid\" bug family).",
+    "Capability/feature modularity + adherence detection is a separate meta-layer (see spec-versioning brief).",
+    "DI concern interfaces and their hand-off contracts are normative only at Level 2; Level 1 needs only observable state/events."
+  ]
+}

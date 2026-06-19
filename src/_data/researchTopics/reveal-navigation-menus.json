@@ -1,0 +1,28 @@
+{
+  "id": "reveal-navigation-menus",
+  "title": "Reveal navigation menus — the disclosure-panel paradigm (mega-menu / hover-disclosure)",
+  "status": "open",
+  "summary": "Grounds decision #609: top-level nav whose sections disclose a panel of links on hover/focus (dropdown nav, mega-menus, the WE header). The survey is decisive that this is the WAI-ARIA APG *Disclosure Navigation* pattern (native list/anchor semantics + aria-expanded + aria-controls) composed with the existing Anchor intent (placement/collision/strategy/dismissal) — NOT the menu/menubar role (composite-widget roving focus + first-character type-ahead, for application command menus like Google Docs), and NOT a new widget. The base already exists as the nav-list block (blocks.json:2082, APG Disclosure Navigation, nav:section toggle). After research only TWO genuine forks survive. Fork 1 (home): a composition recipe (nav-list section + disclosure + anchor strategy=escape popover), no new block — DEFAULT, vs a named composition block matching the menu/drawer house-style precedent (both are 'composition manifests'); the mega-menu multi-column shape is demoted to support-all (panel layout, not a standard). Fork 2 (hover-intent home): the open/close-delay + safe-area corridor that fixes the diagonal problem (origin Tognazzini/Batson Apple HID, the 'Amazon triangle') recurs across reveal-nav, menu submenus, and hovercards — so per the separation bias mint a small standalone hover-intent behavioral concern they compose (DEFAULT) vs fold a hoverIntent dimension into the anchor intent; the MECHANIC (delay-only à la Radix/Headless · CSS safe-area bridge à la the WE dogfood · JS pointer-direction polygon à la jQuery-menu-aim/safe-triangle — unsettled across libraries, Radix ships delay-only with open polygon requests #1549/#2437) is a Technical Configurator setting, not a UX dimension or WE mandate. DISSOLVED by research: 'no-reflow' is the existing anchor.strategy=inline|escape axis (in-flow sidebar accordion reflows fine; header popover must not), not a new dimension; i18n label-growth (no English-keyed fixed widths, no truncation) and native-first CSS-disclosure-baseline-plus-JS-enhancement are forced invariants; disclosure-not-menu is a forced invariant (ratify). The dogfood WE header (base.njk:32-69, style.css:241-276) is the conform-to-standard reference and is NOT yet APG-conformant (heads are aria-hidden spans, no aria-expanded/controls, hover/:focus-within-only with no Esc/outside-click) — conforming it is a graduation build, not a fork. Both forks confidence: med. Full grounding in reports/2026-06-14-reveal-navigation-disclosure-pattern.md.",
+  "dateOpened": "2026-06-14",
+  "lastReviewed": "2026-06-14",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "navigation",
+    "disclosure",
+    "mega-menu",
+    "hover-intent",
+    "safe-triangle",
+    "anchor",
+    "accessibility",
+    "apg",
+    "candidate-standard",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "nav-list",
+    "menu",
+    "drawer"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

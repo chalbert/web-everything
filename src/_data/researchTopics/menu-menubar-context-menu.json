@@ -1,0 +1,25 @@
+{
+  "id": "menu-menubar-context-menu",
+  "title": "Menu / Menubar / Context-menu — Action Invocation",
+  "status": "resolved",
+  "summary": "Web-platform and library prior art for a Web Everything Menu block (the ARIA menu/menubar/menu-button/context-menu family — action invocation, not value selection), grounding backlog #173. Every benchmark library (Radix/Headless/MUI/Fluent/Carbon/Ant/Shoelace) models menu as a separate component from listbox/select. WAI-ARIA APG fully specifies the roles and keyboard model and — contrary to the item's premise — permits roving tabindex OR aria-activedescendant (WE chooses roving by convention, fixed). Native substrate is thin: <menu> is a <ul> alias, type=context is dead, but Popover supplies the surface and the newly-Baseline Invoker Commands API (command/commandfor + CommandEvent) is the action-dispatch substrate for the command intent (#016) — the menu's one net-new dependency. Everything else composes existing intents (Anchor, Focus Delegation roving, Type-Ahead, Selection for checkable items, Disclosure for submenus, Action for prominence). Forks: command intent vs Action (A), roving as fixed default (B), one block with a shape dimension vs three (C), checkable=Selection under a trait (D), submenu=Disclosure not the hierarchy intent (E); plus two the item omitted — separator/group semantics (F) and the menu-button double-home in the droplist roster (G).",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "menu",
+    "menubar",
+    "context-menu",
+    "command",
+    "invoker-commands",
+    "apg",
+    "roving-tabindex",
+    "disclosure",
+    "selection",
+    "gap-analysis",
+    "vocabulary"
+  ],
+  "relatedBlocks": [
+    "droplist"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webblocks"
+}

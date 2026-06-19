@@ -1,0 +1,25 @@
+{
+  "id": "surface",
+  "name": "Surface Intent",
+  "status": "draft",
+  "summary": "Protocol defining Z-Axis depth, material texture (Glass/Solid), and interactions across lighting modes.",
+  "dimensions": {
+    "texture": {
+      "description": "Physical material of the surface",
+      "values": [
+        "solid",
+        "glass",
+        "transparent"
+      ]
+    },
+    "interaction": {
+      "description": "Visual response to user interaction",
+      "values": [
+        "static",
+        "lift",
+        "scale"
+      ]
+    }
+  },
+  "description": "<h3>Elevation Semantics (Z-Axis)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>0</code>: Base. Application background.</li><li><code>1-2</code>: Grouping content. (Cards, Lists).</li><li><code>3-5</code>: Floating content. (Sticky Headers, Modals, Tooltips).</li></ul><h3>Material Texture</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>solid</code>: Opaque. Standard for Material Design 3 (Surface Tones).</li><li><code>glass</code>: Blurred background. Standard for macOS/iOS (Vibrancy) and Windows (Mica/Acrylic).</li><li><code>transparent</code>: Layout-only containment.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SurfaceMaterial = 'solid' | 'glass' | 'transparent';\ntype SurfaceInteraction = 'static' | 'lift' | 'scale';\n\ninterface SurfaceIntent {\n    // Z-axis position relative to parent (0-5)\n    elevation: number;\n    \n    // Physical texture of the surface\n    texture: SurfaceMaterial;\n    \n    // Visual variation (Default vs High Contrast)\n    variant: 'default' | 'alt';\n    \n    // Interaction physics\n    interaction: SurfaceInteraction;\n}</code></pre>"
+}

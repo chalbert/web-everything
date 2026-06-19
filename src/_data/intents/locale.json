@@ -1,0 +1,47 @@
+{
+  "id": "locale",
+  "name": "Locale Intent",
+  "status": "concept",
+  "summary": "Protocol defining the application's active locale, writing direction, and locale-bound format preferences. The app-wide preference axis the Localization Protocol consumes; retroactively fills the RTL/format gaps implied by temporal, typography, and anchor.",
+  "dimensions": {
+    "locale": {
+      "description": "The active locale as a BCP-47 language tag (open-valued — not a fixed enum)",
+      "values": [
+        "en",
+        "en-US",
+        "fr-CA",
+        "ar",
+        "ja",
+        "…BCP-47"
+      ]
+    },
+    "direction": {
+      "description": "The writing direction the layout flows in",
+      "values": [
+        "ltr",
+        "rtl",
+        "auto"
+      ]
+    },
+    "numbering": {
+      "description": "Optional override for the numbering system (defaults to the locale's CLDR default)",
+      "values": [
+        "latn",
+        "arab",
+        "deva",
+        "…Unicode bn"
+      ]
+    },
+    "calendar": {
+      "description": "Optional override for the calendar system (defaults to the locale's CLDR default)",
+      "values": [
+        "gregory",
+        "islamic",
+        "buddhist",
+        "japanese",
+        "…Unicode ca"
+      ]
+    }
+  },
+  "description": "<h3>Active Locale</h3><p class=\"text-sm text-gray-600 mb-2\">The current locale as a <a href=\"https://www.rfc-editor.org/info/bcp47\">BCP-47</a> language tag. This is an <strong>open axis</strong> — the standard fixes the <em>shape</em> (a valid tag) and the negotiation rules, not a closed list of locales. Components read the active locale to format values (via <code>Intl</code>) and resolve messages (via the <a href=\"/projects/webintl/#protocol-localization\">Localization Protocol</a>).</p><h3>Writing Direction</h3><p class=\"text-sm text-gray-600 mb-2\">The direction the layout flows in. Drives the <code>dir</code> attribute, the <code>:dir()</code> pseudo-class, and CSS logical properties so components adapt without bidirectional CSS forks.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>ltr</code>: Left-to-right (Latin, Cyrillic, CJK).</li><li><code>rtl</code>: Right-to-left (Arabic, Hebrew). Inline start/end flip; physical left/right do not.</li><li><code>auto</code>: Direction inferred per the Unicode bidi algorithm from the content's first strong character (matches <code>dir=\"auto\"</code>).</li></ul><h3>Format Preferences</h3><p class=\"text-sm text-gray-600 mb-2\">Optional overrides for locale-bound formatting, defaulting to the locale's CLDR defaults. These complement the <a href=\"/intents/temporal/\">Temporal</a> and <a href=\"/intents/typography/\">Typography</a> intents, which previously had no locale axis to defer to.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>numbering</code>: Unicode numbering system (a <code>nu</code> subtag value) — e.g. <code>latn</code>, <code>arab</code>, <code>deva</code>.</li><li><code>calendar</code>: Unicode calendar system (a <code>ca</code> subtag value) — e.g. <code>gregory</code>, <code>islamic</code>, <code>japanese</code>.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Direction = 'ltr' | 'rtl' | 'auto';\n\ninterface LocaleIntent {\n    // Active BCP-47 language tag (open-valued)\n    locale: string;\n    // Writing direction the layout flows in\n    direction: Direction;\n    // Optional Unicode numbering system (nu subtag)\n    numbering?: string;\n    // Optional Unicode calendar system (ca subtag)\n    calendar?: string;\n}</code></pre>"
+}

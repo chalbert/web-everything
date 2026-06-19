@@ -1,0 +1,22 @@
+{
+  "id": "polyglot-maas-origin",
+  "title": "Polyglot MaaS origin — codegen vs Wasm, source-of-truth & cross-language conformance",
+  "status": "open",
+  "summary": "Prep prior-art survey for decision #463 (blocked by #461, the canonical JS Fetch-standard origin = reference impl; parent MaaS #081). The self-hosted MaaS origin is today only a JS Fetch handler; enterprises run .NET/Java, so a JS-only origin forces a JS sidecar. #463 asks how WE projects a native origin outward via a forward/codegen adapter (the inverse of WE's ingest adapters). Three forks: (a) mechanism, (b) source of truth, (c) conformance. The survey reshapes fork (a) from three options to four. Mechanism: AWS Smithy proves the IDL→multi-language-server-codegen pattern (generates routing/serde/validation/types, leaves a business-logic seam, protocol-agnostic) but server-codegen maturity is lumpy (no off-the-shelf .NET/Go server emitter; Java GA 2026 but client-leaning); OpenAPI Generator reaches many languages and is HTTP-shaped but quality is per-generator. The FOURTH option is compile-once-to-Wasm + host bindings (WebAssembly Component Model + WIT): one binary embedded by each host (.NET componentize-dotnet/Wasmtime, JVM chicory, Go wazero) structurally eliminates cross-language drift — serious in 2026 (Wasm 3.0 ratified Sept 2025, WASI P2 stable, server-side now majority prod use) but host SDKs are preview-grade. Source of truth: every precedent authors a language-neutral contract and treats each language including the original as an output — favor the protocols.json#maas-versioning protocol (projectable to OpenAPI for the HTTP-GET shape) as authority, JS as just another target, #461 as reference impl not SoT. Conformance: a shared spec does NOT guarantee interop — only a conformance suite does (protobuf: same spec, 0 vs 1847 failures across libs; Connect/gRPC suite found 22+ bugs in Google's own gRPC v1.0); adopt golden-vectors + reference-impl + runner gating each release — the single most load-bearing decision, orthogonal to the codegen-vs-Wasm choice. Recommendation: generation-adapter codegen from a neutral SoT with a deterministic-core/HTTP-shell split, gated by a conformance suite, Wasm named as the convergence target for the core once host SDKs mature.",
+  "dateOpened": "2026-06-13",
+  "tags": [
+    "module-as-a-service",
+    "polyglot",
+    "codegen",
+    "generation-adapter",
+    "wasm-component-model",
+    "conformance",
+    "source-of-truth",
+    "dotnet",
+    "java",
+    "enterprise"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webadapters"
+}

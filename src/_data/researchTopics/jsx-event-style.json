@@ -1,0 +1,21 @@
+{
+  "id": "jsx-event-style",
+  "title": "JSX Event-Style — Function Prop vs String Behavior",
+  "status": "open",
+  "summary": "Framework prior art grounding backlog #051: the JSX adapter mirrors the canonical HTML adapter and accepts one event handler two ways — the function prop onclick={inc} (JSX's type-checked ergonomic draw) and the string behavior on:click=\"inc($event)\" (the canonical form that survives to HTML). The handler-attachment surface is the most divergent across the ecosystem (React/Preact onClick={fn}, Solid on:click={fn}, Vue @click=\"inc($event)\", Lit @click=${fn}, native inline-string vs addEventListener), so it is a spelling choice, not a semantic one. Only the string form serializes to an HTML attribute, so it must be canonical; named handlers round-trip while inline closures are one-way (lossy). Recommends authoring function-style with string canonicalization, plus a string-function display sub-toggle reusing the shipped soft html | react dialect machinery — not a new protocol.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "jsx",
+    "adapters",
+    "events",
+    "event-handlers",
+    "round-trip",
+    "lossy",
+    "dialect",
+    "spelling",
+    "vocabulary"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webadapters"
+}

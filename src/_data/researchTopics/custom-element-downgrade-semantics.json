@@ -1,0 +1,22 @@
+{
+  "id": "custom-element-downgrade-semantics",
+  "title": "CustomElementRegistry.downgrade() semantics — there is no native API to mirror",
+  "status": "open",
+  "summary": "Prep research for decision #1103 (carved from webregistries completion epic #1088). The scoped CustomElementRegistry polyfill carries a stub whose body is literally a question — downgrade() { /* TODO: What should downgrade do? */ } at plugs/webregistries/CustomElementRegistry.ts:134-137. Unlike every other method on this polyfill, native CustomElementRegistry has NO downgrade, so there is no native behaviour to mirror. FINDING: the custom-elements machinery is monotonic by design, twice over — (1) element upgrade is a one-way prototype swap; the HTML custom-element-state machine moves undefined → uncustomized/failed → custom with NO edge back, and no platform primitive un-upgrades a live node; (2) the registry is append-only — native exposes define/get/getName/whenDefined/upgrade and notably NO undefine, so a name once defined cannot be removed. The WICG Scoped Custom Element Registry proposal (the standards basis for this polyfill) adds only a constructor + ShadowRoot binding and explicitly defers any teardown to 'a user-land abstraction, post-MVP'. The only 'downgrade' in WHATWG discussion is the cross-document adoption debate (whatwg/html#6480), which preserves object identity rather than tearing elements down. The three proposed options map to: A revert-to-stand-ins (no platform primitive; a setPrototypeOf hack that runs no downgrade lifecycle and breaks identity/state — fights the one-way invariant), B drop the method (mirror the deliberate omission; global teardown is already removePatches()'s job at index.ts:72-80), C a removePatches()-time un-scope helper (redundant with removePatches, and inherits A's impossibility for already-upgraded elements; native stand-ins can't be un-defined anyway). RECOMMENDATION: B — a faithful polyfill mirrors the native surface, which omits downgrade on purpose; both 'do something' options ship a non-standard mutation API with no native equivalent (lock-in WE refuses). If a real per-subtree teardown need surfaces later, design it then as a named, explicitly non-standard extension. Single prepared fork, default B. Full grounding in reports/2026-06-19-custom-element-downgrade-semantics.md.",
+  "dateOpened": "2026-06-19",
+  "lastReviewed": "2026-06-19",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webregistries",
+    "custom-elements",
+    "polyfill",
+    "native-first",
+    "downgrade",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [
+    "webregistries"
+  ],
+  "relatedProject": "webregistries"
+}

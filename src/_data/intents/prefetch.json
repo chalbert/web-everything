@@ -1,0 +1,25 @@
+{
+  "id": "prefetch",
+  "name": "Prefetch Intent",
+  "status": "draft",
+  "summary": "Controls the eagerness of resource prefetching based on connection and power.",
+  "dimensions": {
+    "eagerness": {
+      "description": "How proactively the application anticipates the user's next action",
+      "values": [
+        "viewport",
+        "hover",
+        "interaction"
+      ]
+    },
+    "suppressWhen": {
+      "description": "Conditions that suppress prefetching to respect the user's environment",
+      "values": [
+        "limited-data",
+        "low-power",
+        "slow-connection"
+      ]
+    }
+  },
+  "description": "<h3>Eagerness</h3><p class=\"text-sm text-gray-600 mb-2\">How proactively the application anticipates the user's next action. Higher eagerness improves perceived speed but consumes more resources.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>viewport</code>: Prefetch when the link becomes visible to the user (Lazy).</li><li><code>hover</code>: Prefetch when the user shows interest (hovering or focusing) (Moderate).</li><li><code>interaction</code>: Prefetch at the moment the user begins to act (pointer down) (Eager).</li></ul><h3>User Conditions</h3><p class=\"text-sm text-gray-600 mb-2\">Conditions under which prefetching should be suppressed to respect the user's environment. The implementing block decides which APIs to use for detection.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>limited-data</code>: User has indicated a preference to conserve data (e.g., metered connection).</li><li><code>low-power</code>: Device is in a low-battery or power-saving state.</li><li><code>slow-connection</code>: Network quality is too poor for speculative loading to be beneficial.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type PrefetchEagerness = 'viewport' | 'hover' | 'interaction';\ntype PrefetchConstraint = 'limited-data' | 'low-power' | 'slow-connection';\n\ninterface PrefetchIntent {\n    // How proactively to prefetch\n    eagerness: PrefetchEagerness;\n    // Conditions that suppress prefetching\n    suppressWhen: PrefetchConstraint[];\n}</code></pre>"
+}

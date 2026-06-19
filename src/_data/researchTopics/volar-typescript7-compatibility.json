@@ -1,0 +1,22 @@
+{
+  "id": "volar-typescript7-compatibility",
+  "title": "Volar & TypeScript 7 (Corsa/tsgo) Compatibility",
+  "status": "open",
+  "summary": "Researching how Volar.js and Vue language tools will interact with TypeScript 7's native Go rewrite (Project Corsa / tsgo). Covers the Corsa IPC-based API surface, the loss of TSServer plugin support, the viability of writing Volar language plugins in Go or native code, performance profiles and bottlenecks of Volar-based language servers, and potential IPC/WASM/FFI communication patterns between native analysis engines and Volar's Node.js-based framework.",
+  "dateOpened": "2026-02-26",
+  "tags": [
+    "volar",
+    "typescript",
+    "tsgo",
+    "corsa",
+    "language-server",
+    "ipc",
+    "wasm",
+    "performance",
+    "go",
+    "tooling"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webtooling"
+}

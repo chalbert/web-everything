@@ -1,0 +1,31 @@
+{
+  "id": "enforce-compose-traits-conformance",
+  "title": "Enforcing \"compose existing traits over hand-rolled re-implementation\" — the conformance-gate mechanism (advisory vs mechanical, detection teeth, declaration home)",
+  "status": "open",
+  "summary": "Prep research for decision #933. The principle is settled (compose a registered WE trait/behavior for any capability a standard already covers; never hand-roll it with raw addEventListener); the open call is the ENFORCEMENT MECHANISM. Two FUI chrome blocks re-implemented the W3C APG Disclosure Navigation pattern that already exists as the nav:section/nav:list traits — sectioned-nav (#870), then disclosure-nav (#931) — and nothing mechanical caught either. Survey of conformance/lint/fitness-function prior art (WAI-ARIA APG disclosure pattern; ESLint no-restricted-syntax / jsx-a11y; ArchUnit/dependency-cruiser/ts-arch fitness functions; axe-core rendered-vs-static) reshaped the original A/B/C fork: A (advisory pre-flight only) is the EXCLUDED branch (it is what already existed and failed twice → a mechanical gate is a forced invariant, the checklist stays as a complement); C (declarative-only by construction) is NOT a rival but is sequenced after the mode-C registry-boot decision #932/#934 (removes the temptation at source over time); B (mechanical gate) is forced and carries the two genuine open calls. Fork 1 — the gate detection teeth: declaration-resolution + a curated pattern→trait deny-list (disclosure→nav:section, roving-tabindex→nav:list), warn-first per the #840/#844 precedent (default ~75%); reject open-ended addEventListener sniffing (ESLint lesson: open heuristics are false-positive factories that get disabled) and reject declaration-only (misses a block that declares nothing and hand-rolls — the exact #931/#870 mode). Fork 2 — the declaration home: a new explicit block-protocol field for COMPOSED (consumed) traits, projected into CEM x-webeverything and asserted to resolve against traits.json (default ~80%); reject overloading the existing traits field (it means traits a block PROVIDES) and reject the name composesTraits (already rejected 2026-06-06 for The Map materialization, traits.json:29 — name-collision footgun). Key non-obvious finding: axe passed on #931 (a hand-rolled disclosure can be a11y-clean), so a RENDERED conformance check cannot catch this — the defect is visible only in source+declaration, pinning the gate to the static check:standards path beside validateBlockImplConformance (check-standards-rules.mjs:1234). Full grounding in reports/2026-06-18-933-enforce-compose-traits-over-hand-roll.md.",
+  "dateOpened": "2026-06-18",
+  "lastReviewed": "2026-06-18",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "conformance",
+    "traits",
+    "behaviors",
+    "work-method",
+    "governance",
+    "enforcement",
+    "lint",
+    "fitness-function",
+    "apg",
+    "disclosure",
+    "eslint",
+    "axe-core",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "nav-list"
+  ],
+  "relatedPlugs": [
+    "webbehaviors"
+  ],
+  "relatedProject": "webdocs"
+}

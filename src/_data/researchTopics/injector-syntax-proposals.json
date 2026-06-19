@@ -1,0 +1,24 @@
+{
+  "id": "injector-syntax-proposals",
+  "title": "Provide/Consume/Injector Syntax Proposals",
+  "status": "open",
+  "summary": "Cataloging the four layers of provide/consume/injector syntax explored in the plateau project — from runtime API (Consumable, consume(), Node context methods) through HTML declarative forms (script type=expression/context), decorators (@provide, @context), and language-level DSL (injector blocks, provide/consume/map statements). Evaluates what should carry forward to Web Everything and what was exploratory.",
+  "dateOpened": "2026-02-24",
+  "tags": [
+    "injector",
+    "provide",
+    "consume",
+    "syntax",
+    "dsl",
+    "consumable",
+    "decorators",
+    "context"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [
+    "webinjectors",
+    "webcontexts",
+    "webstates"
+  ],
+  "relatedProject": "webinjectors"
+}

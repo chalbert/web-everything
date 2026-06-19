@@ -1,0 +1,63 @@
+{
+  "id": "exit-guard",
+  "name": "Exit Guard Intent",
+  "status": "concept",
+  "summary": "UX vocabulary for confirming before a region the user is in is torn down while it holds unsaved or in-flight work. The exit-guard member of the Guard protocol: arms on the cancelable dismissal of any region (document, route, overlay); the deny-outcome is a user-mediated confirm (stay / discard / save). The loss-of-state predicate is supplied by the guard provider, never by the intent.",
+  "dimensions": {
+    "scope": {
+      "description": "Which region's teardown is guarded — scale-invariant. document is the outermost region (the whole page leaving); route is a same-document navigation; overlay is an in-app dismissal (modal, drawer, panel).",
+      "values": [
+        "document",
+        "route",
+        "overlay"
+      ]
+    },
+    "condition": {
+      "description": "What the user is warned they would lose — the user-facing flavour of the loss-of-state predicate. unsaved = uncommitted edits (dirty form, editor); in-flight = work still running (an upload, a background task).",
+      "values": [
+        "unsaved",
+        "in-flight"
+      ]
+    },
+    "resolution": {
+      "description": "The user-mediated outcomes the confirm offers. stay cancels the dismissal and keeps the region; discard proceeds and abandons the work; save commits the work first, then proceeds.",
+      "values": [
+        "stay",
+        "discard",
+        "save"
+      ]
+    },
+    "presentation": {
+      "description": "How the confirm is shown. native = the browser's own generic, non-customizable prompt (the only option at document scope, via beforeunload); custom = an in-app dialog with bespoke copy and a save affordance (available for route and overlay scopes).",
+      "values": [
+        "native",
+        "custom"
+      ]
+    }
+  },
+  "description": "<h3>Exit Guard Contract</h3><p class=\"text-sm text-gray-600 mb-2\">When the user makes an <strong>intentful, cancelable attempt to leave or dismiss a region</strong> — closing the tab, navigating to a new route, dismissing a modal — and that region holds outstanding work, a <strong>confirm</strong> is presented before the teardown completes. The user, not the app, decides whether to proceed. Whether work is outstanding is decided by the <a href=\"/projects/webguards/#protocol-guard\">guard provider</a>; this intent only declares <em>that</em> a confirm is presented when it is, never <em>how</em> the condition is computed.</p><h3>Per-scope vocabulary</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>document</code>: the whole page is closing or reloading. The browser shows its <strong>own generic prompt</strong> (<code>beforeunload</code>) — the app cannot customize the text or offer a Save button. <code>presentation</code> is forced to <code>native</code> here.</li><li><code>route</code>: a same-document navigation away from the current view. The app intercepts the navigation and can show a <code>custom</code> dialog with bespoke copy.</li><li><code>overlay</code>: an in-app dismissal of a modal, drawer, or panel. The cancelable close action is intercepted; a <code>custom</code> dialog is shown.</li></ul><h3>Resolution</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>stay</code>: cancel the dismissal; the region and its work remain.</li><li><code>discard</code>: proceed; the outstanding work is abandoned.</li><li><code>save</code>: commit the work, then proceed (custom presentations only — the native prompt cannot offer this).</li></ul><h3>What this intent does not cover</h3><p class=\"text-sm text-gray-600 mb-2\">Only <strong>cancelable dismissal triggers</strong> are guardable — a close button, a route change, <code>beforeunload</code>. Imperative teardown that bypasses a guardable trigger (an ancestor calling <code>el.remove()</code>, a framework unmount) happens too late to confirm and is <strong>out of scope</strong>. The predicate, its provider, and the trust/enforcement boundary live in the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a>, not here.</p><h3>Composition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li>Built on the <strong><a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a></strong> — the sibling of the entry-guard / access member (access control); both delegate their predicate to a guard provider, but the exit guard's deny-outcome is a <code>confirm</code> rather than <code>hide / redirect / forbid / cloak</code>.</li><li>The <strong>Form block</strong> and any unsaved-editor surface reference this intent rather than re-implementing a dirty-check prompt.</li><li>The <strong>Background Task Intent</strong>'s navigation-guard dimension collapses to referencing this intent for the in-flight case.</li></ul>",
+  "events": [
+    "exitattempt",
+    "exitconfirm",
+    "exitcancel"
+  ],
+  "uxResearch": [
+    {
+      "title": "Exit-guard prior art across frameworks and platforms",
+      "source": "Web Everything navigation-guard / Guard protocol research (#129, 2026-06-10)",
+      "findings": [
+        "Every major router exposes a leave-guard: Angular CanDeactivate, Vue beforeRouteLeave, React Router useBlocker, SvelteKit beforeNavigate — all gate a transition on a predicate and let the user cancel.",
+        "The browser baseline is beforeunload, which arms the document scope but can only render a generic, non-customizable prompt — no custom copy and no Save affordance.",
+        "Native platforms confirm the same pattern at overlay scope: iOS presentationControllerShouldDismiss / isModalInPresentation guard an interactive dismissal against a dirty state.",
+        "The unifying abstraction is guarding a region's teardown against a loss-of-state predicate, not 'navigation' — which is why this is the exit-guard member of the surface-agnostic Guard protocol, not a router-only feature."
+      ],
+      "keyInsight": "Routing leave-guards, beforeunload, and native modal-dismissal guards are one intent at three scopes; the only real UX divergence is that the document scope is stuck with the browser's native prompt.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event"
+    }
+  ],
+  "researchGaps": [
+    "Reconcile a custom route-scope confirm with the browser's native beforeunload prompt when a single user action triggers both (e.g. a hard reload mid-route) — the user must not see two stacked prompts.",
+    "Whether 'save' belongs in this intent's resolution vocabulary or composes from a separate Save/Action intent, given the native scope structurally cannot offer it.",
+    "How the confirm copy is sourced per condition (unsaved vs in-flight) without the intent reaching into the provider's predicate internals."
+  ]
+}

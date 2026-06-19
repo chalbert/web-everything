@@ -1,0 +1,28 @@
+{
+  "id": "app-shell-compatibility-map",
+  "title": "App Shell + Micro-App Compatibility Map",
+  "status": "open",
+  "summary": "Web-platform and industry prior art grounding backlog #104: a thin App Shell that loads independently-developed micro-apps as pages of one SPA, deciding on navigation whether the next page loads in the same SPA or needs a hard refresh, plus a Platform compatibility map. Deepened 2026-06-13: Module Federation 2.0 (mf-manifest.json + DevTools dependency graph), Native Federation, Piral, qiankun, Luigi, Bit, plus the classic declared-range resolvers (npm peerDependencies/engines, OSGi, Kubernetes version-skew). Correcting the first cut: declared manifests and rendered graphs already exist — but only for the shared-library-version dimension. The genuine novelty is a declared COEXISTENCE contract that also covers the DOM dimension (custom-element tag-names, window globals, route ownership) — which no surveyed tool declares; the ones that solve it (qiankun, Luigi) use enforced isolation, never a declared+mapped contract. Recommends: split the home — a thin app-shell-compatibility protocol owned by webmanifests plus the live map as a Plateau dashboard (Zephyr Cloud is proof the product leg is viable); declare flat (npm-peerDependencies-shaped provider ranges + OSGi-namespaced globals/tag-names/routes claims) and compute a browser-compat-data-style matrix as the rendered view (BCD is curated, not declared), with three states and an asymmetric skew window; borrow the Storage eviction model (best-effort/persistent + LRU under a mounted-app budget). Adapters-via-DI (webinjectors) shrink the incompatible set so hard refresh is the last resort.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "app-shell",
+    "micro-frontend",
+    "micro-apps",
+    "compatibility-map",
+    "spa",
+    "module-federation",
+    "native-federation",
+    "piral",
+    "qiankun",
+    "import-maps",
+    "peer-dependencies",
+    "osgi",
+    "version-skew",
+    "browser-compat-data",
+    "eviction",
+    "evergreen"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webmanifests"
+}

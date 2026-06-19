@@ -1,0 +1,22 @@
+{
+  "id": "auto-update-pipeline",
+  "title": "Auto-update Pipeline & Change Management",
+  "status": "open",
+  "summary": "Change-management prior-art survey grounding backlog #101: the orchestration that keeps an app current on deps/standards safely — trigger → security scan → cool-off → auto-branch+test → gates → merge/deploy → monitor → revert. Every tool (Dependabot, Renovate, semantic-release, changesets) splits a committed policy file from a swappable runner, so the WE shape is a thin protocol declaring update policy + capability (the escapable lock) with orchestration as a Plateau/reliability service — the same registry+provider pattern as Guard and render-strategy. The gate is graded config keyed to severity + signal, never one mechanic: a pre-merge gate (stability buffer → merge confidence → auto-merge low-risk-green, human-gate major + visual-diff) plus a post-deploy staged-rollout metric gate (auto-rollback). Migration/codemods are consumed from #102/#094 (hence blockedBy); the net-new edge is Platform-side pre-testing against consumers' suites before release.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "auto-update",
+    "evergreen",
+    "change-management",
+    "dependencies",
+    "risk-gates",
+    "phased-rollout",
+    "reversion",
+    "protocol",
+    "reliability",
+    "gap-analysis"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webreliability"
+}

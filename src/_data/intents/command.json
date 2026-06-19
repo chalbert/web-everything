@@ -1,0 +1,37 @@
+{
+  "id": "command",
+  "name": "Command Intent",
+  "status": "draft",
+  "summary": "The declarative surface for invoking an action — which commands exist, their keybindings, and command-palette behaviour. Grounded on the Baseline Invoker Commands API (command/commandfor + CommandEvent); a keybinding engine (Mousetrap, tinykeys) is an adapter, never the baseline. Orthogonal to the Action Intent (visual weight); the net-new dependency the Menu block composes.",
+  "dimensions": {
+    "binding": {
+      "description": "The keyboard shape that triggers the command (default: none)",
+      "values": [
+        "none",
+        "chord",
+        "sequence"
+      ]
+    },
+    "scope": {
+      "description": "Where the command and its binding are active (default: contextual)",
+      "values": [
+        "contextual",
+        "global"
+      ]
+    },
+    "discoverability": {
+      "description": "Whether the command appears in the command palette (default: listed)",
+      "values": [
+        "listed",
+        "hidden"
+      ]
+    }
+  },
+  "requiresCapabilities": [
+    "invokers"
+  ],
+  "description": "<h3>What Command Is</h3><p class=\"text-sm text-gray-600 mb-2\">A command is the declarative surface for <strong>invoking an action</strong> — <em>which</em> commands exist, the keyboard shortcuts that trigger them, and how they surface in a command palette. The native substrate is the <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API\">Invoker Commands API</a> (Baseline 2025): a control declares <code>commandfor</code> + <code>command</code>, and activating it dispatches a <code>CommandEvent</code> on the target (carrying <code>.command</code> and <code>.source</code>). Built-in commands cover popovers and dialogs; an app-defined command uses a <code>--</code>-prefixed value and handles its own <code>CommandEvent</code>.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>Command is not the <a href=\"/intents/action/\">Action Intent</a>.</strong> Action is about an element's <em>visual weight</em> (<code>primary</code>/<code>destructive</code>); Command is about <em>invocation</em> (what fires, by what key, found where). They are orthogonal and compose: a destructive button can invoke a command. And a <strong>keybinding engine</strong> (Mousetrap, tinykeys, hotkeys-js) is an <em>adapter</em>, never the baseline — the platform's key handling and <code>CommandEvent</code> are native-first; an engine is the optional opt-in (settled in #016).</p><h3>Binding</h3><p class=\"text-sm text-gray-600 mb-2\">The keyboard shape that triggers the command — using the established keybinding vocabulary:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>none</code>: <strong>Default</strong>. No dedicated shortcut; the command is invoked by click, menu item, or the palette. Most commands are this.</li><li><code>chord</code>: A single simultaneous combination (e.g. <kbd>Ctrl</kbd>+<kbd>K</kbd>).</li><li><code>sequence</code>: An ordered multi-key sequence (the <kbd>g</kbd> then <kbd>i</kbd> style).</li></ul><h3>Scope</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>contextual</code>: <strong>Default</strong>. The command (and its binding) is active only while its surface or element has focus. The safe, composable default — it cannot collide app-wide.</li><li><code>global</code>: Active application-wide regardless of focus. A deliberate opt-in: a global binding claims an app-wide shortcut and can shadow other contexts, so it is never the default.</li></ul><h3>Discoverability</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>listed</code>: <strong>Default</strong>. The command appears in the command palette, so it is discoverable and searchable by name. The most permissive default — every command is findable unless deliberately hidden.</li><li><code>hidden</code>: The command is invocable (by key or programmatically) but omitted from the palette — for internal or redundant commands.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Command is the one net-new dependency the <a href=\"/blocks/menu/\">Menu</a> family (#173) composes — every <code>menuitem</code> <em>invokes</em> a command. A <strong>toggle command</strong> (e.g. \"Toggle Sidebar\") does not own its on/off state: it composes <a href=\"/intents/selection/\">Selection</a> or <a href=\"/intents/disclosure/\">Disclosure</a> for the state and stays a pure invocation here. Visual prominence composes the orthogonal <a href=\"/intents/action/\">Action Intent</a>; modality of the trigger composes <a href=\"/intents/interaction/\">Interaction</a>. The command palette itself is a surface that lists <code>listed</code> commands and dispatches the chosen one.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Binding = 'none' | 'chord' | 'sequence';type Scope = 'contextual' | 'global';type Discoverability = 'listed' | 'hidden';interface CommandIntent {    // Stable command identifier (maps to the `--`-prefixed CommandEvent.command value)    id: string;    // Human label shown in menus and the palette    label: string;    // Keyboard shape that triggers it (default: none)    binding: Binding;    // Where the binding is active (default: contextual)    scope: Scope;    // Whether it appears in the command palette (default: listed)    discoverability: Discoverability;}</code></pre>",
+  "events": [
+    "command"
+  ]
+}

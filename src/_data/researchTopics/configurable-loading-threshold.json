@@ -1,0 +1,24 @@
+{
+  "id": "configurable-loading-threshold",
+  "title": "Configurable Loading Threshold via Intents",
+  "status": "open",
+  "summary": "Researching how the 400ms debounce loading threshold should be configurable through the Intent system, backed by UX perception research and framework precedent.",
+  "dateOpened": "2026-02-23",
+  "tags": [
+    "loading",
+    "debounce",
+    "timing",
+    "intents",
+    "ux-research",
+    "skeleton"
+  ],
+  "relatedBlocks": [
+    "resource-loader",
+    "router"
+  ],
+  "relatedPlugs": [
+    "webinjectors",
+    "webcontexts"
+  ],
+  "relatedProject": "webintents"
+}

@@ -1,0 +1,26 @@
+{
+  "id": "mode-c-host-config-transport",
+  "title": "Mode-C host→FUI config transport — how a same-realm in-document host hands WE-owned chrome config to a generic FUI module",
+  "summary": "Prep research for decision #881 (the WE→FUI mode-C host-config transport, gating the WE-docs chrome migration #865, under the dogfooding epic #777). Mode C (#786) mounts a FUI component in WE's own DOM behind a shadow root with NO config channel — the SDK calls mod.mountInDocument(root) with only the ShadowRoot (frontierui/embed/in-document.ts:89, contract frontierui/embed/contract.ts:72-74). The dogfooded chrome (#865) needs WE to supply its nav tree / brand / footer (WE-owned information architecture = content) to FUI's app-shell/sectioned-nav/button blocks (#870), which expose mount*(root, config) factories. The #765 docs-rendering boundary forbids baking WE's IA into a FUI module, so host config must cross WE→FUI at mount time — a reusable cross-repo convention every future mode-C host inherits. LOAD-BEARING GROUNDING WRINKLE the survey resolved: AppShellConfig takes LIVE DOM Nodes (nav?: Node, footer?: Node, headerControls?: Node[] — AppShell.ts:29-43), but mode C has NO host->module JS handoff point (the SDK imports the module and calls mountInDocument(root); the host never gets a factory reference). The only host-reachable handle inside the module is root.host plus whatever the host left in the DOM. So ANY transport riding the existing SDK is inherently DOM-mediated and must carry a SERIALIZABLE projection; the generic FUI module deserializes it and rebuilds the Node tree via the sub-block factories before calling mountAppShell. The decision therefore defines a JSON-serializable ChromeConfig schema, NOT a pass-through of AppShellConfig. The host->component configuration space (browser platform + third-party embed kits) splits FOUR families: (1) data-* attribute JSON on the mount point — the dominant third-party-widget convention (Stripe Elements, Cloudflare Turnstile, analytics embeds), standards-compliant, decoupled, degrades cleanly, but strings need JSON.parse and deep structures inflate via HTML entity-encoding; (2) <script type=\"application/json\"> config sidecar inside the mount point — the canonical platform pattern (JSON-LD, Inertia data-page), same parse step but NO entity-encoding overhead (a measured case dropped 179->98 chars) and reads naturally for a deep nav tree, i.e. the ERGONOMIC REFINEMENT of family 1, not a rival channel; (3) JS properties / typed argument — the web-component-native way to pass complex objects, what a contract change (mountInDocument(root, hostConfig?)) buys, but it needs a JS handoff point mode C lacks, so it means changing the #786 contract + SDK + every consumer; (4) light-DOM declarative HTML the module reads/enhances (the 'HTML web component' pattern) — doubles as the no-JS SSR baseline, but #865 keeps base.njk as that baseline and scopes PE fallback out, so a variant to note not adopt. MAPPED ONTO #881: Fork 1 (channel) families 1+2 = Option A (host writes config as data on the mount point; generic FUI module reads root.host and calls the #870 factories) — the survey REFINES A by adopting the <script type=application/json> sidecar as the carrier for the deep nav tree, dissolving A's only residual (JSON-in-attribute ergonomics); family 3 = Option B (extend the contract), coherent but a contract change for a chrome-only need today, a clean LATER promotion; C (WE-specific FUI-hosted module) stays rejected on the #765 boundary; D (global) stays strictly worse than per-mount-point locality. Fork 2 (granularity) unmoved: app-shell is the composing block and static chrome has no independent-lifecycle need, so one mount point / one config blob (A) holds. Net: the survey CONFIRMS A and dissolves its residual, and adds the serializable-ChromeConfig + script-sidecar constraint the build inherits. Full grounding in reports/2026-06-17-881-mode-c-host-config-transport.md.",
+  "tags": [
+    "webdocs",
+    "dogfooding",
+    "mode-c",
+    "in-document",
+    "embed",
+    "config-transport",
+    "app-shell",
+    "chrome",
+    "data-attributes",
+    "script-json",
+    "web-components",
+    "decision-prep"
+  ],
+  "relatedProject": "webdocs",
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "status": "open",
+  "dateOpened": "2026-06-17",
+  "lastReviewed": "2026-06-17",
+  "reviewHorizon": "P12M"
+}

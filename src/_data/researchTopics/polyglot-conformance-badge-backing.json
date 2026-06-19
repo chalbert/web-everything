@@ -1,0 +1,27 @@
+{
+  "id": "polyglot-conformance-badge-backing",
+  "title": "Polyglot panel — what verdict backs a per-target *conformance* badge (source-golden vs behavioral vs health)",
+  "status": "open",
+  "summary": "Prep research for decision #913 (Block Explorer polyglot-panel slice c, epic #746; sibling of behavioral badge #967 = #954 Fork 2): what deterministic verdict, if any, can back a pass/fail CONFORMANCE badge on each genWrapper target tab (react/vue) — or should the badge just be the behavioral one (#967)? The card was filed assuming an 'already-committed deterministic #506 verdict' backs it; tracing to the tree shows that verdict does NOT exist for react/vue. GROUNDING (verified): panel targets are react/vue only (fui:workbench/mount.ts:648 TARGET_LABELS; TARGETS from fui:tools/gen-wrapper/genWrapper.mjs:26; slice-c reservation comment mount.ts:635); genWrapper is a pure (decl,target)=>string (genWrapper.mjs:207-212) emitting SOURCE ONLY — no diagnostics, no lossy flag, no conformance metadata, and no committed source golden exists (tests are substring assertions, not snapshots); the committed #506 golden (we:blocks/renderers/module-service/conformance/golden.json) is 14 MaaS/HTTP X-MaaS vectors for reference-JS vs .NET — ZERO react/vue content, a different axis; the ONLY react/vue conformance artifact is BEHAVIORAL — we:wrapper-conformance/runner.ts+vectors.ts, five contract vectors executed over a LIVE mounted WrapperSubject (runner.ts:37-46 requires render()->host element, dispatches real DOM events) = exactly #967's scope (blockedBy [912,954], needs the #912 live sandbox). PRIOR ART: (1) custom-elements-everywhere.com — THE canonical per-framework conformance badge; methodology is BEHAVIORAL (Karma in real browsers checking display/bind/children/events); React's '100% as of v19' badge is a runtime behavioral result, not a source snapshot — the industry's 'wrapper/interop conformance badge' is behavioral by definition. (2) Stencil output targets (closest analog: CEM->react/vue wrappers) — ecosystem wisdom is explicit that snapshot-of-generated-source and behavioral assertions cover DIFFERENT risks and are complementary: a source golden catches generator DRIFT, only behavioral verifies the wrapper actually forwards props/events. (3) Snapshot/golden testing generally is a REGRESSION signal ('output unchanged unless intentionally changed'), NOT a behavior/conformance guarantee. SYNTHESIS to #913 (separating truthful-claim from cost): A (deterministic wrapper-source golden) = a generator-REGRESSION signal, honest only if labelled 'source-stable'; behind a 'conformance' label it over-claims, same honesty flaw as C — a legit independent artifact but not the conformance badge. B (collapse #913's deterministic-conformance badge into #967's behavioral one) = the only genuine per-target conformance signal, confirmed by tree (sole react/vue artifact is behavioral) AND prior art 1; #954 Fork 2 split deterministic-vs-behavioral on a premise (a deterministic verdict exists) that is false, so they re-merge — RECOMMENDED DEFAULT ~75-80%. C (cheap genWrapper health: emit-success/no-lossy/no-diagnostics) = genWrapper emits no such metadata today (bare string) so nothing to read without building it first, and 'generated cleanly' is not conformant — weakest. CLASSIFICATION: badge=FUI workbench UI (locus:frontierui set); vectors=WE-owned contract (we:wrapper-conformance/vectors.ts); the live-subject runner=impl->FUI (impl-is-not-a-standard, #817 'a running handler is impl'); under B only vectors cross WE->FUI, honoring #700 — clean placement matching #967's locus+blockedBy. RESIDUAL for decider: whether a sandbox-independent deterministic tier is wanted enough to keep a RELABELLED 'source-stable' badge (A, honestly framed) as a SECOND badge alongside behavioral (Stencil 'both cover different risks' lesson), vs. #913 redundant with #967 and a source-golden filed separately as a generator-regression test. Full grounding in reports/2026-06-18-polyglot-conformance-badge-backing.md.",
+  "dateOpened": "2026-06-18",
+  "lastReviewed": "2026-06-18",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "block-explorer",
+    "polyglot",
+    "conformance",
+    "conformance-badge",
+    "genwrapper",
+    "wrapper-conformance",
+    "custom-elements-everywhere",
+    "stencil",
+    "snapshot-golden",
+    "behavioral-conformance",
+    "frontierui",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "frontierui"
+}

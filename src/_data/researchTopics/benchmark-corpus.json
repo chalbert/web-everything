@@ -1,0 +1,19 @@
+{
+  "id": "benchmark-corpus",
+  "title": "Benchmark corpus — design systems & UI libraries for competitive coverage analysis",
+  "status": "open",
+  "summary": "The canonical input to the competitive coverage gap-analysis program (backlog #315): an explicit, reproducible list of the leading design systems and UI libraries to benchmark, governed by stated selection criteria so a re-run lands on a comparable list. Spans five category axes — mature opinionated design systems (Material 3, Carbon, Fluent, Spectrum, Polaris, Atlassian, Primer, Lightning), headless/a11y-first primitives (Radix, React Aria, Base UI, Ark, Headless UI), web-component systems (Shoelace, Spectrum Web Components, Lion; FAST retired), popular component kits (MUI, Ant, Chakra, Mantine, shadcn/ui), and platform/standards guidance (Apple HIG, GOV.UK, WAI-ARIA APG, Open UI) — deliberately so the gap sweep is not biased toward one design philosophy. The corpus data lives in src/_data/benchmarkCorpus.json; the references.json 'Reference Design Systems' set is its curated docs-surface subset. Phase 2 (extraction, #346) and phase 3 (mapping & gap detection, #347) join against it.",
+  "dateOpened": "2026-06-12",
+  "tags": [
+    "gap-analysis",
+    "competitive-analysis",
+    "design-systems",
+    "ui-libraries",
+    "corpus",
+    "benchmark",
+    "native-first"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

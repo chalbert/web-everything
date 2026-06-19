@@ -1,0 +1,27 @@
+{
+  "id": "block-explorer-manipulation-channel",
+  "title": "Block-Explorer manipulation channel & UI locus — how a workbench drives/inspects a live block, and who owns the chrome",
+  "status": "open",
+  "summary": "Prep research for decision #809 (under Block Explorer epic #746): how the four manipulating slices (#749 live theme switch, #750 live trait toggle, #755 inspection devtools, #806 exploded view) reach INTO a running FUI block to set its theme, flip its attributes, and read its computed styles / ARIA tree / shadow DOM — a reach the cross-origin fuiDemo iframe (#727, FUI_DEMO_BASE :3001) forbids. Orthogonal to the component-workbench landscape topic (#624), which catalogued WHICH tools exist and their business models; this is the TECHNICAL channel question. Two design axes: the manipulation CHANNEL (in-document/mode-C host-side vs an iframe message protocol) and the control-UI LOCUS (FUI-owned workbench vs WE docs chrome). Surveyed three references. (1) Storybook — the iframe-protocol precedent: a manager↔preview split renders the story in an iframe and syncs over a postMessage channel (@storybook/channels / PostmsgTransport); Controls serialize ARGS one-way into the preview. Load-bearing: it proves an iframe message channel works for PUSHING INPUTS IN (theme/trait), but it never reads the preview's computed styles / ARIA / shadow DOM — i.e. SILENT on inspection. (2) api-viewer (open-wc) — the in-document precedent: a single web component mounts a real instance IN THE SAME DOCUMENT and a Knobs panel toggles properties/attributes/slots with CSS-custom-property + CSS-shadow-part panels, with NO message protocol at all — a SHIPPING reference design for the host-side (mode-C) channel. (3) The platform: CSS custom properties PIERCE the shadow boundary by design, getComputedStyle() returns resolved values, and shadow roots are walkable from the host — so host-side theming AND inspection are FREE in-document; but the same-origin policy BLOCKS all DOM/computed-style reads across the cross-origin iframe, leaving only a cooperating guest marshaling each datum (computed-style cascade, full ARIA tree, token provenance barely survive the wire). Findings handed to #809: Fork 1 (channel) — mode C (already built #786 on the #807 embed SDK, sanctioned #765 for the trusted WE↔FUI pair) gives all four subsets host-side with ZERO new protocol while the iframe branch is BROKEN for the inspection subset → recommend A (mode C); api-viewer proves the host-side workbench is real. Fork 2 (locus) — both references separate the tool's control chrome from the documented component; mapped onto the constellation the rendered block is FUI's impl (mode-C SDK renders it, impl→FUI untouched per #765) while the control/devtools chrome that drives and introspects it is WE documentation tooling (the #755 inspectors introspect WE standards: intent→ARIA, token provenance, the #092 provider↔consumer graph) → recommend B (WE docs chrome, slices stay WE-locus); #746's 'lives in FUI' reconciled as the block RENDERING lives in FUI, with the chrome's UI primitives rendering from FUI components later under the separate dogfooding epic #777. Full grounding in reports/2026-06-16-block-explorer-manipulation-channel.md.",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "block-explorer",
+    "workbench",
+    "manipulation-channel",
+    "mode-c",
+    "in-document",
+    "iframe",
+    "postmessage",
+    "shadow-dom",
+    "inspection",
+    "storybook",
+    "api-viewer",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

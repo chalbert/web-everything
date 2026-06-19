@@ -1,0 +1,37 @@
+{
+  "id": "typography",
+  "name": "Typography Intent",
+  "status": "draft",
+  "summary": "Protocol abstracting visual hierarchy from semantic HTML, normalizing roles across Design Systems.",
+  "dimensions": {
+    "role": {
+      "description": "The semantic purpose of the text",
+      "values": [
+        "display",
+        "heading",
+        "body",
+        "label",
+        "code"
+      ]
+    },
+    "scale": {
+      "description": "Relative size/emphasis within the role",
+      "values": [
+        "xs",
+        "sm",
+        "md",
+        "lg",
+        "xl"
+      ]
+    },
+    "truncation": {
+      "description": "How text that overflows its box is cut, and how the full value is recovered",
+      "values": [
+        "clip",
+        "ellipsis",
+        "fade"
+      ]
+    }
+  },
+  "description": "<h3>Role Definition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>display</code>: Expressive/Decorative (Hero, Splash). Low density.</li><li><code>heading</code>: Structural hierarchy (H1-H6 markers).</li><li><code>body</code>: focused on Readability (Long-form content).</li><li><code>label</code>: focused on Legibility (UI Components, Buttons).</li><li><code>code</code>: Monospace technical data.</li></ul><h3>Truncation</h3><p class=\"text-sm text-gray-600 mb-2\">How overflowing text is cut. Always truncate <em>visually</em> (CSS) while keeping the full string as the element's text content — never hard-slice the string mid-grapheme, and keep at least ~4 meaningful characters.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>clip</code>: Hard cut at the box edge, no indicator. Use only where the cut is obvious from context.</li><li><code>ellipsis</code>: <code>text-overflow: ellipsis</code> — the conventional single-line cut with a trailing &hellip;.</li><li><code>fade</code>: A gradient mask fades the trailing edge; avoids the visual weight of an ellipsis.</li></ul><p class=\"text-sm text-gray-600 mb-2\"><strong>Recovery &amp; accessibility:</strong> whenever text is truncated, provide a way to read the full value — a <code>title</code> / tooltip for short labels, an expand affordance for longer ones. Front-load the distinguishing words so they survive the cut. Because the full text remains the accessible name, an interactive truncated label still satisfies <a href=\"https://www.w3.org/WAI/WCAG21/Understanding/label-in-name.html\">WCAG 2.5.3 Label in Name</a> — do not replace it with an unrelated <code>aria-label</code>. This axis is the home for the <em>Accessible truncation</em> paradigm reused by table cells, tabs, breadcrumbs, chips, and dropdown option labels.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type TypographyRole = 'display' | 'heading' | 'body' | 'label' | 'code';\n// T-shirt scale relative to the Role base size\ntype TypographyScale = 'xs' | 'sm' | 'md' | 'lg' | 'xl';\n\ninterface ToneFeatures {\n    // Force monospace numbers (Data Grids)\n    tabular?: boolean;\n    // Overflow behavior\n    truncation?: 'clip' | 'ellipsis' | 'fade';\n    // Disable definition-based optical sizing\n    opticalSizing?: 'auto' | 'none';\n}\n\ninterface TypographyIntent {\n    // The semantic purpose\n    role: TypographyRole;\n    // Relative size/emphasis within that role\n    scale?: TypographyScale;\n    // Rendering constraints\n    features?: ToneFeatures;\n}</code></pre>"
+}

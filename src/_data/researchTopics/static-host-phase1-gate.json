@@ -1,0 +1,24 @@
+{
+  "id": "static-host-phase1-gate",
+  "title": "Static host + phase-1 gate for the public WE site — pick the substrate that carries the whole #1104 roadmap",
+  "status": "open",
+  "summary": "Decision-prep for #1135 (first slice of epic #1104, publish the WE site publicly behind a graduated gate). Two coupled picks: the static host for the we: Eleventy _site/ build, and where the phase-1 shared-code gate lives. FINDING: the choice optimises ROADMAP burden, not phase-1 burden — #1104 escalates phase 1 shared code → 2 analytics → 3 per-person codes → 4 emailed codes → 5 login, and three of five phases need server-side state/compute. So the right phase-1 host is the one whose substrate carries the later phases with no re-platform. Recommendation: Cloudflare Pages (free: unlimited bw/req, 500 builds/mo; and Pages Functions + KV + email + Access host phases 1-5 on one free platform) + an edge function gate (~20-line Pages Function: check shared code vs server-side secret → signed cookie; the exact seam phase 3 extends to a KV per-person lookup). Host-native Access is rejected for phase 1 (it is email-identity auth, the phase-5 tool, not a shared code); Netlify's site password IS an exact shared-code match but is paid (Pro) and a per-person dead-end; client-side gate is acceptable phase-1-only. Soft, revisitable, low-stakes (operational infra, not a WE standard). Full grounding in reports/2026-06-19-static-host-phase1-gate.md.",
+  "dateOpened": "2026-06-19",
+  "lastReviewed": "2026-06-19",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "deployment",
+    "hosting",
+    "static-site",
+    "cloudflare-pages",
+    "edge-function",
+    "gated-access",
+    "controlled-rollout",
+    "solo-founder",
+    "webdocs",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

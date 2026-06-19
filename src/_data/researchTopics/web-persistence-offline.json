@@ -1,0 +1,23 @@
+{
+  "id": "web-persistence-offline",
+  "title": "Persistence & Offline",
+  "status": "open",
+  "summary": "Web-platform and library prior art grounding backlog #011, which completes the data story (webresources fetches, webstates holds, nothing persists). The platform splits persistence into four orthogonal layers: durable structured storage (IndexedDB + navigator.storage.persist()), HTTP-response caching (Cache Storage + Service Worker, a webresources/fetch concern), deferred replay (Background Sync, unsupported in Safari — a JS outbox is the portable fallback), and cross-tab coordination (Web Locks). Verdict per fork: storage is a thin Protocol (CustomStorageStrategy, IndexedDB native-first, Dexie/RxDB/PouchDB adapters) — possibly a webstates facet rather than a new top-level project; optimistic UX already lives in the Loader intent, only the durable outbox is new (a fixed mechanism); conflict resolution is a strategy dimension of the existing Change Tracking protocol; offline cache leans to webresources, the durable store to webstates. Default: no new top-level project.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "persistence",
+    "offline",
+    "indexeddb",
+    "cache-api",
+    "background-sync",
+    "service-worker",
+    "storage",
+    "protocol",
+    "change-tracking",
+    "gap-analysis",
+    "vocabulary"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webstates"
+}

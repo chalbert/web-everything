@@ -1,0 +1,36 @@
+{
+  "id": "viewport-presence",
+  "name": "Viewport Presence Intent",
+  "status": "draft",
+  "summary": "The shared in/out-of-view trigger: observe when an element enters or leaves a reference frame, owning the observe-vocabulary (reference, margin, coverage, enter/leave) — not the UX decision (fetch, prefetch, activate) that each consumer keeps.",
+  "dimensions": {
+    "reference": {
+      "description": "The frame an element's presence is measured against (the IntersectionObserver root)",
+      "values": [
+        "viewport",
+        "scroll-ancestor"
+      ]
+    },
+    "margin": {
+      "description": "How early presence flips relative to the reference edge (the IntersectionObserver rootMargin)",
+      "values": [
+        "flush",
+        "anticipatory"
+      ]
+    },
+    "coverage": {
+      "description": "How much of the element must lie within the reference to count as present (the IntersectionObserver threshold)",
+      "values": [
+        "sliver",
+        "partial",
+        "majority",
+        "full"
+      ]
+    }
+  },
+  "description": "<h3>What Viewport Presence Is</h3><p class=\"text-sm text-gray-600 mb-2\">Viewport Presence is the thin, shared <strong>in/out-of-view trigger</strong> — the answer to \"is this element currently within a reference frame?\", surfaced as <code>enter</code>/<code>leave</code> events. The native substrate is <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/Intersection_Observer_API\">IntersectionObserver</a>: it owns the <em>observe-vocabulary</em> (<code>root</code>, <code>rootMargin</code>, <code>threshold</code>) and nothing about what happens next.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>It owns the trigger, not the UX decision.</strong> What a consumer <em>does</em> on presence — fetch the next page, prefetch a link, activate a visibility-gated behavior — stays with that consumer. This intent exists only so the three consumers that today re-implement the same observer (<a href=\"/intents/collection-operations/\">Collection Operations</a> <code>advance:auto</code>, <a href=\"/intents/prefetch/\">Prefetch</a> <code>eagerness:viewport</code>, and the visibility-gated trait) <em>compose</em> one trigger instead of triplicating it — so a <code>rootMargin</code>-defaulting fix lands once, not three times.</p><h3>Reference</h3><p class=\"text-sm text-gray-600 mb-2\">The frame presence is measured against — the IntersectionObserver <code>root</code>.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>viewport</code>: Presence is measured against the browser viewport (<code>root: null</code>). The common case.</li><li><code>scroll-ancestor</code>: Presence is measured against a scrolling ancestor element (e.g. a scroll container or virtualized list), passed as the observer <code>root</code>.</li></ul><h3>Margin</h3><p class=\"text-sm text-gray-600 mb-2\">How early presence flips relative to the reference edge — the IntersectionObserver <code>rootMargin</code>. The exact offset is a config value the consuming surface (or the platform config it extends) sets; the dimension names the two intents.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>flush</code>: Presence flips exactly at the reference edge (zero margin) — react when the element is actually on screen.</li><li><code>anticipatory</code>: Presence flips before the edge (a positive <code>rootMargin</code>) — fire ahead of arrival so a consumer can fetch or prefetch in advance. The most-flexible, eager framing the pre-trigger consumers want.</li></ul><h3>Coverage</h3><p class=\"text-sm text-gray-600 mb-2\">How much of the element must lie within the reference to count as present — the IntersectionObserver <code>threshold</code>.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>sliver</code>: Any pixel visible counts (<code>threshold: 0</code>) — the most permissive.</li><li><code>partial</code>: A small fraction must be visible before presence flips.</li><li><code>majority</code>: More than half must be visible.</li><li><code>full</code>: The whole element must be within the reference (<code>threshold: 1</code>).</li></ul><h3>Events</h3><p class=\"text-sm text-gray-600 mb-2\">The two observable transitions every consumer composes:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>enter</code>: The element became present (crossed into the reference under the active margin + coverage).</li><li><code>leave</code>: The element became absent (crossed back out).</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Consumers <em>compose</em> Viewport Presence rather than inline an observer: <a href=\"/intents/collection-operations/\">Collection Operations</a> keeps <code>advance:auto</code> (scroll-to-boundary &rarr; fetch the next slice) and delegates only the trigger; <a href=\"/intents/prefetch/\">Prefetch</a> keeps <code>eagerness:viewport</code> and delegates only the trigger; a visibility-gated trait activates its behavior on <code>enter</code>. The UX decision stays three; the observe-mechanism becomes one.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type PresenceReference = 'viewport' | 'scroll-ancestor';type PresenceMargin = 'flush' | 'anticipatory';type PresenceCoverage = 'sliver' | 'partial' | 'majority' | 'full';interface ViewportPresenceIntent {    // The frame presence is measured against (IntersectionObserver root)    reference: PresenceReference;    // How early presence flips vs the reference edge (IntersectionObserver rootMargin)    margin: PresenceMargin;    // How much of the element must be in-frame to count (IntersectionObserver threshold)    coverage: PresenceCoverage;}</code></pre>",
+  "events": [
+    "enter",
+    "leave"
+  ]
+}

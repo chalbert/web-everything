@@ -1,0 +1,21 @@
+{
+  "id": "maas-conformance-gate-policy",
+  "title": "MaaS execution-conformance gate policy — fold-into-default vs optional-toolchain suite",
+  "status": "open",
+  "summary": "Prep prior-art survey for decision #549 (slice 3 of epic #507; ratified parent #463 fork a/c). #506 ships a deterministic, language-neutral conformance runner (runner.ts) that drives any origin — a ConformanceTarget = (vector) => Promise<ActualResponse> — against frozen golden vectors and asserts byte-identical fidelity. #548 added the first FOREIGN target: a byte-locked C# origin (GeneratedMaaSOrigin.cs), drift-gated today only by a string-match snapshot, not by compiling + running it. #549 closes that gap: wire the C# origin as a live subprocess ConformanceTarget (dotnet-hosted) so divergence in EXECUTED behaviour is caught. The transport is already settled in code (runner.ts pre-commits a subprocess target reading the same golden.json); the only open dimension is GATE POLICY — running the C# target needs a dotnet toolchain (compile + execute), heavy and not universally present. Fork: (A) fold into the default gate — every dev/CI run compiles + drives the C# target (max drift safety, hard dotnet dependency everywhere, slow), or (B) a separate opt-in check:maas-conformance suite that detects dotnet and skips-with-notice otherwise (portable/fast default; drift can land if unrun). Prior art is unambiguous: every mature cross-language conformance suite (Protobuf conformance over a sub-process pipe; connectrpc/conformance = a standalone connectconformance binary driving the target over stdin/stdout, integrated as a SEPARATE CI workflow not each library’s default unit suite; OpenXR CTS; IPFS gateway-conformance) runs the foreign target as a separate, toolchain-gated job — never folded into the host library’s fast unit gate. Local precedent agrees: test:integration (Playwright, heavy toolchain) is already a separate script from test:unit (vitest run), and check:standards doesn’t run vitest at all. dotnet exists locally at /usr/local/share/dotnet/dotnet but is NOT on PATH, so even locally a default-gate fold needs explicit toolchain discovery. Recommendation: default to the opt-in suite (B) — matches the canonical protobuf/Connect pattern and the repo Playwright precedent, keeps the inner loop portable; keep A available as a CI posture layered on B (promote the suite into a required gate where the toolchain is guaranteed), not a separate impl; the free byte-level source snapshot stays in the default vitest run regardless.",
+  "dateOpened": "2026-06-14",
+  "tags": [
+    "module-as-a-service",
+    "polyglot",
+    "conformance",
+    "dotnet",
+    "csharp",
+    "ci-gate",
+    "toolchain",
+    "generation-adapter",
+    "subprocess-target"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webadapters"
+}

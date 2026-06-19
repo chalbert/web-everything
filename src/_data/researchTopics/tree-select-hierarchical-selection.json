@@ -1,0 +1,24 @@
+{
+  "id": "tree-select-hierarchical-selection",
+  "title": "Tree-select & Hierarchical Selection",
+  "status": "resolved",
+  "summary": "Web-platform and library prior art for a hierarchical member of the droplist family, grounding backlog #064's open forks. WAI-ARIA APG and all six surveyed libraries (Ant/MUI/Fluent/Carbon/PrimeReact/Shoelace) keep three axes independent — disclosure (aria-expanded, shared with <details>/accordion), hierarchy (role=tree›treeitem›group + aria-level/setsize/posinset), and selection (aria-selected, already WE's Selection Intent) — so hierarchy earns its own intent that delegates selection/focus/type-ahead and composes a separate disclosure axis. The keyboard model is fully APG-specified (Right/Left carry expand+traversal; Up/Down never change disclosure). Any node is selectable by default (leaf-only is an opt-in constraint). Windowing is flatten-to-visible-rows so Windowed Collection needs zero tree changes; the real coupling is focus — virtual aria-activedescendant is viable because the active-always-mounted invariant already holds, with roving tabindex the alternative for giant trees and collapse-focuses-ancestor keeping focus in the projection. There is no native tree-select (optgroup can't nest). The survey also surfaced a fork the item omitted: multi-select parent/child cascade (divergent across libraries) — a configurable cascade + value-reporting dimension.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "droplist",
+    "tree-select",
+    "hierarchy",
+    "disclosure",
+    "selection",
+    "windowing",
+    "aria-activedescendant",
+    "apg",
+    "gap-analysis",
+    "vocabulary"
+  ],
+  "relatedBlocks": [
+    "droplist"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webblocks"
+}

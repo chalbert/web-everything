@@ -1,0 +1,186 @@
+{
+  "id": "loader",
+  "name": "Loader Intent",
+  "status": "draft",
+  "summary": "Protocol defining how a pending state affects the user interface via Blocking, Scoping, and Timing profiles. Covers anti-flicker thresholds, loader-vs-skeleton indicators, determinate progress, and long-wait escalation (warn / go-async), plus version token tracking and hierarchy aggregation for async lifecycle management.",
+  "dimensions": {
+    "strategy": {
+      "description": "How the UI is blocked during a pending state",
+      "values": [
+        "optimistic",
+        "soft",
+        "hard",
+        "replacement"
+      ]
+    },
+    "scope": {
+      "description": "What part of the UI is affected by the pending state",
+      "values": [
+        "element",
+        "region",
+        "viewport"
+      ]
+    },
+    "progress": {
+      "description": "Whether the user can see measurable progress",
+      "values": [
+        "determinate",
+        "indeterminate"
+      ]
+    },
+    "context": {
+      "description": "Whether prior content exists when loading begins",
+      "values": [
+        "initial",
+        "transition"
+      ]
+    },
+    "threshold": {
+      "description": "Named loading-threshold profile bundling the two anti-flicker parameters (delay before the indicator shows + minimum visible duration once shown); the default flavors are immediate / debounced / patient, and an app may override their ms or register new profiles",
+      "values": [
+        "immediate",
+        "debounced",
+        "patient"
+      ]
+    },
+    "timing": {
+      "description": "When the loading indicator appears — the delay parameter of the resolved threshold profile (overridable per-call)",
+      "values": [
+        "immediate",
+        "debounced",
+        "patient"
+      ]
+    },
+    "indicator": {
+      "description": "What kind of indeterminate indicator is shown",
+      "values": [
+        "loader",
+        "skeleton"
+      ]
+    },
+    "holdFloor": {
+      "description": "Whether a shown indicator is held for a minimum duration to prevent flash",
+      "values": [
+        "none",
+        "minimum"
+      ]
+    },
+    "escalation": {
+      "description": "How a wait that exceeds expected duration is surfaced",
+      "values": [
+        "none",
+        "warn",
+        "async"
+      ]
+    }
+  },
+  "description": "<h3>Blocking Strategy</h3><p class=\"text-sm text-gray-600 mb-2\">How the UI responds to a pending state. Each strategy represents a different trade-off between user freedom and data integrity.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>optimistic</code>: <strong>Non-blocking</strong>. UI remains fully interactive (background sync). The predicted outcome is shown immediately; reverted on failure.</li><li><code>soft</code>: <strong>Input-blocking</strong>. Applies <code>aria-disabled</code> and <code>pointer-events: none</code>. Content remains visible but non-interactive.</li><li><code>hard</code>: <strong>Visual-blocking</strong>. Content is obscured or overlaid (Backdrop). User must wait.</li><li><code>replacement</code>: <strong>Content-blocking</strong>. Placeholder content (Skeleton, Spinner) temporarily replaces the view.</li></ul><h3>Scope Definition</h3><p class=\"text-sm text-gray-600 mb-2\">What part of the UI is affected by the pending state.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>element</code>: Constrained to the triggering target (e.g., Button spinner).</li><li><code>region</code>: Constrained to the containing landmark (e.g., <code>aria-busy</code> on the Form).</li><li><code>viewport</code>: Global interruption (Glass pane).</li></ul><h3>Progress Indication</h3><p class=\"text-sm text-gray-600 mb-2\">Whether the user can see measurable progress or only that activity is happening.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>determinate</code>: Progress can be measured (0–100%). Rendered as a progress bar or percentage. Research suggests this is preferred for operations exceeding 10 seconds.</li><li><code>indeterminate</code>: Progress is happening but completion is unknown. Rendered as a spinner, pulse, or shimmer animation. Most web waits are this case — the duration cannot be known up front.</li></ul><p class=\"text-sm text-gray-600 mb-2\"><strong>Determinate guidance:</strong> when a real measure exists (file upload/download), show a true progress bar reflecting transfer only — it excludes server-side processing time, so don't leave the bar stuck at 100%; if processing follows, show an indeterminate loader after the bar completes. Consider starting the bar slightly above 0% so slow-to-start operations feel responsive. Run multiple transfers in parallel (not sequentially), make each individually retryable, and don't let one failure abort the whole batch unless the items are dependent.</p><h3>Indicator</h3><p class=\"text-sm text-gray-600 mb-2\">What kind of indeterminate indicator is shown. Both signal that work is happening; they differ in what they tell the user about the incoming content.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>loader</code>: An animation (e.g. spinner, pulse, shimmer). Signals activity but conveys nothing about the shape of the content to come.</li><li><code>skeleton</code>: A placeholder shaped like the content that will (or may) load. Sets the user's expectation of the content's nature and limits layout shift when real content arrives; subtly animated to indicate ongoing work. Preferred for known layouts (the <code>replacement</code> strategy over <code>initial</code> context).</li></ul><h3>Loading Context</h3><p class=\"text-sm text-gray-600 mb-2\">Whether prior content exists. This changes user expectations for how the pending state should look.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>initial</code>: No prior content is available. The user expects a placeholder (skeleton, spinner, empty state).</li><li><code>transition</code>: Prior content is already visible. The user expects the existing content to remain visible (dimmed, stale) while new content loads. Replacing visible content with a loading indicator is perceived as regression.</li></ul><h3>Threshold Profiles (delay + minimum)</h3><p class=\"text-sm text-gray-600 mb-2\">The <code>threshold</code> dimension names a <strong>two-parameter</strong> loading-threshold profile (Angular <code>@defer</code>'s <code>after</code>/<code>minimum</code> model — the only major framework with both): <code>delay</code> = how long to wait before showing the indicator (suppresses it for fast operations); <code>minimum</code> = how long to keep it visible once shown (prevents a flash). One named profile sets <em>both</em> the <code>timing</code> entry-delay and the <code>holdFloor</code> minimum-hold, so they are tuned as one unit rather than two loose knobs. <strong>Most-flexible-default:</strong> an app may override a profile's ms or register new profiles, resolved through the injector hierarchy (app default → per-route → per-component → user preference, with <code>prefers-reduced-motion</code> → <code>immediate</code>).</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>immediate</code>: <code>delay 0ms</code> / <code>minimum 0ms</code> — first page load (no prior content); show at once, no hold.</li><li><code>debounced</code> (default): <code>delay 400ms</code> / <code>minimum 500ms</code> — navigation and data fetching. 300–400ms is the perception knee where a spinner stops relieving anxiety and starts causing it (Nielsen Norman Group; React's 300ms internal throttle, Vaadin 300ms, spin-delay 500/200 all converge here).</li><li><code>patient</code>: <code>delay 800ms</code> / <code>minimum 1000ms</code> — known-slow operations (report generation).</li><li><code>[custom]</code>: app-registered keys (e.g., <code>slow: { delay: 1000, minimum: 1000 }</code>).</li></ul><h3>Anti-Flicker</h3><p class=\"text-sm text-gray-600 mb-2\">A loader must never flash. Two paired guards form one anti-flicker contract — both are defaults and configurable, and the exact values should be confirmed against a test/tool:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Entry threshold</strong> (<code>timing</code>): only show the indicator once the wait passes a threshold (≈50ms), so quick operations show nothing at all.</li><li><strong>Minimum hold</strong> (<code>holdFloor</code>): once shown, keep the indicator visible for a floor duration (≈100ms) even if the operation resolves sooner, so it never appears-and-vanishes in a flash. <code>holdFloor: minimum</code> is the default; <code>none</code> hides the instant the operation resolves.</li></ul><h3>Long Waits &amp; Going Async</h3><p class=\"text-sm text-gray-600 mb-2\">How a wait that runs longer than expected is surfaced (<code>escalation</code>). This is about a still-succeeding operation taking too long — distinct from failure, which the <a href=\"/intents/reliability/\">Reliability Intent</a> owns.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>none</code>: No escalation; the indicator simply persists.</li><li><code>warn</code>: Past a platform-defined threshold, show a message warning the user it is taking longer than usual.</li><li><code>async</code>: Past a longer platform-defined duration, recommend taking the task async — a persistent status bar stays present, the user is free to navigate away, and a window prompt warns before they close or leave the app (the task continues in the background). Best when the operation is not a blocking step in a longer flow. The surface that hosts these backgrounded tasks is defined by the <a href=\"/intents/background-task/\">Background Task Intent</a>.</li></ul><p class=\"text-sm text-gray-600 mb-2\"><strong>Composition with Reliability:</strong> timeout policy (a sensible default, configurable per operation class — short for quick calls, long for uploads) and failure handling live in the <a href=\"/intents/reliability/\">Reliability Intent</a>. Loader's <code>escalation</code> governs the experience while the operation is still running; Reliability takes over once it times out or fails.</p><h3>Lifecycle States</h3><p class=\"text-sm text-gray-600 mb-2\">The full state machine for a loading operation. Components can react to any state transition.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>idle</code>: No operation in progress. Default state.</li><li><code>pending</code>: Operation started, no result yet. Loading indicator is active. <strong>Carries a version/generation token</strong> — an immutable snapshot of the input/request state at dispatch time. On resolution, if the current input version has changed, the result is dropped (stale-resolve prevention, cross-cutting req #1).</li><li><code>success</code>: Operation completed successfully. Indicator may briefly show confirmation before returning to idle.</li><li><code>error</code>: Operation failed. Error state may persist until dismissed or retried.</li><li><code>stale</code>: Showing previous data while a refresh is in progress. Combines with <code>transition</code> context.</li><li><code>filtering</code>: Re-querying an already-open collection on new filter text (combobox / search-as-you-type). A pending sub-state that keeps prior results visible; debounce the query (see <code>timing</code>) and drop stale resolutions via the version token.</li><li><code>loadingMore</code>: Fetching the next page of an infinite / paginated collection. Surfaces as an announced progress row at the list end, never a blocking overlay — composes the <a href=\"/intents/windowed-collection/\">Windowed Collection Intent</a>.</li></ul><h3>Hierarchy Aggregation</h3><p class=\"text-sm text-gray-600 mb-2\"><strong>Validation and form hierarchies compose the loader lifecycle:</strong> a parent's pending state rolls up from its children — <code>pending</code> if any descendant is pending; otherwise <code>success</code>/<code>error</code>/<code>idle</code> per precedence. This aggregation surfaces the full async tree's readiness, enabling submission gates and progress indication. Validation composes this as its async-orchestration meta-intent (cross-cutting req #3: \"pending aggregation + submit awaits in-flight async\").</p><h3>Label Conventions</h3><p class=\"text-sm text-gray-600 mb-2\">Recommended conventions for loading indicator labels, drawn from design system research (Fluent, Spectrum).</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Casing</strong>: Sentence case (\"Loading data...\" not \"LOADING DATA\").</li><li><strong>Suffix</strong>: Trailing ellipsis to convey ongoing activity.</li><li><strong>Form</strong>: Gerund / \"-ing\" verbs (\"Loading\", \"Saving\", \"Submitting\").</li><li><strong>Length</strong>: Three words or fewer for conciseness.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type BlockingStrategy = 'optimistic' | 'soft' | 'hard' | 'replacement';\ntype LoaderScope = 'element' | 'region' | 'viewport';\ntype LoaderProgress = 'determinate' | 'indeterminate';\ntype LoaderContext = 'initial' | 'transition';\ntype LoaderIndicator = 'loader' | 'skeleton';\ntype LoaderHoldFloor = 'none' | 'minimum';\ntype LoaderThreshold = 'immediate' | 'debounced' | 'patient' | string;\ntype LoaderEscalation = 'none' | 'warn' | 'async';\n\n// A named threshold profile resolves to the two anti-flicker parameters (ms).\ninterface LoaderThresholdProfile {\n    delay: number;    // wait before showing the indicator\n    minimum: number;  // minimum visible duration once shown\n}\ntype LoaderState = 'idle' | 'pending' | 'success' | 'error' | 'stale' | 'filtering' | 'loadingMore';\n\ninterface LoaderIntent {\n    // How the UI is blocked\n    strategy: BlockingStrategy;\n    // What part of the UI is affected\n    scope: LoaderScope;\n    // Whether progress is measurable\n    progress: LoaderProgress;\n    // Whether prior content exists\n    context: LoaderContext;\n    // Named loading-threshold profile — sets both `timing` (delay) and `holdFloor` (minimum)\n    threshold?: LoaderThreshold;\n    // When the loader appears — the profile's delay parameter (overridable per-call)\n    timing: 'immediate' | 'debounced' | 'patient' | string;\n    // Indeterminate indicator kind (animation vs content-shaped placeholder)\n    indicator?: LoaderIndicator;\n    // Hold a shown indicator for a minimum duration to prevent flash (the profile's minimum)\n    holdFloor?: LoaderHoldFloor;\n    // How an over-long but still-running wait is surfaced\n    escalation?: LoaderEscalation;\n    // Accessibility label\n    label?: string;\n    // Motion bindings per lifecycle state\n    animations?: Partial&lt;Record&lt;LoaderState, string&gt;&gt;;\n}</code></pre><h3>Provisioning Example</h3><pre><code class=\"language-typescript\">const LoaderConfig = {\n    // Two-parameter named threshold profiles (delay + minimum, ms).\n    thresholds: {\n        immediate: { delay: 0,   minimum: 0 },\n        debounced: { delay: 400, minimum: 500 },\n        patient:   { delay: 800, minimum: 1000 },\n        slow:      { delay: 1000, minimum: 1000 } // app-registered\n    },\n    defaults: {\n        region: { strategy: 'soft', threshold: 'debounced', context: 'transition' }\n    }\n};\n\ninjector Application {\n    provide { Loader } to '@web-intents' from './components/GlobalLoader';\n    provide { LoaderConfig } to '@web-intents/loader';\n}</code></pre><h3>Consumer Integration</h3><p class=\"text-sm text-gray-600 mb-2\">Blocks that consume the Loader Intent resolve it from the injector chain via <code>customContexts:loaderIntent</code> and select the matching <a href=\"/blocks/resource-loader/\">Resource Loader</a> trait for their loading behavior.</p><pre><code class=\"language-typescript\">// Consumer (e.g., Router) resolves the intent\nconst intent = InjectorRoot.getProviderOf(element, 'customContexts:loaderIntent');\n\n// Select trait based on declared strategy\nswitch (intent?.strategy) {\n    case 'replacement':\n        // Swap content with skeleton/spinner\n        return withReplacement(withSkeleton(BaseElement));\n    case 'hard':\n        // Overlay with backdrop, trap focus\n        return withHardBlocking(BaseElement);\n    case 'optimistic':\n        // No visual change, revert on error\n        return withOptimistic(BaseElement);\n    default:\n        // Soft: aria-busy + pointer-events:none\n        return withSoftBlocking(BaseElement);\n}</code></pre><p class=\"text-sm text-gray-600 mb-2\">Current consumers: <a href=\"/blocks/router/\">Router</a> (route transitions). The same pattern applies to forms, data grids, and any block with async operations.</p>",
+  "events": [
+    "idle",
+    "pending",
+    "success",
+    "error",
+    "stale",
+    "filtering",
+    "loadingMore"
+  ],
+  "designSystemResearch": [
+    {
+      "system": "Material Design 3",
+      "components": [
+        "Linear progress indicator",
+        "Circular progress indicator"
+      ],
+      "keyInsight": "Both support determinate and indeterminate. Naming uses 'progress indicators' (not 'spinner' or 'loader').",
+      "reference": "https://m3.material.io/components/progress-indicators/overview"
+    },
+    {
+      "system": "Carbon (IBM)",
+      "components": [
+        "Loading (full-page)",
+        "Inline Loading (four-state: inactive → active → success → error)",
+        "Skeleton states"
+      ],
+      "keyInsight": "Four-state Inline Loading is the most complete lifecycle model. Progressive loading pattern: skeleton first, then primary content, then secondary. Never skeleton toasts, modals, or overflow menus.",
+      "reference": "https://carbondesignsystem.com/patterns/loading-pattern/"
+    },
+    {
+      "system": "Spectrum (Adobe)",
+      "components": [
+        "ProgressBar (linear)",
+        "ProgressCircle (circular)"
+      ],
+      "keyInsight": "Size scale (S/M/L/XL). Width constraints (48px min, 768px max for bars). Labels: sentence case with trailing ellipsis. RTL reverses bar fill; circles always spin clockwise.",
+      "reference": "https://spectrum.adobe.com/page/progress-bar/"
+    },
+    {
+      "system": "Fluent 2 (Microsoft)",
+      "components": [
+        "Spinner",
+        "ProgressBar",
+        "Skeleton"
+      ],
+      "keyInsight": "Labels: short -ing verbs, ≤3 words, trailing ellipsis. Never rewind a progress bar. Switch from indeterminate to determinate once enough data is available.",
+      "reference": "https://fluent2.microsoft.design/"
+    },
+    {
+      "system": "Apple HIG",
+      "components": [
+        "Activity Indicator (indeterminate)",
+        "Progress Bar (determinate)"
+      ],
+      "keyInsight": "Never display inaccurate progress. Always allow cancellation for long operations. Activity indicators are non-interactive and must disappear on completion.",
+      "reference": "https://developer.apple.com/design/human-interface-guidelines/progress-indicators"
+    },
+    {
+      "system": "GOV.UK",
+      "components": [],
+      "keyInsight": "No dedicated loading components. Philosophy: progressive enhancement and server rendering avoid loading states by architecture. Relevant for the 'optimistic' strategy baseline.",
+      "reference": "https://design-system.service.gov.uk/patterns/"
+    }
+  ],
+  "uxResearch": [
+    {
+      "title": "Timing Thresholds",
+      "source": "Nielsen Norman Group",
+      "findings": [
+        "< 1 second: Show nothing — any indicator would flash annoyingly",
+        "1–10 seconds: Spinner or skeleton screen (skeleton for known layouts, spinner for unknown)",
+        "> 10 seconds: Determinate progress bar — users need to see how much is left; spinners lose credibility"
+      ],
+      "reference": "https://www.nngroup.com/articles/skeleton-screens/"
+    },
+    {
+      "title": "Skeleton Screen Types",
+      "source": "Nielsen Norman Group",
+      "findings": [
+        "Animated shimmer: Best — wave/pulse animation conveys activity and outperforms static",
+        "Static placeholder: Good — gray blocks matching layout structure",
+        "Frame-only: Harmful — showing only chrome (header/footer) without content placeholders makes users assume the page is broken"
+      ]
+    },
+    {
+      "title": "Perceived Performance",
+      "source": "Multiple (Facebook, Maister)",
+      "findings": [
+        "Skeleton screens led to ~300ms faster perceived load vs. spinners (Facebook study)",
+        "Uncertain waits feel longer than known waits — favor determinate indicators",
+        "Unexplained waits feel longer — provide labels and context",
+        "Showing page structure (skeletons) reduces anxiety and cognitive load when content appears",
+        "People overestimate passive waits by 36% (Maister's psychology of waiting)"
+      ]
+    },
+    {
+      "title": "Don't Hide Visible Content",
+      "source": "Cross-industry convergence",
+      "findings": [
+        "When content is already visible, keep it visible (dimmed/stale) rather than replacing with a loading fallback",
+        "Initial loads use fallbacks; transitions preserve existing content",
+        "Replacing visible content with a spinner feels like regression"
+      ]
+    }
+  ],
+  "researchGaps": [
+    "Skeleton exclusion rules not defined — Carbon research shows the 'replacement' strategy should never apply to toasts, modals, overflow menus, or loaders themselves. Consider an excludeFrom convention."
+  ]
+}

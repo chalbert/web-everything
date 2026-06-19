@@ -27,6 +27,8 @@ import { parseClaims, mineFiles, porcelainFiles, partitionFindings, partitionLoc
 import { checkDemos } from './check-demos.mjs';
 import { buildReport, source as reportSource, finding as reportFinding, section as reportSection } from './lib/buildReport.mjs';
 import { loadBlocks } from './lib/blocks-loader.cjs';
+import { loadIntents } from './lib/intents-loader.cjs';
+import { loadResearch } from './lib/research-loader.cjs';
 import {
   BACKLOG_STATUSES, BACKLOG_TYPES, WORK_ITEMS, FIB, FILE, blockSpecFile,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated,
@@ -106,12 +108,12 @@ const BLOCK_TYPES = new Set(['Store', 'Parser', 'Behavior', 'Directive', 'Compon
 const blocks = arr(loadBlocks()); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
 const plugs = arr(readJson('plugs.json'));
 const semantics = arr(readJson('semantics.json'));
-const research = arr(readJson('researchTopics.json'));
+const research = arr(loadResearch()); // per-topic specs src/_data/researchTopics/<id>.json, assembled (#1145)
 const protocols = arr(readJson('protocols.json'));
 const presets = arr((readJson('assemblerPresets.json') || {}).presets);
 const designSystems = arr(readJson('designSystems.json'));
 const projects = arr(readJson('projects.json'));
-const intents = arr(readJson('intents.json'));
+const intents = arr(loadIntents()); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
 const capabilities = arr(readJson('capabilities.json'));
 const adapters = arr(readJson('adapters.json'));
 const demos = arr(readJson('demos.json'));

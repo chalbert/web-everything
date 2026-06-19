@@ -1,0 +1,27 @@
+{
+  "id": "gate-violation-attribution",
+  "title": "Gate-violation attribution — letting a concurrent session's in-flight work not red yours in a shared working tree",
+  "status": "open",
+  "summary": "Prep research for decision #949: how should the backlog gate (check:standards primarily, check:health secondarily) attribute violations to their owning work so that 'gate red' only stops the session whose change caused it? THE PROBLEM: N agent sessions share ONE working tree; each claims its own items and commits per-finished-item (often straight to main), so the tree holds HEAD (clean) + the UNION of every live session's uncommitted edits. check:standards is whole-repo and exits 1 on any error (check-standards.mjs:930); each finding is {message, descriptor?} and the descriptor carries only a file path (location:{path}, :903), never a backlog-item id or session — so session B's in-flight file reds session A. The standing rule (memory feedback_gate_red_stop_scoped_to_own_work) says step over a purely-external red, but the triage is MANUAL (git status + grep). check:health is the inverse: findings are ALREADY item-keyed (flags G1..G6/D1..D3 each {id:item.id}, audit-backlog-health.mjs:278/:295) and it already shells to git (execFileSync :52/:225/:232) — so health attribution is trivial (filter by claimed item ids); the hard half is file-keyed check:standards. No file->item map exists (frontmatter.mjs:128 tracks graduatedTo/blockedBy, no touches/files); the only per-session state is reservations.json (soft item-number holds keyed by session, TTL-pruned) which neither gate consults. PRIOR ART SURVEYED: (1) Nx affected — git changed-files vs a base ref (default main) -> project graph -> affected subset; base/head explicit, --files override; assumes single-actor/clean-base. (2) reviewdog -filter-mode = added(default)/diff_context/file/nofilter — linter scans everything, findings FILTERED to the diff before failing; 'file' mode (whole file for any changed file) is the granularity #949 wants. (3) Android Lint baseline / betterer — snapshot current violations, fail only on NEW; a TEMPORAL ratchet (old-vs-new in time, globally), not by-owner. (4) lint-staged — lint only git-staged paths. (5) CODEOWNERS — declared path->owner map (the manifest family; declared not derived -> drifts). (6) git worktrees/per-branch isolation — give each actor a clean base so naive whole-repo gating already sees only its work. THE LOAD-BEARING MISMATCH: all changed-files tooling assumes ONE actor against a clean base ref, so git diff vs HEAD IS 'my change'; our problem is N actors sharing ONE dirty tree with no per-actor branch, where git diff vs HEAD = the UNION (the over-attribution we're undoing). Recovering 'mine' needs extra per-session state single-actor tooling never carries — OR the structural worktree fix. This reshaped the fork: the survey surfaced worktree-isolation, an option the item's 'make the gate attribute' framing didn't name -> it becomes the top-level fork. SYNTHESIS handed to #949 — three forks. Fork 1 (strategy): in-gate attribution vs worktree-per-session isolation; recommend in-gate (~80%, preserves shared-tree + running-dev-server + commit-to-main workflow; isolation is the heavier escalation, though Agent already supports isolation:worktree). Fork 2 (signal): per-session git baseline snapshot at claim (derived not declared, fails safe on the in-window leak) vs declared frontmatter manifest (drifts; against derive-from-state) vs session file-claim registry extending reservations.json (most precise, adds a hook + orphan cleanup); recommend the baseline snapshot (~75%). Fork 3 (behavior): a --scope filter mode (exit 1 only on in-scope errors, default no-flag run unchanged) vs a baseline ratchet (wrong axis — temporal not by-owner, + shared mutable baseline races) vs annotate-only (doesn't change the exit, fails the ask); recommend --scope (~85%). Supported by default (not forks): check:health reuses the scope mode keyed on item-id directly; scope granularity is the SESSION's whole claimed set. Classification: repo-internal devtools/workflow tooling, not a WE standard (impl-is-not-a-standard, minimize-lock-in) — no protocol minted; a correctness gate's safe default is STRICT, scoping is an opt-in per-run flag (dimension, not baked). Full grounding in reports/2026-06-18-gate-violation-attribution.md.",
+  "dateOpened": "2026-06-18",
+  "lastReviewed": "2026-06-18",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "backlog-workflow",
+    "gate",
+    "check-standards",
+    "concurrency",
+    "attribution",
+    "git-worktree",
+    "nx-affected",
+    "reviewdog",
+    "lint-baseline",
+    "betterer",
+    "codeowners",
+    "devtools",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

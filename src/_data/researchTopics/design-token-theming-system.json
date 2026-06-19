@@ -1,0 +1,19 @@
+{
+  "id": "design-token-theming-system",
+  "title": "Unified design-token / theming system — how Web Everything structures the concrete-value layer",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #364 (the design-token project #010 deferred as \"the technical half\"). The W3C Design Tokens Community Group reached its first stable format (DTCG 2025.10, Oct 2025); the native CSS substrate (custom properties, @property typed registration, light-dark()/color-scheme, relative color syntax + color-mix) is Baseline; and the benchmark design systems (MD3 ref/sys/comp, Fluent global/alias, Spectrum, Radix 12-step scales, Apple HIG dynamic system colors) are unanimous on a 2-3 tier primitive→semantic→component taxonomy. The WE-specific reframe: WE already owns the semantic tier as Intents (surface/density/typography/motion + theme-color #010), so the token project should own the primitive + component tiers and leave the semantic tier to the intents — not coin a parallel vocabulary. Grounds four forks: home/layer, format (adopt DTCG), tier taxonomy + the #010 seam, and scheme/accent-derivation (native-auto vs curated — the one divergent call). Report: reports/2026-06-12-design-token-theming-system.md.",
+  "dateOpened": "2026-06-12",
+  "tags": [
+    "gap-analysis",
+    "design-tokens",
+    "theming",
+    "native-first",
+    "color-scheme",
+    "intents",
+    "dtcg"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

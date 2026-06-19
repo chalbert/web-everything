@@ -1,0 +1,22 @@
+{
+  "id": "managed-inbox-auth-capture",
+  "title": "Managed-inbox / auth-capture capability — build-vs-buy & the Plateau-service boundary",
+  "status": "open",
+  "summary": "Prep research for decision #709 (the boundary fork carved out of #611, the auth-walled app-screenshot capability). An agent that screenshots apps behind a login needs a managed email identity it controls end-to-end (create inboxes, read verification/magic/OTP mail, drive signup via Playwright, vault credentials). Two forks. Fork 1 — where the capability lives — is a near-exact replay of the #475 vision ruling: it is a stateful, credential-bearing IMPL capability, not a WE standard, so by #475 it is a Plateau service WE consumes as a NO-LEAKAGE client, with only a thin vendor-free client seam in WEs capture devtooling (the design-refs/vision.mjs precedent: env-selected provider module, repointed at the Plateau service when it exists) [recommended A — high confidence]; owning the capability inside the WE standards repo (B) rebuilds in WE what Plateau should own and drags credential-vaulting + signup automation into the standards layer (the broken branch). Fork 2 — build vs buy — is governed by Plateaus linear-cost-with-revenue hard rule: metered per-inbox/per-email SaaS (MailSlurp, Mailosaur) scales cost with capture volume not revenue, so it is excluded as the FLOOR and demoted to an opt-in BYO tier; the recommended floor is an owned-domain catch-all (Cloudflare Email Routing + Email Workers, free, fixed-cost; or a self-hosted Stalwart/maddy catch-all on the Plateau box) [med-high]. The exact owned realization is a Plateau implementation sub-choice (delegated to the Plateau build); WE states the floor and the constraint. Landscape note: dev SMTP sinks (Mailpit, Inbucket) are the WRONG tool — they capture your own outbound only, no public MX, so they cannot receive a target sites verification mail. Abuse/ToS guardrails (only sign up where terms permit, no CAPTCHA circumvention, respect rate limits, vault credentials) are required-by-default invariants, not a fork. Full grounding in reports/2026-06-15-managed-inbox-auth-capture.md.",
+  "dateOpened": "2026-06-15",
+  "lastReviewed": "2026-06-15",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "managed-inbox",
+    "auth-capture",
+    "screenshot",
+    "plateau-service",
+    "no-leakage",
+    "linear-cost",
+    "build-vs-buy",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}

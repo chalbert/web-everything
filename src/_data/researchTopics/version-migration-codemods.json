@@ -1,0 +1,21 @@
+{
+  "id": "version-migration-codemods",
+  "title": "Upgrader Version-Migration Codemods",
+  "status": "open",
+  "summary": "Prior-art survey (Angular ng update / migrations.json, OpenRewrite, jscodeshift/codemod) grounding backlog #191 — applying breaking-change codemods when a protocol/adapter/provider contract evolves across versions. The key finding reshapes the decision: both prerequisites #191 named already shipped. The machine-readable migration descriptor is the resolved changelog-manifest protocol (#102) — per-module entries keyed to semver severity + a migration linkage referencing the codemod that applies a breaking change, with author/integrity trust. The transform engine + provider registry + verify gate is #094's upgraderEngine (verifyUpgrade re-parses + round-trips + conformance-checks). So #191 is wiring + two design forks, not greenfield. Fork 1: the version-migration upgrader is a mode/input-adapter of the existing engine, not a distinct tool (#094's own follow-on said shared core, different input adapter). Fork 2: migration transforms are declarative-first with an imperative escape hatch — the OpenRewrite principle (declarative if it can be, imperative only when necessary), the descriptor referencing a codemod only for the complex tail. Angular's ng update supplies the version-gated, ordered, intermediate-spanning run loop; the verifyUpgrade gate is WE's moat over schematics/jscodeshift, which apply transforms without verifying conformance.",
+  "dateOpened": "2026-06-12",
+  "tags": [
+    "upgrader",
+    "codemod",
+    "migration",
+    "version-migration",
+    "changelog-manifest",
+    "spec-versioning",
+    "ng-update",
+    "openrewrite",
+    "webadapters"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webadapters"
+}

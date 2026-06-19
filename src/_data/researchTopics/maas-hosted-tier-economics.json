@@ -1,0 +1,21 @@
+{
+  "id": "maas-hosted-tier-economics",
+  "title": "MaaS hosted-tier economics — build-vs-ride and the freemium pattern",
+  "status": "open",
+  "summary": "Prep economics survey for product-decision #451 (gates phase d of MaaS distribution #087; open-core cluster #089/#091/#097). The item framed one fork — a hosted CDN-like Module-as-a-Service free for public components / paid for private / both. The survey reshapes it from free-vs-paid into BUILD-vs-RIDE. The 'free public ESM CDN for any npm package' function is already a commoditized free service: esm.sh and jsDelivr serve any published package as ESM, globally, free, with bandwidth DONATED by Cloudflare/Fastly (jsDelivr has no paid tier; its founder personally subsidizes origin). Building a free public tier rebuilds a commodity and inherits its maintenance liability — Skypack is the cautionary tale (a Cloudflare/GCP/AWS-backed smart-ESM-CDN by the Snowpack team that went unmaintained since ~2023, breaks on modern JS, recurring outages, users abandoned without notice). 'Free public + paid private' is the universal registry pattern (npm Pro $7/mo, GitHub Packages free-public + metered private $0.25/GB storage $0.50/GB egress; JSR free-only/Deno-subsidized) but the free half only works because someone else pays the bandwidth. Component-hosting businesses that survive charge for a workflow value-add not bytes (Chromatic = hosted visual testing $149/mo+, free for OSS; Bit pivoted away from component distribution to AI dev workspaces). A global 24/7 public CDN is operationally untenable for a solo operator (uncapped egress, abuse, forever maintenance liability) — squaring with the project's defer-live-serve monetization stance. Recommendation: ride existing CDNs for the public tier (publish components to npm; esm.sh/jsDelivr serve them); reserve build effort for a thin paid value-add layer needing no CDN infra (private/curated registry metered like GitHub Packages, provenance/SRI+SLA, usage analytics off jsDelivr's stats API, migration/conformance tooling) — the Chromatic playbook, open-core, deferred to plateau-app per #091. Product call: recommendation grounds it, the product owner ratifies.",
+  "dateOpened": "2026-06-13",
+  "tags": [
+    "module-as-a-service",
+    "distribution",
+    "cdn",
+    "registry",
+    "pricing",
+    "monetization",
+    "open-core",
+    "build-vs-ride",
+    "product"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webadapters"
+}

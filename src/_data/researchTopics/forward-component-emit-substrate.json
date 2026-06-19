@@ -1,0 +1,26 @@
+{
+  "id": "forward-component-emit-substrate",
+  "title": "Forward component-emit substrate — what backs generating a block across React/Vue/Svelte/Angular/WC",
+  "status": "open",
+  "summary": "Prep research for decision #811 (blocking the polyglot adapter panel #753, under Block Explorer epic #746): what substrate backs FORWARD per-framework component emit, after #810 verified none exists in the tree (#547 is server-origin generation off ServePathIR — wrong axis; the upgrader ComponentIR is ingest-only and emits the WE declarative form; htmlToJsx is a tree-level JSX pane mirror). The item entered prep with one fork (A extend the ingest ComponentIR · B HTML-canonical adapters off htmlToJsx · C a new forward IR), default B, prior art unsurveyed. The survey of multi-framework component tooling splits the prior art into TWO families and the item's A/B/C live in only one. FAMILY 1 — transpile to native source: Mitosis (Builder.io) is the lone shipping proof that a neutral IR forward-emits idiomatic React/Vue/Svelte/Angular/Solid/Qwik source (+ WC/Lit/Stencil targets); two load-bearing details — its MitosisComponent IR is PURPOSE-BUILT FOR EMIT (a static serializable JSON shape, NOT a reused lossy ingest rep — direct evidence for Option C over A, since the WE upgrader ComponentIR is explicitly scoped for lossy-subset ingest, 'flag don't fake'), and WC is just one of ~15 targets; the per-framework template compilers (Vue SFC/Svelte/Angular) confirm Option B's con — binding/event idioms (v-model, bind:, [()]) are real grammars a flat HTML tree under-specifies. FAMILY 2 — the item never named it — WC-core + generated wrappers: Stencil output targets (@stencil/react-output-target/-vue/-angular) author once as a web component and AUTO-GENERATE thin framework wrappers; Lit Labs gen-wrapper-react/vue/angular generate those wrappers FROM the Custom Elements Manifest (gen-manifest). Both leaders converged: the web component is the source of truth, the per-framework artifact is a CEM-keyed wrapper not a reimplementation. THE PLATFORM SHIFT: React 19 now scores 100% on Custom Elements Everywhere (full custom-element support — props→properties, custom events; React was the lone historical laggard, now closed); Vue/Svelte/Angular long ~100%. So a native WC drops cleanly into all five frameworks with NO per-framework artifact for common usage — and the block already IS a WC (#810), so the conformance claim the panel wants is already true for plain WC consumption. This reshapes the fork: a NEW top-level fork (emit MODEL — WC-core + generated wrappers vs full native-source transpilation) that, if wrappers, DISSOLVES A/B/C entirely (need only the block's CEM + a wrapper generator + a FUI-hosted live demo, no component IR); A/B/C survive only inside the transpile branch with the default flipped from B to C. Recommended default: WC-core + CEM-driven wrappers (block is already a WC; React 19=100% CEE; wrapper generators are shipping prior art keyed off the CEM WE already RATIFIED #626 and derives via scripts/gen-cem.mjs; far the smallest build) — transpilation (Mitosis path) is the maximalist 'idiomatic source per framework' option, filed as a later enhancement if pedagogy demands it. Classification: substrate/generation = WE forward-adapter artifact (the #463/#505/#507 polyglot family); live render = FUI (docs-rendering boundary — WE embeds a FUI-hosted fuiDemo iframe, never renders FUI block code); conformance badge = the #506 deterministic gate; per-framework emitters are author-time devtools providers (the explicit-input CustomAnalyzerRegistry shape), not runtime DI; Option W mints no new protocol (reuses custom-elements-manifest). Full grounding in reports/2026-06-16-forward-component-emit-substrate.md.",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "block-explorer",
+    "polyglot",
+    "generation",
+    "component-emit",
+    "forward-adapter",
+    "mitosis",
+    "stencil",
+    "lit-labs",
+    "custom-elements-manifest",
+    "react-19",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

@@ -1,0 +1,20 @@
+{
+  "id": "responsive-container-query-layout",
+  "title": "Responsive / container-query layout — placement against the existing breakpoint & layout intents",
+  "status": "open",
+  "summary": "Prep prior-art survey for decision #467 (parent: book-triage epic #111). The book candidate 'constraint-based / container-query responsive layout' (FlexRow-style flow, ResizeObserver, container vs media queries) reads as homeless, but the survey reshapes the fork: the concern is already substantially modeled by two existing intents — `breakpoint` (draft: adaptation strategy mobile-first/desktop-first/strict-range + semantic steps compact/medium/expanded, explicitly 'mapped to concrete media/container queries') and `layout` (concept: app-shell regions — drawer/rail/pane/dock, push/overlay/rail). So the original 'new project vs intent vs webpositioning' framing collapses: NOT a new project (no provider seam, interchange schema, or vendor-interop contract to standardize — the same 'not every gap is a project' discipline that ruled #409 master-detail to a plain intent), and NOT webpositioning (that project anchors floating elements to a reference — an orthogonal concern). Web-platform grounding (2026): CSS container size queries are Baseline since 2023 (Chrome/FF/Safari) with `container-type: inline-size` and `cqi`/`cqw` units (1% of container inline size); `@container` mirrors `@media` syntax but resolves against an element's container rather than the viewport; style queries are Chrome-family only and scroll-state queries landed Chrome Dec 2025; ResizeObserver is the imperative substrate for cases CSS can't express. Industry: Material 3 moved AWAY from rigid pixel breakpoints to semantic Window Size Classes (compact <600 / medium 600-839 / expanded 840-1199 / large / extra-large) + Canonical Layouts with repositioning — which is exactly the vocabulary the breakpoint intent already borrows. Three forks survive: (1) PLACEMENT — fold into the existing breakpoint + layout intents (extend, don't create) [default], over a new intent or project; (2) SCOPE — one `breakpoint` intent with an added `scope: viewport | container` dimension [default] vs two separate intents, since the semantic-steps model and `change` event are identical and only the reference frame differs (textbook expose-the-axis-as-a-dimension, not a split); (3) FLEXROW — a small deferred webblocks block (intrinsic auto-flow container realizing breakpoint at container scope, ResizeObserver as impl substrate, CSS @container/flex-wrap as the native-first default) [default] vs a layout-intent dimension (rejected: layout is app-shell altitude, FlexRow is content-flow) vs nothing (rejected: the semantic vocabulary + container-query wiring is the standard-worthy part, not the flex CSS). Recommendation carried into #467: no new project, no new intent — extend breakpoint with a scope dimension, leave layout as-is, and defer a FlexRow webblocks block.",
+  "dateOpened": "2026-06-13",
+  "tags": [
+    "responsive",
+    "container-queries",
+    "breakpoint-intent",
+    "layout-intent",
+    "resize-observer",
+    "material-3",
+    "layer-placement",
+    "book-candidate"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

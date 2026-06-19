@@ -1,0 +1,19 @@
+{
+  "id": "design-ref-taxonomy",
+  "title": "Design-reference corpus taxonomy — how to seed categories, registers & first-run scope",
+  "status": "open",
+  "summary": "The taxonomy seed for the design-reference screenshot corpus (backlog #382/#394): how to classify and grow the worklist of real web-app screenshots so design patterns can be codified later. Surveys how the established reference galleries taxonomise UIs — Mobbin’s faceted model (app-category × UI-pattern/flow × UI-element × platform × design-trend), Page Flows / Screenlane’s screen-type axis (onboarding, dashboard, settings, checkout, empty/error…) — and the information-architecture finding that a faceted controlled vocabulary that grows beats both a closed enum (too rigid) and free-text folksonomy (synonym/polysemy noise), the way G2/Capterra keep evolving keyed category taxonomies. Three implications drive the seed: split the conflated ‘designRegister’ into productRegister (archetype, deterministic) + visualStyle (named aesthetic — flat/material/glass/neobrutalist — deferred to the vision pass); store the seed as an open-growing keyed registry (design-refs/taxonomy.json, mirroring benchmarkCorpus.json); and scope the first run by scarcity-weighted grow-targets that fill the registers thin today (everything outside dev-tools/editors). Internal research-corpus tooling — no standard, zero project-facing lock-in.",
+  "dateOpened": "2026-06-12",
+  "tags": [
+    "design-reference",
+    "corpus",
+    "taxonomy",
+    "screenshots",
+    "classification",
+    "controlled-vocabulary",
+    "faceted-classification"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

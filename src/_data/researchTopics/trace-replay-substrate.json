@@ -1,0 +1,26 @@
+{
+  "id": "trace-replay-substrate",
+  "title": "Trace/replay substrate — what makes a session replayable, and is webevents event-identity load-bearing for determinism",
+  "status": "open",
+  "summary": "Prep research for decision #992 (the #140 keystone): design the trace/replay artifact — a declared state snapshot + ordered action trace — that unblocks the #140 state explorer (6), dev error-repro (9), and in-context bug report (10). FINDING: the record's parts are ALREADY specified across four projects — webcontexts SSR serialization is the snapshot (project-webcontexts.njk:225-245), webstates ChangeRecord {path,op,oldValue,newValue,source,timestamp,version} is the state-transition journal (project-webstates.njk:136), webstates ChangeSource.traceparent ALREADY links each change to a webtraces span (project-webstates.njk:149), webevents listenForScoped is action identity (project-webevents.njk:14), webtraces trace-observability is the span timeline. So the substrate is a COMPOSITION; the only new contract is the session-replay envelope. The web survey (Redux DevTools, rrweb, replay.io) returns three determinism paradigms: A state-diff re-application (rrweb — re-apply recorded diffs, execute no app JS, deterministic by construction → maps to ChangeRecord journal), B action re-fold through pure handlers (Redux/event-sourcing — deterministic only if pure, event identity load-bearing), C runtime deterministic re-execution (replay.io — heavyweight, ruled out by #140's lightweight-local-semantic scope). Answer to the named fork: webevents identity is NOT load-bearing for determinism (anchor on the A journal) but IS load-bearing for correlation/comprehension (which action caused which diffs). Grounds two forks: (1) determinism anchor A/B/C, (2) home of the envelope protocol (webtraces default). Full grounding in reports/2026-06-19-trace-replay-substrate.md.",
+  "dateOpened": "2026-06-19",
+  "lastReviewed": "2026-06-19",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webtraces",
+    "webevents",
+    "webstates",
+    "webcontexts",
+    "trace-replay",
+    "session-replay",
+    "determinism",
+    "event-sourcing",
+    "time-travel",
+    "dev-surface",
+    "protocol",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webtraces"
+}

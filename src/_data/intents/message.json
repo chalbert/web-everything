@@ -1,0 +1,27 @@
+{
+  "id": "message",
+  "name": "Message Intent",
+  "status": "concept",
+  "summary": "Protocol defining communication priority (Attention) and structural anatomy across alerts, banners, and dialogs. Tone dimension participates in the unified severity/tone vocabulary shared with Feedback and Validation intents.",
+  "dimensions": {
+    "attention": {
+      "description": "Priority level determining how the message interrupts the user",
+      "values": [
+        "ambient",
+        "routine",
+        "urgent",
+        "critical"
+      ]
+    },
+    "tone": {
+      "description": "Semantic meaning conveyed by the message. Part of unified severity vocabulary: neutral↔info, positive↔success, caution↔warning, negative↔error.",
+      "values": [
+        "neutral",
+        "positive",
+        "caution",
+        "negative"
+      ]
+    }
+  },
+  "description": "<h3>Attention Hierarchy</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>ambient</code>: Low priority. Status bars or helper text.</li><li><code>routine</code>: Standard priority. Toasts or inline notes.</li><li><code>urgent</code>: High priority. Banners or System Alerts.</li><li><code>critical</code>: Blocking priority. Dialogs or Screen Takeovers.</li></ul><h3>Tone Semantics</h3><p class=\"text-sm text-gray-600 mb-2\"><code>tone</code> is part of a <strong>unified severity/tone vocabulary</strong> shared across Message (structural), Feedback (transient), and Validation (input states). The semantic mapping aligns all three:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>neutral</code> / info: Informational. No action required.</li><li><code>positive</code> / success: Confirmation. Positive outcome achieved.</li><li><code>caution</code> / warning: Advisory. Issue detected but not blocking. User may act.</li><li><code>negative</code> / error: Failure. Problem occurred. User action required.</li></ul>"
+}

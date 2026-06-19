@@ -1,0 +1,24 @@
+{
+  "id": "rendered-site-a11y-gating",
+  "title": "Rendered-site a11y/UX gating — which tool, harness, posture, and route set gate website changes",
+  "status": "open",
+  "summary": "Prep research for decision #763. check:standards validates spec/data/backlog consistency and SKIPS the 11ty build (scripts/check-standards.mjs runs no browser), so rendered-site a11y regressions stay green — #762 (no aria-current on either site nav, shipped silently) is the worked example. The load-bearing finding reshapes the item's A/B/C framing: the repo ALREADY has a Playwright integration lane (test:integration → playwright.config.ts) whose webServer boots `npm run dev` (Vite :3000 proxying /backlog/ to 11ty :8080) and REUSES the running dev server — so 'axe over the built sites' is not new infra, it is @axe-core/playwright added to the existing project, and the 'requires building the sites' cost the item worried about is already paid. Three tool families, distinct jobs: axe-core is the embeddable WCAG rule engine (AxeBuilder scopes by .include()/.exclude(), filters by .withTags(['wcag2a','wcag2aa','wcag21a','wcag21aa']), per-rule fail-build) — the right primary gate; pa11y-ci is a standalone CLI wrapping axe with a native .pa11yci urls[] route-list (a second harness to maintain); Lighthouse CI is broadest (perf+SEO+best-practices+a11y) but its a11y is a coarse aggregate score, a supplement not a primary a11y gate. Classification: this is a devtools QUALITY GATE (like check:standards itself), not a Block/Intent/Protocol/Capability — zero consumer lock-in, no protocol minted (axe IS the WCAG conformance engine, consumed not re-specified). So A/B/C collapse: the static template lint (A) and the DoD checklist (C) are NOT rivals to axe (B) — they coexist (fork-existence test: 'A and B are not mutually exclusive', per the item itself), so they are demoted to supported-by-default. The genuine call is the gating TOOL (axe-via-Playwright vs pa11y-ci vs Lighthouse CI), with two sub-decisions the original collapsed: blocking POSTURE (warn→enforce ratchet, like #477 research-freshness, vs hard-fail day one vs CI-only advisory) and the gated ROUTE SET (hand-maintained allowlist mirrored per-repo — matching the existing §9 Vite-proxy-allowlist precedent at check-standards.mjs:716 and the dev-panel-duplicated pattern — vs auto-derived from the 11ty collection/sitemap). Recommended: @axe-core/playwright into the existing lane, warn→enforce ratchet, hand-list mirrored per-repo, static lint + DoD checklist shipped alongside. Full grounding in reports/2026-06-16-rendered-site-a11y-gating.md.",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "accessibility",
+    "a11y",
+    "ci-gate",
+    "axe-core",
+    "playwright",
+    "pa11y",
+    "lighthouse-ci",
+    "wcag",
+    "devtools",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}

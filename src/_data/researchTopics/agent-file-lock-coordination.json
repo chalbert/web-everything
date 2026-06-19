@@ -1,0 +1,20 @@
+{
+  "id": "agent-file-lock-coordination",
+  "title": "Agent File-Lock Coordination",
+  "status": "open",
+  "summary": "OS / database / distributed-systems prior art grounding backlog #083: a just-in-time, fine-grained file lock for when independent agents sometimes touch the same files and the file set is unknown upfront — claim right before editing, hold for seconds, release after, with a per-file FIFO queue plus crash/deadlock safeties. Each fork maps to established theory: advisory-vs-mandatory is the flock/kernel split (only a PreToolUse hook is a real lock, not a convention); crash safety is a lease + TTL + heartbeat with git as the ground-truth backstop and fencing tokens as the principled escalation; deadlock is broken via no-hold-while-blocked (the only Coffman-breaker when the lock set is unknowable); granularity stays file-level with hot shared files single-writer by policy; queue fairness is FIFO + a TTL on waiters. Meta-fork: the 2025-2026 worktree-isolation consensus already covers most value, so keep parked — build the v1 (lock.mjs + hook) only on an observed residual same-file collision.",
+  "dateOpened": "2026-06-11",
+  "tags": [
+    "agent-coordination",
+    "file-locking",
+    "multi-agent",
+    "hooks",
+    "concurrency",
+    "deadlock",
+    "lease-ttl",
+    "worktrees",
+    "dev-workflow"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

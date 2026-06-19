@@ -24,6 +24,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadBlocks } from './lib/blocks-loader.cjs';
+import { loadIntents } from './lib/intents-loader.cjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = join(ROOT, 'src/_data');
@@ -36,7 +37,9 @@ const SOURCES = {
   // remains one of the structured homes listed in `homes` (Object.keys(SOURCES)).
   blocks: 'blocks/*.json',
   capability: 'benchmarkCapabilityPresence.json',
-  intents: 'intents.json',
+  // intents are read via the per-intent loader (#1145), not this path; the key stays so `intents`
+  // remains one of the structured homes listed in `homes` (Object.keys(SOURCES)).
+  intents: 'intents/*.json',
 };
 
 const readJson = (name) => {
@@ -99,8 +102,8 @@ function collect() {
     push(r.url, 'capability', r.sourceId, r.sourceName || `${r.sourceId} · ${r.capabilityId}`);
   }
 
-  // 5. Intent docs — URLs embedded in the HTML description
-  const intents = readJson(SOURCES.intents);
+  // 5. Intent docs — URLs embedded in the HTML description (per-intent specs, #1145)
+  const intents = loadIntents();
   for (const i of intents ?? []) {
     const urls = (i.description || '').match(/https?:\/\/[^\s"'<)]+/g) || [];
     for (const u of urls) push(u, 'intents', i.id, i.name);

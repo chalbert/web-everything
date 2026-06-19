@@ -1,0 +1,35 @@
+{
+  "id": "flow-progress",
+  "name": "Flow Progress Intent",
+  "status": "draft",
+  "summary": "Canonical, accessible presentation of where a user is in a multi-step workflow — the current position, each step's status, and what remains before completion — so a wizard, a single-page progressive form, a conversational flow, and a board all read consistently. The UX member of the Web Workflows protocol: it reads the same workflow engine and renders the position + per-step status, while the orchestration (transitions, guards, parallel, completion) stays on the protocol. Reuses navigation's structure:linear / guard / history rather than reinventing them, and adopts the native aria-current=\"step\" token. Avoid the name 'stepper' — it collides with the numeric NumberField.",
+  "dimensions": {
+    "register": {
+      "description": "The visual arrangement of the flow — all coherent end-states (support-all); the most-permissive default is the richest, dedicated-surface wizard",
+      "values": [
+        "wizard",
+        "single-page",
+        "conversational",
+        "board"
+      ]
+    },
+    "stepStatus": {
+      "description": "How each step's state is surfaced (the cleanest surveyed enum; `disabled` and `optional` are orthogonal modifiers, not members)",
+      "values": [
+        "wait",
+        "process",
+        "finish",
+        "error"
+      ]
+    },
+    "movement": {
+      "description": "Which traversal the UX affords — reuses navigation's guard axis; back/undo is allowed by default (most-permissive), forward-only is the author's opt-in",
+      "values": [
+        "back-allowed",
+        "free",
+        "forward-only"
+      ]
+    }
+  },
+  "description": "<h3>What Flow Progress Is</h3><p class=\"text-sm text-gray-600 mb-2\">The canonical, accessible presentation of <strong>where a user is in a workflow</strong> &mdash; the checkout that is on <code>pay</code> after <code>collect-address</code>, the onboarding on step 3 of 5, the application part-way through a multi-stage review. It is the <strong>UX member</strong> of the <a href=\"/projects/webworkflows/\">Web Workflows</a> protocol: it reads the same workflow engine and renders the current position plus each step's status, while the orchestration (transitions, guards, parallel, completion) lives on the protocol.</p><h3>Reuse, don't reinvent</h3><p class=\"text-sm text-gray-600 mb-2\">This intent does <strong>not</strong> re-create linear navigation. It reuses the <a href=\"/intents/navigation/\">navigation</a> intent's <code>structure:linear</code>, <code>guard</code>, and <code>history</code> dimensions, and adopts the native <code>aria-current=\"step\"</code> token for the position indicator. Per-step status uses the cleanest surveyed enum (<code>wait</code> / <code>process</code> / <code>finish</code> / <code>error</code>), with <code>disabled</code> and <code>optional</code> as orthogonal modifiers.</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>register</code>: <code>wizard</code> (dedicated-surface, the most-permissive default) / <code>single-page</code> (progressive disclosure) / <code>conversational</code> / <code>board</code> &mdash; all coherent end-states, a configurable dimension, never a fork.</li><li><code>stepStatus</code>: <code>wait</code> / <code>process</code> / <code>finish</code> / <code>error</code>.</li><li><code>movement</code>: <code>back-allowed</code> (default) / <code>free</code> / <code>forward-only</code> &mdash; the back/undo affordance, reusing navigation's guard axis.</li></ul><h3>UX-only &rarr; orchestration is the Workflow protocol</h3><p class=\"text-sm text-gray-600 mb-2\">The <em>machinery</em> — the transition graph, guards, parallel fork/join, the runnable engine — is <strong>not</strong> part of this intent (intents carry no impl refs). It is the <a href=\"/projects/webworkflows/\">Workflow protocol</a>, resolved by a swappable <code>CustomWorkflowEngine</code>. Ratified in <a href=\"/backlog/634-meta-intent-workflow-as-composable-intent/\">#634</a>; grounded in the workflow meta-intent survey (<a href=\"/research/workflow-meta-intent/\">/research/workflow-meta-intent/</a>).</p>"
+}

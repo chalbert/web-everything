@@ -1,0 +1,21 @@
+{
+  "id": "research-freshness-model",
+  "title": "Research-freshness model — history, metadata home, staleness, review horizon",
+  "status": "open",
+  "summary": "Prior-art survey for the metadata + versioning model that keeps /research/ topics alive over time (backlog #441, foundation forks of epic #192). No design exists yet — none of lastReviewed / supersedes / reviewHorizon are in the tree. Surveys four orthogonal axes. History/supersedes: RFC (Obsoletes/Obsoleted-by), PEP (Replaces/Superseded-By + Status: Superseded), MADR and W3C TR all converge on immutable dated records + bidirectional supersedes pointers + a superseded status value, never an in-place overwrite — matching /research/'s existing dated reports/YYYY-MM-DD-{slug}.md snapshots, which only lack the pointer+status. Metadata home: per-doc frontmatter is the prevailing source of truth (Microsoft ms.date, Hugo lastmod), but because WE's report is an immutable snapshot and the topic is the living unit, the topic-level review date belongs on the registry (also the render + validator source) — and last-changed (dateModified) must stay distinct from last-reviewed, which ms.date wrongly conflates. Staleness: the norm is a reader badge + a maintainer warning, never a hard build failure (Vale fails only on error severity) — confirming badge+warning coexist by design rather than being an either/or. Review horizon (the axis the item omitted): per-document reviewBy with volatility tiers beats a single global interval, modeled on RFC 5861's freshness-lifetime + stale-while-revalidate grace window rather than a hard cliff — the one genuinely divergent call.",
+  "dateOpened": "2026-06-12",
+  "lastReviewed": "2026-06-12",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "research",
+    "freshness",
+    "versioning",
+    "supersedes",
+    "staleness",
+    "review-horizon",
+    "webdocs"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

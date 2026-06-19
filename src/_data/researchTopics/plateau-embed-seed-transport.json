@@ -1,0 +1,24 @@
+{
+  "id": "plateau-embed-seed-transport",
+  "title": "Plateau↔WE embed/seed transport — how a docs surface seeds (and reads back) an embedded Plateau Configurator",
+  "status": "open",
+  "summary": "Prep research for decision #788 (the blocking fork of the embedded technical-configurator story #752, under Block Explorer epic #746): how a WE/FUI docs surface embeds a Plateau Technical Configurator view SEEDED with a block's four technical dimensions (render strategy #079, transport #455, trait lazy-load #448, chunk split #719/#720), plus a deep-link to the full configurator and a cost-preview readback. The seam today has NO inbound channel: mountTechnicalConfigurator(root) takes only a host element (plateau-app/src/technical-configurator/configurator.ts:581), state loads from localStorage only (:81-94), and the SPA route-stamps the mount with zero URL-param reading (plateau-app/src/main.ts:327-337). The only WE embed precedent is the #701 fuiDemo shortcode — a pure-URL sandboxed iframe with no seed (.eleventy.js:38-50). Surveyed the embed-kit prior art (Google Maps Embed API, StackBlitz/CodeSandbox embeds, Figma Embed Kit 2.0, YouTube IFrame API) + the platform messaging standards (WHATWG cross-document messaging, MDN postMessage/URLSearchParams). Load-bearing finding: the two mechanisms split by JOB, not as rivals — URL query/hash params SEED the initial view and make it shareable/deep-linkable (Google Maps is URL-only; CodeSandbox/StackBlitz seed via URL); postMessage drives LIVE control/readback after load (Figma/YouTube/StackBlitz SDK), needing a ready-handshake + strict targetOrigin/event.origin checks. StackBlitz & CodeSandbox ship BOTH layered, URL-canonical + postMessage additive. This collapses the item's original 3-way fork via the fork-existence test: SHARED-COMPONENT is excluded as broken (npm-scope-mirrors-layer + the #700 DC-7 cross-repo-import ruling; Plateau is the product layer, one hop further than FUI), and DEEP-LINK is a supported-by-default companion the #752 story wants anyway (not a rival to embedding) — so iframe embed is a FORCED INVARIANT. The one genuine fork is the seed transport: A — URL query/hash params canonical (shareable, deep-linkable for free, matches #701 + the #754 permalink serialization, no handshake) with postMessage additive for readback/auto-resize [recommended — the StackBlitz/CodeSandbox layered model] vs B — postMessage-handshake as the canonical seed (richer/bidirectional but unshareable, race-prone, and still needs a URL vocab for the deep-link, so strictly more work). Classification: NOT a minted WE Protocol (two parties, no swappable-vendor story → bilateral documented contract, owned at the Plateau route; minting one is lock-in for no interop gain), a technical setting (never a UX intent dimension), base URL env-parameterized like FUI_DEMO_BASE. The same contract serves #751 (theme-creator embed) and shares its URL grammar with #754 (permalink) — design once. Full grounding in reports/2026-06-16-plateau-we-embed-seed-transport.md.",
+  "dateOpened": "2026-06-16",
+  "lastReviewed": "2026-06-16",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "plateau-embed",
+    "block-explorer",
+    "technical-configurator",
+    "iframe",
+    "postmessage",
+    "url-state",
+    "cross-repo-seam",
+    "embed",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}
