@@ -133,3 +133,14 @@ got us here. Retained for trace; the scope above supersedes all of it.
   and the copy-down into the single relocation now scoped above. The 75 FU import rewrites the old plan required
   largely **vanish** under the inversion (FU keeps its own tree as the package source); the rewrite burden shifts to
   WE + plateau-app consumers instead.
+
+## Dropped from batch-2026-06-19 (live dev-server verified)
+
+Re-confirmed not-batchable. Verified a WE Vite dev server **live on :3000** (PID 1968) at claim time;
+this slice's core edit is `we:vite.config.mts` (+ `we:tsconfig.json`) to wire the `@frontierui/plugs`
+alias, which force-restarts that running server — forbidden by the dev-server instruction ("leave servers
+as you found them"). No safe partial exists: the 42 import rewrites don't resolve at runtime until the
+vite alias lands, so a config-deferred pass leaves WE demos broken. Resume via a dedicated `/next 449`
+session where the dev server can be restarted. Not a stop of the batch — a single-item deferral; the
+remaining items are independent. Blockers (#1045/#950/#725) all resolved — readiness is purely the
+toolchain-restart constraint.
