@@ -21,9 +21,31 @@
  *    Registration order is the priority — explicit and reviewable, never hardwired into the standard.
  *  - **The outcome set is closed** (`retry | queued | fallback | abort`) so a conformant consumer can
  *    map each to the Reliability Intent UX dimensions (`recovering` / `fallback` / `failed`).
- *  - **Scope is the handler registry only.** The deeper *protocol-level error-recovery seam* (how
- *    recovery composes across the protocol) is a SEPARATE design-gated slice held behind decision #1032
- *    — deliberately NOT defined here.
+ *  - **The error-recovery *semantics* over the registry are now decided** (decision #1032). The contract
+ *    normalizes the cross-handler *outputs* every consumer/UX reads — a **failure disposition** and an
+ *    **in-flight recovery phase** — while every per-operation *mechanism* (raw classification, backoff
+ *    math, composition order) stays private to handlers (adapter-as-normalization-hub). See the
+ *    `FailureDisposition`, `RecoveryPhase`, and `RecoveryResult.disposition` definitions below.
+ *
+ * Decision #1032 — the three forks, encoded not redecided:
+ *  - **Fork 1 (classification):** the contract carries a normalized `FailureDisposition`
+ *    (`transient`/`terminal`/`deferred`) a handler maps the raw error into; the raw classification logic
+ *    (HTTP status, `Retry-After`, DB error shapes) stays private. Disposition is **orthogonal** to the
+ *    Reliability Intent `tolerance` axis (recoverability × user-impact severity — not 1:1).
+ *  - **Fork 2 (surfacing):** the contract adds a `RecoveryPhase` discriminator on the in-flight
+ *    `recovering` state — an **open meta-schema** with a minimal core (`retrying`/`queued`/`awaiting-manual`);
+ *    `circuit-open` (and any future `rate-limited`) ship as **registered extensions**, NOT core, because
+ *    the protocol bundles no circuit-breaker handler. Kept separate from data/loader status (the TanStack
+ *    `status` vs `fetchStatus` split).
+ *  - **Fork 3 (composition):** single-dispatch is preserved (the registry still picks the first handler
+ *    that accepts); multi-concern cooperation is an **author-ordered composite handler** that nests (the
+ *    Polly `PolicyWrap` analogue), NOT protocol-level orchestration — the wrap order is load-bearing, so
+ *    the author owns it. A flat-escalation `'continue'` outcome is **not** authored here: it is a deferred,
+ *    app-opt-in capability for a *different* need (flat fallthrough, not nesting), added additively only
+ *    when a real app demonstrates it — not rejected, just YAGNI-deferred.
+ *
+ * Invariants unchanged: backoff math stays in handlers (the contract exposes only an opaque `delay`);
+ * the runtime half — concrete handlers and the `customRecovery` swap registry — is impl and lives in FUI.
  */
 
 /** The error that triggered recovery — opaque to the seam; a handler classifies it however it needs. */
@@ -38,6 +60,45 @@ export type RecoveryError = unknown;
  *  - `abort` — terminal, surface the error; `failed`.
  */
 export type RecoveryOutcome = 'retry' | 'queued' | 'fallback' | 'abort';
+
+/**
+ * **Fork 1 (#1032) — the normalized recoverability of a failure**, the UX-facing projection of a
+ * handler's *private* classification. A handler maps the raw error (HTTP status, `Retry-After`, DB error
+ * shapes — all private) into one of three dispositions; the consumer reads the disposition without
+ * knowing how the handler decided it (adapter-as-normalization-hub):
+ *  - `transient` — worth recovering (will likely succeed on a retry / reconnection).
+ *  - `terminal` — give up; the failure won't resolve by retrying (e.g. a 4xx client error).
+ *  - `deferred` — parked for later replay (an offline-queued operation awaiting reconnection).
+ *
+ * **Orthogonal** to the Reliability *Intent* `tolerance` axis (which is user-impact *severity*:
+ * forgivable / degraded / terminal). Disposition is *recoverability*; tolerance is *severity*; the UX
+ * reads both together — they are NOT 1:1 (a `transient` failure can still be `terminal`-severity to the
+ * user, and a `terminal` failure can be `forgivable`).
+ */
+export type FailureDisposition = 'transient' | 'terminal' | 'deferred';
+
+/**
+ * **Fork 2 (#1032) — the core phases of an in-flight recovery** (the `recovering` observable state),
+ * kept SEPARATE from data/loader status (the TanStack `status` vs `fetchStatus` split). This is the
+ * *closed core* of an OPEN meta-schema:
+ *  - `retrying` — a retry attempt is in flight or its backoff `delay` is elapsing.
+ *  - `queued` — the operation is parked in an offline queue, awaiting reconnection replay.
+ *  - `awaiting-manual` — recovery is paused pending a user-triggered retry affordance.
+ *
+ * `circuit-open` (and any future `rate-limited`) are **registered extensions**, not core members — the
+ * protocol bundles no circuit-breaker handler, so those phases enter via registration when a handler that
+ * produces them is installed (see {@link RecoveryPhase}).
+ */
+export type RecoveryPhaseCore = 'retrying' | 'queued' | 'awaiting-manual';
+
+/**
+ * **Fork 2 (#1032) — the open meta-schema for recovery phase.** A registered extension value (e.g.
+ * `circuit-open`, surfaced by a FUI circuit-breaker handler) widens the union WITHOUT a contract break —
+ * the `(string & {})` tail keeps the core members autocompletable while admitting registered extensions.
+ * Mirrors the open-system stance of intents (standardize the meta-schema, not the closed list): a
+ * conformant consumer binds to the phase it understands and treats unknown phases as generic `recovering`.
+ */
+export type RecoveryPhase = RecoveryPhaseCore | (string & {});
 
 /**
  * Everything a handler needs to decide a recovery — pure context, no recovery logic. The consumer
@@ -61,6 +122,19 @@ export interface RecoveryContext {
  */
 export interface RecoveryResult {
   readonly outcome: RecoveryOutcome;
+  /**
+   * **Fork 1 (#1032)** — the normalized recoverability of the failure (`transient`/`terminal`/`deferred`),
+   * the handler's UX-facing projection of its private classification. Optional on the contract for
+   * backward compatibility; a conformant handler SHOULD set it so the consumer can surface recoverability
+   * independent of which handler ran. ORTHOGONAL to the Reliability Intent `tolerance` (severity) axis.
+   */
+  readonly disposition?: FailureDisposition;
+  /**
+   * **Fork 2 (#1032)** — the in-flight recovery phase to surface while `outcome` keeps the operation in
+   * the `recovering` state (`retrying`/`queued`/`awaiting-manual` core, plus registered extensions like
+   * `circuit-open`). Read by the Reliability + Loader Intent UX without knowing which handler produced it.
+   */
+  readonly phase?: RecoveryPhase;
   /** Milliseconds to wait before the next attempt (backoff) — applies to `retry`/`queued`. */
   readonly delay?: number;
   /** Advisory note surfaced for legibility / logging — never control flow. */

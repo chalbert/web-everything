@@ -1,7 +1,7 @@
 {
   "id": "error-recovery",
   "name": "Error Recovery",
-  "summary": "Conformance reference for mechanism failure recovery via pluggable handlers. Defines the CustomRecoveryHandler contract, registry resolution pattern, and observable states. Applies to any operation — HTTP, database, computation, async tasks.",
+  "summary": "Conformance reference for mechanism failure recovery via pluggable handlers. Defines the CustomRecoveryHandler contract, registry resolution pattern, observable states, and the #1032 error-recovery semantics: a normalized failure disposition (transient/terminal/deferred) and an open recovery-phase meta-schema (core retrying/queued/awaiting-manual; circuit-open a registered extension), with raw classification, backoff math, and composition order kept private to handlers. Applies to any operation — HTTP, database, computation, async tasks.",
   "status": "concept",
   "ownedByProject": "webreliability",
   "realizesIntent": "reliability",

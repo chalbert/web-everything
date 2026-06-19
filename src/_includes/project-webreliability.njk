@@ -49,7 +49,7 @@
         <tr><td colspan="5" style="font-weight:600; background:rgba(5,150,105,0.06);">Resilience patterns</td></tr>
         <tr><td><strong>Circuit breaker</strong></td><td>Any endpoint / service</td><td>Stop retrying after consecutive failures; probe to recover</td><td>✅ handler</td><td>—</td></tr>
         <tr><td><strong>Offline queuing</strong></td><td>Network operations</td><td>Queue operations when offline; replay on reconnection</td><td>✅ handler</td><td>—</td></tr>
-        <tr><td><strong>Error classification</strong></td><td>Handler-specific</td><td>Map raw errors to terminal / retryable / rate-limited</td><td>✅ handler</td><td>—</td></tr>
+        <tr><td><strong>Error classification</strong></td><td>Handler + contract</td><td>Raw classification (HTTP status, <code>Retry-After</code>, DB error shapes) stays private to the handler; the handler maps it into a <strong>normalized <code>disposition</code></strong> (<code>transient</code> / <code>terminal</code> / <code>deferred</code>) the consumer reads (#1032 Fork&nbsp;1)</td><td>normalized output (contract) + raw classification (handler)</td><td>—</td></tr>
         <tr><td colspan="5" style="font-weight:600; background:rgba(99,102,241,0.06);">UX — composed, not reimplemented</td></tr>
         <tr><td><strong>Loading states</strong></td><td>Resource consumers</td><td>Skeleton, overlay, replacement during recovery</td><td colspan="2">🔗 <a href="/intents/loader/">Loader Intent</a></td></tr>
         <tr><td><strong>Fallback content</strong></td><td>Resource consumers</td><td>Skeleton, empty, or stale-previous on exhaustion</td><td colspan="2">🔗 <a href="/intents/reliability/">Reliability Intent</a> fallback dimension</td></tr>
@@ -168,7 +168,7 @@ async function runWithRecovery(
     <tbody>
       <tr>
         <td><code>recovering</code></td>
-        <td>A retry or queue result is pending; the operation is in flight or waiting</td>
+        <td>A retry or queue result is pending; the operation is in flight or waiting. The <code>RecoveryResult.phase</code> discriminator (#1032 Fork&nbsp;2) refines <em>which</em> in-flight phase: <code>retrying</code> / <code>queued</code> / <code>awaiting-manual</code> (core) + registered extensions (e.g. <code>circuit-open</code>)</td>
         <td><code>recovery: automatic | manual</code></td>
       </tr>
       <tr>
@@ -209,9 +209,21 @@ async function runWithRecovery(
 /** Outcome the handler instructs the consumer to apply. */
 type RecoveryOutcome = 'retry' | 'queued' | 'fallback' | 'abort';
 
+/** #1032 Fork 1 — normalized recoverability (the UX-facing projection of
+ *  the handler's PRIVATE classification). Orthogonal to the Reliability
+ *  Intent `tolerance` axis (recoverability × severity — not 1:1). */
+type FailureDisposition = 'transient' | 'terminal' | 'deferred';
+
+/** #1032 Fork 2 — in-flight recovery phase. Open meta-schema: a minimal
+ *  core, widened by REGISTERED extensions without a contract break. */
+type RecoveryPhaseCore = 'retrying' | 'queued' | 'awaiting-manual';
+type RecoveryPhase     = RecoveryPhaseCore | (string & {}); // e.g. 'circuit-open' (registered extension)
+
 /** Returned when a handler accepts the error. */
 interface RecoveryResult {
     outcome: RecoveryOutcome;
+    disposition?: FailureDisposition; // #1032 — what kind of failure it was.
+    phase?: RecoveryPhase;            // #1032 — which in-flight recovery phase to surface.
     delay?: number;       // ms before retry (outcome: 'retry' only).
     signal?: AbortSignal; // Fresh signal for the next attempt.
 }
@@ -240,6 +252,7 @@ abstract class CustomRecoveryHandler {
     <li><strong>First-that-accepts:</strong> handlers are tried in registration order. The first <code>tryRecover()</code> that returns a non-null <code>RecoveryResult</code> owns the recovery; subsequent handlers are not called. Mirrors the pattern used by <code>CustomExpressionParserRegistry</code> (<code>tryParse</code>) and route matching (<code>matchRoute</code>).</li>
     <li><strong>No default handlers:</strong> the protocol ships no built-in handlers. Implementations (HTTP retry, circuit breaker, offline queue) are registered by the consuming project — keeps the standard lean and prevents prescribing strategies that may not suit every operation type.</li>
     <li><strong>Null means pass-through:</strong> a handler returning <code>null</code> explicitly declines the error without side effects. Avoids the need for a separate <code>canHandle()</code> predicate.</li>
+    <li><strong>Composition is an author-ordered composite handler, not protocol orchestration (#1032 Fork&nbsp;3):</strong> single-dispatch is preserved — the registry still picks the <em>first</em> handler that accepts. Multi-concern cooperation (breaker × retry × offline) is a composite handler the author <em>wraps in the order they need</em> (the Polly <code>PolicyWrap</code> analogue), since the wrap order is load-bearing: <code>new CircuitBreakerHandler(new RetryHandler(httpRetry))</code> counts a whole retried attempt as one breaker call (correct for short delays); wrap the other way for long delays. A flat-escalation <code>'continue'</code> outcome is <strong>not</strong> in the contract — it expresses only flat fallthrough, never this nesting, so it's a <em>deferred, app-opt-in</em> capability (added additively when a real app needs flat escalation), not a rejected branch.</li>
   </ul>
 
   <h4 id="exports">Exports</h4>
@@ -252,6 +265,8 @@ abstract class CustomRecoveryHandler {
       <tr><td><code>RecoveryContext</code></td><td>Interface</td><td>Error, attempt count, abort signal passed to handlers</td></tr>
       <tr><td><code>RecoveryResult</code></td><td>Interface</td><td>Outcome returned by an accepting handler</td></tr>
       <tr><td><code>RecoveryOutcome</code></td><td>Type</td><td><code>'retry' | 'queued' | 'fallback' | 'abort'</code></td></tr>
+      <tr><td><code>FailureDisposition</code></td><td>Type</td><td>#1032 Fork&nbsp;1 — <code>'transient' | 'terminal' | 'deferred'</code> (normalized recoverability)</td></tr>
+      <tr><td><code>RecoveryPhase</code></td><td>Type</td><td>#1032 Fork&nbsp;2 — open meta-schema; core <code>'retrying' | 'queued' | 'awaiting-manual'</code> + registered extensions</td></tr>
     </tbody>
   </table>
 </section>
@@ -280,6 +295,14 @@ abstract class CustomRecoveryHandler {
   <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
     <li>Should <code>RecoveryContext</code> carry an attempt counter, or is that the handler's internal concern?</li>
     <li>Is a cancellation hook (<code>RecoveryResult.abort()</code>) needed, or is AbortSignal sufficient?</li>
-    <li>How should Resource Loader surface the active recovery state (retrying vs. queued vs. circuit-open) to the Loader Intent UX?</li>
   </ul>
+  <p style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <strong>Resolved (#1032 Fork&nbsp;2):</strong> Resource Loader surfaces the active recovery state via the
+    <code>RecoveryPhase</code> discriminator on the in-flight <code>recovering</code> state — an open meta-schema
+    with a minimal core (<code>retrying</code> / <code>queued</code> / <code>awaiting-manual</code>). <code>circuit-open</code>
+    is a <strong>registered extension</strong>, not a core member, because the protocol bundles no
+    circuit-breaker handler. Kept separate from data/loader status (the TanStack <code>status</code> vs
+    <code>fetchStatus</code> split); the Loader Intent UX binds to the phase it understands and treats unknown
+    phases as generic <code>recovering</code>.
+  </p>
 </section>

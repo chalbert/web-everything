@@ -3,8 +3,10 @@ type: issue
 workItem: story
 size: 3
 parent: "1019"
-status: open
+status: resolved
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
 tags: []
 ---
 
@@ -95,3 +97,12 @@ only when a real app demonstrates it. Do **not** add it in this build.
 - Flip the **'Error classification'** row ([njk:52](../src/_includes/project-webreliability.njk#L52)) from `✅ handler` to "normalized disposition output (contract) + raw classification (handler)".
 - Resolve **open question #3** ([njk:283](../src/_includes/project-webreliability.njk#L283)) with the recovery-phase discriminator above.
 - Add the composite-handler composition note next to the registry-not-chain line ([njk:239](../src/_includes/project-webreliability.njk#L239)).
+
+## Progress (resolved 2026-06-19)
+
+Authored the #1032 ruling into the contract + page:
+- **we:reliability/contract.ts** — added `FailureDisposition` (`transient`/`terminal`/`deferred`, Fork 1), `RecoveryPhaseCore` + open-meta-schema `RecoveryPhase` (`RecoveryPhaseCore | (string & {})`, Fork 2, `circuit-open`/`rate-limited` documented as registered extensions not core), and extended `RecoveryResult` with optional `disposition?` + `phase?`. Module-header now encodes all three forks (incl. Fork 3: author-ordered composite handler, no `'continue'`) replacing the "held behind #1032" note. Orthogonality of disposition vs Intent `tolerance` spelled out.
+- **we:src/_data/protocols/error-recovery.json** — summary now states the normalized semantics (the protocols registry is split per-entry since #1145/#1146; edited this entry's own file only).
+- **we:src/_includes/project-webreliability.njk** — flipped the Error-classification row to "normalized output (contract) + raw classification (handler)"; added `FailureDisposition`/`RecoveryPhase` to the Interface block + Exports table; added the composite-handler/`PolicyWrap` composition note (Fork 3); refined the `recovering` observable-state row with the `phase` discriminator; resolved open-question #3 inline (recovery-phase surfacing).
+
+Invariants preserved: backoff math stays in handlers (opaque `delay`); runtime handlers are FUI. Whole-repo gate green.
