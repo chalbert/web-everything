@@ -15,7 +15,9 @@
         "1112-webvalidation-commitment-policy-standalone-model-full-deferr",
         "1117-webcontexts-strict-vs-flexible-lookup-modes-consulting-claim",
         "1125-webexpressions-observer-upgrades-addednodes-dynamic-insertio",
-        "1132-webdirectives-default-customcommentparser-customcommentparse"
+        "1132-webdirectives-default-customcommentparser-customcommentparse",
+        "1046-repoint-plateau-app-from-we-plugs-to-frontierui-plugs",
+        "1100-webregistries-plugged-mode-global-patching-api-applypatches-"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",
