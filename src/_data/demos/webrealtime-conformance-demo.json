@@ -1,0 +1,12 @@
+{
+  "id": "webrealtime-conformance-demo",
+  "name": "Web Realtime Conformance Demo",
+  "summary": "The runnable proof of the webrealtime transport-negotiation contract+runtime (#1025, slice C). An in-demo negotiating stub conforms to CustomTransportProvider: it probes a prefer order top-down, degrades when a capability-gated channel (WebTransport) is absent, falls through to the long-poll floor, exposes send only on bidirectional channels (type-honest one-way SSE), and round-trips messages. The runtime (native SSE/WebSocket, the WebTransport probe, hub adapters) is impl in Frontier UI — only the contract crosses the seam.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runnable proof of the transport-negotiation contract+runtime (<a href=\"/backlog/1025-webrealtime-impl-epic/\">#1025</a>, slice C). An in-demo <strong>negotiating stub</strong> conforms to <code>CustomTransportProvider</code> and proves native-first negotiation.</p><h3>Verified contract</h3><p>Probes the prefer order top-down; an absent capability-gated WebTransport degrades down the floor; the long-poll floor always works; <code>send</code> is present only on bidirectional channels (type-honest one-way SSE); messages round-trip and <code>close()</code> fires. The runtime is impl in Frontier UI — only the contract crosses the seam.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webrealtime-conformance-demo.html",
+  "projects": [
+    "webrealtime"
+  ]
+}
