@@ -22,6 +22,12 @@ export type {
   StoreDefinition,
 } from './CustomStoreRegistry';
 
+export {
+  default as CustomChangeStrategyRegistry,
+  createDefaultChangeStrategyRegistry,
+} from './CustomChangeStrategyRegistry';
+export type { CustomChangeStrategyRegistryOptions } from './CustomChangeStrategyRegistry';
+
 export { NativeChangeStrategy, nativeChangeStrategy } from './CustomChangeStrategy';
 export type {
   ChangeRecord,
