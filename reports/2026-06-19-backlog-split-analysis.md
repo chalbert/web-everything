@@ -137,14 +137,14 @@ of the rubric), each a future `/slice` candidate. The body itself seeds "slice p
 
 | Standard | Spec lineage | Impl surface | §10 gap (seed) | Granularity |
 |---|---|---|---|---|
-| webregistries | `src/_includes/project-webregistries.njk` | `plugs/webregistries/*` (9 TODOs) | global-patching API stubbed ([index.ts:49](../plugs/webregistries/index.ts#L49)), `getStandInElement`/downgrade/`whenDefined` TODO ([CustomElementRegistry.ts:114,135,148](../plugs/webregistries/CustomElementRegistry.ts#L114)), 1 of ~10 registry types | sub-epic |
-| webstates | `src/_includes/project-webstates.njk` | `plugs/webstates/*` (CustomStore only) | change-tracking **and** storage protocols absent; **reconcile [#503](../backlog/503-build-the-webstates-storage-protocol-durable-client-persiste.md)** (resolved·size5 but L3 found no storage impl) | sub-epic |
-| webvalidation | `src/_includes/project-webvalidation.njk` | `plugs/webvalidation/*` | no L1 observable attrs/events, commitment policy, error-summary (registry plane only) | sub-epic |
-| webcontexts | `src/_includes/project-webcontexts.njk` | `plugs/webcontexts/*` (3 TODOs) | no claim/query protocol, strict-vs-flexible modes, SSR | sub-epic |
-| webbehaviors | `src/_includes/project-webbehaviors.njk` | `plugs/webbehaviors/*` | missing `whenDefined`, ownerElement-vs-target naming, hyphen validation | sub-epic (small) |
-| webexpressions | `src/_includes/project-webexpressions.njk` | `plugs/webexpressions/*` | excludedElements, cloak removal, partial upgrade-trigger interception | sub-epic (small) |
-| webtheme | `src/_includes/project-webtheme.njk` | `webtheme/*` (compile/schemes/tokens) | scheme runtime unproven, high-contrast missing, accent CSS not regression-tested | sub-epic (small) |
-| webdirectives | `src/_includes/project-webdirectives.njk` | `plugs/webdirectives/*` (CustomTemplateDirective only) | ~70% unimplemented — CustomComment subsystem, multi-template; **build-vs-defer = prioritization, not a fork** | sub-epic |
+| webregistries | `we:src/_includes/project-webregistries.njk` | `we:plugs/webregistries/` (9 TODOs) | global-patching API stubbed (`we:plugs/webregistries/index.ts:49`), `getStandInElement`/downgrade/`whenDefined` TODO (`we:plugs/webregistries/CustomElementRegistry.ts:114,135,148`), 1 of ~10 registry types | sub-epic |
+| webstates | `we:src/_includes/project-webstates.njk` | `we:plugs/webstates/` (CustomStore only) | change-tracking **and** storage protocols absent; **reconcile [#503](../backlog/503-build-the-webstates-storage-protocol-durable-client-persiste.md)** (resolved·size5 but L3 found no storage impl) | sub-epic |
+| webvalidation | `we:src/_includes/project-webvalidation.njk` | `we:plugs/webvalidation/` | no L1 observable attrs/events, commitment policy, error-summary (registry plane only) | sub-epic |
+| webcontexts | `we:src/_includes/project-webcontexts.njk` | `we:plugs/webcontexts/` (3 TODOs) | no claim/query protocol, strict-vs-flexible modes, SSR | sub-epic |
+| webbehaviors | `we:src/_includes/project-webbehaviors.njk` | `we:plugs/webbehaviors/` | missing `whenDefined`, ownerElement-vs-target naming, hyphen validation | sub-epic (small) |
+| webexpressions | `we:src/_includes/project-webexpressions.njk` | `we:plugs/webexpressions/` | excludedElements, cloak removal, partial upgrade-trigger interception | sub-epic (small) |
+| webtheme | `we:src/_includes/project-webtheme.njk` | `we:webtheme/` (compile/schemes/tokens) | scheme runtime unproven, high-contrast missing, accent CSS not regression-tested | sub-epic (small) |
+| webdirectives | `we:src/_includes/project-webdirectives.njk` | `we:plugs/webdirectives/` (CustomTemplateDirective only) | ~70% unimplemented — CustomComment subsystem, multi-template; **build-vs-defer = prioritization, not a fork** | sub-epic |
 
 **Excluded (body says intentional layering, NOT re-filed):** webcomponents (#854/#792), webguards
 (#178/#273/#338), webworkflows (#657), webinjectors (minor / cross-repo deferred).
@@ -191,7 +191,7 @@ the usual partial.
 
 1. #1042 stays `workItem: epic` (kind **b**, no story→epic conversion); it has no `size` to drop. Refresh
    its digest to umbrella framing + pointer to this report.
-2. Scaffold the 8 sub-epics: `node scripts/backlog.mjs scaffold --type=idea --workitem=epic
+2. Scaffold the 8 sub-epics: `node we:scripts/backlog.mjs scaffold --type=idea --workitem=epic
    --title="<standard> completion …" --parent=1042 --digest="…"` (no `--size`, no `--blocked-by`), each
    body seeded with its §10 gap row + spec-page lineage.
 3. `npm run check:standards` green; backlog count `+8`.
