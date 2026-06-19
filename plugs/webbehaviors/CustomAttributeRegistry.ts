@@ -144,6 +144,14 @@ export default class CustomAttributeRegistry extends HTMLRegistry<AttributeDefin
   #lazyLoading = new Map<string, Promise<void>>();
 
   /**
+   * Pending `whenDefined(name)` resolvers (#1119, spec njk:113), settled the moment that name is
+   * `define`d — including the lazy path, since `#loadLazy` resolves a name through `define()`. Keyed by
+   * name; a name maps to the list of awaiters registered before it was defined. Mirrors the working
+   * `webregistries/CustomElementRegistry.whenDefined` (#1101), NOT the rejecting stub.
+   */
+  #whenDefinedResolvers = new Map<string, ((ctor: ImplementedAttribute) => void)[]>();
+
+  /**
    * Roots currently upgraded/observed, so a lazy load that resolves later can
    * find and upgrade the elements whose appearance triggered it.
    */
@@ -212,6 +220,31 @@ export default class CustomAttributeRegistry extends HTMLRegistry<AttributeDefin
     this.#lazyLoading.delete(name);
 
     this.set(name, definition);
+
+    // Settle any pending whenDefined(name) promises now the name is defined (#1119). This single drain
+    // point covers BOTH the eager and lazy paths, because #loadLazy resolves a name through define().
+    const pending = this.#whenDefinedResolvers.get(name);
+    if (pending) {
+      this.#whenDefinedResolvers.delete(name);
+      pending.forEach((resolve) => resolve(attribute));
+    }
+  }
+
+  /**
+   * Returns a promise that resolves with the attribute constructor when `name` is defined (#1119, spec
+   * njk:113). Resolves **immediately** if the name is already defined; otherwise queues a resolver settled
+   * by the next `define(name, …)` — which the lazy-load path also reaches (`#loadLazy` → `define`), so a
+   * `defineLazy` name resolves on its load completion. Compatible with native
+   * `CustomElementRegistry.whenDefined`; never rejects (unlike the webregistries stub the spec warns off).
+   */
+  whenDefined(name: string): Promise<ImplementedAttribute> {
+    const existing = this.get(name);
+    if (existing) return Promise.resolve(existing);
+    return new Promise((resolve) => {
+      const list = this.#whenDefinedResolvers.get(name) ?? [];
+      list.push(resolve);
+      this.#whenDefinedResolvers.set(name, list);
+    });
   }
 
   /**
