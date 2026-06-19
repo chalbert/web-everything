@@ -137,17 +137,24 @@ const effective = resolvePolicy(projectPolicy);   // → the gates that actually
 <section id="status" class="section-card">
   <h3 id="status">Status</h3>
   <p>
-    Web Compliance is in <strong>concept</strong> phase; the policy/rule model is specified here as the
-    canonical first slice of the compliance epic (<a href="/backlog/351-web-compliance-project/">#351</a>).
-    The Project + policy-model shape was ratified: <strong>no compliance-specific protocol in v1</strong>
-    &mdash; results ride <a href="/projects/webreporting/">Web Reporting</a>'s report model, and a
-    policy-interchange protocol is added only if a concrete cross-vendor need appears. The gates
+    Web Compliance is in <strong>PoC</strong> phase: the policy/rule model is specified here as the
+    canonical first slice of the compliance epic (<a href="/backlog/351-web-compliance-project/">#351</a>),
+    and <strong>all four spec layers are built</strong> in the PoC impl tree (<code>we:webcompliance/</code>
+    &mdash; <code>gate.ts</code>, <code>waiver.ts</code>, <code>audit.ts</code>,
+    <code>policies/platform-default.ts</code>, <code>conventions/vcs.ts</code>; 36 unit tests). The Project
+    + policy-model shape was ratified: <strong>no compliance-specific protocol in v1</strong> &mdash;
+    results ride <a href="/projects/webreporting/">Web Reporting</a>'s report model, and a policy-interchange
+    protocol is added only if a concrete cross-vendor need appears. The built layers: gates
     (<a href="/backlog/437-build-the-compliance-gates-ci-runners-that-block-on-a-policy/">#437</a>), waivers
     (<a href="/backlog/438-add-waivers-exceptions-tracked-expiring-audited-overrides/">#438</a>), audit
-    trail (<a href="/backlog/439-build-the-audit-evidence-trail-emit-through-web-reporting/">#439</a>), and
-    the retrofit of <code>check:standards</code> + readiness gates as declared policies
-    (<a href="/backlog/440-retrofit-check-standards-readiness-gates-as-declared-complia/">#440</a>) build on
-    this model.
+    trail emit through Web Reporting
+    (<a href="/backlog/439-build-the-audit-evidence-trail-emit-through-web-reporting/">#439</a>), the
+    retrofit of <code>check:standards</code> + readiness gates as declared policies
+    (<a href="/backlog/440-retrofit-check-standards-readiness-gates-as-declared-complia/">#440</a>), and the
+    platform-default VCS-convention vocabulary
+    (<a href="/backlog/579-platform-default-vcs-convention-vocabulary-in-the-compliance/">#579</a>) &mdash;
+    all resolved. The deferred <em>hosted</em> compliance product is a separate, parked question
+    (<a href="/backlog/966-where-does-hosted-we-compliance-validation-live-plateau-app-/">#966</a>).
   </p>
   <h4 style="margin-top: 1rem;">Open Questions</h4>
   <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
