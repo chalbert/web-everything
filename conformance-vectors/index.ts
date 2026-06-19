@@ -10,9 +10,14 @@
  */
 export * from './schema.js';
 export { validatorResolutionSuite } from './validator-resolution.vectors.js';
+export { sessionReplayEnvelopeSuite } from './session-replay-envelope.vectors.js';
 
 import type { ConformanceVectorSuite } from './schema.js';
 import { validatorResolutionSuite } from './validator-resolution.vectors.js';
+import { sessionReplayEnvelopeSuite } from './session-replay-envelope.vectors.js';
 
 /** The registry of shipped per-standard suites — what the #899 driver enumerates. */
-export const conformanceSuites: ReadonlyArray<ConformanceVectorSuite> = [validatorResolutionSuite];
+export const conformanceSuites: ReadonlyArray<ConformanceVectorSuite> = [
+  validatorResolutionSuite,
+  sessionReplayEnvelopeSuite,
+];

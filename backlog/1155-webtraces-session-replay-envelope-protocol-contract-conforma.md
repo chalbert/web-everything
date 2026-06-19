@@ -3,8 +3,11 @@ type: issue
 workItem: story
 parent: "140"
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: plugs/webtraces/sessionReplayEnvelope.ts
 tags: []
 ---
 

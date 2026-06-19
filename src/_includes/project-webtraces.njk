@@ -105,3 +105,35 @@ effect(operation, { input, output, attributes });
         <li><strong>Client-only:</strong> All span creation, context propagation, sampling, attribute attachment, and exporter configuration are client-side operations. No server rendering contract is needed for trace instrumentation.</li>
     </ul>
 </section>
+
+<section id="protocol-session-replay-envelope" class="section-card">
+    <h3 id="session-replay-envelope">Session-Replay Envelope Protocol</h3>
+    <p>
+        Ratified in <a href="/backlog/992-design-the-trace-replay-substrate-webtraces-webevents-the-14/">#992</a>.
+        A <strong>thin binding/ordering</strong> contract for lightweight local session replay — an ordered
+        session of Web Traces spans plus <strong>correlated references</strong> to three artifacts whose schemas
+        it redefines none of:
+    </p>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Snapshot</strong> — the <a href="/projects/webcontexts/">Web Contexts</a> serialization (<code>&lt;script type="context"&gt;</code>) is the replay starting state.</li>
+        <li><strong>Journal (the determinism anchor)</strong> — the <a href="/projects/webstates/">Web States</a> <code>ChangeRecord</code> journal is <em>re-applied</em> to the snapshot, executing <strong>no application JavaScript</strong> (anchor A — deterministic over journaled state).</li>
+        <li><strong>Action identity (correlation)</strong> — <a href="/projects/webevents/">Web Events</a> typed-event identity labels which action caused which diffs; correlation/comprehension only, <strong>not</strong> load-bearing for journaled-state determinism.</li>
+    </ul>
+
+    <h4>Required invariants (#992 amendment)</h4>
+    <ol class="list-decimal ml-6 text-gray-600 text-sm">
+        <li><strong>Snapshot↔journal consistency precondition.</strong> The snapshot reference carries a
+            version/hash (reusing <code>ChangeRecord.version</code>) that the journal asserts it applies onto;
+            a replayer <strong>refuses or flags</strong> a drifted snapshot rather than applying diffs blindly.</li>
+        <li><strong>Off-journal-state boundary.</strong> Non-journaled state (imperative DOM focus/scroll,
+            refs, non-store locals) is <strong>out of replay scope</strong> by contract. The optional
+            <strong>behavioral-replay</strong> mode (re-fold actions through handlers — where Web Events
+            identity <em>is</em> load-bearing) is the documented escape hatch for faithful off-journal repro.</li>
+    </ol>
+
+    <p>
+        The contract type + structural validator ship at <code>we:plugs/webtraces/sessionReplayEnvelope.ts</code>;
+        behavioral conformance vectors at <code>we:conformance-vectors/session-replay-envelope.vectors.ts</code>
+        judge a replayer's observable outcome (drift-refused vs. applied; off-journal disclosed vs. reproduced).
+    </p>
+</section>
