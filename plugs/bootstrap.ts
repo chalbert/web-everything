@@ -52,6 +52,7 @@ import { registerRouter } from '../blocks/router/registerRouter';
 import { registerTransient } from '../blocks/transient/registerTransient';
 import { registerNavigation } from '../blocks/navigation/registerNavigation';
 import { registerForEach } from '../blocks/for-each/registerForEach';
+import { registerTrustedHtml } from '../blocks/trusted-html/registerTrustedHtml';
 import { registerTraits } from './webbehaviors/traitManifest';
 // The trait manifest — "The Map" (#116/#170). Static import so it resolves synchronously
 // *before* the first upgrade(): the observer's attribute filter is fixed at upgrade time, so
@@ -272,6 +273,9 @@ registerNavigation(window.attributes);
 // Register for-each directive
 registerForEach(window.attributes);
 
+// Register trusted-html behavior (Trusted Types policy enforcement on innerHTML mutations)
+registerTrustedHtml(window.attributes);
+
 // Register lazily-loaded traits from The Map — the trait manifest (#116/#170/#448). Must run
 // before the first upgrade(): defineLazy seeds the observer's attribute filter, fixed at upgrade
 // time. Ships empty until the Enforcer is ported, so this is a no-op today — the wiring is the point.
@@ -285,5 +289,6 @@ console.log('[Web Everything] Router registered: route-view, route-outlet, route
 console.log('[Web Everything] Transient components registered: auto-heading');
 console.log('[Web Everything] Navigation registered: nav:list, nav:section');
 console.log('[Web Everything] Directives registered: for-each');
+console.log('[Web Everything] Behaviors registered: trusted-html (Trusted Types innerHTML enforcement)');
 console.log('[Web Everything] Data Grid registered: grid:cell-navigation');
 console.log('[Web Everything] Validity merge registered: customValidityMerge (source-reduction default), <validity-merge-field>');

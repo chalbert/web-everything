@@ -1,0 +1,11 @@
+{
+  "id": "trusted-html-behavior-demo",
+  "name": "Trusted HTML Behavior Demo",
+  "summary": "Attribute behavior that routes an element's innerHTML assignments through a Trusted Types policy (the TrustedHTML sink) instead of writing a raw string to the DOM.",
+  "description": "<h2>Concept</h2><p>The <code>trusted-html</code> attribute is the composable <strong>behavior</strong> form of the <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API\" target=\"_blank\" rel=\"noopener\">Trusted Types API</a>. Put it on any element and every string assignment to that element's <code>innerHTML</code> is routed through a <code>TrustedHTMLPolicy.createHTML(...)</code> sink before it reaches the DOM — making the sink CSP-compatible (<code>require-trusted-types-for 'script'</code>) and auditable.</p><h3>Key points</h3><ul><li><strong>Behavior, not element:</strong> hardens the innerHTML sink of an existing element (attribute on any element), distinct from the <code>trusted-html</code> element form it composes with (bias-toward-separation).</li><li><strong>Native-first / graceful degradation:</strong> when Trusted Types is unavailable (Firefox/Safari today, non-secure contexts) the behavior is a transparent pass-through — assignments still work, they are just not routed through a <code>TrustedHTML</code> object.</li><li><strong>Shared policy:</strong> one policy per name, deduped process-wide; an app can pre-register a same-named sanitizing policy and the behavior reuses it.</li><li><strong>Side-by-side contrast:</strong> the demo shows a hardened sink (with the attribute) next to a plain sink (native innerHTML).</li></ul>",
+  "status": "active",
+  "liveUrl": "http://localhost:3000/demos/trusted-html-behavior-demo.html",
+  "projects": [
+    "webbehaviors"
+  ]
+}

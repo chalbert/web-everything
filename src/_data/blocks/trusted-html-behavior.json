@@ -1,12 +1,30 @@
 {
   "id": "trusted-html-behavior",
   "name": "Trusted HTML Behavior",
-  "status": "draft",
+  "status": "active",
   "type": "Behavior",
   "summary": "Attribute-based behavior that enforces Trusted Types policies on an element's innerHTML mutations.",
+  "extendsClass": "CustomAttribute",
+  "implementedBy": "@frontierui/blocks/trusted-html/index.ts",
+  "exports": [
+    "TrustedHtmlBehavior",
+    "registerTrustedHtml"
+  ],
+  "syntax": {
+    "description": "Attribute placed on any element; an optional value names the Trusted Types policy to route through (default: \"trusted-html\").",
+    "examples": [
+      "<div trusted-html></div>",
+      "<article trusted-html=\"article-html\"></article>"
+    ]
+  },
   "related": [
     "trusted-html"
   ],
+  "fuiDemo": {
+    "file": "trusted-html-behavior-demo.html",
+    "title": "Trusted HTML Behavior — Trusted Types innerHTML enforcement",
+    "height": 560
+  },
   "webStandards": {
     "trustedTypes": {
       "usage": "An attribute behaviour that enforces a Trusted Types policy on an element’s `innerHTML` mutations via `TrustedHTML`.",

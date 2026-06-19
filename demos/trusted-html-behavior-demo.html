@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trusted HTML Behavior Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/trusted-html-behavior-demo.css">
+</head>
+<body>
+  <div class="demo-container">
+    <h1>Trusted HTML Behavior Demo</h1>
+    <p class="demo-subtitle">
+      The <code>trusted-html</code> attribute routes every <code>innerHTML</code> assignment on an
+      element through a <a href="https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API"
+      target="_blank" rel="noopener">Trusted Types</a> policy — the auditable, CSP-compatible
+      <code>TrustedHTML</code> sink — instead of writing a raw string straight to the DOM.
+    </p>
+
+    <div class="support" data-test="support">
+      <span class="support-label">Trusted Types support:</span>
+      <span class="support-value" data-test="support-value">checking…</span>
+    </div>
+
+    <!-- Demo 1: hardened sink (trusted-html present) -->
+    <section class="demo-section">
+      <h2 class="section-title">Hardened sink — <code>trusted-html</code></h2>
+      <p class="section-note">
+        Assignments to this element's <code>innerHTML</code> are routed through the policy. When
+        Trusted Types is available the behavior reports <strong>active</strong>; otherwise it is a
+        transparent native pass-through (the assignment still works).
+      </p>
+      <div class="controls">
+        <input
+          type="text"
+          class="html-input"
+          data-test="trusted-input"
+          value="<strong>Hello</strong> from a <em>trusted</em> sink"
+          aria-label="HTML to assign to the hardened sink"
+        />
+        <button type="button" class="apply-btn" data-test="trusted-apply">Assign innerHTML</button>
+      </div>
+      <div class="sink hardened" trusted-html data-test="trusted-sink"></div>
+      <div class="status" data-test="trusted-status"></div>
+    </section>
+
+    <!-- Demo 2: plain sink (no attribute) for contrast -->
+    <section class="demo-section">
+      <h2 class="section-title">Plain sink — no attribute (for contrast)</h2>
+      <p class="section-note">
+        An identical element <em>without</em> the behavior. Its <code>innerHTML</code> is the native
+        accessor — no policy is consulted.
+      </p>
+      <div class="controls">
+        <input
+          type="text"
+          class="html-input"
+          data-test="plain-input"
+          value="<strong>Hello</strong> from a plain sink"
+          aria-label="HTML to assign to the plain sink"
+        />
+        <button type="button" class="apply-btn" data-test="plain-apply">Assign innerHTML</button>
+      </div>
+      <div class="sink" data-test="plain-sink"></div>
+      <div class="status" data-test="plain-status"></div>
+    </section>
+  </div>
+
+  <!-- Bootstrap: applies patches, exposes globals, registers trusted-html. -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+
+  <script type="module">
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+
+    function init() {
+      // Upgrade attributes so the trusted-html behavior attaches to the hardened sink.
+      window.attributes.upgrade(document.body);
+
+      const supported = typeof window.trustedTypes !== 'undefined';
+      const supportValue = document.querySelector('[data-test="support-value"]');
+      if (supportValue) {
+        supportValue.textContent = supported
+          ? 'available — assignments route through TrustedHTML'
+          : 'unavailable — behavior is a native pass-through (still works)';
+        supportValue.classList.add(supported ? 'ok' : 'na');
+      }
+
+      wire('[data-test="trusted-apply"]', '[data-test="trusted-input"]', '[data-test="trusted-sink"]', '[data-test="trusted-status"]', supported);
+      wire('[data-test="plain-apply"]', '[data-test="plain-input"]', '[data-test="plain-sink"]', '[data-test="plain-status"]', false);
+
+      window.demoReady = true;
+    }
+
+    function wire(btnSel, inputSel, sinkSel, statusSel, routed) {
+      const btn = document.querySelector(btnSel);
+      const input = document.querySelector(inputSel);
+      const sink = document.querySelector(sinkSel);
+      const status = document.querySelector(statusSel);
+      if (!btn || !input || !sink || !status) return;
+
+      const assign = () => {
+        // The single line under test: a string assignment to innerHTML. On the hardened sink this
+        // is intercepted and routed through the Trusted Types policy; on the plain sink it is the
+        // native sink.
+        sink.innerHTML = input.value;
+        status.textContent = routed
+          ? 'Assigned via TrustedHTML policy (hardened sink).'
+          : 'Assigned via the native innerHTML sink.';
+        status.classList.toggle('routed', routed);
+      };
+
+      btn.addEventListener('click', assign);
+      assign(); // initial render
+    }
+  </script>
+</body>
+</html>
