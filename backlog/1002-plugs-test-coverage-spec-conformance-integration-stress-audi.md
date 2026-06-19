@@ -1,13 +1,23 @@
 ---
 type: idea
 workItem: epic
-size: 13
-status: open
+status: resolved
 dateOpened: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: none
 tags: []
 ---
 
 # Plugs test-coverage, spec-conformance & integration stress audit
+
+> **Umbrella epic** — partially sliced 2026-06-18 (`/slice 1002`). Three groundable slices cut now:
+> **#1009** (testing-strategy doc + WE-mirror coverage **measurement** — foundational), **#1010**
+> (webvalidation to the bar, both mirrors — the named priority slice), **#1011** (#960-class
+> patch-interaction stress harness). The remaining **~9 per-plug coverage+e2e slices** are deliberately
+> **not** pre-cut: their precise scope is unknown until #1009's WE-mirror measurement lands (the FUI
+> snapshot below is stale for the WE side — e.g. webvalidation shows 6 WE unit test files vs the "0"
+> here). **Re-run `/slice 1002` after #1009 lands** to cut the per-plug wave against measured gaps. See
+> `we:reports/2026-06-18-backlog-split-analysis.md`.
 
 Quality epic to bring **all 11** plug domains (webcomponents, webexpressions, webinjectors, webcontexts,
 webstates, webbehaviors, webguards, webvalidation, webregistries, webdirectives, core) to full test
@@ -37,7 +47,7 @@ zeroes below must go.
 **B. E2e + integration depth review (the priority lens).** For each plug, audit the real-browser e2e:
 is the plugged behavior actually exercised through `fui:plugs/bootstrap.ts`, or only asserted in
 happy-dom? Several plugs have rich unit tests but thin/absent e2e (webvalidation, webguards,
-webdirectives have **no dedicated** `plugs/__tests__/e2e/*.spec.ts`). Add the missing e2e lanes and
+webdirectives have **no dedicated** `we:plugs/__tests__/e2e/` spec). Add the missing e2e lanes and
 deepen the integration scenarios — patches composed, not tested in isolation.
 
 **C. Integration / patch-interaction stress.** Explicitly test the seams where one plug's patch can
