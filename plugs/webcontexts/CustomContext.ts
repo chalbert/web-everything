@@ -19,6 +19,16 @@ export interface ContextSubscription<T = any> {
 }
 
 /**
+ * A resolution query a context is asked to {@link CustomContext.claim}. `expression` is the dotted path
+ * being resolved (`user.name`, `currentUser.id`); a context inspects it to decide whether it owns the
+ * query. Mirrors the {@link ContextSubscription} expression shape.
+ */
+export interface ContextQuery {
+  /** The dotted expression being resolved, or null for the full-state query. */
+  expression?: string | null;
+}
+
+/**
  * Return type of subscribe() — provides current value and cleanup.
  */
 export interface ContextSubscriptionHandle<T = any> {
@@ -88,6 +98,22 @@ export default abstract class CustomContext<
 
   get value(): ContextValue {
     return typeof this.#value !== 'undefined' ? this.#value : (this.initialValue as ContextValue);
+  }
+
+  /**
+   * Negotiation hook (#1115): does this context own a given resolution `query`? The base **claims
+   * everything** (`return true`) — the most-flexible default, so an un-overriding context resolves any
+   * query exactly as before (resolution order is unchanged by this hook). A subclass narrows ownership
+   * by inspecting `query.expression` (e.g. a `UserContext` claims only `user.`/`currentUser.` queries),
+   * enabling selective resolution when a consumer consults `claim()` before delegating. Consumer-side
+   * primitive only: defining it here does not itself change how the registry resolves.
+   *
+   * @param query - the resolution query (its dotted `expression`).
+   * @param context - optional resolution context (the consuming element/scope), opaque to the base.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  claim(query: ContextQuery, context?: unknown): boolean {
+    return true;
   }
 
   set value(newValue: ContextValue) {
