@@ -22,7 +22,7 @@
 | Runs where | **any device, incl. mobile, offline** | **capable devices only** (WebGPU ~2 GB+ at the top end) | server, needs a key + network |
 | Cost | ~zero, at any volume | ~zero per call, but device-gated | **per call** (the cost that breaks flat-rate) |
 | Build | distill from teacher labels (offline) | fine-tune/distill a VLM (heavier) | none — it's the teacher |
-| Today | tooling built (#511/#512), training parked on corpus volume (#513) | not built | the interim bridge ([`anthropic-vision.mjs`](../../scripts/design-refs/providers/anthropic-vision.mjs), #485) |
+| Today | tooling built (#511/#512), training parked on corpus volume (#513) | epic #1073 (open, to slice) | the interim bridge ([`anthropic-vision.mjs`](../../scripts/design-refs/providers/anthropic-vision.mjs), #485) |
 
 ## Capabilities & limits
 
