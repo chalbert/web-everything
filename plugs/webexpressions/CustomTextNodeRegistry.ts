@@ -155,6 +155,26 @@ export default class CustomTextNodeRegistry extends HTMLRegistry<TextNodeDefinit
    */
   #addTextNodesOnTree(tree: Node): void {
     this.#applyOnTree(tree, 'add');
+    // Once a subtree's expressions are upgraded, reveal it: drop the CSS-cloak attribute (#1124, spec
+    // njk:247-268) — the v-cloak/x-cloak pattern. Covers both upgrade() and dynamic insertion (#1125).
+    this.#removeCloak(tree);
+  }
+
+  /**
+   * Remove the `[cloak]` attribute from an upgraded subtree (the CSS-cloak reveal, #1124): any cloaked
+   * element within `tree` (and `tree` itself), plus the nearest cloaked ancestor that hid this subtree.
+   */
+  #removeCloak(tree: Node): void {
+    const parent = tree as ParentNode & Node;
+    if (typeof parent.querySelectorAll === 'function') {
+      parent.querySelectorAll('[cloak]').forEach((el) => el.removeAttribute('cloak'));
+    }
+    if (tree instanceof Element && tree.hasAttribute('cloak')) {
+      tree.removeAttribute('cloak');
+    }
+    // The cloak is often on an ancestor wrapping the upgraded subtree (`<div cloak>…{{x}}…</div>`).
+    const host = tree instanceof Element ? tree : (tree as { parentElement?: Element | null }).parentElement ?? null;
+    host?.closest('[cloak]')?.removeAttribute('cloak');
   }
 
   /**
