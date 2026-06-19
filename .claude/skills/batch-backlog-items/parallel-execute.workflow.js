@@ -69,9 +69,9 @@ const PROBE_SCHEMA = {
     },
     touchesMonolith: {
       type: 'array', items: { type: 'string' },
-      description: 'still-monolithic shared files it must edit (e.g. src/_data/projects.json) — these force the integrator path, list them explicitly.',
+      description: 'still-monolithic shared files it must edit (e.g. src/_data/projects.json) — these force the integrator path, list them explicitly. Per-entry registry files (src/_data/<reg>/<id>.json) are NOT monolithic — never list them.',
     },
-    confident: { type: 'boolean', description: 'false if the touch-set is uncertain — the item is then forced into the serial lane (safe default).' },
+    confident: { type: 'boolean', description: 'TRUE when every predicted file is one this item OWNS (its own impl/code, its own demo page, its own backlog/NNN.md, its own per-entry registry entries, its own test file). FALSE *only* when work plausibly spills into a SHARED surface another item could also touch: a still-monolithic registry, shared runtime (plugs/bootstrap.ts), a shared *.njk include, shared test specs, build config (tsconfig/vite/package.json), or a broad cross-file refactor. Routine uncertainty about the exact file COUNT is NOT a reason for false; only genuine shared-surface risk is. Per-entry registry writes do NOT lower confidence. False forces the serial lane.' },
   },
 };
 
@@ -138,6 +138,7 @@ const INTEGRATE_SCHEMA = {
 phase('Probe');
 log(`Probing ${items.length} packed item(s) for their real touch-sets…`);
 
+let probedCount = 0;
 const probes = await parallel(items.map((it) => () =>
   agent(
     [
@@ -146,12 +147,28 @@ const probes = await parallel(items.map((it) => () =>
       `its impl/code files, its own we:backlog/${it.num}.md, and any per-entry registry file it would add`,
       `(src/_data/<registry>/<id>.json — registries are one-file-per-entry since #1145/#1146).`,
       `Frontmatter declares: ${JSON.stringify(it.declaredFiles || [])} — treat that as a LOWER BOUND only.`,
-      `List still-monolithic shared files it must edit separately in touchesMonolith.`,
-      `Set confident=false if you are at all unsure of the touch-set — a missed file corrupts a merge, so`,
-      `uncertainty must fall back to serial. Return ONLY the structured object.`,
+      `Per-entry registry files (src/_data/<registry>/<id>.json) are DISJOINT by construction (#1145/#1146):`,
+      `writing your OWN new/edited entry never collides with another lane, so do NOT list them in touchesMonolith`,
+      `and they do NOT lower your confidence. List in touchesMonolith ONLY still-monolithic shared files`,
+      `(projects/capabilities/adapters/capabilityMatrix/designSystems registries, plugs/bootstrap.ts, build config).`,
+      `Set confident=TRUE when every file you'll touch is one this item clearly OWNS — its own impl/code, its own`,
+      `demo page, its own we:backlog/${it.num}.md, its own per-entry registry entries, its own test file.`,
+      `Set confident=FALSE *only* when the work plausibly SPILLS into a shared surface another item could also`,
+      `touch (a monolithic registry, plugs/bootstrap.ts, a shared *.njk include, a shared test spec, tsconfig/vite/`,
+      `package.json, or a broad cross-file refactor). Routine uncertainty about the exact file COUNT is NOT a reason`,
+      `for false — only genuine shared-surface risk is; default disjoint-looking work to TRUE. Return ONLY the structured object.`,
     ].join(' '),
     { label: `probe:${it.num}`, phase: 'Probe', schema: PROBE_SCHEMA, effort: 'low' },
-  ).then((p) => ({ ...it, probe: p })).catch(() => ({ ...it, probe: null })),
+  ).then((p) => {
+    // Per-probe heartbeat — fires as each probe lands, so /workflows shows incremental scoping progress
+    // (parallel() is a barrier, but these .then callbacks run the moment each agent resolves).
+    probedCount++;
+    const fileN = p && Array.isArray(p.predictedFiles) ? p.predictedFiles.length : 0;
+    const verdict = !p ? 'no result → serial' : p.confident === false ? 'low-confidence → serial' :
+      (p.touchesMonolith && p.touchesMonolith.length) ? 'touches monolith → serial' : `${fileN} file(s), parallel-eligible`;
+    log(`  probe ${probedCount}/${items.length}: #${it.num} — ${verdict}`);
+    return { ...it, probe: p };
+  }).catch(() => { probedCount++; log(`  probe ${probedCount}/${items.length}: #${it.num} — probe FAILED → serial`); return { ...it, probe: null }; }),
 ));
 
 // Greedy partition into lanes. Lane 0 is the SERIAL fallback lane: every item that can't be PROVEN
@@ -233,13 +250,24 @@ function laneAgentPrompt(laneId, laneItems) {
   ].join('\n');
 }
 
+if (parallelLanes.length > 0) {
+  log(`Working ${parallelLanes.length} lane(s) concurrently in isolated worktrees — each lane result is logged the instant it lands…`);
+}
+let lanesDone = 0;
 const laneResults = await parallel(parallelLanes.map((laneItems, idx) => () =>
   agent(laneAgentPrompt(`L${idx + 1}`, laneItems), {
     label: `lane:L${idx + 1}`,
     phase: 'Lanes',
     schema: LANE_RESULT_SCHEMA,
     isolation: 'worktree',
-  }).catch(() => null),
+  }).then((r) => {
+    // Per-lane heartbeat — surfaces each lane's outcome as it returns (not only after the barrier).
+    lanesDone++;
+    const worked = r && Array.isArray(r.worked) ? r.worked : [];
+    const ok = worked.filter((w) => w.status === 'resolved').length;
+    log(`  lane L${idx + 1} done (${lanesDone}/${parallelLanes.length}): gate ${r ? r.laneGate : 'n/a'}, ${ok}/${worked.length} resolved [${laneItems.map((e) => '#' + e.num).join(', ')}]`);
+    return r;
+  }).catch(() => { lanesDone++; log(`  lane L${idx + 1} died (${lanesDone}/${parallelLanes.length}) → will replay serially [${laneItems.map((e) => '#' + e.num).join(', ')}]`); return null; }),
 ));
 
 // ── Phase 3 — Integrate: merge clean lanes ONE AT A TIME, full gate per merge, replay on conflict ─
@@ -285,6 +313,7 @@ if (serialLane.length > 0) {
 // 3b. Merge each parallel lane in turn. The JS loop is single-threaded, so integrations are naturally
 // serialized (the mutex the SKILL requires). A conflicted or red lane is replayed serially on the merged
 // result — never force-merged.
+if (laneResults.length > 0) log(`Integrating ${laneResults.length} lane(s) one at a time, full gate per merge…`);
 for (let i = 0; i < laneResults.length; i++) {
   const lr = laneResults[i];
   const laneId = `L${i + 1}`;
@@ -297,6 +326,7 @@ for (let i = 0; i < laneResults.length; i++) {
   const mergeable = lr && lr.laneGate === 'green' && lr.branch;
   let integrated = null;
   if (mergeable) {
+    log(`  merging lane ${laneId} (${i + 1}/${laneResults.length})…`);
     integrated = await agent(
       [
         `Integrate parallel batch lane ${laneId} (branch "${lr.branch}") into the current integration branch.`,
