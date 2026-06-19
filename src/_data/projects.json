@@ -190,7 +190,7 @@
     "id": "webtraits",
     "name": "Web Traits",
     "description": "Standard for creating granular, auto-loadable features that bridge the gap between easy developer experience and optimal performance.",
-    "status": "concept",
+    "status": "poc",
     "category": "utility",
     "icon": "/assets/icons/webtraits.svg",
     "isSvg": true
@@ -208,7 +208,7 @@
     "id": "webcases",
     "name": "Web Cases",
     "description": "A collection of isolated HTML test cases serving as the source of truth for protocol conformity and documentation examples.",
-    "status": "concept",
+    "status": "poc",
     "category": "utility",
     "icon": "/assets/icons/webcases.svg",
     "isSvg": true
@@ -226,7 +226,7 @@
     "id": "webdocs",
     "name": "Web Docs",
     "description": "The meta-standard that orchestrates Web Manifests and Web Cases to generate comprehensive documentation sites.",
-    "status": "concept",
+    "status": "poc",
     "category": "utility",
     "icon": "/assets/icons/webdocs.svg",
     "isSvg": true
