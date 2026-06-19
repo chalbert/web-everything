@@ -23,4 +23,4 @@ Run a per-item agent workflow (one agent per G7 item, surgical Edit-tool changes
 1. Anchors must be verified-correct first — **done** in #911 (all 132 `codifiedIn` resolve, 0 dangling).
 2. **Run solo, no concurrent batch/session** — another session's `git add -A` swept/scattered the edits repeatedly in the first attempt; that race is the only reason this was deferred.
 
-**Success:** G7 drops to its irreducible lineage floor; `check:health` G7 tracks the candidate pool. Origin #911; mechanism in `scripts/audit-backlog-health.mjs` (G7, live-scoped).
+**Success:** G7 drops to its irreducible lineage floor; `check:health` G7 tracks the candidate pool. Origin #911; mechanism in `we:scripts/audit-backlog-health.mjs` (G7, live-scoped).
