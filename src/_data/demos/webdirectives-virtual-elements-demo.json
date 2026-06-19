@@ -1,0 +1,12 @@
+{
+  "id": "webdirectives-virtual-elements-demo",
+  "name": "Web Directives: Virtual Elements",
+  "summary": "A control:for-each / control:if directive expressed as a real HTML comment marker, upgraded by the customComments registry (#1131) with its options parsed by the default namespaced parser (#1132). The markers are virtual elements — they carry logic but add no node to the layout tree, so a 3-column CSS Grid keeps its direct parent-child relationship whether the conditional card shows or hides.",
+  "description": "<h2>Concept</h2><p>Web Directives express structural control flow (<code>control:if</code>, <code>control:for-each</code>) as real <strong>HTML comment markers</strong> rather than wrapper elements. The <code>customComments</code> registry (#1131) <code>upgrade()</code>s the page's comment nodes onto <code>CustomComment</code> (#1130) subclasses and runs their lifecycle; the shipped default parser (#1132) turns each marker's text (<code>control:if when=\"showMiddle\"</code>) into <code>{ name, options }</code>.</p><h3>The virtual-element claim</h3><p>Because the markers are comments, they add zero element nodes to the layout tree. The case-study grid's <code>grid-template-columns: repeat(3, 1fr)</code> stays intact whether the conditional card is shown or hidden — the exact thing a framework <code>&lt;If&gt;</code> wrapper element breaks. A live readout shows the grid's element-child count excludes the markers.</p><h3>Scope</h3><p>One registry, two directives, one <code>upgrade()</code> walk; each directive re-parses its own comment text through the shared default parser. Native DOM (a plug demo, not block rendering).</p>",
+  "kind": "demo",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webdirectives-virtual-elements-demo.html",
+  "projects": [
+    "webdirectives"
+  ]
+}
