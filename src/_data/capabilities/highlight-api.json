@@ -1,0 +1,8 @@
+{
+  "id": "highlight-api",
+  "label": "CSS Custom Highlight API",
+  "webFeaturesKey": "custom-highlight",
+  "baseline": false,
+  "polyfill": "partial",
+  "summary": "<code>CSS.highlights</code> + <code>::highlight()</code> paint arbitrary <code>Range</code>s (find-on-page, spellcheck, collab carets) with no DOM mutation. Partial span-wrapping fallback. Used for editor decorations."
+}

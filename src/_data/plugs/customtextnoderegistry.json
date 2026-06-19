@@ -1,0 +1,10 @@
+{
+  "id": "customtextnoderegistry",
+  "name": "CustomTextNodeRegistry",
+  "status": "active",
+  "type": "Global",
+  "summary": "Allows defining parsers for text content, enabling custom template syntax like Mustache-style interpolation.",
+  "projects": [
+    "webexpressions"
+  ]
+}

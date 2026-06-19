@@ -1,0 +1,7 @@
+{
+  "id": "schemas",
+  "name": "Custom Schemas",
+  "status": "draft",
+  "summary": "Standard for structural validation (Zod, Supstruct, Yup integration).",
+  "description": "<h3>Design Philosophy</h3><p>Validation logic is often tightly coupled to specific libraries. The <strong>CustomSchema</strong> protocol defines a universal contract for validating unknown data structures.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">interface CustomSchema&lt;T = unknown&gt; {\n    // Synchronous Validation\n    validate(data: unknown): T; // throws ValidationError\n    safeParse(data: unknown): {\n        success: boolean;\n        data?: T;\n        error?: Error;\n    };\n\n    // Async Validation\n    validateAsync?(data: unknown): Promise&lt;T&gt;;\n}</code></pre>"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "htmlinjector",
+  "name": "HTMLInjector",
+  "status": "active",
+  "type": "Global",
+  "summary": "Injector instance bound to a specific DOM node, providing hierarchical dependency resolution.",
+  "projects": [
+    "webinjectors"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "id": "declarative-shadow-dom",
+  "label": "Declarative Shadow DOM",
+  "webFeaturesKey": "declarative-shadow-dom",
+  "baseline": "2024",
+  "polyfill": "polyfillable",
+  "summary": "<code>&lt;template shadowrootmode&gt;</code> — SSR-able shadow roots with no JS."
+}

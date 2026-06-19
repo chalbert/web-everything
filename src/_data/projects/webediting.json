@@ -1,0 +1,9 @@
+{
+  "id": "webediting",
+  "name": "Web Editing",
+  "description": "Standard for the <strong>rich-text / structured editing domain</strong> &mdash; a browser-aligned way to drive an editable surface that keeps the <em>editing engine</em> (how text is captured and mutated) swappable behind one contract. It defines the <strong>Editor Engine Protocol</strong> &mdash; an engine-swap registry with a <strong>native-first</strong> default (<code>contenteditable</code> + <code>InputEvent</code> + the editing-surface <a href=\"/capabilities/\">capabilities</a>, with an <code>editcontext</code> upgrade) over a <strong>structured-node-tree</strong> internal pivot, so thin adapters (ProseMirror, Lexical, Slate, Quill) plug in behind it. Graduated from <a href=\"/backlog/590-candidate-standard-rich-text-contenteditable-editing/\">#590</a> (Fork 2 ratified) under epic <a href=\"/backlog/618-graduate-the-rich-text-editing-standard-webediting-project-s/\">#618</a>.",
+  "status": "concept",
+  "category": "standard",
+  "icon": "/assets/icons/webediting.svg",
+  "isSvg": true
+}

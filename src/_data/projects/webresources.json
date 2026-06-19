@@ -1,0 +1,9 @@
+{
+  "id": "webresources",
+  "name": "Web Resources",
+  "description": "Standard protocols for data exchange, interceptors, and resource definition.",
+  "status": "concept",
+  "category": "standard",
+  "icon": "/assets/icons/webresources.svg",
+  "isSvg": true
+}

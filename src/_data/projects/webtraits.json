@@ -1,0 +1,9 @@
+{
+  "id": "webtraits",
+  "name": "Web Traits",
+  "description": "Standard for creating granular, auto-loadable features that bridge the gap between easy developer experience and optimal performance.",
+  "status": "poc",
+  "category": "utility",
+  "icon": "/assets/icons/webtraits.svg",
+  "isSvg": true
+}

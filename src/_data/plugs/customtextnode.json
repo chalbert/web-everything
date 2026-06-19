@@ -1,0 +1,10 @@
+{
+  "id": "customtextnode",
+  "name": "CustomTextNode",
+  "status": "active",
+  "type": "Global",
+  "summary": "Base class for enhanced text nodes with reactive binding capabilities.",
+  "projects": [
+    "webexpressions"
+  ]
+}

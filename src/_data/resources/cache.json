@@ -1,0 +1,7 @@
+{
+  "id": "cache",
+  "name": "Custom Cache",
+  "status": "draft",
+  "summary": "Standard for defining validity and retention policies.",
+  "description": "<h3>Design Philosophy</h3><p>Defining <em>how</em> long data is fresh should be separate from <em>where</em> it is stored. This protocol standardizes concepts from <strong>HTTP Cache-Control</strong> and <strong>TanStack Query</strong>.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">interface CustomCachePolicy {\n    mode:\n        | 'cache-first'\n        | 'network-only'\n        | 'stale-while-revalidate';\n    maxAge: number; // ms\n    staleWhileRevalidate: number; // ms\n    key: (op: ResourceOperation) => string;\n}</code></pre>"
+}

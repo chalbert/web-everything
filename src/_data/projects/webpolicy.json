@@ -1,0 +1,9 @@
+{
+  "id": "webpolicy",
+  "name": "Web Policy",
+  "description": "Standard for <strong>declarative domain policy</strong> &mdash; the rules that govern whether an action is allowed, an entity qualifies, or an approval is required (&ldquo;orders over $X need sign-off&rdquo;, &ldquo;a minor can't consent&rdquo;). Distinct from <a href=\"/projects/webvalidation/\">Web Validation</a> (input <em>invalidity</em> &mdash; a field is wrong): policy decides whether an <em>action</em> is permitted, a different concern with its own home. Adopts the <strong>OMG DMN</strong> vocabulary &mdash; decision tables + FEEL-style expressions &mdash; as the <strong>rule meta-schema</strong> (standardize the meta-schema, not the rule list), with rule <strong>versioning</strong> and per-<strong>context/tenant scoping</strong>. <em>Composes</em> the existing substrate &mdash; <a href=\"/projects/webexpressions/\">Web Expressions</a> (conditional logic), <a href=\"/projects/webcontexts/\">Web Contexts</a> (scoped policy flow), <a href=\"/projects/webvalidation/\">Web Validation</a>, <a href=\"/projects/webtraces/\">Web Traces</a> (the proof point) &mdash; rather than absorbing into them. Rule authoring surfaces as a Technical Configurator domain (plateau-app). Foundation for the proof-of-compliance (tamper-evident decision log) and enforcement (PDP/PEP) slices.",
+  "status": "concept",
+  "category": "standard",
+  "icon": "/assets/icons/webpolicy.svg",
+  "isSvg": true
+}

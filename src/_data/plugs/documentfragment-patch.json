@@ -1,0 +1,11 @@
+{
+  "id": "documentfragment-patch",
+  "name": "DocumentFragment.ownerTemplate",
+  "status": "active",
+  "type": "Patch",
+  "summary": "Adds ownerTemplate property to DocumentFragment for template ownership tracking.",
+  "projects": [
+    "webcomponents"
+  ],
+  "patchFile": "custom-elements/DocumentFragment.patch.ts"
+}

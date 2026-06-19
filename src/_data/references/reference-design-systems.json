@@ -1,0 +1,61 @@
+{
+  "category": "Reference Design Systems",
+  "description": "Gold-standard implementations used as benchmarks for component behavior, states, and accessibility.",
+  "links": [
+    {
+      "title": "Material Design 3 (Google)",
+      "url": "https://m3.material.io/",
+      "context": "Benchmark for state definitions (Interaction States), elevation, and motion choreography."
+    },
+    {
+      "title": "Carbon Design System (IBM)",
+      "url": "https://carbondesignsystem.com/",
+      "context": "Reference for complex data density, loading patterns, and strict accessibility compliance."
+    },
+    {
+      "title": "Radix UI Primitives",
+      "url": "https://www.radix-ui.com/primitives",
+      "context": "Modern standard for 'Headless' component behavior and ARIA management."
+    },
+    {
+      "title": "Fluent 2 (Microsoft)",
+      "url": "https://fluent2.microsoft.design/",
+      "context": "Reference for productivity-focused interfaces, density controls, and keyboard interaction."
+    },
+    {
+      "title": "Spectrum (Adobe)",
+      "url": "https://spectrum.adobe.com/",
+      "context": "Best-in-class example of adaptive scaling (Touch/Mouse) and theming systems."
+    },
+    {
+      "title": "Human Interface Guidelines (Apple)",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/",
+      "context": "Defines the 'Native Feel' baseline for modal, navigation, and feedback patterns."
+    },
+    {
+      "title": "GOV.UK Design System",
+      "url": "https://design-system.service.gov.uk/",
+      "context": "The gold standard for form validation behaviors, error messaging, and copywriting."
+    },
+    {
+      "title": "WAI-ARIA Authoring Practices Guide (W3C)",
+      "url": "https://www.w3.org/WAI/ARIA/apg/",
+      "context": "Canonical accessible-widget patterns + keyboard interaction — the native-first benchmark for ARIA behavior."
+    },
+    {
+      "title": "Open UI (W3C Community Group)",
+      "url": "https://open-ui.org/",
+      "context": "Standardizing native UI controls (selectlist, popover, etc.) — the native-platform frontier the gap analysis weighs against."
+    },
+    {
+      "title": "React Aria (Adobe)",
+      "url": "https://react-spectrum.adobe.com/react-aria/",
+      "context": "Behavior + accessibility hooks distilled from APG; deep interaction and i18n coverage."
+    },
+    {
+      "title": "Shoelace / Web Awesome",
+      "url": "https://shoelace.style/",
+      "context": "Framework-agnostic web-component system — the web-component axis benchmark."
+    }
+  ]
+}

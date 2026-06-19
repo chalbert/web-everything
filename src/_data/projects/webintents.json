@@ -1,0 +1,9 @@
+{
+  "id": "webintents",
+  "name": "Web Intents",
+  "description": "Declarative profiles for application-wide UX/UI behavior (e.g., density, motion, interaction models) that components automatically adhere to.",
+  "status": "draft",
+  "category": "ecosystem",
+  "icon": "/assets/icons/webintents.svg",
+  "isSvg": true
+}

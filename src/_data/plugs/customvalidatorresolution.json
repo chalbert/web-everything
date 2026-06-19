@@ -1,0 +1,10 @@
+{
+  "id": "customvalidatorresolution",
+  "name": "CustomValidatorResolution",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Base contract an async-resolution strategy implements — startValidation(fieldId, input) opening a generation handle, shouldApplyResult(handle, result) deciding whether a freshly-arrived answer is still current (the heart of stale-drop), and onInputChange(fieldId, newInput) superseding/aborting an in-flight check. The only constraint is that results feed the same pending{version} → valid|invalid SourceResult #212 consumes. Satisfied alike by the versioning default, cancellation, and custom strategies.",
+  "projects": [
+    "webvalidation"
+  ]
+}

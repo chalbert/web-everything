@@ -1,0 +1,8 @@
+{
+  "id": "details-name",
+  "label": "Exclusive Accordion (details name)",
+  "webFeaturesKey": "details-name",
+  "baseline": "2024",
+  "polyfill": "polyfillable",
+  "summary": "The <code>name</code> attribute on <code>&lt;details&gt;</code> groups panels into an <em>exclusive accordion</em> — opening one closes its siblings, no script required."
+}

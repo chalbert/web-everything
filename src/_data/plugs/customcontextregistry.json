@@ -1,0 +1,10 @@
+{
+  "id": "customcontextregistry",
+  "name": "CustomContextRegistry",
+  "status": "active",
+  "type": "Global",
+  "summary": "Exposes window.customContextTypes for registering context definitions that provide hierarchical data flow.",
+  "projects": [
+    "webcontexts"
+  ]
+}

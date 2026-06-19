@@ -19,6 +19,7 @@ import { loadBlocks } from '../lib/blocks-loader.cjs';
 import { loadIntents } from '../lib/intents-loader.cjs';
 import { loadResearch } from '../lib/research-loader.cjs';
 import { loadProtocols } from '../lib/protocols-loader.cjs';
+import { loadDataRegistry } from '../lib/registry-loader.cjs';
 import {
   checkStatus, validateProtocol, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, isSegmentCovered, permalinkSegment,
@@ -362,8 +363,8 @@ describe('real data stays clean (per family)', () => {
   const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
   const intents = loadIntents(); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
   const protocols = loadProtocols(); // per-protocol specs src/_data/protocols/<id>.json, assembled (#1146)
-  const projects = loadJson('projects.json');
-  const capabilities = loadJson('capabilities.json');
+  const projects = loadDataRegistry('projects'); // per-project specs src/_data/projects/<id>.json (#1157)
+  const capabilities = loadDataRegistry('capabilities'); // per-capability specs (#1157)
   const capabilityMatrix = JSON.parse(readFileSync(join(DATA, 'capabilityMatrix.json'), 'utf8'));
   const research = loadResearch(); // per-topic specs src/_data/researchTopics/<id>.json, assembled (#1145)
   const loadBacklog = require(join(ROOT, 'src/_data/backlog.js'));
@@ -387,7 +388,7 @@ describe('real data stays clean (per family)', () => {
     expect(collect(intents, (i) => validateIntent(i, { capabilityIds }))).toEqual([]);
   });
   it('design systems', () => {
-    const designSystems = loadJson('designSystems.json');
+    const designSystems = loadDataRegistry('designSystems'); // per-entry specs (#1157)
     const designSystemIds = new Set(designSystems.map((d) => d.id).filter(Boolean));
     const readManifest = (rel) => {
       const p = join(ROOT, rel);

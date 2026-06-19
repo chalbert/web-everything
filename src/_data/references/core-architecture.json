@@ -1,0 +1,16 @@
+{
+  "category": "Core & Architecture",
+  "description": "Foundational patterns for Dependency Injection, Registries, and Element definition.",
+  "links": [
+    {
+      "title": "MDN: Custom Elements",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/Web_Components/Using_custom_elements",
+      "context": "Basis for Web Components architecture."
+    },
+    {
+      "title": "W3C: Context Protocol",
+      "url": "https://github.com/webcomponents-cg/community-protocols/blob/main/proposals/context.md",
+      "context": "Inspiration for dependency injection and data consumption."
+    }
+  ]
+}

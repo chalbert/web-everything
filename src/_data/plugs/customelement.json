@@ -1,0 +1,10 @@
+{
+  "id": "customelement",
+  "name": "CustomElement",
+  "status": "active",
+  "type": "Global",
+  "summary": "Base class for custom elements with enhanced lifecycle and options support.",
+  "projects": [
+    "webcomponents"
+  ]
+}

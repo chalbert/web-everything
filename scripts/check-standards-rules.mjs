@@ -585,6 +585,7 @@ export const FILE = {
 const PER_ID_SPEC_DIR = {
   Block: 'blocks', Intent: 'intents', Research: 'researchTopics',
   Protocol: 'protocols', Demo: 'demos', Preset: 'assemblerPresets', // #1146
+  Plug: 'plugs', Capability: 'capabilities', Project: 'projects', DesignSystem: 'designSystems', // #1157
 };
 
 /** The per-block spec file a Block fixer edits (#882 — replaces the former single blocks.json row). */

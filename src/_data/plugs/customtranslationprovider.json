@@ -1,0 +1,10 @@
+{
+  "id": "customtranslationprovider",
+  "name": "CustomTranslationProvider",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Base contract a translation provider implements — resolve(key, locale) returning a MessageFn or null. Returning null declines the key and passes control down the locale fallback chain and the next registered provider. Implementations include a native Intl MF2 formatter, lazy-namespace catalogs, and library adapters (FormatJS, i18next, Lingui, Paraglide).",
+  "projects": [
+    "webintl"
+  ]
+}

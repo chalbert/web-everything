@@ -1,0 +1,10 @@
+{
+  "id": "customvalidatorresolutionregistry",
+  "name": "CustomValidatorResolutionRegistry",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Exposes window.customValidatorResolution for registering named async-validator-resolution strategies — how an in-flight async check is reconciled when the input keeps changing. The named sibling of the validity-merge plane (#212): versioning (native-first default — stamp a per-field generation token, drop answers older than the current input) and cancellation (abort the in-flight request via AbortController) ship registered, custom strategies are first-class, and the async runner emits the same pending{version} → valid|invalid SourceResult the merge plane consumes.",
+  "projects": [
+    "webvalidation"
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "id": "cross-root-aria",
+  "label": "Cross-root ARIA / Reference Target",
+  "webFeaturesKey": "cross-root-aria",
+  "baseline": false,
+  "polyfill": "partial",
+  "summary": "Point <code>aria-activedescendant</code> across a shadow boundary. The gap lives in the a11y tree JS can't write — partial mitigation only, the one genuine blocker for shadow-encapsulated comboboxes."
+}

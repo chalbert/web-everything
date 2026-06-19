@@ -67,6 +67,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { parseClaims, claimedIdsFor, partitionById } from './readiness/claimScope.mjs';
+import { loadDataRegistry } from './lib/registry-loader.cjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BL = join(ROOT, 'backlog');
@@ -314,9 +315,8 @@ function citesCodifiedCase(it) {
 // ---- project liveness ----------------------------------------------------
 let projects = new Map();
 try {
-  const pj = JSON.parse(readFileSync(join(ROOT, 'src/_data/projects.json'), 'utf8'));
-  const arr = Array.isArray(pj) ? pj : (pj.projects || Object.values(pj));
-  for (const p of arr) if (p && p.id) projects.set(p.id, p.status || '?');
+  // per-project specs src/_data/projects/<id>.json, assembled (#1157)
+  for (const p of loadDataRegistry('projects')) if (p && p.id) projects.set(p.id, p.status || '?');
 } catch { /* ignore */ }
 
 // ---- run checks ----------------------------------------------------------

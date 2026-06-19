@@ -1,0 +1,9 @@
+{
+  "id": "weblifecycle",
+  "name": "Web Lifecycle",
+  "description": "Standard for a <strong>domain entity's lifecycle</strong>: a declared <strong>status set</strong> with <strong>guarded, role-scoped transitions</strong> and a canonical status presentation. A loan, a policy, a claim, an order, a ticket &mdash; each is a state machine (<code>draft &rarr; submitted &rarr; &hellip; &rarr; closed</code>) whose legal moves depend on the actor and on guard predicates. The transition map is declarative; <em>whether</em> an actor may fire a transition is delegated to a <strong>guard provider</strong> (Web Guards), and each transition is an observable event other standards (audit, reporting) compose on. Distinct from Web States (reactive state <em>primitives</em>) and from a region's lifecycle (Web Guards): this is the <em>domain object's</em> workflow state.",
+  "status": "poc",
+  "category": "standard",
+  "icon": "/assets/icons/weblifecycle.svg",
+  "isSvg": true
+}

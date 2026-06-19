@@ -1,0 +1,8 @@
+{
+  "id": "editcontext",
+  "label": "EditContext API",
+  "webFeaturesKey": "editcontext",
+  "baseline": false,
+  "polyfill": "capability",
+  "summary": "<code>EditContext</code> decouples editing state (text, selection, IME composition) from the DOM view, giving custom editors native IME + a11y without <code>contenteditable</code>'s quirks. The editing-surface upgrade tier (#590 Fork 3)."
+}

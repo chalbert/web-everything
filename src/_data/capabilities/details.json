@@ -1,0 +1,8 @@
+{
+  "id": "details",
+  "label": "Details / Summary",
+  "webFeaturesKey": "details",
+  "baseline": "2020",
+  "polyfill": "polyfillable",
+  "summary": "Native <code>&lt;details&gt;</code>/<code>&lt;summary&gt;</code> disclosure widget — the <code>open</code> attribute, <code>toggle</code>/<code>beforetoggle</code> events, and a summary that exposes <code>aria-expanded</code> without script."
+}

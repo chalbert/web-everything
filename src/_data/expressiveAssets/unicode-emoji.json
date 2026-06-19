@@ -1,0 +1,13 @@
+{
+  "id": "unicode-emoji",
+  "kind": "emoji-set",
+  "label": "Unicode Emoji",
+  "provider": "Unicode Consortium",
+  "license": "Unicode (data)",
+  "approxCount": 3800,
+  "axes": [
+    "skin-tone",
+    "presentation:emoji|text"
+  ],
+  "summary": "The standard emoji set — its skin-tone and emoji/text presentation variants are exactly the expressive-symbol intent's skinTone + presentation dimensions. The :-trigger picker (demo:inline-emoji-picker) shops this set; rendering is the platform emoji font (renderStrategy)."
+}

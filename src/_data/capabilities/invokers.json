@@ -1,0 +1,8 @@
+{
+  "id": "invokers",
+  "label": "Invoker Commands",
+  "webFeaturesKey": "command",
+  "baseline": false,
+  "polyfill": "polyfillable",
+  "summary": "<code>command</code> / <code>commandfor</code> — declare a button's effect on another element in markup."
+}

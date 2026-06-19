@@ -1,0 +1,9 @@
+{
+  "id": "webportals",
+  "name": "Web Portals",
+  "description": "Mimics React portals: render an element outside its logical parent in the DOM, but retain its web contexts. Enables overlays, modals, and tooltips to visually escape their parent while staying connected to their logical ancestors' data and services.",
+  "status": "concept",
+  "category": "standard",
+  "icon": "/assets/icons/webportals.svg",
+  "isSvg": true
+}

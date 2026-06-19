@@ -1,0 +1,10 @@
+{
+  "id": "customattributesregistry",
+  "name": "CustomAttributesRegistry",
+  "status": "active",
+  "type": "Global",
+  "summary": "Exposes window.customAttributes, monitoring DOM for attribute changes and facilitating upgrade of attributes into behaviors.",
+  "projects": [
+    "webbehaviors"
+  ]
+}

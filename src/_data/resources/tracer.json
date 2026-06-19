@@ -1,0 +1,7 @@
+{
+  "id": "tracer",
+  "name": "Custom Tracer",
+  "status": "draft",
+  "summary": "Protocol for observability and request tracing, decoupled from the implementation.",
+  "description": "<h3>Design Philosophy</h3><p><strong>Tracing</strong> (Lifecycle) is distinct from <strong>Tracking</strong> (User Behavior).</p><ul><li><strong>Tracing</strong>: Observes the <em>provenance</em> of the data (e.g., \"Request used Schema V2, took 50ms, transformed by Pipe X\").</li><li><strong>Tracking</strong>: Observes the <em>outcome</em> for business logic (e.g., \"User purchased item\").</li></ul><p>This protocol focuses on <strong>Context Propagation</strong> (via <strong>W3C Trace Context</strong>) and collecting safe execution metadata (Schema, Transformations) to establish provenance, independent of the storage backend.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">interface CustomTracer {\n    // Wraps execution to measure duration\n    trace(\n        op: ResourceOperation,\n        execute: () => Consumable&lt;ResourceResult&gt;\n    ): Consumable&lt;ResourceResult&gt;;\n\n    // Injects tracing headers (W3C Trace Context)\n    injectContext(op: ResourceOperation): void;\n}</code></pre>"
+}

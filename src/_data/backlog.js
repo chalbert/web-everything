@@ -245,9 +245,10 @@ module.exports = function backlog() {
   // mislabeled concept) are not. We never demote on a `concept` label alone.
   let projectStatus = new Map();
   try {
-    const projects = JSON.parse(readFileSync(join(ROOT, 'src/_data/projects.json'), 'utf8'));
-    projectStatus = new Map(projects.map((p) => [p.id, p.status]));
-  } catch { /* missing/malformed projects.json → no D3-readiness demotion (degrade, don't crash) */ }
+    // per-project specs src/_data/projects/<id>.json, assembled (#1157)
+    const { loadDataRegistry } = require('../../scripts/lib/registry-loader.cjs');
+    projectStatus = new Map(loadDataRegistry('projects').map((p) => [p.id, p.status]));
+  } catch { /* missing/malformed projects → no D3-readiness demotion (degrade, don't crash) */ }
   // D3-readiness fields (#608/#621), derived by the pure helper so the loader and its regression test
   // share one source of truth. Aligned by index with `items`.
   const projectReadiness = deriveProjectReadiness(items, projectStatus);

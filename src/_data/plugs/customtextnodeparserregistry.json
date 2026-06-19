@@ -1,0 +1,10 @@
+{
+  "id": "customtextnodeparserregistry",
+  "name": "CustomTextNodeParserRegistry",
+  "status": "active",
+  "type": "Global",
+  "summary": "Manages parsers that can interpret text node content and transform it into reactive components.",
+  "projects": [
+    "webexpressions"
+  ]
+}

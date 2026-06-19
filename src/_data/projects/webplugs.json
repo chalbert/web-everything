@@ -1,0 +1,9 @@
+{
+  "id": "webplugs",
+  "name": "Web Plugs",
+  "description": "The missing browser standards (polyfilled). Runs 'plugged' (native patches) or 'unplugged' (safe libs) as the foundation for Web Blocks.",
+  "status": "concept",
+  "category": "utility",
+  "icon": "/assets/icons/webplugs.svg",
+  "isSvg": true
+}

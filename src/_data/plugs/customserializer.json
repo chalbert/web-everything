@@ -1,0 +1,10 @@
+{
+  "id": "customserializer",
+  "name": "CustomSerializer",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Base contract a serializer provider implements — serialize(model) → string and deserialize(string) → model — round-tripping the structured content pivot to a wire format. Satisfied alike by the HTML flavor default (the platform default the project config extends) and by every alternative flavor (Markdown, JSON node-tree, …).",
+  "projects": [
+    "webediting"
+  ]
+}

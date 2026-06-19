@@ -1,0 +1,10 @@
+{
+  "id": "customcommentparserregistry",
+  "name": "CustomCommentParserRegistry",
+  "status": "active",
+  "type": "Global",
+  "summary": "Parses comment content to identify and upgrade custom comments into active directives.",
+  "projects": [
+    "webdirectives"
+  ]
+}

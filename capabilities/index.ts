@@ -4,7 +4,7 @@
  * `/capabilities/` catalog page renders the same JSON, so the page and this provider can never
  * disagree.
  */
-import capabilitiesData from '../src/_data/capabilities.json';
+import { capabilities as capabilitiesData } from '../src/_data/capabilities.data'; // per-capability specs assembled via Vite glob (#1157)
 import matrixData from '../src/_data/capabilityMatrix.json';
 import { intents as intentsData } from '../src/_data/intents.data'; // per-intent specs assembled via Vite glob (#1145)
 import {

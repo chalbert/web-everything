@@ -1,0 +1,9 @@
+{
+  "id": "webreliability",
+  "name": "Web Reliability",
+  "description": "Standard for handling mechanism failures — retries, recovery strategies, and resilience patterns — across any operation (HTTP, database, computation, async tasks). A registry of recovery handlers tried in priority order; the first that accepts the error owns the recovery. Distinct from validation: reliability handles system failures, not input invalidity.",
+  "status": "concept",
+  "category": "standard",
+  "icon": "/assets/icons/webreliability.svg",
+  "isSvg": true
+}

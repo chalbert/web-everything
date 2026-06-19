@@ -1,0 +1,6 @@
+{
+  "id": "declarative-static",
+  "name": "Declarative-static",
+  "default": true,
+  "summary": "Parse-once DOM + bind-* + {{ }} text + <template is> directives. The native-first default; mount-once (no update())."
+}

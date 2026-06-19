@@ -1,0 +1,15 @@
+{
+  "id": "material-symbols",
+  "kind": "icon-set",
+  "label": "Material Symbols",
+  "provider": "Google",
+  "license": "Apache-2.0",
+  "approxCount": 3700,
+  "axes": [
+    "weight",
+    "fill",
+    "grade",
+    "optical-size"
+  ],
+  "summary": "Google's variable icon font — the icon intent's size/weight/style dimensions map directly onto its font-variation axes. A name (e.g. `home`, `search`) resolves to one glyph within this set."
+}

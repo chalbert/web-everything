@@ -1,0 +1,9 @@
+{
+  "id": "webguards",
+  "name": "Web Guards",
+  "description": "Standard for <strong>guarding a region's lifecycle against a predicate</strong>: a policy attached to a region (document, route, modal, element), evaluated at a lifecycle event, whose deny-branch resolves to a member-specific outcome. The predicate is resolved by a swappable <strong>guard provider</strong> (native-first default &rarr; project override &rarr; custom plug), so swapping a policy engine leaves the guarded surface untouched. Generalizes navigation/exit guards (unsaved-state) and access control (authorization) onto one provider seam.",
+  "status": "poc",
+  "category": "standard",
+  "icon": "/assets/icons/webguards.svg",
+  "isSvg": true
+}

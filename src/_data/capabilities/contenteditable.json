@@ -1,0 +1,8 @@
+{
+  "id": "contenteditable",
+  "label": "contentEditable",
+  "webFeaturesKey": "contenteditable",
+  "baseline": "2020",
+  "polyfill": "capability",
+  "summary": "<code>contenteditable</code> attribute — the editable-surface floor: a UA-managed editing host with native caret, selection, IME composition and undo. The engine Protocol's baseline editing surface (#590)."
+}

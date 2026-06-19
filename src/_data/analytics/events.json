@@ -1,0 +1,7 @@
+{
+  "id": "events",
+  "name": "Custom Events",
+  "status": "draft",
+  "summary": "Standard for semantic analytics events (Segment Spec / Activity Streams).",
+  "description": "<h3>Design Philosophy</h3><p>Tracking events should be semantic (User Behaviors) rather than tight-coupled to a vendor (Google Analytics). This standard adopts the <strong>Segment Spec</strong> vocabulary, focusing on the <em>Who</em> (Identity), <em>What</em> (Event), and <em>Where</em> (Context).</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">interface CustomAnalyticsEvent {    name: string; // e.g. 'Order Completed'    properties?: Record&lt;string, unknown&gt;; // e.g. { orderId: '50314b8e9bcf000000000000' }    options?: CustomAnalyticsOptions;}interface CustomAnalyticsIdentity {    userId: string;    traits?: Record&lt;string, unknown&gt;; // e.g. { email: 'bill@microsoft.com' }}interface CustomAnalyticsOptions {    integrations?: Record&lt;string, boolean&gt;; // e.g. { 'All': false, 'Mixpanel': true }    timestamp?: Date;}</code></pre>"
+}

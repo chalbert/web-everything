@@ -1,0 +1,10 @@
+{
+  "id": "htmlregistry",
+  "name": "HTMLRegistry",
+  "status": "active",
+  "type": "Global",
+  "summary": "Specialized abstract registry for storing constructors bound to DOM nodes, handling node upgrade and downgrade lifecycles.",
+  "projects": [
+    "webregistries"
+  ]
+}

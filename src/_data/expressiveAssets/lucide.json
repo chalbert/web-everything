@@ -1,0 +1,12 @@
+{
+  "id": "lucide",
+  "kind": "icon-set",
+  "label": "Lucide",
+  "provider": "Lucide community",
+  "license": "ISC",
+  "approxCount": 1500,
+  "axes": [
+    "stroke-width"
+  ],
+  "summary": "An MIT-spirited community fork of Feather — consistent 24px stroke icons, SVG-per-glyph, tree-shakeable. A common most-permissive default icon set for an open project."
+}

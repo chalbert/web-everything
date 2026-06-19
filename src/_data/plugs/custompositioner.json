@@ -1,0 +1,10 @@
+{
+  "id": "custompositioner",
+  "name": "CustomPositioner",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Base contract a positioning provider implements — position(anchor, anchored, options) returning a cleanup. Satisfied alike by the native-first default and by every library adapter.",
+  "projects": [
+    "webpositioning"
+  ]
+}

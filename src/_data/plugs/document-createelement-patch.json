@@ -1,0 +1,11 @@
+{
+  "id": "document-createelement-patch",
+  "name": "Document.createElement",
+  "status": "active",
+  "type": "Patch",
+  "summary": "Patches createElement to apply correct prototypes from the patched constructors.",
+  "projects": [
+    "webcomponents"
+  ],
+  "patchFile": "custom-elements/Document.patch.ts"
+}

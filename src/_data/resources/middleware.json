@@ -1,0 +1,7 @@
+{
+  "id": "middleware",
+  "name": "Custom Middleware",
+  "status": "draft",
+  "summary": "Standard for interceptors (Auth, Logging, Retry).",
+  "description": "<h3>Design Philosophy</h3><p>Middleware allows cross-cutting concerns to be composed independently of the client. Aligns with <strong>Axios Interceptors</strong> but stackable via dependency injection.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type MiddlewareNext = (\n    req: ResourceOperation\n) => Consumable&lt;ResourceResult&gt;;\n\ninterface CustomMiddleware {\n    process(\n        req: ResourceOperation,\n        next: MiddlewareNext\n    ): Consumable&lt;ResourceResult&gt;;\n}</code></pre>"
+}

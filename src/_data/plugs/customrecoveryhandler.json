@@ -1,0 +1,10 @@
+{
+  "id": "customrecoveryhandler",
+  "name": "CustomRecoveryHandler",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Base contract a recovery handler implements — tryRecover(error, context) returning a RecoveryResult or null. Returning null passes control to the next handler in registration order. Implementations include HTTP retry handlers, circuit breakers, offline queues, and custom domain handlers.",
+  "projects": [
+    "webreliability"
+  ]
+}

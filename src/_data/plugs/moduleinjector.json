@@ -1,0 +1,10 @@
+{
+  "id": "moduleinjector",
+  "name": "ModuleInjector",
+  "status": "active",
+  "type": "Global",
+  "summary": "Module-scoped injector for ES Module dependency injection, where any consumer can access providers since module scope is not spatially constrained.",
+  "projects": [
+    "webinjectors"
+  ]
+}

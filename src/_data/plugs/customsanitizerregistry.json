@@ -1,0 +1,10 @@
+{
+  "id": "customsanitizerregistry",
+  "name": "CustomSanitizerRegistry",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Exposes window.customSanitizer for registering named sanitizer providers that strip untrusted markup to an allowed schema. Native Element.setHTML is the default (the platform floor), with a DOMPurify adapter as the production floor for engines that lack it (#590 Fork 7); composed by the editor on the insertFromPaste path. Sanitizer ownership is webvalidation (ratified default), consumed by webediting as a no-leakage client.",
+  "projects": [
+    "webvalidation"
+  ]
+}

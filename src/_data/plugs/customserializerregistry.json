@@ -1,0 +1,10 @@
+{
+  "id": "customserializerregistry",
+  "name": "CustomSerializerRegistry",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Exposes window.customSerializer for registering named serializer providers that round-trip the structured content model to and from a wire format. Default-less core (the Config-Extends-Platform-Default shape, #590 Fork 6): a project config selects the platform default — the HTML flavor — while the registry itself ships no opinion, so any editor delegates serialization to one shared, swappable engine resolved through the injector chain.",
+  "projects": [
+    "webediting"
+  ]
+}

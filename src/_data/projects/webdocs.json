@@ -1,0 +1,9 @@
+{
+  "id": "webdocs",
+  "name": "Web Docs",
+  "description": "The meta-standard that orchestrates Web Manifests and Web Cases to generate comprehensive documentation sites.",
+  "status": "poc",
+  "category": "utility",
+  "icon": "/assets/icons/webdocs.svg",
+  "isSvg": true
+}

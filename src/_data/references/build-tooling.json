@@ -1,0 +1,11 @@
+{
+  "category": "Build & Tooling",
+  "description": "Compilers, bundlers, and static site generation.",
+  "links": [
+    {
+      "title": "11ty",
+      "url": "https://www.11ty.dev/",
+      "context": "Our Static Site Generator of choice."
+    }
+  ]
+}

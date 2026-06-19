@@ -1,0 +1,10 @@
+{
+  "id": "customattributeparserregistry",
+  "name": "CustomAttributeParserRegistry",
+  "status": "active",
+  "type": "Global",
+  "summary": "Allows defining parsing logic for attribute values, enabling custom syntax and transformations.",
+  "projects": [
+    "webexpressions"
+  ]
+}

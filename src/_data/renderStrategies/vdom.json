@@ -1,0 +1,5 @@
+{
+  "id": "vdom",
+  "name": "Virtual DOM",
+  "summary": "A render() returns a tree; diff + patch on change. Iteration/conditionals are plain JS (.map(), &&)."
+}

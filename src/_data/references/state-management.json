@@ -1,0 +1,16 @@
+{
+  "category": "State Management",
+  "description": "References for Signals, Stores, and Reactivity.",
+  "links": [
+    {
+      "title": "TC39 Signals Proposal",
+      "url": "https://github.com/tc39/proposal-signals",
+      "context": "Standard for fine-grained reactivity."
+    },
+    {
+      "title": "XState",
+      "url": "https://stately.ai/docs",
+      "context": "Reference for Finite State Machines and statecharts."
+    }
+  ]
+}

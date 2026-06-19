@@ -1,0 +1,11 @@
+{
+  "id": "customelementregistry-patch",
+  "name": "CustomElementRegistry",
+  "status": "active",
+  "type": "Patch",
+  "summary": "Replaces native window.customElements with an extended version supporting scoped registries and inheritance.",
+  "projects": [
+    "webregistries"
+  ],
+  "patchFile": "custom-elements/CustomElementRegistry.ts"
+}

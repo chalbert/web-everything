@@ -1,0 +1,8 @@
+{
+  "id": "material-like",
+  "name": "Material-like",
+  "summary": "MD3-flavored bundle — comfortable density, natural motion, lift surfaces, generously rounded corners. Exercises every optional field of the manifest schema.",
+  "status": "concept",
+  "ownedByProject": "webtheme",
+  "manifest": "design-systems/material-like.designsystem.json"
+}

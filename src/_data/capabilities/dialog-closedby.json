@@ -1,0 +1,8 @@
+{
+  "id": "dialog-closedby",
+  "label": "<dialog closedby>",
+  "webFeaturesKey": "dialog-closedby",
+  "baseline": false,
+  "polyfill": "polyfillable",
+  "summary": "Declarative light-dismiss control (<code>any</code> / <code>closerequest</code> / <code>none</code>), unifying the dismiss vocabulary popover uses."
+}

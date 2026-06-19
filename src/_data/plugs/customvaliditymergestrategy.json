@@ -1,0 +1,10 @@
+{
+  "id": "customvaliditymergestrategy",
+  "name": "CustomValidityMergeStrategy",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Base contract a merge strategy implements — merge(sources) returning a MergedValidity (the #004 OP-1 surface: state, valid/pending flags, ordered messages with sources, blocking source, generation token). Strategies vary the computation, never the surface — the only constraint that keeps them L1-swappable. Satisfied alike by the source-reduction default, the degenerate last-write-wins, and custom strategies.",
+  "projects": [
+    "webvalidation"
+  ]
+}

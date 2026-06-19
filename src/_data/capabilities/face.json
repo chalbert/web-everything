@@ -1,0 +1,8 @@
+{
+  "id": "face",
+  "label": "Form-Associated Custom Elements",
+  "webFeaturesKey": "form-associated-custom-elements",
+  "baseline": "2023",
+  "polyfill": "polyfillable",
+  "summary": "<code>static formAssociated</code> + <code>ElementInternals</code> make a custom element a real form control (value, validity, lifecycle)."
+}

@@ -1,0 +1,10 @@
+{
+  "id": "reference-stickers",
+  "kind": "sticker-pack",
+  "label": "Reference Sticker Pack",
+  "provider": "Web Everything (reference)",
+  "license": "CC0",
+  "approxCount": 12,
+  "axes": [],
+  "summary": "A reference custom-image sticker pack illustrating the expressive-symbol `mode: sticker` path (a sticker is a custom image, not a Unicode glyph) — the proof a project extends the catalog with its own non-Unicode asset set."
+}

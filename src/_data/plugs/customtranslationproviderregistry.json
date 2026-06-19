@@ -1,0 +1,10 @@
+{
+  "id": "customtranslationproviderregistry",
+  "name": "CustomTranslationProviderRegistry",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Exposes window.customTranslations for registering named translation providers tried in priority order — the first provider whose resolve(key, locale) returns a non-null MessageFn owns the message. Any consumer resolves the registry through the injector chain and reads messages via the @t context without knowing which provider answered or which library backs it.",
+  "projects": [
+    "webintl"
+  ]
+}

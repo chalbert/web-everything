@@ -1,0 +1,7 @@
+{
+  "id": "resources",
+  "name": "Custom Resources",
+  "status": "draft",
+  "summary": "Standard for defining resource entities and their data strategies (Registry).",
+  "description": "<h3>Design Philosophy</h3><p>Just like <code>customElements</code> maps a tag name to a class, <strong>customResources</strong> maps a business entity (e.g. 'user', 'product') to its resource configuration. This allows the application to simply request <code>users</code> without knowing if it comes from GraphQL or REST.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">interface CustomResourceRegistry\n    extends CustomRegistry&lt;ResourceDefinition&gt; {\n\n    readonly localName = 'customResources';\n\n    define(name: string, def: ResourceDefinition): void;\n\n    // Returns the config wrapper for a resource\n    get(name: string): ResourceHandle;\n}\n\ninterface ResourceDefinition {\n    // The Resolver\n    identify?: (params: unknown) => unknown[];\n    // e.g. OpenTelemetry\n    tracer?: CustomTracer;\n    // Strategy (Offset/Cursor)\n    pagination?: CustomPaginationDefinition;\n}</code></pre>"
+}

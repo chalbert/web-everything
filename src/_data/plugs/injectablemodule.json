@@ -1,0 +1,10 @@
+{
+  "id": "injectablemodule",
+  "name": "InjectableModule",
+  "status": "active",
+  "type": "Global",
+  "summary": "Ergonomic facade wrapping a ModuleInjector with provide/consume/register methods and a bootstrap lifecycle for module-scoped dependency injection.",
+  "projects": [
+    "webinjectors"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "htmltemplateelement-patch",
+  "name": "HTMLTemplateElement.content",
+  "status": "active",
+  "type": "Patch",
+  "summary": "Patches the content getter to support enhanced template functionality.",
+  "projects": [
+    "webcomponents"
+  ],
+  "patchFile": "custom-elements/HTMLTemplateElement.patch.ts"
+}
