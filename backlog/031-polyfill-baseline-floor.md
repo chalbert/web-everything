@@ -6,6 +6,7 @@ status: resolved
 dateOpened: '2026-06-02'
 dateStarted: '2026-06-07'
 dateResolved: '2026-06-07'
+codifiedIn: "docs/agent/platform-decisions.md#native-first-baseline"
 tags:
   - polyfill
   - baseline

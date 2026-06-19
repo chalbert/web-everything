@@ -8,6 +8,7 @@ dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
 graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#forward-generation-adapters"
 preparedDate: "2026-06-13"
 tags: [module-as-a-service, distribution, polyglot, dotnet, java, generation-adapter, codegen, enterprise, adapters, conformance, source-of-truth]
 parent: "081"

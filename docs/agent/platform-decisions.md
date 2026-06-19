@@ -244,6 +244,68 @@ after #932/#934 — it removes the *temptation*; the gate catches what slips *no
 **Lineage:** #933 (ratified 2026-06-18) · incidents #870 #931 · precedent #436/#437 (conventions
 fold into compliance), #840/#844/#477 (warn-first rollout).
 
+### Mandate the surface contract, not the computation {#surface-contract-not-computation}
+
+A WE standard normatively pins the **observable surface contract** — the hand-off shape, the regions,
+the stable-id events — and **never the computation behind it**. Competing "models" that emit the same
+surface are not separate models; they are **swappable provider strategies** (e.g. a `ValidityMergeRegistry`
+resolver) that conform *iff* they leave the surface unchanged. So a state-derived engine, an event-driven
+engine, and a degenerate/flat strategy all conform — conformance is the observable contract, never the
+internal computation. When a fork looks like "which algorithm/model do we mandate?", the answer is almost
+always: mandate neither, pin the surface, register both as strategies.
+
+**Lineage:** #4 (validation validity-model & conformance-tier). Relates to [native-first-baseline](#native-first-baseline),
+[forward-generation-adapters](#forward-generation-adapters) (both are "contract is the authority, impl is swappable").
+
+### Native-first baseline floor {#native-first-baseline}
+
+Standards **assume modern web-platform primitives are present** (Baseline-2024: FACE/`ElementInternals`,
+`popover`, `:state()`/`CustomStateSet`, `:user-invalid`, anchor positioning) and treat anything below the
+floor as **out of scope**. A spec stays **single-substrate** — it never carries a dual native-vs-shimmed
+contract — and **polyfills are an opt-in enhancement layer the consumer adds**, never part of the standard.
+This is the standards-level statement of the native-first default (`AGENTS.md` hard rule 6 carries the
+day-to-day form; cite whichever fits).
+
+**Lineage:** #31 (polyfill baseline floor). Mirrors `AGENTS.md` rule 6 + the native-first authoring default.
+
+### Behavior activation lifecycle — connected ≠ active {#behavior-activation-lifecycle}
+
+A behavior (webtraits `CustomAttribute`) has **two orthogonal states**: **connected** (in the DOM, via
+`connected/disconnectedCallback`) and **active** (should actually run, via a shared `activate()`/`deactivate()`
+lifecycle). They are independent — a connected behavior can be dormant. Activation boundaries **reuse native
+attributes** (e.g. `inert` marks a dead-zone) rather than inventing markers; **auto-dormancy is scoped by
+meaning** to interaction-driven behaviors only; and a per-usage `<trait>-active` override re-enables. The
+lifecycle contract is specified **once** and consumed by every activation gate (visibility #221, inert
+dead-zone #222) — gates don't each re-derive what "active" means.
+
+**Lineage:** #221 #222 (behaviour activation / inert dead-zone). Distinct from [guard-gate](#guard-gate)
+(predicate-gated *transitions*; this is behavior *run-state*).
+
+### Forward (generation) adapters for polyglot reach {#forward-generation-adapters}
+
+A WE standard projects **outward** into non-JS / enterprise runtimes (.NET, Java, Go) via a
+**forward/generation adapter** — the inverse of an ingest adapter. The authority is a **language-neutral
+contract/IR** (no language, *including JS*, is privileged); **generation is deterministic** (byte-identical
+output; AI assists only at adapter-*development* time, never in the gen path or the gate); and a **shared
+cross-language conformance suite gates every target's release**. The forward adapter is a WE `webadapters`
+standard artifact; the generated origins are ecosystem impl, and any served product is Plateau (per
+[constellation-placement](#constellation-placement)).
+
+**Lineage:** #463 (ratified — polyglot MaaS origin generation) · builds #505/#506/#507. Relates to
+[surface-contract-not-computation](#surface-contract-not-computation) (neutral contract is the SoT).
+
+### Framework-free core; vendor frameworks segregated at the package boundary {#framework-free-core-vendor-segregation}
+
+Frontier UI's **framework-free principle scopes to the core/floor packages only** — *not* identity-wide.
+A framework-coupled vendor adapter lives in its **own published `@frontierui/<block>-<vendor>` package**, with
+that vendor's framework as a **normal dependency of that package alone**, loaded **opt-in via a plain dynamic
+`import()`** so the core's dependency tree stays *provably* framework-free. The whole mechanism is "a published
+package + a dynamic import" — **no Module Federation**. If cross-deploy runtime sharing is ever needed, it uses
+web-standard import-maps / Native-Federation, never webpack Module Federation (per the bundler-agnostic axis).
+
+**Lineage:** #963 (Slate/React optional-dep fork). Refines — does not duplicate — [constellation-placement](#constellation-placement)
+(WE/FUI/Plateau division); this is *intra-FUI* framework containment.
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)

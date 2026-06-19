@@ -6,6 +6,7 @@ status: resolved
 dateOpened: "2026-06-08"
 dateStarted: "2026-06-09"
 dateResolved: "2026-06-09"
+codifiedIn: "docs/agent/platform-decisions.md#behavior-activation-lifecycle"
 tags: [webtraits, webbehaviors, activation-lifecycle, accessibility, inert, dead-zone, native-first]
 relatedReport: reports/2026-06-02-lazy-traits-loading.md
 relatedProject: webtraits
