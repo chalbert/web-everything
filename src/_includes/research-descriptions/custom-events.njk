@@ -991,7 +991,7 @@ class MyBehavior extends CustomAttribute {
 
   connectedCallback() {
     // Listen on the closest ancestor — only TabChangeEvent instances fire
-    this.#unsub = listenFor(this.target, TabChangeEvent, (e) =&gt; {
+    this.#unsub = listenFor(this.ownerElement, TabChangeEvent, (e) =&gt; {
       this.#onTabChange(e.detail);
     });
   }
@@ -1202,14 +1202,14 @@ class ContainerBehavior extends CustomAttribute {
   connectedCallback() {
     // Listen for any 'item-selected' event from a known provider
     this.#unsubs.push(
-      listenForScoped(this.target, 'item-selected', 'customEvents:item-selected', (e) =&gt; {
+      listenForScoped(this.ownerElement, 'item-selected', 'customEvents:item-selected', (e) =&gt; {
         this.#handleSelection(e.detail);
       }),
     );
 
     // Listen for any 'item-removed' event from a known provider
     this.#unsubs.push(
-      listenForScoped(this.target, 'item-removed', 'customEvents:item-removed', (e) =&gt; {
+      listenForScoped(this.ownerElement, 'item-removed', 'customEvents:item-removed', (e) =&gt; {
         this.#handleRemoval(e.detail);
       }),
     );

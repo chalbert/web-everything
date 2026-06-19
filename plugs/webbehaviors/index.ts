@@ -12,11 +12,11 @@
  * // Define a custom attribute
  * class TooltipAttribute extends CustomAttribute {
  *   attachedCallback() {
- *     this.target.addEventListener('mouseenter', this.show);
+ *     this.ownerElement.addEventListener('mouseenter', this.show);
  *   }
  * 
  *   detachedCallback() {
- *     this.target.removeEventListener('mouseenter', this.show);
+ *     this.ownerElement.removeEventListener('mouseenter', this.show);
  *   }
  * 
  *   show = () => {

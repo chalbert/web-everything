@@ -392,7 +392,7 @@ attributes.upgrade(document.body);
 
         const store = getStoreForPath(path);
         this._updateText = () => {
-          if (this.target) this.target.textContent = store.getItem(path) ?? '';
+          if (this.ownerElement) this.ownerElement.textContent = store.getItem(path) ?? '';
         };
         this._updateText();
         this._unsubscribe = store.subscribe(this._updateText);
@@ -413,23 +413,23 @@ attributes.upgrade(document.body);
 
         // Initial value
         const value = store.getItem(path);
-        if (this.target && value !== undefined) this.target.value = value;
+        if (this.ownerElement && value !== undefined) this.ownerElement.value = value;
 
         // Handle input
         this._handleInput = (e) => store.setItem(path, e.target.value);
-        this.target?.addEventListener('input', this._handleInput);
+        this.ownerElement?.addEventListener('input', this._handleInput);
 
         // Sync from store
         this._unsubscribe = store.subscribe(() => {
           const newValue = store.getItem(path);
-          if (this.target && this.target.value !== newValue) {
-            this.target.value = newValue ?? '';
+          if (this.ownerElement && this.ownerElement.value !== newValue) {
+            this.ownerElement.value = newValue ?? '';
           }
         });
       }
 
       disconnectedCallback() {
-        this.target?.removeEventListener('input', this._handleInput);
+        this.ownerElement?.removeEventListener('input', this._handleInput);
         this._unsubscribe?.();
       }
     }

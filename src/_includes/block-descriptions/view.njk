@@ -290,10 +290,10 @@ class ViewBehavior extends CustomAttribute {
   #view = new ___(/* TBD */)();
 
   connectedCallback() {
-    this.target!.addEventListener('command', (e) => {
-      if (e.command === '--view-show')   this.#view.show(this.target!);
-      if (e.command === '--view-hide')   this.#view.hide(this.target!);
-      if (e.command === '--view-toggle') this.#view.toggle(this.target!);
+    this.ownerElement!.addEventListener('command', (e) => {
+      if (e.command === '--view-show')   this.#view.show(this.ownerElement!);
+      if (e.command === '--view-hide')   this.#view.hide(this.ownerElement!);
+      if (e.command === '--view-toggle') this.#view.toggle(this.ownerElement!);
     });
   }
 }
@@ -303,8 +303,8 @@ class ViewShowBehavior extends CustomAttribute {
   #view = new ___(/* TBD */)();
 
   #onStateChange(value: unknown) {
-    if (value) this.#view.show(this.target!);
-    else       this.#view.hide(this.target!);
+    if (value) this.#view.show(this.ownerElement!);
+    else       this.#view.hide(this.ownerElement!);
   }
 }
 

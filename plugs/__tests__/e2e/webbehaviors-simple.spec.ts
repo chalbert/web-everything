@@ -17,15 +17,15 @@ test.describe('webbehaviors - Custom Attributes', () => {
         static observedAttributes = ['highlight'];
         
         connectedCallback() {
-          this.target.style.backgroundColor = this.value || 'yellow';
+          this.ownerElement.style.backgroundColor = this.value || 'yellow';
         }
         
         attributeChangedCallback(name, oldValue, newValue) {
-          this.target.style.backgroundColor = newValue || 'yellow';
+          this.ownerElement.style.backgroundColor = newValue || 'yellow';
         }
         
         disconnectedCallback() {
-          this.target.style.backgroundColor = '';
+          this.ownerElement.style.backgroundColor = '';
         }
       }
       
@@ -125,7 +125,7 @@ test.describe('webbehaviors - Custom Attributes', () => {
       // Define second attribute
       class TooltipAttribute extends window.CustomAttribute {
         connectedCallback() {
-          this.target.title = this.value || 'tooltip';
+          this.ownerElement.title = this.value || 'tooltip';
         }
       }
       

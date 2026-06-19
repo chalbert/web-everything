@@ -126,11 +126,11 @@ are silently ignored.</p>
 // What the broadcast behavior does internally:
 class BroadcastBehavior extends CustomAttribute {
   connectedCallback() {
-    this.target!.addEventListener(this.#triggerEvent, this.#onTrigger);
+    this.ownerElement!.addEventListener(this.#triggerEvent, this.#onTrigger);
   }
 
   disconnectedCallback() {
-    this.target!.removeEventListener(this.#triggerEvent, this.#onTrigger);
+    this.ownerElement!.removeEventListener(this.#triggerEvent, this.#onTrigger);
   }
 
   #onTrigger = (e: Event) => {
@@ -138,7 +138,7 @@ class BroadcastBehavior extends CustomAttribute {
 
     // 1. Resolve event class from injector
     const providerKey = this.value; // e.g., 'customEvents:close-modals'
-    const EventClass = InjectorRoot.getProviderOf(this.target!, providerKey);
+    const EventClass = InjectorRoot.getProviderOf(this.ownerElement!, providerKey);
     if (!EventClass) return;
 
     // 2. Build detail (static JSON, store reference, or void)
@@ -149,16 +149,16 @@ class BroadcastBehavior extends CustomAttribute {
   };
 
   get #triggerEvent(): string {
-    return this.target!.getAttribute('broadcast-on') ?? 'click';
+    return this.ownerElement!.getAttribute('broadcast-on') ?? 'click';
   }
 
   #resolveDetail(): unknown {
-    const staticDetail = this.target!.getAttribute('broadcast-detail');
+    const staticDetail = this.ownerElement!.getAttribute('broadcast-detail');
     if (staticDetail) return JSON.parse(staticDetail);
 
-    const storeKey = this.target!.getAttribute('broadcast-from');
+    const storeKey = this.ownerElement!.getAttribute('broadcast-from');
     if (storeKey) {
-      const store = InjectorRoot.getProviderOf(this.target!, `customStores:${storeKey}`);
+      const store = InjectorRoot.getProviderOf(this.ownerElement!, `customStores:${storeKey}`);
       return store?.getState();
     }
 
