@@ -86,7 +86,7 @@
     "id": "webevents",
     "name": "Web Events",
     "description": "Scoped event discrimination for cross-team DOM events. Extends <code>addEventListener</code> with provider-based <code>instanceof</code> validation.",
-    "status": "concept",
+    "status": "poc",
     "category": "standard",
     "icon": "/assets/icons/webevents.svg",
     "details": "Web Events solves the DOM event collision problem: when nested components fire identically-named events, listeners have no structural way to distinguish them. The project introduces <code>listenForScoped</code> &mdash; a single API that resolves the expected event class from the injector scope of <code>event.target</code> and validates via <code>instanceof</code>. In plugged mode, this becomes a <code>provider</code> option on standard <code>addEventListener</code>.",
@@ -132,7 +132,7 @@
     "id": "webtraces",
     "name": "Web Traces",
     "description": "Standard for execution flow monitoring and distributed tracing, aligning with W3C Trace Context and OpenTelemetry.",
-    "status": "concept",
+    "status": "poc",
     "category": "standard",
     "icon": "/assets/icons/webtraces.svg",
     "isSvg": true

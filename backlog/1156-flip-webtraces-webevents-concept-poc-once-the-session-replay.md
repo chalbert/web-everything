@@ -2,9 +2,12 @@
 type: issue
 workItem: task
 parent: "140"
-status: open
+status: resolved
 blockedBy: ["1155"]
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: src/_data/projects.json
 tags: []
 ---
 
