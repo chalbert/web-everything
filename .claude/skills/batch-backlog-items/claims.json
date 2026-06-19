@@ -14,7 +14,8 @@
         "1111-webvalidation-validation-control-stable-id-event-surface",
         "1112-webvalidation-commitment-policy-standalone-model-full-deferr",
         "1117-webcontexts-strict-vs-flexible-lookup-modes-consulting-claim",
-        "1125-webexpressions-observer-upgrades-addednodes-dynamic-insertio"
+        "1125-webexpressions-observer-upgrades-addednodes-dynamic-insertio",
+        "1132-webdirectives-default-customcommentparser-customcommentparse"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",

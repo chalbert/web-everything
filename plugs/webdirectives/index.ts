@@ -13,3 +13,14 @@ export { default as CustomComment } from './CustomComment';
 export type { CustomCommentOptions } from './CustomComment';
 export { default as CustomCommentRegistry } from './CustomCommentRegistry';
 export type { CommentDefinition, CustomCommentConstructor } from './CustomCommentRegistry';
+export {
+  DefaultCommentParser,
+  defaultCommentParser,
+  parseCommentOptions,
+  parseClosingMarker,
+} from './CustomCommentParser';
+export type { CustomCommentParser, ParsedCommentDirective } from './CustomCommentParser';
+export {
+  default as CustomCommentParserRegistry,
+  createDefaultCommentParserRegistry,
+} from './CustomCommentParserRegistry';
