@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Positioning Conformance Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/webpositioning-conformance-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Web Positioning Conformance Demo</h1>
+      <p>
+        The runnable proof of the <code>PositioningStrategy</code> contract
+        (<a href="/backlog/1048-webpositioning-contract-the-pure-contract-half-of-the-anchor/">#1048</a>):
+        a surface declares <strong>intent</strong> — a <code>Placement</code> (<code>bottom-start</code>,
+        <code>top-end</code>, …) plus collision flags (<code>flip</code> / <code>shift</code> / <code>resize</code>)
+        — and a swappable strategy realizes it and returns a reversible <code>PositioningTeardown</code>.
+      </p>
+      <p class="play-caveat">
+        The contract is type-only (<code>positioning/contract.ts</code>); the native CSS-anchor strategy, the
+        JS fallback, and the <code>customPositioning</code> swap registry are impl and live in Frontier UI.
+        So this demo supplies its <strong>own</strong> in-demo JS placement strategy — honest for a browser
+        demo — to prove the contract is realizable. The section below asserts each contract invariant
+        (placement, flip, shift, reversible teardown) live.
+      </p>
+    </header>
+
+    <div id="play-root">Loading demo&hellip;</div>
+  </main>
+
+  <!-- Unplugged: the demo imports the positioning contract types only (no global patch, no FUI impl). -->
+  <script type="module" src="/demos/webpositioning-conformance-demo.ts"></script>
+</body>
+</html>

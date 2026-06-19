@@ -1,0 +1,33 @@
+/* Web Positioning conformance demo (#1050) — chrome only; .badge/.summary/.play-card come from playground.css. */
+.wp-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.6rem;
+  padding: 1rem 1.25rem;
+  margin-top: 1rem;
+}
+.wp-card h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+.wp-check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+}
+.wp-check-title {
+  font-size: 0.88rem;
+  color: #334155;
+}
+/* Transient measurement stages the checks mount + remove; kept off-canvas + non-interactive. */
+.wp-stage {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+.wp-surface {
+  background: #1e293b;
+  color: #fff;
+}
