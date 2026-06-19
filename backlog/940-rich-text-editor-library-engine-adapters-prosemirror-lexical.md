@@ -1,10 +1,12 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 locus: frontierui
 blockedBy: ["923"]
 dateOpened: "2026-06-18"
+dateResolved: "2026-06-19"
+graduatedTo: "fui:blocks/rich-text-editor/editorEngine.ts"
 tags: [webediting, rich-text-editor, editor-engine, adapters]
 ---
 
