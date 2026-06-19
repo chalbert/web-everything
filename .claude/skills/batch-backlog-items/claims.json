@@ -12,7 +12,8 @@
         "1107-webstates-customchangestrategyregistry-per-scope-selection",
         "1108-webstates-customstoragestrategyregistry-indexeddb-to-localst",
         "1111-webvalidation-validation-control-stable-id-event-surface",
-        "1112-webvalidation-commitment-policy-standalone-model-full-deferr"
+        "1112-webvalidation-commitment-policy-standalone-model-full-deferr",
+        "1117-webcontexts-strict-vs-flexible-lookup-modes-consulting-claim"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",

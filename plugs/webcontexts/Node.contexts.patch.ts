@@ -8,6 +8,18 @@ import InjectorRoot from '../webinjectors/InjectorRoot';
 import HTMLInjector from '../webinjectors/HTMLInjector';
 import type { HTMLInjectorTarget } from '../webinjectors/HTMLInjector';
 import type CustomContext from './CustomContext';
+import type { ContextQuery } from './CustomContext';
+
+/**
+ * Lookup mode for {@link Node.resolveContext} (#1117, spec §"Strict vs. Flexible Lookup"):
+ *   - `strict`   — stop at the first matching context (the closest), ignoring `claim()`.
+ *   - `flexible` — traverse the parent chain, skipping contexts that DECLINE the query (`claim()===false`)
+ *     and returning the first that claims it (negotiation / protocol-driven fallback).
+ * Default is `flexible` per the Most-Flexible-Default rule (#911): the base `claim()` claims everything, so
+ * for un-overriding contexts flexible resolves identically to strict (first-found) — the negotiation only
+ * changes behaviour once a context narrows its ownership.
+ */
+export type ContextLookupMode = 'strict' | 'flexible';
 
 // Store original methods
 const OriginalNode = Node;
@@ -90,6 +102,31 @@ export function applyNodeContextsPatch(): void {
     },
   });
 
+  // resolveContext: claim-aware resolution (#1117). strict = closest context (claim ignored); flexible =
+  // walk the injector chain, skipping contexts that decline the query, returning the first that claims it.
+  Object.defineProperty(Node.prototype, 'resolveContext', {
+    ...baseDescriptor,
+    value(
+      this: Node,
+      contextType: string,
+      query: ContextQuery = {},
+      mode: ContextLookupMode = 'flexible',
+    ): CustomContext<any> | undefined {
+      // strict: stop at the first match — identical to getContext (claim is not consulted).
+      if (mode === 'strict') return this.getContext(contextType);
+      // flexible: traverse the chain; a context that declines (claim()===false) defers to its parent.
+      const injectors = this.injectors();
+      let currentInjector: HTMLInjector;
+      while ((currentInjector = injectors.next()?.value)) {
+        const customContext = currentInjector.get(`customContexts:${contextType}`) as CustomContext<any> | undefined;
+        if (customContext && customContext.claim(query)) {
+          return customContext;
+        }
+      }
+      return undefined;
+    },
+  });
+
   // ensureContext: Gets existing or creates new context
   Object.defineProperty(Node.prototype, 'ensureContext', {
     ...baseDescriptor,
@@ -152,7 +189,9 @@ export function applyNodeContextsPatch(): void {
   Object.defineProperty(Node.prototype, 'queryContext', {
     ...baseDescriptor,
     value(this: Node, contextType: string, expression: any): any {
-      const context = this.getContext(contextType);
+      // Claim-aware (flexible) by default (#1117): a context that declines this expression defers up-chain
+      // to a claiming provider, so the binding resolves against the context that actually owns the query.
+      const context = this.resolveContext(contextType, { expression }, 'flexible');
       if (!context) return undefined;
       return context.subscribe(expression, () => {});
     },
@@ -175,6 +214,7 @@ export function removeNodeContextsPatch(): void {
   delete (Node.prototype as any).createElement;
   delete (Node.prototype as any).createContext;
   delete (Node.prototype as any).getContext;
+  delete (Node.prototype as any).resolveContext;
   delete (Node.prototype as any).ensureContext;
   delete (Node.prototype as any).getOwnContext;
   delete (Node.prototype as any).hasContext;
@@ -202,6 +242,17 @@ declare global {
      * Get an existing context by traversing the injector hierarchy
      */
     getContext(contextType: string): CustomContext<any> | undefined;
+
+    /**
+     * Resolve a context with negotiation (#1117). `strict` returns the closest context; `flexible`
+     * (default) walks the injector chain, skipping contexts that decline the query via `claim()` and
+     * returning the first that claims it.
+     */
+    resolveContext(
+      contextType: string,
+      query?: ContextQuery,
+      mode?: ContextLookupMode,
+    ): CustomContext<any> | undefined;
 
     /**
      * Get existing or create new context
