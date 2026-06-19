@@ -27,6 +27,10 @@ export type { AsyncSourceTarget } from './AsyncValidatorField';
 export { default as CustomCommitmentPolicyRegistry } from './CustomCommitmentPolicyRegistry';
 export { createDefaultCommitmentPolicyRegistry } from './CustomCommitmentPolicyRegistry';
 
+// The GOV.UK error-summary element (#1114) — aggregates field errors DOM-ordered, role=alert, links to
+// fields, focuses on submit-blocked. Aggregation is the pure error-summary/ model.
+export { default as ValidationErrorSummary } from './ValidationErrorSummary';
+
 // Re-export the resolution-plane vocabulary (#214) from one entry point, mirroring the merge re-exports.
 export {
   type CustomValidatorResolution,
