@@ -24,7 +24,8 @@
         "1124-webexpressions-cloak-removal-after-upgrade",
         "1035-review-design-claude-skill-screenshot-a-page-return-a-struct",
         "1050-webpositioning-conformance-demo",
-        "1053-webreliability-conformance-demo"
+        "1053-webreliability-conformance-demo",
+        "1030-workbench-same-document-live-test-mount-react-vue-devdeps"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",
