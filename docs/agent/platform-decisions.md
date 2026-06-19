@@ -268,6 +268,24 @@ day-to-day form; cite whichever fits).
 
 **Lineage:** #31 (polyfill baseline floor). Mirrors `AGENTS.md` rule 6 + the native-first authoring default.
 
+### Shape a new contract's surface by platform idiom, not capability {#contract-surface-platform-idiom}
+
+When inventing a **new** protocol surface, pick the API shape the platform already uses for that *kind* of
+thing — and never justify a shape by a capability difference that does not exist. A relationship to another
+element that is **declared by an IDREF attribute** is a **writable element-reference property**
+(`popovertarget`/`popoverTargetElement`, `for`/`htmlFor`), **not** a method; only the **derived/resolved
+chain** stays read-only (`parentNode`, `assignedSlot`, `label.control`). A new propagation/visibility concern
+that is **orthogonal** to an existing platform flag gets its **own flag** — never an overload of the existing
+one (`composedLogical`, not a reinterpreted `composed`). "Use a method so we get validation/events" is a
+**non-reason**: an accessor's setter validates and fires events exactly as a method does, so decide on idiom,
+not capability.
+
+**Lineage:** #1000 (Web Portals contract shape — `logicalParent` writable element-reference property +
+`composedLogical` separate flag; the capability-not-idiom trap was caught by author review). Refines
+[native-first-baseline](#native-first-baseline) (this shapes *new* surfaces to the platform; that floors on
+*existing* features) and relates to [surface-contract-not-computation](#surface-contract-not-computation) and
+[compose-intent-dont-duplicate](#compose-intent-dont-duplicate) (Web Portals composes Focus Containment, Q3).
+
 ### Behavior activation lifecycle — connected ≠ active {#behavior-activation-lifecycle}
 
 A behavior (webtraits `CustomAttribute`) has **two orthogonal states**: **connected** (in the DOM, via

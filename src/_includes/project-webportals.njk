@@ -299,13 +299,18 @@ html`
   </p>
   {% highlight "typescript" %}
 interface Node {
-  // The logical parent for context/event propagation (defaults to parentNode)
+  // The logical parent for context/event propagation (defaults to parentNode).
+  // Writable element-reference property — mirrors button.popoverTargetElement, and
+  // reflects the declarative `logicalparent="id"` IDREF content attribute. Setting it
+  // validates the logical graph (throws DOMException "HierarchyRequestError" on a cycle),
+  // detaches from the prior logical parent, and fires a "logicalparentchange" event.
+  // (ratified #1000, Fork 1)
   logicalParent: Node | null;
 
   // Read-only: the injector resolved via logical ancestry
   readonly logicalInjector: Injector | null;
 
-  // Walk the logical ancestor chain
+  // Read-only: walk the resolved logical ancestor chain (derived, like parentNode)
   logicalAncestors(): IterableIterator<Node>;
 
   // Check if this node is a logical descendant of another
@@ -313,6 +318,7 @@ interface Node {
 }
   {% endhighlight %}
   <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>Declarative front door:</strong> the <code>logicalparent="id"</code> IDREF content attribute sets the relationship in pure HTML (matching <code>for</code>/<code>slot</code>/<code>popovertarget</code>), reflected by the writable <code>logicalParent</code> property — the <code>popovertarget</code>/<code>popoverTargetElement</code> pattern. Setting either validates the graph (<code>HierarchyRequestError</code> on a cycle) and fires <code>logicalparentchange</code> (ratified #1000, Fork 1)</li>
     <li><strong>Default behavior:</strong> When <code>logicalParent</code> is <code>null</code>, it defaults to <code>parentNode</code> (normal DOM behavior)</li>
     <li><strong>Context resolution:</strong> <code>getContext()</code> walks <code>logicalParent</code> chain, not <code>parentNode</code></li>
     <li><strong>Injector chain:</strong> <code>logicalInjector</code> resolves via logical ancestry</li>
@@ -326,11 +332,22 @@ interface Node {
 interface EventInit {
   // New: should this event bubble through logical tree? (default: false)
   bubblesLogical?: boolean;
+
+  // New: cross logical (portal) boundaries. ORTHOGONAL to native `composed`, which
+  // crosses the target's SHADOW boundary — a separate flag, never an overload.
+  // Default false (preserves encapsulation). (ratified #1000, Fork 2)
+  composedLogical?: boolean;
 }
 
 interface Event {
-  // The logical propagation path (if bubblesLogical is true)
+  // The logical propagation path (if bubblesLogical is true). Computed PRE-retarget as a
+  // parallel pass over the logical chain; a fresh retarget runs at each logical hop whose
+  // host is the portal's DECLARATION element (not its mount/outlet), so a listener's
+  // event.target stays inside its own logical tree. (ratified #1000, Fork 2)
   readonly logicalPath: EventTarget[];
+
+  // Logical analogue of composedPath(), for events with composedLogical: true.
+  composedLogicalPath(): EventTarget[];
 
   // Stop propagation through both DOM and logical trees
   stopLogicalPropagation(): void;
@@ -385,47 +402,12 @@ customElements.define('portal-outlet', PortalOutlet);
     <li><strong>Named outlets:</strong> Target by ID, CSS selector, or direct reference</li>
   </ul>
 
-  <h4 id="primitive-4" style="margin-top: 2rem;">4. Focus Scope</h4>
-  <p>
-    Focus management needs to respect logical boundaries for tab navigation and focus traps. We propose a <code>focusscope</code> attribute and related APIs.
-  </p>
-  {% highlight "typescript" %}
-interface FocusScopeOptions {
-  // Trap focus within this scope (for modals)
-  trap?: boolean;
-
-  // Return focus to trigger element on scope exit
-  returnFocus?: boolean;
-
-  // The element to return focus to (defaults to previously focused)
-  returnTarget?: Element;
-}
-
-interface Element {
-  // Create a focus scope rooted at this element
-  createFocusScope(options?: FocusScopeOptions): FocusScope;
-}
-
-interface FocusScope {
-  // The scope root element
-  readonly root: Element;
-
-  // Is focus currently within this scope?
-  readonly active: boolean;
-
-  // Release the focus scope
-  release(): void;
-}
-  {% endhighlight %}
-  {% highlight "html" %}
-<!-- Declarative focus scope via attribute -->
-<div class="modal" focusscope="trap returnfocus">
-  <input type="text" autofocus>
-  <button>Submit</button>
-  <button>Cancel</button>
-  <!-- Tab cycles within modal, ESC or close returns focus to trigger -->
-</div>
-  {% endhighlight %}
+  <h4 id="primitive-4" style="margin-top: 2rem;">4. Focus containment — composed, not owned</h4>
+  <div class="content-box">
+    <p style="margin: 0; font-size: 0.95rem;">
+      Focus management is <strong>not</strong> a Web Portals primitive. Confining focus to the portaled surface, marking the rest of the page <code>inert</code>, choosing where focus lands on open, and restoring it on close are owned by the <a href="/intents/focus-containment/">Focus Containment Intent</a> — which the <a href="/intents/modal/">Modal</a>, <a href="/intents/anchor/">Anchor</a>, and <a href="/intents/autofocus-on-activation/">Autofocus-on-Activation</a> intents already <em>compose</em> rather than redefine. A portaled surface adopts containment the same way; its native substrate is <code>&lt;dialog&gt;.showModal()</code> (auto-<code>inert</code> + top layer + <code>:modal</code>). The two concerns are orthogonal: you can portal without a trap (toast, tooltip) and trap without a portal (an in-place <code>&lt;dialog&gt;</code> wizard step). The earlier <code>focusscope</code> / <code>createFocusScope()</code> primitive proposed here is <strong>struck</strong>. (Ratified #1000, Fork 3.)
+    </p>
+  </div>
 
   <h4 id="primitive-5" style="margin-top: 2rem;">5. The Portal Directive</h4>
   <p>
@@ -433,7 +415,7 @@ interface FocusScope {
   </p>
   {% highlight "typescript" %}
 class PortalDirective extends CustomTemplateDirective {
-  static observedAttributes = ['target', 'disabled'];
+  static observedAttributes = ['target', 'disabled', 'required'];
 
   // The target outlet (selector, element reference, or 'body')
   target: string | Element = 'body';
@@ -441,22 +423,31 @@ class PortalDirective extends CustomTemplateDirective {
   // Disable the portal (content stays in place)
   disabled: boolean = false;
 
+  // Fail-fast: throw synchronously in connectedCallback if the target is absent,
+  // instead of the deferred-by-default attach-or-observe behavior. (ratified #1000, Fork 4)
+  required: boolean = false;
+
   // The rendered content
   readonly content: DocumentFragment | null;
 
   // Lifecycle
   connectedCallback(): void {
-    // 1. Resolve target outlet
+    // 1. Resolve target outlet (deferred-by-default — ratified #1000, Fork 4):
+    //      present -> attach immediately;
+    //      absent  -> observe via the shared root InjectorRoot MutationObserver and attach
+    //                 when it appears. An unresolved target is warned at a STRUCTURAL trigger
+    //                 (DOMContentLoaded on initial load, or one requestAnimationFrame after a
+    //                 post-load connection) — never a wall-clock timeout. `required` instead
+    //                 throws synchronously here.
     // 2. Instantiate template content
-    // 3. Set logicalParent on content root to this directive's parent
+    // 3. Set logicalParent on content root to this directive's parent (the declaration element)
     // 4. Append content to target
-    // 5. Set up event proxying
+    // 5. Set up event proxying (logical retarget host = this declaration element — Fork 2)
   }
 
   disconnectedCallback(): void {
     // 1. Remove content from target
-    // 2. Clean up event listeners
-    // 3. Release focus scope if active
+    // 2. Clean up event listeners (incl. the deferred-resolution observer subscription)
   }
 }
 
@@ -469,11 +460,12 @@ customElements.define('portal', PortalDirective, { extends: 'template' });
 <!-- Usage: content renders to #modals but maintains logical context -->
 <my-widget>
   <template is="portal" target="#modals">
-    <div class="widget-modal" focusscope="trap returnfocus">
+    <dialog class="widget-modal">
+      <!-- Focus trap/restore via the Focus Containment Intent (dialog.showModal), not a portal primitive -->
       <!-- Full access to my-widget's contexts and injectors -->
       <h2 data-bind="widgetTitle"></h2>
       <button on-click="closeModal">Close</button>
-    </div>
+    </dialog>
   </template>
 </my-widget>
 {% endhighlight %}
@@ -485,11 +477,12 @@ function MyWidget() {
 
   return (
     <Portal target="#modals">
-      <div className="widget-modal" focusScope={%raw%}{{ trap: true, returnFocus: true }}{%endraw%}>
+      <dialog className="widget-modal">
+        {/* Focus via the Focus Containment Intent (dialog.showModal), not a portal primitive */}
         {/* Full access to my-widget's contexts */}
         <h2>{widgetTitle}</h2>
         <button onClick={closeModal}>Close</button>
-      </div>
+      </dialog>
     </Portal>
   );
 }
@@ -500,11 +493,12 @@ function MyWidget() {
 html`
   <my-widget>
     <Portal target="#modals">
-      <div class="widget-modal" focusscope="trap returnfocus">
+      <dialog class="widget-modal">
+        <!-- Focus via the Focus Containment Intent (dialog.showModal), not a portal primitive -->
         <!-- Full access to my-widget's contexts and injectors -->
         <h2>${widgetTitle}</h2>
         <button @click=${closeModal}>Close</button>
-      </div>
+      </dialog>
     </Portal>
   </my-widget>
 `
@@ -885,12 +879,17 @@ html`
     <li><a href="/projects/webcontexts/">Web Contexts</a> — Context resolution via logical ancestry</li>
     <li><a href="/projects/webdirectives/">Web Directives</a> — The <code>CustomTemplateDirective</code> base for the portal directive</li>
   </ul>
-  <h4 style="margin-top: 1rem;">Open Questions</h4>
+  <h4 style="margin-top: 1rem;">Resolved Questions</h4>
+  <p style="font-size: 0.9rem; color: var(--color-text-muted);">
+    The four open questions that gated this protocol were ratified in
+    <a href="/backlog/1000-ratify-the-web-portals-protocol-resolve-the-4-spec-open-ques/">backlog #1000</a>
+    (2026-06-19):
+  </p>
   <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
-    <li>Should <code>logicalParent</code> be a writable property or set via a method?</li>
-    <li>How should <code>bubblesLogical</code> interact with Shadow DOM event retargeting?</li>
-    <li>Should focus scopes be integrated into the portal directive or remain separate?</li>
-    <li>What's the behavior when a portal target doesn't exist yet (deferred resolution like Vue 3.5)?</li>
+    <li><strong>logicalParent surface</strong> — a writable element-reference property (mirroring <code>popoverTargetElement</code>) reflecting a declarative <code>logicalparent="id"</code> attribute, with a validating setter + <code>logicalparentchange</code>. <em>Not</em> a method.</li>
+    <li><strong>Logical bubbling × retargeting</strong> — a separate opt-in <code>composedLogical</code> flag + <code>composedLogicalPath()</code> (never an overload of native <code>composed</code>); <code>logicalPath</code> computed pre-retarget; the retarget host at a logical hop is the <em>declaration</em> element.</li>
+    <li><strong>Focus scopes</strong> — struck as a portal primitive; the portal composes the <a href="/intents/focus-containment/">Focus Containment Intent</a>.</li>
+    <li><strong>Deferred resolution</strong> — deferred-by-default (attach-or-observe via the shared <code>InjectorRoot</code> observer); structural diagnostic trigger (DOMContentLoaded / one <code>requestAnimationFrame</code>), with a <code>required</code> opt-out for fail-fast.</li>
   </ul>
 </section>
 

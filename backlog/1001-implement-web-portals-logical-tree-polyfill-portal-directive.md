@@ -30,3 +30,27 @@ Anticipated slices (to be carved once #1000 ratifies — sizes/forks may shift w
 Blocked on #1000 — the contract shape (writable-vs-method `logicalParent`, shadow-retarget composition,
 focus-scope boundary) must settle before impl. Per WE=contracts: protocol → `@webeverything`, polyfill +
 directive runtime → FUI (impl/tooling is never a WE standard artifact).
+
+## Ratified contract shape (from #1000, 2026-06-19)
+
+The four open questions are settled (spec edits applied to `we:src/_includes/project-webportals.njk`):
+
+- **`logicalParent`** — a **writable element-reference property** (mirroring `popoverTargetElement`)
+  reflecting a declarative `logicalparent="id"` IDREF attribute; the setter validates the graph
+  (`HierarchyRequestError` on a cycle), detaches from the prior logical parent, and fires
+  `logicalparentchange`. No `setLogicalParent()` method. `logicalAncestors()`/`logicalInjector` stay
+  read-only.
+- **Logical events** — a **separate** opt-in `composedLogical` flag + `composedLogicalPath()` (never an
+  overload of native `composed`); `logicalPath` computed **pre-retarget**; the retarget host at a logical
+  hop is the **declaration element** (not the mount/outlet), so `event.target` stays in the listener's
+  logical tree.
+- **Focus** — **not** a portal concern; compose the [Focus Containment Intent](/intents/focus-containment/)
+  (no `focusscope`/`createFocusScope`).
+- **Deferred targets** — **deferred-by-default** (attach-or-observe); diagnostic at a **structural**
+  trigger (DOMContentLoaded / one `requestAnimationFrame`), **not** a wall-clock timeout; a `required`
+  attribute opts into a synchronous throw.
+
+**Impl residual to verify (Fork 4):** confirm the shared root `InjectorRoot` `MutationObserver` is
+**document-rooted** — i.e. it sees a target appended to `document.body` by unrelated code. If it is
+subtree-scoped, add **one** timer-free root-level fallback observer (never one observer per portal). This
+is the only sub-decision left to the build; it does not change the contract.
