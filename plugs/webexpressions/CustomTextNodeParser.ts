@@ -52,6 +52,17 @@ export default abstract class CustomTextNodeParser {
   localName: string | null = null;
 
   /**
+   * Element tag names (lower-cased `localName`s) inside which this parser should NOT run — text in their
+   * subtree is left as plain text, so `<code>{{name}}</code>` renders literally without HTML entities
+   * (#1123). The CustomTextNodeRegistry consults this when upgrading a tree: a text node whose ancestor
+   * chain (up to the upgrade root) contains an excluded element is skipped by THIS parser (other parsers,
+   * with different exclusions, still run). Optional — `undefined`/`[]` means "parse everywhere" (the
+   * most-flexible default). To opt a specific excluded element back in, call `customExpressions.upgrade(el)`
+   * directly on it. Conventional set: `['code', 'pre', 'script', 'style', 'textarea']`.
+   */
+  excludedElements?: string[];
+
+  /**
    * Parse a text string, splitting it into Text and UndeterminedTextNode instances.
    *
    * Static text segments become regular Text nodes.
