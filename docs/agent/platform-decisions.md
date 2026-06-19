@@ -186,6 +186,26 @@ never *mandates* conventions — it ships a default vocabulary projects customiz
 **Lineage:** #841 (tagName convention) · #822 (CEM surface as contract) · #045 #046 · #063 #030 ·
 #436/#437 (conventions-fold-into-compliance).
 
+### Host back-reference property naming {#host-backreference-naming}
+
+A host-attached object names its back-reference to the host **by the relationship's native /
+semantic name — never a universal `target`**. `target`/`currentTarget` are reserved for transient
+dispatch/observation (`Event`, `MutationRecord`), not persistent ownership, and collide with the
+`e.target` a behaviour reads in its own listeners.
+
+1. An `Attr`-derived host object (`CustomAttribute` + subclasses, which chain to `Attr.prototype`)
+   uses **`ownerElement`** — the exact native `Attr.ownerElement`.
+2. A non-attribute host-attached object (`Injector`, `CustomContext`, controllers) uses **`host`**
+   (matches `ShadowRoot.host`, Lit `ReactiveControllerHost`, Angular host element).
+3. **Name by semantics, not by uniformity:** two right names (`ownerElement` for `Attr`, `host`
+   elsewhere) beat one wrong-but-uniform name — the web platform itself diverges this way
+   (`Attr.ownerElement` vs `ShadowRoot.host`). A permanent dual name for one class is excluded; a
+   deprecated alias getter for one cycle is a rollout tactic, not a second canonical name.
+
+**Lineage:** #1121 (`CustomAttribute` → `ownerElement`, scoped to `Attr` subclasses) · #1042
+(sibling `Injector`/`CustomContext` → `host`, open) · derived from [native-first
+baseline](#native-first-baseline).
+
 ### Guard / Gate vocabulary {#guard-gate}
 
 **Guard** gates a *transition*; **Gate** gates *presence*. Protocolize only the **provider +
