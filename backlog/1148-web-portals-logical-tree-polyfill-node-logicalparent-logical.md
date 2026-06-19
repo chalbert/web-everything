@@ -3,8 +3,11 @@ type: idea
 workItem: story
 size: 5
 parent: "1001"
-status: open
+status: resolved
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: plugs/webportals/Node.logical.patch.ts
 relatedProject: webportals
 tags: [webportals, build]
 ---
