@@ -58,6 +58,7 @@ export default defineConfig({
       'conformance-evidence/**/__tests__/**/*.test.{ts,tsx}', // conformance-evidence manifest contract (#599)
       'guard/**/__tests__/**/*.test.{ts,tsx}', // guard protocol provider+predicate seam (#288/#289)
       'wrapper-conformance/**/__tests__/**/*.test.{ts,tsx}', // behavioral wrapper conformance vectors + runner (#891)
+      'conformance-vectors/**/__tests__/**/*.test.{ts,tsx}', // behavioral conformance-vector schema + per-standard suites (#1016)
       'webtheme/**/__tests__/**/*.test.{ts,tsx}', // webtheme token model + DTCG→CSS compile (#404)
       'webtraits/**/__tests__/**/*.test.{ts,tsx}', // intent-profile → trait build-time resolver (#776)
       'webpolicy/**/__tests__/**/*.test.{ts,tsx}', // webpolicy proof-of-compliance hash chain (#407) + enforcement seam (#408)
