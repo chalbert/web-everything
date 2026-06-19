@@ -34,6 +34,7 @@ import {
   ValidityMergeField,
   createDefaultValidatorResolutionRegistry,
   AsyncValidatorField,
+  createDefaultCommitmentPolicyRegistry,
 } from './webvalidation';
 import { CustomGuardRegistry, createDefaultGuardRegistry } from './webguards';
 
@@ -230,6 +231,12 @@ if (!customElements.get('validity-merge-field')) {
 const validatorResolution = createDefaultValidatorResolutionRegistry();
 window.customValidatorResolution = validatorResolution;
 documentInjector?.set('customValidatorResolution', validatorResolution);
+
+// Setup the commitment-policy registry (#1113): the commit-timing/staleness policy the tree shares,
+// resolved per-scope through the injector chain. Pre-loaded with full (eager default) + deferred.
+const commitmentPolicy = createDefaultCommitmentPolicyRegistry();
+window.customCommitmentPolicy = commitmentPolicy;
+documentInjector?.set('customCommitmentPolicy', commitmentPolicy);
 
 // Define the async driver that feeds a <validity-merge-field>'s `async` source.
 if (!customElements.get('async-validator-field')) {
