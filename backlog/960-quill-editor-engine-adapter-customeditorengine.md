@@ -3,10 +3,12 @@ type: idea
 workItem: story
 size: 3
 parent: "940"
-status: open
+status: resolved
 blockedBy: ["959"]
 dateOpened: "2026-06-18"
-dateStarted: "2026-06-18"
+dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: "fui:blocks/rich-text-editor/engines/quill.ts"
 tags: []
 ---
 
@@ -14,31 +16,37 @@ tags: []
 
 Register Quill behind the CustomEditorEngine seam (fui:blocks/rich-text-editor/editorEngine.ts:34): new fui:blocks/rich-text-editor/engines/quill.ts mapping Quill's doc model to/from the HTML pivot via getSemanticHTML() / dangerouslyPasteHTML(); register on customEditorEngine; quill as optional peerDep+devDep (mirrors #935 xstate); unit test + add 'quill' to the demo switcher + Playwright e2e. Most self-contained library (one package).
 
-## Blocked + released — needs a Vite-config prerequisite (batch-2026-06-18)
+## Progress — resolved 2026-06-19
 
-Attempted in batch-2026-06-18 and **released** (stop-rule: outgrew a story·3 into a toolchain-config
-fix that restarts the running dev server). The adapter design is **sound and verified at the seam** — the
-blocker is purely Vite's dependency pre-bundle.
+Shipped. Quill registers behind the `CustomEditorEngine` seam and edits live in the real (plugged)
+browser demo: typing + select-all + the `bold` command round-trips through Quill's Delta model to the
+shared HTML pivot as `<p><strong>hello world</strong></p>`.
 
-**What was built (and works):** `fui:blocks/rich-text-editor/engines/quill.ts` — `QuillEngine implements CustomEditorEngine`, mapping
-the HTML pivot via `quill.getSemanticHTML()` (out) / `clipboard.dangerouslyPasteHTML(sanitize(v))` (in),
-`format()` → `quill.format(cmd, value, 'user')`, `destroy()` restores the host. Registration-level unit
-test green (engine registers behind the seam). `quill@^2` wired as an optional `peerDependency` (mirrors
-the #935 xstate pattern). Quill **cannot** instantiate under happy-dom (Parchment recurses → stack
-overflow), so the unit layer stays registration-only and the editing path is e2e-only — as designed.
+**Done:**
+- `fui:blocks/rich-text-editor/engines/quill.ts` — `QuillEngine implements CustomEditorEngine`: HTML
+  pivot out via `quill.getSemanticHTML()`, in via `clipboard.dangerouslyPasteHTML(sanitize(v))`,
+  `format()` → `quill.format(cmd, value ?? true, 'user')`, `destroy()` strips Quill's DOM/classes off
+  the shared host so the next engine re-attaches clean. Self-registers on import (the opt-in module that
+  imports `quill`, keeping core `fui:blocks/rich-text-editor/editorEngine.ts` dependency-free — mirrors the #935 xstate split).
+- `quill@^2` as optional `peerDependency` + devDep (#935 pattern).
+- Registration-only unit test `fui:blocks/rich-text-editor/__tests__/quillEngine.test.ts` (Quill can't
+  instantiate under happy-dom — Parchment recurses — so the editing path is e2e-only, by design).
+- Demo wires it: `fui:demos/rich-text-editor/rich-text-editor.ts` imports the adapter; switcher list is
+  `['native','quill','plain']`; e2e `fui:demos/rich-text-editor/__tests__/quill-engine.spec.ts` proves
+  the edit + format path and a swap-through-Quill-back-to-native pivot survival.
 
-**The blocker (verified):** in the real browser, `new Quill(host)` throws **`TypeError: Invalid value
-used as weak map key`** at Parchment's `ShadowBlot` constructor (`WeakMap.set(domNode, …)`), inside
-Vite's pre-bundled `fui:node_modules/.vite/deps/quill.js`. Single hoisted `parchment@3.0.0` (not a duplicate)
-— it's esbuild's pre-bundle of Quill 2.0.3 breaking Parchment's registry/class init. **Fix:** a
-`vite.config.mts` change — `optimizeDeps: { exclude: ['quill'] }` (serve Quill as native ESM, preserving
-class semantics) — which forces Vite to **restart the dev server** + re-optimize. Deferred because the
-batch must not restart the user's running server.
+**The real blocker was NOT Vite** (the batch's recorded `optimizeDeps` hypothesis was wrong — verified:
+`exclude: ['quill']` breaks `quill-delta`'s CJS interop, and pre-bundling was never the cause). True
+cause: FUI's **`webinjectors` bootstrap patch** (`fui:plugs/webinjectors/Node.injectors.patch.ts`)
+replaces global `Node` with a `PatchedNode` that **dropped Node's static constants** (`TEXT_NODE`,
+`ELEMENT_NODE`, …). So `Node.TEXT_NODE` became `undefined`, which silently poisons every `x.nodeType ===
+Node.TEXT_NODE` guard (`undefined === undefined` → true). Parchment's `registry.create` then mistook the
+string tag `'block'` for a Node and did `WeakMap.set('block', …)` → "Invalid value used as weak map key".
+A latent bug for **any** third-party lib reading `Node.*` constants off the global, not just Quill.
+**Fix:** copy `OriginalNode`'s own static property descriptors onto `PatchedNode` (no Vite change — the
+`optimizeDeps` churn was reverted). Root-caused by bisecting the four bootstrap patch groups on an
+`-unplugged` probe page.
 
-**Resume recipe (fast):** (1) add `optimizeDeps.exclude: ['quill']` to `fui:vite.config.mts`; (2)
-reinstate `fui:blocks/rich-text-editor/engines/quill.ts` + the registration unit test (both reverted clean); (3) `npm i -D quill` +
-re-add the optional `peerDependency`; (4) register `QuillEngine` in `fui:demos/rich-text-editor/rich-text-editor.ts`
-+ extend the `engines()` assertion in `fui:demos/rich-text-editor/__tests__/engine-switcher.spec.ts` to `['native','plain','quill']`; (5)
-re-add `fui:demos/rich-text-editor/__tests__/quill-engine.spec.ts` (type → keyboard select-all → bold →
-assert `<strong>` in the pivot). **Likely shared by siblings #961 (Lexical) / #962 (ProseMirror)** — same
-Vite pre-bundle class — so land the `optimizeDeps` fix once and the three adapters follow.
+Verified: frontierui `tsc --noEmit` clean, full vitest **2013 passed**, the 5 rich-text-editor e2e
+(3 switcher + 2 quill) pass, webinjectors 175 unit tests pass. Siblings #961 (Lexical) / #962
+(ProseMirror) inherit the now-correct patch for free — no shared Vite fix needed.
