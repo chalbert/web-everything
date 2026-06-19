@@ -13,7 +13,7 @@ tags: [compliance, conformance, monetization, plateau, managed-offering]
 Decide the home for a HOSTED WE-compliance validation product ("WE Compliance by Plateau" — upload a
 design system, get a conformance report/badge/dashboard). The conformance STANDARD (vectors, the #891
 runner, gate definitions, WE's own self-gate) stays in WE and cannot move (#855 B2; WE can't depend on
-Plateau to validate itself). The hosted PRODUCT is a Plateau-layer managed offering per #091/#899/#475.
+Plateau to validate itself). The hosted PRODUCT is a Plateau-layer managed offering per the [Constellation placement](docs/agent/platform-decisions.md#constellation-placement) rule (#091/#899/#475).
 Open call: make it a plateau-app DOMAIN first (like the Technical Configurator / webvalidation), or stand
 up its own repo. Lean domain-first; graduate only when deploy/lifecycle diverge or it becomes a primary
 revenue line (soft/monetization-revisitable). Parked until product appetite shows.
@@ -44,7 +44,7 @@ whole point:
 
 - **A — plateau-app domain (default, ~80%).** Build it as a domain inside plateau-app, exactly like
   the Technical Configurator and the just-landed webvalidation domain (#725). Consumes WE vectors +
-  runner as a no-leakage client (#475). Lowest operational cost for a solo dev; the monetization ranking
+  runner as a [no-leakage Plateau service client](docs/agent/platform-decisions.md#no-leakage-client) (#475). Lowest operational cost for a solo dev; the [monetization](docs/agent/platform-decisions.md#monetization) ranking
   favors "self-run tool / single service" over standing up new infrastructure (see #089-#093).
 - **B — its own repo/project in the constellation.** Justified only once it earns an independent
   deploy/lifecycle or becomes a primary revenue line. Bias-toward-separation governs *modules*; a new
