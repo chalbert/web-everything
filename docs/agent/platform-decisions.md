@@ -122,7 +122,9 @@ partition) · #809 (workbench locus) · #932 (website≠standard; consumer may r
    protocol/intent.
 
 **Lineage:** #015 #016 #011 #014 #409 #616 #634 · #041 (protocol-extraction timing) · #258
-(paradigm → semantics) · #020→#291.
+(paradigm → semantics) · #020→#291 · #1175 (deck placement: a deck is composition, not a domain —
+no `webdecks` project; novel surface is a *cross-media advanceable-sequence* family homed in webintents,
+shared with video/carousel; rule 2 + temporal rule 3 applied).
 
 ### Intents are UX-only; technical strategy → Configurator {#intents-ux-only}
 
