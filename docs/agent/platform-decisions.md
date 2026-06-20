@@ -440,6 +440,32 @@ builds **only the one genuinely-missing intent** (command invocation), not a fre
 
 **Lineage:** #124 (Resource → Loader Intent) · #173 (Menu → existing intents + the one missing `command`). Sibling of [compose-dont-handroll](#compose-dont-handroll).
 
+### Configurability partition — declarative vocabulary is the portable standard; imperative is the per-impl escape hatch {#configurability-partition}
+
+A runtime-agnostic standard's **author-facing configuration** splits along the **declarative/imperative
+line**, *not* along "the reference impl vs others." A **declarative strategy vocabulary** (options expressed
+as *data* — `sort by field, desc`; `group by tag`; an order pin) is **part of the standard**: portable,
+golden-vector-locked, honored identically by **any** conforming implementer. An **imperative custom
+function** (a JS/C# sort fn) is **inherently non-portable** (code, not data), so it is a **per-implementer
+escape hatch**, never in the standard — and reaching for one is an explicit, **graceful-degradation** opt-out
+of cross-implementer reproducibility for that aspect (another implementer declares non-support and falls
+back to the declarative default, never silently differs). Consequences: configurability is **unbounded at
+two levels** (portable declarative + per-impl imperative) without bloating the contract; the named
+implementer is the **reference** impl, not "the engine" — the standard stays runtime-agnostic so a second
+generator (`.NET`/Go) is a first-class possibility; the declarative vocabulary **starts minimal and grows on
+demand** (promote a popular escape-hatch option into the vocabulary when real demand / a second implementer
+appears — grow the *vocabulary*, not an impl's private knobs). Reproducibility (e.g. #091 no-drift) holds
+across *any* implementer over the declarative surface, degrade-gracefully over the imperative one. **Tell:**
+when "we must let people customize X" tempts a vendor-injected plugin *inside* the contract, the right move
+is a declarative vocabulary entry (if expressible as data) **plus** an imperative escape hatch outside the
+contract — never an imperative seam folded into the standard.
+
+**Lineage:** #1163 (webdocs Doc Spec — declarative `docs.*` vocabulary in WE, custom `SortStrategy` fn as a
+per-impl escape hatch; FUI = reference impl). Composes [surface-contract-not-computation](#surface-contract-not-computation)
+(pin surface / swap impl), [intents-ux-only](#intents-ux-only) + Intents-Open-Design (standardize the
+meta-schema, not the list), and the minimize-lock-in / escapable-lock principle; the config-surface analogue
+of [forward-generation-adapters](#forward-generation-adapters) (contract is the authority, code crosses no seam).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
