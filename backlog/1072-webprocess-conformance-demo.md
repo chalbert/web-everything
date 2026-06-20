@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 3
 parent: "1026"
-status: open
+status: resolved
 blockedBy: ["1070", "1071"]
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: "we:demos/webprocess-conformance-demo.ts"
 tags: []
 ---
 
@@ -13,6 +16,10 @@ tags: []
 
 Slice C of webprocess impl epic #1026 (blockedBy slice A contract). Runtime conformance demo exercising the self-driven artefact contract+runtime in a real browser, proving they satisfy the standard. Wired into the demo registry.
 
-## Blocked-in-fact — runtime slice #1071 is the real prerequisite (2026-06-19)
+## Resolution (batch-2026-06-19) — runtime #1071 landed in WE, so the demo is buildable
 
-Claimed in a batch and verified non-batchable: the card says "exercising the self-driven artefact **contract+runtime**", but the only WE-side artefact that exists is the **type-only, compile-erased** `we:process/contract.ts` (#1070). The runtime half — the driving loop, the meta-schema registries, default-recipe resolution — is explicitly impl that lives in **FUI/plateau-app** (per the contract module header) and is slice **B / #1071**, which is still `open`. There is nothing to exercise in a real browser yet: no runtime export in `we:process/`, no `webprocess` conformance vectors, no demo fixture. A demo would have to hand-roll the runtime, which violates the platform-first rule (it would BE slice B). Real fix applied: added `blockedBy: 1071` so the readiness projection drops it from the ready pool until the runtime lands (it was mis-flagged batchable on the contract-only blocker #1070). Cross-locus (FUI) + unbuilt → cannot be completed in a WE-only lane. Stays `open`.
+The earlier blocked-in-fact note's premise was wrong: #1071 did NOT build the runtime in FUI/plateau-app — it graduated to `we:process/provider.ts`, and `we:process/` now ships the full runtime (`contract.ts` + `provider.ts` + `registry.ts` + `driver.ts` + `index.ts`). Both `blockedBy` edges (#1070/#1071) are resolved. So a WE-side browser demo exercising the runtime is exactly the right slice C.
+
+Built `we:demos/webprocess-conformance-demo.{ts,html,css}` + the `we:src/_data/demos/webprocess-conformance-demo.json` registry entry (mirroring the sibling `analytics-conformance-demo`). The demo imports the runtime as a plain library (unplugged) and asserts **10 contract invariants live**: the default seam ships the `L0–L5` ladder + the `webprocess/default` recipe; `assertStep`/`assertProcessRecipe` enforce the shape at the seam; `indexSteps` throws `BrokenStepGraphError` on a dangling edge; `runnableSteps` yields the dependency frontier; `isRunComplete` needs a completed final step; `effectiveCeiling` throttles the autonomy ceiling DOWN per low-tolerance dimension (never grants, floored at `L0`), with recipe ceiling overrides applied before the throttle; and the autonomy ladder is OPEN to new rungs.
+
+Verified live on the running dev server (Playwright, `http://localhost:3000/demos/webprocess-conformance-demo.html`): **10/10 invariants hold**. (The 7 unrelated `blocks/parsers/*` 500s in the console are a concurrent session's in-flight files — the known-good `analytics-conformance-demo` shows the identical set; not caused by this demo, which imports only `we:process/`.) AGENTS.md inventory regenerated.
