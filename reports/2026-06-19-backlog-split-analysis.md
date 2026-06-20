@@ -368,3 +368,44 @@ C (Doc Spec)  — Tier-C, design-first before any build slice
 4. `npm run check:standards` green; backlog count **+4**.
 
 *(Confidence ~75%. Residuals: (i) whether C should be filed as a story child at all vs left as a could-not-split note until the Doc-Spec design lands — I lean "file it so the scope is tracked, tagged Tier-C"; (ii) whether B's built-already residual is even worth a separate story or folds into D's follow-up task — I lean separate story since the case→test bridge conformance is real coverage work independent of the fork.)*
+
+---
+
+# `/split 927` — export-shape arm on the block drift gate (story·13, has parent #904)
+
+**Date:** 2026-06-19
+**Scope:** focused split of story [#927](../backlog/927-add-export-shape-arm-to-the-block-drift-gate-cem-surface-vs-.md) (`workItem: story`, `size: 13`, `parent: 904`, all 11 blockers incl. #948 now **resolved**).
+**Grounding:** [we:scripts/check-standards-rules.mjs:1324](../scripts/check-standards-rules.mjs#L1324) (`validateBlockImplConformance`, the arm-1 sibling) · wiring [we:scripts/check-standards.mjs:780](../scripts/check-standards.mjs#L780) · block contracts `we:src/_data/blocks/<id>.json` · FUI impls `fui:blocks/router/index.ts` (per block). `typescript@^5.9.3` is already a project dep — a TS-program resolver needs no new infra.
+
+## Verdict: **could not split** — the residual build is atomic; the rest is two buried *decisions* you can't slice away
+
+#927's body already did the hard investigation pass (and #948 fixed the modeling mismatch it surfaced). I re-verified its post-#948 map against the real tree and it holds exactly:
+
+- **Clean barrels (arm passes):** `router`, `for-each`, `type-ahead`, `resource-loader` — `fui:blocks/router/index.ts` (per block) re-exports the declared surface. ✓ verified.
+- **Real export drift (3):** `tabs` declares `TabsComponent`/`TabList|Trigger|PanelAttribute` but `fui:blocks/tabs/index.ts` ships only `TabGroupBehavior`; `transient-component` declares `SmartLink`/`withSelfReplacement` (absent from `fui:blocks/transient/`); `view` declares `ViewEngineOptions`/`ViewShowBehavior`/`ViewIfDirective`/`ViewSwitchDirective` (absent from `fui:blocks/view/`). ✓ verified file-by-file.
+- **Renderer blocks (5), no barrel:** `collection-operations`/`data-grid`/`data-table`/`pagination`/`reorderable-list` keep a dir-style `implementedBy` and have **no barrel** (no `fui:blocks/renderers/data-grid/index.ts`). ✓ verified.
+
+Strip those out and what remains as *build volume* is **one atomic deliverable** — the TS-program export resolver + `validateBlockExportShape` arm (warn-first), scoped to the 7 barrel blocks. It **cannot be sub-divided without leaving a false-positive intermediate** (a regex/direct-only gather would wrongly fail `resource-loader`/`type-ahead`, whose surface comes via `export type *` + `@webeverything/contracts/…` package re-exports — so the re-export-following must ship *with* the first gather, not after it). That fails rubric **(5)**. And everything beyond the atomic arm is a **decision**, not volume — rubric **(1)**: *you cannot split away a decision.*
+
+### Could split
+
+**None.** No ≥2 independent batchable build slices exist (rubric (2) fails for builds).
+
+### Could not split
+
+| Item | Failed condition | Unblocking action |
+|---|---|---|
+| **The export-shape arm itself** | **(5) + (1)** — must ship whole (re-export following can't be a later slice without false positives); residual beyond it is decisions, not volume. | None — it's a single batchable build once re-sized. **The frontmatter `size: 13` is stale** (body already says "re-scoped to size 8"); after de-burying the two decisions below, the arm re-estimates to **`size: 5`** (warn-first, 7 barrel blocks, TS-program resolver; mirrors the existing `BLOCK_IMPL_DRIFT_ENFORCED` warn-first arm). |
+| **Renderer-block coverage** (5 no-barrel blocks) | **(1) buried fork** — the body's own "decide it when (b) lands": resolver walks the dir vs FUI adds 5 barrels vs exempt renderers. A real multi-option call. | File a `type:decision` card (sibling under #904). #927's arm scopes to barrel blocks + logs renderers as un-coverable; the renderer *build* follows the decision. |
+| **3 export-drift findings** (`tabs`/`transient-component`/`view`) | **(1) source-of-truth fork** — each: correct the `we:` `exports` contract **vs** file a FUI build for the missing surface. Two legitimate end-states ⇒ a decision, not a build. | File a `type:decision` card (sibling under #904 — these are new drift gaps, squarely #904's mission). The arm **surfaces them as warnings** (warn-first), so they do **not** block the arm. |
+
+**Why these aren't blockers to the arm:** the gate ships **warn-first** (the settled `BLOCK_IMPL_DRIFT_ENFORCED`/`COMPOSE_TRAITS_ENFORCED` precedent at [we:scripts/check-standards-rules.mjs:1356](../scripts/check-standards-rules.mjs#L1356)). A warn-first arm's *job* is to surface the 3 drifts as findings and note renderers as un-coverable — it lands green without either decision resolved. The flip to `EXPORT_SHAPE_ENFORCED=true` is the future step that waits on both.
+
+## Proposed mutation (on "go") — de-bury + re-size, not a slice-out
+
+1. **#927** stays `workItem: story`, `parent: 904` (edge case — already parented, don't nest). **Re-size `13 → 5`.** Rewrite the body to scope the deliverable to *barrel blocks, warn-first* (the atomic arm), and **replace the two inline forks with pointers** to the cards below (de-bury). Add a pointer to this report.
+2. Scaffold **decision card** — "Renderer-block export-shape coverage: dir-walk gather vs require FUI barrels vs exempt" (`type:decision`, `parent=904`), seeded with the 5 no-barrel block list.
+3. Scaffold **decision card** — "Resolve 3 export-shape drift findings (tabs/transient-component/view): correct contract `exports` vs file FUI build" (`type:decision`, `parent=904`), seeded with the per-block missing-symbol lists.
+4. `npm run check:standards` green; backlog count **+2** (two decision cards); #927 re-sized in place.
+
+*(Confidence ~80%. Residuals: (i) the arm could land `size: 8` not 5 if the TS-program re-export/package-specifier resolution proves heavier than the existing regex toolchain suggests — either way it's batchable, not a split candidate; (ii) the 3 drifts could be one card with three rows (chosen, same decision shape) vs three cards — I lean one to keep #904's child set crisp.)*

@@ -45,3 +45,15 @@ needs the impls present to parse their exports, so it cascades from the build.
 **Next:** resized to 13 (drops from the batch pool) and re-homed conceptually to FUI. Should be
 `/slice`d into per-block (or per-cluster) build items — each block impl is independently deliverable —
 before the gate flip + export-shape arm land as the closing slices. Left `BLOCK_IMPL_DRIFT_ENFORCED=false`.
+
+## Export-shape arm sliced (2026-06-19, `/slice 927` — `we:reports/2026-06-19-backlog-split-analysis.md`)
+
+`/slice 927` found the export-shape arm doesn't split into multiple build slices — the warn-first resolver
+is atomic (re-export following must ship with the first gather) and the rest is decisions, not volume. So
+#927 was **re-sized 13 → 5** (the barrel-scoped warn-first arm) and its two embedded forks were **de-buried**
+into sibling decision children:
+
+- **#1164** — renderer-block export-shape coverage (5 no-barrel renderer blocks: dir-walk vs FUI barrels vs exempt).
+- **#1165** — resolve the 3 export-shape drift findings (`tabs`/`transient-component`/`view`): correct contract vs FUI build.
+
+Both surface warn-first via #927 and are the prerequisites (with #927) to flipping `EXPORT_SHAPE_ENFORCED`.

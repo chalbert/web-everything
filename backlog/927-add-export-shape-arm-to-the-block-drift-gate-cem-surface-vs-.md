@@ -1,7 +1,7 @@
 ---
 type: issue
 workItem: story
-size: 13
+size: 5
 parent: "904"
 status: open
 locus: webeverything
@@ -13,54 +13,44 @@ tags: []
 
 # Add export-shape arm to the block drift gate (CEM surface vs actual impl exports)
 
-Extend validateBlockImplConformance (we:scripts/check-standards-rules.mjs) with a second arm that compares each block's declared exports/CEM surface against the resolved FUI impl module's ACTUAL exports — the deeper content-equality the #170 hazard implies (#659 shipped impl-existence only). Needs a TS export parse of the resolved impl; gated on all 10 impls existing (#916–#925) so there are exports to parse. locus webeverything. Slice of #904.
+Add a **warn-first** second arm to the block drift gate (`validateBlockImplConformance`,
+[we:scripts/check-standards-rules.mjs:1324](../scripts/check-standards-rules.mjs#L1324); wired at
+[we:scripts/check-standards.mjs:780](../scripts/check-standards.mjs#L780)) that compares each block's
+declared `exports` (`we:src/_data/blocks/<id>.json`) against the resolved FUI impl barrel's **actual**
+exports — the deeper content-equality the #170 hazard implies (#659 shipped impl-existence only). Mirrors
+the `BLOCK_IMPL_DRIFT_ENFORCED` warn-first → flip precedent ([we:scripts/check-standards-rules.mjs:1356](../scripts/check-standards-rules.mjs#L1356)).
+`typescript@^5.9.3` is already a dep, so the resolver is a real TS program (not regex). locus webeverything. Slice of #904.
 
-## Attempted in batch-2026-06-18 — surfaced a cross-block modeling mismatch; not a clean slice
+## Scope (post-#948, post-`/slice 927`): the resolver arm, barrel blocks, warn-first
 
-Prototyped the export-shape arm (`validateBlockExportShape` + an fs-walk export gatherer in
-`we:scripts/check-standards.mjs`) gathering each impl module's actual exports (named decls + re-export
-resolution) and comparing against the contract's `exports`. Running it against the real corpus
-revealed the arm **cannot be enforced cleanly yet** — it fails **7 pre-existing blocks** for two
-structural reasons, not real export typos:
+#948 re-pointed every deep-file `implementedBy` at the enumerable index barrel. So this story is the
+**single, atomic** deliverable that remains:
 
-- **`implementedBy` names one file, `exports` span the module.** `router` points at
-  `we:RouteViewElement.ts` but declares `registerRouter`/`RouteOutletElement`/… which live in sibling
-  files (`we:registerRouter.ts`, `we:RouteOutletElement.ts`); same for `for-each`, `tabs`,
-  `transient-component`. A single-file gather can never see them.
-- **Package-specifier / `export type *` re-exports aren't statically resolvable by regex.**
-  `resource-loader`/`type-ahead`/`view` re-export their type surface via
-  `export type * from '@webeverything/contracts/…'` — a cross-package wildcard a regex gatherer can't
-  follow, so it can't prove the surface.
+- A `validateBlockExportShape` arm + a **TS-program export resolver** that gathers a block's
+  resolved barrel surface (e.g. `fui:blocks/router/index.ts`), **following `export type *` and `@webeverything/contracts/…`
+  package-specifier re-exports** (a regex can't — this is why the re-export-following must ship *with* the
+  first gather, not as a later slice: otherwise it false-fails `resource-loader`/`type-ahead`).
+- Compare against the declared `exports`; **warn-first** (`EXPORT_SHAPE_ENFORCED=false`).
+- **Scoped to the 7 barrel blocks.** Expected outcome: 4 pass (`router`, `for-each`, `type-ahead`,
+  `resource-loader`); 3 surface as warnings — the genuine drifts, which is the gate's job (see #1165).
+- **Renderer blocks (5) are logged as un-coverable** and skipped here (no barrel — see #1164).
 
-**Conclusion:** a sound, enforce-ready export-shape gate needs (a) the `implementedBy`↔`exports`
-modeling **aligned** first — either point `implementedBy` at an enumerable module index, or scope
-`exports` to the named file — across the ~7 mismatched blocks, **and** (b) a real module resolver
-(a TS program, not regex) that follows package + `export type *` re-exports. Reverted the prototype
-(the gate must not ship false positives). **Re-scoped to size 8**; should carry a prereq to first fix
-the `implementedBy`↔`exports` alignment (its own cleanup item) before the resolver lands. Released.
+**Demo:** `npm run check:standards` runs green, surfacing the 3 drift warnings + the renderer skip note.
 
-## Post-#948 map (alignment prereq done — what the resolver will meet)
+## Carved-out decisions (de-buried 2026-06-19, `/slice 927` — see `we:reports/2026-06-19-backlog-split-analysis.md`)
 
-#948 re-pointed every deep-file `implementedBy` (in the block JSON under `we:src/_data/blocks/`) at the
-enumerable index barrel (e.g. `fui:blocks/router/index.ts`; CEM `path` regenerated to match). When the
-real TS resolver lands here, it will partition into three groups — only the first is "clean", the rest
-are **genuine findings the gate SHOULD surface**, not modeling artifacts to suppress:
+The export-shape work embedded two real forks that this story does **not** resolve (warn-first surfaces
+them; resolving them gates the eventual `EXPORT_SHAPE_ENFORCED` flip):
 
-- **Clean (barrel re-exports the full declared surface):** `router`, `for-each`, `type-ahead`,
-  `resource-loader`. These were the true modeling artifacts #948 fixed — the resolver should pass them
-  (note `resource-loader`/`type-ahead` still need the `export type *`/package re-export following, the (b)
-  resolver work — regex can't prove them but a TS program will).
-- **Real export drift — needs a source-of-truth call, NOT a modeling fix** (the barrel sees all siblings,
-  has no wildcard, yet these declared symbols are absent from `fui:blocks/<block>/` entirely):
-  - `tabs` — declares `TabsComponent`/`TabListAttribute`/`TabTriggerAttribute`/`TabPanelAttribute`; FUI
-    ships only `TabGroupBehavior` (+ types). A contract(component+attributes)↔impl(single behavior)
-    divergence. Resolve by either correcting `we:` `exports` to the `TabGroupBehavior` shape **or** filing
-    a FUI build for the component+attribute surface.
-  - `transient-component` — declares `SmartLink`, `withSelfReplacement` (absent from `fui:blocks/transient/`).
-  - `view` — declares `ViewEngineOptions`, `ViewShowBehavior`, `ViewIfDirective`, `ViewSwitchDirective`
-    (absent from `fui:blocks/view/`).
-- **Renderer blocks have no barrel** — `collection-operations`, `data-grid`, `data-table`, `pagination`,
-  `reorderable-list` keep a dir-style `implementedBy` (under `fui:blocks/renderers/`) but the dir holds
-  only leaf modules (no index barrel). The resolver's gather must either walk the dir or require FUI to
-  add a barrel — a design point #948 left untouched (it's FUI/gather scope, not WE `implementedBy`↔`exports`
-  modeling). Decide it when (b) lands.
+- **#1164** — renderer-block export-shape coverage (5 no-barrel blocks: dir-walk gather vs require FUI
+  barrels vs exempt).
+- **#1165** — resolve the 3 export-shape drift findings (`tabs` / `transient-component` / `view`): correct
+  the contract `exports` vs file a FUI build for the missing surface.
+
+## History — `/slice` re-scope (was size 13)
+
+This was a `size 13` lump. The batch-2026-06-18 prototype proved the arm couldn't enforce cleanly because
+of an `implementedBy`↔`exports` modeling mismatch (now fixed by **#948**) and two embedded design forks
+(now carved to **#1164**/**#1165**). With those removed, the residual is the warn-first resolver arm above
+— re-sized **13 → 5**, batchable. The full prior investigation lives in the git history of this file and
+the post-#948 map it carried.
