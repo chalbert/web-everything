@@ -22,12 +22,13 @@ Unblocked by #1344 (alias wiring) and ported both files into `fui:plugs/webvalid
 
 - **`fui:plugs/webvalidation/CustomCommitmentPolicyRegistry.ts`** — ported from WE. **Import audit**: the
   `commitment-policy/` model is WE-resident (not vendored into FUI — confirmed `frontierui/commitment-policy/`
-  absent, unlike the local `validator-resolution/`/`validity-merge/`), so WE's `../../commitment-policy/index.js`
-  + `../../commitment-policy/registry.js` were retargeted onto the **`@webeverything/commitment-policy`**
-  alias (#1344). `UnknownCommitmentPolicyError` rides the same index barrel, so the two WE imports collapse
-  to one. Core `CustomRegistry` import stays FUI-local (`../core/CustomRegistry`).
-- **`fui:plugs/webvalidation/ValidationErrorSummary.ts`** — ported from WE; `../../error-summary/index.js`
-  → **`@webeverything/error-summary`** (#1344). Body verbatim otherwise.
+  absent, unlike the local `validator-resolution/`/`validity-merge/`), so WE's relative imports of
+  `we:commitment-policy/index.ts` + `we:commitment-policy/registry.ts` were retargeted onto the
+  **`@webeverything/commitment-policy`** alias (#1344). `UnknownCommitmentPolicyError` rides the same index
+  barrel, so the two WE imports collapse to one. Core `CustomRegistry` import stays FUI-local
+  (`fui:plugs/core/CustomRegistry.ts`).
+- **`fui:plugs/webvalidation/ValidationErrorSummary.ts`** — ported from WE; its `we:error-summary/index.ts`
+  import → **`@webeverything/error-summary`** (#1344). Body verbatim otherwise.
 - **`fui:plugs/webvalidation/index.ts`** — added the 3 exports next to their merge/resolution siblings,
   **preserving FUI's `@webeverything/*` alias style** (did not blind-copy WE's relative-path index).
 
