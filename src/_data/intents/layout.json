@@ -11,6 +11,14 @@
         "overlay",
         "rail"
       ]
+    },
+    "variant": {
+      "description": "Purely-presentational treatment of a region's surface, orthogonal to `behavior` and behavior-free (open-numbered-variants, platform-decisions.md#open-numbered-variants — generalized from Action #1318 to layout per #1322/#1323). The listed values are the recommended core set, not a closed enum: an open-numbered axis, so authors mint additional members per the variant contract (a value names a presentational treatment that leaves semantics and behavior unchanged). Optional with a most-permissive default: absent → the conventional surface for the region. Surface is a plain attribute consumed by CSS (`[pane][variant]`); no wrapper required. Structural differences (a rail vs an overlay) are `behavior`/block polymorphism, never variants.",
+      "values": [
+        "flat",
+        "elevated",
+        "bordered"
+      ]
     }
   },
   "description": "<h3>Region Behavior</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>push</code>: Region consumes space, shifting the main content (Desktop).</li><li><code>overlay</code>: Region floats above content with a backdrop (Mobile).</li><li><code>rail</code>: Region collapses to a thin strip (Icons) rather than disappearing.</li></ul><h3>Anatomy</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>shell</code>: The global viewport container.</li><li><code>pane</code>: A resizable subdivision of the shell.</li><li><code>dock</code>: A sticky region (Header/Footer).</li></ul>"
