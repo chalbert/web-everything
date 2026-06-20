@@ -36,6 +36,18 @@ Do exactly this, in order:
    An epic passes review when its scope was actually delivered by its children, or every remaining strand
    is a **deliberate deferral that cites its tracking `#NNN`**. State the pass/fail verdict in one line.
 
+   On **fail, you must reconcile it — never leave it as a bare "kept open"** (the gate would just re-flag
+   it every run, the limbo this guard exists to kill). Drive one of:
+   - **scaffold the next slice** — the remaining scope is carvable now → create the next child item
+     (`backlog.mjs scaffold …`, parented to the epic). The epic now has an open child, so it's no longer
+     "all slices done"; OR
+   - **declare the stall** — the remaining scope can't be carved yet (blocked / undecided / untriaged /
+     program) → ensure the epic carries the matching `childlessReason` (and a `blockedBy` edge if it's
+     blocked). As of the gate's `CHILDLESS_REASONS` exemption, a declared `childlessReason` is a
+     legitimate steady state and clears the nudge — so the candidate stops re-surfacing.
+   Present these as the options for the item and apply the one that fits (a blocked epic that already
+   declares its `childlessReason` is *already* reconciled — confirm and move on).
+
 2. **The no-open-slice guard is enforced by the CLI.** As of #658, `backlog.mjs resolve` itself refuses
    to close a `workItem: epic` that still has open children — it enumerates them by the `parent:` EDGE
    (never the body's stale "N children" prose) and dies *before* writing, listing each `#NNN — status`.
