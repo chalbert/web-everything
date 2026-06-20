@@ -1,5 +1,5 @@
 {
   "term": "Fit",
-  "definition": "The strategy for forcing content into a container (Cover, Contain, Fill) preserving aspect ratio.",
-  "usage": "Used across Media and Layout blocks."
+  "definition": "The strategy for forcing content into a container (Cover, Contain, Fill) preserving aspect ratio. Extended (#1186) with a fit-to-viewport, fixed-aspect-ratio variant: a base design size (baseW × baseH) is uniformly scaled by scale = min(vw / baseW, vh / baseH), clamped to a configured min/max, so the whole surface is letterboxed into the viewport at a locked aspect ratio (the deck-slide / fixed-canvas case).",
+  "usage": "Used across Media and Layout blocks, and (the #1186 extension) the fixed-aspect viewport-fit surface. Contract notes: CSS alone cannot derive the contain scale factor (no `min(vw/baseW, vh/baseH)` primitive over two intrinsic axes), so a ResizeObserver-driven `--fit` custom-property shim that writes the computed scale is part of the contract, not an optional enhancement — the element applies it via `transform: scale(var(--fit))` on a fixed base-size stage. Conformance footguns baked as required vectors: (1) blurry sub-pixel text — scaling a rasterized stage must round to device-pixel-aligned transforms / prefer transform over zoom to keep text crisp; (2) broken pointer hit-testing under scale — coordinates inside a `transform: scale()` subtree must be unscaled before hit-testing, and the conformance vector asserts a click at a scaled coordinate resolves to the correct logical target. Homed in webpositioning."
 }
