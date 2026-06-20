@@ -126,18 +126,50 @@ genuinely-hard ones (per the cross-framework survey) are flagged ⚠.
     Transition); extends [we:code-view block](../src/_data/blocks/code-view.json). *Kind: block
     extension. Locus: WE contract; FUI Shiki/highlight aesthetics.*
 
-## Recommendation
+### Coverage gaps the first pass missed (added in review)
 
-Open epic #1164 as the umbrella, scoped to the **WE-standards layer**. **Resolve GAP-0 (placement)
-first** — it decides whether the rest are `webdecks` items or distributed extensions. Then slice the
-remaining gaps into independently-deliverable spec items, several of which are *extensions* to
-existing standards (3, 4, 7, 11, 14, 17) rather than greenfield — those are the cheapest. The
-genuinely-novel WE contracts are: the **document model (1)**, **fragment intent (2)**,
-**presenter-sync protocol (5)**, **paged-export protocol (10)**, **layout-template vocabulary (12)**,
-and **embed protocol (13)**.
+The initial 17 stopped at slide mechanics. Three of these are **general** capabilities the deck merely
+*consumes* (not deck standards), and two are **cross-media** family members — both facts cut toward the
+distributed placement (see the reframe below).
 
-The hidden risk the survey surfaced: **reduced-motion under View Transitions** and **fit-scale
-hit-testing** are correctness traps, not polish — bake them as conformance vectors (GAP 4, 7, 16),
-not author options.
+18. **Content/element animation orchestration** — *intra-element* build-ins: SVG draw-on, staggered
+    reveals — distinct from slide-transition (#4) and fragment-reveal (#2). *Kind: intent/behavior over
+    `motion`. Locus: WE; **general, not deck-specific.***
+19. **Fullscreen presentation mode** — Fullscreen API + cursor-hide + Screen Wake Lock. *Kind: semantic
+    + intent. Locus: WE; **general** (video/image/app want it too).*
+20. **"Up next" / what-to-view-next preview** — shared with video playlists & carousel. *Kind: intent,
+    member of the cross-media advanceable-sequence family. Locus: WE.*
+21. **Interstitial / overlay insertion** — content at start / mid-sequence / overlay (pre-roll,
+    mid-roll, banner; skippable vs forced; resume-after). *Kind: scheduled-insertion intent + overlay
+    surface. Locus: WE; **shared with video ad-breaks.***
 
-Open questions tracked on the backlog (#1164 and its slices), not here.
+### The reframe — a deck *is* a temporal/advanceable-media sequence
+
+The headline harvest: **deck, video player, and carousel are one family**, sharing *advance · autoplay
+· up-next · fullscreen · interstitial/ad insertion · captions · narration · live interaction*. The
+high-leverage move is **not** "deck contracts" but a shared **temporal/advanceable-media sequence intent
+family** (webintents) that all three *compose* — each adding only its layer (deck → fragments, 2D-nav,
+presenter; video → scrubbing, buffering; carousel → peek/loop). [we:carousel](../src/_data/blocks/carousel.json)
+already owns the advance/sequence kernel, so this generalises it. This is the strongest evidence that
+the novel surface is **cross-media**, not deck-specific.
+
+## Recommendation — superseded by ratified placement #1175 (B)
+
+> **Resolved 2026-06-20.** The original recommendation (open a single umbrella, resolve placement,
+> then slice) was carried out: the placement decision **#1175 ratified B (fully distributed) — no
+> `webdecks` project**. Per the *#project-protocol-bar* statute, a deck is overwhelmingly reuse
+> composed at the page level, so its contracts **scatter to their kin projects**.
+
+The umbrella epic (#1173) is resolved as the analysis artifact (it graduates to this report). The 21
+contracts are carved as **standalone** slices **#1180–#1200**, each homed by `relatedProject`
+(none mints a project); the cross-media family is **#1179** (the temporal/advanceable-media sequence
+intent family, webintents). The genuinely-novel contracts (document model, fragment intent,
+presenter-sync, paged-export, layout-template vocabulary, embed) home with their kin rather than in a
+deck project. Full contract-inventory & homes table: backlog #1175.
+
+The hidden risk the survey surfaced — **reduced-motion under View Transitions** and **fit-scale
+hit-testing** — are correctness traps, not polish: baked as conformance vectors (#1183, #1186) folded
+into the named a11y vector set (#1195, tag `deck`), which is the "single conformance story" that needs
+no project to home it.
+
+Open questions tracked on the backlog (#1175 and the carved slices), not here.
