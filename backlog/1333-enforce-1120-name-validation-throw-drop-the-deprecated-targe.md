@@ -3,8 +3,11 @@ kind: story
 size: 2
 parent: "1250"
 locus: frontierui
-status: open
+status: resolved
 dateOpened: "2026-06-20"
+dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: "fui:plugs/webbehaviors/CustomAttribute.ts"
 tags: []
 ---
 
@@ -46,3 +49,22 @@ the throwing `#assertValidName`). The throw flip was carved to
 naming-scope decision [#1347](/backlog/1347-does-1120-define-name-validation-apply-beyond-customattribut/)
 (*does #1120 validation apply beyond CustomAttribute to the parser/expression registries?*). This item is
 fork-free and independent — its `blockedBy` (#1299, #1328–1332) are all resolved, so it proceeds now.
+
+## Progress (2026-06-20, batch-2026-06-20-1344-1342)
+
+Alias fully drained and the `@deprecated target` getter deleted:
+
+- **Base class** `fui:plugs/webbehaviors/CustomAttribute.ts` — switched the 3 self-consumption sites
+  (`set value` setAttribute, `get localName` ×2) to `this.ownerElement`, deleted the `get target()` getter
+  + its jsdoc, and updated the class-level `@example` + the `ownerElement` doc-comment to stop naming the
+  removed alias.
+- **Test/e2e surface** migrated `this.target` → `this.ownerElement`: `fui:plugs/__tests__/unplugged.e2e.test.ts`
+  (10), `fui:plugs/__tests__/unplugged.integration.test.ts` (5), `fui:plugs/__tests__/e2e/webbehaviors-simple.spec.ts`
+  (4), `fui:plugs/webbehaviors/__tests__/unit/CustomAttributeRegistry.test.ts` (2). Also caught a file the
+  scope note missed — `fui:plugs/webbehaviors/__tests__/unit/CustomAttribute.test.ts` directly asserted the
+  deprecated getter: removed its dedicated `describe('target property (deprecated alias…)')` block and
+  migrated the attach/detach asserts.
+- **Out of scope, verified untouched**: `Injector.target` (`fui:plugs/webinjectors/*`), `CustomContext#target`,
+  the `portal-directive` `target` IDREF, native `MutationRecord.target` — all distinct fields.
+
+Demo green: `npx vitest run plugs/webbehaviors …` → **131 passed, 0 `target`-getter reference remaining**.
