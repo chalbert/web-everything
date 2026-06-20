@@ -2,15 +2,16 @@
 type: idea
 workItem: epic
 parent: "099"
-status: resolved
+status: open
+ongoing: true
 dateOpened: "2026-06-06"
-dateResolved: "2026-06-15"
-graduatedTo: none
 tags: [roadmap, mvp, go-to-market, strategy, emergent, monetization, solo-founder, product]
 crossRef: { url: /backlog/089-monetization-product-ideas/, label: "Product ideas (#089)" }
 ---
 
 # Emergent MVP strategy — work many product candidates; let the MVP emerge
+
+> **Reopened 2026-06-20 (`ongoing: true`).** Resolving this 2026-06-15 was premature — it is a *living strategy doc* for a perpetual, emergent process, not a finite deliverable. It legitimately sits `open` with all child slices resolved between rounds; the next candidate/round is added as the strategy advances.
 
 The path from "ideas catalogued" to **one shipped, paying product**, run by a
 single person. The earlier framing tried to *pick* the first product up front;

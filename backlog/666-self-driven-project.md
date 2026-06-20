@@ -1,16 +1,17 @@
 ---
 type: idea
 workItem: epic
-status: resolved
+status: open
+ongoing: true
 dateOpened: "2026-06-15"
-dateResolved: "2026-06-16"
-graduatedTo: none
 tags: [self-driven-project, autonomy, methodology, sdlc, conformance, plateau, positioning, saas]
 relatedReport: reports/2026-06-15-self-driven-project-prior-art.md
 crossRef: { url: /backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas/, label: "Framing decision (#665)" }
 ---
 
 # Self-Driven Project
+
+> **Reopened 2026-06-20 (`ongoing: true`).** Resolving this 2026-06-16 was premature — it is the perpetual *vision umbrella* (the whole-SDLC self-driving north star), not a finite build; the framing decision [#665](/backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas/) stays resolved, but the program itself is continuous and stays `open`.
 
 Umbrella for the **Self-Driven Project**: the self-driving-car model applied to the whole SDLC. A
 human **sets the goal + a tolerance/risk envelope**; the system **drives the steps**
