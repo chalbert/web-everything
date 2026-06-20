@@ -3,7 +3,7 @@ kind: story
 status: open
 locus: webeverything
 dateOpened: "2026-06-20"
-size: 3
+size: 5
 dateStarted: "2026-06-20"
 tags: [webexpressions, interpolation, text-node, injector, binding, demo]
 ---
@@ -109,3 +109,31 @@ the `instanceof` guard at all, and whether `determine()`/the parserName→nodeCl
 `InterpolationTextNode`) fires. The earlier "duplicate-module `instanceof` split" diagnosis is now
 disproven for the runtime as configured; start from the upgrade walk. (Carried forward from
 batch-2026-06-20 — outgrew the stated 3-pt one-line fix.)
+
+## Investigation 2026-06-20 (batch-2026-06-20, round 2) — registry resolution RULED OUT; pinned to the `instanceof` guard
+
+Two live Playwright probes on the running :3000 demo narrowed it materially (size bumped 3 → 5 — a debug
+spike, not batch fodder):
+
+1. **The demo's "upgrade detached then insert" is NOT the (sole) cause.** The demo does
+   `window.customTextNodes.upgrade(clone)` while `clone` is a detached fragment (before `appendChild`),
+   so `fui:plugs/webexpressions/CustomTextNodeRegistry.ts:100`'s `if (element.isConnected)` takes the
+   `else` branch (line 130-135 "Not connected - just replace" → inserts the **undetermined** parsed
+   nodes = raw path). BUT replicating insert-**then**-upgrade on a *connected* host subtree **still
+   renders `Hello, name!`** — so connection ordering is not the fix.
+2. **Registry resolution + `mustache` lookup are FINE** (eliminated). On a connected host:
+   `InjectorRoot.getProviderOf(host, 'customTextNodes')` → resolves ✓, **is** `window.customTextNodes` ✓,
+   and that registry **has** `mustache` → `InterpolationTextNode` ✓ (`providerHasMustache: true`). So the
+   determine lookup at registry line 109 would return the class — the break is **upstream of it**.
+3. **Pinned to the `instanceof CustomTextNode` guard (registry line 105)** or the parser's node output:
+   determine only runs if the parsed node is `textNode instanceof CustomTextNode && !determined &&
+   parserName`. Registry/lookup being healthy means the parsed node is failing this guard — i.e. the
+   parser-produced node's **class identity** (the #449 duplicate-`CustomTextNode` split, which the import
+   flip *reverted*, so it is live again) or `determined`/`parserName` state.
+
+**Next session (focused):** instrument the actual `#upgradeTextNode` call on the live connected node —
+log the parsed node's constructor vs the registry's `CustomTextNode` (`weClass===fuiClass?`), `determined`,
+`parserName`, and whether the line-105 guard passes. The fix is almost certainly the #449 single-plug-copy
+completion (one `CustomTextNode` class at runtime) — verify by forcing both the parser and the registry
+onto the same `fui:plugs/webexpressions/CustomTextNode` import, then add the real-browser regression test
+(acceptance #2). Carried forward — still outgrew the batch slot.
