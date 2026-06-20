@@ -1,0 +1,140 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  webtheme's configuration should be able to load a <strong>palette from an external source</strong>.
+  This topic grounds what "a palette" is across the industry, what standards exist, and how an import
+  boundary should sit in front of webtheme's existing DTCG token model — the prep behind decision
+  <a href="/backlog/1274-webtheme-palette-source-ingest-source-priority-static-only-v/">#1274</a> (the two
+  forks carved from the <a href="/backlog/1252-webtheme-load-palette-from-external-source-palette-source-in/">#1252</a>
+  build). It is <strong>not greenfield</strong>: the <code>webtheme</code> project (graduated from
+  #364/#403/#404/#405) already adopts DTCG 2025.10 as its internal pivot, derives ramps from a seed
+  natively, and compiles to native custom properties.
+</p>
+
+<h2>What webtheme already ships (the prior art is in-repo)</h2>
+<ul>
+  <li><strong>DTCG 2025.10 as the internal pivot</strong> — <code>webtheme/tokens.ts</code> parses DTCG
+    docs, resolves <code>{alias}</code> refs, deep-merges via <code>extends</code>.</li>
+  <li><strong>Native seed → ramp derivation</strong> — <code>webtheme/schemes.ts</code>
+    (<code>deriveSchemeRuntime</code>, #405) derives a tonal accent scale from a single seed via the native
+    relative-color syntax <code>oklch(from var(--color-accent) L c h)</code>, emitted <em>verbatim</em> so
+    the scale re-tints at runtime when the seed token changes. The literal sRGB is computed in TS
+    <em>only</em> to gate every step against <strong>WCAG 2.x</strong> ratio <em>and</em> <strong>APCA
+    Lc</strong> — "lossy-but-loud, never a silent inaccessible token." A <code>curated</code> override
+    supplies explicit per-step literals that bypass derivation (still validated).</li>
+  <li><strong>No build-time baking</strong> — <code>webtheme/compile.ts</code> (#403/#404) compiles each
+    resolved token to one custom property (typed numerics also register via <code>@property</code>);
+    aliases compile to <code>var(--ref)</code> so values track at runtime. The file is explicit: "No
+    build-time value baking beyond this; no second runtime."</li>
+  <li>A Design Tokens protocol (<code>src/_data/protocols/design-tokens.json</code>), a pending
+    theme-color intent, and a design-system bundle layer (#747) that could name an external palette
+    source.</li>
+</ul>
+<p>
+  Doctrine in play: intents own the semantic tier (UX-only); webtheme owns primitive + component tiers; we
+  coin no format — we adopt DTCG.
+</p>
+
+<h2>Standards landscape</h2>
+
+<h3>1 · W3C DTCG (2025.10) — the interchange standard</h3>
+<p>
+  Reached first stable version (2025.10) on 2025-10-28, split into Format + Color modules. Plain JSON. A
+  <strong>token</strong> = any object with <code>$value</code>; an object without it is a
+  <strong>group</strong> (groups build the dotted namespace). Color is a <em>structured object</em> in
+  2025.10 (hex is now only an optional fallback field):
+</p>
+<pre><code>{ "$type":"color", "$value": {
+  "colorSpace":"oklch", "components":[0.62,0.19,256], "alpha":1, "hex":"#0d9488" } }</code></pre>
+<p>
+  <code>colorSpace</code> enum spans srgb…oklch…display-p3…rec2020. Aliasing via
+  <code>"{color.blue.500}"</code>. <strong>A palette is just a group of color tokens; a ramp is a
+  numeric-keyed sub-group — there is no dedicated palette/scale primitive.</strong> Caveat: structured-color
+  interop is still maturing; many exporters still emit/ingest the legacy hex string.
+</p>
+
+<h3>2 · Native CSS substrate</h3>
+<ul>
+  <li><strong>Custom Properties L1</strong> — flat inheritable namespace, untyped.</li>
+  <li><strong><code>@property</code> (Houdini)</strong> — typed, animatable, validated tokens.</li>
+  <li><strong>Color L4</strong> — <code>oklch()</code>/<code>oklab()</code>; oklch is the modern default
+    for ramps (perceptually-uniform L).</li>
+  <li><strong>Color L5</strong> — relative color <code>oklch(from var(--brand) 0.95 c h)</code> +
+    <code>color-mix()</code>: generate a whole ramp from one base in pure CSS (parametric palette). This is
+    exactly the technique <code>schemes.ts</code> emits. Cross-engine ~90%+, "newly available" — guard
+    with <code>@supports</code>.</li>
+  <li><strong><code>light-dark()</code> + <code>color-scheme</code></strong> — binary scheme switch
+    honoring OS pref, no media query.</li>
+</ul>
+
+<h3>3 · Major design-system palette formats</h3>
+<p>Three recurring shapes: (a) flat <code>family→{shade:hex}</code> map, (b) flat
+  <code>--prefix-name-shade</code> CSS vars, (c) nested token tree with sets/themes/modes.</p>
+<ul>
+  <li><strong>Material Design 3</strong> — HCT space (Tone == CIELAB L*, so tone→contrast is predictable).
+    Seed → CorePalette → 6 tonal palettes → ~26 roles per light/dark. <strong>Generative</strong> — persist
+    the seed.</li>
+  <li><strong>Tailwind</strong> — <code>family × 50–950</code>. v4 is CSS-first
+    (<code>@theme { --color-brand-500: oklch(...) }</code>; defaults ship OKLCH). Static swatches.</li>
+  <li><strong>Adobe Leonardo</strong> — generative, contrast-driven: key colors + target contrast ratios +
+    bg → swatches computed to hit each ratio. Persist inputs.</li>
+  <li><strong>Radix Colors</strong> — static 12-step scales, each step a fixed UI role. Consume by role
+    number, don't generate.</li>
+  <li><strong>Open Color</strong> — 13 hues × 0–9, <strong>positional arrays</strong>
+    (<code>blue[5]</code>) — positional, not shade-keyed.</li>
+  <li><strong>Style Dictionary (Amazon)</strong> — the reference external-palette→theme pipeline:
+    <code>source → per-source parser → token pivot → transforms → emit</code>. The architecture this
+    boundary mirrors.</li>
+  <li><strong>Tokens Studio / Figma</strong> — Tokens Studio JSON = token sets + a reserved
+    <code>$themes</code> JSON. Figma Variables <strong>REST API</strong> differs: collections→modes→variables,
+    COLOR = 0–1 float <code>{r,g,b,a}</code>, aliases = <code>{type:"VARIABLE_ALIAS",id}</code>. A
+    <em>live, credential-holding network</em> source.</li>
+</ul>
+
+<h3>4 · Interchange / export-import formats</h3>
+<p>
+  Only JSON token formats (DTCG, Tokens Studio) round-trip scales + semantics + aliases. Binary swatch
+  formats — <strong>ASE</strong> (Adobe, reverse-engineered, no official spec), <strong>ACO</strong>
+  (Photoshop), <strong>GPL</strong> (GIMP, plain text, the simplest target) — are flat, lossy seeds: no
+  scales, no semantics, no aliases, no alpha.
+</p>
+
+<h2>Classification — how the prior art settles the two carved forks</h2>
+<p>
+  Running the per-fork classification pass (which layer? · protocol or intent dimension? · open registry or
+  locked set? · most-permissive default?) against this landscape answers most of the decision:
+</p>
+<ul>
+  <li><strong>Layer = adapter, not protocol.</strong> Parsing a source shape into the DTCG pivot is a
+    deterministic transform with <em>no swappable-vendor interop story</em> — so it is not a protocol
+    (that would be lock-in for no gain). It is the ratified <em>adapter-as-normalization-hub</em>: ingest
+    incumbents bottom-up into a lossy internal pivot the project never sees.</li>
+  <li><strong>An open registry, not a mandated source set.</strong> Per Config-Extends-Platform-Default
+    (cf. #370): a default-less registry of per-source parsers, projects register/extend them. WE mandates
+    no fixed first-subset — so <em>"which sources first"</em> is build-order (backlog prioritization),
+    not a design branch (#465: cost/sequencing is never a fork).</li>
+  <li><strong>The genuine boundary call is file/snapshot vs. live client.</strong> File parsers
+    (DTCG/Tailwind/M3-JSON/ASE/GPL) are pure local transforms → WE-layer. A live Figma Variables REST pull
+    is network + credential → excluded from the WE standard per no-leakage + the #817 contract/impl
+    placement test; WE owns the parser <em>contract</em> over the Figma Variables JSON shape, the live
+    fetch stays product-layer (plateau's design-system creator already ships it, #889).</li>
+  <li><strong>Generative ingest is nearly free, and must derive natively.</strong>
+    <code>deriveSchemeRuntime</code> already derives ramps from a seed, so a generative source (M3 seed,
+    Leonardo inputs) routes through it — "static-only" is reduced scope, not a merit end-state. A seed must
+    derive the webtheme native in-cascade way; baking ramps to literal swatches at ingest violates the
+    ratified #403/#405 native-no-baking invariant and loses the runtime-retint property.</li>
+</ul>
+
+<h2>Design implications for the build (#1252)</h2>
+<ul>
+  <li><strong>Pivot = DTCG color tokens</strong> — already webtheme's internal model.</li>
+  <li><strong>Per-source parser</strong> normalizes incoming shapes into the pivot — mirrors Style
+    Dictionary and the ratified adapter-as-normalization-hub pattern.</li>
+  <li><strong>Value-type normalization at the boundary is mandatory</strong> — hex / ARGB int / 0–1 float
+    / oklch; no two sources agree. Normalize to the DTCG structured color object.</li>
+  <li><strong>Match on role/name, not position</strong> (M3 <code>--md-sys-color-*</code>, Radix step
+    numbers, DTCG paths) — except Open Color (positional).</li>
+  <li><strong>Lossy seeds</strong> (ASE/ACO/GPL) fill the primitive tier only; synthesize ramps + semantic
+    aliases on top via the existing derive path.</li>
+</ul>
+{% endraw %}

@@ -1,0 +1,22 @@
+{
+  "id": "palette-source-ingest",
+  "title": "Palette-source ingest — the import boundary in front of webtheme's DTCG token model",
+  "status": "open",
+  "summary": "Prep research for decision #1274 (the two forks carved from the #1252 build). The webtheme project already adopts DTCG 2025.10 as its internal pivot (webtheme/tokens.ts), derives accent ramps from a single seed via native relative-color CSS — `oklch(from var(--color-accent) L c h)` emitted verbatim, the literal computed ONLY to gate WCAG/APCA contrast at build time (webtheme/schemes.ts, #405) — and compiles to native custom properties with NO build-time value baking and NO second runtime (webtheme/compile.ts:9, #403). The sweep grounds what 'a palette' is across the industry (DTCG 2025.10 structured-color module; native CSS Color L4/L5; Material 3 HCT-seed, Tailwind family×shade, Adobe Leonardo contrast-driven, Radix static 12-step, Open Color positional arrays, Style Dictionary's source→parser→pivot→emit reference pipeline, Tokens Studio / Figma Variables REST, ASE/ACO/GPL binary swatch files), and classifies the import boundary against that prior art. FINDINGS that settle the carved forks: (1) the boundary is an ADAPTER, not a protocol — a deterministic parse-into-pivot transform with no swappable-vendor interop story, so per minimize-lock-in it is the adapter-as-normalization-hub, exposed as a default-less OPEN REGISTRY of per-source parsers (Config-Extends-Platform-Default / #370), which dissolves 'which sources first' into backlog prioritization rather than a design branch — WE mandates no fixed source set. (2) The one genuine boundary call is file/snapshot parsers (pure local transforms, WE-layer) vs. a live networked client (Figma Variables REST = network + credential): the live client is excluded from the WE standard per no-leakage + the #817 contract/impl placement test + #889 (plateau's design-system creator already ships the live Figma fetch) — WE owns the parser CONTRACT over the Figma Variables JSON shape, the live fetch stays product-layer. (3) Generative ingest (M3 seed, Leonardo inputs) is nearly free because deriveSchemeRuntime already derives from a seed, so 'static-only' is reduced scope, not a merit end-state — support both; and a generative seed must derive the webtheme native in-cascade way (reuse deriveSchemeRuntime), NOT bake ramps to literal swatches at ingest, because at-ingest baking violates the ratified #403/#405 native-no-baking invariant and loses the runtime-retint property. Value-type normalization at the boundary (hex / ARGB int / 0-1 float / oklch) is mandatory and already a settled #1252 constraint; lossy binary seeds (ASE/ACO/GPL) fill the primitive tier only, then synthesize ramps + semantic aliases on top. Full grounding in reports/2026-06-20-palette-source-ingest.md.",
+  "dateOpened": "2026-06-20",
+  "lastReviewed": "2026-06-20",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webtheme",
+    "design-tokens",
+    "dtcg",
+    "palette",
+    "color",
+    "adapter",
+    "native-first",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webtheme"
+}
