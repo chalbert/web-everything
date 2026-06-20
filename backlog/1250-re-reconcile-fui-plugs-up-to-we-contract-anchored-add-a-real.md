@@ -1,10 +1,8 @@
 ---
 kind: epic
-size: 13
 parent: "170"
 status: open
 dateOpened: "2026-06-20"
-childlessReason: undecided
 tags: [plugs, dedup, drift, reconciliation, frontierui, contract-anchored]
 ---
 
@@ -56,21 +54,51 @@ over in the impl.
 "differ" is direction-agnostic — the per-domain contract audit (#1270 principle 1, contract-anchored)
 determines who is right.
 
-## Slices to carve on pickup
+## Slices (carved 2026-06-20 — `we:reports/2026-06-20-backlog-split-analysis.md`)
 
-Per-domain (or grouped) reconciliation slices once the contract audit scopes each. Likely:
+13 leaf slices. Each per-domain slice **starts** by auditing its own domain vs contract+vectors
+(#1270 principle 1), then reconciles FUI up and fixes any contract holes (principle 2) — so there is no
+separate audit slice. The proven pair (#1014, #1117) skip straight to the fix. Real surface differs from
+the original body estimate: webportals = **5** files (not 10), webtraces = **1** (not 3).
 
-1. **Per-domain contract-anchored reconciliation** — one slice per drifted domain (audit vs contract →
-   fix contract holes → bring FUI up). Start with the proven-broken pair: webanalytics (#1014) +
-   webcontexts (#1117).
-2. **Port `webportals` → FUI** (10 files, contract-anchored; consumer: `we:demos/webportals-conformance-demo`).
-3. **Port `webtraces` → FUI** (3 files, contract-anchored; `sessionReplayEnvelope`).
-4. **A real plugs drift gate** — extend `check:standards` to actually fail on `we:plugs/` vs `fui:plugs/`
-   divergence (the current gate does not catch it). Mirror the #1245 blocks-side gate ask.
-5. **Final WE-side repoint = #1234** — once FUI is the superset, finish repointing `we:demos`/`we:test-pages`
-   + the bootstrap `src` + the `@core`/`@webX` aliases off `we:plugs/`, add the `@webeverything/* →
-   this-repo` mirror-alias map (so FUI plugs that consume contracts resolve when served by WE), then
-   #1047 deletes `we:plugs/`. **#1234 is `blockedBy` this epic.**
+**Per-domain reconciliation (independent — 12-wide parallel batch):**
+- **#1297** — webanalytics (proven #1014, `UnknownTrackerError`)
+- **#1298** — webcontexts (proven #1117, `resolveContext`)
+- **#1299** — webbehaviors · **#1300** — webdirectives · **#1301** — webexpressions
+- **#1302** — webguards · **#1303** — webinjectors · **#1304** — webregistries
+- **#1305** — webstates · **#1306** — webvalidation (+ consume published `@webeverything/*` contracts)
+- **#1307** — port `webportals` → FUI (5 files) · **#1308** — port `webtraces` → FUI (1 file)
 
-> Umbrella — do not start dedup before the per-domain contract audit (#1270 principle 1). `childlessReason:
-> undecided` until the audit carves the slices above.
+**Gate (lands last):**
+- **#1309** — plugs WE↔FUI drift gate in `check:standards`, mirroring the blocks-side §8c/#659.
+  `blockedBy` all of #1297–#1308 (must land after drift is resolved, or it fails red).
+
+**Downstream (not a slice — already filed):**
+- **#1234** — final WE-side repoint (`we:demos`/`we:test-pages` + bootstrap `src` + `@core`/`@webX`
+  aliases off `we:plugs/`, add the `@webeverything/* → this-repo` mirror-alias map), `blockedBy` this
+  epic; then **#1047** deletes `we:plugs/`.
+
+> Umbrella — sliced; the governing decision (#1270) is resolved so this is pure execution. The 12
+> reconcile/port slices are disjoint (per-domain dirs) → run them via `/batch` or `/workflow`; #1309
+> closes the loop with the drift gate.
+
+## Grounding addendum (2026-06-20, batch attempt batch-2026-06-20-1297-1306)
+
+A batch run on the per-domain slices surfaced two corrections to the "12-wide clean batch" framing —
+**re-scope the family before re-batching:**
+
+1. **"differ" ≠ feature drift.** The drift-map counts include **repo-structural diffs** (import paths,
+   doc-comment path refs), not just real feature gaps. e.g. webguards (#1302) "2 diffs" are almost
+   entirely WE `../../guard/` vs FUI `../../blocks/guard/` + doc comments — no feature gap. So a slice
+   **cannot be reconciled by copying WE files over FUI** (it breaks FUI's imports); each needs a per-file
+   audit to separate structural diffs from genuine drift, then port only the real delta.
+2. **Enforcing a resolved WE rule drags a consumer migration.** webbehaviors (#1299) reconciles in
+   `whenDefined` (#1119), the `target`→`ownerElement` rename (#1121), and the `#assertValidName`
+   hyphen check (#1120) — all contract-settled, no fork — but #1120 **throws** on every bare attribute
+   name FUI's tests + 3 SPA demos use, and #1121 renames a public property across those same consumers.
+   So that slice is a per-domain audit **+ a browser-verifiable demo migration** (size 2 → **8**), not a
+   3-file copy. Re-sized #1299 accordingly; the others likely vary (some near-trivial structural-only,
+   some with real consumer fallout) — audit each before sizing.
+
+Net: these are careful single-item audits, **not** mechanical size-2/3 batch fodder. Run via `/prepare`
+or focused single items, or `/split` after a per-domain audit re-sizes them.
