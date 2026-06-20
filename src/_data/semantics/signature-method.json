@@ -1,0 +1,5 @@
+{
+  "term": "Signature Method",
+  "definition": "How a signature was captured: <code>typed</code> — a legal name entered via the keyboard, the <strong>accessible primary path</strong> always available; or <code>drawn</code> — a freehand mark on a canvas, an enhancement offered on top of (never instead of) the typed path. Recorded on the <a href=\"#signature-record\">Signature Record</a> so consumers know the capture modality.",
+  "usage": "The <code>signature-pad</code> block keeps the typed path present even in drawn mode (the keyboard-first principle, mirroring <code>data-transfer</code>'s file-picker primary path)."
+}

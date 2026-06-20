@@ -1,0 +1,53 @@
+{
+  "id": "signature-pad",
+  "name": "Signature Pad",
+  "status": "active",
+  "type": "Component",
+  "implementedBy": "@frontierui/blocks/signature-pad/SignaturePadElement.ts",
+  "implementsIntent": "signature",
+  "summary": "The runnable surface that realizes the Signature Intent — a keyboard-first signature capture that affirms intent and emits an immutable Signature Record. The typed legal-name field is the accessible primary path and is always present; a drawn canvas is an opt-in enhancement on top of it. A signature cannot commit until the signer accepts the author-supplied affirmation statement (the intent gate). On commit the element dispatches `sign` with the record { signer, signedAt, method, value, affirmed } and never mutates a past record. Cryptographic sealing and legal-compliance audit are deliberately out of scope — composed on top (a sealing adapter; the audit-trail block), not baked into capture. Native-first: a real <input> + <button> + an optional <canvas>, no synthetic input model.",
+  "exports": [
+    "SignaturePadElement",
+    "registerSignaturePad",
+    "buildRecord",
+    "isCommittable",
+    "SignatureRecord",
+    "SignatureMethod",
+    "SignDetail",
+    "SIGN_EVENT",
+    "CLEAR_EVENT"
+  ],
+  "events": {
+    "sign": {
+      "description": "The signature committed — an immutable Signature Record (signer, signedAt, method, value, affirmed) was produced.",
+      "taxonomy": "notification",
+      "detail": { "record": "SignatureRecord" },
+      "bubbles": true,
+      "cancelable": false
+    },
+    "clear": {
+      "description": "The pad was reset before commit — the in-progress typed name / drawn mark was cleared.",
+      "taxonomy": "notification",
+      "detail": { "method": "SignatureMethod" },
+      "bubbles": true,
+      "cancelable": false
+    }
+  },
+  "designDecisions": [
+    "Keyboard-first, typed primary — drawn is an enhancement, never the only path. The typed legal-name <input> is always present and is the accessible signature path; the drawn <canvas> is offered on top (mode=\"draw\"), so a keyboard or assistive-tech user is never forced to draw to sign. This mirrors the data-transfer block's keyboardPathIsPrimary rule: the platform-accessible path is the baseline, the richer pointer interaction is sugar.",
+    "Affirmation gates commit — deliberate intent is structural, not decorative. The element refuses to emit `sign` until the signer accepts the author-supplied affirmation statement (the `affirmation` attribute). Intent-to-sign is therefore a precondition of capture, not an after-the-fact checkbox the app must remember to validate. `affirmation` may be set to none for the rare internal-initialing flow, but required is the default (most-restrictive-where-it-protects-the-user).",
+    "The record is immutable by contract, not by crypto. `sign` emits a frozen Signature Record the element never re-mutates; re-signing produces a new record. The standard guarantees the capture shape and that past records are not silently altered — it does NOT claim cryptographic non-repudiation. Sealing (hashing/PKI) and legal-compliance audit (ESIGN/UETA) are layered on top by a sealing adapter and the audit-trail block, kept out of the capture contract (bias toward separation).",
+    "Distinct from web-identity and from commitment-policy. web-identity establishes WHO an actor is (authentication); a signature is the ACT of an already-identified actor affirming a document. commitment-policy decides WHEN a form commits its validation; a signature is a discrete deliberate event, not a form-commit timing. The three are cross-referenced and never conflated.",
+    "Native-first capture surface — a real <input>, <button>, and optional <canvas>. The typed path is a constraint-validatable text input; the affirmation is a native checkbox; commit is a real <button>; the drawn path is a <canvas> reading native Pointer events. No bespoke text model or synthetic drawing framework — the platform primitives are the implementation, the block owns only the affirmation gate, the record shape, and the typed/drawn funnel."
+  ],
+  "webStandards": {
+    "constraintValidation": {
+      "usage": "The typed legal-name field is a native text <input> participating in constraint validation (required, checkValidity()) — the per-control floor is native, the block adds only the affirmation gate and record shape.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Constraint_validation"
+    },
+    "pointerEvents": {
+      "usage": "The optional drawn path reads native Pointer events on a <canvas>, so one code path covers mouse, touch, and stylus.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events"
+    }
+  }
+}

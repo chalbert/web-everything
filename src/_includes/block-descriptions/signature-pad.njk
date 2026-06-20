@@ -1,0 +1,65 @@
+<h2>Overview</h2>
+<p>
+  <strong>Signature Pad</strong> is the runnable surface that realizes the
+  <a href="/intents/signature/">Signature Intent</a> — a keyboard-first capture of a deliberate
+  signature commitment that affirms intent and emits an <a href="/semantics/#signature-record">immutable
+  Signature Record</a>. A typed legal-name field is the <strong>accessible primary path</strong> and is
+  always present; a drawn <code>&lt;canvas&gt;</code> is an opt-in enhancement layered on top — never the
+  only way to sign. A signature cannot commit until the signer accepts the author-supplied
+  <a href="/semantics/#signature-affirmation">affirmation</a> statement, so deliberate intent is a
+  structural precondition of capture rather than an afterthought the app must remember to check.
+</p>
+<p>
+  It is deliberately distinct from two neighbours: <a href="/backlog/1022-webidentity-implementation-credential-management-provider/">web-identity</a>
+  establishes <em>who you are</em> (authentication), whereas a signature is the <em>act</em> of an
+  already-identified actor affirming a document; and commitment-policy decides <em>when</em> a form commits
+  its validation, whereas a signature is a discrete, deliberate event. Cryptographic sealing (PKI/hashing)
+  and legal-compliance audit (ESIGN/UETA) are explicitly <strong>out of scope</strong> — layered on top by
+  a sealing adapter and the <a href="/blocks/audit-trail/">audit-trail</a> block, not baked into the
+  capture contract.
+</p>
+
+<h2>Web Standards Alignment</h2>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr><td><a href="https://developer.mozilla.org/docs/Web/HTML/Constraint_validation">Constraint Validation</a></td><td>Baseline</td><td>The typed legal-name field is a native text <code>&lt;input&gt;</code> (<code>required</code>, <code>checkValidity()</code>) — the per-control floor is native; the block adds only the affirmation gate and the record shape.</td></tr>
+  <tr><td><a href="https://developer.mozilla.org/docs/Web/API/Pointer_events">Pointer Events</a></td><td>Baseline</td><td>The optional drawn path reads native Pointer events on a <code>&lt;canvas&gt;</code>, so one code path covers mouse, touch, and stylus.</td></tr>
+  <tr><td><a href="https://www.w3.org/WAI/WCAG22/Understanding/">WCAG 2.2</a></td><td>WCAG 2.2</td><td>The typed path guarantees a keyboard- and AT-accessible way to sign; drawn capture is never the sole method.</td></tr>
+</table>
+
+<h2>Framework / Library Research</h2>
+<table>
+  <tr><th>Source</th><th>Key Patterns Adopted</th></tr>
+  <tr><td><a href="https://github.com/szimek/signature_pad">signature_pad</a></td><td>The drawn-canvas capture model (variable-width strokes, export to data-URL). Adopted as the enhancement implementation / an adapter target — not the baseline.</td></tr>
+  <tr><td>DocuSign / Adobe Sign</td><td>The affirmation-before-commit gate (an explicit intent-to-sign consent), typed vs drawn vs adopted-signature methods, and a timestamped record as the durable artifact.</td></tr>
+  <tr><td>ESIGN Act / UETA (conceptual)</td><td>The record's signer + intent + timestamp shape — captured as UX, with the legal/compliance evaluation left to the consuming app (out of the block's scope).</td></tr>
+</table>
+
+<h2>Contract</h2>
+<p>
+  The block ships a <code>&lt;signature-pad&gt;</code> element. Attributes: <code>signer</code> (pre-fill /
+  lock the identity, else taken from the typed field), <code>method</code> (<code>type</code> default,
+  <code>draw</code> to enable the canvas enhancement), <code>affirmation</code> (the author-supplied
+  intent-to-sign text; <code>required</code> by default), and <code>affirmation="none"</code> for the rare
+  internal-initialing flow. It exposes <code>sign()</code> / <code>clear()</code> and emits:
+</p>
+<table>
+  <tr><th>Event</th><th>Detail</th><th>When</th></tr>
+  <tr><td><code>sign</code></td><td><code>{ record: SignatureRecord }</code></td><td>The signature committed — affirmation accepted and a name typed (or a mark drawn). The record is frozen and never re-mutated.</td></tr>
+  <tr><td><code>clear</code></td><td><code>{ method: SignatureMethod }</code></td><td>The in-progress typed name / drawn mark was reset before commit.</td></tr>
+</table>
+<pre><code class="language-typescript">type SignatureMethod = 'typed' | 'drawn';
+
+interface SignatureRecord {
+  signer: string;        // the affirmed identity (typed legal name or the supplied signer)
+  signedAt: string;      // ISO-8601 timestamp
+  method: SignatureMethod;
+  value: string;         // the typed name, or a data-URL for a drawn mark
+  affirmed: boolean;     // the intent-to-sign the signer accepted
+}
+</code></pre>
+<p class="text-sm text-gray-600">
+  <strong>Status note:</strong> a freshly-minted contract (first shipped to drive the loan-origination
+  exercise app's S9 disclosures). The shape is implemented + consumed + tested, but the contract is open to
+  revision as more consumers appear.
+</p>

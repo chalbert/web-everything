@@ -1,0 +1,17 @@
+{
+  "id": "signature",
+  "name": "Signature Intent",
+  "status": "draft",
+  "summary": "Declarative capture of a deliberate signature commitment: a signer affirms their identity and intent, producing an immutable Signature Record (signer, timestamp, method). Keyboard-first — a typed legal name is the accessible primary path; a drawn mark is an enhancement, never the only way to sign. Captures the act of affirming a document; cryptographic sealing and legal-compliance audit are deliberately out of scope (app/adapter concerns layered on top). Distinct from web-identity (who you are / authentication) and from commitment-policy (when a form commits validation).",
+  "dimensions": {
+    "method": {
+      "description": "How the signature is captured. typed = a legal name via keyboard (the accessible primary path); drawn = a freehand canvas mark (an enhancement, with the typed path still present).",
+      "values": ["typed", "drawn"]
+    },
+    "affirmation": {
+      "description": "The explicit intent-to-sign the signer must accept before the signature commits. required = a signature cannot be emitted until affirmed (the default); none = capture without an affirmation gate (rare; e.g. an internal initialing flow).",
+      "values": ["required", "none"]
+    }
+  },
+  "description": "<h3>Why a standard</h3><p class=\"text-sm text-gray-600 mb-2\">Electronic signatures recur across origination, contracts, consent, and onboarding flows, and are almost always hand-rolled as a bespoke text input plus a timestamp. The Signature Intent captures the shared UX particularities — a deliberate <strong>affirmation of intent</strong>, a recorded <strong>signer identity</strong> and <strong>timestamp</strong>, and an <strong>immutable record</strong> — without prescribing presentation.</p><h3>Keyboard-first capture</h3><p class=\"text-sm text-gray-600 mb-2\">A typed legal name is the <strong>primary, accessible</strong> path and is always available. A drawn mark (canvas) is an <em>enhancement</em> — offered on top of, never instead of, typing — mirroring the <code>data-transfer</code> file-picker-primary principle. Affirmation is a structural precondition: no <a href=\"#signature-record\">Signature Record</a> is emitted until the signer accepts the author-supplied affirmation statement.</p><h3>Scope boundary</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>In scope:</strong> the capture surface, the affirmation gate, and the immutable record (signer, timestamp, method, value, affirmed).</li><li><strong>Out of scope:</strong> cryptographic signing / PKI (a sealing adapter), and legal-compliance audit (ESIGN/UETA) — composed app-side with the <code>audit-trail</code> block, not baked into the record.</li><li><strong>Not this:</strong> <code>web-identity</code> establishes <em>who you are</em> (authentication); a signature is the <em>act of affirming a document</em> by an already-identified actor.</li></ul><h3>Interface</h3><pre><code class=\"language-typescript\">type SignatureMethod = 'typed' | 'drawn';\n\ninterface SignatureRecord {\n  signer: string;        // the affirmed identity (typed legal name or supplied signer)\n  signedAt: string;      // ISO-8601 timestamp\n  method: SignatureMethod;\n  value: string;         // the typed name, or a data-URL for a drawn mark\n  affirmed: boolean;     // the intent-to-sign the signer accepted\n}\n\ninterface SignatureIntent {\n  method: SignatureMethod;       // typed (primary) | drawn (enhancement)\n  affirmation: 'required' | 'none';\n}</code></pre>"
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Signature Record",
+  "definition": "The immutable artifact a signature commitment produces: <code>signer</code> (the affirmed identity), <code>signedAt</code> (ISO-8601 timestamp), <code>method</code> (the <a href=\"#signature-method\">Signature Method</a>), <code>value</code> (the typed legal name, or a data-URL image for a drawn mark), and <code>affirmed</code> (the <a href=\"#signature-affirmation\">Signature Affirmation</a> the signer accepted). Emitted once when the signature commits and never mutated by the producing element — immutability is a contract guarantee, not a cryptographic seal.",
+  "usage": "Carried in the <code>signature-pad</code> block's <code>sign</code> event detail. Downstream sealing (PKI, hashing) and legal-compliance audit (ESIGN/UETA) are app/adapter concerns layered on top, never part of the record's capture shape."
+}

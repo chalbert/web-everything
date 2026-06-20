@@ -1,0 +1,5 @@
+{
+  "term": "Signature Affirmation",
+  "definition": "The explicit statement of intent a signer must accept before a signature commits — the electronic-signature equivalent of \"I intend to sign and agree to be bound by this document.\" Captured as a boolean on the <a href=\"#signature-record\">Signature Record</a>; the <code>signature-pad</code> block refuses to emit a <code>sign</code> event until it is affirmed, making deliberate intent a structural precondition of capture.",
+  "usage": "The affirmation text is author-supplied (the <code>affirmation</code> attribute) so each document can state what is being agreed to; the block owns only the gate that intent must precede signature."
+}
