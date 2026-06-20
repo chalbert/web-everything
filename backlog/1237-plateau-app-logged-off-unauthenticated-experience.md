@@ -1,8 +1,10 @@
 ---
 kind: epic
-status: open
+status: resolved
 locus: plateau-app
 dateOpened: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: none
 relatedReport: reports/2026-06-20-1237-split-analysis.md
 tags: [plateau, plateau-app, logged-off, unauthenticated, auth, landing, marketing, pricing, product-build]
 ---
