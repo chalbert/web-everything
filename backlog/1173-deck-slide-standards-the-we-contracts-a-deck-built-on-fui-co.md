@@ -2,7 +2,6 @@
 type: idea
 workItem: epic
 status: open
-size: 13
 dateOpened: "2026-06-19"
 tags: [deck, slides, presentation, navigation, view-transition, theming, conformance]
 relatedReport: reports/2026-06-19-deck-slide-standards.md
@@ -46,7 +45,8 @@ Proposed children, each an independently-deliverable WE spec; *extension* items 
 marked **[ext]**:
 
 - **GAP-0 — placement decision (`type:decision`, resolve first):** new `webdecks` project vs
-  distribute the new contracts across existing projects. Gates the rest.
+  distribute the new contracts across existing projects. **Carved → #1175** (prepared, ready to
+  ratify). Gates the framing/home of every slice below.
 - **1 — slide/deck document model** (semantic + intent) — load-bearing data model.
 - **2 — fragment / incremental-reveal intent** — finer-than-slide step reveal; overloaded "next".
 - **3 — slide addressing / 2D-nav** **[ext]** — two-level deep-link + instant-jump restore.
@@ -69,6 +69,7 @@ The genuinely-novel WE contracts are 1, 2, 5, 10, 12, 13; the rest are extension
 standards or compositions. **Correctness traps to bake as conformance vectors (not author options):**
 reduced-motion under View Transitions (4, 16) and fit-scale hit-testing (7).
 
-> This epic is **unsliced** (carries a `size`) until the placement decision (GAP-0) is ratified and
-> the slices are carved as child items — at which point the `size` drops and scope moves onto the
-> children (per backlog-workflow epic rules).
+> This epic is now **sliced** (child #1175 carved; `size` dropped per backlog-workflow epic rules).
+> The remaining gap slices above stay as prose candidates until GAP-0 (#1175) is ratified — its
+> outcome sets each one's home and artifact kind, so they're carved in a single consistent pass
+> afterward rather than re-homed.
