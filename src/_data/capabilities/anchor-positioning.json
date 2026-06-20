@@ -4,5 +4,5 @@
   "webFeaturesKey": "anchor-positioning",
   "baseline": false,
   "polyfill": "polyfillable",
-  "summary": "<code>anchor-name</code> / <code>position-anchor</code> / <code>position-try-fallbacks</code> — tether a popover to its trigger and auto-flip on overflow."
+  "summary": "<code>anchor-name</code> / <code>position-anchor</code> / <code>position-try-fallbacks</code> — tether a popover to its trigger and auto-flip on overflow. Native-first positioning strategy for the anchor intent (#1262): registered as an additional resolver alongside the #149 floating-ui provider, promoted to default once it reaches Baseline (shipping all engines — FF 147, Safari 26 — but <code>baseline: false</code> until cross-browser-stable). The JS provider is the fallback."
 }

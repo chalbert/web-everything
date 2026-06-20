@@ -15,7 +15,9 @@
       "standard": "droplist overlay positioning strategy",
       "nativeApi": "CSS anchor positioning (anchor(), position-area)",
       "baseline": "limited",
-      "registered": false,
+      "registered": true,
+      "registeredIn": "src/_data/capabilities/anchor-positioning.json",
+      "note": "registered as an additional strategy; default promotion gated on Baseline (web-features baseline:false)",
       "trackingItem": "1262"
     },
     {
