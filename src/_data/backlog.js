@@ -407,12 +407,16 @@ module.exports = function backlog() {
     //               NOT a slice to-do — surface the reason, never prompt a slice.
     //   'done'      every child resolved, epic open    → needs an explicit resolve (a status update)
     //   'tracking'  open child slices remain           → NO epic-level action; progress IS the children
-    // Only 'unsliced' + 'done' are "actionable"; 'parked' + 'tracking' are not. Set only on sliceable
-    // epics (`sliceable` is assigned in the enrichment loop above, before this one).
+    //   'program'   an `ongoing: true` continuous program → NEVER a resolve cue, even with all children
+    //               resolved between slices; it is perpetual by design (e.g. the flagship exercise apps).
+    // Only 'unsliced' + 'done' are "actionable"; 'parked' + 'tracking' + 'program' are not. Set only on
+    // sliceable epics (`sliceable` is assigned in the enrichment loop above, before this one).
     if (item.sliceable) {
-      item.epicState = item.children.length > 0
-        ? (item.openChildCount === 0 ? 'done' : 'tracking')
-        : (item.childlessReason ? 'parked' : 'unsliced');
+      item.epicState = item.ongoing
+        ? 'program'
+        : item.children.length > 0
+          ? (item.openChildCount === 0 ? 'done' : 'tracking')
+          : (item.childlessReason ? 'parked' : 'unsliced');
     }
   }
 
@@ -455,6 +459,7 @@ module.exports = function backlog() {
   items.countEpicUnsliced = items.filter((it) => it.epicState === 'unsliced').length;
   items.countEpicDone = items.filter((it) => it.epicState === 'done').length;
   items.countEpicParked = items.filter((it) => it.epicState === 'parked').length;
+  items.countEpicProgram = items.filter((it) => it.epicState === 'program').length;
   items.countEpicActionable = items.countEpicUnsliced + items.countEpicDone;
 
   // Active batches (DEV-ONLY, advisory) — the live soft-reservations a running `/batch` stamps in

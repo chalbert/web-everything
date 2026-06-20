@@ -2,6 +2,7 @@
 type: idea
 workItem: epic
 status: open
+ongoing: true
 dateOpened: "2026-06-11"
 tags: [exercise-app, requirements, validation, financial, insurance, healthcare, government, logistics, coverage, showcase]
 crossRef: { url: /backlog/100-requirement-as-code/, label: "Requirement-as-code (#100)" }

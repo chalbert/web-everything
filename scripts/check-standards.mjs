@@ -599,8 +599,10 @@ for (const item of backlog) {
     err(`Backlog item "${item.id}" is a resolved epic but has ${openKids.length} open child slice(s) (${openKids.map((k) => `#${k.num}`).join(', ')}) — a closed umbrella with live work under it. Reopen the epic or resolve/re-parent the open child(ren).`);
   else if (item.status !== 'resolved' && (item.blockedBy?.length) && !openKids.length && !CHILDLESS_REASONS.has(item.childlessReason))
     err(`Backlog item "${item.id}" is a blocked epic with no open children and no childlessReason — set childlessReason: ${[...CHILDLESS_REASONS].join('|')} so the board shows why it's stalled, or add the next slice.`);
-  else if (item.status !== 'resolved' && !openKids.length)
+  else if (item.status !== 'resolved' && !openKids.length && !item.ongoing)
     warn(`Backlog item "${item.id}" is an epic whose every child is resolved ('all slices done') — reconcile it: resolve the epic (its scope is delivered) or scaffold the next slice.`);
+  // An `ongoing: true` epic (a perpetual program, e.g. the flagship exercise apps) is intentionally never
+  // a resolve cue — between slices it legitimately has every child resolved without being "done".
 }
 
 // Date↔status coherence: dateResolved only makes sense on a resolved item (the burndown

@@ -3,6 +3,7 @@ type: idea
 workItem: epic
 status: active
 parent: "314"
+ongoing: true
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-11"
 relatedReport: reports/2026-06-11-exercise-app-loan-origination-requirements.md
