@@ -14,6 +14,8 @@ describe('CustomTemplateDirective', () => {
     callbackLog: string[] = [];
 
     connectedCallback() {
+      // Chain to the base for the `is` attribute + `{children}` projection (#1174).
+      super.connectedCallback();
       this.callbackLog.push('connected');
     }
 
@@ -398,6 +400,21 @@ describe('CustomTemplateDirective', () => {
       const directive = new TestDirective({});
 
       expect(directive).toBeInstanceOf(HTMLElement);
+    });
+
+    it('should define connectedCallback on the prototype, not the instance (#1174)', () => {
+      // Custom-element reaction callbacks are read from the PROTOTYPE at define() time.
+      // The old base set an instance-own connectedCallback in the constructor, which a real
+      // browser never invokes — so `is` + `{children}` were silently dropped. Guard against
+      // a regression to that shape.
+      const directive = new TestDirective({});
+
+      expect(
+        Object.prototype.hasOwnProperty.call(directive, 'connectedCallback')
+      ).toBe(false);
+      expect(
+        typeof CustomTemplateDirective.prototype.connectedCallback
+      ).toBe('function');
     });
   });
 });

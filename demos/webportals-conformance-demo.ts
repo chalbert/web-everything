@@ -88,14 +88,11 @@ function buildScene(host: HTMLElement): Scene {
   );
 
   // The portal directive: a customized <template is="portal-directive"> targeting the outlet by id. The
-  // projected content goes in the template's `.content` (its canonical home — where the HTML parser also
-  // puts a declarative `<template>`'s children). We populate it directly rather than via the `{children}`
-  // constructor option: that option appends from an INSTANCE-property connectedCallback, but the browser
-  // invokes the PROTOTYPE connectedCallback cached at define() time, so the option is a no-op in a real
-  // browser (it works only under jsdom). Tracked as a webdirectives follow-up (#1174).
-  const portal = new PortalDirective({});
+  // `{children}` constructor option projects the modal into the template's `.content` (its canonical home —
+  // where the HTML parser also puts a declarative `<template>`'s children) on connect, via the base
+  // prototype connectedCallback (#1174 — the option is now browser-correct, not a no-op).
+  const portal = new PortalDirective({ children: modal });
   portal.setAttribute('target', 'wp-outlet');
-  portal.content.append(modal);
 
   // Nest the portal DEEP inside the clipped, transformed ancestor.
   const inner = el('div', { class: 'wp-inner' }, portal);

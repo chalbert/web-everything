@@ -65,27 +65,13 @@ export default abstract class CustomTemplateDirective<
   constructor(options: Options & CustomTemplateDirectiveOptions) {
     super();
     this.options = options;
-
-    // Store original connectedCallback for chaining
-    const originalConnectedCallback = this.connectedCallback?.bind(this);
-
-    // Override connectedCallback to handle initialization
-    this.connectedCallback = function (this: CustomTemplateDirective<Options>) {
-      // Set 'is' attribute based on constructor name
-      const directiveName = toKebabCase(this.constructor.name).toLowerCase();
-      this.setAttribute('is', directiveName);
-
-      // Append children to template content if provided
-      if (this.options.children) {
-        const nodes = Array.isArray(this.options.children)
-          ? this.options.children
-          : [this.options.children];
-        this.content.append(...nodes);
-      }
-
-      // Call original connectedCallback if it exists
-      originalConnectedCallback?.call(this);
-    };
+    // Base init (the `is` attribute + `{children}` projection) lives in the prototype
+    // `connectedCallback` below — NOT an instance-property override. A custom element's
+    // reaction callbacks are read from the PROTOTYPE at define() time, so an instance-assigned
+    // connectedCallback is never invoked by a real browser (jsdom/happy-dom read the instance
+    // prop, which is why the old instance override passed tests but silently dropped
+    // `{children}` in a real browser — #1174). Subclasses that override connectedCallback MUST
+    // call super.connectedCallback() to run this init.
   }
 
   /**
@@ -101,9 +87,25 @@ export default abstract class CustomTemplateDirective<
   detachedCallback?(): void;
 
   /**
-   * Called when the directive is connected to the document
+   * Called when the directive is connected to the document. Performs base init: reflects the
+   * kebab-cased constructor name to the `is` attribute and projects any `{children}` from the
+   * constructor options into `.content`. Subclasses that override this MUST call
+   * `super.connectedCallback()` — the browser invokes only the most-derived prototype callback,
+   * so this base init does not run otherwise (#1174).
    */
-  connectedCallback?(): void;
+  connectedCallback(): void {
+    // Set 'is' attribute based on constructor name
+    const directiveName = toKebabCase(this.constructor.name).toLowerCase();
+    this.setAttribute('is', directiveName);
+
+    // Append children to template content if provided
+    if (this.options.children) {
+      const nodes = Array.isArray(this.options.children)
+        ? this.options.children
+        : [this.options.children];
+      this.content.append(...nodes);
+    }
+  }
 
   /**
    * Called when the directive is disconnected from the document

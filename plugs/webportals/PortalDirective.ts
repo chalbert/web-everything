@@ -137,6 +137,9 @@ export default class PortalDirective extends CustomTemplateDirective {
   /* ── lifecycle ── */
 
   connectedCallback(): void {
+    // Chain to the base so the `is` attribute + any `{children}` projection run before we
+    // read `this.content` — the browser invokes only this most-derived callback (#1174).
+    super.connectedCallback();
     this.#activate();
   }
 
