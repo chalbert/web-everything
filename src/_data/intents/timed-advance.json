@@ -1,0 +1,21 @@
+{
+  "id": "timed-advance",
+  "name": "Timed-Advance / Autoplay Intent",
+  "status": "draft",
+  "summary": "Unattended auto-advance through an ordered sequence — per-item timing, pause-on-interaction, resume, loop, and a Screen Wake Lock so the display does not sleep during kiosk/autoplay. Extends the carousel block's autoplay, which is single-rate: this generalises it to per-item durations and adds the Wake Lock layer, as the timed member of the advanceable-sequence family (#1179). The boundary behavior (loop / stop / rewind at the end) defers to advanceable-sequence; this intent owns the timing, the pause model, and the wake-lock. Composes the Motion intent (reduced-motion still applies to the transitions it triggers).",
+  "dimensions": {
+    "timing": {
+      "description": "How long each item is shown. uniform = a single interval for every item (the carousel baseline); per-item = a per-slide/per-item duration (a title slide lingers, a dense slide longer), declared on the item.",
+      "values": ["uniform", "per-item"]
+    },
+    "pause": {
+      "description": "Whether user interaction suspends auto-advance. on-interaction = hovering/focusing/touching pauses, resuming after (the APG-conformant default); manual-only = autoplay runs until an explicit pause control (kiosk/signage).",
+      "values": ["on-interaction", "manual-only"]
+    },
+    "wakeLock": {
+      "description": "Whether a Screen Wake Lock is held while autoplay runs. held = request the Wake Lock so the screen stays on during a kiosk/presentation (released on pause/exit); none = let the display sleep per system policy.",
+      "values": ["held", "none"]
+    }
+  },
+  "description": "<h3>Hands-off advance</h3><p class=\"text-sm text-gray-600 mb-2\">A deck on a kiosk, a signage carousel, an auto-playing walkthrough: the sequence advances itself on a timer. The Timed-Advance intent owns the timing, the pause behavior, and keeping the screen awake.</p><h3>Generalises the carousel kernel</h3><p class=\"text-sm text-gray-600 mb-2\">The <a href=\"/blocks/carousel/\">carousel block</a> already ships autoplay, but at a <em>single rate</em> with pause-on-hover/focus. This intent lifts that to <strong>per-item</strong> durations and adds <strong>Screen Wake Lock</strong>, as the timed member of the <a href=\"/intents/advanceable-sequence/\">advanceable-sequence family</a> (#1179). End-of-sequence behavior (loop / rewind / stop) is the family's <code>boundary</code> axis, not re-declared here.</p><h3>Accessibility</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Pause control required:</strong> auto-advancing content must offer a pause (WCAG 2.2.2); <code>pause: on-interaction</code> is the conformant default.</li><li><strong>Reduced motion:</strong> the transitions auto-advance triggers still honor <code>prefers-reduced-motion</code> via the <a href=\"/intents/motion/\">Motion intent</a>.</li></ul>"
+}
