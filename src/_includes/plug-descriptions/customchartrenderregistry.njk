@@ -1,0 +1,79 @@
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
+<p>
+    Exposes <code>window.customChartRenderers</code> for registering named <strong>chart renderers</strong>.
+    A renderer is any drawing engine that can turn a semantic <code>ChartSpec</code> into output — the
+    native-first SVG default, a <a href="https://vega.github.io/vega-lite/">Vega</a> adapter, Plotly, ECharts,
+    or a custom one. Charts resolve the application's renderer through the injector chain and delegate, so a
+    page ships <strong>one</strong> charting engine that every chart shares rather than bundling one per
+    library. A renderer declares the L-tier of the Vega-Lite profile it supports, and the registry resolves a
+    spec to its chosen impl behind the <a href="/plugs/customchartrenderer/"><code>CustomChartRenderer</code></a>
+    contract.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://vega.github.io/vega-lite/">Vega-Lite</a></td>
+        <td>De-facto grammar</td>
+        <td>The L1 profile is the semantic contract; the registry matches a spec's required tier to a registered renderer.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/SVG">SVG</a></td>
+        <td>Baseline</td>
+        <td>The default renderer needs no library; adapters are opt-in enhancements registered alongside it.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+interface CustomChartRenderRegistry extends CustomRegistry<CustomChartRenderer> {
+    readonly localName = 'customChartRenderers';
+
+    // Register a named renderer (e.g. 'svg-default', 'vega', 'plotly')
+    define(name: string, renderer: CustomChartRenderer): void;
+
+    // The renderer a chart should use, resolved via the injector chain
+    resolve(forElement: Element): CustomChartRenderer;
+}
+{% endhighlight %}
+
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("chart-renderer-example", code=true) }}
+{% highlight "javascript" %}
+// The application registers ONE renderer and selects it for the tree.
+import { VegaAdapter } from '@web-adapters/vega';
+customChartRenderers.define('vega', new VegaAdapter());
+
+// A vendor chart delegates — it never bundles its own engine.
+const renderer = customChartRenderers.resolve(chartEl);
+const handle = renderer.render(chartEl, spec, resolvedTheme);
+{% endhighlight %}
+
+{{ unpluggedContent("chart-renderer-example", code=true) }}
+{% highlight "javascript" %}
+consume { customChartRenderers } of '@web-charts';
+
+customChartRenderers.define('vega', new VegaAdapter());
+
+const renderer = customChartRenderers.resolve(chartEl);
+const handle = renderer.render(chartEl, spec, resolvedTheme);
+{% endhighlight %}
+
+{{ endContent() }}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>Registry, not a hard dependency.</strong> Charting is a swappable service so many components converge on one engine. Swapping engines is a one-line registration change with zero spec edits.</li>
+    <li><strong>Native-first default.</strong> The bundled renderer draws with SVG + theme tokens; libraries are opt-in enhancements through adapters, not the baseline.</li>
+    <li><strong>Semantic plane only.</strong> The registry routes by declared L-tier and resolves presentation from <a href="/projects/webtheme/">webtheme</a>; the <code>ChartSpec</code> stays free of drawing concerns.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Renderers satisfy the <a href="/plugs/customchartrenderer/"><code>CustomChartRenderer</code></a> contract.
+    See the <a href="/protocols/custom-chart-renderer/">CustomChartRenderer protocol</a> and
+    <a href="/projects/webcharts/">Web Charts</a> for the full surface.
+</p>

@@ -1,0 +1,61 @@
+<h3 id="overview">Overview</h3>
+<p>
+    <code>CustomChartRenderer</code> is the single contract every chart drawing engine implements. Its one
+    method, <code>render()</code>, consumes a <em>semantic</em> <code>ChartSpec</code> (the
+    <a href="/projects/webcharts/">Web Charts</a> Vega-Lite L1 profile) plus the resolved
+    <a href="/projects/webtheme/">webtheme</a> tokens, and returns a <code>ChartHandle</code> for updates and
+    teardown. The native-first SVG default (the standard's canonical impl, shipped by Frontier UI) and every
+    library adapter (<a href="https://vega.github.io/vega-lite/">Vega</a>, Plotly, ECharts) satisfy this same
+    interface, which is what lets <a href="/plugs/customchartrenderregistry/">the registry</a> treat them
+    interchangeably. The spec is the only lock — swapping impls leaves the <code>ChartSpec</code> untouched,
+    because the renderer reads the semantic plane and resolves presentation from theme tokens, never the reverse.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://vega.github.io/vega-lite/">Vega-Lite</a></td>
+        <td>De-facto grammar</td>
+        <td>The L1 profile is the semantic schema the renderer consumes; renderers declare which L-tier they support.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/SVG">SVG</a></td>
+        <td>Baseline</td>
+        <td>The native-first default draws with plain SVG + theme tokens, no library dependency.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+type ChartTier = 'L1' | 'L2' | 'L3';   // declared conformance tier of the Vega-Lite profile
+
+interface ResolvedTheme {
+    // webtheme tokens already resolved to concrete values for the active scheme
+    [token: string]: string;
+}
+
+interface ChartHandle {
+    update(spec: ChartSpec): void;     // re-render against a new semantic spec
+    destroy(): void;                   // tear down DOM + listeners
+}
+
+interface CustomChartRenderer {
+    readonly tier: ChartTier;          // the L-tier this engine supports
+    // Draw `spec` into `target`, resolving presentation from theme tokens.
+    render(target: Element, spec: ChartSpec, theme: ResolvedTheme): ChartHandle;
+}
+{% endhighlight %}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>Semantic spec is the only lock.</strong> The renderer consumes meaning (encodings, measurement types), never presentation, so an SVG default and a Vega adapter draw the same <code>ChartSpec</code>.</li>
+    <li><strong>Theme application is an axis, not a fork.</strong> Presentation resolves from webtheme tokens, keeping the spec free of colours and sizes.</li>
+    <li><strong>Tier declaration over a monolith.</strong> A renderer advertises its L-tier; conformance scores it on semantic fidelity, theme application, and accessibility.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Registered through <a href="/plugs/customchartrenderregistry/"><code>CustomChartRenderRegistry</code></a>.
+    See the <a href="/protocols/custom-chart-renderer/">CustomChartRenderer protocol</a> and
+    <a href="/projects/webcharts/">Web Charts</a>.
+</p>

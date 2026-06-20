@@ -1,0 +1,10 @@
+{
+  "id": "customchartrenderregistry",
+  "name": "CustomChartRenderRegistry",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Exposes window.customChartRenderers for registering named chart renderers (native-first SVG default, Vega, Plotly, ECharts, …) so any chart delegates drawing to one shared engine resolved through the injector chain. A renderer declares the L-tier of the Vega-Lite profile it supports; the registry resolves a ChartSpec to its chosen impl behind the CustomChartRenderer contract.",
+  "projects": [
+    "webcharts"
+  ]
+}

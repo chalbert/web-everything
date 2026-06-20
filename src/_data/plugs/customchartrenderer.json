@@ -1,0 +1,10 @@
+{
+  "id": "customchartrenderer",
+  "name": "CustomChartRenderer",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Base contract a chart renderer implements — render(spec, resolvedTheme) consuming a semantic ChartSpec (Vega-Lite L1 profile) plus resolved webtheme tokens and returning a ChartHandle. Satisfied alike by the native-first SVG default (Frontier UI's canonical impl) and by every library adapter (Vega, Plotly, ECharts). The spec is the only lock: swapping impls leaves the ChartSpec untouched.",
+  "projects": [
+    "webcharts"
+  ]
+}
