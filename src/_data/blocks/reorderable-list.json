@@ -3,7 +3,7 @@
   "name": "Reorderable List",
   "status": "draft",
   "type": "Component",
-  "implementedBy": "@frontierui/blocks/renderers/reorderable-list/",
+  "implementedBy": "@frontierui/blocks/renderers/reorderable-list/index.ts",
   "exports": [
     "reduceReorder",
     "renderReorderableList",

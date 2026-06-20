@@ -696,7 +696,7 @@
               }
             },
             "blockType": "Module",
-            "status": "concept"
+            "status": "active"
           }
         }
       ],
@@ -968,7 +968,7 @@
         {
           "kind": "class",
           "name": "CodeViewElement",
-          "description": "Renders syntax-highlighted component source with a copy affordance — the source-code-view feature from the workbench inventory (#625), ratified by #626 as a forced block mint. The copy affordance composes the data-transfer copy intent (the copy-out half). Native-first: highlighting paints token ranges via the CSS Custom Highlight API over a tokenizer rather than wrapping every token in a <span>, with library highlighters (Prism/Shiki/highlight.js) as opt-in adapters. A live-editable sandbox embed is explicitly out of scope (that is the assembler/playground concern).",
+          "description": "Renders syntax-highlighted component source with a copy affordance — the source-code-view feature from the workbench inventory (#625), ratified by #626 as a forced block mint. The copy affordance composes the data-transfer copy intent (the copy-out half). Native-first: highlighting paints token ranges via the CSS Custom Highlight API over a tokenizer rather than wrapping every token in a <span>, with library highlighters (Prism/Shiki/highlight.js) as opt-in adapters. A live-editable sandbox embed is explicitly out of scope (that is the assembler/playground concern). Extended for code presentation (#1196) with line-focus (a stepped emphasis range that dims unfocused lines) and magic-move (a token-level View Transition that morphs code spans between steps when the source changes) — the deck/walkthrough step-through over code, layered on the same Highlight API ranges.",
           "x-webeverything": {
             "composesIntents": [
               "data-transfer"
@@ -985,6 +985,12 @@
                 "pattern": "Async Clipboard API (navigator.clipboard.writeText) behind the data-transfer copy intent",
                 "adoption": "The copy button writes the verbatim source via the data-transfer copy-out (emit) half, so the affordance is the shared intent, not a bespoke clipboard call.",
                 "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API"
+              },
+              "viewTransitions": {
+                "status": "Baseline 2025",
+                "pattern": "View Transitions API for token-level magic-move — morph code spans between steps via view-transition-name on stable token identities",
+                "adoption": "Magic-move assigns a view-transition-name to tokens shared between two code states, so changing the source animates a morph (insert/move/delete) rather than a hard swap; honors prefers-reduced-motion (instant when reduced).",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/View_Transitions_API"
               }
             },
             "blockType": "Component",
@@ -1013,7 +1019,7 @@
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/renderers/collection-operations/",
+      "path": "@frontierui/blocks/renderers/collection-operations/index.ts",
       "declarations": [
         {
           "kind": "class",
@@ -1043,7 +1049,7 @@
           "name": "CollectionOperationsModule",
           "declaration": {
             "name": "CollectionOperationsModule",
-            "module": "@frontierui/blocks/renderers/collection-operations/"
+            "module": "@frontierui/blocks/renderers/collection-operations/index.ts"
           }
         },
         {
@@ -1051,7 +1057,7 @@
           "name": "CollectionOperationsBehavior",
           "declaration": {
             "name": "CollectionOperationsBehavior",
-            "module": "@frontierui/blocks/renderers/collection-operations/"
+            "module": "@frontierui/blocks/renderers/collection-operations/index.ts"
           }
         },
         {
@@ -1059,7 +1065,7 @@
           "name": "registerCollectionOperations",
           "declaration": {
             "name": "registerCollectionOperations",
-            "module": "@frontierui/blocks/renderers/collection-operations/"
+            "module": "@frontierui/blocks/renderers/collection-operations/index.ts"
           }
         }
       ]
@@ -1204,7 +1210,7 @@
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/renderers/data-grid/",
+      "path": "@frontierui/blocks/renderers/data-grid/index.ts",
       "declarations": [
         {
           "kind": "class",
@@ -1258,7 +1264,7 @@
           "name": "DataGridModule",
           "declaration": {
             "name": "DataGridModule",
-            "module": "@frontierui/blocks/renderers/data-grid/"
+            "module": "@frontierui/blocks/renderers/data-grid/index.ts"
           }
         },
         {
@@ -1266,7 +1272,7 @@
           "name": "DataGridBehavior",
           "declaration": {
             "name": "DataGridBehavior",
-            "module": "@frontierui/blocks/renderers/data-grid/"
+            "module": "@frontierui/blocks/renderers/data-grid/index.ts"
           }
         },
         {
@@ -1274,14 +1280,14 @@
           "name": "registerDataGrid",
           "declaration": {
             "name": "registerDataGrid",
-            "module": "@frontierui/blocks/renderers/data-grid/"
+            "module": "@frontierui/blocks/renderers/data-grid/index.ts"
           }
         }
       ]
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/renderers/data-table/",
+      "path": "@frontierui/blocks/renderers/data-table/index.ts",
       "declarations": [
         {
           "kind": "class",
@@ -1360,7 +1366,7 @@
           "name": "DataTableModule",
           "declaration": {
             "name": "DataTableModule",
-            "module": "@frontierui/blocks/renderers/data-table/"
+            "module": "@frontierui/blocks/renderers/data-table/index.ts"
           }
         },
         {
@@ -1368,7 +1374,7 @@
           "name": "DataTableBehavior",
           "declaration": {
             "name": "DataTableBehavior",
-            "module": "@frontierui/blocks/renderers/data-table/"
+            "module": "@frontierui/blocks/renderers/data-table/index.ts"
           }
         },
         {
@@ -1376,7 +1382,7 @@
           "name": "registerDataTable",
           "declaration": {
             "name": "registerDataTable",
-            "module": "@frontierui/blocks/renderers/data-table/"
+            "module": "@frontierui/blocks/renderers/data-table/index.ts"
           }
         }
       ]
@@ -2775,7 +2781,7 @@
               }
             },
             "blockType": "Module",
-            "status": "draft"
+            "status": "active"
           }
         }
       ],
@@ -3035,22 +3041,33 @@
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/notification/index.ts",
+      "path": "@frontierui/blocks/notification/NotificationRegionElement.ts",
       "declarations": [
         {
           "kind": "class",
-          "name": "Notification",
+          "name": "NotificationRegionElement",
           "description": "The runnable surface that realizes the Feedback Intent — a transient, non-blocking message that appears, is accessibly announced, persists for a bounded time (or until dismissed), and is removed. It owns the general notification contract: a top-layer region host plus an injectable controller that app code calls imperatively to enqueue messages, with queueing/stacking, severity-mapped announcement, auto-timeout (paused on hover/focus, forced indefinite when an action is present), and manual dismissal. Presentation styles (toast, snackbar, banner-position, …) are the implementation's choice, not part of the contract — the block defines behaviour, the implementation picks the look. Native-first: the region mounts to the top layer via the Popover API where supported, falling back to a Web Portals mount. Composes the Message Intent (shared severity/tone vocabulary), the Live-Region Status Intent (announcement transport), the Surface Intent (card elevation/material), and the Motion Intent (enter/exit). Deliberately distinct from the OS-level Web Notifications API (system notifications, permission-gated — Web Permissions #009), from background-task-surface (#135, a persistent long-running-task surface), and from inline Message banners (structural, in-flow).",
           "events": [
             {
+              "name": "notification-shown",
               "type": {
                 "text": "CustomEvent"
-              }
+              },
+              "description": "A notification became visible in the region (announced via its severity-mapped live region)."
             },
             {
+              "name": "notification-dismissed",
               "type": {
                 "text": "CustomEvent"
-              }
+              },
+              "description": "A notification left the region; `reason` is why (timeout, user, replaced, programmatic)."
+            },
+            {
+              "name": "notification-action",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "The user activated a notification's inline action (e.g. Undo) before it dismisses."
             }
           ],
           "x-webeverything": {
@@ -3068,24 +3085,176 @@
               }
             },
             "blockType": "Component",
-            "status": "draft"
+            "status": "active"
           }
         }
       ],
       "exports": [
         {
           "kind": "js",
-          "name": "Notification",
+          "name": "NotificationRegionElement",
           "declaration": {
-            "name": "Notification",
-            "module": "@frontierui/blocks/notification/index.ts"
+            "name": "NotificationRegionElement",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerNotificationRegion",
+          "declaration": {
+            "name": "registerNotificationRegion",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "admit",
+          "declaration": {
+            "name": "admit",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "resolveNotification",
+          "declaration": {
+            "name": "resolveNotification",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "politenessFor",
+          "declaration": {
+            "name": "politenessFor",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "roleFor",
+          "declaration": {
+            "name": "roleFor",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "defaultDuration",
+          "declaration": {
+            "name": "defaultDuration",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DURATION_MS",
+          "declaration": {
+            "name": "DURATION_MS",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "NotificationInput",
+          "declaration": {
+            "name": "NotificationInput",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "NotificationAction",
+          "declaration": {
+            "name": "NotificationAction",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ResolvedNotification",
+          "declaration": {
+            "name": "ResolvedNotification",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "NotificationSeverity",
+          "declaration": {
+            "name": "NotificationSeverity",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "NotificationDuration",
+          "declaration": {
+            "name": "NotificationDuration",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DismissReason",
+          "declaration": {
+            "name": "DismissReason",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ShownDetail",
+          "declaration": {
+            "name": "ShownDetail",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DismissedDetail",
+          "declaration": {
+            "name": "DismissedDetail",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ActionDetail",
+          "declaration": {
+            "name": "ActionDetail",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "SHOWN_EVENT",
+          "declaration": {
+            "name": "SHOWN_EVENT",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DISMISSED_EVENT",
+          "declaration": {
+            "name": "DISMISSED_EVENT",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ACTION_EVENT",
+          "declaration": {
+            "name": "ACTION_EVENT",
+            "module": "@frontierui/blocks/notification/NotificationRegionElement.ts"
           }
         }
       ]
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/renderers/pagination/",
+      "path": "@frontierui/blocks/renderers/pagination/index.ts",
       "declarations": [
         {
           "kind": "class",
@@ -3302,7 +3471,7 @@
           "name": "PaginationModule",
           "declaration": {
             "name": "PaginationModule",
-            "module": "@frontierui/blocks/renderers/pagination/"
+            "module": "@frontierui/blocks/renderers/pagination/index.ts"
           }
         },
         {
@@ -3310,7 +3479,7 @@
           "name": "PaginationBehavior",
           "declaration": {
             "name": "PaginationBehavior",
-            "module": "@frontierui/blocks/renderers/pagination/"
+            "module": "@frontierui/blocks/renderers/pagination/index.ts"
           }
         },
         {
@@ -3318,7 +3487,7 @@
           "name": "registerPagination",
           "declaration": {
             "name": "registerPagination",
-            "module": "@frontierui/blocks/renderers/pagination/"
+            "module": "@frontierui/blocks/renderers/pagination/index.ts"
           }
         }
       ]
@@ -3700,7 +3869,7 @@
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/renderers/reorderable-list/",
+      "path": "@frontierui/blocks/renderers/reorderable-list/index.ts",
       "declarations": [
         {
           "kind": "class",
@@ -3813,7 +3982,7 @@
           "name": "reduceReorder",
           "declaration": {
             "name": "reduceReorder",
-            "module": "@frontierui/blocks/renderers/reorderable-list/"
+            "module": "@frontierui/blocks/renderers/reorderable-list/index.ts"
           }
         },
         {
@@ -3821,7 +3990,7 @@
           "name": "renderReorderableList",
           "declaration": {
             "name": "renderReorderableList",
-            "module": "@frontierui/blocks/renderers/reorderable-list/"
+            "module": "@frontierui/blocks/renderers/reorderable-list/index.ts"
           }
         },
         {
@@ -3829,7 +3998,7 @@
           "name": "auditReorderableList",
           "declaration": {
             "name": "auditReorderableList",
-            "module": "@frontierui/blocks/renderers/reorderable-list/"
+            "module": "@frontierui/blocks/renderers/reorderable-list/index.ts"
           }
         },
         {
@@ -3837,7 +4006,7 @@
           "name": "reconcileOrder",
           "declaration": {
             "name": "reconcileOrder",
-            "module": "@frontierui/blocks/renderers/reorderable-list/"
+            "module": "@frontierui/blocks/renderers/reorderable-list/index.ts"
           }
         },
         {
@@ -3845,7 +4014,7 @@
           "name": "announce",
           "declaration": {
             "name": "announce",
-            "module": "@frontierui/blocks/renderers/reorderable-list/"
+            "module": "@frontierui/blocks/renderers/reorderable-list/index.ts"
           }
         },
         {
@@ -3853,7 +4022,7 @@
           "name": "initialState",
           "declaration": {
             "name": "initialState",
-            "module": "@frontierui/blocks/renderers/reorderable-list/"
+            "module": "@frontierui/blocks/renderers/reorderable-list/index.ts"
           }
         }
       ]
@@ -4870,6 +5039,122 @@
     },
     {
       "kind": "javascript-module",
+      "path": "@frontierui/blocks/signature-pad/SignaturePadElement.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "SignaturePadElement",
+          "description": "The runnable surface that realizes the Signature Intent — a keyboard-first signature capture that affirms intent and emits an immutable Signature Record. The typed legal-name field is the accessible primary path and is always present; a drawn canvas is an opt-in enhancement on top of it. A signature cannot commit until the signer accepts the author-supplied affirmation statement (the intent gate). On commit the element dispatches `sign` with the record { signer, signedAt, method, value, affirmed } and never mutates a past record. Cryptographic sealing and legal-compliance audit are deliberately out of scope — composed on top (a sealing adapter; the audit-trail block), not baked into capture. Native-first: a real <input> + <button> + an optional <canvas>, no synthetic input model.",
+          "events": [
+            {
+              "name": "sign",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "The signature committed — an immutable Signature Record (signer, signedAt, method, value, affirmed) was produced."
+            },
+            {
+              "name": "clear",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "The pad was reset before commit — the in-progress typed name / drawn mark was cleared."
+            }
+          ],
+          "x-webeverything": {
+            "implementsIntent": "signature",
+            "webStandards": {
+              "constraintValidation": {
+                "usage": "The typed legal-name field is a native text <input> participating in constraint validation (required, checkValidity()) — the per-control floor is native, the block adds only the affirmation gate and record shape.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Constraint_validation"
+              },
+              "pointerEvents": {
+                "usage": "The optional drawn path reads native Pointer events on a <canvas>, so one code path covers mouse, touch, and stylus.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events"
+              }
+            },
+            "blockType": "Component",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "SignaturePadElement",
+          "declaration": {
+            "name": "SignaturePadElement",
+            "module": "@frontierui/blocks/signature-pad/SignaturePadElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerSignaturePad",
+          "declaration": {
+            "name": "registerSignaturePad",
+            "module": "@frontierui/blocks/signature-pad/SignaturePadElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "buildRecord",
+          "declaration": {
+            "name": "buildRecord",
+            "module": "@frontierui/blocks/signature-pad/SignaturePadElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "isCommittable",
+          "declaration": {
+            "name": "isCommittable",
+            "module": "@frontierui/blocks/signature-pad/SignaturePadElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "SignatureRecord",
+          "declaration": {
+            "name": "SignatureRecord",
+            "module": "@frontierui/blocks/signature-pad/SignaturePadElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "SignatureMethod",
+          "declaration": {
+            "name": "SignatureMethod",
+            "module": "@frontierui/blocks/signature-pad/SignaturePadElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "SignDetail",
+          "declaration": {
+            "name": "SignDetail",
+            "module": "@frontierui/blocks/signature-pad/SignaturePadElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "SIGN_EVENT",
+          "declaration": {
+            "name": "SIGN_EVENT",
+            "module": "@frontierui/blocks/signature-pad/SignaturePadElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "CLEAR_EVENT",
+          "declaration": {
+            "name": "CLEAR_EVENT",
+            "module": "@frontierui/blocks/signature-pad/SignaturePadElement.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
       "path": "@frontierui/blocks/stores/simple/SimpleStore.ts",
       "declarations": [
         {
@@ -5200,7 +5485,7 @@
       "declarations": [
         {
           "kind": "class",
-          "name": "TabsComponent",
+          "name": "TabGroupBehavior",
           "description": "Accessible tab interface component built on View (ViewBehavior for panel switching), providing tab triggers, panels, and ARIA semantics.",
           "attributes": [
             {
@@ -5285,33 +5570,33 @@
       "exports": [
         {
           "kind": "js",
-          "name": "TabsComponent",
+          "name": "TabGroupBehavior",
           "declaration": {
-            "name": "TabsComponent",
+            "name": "TabGroupBehavior",
             "module": "@frontierui/blocks/tabs/index.ts"
           }
         },
         {
           "kind": "js",
-          "name": "TabListAttribute",
+          "name": "TabActivationMode",
           "declaration": {
-            "name": "TabListAttribute",
+            "name": "TabActivationMode",
             "module": "@frontierui/blocks/tabs/index.ts"
           }
         },
         {
           "kind": "js",
-          "name": "TabTriggerAttribute",
+          "name": "TabOrientation",
           "declaration": {
-            "name": "TabTriggerAttribute",
+            "name": "TabOrientation",
             "module": "@frontierui/blocks/tabs/index.ts"
           }
         },
         {
           "kind": "js",
-          "name": "TabPanelAttribute",
+          "name": "TabChangeEventDetail",
           "declaration": {
-            "name": "TabPanelAttribute",
+            "name": "TabChangeEventDetail",
             "module": "@frontierui/blocks/tabs/index.ts"
           }
         }
@@ -5639,25 +5924,17 @@
         },
         {
           "kind": "js",
-          "name": "SmartLink",
-          "declaration": {
-            "name": "SmartLink",
-            "module": "@frontierui/blocks/transient/index.ts"
-          }
-        },
-        {
-          "kind": "js",
-          "name": "withSelfReplacement",
-          "declaration": {
-            "name": "withSelfReplacement",
-            "module": "@frontierui/blocks/transient/index.ts"
-          }
-        },
-        {
-          "kind": "js",
           "name": "calculateHeadingLevel",
           "declaration": {
             "name": "calculateHeadingLevel",
+            "module": "@frontierui/blocks/transient/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerTransient",
+          "declaration": {
+            "name": "registerTransient",
             "module": "@frontierui/blocks/transient/index.ts"
           }
         }
@@ -5744,7 +6021,7 @@
       "declarations": [
         {
           "kind": "class",
-          "name": "TrustedHTMLBehavior",
+          "name": "TrustedHtmlBehavior",
           "description": "Attribute-based behavior that enforces Trusted Types policies on an element's innerHTML mutations.",
           "x-webeverything": {
             "webStandards": {
@@ -5754,16 +6031,24 @@
               }
             },
             "blockType": "Behavior",
-            "status": "draft"
+            "status": "active"
           }
         }
       ],
       "exports": [
         {
           "kind": "js",
-          "name": "TrustedHTMLBehavior",
+          "name": "TrustedHtmlBehavior",
           "declaration": {
-            "name": "TrustedHTMLBehavior",
+            "name": "TrustedHtmlBehavior",
+            "module": "@frontierui/blocks/trusted-html-behavior/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerTrustedHtml",
+          "declaration": {
+            "name": "registerTrustedHtml",
             "module": "@frontierui/blocks/trusted-html-behavior/index.ts"
           }
         }
@@ -5967,9 +6252,9 @@
         },
         {
           "kind": "js",
-          "name": "ViewEngineOptions",
+          "name": "ViewOptions",
           "declaration": {
-            "name": "ViewEngineOptions",
+            "name": "ViewOptions",
             "module": "@frontierui/blocks/view/index.ts"
           }
         },

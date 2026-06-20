@@ -14,7 +14,7 @@
     "data-table",
     "pagination"
   ],
-  "implementedBy": "@frontierui/blocks/renderers/collection-operations/",
+  "implementedBy": "@frontierui/blocks/renderers/collection-operations/index.ts",
   "designDecisions": {
     "wholeBookThenWindow": {
       "description": "Run filter -> sort -> group across the ENTIRE collection, then apply the page stage (the slice) — never page-then-sort",
