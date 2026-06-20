@@ -1,8 +1,31 @@
 {
   "id": "notification",
   "name": "Notification",
-  "status": "draft",
+  "status": "active",
   "type": "Component",
+  "implementedBy": "@frontierui/blocks/notification/NotificationRegionElement.ts",
+  "exports": [
+    "NotificationRegionElement",
+    "registerNotificationRegion",
+    "admit",
+    "resolveNotification",
+    "politenessFor",
+    "roleFor",
+    "defaultDuration",
+    "DURATION_MS",
+    "NotificationInput",
+    "NotificationAction",
+    "ResolvedNotification",
+    "NotificationSeverity",
+    "NotificationDuration",
+    "DismissReason",
+    "ShownDetail",
+    "DismissedDetail",
+    "ActionDetail",
+    "SHOWN_EVENT",
+    "DISMISSED_EVENT",
+    "ACTION_EVENT"
+  ],
   "summary": "The runnable surface that realizes the Feedback Intent — a transient, non-blocking message that appears, is accessibly announced, persists for a bounded time (or until dismissed), and is removed. It owns the general notification contract: a top-layer region host plus an injectable controller that app code calls imperatively to enqueue messages, with queueing/stacking, severity-mapped announcement, auto-timeout (paused on hover/focus, forced indefinite when an action is present), and manual dismissal. Presentation styles (toast, snackbar, banner-position, …) are the implementation's choice, not part of the contract — the block defines behaviour, the implementation picks the look. Native-first: the region mounts to the top layer via the Popover API where supported, falling back to a Web Portals mount. Composes the Message Intent (shared severity/tone vocabulary), the Live-Region Status Intent (announcement transport), the Surface Intent (card elevation/material), and the Motion Intent (enter/exit). Deliberately distinct from the OS-level Web Notifications API (system notifications, permission-gated — Web Permissions #009), from background-task-surface (#135, a persistent long-running-task surface), and from inline Message banners (structural, in-flow).",
   "implementsIntent": "feedback",
   "composesIntents": [
@@ -11,10 +34,29 @@
     "surface",
     "motion"
   ],
-  "events": [
-    "notification-shown",
-    "notification-dismissed"
-  ],
+  "events": {
+    "notification-shown": {
+      "description": "A notification became visible in the region (announced via its severity-mapped live region).",
+      "taxonomy": "notification",
+      "detail": { "id": "string", "severity": "NotificationSeverity" },
+      "bubbles": true,
+      "cancelable": false
+    },
+    "notification-dismissed": {
+      "description": "A notification left the region; `reason` is why (timeout, user, replaced, programmatic).",
+      "taxonomy": "notification",
+      "detail": { "id": "string", "reason": "DismissReason" },
+      "bubbles": true,
+      "cancelable": false
+    },
+    "notification-action": {
+      "description": "The user activated a notification's inline action (e.g. Undo) before it dismisses.",
+      "taxonomy": "notification",
+      "detail": { "id": "string", "actionId": "string?" },
+      "bubbles": true,
+      "cancelable": false
+    }
+  },
   "designDecisions": [
     "Named for the concept, not the presentation — `notification`, never `toast`. A toast is ONE presentation of a notification (a small transient card in a viewport corner); snackbars, banner-position notices, and status pills are others. The standard captures the general UX particularities every notification shares — temporary, non-blocking, dismissable, queued, severity-weighted, accessibly announced — and leaves the visual presentation to the implementation (Frontier UI). Baking 'toast' into the block name or contract would over-fit the standard to one look and is rejected (bias toward the most general, presentation-agnostic contract).",
     "In-page UI, not the OS — distinct from the Web Notifications API. This block is in-document notification UI: a top-layer region inside the page. The browser's Notifications API (system/desktop notifications, permission-gated, surfacing outside the tab) shares the word but not the surface, the lifecycle, or the permission model — that is a separate capability owned by Web Permissions (#009). The two are cross-referenced and never conflated; choosing between them is the app's call (in-page reassurance vs. out-of-tab alert).",
