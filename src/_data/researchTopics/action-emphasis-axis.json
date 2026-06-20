@@ -1,0 +1,22 @@
+{
+  "id": "action-emphasis-axis",
+  "title": "Action Intent — the emphasis-style axis (fill | outline | ghost | link) orthogonal to priority level",
+  "status": "open",
+  "summary": "Prep research for decision #1318 (gap #3 of the shadcn reproduction-conformance delta, we:reports/2026-06-20-1243-shadcn-first-gap-delta.md:44). Action Intent (we:src/_data/intents/action.json) expresses semantic priority LEVELS (primary | secondary | tertiary | destructive); shadcn buttons also vary on an orthogonal emphasis STYLE — filled vs outline vs ghost vs link — at the SAME priority level, which is not expressible as a level. The question: where does the emphasis-style axis live — a second dimension on Action Intent, or a separate intent/trait? FINDING 1 — the web platform has NO native vocabulary for button emphasis: <button> has no variant/appearance attribute, CSS `appearance` only toggles native-rendering, and ARIA has no emphasis state (a ghost and a filled button share the same role). So unlike aria-sort / Intl.Collator the axis is a pure design-system convention and the vocabulary is borrowed from the benchmark libraries, not a spec — and the axis is presentational, raising the intent-vs-presentation boundary. FINDING 2 — the style axis is real and converges across systems on { filled, outlined, ghost/subtle/text, link } with a system-specific tail (tonal, elevated, tinted, dashed), BUT most systems CONFLATE priority and style into one prop (shadcn `variant`, Ant `type`, Carbon `kind`) — so they cannot express 'secondary-priority rendered filled'. The systems that keep them orthogonal (Material's separate variant, Bootstrap's `-outline-` modifier) are the ones a designer drives on two knobs. WE's Action Intent already separates `level`, so adding emphasis as a SECOND ORTHOGONAL dimension avoids the conflation these systems suffer; folding into level would reproduce it (the fork-existence proof — 'fold into level' is the broken branch). FINDING 3 (decisive, in-tree) — WE already keeps this axis LOCAL on the owning intent: Input Intent declares `variant: outlined|filled|borderless` (we:src/_data/intents/input.json:11-18), and that vocabulary DIVERGES from a button's (ghost/link vs borderless) — the axes rhyme but value sets are intent-specific, so a single shared 'Emphasis Intent' would flatten them lossily; co-home on the owning intent. Action Intent is already multi-axis (level/busy/groupOrdering/groupSizing, action.json:9-41) so a 5th `emphasis` dimension is the established shape. Classification: intent layer, dimension (not protocol/trait — traits are structural composition #030, emphasis selects a treatment), structural/presentational so resolves explicit ⊕ ambient project default ⊕ default, most-permissive default = unspecified (level implies the treatment), open vocabulary (standardize the dimension + recommended core, authors extend). Two prepared forks: Fork 1 HOME = `emphasis` dimension on Action Intent (default) vs a separate cross-cutting Emphasis Intent; Fork 2 = does `link` belong to the axis (default: include as lowest-emphasis) vs exclude as element-semantics. Full grounding in we:reports/2026-06-20-action-emphasis-axis.md.",
+  "dateOpened": "2026-06-20",
+  "lastReviewed": "2026-06-20",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webintents",
+    "action-intent",
+    "emphasis",
+    "reproduction",
+    "shadcn",
+    "gap-sweep",
+    "native-first",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

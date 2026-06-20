@@ -1,0 +1,87 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  <a href="/intents/">Action Intent</a> (<code>src/_data/intents/action.json</code>) expresses the
+  semantic <strong>priority level</strong> of an interactive element —
+  <code>primary | secondary | tertiary | destructive</code>. But shadcn buttons (and every benchmark
+  design system) also vary on an orthogonal emphasis <strong>style</strong> — <em>filled</em> vs
+  <em>outline</em> vs <em>ghost</em> vs <em>link</em> — at the <em>same</em> priority level. That style is
+  not expressible as a level, so the gap (#3 of the shadcn reproduction-conformance delta) asks
+  <strong>where the emphasis-style axis lives</strong>: a second dimension on Action Intent, or a separate
+  intent/trait?
+</p>
+
+<h2>Finding 1 — the platform has no native vocabulary for button emphasis</h2>
+<p>
+  Unlike most intent axes, which borrow a platform term (<code>aria-sort</code>, <code>Intl.Collator</code>,
+  <code>inert</code>), there is <strong>no web-platform vocabulary</strong> for button emphasis.
+  <code>&lt;button&gt;</code> has no <code>variant</code>/<code>appearance</code> attribute; CSS
+  <code>appearance</code> only toggles native rendering; ARIA has no emphasis state — a ghost button and a
+  filled button share the same role, because emphasis is purely presentational and carries no a11y
+  semantics. The axis is therefore a <strong>pure design-system convention</strong>: the vocabulary is
+  borrowed from the benchmark libraries, not a spec, and its presentational nature is what raises the
+  intent-vs-presentation boundary (resolved below).
+</p>
+
+<h2>Finding 2 — the axis converges, but most systems conflate it with level</h2>
+<p>
+  Surveyed across Material 3 (<code>elevated · filled · filled-tonal · outlined · text</code>), Fluent 2
+  (<code>primary · secondary · outline · subtle · transparent</code>), Apple HIG/SwiftUI
+  (<code>borderedProminent · bordered · borderless · tinted</code>), Bootstrap
+  (<code>btn-*</code> vs <code>btn-outline-*</code>), shadcn (<code>default · destructive · outline ·
+  secondary · ghost · link</code>), Ant (<code>type</code> + <code>ghost</code>), and Carbon
+  (<code>kind</code>), the style axis is real and converges on roughly
+  <strong>{ filled, outlined, ghost/subtle/text, link }</strong> with a system-specific tail.
+</p>
+<p>
+  The decisive observation: <strong>most systems conflate priority and style into one prop</strong>
+  (shadcn <code>variant</code>, Ant <code>type</code>, Carbon <code>kind</code>) — so they cannot express
+  "a <em>secondary</em>-priority button rendered <em>filled</em>." The systems that keep them orthogonal
+  (Material's separate variant, Bootstrap's <code>-outline-</code> modifier) are the ones a designer drives
+  on two independent knobs. WE's Action Intent <em>already</em> separates <code>level</code>, so adding
+  emphasis as a <strong>second orthogonal dimension</strong> is the move that <em>avoids</em> the
+  conflation these systems suffer — and folding it into <code>level</code> would reproduce it. That
+  orthogonality (same level, different style) is the fork-existence proof: "fold into level" is the broken
+  branch.
+</p>
+
+<h2>Finding 3 — WE already keeps emphasis-style local on the owning intent</h2>
+<p>
+  The most decisive prior art is in-tree. <strong>Input Intent already carries this exact axis as a local
+  dimension</strong>: <code>src/_data/intents/input.json:11-18</code> declares
+  <code>variant: outlined | filled | borderless</code>. WE has therefore already decided once that an
+  emphasis-style axis lives <em>as a dimension on the intent that owns it</em>, not as a shared
+  cross-cutting intent — and the input vocabulary (<code>borderless</code>) <strong>diverges</strong> from
+  a button's (<code>ghost</code>, <code>link</code>). The axes rhyme but the value sets are
+  intent-specific, so a single shared "Emphasis Intent" would have to flatten them lossily or be an empty
+  meta-pattern. The precedent says co-home emphasis on the owning intent. Action Intent is also already
+  multi-axis (<code>level · busy · groupOrdering · groupSizing</code>,
+  <code>action.json:9-41</code>), so a fifth <code>emphasis</code> dimension is the established shape.
+</p>
+
+<h2>The prepared forks</h2>
+<ul>
+  <li>
+    <strong>Fork 1 — Home of the emphasis axis.</strong> A new <code>emphasis</code> dimension on Action
+    Intent (default, mirrors <code>input.variant</code>) vs a separate cross-cutting Emphasis Intent.
+    Broken branches, not forks: fold into <code>level</code> (Finding 2) and "make it a trait" — traits
+    are structural <em>composition</em> (#030); emphasis selects a treatment, it composes nothing.
+  </li>
+  <li>
+    <strong>Fork 2 — Does <code>link</code> belong to the axis?</strong> Include <code>link</code> as the
+    lowest-emphasis value (default — Material's "text" and Ant/shadcn's "link" are the same treatment, and
+    action semantics are unchanged) vs exclude it as element-semantics. Supported by default (no fork):
+    emphasis is an intent dimension not a theme token; optional with a most-permissive unspecified default
+    (the <code>level</code> implies the treatment); resolves <code>explicit ⊕ ambient ⊕ default</code>;
+    open vocabulary — standardize the dimension + a recommended core set, authors may extend.
+  </li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/intents/">Web Intents catalog</a> — where Action Intent and its dimensions render.</li>
+  <li>Backlog <a href="/backlog/1318-action-intent-emphasis-style-axis-fill-outline-ghost-link-or/">#1318</a> — the decision this research prepares.</li>
+  <li>Backlog <a href="/backlog/1243-reproduce-shadcn-ui-as-theme-intents-over-we-fui-first-parit/">#1243</a> — the shadcn reproduction-conformance slice that surfaced this gap.</li>
+  <li>Backlog <a href="/backlog/315-competitive-coverage-gap-analysis-program/">#315</a> — the gap-sweep program this feeds.</li>
+</ul>
+{% endraw %}
