@@ -1,9 +1,10 @@
 ---
 kind: story
-status: active
+status: open
 locus: webeverything
 dateOpened: "2026-06-20"
 size: 3
+dateStarted: "2026-06-20"
 tags: [webexpressions, interpolation, text-node, injector, binding, demo]
 ---
 
@@ -78,3 +79,33 @@ calls `customTextNodes.upgrade()` on a connected node and asserts the rendered v
 - [ ] A **real-browser** test drives `customTextNodes.upgrade()` end-to-end and asserts the rendered
       value (not a hand-rolled pipeline, not happy-dom-only).
 - [ ] No second duplicate-`CustomTextNode` split remains (one plug copy at runtime).
+
+## Investigation 2026-06-20 (batch-2026-06-20) — the stated fix is necessary but NOT sufficient
+
+Applied the "## Fix direction" change — flipped `we:plugs/bootstrap.ts` line 43 to import the
+webexpressions registries from `@frontierui/plugs/webexpressions` (instead of WE-local
+`./webexpressions`). Verified live on the running Vite server (:3000) that the change is served and
+that the class-identity split it targeted is now **closed**:
+
+- `window.customTextNodes instanceof` the FUI barrel `CustomTextNodeRegistry` → **true** (registry is
+  now FUI's class).
+- Curl of the three relevant modules as Vite serves them shows **one** `CustomTextNode` module instance:
+  `we:blocks/text-nodes/interpolation/InterpolationTextNode.ts`, `fui:plugs/webexpressions/UndeterminedTextNode.ts`,
+  and the `fui:plugs/webexpressions/index.ts` barrel **all** import
+  `/@fs/.../frontierui/plugs/webexpressions/CustomTextNode.ts` (same URL → same class). No duplicate split remains.
+
+**Yet the demo still renders `Hello, name!`** (the `{{name}}` UndeterminedTextNode is left un-upgraded)
+— Playwright on `we:demos/text-interpolation-demo.html` after the fix, `window.demoReady===true`, zero
+console errors. So the `instanceof CustomTextNode` guard at
+`fui:plugs/webexpressions/CustomTextNodeRegistry.ts:105` is **no longer** the (sole) cause; the break is
+**downstream in the upgrade/determine walk**, not class identity. The import flip is correct per #449
+(bootstrap should consume `@frontierui/plugs`, and the scope check found WE-local
+`we:plugs/webexpressions` is otherwise only cross-imported by the dormant WE-local plug tree, not the
+demo runtime) — but it does not fix the symptom, so it was **reverted** to keep the tree clean.
+
+**Next session (focused):** re-instrument `CustomTextNodeRegistry.upgrade()` / `#upgradeTextNode` on the
+live page — confirm the parser actually returns the UndeterminedTextNode array, whether the node reaches
+the `instanceof` guard at all, and whether `determine()`/the parserName→nodeClass match (`'mustache'` →
+`InterpolationTextNode`) fires. The earlier "duplicate-module `instanceof` split" diagnosis is now
+disproven for the runtime as configured; start from the upgrade walk. (Carried forward from
+batch-2026-06-20 — outgrew the stated 3-pt one-line fix.)
