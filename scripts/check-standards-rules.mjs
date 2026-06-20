@@ -55,8 +55,10 @@ export const dMissingField = (entity, id, file, field) =>
   ({ kind: 'missing-required-field', fix: 'model', entity, id, file, field });
 // A cross-reference whose value doesn't resolve in its target registry — model judgment (typo vs.
 // genuinely-missing entity), so `model`. `refRegistry` names the registry the value should resolve in.
+// `global: true` — a cross-registry JOIN: in an isolated `--local` worktree the referent may live in a
+// sibling lane or a not-yet-regenerated registry, so this defers to the integrator's per-merge gate (#1159).
 export const dUnresolvedRef = (entity, id, file, field, value, refRegistry) =>
-  ({ kind: 'unresolved-ref', fix: 'model', entity, id, file, field, value, refRegistry });
+  ({ kind: 'unresolved-ref', fix: 'model', entity, id, file, field, value, refRegistry, global: true });
 
 // graduatedTo compact ref shape (#247): a single lowercase kind, a colon, and a kebab/underscore slug
 // — no spaces, slashes, or dots, so prose / paths / URLs / the `none` sentinel never match and stay

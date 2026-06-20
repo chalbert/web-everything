@@ -150,5 +150,23 @@ describe('claimScope — claim-time baseline + finding attribution (#952, #949)'
       expect(blocking.map((f) => f.message)).toEqual(['mine', 'other']);
       expect(demoted.map((f) => f.message)).toEqual(['global — dup id, no owning file']);
     });
+
+    // #1159 — a global-consistency rule (cross-registry join, derived-artifact coherence) attributes to a
+    // file the lane OWNS, yet can't be satisfied in isolation. `descriptor.global` demotes it under --local
+    // even though its file is in the set; without --local it stays fail-safe blocking.
+    const globalOnMine = { descriptor: { file: 'backlog/100-a.md', global: true }, message: 'global on my file' };
+    it('--local --files: demotes a descriptor.global finding even when it touches my own file (#1159)', () => {
+      const fileSet = new Set(['backlog/100-a.md']);
+      const { blocking, demoted } = partitionLocal([mineFile, globalOnMine], { fileSet, local: true });
+      expect(blocking.map((f) => f.message)).toEqual(['mine']);
+      expect(demoted.map((f) => f.message)).toEqual(['global on my file']);
+    });
+
+    it('--files WITHOUT --local: a descriptor.global finding on my file stays blocking (fail-safe)', () => {
+      const fileSet = new Set(['backlog/100-a.md']);
+      const { blocking, demoted } = partitionLocal([globalOnMine], { fileSet, local: false });
+      expect(blocking.map((f) => f.message)).toEqual(['global on my file']);
+      expect(demoted).toEqual([]);
+    });
   });
 });

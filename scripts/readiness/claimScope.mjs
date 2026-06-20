@@ -200,21 +200,31 @@ export function partitionFindings(findings, mineSet) {
  *
  *   - `fileSet` (an explicit file list — the `--files` sibling of `--scope`'s claim baseline): a finding
  *     BLOCKS iff at least one of its files is in the set; a finding on OTHER files is demoted to a note.
- *   - `local` (the `--local` flag): a path-less / cross-entity finding — a GLOBAL/RELATIONAL invariant
- *     (dup ids, the blockedBy cycle walk, registry joins) with no single owning file — is demoted rather
- *     than kept fail-safe. Rationale: a lane runs in its OWN git worktree and cannot see sibling lanes, so
- *     those invariants only become real at MERGE, where the full no-flag gate is the authority. A lane must
- *     not red on a global it cannot have caused.
+ *   - `local` (the `--local` flag): two classes of finding are demoted, because a lane runs in its OWN
+ *     git worktree branched from base and cannot see sibling lanes — these invariants only become real at
+ *     MERGE, where the full no-flag gate is the authority:
+ *       (a) a path-less / cross-entity finding — a GLOBAL/RELATIONAL invariant (dup ids, the blockedBy
+ *           cycle walk) with no single owning file; and
+ *       (b) a `descriptor.global` finding — a GLOBAL-CONSISTENCY rule (a cross-registry join / `unresolved-ref`,
+ *           the AGENTS.md derived-artifact `inventory` coherence) that *does* attribute to a file the lane
+ *           edited, yet cannot be satisfied in isolation because it depends on whole-repo or sibling-lane
+ *           state (#1159). Without this, such a rule false-reds a clean lane (4 of 7 items in #1153's first
+ *           multi-lane run), eating the parallel speed-win.
+ *     A lane must not red on a global it cannot have caused; the integrator's per-merge full gate re-runs it.
  *
- * The default (no `--local`) keeps the fail-safe stance — a path-less finding stays blocking — matching
- * `partitionFindings`. With no `fileSet` (i.e. `--local` alone), every file-attributable finding blocks and
- * only the path-less globals are demoted. Pure; mirrors `partitionFindings` on the file-isolation axis.
+ * The default (no `--local`) keeps the fail-safe stance — path-less AND `global`-marked findings stay
+ * blocking — matching `partitionFindings`. With no `fileSet` (i.e. `--local` alone), every file-local
+ * finding blocks and only the global ones (path-less or `descriptor.global`) demote. Pure; mirrors
+ * `partitionFindings` on the file-isolation axis.
  */
 export function partitionLocal(findings, { fileSet = null, local = false } = {}) {
   const blocking = [];
   const demoted = [];
   for (const f of findings) {
     const files = findingFiles(f);
+    // (b) above: a global-consistency rule deferred to the integrator's merge gate. Checked before the
+    // file-membership branches so a `global` finding on one of the lane's OWN files still demotes (#1159).
+    if (local && f?.descriptor?.global) { demoted.push(f); continue; }
     if (fileSet) {
       if (files.some((x) => fileSet.has(x))) blocking.push(f);        // attributable to my files → blocks
       else if (files.length > 0) demoted.push(f);                     // another file → note

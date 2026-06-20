@@ -684,7 +684,9 @@ try {
   const agentsPath = join(ROOT, 'AGENTS.md');
   const current = readFileSync(agentsPath, 'utf8');
   if (spliceInventory(current, renderInventory()) !== current)
-    err('AGENTS.md inventory is stale — run `npm run gen:inventory`', { kind: 'inventory', file: 'AGENTS.md' });
+    // `global: true` — AGENTS.md is a DERIVED artifact the integrator regenerates ONCE after merge; an
+    // isolated `--local` lane never runs `gen:inventory`, so this defers to the per-merge gate (#1159).
+    err('AGENTS.md inventory is stale — run `npm run gen:inventory`', { kind: 'inventory', file: 'AGENTS.md', global: true });
 } catch (e) {
   err(`AGENTS.md inventory check failed: ${e.message}`);
 }
@@ -1005,10 +1007,13 @@ if (scopeSession) {
 // ── Local / per-lane gating (#1144, consumed by the parallel-batch orchestrator #1147) ─────────
 // `--files=<comma|space list>` scopes the BLOCKING set to findings attributable to those files — an
 // explicit-list sibling of `--scope` (which derives the set from a session's claim baseline). `--local`
-// additionally demotes path-less GLOBAL/RELATIONAL findings (dup ids, the blockedBy cycle walk, registry
-// joins) to non-failing notes: a lane runs in its OWN worktree and cannot see sibling lanes, so those
-// invariants only become real at MERGE, where the full no-flag gate is the authority. Combined,
-// `--local --files=<lane files>` blocks ONLY on the lane's own file-isolation findings. Applied AFTER
+// additionally demotes the GLOBAL-CONSISTENCY findings to non-failing notes — both the path-less ones
+// (dup ids, the blockedBy cycle walk) AND the `descriptor.global`-marked ones that DO attribute to a
+// lane-edited file but depend on whole-repo / sibling-lane state (cross-registry `unresolved-ref` joins,
+// the AGENTS.md derived-artifact `inventory` coherence). A lane runs in its OWN worktree and cannot see
+// sibling lanes, so those invariants only become real at MERGE, where the full no-flag gate is the
+// authority (#1159). Combined, `--local --files=<lane files>` blocks ONLY on the lane's own file-local
+// findings. Applied AFTER
 // `--scope` so the two compose (scope demotes concurrent sessions' files; --files/--local narrows further).
 const filesArg = process.argv.find((a) => a.startsWith('--files='));
 const LOCAL_MODE = process.argv.includes('--local');
