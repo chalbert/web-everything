@@ -61,6 +61,12 @@ export interface ConformanceVector {
   readonly expect: ConformanceExpectation;
   /** Platform surfaces the outcome is read through (`aria`, `renderedMessage`, `validity`, `events`, …). */
   readonly observeVia: ReadonlyArray<string>;
+  /**
+   * Optional conformance tier the outcome is asserted at (the fixed WE tier vocabulary). Carried by vectors
+   * lowered from a webcases requirement (#1162, ruling #1233-A) so a tiered conformance run can scope which
+   * vectors apply; absent on hand-authored vectors. The only schema change #1162 introduces.
+   */
+  readonly tier?: string;
   /** Optional human-facing note on what the vector proves. */
   readonly description?: string;
 }
