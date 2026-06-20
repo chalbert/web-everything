@@ -13,6 +13,15 @@
  *   3. assigns rich properties as DOM *properties* (never serialized to an attribute),
  *   4. bridges host CustomEvents to handler props,
  *   5. projects slotted children into the host's light DOM.
+ *
+ * Front-A conformance currency (framework-churn watch #1258 — verified 2026-06-20 against React 19,
+ * Vue 3.5 + Vapor, Angular 20 zoneless, Svelte 5 runes, #1273): the five-behaviour contract is
+ * version-AGNOSTIC and remains correct — it is exactly what "Custom Elements Everywhere" tests, so no
+ * vector change is needed as majors move. The notable shift is that frameworks now satisfy the contract
+ * NATIVELY: React 19 passes Custom Elements Everywhere (behaviours 3 + 4 — rich props as DOM properties,
+ * CustomEvent bridging — were React's historical gaps and React 19 closes them), so a React wrapper is now
+ * largely OPTIONAL (#1271) — needed only for genuine residual gaps (e.g. SSR prop hydration), not as the
+ * default consumption path. The wrapper contract here still defines what a wrapper MUST do when one is used.
  */
 
 /** A custom event the host emits → the wrapper must bridge it to a framework handler prop. */
