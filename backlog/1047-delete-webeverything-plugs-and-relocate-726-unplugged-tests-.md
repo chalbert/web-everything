@@ -4,7 +4,7 @@ workItem: task
 parent: "170"
 status: open
 locus: webeverything
-blockedBy: ["449"]
+blockedBy: ["1234"]
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
 tags: [plugs, dedup, migration, webeverything, frontierui]

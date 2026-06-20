@@ -3,7 +3,6 @@ type: idea
 workItem: epic
 parent: "746"
 status: open
-blockedBy: ["753", "955", "977"]
 dateOpened: "2026-06-18"
 dateStarted: "2026-06-19"
 locus: frontierui

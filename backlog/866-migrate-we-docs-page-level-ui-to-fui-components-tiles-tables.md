@@ -4,7 +4,6 @@ workItem: story
 size: 5
 parent: "777"
 status: parked
-blockedBy: ["865"]
 dateOpened: "2026-06-17"
 tags: []
 ---

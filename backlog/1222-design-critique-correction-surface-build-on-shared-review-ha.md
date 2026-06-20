@@ -4,7 +4,6 @@ workItem: story
 size: 8
 parent: "1033"
 status: open
-blockedBy: ["1036"]
 dateOpened: "2026-06-20"
 tags: [design-reference, vision, design-critique, human-in-the-loop, plateau, training-data]
 ---

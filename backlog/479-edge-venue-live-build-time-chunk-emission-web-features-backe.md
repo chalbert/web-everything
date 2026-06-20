@@ -2,7 +2,6 @@
 type: idea
 workItem: epic
 status: open
-blockedBy: ["219"]
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-15"
 tags: []

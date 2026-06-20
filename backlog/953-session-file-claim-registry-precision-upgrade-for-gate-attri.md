@@ -3,7 +3,6 @@ type: idea
 workItem: story
 size: 3
 status: parked
-blockedBy: ["952"]
 dateOpened: "2026-06-18"
 tags: []
 ---

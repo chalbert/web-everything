@@ -3,7 +3,6 @@ type: issue
 workItem: story
 size: 5
 status: open
-blockedBy: ["466"]
 dateOpened: "2026-06-13"
 tags: [stop-the-world]
 ---

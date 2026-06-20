@@ -2,8 +2,6 @@
 type: idea
 workItem: epic
 status: open
-childlessReason: blocked
-blockedBy: ["1228"]
 dateOpened: "2026-06-20"
 relatedProject: webdocs
 tags: [deck, presentation, dogfood, conformance, fui]

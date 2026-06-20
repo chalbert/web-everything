@@ -3,7 +3,6 @@ type: idea
 workItem: story
 status: open
 size: 2
-blockedBy: ["1175"]
 dateOpened: "2026-06-20"
 relatedProject: webpositioning
 tags: [deck, fit, scaling, webpositioning]

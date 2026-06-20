@@ -3,7 +3,6 @@ type: idea
 workItem: story
 status: open
 size: 3
-blockedBy: ["1175"]
 dateOpened: "2026-06-20"
 relatedProject: webrealtime
 tags: [deck, remote-control, multiplex, webrealtime]
