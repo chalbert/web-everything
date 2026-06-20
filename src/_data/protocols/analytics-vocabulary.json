@@ -1,7 +1,7 @@
 {
   "id": "analytics-vocabulary",
   "name": "Analytics Event Vocabulary",
-  "summary": "Vendor-neutral analytics instrumentation contract using the Segment Spec vocabulary (Identify, Track, Page). One call site routes to any conformant backend (Segment, Mixpanel, GA4, custom).",
+  "summary": "Vendor-neutral analytics instrumentation contract using the Segment Spec vocabulary (Identify, Track, Page). One call site routes to any conformant backend (Segment, Mixpanel, GA4, custom). Extended with a standard deck event vocabulary (Slide Viewed / Dwell / Deck Completed-Abandoned / Slide Interaction) layered on Track — impressions, dwell, and drop-off keyed by a Deck Document Model slide address, adding vocabulary rather than a new transport (#1193).",
   "status": "draft",
   "ownedByProject": "webanalytics",
   "anchor": "protocol-analytics-vocabulary"

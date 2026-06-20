@@ -62,6 +62,31 @@ interface AnalyticsBackend {
     <li>Stable, well-documented vocabulary with conventions for verb-noun naming and common e-commerce / SaaS events.</li>
     <li>Allows swapping backends without touching call sites — a procurement / privacy decision rather than an engineering migration.</li>
   </ul>
+
+  <h4 id="deck-events">Deck Event Extension</h4>
+  <p>
+    A standard deck/presentation event vocabulary layered on <code>track</code> — greenfield in every
+    open deck framework (only PowerPoint Present-Live ships anything comparable). Each is a verb-noun
+    <code>track</code> event carrying a slide address from the
+    <a href="../webcomponents/#protocol-deck-document-model">Deck Document Model</a>, so impressions,
+    attention, and drop-off are measurable without a bespoke schema.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Event</th><th>Purpose</th><th>Key Properties</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>Slide Viewed</code></td><td>A slide became the active slide (impression).</td><td><code>deckId</code> · <code>slideId</code> · <code>index</code></td></tr>
+      <tr><td><code>Slide Dwell</code></td><td>Time spent on a slide before advancing (attention).</td><td><code>slideId</code> · <code>dwellMs</code></td></tr>
+      <tr><td><code>Deck Completed</code> / <code>Deck Abandoned</code></td><td>Reached the end vs left early (drop-off + the last slide seen).</td><td><code>deckId</code> · <code>lastSlideId</code> · <code>completedPct</code></td></tr>
+      <tr><td><code>Slide Interaction</code></td><td>A within-slide action — fragment revealed, link/control activated.</td><td><code>slideId</code> · <code>interaction</code> (verb)</td></tr>
+    </tbody>
+  </table>
+  <p>
+    The names follow the Segment verb-noun convention so the same call site reaches any conformant
+    backend; the deck layer adds the vocabulary, not a new transport. Homed in webanalytics per the
+    ratified distributed placement (<a href="/backlog/1175/">#1175</a>).
+  </p>
 </section>
 
 <section id="composition" class="section-card">
