@@ -1,9 +1,11 @@
 ---
 type: decision
 workItem: task
-status: open
+status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+codifiedIn: "docs/agent/platform-decisions.md#reproduction-conformance"
 relatedReport: reports/2026-06-20-reproduction-conformance.md
 preparedDate: "2026-06-20"
 tags: []
@@ -121,6 +123,48 @@ capability is a Plateau service the WE project consumes as a client. They cannot
   engine" is about the *driver*, not the *judge*.
 
 **Recommended: the layered split** — FUI engine, Plateau judgment, WE consumes deltas.
+
+---
+
+## Ratified — 2026-06-20
+
+Ratified after an inline + skeptic-sub-agent red-team. Codified as a standing rule:
+[`we:docs/agent/platform-decisions.md#reproduction-conformance`](../docs/agent/platform-decisions.md#reproduction-conformance).
+
+**The charter (invariants).** Reproducing an incumbent is a **forcing function, never a product**; the
+**gap list (bucket 3) is the deliverable**; *a divergence reproducible only by escaping WE/FUI is a gap to
+file, never a hack to add* (the exercise-app *active-bypass = FAIL* analogue). Output shape = a #747
+theme+intents bundle; placement per the WE/FUI/Plateau boundary; targets drawn from the gap-sweep corpus
+#316; render substrate proven by #777/#786.
+
+**No assumed quality — parity is a measured fact.** No parity claim may rest on eyeballing. The oracle is
+**layered** (support-all, not a fork): fuzzy-tolerance pixel (WPT-reftest model) + structural DOM/ARIA diff
++ **advisory** VLM judge. Naïve pixel-diff is disqualified (30–40% false positives). Reproduction-as-
+conformance *is* the WPT/reftest method.
+
+**Fork 1 — sequencing: DEMOTED from a fork (skeptic landed, ~70%).** "Co-evolution vs hard-block" is
+**prioritization in fork's clothing** — both branches share the identical end-state (validator parity-grade
++ every claim measured), differing only on idle-time/provisional-tag duration (schedule, not merit), so it
+fails the *fork-is-not-prioritization* test. **Ratified as the invariant** ("no parity claim without a
+confirmed measurement") **plus a prioritization note:** the validator **co-evolves** (not a hard
+`blockedBy`), specified by a concrete adversarial target, with the **claim-gate** carrying the correctness
+guarantee — nothing ships "done" un-green, mirroring the real `we:scripts/check-app-conformance.mjs`
+tagged-bypass mechanism. The correctness attack on co-evolution failed (the residual is only rework, a cost).
+
+**Fork 2 — validation-engine ownership: LAYERED SPLIT (attack failed, ~85%).** The deterministic **diff
+engine** (drive/capture/compare) is **FUI** (impl/devtool, kin to #809); the **VLM/vision judgment** is
+**Plateau** ([#475](/backlog/475-vision-is-a-plateau-service/) is *categorical* — a vision capability cannot
+fold into FUI; #809/#855 don't rescue the single-engine alternative because those tools carry **no** vision
+capability, so #475 never fired there); **WE consumes only the verdict + gap deltas**. The single-FUI-engine
+alternative is rejected (violates #475 + the on-device-cost rule). **Rider:** the **Plateau→WE delta protocol
+is kept deliberately thin** (pass/fail + gap list, not a fat schema) — the one genuine new cross-repo surface.
+
+**Carry-along (prioritization, not forks):** first target **shadcn/ui → Material 3**; the
+reproduction-parity **conformance vectors are owned by WE** (same class as the #899 behavioral vectors).
+
+**Graduation:** carve (1) the `reproduction-conformance` umbrella epic (validator chain
+#1167/#1219/#1220/#1221 as a co-evolving dependency, not a hard block); (2) the thin Plateau→WE
+verdict/delta protocol contract. Separately-prioritized builds.
 
 ---
 

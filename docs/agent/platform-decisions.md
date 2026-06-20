@@ -466,6 +466,41 @@ per-impl escape hatch; FUI = reference impl). Composes [surface-contract-not-com
 meta-schema, not the list), and the minimize-lock-in / escapable-lock principle; the config-surface analogue
 of [forward-generation-adapters](#forward-generation-adapters) (contract is the authority, code crosses no seam).
 
+### Reproduction-conformance: reproduce incumbents as theme+intents; the copy is a forcing function {#reproduction-conformance}
+
+Reproducing a third-party design system (Material, Ant, Carbon, Fluent, shadcn…) on the constellation is a
+**forcing function, never a product**. The hypothesis under test is that the only difference between any two
+top design systems is `theme tokens + intents`; everything structural/behavioral is shared WE-standard over
+FUI primitives (the headless-library thesis — React Aria/Radix/Ark/Base — applied as a conformance probe).
+Each target yields three buckets: a **theme pack** (DTCG tokens), an **intent set**, and a **gap list** — the
+residue reproducible *only* by escaping the standard. **The gap list is the deliverable.** The governing
+discipline mirrors [exercise-app *active-bypass = FAIL*](#) : a divergence you can only hit by hand-rolling
+outside WE/FUI is a **gap to file, never a hack to add** — per-library escape hatches buy the screenshots and
+learn nothing. Three consequences, all forced:
+
+1. **No assumed quality — parity is a measured fact.** No parity claim may rest on eyeballing; each gates on a
+   confirmed measurement. The oracle is **layered** (support-all, not a fork): **fuzzy-tolerance pixel**
+   (WPT-reftest model — max per-channel color delta + max differing-pixel count, *not* naïve pixel-diff, which
+   throws 30–40% false positives), **structural DOM/ARIA/focus-order diff** (deterministic), and an
+   **advisory VLM/semantic judge** (never the sole gate). Reproduction-as-conformance *is* the WPT/reftest
+   method: the incumbent's own render is the reference, the FUI-themed repro is the test.
+2. **Validation-engine ownership splits at the capability seam** (the load-bearing rule). The **deterministic
+   diff engine** (drives + captures + compares) is **FUI** (impl/devtool, like the #809 block-explorer); the
+   **VLM/vision judgment** is **Plateau** ([no-leakage-client](#no-leakage-client) — #475 is categorical: a
+   tool containing a vision capability cannot fold it into FUI); **WE consumes only the verdict + gap deltas**
+   (never renders FUI, never runs the judge). The Plateau→WE delta protocol stays **deliberately thin**
+   (pass/fail + gap list, not a fat schema).
+3. **The instrument need not be finished before reproduction starts** (prioritization, not a fork). "No claim
+   without measurement" is the invariant; *when* the validator reaches parity-grade relative to the first
+   target is a scheduling call — the validator co-evolves, specified by a concrete adversarial target, with
+   the claim-gate (not a hard `blockedBy`) carrying the correctness guarantee.
+
+**Lineage:** #1225 (program charter — reproduction-conformance; ratified 2026-06-20; research topic
+`/research/reproduction-conformance/`). Composes [no-leakage-client](#no-leakage-client) (vision → Plateau),
+[we-fui-embed-boundary](#we-fui-embed-boundary) (FUI owns impl + render, WE consumes outputs),
+[constellation-placement](#constellation-placement), and the backlog *fork-is-not-prioritization* rule
+(sequencing demoted out of the fork set). Sibling forcing-function to the exercise-app conformance loop (#314).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
