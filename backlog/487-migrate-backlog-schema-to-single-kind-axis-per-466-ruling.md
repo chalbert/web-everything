@@ -1,9 +1,11 @@
 ---
 kind: story
 size: 5
-status: active
+status: resolved
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: none
 tags: [stop-the-world]
 ---
 
