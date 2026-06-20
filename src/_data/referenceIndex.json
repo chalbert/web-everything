@@ -10,11 +10,11 @@
   ],
   "summary": {
     "uniqueUrls": 1231,
-    "totalOccurrences": 1548,
+    "totalOccurrences": 1551,
     "byHome": {
       "corpus": 51,
       "references": 28,
-      "blocks": 179,
+      "blocks": 182,
       "capability": 1266,
       "intents": 24
     }
@@ -4237,7 +4237,7 @@
       "homes": [
         "blocks"
       ],
-      "occurrences": 1
+      "occurrences": 2
     },
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Popover_API",
@@ -4313,12 +4313,12 @@
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/View_Transitions_API",
       "home": "blocks",
-      "sourceId": "router",
-      "label": "Router · viewTransitionsAPI",
+      "sourceId": "code-view",
+      "label": "Code View · viewTransitions",
       "homes": [
         "blocks"
       ],
-      "occurrences": 2
+      "occurrences": 3
     },
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_custom_elements",
@@ -4489,7 +4489,7 @@
       "homes": [
         "blocks"
       ],
-      "occurrences": 1
+      "occurrences": 2
     },
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/dialog",
