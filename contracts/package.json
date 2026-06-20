@@ -12,6 +12,7 @@
   },
   "exports": {
     "./analytics": "./analytics.ts",
+    "./charts": "./charts.ts",
     "./credential-management": "./credential-management.ts",
     "./guard": "./guard.ts",
     "./positioning": "./positioning.ts",
