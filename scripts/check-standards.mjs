@@ -474,6 +474,31 @@ const projectPending = backlog.filter((it) => it.projectPending).map((it) => `#$
 if (projectPending.length)
   warn(`${projectPending.length} open build(s) held by D3-readiness — relatedProject is a \`concept\` project with no shipped surface, so the standard must exist first (loader demotes them out of Tier A; not a \`blockedBy\` edge). Either ship/graduate the project or re-home the item. Items: ${projectPending.join(', ')}`);
 
+// #1137 — HUMAN-GATE shape + surfacing. A `humanGate` (a residual only a person can clear) demotes an
+// open item out of Tier A like project-pending. Validate the shape (must be `{ kind, what }`, kind in the
+// known set) so a typo doesn't silently mis-render, and surface the held set as one aggregate nudge — the
+// human-action analogue of the D3 nudge above, so the standing /check shows what's parked on a person.
+const { HUMAN_GATE_KINDS } = require(join(ROOT, 'src/_data/backlog.js'));
+const humanGated = [];
+for (const it of backlog) {
+  if (!it.humanGate) continue;
+  const ref = `#${it.num ?? it.id}`;
+  const g = it.humanGate;
+  if (typeof g !== 'object' || Array.isArray(g))
+    err(`Backlog item "${it.id}" has a malformed \`humanGate\` — it must be a mapping \`{ kind, what }\` (kind ∈ ${[...HUMAN_GATE_KINDS].join('|')}; what = the one-line human action).`);
+  else {
+    if (!HUMAN_GATE_KINDS.has(g.kind))
+      err(`Backlog item "${it.id}" has \`humanGate.kind: ${g.kind ?? '(missing)'}\` — must be one of ${[...HUMAN_GATE_KINDS].join('|')}.`);
+    if (!g.what || typeof g.what !== 'string')
+      err(`Backlog item "${it.id}" has a \`humanGate\` with no \`what\` — record the one-line human action (a runbook pointer / the feedback asked for) so the holder knows what to do.`);
+  }
+  // A human-gate only makes sense on an OPEN, otherwise-agent-ready item; on a resolved/active one it's stale.
+  if (it.status !== 'open') warn(`Backlog item "${it.id}" carries a \`humanGate\` but status is \`${it.status}\` — clear the gate when the work is claimed/done (the gate holds an OPEN item out of Tier A).`);
+  humanGated.push(`${ref} (${g && g.kind ? g.kind : '?'})`);
+}
+if (humanGated.length)
+  warn(`${humanGated.length} open item(s) held by a HUMAN GATE — the only residual is a human-only action (credentialed deploy / agent-training feedback / setup / review), not a \`blockedBy\` edge, so the loader demotes them out of Tier A and the selector lists them under "Held — awaiting a human action". Do the action, then remove \`humanGate\`. Items: ${humanGated.join(', ')}`);
+
 // ── 6d-bis. Per-item RENDERING lints (#290 raw-HTML · #441 buried-fork · mis-flagged-batchable · #845 ──
 // bad-body-links) — the structural/rendering checks that operate on ONE item's body, consolidated into the
 // shared `lintBacklogItemRendering` (#845) so the whole-repo gate and the scoped `check:standards --item NNN`

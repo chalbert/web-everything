@@ -94,18 +94,29 @@ function deriveProjectReadiness(items, projectStatus) {
 // loader run (the sibling of `deriveProjectReadiness`; see src/_data/__tests__/tier.test.ts). The prose
 // rationale lives at the call site below. `blockers` is the lightweight `[{ status }]` array the loader
 // attaches; `projectPending` is `deriveProjectReadiness`'s D3-readiness demotion (#608).
-//   A — agent-ready:    open issue/idea, every blocker resolved, project not pending.
+//   A — agent-ready:    open issue/idea, every blocker resolved, project not pending, no human gate.
 //   B — one nod away:   open decision, every blocker resolved (a still-blocked decision can't be
 //                        ratified yet — its prerequisite ruling is open — so it is NOT B).
-//   C — needs design:   any other open item (blocked issue/idea/decision, or a pending-project build).
+//   C — needs design:   any other open item (blocked issue/idea/decision, a pending-project build, or
+//                        an item held on a human-only action — see `humanGate` below).
 //   undefined — non-open items carry no tier (readiness is moot once claimed/done/shelved).
+// A `humanGate` (a residual that ONLY a human can do — credentialed deploy, agent-training feedback,
+// external account setup, a human review/approval) demotes an item out of Tier A exactly like a
+// pending project: it's agent-unworkable however clean the frontmatter, but it is NOT a `blockedBy`
+// edge (nothing in the backlog will resolve it — a person acts), so it surfaces in its own held
+// section rather than looking mysteriously absent. See docs/agent/backlog-workflow.md → Human gate.
 function deriveTier(item) {
   if (item.status !== 'open') return undefined;
   const blockersClear = item.blockers.every((b) => b.status === 'resolved');
-  if ((item.type === 'issue' || item.type === 'idea') && blockersClear && !item.projectPending) return 'A';
+  if ((item.type === 'issue' || item.type === 'idea') && blockersClear && !item.projectPending && !item.humanGate) return 'A';
   if (item.type === 'decision' && blockersClear) return 'B';
   return 'C';
 }
+
+// Valid `humanGate.kind` values (the pill + held-section vocabulary live in backlogMeta.js). A gate is
+// `{ kind, what }`: `kind` classifies the human action; `what` is the one-line instruction (a runbook
+// pointer / the feedback asked for). Unknown kinds still gate (fail-safe demotion) but render generic.
+const HUMAN_GATE_KINDS = new Set(['deploy', 'credential', 'feedback', 'review', 'setup']);
 
 // Strip inline markdown so a line makes a clean one-line summary.
 const stripInline = (s) => s
@@ -276,6 +287,14 @@ module.exports = function backlog() {
     item.relatedProjectStatus = projectReadiness[idx].relatedProjectStatus;
     item.projectPending = projectReadiness[idx].projectPending;
 
+    // Human gate (#1137 class) — a residual only a person can clear (credentialed deploy, agent-training
+    // feedback, account setup, human review). `humanGate` is `{ kind, what }` from frontmatter; spread in
+    // via `...data` above. Expose a normalized boolean + a known-kind flag for the tab/selector; deriveTier
+    // reads `item.humanGate` directly to demote it out of Tier A (a non-`blockedBy` hold, like projectPending).
+    item.humanGated = !!item.humanGate;
+    item.humanGateKind = item.humanGate && typeof item.humanGate === 'object' ? item.humanGate.kind : undefined;
+    item.humanGateKnownKind = HUMAN_GATE_KINDS.has(item.humanGateKind);
+
     item.tier = deriveTier(item);
 
     // Batchable (deterministic) — the candidate set a POINTS-BUDGETED batch may pack
@@ -286,10 +305,17 @@ module.exports = function backlog() {
     // reaching a single `size·8` only when the remaining budget fits — one pool, ordered by `batchCost`.
     // The one non-structural guard the batch skill adds — no buried design fork in the body — can't be
     // decided from fields, so this flag is the size+tier gate; selection still skims the body for a fork.
-    item.batchable = item.tier === 'A' && (
-      item.workItem === 'task' ||
-      (item.workItem === 'story' && typeof item.size === 'number' && item.size <= 8)
-    );
+    const batchShape = item.workItem === 'task'
+      || (item.workItem === 'story' && typeof item.size === 'number' && item.size <= 8);
+    item.batchable = item.tier === 'A' && batchShape;
+
+    // Active batchable — a batch-shaped item already CLAIMED (status:active). It carries no tier (tier is
+    // open-only, deriveTier above), so it drops out of `batchable` and the open-only Prioritisation table.
+    // We pin it back like an in-flight decision so a concurrent batcher sees the batch work genuinely
+    // underway — the authoritative status:open→active lock, not just the ephemeral reservations.json
+    // soft-hold (which is dev-only and lease-expires). Mirrors the activeDecisions pin in backlog.njk;
+    // disjoint from `batchable` (open) by the status gate, so the two never double-count.
+    item.activeBatchable = item.status === 'active' && batchShape;
 
     // An open, unblocked `epic` clears every prerequisite (so it's Tier A) but an agent can't BUILD it
     // directly — its work lives in child stories/tasks. It is ready to be SLICED, not implemented. We
@@ -513,6 +539,7 @@ module.exports.deriveProjectReadiness = deriveProjectReadiness;
 // Named export of the pure tier rubric for direct regression testing (the decision-with-open-blocker
 // demotion); inert to the Eleventy build, which only invokes the default function export.
 module.exports.deriveTier = deriveTier;
+module.exports.HUMAN_GATE_KINDS = HUMAN_GATE_KINDS;
 // Named export of the title/summary/details derivation (#745) for direct regression testing — Eleventy
 // only ever invokes the default function export, so attaching this property is inert to the build.
 module.exports.derive = derive;

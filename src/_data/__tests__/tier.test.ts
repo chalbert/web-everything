@@ -15,6 +15,7 @@ const { deriveTier } = require('../backlog.js') as {
     type: string;
     blockers: { status: string }[];
     projectPending?: boolean;
+    humanGate?: { kind: string; what: string };
   }) => 'A' | 'B' | 'C' | undefined;
 };
 
@@ -60,6 +61,15 @@ describe('deriveTier — agent-readiness rubric', () => {
 
     it('an open issue whose relatedProject is pending (D3-readiness #608) is C, not A', () => {
       expect(deriveTier(item({ type: 'issue', projectPending: true }))).toBe('C');
+    });
+
+    it('an open issue held by a humanGate (#1137) is C, not A — even with every blocker resolved', () => {
+      expect(deriveTier(item({
+        type: 'issue', blockers: [{ status: 'resolved' }],
+        humanGate: { kind: 'deploy', what: 'run the credentialed deploy from an authed session' },
+      }))).toBe('C');
+      // The gate alone demotes; project-pending is independent.
+      expect(deriveTier(item({ type: 'idea', humanGate: { kind: 'feedback', what: 'collect training feedback' } }))).toBe('C');
     });
   });
 

@@ -34,11 +34,18 @@ the per-item chat-rename — a batch labels the session **once**.
      for eligibility, a dirty tree is the baseline and `claim` ignores it). Clean pack → go; look one cluster
      deeper only if the skim surfaces a fork.
    - **Mis-flagged item → fix the flag in place, don't skip it** — retype `type: decision` (→ Tier B), set
-     `status: parked`, or bump `size` to `13` (drops it from the pool), then re-run. The skim is
-     principle-conformance, not just a fork check (#608): a stale `file:line`, false premise, or missing
-     placement note → **remediate in place** (pure-agent only — never quietly make a design call to force
-     batchability); escalate only an irreducible fork as a ready-to-ratify nod. (`npm run check:health`
-     surfaces deterministic governance/ref flags worth a glance before a long run.)
+     `status: parked`, bump `size` to `13` (drops it from the pool), or — when the only residual is a
+     **human-only action** an agent can't do (credentialed deploy/secret, agent-training feedback, external
+     setup, a human review) — add a `humanGate: { kind, what }` (`kind ∈ deploy|credential|feedback|review|setup`;
+     *backlog-workflow.md → Human gate*), which demotes it out of Tier A exactly like a pending project. Then
+     re-run. A buried **dependency** must be encoded as a real `blockedBy` edge (file the prerequisite item if
+     it doesn't exist) — never left as a prose note the selector can't see; a human residual gets a `humanGate`,
+     **not** a `blockedBy` to a phantom node. `taken` (a live reservation) is the one reason that needs no data
+     fix — it already shows a pill on the tab. The skim is principle-conformance, not just a fork check (#608):
+     a stale `file:line`, false premise, or missing placement note → **remediate in place** (pure-agent only —
+     never quietly make a design call to force batchability); escalate only an irreducible fork as a
+     ready-to-ratify nod. (`npm run check:health` surfaces deterministic governance/ref flags worth a glance
+     before a long run.)
    - **Pool can't fill the budget → the batch is just shorter** (stop rule 3); don't pad with `≥13`/`epic`
      work — those stay single-item (the *Other Tier-A* list).
 2. **Plan + one "go" + label once** — present the pack as an ordered plan (each item: `live` + `md` links,

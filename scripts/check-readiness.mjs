@@ -223,6 +223,20 @@ if (SELECT) {
     pending.forEach((it) => console.log(`  ${YEL}⊗${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— relatedProject \`${it.relatedProject}\` (${it.relatedProjectStatus}); demoted to Tier C until the project ships${RST}`));
   }
 
+  // HUMAN GATE (#1137) — open items demoted out of Tier A because their only residual is a human-only
+  // action (credentialed deploy, agent-training feedback, account setup, a sign-off). Like project-pending
+  // it's NOT a `blockedBy` edge — nothing in the backlog resolves it, a person acts — so it's surfaced here
+  // rather than looking mysteriously absent. A human clears the gate (does the action, removes `humanGate`).
+  const gated = items.filter((it) => it.status === 'open' && it.humanGate);
+  if (gated.length) {
+    console.log(`\n${YEL}${BLD}Held — awaiting a human action (not a \`blockedBy\` edge; an agent can't clear it): do the action, then remove \`humanGate\`${RST}`);
+    gated.forEach((it) => {
+      const g = it.humanGate || {};
+      const kind = `${g.kind || '?'}${(g.kind && !it.humanGateKnownKind) ? ' (unknown kind)' : ''}`;
+      console.log(`  ${YEL}⊗${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— human-gate \`${kind}\`: ${g.what || 'no action recorded'}${RST}`);
+    });
+  }
+
   console.log(`\n${DIM}Ranking is a pure projection of loader fields (tier/batchable/leverage) — instant, identical to the tab, no rubric re-derived. Body-fork pre-flight (skill) is the only per-item judgment left.${RST}`);
   process.exit(0);
 }
