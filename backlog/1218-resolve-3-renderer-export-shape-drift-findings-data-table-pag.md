@@ -3,10 +3,13 @@ type: decision
 workItem: story
 size: 3
 parent: "904"
-status: open
+status: resolved
 blockedBy: []
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#export-shape-drift"
 preparedDate: "2026-06-20"
 tags: [export-shape-drift, renderers, frontierui]
 ---
@@ -27,7 +30,14 @@ fork; it only prioritizes a spawned build.* All 3 blocks are `type: Module` (the
 | --- | --- | --- | --- |
 | `data-table` | `DataTableModule` · `DataTableBehavior` · `registerDataTable` | `DataTableBehavior` · **`DataTableElement`** · `registerDataTable` (`fui:blocks/renderers/data-table/DataTableBehavior.ts`) | element class shipped as `*Element`, contract says `*Module` — **pure rename** |
 | `pagination` | `PaginationModule` · `PaginationBehavior` · `registerPagination` | `PaginationBehavior` · **`PaginationElement`** · `registerPagination` (`fui:blocks/renderers/pagination/PaginationBehavior.ts`) | same `*Element`-vs-`*Module` rename |
-| `data-grid` | `DataGridModule` · `DataGridBehavior` · `registerDataGrid` | **none** — functional-only: `renderDataGrid` · `auditDataGrid` · `editableGrid` helpers (no element class / behavior / registrar) | the whole triad is **absent**, not renamed |
+| `data-grid` | `DataGridModule` · `DataGridBehavior` · `registerDataGrid` | **attribute-built, split across two dirs** — `DataGridBehavior` (a *default*-exported `CustomAttribute` `grid:cell-navigation`) + `registerDataGrid` in `fui:blocks/data-grid/`; `renderDataGrid` · `auditDataGrid` · `editableGrid` helpers in `fui:blocks/renderers/data-grid/`; **no `*Module` element class anywhere** (grep: 0 `extends HTMLElement` / 0 `customElements.define` for the grid) | only the **`DataGridModule` element** is genuinely absent — the behavior+registrar exist, but as an *attribute* behavior (not the named coordinator the contract/siblings declare) and in an unbarrelled location |
+
+> **Finding correction (2026-06-20, post-claim grounding).** The original data-grid row called it
+> "functional-only, the whole triad absent." That was wrong: `DataGridBehavior` + `registerDataGrid` **exist**
+> in `fui:blocks/data-grid/` (verified by grep), just as a `CustomAttribute` rather than the element-wrapper
+> triad. What's truly absent is only the `DataGridModule` element. This correction does not change the Fork B
+> verdict (still B1 — build the element), but it reshapes the build into a thin element wrapping the existing
+> behavior + a location/naming reconciliation, not a from-scratch triad.
 
 Note the deviation direction: `collection-operations` (the family's clean case) ships
 `CollectionOperationsModule` — so `*Module` is the family convention and `data-table`/`pagination` are the
@@ -79,3 +89,40 @@ Worth the skeptic pass before ratifying; if headless-by-intent, B2.
 contract" verdict edits the renderer's `we:src/_data/blocks/<id>.json` `exports` in place. Once each
 renderer's surface is reconciled, its curated barrel (#1203) is a trivial follow-up — **#1203 is `blockedBy`
 this item**. Sibling of the ratified #1165; cites its codified axis, does not re-litigate it.
+
+---
+
+## Ruling — RATIFIED 2026-06-20 (A1 + B1)
+
+Applies the codified axis `we:docs/agent/platform-decisions.md#export-shape-drift` (the #1165 precedent);
+coins no new rule.
+
+- **Fork A → A1 (~80%):** rename the impl `*Element` → `*Module` for `data-table` and `pagination`. The
+  element class exists in both (`DataTableElement`/`PaginationElement`, both `extends HTMLElement`); only the
+  name deviates from the declared `*Module` and the `CollectionOperationsModule` family convention. Contract
+  stays the source of truth; impl aligns to it. (Rejected A2 = correcting the contract to `*Element`, even
+  though it is the *cheaper* branch — cost does not decide a fork. A family-wide `*Module`→`*Element`
+  reconvention remains a separate, out-of-scope call.)
+- **Fork B → B1 (~70%):** build the `DataGridModule` element triad in FUI. The element is load-bearing to the
+  family's coherent surface (every sibling ships one; the block is `type: Module`); nothing in the design
+  states headless-by-intent. **Red-team note:** the prepared turn briefly reversed to B2 on the block's
+  `composesFocusDelegation` design decision — but that governs the *internal* roving-focus engine, not the
+  *distribution shape* (data-table also composes behaviors yet ships an element), so it is orthogonal and B2
+  loses its only grounding. The behavior+registrar already exist as a `CustomAttribute`, so B1 is a thin
+  element wrapper + location/naming reconciliation, not a from-scratch build.
+
+**Fork-merit note.** Both defaults pick the *more expensive* branch on merit (A1 over the one-line A2; B1
+over the one-line B2-trim); cost only prioritizes the spawned builds, never the fork.
+
+**Supersedes #1205** (concurrent-session duplicate covering the identical three `*Module` drifts; its "exist
+NOWHERE / grep=0" grounding was wrong for `data-table`/`pagination`, which ship `*Element`). #1205 resolved as
+superseded-by this item; its implied builds are the two stories spawned here.
+
+**Spawned (both `locus: frontierui`, under #904):**
+
+- **#1229** — rename `DataTableElement`→`DataTableModule` + `PaginationElement`→`PaginationModule` (A1).
+- **#1230** — build the `DataGridModule` element triad wrapping the existing `grid:cell-navigation`
+  behavior (B1).
+
+The export-shape warning persists on the 3 `*Module` symbols until those land. **#1203 (curated barrels) is
+unblocked** by this resolution.
