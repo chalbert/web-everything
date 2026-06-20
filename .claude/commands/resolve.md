@@ -1,16 +1,40 @@
 ---
-description: Resolve a backlog item — for an epic, only after every child is resolved (the no-open-slice guard). Mechanical status splice + gate.
+description: Resolve a backlog item (or, with no NNN / `next` / `all`, the gate's "all slices done" epics that pass a scope-delivered review). For an epic, only after every child is resolved (the no-open-slice guard). Mechanical status splice + gate.
 ---
 
-Resolve backlog item **`$ARGUMENTS`** (the leading `NNN` is the item; an optional `--graduated-to=…`
-passes straight through). This is the mechanical close-out — a status splice via `backlog.mjs`, then the
-gate. For an **epic** it additionally enforces the *no open slice* invariant so you never create the
-`resolved-epic-with-open-child` contradiction the gate would later flag.
+Resolve backlog item(s) per **`$ARGUMENTS`**. A leading `NNN` is one explicit item (an optional
+`--graduated-to=…` passes straight through). If `$ARGUMENTS` is **empty**, or is `next` / `all`,
+operate in **discovery mode** (step 0). This is the mechanical close-out — a status splice via
+`backlog.mjs`, then the gate. For an **epic** it additionally enforces the *no open slice* invariant so
+you never create the `resolved-epic-with-open-child` contradiction the gate would later flag.
 
 Do exactly this, in order:
 
+0. **Discovery mode (only when no explicit `NNN` given).** Run `npm run check:standards` and collect the
+   epics it flags with `every child is resolved ('all slices done')` — these are the resolution
+   candidates. For **each** candidate apply the **scope-delivered review** in step 1a *before* touching
+   it. Then:
+   - `next` (or empty `$ARGUMENTS`) → resolve only the **first** candidate that passes review; report the
+     rest as candidates with a one-line verdict each.
+   - `all` → resolve **every** candidate that passes review; for each that fails, leave it open and give
+     the one-line reason. Resolve + verify + commit them one at a time (loop steps 3–5 per item) so each
+     lands as its own commit.
+   If discovery finds no candidates, say so and stop.
+
 1. **Locate the item.** Find `backlog/NNN-*.md`. If none, stop and say so. Read its frontmatter —
-   note `workItem` and `status`.
+   note `workItem`, `status`, `blockedBy`, `childlessReason`.
+
+1a. **Scope-delivered review (epics only — do NOT skip for "all slices done" items).** The gate's
+   *all slices done* nudge fires when every **carved** child is resolved — it does **not** prove the
+   epic's *scope* shipped. Before resolving, confirm the scope is genuinely delivered, not just that the
+   one slice that happened to be carved closed. **Keep the epic open** (and offer to scaffold the next
+   slice) when any of these hold — closing here is the `#1167`/`#1210` "resolved over uncarved scope" trap:
+   - the epic is `blockedBy: [...]` or `childlessReason: blocked` (its remaining scope can't even be
+     carved yet);
+   - the body frames the resolved child as a **"first slice"** / lists **"Slices:"** implying more to come;
+   - the epic states its own **resolution criterion** ("resolves when …") and that criterion isn't met.
+   An epic passes review when its scope was actually delivered by its children, or every remaining strand
+   is a **deliberate deferral that cites its tracking `#NNN`**. State the pass/fail verdict in one line.
 
 2. **The no-open-slice guard is enforced by the CLI.** As of #658, `backlog.mjs resolve` itself refuses
    to close a `workItem: epic` that still has open children — it enumerates them by the `parent:` EDGE
@@ -35,7 +59,8 @@ Do exactly this, in order:
    commit-each-finished-piece rule, stage **only** this item's file (and any child re-parent you made) and
    commit `backlog: resolve #NNN — <title>`. Never `git add -A`, never push.
 
-Report format: a one-line verdict (`✓ resolved #NNN` or `✗ blocked — open children`), then the gate
-result line, then the one-line commit note if you committed. Nothing else.
+Report format: one line per item touched — `✓ resolved #NNN`, `✗ blocked — open children`, or
+`▷ kept open #NNN — <scope-not-delivered reason>` — then the final gate result line, then the one-line
+commit note(s). In discovery mode, list every candidate with its verdict. Nothing else.
 
 $ARGUMENTS
