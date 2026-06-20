@@ -1,0 +1,100 @@
+{% raw %}
+<h2>The idea</h2>
+<p>
+  Rebuild the top design systems — shadcn/ui, Material 3, Ant, Carbon, Fluent — <strong>pixel-perfect and
+  behavior-perfect</strong>, using <strong>only</strong> Web Everything intents plus
+  <code>webtheme</code> tokens over Frontier UI primitives. The hypothesis under test:
+  <strong>the only thing that differs between any two top design systems is <code>theme tokens +
+  intents</code></strong> — every bit of structure, animation, and behavior is shared WE-standard.
+  Reproducing them exactly, while <em>forbidden from escaping the standard</em>, turns that hypothesis into a
+  falsifiable measurement and emits the residue — what <code>theme+intents</code> <em>can't</em> express — as
+  a list of standards gaps.
+</p>
+<p>
+  The pixel-perfect copy is a <strong>forcing function, never a product</strong>. The deliverable is the
+  <strong>gap list</strong>, the same way the exercise-app loop's deliverable is platform progress, not the
+  app. The governing rule is the direct analogue of that loop's <em>active-bypass = FAIL</em>:
+  <strong>a divergence you can only reproduce by hand-rolling outside WE/FUI is a gap to file, never a hack
+  to add.</strong> Allowing per-library escape hatches would buy the screenshots and learn nothing.
+</p>
+
+<h2>Finding 1 — the hypothesis is the headless-library thesis, already market-proven</h2>
+<p>
+  The separation the program assumes — behavior, state, and accessibility are shareable; look is a swappable
+  layer — is the explicit architecture of the <strong>headless / unstyled component</strong> category, now
+  the default way serious design systems are built:
+</p>
+<ul>
+  <li>
+    <strong>React Aria</strong> ships <strong>40+ component patterns as behavior-only hooks</strong> — ARIA
+    semantics, i18n, focus, interaction — with <em>no styling at all</em>.
+  </li>
+  <li>
+    <strong>Radix Primitives</strong> are unstyled-by-default with an <code>asChild</code> composition prop;
+    <strong>Ark UI</strong> and <strong>Base UI</strong> are the same shape — behavior is the product, style
+    is the consumer's.
+  </li>
+</ul>
+<p>
+  So the hypothesis is <em>sound</em>: the market already factors components into (shared behavior) +
+  (theme). But the survey also sharpens the residue. Real shipped systems layer <strong>proprietary look and
+  motion</strong> on top of that behavior core — Material's state-layer/ripple, Carbon's motion curves,
+  Fluent's reveal. The headless libs prove the <em>floor</em> is shareable; this program tests whether the
+  <em>ceiling</em> — the branded surface — is <code>theme+intents</code>-expressible or needs new standards.
+  That is bucket 3.
+</p>
+
+<h2>Finding 2 — parity must be a layered oracle; naïve pixel-diff is disqualified</h2>
+<p>
+  A single pixel-by-pixel screenshot diff is <strong>not</strong> an acceptable parity oracle, and the
+  industry has converged on why. Pixel diffs throw <strong>30–40% false positives</strong> from
+  anti-aliasing, sub-pixel rendering, and OS font smoothing — differences a human never sees — while
+  semantic/ML visual tools (Applitools Eyes) cut that to <strong>under ~2%</strong> by understanding what
+  elements <em>mean</em>. The <strong>WPT reftest</strong> model — the canonical cross-implementation
+  rendering-conformance method — handles the same noise with <strong>fuzzy matching</strong>: a declared
+  tolerance of <em>(max per-channel color delta, max number of differing pixels)</em>.
+</p>
+<p>
+  So the parity oracle is <strong>layered, not a single diff</strong>: (a) <strong>fuzzy-tolerance pixel</strong>
+  for visual parity (WPT model), (b) <strong>structural DOM / ARIA / focus-order diff</strong> for behavioral
+  parity (deterministic, no judgment), (c) an <strong>advisory VLM / semantic judge</strong> for the
+  "looks the same to a human" verdict that pixels can't settle. This is <em>support-all-three</em> — no
+  branch is excluded — so it is a supported-by-default design element, not a fork. It also separates the
+  deterministic <em>diff engine</em> from the <em>semantic judgment</em>, which feeds the engine-ownership
+  fork.
+</p>
+
+<h2>Finding 3 — reproduction-as-conformance is the WPT/reftest method</h2>
+<p>
+  "Rebuild the thing on a different engine and assert the rendering matches a reference" is exactly how the
+  web platform proves cross-browser conformance. In a WPT reftest the <strong>reference page is written to
+  <em>not</em> use the technology under test</strong> — an independent ground-truth rendering. Mapping to
+  this program: the <strong>incumbent library's own rendered output is the reference</strong>, the
+  <strong>FUI-themed reproduction is the test</strong>, and parity — within the fuzzy + structural + semantic
+  layers — is the assertion. The "forcing function, not a product" framing <em>is</em> the reftest
+  discipline: the artifact that matters is the pass/fail and the diff, not the page.
+</p>
+
+<h2>How the survey reshaped the forks</h2>
+<ul>
+  <li>
+    <strong>No new fork minted</strong> — the layered parity oracle is support-all (headless + WPT + VLM
+    evidence), recorded below the divider, not as a <code>## Fork N</code>.
+  </li>
+  <li>
+    <strong>Fork 1 (validator sequencing) hardened</strong> — the validator is non-trivial (must be fuzzy +
+    structural + semantic to be parity-grade), so a naïve pixel gate would be worse than none. It must be
+    specified by a concrete target, not stood up abstractly first → strengthens the co-evolution default.
+  </li>
+  <li>
+    <strong>Fork 2 (engine ownership) reinforced</strong> — the survey cleanly separates the deterministic
+    <em>diff engine</em> (FUI's explorer territory, <code>#1167</code>) from the <em>semantic VLM
+    judgment</em> (Plateau's vision service per <code>#475</code>). The split falls out of the evidence.
+  </li>
+</ul>
+
+<p>
+  Full grounding, with sources, in the session report
+  <code>reports/2026-06-20-reproduction-conformance.md</code>.
+</p>
+{% endraw %}

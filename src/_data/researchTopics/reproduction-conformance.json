@@ -1,0 +1,24 @@
+{
+  "id": "reproduction-conformance",
+  "title": "Reproduction-conformance — rebuilding top design systems as theme+intents over WE/FUI, as a forcing function",
+  "status": "open",
+  "summary": "Prep research for the #1225 program charter. The program: reproduce top design systems (shadcn, Material 3, Ant, Carbon, Fluent…) pixel- and behavior-perfect using ONLY WE intents + webtheme tokens over FUI primitives — the hypothesis being that `theme tokens + intents` is the ONLY thing that differs between any two of them, and everything else (structure, animation, behavior) is shared WE-standard. The deliverable is the GAP LIST (what theme+intents can't express), not the copy — the exact analogue of the exercise-app loop's `active-bypass = FAIL`. THREE GROUNDING FINDINGS. (1) HYPOTHESIS IS SOUND & MARKET-PROVEN: the behavior-is-shareable/look-is-a-layer split is exactly the headless/unstyled category — React Aria (40+ patterns as behavior-only hooks), Radix Primitives (`asChild` composition, unstyled-by-default), Ark UI, Base UI. The headless libs prove the FLOOR (behavior) is shareable; the program tests whether the CEILING (Material's state-layer/ripple, Carbon motion, Fluent reveal) is theme+intents-expressible or needs new standards — that residue IS bucket 3. (2) PARITY MUST BE A LAYERED ORACLE, naive pixel-diff is disqualified: pixel-by-pixel diffs throw 30-40% false positives from anti-aliasing/sub-pixel/font-smoothing (vs <2% for semantic/VLM tools like Applitools Eyes); the WPT reftest model absorbs the same noise with FUZZY matching (max per-channel color delta + max differing-pixel count). So the oracle is layered: fuzzy-tolerance pixel (visual) + structural DOM/ARIA/focus-order diff (behavioral, deterministic) + advisory VLM judge (the human-equivalence verdict) — support-all-three, recorded as supported-by-default, NOT a fork. (3) REPRODUCTION-AS-CONFORMANCE IS THE WPT/REFTEST METHOD: render test-vs-reference and assert identical-within-fuzz, where the reference is independent ground truth that does NOT use the technology under test. Mapping: the incumbent library's own rendered output is the reference, the FUI-themed reproduction is the test, parity is the assertion — the same shape as the in-repo exercise-app loop and gap-sweep diff-against-snapshot, now with an external ground truth. The survey hardened Fork 1 (validator is non-trivial → must be specified by a concrete target, co-evolution) and reinforced Fork 2 (clean split: deterministic diff engine = FUI explorer territory; semantic VLM judgment = Plateau vision service per #475). Full grounding in reports/2026-06-20-reproduction-conformance.md.",
+  "dateOpened": "2026-06-20",
+  "lastReviewed": "2026-06-20",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "reproduction-conformance",
+    "design-systems",
+    "forcing-function",
+    "visual-regression",
+    "reftest",
+    "headless-ui",
+    "theme-tokens",
+    "intents",
+    "vlm-judge",
+    "parity-oracle"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webtheme"
+}
