@@ -1,6 +1,5 @@
 ---
-type: decision
-workItem: story
+kind: decision
 size: 2
 status: resolved
 dateOpened: '2026-06-06'

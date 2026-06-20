@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: task
+kind: task
 parent: "495"
 status: resolved
 dateOpened: "2026-06-14"

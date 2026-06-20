@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: task
+kind: task
 parent: "140"
 status: open
 blockedBy: ["140"]

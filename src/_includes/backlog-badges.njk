@@ -4,7 +4,7 @@
   Imported (with context, so the global `backlogMeta` resolves) by BOTH backlog item surfaces so they
   cannot drift:
     {% import "backlog-badges.njk" as bk with context %}
-  and called as bk.typeBadge(...), bk.statusBadge(...), etc.
+  and called as bk.kindBadge(...), bk.statusBadge(...), etc.
     • src/backlog.njk        — /backlog/ tile + Prioritisation table   (scale 'sm', the dense card grid)
     • src/backlog-pages.njk  — /backlog/{id}/ detail page              (scale 'md', the full page)
 
@@ -19,10 +19,13 @@
   duplicated definitions across two files.
 #}
 
-{% macro typeBadge(type, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
-<span style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
-  background: {% if type == 'idea' %}#ede9fe{% elif type == 'issue' %}#fee2e2{% elif type == 'decision' %}#e0e7ff{% else %}#f1f5f9{% endif %};
-  color: {% if type == 'idea' %}#5b21b6{% elif type == 'issue' %}#991b1b{% elif type == 'decision' %}#3730a3{% else %}#475569{% endif %};">{{ type }}</span>
+{# The item KIND badge — the one merged nature+hierarchy axis (#466/#487): story | epic | task | decision.
+   `epic`/`task` self-name here (they replaced the old unsized-stand-in `workItemBadge`); a `story` shows
+   its kind alongside the size badge; a `decision` keeps the indigo it had as a `type`. #}
+{% macro kindBadge(kind, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
+<span title="{% if kind == 'epic' %}epic — umbrella; rolls up its child stories/tasks{% elif kind == 'task' %}task — bounded sub-work; points roll up to its parent{% elif kind == 'decision' %}decision — a design fork to ratify (Tier B){% else %}story — an independently valuable, sized deliverable{% endif %}" style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
+  background: {% if kind == 'story' %}#dbeafe{% elif kind == 'epic' %}#ede9fe{% elif kind == 'decision' %}#e0e7ff{% else %}#f1f5f9{% endif %};
+  color: {% if kind == 'story' %}#1e40af{% elif kind == 'epic' %}#5b21b6{% elif kind == 'decision' %}#3730a3{% else %}#475569{% endif %};">{{ kind }}</span>
 {% endmacro %}
 
 {# Includes the `preparing` → "Prepping" branch on BOTH surfaces (was missing on the detail page). #}
@@ -34,12 +37,6 @@
 
 {% macro sizeBadge(size, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
 <span title="Estimate: {{ size }} agile point{% if size != 1 %}s{% endif %}" style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569);">{{ size }} pt{% if size != 1 %}s{% endif %}</span>
-{% endmacro %}
-
-{# Stand-in for the size badge on an UNSIZED item (an epic rolls its children's points; a task's roll up
-   to its parent) so every surface shows something in the size slot. #}
-{% macro workItemBadge(workItem, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
-<span title="{{ workItem }} — unsized ({% if workItem == 'epic' %}rolls up its child stories{% else %}points roll up to its parent{% endif %})" style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569);">{{ workItem }}</span>
 {% endmacro %}
 
 {# Agent-readiness chip. Heuristic HINT (loader-derived from structured fields), not authoritative. #}
@@ -62,7 +59,7 @@
 {# The epic-status badge cluster — picks exactly one of: ongoing program / unsliced·why / all slices done /
    ⚠ open slice. ONE place so the tile and the detail page read identically. #}
 {% macro epicStatusBadge(item, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
-{% if item.workItem == 'epic' %}
+{% if item.kind == 'epic' %}
 {%- if item.ongoing and item.status != 'resolved' -%}
 <span title="Ongoing program — a continuous effort, not a fixed deliverable. It legitimately has every child resolved between slices and is NEVER a resolve cue; the next slice is added as the program advances." style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #e0f2fe; color: #075985;">ongoing program</span>
 {%- elif not (item.children | length) -%}{{ unslicedBadge(item.childlessReason, scale) }}
@@ -89,7 +86,7 @@
 {% elif child.status == 'preparing' %}{% set bg = "#ede9fe" %}{% set bd = "#7c3aed" %}{% set fg = "#6d28d9" %}
 {% elif child.tier == 'A' %}{% set bg = "#dcfce7" %}{% set bd = "#16a34a" %}{% set fg = "#166534" %}
 {% elif child.tier == 'B' %}{% set bg = "#fef3c7" %}{% set bd = "#d97706" %}{% set fg = "#92400e" %}{% endif %}
-<a href="/backlog/{{ child.id }}/" title="#{{ child.num }} {{ child.title }} · {% if child.size %}{{ child.size }} pt{% if child.size != 1 %}s{% endif %}{% else %}{{ child.workItem }}{% endif %} · {{ child.status }}" style="position: relative; z-index: 2; display: inline-flex; align-items: center; justify-content: center; min-width: 1.7rem; height: 1.7rem; padding: 0 0.35rem; border-radius: 9999px; background: {{ bg }}; border: 1.5px solid {{ bd }}; color: {{ fg }}; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none;">{{ child.num }}</a>
+<a href="/backlog/{{ child.id }}/" title="#{{ child.num }} {{ child.title }} · {% if child.size %}{{ child.size }} pt{% if child.size != 1 %}s{% endif %}{% else %}{{ child.kind }}{% endif %} · {{ child.status }}" style="position: relative; z-index: 2; display: inline-flex; align-items: center; justify-content: center; min-width: 1.7rem; height: 1.7rem; padding: 0 0.35rem; border-radius: 9999px; background: {{ bg }}; border: 1.5px solid {{ bd }}; color: {{ fg }}; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none;">{{ child.num }}</a>
 {% endmacro %}
 
 {# A prerequisite (`blockedBy`) drawn as a pill: a still-open blocker is red with ⛔, a resolved one green
@@ -101,3 +98,18 @@
 <a href="/backlog/{{ b.id }}/" title="#{{ b.num }} {{ b.title }} · {{ b.status }} — still blocking" style="position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.05rem 0.45rem; border-radius: 9999px; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca;">&#9940; #{{ b.num }}</a>
 {% endif %}
 {% endmacro %}
+
+{# Not-ready REASON pill — sits next to the "Not ready" tier badge in the Readiness column and says WHY an
+   item isn't agent-ready (the "what" badge alone doesn't). Driven straight off the loader fields the
+   ranker's held sections read (humanGate / openBlockers / projectPending / stopTheWorld), so the table and
+   `check:readiness` always agree. Precedence mirrors the loader's `notBatchableReason` chain
+   (stop-the-world → human-gate → blocked → project-pending) and renders exactly one pill. Epic-INCLUSIVE
+   on purpose: a project-pending / human-gated epic (e.g. #170) carries no `notBatchableReason` yet must
+   still show its hold. Emits nothing for an agent-ready (A) or ready-to-ratify (B) item — none of these
+   fields fire there. Vocabulary/colours come from backlogMeta (single source of truth). #}
+{% macro reasonPill(item, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.05rem 0.4rem' %}{% set fs = '0.78em' if scale == 'md' else '0.62em' %}{% set base = 'border-radius:9999px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; white-space:nowrap; padding:' + pad + '; font-size:' + fs + ';' %}
+{%- if item.stopTheWorld %}{% set nb = backlogMeta.notBatchableMeta['stop-the-world'] %} <span title="{{ nb.tip }}" style="{{ base }} background:{{ nb.bg }}; color:{{ nb.fg }};">⊗ {{ nb.label }}</span>
+{%- elif item.humanGate %}{% set hg = backlogMeta.humanGateMeta[item.humanGateKind] %} <span title="{{ hg.tip if hg else 'Held on a human-only action — an agent can’t clear it. See the item for what to do.' }}{% if item.humanGate.what %} — {{ item.humanGate.what }}{% endif %}" style="{{ base }} background:{{ hg.bg if hg else '#fef2f2' }}; color:{{ hg.fg if hg else '#991b1b' }};">⊗ {{ hg.label if hg else 'human-gated' }}</span>
+{%- elif item.openBlockers.length %} <span title="Blocked — waiting on an unresolved prerequisite (blockedBy). Not workable until it resolves." style="{{ base }} background:#fef2f2; color:#991b1b;">⊗ blocked by {% for n in item.openBlockers %}#{{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+{%- elif item.projectPending %}{% set nb = backlogMeta.notBatchableMeta['project-pending'] %} <a href="/projects/{{ item.relatedProject }}/" title="{{ nb.tip }} — held on project `{{ item.relatedProject }}` ({{ item.relatedProjectStatus }}); open it to ship/graduate, or re-home this item." style="{{ base }} background:{{ nb.bg }}; color:{{ nb.fg }}; text-decoration:none;">⊗ {{ nb.label }} · {{ item.relatedProject }}</a>
+{%- endif %}{% endmacro %}

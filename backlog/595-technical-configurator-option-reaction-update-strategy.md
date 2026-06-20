@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: story
+kind: story
 size: 1
 parent: "586"
 status: resolved

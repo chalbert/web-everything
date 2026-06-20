@@ -82,7 +82,7 @@ function deriveProjectReadiness(items, projectStatus) {
     const relatedProjectStatus = typeof item.relatedProject === 'string'
       ? (projectStatus.get(item.relatedProject) ?? 'unknown') : undefined;
     const projectPending = item.status === 'open'
-      && (item.type === 'issue' || item.type === 'idea')
+      && item.kind !== 'decision'
       && relatedProjectStatus === 'concept'
       && !(resolvedByProject.get(item.relatedProject) > 0);
     return { relatedProjectStatus, projectPending };
@@ -108,8 +108,8 @@ function deriveProjectReadiness(items, projectStatus) {
 function deriveTier(item) {
   if (item.status !== 'open') return undefined;
   const blockersClear = item.blockers.every((b) => b.status === 'resolved');
-  if ((item.type === 'issue' || item.type === 'idea') && blockersClear && !item.projectPending && !item.humanGate) return 'A';
-  if (item.type === 'decision' && blockersClear) return 'B';
+  if (item.kind !== 'decision' && blockersClear && !item.projectPending && !item.humanGate) return 'A';
+  if (item.kind === 'decision' && blockersClear) return 'B';
   return 'C';
 }
 
@@ -305,8 +305,8 @@ module.exports = function backlog() {
     // reaching a single `size·8` only when the remaining budget fits — one pool, ordered by `batchCost`.
     // The one non-structural guard the batch skill adds — no buried design fork in the body — can't be
     // decided from fields, so this flag is the size+tier gate; selection still skims the body for a fork.
-    const batchShape = item.workItem === 'task'
-      || (item.workItem === 'story' && typeof item.size === 'number' && item.size <= 8);
+    const batchShape = item.kind === 'task'
+      || (item.kind === 'story' && typeof item.size === 'number' && item.size <= 8);
     // A `stop-the-world` migration (e.g. #487 schema migration) is shape-batchable and Tier A, but it can
     // NEVER ride a routine batch: it needs the whole backlog drained (quiescent) + a dedicated run, so the
     // selector already refuses to pack it. Encode that in `batchable` itself so the flag — and the tab's
@@ -328,13 +328,13 @@ module.exports = function backlog() {
     // By construction a Tier-C issue/idea always has open blockers, projectPending, or a humanGate, and a
     // Tier-C decision always has open blockers — so this chain yields a non-null reason for every not-ready item.
     item.notBatchableReason = (() => {
-      if (item.status !== 'open' || item.batchable || item.workItem === 'epic') return null;
+      if (item.status !== 'open' || item.batchable || item.kind === 'epic') return null;
       if (item.stopTheWorld) return 'stop-the-world';
       if (item.humanGate) return 'human-gate';        // rendered by the humanGate pill
-      if (item.openBlockers.length) return 'blocked';   // any blocked item — issue/idea OR a Tier-C decision
+      if (item.openBlockers.length) return 'blocked';   // any blocked item — build OR a Tier-C decision
       if (item.projectPending) return 'project-pending';
-      if (item.type === 'decision') return 'decision';  // Tier-B, ready to ratify — decision-ready badge covers it
-      if (item.workItem === 'story' && typeof item.size === 'number' && item.size > 8) return 'oversized'; // split pill
+      if (item.kind === 'decision') return 'decision';  // Tier-B, ready to ratify — decision-ready badge covers it
+      if (item.kind === 'story' && typeof item.size === 'number' && item.size > 8) return 'oversized'; // split pill
       return null;
     })();
 
@@ -353,7 +353,7 @@ module.exports = function backlog() {
     // count — the complaint that drove this). `batchable` ⊂ Tier A and `sliceable` ⊂ Tier A are disjoint:
     // an epic is never batchable, a task/story is never sliceable. A `story·≥13` stays plain agent-ready
     // (real buildable work, just beyond the batch pool) — only epics peel off.
-    item.sliceable = item.tier === 'A' && item.workItem === 'epic';
+    item.sliceable = item.tier === 'A' && item.kind === 'epic';
 
     // Splittable (deterministic) — an open `story` too big to chain (`size` > 8, i.e. the 13 band) is the
     // `/split` skill's story-class candidate: real buildable work, but better cut into ≤5 slices first
@@ -362,7 +362,7 @@ module.exports = function backlog() {
     // of the agent-ready pool — an oversized story IS buildable as-is, so `splittable` is an ORTHOGONAL
     // flag layered ON TOP of its tier (it stays in the agent-ready/not-ready bucket), not a tier of its own.
     // Independent of `tier`: a still-blocked (Tier C) oversized story is just as worth splitting.
-    item.splittable = item.status === 'open' && item.workItem === 'story'
+    item.splittable = item.status === 'open' && item.kind === 'story'
       && typeof item.size === 'number' && item.size > 8;
 
     // Batch COST (deterministic) — the context-budget weight used to pack a POINTS-BUDGETED batch
@@ -370,7 +370,7 @@ module.exports = function backlog() {
     // carries no burndown points (they roll up to a parent) but still consumes a session's context, so
     // it is weighted at a nominal TASK_COST (2). A `story`/unstoried-epic uses its own `size`. The
     // budget sums this, NOT burndown `size`, so a task-heavy chain can't slip through "free".
-    item.batchCost = item.workItem === 'task' ? 2
+    item.batchCost = item.kind === 'task' ? 2
       : typeof item.size === 'number' ? item.size
       : undefined;
 
@@ -429,7 +429,7 @@ module.exports = function backlog() {
     // *other* blocker is already resolved, so this item is their last open prerequisite. This is the
     // leverage that actually frees work (an edge to a still-multiply-blocked item frees nothing yet).
     item.unblocksToReady = openDirect.filter((dep) =>
-      (dep.type === 'issue' || dep.type === 'idea') &&
+      dep.kind !== 'decision' &&
       dep.blockers.every((b) => b.status === 'resolved' || b.num === item.num),
     ).length;
     // Single composite for a deterministic template sort: transitive reach dominates (×1000, counts are
@@ -446,8 +446,8 @@ module.exports = function backlog() {
     item.children = items
       .filter((c) => c.parent != null && String(c.parent) === item.num)
       .sort((a, b) => String(a.num).localeCompare(String(b.num)))
-      .map(({ id, num, slug, title, status, workItem, size, tier }) =>
-        ({ id, num, slug, title, status, workItem, size, tier }));
+      .map(({ id, num, slug, title, status, kind, size, tier }) =>
+        ({ id, num, slug, title, status, kind, size, tier }));
     // How many child slices are still unresolved — drives the tile's epic-state badge. An open epic with
     // 0 open children is effectively delivered (ready to resolve); a resolved epic with >0 open children
     // is a contradiction worth flagging.

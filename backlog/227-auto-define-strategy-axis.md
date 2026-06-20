@@ -1,6 +1,5 @@
 ---
-type: decision
-workItem: story
+kind: decision
 status: resolved
 dateOpened: "2026-06-09"
 dateStarted: "2026-06-09"

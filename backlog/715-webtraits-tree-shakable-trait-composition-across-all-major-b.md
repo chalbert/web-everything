@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: epic
+kind: epic
 status: open
 dateOpened: "2026-06-15"
 tags: []

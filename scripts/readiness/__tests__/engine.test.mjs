@@ -31,15 +31,18 @@ function makeItems(specs) {
       const b = byNum.get(String(n));
       return { id: `${n}-x`, num: String(n), slug: 'x', title: `#${n}`, status: b ? b.status : 'open' };
     });
-    const tier = deriveTier({ status: s.status, type: s.type, blockers, projectPending: s.projectPending });
+    // One `kind` axis (#466/#487). A fixture may give `kind` directly, or the pre-migration shorthand
+    // (`type`+`workItem`), which the loader's converter collapses as: decision wins, else the workItem.
+    const kind = s.kind ?? (s.type === 'decision' ? 'decision' : (s.workItem ?? 'story'));
+    const tier = deriveTier({ status: s.status, kind, blockers, projectPending: s.projectPending });
     // Mirror the loader's #254 derivations so computeSelection consumes the same fields it would in prod.
     const batchable = tier === 'A'
-      && (s.workItem === 'task' || (s.workItem === 'story' && typeof s.size === 'number' && s.size <= 8));
-    const batchCost = s.workItem === 'task' ? 2 : typeof s.size === 'number' ? s.size : undefined;
+      && (kind === 'task' || (kind === 'story' && typeof s.size === 'number' && s.size <= 8));
+    const batchCost = kind === 'task' ? 2 : typeof s.size === 'number' ? s.size : undefined;
     return {
       id: `${s.num}-${s.slug ?? 'slug'}`, num: String(s.num), slug: s.slug ?? 'slug',
       title: s.title ?? `#${s.num}`,
-      type: s.type, status: s.status, workItem: s.workItem, size: s.size,
+      kind, status: s.status, size: s.size,
       epicState: s.epicState,
       dateStarted: s.dateStarted, blockedBy: s.blockedBy, blockers, tier,
       batchable, batchCost, leverageScore: s.leverageScore ?? 0,
@@ -109,11 +112,10 @@ describe('structural normalization (#250)', () => {
     expect(sizes.map((n) => n.id)).toEqual(['10-slug']);
   });
 
-  it('leaves Tier C decision/review items untouched (no cascade, no edge churn)', () => {
+  it('leaves decision items untouched by the cascade (no promotion, no edge churn)', () => {
     const items = makeItems([
-      { num: 1, type: 'idea', status: 'resolved' },
-      { num: 10, type: 'decision', status: 'open', blockedBy: [1] },   // resolved edge, but a decision
-      { num: 11, type: 'review', status: 'open' },
+      { num: 1, kind: 'story', size: 3, status: 'resolved' },
+      { num: 10, kind: 'decision', status: 'open', blockedBy: [1] },   // resolved edge, but a decision
     ]);
     const { cascade, normalization } = computeReadiness(items);
     expect(cascade.nowReady).toEqual([]);          // decisions are never "agent-ready" via cascade
@@ -130,9 +132,9 @@ describe('selection view (#254 projection) — the skills consume this, never re
       { num: 1, type: 'idea', status: 'open', workItem: 'story', size: 3 },   // batchable Tier A
       { num: 2, type: 'issue', status: 'open', workItem: 'task' },            // batchable Tier A
       { num: 3, type: 'idea', status: 'open', workItem: 'story', size: 13 },  // Tier A, NOT batchable (>8)
-      { num: 4, type: 'decision', status: 'open', workItem: 'story', size: 2 }, // Tier B
-      { num: 5, type: 'review', status: 'open', workItem: 'story', size: 3 },  // Tier C
-      { num: 6, type: 'idea', status: 'resolved', workItem: 'story', size: 1 },// dropped (not open)
+      { num: 4, kind: 'decision', status: 'open', size: 2 },                  // Tier B
+      { num: 5, kind: 'story', status: 'open', size: 3, projectPending: true }, // Tier C (project pending)
+      { num: 6, kind: 'story', status: 'resolved', size: 1 },                 // dropped (not open)
     ]);
     const sel = computeSelection(items);
     expect(sel.counts).toEqual({ open: 5, tierA: 3, agentReady: 3, sliceable: 0, epicActionable: 0, tierB: 1, tierBPrepared: 0, tierC: 1, batchable: 2, inFlight: 0 });
@@ -152,7 +154,7 @@ describe('selection view (#254 projection) — the skills consume this, never re
     expect(sel.counts.agentReady).toBe(1);     // only the buildable story
     expect(sel.counts.sliceable).toBe(2);      // both epics
     expect(sel.sliceable.map((i) => i.num).sort()).toEqual(['2', '3']);
-    expect(sel.batchable.some((i) => i.workItem === 'epic')).toBe(false);  // an epic is never batchable
+    expect(sel.batchable.some((i) => i.kind === 'epic')).toBe(false);  // an epic is never batchable
   });
 
   it('counts only actionable epics (unsliced / all-children-done) — not tracking, and not parked', () => {
@@ -180,12 +182,12 @@ describe('selection view (#254 projection) — the skills consume this, never re
     expect(sel.inFlight.map((i) => i.num).sort()).toEqual(['1', '2']);
   });
 
-  it('ranks by leverage desc, then issue-before-idea, then smaller-first, then NNN', () => {
+  it('ranks by leverage desc, then smaller-first (task=0), then NNN', () => {
     const items = makeItems([
-      { num: 10, type: 'idea', status: 'open', workItem: 'story', size: 3, leverageScore: 0 },
-      { num: 11, type: 'idea', status: 'open', workItem: 'story', size: 3, leverageScore: 2000 }, // highest leverage → first
-      { num: 12, type: 'issue', status: 'open', workItem: 'task', leverageScore: 0 },  // issue before idea at equal leverage
-      { num: 13, type: 'idea', status: 'open', workItem: 'story', size: 1, leverageScore: 0 }, // smaller story before #10
+      { num: 10, kind: 'story', status: 'open', size: 3, leverageScore: 0 },
+      { num: 11, kind: 'story', status: 'open', size: 3, leverageScore: 2000 }, // highest leverage → first
+      { num: 12, kind: 'task', status: 'open', leverageScore: 0 },              // task (size 0) → first of the lev-0 group
+      { num: 13, kind: 'story', status: 'open', size: 1, leverageScore: 0 },    // smaller story before #10
     ]);
     const sel = computeSelection(items);
     expect(sel.tierA.map((i) => i.num)).toEqual(['11', '12', '13', '10']);
@@ -317,7 +319,7 @@ describe('determinism (#250)', () => {
 describe('spliceStaleEdges — frontmatter-only, body never touched (#250)', () => {
   const FILE = [
     '---',
-    'type: idea',
+    'kind: story',
     'status: active',
     'blockedBy: ["248", "249"]',
     'tags: [backlog]',
@@ -348,7 +350,7 @@ describe('spliceStaleEdges — frontmatter-only, body never touched (#250)', () 
   });
 
   it('returns null when blockedBy is block-style (not a flow array) rather than guessing', () => {
-    const blockStyle = '---\ntype: idea\nblockedBy:\n  - "248"\n---\n# T\n';
+    const blockStyle = '---\nkind: story\nblockedBy:\n  - "248"\n---\n# T\n';
     expect(spliceStaleEdges(blockStyle, ['248'])).toBeNull();
   });
 });

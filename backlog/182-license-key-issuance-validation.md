@@ -1,6 +1,5 @@
 ---
-type: decision
-workItem: story
+kind: decision
 size: 3
 parent: "181"
 status: resolved

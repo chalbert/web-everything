@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: open
 dateOpened: "2026-06-06"
 tags: [evergreen, vision, north-star, auto-update, module-as-a-service, requirement-as-code, ai, app-shell, platform, conformance]

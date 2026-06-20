@@ -115,7 +115,7 @@ export function quoteScalar(value) {
 export function validateCodifiedIn(value) {
   const v = (value ?? '').trim().replace(/^["']|["']$/g, '');
   const HINT =
-    'a `type: decision` resolves only with `codifiedIn` (#911). Promote its rule to the statute layer ' +
+    'a `kind: decision` resolves only with `codifiedIn` (#911). Promote its rule to the statute layer ' +
     '(docs/agent/platform-decisions.md#<anchor>, or the topical docs/agent/*.md it belongs to) and pass ' +
     '`--codified-to=<path#anchor>`. For a narrow call that yields no reusable rule, pass `--codified-to=one-off`.';
   if (!v) return `no codifiedIn — ${HINT}`;
@@ -139,7 +139,7 @@ export function validateCodifiedIn(value) {
  * a non-`open`, in-flight state (drops from selection exactly like `active`) but reads distinctly on the
  * board; `release` returns either `active` or `preparing` to `open`.
  *
- * **Codification gate (#911 discipline, hard-enforced here):** a `type: decision` cannot be resolved
+ * **Codification gate (#911 discipline, hard-enforced here):** a `kind: decision` cannot be resolved
  * without a `codifiedIn` — the statute-layer pointer that promotes its reusable rule out of the
  * case-law chain (or the sanctioned `one-off` sentinel for a narrow call). The CLI passes `codifiedTo`
  * to stamp it inline; absent both an existing field and the flag, the resolve is refused. This is what
@@ -154,7 +154,7 @@ export function validateCodifiedIn(value) {
  */
 export function applyTransition(content, verb, { today, graduatedTo, codifiedTo, as } = {}) {
   const status = readField(content, 'status');
-  const DATE_ANCHORS = ['dateOpened', 'dateStarted', 'dateResolved', 'status', 'blockedBy', 'size', 'workItem', 'type'];
+  const DATE_ANCHORS = ['dateOpened', 'dateStarted', 'dateResolved', 'status', 'blockedBy', 'size', 'kind'];
 
   if (verb === 'claim') {
     if (status !== 'open') return { error: `status is "${status}", expected "open" — lost the race or already claimed` };
@@ -166,7 +166,7 @@ export function applyTransition(content, verb, { today, graduatedTo, codifiedTo,
   if (verb === 'resolve') {
     if (status !== 'active' && status !== 'open') return { error: `status is "${status}", expected "active" — only an in-flight item is resolved` };
     // Codification gate (#911): a decision must carry its rule into the statute layer before it resolves.
-    if (readField(content, 'type') === 'decision') {
+    if (readField(content, 'kind') === 'decision') {
       const existing = readField(content, 'codifiedIn');
       const codErr = validateCodifiedIn(codifiedTo ?? existing);
       if (codErr) return { error: codErr };

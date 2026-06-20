@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: epic
+kind: epic
 parent: "658"
 locus: frontierui
 status: resolved

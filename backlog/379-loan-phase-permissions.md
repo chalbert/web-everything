@@ -1,7 +1,6 @@
 ---
-type: idea
+kind: epic
 locus: exercise-app
-workItem: epic
 status: resolved
 parent: "317"
 dateOpened: "2026-06-12"

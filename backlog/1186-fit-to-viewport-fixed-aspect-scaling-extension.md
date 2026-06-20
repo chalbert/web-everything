@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: story
+kind: story
 status: open
 size: 2
 dateOpened: "2026-06-20"

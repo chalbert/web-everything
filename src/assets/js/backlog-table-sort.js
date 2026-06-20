@@ -54,7 +54,7 @@
   if (!table) return;
   var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
   var readyChips = Array.prototype.slice.call(document.querySelectorAll('[data-pready]'));
-  var typeChips = Array.prototype.slice.call(document.querySelectorAll('[data-ptype]'));
+  var kindChips = Array.prototype.slice.call(document.querySelectorAll('[data-pkind]'));
   // `splittable` is an ORTHOGONAL facet, not a readiness value — a split candidate (story · size > 8) is
   // ALSO agent-ready or not-ready, so it can't live in the mutually-exclusive readiness group. It's a
   // single ON/OFF toggle (default OFF) that AND-composes with the other filters: when on, narrow to rows
@@ -63,7 +63,7 @@
   var splitSummary = document.querySelector('[data-psplitfilter]');
   var search = document.querySelector('[data-ptable-search]');
   var countEl = document.querySelector('[data-ptable-count]');
-  if (!readyChips.length && !typeChips.length && !search) return;
+  if (!readyChips.length && !kindChips.length && !search) return;
 
   // ── Visual state + persistence ──────────────────────────────────────────────
   // A chip's pressed state lives in `aria-pressed`, but the chip palette (style.css) only highlights
@@ -72,7 +72,7 @@
   // filter (which chips are on + the search box) is remembered in localStorage and re-applied on reload,
   // matching every other backlog filter (graph toggle, tab, home chips).
   var READY_KEY = 'we-backlog-priority-ready';
-  var TYPE_KEY = 'we-backlog-priority-type';
+  var KIND_KEY = 'we-backlog-priority-kind';
   var SPLIT_KEY = 'we-backlog-priority-split';
   var SEARCH_KEY = 'we-backlog-priority-search';
   function pressedVals(chips, attr) {
@@ -81,7 +81,7 @@
   }
   function splitOn() { return splitChip && splitChip.getAttribute('aria-pressed') === 'true'; }
   function syncVisual() {
-    readyChips.concat(typeChips).forEach(function (c) {
+    readyChips.concat(kindChips).forEach(function (c) {
       c.classList.toggle('is-active', c.getAttribute('aria-pressed') !== 'false');
     });
     // The split toggle defaults OFF, so (unlike the groups above) is-active tracks pressed === 'true'.
@@ -90,7 +90,7 @@
   function save() {
     try {
       localStorage.setItem(READY_KEY, JSON.stringify(pressedVals(readyChips, 'data-pready')));
-      localStorage.setItem(TYPE_KEY, JSON.stringify(pressedVals(typeChips, 'data-ptype')));
+      localStorage.setItem(KIND_KEY, JSON.stringify(pressedVals(kindChips, 'data-pkind')));
       localStorage.setItem(SPLIT_KEY, splitOn() ? '1' : '0');
       localStorage.setItem(SEARCH_KEY, (search && search.value) || '');
     } catch (e) { /* ignore */ }
@@ -101,8 +101,8 @@
     try {
       var r = JSON.parse(localStorage.getItem(READY_KEY));
       if (Array.isArray(r)) readyChips.forEach(function (c) { c.setAttribute('aria-pressed', r.indexOf(c.getAttribute('data-pready')) >= 0 ? 'true' : 'false'); });
-      var t = JSON.parse(localStorage.getItem(TYPE_KEY));
-      if (Array.isArray(t)) typeChips.forEach(function (c) { c.setAttribute('aria-pressed', t.indexOf(c.getAttribute('data-ptype')) >= 0 ? 'true' : 'false'); });
+      var t = JSON.parse(localStorage.getItem(KIND_KEY));
+      if (Array.isArray(t)) kindChips.forEach(function (c) { c.setAttribute('aria-pressed', t.indexOf(c.getAttribute('data-pkind')) >= 0 ? 'true' : 'false'); });
       var s = localStorage.getItem(SPLIT_KEY);
       if (splitChip && s != null) splitChip.setAttribute('aria-pressed', s === '1' ? 'true' : 'false');
       var q = localStorage.getItem(SEARCH_KEY);
@@ -121,7 +121,7 @@
 
   function apply() {
     var reads = active(readyChips, 'data-pready');
-    var types = active(typeChips, 'data-ptype');
+    var kinds = active(kindChips, 'data-pkind');
     var q = ((search && search.value) || '').trim().toLowerCase();
     var shown = 0;
     rows.forEach(function (r) {
@@ -131,7 +131,7 @@
       // should show only batchable cards). Pinning governs ORDER (it's concatenated to the top), not an
       // unconditional filter bypass. Free-text search narrows it like any other row.
       var ok = (!reads || reads[r.getAttribute('data-readiness')])
-            && (!types || types[r.getAttribute('data-type')])
+            && (!kinds || kinds[r.getAttribute('data-kind')])
             && (!splitOn() || r.getAttribute('data-splittable') === 'true')
             && (!q || (r.getAttribute('data-search') || '').indexOf(q) >= 0);
       r.style.display = ok ? '' : 'none';
@@ -153,7 +153,7 @@
   }
   function resetAllChips() {
     readyChips.forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });
-    typeChips.forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });
+    kindChips.forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });
     if (splitChip) splitChip.setAttribute('aria-pressed', 'false');   // split defaults OFF (no constraint)
     if (search) search.value = '';
   }
@@ -166,7 +166,7 @@
     });
   }
   readyChips.forEach(bindToggle);
-  typeChips.forEach(bindToggle);
+  kindChips.forEach(bindToggle);
   if (splitChip) bindToggle(splitChip);   // same flip-and-apply as the group chips; its is-active is OFF-default
   if (search) search.addEventListener('input', function () { clearSummary(); apply(); });
 
@@ -194,7 +194,7 @@
         resetAllChips();
       } else {
         var cats = (chip.getAttribute('data-pfilter') || '').split(',');
-        typeChips.forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });   // readiness-only shortcut
+        kindChips.forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });   // readiness-only shortcut
         if (splitChip) splitChip.setAttribute('aria-pressed', 'false');   // a readiness shortcut is a fresh view — drop the split facet
         if (search) search.value = '';
         readyChips.forEach(function (c) {

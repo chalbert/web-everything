@@ -1,7 +1,6 @@
 ---
-type: idea
+kind: story
 locus: plateau-app
-workItem: story
 size: 5
 parent: "402"
 status: resolved

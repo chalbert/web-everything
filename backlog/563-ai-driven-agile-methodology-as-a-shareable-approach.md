@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: open
 dateOpened: "2026-06-14"
 tags: [methodology, agile, ai, ways-of-working, enablement, personas, plateau, positioning]

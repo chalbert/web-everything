@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: story
+kind: story
 size: 5
 status: active
 dateOpened: "2026-06-15"

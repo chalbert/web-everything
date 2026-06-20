@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: epic
+kind: epic
 status: open
 dateOpened: "2026-06-07"
 tags: [plugs, duplication, drift, single-source, frontierui, maintenance, runtime]

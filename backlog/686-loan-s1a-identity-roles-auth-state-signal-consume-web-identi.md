@@ -1,7 +1,6 @@
 ---
-type: idea
+kind: story
 locus: exercise-app
-workItem: story
 size: 3
 parent: "379"
 status: resolved

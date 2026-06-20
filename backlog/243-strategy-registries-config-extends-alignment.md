@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: story
+kind: story
 status: resolved
 blockedBy: ["227"]
 dateOpened: "2026-06-09"

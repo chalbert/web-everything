@@ -1,7 +1,6 @@
 ---
-type: idea
+kind: story
 status: resolved
-workItem: story
 size: 5
 dateOpened: "2026-06-09"
 dateStarted: "2026-06-09"

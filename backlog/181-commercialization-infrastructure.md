@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: open
 dateOpened: "2026-06-08"
 tags: [monetization, infrastructure, go-to-market, auth, licensing, payments, marketing, legal, solo-founder, product-agnostic]

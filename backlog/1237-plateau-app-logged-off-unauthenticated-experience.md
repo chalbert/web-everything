@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: open
 locus: plateau-app
 dateOpened: "2026-06-20"

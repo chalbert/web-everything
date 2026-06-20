@@ -1,7 +1,6 @@
 ---
-type: idea
+kind: task
 locus: exercise-app
-workItem: task
 parent: "379"
 status: resolved
 blockedBy: ["686"]

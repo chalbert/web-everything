@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: task
+kind: task
 parent: "081"
 status: parked
 blockedBy: []

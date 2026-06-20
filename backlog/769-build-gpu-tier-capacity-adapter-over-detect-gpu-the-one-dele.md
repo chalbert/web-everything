@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: task
+kind: task
 status: resolved
 blockedBy: ["767"]
 dateOpened: "2026-06-16"

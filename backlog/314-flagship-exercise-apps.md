@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: open
 ongoing: true
 dateOpened: "2026-06-11"

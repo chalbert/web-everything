@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 parent: "150"
 status: open
 dateOpened: "2026-06-09"

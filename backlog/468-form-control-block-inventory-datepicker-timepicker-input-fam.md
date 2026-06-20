@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 parent: "099"
 relatedReport: reports/2026-06-13-backlog-split-analysis.md
 status: resolved

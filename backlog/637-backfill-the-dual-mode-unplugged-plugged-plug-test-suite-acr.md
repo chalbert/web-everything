@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: story
+kind: story
 size: 8
 status: resolved
 blockedBy: ["635", "636", "649"]

@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: story
+kind: story
 size: 5
 status: resolved
 crossRef: { url: /backlog/578-fix-loop-git-integration-bot-pr-mechanics-flow-forge-auth-ag/, label: "#578 — the ruling that motivated this sweep" }

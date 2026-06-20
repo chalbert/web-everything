@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: story
+kind: story
 size: 1
 parent: "757"
 locus: frontierui

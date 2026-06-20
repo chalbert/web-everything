@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: open
 dateOpened: "2026-06-13"
 relatedReport: reports/2026-06-13-on-device-ui-vision-capability.md

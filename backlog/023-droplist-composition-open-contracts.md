@@ -1,6 +1,5 @@
 ---
-type: decision
-workItem: epic
+kind: decision
 status: resolved
 dateOpened: '2026-06-02'
 dateStarted: '2026-06-08'

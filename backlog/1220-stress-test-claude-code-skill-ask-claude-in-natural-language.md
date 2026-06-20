@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: story
+kind: story
 size: 2
 locus: frontierui
 status: resolved

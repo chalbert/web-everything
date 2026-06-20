@@ -26,22 +26,22 @@ export const slugify = (s) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
 
 /**
- * Render a backlog item skeleton. Emits only the fields the validator needs (`type`, `status`,
- * `workItem`, `size` when a story, `dateOpened`, optional `blockedBy`/`parent`), an H1 title, and a
- * one-line digest placeholder the caller is expected to replace. `check:standards` passes on the
- * skeleton (non-empty digest, valid sizing), but the digest is intentionally a TODO so it reads as
- * unfinished, not as a real summary.
+ * Render a backlog item skeleton. Emits only the fields the validator needs (`kind`, `status`,
+ * `size` when a story, `dateOpened`, optional `blockedBy`/`parent`), an H1 title, and a one-line
+ * digest placeholder the caller is expected to replace. `check:standards` passes on the skeleton
+ * (non-empty digest, valid sizing), but the digest is intentionally a TODO so it reads as unfinished,
+ * not as a real summary. `kind ∈ story|epic|task|decision` (the merged #466/#487 axis).
  *
  * @param {{
- *   type: string, workItem: string, size?: number, slug: string, title: string,
+ *   kind: string, size?: number, slug: string, title: string,
  *   today: string, blockedBy?: string[], parent?: string, digest?: string,
  * }} spec
  * @returns {string} the file content
  */
 export function renderItem(spec) {
-  const { type, workItem, size, title, today, blockedBy = [], parent, digest } = spec;
-  const fm = ['---', `type: ${type}`, `workItem: ${workItem}`];
-  if (workItem === 'story' || (workItem === 'epic' && typeof size === 'number')) fm.push(`size: ${size}`);
+  const { kind, size, title, today, blockedBy = [], parent, digest } = spec;
+  const fm = ['---', `kind: ${kind}`];
+  if (kind === 'story' || (kind === 'epic' && typeof size === 'number')) fm.push(`size: ${size}`);
   if (parent) fm.push(`parent: "${parent}"`);
   fm.push('status: open');
   if (blockedBy.length) fm.push(`blockedBy: [${blockedBy.map((n) => `"${n}"`).join(', ')}]`);

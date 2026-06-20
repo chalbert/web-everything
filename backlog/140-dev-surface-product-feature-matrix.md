@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: open
 dateOpened: "2026-06-07"
 tags: [product-strategy, dev-experience, product-surface, dev-browser, vscode-extension, chrome-extension, saas, feature-matrix, monetization, market-landscape]

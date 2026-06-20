@@ -21,7 +21,7 @@ describe('backlog burndown — accounting invariants', () => {
   });
 
   it('only stories and epics may carry points — a task is never sized', () => {
-    for (const i of items) if (i.workItem === 'task') expect(i.size).toBeUndefined();
+    for (const i of items) if (i.kind === 'task') expect(i.size).toBeUndefined();
   });
 
   it('no double-count: a sized (unstoried) epic has no sized child', () => {
@@ -30,7 +30,7 @@ describe('backlog burndown — accounting invariants', () => {
       if (i.parent != null && typeof i.size === 'number')
         sizedKids.set(String(i.parent), (sizedKids.get(String(i.parent)) || 0) + 1);
     for (const i of items)
-      if (i.workItem === 'epic' && typeof i.size === 'number')
+      if (i.kind === 'epic' && typeof i.size === 'number')
         expect(sizedKids.get(i.num) || 0).toBe(0);
   });
 

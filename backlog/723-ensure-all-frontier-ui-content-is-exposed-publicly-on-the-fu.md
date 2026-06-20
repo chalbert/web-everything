@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: epic
+kind: epic
 status: resolved
 locus: frontierui
 dateOpened: "2026-06-15"

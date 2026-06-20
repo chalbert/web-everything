@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 parent: "099"
 status: open
 ongoing: true

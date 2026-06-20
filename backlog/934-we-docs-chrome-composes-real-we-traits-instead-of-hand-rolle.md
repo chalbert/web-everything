@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 parent: "777"
 status: resolved
 blockedBy: ["932"]

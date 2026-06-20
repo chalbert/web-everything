@@ -33,8 +33,8 @@ module.exports = function burndown() {
     }))
     .filter((it) => it.opened != null);
 
-  const counts = { story: 0, epic: 0, task: 0 };
-  for (const it of all) if (it.workItem) counts[it.workItem] = (counts[it.workItem] || 0) + 1;
+  const counts = { story: 0, epic: 0, task: 0, decision: 0 };
+  for (const it of all) if (it.kind) counts[it.kind] = (counts[it.kind] || 0) + 1;
 
   if (!sized.length) {
     return { empty: true, counts, points: { total: 0, done: 0, remaining: 0 } };

@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: epic
+kind: epic
 size: 8
 status: open
 dateOpened: "2026-06-20"

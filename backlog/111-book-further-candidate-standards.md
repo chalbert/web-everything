@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 size: 2
 parent: "099"
 status: resolved

@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: task
+kind: task
 parent: "048"
 status: resolved
 blockedBy: ["048"]

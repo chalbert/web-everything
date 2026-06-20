@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: story
+kind: story
 size: 1
 status: resolved
 dateOpened: '2026-06-02'

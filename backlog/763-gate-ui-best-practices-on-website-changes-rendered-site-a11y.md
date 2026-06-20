@@ -1,6 +1,5 @@
 ---
-type: decision
-workItem: task
+kind: decision
 status: resolved
 dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"

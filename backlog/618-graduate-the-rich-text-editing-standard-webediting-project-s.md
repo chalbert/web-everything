@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: epic
+kind: epic
 status: resolved
 blockedBy: ["590"]
 dateOpened: "2026-06-14"

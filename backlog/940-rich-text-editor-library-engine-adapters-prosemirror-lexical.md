@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: resolved
 locus: frontierui
 blockedBy: ["923"]

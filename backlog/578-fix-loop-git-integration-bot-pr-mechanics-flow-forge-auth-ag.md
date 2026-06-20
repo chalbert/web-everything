@@ -1,6 +1,5 @@
 ---
-type: decision
-workItem: story
+kind: decision
 size: 5
 status: resolved
 blockedBy: ["562", "141"]

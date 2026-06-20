@@ -27,7 +27,7 @@ function derive(items: any[], projectStatus: Map<string, string>) {
 describe('D3-readiness — projectPending demotion (#608/#621)', () => {
   it('(a) demotes an open build whose relatedProject is a concept project with 0 resolved surface', () => {
     const items = [
-      { num: '1', type: 'issue', status: 'open', relatedProject: 'webplugs' },
+      { num: '1', kind: 'story', status: 'open', relatedProject: 'webplugs' },
     ];
     const projectStatus = new Map([['webplugs', 'concept']]);
     const r = derive(items, projectStatus).get('1')!;
@@ -38,8 +38,8 @@ describe('D3-readiness — projectPending demotion (#608/#621)', () => {
     // webblocks is labelled `concept` but already has resolved work filed against it (#617 precision):
     // that is data-drift, not a project that genuinely isn't built — its open builds stay Tier A.
     const items = [
-      { num: '1', type: 'issue', status: 'open', relatedProject: 'webblocks' },
-      { num: '2', type: 'story', status: 'resolved', relatedProject: 'webblocks' },
+      { num: '1', kind: 'story', status: 'open', relatedProject: 'webblocks' },
+      { num: '2', kind: 'story', status: 'resolved', relatedProject: 'webblocks' },
     ];
     const projectStatus = new Map([['webblocks', 'concept']]);
     const r = derive(items, projectStatus).get('1')!;
@@ -48,9 +48,9 @@ describe('D3-readiness — projectPending demotion (#608/#621)', () => {
 
   it('(c) populates relatedProjectStatus (and leaves it undefined when there is no relatedProject)', () => {
     const items = [
-      { num: '1', type: 'issue', status: 'open', relatedProject: 'webplugs' },
-      { num: '2', type: 'issue', status: 'open', relatedProject: 'mystery' }, // not in the status map
-      { num: '3', type: 'issue', status: 'open' }, // no relatedProject at all
+      { num: '1', kind: 'story', status: 'open', relatedProject: 'webplugs' },
+      { num: '2', kind: 'story', status: 'open', relatedProject: 'mystery' }, // not in the status map
+      { num: '3', kind: 'story', status: 'open' }, // no relatedProject at all
     ];
     const projectStatus = new Map([['webplugs', 'concept']]);
     const d = derive(items, projectStatus);
@@ -61,8 +61,8 @@ describe('D3-readiness — projectPending demotion (#608/#621)', () => {
 
   it('never demotes on a concept label alone — only the concept+zero-surface conjunction pends', () => {
     const items = [
-      { num: '1', type: 'issue', status: 'open', relatedProject: 'shipped' }, // poc, not concept
-      { num: '2', type: 'idea', status: 'open', relatedProject: 'pending' }, // concept, 0 resolved
+      { num: '1', kind: 'story', status: 'open', relatedProject: 'shipped' }, // poc, not concept
+      { num: '2', kind: 'story', status: 'open', relatedProject: 'pending' }, // concept, 0 resolved
     ];
     const projectStatus = new Map([['shipped', 'poc'], ['pending', 'concept']]);
     const d = derive(items, projectStatus);
@@ -74,10 +74,10 @@ describe('D3-readiness — projectPending demotion (#608/#621)', () => {
     // Each item points at its OWN zero-surface concept project, so the only thing varying is the item's
     // own status/type (no shipped-surface side effect to confound the assertion).
     const items = [
-      { num: '1', type: 'issue', status: 'open', relatedProject: 'p1' }, // open issue → pends
-      { num: '2', type: 'issue', status: 'resolved', relatedProject: 'p2' }, // resolved → moot
-      { num: '3', type: 'issue', status: 'active', relatedProject: 'p3' }, // active → moot
-      { num: '4', type: 'decision', status: 'open', relatedProject: 'p4' }, // decision is not a build
+      { num: '1', kind: 'story', status: 'open', relatedProject: 'p1' }, // open issue → pends
+      { num: '2', kind: 'story', status: 'resolved', relatedProject: 'p2' }, // resolved → moot
+      { num: '3', kind: 'story', status: 'active', relatedProject: 'p3' }, // active → moot
+      { num: '4', kind: 'decision', status: 'open', relatedProject: 'p4' }, // decision is not a build
     ];
     const projectStatus = new Map([
       ['p1', 'concept'], ['p2', 'concept'], ['p3', 'concept'], ['p4', 'concept'],

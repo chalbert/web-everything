@@ -1,7 +1,6 @@
 ---
-type: idea
+kind: story
 locus: plateau-app
-workItem: story
 size: 5
 status: parked
 dateOpened: "2026-06-11"

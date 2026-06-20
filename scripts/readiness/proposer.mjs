@@ -34,8 +34,8 @@
 /** Numeric-stable ascending sort by the leading NNN id, so output never depends on load order. */
 const byNum = (a, b) => Number(a.num) - Number(b.num);
 
-/** A buildable (non-decision/review) work item — the only type the proposer will draft for. */
-const isBuildable = (it) => it.type === 'issue' || it.type === 'idea';
+/** A buildable (non-decision) work item — the only kind the proposer will draft for. */
+const isBuildable = (it) => it.kind !== 'decision';
 
 // ── Gap detection (deterministic) ───────────────────────────────────────────────
 //

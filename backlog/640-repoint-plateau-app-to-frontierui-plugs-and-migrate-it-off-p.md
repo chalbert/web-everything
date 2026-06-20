@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: story
+kind: story
 size: 5
 status: open
 blockedBy: ["170"]

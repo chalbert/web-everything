@@ -1,6 +1,5 @@
 ---
-type: decision
-workItem: task
+kind: decision
 status: resolved
 codifiedIn: docs/agent/platform-decisions.md#constellation-placement
 dateOpened: "2026-06-16"

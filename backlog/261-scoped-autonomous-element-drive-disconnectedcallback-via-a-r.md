@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: task
+kind: task
 parent: "167"
 status: resolved
 blockedBy: ["228"]

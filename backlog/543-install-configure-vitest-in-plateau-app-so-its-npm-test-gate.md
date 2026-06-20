@@ -1,7 +1,6 @@
 ---
-type: issue
+kind: story
 locus: plateau-app
-workItem: story
 size: 2
 status: resolved
 dateOpened: "2026-06-14"

@@ -1,7 +1,6 @@
 ---
-type: idea
+kind: story
 locus: frontierui
-workItem: story
 size: 5
 status: resolved
 blockedBy: ["100", "804"]

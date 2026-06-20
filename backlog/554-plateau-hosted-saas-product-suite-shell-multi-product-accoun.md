@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 parent: "089"
 status: parked
 dateOpened: "2026-06-14"

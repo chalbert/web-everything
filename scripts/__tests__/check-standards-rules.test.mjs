@@ -336,7 +336,7 @@ describe('validateViteProxyCoverage — uncovered catalog routes', () => {
 
 describe('findUnquotedColonScalars — frontmatter quote-fix lint (#453)', () => {
   it('flags an unquoted scalar embedding a colon-space (the loader-skip trigger)', () => {
-    const raw = '---\ntype: idea\ngraduatedTo: a/b.json: foo\nstatus: open\n---\nbody: has colons: fine\n';
+    const raw = '---\nkind: story\ngraduatedTo: a/b.json: foo\nstatus: open\n---\nbody: has colons: fine\n';
     const hits = findUnquotedColonScalars(raw);
     expect(hits).toEqual([{ line: 3, key: 'graduatedTo', value: 'a/b.json: foo' }]);
   });
@@ -349,7 +349,7 @@ describe('findUnquotedColonScalars — frontmatter quote-fix lint (#453)', () =>
     expect(findUnquotedColonScalars('---\nhome: https://example.com/x\n---\n')).toEqual([]);
   });
   it('only scans the frontmatter block, never the body', () => {
-    expect(findUnquotedColonScalars('---\ntype: idea\n---\nA line: with a colon in the body.\n')).toEqual([]);
+    expect(findUnquotedColonScalars('---\nkind: story\n---\nA line: with a colon in the body.\n')).toEqual([]);
   });
   it('ignores content with no frontmatter fence', () => {
     expect(findUnquotedColonScalars('no frontmatter: here\n')).toEqual([]);
@@ -1104,7 +1104,7 @@ describe('validateTemplateA11y — static template a11y lint (#772, #762 class)'
 });
 
 describe('lintBacklogItemRendering (#845 — the shared per-item rendering lint)', () => {
-  const item = (over = {}) => ({ id: '999-x', type: 'idea', status: 'open', batchable: false, ...over });
+  const item = (over = {}) => ({ id: '999-x', kind: 'story', status: 'open', batchable: false, ...over });
 
   it('errors on a [[wiki-link]] and a dead .md backlog link; warns on raw HTML', () => {
     const body = 'See [[feedback_foo]].\n\nA raw <select> here.\n\nLink to [x](092-thing.md).';
@@ -1117,7 +1117,7 @@ describe('lintBacklogItemRendering (#845 — the shared per-item rendering lint)
   it('warns on a fork-shaped heading only in a non-decision, non-resolved body', () => {
     const body = '## Open question — A vs B\n\nWeigh the options.';
     expect(lintBacklogItemRendering({ item: item(), body }).warnings.some((w) => /fork-shaped/.test(w))).toBe(true);
-    expect(lintBacklogItemRendering({ item: item({ type: 'decision' }), body }).warnings.some((w) => /fork-shaped/.test(w))).toBe(false);
+    expect(lintBacklogItemRendering({ item: item({ kind: 'decision' }), body }).warnings.some((w) => /fork-shaped/.test(w))).toBe(false);
     expect(lintBacklogItemRendering({ item: item({ status: 'resolved' }), body }).warnings.some((w) => /fork-shaped/.test(w))).toBe(false);
   });
 
@@ -1135,7 +1135,7 @@ describe('lintBacklogItemRendering (#845 — the shared per-item rendering lint)
   });
 
   describe('premature-epic-closure guard (#777)', () => {
-    const epic = (over = {}) => item({ workItem: 'epic', status: 'resolved', ...over });
+    const epic = (over = {}) => item({ kind: 'epic', status: 'resolved', ...over });
 
     it('errors on an unchecked scope box in a RESOLVED epic', () => {
       const body = '# T\n\n- [ ] migration slice not done\n';

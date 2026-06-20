@@ -44,11 +44,10 @@ const baseItem = {
   id: '999-fixture',
   num: '999',
   title: 'Fixture item',
-  type: 'idea',
+  kind: 'task',
   status: 'open',
   summary: 'A synthetic backlog item for the rule harness.',
   dateOpened: '2026-06-09',
-  workItem: 'task',
 };
 const run = (overrides) => validateBacklogItem({ ...baseItem, ...overrides }, FIXTURE_CTX);
 const messages = (res) => res.errors.map((e) => e.message);
@@ -104,8 +103,10 @@ describe('isCanonicalGraduated — graduatedTo leading-token canonicality (#614)
     expect(isCanonicalGraduated({ url: '/blocks/x/', label: 'X' }, FIXTURE_KINDS)).toBe(true);
   });
 
-  it('nudges a resolved idea that records no graduatedTo (warning, not error)', () => {
-    const res = run({ status: 'resolved', dateResolved: '2026-06-09' });
+  it('nudges a resolved story that records no graduatedTo (warning, not error)', () => {
+    // base fixture is a `task` (exempt from the nudge, like a decision); a resolved story/epic is the
+    // class that should record what it became (#487 maps the old `issue` exemption to `task`).
+    const res = run({ kind: 'story', size: 3, status: 'resolved', dateResolved: '2026-06-09' });
     expect(res.errors).toEqual([]);
     expect(res.warnings.map((w) => w.message)).toContainEqual(expect.stringContaining('no graduatedTo'));
   });
@@ -148,7 +149,7 @@ describe('validateBacklogItem — sibling reference + sizing rules', () => {
   });
 
   it('errors on a non-Fibonacci size', () => {
-    const res = run({ workItem: 'story', size: 4 });
+    const res = run({ kind: 'story', size: 4 });
     expect(messages(res)).toContainEqual(expect.stringContaining('non-Fibonacci size "4"'));
   });
 

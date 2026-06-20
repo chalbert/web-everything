@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: resolved
 locus: frontierui
 dateOpened: "2026-06-19"
@@ -14,7 +13,7 @@ relatedReport: reports/2026-06-19-autonomous-exploratory-ui-testing.md
 
 ## Resolved (batch-2026-06-19) — all carved slices shipped; Layer-2/3 is a deliberate deferral on #899
 
-Every carved slice landed in `fui:tools/explorer/` (batch-2026-06-19): **#1168** engine core (Crawljax state-flow walk + Playwright driver), **#1169** Layer-1 generic-invariants oracle bus, **#1170** Consumer 1 (component stress-test), **#1171** Consumer 2 (docs-site sweep, doubles as the #777 rendered-works proof), **#1172** Consumer 3 (deterministic pre-close gate). One engine, three consumers, all live-smoked against the running dev servers. The **Layer-2 conformance-vector oracle + Layer-3 advisory LLM-judge** below are an explicit, deliberate **deferral blocked on #899** (the behavioral-conformance vectors must exist first) — NOT an unsliced gap; carve them once #899 lands. The "(Later, not yet carved)" / "Build order" language below is the original plan, retained for lineage.
+Every carved slice landed in `fui:tools/explorer/` (batch-2026-06-19): **#1168** engine core, **#1169** Layer-1 oracle bus, **#1170** Consumer 1 (component stress-test), **#1171** Consumer 2 (docs-site sweep), **#1172** Consumer 3 (deterministic pre-close gate). One engine, three consumers, all live-smoked. The deferred **Layer-2/3 oracle** is now tracked as open item **[#1176](/backlog/1176-layer-2-conformance-vector-oracle-layer-3-advisory-llm-judge/)** (unblocked since #899 resolved); this epic stays resolved for its delivered scope. The "(Later, not yet carved)" / "Build order" lineage below is superseded by #1176.
 
 An agent that drives a live web UI **on its own** — clicks, types, navigates — discovers reachable states, and flags bugs/regressions/odd behaviors **without a pre-written script** (autonomous exploratory / monkey / model-based testing, LLM-steerable). Three first consumers ride **one engine**, in priority order: **(1)** stress-test FUI components in isolation (the primary use); **(2)** verify the WE docs website works-as-supposed (same engine, components-in-assembly — doubles as the dogfood [#777](/backlog/777-dogfood-the-we-docs-website-on-fui-components-rework-the-sit/) rendered-works proof); **(3)** an agent-invoked pre-close gate on UI work items. Grounded in [we:reports/2026-06-19-autonomous-exploratory-ui-testing.md](../reports/2026-06-19-autonomous-exploratory-ui-testing.md).
 

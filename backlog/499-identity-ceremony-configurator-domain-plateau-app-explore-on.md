@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: task
+kind: task
 status: parked
 blockedBy: []
 dateOpened: "2026-06-13"

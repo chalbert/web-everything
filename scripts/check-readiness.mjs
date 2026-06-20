@@ -114,7 +114,7 @@ if (JSON_MODE) {
 
 // ── --select: the deterministic selection view (skills' step 1; instant, zero desync with the tab) ──
 if (SELECT) {
-  const eff = (it) => `${it.workItem}${typeof it.size === 'number' ? '·' + it.size : ''}`;
+  const eff = (it) => `${it.kind}${typeof it.size === 'number' ? '·' + it.size : ''}`;
   const lev = (it) => (it.leverageScore ? `${DIM}frees ${it.unblocksToReady}·gates ${it.transitiveUnblocks}${RST}` : '');
   // A foreign-held item carries `reservedBy` (deprioritize, not exclude — #083): tag it so the human
   // sees it was sunk because another session planned it, not skipped.
@@ -179,8 +179,8 @@ if (SELECT) {
   // Tier-A non-batchable splits two ways: buildable-but-large (story·≥13 / unsized story) an agent can
   // still implement, versus epics — unblocked but only ready to SLICE (work lives in child slices, not
   // the epic). Keep them in separate sections so an epic never reads as a buildable to-do (#double-count).
-  const restA = tierAforPack.filter((it) => !it.batchable && it.workItem !== 'epic');
-  const sliceA = tierAforPack.filter((it) => it.workItem === 'epic');
+  const restA = tierAforPack.filter((it) => !it.batchable && it.kind !== 'epic');
+  const sliceA = tierAforPack.filter((it) => it.kind === 'epic');
   console.log(`\n${GRN}${BLD}Other Tier-A — agent-ready, single-item (story·≥13 / unsized)${RST}`);
   if (restA.length) restA.forEach((it) => line(it, it.reservedBy ? `${YEL}⊘${RST}` : `${GRN}▲${RST}`));
   else console.log(`${DIM}  none.${RST}`);

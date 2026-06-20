@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: story
+kind: story
 size: 8
 status: resolved
 blockedBy: ["576"]

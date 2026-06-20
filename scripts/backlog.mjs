@@ -15,9 +15,9 @@
  *
  * Usage:
  *   node scripts/backlog.mjs claim   <NNN> [--as=preparing] [--force]  # open    → active (or preparing, for /prepare) + dateStarted=today; prints rename slug. Refuses if the item's own file is dirty (claim-first guard); --force overrides
- *   node scripts/backlog.mjs resolve <NNN> [--graduated-to=X] [--codified-to=Y] [--force]  # active → resolved + dateResolved=today (+ graduatedTo); a type:decision REQUIRES --codified-to=<doc#anchor|one-off> (#911 gate); an epic with open children is refused unless --force (#658 no-open-slice guard)
+ *   node scripts/backlog.mjs resolve <NNN> [--graduated-to=X] [--codified-to=Y] [--force]  # active → resolved + dateResolved=today (+ graduatedTo); a kind:decision REQUIRES --codified-to=<doc#anchor|one-off> (#911 gate); an epic with open children is refused unless --force (#658 no-open-slice guard)
  *   node scripts/backlog.mjs release <NNN>                       # active|preparing → open (abandon/redirect; stamps untouched)
- *   node scripts/backlog.mjs scaffold --type=idea --workitem=story --size=3 --title="..." [--digest="..."] [--blocked-by=NNN,NNN] [--parent=NNN]
+ *   node scripts/backlog.mjs scaffold --kind=story --size=3 --title="..." [--digest="..."] [--blocked-by=NNN,NNN] [--parent=NNN]   # --kind ∈ story|epic|task|decision (#466/#487)
  *   node scripts/backlog.mjs reserve   <NNN...> --session=<slug>     # soft-hold planned items (#083 cross-session deprioritize)
  *   node scripts/backlog.mjs unreserve [--session=<slug>] [<NNN...>] # release soft holds (whole session, or specific items)
  *   add --json to any verb for machine-readable output.
@@ -122,7 +122,7 @@ function transition(v) {
   // the `parent:` EDGE (not the body's stale "N children" listing) and refuse BEFORE writing — so the
   // `resolved-epic-with-open-child` contradiction is never created, not just caught later by the gate.
   // `--force` overrides for the rare deliberate mid-re-parent case (prints what it stepped over).
-  if (v === 'resolve' && readField(before, 'workItem') === 'epic') {
+  if (v === 'resolve' && readField(before, 'kind') === 'epic') {
     const padded = file.match(/^\d+/)[0];
     const openKids = openChildrenOf(padded);
     if (openKids.length && !argv.includes('--force'))
@@ -225,12 +225,20 @@ function unreserve() {
 }
 
 function scaffold() {
-  const type = flag('type') || 'idea';
-  const workitem = flag('workitem') || 'story';
+  // One `kind` axis (#466/#487). Prefer --kind; accept legacy --type/--workitem (a `decision` type wins,
+  // else the workItem carries the kind) so older skill/doc invocations don't break mid-migration.
+  let kind = flag('kind');
+  if (!kind) {
+    const legacyType = flag('type');
+    const legacyWorkitem = flag('workitem');
+    if (legacyType || legacyWorkitem) kind = legacyType === 'decision' ? 'decision' : (legacyWorkitem || 'story');
+    else kind = 'story';
+  }
+  if (!['story', 'epic', 'task', 'decision'].includes(kind)) die(`--kind must be story|epic|task|decision (got "${kind}")`);
   const size = flag('size') !== undefined ? Number(flag('size')) : undefined;
   const title = flag('title');
   if (!title) die('scaffold needs --title="…"');
-  if (workitem === 'story' && !Number.isFinite(size)) die('a story needs --size=<Fibonacci>');
+  if (kind === 'story' && !Number.isFinite(size)) die('a story needs --size=<Fibonacci>');
   const slug = flag('slug') || slugify(title);
   const blockedBy = (flag('blocked-by') || '').split(',').map((s) => s.trim()).filter(Boolean).map((n) => n.padStart(3, '0'));
   const parent = flag('parent') ? flag('parent').padStart(3, '0') : undefined;
@@ -246,7 +254,7 @@ function scaffold() {
     finalName = `${finalNum}-${slug}.md`;
     finalAbs = join(DIR, finalName);
   }
-  const content = renderItem({ type, workItem: workitem, size, slug, title, today: today(), blockedBy, parent, digest: flag('digest') });
+  const content = renderItem({ kind, size, slug, title, today: today(), blockedBy, parent, digest: flag('digest') });
   writeFileSync(finalAbs, content);
   const id = finalName.replace(/\.md$/, '');
   const filled = !!flag('digest');
@@ -322,7 +330,7 @@ switch (verb) {
       `  ${GRN}claim${RST} <NNN> [--as=preparing] [--force]   open → active (or preparing, /prepare) + dateStarted; refuses on a dirty item file (claim-first), --force overrides\n` +
       `  ${GRN}resolve${RST} <NNN> [--graduated-to=X] [--codified-to=Y] [--force]   active → resolved + dateResolved (decision REQUIRES --codified-to=<doc#anchor|one-off>; an epic with open children is refused unless --force)\n` +
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
-      `  ${GRN}scaffold${RST} --type= --workitem= --size= --title= [--digest=] [--blocked-by=] [--parent=]\n` +
+      `  ${GRN}scaffold${RST} --kind=story|epic|task|decision --size= --title= [--digest=] [--blocked-by=] [--parent=]\n` +
       `  ${GRN}calibrate${RST} --points= --context-pct= [--stop-reason=budget|context|empty-pool|fork|gate|outgrew|manual|abort]   fold a session into the batch point-budget estimate\n` +
       `  ${GRN}reserve${RST} <NNN...> --session=<slug>    soft-hold planned items (deprioritize for other sessions)\n` +
       `  ${GRN}unreserve${RST} [--session=<slug>] [<NNN...>]  release soft holds (clear a session, or specific items)\n` +

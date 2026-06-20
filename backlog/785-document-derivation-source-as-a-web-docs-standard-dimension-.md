@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: story
+kind: story
 size: 2
 parent: "731"
 status: resolved

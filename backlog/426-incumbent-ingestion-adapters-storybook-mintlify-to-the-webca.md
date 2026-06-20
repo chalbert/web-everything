@@ -1,7 +1,6 @@
 ---
-type: decision
+kind: decision
 locus: frontierui
-workItem: story
 size: 3
 parent: "398"
 status: resolved

@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: epic
+kind: epic
 parent: "315"
 status: resolved
 dateOpened: "2026-06-13"

@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 size: 13
 status: open
 blockedBy: ["554"]

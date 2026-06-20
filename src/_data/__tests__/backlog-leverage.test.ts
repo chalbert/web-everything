@@ -58,12 +58,12 @@ describe('backlog unblock-leverage — derivation invariants', () => {
     }
   });
 
-  it('unblocksToReady only ever names open issue/idea dependents this is the last open blocker for', () => {
+  it('unblocksToReady only ever names open non-decision dependents this is the last open blocker for', () => {
     for (const i of items) {
       const flips = i.dependents
         .filter((d: any) => d.status === 'open')
         .map((d: any) => byNum.get(d.num))
-        .filter((dep: any) => (dep.type === 'issue' || dep.type === 'idea')
+        .filter((dep: any) => dep.kind !== 'decision'
           && dep.blockers.every((b: any) => b.status === 'resolved' || b.num === i.num));
       expect(i.unblocksToReady).toBe(flips.length);
     }

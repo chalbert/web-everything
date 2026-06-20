@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: open
 dateOpened: "2026-06-19"
 tags: [deployment, hosting, gated-access, controlled-rollout, analytics, auth, website, webdocs, solo-founder]

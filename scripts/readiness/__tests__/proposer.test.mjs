@@ -17,7 +17,7 @@ import {
 
 /** Loader-shaped item; body is supplied separately via the fake readBody below. */
 const item = (num, over = {}) => ({
-  num: String(num), id: `${num}-slug`, type: 'idea', status: 'open',
+  num: String(num), id: `${num}-slug`, kind: 'story', status: 'open',
   title: `Item ${num}`, summary: 'A decided thing.', tags: ['cli'], ...over,
 });
 
@@ -46,8 +46,8 @@ describe('candidate selection (#252) — deterministic, decided-but-thin only', 
     expect(cands[0].gaps).toEqual(['acceptance-criteria']);
   });
 
-  it('never selects a decision or review item — a fork is a human call, not a gap to fill', () => {
-    const items = [item(10, { type: 'decision' }), item(11, { type: 'review' })];
+  it('never selects a decision item — a fork is a human call, not a gap to fill', () => {
+    const items = [item(10, { kind: 'decision' }), item(11, { kind: 'decision' })];
     const cands = selectProposalCandidates(items, bodyMapReader({})); // both have thin (empty) bodies
     expect(cands).toEqual([]);
   });

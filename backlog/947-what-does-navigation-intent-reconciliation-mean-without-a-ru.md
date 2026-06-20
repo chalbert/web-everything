@@ -1,6 +1,5 @@
 ---
-type: decision
-workItem: story
+kind: decision
 size: 3
 status: parked
 dateOpened: "2026-06-18"

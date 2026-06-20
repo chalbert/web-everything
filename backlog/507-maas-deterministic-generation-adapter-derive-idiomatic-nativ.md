@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: epic
+kind: epic
 parent: "081"
 status: resolved
 blockedBy: ["505", "506"]

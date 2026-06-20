@@ -1,9 +1,9 @@
 ---
-type: issue
-workItem: story
+kind: story
 size: 5
-status: open
+status: active
 dateOpened: "2026-06-13"
+dateStarted: "2026-06-20"
 tags: [stop-the-world]
 ---
 

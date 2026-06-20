@@ -9,8 +9,7 @@ import { nextNum, slugify, renderItem } from '../scaffold.mjs';
 
 const ITEM = [
   '---',
-  'type: idea',
-  'workItem: story',
+  'kind: story',
   'size: 3',
   'status: open',
   'blockedBy: ["035", "136"]',
@@ -114,9 +113,9 @@ describe('applyTransition — legal from-status enforced', () => {
   });
 });
 
-describe('applyTransition — codification gate on type:decision (#911)', () => {
+describe('applyTransition — codification gate on kind:decision (#911)', () => {
   const DECISION = [
-    '---', 'type: decision', 'workItem: task', 'status: active',
+    '---', 'kind: decision', 'status: active',
     'dateOpened: "2026-06-18"', '---', '', '# A cross-cutting ruling', '',
   ].join('\n');
 
@@ -210,8 +209,8 @@ describe('scaffold helpers', () => {
   });
 
   it('renderItem emits a check:standards-shaped skeleton (story carries size, digest present)', () => {
-    const out = renderItem({ type: 'idea', workItem: 'story', size: 3, slug: 'x', title: 'Do the thing', today: '2026-06-10', blockedBy: ['254'] });
-    expect(out).toContain('type: idea');
+    const out = renderItem({ kind: 'story', size: 3, slug: 'x', title: 'Do the thing', today: '2026-06-10', blockedBy: ['254'] });
+    expect(out).toContain('kind: story');
     expect(out).toContain('size: 3');
     expect(out).toContain('status: open');
     expect(out).toContain('blockedBy: ["254"]');
@@ -220,7 +219,7 @@ describe('scaffold helpers', () => {
   });
 
   it('a task carries no size', () => {
-    const out = renderItem({ type: 'issue', workItem: 'task', slug: 'x', title: 'Fix it', today: '2026-06-10' });
+    const out = renderItem({ kind: 'task', slug: 'x', title: 'Fix it', today: '2026-06-10' });
     expect(out).not.toContain('size:');
   });
 });

@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: task
+kind: task
 parent: "991"
 status: resolved
 dateOpened: "2026-06-19"

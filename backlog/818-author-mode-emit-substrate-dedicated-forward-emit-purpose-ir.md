@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: story
+kind: story
 size: 3
 status: parked
 parent: "746"

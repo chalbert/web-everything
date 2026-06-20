@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: story
+kind: story
 status: resolved
 locus: webeverything
 dateOpened: "2026-06-20"

@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: resolved
 dateOpened: "2026-06-20"
 dateResolved: "2026-06-20"

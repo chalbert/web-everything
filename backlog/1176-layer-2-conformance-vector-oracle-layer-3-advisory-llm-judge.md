@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: story
+kind: story
 size: 5
 crossRef: { url: /backlog/1167-autonomous-exploratory-ui-testing-tool-fui-owned-engine-that/, label: "#1167 autonomous UI tester epic (resolved; this is its post-#899 follow-on)" }
 locus: frontierui

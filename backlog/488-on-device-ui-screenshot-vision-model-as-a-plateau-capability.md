@@ -1,6 +1,5 @@
 ---
-type: decision
-workItem: story
+kind: decision
 size: 8
 status: resolved
 codifiedIn: docs/agent/platform-decisions.md#no-leakage-client

@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 const { deriveTier } = require('../backlog.js') as {
   deriveTier: (item: {
     status: string;
-    type: string;
+    kind: string;
     blockers: { status: string }[];
     projectPending?: boolean;
     humanGate?: { kind: string; what: string };
@@ -22,7 +22,7 @@ const { deriveTier } = require('../backlog.js') as {
 /** Build a loader-shaped item; `blockedBy` is the lightweight `[{ status }]` array the loader attaches. */
 const item = (over: Partial<Parameters<typeof deriveTier>[0]>) => ({
   status: 'open',
-  type: 'issue',
+  kind: 'story',
   blockers: [],
   projectPending: false,
   ...over,
@@ -31,19 +31,19 @@ const item = (over: Partial<Parameters<typeof deriveTier>[0]>) => ({
 describe('deriveTier — agent-readiness rubric', () => {
   describe('Tier B (decision-ready) gates on resolved blockers — the #779-class regression', () => {
     it('an open decision with NO blockers is B (ready to ratify)', () => {
-      expect(deriveTier(item({ type: 'decision' }))).toBe('B');
+      expect(deriveTier(item({ kind: 'decision' }))).toBe('B');
     });
 
     it('an open decision with every blocker RESOLVED is B', () => {
-      expect(deriveTier(item({ type: 'decision', blockers: [{ status: 'resolved' }] }))).toBe('B');
+      expect(deriveTier(item({ kind: 'decision', blockers: [{ status: 'resolved' }] }))).toBe('B');
     });
 
     it('an open decision with an UNRESOLVED blocker is C, not B (the bug)', () => {
-      expect(deriveTier(item({ type: 'decision', blockers: [{ status: 'open' }] }))).toBe('C');
-      expect(deriveTier(item({ type: 'decision', blockers: [{ status: 'active' }] }))).toBe('C');
+      expect(deriveTier(item({ kind: 'decision', blockers: [{ status: 'open' }] }))).toBe('C');
+      expect(deriveTier(item({ kind: 'decision', blockers: [{ status: 'active' }] }))).toBe('C');
       // mixed: one resolved, one still open ⇒ still blocked ⇒ C
       expect(deriveTier(item({
-        type: 'decision',
+        kind: 'decision',
         blockers: [{ status: 'resolved' }, { status: 'open' }],
       }))).toBe('C');
     });
@@ -51,33 +51,33 @@ describe('deriveTier — agent-readiness rubric', () => {
 
   describe('Tier A (agent-ready) — the sibling rule, unchanged', () => {
     it('an open issue/idea with all blockers resolved and project not pending is A', () => {
-      expect(deriveTier(item({ type: 'issue', blockers: [{ status: 'resolved' }] }))).toBe('A');
-      expect(deriveTier(item({ type: 'idea' }))).toBe('A');
+      expect(deriveTier(item({ kind: 'story', blockers: [{ status: 'resolved' }] }))).toBe('A');
+      expect(deriveTier(item({ kind: 'story' }))).toBe('A');
     });
 
     it('an open issue/idea with an unresolved blocker is C', () => {
-      expect(deriveTier(item({ type: 'issue', blockers: [{ status: 'open' }] }))).toBe('C');
+      expect(deriveTier(item({ kind: 'story', blockers: [{ status: 'open' }] }))).toBe('C');
     });
 
     it('an open issue whose relatedProject is pending (D3-readiness #608) is C, not A', () => {
-      expect(deriveTier(item({ type: 'issue', projectPending: true }))).toBe('C');
+      expect(deriveTier(item({ kind: 'story', projectPending: true }))).toBe('C');
     });
 
     it('an open issue held by a humanGate (#1137) is C, not A — even with every blocker resolved', () => {
       expect(deriveTier(item({
-        type: 'issue', blockers: [{ status: 'resolved' }],
+        kind: 'story', blockers: [{ status: 'resolved' }],
         humanGate: { kind: 'deploy', what: 'run the credentialed deploy from an authed session' },
       }))).toBe('C');
       // The gate alone demotes; project-pending is independent.
-      expect(deriveTier(item({ type: 'idea', humanGate: { kind: 'feedback', what: 'collect training feedback' } }))).toBe('C');
+      expect(deriveTier(item({ kind: 'story', humanGate: { kind: 'feedback', what: 'collect training feedback' } }))).toBe('C');
     });
   });
 
   describe('only open items carry a tier', () => {
     it('non-open items get undefined regardless of type/blockers', () => {
       for (const status of ['active', 'resolved', 'parked']) {
-        expect(deriveTier(item({ status, type: 'decision' }))).toBeUndefined();
-        expect(deriveTier(item({ status, type: 'issue' }))).toBeUndefined();
+        expect(deriveTier(item({ status, kind: 'decision' }))).toBeUndefined();
+        expect(deriveTier(item({ status, kind: 'story' }))).toBeUndefined();
       }
     });
   });

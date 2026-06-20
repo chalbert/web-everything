@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: story
+kind: story
 size: 13
 parent: "1226"
 status: open

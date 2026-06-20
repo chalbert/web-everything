@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: resolved
 blockedBy: []
 dateOpened: "2026-06-19"

@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 size: 13
 parent: "150"
 status: open

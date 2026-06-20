@@ -26,9 +26,8 @@ eleventyComputed:
             <h1 class="plug-title">{% if item.num %}<span style="color: var(--color-text-muted, #94a3b8); font-weight: 600; font-variant-numeric: tabular-nums;">#{{ item.num }}</span> {% endif %}{{ item.title }}</h1>
         </div>
         <div class="plug-status" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; width: 100%; margin-top: 0.5rem;">
-            {{ bk.typeBadge(item.type, 'md') }}
+            {{ bk.kindBadge(item.kind, 'md') }}
             {{ bk.statusBadge(item.status, 'md') }}
-            {% if item.workItem %}{{ bk.metaBadge('Work', item.workItem) }}{% endif %}
             {% if item.size %}{{ bk.metaBadge('Size', item.size) }}{% endif %}
             {% if item.tier %}{{ bk.metaBadge('Tier', item.tier) }}{% endif %}
             {% if item.batchable %}{{ bk.metaBadge('Batchable', 'yes') }}{% endif %}
@@ -82,7 +81,7 @@ eleventyComputed:
                 <li style="display: flex; gap: 0.5rem; align-items: center;">
                     {{ bk.childCircle(child) }}
                     <a href="/backlog/{{ child.id }}/" style="color: var(--color-primary); font-weight: 600; text-decoration: none;">{{ child.title }}</a>
-                    {% if child.size %}{{ bk.metaBadge('Size', child.size) }}{% elif child.workItem %}{{ bk.metaBadge('Work', child.workItem) }}{% endif %}
+                    {% if child.size %}{{ bk.metaBadge('Size', child.size) }}{% elif child.kind %}{{ bk.metaBadge('Kind', child.kind) }}{% endif %}
                     {{ bk.statusBadge(child.status, 'md') }}
                 </li>
                 {% endfor %}

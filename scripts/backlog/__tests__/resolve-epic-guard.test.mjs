@@ -21,8 +21,8 @@ describe('backlog.mjs resolve refuses an epic with open children (#658)', () => 
     expect(SRC).toMatch(/readField\(content, 'parent'\)/);
   });
 
-  it('guards the resolve path on workItem: epic and dies before applyTransition', () => {
-    expect(SRC).toMatch(/v === 'resolve' && readField\(before, 'workItem'\) === 'epic'/);
+  it('guards the resolve path on kind: epic and dies before applyTransition', () => {
+    expect(SRC).toMatch(/v === 'resolve' && readField\(before, 'kind'\) === 'epic'/);
     // the guard sits ahead of the write (applyTransition) in source order
     expect(SRC.indexOf('openChildrenOf(padded)')).toBeLessThan(SRC.indexOf('applyTransition(before, v'));
   });

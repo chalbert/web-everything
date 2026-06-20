@@ -1,6 +1,5 @@
 ---
-type: issue
-workItem: task
+kind: task
 parent: "137"
 status: resolved
 graduatedTo: "plateau/src/plugs/custom-elements/pathInsertionMethods.ts (leadingArgs slice fix + extracted pure splitInsertionArgs); proven by pathInsertionMethods.test.ts (8) + real-patch e2e plugs/custom-elements/__demos__/insert-adjacent-element.* driven by e2e/insert-adjacent-element.spec.ts (3)"

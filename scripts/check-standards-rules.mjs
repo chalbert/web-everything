@@ -18,7 +18,11 @@
 // `preparing` (#375) — a decision being researched by /prepare: non-open + in-flight (drops from
 // selection like `active`) but distinct on the board from a story mid-build.
 export const BACKLOG_STATUSES = new Set(['open', 'active', 'preparing', 'parked', 'resolved']);
-export const BACKLOG_TYPES = new Set(['idea', 'issue', 'decision']);
+// One `kind` axis (#466/#487) — the merged nature+hierarchy field that replaced the former two
+// correlated axes (`type ∈ idea|issue|decision` + `workItem ∈ story|epic|task`). `story|epic|task` keep
+// the sizing/hierarchy semantics; `decision` keeps Tier-B + fork validation. `size` stays a separate
+// orthogonal field; fix-vs-feature, if ever wanted, is an optional `tags: [fix]` (never a field).
+export const BACKLOG_KINDS = new Set(['story', 'epic', 'task', 'decision']);
 // Repo-LOCUS (backlog-workflow.md → "Repo-locus") — the declarative per-locus gate registry (#498/#500).
 // An item's `locus` is its **gate home**: which repo's gate can honestly CLOSE it. A cross-locus `/batch`
 // is locus-agnostic — it packs items of any locus and gates **each in its own locus** using this record:
@@ -41,7 +45,6 @@ export const LOCI = {
     closeoutDiscipline: 'platform-first build; if you must bypass a standard, tag a GAP — a required, non-skippable close-out step (see /exercise-app)',
   },
 };
-export const WORK_ITEMS = new Set(['story', 'epic', 'task']);
 export const FIB = new Set([1, 2, 3, 5, 8, 13]);
 // The digest is each item's lead paragraph (the loader's derived `summary`), surfaced for one-glance
 // selection. Presence is a required-field error; length is a soft nudge — a runaway opener defeats the
@@ -120,7 +123,7 @@ export function validateBacklogItem(item, ctx) {
   const warn = (m, descriptor) => warnings.push({ message: m, descriptor });
 
   const backlogFile = item.id ? `backlog/${item.id}.md` : undefined;
-  for (const f of ['id', 'title', 'type', 'status', 'summary', 'dateOpened']) {
+  for (const f of ['id', 'title', 'kind', 'status', 'summary', 'dateOpened']) {
     if (item[f] === undefined || item[f] === null || item[f] === '')
       err(`Backlog item "${item.id || '<no id>'}" missing required field "${f}"`,
         dMissingField('Backlog', item.id, backlogFile, f));
@@ -131,8 +134,8 @@ export function validateBacklogItem(item, ctx) {
     if (words > DIGEST_MAX_WORDS)
       warn(`Backlog item "${item.id}" digest (lead paragraph) is ${words} words — keep it under ${DIGEST_MAX_WORDS} for one-glance selection`);
   }
-  if (item.type && !BACKLOG_TYPES.has(item.type))
-    err(`Backlog item "${item.id}" has invalid type "${item.type}" (expected ${[...BACKLOG_TYPES].join(' / ')})`);
+  if (item.kind && !BACKLOG_KINDS.has(item.kind))
+    err(`Backlog item "${item.id}" has invalid kind "${item.kind}" (expected ${[...BACKLOG_KINDS].join(' / ')})`);
   if (item.status && !BACKLOG_STATUSES.has(item.status))
     err(`Backlog item "${item.id}" has invalid status "${item.status}" (expected ${[...BACKLOG_STATUSES].join(' / ')})`);
   // Repo-locus: an AUTHORED `locus:` must be a known registry key (a typo'd locus → the batch runs the
@@ -152,9 +155,11 @@ export function validateBacklogItem(item, ctx) {
   if (item.crossRef && (!item.crossRef.url || !item.crossRef.label))
     err(`Backlog item "${item.id}" crossRef must have both "url" and "label"`);
   // graduatedTo records the entity a resolved item became. It doesn't apply to outcomes that aren't a
-  // new entity: an `issue` (a fix/audit) or a `decision` (a ruling). A resolved `idea` that
-  // produced no entity sets the sentinel `graduatedTo: none`; any present value silences this nudge.
-  if (item.status === 'resolved' && !item.graduatedTo && !['issue', 'decision'].includes(item.type))
+  // new entity: a `task` (bounded sub-work / a fix that rolls up) or a `decision` (a ruling). A resolved
+  // `story`/`epic` that produced no entity sets the sentinel `graduatedTo: none`; any present value
+  // silences this nudge. (Pre-#487 this exempted `issue`; issues are now `story`/`task` by kind, so the
+  // fix-class exemption maps to `task`.)
+  if (item.status === 'resolved' && !item.graduatedTo && !['task', 'decision'].includes(item.kind))
     warn(`Backlog item "${item.id}" is resolved but has no graduatedTo — record what it became`);
   // #247 — resolve the value, not just its presence. A compact `kind:slug` ref must have a known kind
   // and a resolving slug; the `none` sentinel and every free-form value don't match GRADUATED_REF and
@@ -172,16 +177,16 @@ export function validateBacklogItem(item, ctx) {
     }
   }
 
-  // ── Agile sizing — drives the /backlog/ burndown ──
-  if (!item.workItem)
-    err(`Backlog item "${item.id}" missing required field "workItem" (story / epic / task)`);
-  else if (!WORK_ITEMS.has(item.workItem))
-    err(`Backlog item "${item.id}" has invalid workItem "${item.workItem}" (expected ${[...WORK_ITEMS].join(' / ')})`);
+  // ── Agile sizing — drives the /backlog/ burndown (keyed on the merged `kind` axis, #487) ──
+  // `kind` presence + enum are checked above; here only the size-by-kind constraints. A `story` requires
+  // Fibonacci points; a `task` is never sized (rolls up to a parent); an `epic` is sized only while
+  // unsliced (the sized-epic-with-children double-count is caught in check-standards.mjs); a `decision`
+  // carries an optional size (its analysis effort) — no constraint.
   if (item.size !== undefined && !FIB.has(item.size))
     err(`Backlog item "${item.id}" has non-Fibonacci size "${item.size}" (expected one of ${[...FIB].join(', ')})`);
-  if (item.workItem === 'story' && item.size === undefined)
+  if (item.kind === 'story' && item.size === undefined)
     err(`Backlog item "${item.id}" is a story but has no size — every story must carry Fibonacci points`);
-  if (item.workItem === 'task' && item.size !== undefined)
+  if (item.kind === 'task' && item.size !== undefined)
     err(`Backlog item "${item.id}" is a task but has a size — tasks are never sized (they roll up under a story/epic)`);
   if (item.parent !== undefined && !knownNums.has(String(item.parent)))
     err(`Backlog item "${item.id}" parent "#${item.parent}" does not resolve to an existing item`,
@@ -502,11 +507,11 @@ export function lintBacklogItemRendering({ item, body }) {
   }
 
   // Buried fork — a fork-shaped section in a non-decision, non-resolved body should be carved to a decision.
-  if (item.type !== 'decision' && item.status !== 'resolved') {
+  if (item.kind !== 'decision' && item.status !== 'resolved') {
     const forkHits = findBuriedForkSections(body);
     if (forkHits.length) {
       const where = forkHits.map((h) => `"${h.heading}" (line ${h.line})`).join(', ');
-      warnings.push(`Backlog item "${id}" (${item.type}) has a fork-shaped section ${where} in a non-decision ` +
+      warnings.push(`Backlog item "${id}" (${item.kind}) has a fork-shaped section ${where} in a non-decision ` +
         `body — if it's a live design fork, carve it to a type:decision item that blocks this one; if it's ` +
         `already resolved or deferred elsewhere, reframe the heading or cite the decision (#NNN). ` +
         `See docs/agent/backlog-workflow.md → the carve rule.`);
@@ -536,7 +541,7 @@ export function lintBacklogItemRendering({ item, body }) {
   //      contradiction (check the box once the scope ships, or don't resolve) → ERROR.
   //   2. forward-looking uncarved-slice language ("not carved", "carve once/after/later") — softer,
   //      because a deliberate deferral that cites its tracking item (#666 → #665) is legitimate → WARN.
-  if (item.status === 'resolved' && item.workItem === 'epic') {
+  if (item.status === 'resolved' && item.kind === 'epic') {
     const uncheckedBoxes = [];
     const uncarvedTells = [];
     let inFence = false;

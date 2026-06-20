@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: open
 dateOpened: "2026-06-11"
 tags: [gap-analysis, competitive-analysis, design-systems, ui-libraries, inventory, coverage, research, repeatable, epic]

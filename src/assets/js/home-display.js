@@ -1,7 +1,7 @@
 // Per-section display tool for the home page. Each toolbar scopes to its own
 // section: a density toggle (default card grid vs. compact list of smaller
 // tiles), a magnifying-glass search that expands inline on click, plus opt-in
-// status/type filter chips (e.g. /backlog/). The chosen view, the active
+// status/kind filter chips (e.g. /backlog/). The chosen view, the active
 // filters, and the search query are all remembered per section in localStorage.
 //
 // init() is safe to run more than once: the dev server hot-reloads pages with
@@ -27,10 +27,9 @@
         }
         const viewKey = 'we-home-view:' + titleText;
         const statusKey = 'we-status-filter:' + titleText;
-        const typeKey = 'we-type-filter:' + titleText;
+        const kindKey = 'we-kind-filter:' + titleText;
         const sizeKey = 'we-size-filter:' + titleText;
         const tierKey = 'we-tier-filter:' + titleText;
-        const workItemKey = 'we-workitem-filter:' + titleText;
         const searchKey = 'we-search-filter:' + titleText;
 
         const buttons = Array.from(toolbar.querySelectorAll('.view-toggle-btn'));
@@ -38,15 +37,13 @@
         const filter = toolbar.querySelector('.home-filter');
         const countTarget = section.querySelector('[data-count-target]');
         const statusChips = Array.from(section.querySelectorAll('[data-status-chip]'));
-        const typeChips = Array.from(section.querySelectorAll('[data-type-chip]'));
+        const kindChips = Array.from(section.querySelectorAll('[data-kind-chip]'));
         const sizeChips = Array.from(section.querySelectorAll('[data-size-chip]'));
         const tierChips = Array.from(section.querySelectorAll('[data-tier-chip]'));
-        const workItemChips = Array.from(section.querySelectorAll('[data-workitem-chip]'));
         const statusAll = statusChips.map(function (c) { return c.dataset.statusChip; });
-        const typeAll = typeChips.map(function (c) { return c.dataset.typeChip; });
+        const kindAll = kindChips.map(function (c) { return c.dataset.kindChip; });
         const sizeAll = sizeChips.map(function (c) { return c.dataset.sizeChip; });
         const tierAll = tierChips.map(function (c) { return c.dataset.tierChip; });
-        const workItemAll = workItemChips.map(function (c) { return c.dataset.workitemChip; });
 
         // Cards are re-queried live so a hot-reload that adds/removes a backlog
         // item is reflected without a captured stale list.
@@ -65,18 +62,16 @@
             return new Set(allValues.filter(function (s) { return defaultExclude.indexOf(s) === -1; }));
         }
         function activeStatuses() { return statusChips.length ? readSet(statusKey, statusAll, ['resolved']) : null; }
-        function activeTypes() { return typeChips.length ? readSet(typeKey, typeAll, []) : null; }
+        function activeKinds() { return kindChips.length ? readSet(kindKey, kindAll, []) : null; }
         function activeSizes() { return sizeChips.length ? readSet(sizeKey, sizeAll, []) : null; }
         function activeTiers() { return tierChips.length ? readSet(tierKey, tierAll, []) : null; }
-        function activeWorkItems() { return workItemChips.length ? readSet(workItemKey, workItemAll, []) : null; }
 
         function applyFilter() {
             const q = filter ? filter.value.trim().toLowerCase() : '';
             const st = activeStatuses();
-            const ty = activeTypes();
+            const kd = activeKinds();
             const sz = activeSizes();
             const tr = activeTiers();
-            const wi = activeWorkItems();
             let shown = 0;
             cards().forEach(function (card) {
                 const title = card.querySelector('.project-title');
@@ -84,7 +79,7 @@
                 const text = ((title ? title.textContent : '') + ' ' + (desc ? desc.textContent : '')).toLowerCase();
                 const failSearch = !!q && text.indexOf(q) === -1;
                 const failStatus = st && card.dataset.status && !st.has(card.dataset.status);
-                const failType = ty && card.dataset.type && !ty.has(card.dataset.type);
+                const failKind = kd && card.dataset.kind && !kd.has(card.dataset.kind);
                 // A size subset is an explicit "show only these point sizes", so an unsized
                 // card (epic/task with no points) is excluded too — unlike tier below, where
                 // a missing value passes. When every size is active, nothing is hidden.
@@ -93,8 +88,7 @@
                 // Only open items carry a tier; a card with no data-tier always passes the tier
                 // facet, so filtering to Tier A narrows the open pool without hiding active/resolved.
                 const failTier = tr && card.dataset.tier && !tr.has(card.dataset.tier);
-                const failWorkItem = wi && card.dataset.workitem && !wi.has(card.dataset.workitem);
-                const hidden = failSearch || failStatus || failType || failSize || failTier || failWorkItem;
+                const hidden = failSearch || failStatus || failKind || failSize || failTier;
                 card.classList.toggle('is-filtered-out', hidden);
                 if (!hidden) shown++;
             });
@@ -143,10 +137,9 @@
         }
 
         wireChips(statusChips, 'statusChip', statusKey, statusAll, ['resolved'], activeStatuses);
-        wireChips(typeChips, 'typeChip', typeKey, typeAll, [], activeTypes);
+        wireChips(kindChips, 'kindChip', kindKey, kindAll, [], activeKinds);
         wireChips(sizeChips, 'sizeChip', sizeKey, sizeAll, [], activeSizes);
         wireChips(tierChips, 'tierChip', tierKey, tierAll, [], activeTiers);
-        wireChips(workItemChips, 'workitemChip', workItemKey, workItemAll, [], activeWorkItems);
 
         function setView(view) {
             const isList = view === 'list';
@@ -214,10 +207,9 @@
 
         // Re-apply the saved state on every run (first load and hot-reload).
         syncChips(statusChips, 'statusChip', activeStatuses);
-        syncChips(typeChips, 'typeChip', activeTypes);
+        syncChips(kindChips, 'kindChip', activeKinds);
         syncChips(sizeChips, 'sizeChip', activeSizes);
         syncChips(tierChips, 'tierChip', activeTiers);
-        syncChips(workItemChips, 'workitemChip', activeWorkItems);
         applyFilter();
         let savedView = 'grid';
         try { savedView = localStorage.getItem(viewKey) || 'grid'; } catch (e) { /* ignore */ }

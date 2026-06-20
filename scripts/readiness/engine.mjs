@@ -39,8 +39,8 @@ import { buildReport, source as reportSource, section as reportSection, score as
 /** Numeric-stable ascending sort by the leading NNN id, so output never depends on load order. */
 const byNum = (a, b) => Number(a.num) - Number(b.num);
 
-/** Is this item a buildable (non-decision/review) work item the readiness rubric can gate? */
-const isBuildable = (it) => it.type === 'issue' || it.type === 'idea';
+/** Is this item a buildable (non-decision) work item the readiness rubric can gate? */
+const isBuildable = (it) => it.kind !== 'decision';
 
 /**
  * Compute the deterministic readiness report for a set of loaded backlog items.
@@ -100,7 +100,7 @@ export function computeReadiness(items) {
     // missing-size — a story with no Fibonacci points. Flag only (the estimate is human judgment).
     // Scoped to stories to match the validator's hard rule exactly; an epic's points depend on
     // whether it is unstoried (a parent-graph judgment), so epics are deliberately not flagged here.
-    if (it.workItem === 'story' && it.size === undefined) {
+    if (it.kind === 'story' && it.size === undefined) {
       normalization.push({
         kind: 'missing-size', num: it.num, id: it.id, file: fileOf(it), applicable: false,
         detail: 'story has no size — assign Fibonacci points by hand',
@@ -123,8 +123,8 @@ export function computeReadiness(items) {
  * NOTHING. The skills run this once for the ranked shortlist, then apply the only judgment a field
  * can't decide: the body-fork pre-flight, on the shortlist only.
  *
- * Ordering (deterministic; same state → same order): leverage desc (unblock-the-chain-first) → issue
- * before idea → smaller first (task=0, then `size`) → NNN asc. The Tier-A list and its `batchable`
+ * Ordering (deterministic; same state → same order): leverage desc (unblock-the-chain-first) →
+ * smaller first (task=0, then `size`) → NNN asc. The Tier-A list and its `batchable`
  * subset share this order; Tier B (decisions, one nod away) is ranked by leverage for decision-mode.
  *
  * @param {Array<object>} items  Loader items — each carries `tier`, `batchable`, `leverageScore`,
@@ -136,8 +136,8 @@ export function computeReadiness(items) {
  */
 export function computeSelection(items) {
   const project = (it) => ({
-    num: it.num, id: it.id, title: it.title, type: it.type,
-    workItem: it.workItem, size: it.size, tier: it.tier, batchable: !!it.batchable,
+    num: it.num, id: it.id, title: it.title, kind: it.kind,
+    size: it.size, tier: it.tier, batchable: !!it.batchable,
     batchCost: it.batchCost,
     // Repo-locus (backlog-workflow.md → "Repo-locus"): the gate that can honestly close this item. A
     // pack takes only its own locus; cross-locus items surface separately. Loader-derived (explicit
@@ -158,12 +158,11 @@ export function computeSelection(items) {
     unblocksToReady: it.unblocksToReady ?? 0,
   });
   // Smaller-first key: a `task` is bounded sub-work (0); a sized story uses its points; anything
-  // unsized sorts last. Effort tiebreak only — leverage and type dominate.
-  const sizeKey = (it) => (it.workItem === 'task' ? 0 : typeof it.size === 'number' ? it.size : 99);
-  const typeKey = (it) => (it.type === 'issue' ? 0 : 1); // issue (known fix) before idea (build)
+  // unsized sorts last. Effort tiebreak only — leverage dominates. (The pre-#487 "issue before idea"
+  // tiebreak is gone with the type axis; fix-vs-feature is now an optional `tags: [fix]`, not a rank input.)
+  const sizeKey = (it) => (it.kind === 'task' ? 0 : typeof it.size === 'number' ? it.size : 99);
   const rank = (a, b) =>
     (b.leverageScore ?? 0) - (a.leverageScore ?? 0)
-    || typeKey(a) - typeKey(b)
     || sizeKey(a) - sizeKey(b)
     || Number(a.num) - Number(b.num);
 
@@ -182,8 +181,8 @@ export function computeSelection(items) {
   // child stories/tasks, so it's a `/slice` candidate, not buildable work. Split out of the agent-ready
   // tally so a container epic isn't counted alongside the very slices its work lives in (mirrors the
   // loader `sliceable` field + the Prioritisation tab's "ready to slice" bucket). Derived from
-  // `workItem` so it holds for in-memory test fixtures that don't carry the loader field.
-  const sliceable = tierA.filter((it) => it.workItem === 'epic');
+  // `kind` so it holds for in-memory test fixtures that don't carry the loader field.
+  const sliceable = tierA.filter((it) => it.kind === 'epic');
 
   // In-flight (#083 legible-stop): items another session is ACTIVELY working (`status: active`) that
   // are batch-shaped (task or story·≤8) — i.e. the items that WOULD be in the batch pool were they
@@ -192,7 +191,7 @@ export function computeSelection(items) {
   // `claim`ed the open work. Byte-deterministic (a pure function of on-disk `status`), so it belongs
   // here in the core counts, NOT at the time/session-dependent reservation boundary in the CLI.
   const isBatchShape = (it) =>
-    it.workItem === 'task' || (it.workItem === 'story' && typeof it.size === 'number' && it.size <= 8);
+    it.kind === 'task' || (it.kind === 'story' && typeof it.size === 'number' && it.size <= 8);
   const inFlight = items.filter((it) => it.status === 'active' && isBatchShape(it)).sort(rank).map(project);
 
   return {

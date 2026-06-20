@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: task
+kind: task
 parent: "934"
 status: resolved
 blockedBy: ["945", "944"]

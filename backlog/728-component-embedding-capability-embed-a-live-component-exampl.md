@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: epic
+kind: epic
 status: open
 dateOpened: "2026-06-15"
 tags: [embedding, iframe, components, docs, mechanism, capability]

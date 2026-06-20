@@ -1,6 +1,5 @@
 ---
-type: idea
-workItem: story
+kind: story
 size: 2
 status: parked
 dateOpened: "2026-06-07"

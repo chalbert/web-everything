@@ -35,7 +35,7 @@ import { loadSemantics } from './lib/semantics-loader.cjs';
 import { loadPresets } from './lib/presets-loader.cjs';
 import { loadDataRegistry } from './lib/registry-loader.cjs';
 import {
-  BACKLOG_STATUSES, BACKLOG_TYPES, WORK_ITEMS, FIB, FILE, blockSpecFile,
+  BACKLOG_STATUSES, BACKLOG_KINDS, FIB, FILE, blockSpecFile,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated,
   checkStatus, validateProtocol, validatePreset, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
@@ -105,9 +105,9 @@ const RESEARCH_STATUSES = new Set(['open', 'resolved', 'draft', 'closed', 'super
 // with the Eleventy freshness badge; staleness derivation is `deriveResearchFreshness` (#477, warn-only below).
 const ISO_DURATION = /^P(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-// Backlog operational axis (BACKLOG_STATUSES/BACKLOG_TYPES) and the agile sizing axis
-// (WORK_ITEMS/FIB) are imported from ./check-standards-rules.mjs — the single definition shared with
-// the backlog-rule unit tests (#251). See docs/agent/backlog-workflow.md → "Agile sizing".
+// Backlog operational axis (BACKLOG_STATUSES) and the merged kind+sizing axis (BACKLOG_KINDS/FIB) are
+// imported from ./check-standards-rules.mjs — the single definition shared with the backlog-rule unit
+// tests (#251). See docs/agent/backlog-workflow.md → "Agile sizing".
 const BLOCK_TYPES = new Set(['Store', 'Parser', 'Behavior', 'Directive', 'Component', 'Module']);
 
 // ── Load specs ───────────────────────────────────────────────────────────────
@@ -605,7 +605,7 @@ for (const item of backlog) {
   }
 }
 for (const item of backlog) {
-  if (item.workItem !== 'epic' || typeof item.size !== 'number') continue;
+  if (item.kind !== 'epic' || typeof item.size !== 'number') continue;
   const kids = childrenOf.get(item.num) || [];
   const sized = kids.filter((k) => typeof k.size === 'number').length;
   if (sized)
@@ -624,7 +624,7 @@ for (const item of backlog) {
 //       reconcile it (resolve the epic, or add the next slice). Warn, don't fail — it's a nudge.
 const CHILDLESS_REASONS = new Set(['blocked', 'undecided', 'untriaged', 'program']);
 for (const item of backlog) {
-  if (item.workItem !== 'epic') continue;
+  if (item.kind !== 'epic') continue;
   const kids = childrenOf.get(item.num) || [];
   if (!kids.length) continue;
   const openKids = kids.filter((k) => k.status !== 'resolved');
@@ -1040,7 +1040,7 @@ try {
 // colour added to one but not the other). So: each surface MUST import the shared file, and MUST NOT
 // define any of the shared badge macros locally. Mechanical guard so the parity rule isn't just a comment.
 {
-  const SHARED_BADGE_MACROS = ['typeBadge', 'statusBadge', 'sizeBadge', 'workItemBadge', 'tierBadge', 'unslicedBadge', 'metaBadge', 'epicStatusBadge', 'tagsRow', 'childCircle', 'blockerChip'];
+  const SHARED_BADGE_MACROS = ['kindBadge', 'statusBadge', 'sizeBadge', 'tierBadge', 'unslicedBadge', 'metaBadge', 'epicStatusBadge', 'tagsRow', 'childCircle', 'blockerChip'];
   for (const rel of ['src/backlog.njk', 'src/backlog-pages.njk']) {
     const file = join(ROOT, rel);
     if (!existsSync(file)) continue;
@@ -1053,33 +1053,33 @@ try {
   }
 }
 
-// ── 10. Backlog type-filter UI must cover every BACKLOG_TYPE ───────────────────
-// The /backlog/ board hides any card whose `data-type` is not an *active filter chip*
-// (src/assets/js/home-display.js → `failType`). The chip set is built from hard-coded type
+// ── 10. Backlog kind-filter UI must cover every BACKLOG_KIND ───────────────────
+// The /backlog/ board hides any card whose `data-kind` is not an *active filter chip*
+// (src/assets/js/home-display.js → `failKind`). The chip set is built from hard-coded kind
 // lists in src/backlog.njk (the "Tracked work" facet + the "Prioritisation" table facet). When a
-// new type is added to BACKLOG_TYPES (the SoT in check-standards-rules.mjs) but a UI list is not
-// updated, EVERY item of that type renders into the DOM yet is permanently invisible — there is no
+// new kind is added to BACKLOG_KINDS (the SoT in check-standards-rules.mjs) but a UI list is not
+// updated, EVERY item of that kind renders into the DOM yet is permanently invisible — there is no
 // chip to re-enable it. That is exactly how `type: review` items (#602/#610) vanished from the board
-// while passing every other check. Assert each hard-coded list covers the full type vocabulary so
+// while passing every other check. Assert each hard-coded list covers the full kind vocabulary so
 // the drift fails the gate instead of silently swallowing a whole class of items.
 try {
   const njk = readFileSync(join(ROOT, 'src/backlog.njk'), 'utf8');
-  // Both facets declare their order as a bracketed string-array literal of type tokens. Match every
-  // `[ "idea", "issue", … ]` whose members are all known types — that uniquely identifies the two
-  // type-filter lists without coupling to surrounding template syntax.
-  const TYPE_TOKENS = [...BACKLOG_TYPES];
+  // Both facets declare their order as a bracketed string-array literal of kind tokens. Match every
+  // `[ "story", "epic", … ]` whose members are all known kinds — that uniquely identifies the two
+  // kind-filter lists without coupling to surrounding template syntax.
+  const KIND_TOKENS = [...BACKLOG_KINDS];
   const listLiterals = [...njk.matchAll(/\[((?:\s*["'][a-z]+["']\s*,?)+)\]/g)]
     .map((m) => m[1].match(/["']([a-z]+)["']/g).map((q) => q.replace(/["']/g, '')))
-    .filter((toks) => toks.every((t) => BACKLOG_TYPES.has(t)) && toks.includes('decision'));
+    .filter((toks) => toks.every((t) => BACKLOG_KINDS.has(t)) && toks.includes('decision'));
   if (!listLiterals.length)
-    err('Backlog type-filter check: could not find any type-list literal in src/backlog.njk (template shape changed — update check-standards.mjs §10)');
+    err('Backlog kind-filter check: could not find any kind-list literal in src/backlog.njk (template shape changed — update check-standards.mjs §10)');
   for (const toks of listLiterals) {
-    const missing = TYPE_TOKENS.filter((t) => !toks.includes(t));
+    const missing = KIND_TOKENS.filter((t) => !toks.includes(t));
     if (missing.length)
-      err(`src/backlog.njk type-filter list [${toks.join(', ')}] omits backlog type(s) ${missing.map((t) => `"${t}"`).join(', ')} — those items render but are permanently hidden (no filter chip). Add them to every type list in backlog.njk.`);
+      err(`src/backlog.njk kind-filter list [${toks.join(', ')}] omits backlog kind(s) ${missing.map((t) => `"${t}"`).join(', ')} — those items render but are permanently hidden (no filter chip). Add them to every kind list in backlog.njk.`);
   }
 } catch (e) {
-  err(`Backlog type-filter coverage check failed: ${e.message}`);
+  err(`Backlog kind-filter coverage check failed: ${e.message}`);
 }
 
 // ── 11. Static template a11y lint (#772, complements the #770/#771 rendered axe gate) ──
