@@ -13,6 +13,9 @@ export { validatorResolutionSuite } from './validator-resolution.vectors.js';
 export { sessionReplayEnvelopeSuite } from './session-replay-envelope.vectors.js';
 export { slideTransitionReducedMotionSuite } from './slide-transition-reduced-motion.vectors.js';
 export { presentationA11ySuite } from './presentation-a11y.vectors.js';
+// The Doc Spec suite (#1163) is a pure (manifest, cases) → DocsSite golden-vector suite, a different shape
+// from the interaction-script ConformanceVectorSuite — exported on its own, not in `conformanceSuites`.
+export { webdocsDocSpecSuite, assertDocSpecSuite, DocSpecSchemaError } from './webdocs.vectors.js';
 
 import type { ConformanceVectorSuite } from './schema.js';
 import { validatorResolutionSuite } from './validator-resolution.vectors.js';
