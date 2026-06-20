@@ -513,6 +513,7 @@ for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('
 // can score without an LLM. Guard the graph's integrity: every edge must resolve to a real item,
 // never point at itself, and never form a cycle (the readiness algorithm assumes acyclicity).
 const blockedEdges = new Map(); // num -> [target nums], for the cycle walk
+const statusByNum = new Map(backlog.map((i) => [i.num, i.status]));
 for (const item of backlog) {
   if (item.blockedBy === undefined) continue;
   const backlogFile = item.id ? `backlog/${item.id}.md` : undefined;
@@ -535,6 +536,13 @@ for (const item of backlog) {
     targets.push(target);
   }
   if (item.num) blockedEdges.set(item.num, targets);
+  // Stale-block guard: a non-resolved item whose blockedBy edges are ALL resolved is no longer actually
+  // blocked — the prerequisite landed but the edge (and any `childlessReason: blocked`) was never updated.
+  // This is the #1210 trap, and it's the failure mode the CHILDLESS_REASONS exemption above could mask, so
+  // surface it here. Partial-resolved is normal (prereqs land one at a time), so only flag a FULLY cleared
+  // block. The fix: start the item, or re-point blockedBy at the genuine remaining open dependency.
+  if (item.status !== 'resolved' && targets.length && targets.every((t) => statusByNum.get(t) === 'resolved'))
+    warn(`Backlog item "${item.id}" is still marked blocked but every blockedBy target (${targets.map((t) => `#${t}`).join(', ')}) is resolved — the block is stale. Start it, or re-point blockedBy at the real remaining open dependency (and clear \`childlessReason: blocked\` if it no longer applies).`);
 }
 // Cycle detection over the resolved edges (DFS with a colour map). A back-edge means A blocks B
 // blocks … blocks A — no item could ever start, so the readiness function would never converge.

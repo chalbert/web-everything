@@ -36,17 +36,31 @@ Do exactly this, in order:
    An epic passes review when its scope was actually delivered by its children, or every remaining strand
    is a **deliberate deferral that cites its tracking `#NNN`**. State the pass/fail verdict in one line.
 
-   On **fail, you must reconcile it — never leave it as a bare "kept open"** (the gate would just re-flag
-   it every run, the limbo this guard exists to kill). Drive one of:
-   - **scaffold the next slice** — the remaining scope is carvable now → create the next child item
-     (`backlog.mjs scaffold …`, parented to the epic). The epic now has an open child, so it's no longer
-     "all slices done"; OR
-   - **declare the stall** — the remaining scope can't be carved yet (blocked / undecided / untriaged /
-     program) → ensure the epic carries the matching `childlessReason` (and a `blockedBy` edge if it's
-     blocked). As of the gate's `CHILDLESS_REASONS` exemption, a declared `childlessReason` is a
-     legitimate steady state and clears the nudge — so the candidate stops re-surfacing.
-   Present these as the options for the item and apply the one that fits (a blocked epic that already
-   declares its `childlessReason` is *already* reconciled — confirm and move on).
+   On **fail, you MUST reconcile it — a non-resolvable item can never just stay parked at the resolve
+   cue** (the gate would re-flag it every run, the limbo this guard exists to kill). First **validate any
+   stated block is still live**, then drive exactly one reconciliation. Present the options for the item,
+   recommend one, and apply it:
+
+   - **Stale block → re-point (check this FIRST).** If the epic is `blockedBy: [...]`, resolve each edge
+     and confirm the targets are still **open**. If they're now **resolved**, the block is stale — the
+     item only *looks* non-resolvable. Do NOT leave it "blocked": find the genuine remaining dependency
+     (read the body / any readiness-map child), **file it if it doesn't exist yet** (`backlog.mjs
+     scaffold …`, set its `locus`/`relatedProject`), and **re-point** `blockedBy` at the real open item.
+     If there is no real remaining dependency, the block was the only thing holding it open → fall to
+     *scaffold the next slice* or *resolve* as the scope dictates. (This is the #1210 case: `blockedBy:
+     [1175,765]` both resolved → re-pointed at the FUI-build #1228.)
+   - **Scaffold the next slice.** The remaining scope is carvable now → create the next child item
+     (`backlog.mjs scaffold … --parent=NNN`). The epic now has an open child, so it's no longer "all
+     slices done."
+   - **Declare the stall (only on a LIVE edge).** The remaining scope genuinely can't be carved yet
+     (blocked / undecided / untriaged / program) → ensure the epic carries the matching `childlessReason`
+     **and**, if blocked, a `blockedBy` edge to a still-**open** item. The gate's `CHILDLESS_REASONS`
+     exemption then makes this a legitimate steady state and the candidate stops re-surfacing — but a
+     `childlessReason: blocked` with no live blocker is the stale-block trap above, not a valid stall.
+
+   A blocked epic that already declares a `childlessReason` is only *already reconciled* once you've
+   confirmed its blocker is still open — otherwise reconcile per the stale-block path. Never close on
+   `--force` to clear a warning; reconcile the real state instead.
 
 2. **The no-open-slice guard is enforced by the CLI.** As of #658, `backlog.mjs resolve` itself refuses
    to close a `workItem: epic` that still has open children — it enumerates them by the `parent:` EDGE
