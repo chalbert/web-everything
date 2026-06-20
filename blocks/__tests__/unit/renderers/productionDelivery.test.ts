@@ -46,6 +46,39 @@ describe('deliverModule', () => {
     });
   });
 
+  it('carries richer declared manifest fields forward — the CEM pointer + description (#1161, not dropped)', () => {
+    const served = serve(DEF, { form: 'wc-class' });
+    const { packageManifest } = deliverModule(served, {
+      id: 'user-card',
+      version: '1.2.3',
+      manifest: { customElements: 'custom-elements.json', description: 'A user card', keywords: ['ui', 'card'] },
+    });
+    // Richer fields are carried…
+    expect(packageManifest.customElements).toBe('custom-elements.json');
+    expect(packageManifest.description).toBe('A user card');
+    expect(packageManifest.keywords).toEqual(['ui', 'card']);
+    // …and the derived core stays intact.
+    expect(packageManifest.name).toBe('@frontierui/user-card');
+    expect(packageManifest.type).toBe('module');
+    expect(packageManifest.sideEffects).toBe(true);
+  });
+
+  it('drops a declared override of a derived field and reports it — never silent (#1161)', () => {
+    const served = serve(DEF, { form: 'wc-class' });
+    const artifact = deliverModule(served, {
+      id: 'user-card',
+      manifest: { name: '@evil/hijack', sideEffects: false, description: 'kept' },
+    });
+    // Derived identity wins over the declared override…
+    expect(artifact.packageManifest.name).toBe('@frontierui/user-card');
+    expect(artifact.packageManifest.sideEffects).toBe(true);
+    // …non-colliding richer fields still carry…
+    expect(artifact.packageManifest.description).toBe('kept');
+    // …and the dropped overrides are surfaced, not swallowed.
+    expect(artifact.diagnostics.join('\n')).toMatch(/manifest field "name" is derived/);
+    expect(artifact.diagnostics.join('\n')).toMatch(/manifest field "sideEffects" is derived/);
+  });
+
   it('honours a custom scope and base URL (cache-friendly absolute delivery)', () => {
     const served = serve(DEF, { form: 'wc-class' });
     const artifact = deliverModule(served, { id: 'user-card', scope: '@acme', baseUrl: 'https://cdn.example.com/v1/' });

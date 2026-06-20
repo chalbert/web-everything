@@ -13,6 +13,11 @@
  * compiled module bytes + file name, the import-map entry, and a minimal `package.json` manifest — and
  * assembles a whole production import map from a set of them ({@link buildImportMap}).
  *
+ * The manifest derivation is forward-compatible (#1161): richer declared fields (the `customElements` CEM
+ * pointer, `description`, …) ride through into the emitted `package.json` instead of being dropped, while the
+ * six derived fields stay authoritative — a declared override of a derived field is reported, never silently
+ * applied. So a new package.json field needs no change here.
+ *
  * Scope follows the constellation rule (npm-scope-mirrors-layer, #239): served *implementations* publish
  * under **`@frontierui`**, never `@webeverything` (the standard never ships impl). It owns no transform:
  * the compiled bytes come from `serveCompiled` (the esbuild seam); this only frames them for delivery.
@@ -33,9 +38,25 @@ export interface ProductionDeliveryOptions {
   readonly version?: string;
   /** Base URL the compiled file is served from (no trailing slash); defaults to the package-relative `.`. */
   readonly baseUrl?: string;
+  /**
+   * Richer, forward-compat manifest fields declared by the source CEM / authoring surface, carried into the
+   * emitted `package.json` instead of being dropped (backlog #1161). The canonical link is `customElements`
+   * — a custom-element package points at its Custom Elements Manifest (`customElements: "custom-elements.json"`)
+   * so a consumer can discover the element's declared surface; but any future package.json field
+   * (`description`, `keywords`, `author`, `repository`, `dependencies`, …) is tolerated, not enumerated, so
+   * the derivation never silently drops a richer declared field. A field that collides with a DERIVED core
+   * field (`name`/`version`/`type`/`main`/`exports`/`sideEffects`) is NOT honoured — the derived identity
+   * stays authoritative — and the dropped override is reported in `diagnostics` (never silent).
+   */
+  readonly manifest?: Readonly<Record<string, unknown>>;
 }
 
-/** A minimal, publish-ready `package.json` for a single served component — native ESM, one export. */
+/**
+ * A publish-ready `package.json` for a single served component — native ESM, one export. The six listed
+ * fields are DERIVED and authoritative; the open index signature carries the forward-compat richer fields
+ * declared via {@link ProductionDeliveryOptions.manifest} (e.g. `customElements`, `description`) so a future
+ * field is propagated without a schema change here (#1161).
+ */
 export interface PackageManifest {
   readonly name: string;
   readonly version: string;
@@ -43,7 +64,11 @@ export interface PackageManifest {
   readonly main: string;
   readonly exports: Record<string, string>;
   readonly sideEffects: boolean;
+  readonly [field: string]: unknown;
 }
+
+/** The derived, authoritative manifest fields — a declared override of one of these is dropped (with a diagnostic). */
+const DERIVED_MANIFEST_FIELDS = ['name', 'version', 'type', 'main', 'exports', 'sideEffects'] as const;
 
 /** One import-map entry: the bare specifier and the URL it resolves to in production. */
 export interface ImportMapEntry {
@@ -100,7 +125,7 @@ export function deliverModule(served: ServeResult, opts: ProductionDeliveryOptio
     diagnostics.push(`form "${served.form}" is still "${served.language}", not compiled .js — lower it via serveCompiled (the esbuild seam) before delivery.`);
   }
 
-  const packageManifest: PackageManifest = {
+  const core: PackageManifest = {
     name: bareSpecifier,
     version,
     type: 'module',
@@ -109,6 +134,22 @@ export function deliverModule(served: ServeResult, opts: ProductionDeliveryOptio
     // A custom-element module registers on import (`customElements.define`) — that side effect must survive tree-shaking.
     sideEffects: true,
   };
+
+  // Forward-compat (#1161): carry richer declared fields (e.g. the `customElements` CEM pointer, `description`)
+  // into the manifest rather than dropping them. The derived core stays authoritative — a declared field that
+  // collides with one is dropped, never silently: it's reported in `diagnostics`. Spread richer-first so core wins.
+  let packageManifest = core;
+  if (opts.manifest) {
+    const carried: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(opts.manifest)) {
+      if ((DERIVED_MANIFEST_FIELDS as readonly string[]).includes(key)) {
+        diagnostics.push(`manifest field "${key}" is derived and authoritative — declared override ignored (kept "${String(core[key])}").`);
+        continue;
+      }
+      carried[key] = value;
+    }
+    packageManifest = { ...carried, ...core };
+  }
 
   return {
     id: opts.id,
