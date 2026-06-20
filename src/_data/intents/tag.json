@@ -1,0 +1,36 @@
+{
+  "id": "tag",
+  "name": "Tag Intent",
+  "status": "draft",
+  "summary": "A purely-decorative label/tag — a small inline chip that categorizes or annotates (a topic, a category, a keyword), distinct from the lifecycle Status Indicator and the count-bearing Notification Marker. Minted by #1319 (decompose-overloaded-vocabulary-by-semantic-source): same visual family, different semantic source. Decorative-only — it carries no lifecycle, no count, and no interaction; interactivity composes Action / Selection rather than being baked in.",
+  "dimensions": {
+    "tone": {
+      "description": "The semantic colour family — a category/severity hue, not an ad-hoc hex (the theme resolves it). Beyond the severity set, an open categorical/brand tone covers topic/keyword tags that map to no severity.",
+      "values": [
+        "neutral",
+        "info",
+        "positive",
+        "caution",
+        "critical",
+        "categorical"
+      ]
+    },
+    "emphasis": {
+      "description": "Visual weight of the tag's fill — how strongly it reads against the surface.",
+      "values": [
+        "subtle",
+        "solid",
+        "outline"
+      ]
+    },
+    "shape": {
+      "description": "The visual metaphor for the tag token (reuses the Status Indicator vocabulary).",
+      "values": [
+        "badge",
+        "pill",
+        "tag"
+      ]
+    }
+  },
+  "description": "<h3>What Tag Is</h3><p class=\"text-sm text-gray-600 mb-2\">A <strong>decorative label</strong> &mdash; a small inline chip that <em>categorizes or annotates</em> (a topic, a category, a keyword, a count-less marker). It is the presentational sibling of the <a href=\"/intents/status-indicator/\">Status Indicator</a> and the <a href=\"/intents/notification-marker/\">Notification Marker</a>: <strong>same visual family, different semantic source</strong> (<a href=\"/backlog/1319-decorative-label-tag-intent-distinct-from-lifecycle-status-i/\">#1319</a>, <a href=\"/docs/agent/platform-decisions.md#decompose-overloaded-vocabulary-by-semantic-source\">decompose-overloaded-vocabulary-by-semantic-source</a>). Status Indicator reads a <em>lifecycle</em>; Notification Marker carries a <em>count</em>; Tag carries <strong>neither</strong> &mdash; it is meaning by category alone.</p><h3>Decorative-only (Fork&nbsp;2&nbsp;=&nbsp;A)</h3><p class=\"text-sm text-gray-600 mb-2\">Tag bakes in <strong>no interactivity</strong>. A removable filter-chip or a clickable category is a <em>composition</em> &mdash; the host element also carries an <a href=\"/intents/action/\">Action</a> (a remove/activate control) or <a href=\"/intents/selection/\">Selection</a> (a toggle in a set); Tag stays the inert label underneath. This keeps the decorative axis from re-absorbing behavior it doesn't own.</p><h3>Tone &middot; Emphasis &middot; Shape</h3><p class=\"text-sm text-gray-600 mb-2\"><strong>Tone</strong> (default <code>neutral</code>) is a semantic colour family, not a hex; beyond the severity set, <code>categorical</code> covers topic/keyword tags that map to no severity. <strong>Emphasis</strong> (default <code>subtle</code>) is the fill weight &mdash; <code>subtle</code> / <code>solid</code> / <code>outline</code>. <strong>Shape</strong> reuses the Status Indicator vocabulary &mdash; <code>badge</code> / <code>pill</code> / <code>tag</code>. All three are optional with most-permissive defaults.</p><h3>Accessibility</h3><p class=\"text-sm text-gray-600 mb-2\">A tag is <strong>inert text</strong>. When it conveys meaning <em>beyond colour</em> (a category the sighted reader gets from the hue), it earns an accessible name so the meaning isn't colour-only. It is <strong>not</strong> announced via <a href=\"/intents/live-region-status/\">Live Region Status</a> &mdash; a decorative label is not a live status change. Reproduction note: shadcn's <code>badge</code> remaps onto this intent (it was previously mis-mapped to Status Indicator). Feeds gap-sweep #315.</p>"
+}
