@@ -33,3 +33,5 @@ Full standards + prior-art sweep in we:reports/2026-06-20-palette-source-ingest.
 ## Lineage
 
 Extends the resolved #364 (unified design-token / theming system) — the palette-ingest seam its DTCG adoption makes possible. Does not reopen #364; sits beneath the #747 design-system bundle layer (a bundle could name an external palette source).
+
+**Cross-reference #889** (resolved, locus plateau-app): the Plateau design-system *creator* already ships `parseDtcg` + `parseFigmaVariables` (plateau:plateau-app/src/design-system-creator/importAdapter.ts) that normalize DTCG + Figma variables into the creator's flat `themeTokens` pivot. Distinct track per the constellation — #889 is the **product-layer** import into a creator UI; #1252 is the **standard-layer** import boundary into webtheme's DTCG model. Reuse/mirror #889's parsers rather than rebuilding them; the open work here is the standard-side seam + the broader source set (Tailwind / Material 3 seed / ASE-GPL swatches) #889 doesn't cover.
