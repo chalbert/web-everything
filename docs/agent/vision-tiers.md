@@ -148,6 +148,23 @@ The tier-tags route cheaply: Tier A (deterministic from DOM/CSS), Tier B (algori
 pixels), Tier C (genuine VLM/human judgment). #1035's `/review-design` skill applies this rubric;
 #1036's correction surface persists rubric-scored critiques as labeled pairs.
 
+## Vision correction-surface convention (ratified #1036)
+
+Every human-in-the-loop surface that corrects a vision-provider output (the QC verdict #475, codification
+#396, this design critique #1034, and the Tier-2 RichOutput review #1084) follows two rules:
+
+- **Preserve-both records.** A saved correction keeps the model's proposal **read-only** alongside the human
+  gold, never overwriting it: `{ proposed (the provider output + per-element confidence + provider/model
+  version), corrected (human gold), comment, annotator / timestamp / time-spent, per-element verdict
+  (accept|fix|reject) }`. The model↔human **disagreement** is the active-learning selector (#490/#1081) and
+  the distillation noise-correction signal (#513) — overwriting discards exactly what the corpus exists to
+  capture. This extends the #489 `{frame, verdict}` shape, never breaks it.
+- **One shared review harness.** The contract-agnostic shell — review queue, screenshot canvas + region
+  drag/edit, persistence, accept/fix/reject verbs, no-leakage boundary — is a single module each surface
+  composes by supplying only its own output-contract editor. The shell never forks per vocabulary; the
+  output-contract editor is the only per-surface part. (`plateau:src/vision-review/` is the first
+  implementation; later surfaces migrate it onto the shared harness rather than duplicating the shell.)
+
 ## Open (still to discuss)
 
 - Whether the richer critique runs **on-device (Tier 2)** or **stays hosted** — depends on whether the

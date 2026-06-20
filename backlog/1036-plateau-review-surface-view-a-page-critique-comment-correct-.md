@@ -4,9 +4,12 @@ workItem: story
 size: 8
 parent: "1033"
 blockedBy: ["1034"]
-status: open
+status: resolved
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: none
+codifiedIn: "docs/agent/vision-tiers.md#vision-correction-surface-convention-ratified-1036"
 preparedDate: "2026-06-20"
 relatedReport: reports/2026-06-20-design-critique-correction-surface.md
 tags: [design-reference, vision, design-critique, human-in-the-loop, plateau, training-data]
@@ -35,6 +38,27 @@ of Label Studio / Prodigy / CVAT / Labelbox / SageMaker A2I + the active-learnin
   corrects *values within* this contract; it never edits the contract.
 - **Plateau phase rule:** Phase-1 is browser-only (no backend); a real corpus source / write-back is
   Phase-2 (#554). Mirrors `vision-review/` exactly.
+
+## Ruling — ratified 2026-06-20 (A / A)
+
+Both forks ratified at their bold defaults after an inline red-team (each attack failed):
+
+- **Fork 1 → A · Shared review harness** (~75%). Extract the contract-agnostic shell (review queue,
+  screenshot canvas + region drag/edit, persistence, accept/fix/reject verbs, no-leakage boundary) into one
+  module both surfaces compose; each supplies its own output-contract editor. `plateau:src/vision-review/`
+  (#1084) is migrated onto the harness so there is exactly one shell. Red-team (separation-bias): 1A *is* the
+  separation pattern — the harness is a composable home, the variant editors compose it; the extracted shell
+  is exactly the part that is contract-agnostic, so this is not premature abstraction. Residual is build
+  *sequencing* (refactor the twin now vs migrate in a follow-up), not the end-state.
+- **Fork 2 → A · Preserve-both** (~85%). Persist each pair as `{ proposed (read-only: axes + findings +
+  per-element confidence + provider/model version), corrected (human gold), comment, annotator / timestamp /
+  time-spent, per-element verdict }`; derive edit-distance / disagreement. Extends the #489 `{frame, verdict}`
+  shape, never breaks it. Red-team: the HITL survey is unanimous (Label Studio, A2I) and the disagreement
+  signal is the corpus's literal purpose (#490 active-learning selector, #513 distillation noise-correction);
+  the overwrite alternative is strictly less informative. If Fork 1's harness lands, it standardizes
+  preserve-both and `vision-review/`'s `ReviewRecord` is retrofitted to match.
+
+Build follow-up filed as a separate item (this is a `type:decision`, not the build).
 
 ## The axis being decided
 
