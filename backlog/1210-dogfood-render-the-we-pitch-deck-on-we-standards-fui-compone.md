@@ -2,6 +2,7 @@
 type: idea
 workItem: epic
 status: open
+childlessReason: blocked
 blockedBy: ["1175", "765"]
 dateOpened: "2026-06-20"
 relatedProject: webdocs
