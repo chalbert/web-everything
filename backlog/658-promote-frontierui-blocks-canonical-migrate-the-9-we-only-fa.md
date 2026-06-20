@@ -1,5 +1,6 @@
 ---
 kind: epic
+parent: "1255"
 status: resolved
 blockedBy: ["657"]
 dateOpened: "2026-06-15"

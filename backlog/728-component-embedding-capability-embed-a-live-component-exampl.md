@@ -1,5 +1,6 @@
 ---
 kind: epic
+parent: "1255"
 status: open
 dateOpened: "2026-06-15"
 tags: [embedding, iframe, components, docs, mechanism, capability]

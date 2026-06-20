@@ -1,5 +1,6 @@
 ---
 kind: epic
+parent: "1255"
 status: open
 dateOpened: "2026-06-07"
 tags: [plugs, duplication, drift, single-source, frontierui, maintenance, runtime]

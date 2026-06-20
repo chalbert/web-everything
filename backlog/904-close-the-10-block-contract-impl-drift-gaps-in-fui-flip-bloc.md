@@ -1,5 +1,6 @@
 ---
 kind: epic
+parent: "1255"
 status: resolved
 dateOpened: "2026-06-18"
 dateResolved: "2026-06-20"
