@@ -2,22 +2,46 @@
 kind: story
 size: 5
 parent: "364"
-status: open
+status: resolved
 dateOpened: "2026-06-20"
+blockedBy: ["1274"]
+dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: "we:webtheme/paletteSource.ts"
 relatedReport: "reports/2026-06-20-palette-source-ingest.md"
 tags: []
 ---
 
 # webtheme: load palette from external source (palette-source ingest adapter)
 
+## Progress (batch-2026-06-20) — DONE (first slice; broader source set is follow-on)
+
+Built the ingest boundary in `we:webtheme/paletteSource.ts` per the #1274 ruling:
+- **Default-less open registry** `CustomPaletteSourceRegistry` (#1274 Fork 1 → A) — ships empty, mandates
+  no fixed source; a project registers the parsers it wants (Config-Extends-Platform-Default). No live/
+  credential-holding client (file/snapshot shapes only, #817).
+- **Shared value-type normalization** (`normalizeColorValue` + `argbIntToHex` / `floatRgbToHex`) — hex /
+  ARGB-int (Material MCU) / Figma 0–1 float / oklch string all normalize to webtheme's pivot string value,
+  so the token feeds `extends → derive → compile` unchanged.
+- **First two built-in parsers** (the #1274 build order, DTCG → Tailwind): `parseDtcgPalette` (passthrough
+  — the source already is the pivot) + `parseTailwindPalette` (`{family:{shade:value}}` → DTCG color group,
+  matched on name). A static-mode ingest; generative-seed (Fork 2 → A) hands off to the existing
+  `we:webtheme/schemes.ts` derive (no baking).
+- 11 tests (`we:webtheme/__tests__/paletteSource.test.ts`) incl. an end-to-end ingest → `extendTokens` →
+  `resolveTokens` → `compileToCss` proving the normalized palette flows through. Gate green.
+
+**Follow-on (prioritization, not forks, per #1274):** the Material 3 seed / ASE-GPL / Figma-Variables-export
+parsers register against the same contract; and the richer DTCG **structured-color object**
+(`{colorSpace, components, alpha, hex}`) is a token-model enhancement over the current string pivot — both
+deferred. Reuse `plateau:plateau-app/src/design-system-creator/importAdapter.ts` (#889) shapes when adding them.
 webtheme already adopts DTCG 2025.10 as its internal token model (we:webtheme/tokens.ts parses docs, resolves `{alias}` refs, deep-merges via `extends`) and derives schemes/accent natively (we:webtheme/schemes.ts, we:webtheme/compile.ts). This item adds an **import boundary** in front of that model: a per-source parser/adapter that normalizes an externally-authored palette into the DTCG color-token pivot, which then feeds the existing extends → derive → compile path. Mirrors the Style Dictionary `source → parser → normalized pivot → emit` architecture and our ratified adapter-as-normalization-hub pattern (ingest incumbents bottom-up into a lossy internal pivot). File-then-review — research done, build not started.
 
-## Scope notes (carve a type:decision at pickup)
+## Scope notes (two forks carved to #1274 — this build is `blockedBy` it)
 
-Two genuine forks live here — when this item is picked up, carve them to a `type:decision` item that blocks the build (do not decide them in this story body):
-
-1. **Which sources first / at all** — DTCG color file (already the pivot — trivial), Tailwind `family→{shade:hex}` map, Material 3 seed or scheme JSON, Figma Variables REST (0–1 float `{r,g,b,a}`), flat swatch files (ASE, GIMP .gpl). Prioritized subset vs broad adapter set.
-2. **Static-swatch ingest only vs static + generative** — Material 3 (HCT seed) and Adobe Leonardo (contrast ratios) persist *inputs* and derive; everyone else persists swatches. CSS Color L5 (`oklch(from …)`, `color-mix()`) lets us do the generative derivation natively in-cascade.
+The two genuine forks once listed here are now carved to the `type:decision` #1274
+(webtheme palette-source ingest: source priority + static-only vs generative), which blocks
+this build: (1) which sources first / at all, (2) static-swatch ingest only vs static +
+generative. Do not decide them in this story body — resolve #1274 first, then build to its ruling.
 
 Settled implementation constraints (not forks):
 
