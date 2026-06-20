@@ -41,10 +41,12 @@
     },
     {
       "id": "scroll-driven-animations",
-      "standard": "webscroll",
-      "nativeApi": "scroll-driven animations (animation-timeline, scroll/view-timeline)",
+      "standard": "webscroll project (#014, not yet materialized as a registry def)",
+      "nativeApi": "scroll-driven animations (animation-timeline, scroll-timeline, view-timeline)",
       "baseline": "limited",
-      "registered": false,
+      "registered": true,
+      "registeredIn": "this ledger — the front-A native-first registry; webscroll has no materialized def, and scroll-driven animation is out of the droplist-substrate capabilityMatrix domain",
+      "note": "baseline:false (web-features) — an Interop 2026 focus, maturing; JS scroll observers are the fallback. Default-promote when Baseline",
       "trackingItem": "1265"
     },
     {
