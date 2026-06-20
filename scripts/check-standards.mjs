@@ -499,6 +499,21 @@ for (const it of backlog) {
 if (humanGated.length)
   warn(`${humanGated.length} open item(s) held by a HUMAN GATE — the only residual is a human-only action (credentialed deploy / agent-training feedback / setup / review), not a \`blockedBy\` edge, so the loader demotes them out of Tier A and the selector lists them under "Held — awaiting a human action". Do the action, then remove \`humanGate\`. Items: ${humanGated.join(', ')}`);
 
+// #1275 — CTA INVARIANT (hard gate). Every OPEN item MUST carry a call-to-action: a pill on the
+// Prioritisation table telling whoever picks it up what to do next, or a passive reason it's parked.
+// The loader derives `hasCta` as the exact union of every renderable pill (tier badge / batch / slice /
+// split / stop-the-world / human-gate / blocked-by / project-pending); if it's false the item would
+// render a bare tier badge with no next step — the dead end #1004 surfaced (a project-pending epic whose
+// only signal was "project pending", with no "slice me" cue). This makes that state IMPOSSIBLE to ship:
+// every not-ready item must resolve to one of the known next-actions. To fix a flagged item, give it the
+// state that earns a pill — a `blockedBy` edge (→ blocked), unsliced-epic shape (→ slice), `size > 8`
+// story (→ split), a `relatedProject` to graduate (→ project-pending), or a `humanGate` (→ human action).
+const ctaless = backlog
+  .filter((it) => it.status === 'open' && !it.hasCta)
+  .map((it) => `#${it.num ?? it.id} (${it.kind})`);
+if (ctaless.length)
+  err(`${ctaless.length} OPEN item(s) have NO call-to-action — they would render a bare tier badge with no next step (the #1004 dead-end class). Every not-ready item must resolve to a known next-action: build (Tier A) / ratify (decision) / slice (epic) / split (story>8) / unblock (blockedBy) / graduate the project (relatedProject) / clear a human gate. Fix each item's state so a pill renders. Items: ${ctaless.join(', ')}`);
+
 // ── 6d-bis. Per-item RENDERING lints (#290 raw-HTML · #441 buried-fork · mis-flagged-batchable · #845 ──
 // bad-body-links) — the structural/rendering checks that operate on ONE item's body, consolidated into the
 // shared `lintBacklogItemRendering` (#845) so the whole-repo gate and the scoped `check:standards --item NNN`

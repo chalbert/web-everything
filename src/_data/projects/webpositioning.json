@@ -2,7 +2,7 @@
   "id": "webpositioning",
   "name": "Web Positioning",
   "description": "Standard for anchoring a floating element to another element (tooltips, popovers, menus): placement, collision handling, and tethering. A single positioning provider that any component delegates to — native-first (CSS Anchor Positioning) with pluggable adapters (Floating UI) — so components from different vendors share one engine instead of bundling ten.",
-  "status": "concept",
+  "status": "poc",
   "category": "standard",
   "icon": "/assets/icons/webpositioning.svg",
   "isSvg": true

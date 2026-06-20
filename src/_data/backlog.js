@@ -346,14 +346,22 @@ module.exports = function backlog() {
     // disjoint from `batchable` (open) by the status gate, so the two never double-count.
     item.activeBatchable = item.status === 'active' && batchShape;
 
-    // An open, unblocked `epic` clears every prerequisite (so it's Tier A) but an agent can't BUILD it
-    // directly — its work lives in child stories/tasks. It is ready to be SLICED, not implemented. We
-    // surface that as its own readiness class so the Prioritisation tab doesn't tally a container epic
-    // as buildable work standing NEXT TO the very slices its work already lives in (a visual double-
-    // count — the complaint that drove this). `batchable` ⊂ Tier A and `sliceable` ⊂ Tier A are disjoint:
-    // an epic is never batchable, a task/story is never sliceable. A `story·≥13` stays plain agent-ready
-    // (real buildable work, just beyond the batch pool) — only epics peel off.
-    item.sliceable = item.tier === 'A' && item.kind === 'epic';
+    // An open `epic` with every prerequisite cleared can't be BUILT directly — its work lives in child
+    // stories/tasks. It is ready to be SLICED, not implemented. We surface that as its own readiness class
+    // so the Prioritisation tab doesn't tally a container epic as buildable work standing NEXT TO the very
+    // slices its work already lives in (a visual double-count — the complaint that drove this).
+    //
+    // ORTHOGONAL TO TIER (like `splittable`, NOT `⊂ Tier A`): slicing is *decomposition* — an authoring
+    // act — so it does NOT depend on the leaves being buildable. The `projectPending` / `humanGate`
+    // demotions gate BUILDING a leaf into a not-yet-shipped standard (or past a human-only residual); they
+    // never gate carving the umbrella. A `concept`-project epic like #1004 (webcharts: design shipped, no
+    // impl) is therefore Tier C **and** sliceable — "not ready to build, but ready to slice" — and the
+    // slice IS its call-to-action (carving it produces the build slices that inherit the project-pending
+    // demotion). Only an epic with an OPEN `blockedBy` stays non-sliceable: its decomposition may turn on
+    // the blocker's outcome, so it shows "blocked by #NNN" until that clears. `batchable` (task/story) and
+    // `sliceable` (epic) remain disjoint by kind, so the two pools never double-count.
+    item.sliceable = item.status === 'open' && item.kind === 'epic'
+      && item.blockers.every((b) => b.status === 'resolved');
 
     // Splittable (deterministic) — an open `story` too big to chain (`size` > 8, i.e. the 13 band) is the
     // `/split` skill's story-class candidate: real buildable work, but better cut into ≤5 slices first
@@ -391,6 +399,22 @@ module.exports = function backlog() {
     item.locus = item.locusAuthored ? item.locus
       : isExerciseAppDescendant(item, byNum) ? 'exercise-app'
       : inferLocusFromTags(item.tags);
+
+    // CTA INVARIANT (#1275) — every OPEN item must render at least one pill: a call-to-action telling
+    // whoever picks it up what to DO next (build / slice / split / ratify / unblock / graduate the
+    // project / clear a human gate), or a passive reason it's parked. `hasCta` is the exact union of every
+    // pill the Prioritisation table can render — the agent-ready tier badge (A = build it, B = ratify/
+    // prepare), the batch/slice/split action badges, and the `reasonPill` set (stop-the-world / human-gate
+    // / blocked-by / project-pending). It MUST stay in lockstep with backlog.njk + backlog-badges.njk's
+    // `reasonPill`. `check:standards` hard-errors on any open item where this is false, so a not-ready item
+    // can never ship as a bare tier badge with no next step — the dead-end #1004 surfaced. By construction
+    // it holds: a Tier-C item is blocked (openBlockers), project-pending, or human-gated; a Tier-C epic is
+    // additionally sliceable when its blockers clear — so every branch lights a pill.
+    item.hasCta = item.tier === 'A' || item.tier === 'B'
+      || item.batchable || item.activeBatchable
+      || item.sliceable || item.splittable
+      || item.stopTheWorld || !!item.humanGate
+      || item.openBlockers.length > 0 || item.projectPending;
   });
 
   // Reverse dependency edges + unblock-leverage (#254) — INVERT `blockedBy` so each item knows who
@@ -507,10 +531,16 @@ module.exports = function backlog() {
   // Prioritisation chips so a container epic is shown as slice-work, not as a buildable Tier-A item.
   items.countAgentReady = items.filter((it) => it.tier === 'A' && !it.sliceable).length;
   items.countSliceable = items.filter((it) => it.sliceable === true).length;
-  // Oversized stories (story · size > 8) flagged as `/split` candidates — surfaced on the agent-ready chip
-  // ("· N to split") as an orthogonal tally, NOT a separate readiness bucket (an oversized story is real
-  // buildable work; see the `splittable` note above). Includes Tier-C blocked oversized stories too.
+  // Oversized stories (story · size > 8) flagged as `/split` candidates. NOT a separate readiness bucket (an
+  // oversized story is real buildable work; see the `splittable` note above). Includes Tier-C blocked
+  // oversized stories too. `countSplittableReady` is the agent-ready (Tier A) subset — the "· N to split"
+  // sub-tally folded onto the single "agent-ready" Prioritisation pill (the old standalone "to split" pill
+  // was merged in: agent-ready-beyond-batch is the SUPERSET — it also holds stop-the-world / unsized Tier-A
+  // items that aren't splittable — so the pill anchors on agent-ready and shows the split count inside it).
+  // Blocked (Tier C) oversized stories aren't agent-ready, so they sit under the "not ready" pill, still
+  // carrying a `split` badge and reachable via the "Splittable only" chip.
   items.countSplittable = items.filter((it) => it.splittable === true).length;
+  items.countSplittableReady = items.filter((it) => it.splittable === true && it.tier === 'A').length;
   // Of the ready-to-slice epics, how many actually need a human/agent action (slice or resolve) versus
   // are just tracking open children. The chip leads with this so the screen never reads as "N epic
   // to-dos" when most are passive rollups.
