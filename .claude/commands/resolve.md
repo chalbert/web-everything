@@ -12,13 +12,14 @@ Do exactly this, in order:
 1. **Locate the item.** Find `backlog/NNN-*.md`. If none, stop and say so. Read its frontmatter —
    note `workItem` and `status`.
 
-2. **If `workItem: epic` — run the child guard.** Find every item whose frontmatter has `parent: NNN`
-   (`grep -l "^parent: *NNN" backlog/*.md`). Read each child's `status`.
-   - If **any** child is not `resolved` (i.e. `open`/`active`/`preparing`/`parked`), **STOP**. Do not
-     resolve. Report the open children as a checklist (`#NNN — status`) and say the umbrella can't close
-     while live work sits under it — resolve or re-parent those first.
-   - If every child is `resolved` (or there are none), continue. This is the *all slices done* case the
-     gate nudges you to reconcile.
+2. **The no-open-slice guard is enforced by the CLI.** As of #658, `backlog.mjs resolve` itself refuses
+   to close a `workItem: epic` that still has open children — it enumerates them by the `parent:` EDGE
+   (never the body's stale "N children" prose) and dies *before* writing, listing each `#NNN — status`.
+   So you don't grep by hand. If step 3 reports the refusal, **STOP**: report that checklist, say the
+   umbrella can't close while live work sits under it, and resolve or re-parent those children first.
+   Only pass `--force` if the caller has explicitly accepted closing over open children (e.g. a
+   mid-re-parent). An epic with every child resolved (or none) resolves cleanly — the *all slices done*
+   case the gate nudges you to reconcile.
 
 3. **Resolve.** Run `node scripts/backlog.mjs resolve NNN [--graduated-to=…]`. `resolve` is legal from
    `open` or `active`, so an open epic umbrella closes directly — no claim step. For an epic whose scope

@@ -15,7 +15,7 @@
  *
  * Usage:
  *   node scripts/backlog.mjs claim   <NNN> [--as=preparing]      # open    → active (or preparing, for /prepare) + dateStarted=today; prints rename slug
- *   node scripts/backlog.mjs resolve <NNN> [--graduated-to=X] [--codified-to=Y]  # active → resolved + dateResolved=today (+ graduatedTo); a type:decision REQUIRES --codified-to=<doc#anchor|one-off> (#911 gate)
+ *   node scripts/backlog.mjs resolve <NNN> [--graduated-to=X] [--codified-to=Y] [--force]  # active → resolved + dateResolved=today (+ graduatedTo); a type:decision REQUIRES --codified-to=<doc#anchor|one-off> (#911 gate); an epic with open children is refused unless --force (#658 no-open-slice guard)
  *   node scripts/backlog.mjs release <NNN>                       # active|preparing → open (abandon/redirect; stamps untouched)
  *   node scripts/backlog.mjs scaffold --type=idea --workitem=story --size=3 --title="..." [--digest="..."] [--blocked-by=NNN,NNN] [--parent=NNN]
  *   node scripts/backlog.mjs reserve   <NNN...> --session=<slug>     # soft-hold planned items (#083 cross-session deprioritize)
@@ -59,6 +59,26 @@ function ok(payload, human) {
   process.exit(0);
 }
 
+/**
+ * Enumerate the open children of an epic by `parent:` EDGE (never the body's "N children" prose, which
+ * goes stale — the #658 footgun). Returns every child item whose `status` isn't `resolved`, so `resolve`
+ * can refuse to close an umbrella with live work under it BEFORE writing the bad state (instead of the
+ * post-hoc `check:standards` catch). Mirrors the gate's resolved-epic-with-open-child rule.
+ * @param {string} padded  The epic's zero-padded NNN.
+ * @returns {{ num: string, status: string }[]}
+ */
+function openChildrenOf(padded) {
+  const open = [];
+  for (const f of files()) {
+    const content = readFileSync(join(DIR, f), 'utf8');
+    const parent = readField(content, 'parent');
+    if (parent !== padded) continue;
+    const status = readField(content, 'status') || 'open';
+    if (status !== 'resolved') open.push({ num: f.match(/^\d+/)[0], status });
+  }
+  return open;
+}
+
 /** Resolve a bare NNN (or NNN-slug) to its current filename, or die if it's missing/ambiguous. */
 function resolveFile(ref) {
   if (!ref) die('missing <NNN> — e.g. `backlog.mjs claim 122`');
@@ -82,6 +102,17 @@ function transition(v) {
   // ownership (a perpetually-dirty tree is the normal baseline), so claim never inspects it.
   const as = flag('as');
   if (v === 'claim' && as && as !== 'active' && as !== 'preparing') die(`--as="${as}" is not valid — use --as=preparing (a /prepare claim) or omit for a normal active claim`);
+  // No-open-slice guard (#658): an epic can't close while live work sits under it. Enumerate children by
+  // the `parent:` EDGE (not the body's stale "N children" listing) and refuse BEFORE writing — so the
+  // `resolved-epic-with-open-child` contradiction is never created, not just caught later by the gate.
+  // `--force` overrides for the rare deliberate mid-re-parent case (prints what it stepped over).
+  if (v === 'resolve' && readField(before, 'workItem') === 'epic') {
+    const padded = file.match(/^\d+/)[0];
+    const openKids = openChildrenOf(padded);
+    if (openKids.length && !argv.includes('--force'))
+      die(`#${padded} is an epic with ${openKids.length} open child slice(s) — resolve or re-parent them first, or pass --force:\n${openKids.map((k) => `    #${k.num} — ${k.status}`).join('\n')}`);
+    if (openKids.length) console.error(`${YEL}warning:${RST} ${DIM}--force: resolving epic #${padded} over ${openKids.length} open child(ren): ${openKids.map((k) => `#${k.num}`).join(', ')}${RST}`);
+  }
   const res = applyTransition(before, v, { today: today(), graduatedTo: flag('graduated-to'), codifiedTo: flag('codified-to'), as });
   if (res.error) die(`#${file.match(/^\d+/)[0]} — ${res.error}`);
   writeFileSync(abs, res.content);
@@ -273,7 +304,7 @@ switch (verb) {
   default:
     console.error(`${BLD}backlog.mjs${RST} — mechanical backlog-status CLI\n` +
       `  ${GRN}claim${RST} <NNN> [--as=preparing]   open → active (or preparing, /prepare) + dateStarted\n` +
-      `  ${GRN}resolve${RST} <NNN> [--graduated-to=X] [--codified-to=Y]   active → resolved + dateResolved (decision REQUIRES --codified-to=<doc#anchor|one-off>)\n` +
+      `  ${GRN}resolve${RST} <NNN> [--graduated-to=X] [--codified-to=Y] [--force]   active → resolved + dateResolved (decision REQUIRES --codified-to=<doc#anchor|one-off>; an epic with open children is refused unless --force)\n` +
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
       `  ${GRN}scaffold${RST} --type= --workitem= --size= --title= [--digest=] [--blocked-by=] [--parent=]\n` +
       `  ${GRN}calibrate${RST} --points= --context-pct= [--stop-reason=budget|context|empty-pool|fork|gate|outgrew|manual|abort]   fold a session into the batch point-budget estimate\n` +
