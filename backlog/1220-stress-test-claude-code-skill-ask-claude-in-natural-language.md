@@ -3,8 +3,11 @@ type: idea
 workItem: story
 size: 2
 locus: frontierui
-status: open
+status: resolved
 dateOpened: "2026-06-20"
+dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: "fui:.claude/skills/stress-test/SKILL.md"
 crossRef: { url: /backlog/1167-autonomous-exploratory-ui-testing-tool-fui-owned-engine-that/, label: "#1167 autonomous UI tester epic (resolved) — this is its conversational trigger" }
 tags: [fui-devtool, exploratory-testing, claude-code, skill, dx]
 ---
