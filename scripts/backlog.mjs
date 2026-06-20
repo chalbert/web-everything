@@ -14,7 +14,7 @@
  * discipline: `claim` prints the rename slug for you to copy, but the script can't (and doesn't) rename.
  *
  * Usage:
- *   node scripts/backlog.mjs claim   <NNN> [--as=preparing]      # open    → active (or preparing, for /prepare) + dateStarted=today; prints rename slug
+ *   node scripts/backlog.mjs claim   <NNN> [--as=preparing] [--force]  # open    → active (or preparing, for /prepare) + dateStarted=today; prints rename slug. Refuses if the item's own file is dirty (claim-first guard); --force overrides
  *   node scripts/backlog.mjs resolve <NNN> [--graduated-to=X] [--codified-to=Y] [--force]  # active → resolved + dateResolved=today (+ graduatedTo); a type:decision REQUIRES --codified-to=<doc#anchor|one-off> (#911 gate); an epic with open children is refused unless --force (#658 no-open-slice guard)
  *   node scripts/backlog.mjs release <NNN>                       # active|preparing → open (abandon/redirect; stamps untouched)
  *   node scripts/backlog.mjs scaffold --type=idea --workitem=story --size=3 --title="..." [--digest="..."] [--blocked-by=NNN,NNN] [--parent=NNN]
@@ -96,12 +96,28 @@ function transition(v) {
   const rel = `backlog/${file}`;
   const abs = join(DIR, file);
   const before = readFileSync(abs, 'utf8');
-  // No git/commit check here: concurrency is owned by the status transition itself — `claim` only
-  // succeeds from `open`, so a second claimer hits an already-`active` item and the transition errors
-  // (plus the `reserve` session soft-holds, #083). The working tree's commit state is irrelevant to
-  // ownership (a perpetually-dirty tree is the normal baseline), so claim never inspects it.
+  // No WHOLE-tree git/commit check here: concurrency is owned by the status transition itself — `claim`
+  // only succeeds from `open`, so a second claimer hits an already-`active` item and the transition errors
+  // (plus the `reserve` session soft-holds, #083). The tree's commit state at large is irrelevant to
+  // ownership (a perpetually-dirty tree is the normal baseline), so claim never inspects the tree —
+  // EXCEPT the per-item cleanliness guard below, which inspects only the single file being claimed.
   const as = flag('as');
   if (v === 'claim' && as && as !== 'active' && as !== 'preparing') die(`--as="${as}" is not valid — use --as=preparing (a /prepare claim) or omit for a normal active claim`);
+  // Claim-first guard: a claim must be the FIRST action on an item — grounding, editing, and presenting
+  // its substance all come AFTER the flip (next turn). The status transition alone can't catch a session
+  // that read + edited the body BEFORE claiming: claim would silently bundle those pre-claim edits into the
+  // claimed file (it doesn't break — it absorbs them, which is worse, since the two-go arc was skipped).
+  // So for `claim` we additionally refuse when THE ITEM'S OWN FILE is already dirty — scoped to this one
+  // file (via `-- <path>`) so a routinely-dirty tree or concurrent sessions on OTHER items never trip it.
+  // Best-effort: a git hiccup must never block a claim. `--force` overrides for the rare legit case (e.g.
+  // claiming a freshly-scaffolded, not-yet-committed item). NOTE: a pre-claim READ + chat presentation
+  // leaves no on-disk trace and so cannot be gated here — the skill's claim-first STOP covers that path.
+  if (v === 'claim' && !argv.includes('--force')) {
+    let dirty = '';
+    try { dirty = execFileSync('git', ['status', '--porcelain', '--', rel], { cwd: ROOT, encoding: 'utf8' }).trim(); }
+    catch { /* best-effort — never block a claim on a git/IO hiccup */ }
+    if (dirty) die(`#${file.match(/^\d+/)[0]} — ${rel} has uncommitted edits; a claim must be the first action on an item (ground / edit / present AFTER claiming, next turn). Commit, stash, or revert those edits and re-claim — or pass --force if this is deliberate (e.g. a freshly-scaffolded item).`);
+  }
   // No-open-slice guard (#658): an epic can't close while live work sits under it. Enumerate children by
   // the `parent:` EDGE (not the body's stale "N children" listing) and refuse BEFORE writing — so the
   // `resolved-epic-with-open-child` contradiction is never created, not just caught later by the gate.
@@ -303,7 +319,7 @@ switch (verb) {
   case 'unreserve': unreserve(); break;
   default:
     console.error(`${BLD}backlog.mjs${RST} — mechanical backlog-status CLI\n` +
-      `  ${GRN}claim${RST} <NNN> [--as=preparing]   open → active (or preparing, /prepare) + dateStarted\n` +
+      `  ${GRN}claim${RST} <NNN> [--as=preparing] [--force]   open → active (or preparing, /prepare) + dateStarted; refuses on a dirty item file (claim-first), --force overrides\n` +
       `  ${GRN}resolve${RST} <NNN> [--graduated-to=X] [--codified-to=Y] [--force]   active → resolved + dateResolved (decision REQUIRES --codified-to=<doc#anchor|one-off>; an epic with open children is refused unless --force)\n` +
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
       `  ${GRN}scaffold${RST} --type= --workitem= --size= --title= [--digest=] [--blocked-by=] [--parent=]\n` +

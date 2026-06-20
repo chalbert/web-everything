@@ -33,9 +33,21 @@ like `100`, or a full `NNN-slug`), do **not** run the ranking flow (steps 1–3)
   the easy-to-miss trap: a named item (especially a `type:decision`) tempts you to dive straight into
   reading, grounding, and presenting the substance. Do **not**. For an `open` item the *only* action
   this turn is `claim` (step 4) — which STOPs to emit the rename slug — and the work begins next turn.
-  In particular, do **not read or edit the item before claiming**: `backlog.mjs claim` refuses on a
-  dirty file, so a pre-claim edit silently breaks the canonical claim. Claim first, ground/edit/present
-  after.
+  **Treat the claim as the literal first tool call**: do **not** `Read` the item body, run grounding
+  shell, or present any substance before the claim STOP.
+
+  Two distinct anti-paths, only one of which is mechanically caught:
+  - **Pre-claim *edit*** — caught. `backlog.mjs claim` refuses when the item's own file is dirty
+    (the claim-first guard; scoped to that one file, `--force` overrides). Without it, claim would
+    *silently bundle* your pre-claim edits into the claimed file — it doesn't error, which is worse,
+    so the guard turns that into a hard refusal.
+  - **Pre-claim *read + present*** — **NOT** catchable. Reading the body and presenting a stance in
+    chat leaves no on-disk trace, so no CLI can gate it. The harm is real anyway: you form and publish
+    a recommendation before the item is flipped, collapsing the two-go arc (a *selection* go vs a later
+    *ratification* go) and racing concurrent sessions on an unclaimed, unlabelled item. This is exactly
+    the failure the claim-first STOP exists to prevent — discipline is the only guard, so honour it.
+
+  Claim first, ground/edit/present after.
 
 **0b. Invocation is the keyword `decision`/`review` → decision-mode.** The caller wants the
 highest-leverage *call to make*, not an agent-ready build. **Invert the Tier-A bias**: skip the
@@ -129,7 +141,8 @@ an item*). The backlog file is the durable, resumable record — the item body *
 4. **Claim it on start — claiming is its own turn; do not start work in it.** This step runs whenever you
    flip an item to `active`, **including decision-mode** (0b/3a/3b), where the claimable work is the
    discussion itself. Run **`node scripts/backlog.mjs claim <NNN>`** — it wins the race (refuses if no
-   longer `open` or the file is dirty), flips `open → active` + stamps `dateStarted` (today) in one splice,
+   longer `open`, or if the item's own file has uncommitted edits — the claim-first guard, `--force` to
+   override), flips `open → active` + stamps `dateStarted` (today) in one splice,
    and prints the rename slug. (`check:standards` does not backfill `dateStarted`, so the stamping command
    is the point; `dateResolved`/`graduatedTo` come later, at step 7.) Then **STOP that turn immediately** —
    the claim edit and the label prompt are the *only* things that turn does. Do **not** chain reads,
