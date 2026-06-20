@@ -127,7 +127,8 @@ interface Legend { title?: string; }
         renderer-swap contract: any drawing engine renders a <a href="#vega-lite-l1">Vega-Lite L1
         <code>ChartSpec</code></a> behind one interface, taking the semantic spec plus resolved
         <a href="/projects/webtheme/">Web Theme</a> tokens and producing output. The <strong>native-first
-        default</strong> is an SVG renderer that ships with the standard; adapters (Vega, Plotly, ECharts)
+        default</strong> is an SVG renderer Frontier UI ships as the standard's canonical default impl
+        behind the contract (the spec lives here; the renderer runtime lives in FUI); adapters (Vega, Plotly, ECharts)
         register as alternative impls — the same impl-swap shape as
         <a href="/projects/webpositioning/#protocol-anchor-positioning">CustomPositioner</a> and
         <a href="/projects/webrealtime/#protocol-transport-negotiation">CustomTransportProvider</a>.
