@@ -642,6 +642,20 @@ for (const item of backlog) {
   // only to be told by branch C to resolve — the contradiction of "stalled" and "done" at once.
 }
 
+// `unsplittableReason` — the story-side mirror of an epic's `childlessReason` (src/_data/backlogMeta.js
+// → unsplittableReasonMeta). A `/split` run that rules an oversized story could-not-split records the
+// reason to clear the split flag (so the board stops re-flagging it). It's only meaningful on an OPEN
+// story in the should-split band (size > 8) — anywhere else it's a misplaced field that would silently
+// do nothing — and its value must be a known reason. (docs/agent/backlog-workflow.md → "Splitting".)
+const UNSPLITTABLE_REASONS = new Set(['foundational', 'undecided', 'atomic', 'fixture']);
+for (const item of backlog) {
+  if (item.unsplittableReason === undefined) continue;
+  if (!UNSPLITTABLE_REASONS.has(item.unsplittableReason))
+    err(`Backlog item "${item.id}" has unsplittableReason: "${item.unsplittableReason}" — not a known reason. Use one of: ${[...UNSPLITTABLE_REASONS].join('|')}.`);
+  else if (item.kind !== 'story' || typeof item.size !== 'number' || item.size <= 8 || item.status === 'resolved')
+    err(`Backlog item "${item.id}" has unsplittableReason but is not an open oversized story (kind: story, size > 8) — the field only clears the /split flag there. Drop it, or re-size/re-kind the item.`);
+}
+
 // Date↔status coherence: dateResolved only makes sense on a resolved item (the burndown
 // plots resolutions; a stray date on an open item would mis-place it on the chart).
 for (const item of backlog) {

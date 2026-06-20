@@ -362,8 +362,11 @@ module.exports = function backlog() {
     // of the agent-ready pool — an oversized story IS buildable as-is, so `splittable` is an ORTHOGONAL
     // flag layered ON TOP of its tier (it stays in the agent-ready/not-ready bucket), not a tier of its own.
     // Independent of `tier`: a still-blocked (Tier C) oversized story is just as worth splitting.
+    // `unsplittableReason` is the story-side escape hatch (mirrors an epic's `childlessReason`): once a
+    // `/split` run rules a story could-not-split, recording the reason CLEARS the split flag (so it stops
+    // re-flagging) and the table shows a muted "atomic · <reason>" pill instead — analyzed, not a to-do.
     item.splittable = item.status === 'open' && item.kind === 'story'
-      && typeof item.size === 'number' && item.size > 8;
+      && typeof item.size === 'number' && item.size > 8 && !item.unsplittableReason;
 
     // Batch COST (deterministic) — the context-budget weight used to pack a POINTS-BUDGETED batch
     // (docs/agent/backlog-workflow.md → "Running a batch"). Distinct from burndown `size`: a `task`

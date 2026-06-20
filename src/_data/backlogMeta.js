@@ -18,6 +18,17 @@ module.exports = {
     untriaged: { label: 'needs triage', bg: '#ede9fe', fg: '#5b21b6', tip: 'No child stories yet — a holding-pen of candidates; each must be triaged (promote / fold / drop) before any become stories.' },
     program: { label: 'ongoing program', bg: '#e0f2fe', fg: '#075985', tip: 'No fixed child stories by design — a continuous program measured by progress, not a fixed set of child stories.' },
   },
+  // Why an oversized story (size > 8) is NOT a /split candidate after analysis — author-supplied
+  // (`unsplittableReason`), the story-side mirror of an epic's `childlessReason`. Recording it clears the
+  // `splittable` flag (no orange split badge, excluded from the "Splittable only" chip) and shows this muted
+  // "atomic · <label>" pill instead, naming WHY + the action that would unblock a future split. Values track
+  // the /split could-not-split rubric failures (docs/agent/backlog-workflow.md → "Splitting").
+  unsplittableReasonMeta: {
+    foundational: { label: 'foundational first', bg: '#ede9fe', fg: '#5b21b6', tip: 'Could-not-split: the reproduction/impl surface does not exist yet — a foundational slice must land first to expose the seams. This story IS that slice; re-run /split once it ships.' },
+    undecided: { label: 'needs decision', bg: '#fef3c7', fg: '#92400e', tip: 'Could-not-split: a buried fork would just scatter across the slices. Resolve the decision first (carve it to a type:decision card), then re-run /split.' },
+    atomic: { label: 'atomic', bg: '#f1f5f9', fg: '#475569', tip: 'Could-not-split: genuinely one coherent deliverable — no clean seam where one slice ends and the next begins. Build it as-is (just beyond the batch pool).' },
+    fixture: { label: 'needs fixture', bg: '#e0f2fe', fg: '#075985', tip: 'Could-not-split: the slices can only demo independently once a shared fixture is authored up front. Author the fixture first, then re-run /split.' },
+  },
   // Human-gate kinds (#1137 class) — a residual only a person can clear, so the item is demoted out of
   // Tier A like a pending project (a non-`blockedBy` hold). The pill on the Prioritisation tab + the
   // selector's held section read their label/colour/tooltip from here. `feedback` covers agent-training
