@@ -15,12 +15,13 @@ const { deriveProjectReadiness } = require('../backlog.js') as {
   deriveProjectReadiness: (
     items: any[],
     projectStatus: Map<string, string>,
+    builtSurfaceProjects?: Set<string>,
   ) => { relatedProjectStatus: string | undefined; projectPending: boolean }[];
 };
 
 /** Index the derivation back onto each item's num for readable assertions. */
-function derive(items: any[], projectStatus: Map<string, string>) {
-  const out = deriveProjectReadiness(items, projectStatus);
+function derive(items: any[], projectStatus: Map<string, string>, builtSurfaceProjects?: Set<string>) {
+  const out = deriveProjectReadiness(items, projectStatus, builtSurfaceProjects);
   return new Map(items.map((it, i) => [it.num, out[i]]));
 }
 
@@ -87,5 +88,55 @@ describe('D3-readiness — projectPending demotion (#608/#621)', () => {
     expect(d.get('2')!.projectPending).toBe(false);
     expect(d.get('3')!.projectPending).toBe(false);
     expect(d.get('4')!.projectPending).toBe(false);
+  });
+
+  // ── #1260 — broadened shipped-surface proxy (parent-chain / graduatedTo / built demo) ──
+  it('(#1260 shape 2) does NOT demote when surface ships via a resolved parent-CHAIN, not a repeated tag', () => {
+    // The normal carve shape: build slices parented to an impl epic that names the project; the slices
+    // themselves carry no `relatedProject`. The original proxy (own-frontmatter only) missed this.
+    const items = [
+      { num: '10', kind: 'epic', status: 'open', relatedProject: 'webrealtime' }, // impl epic names the project
+      { num: '11', kind: 'story', status: 'resolved', parent: '10' }, // resolved slice, NO own relatedProject
+      { num: '12', kind: 'story', status: 'open', relatedProject: 'webrealtime' }, // the open build under test
+    ];
+    const projectStatus = new Map([['webrealtime', 'concept']]);
+    const d = derive(items, projectStatus);
+    expect(d.get('12')!.projectPending).toBe(false); // chain reaches a resolved surface ⇒ not pending
+  });
+
+  it('(#1260 webcharts lesson) graduatedTo: project:<id> does NOT clear pending — it scaffolds, not builds', () => {
+    // `graduatedTo: project:<id>` marks the item that CREATED the project entity + its design slices
+    // (webcharts #570), which is project creation, not a shipped runtime. Counting it would wrongly clear a
+    // designed-not-built project, so it is deliberately excluded. (The webcharts shape: a resolved scaffold
+    // epic with `graduatedTo: project:webcharts`, design tasks parented under it, but an OPEN impl epic.)
+    const items = [
+      { num: '20', kind: 'epic', status: 'resolved', graduatedTo: 'project:webcharts' }, // the scaffold
+      { num: '21', kind: 'task', status: 'resolved', parent: '20' }, // a design slice under the scaffold
+      { num: '22', kind: 'story', status: 'open', relatedProject: 'webcharts' }, // the build under test
+    ];
+    const projectStatus = new Map([['webcharts', 'concept']]);
+    expect(derive(items, projectStatus).get('22')!.projectPending).toBe(true); // scaffold ≠ built surface
+  });
+
+  it('(#1260 shape — built demo) a built demo clears pending; without one the same project pends', () => {
+    const items = [{ num: '30', kind: 'story', status: 'open', relatedProject: 'webportals' }];
+    const projectStatus = new Map([['webportals', 'concept']]);
+    // no demo names it (and no resolved surface) ⇒ pends
+    expect(derive(items, projectStatus, new Set()).get('30')!.projectPending).toBe(true);
+    // a conformance/demo names it (a built runtime surface) ⇒ not pending
+    expect(derive(items, projectStatus, new Set(['webportals'])).get('30')!.projectPending).toBe(false);
+  });
+
+  it('(#1260 webcharts counter-case) KEEPS pending a designed-not-built project (spec page only, no built surface)', () => {
+    // webcharts: a `concept` project whose design/spec shipped but whose runtime genuinely does not exist
+    // (an OPEN impl epic, zero resolved build items, no demo). Spec pages are deliberately NOT a signal, so
+    // it must stay demoted — the over-correction the broadening must avoid.
+    const items = [
+      { num: '40', kind: 'epic', status: 'open', relatedProject: 'webcharts' }, // OPEN impl epic, not resolved
+      { num: '41', kind: 'story', status: 'open', relatedProject: 'webcharts' }, // the build under test
+    ];
+    const projectStatus = new Map([['webcharts', 'concept']]);
+    const d = derive(items, projectStatus, new Set()); // no demo names webcharts
+    expect(d.get('41')!.projectPending).toBe(true);
   });
 });

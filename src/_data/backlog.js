@@ -69,14 +69,46 @@ function isExerciseAppDescendant(item, byNum) {
 //   • relatedProjectStatus — the status of the item's `relatedProject` (`'unknown'` if not in the map,
 //     `undefined` if the item has no `relatedProject`);
 //   • projectPending — true ⇔ an OPEN issue/idea whose `relatedProject` is a `concept` project with
-//     ZERO resolved surface. A `concept` project that already has resolved work is status-DRIFT (#617),
+//     ZERO shipped surface. A `concept` project that already has shipped work is status-DRIFT (#617),
 //     not a pending project, so its dependents are NOT demoted. We never demote on a `concept` label alone.
-function deriveProjectReadiness(items, projectStatus) {
-  const resolvedByProject = new Map();
-  for (const it of items) {
-    if (it.status === 'resolved' && typeof it.relatedProject === 'string') {
-      resolvedByProject.set(it.relatedProject, (resolvedByProject.get(it.relatedProject) || 0) + 1);
+//
+// #1260 — the shipped-surface proxy was originally "≥1 resolved item with `relatedProject: <proj>` in its
+// OWN frontmatter", which missed a real shipped-surface shape, leaving a live project falsely
+// `project pending`: resolved build work tied to the project via a `parent:` CHAIN (the normal carve shape —
+// slices parented to an impl epic that names the project, none repeating the `relatedProject` tag). That is
+// now counted by walking each resolved item's parent chain for a `relatedProject`. A second surface — a
+// shipped RUNTIME/DEMO — is supplied by the caller as `builtSurfaceProjects` (projects named by a
+// conformance/demo, computed from the demos registry).
+//
+// The webcharts LESSON gates which signals count: a signal must witness a BUILT/RUNTIME artifact (a resolved
+// build item filed against the project, or a demo), never a bare DESIGN/SCAFFOLD surface — a project whose
+// spec/scaffold shipped but whose runtime genuinely doesn't exist (an open impl epic only) must STAY
+// pending. So two tempting signals are DELIBERATELY excluded: (a) a project SPEC PAGE (webcharts has one yet
+// isn't built), and (b) `graduatedTo: project:<id>` — that marks an item that SCAFFOLDED the project entity
+// (e.g. webcharts #570 created the project + its design slices), which is project creation, not a runtime,
+// so counting it would wrongly clear a designed-not-built project. The parent-chain walk likewise keys only
+// on `relatedProject` (a build filed against the project), never on a `graduatedTo: project` ancestor.
+function deriveProjectReadiness(items, projectStatus, builtSurfaceProjects = new Set()) {
+  const byNum = new Map(items.map((it) => [String(it.num), it]));
+  // Walk a resolved item's `parent:` chain (cycle-guarded) for the first `relatedProject` it can reach —
+  // so a build slice parented to an impl epic counts toward that epic's project even when the slice itself
+  // carries no `relatedProject`. Returns the item's own `relatedProject` first (the #617 original signal).
+  const projectViaChain = (it) => {
+    const seen = new Set();
+    let cur = it;
+    while (cur && !seen.has(String(cur.num))) {
+      seen.add(String(cur.num));
+      if (typeof cur.relatedProject === 'string') return cur.relatedProject;
+      if (cur.parent == null) break;
+      cur = byNum.get(String(cur.parent));
     }
+    return undefined;
+  };
+  const shippedSurface = new Set(builtSurfaceProjects);
+  for (const it of items) {
+    if (it.status !== 'resolved') continue;
+    const viaChain = projectViaChain(it);
+    if (viaChain) shippedSurface.add(viaChain);
   }
   return items.map((item) => {
     const relatedProjectStatus = typeof item.relatedProject === 'string'
@@ -84,7 +116,7 @@ function deriveProjectReadiness(items, projectStatus) {
     const projectPending = item.status === 'open'
       && item.kind !== 'decision'
       && relatedProjectStatus === 'concept'
-      && !(resolvedByProject.get(item.relatedProject) > 0);
+      && !shippedSurface.has(item.relatedProject);
     return { relatedProjectStatus, projectPending };
   });
 }
@@ -260,9 +292,22 @@ module.exports = function backlog() {
     const { loadDataRegistry } = require('../../scripts/lib/registry-loader.cjs');
     projectStatus = new Map(loadDataRegistry('projects').map((p) => [p.id, p.status]));
   } catch { /* missing/malformed projects → no D3-readiness demotion (degrade, don't crash) */ }
+  // #1260 — a shipped RUNTIME/DEMO surface also clears `project pending`: every project named by a
+  // conformance/demo (a built, runnable artifact — the webcharts-safe signal, never a bare spec page) is
+  // treated as having shipped surface. Computed here (the demos registry is a sibling loader) and passed
+  // into the pure derivation so the function itself stays testable over plain items.
+  let builtSurfaceProjects = new Set();
+  try {
+    const loadDemos = require('./demos.js');
+    const demos = Array.isArray(loadDemos) ? loadDemos : (typeof loadDemos === 'function' ? loadDemos() : []);
+    for (const d of demos) {
+      const named = Array.isArray(d.projects) ? d.projects : (d.project ? [d.project] : []);
+      for (const p of named) if (typeof p === 'string') builtSurfaceProjects.add(p);
+    }
+  } catch { /* missing/malformed demos → fall back to item-only surface signals (degrade, don't crash) */ }
   // D3-readiness fields (#608/#621), derived by the pure helper so the loader and its regression test
   // share one source of truth. Aligned by index with `items`.
-  const projectReadiness = deriveProjectReadiness(items, projectStatus);
+  const projectReadiness = deriveProjectReadiness(items, projectStatus, builtSurfaceProjects);
 
   items.forEach((item, idx) => {
     const edges = Array.isArray(item.blockedBy) ? item.blockedBy : [];
