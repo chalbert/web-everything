@@ -1,10 +1,11 @@
 {
   "id": "breakpoint-observer",
   "name": "Breakpoint Observer",
-  "status": "concept",
+  "status": "active",
   "type": "Module",
   "summary": "Runtime implementation of the Breakpoint Intent, mapping semantic step names to concrete CSS media queries or container queries and exposing reactive state.",
   "implementsIntent": "breakpoint",
+  "implementedBy": "@frontierui/blocks/breakpoint-observer/index.ts",
   "traits": [
     {
       "name": "withMobileFirst",
