@@ -16,6 +16,15 @@
         "destructive"
       ]
     },
+    "variant": {
+      "description": "Purely-presentational treatment, orthogonal to `level` and behavior-free (#1318, open-numbered-variants). The listed values are the recommended core set, not a closed enum — this is an open-numbered axis, so authors may mint additional members per the variant contract (a value names a presentational treatment that leaves semantics and behavior unchanged). Optional with a most-permissive default: absent → the block renders the conventional treatment for the `level`. Surface is a plain attribute consumed by CSS (`button[variant]`); no wrapper required.",
+      "values": [
+        "fill",
+        "outline",
+        "ghost",
+        "link"
+      ]
+    },
     "busy": {
       "description": "What the user experiences when the action is pending",
       "values": [
