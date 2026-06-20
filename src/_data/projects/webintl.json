@@ -1,0 +1,9 @@
+{
+  "id": "webintl",
+  "name": "Web Intl",
+  "description": "Standard for <strong>localization</strong> — turning one UI into many locales: message formatting (Unicode MessageFormat 2.0), locale negotiation and fallback chains, lazy translation loading, and RTL/bidi adaptation. Native <code>Intl</code> and CSS logical properties are the default; FormatJS / i18next / Lingui plug in behind a translation registry. Defines the Localization protocol so message catalogs and locale strategies from different vendors are swappable and combinable.",
+  "status": "concept",
+  "category": "standard",
+  "icon": "/assets/icons/webintl.svg",
+  "isSvg": true
+}

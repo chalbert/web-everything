@@ -1,0 +1,10 @@
+{
+  "id": "customeditorengineregistry",
+  "name": "CustomEditorEngineRegistry",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Exposes window.customEditorEngine for registering named editing-engine providers (native contenteditable+InputEvent, ProseMirror, Lexical, Slate, Quill) so any editing surface delegates to one shared engine resolved through the injector chain. The native-first default is registered by the standard; library adapters register on top, precedence + graceful degradation the only rules.",
+  "projects": [
+    "webediting"
+  ]
+}

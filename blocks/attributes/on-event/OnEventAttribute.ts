@@ -30,14 +30,14 @@
 import CustomAttribute, {
   type CustomAttributeOptions,
   type ImplementedAttribute,
-} from '../../../plugs/webbehaviors/CustomAttribute';
+} from '@frontierui/plugs/webbehaviors/CustomAttribute';
 import type {
   CustomExpressionParserRegistry,
   ParsedExpression,
   Query,
   ResolvedValues,
-} from '../../../plugs/webexpressions';
-import InjectorRoot from '../../../plugs/webinjectors/InjectorRoot';
+} from '@frontierui/plugs/webexpressions';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
 
 /**
  * Error thrown when no parser registry is found in the injector chain
@@ -258,7 +258,7 @@ export function createOnEventAttribute(): ImplementedAttribute {
       if (!this.target) return undefined;
       return InjectorRoot.getProviderOf(
         this.target,
-        `customContexts:${contextName}` as keyof import('../../../plugs/webinjectors/InjectorRoot').ProviderTypeMap
+        `customContexts:${contextName}` as keyof import('@frontierui/plugs/webinjectors/InjectorRoot').ProviderTypeMap
       );
     }
 

@@ -1,0 +1,10 @@
+{
+  "id": "customeditorengine",
+  "name": "CustomEditorEngine",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Base contract an editing-engine provider implements — attach(host, options) wiring an editable surface over the structured-node-tree pivot and returning a cleanup, emitting normalized InputEvent-shaped changes and negotiating the available editing-surface capability tier (contenteditable floor, editcontext upgrade). Satisfied alike by the native-first contenteditable default and by every library adapter.",
+  "projects": [
+    "webediting"
+  ]
+}

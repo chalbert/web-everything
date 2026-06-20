@@ -1,0 +1,10 @@
+{
+  "id": "customsanitizer",
+  "name": "CustomSanitizer",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Base contract a sanitizer provider implements — sanitize(html, config) → safe-html — narrowing untrusted markup to an allowed element/attribute schema. Satisfied alike by the native Element.setHTML default and by the DOMPurify production-floor adapter.",
+  "projects": [
+    "webvalidation"
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "id": "webbehaviors",
+  "name": "Web Behaviors",
+  "description": "Standard to allow custom attributes to add functionality to any HTML element.",
+  "status": "poc",
+  "category": "standard",
+  "icon": "/assets/icons/webbehaviors.svg",
+  "isSvg": true
+}

@@ -1,0 +1,8 @@
+{
+  "id": "popover",
+  "label": "Popover API",
+  "webFeaturesKey": "popover",
+  "baseline": "2024",
+  "polyfill": "polyfillable",
+  "summary": "<code>popover</code> attribute + <code>popovertarget</code> — top-layer, light-dismiss, focus management with no JS."
+}

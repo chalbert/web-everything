@@ -1,0 +1,7 @@
+{
+  "id": "tracker",
+  "name": "Custom Tracker",
+  "status": "draft",
+  "summary": "Protocol for analytics providers (Identify, Track, Page).",
+  "description": "<h3>Design Philosophy</h3><p>The application should not know about Mixpanel or GA4. It should only know how to <code>track()</code>. Implementations can be swapped via Dependency Injection using <code>@web-analytics</code>.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">interface CustomTracker {    // Who is the user?    identify(userId: string, traits?: Record&lt;string, unknown&gt;, options?: CustomAnalyticsOptions): void;    // What are they doing?    track(event: string, properties?: Record&lt;string, unknown&gt;, options?: CustomAnalyticsOptions): void;    // Where are they?    page(name?: string, category?: string, properties?: Record&lt;string, unknown&gt;, options?: CustomAnalyticsOptions): void;    // Grouping accounts (B2B)    group(groupId: string, traits?: Record&lt;string, unknown&gt;, options?: CustomAnalyticsOptions): void;}</code></pre>"
+}

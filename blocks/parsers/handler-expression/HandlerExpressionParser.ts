@@ -18,7 +18,7 @@
  * @module blocks/expression-parser
  */
 
-import { CustomAttributeParser } from '../../../plugs/webbehaviors/parsers';
+import { CustomAttributeParser } from '@frontierui/plugs/webbehaviors/parsers';
 
 /**
  * Parsed handler expression result

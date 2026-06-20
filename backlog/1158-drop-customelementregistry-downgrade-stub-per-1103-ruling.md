@@ -2,8 +2,11 @@
 type: issue
 workItem: task
 parent: "1088"
-status: open
+status: resolved
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: "plugs/webregistries/CustomElementRegistry.ts"
 tags: []
 ---
 

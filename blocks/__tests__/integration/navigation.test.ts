@@ -17,7 +17,7 @@ import NavListBehavior from '../../navigation/NavListBehavior';
 import NavSectionBehavior from '../../navigation/NavSectionBehavior';
 import RouteLinkBehavior from '../../router/behaviors/RouteLinkBehavior';
 import RouteViewElement from '../../router/elements/RouteViewElement';
-import CustomAttributeRegistry from '../../../plugs/webbehaviors/CustomAttributeRegistry';
+import CustomAttributeRegistry from '@frontierui/plugs/webbehaviors/CustomAttributeRegistry';
 
 // Register custom elements once
 if (!customElements.get('route-view')) {

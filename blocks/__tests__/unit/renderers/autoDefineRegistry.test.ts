@@ -7,7 +7,7 @@
  * Spec: /projects/webcomponents/#protocol-auto-define-strategy
  */
 import { describe, it, expect } from 'vitest';
-import CustomRegistry from '../../../../plugs/core/CustomRegistry';
+import CustomRegistry from '@frontierui/plugs/core/CustomRegistry';
 import {
   CustomAutoDefineRegistry,
   UnknownAutoDefineError,

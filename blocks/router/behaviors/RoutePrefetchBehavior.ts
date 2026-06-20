@@ -12,9 +12,9 @@
  * ```
  */
 
-import CustomAttribute from '../../../plugs/webbehaviors/CustomAttribute';
-import { createViewportPresenceObserver } from '../../../plugs/webbehaviors/viewportPresence';
-import InjectorRoot from '../../../plugs/webinjectors/InjectorRoot';
+import CustomAttribute from '@frontierui/plugs/webbehaviors/CustomAttribute';
+import { createViewportPresenceObserver } from '@frontierui/plugs/webbehaviors/viewportPresence';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
 import { matchRoute } from '../types';
 import type { RouteLoaderFn } from '../types';
 

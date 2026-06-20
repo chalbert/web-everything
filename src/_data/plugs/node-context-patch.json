@@ -1,0 +1,11 @@
+{
+  "id": "node-context-patch",
+  "name": "Node",
+  "status": "active",
+  "type": "Patch",
+  "summary": "Adds context methods to Node prototype: createContext(), getContext(), ensureContext(), getOwnContext(), hasContext(), hasOwnContext(), queryContext().",
+  "projects": [
+    "webcontexts"
+  ],
+  "patchFile": "custom-elements/Node.patch.ts"
+}

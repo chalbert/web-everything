@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadBlocks } from './lib/blocks-loader.cjs';
 import { loadIntents } from './lib/intents-loader.cjs';
+import { loadDataRegistry } from './lib/registry-loader.cjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = join(ROOT, 'src/_data');
@@ -32,7 +33,9 @@ const OUT = join(DATA, 'referenceIndex.json');
 
 const SOURCES = {
   corpus: 'benchmarkCorpus.json',
-  references: 'references.json',
+  // references are read via the per-entry registry loader (#1157), not this path; the key stays so
+  // `references` remains one of the structured homes listed in `homes` (Object.keys(SOURCES)).
+  references: 'references/*.json',
   // blocks are read via the per-block loader (#882), not this path; the key stays so `blocks`
   // remains one of the structured homes listed in `homes` (Object.keys(SOURCES)).
   blocks: 'blocks/*.json',
@@ -82,8 +85,8 @@ function collect() {
     push(s.repoUrl, 'corpus', s.id, `${s.name} (repo)`);
   }
 
-  // 2. Design reference library — external links only
-  const references = readJson(SOURCES.references);
+  // 2. Design reference library — external links only (per-entry specs src/_data/references/<slug>.json, #1157)
+  const references = loadDataRegistry('references');
   for (const cat of references ?? []) {
     for (const link of cat.links ?? []) push(link.url, 'references', cat.category, link.title);
   }

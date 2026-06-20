@@ -5,9 +5,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import InterpolationTextNode from '../../../../blocks/text-nodes/interpolation/InterpolationTextNode';
-import CustomTextNode from '../../../../plugs/webexpressions/CustomTextNode';
-import InjectorRoot from '../../../../plugs/webinjectors/InjectorRoot';
-import CustomExpressionParserRegistry from '../../../../plugs/webexpressions/CustomExpressionParserRegistry';
+import CustomTextNode from '@frontierui/plugs/webexpressions/CustomTextNode';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
+import CustomExpressionParserRegistry from '@frontierui/plugs/webexpressions/CustomExpressionParserRegistry';
 import { ValueParser } from '../../../../blocks/parsers/value/ValueParser';
 import { PipeParser } from '../../../../blocks/parsers/pipe/PipeParser';
 

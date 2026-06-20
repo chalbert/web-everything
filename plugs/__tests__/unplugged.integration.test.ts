@@ -43,7 +43,7 @@ describe('unplugged integration', () => {
 
       class TestAttribute extends CustomAttribute {
         attachedCallback() {
-          attachedCalls.push(this.target!);
+          attachedCalls.push(this.ownerElement!);
         }
       }
 
@@ -64,7 +64,7 @@ describe('unplugged integration', () => {
 
       class TestAttribute extends CustomAttribute {
         detachedCallback() {
-          detachedCalls.push(this.target!);
+          detachedCalls.push(this.ownerElement!);
         }
       }
 
@@ -114,7 +114,7 @@ describe('unplugged integration', () => {
 
       class TestAttribute extends CustomAttribute {
         attachedCallback() {
-          activatedElements.push(this.target!.id);
+          activatedElements.push(this.ownerElement!.id);
         }
       }
 
@@ -233,7 +233,7 @@ describe('unplugged integration', () => {
 
       class TestAttribute extends CustomAttribute {
         attachedCallback() {
-          const root = this.target!.getRootNode();
+          const root = this.ownerElement!.getRootNode();
           activatedRoots.push(root === document ? 'document' : 'shadow');
         }
       }
@@ -263,7 +263,7 @@ describe('unplugged integration', () => {
 
       class TestAttribute extends CustomAttribute {
         detachedCallback() {
-          const root = this.target!.getRootNode();
+          const root = this.ownerElement!.getRootNode();
           detachedRoots.push(root === document ? 'document' : 'shadow');
         }
       }

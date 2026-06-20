@@ -1,0 +1,8 @@
+{
+  "id": "showpicker",
+  "label": "showPicker()",
+  "webFeaturesKey": "showpicker",
+  "baseline": "2023",
+  "polyfill": "capability",
+  "summary": "Summon a control's native picker UI on demand — a UA-privileged action no other API exposes."
+}

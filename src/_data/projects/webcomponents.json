@@ -1,0 +1,9 @@
+{
+  "id": "webcomponents",
+  "name": "Web Components",
+  "description": "Enhanced implementation of Custom Elements supporting Scoped Registries and standard Dependency Injection.",
+  "status": "poc",
+  "category": "standard",
+  "icon": "/assets/icons/webcomponents.svg",
+  "isSvg": true
+}

@@ -37,11 +37,11 @@ describe('CustomAttributeRegistry', () => {
     clickCount = 0;
 
     attachedCallback() {
-      this.target?.addEventListener('click', this.handleClick);
+      this.ownerElement?.addEventListener('click', this.handleClick);
     }
 
     detachedCallback() {
-      this.target?.removeEventListener('click', this.handleClick);
+      this.ownerElement?.removeEventListener('click', this.handleClick);
     }
 
     handleClick = () => {

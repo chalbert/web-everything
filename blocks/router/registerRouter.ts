@@ -5,7 +5,7 @@
  * possible for custom naming.
  */
 
-import type CustomAttributeRegistry from '../../plugs/webbehaviors/CustomAttributeRegistry';
+import type CustomAttributeRegistry from '@frontierui/plugs/webbehaviors/CustomAttributeRegistry';
 import RouteViewElement from './elements/RouteViewElement';
 import RouteOutletElement from './elements/RouteOutletElement';
 import RouteLinkBehavior from './behaviors/RouteLinkBehavior';

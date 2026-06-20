@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Directives: Virtual Elements Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/webdirectives-virtual-elements-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="demo-container">
+    <h1>Web Directives: Virtual Elements</h1>
+    <p class="demo-subtitle">
+      A <code>control:for-each</code> / <code>control:if</code> directive expressed as a real
+      <strong>HTML comment marker</strong> — upgraded by the <code>customComments</code> registry (#1131),
+      its options parsed by the default namespaced parser (#1132). The markers are <em>virtual elements</em>:
+      they carry logic but add no node to the layout tree, so the CSS Grid below keeps its direct
+      parent&ndash;child relationship intact.
+      Spec: <a href="http://localhost:8080/projects/webdirectives/">webdirectives</a>.
+    </p>
+
+    <!-- Case study: a 3-column grid whose direct children stay direct children. A framework <If> wrapper
+         would inject an element here and break `grid-template-columns`; a comment marker does not. -->
+    <section class="demo-section">
+      <h2 class="section-title">Layout preservation</h2>
+      <p class="section-note">
+        The middle card is gated by <code>&lt;!-- control:if when="showMiddle" --&gt;</code>. Toggle it:
+        the grid never reflows around a wrapper because the marker is a comment, not an element.
+      </p>
+
+      <div class="controls">
+        <label><input type="checkbox" id="toggle-middle" data-test="toggle-middle" checked> showMiddle</label>
+        <span class="grid-readout" data-test="grid-readout"></span>
+      </div>
+
+      <div class="card-grid" data-test="card-grid">
+        <div class="card" data-test="card">Always A</div>
+        <!-- control:if when="showMiddle" -->
+        <div class="card card-conditional" data-test="card-conditional">Conditional B</div>
+        <!-- /control:if -->
+        <div class="card" data-test="card">Always C</div>
+      </div>
+    </section>
+
+    <!-- A for-each marker stamps one row per item with no wrapping element around the list. -->
+    <section class="demo-section">
+      <h2 class="section-title">List rendering (no wrapper node)</h2>
+      <p class="section-note">
+        <code>&lt;!-- control:for-each items="members" --&gt;</code> renders one row per item between the
+        opening and closing markers. The <code>&lt;ul&gt;</code>'s only element children are the
+        <code>&lt;li&gt;</code> rows; the directive itself contributes comment nodes only.
+      </p>
+      <ul class="member-list" data-test="member-list">
+        <!-- control:for-each items="members" -->
+        <!-- /control:for-each -->
+      </ul>
+      <p class="section-note" data-test="member-readout"></p>
+    </section>
+  </main>
+
+  <!-- Bootstrap is auto-injected by vite.config.mts; included here to be explicit. -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+  <script type="module" src="/demos/webdirectives-virtual-elements-demo.ts"></script>
+</body>
+</html>

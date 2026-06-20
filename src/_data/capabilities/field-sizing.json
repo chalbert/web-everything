@@ -1,0 +1,8 @@
+{
+  "id": "field-sizing",
+  "label": "field-sizing: content",
+  "webFeaturesKey": "field-sizing",
+  "baseline": false,
+  "polyfill": "polyfillable",
+  "summary": "Auto-grow inputs/textareas to their content via CSS."
+}

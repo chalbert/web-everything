@@ -1,0 +1,10 @@
+{
+  "id": "injectorroot",
+  "name": "InjectorRoot",
+  "status": "active",
+  "type": "Global",
+  "summary": "Root container for dependency injection, handling the map of all active injectors in the DOM tree.",
+  "projects": [
+    "webinjectors"
+  ]
+}

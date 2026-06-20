@@ -1,0 +1,9 @@
+{
+  "id": "webcharts",
+  "name": "Web Charts",
+  "description": "Standard for the <strong>chart / data-visualization domain</strong> &mdash; a declarative, browser-aligned way to specify a chart's <em>semantic intent</em> (what the data means) kept strictly separate from its <em>presentation</em> (how it's drawn, consuming <a href=\"/projects/webtheme/\">Web Theme</a> tokens). The spec adopts a <strong>Vega-Lite L1 profile</strong> as the thin semantic core (L2+ tiers additive) and defines a <code>CustomChartRenderer</code> <strong>Protocol</strong> &mdash; a renderer-swap registry with a <strong>native-first SVG</strong> default, so adapters (Vega, Plotly, ECharts) plug in behind one contract. Conformance scores three axes: <strong>semantic fidelity</strong>, <strong>theme application</strong>, and <strong>accessibility</strong> (a first-class axis, not an afterthought). Ratified in <a href=\"/backlog/105-data-visualization-charts/\">#105</a> and scaffolded under epic <a href=\"/backlog/570-scaffold-the-webcharts-project-vega-lite-l1-profile-customch/\">#570</a>.",
+  "status": "concept",
+  "category": "standard",
+  "icon": "/assets/icons/webcharts.svg",
+  "isSvg": true
+}

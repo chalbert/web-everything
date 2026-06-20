@@ -1,0 +1,8 @@
+{
+  "id": "customizable-select",
+  "label": "Customizable <select> (appearance: base-select)",
+  "webFeaturesKey": "customizable-select",
+  "baseline": false,
+  "polyfill": "capability",
+  "summary": "Arbitrary markup inside <code>&lt;option&gt;</code> + styleable picker while keeping native keyboard, a11y, picker, and form submission. Not polyfillable — only replaceable."
+}

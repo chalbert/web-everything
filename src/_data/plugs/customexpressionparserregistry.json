@@ -1,0 +1,10 @@
+{
+  "id": "customexpressionparserregistry",
+  "name": "CustomExpressionParserRegistry",
+  "status": "active",
+  "type": "Global",
+  "summary": "Registry for expression parsers, standardizing how strings are parsed into executable expressions.",
+  "projects": [
+    "webexpressions"
+  ]
+}

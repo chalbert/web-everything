@@ -34,14 +34,13 @@
 // Each entity that can lack a description maps to the registry JSON the descriptor's `id` resolves in,
 // so the fixer can read the entity's own `name`/`summary` and prompt the model with real context
 // rather than asking it to invent a component from a bare id.
-// Block and Research are NOT here: they are split one-file-per-entity (#882 blocks, #1145 research), so an
-// entity's data is its own src/_data/<dir>/<id>.json (a single object) — resolved per-id in lookupEntity.
-const ENTITY_DATA = {
-  Plug: 'src/_data/plugs.json',
-  CapabilityAdapter: 'src/_data/capabilities.json',
-};
+// Every hand-authored array registry is now split one-file-per-entity (#882 blocks, #1145 research/intents,
+// #1146 protocols/demos, #1157 plugs/capabilities/…), so an entity's data is its own
+// src/_data/<dir>/<id>.json (a single object) — resolved per-id in lookupEntity via PER_ID_DIR. ENTITY_DATA
+// remains the fallback for any entity still backed by a monolithic registry JSON.
+const ENTITY_DATA = {};
 // Per-id-file entities: data lives one-file-per-id under this directory, the file's whole content IS the row.
-const PER_ID_DIR = { Block: 'blocks', Research: 'researchTopics' };
+const PER_ID_DIR = { Block: 'blocks', Research: 'researchTopics', Plug: 'plugs', CapabilityAdapter: 'capabilities' };
 
 /** Find the entity row (by id) in its registry JSON, or null. Tolerant of array or grouped shapes. */
 function lookupEntity(entity, id, read) {

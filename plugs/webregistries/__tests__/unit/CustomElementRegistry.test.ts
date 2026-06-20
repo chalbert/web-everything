@@ -212,15 +212,18 @@ describe('CustomElementRegistry', () => {
     });
   });
 
-  describe('upgrade() and downgrade()', () => {
+  describe('upgrade()', () => {
     it('should have upgrade method', () => {
       expect(typeof registry.upgrade).toBe('function');
     });
 
-    it('should have downgrade method', () => {
-      expect(typeof registry.downgrade).toBe('function');
+    // No downgrade(): native CustomElementRegistry has no such method, so the
+    // polyfill deliberately omits it (ratified #1103). The state machine is one-way
+    // and the registry append-only; teardown is removePatches()'s job.
+    it('should not expose a non-standard downgrade method', () => {
+      expect((registry as unknown as Record<string, unknown>).downgrade).toBeUndefined();
     });
 
-    // TODO: Add integration tests for upgrade/downgrade when DOM patching is implemented
+    // TODO: Add integration tests for upgrade when DOM patching is implemented
   });
 });

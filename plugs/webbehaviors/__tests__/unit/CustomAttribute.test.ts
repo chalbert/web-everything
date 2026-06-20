@@ -145,18 +145,18 @@ describe('CustomAttribute', () => {
     });
   });
 
-  describe('Target property', () => {
+  describe('ownerElement property', () => {
     it('should return undefined when not attached', () => {
       const attr = new TestAttribute();
       
-      expect(attr.target).toBeUndefined();
+      expect(attr.ownerElement).toBeUndefined();
     });
 
     it('should return target element when attached', () => {
       const attr = new TestAttribute();
       attr.attach(element);
       
-      expect(attr.target).toBe(element);
+      expect(attr.ownerElement).toBe(element);
     });
   });
 
@@ -166,7 +166,7 @@ describe('CustomAttribute', () => {
       
       attr.attach(element);
       
-      expect(attr.target).toBe(element);
+      expect(attr.ownerElement).toBe(element);
     });
 
     it('should call attachedCallback', () => {
@@ -207,7 +207,7 @@ describe('CustomAttribute', () => {
       
       attr.detach();
       
-      expect(attr.target).toBeUndefined();
+      expect(attr.ownerElement).toBeUndefined();
     });
 
     it('should unregister from element', () => {

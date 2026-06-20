@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import ResourceLoader from '../../../resource-loader/ResourceLoader';
-import InjectorRoot from '../../../../plugs/webinjectors/InjectorRoot';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
 import type { LoaderIntent, TraitFactory, ResourceStateChangeDetail } from '../../../resource-loader/types';
 import { DEFAULT_INTENT } from '../../../resource-loader/types';
 

@@ -1,0 +1,10 @@
+{
+  "id": "customtextnodeparser",
+  "name": "CustomTextNodeParser",
+  "status": "active",
+  "type": "Global",
+  "summary": "Abstract base class for text node parsers that detect expression syntax and split text into static and expression segments.",
+  "projects": [
+    "webexpressions"
+  ]
+}

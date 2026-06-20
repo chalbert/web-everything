@@ -1,0 +1,9 @@
+{
+  "id": "webaudit",
+  "name": "Web Audit",
+  "description": "Standard for an <strong>immutable, actor-attributed history</strong> of consequential actions on a domain entity &mdash; who did what, when, and before&rarr;after. Every state transition, cleared condition, accepted/rejected document, and issued decision is recorded append-only and surfaced as a queryable <strong>timeline</strong>. It fixes the <strong>AuditEvent</strong> schema and a swappable <strong>audit provider</strong> (in-memory, event-sourced, or an OSCAL backend behind one seam), and <em>composes</em>: a lifecycle (Web Lifecycle) transition becomes one audit event automatically. Distinct from Web States change-tracking (reactive, transient mutation observation) and from Web Compliance's enforcement-evidence trail (the platform twin, same schema, different subject): this is the <em>domain object's</em> operational record.",
+  "status": "poc",
+  "category": "standard",
+  "icon": "/assets/icons/webaudit.svg",
+  "isSvg": true
+}

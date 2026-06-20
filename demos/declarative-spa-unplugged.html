@@ -337,8 +337,8 @@
 
       _updateText(store, path) {
         const value = store.getItem(path);
-        if (this.target) {
-          this.target.textContent = value ?? '';
+        if (this.ownerElement) {
+          this.ownerElement.textContent = value ?? '';
         }
       }
 
@@ -367,27 +367,27 @@
 
         // Initial update
         const value = store.getItem(path);
-        if (this.target && value !== undefined) {
-          this.target.value = value;
+        if (this.ownerElement && value !== undefined) {
+          this.ownerElement.value = value;
         }
 
         // Listen to input changes
         this._handleInput = (e) => {
           store.setItem(path, e.target.value);
         };
-        this.target?.addEventListener('input', this._handleInput);
+        this.ownerElement?.addEventListener('input', this._handleInput);
 
         // Subscribe to store changes
         this._unsubscribe = store.subscribe(() => {
           const newValue = store.getItem(path);
-          if (this.target && this.target.value !== newValue) {
-            this.target.value = newValue ?? '';
+          if (this.ownerElement && this.ownerElement.value !== newValue) {
+            this.ownerElement.value = newValue ?? '';
           }
         });
       }
 
       disconnectedCallback() {
-        this.target?.removeEventListener('input', this._handleInput);
+        this.ownerElement?.removeEventListener('input', this._handleInput);
         if (this._unsubscribe) {
           this._unsubscribe();
         }
@@ -431,11 +431,11 @@
           }
         };
 
-        this.target?.addEventListener('click', this._handleClick);
+        this.ownerElement?.addEventListener('click', this._handleClick);
       }
 
       disconnectedCallback() {
-        this.target?.removeEventListener('click', this._handleClick);
+        this.ownerElement?.removeEventListener('click', this._handleClick);
       }
     }
 
@@ -465,7 +465,7 @@
           }
         };
 
-        this.target?.addEventListener('submit', this._handleSubmit);
+        this.ownerElement?.addEventListener('submit', this._handleSubmit);
 
         // Subscribe to todo changes for rendering
         this._unsubscribe = todoStore.subscribe(() => {
@@ -513,7 +513,7 @@
       }
 
       disconnectedCallback() {
-        this.target?.removeEventListener('submit', this._handleSubmit);
+        this.ownerElement?.removeEventListener('submit', this._handleSubmit);
         if (this._unsubscribe) {
           this._unsubscribe();
         }

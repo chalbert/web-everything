@@ -1,0 +1,8 @@
+{
+  "id": "user-pseudos",
+  "label": ":user-valid / :user-invalid",
+  "webFeaturesKey": "user-pseudos",
+  "baseline": "2023",
+  "polyfill": "polyfillable",
+  "summary": "Validation pseudo-classes that match only after user interaction — the native touched/dirty state."
+}

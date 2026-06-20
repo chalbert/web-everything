@@ -1,0 +1,10 @@
+{
+  "id": "customexpressionparser",
+  "name": "CustomExpressionParser",
+  "status": "active",
+  "type": "Global",
+  "summary": "Standardizes how strings are parsed into executable expressions for use in data bindings.",
+  "projects": [
+    "webexpressions"
+  ]
+}

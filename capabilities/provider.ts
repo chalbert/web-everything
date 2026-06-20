@@ -21,7 +21,7 @@ export type Tier = 'native-ok' | 'polyfill-ok' | 'capability-hard';
 
 export const TIERS: readonly Tier[] = ['native-ok', 'polyfill-ok', 'capability-hard'];
 
-/** One entry of the capability vocabulary (`src/_data/capabilities.json`). */
+/** One entry of the capability vocabulary (per-capability specs `src/_data/capabilities/<id>.json`, #1157). */
 export interface Capability {
   id: string;
   label: string;

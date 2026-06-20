@@ -1,0 +1,9 @@
+{
+  "id": "webadapters",
+  "name": "Web Adapters",
+  "description": "Bridges and syntactic sugars connecting external libraries or languages to Web Everything protocols.",
+  "status": "draft",
+  "category": "utility",
+  "icon": "/assets/icons/webadapters.svg",
+  "isSvg": true
+}

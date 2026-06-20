@@ -1,0 +1,9 @@
+{
+  "id": "webidentity",
+  "name": "Web Identity",
+  "description": "Standard for <strong>acquiring and managing a user's credentials behind one swappable provider</strong>: the <code>navigator.credentials</code> dispatcher is the normalized contract, with passkey/WebAuthn, FedCM, digital-credential, and password as families behind a <strong>credential provider</strong> (native-first default &rarr; project override &rarr; custom plug). One <code>credential-management</code> protocol, families as a request dimension (<code>credentials:[passkey|federated|digital|password]</code>), the lifecycle exposed as open members (request &middot; enrollment &middot; session-mediation). Async, server-authoritative, revocable &mdash; the browser gathers, the server verifies. Identity <em>produces</em> the auth-state predicate that Web Guards' access-gate <em>consumes</em>.",
+  "status": "concept",
+  "category": "standard",
+  "icon": "/assets/icons/webidentity.svg",
+  "isSvg": true
+}

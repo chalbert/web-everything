@@ -1,0 +1,11 @@
+{
+  "id": "element-insertion-patch",
+  "name": "Element",
+  "status": "active",
+  "type": "Patch",
+  "summary": "Patches DOM insertion methods (append, prepend, after, before, replaceChildren, replaceWith) for lazy element upgrade.",
+  "projects": [
+    "webcomponents"
+  ],
+  "patchFile": "custom-elements/Element.patch.ts"
+}

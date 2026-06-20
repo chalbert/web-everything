@@ -1,0 +1,10 @@
+{
+  "id": "customstoreregistry",
+  "name": "CustomStoreRegistry",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Registry for state management stores, enabling reactive data flow patterns.",
+  "projects": [
+    "webstates"
+  ]
+}

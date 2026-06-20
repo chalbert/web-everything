@@ -1,0 +1,11 @@
+{
+  "id": "node-clonenode-patch",
+  "name": "Node.cloneNode",
+  "status": "active",
+  "type": "Patch",
+  "summary": "Patches cloneNode to preserve Custom Elements, Custom Comments, and Custom Text Nodes with their prototypes and options.",
+  "projects": [
+    "webcomponents"
+  ],
+  "patchFile": "custom-elements/Node.patch.ts"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "dialog",
+  "label": "Dialog",
+  "webFeaturesKey": "dialog",
+  "baseline": "2022",
+  "polyfill": "polyfillable",
+  "summary": "Native <code>&lt;dialog&gt;</code> — modal, top-layer, <code>::backdrop</code>, focus-trapping."
+}

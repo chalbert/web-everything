@@ -1,7 +1,7 @@
 {
   "id": "keyboard-shortcuts",
   "name": "Keyboard Shortcuts",
-  "status": "draft",
+  "status": "active",
   "type": "Module",
   "summary": "Standardized keyboard interaction management enabling consistent shortcut handling across shadow boundaries and OS-specific layouts.",
   "webStandards": {

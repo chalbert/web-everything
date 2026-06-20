@@ -5,8 +5,8 @@
 
 import { describe, it, expect } from 'vitest';
 import DoubleSquareBracketParser from '../../../../blocks/parsers/text-node/double-square/DoubleSquareBracketParser';
-import CustomTextNodeParser from '../../../../plugs/webexpressions/CustomTextNodeParser';
-import UndeterminedTextNode from '../../../../plugs/webexpressions/UndeterminedTextNode';
+import CustomTextNodeParser from '@frontierui/plugs/webexpressions/CustomTextNodeParser';
+import UndeterminedTextNode from '@frontierui/plugs/webexpressions/UndeterminedTextNode';
 
 describe('DoubleSquareBracketParser', () => {
   it('should be an instance of CustomTextNodeParser', () => {

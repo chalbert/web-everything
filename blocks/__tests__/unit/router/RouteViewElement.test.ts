@@ -13,7 +13,7 @@
 import 'urlpattern-polyfill';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import RouteViewElement from '../../../router/elements/RouteViewElement';
-import InjectorRoot from '../../../../plugs/webinjectors/InjectorRoot';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
 
 // Register the custom element once
 if (!customElements.get('route-view')) {

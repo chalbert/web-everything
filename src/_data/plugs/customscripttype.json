@@ -1,0 +1,11 @@
+{
+  "id": "customscripttype",
+  "name": "CustomScriptType",
+  "status": "experimental",
+  "type": "Global",
+  "summary": "Base class extending HTMLScriptElement with lifecycle callbacks for custom script types.",
+  "projects": [
+    "webinjectors",
+    "webcontexts"
+  ]
+}

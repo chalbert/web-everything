@@ -1,0 +1,8 @@
+{
+  "id": "custom-state",
+  "label": "CustomStateSet / :state()",
+  "webFeaturesKey": "custom-state",
+  "baseline": "2024",
+  "polyfill": "polyfillable",
+  "summary": "Expose internal element state to CSS via <code>internals.states</code> / <code>:state(x)</code> without leaking attributes."
+}

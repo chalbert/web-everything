@@ -1,0 +1,165 @@
+/* Web Directives: Virtual Elements demo (#1134) */
+
+:root {
+  --color-bg: #0f172a;
+  --color-surface: #1e293b;
+  --color-surface-alt: #334155;
+  --color-border: #475569;
+  --color-text: #e2e8f0;
+  --color-text-muted: #94a3b8;
+  --color-accent: #818cf8;
+  --color-success: #4ade80;
+  --radius: 8px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.6;
+  padding: 0 0 3rem;
+}
+
+.demo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.demo-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.demo-header-brand svg {
+  width: 22px;
+  height: 22px;
+  color: var(--color-accent);
+}
+
+.demo-header-back {
+  color: var(--color-text-muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.demo-header-back:hover {
+  color: var(--color-text);
+}
+
+.demo-container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+h1 {
+  font-size: 1.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.demo-subtitle {
+  color: var(--color-text-muted);
+  margin-bottom: 2rem;
+}
+
+code {
+  background: var(--color-surface-alt);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+a {
+  color: var(--color-accent);
+}
+
+.demo-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.section-title {
+  font-size: 1.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.section-note {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.grid-readout {
+  color: var(--color-success);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The case study: a 3-column grid whose DIRECT children are the cards. A wrapper element around the
+   conditional card would break grid-template-columns; the comment marker keeps the cards direct children. */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+.card {
+  background: var(--color-surface-alt);
+  border-radius: var(--radius);
+  padding: 1.5rem 1rem;
+  text-align: center;
+  font-weight: 600;
+}
+
+.card-conditional {
+  outline: 2px dashed var(--color-accent);
+}
+
+.member-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.member {
+  display: flex;
+  justify-content: space-between;
+  background: var(--color-surface-alt);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+}
+
+.member-role {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+}

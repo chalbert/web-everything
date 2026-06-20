@@ -9,7 +9,7 @@
  * Default tag name: route-view
  */
 
-import InjectorRoot from '../../../plugs/webinjectors/InjectorRoot';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
 import type {
   RouteDefinition,
   MatchedRoute,

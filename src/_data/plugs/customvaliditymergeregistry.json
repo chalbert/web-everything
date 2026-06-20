@@ -1,0 +1,10 @@
+{
+  "id": "customvaliditymergeregistry",
+  "name": "CustomValidityMergeRegistry",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Exposes window.customValidityMerge for registering named validity-merge strategies — how a control reduces several independent SourceResults (native/schema/async/manual) into one MergedValidity. The #004 OP-1 ruling fixes the MergedValidity surface, not the merge math: source-reduction (native-first default) and last-write-wins ship registered, custom strategies are first-class, and the orchestrator auto-stamps generation tokens so devs never hand-author ids.",
+  "projects": [
+    "webvalidation"
+  ]
+}

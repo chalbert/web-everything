@@ -31,7 +31,7 @@ sibling plug to `webdirectives` / `webinjectors` / `webcontexts` and extends the
 (`CustomTemplateDirective`, `InjectorRoot`, the `Node.*.patch.ts` pattern), all of which live and run in
 `we:plugs/` today. So webportals is built in **`we:plugs/webportals/`** now (runnable + demoable on WE's
 dev server) and rides the **same plugs-platform-layer migration as every sibling** — the WE→FUI move
-governed by #170 / #449 / #606 (plugs = FUI-owned, WE consumes as a no-leakage client). The protocol/spec
+governed by the [Constellation placement](docs/agent/platform-decisions.md#constellation-placement) rule (#170 / #449 / #606: plugs = FUI-owned, WE consumes as a no-leakage client). The protocol/spec
 stays `@webeverything` (the ratified `.njk` + conformance vectors). The earlier "directive runtime → FUI"
 line is superseded: the directive is a plug like its siblings, not a webportals-specific FUI carve-out.
 

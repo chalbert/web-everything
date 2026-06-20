@@ -46,7 +46,7 @@ export type ImplementedAttribute = (new (options?: CustomAttributeOptions) => Cu
  * ```typescript
  * class TooltipAttribute extends CustomAttribute {
  *   attachedCallback() {
- *     console.log('Tooltip attached to', this.target);
+ *     console.log('Tooltip attached to', this.ownerElement);
  *   }
  * 
  *   attributeChangedCallback(name, oldValue, newValue) {
@@ -126,9 +126,9 @@ export default abstract class CustomAttribute<
   static visibilityReentry?: 'once' | 'recurring';
 
   /**
-   * The target element this attribute is attached to
+   * The element this attribute is attached to (its owner)
    */
-  #target: Target | undefined;
+  #ownerElement: Target | undefined;
 
   /**
    * The current value of the attribute
@@ -153,8 +153,8 @@ export default abstract class CustomAttribute<
   set value(value: string) {
     this.#value = value;
     const attributeName = this.#name || this.localName;
-    if (this.target && attributeName !== '[[undetermined]]') {
-      this.target.setAttribute(attributeName, value);
+    if (this.ownerElement && attributeName !== '[[undetermined]]') {
+      this.ownerElement.setAttribute(attributeName, value);
     }
   }
 
@@ -201,10 +201,13 @@ export default abstract class CustomAttribute<
   }
 
   /**
-   * Get the target element this attribute is attached to
+   * Get the element this attribute is attached to (its owner)
+   *
+   * Mirrors the native [`Attr.ownerElement`](https://developer.mozilla.org/en-US/docs/Web/API/Attr/ownerElement),
+   * which this class becomes at runtime (its prototype chains to `Attr.prototype`).
    */
-  get target(): Target | undefined {
-    return this.#target;
+  get ownerElement(): Target | undefined {
+    return this.#ownerElement;
   }
 
   /**
@@ -247,10 +250,10 @@ export default abstract class CustomAttribute<
    * @returns The registered local name or '[[undetermined]]'
    */
   get localName(): string {
-    if (this.target) {
+    if (this.ownerElement) {
       const constructor = this.constructor as ConstructorDefinition<ImplementedAttribute>['constructor'];
       const localName = InjectorRoot.getLocalNameInProviderOf(
-        this.target,
+        this.ownerElement,
         'customAttributes',
         constructor
       );
@@ -364,7 +367,7 @@ export default abstract class CustomAttribute<
    * @param target - The element to attach to
    */
   attach(target: Target): void {
-    this.#target = target;
+    this.#ownerElement = target;
 
     // Register this attribute instance with the element
     if (!elementRegistrationMap.has(target)) {
@@ -380,8 +383,8 @@ export default abstract class CustomAttribute<
    * Detach this attribute from its target element
    */
   detach(): void {
-    if (this.#target) {
-      const registrations = elementRegistrationMap.get(this.#target);
+    if (this.#ownerElement) {
+      const registrations = elementRegistrationMap.get(this.#ownerElement);
       if (registrations) {
         const index = registrations.indexOf(this);
         if (index !== -1) {
@@ -389,7 +392,7 @@ export default abstract class CustomAttribute<
         }
       }
     }
-    this.#target = undefined;
+    this.#ownerElement = undefined;
   }
 
   /**

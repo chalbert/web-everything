@@ -20,8 +20,8 @@ import RouteOutletElement from '../../router/elements/RouteOutletElement';
 import RouteLinkBehavior from '../../router/behaviors/RouteLinkBehavior';
 
 // Import plugs
-import InjectorRoot from '../../../plugs/webinjectors/InjectorRoot';
-import CustomAttributeRegistry from '../../../plugs/webbehaviors/CustomAttributeRegistry';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
+import CustomAttributeRegistry from '@frontierui/plugs/webbehaviors/CustomAttributeRegistry';
 
 // Register custom elements once
 if (!customElements.get('route-view')) {

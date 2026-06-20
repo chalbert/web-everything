@@ -1,0 +1,9 @@
+{
+  "id": "webtraces",
+  "name": "Web Traces",
+  "description": "Standard for execution flow monitoring and distributed tracing, aligning with W3C Trace Context and OpenTelemetry.",
+  "status": "poc",
+  "category": "standard",
+  "icon": "/assets/icons/webtraces.svg",
+  "isSvg": true
+}

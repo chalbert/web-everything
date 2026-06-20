@@ -1,0 +1,8 @@
+{
+  "id": "anchor-positioning",
+  "label": "CSS Anchor Positioning",
+  "webFeaturesKey": "anchor-positioning",
+  "baseline": false,
+  "polyfill": "polyfillable",
+  "summary": "<code>anchor-name</code> / <code>position-anchor</code> / <code>position-try-fallbacks</code> — tether a popover to its trigger and auto-flip on overflow."
+}

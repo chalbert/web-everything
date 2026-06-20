@@ -1,0 +1,8 @@
+{
+  "id": "hidden-until-found",
+  "label": "Hidden Until Found",
+  "webFeaturesKey": "hidden-until-found",
+  "baseline": "2024",
+  "polyfill": "polyfillable",
+  "summary": "<code>hidden=\"until-found\"</code> keeps collapsed content matchable by browser find-in-page, auto-revealing it and firing <code>beforematch</code> on a hit."
+}

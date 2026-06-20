@@ -1,0 +1,9 @@
+{
+  "id": "webstates",
+  "name": "Web States",
+  "description": "Standard primitives for observability and state management (signals, stores, and schemas).",
+  "status": "poc",
+  "category": "standard",
+  "icon": "/assets/icons/webstates.svg",
+  "isSvg": true
+}

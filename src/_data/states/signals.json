@@ -1,0 +1,7 @@
+{
+  "id": "signals",
+  "name": "Custom Signals",
+  "status": "draft",
+  "summary": "Standard for reactive primitives, aligning with the TC39 Signals Proposal.",
+  "description": "<h3>Design Philosophy</h3><p>Signals are the atomic units of reactivity. The <strong>CustomSignal</strong> protocol ensures that signals from different libraries (Preact, Solid, Angular) can interoperate within the same dependency graph.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">interface CustomSignal&lt;T&gt; {\n    // Core Value Access\n    readonly value: T;\n    peek(): T;\n\n    // TC39 Alignment (Draft)\n    // Represents a node in the reactive graph\n    get(): T;\n}</code></pre>"
+}

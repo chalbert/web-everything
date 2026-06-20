@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Keyboard Shortcuts Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/keyboard-shortcuts-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Keyboard Shortcuts Demo</h1>
+      <p>The runnable proof of the <a href="/blocks/keyboard-shortcuts/"><code>keyboard-shortcuts</code></a> block (<a href="/backlog/1139-build-demo-the-keyboard-shortcuts-block-graduate-from-orphan/">#1139</a>): a <strong>chord-normalization module</strong> folds a raw <code>KeyboardEvent</code> into one canonical chord — folding the OS accelerator (Cmd on macOS, Ctrl elsewhere) onto a single <code>Mod</code> token — and a <strong>declarative shortcut registry</strong> fires the matching entry regardless of where focus sits, including across shadow boundaries.</p>
+      <p class="play-caveat">
+        This demo supplies its <strong>own</strong> in-demo implementation of the two pieces the block
+        names — honest for a browser demo — to prove the block is realizable and graduate it from
+        <code>draft</code> to <code>active</code>. The section below asserts each contract invariant live;
+        the live registry below it lets you try the chords on the real page.
+      </p>
+    </header>
+
+    <div id="play-root">Loading demo&hellip;</div>
+  </main>
+
+  <script type="module" src="/demos/keyboard-shortcuts-demo.ts"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "id": "customregistry",
+  "name": "CustomRegistry",
+  "status": "active",
+  "type": "Global",
+  "summary": "Abstract base class for all scoped registries, standardizing API for storing and retrieving definitions with inheritance support.",
+  "projects": [
+    "webregistries"
+  ]
+}

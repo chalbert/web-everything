@@ -21,7 +21,9 @@
       "@webregistries/*": ["webregistries/*"],
       "@webinjectors/*": ["webinjectors/*"],
       "@webcomponents/*": ["webcomponents/*"],
-      "@webcontexts/*": ["webcontexts/*"]
+      "@webcontexts/*": ["webcontexts/*"],
+      "@frontierui/plugs": ["../../frontierui/plugs/index.ts"],
+      "@frontierui/plugs/*": ["../../frontierui/plugs/*"]
     }
   },
   "include": ["plugs/**/*", "blocks/**/*"],

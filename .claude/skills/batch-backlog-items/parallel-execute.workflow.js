@@ -28,14 +28,20 @@ export const meta = {
 // worktree (so they're pairwise-disjoint and merge clean — no replay among them); the only residual conflict
 // risk is a concurrent item vs the serial lane, which the merge-one-at-a-time + replay step still catches.
 //
-// WHAT THE REGISTRY SPLIT (#1145/#1146) CHANGED: shared registries are now per-entry files
-// (src/_data/<reg>/<id>.json), so an item adding/editing a registry entry just writes its OWN file — disjoint,
+// WHAT THE REGISTRY SPLIT (#1145/#1146/#1157) CHANGED: every hand-authored COLLECTION registry is now
+// per-entry files (src/_data/<reg>/<id>.json) — #1157 finished the set (plugs/projects/capabilities/
+// references/designSystems/analytics/renderStrategies/states/resources/expressiveAssets, after the
+// #1145/#1146 churned set). An item adding/editing a registry entry just writes its OWN file — disjoint,
 // merges clean, NO integrator-applied manifest. The effects-manifest is NARROW: it covers only the residual
 // shared mutations an item must NOT commit itself —
 //   • DERIVED artifacts that are regenerated (AGENTS.md, src/_data/referenceIndex.json): two items
 //     regenerating them collide, so items leave them alone and the integrator regenerates ONCE.
-//   • Rare edits to a still-MONOLITHIC low-churn registry (projects/capabilities/adapters/capabilityMatrix/
-//     designSystems): an item that must touch one is forced into the serial lane (probe flags touchesMonolith).
+//   • The handful of registries that are NOT collections of independent entries — single structured config
+//     docs (src/_data/{traits,docs,capabilityMatrix}.json), nested-group registries (adapters.json's
+//     items[]), single protocol docs (webhandlers/webportals.json), and the sweep/generated artifacts
+//     (workbench*/benchmark*/capabilityWorkedExample.json). Splitting them per-key is incoherent, so an
+//     item that must edit one is forced into the serial lane (probe flags touchesMonolith). These are the
+//     ONLY monoliths left — no collection registry forces the serial lane anymore (#1157).
 //
 // This script runs in the Workflow JS sandbox: no fs, no child_process, no Date/Math.random. ALL side effects
 // (git, backlog.mjs, npm gates) happen INSIDE agents via Bash; the script only does control flow.
@@ -71,7 +77,7 @@ const PROBE_SCHEMA = {
     },
     touchesMonolith: {
       type: 'array', items: { type: 'string' },
-      description: 'still-monolithic shared files it must edit (e.g. src/_data/projects.json) — these force the serial lane, list them explicitly. Per-entry registry files (src/_data/<reg>/<id>.json) are NOT monolithic — never list them.',
+      description: 'genuinely-monolithic shared files it must edit (the single-doc registries src/_data/{traits,docs,capabilityMatrix}.json, adapters.json, webhandlers/webportals.json, sweep artifacts workbench*/benchmark*.json) — these force the serial lane, list them explicitly. Per-entry registry files (src/_data/<reg>/<id>.json) are NOT monolithic — never list them.',
     },
     confident: { type: 'boolean', description: 'TRUE when every predicted file is one this item OWNS (its own impl/code, its own demo page, its own backlog/NNN.md, its own per-entry registry entries, its own test file). FALSE *only* when work plausibly spills into a SHARED surface another item could also touch: a still-monolithic registry, shared runtime (plugs/bootstrap.ts), a shared *.njk include, shared test specs, build config (tsconfig/vite/package.json), or a broad cross-file refactor. Routine uncertainty about the exact file COUNT is NOT a reason for false; only genuine shared-surface risk is. Per-entry registry writes do NOT lower confidence. False forces the serial lane.' },
   },
@@ -160,12 +166,13 @@ const probes = await parallel(items.map((it) => () =>
       `You are scoping backlog item #${it.num} ("${it.slug}") for a PARALLEL batch. Read we:backlog/${it.file}`,
       `and any files it references. Predict EVERY repo-relative file this item will create or edit if worked now:`,
       `its impl/code files, its own we:backlog/${it.num}.md, and any per-entry registry file it would add`,
-      `(src/_data/<registry>/<id>.json — registries are one-file-per-entry since #1145/#1146).`,
+      `(src/_data/<registry>/<id>.json — every collection registry is one-file-per-entry since #1145/#1146/#1157).`,
       `Frontmatter declares: ${JSON.stringify(it.declaredFiles || [])} — treat that as a LOWER BOUND only.`,
-      `Per-entry registry files (src/_data/<registry>/<id>.json) are DISJOINT by construction (#1145/#1146):`,
+      `Per-entry registry files (src/_data/<registry>/<id>.json) are DISJOINT by construction (#1145/#1146/#1157):`,
       `writing your OWN new/edited entry never collides with another item, so do NOT list them in touchesMonolith`,
-      `and they do NOT lower your confidence. List in touchesMonolith ONLY still-monolithic shared files`,
-      `(projects/capabilities/adapters/capabilityMatrix/designSystems registries, plugs/bootstrap.ts, build config).`,
+      `and they do NOT lower your confidence. List in touchesMonolith ONLY the genuinely-monolithic shared files`,
+      `(the single-doc registries src/_data/{traits,docs,capabilityMatrix}.json, adapters.json, webhandlers/`,
+      `webportals.json, the sweep artifacts workbench*/benchmark*.json; plus plugs/bootstrap.ts, build config).`,
       `Set confident=TRUE when every file you'll touch is one this item clearly OWNS — its own impl/code, its own`,
       `demo page, its own we:backlog/${it.num}.md, its own per-entry registry entries, its own test file.`,
       `Set confident=FALSE *only* when the work plausibly SPILLS into a shared surface another item could also`,
@@ -225,7 +232,8 @@ function itemWorktreePrompt(it) {
     ``,
     `HARD RULES (the parallel-safety contract):`,
     `• Do NOT edit any other item's files, and do NOT splice a still-monolithic shared registry`,
-    `  (projects/capabilities/adapters/capabilityMatrix/designSystems). If this item genuinely needs that,`,
+    `  (the single-doc registries src/_data/{traits,docs,capabilityMatrix}.json, adapters.json, webhandlers/`,
+    `  webportals.json, sweep artifacts workbench*/benchmark*.json). If this item genuinely needs that,`,
     `  STOP, mark status:"dropped" drop:"outgrew", and report it in monolithEdits for the integrator.`,
     `• Do NOT regenerate or stage derived artifacts: AGENTS.md, src/_data/referenceIndex.json. If your work`,
     `  changes the inventory, just LIST them in derivedArtifacts — the integrator regenerates once.`,

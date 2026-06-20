@@ -1,0 +1,10 @@
+{
+  "id": "customattribute",
+  "name": "CustomAttribute",
+  "status": "active",
+  "type": "Global",
+  "summary": "Base class for creating behaviors, similar to HTMLElement, with lifecycle callbacks for attribute-based components.",
+  "projects": [
+    "webbehaviors"
+  ]
+}

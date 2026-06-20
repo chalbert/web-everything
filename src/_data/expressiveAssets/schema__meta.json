@@ -1,0 +1,5 @@
+{
+  "_comment": "Expressive-asset catalog (#593, parent #586). The open registry of asset SETS an author can browse & shop in the full-page picker context (demo:expressive-asset-shop) — the catalog the icon intent's `name` and the expressive-symbol intent resolve a glyph within. It is an OPEN config registry: WE ships this reference vocabulary, a project EXTENDS it (Config-Extends-Platform-Default); it mandates no single set. `kind` ∈ icon-set | emoji-set | sticker-pack. Rendered by Web Docs (#398); not gate-validated.",
+  "id": "_schema",
+  "kind": "meta"
+}

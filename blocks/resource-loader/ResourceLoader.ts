@@ -29,7 +29,7 @@
  * ```
  */
 
-import InjectorRoot from '../../plugs/webinjectors/InjectorRoot';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
 import type {
   LoaderIntent,
   LoaderState,

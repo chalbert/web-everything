@@ -13,6 +13,11 @@ import {
   removeNodeLogicalPatch as _removeNodeLogicalPatch,
   isLogicalPatchApplied as _isLogicalPatchApplied,
 } from './Node.logical.patch';
+import {
+  applyEventLogicalPatch as _applyEventLogicalPatch,
+  removeEventLogicalPatch as _removeEventLogicalPatch,
+  isEventLogicalPatchApplied as _isEventLogicalPatchApplied,
+} from './Event.logical.patch';
 
 export {
   applyNodeLogicalPatch,
@@ -22,17 +27,28 @@ export {
   linkLogicalParent,
 } from './Node.logical.patch';
 
-/** Apply all webportals patches. */
+export {
+  applyEventLogicalPatch,
+  removeEventLogicalPatch,
+  isEventLogicalPatchApplied,
+  dispatchLogical,
+  addLogicalEventListener,
+  removeLogicalEventListener,
+} from './Event.logical.patch';
+
+/** Apply all webportals patches (logical-tree + logical-event). */
 export function applyPatches(): void {
   _applyNodeLogicalPatch();
+  _applyEventLogicalPatch();
 }
 
 /** Remove all webportals patches. */
 export function removePatches(): void {
+  _removeEventLogicalPatch();
   _removeNodeLogicalPatch();
 }
 
 /** Whether all webportals patches are applied. */
 export function isPatched(): boolean {
-  return _isLogicalPatchApplied();
+  return _isLogicalPatchApplied() && _isEventLogicalPatchApplied();
 }

@@ -20,14 +20,14 @@
  * ```
  */
 
-import CustomTextNode, { type CustomTextNodeOptions } from '../../../plugs/webexpressions/CustomTextNode';
-import InjectorRoot from '../../../plugs/webinjectors/InjectorRoot';
+import CustomTextNode, { type CustomTextNodeOptions } from '@frontierui/plugs/webexpressions/CustomTextNode';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
 import type {
   RegistryParseResult,
   Query,
   ResolvedValues,
-} from '../../../plugs/webexpressions';
-import type CustomExpressionParserRegistry from '../../../plugs/webexpressions/CustomExpressionParserRegistry';
+} from '@frontierui/plugs/webexpressions';
+import type CustomExpressionParserRegistry from '@frontierui/plugs/webexpressions/CustomExpressionParserRegistry';
 
 export interface InterpolationTextNodeOptions extends CustomTextNodeOptions {
   children: string;

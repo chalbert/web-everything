@@ -1,0 +1,10 @@
+{
+  "id": "customtemplatedirective",
+  "name": "CustomTemplateDirective",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Base class for template directives that control template instantiation and projection.",
+  "projects": [
+    "webdirectives"
+  ]
+}

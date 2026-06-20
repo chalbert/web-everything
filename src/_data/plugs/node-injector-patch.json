@@ -1,0 +1,11 @@
+{
+  "id": "node-injector-patch",
+  "name": "Node",
+  "status": "active",
+  "type": "Patch",
+  "summary": "Adds injector hierarchy methods to Node prototype: getClosestInjector(), getOwnInjector(), hasOwnInjector(), injectors().",
+  "projects": [
+    "webinjectors"
+  ],
+  "patchFile": "custom-elements/Node.patch.ts"
+}

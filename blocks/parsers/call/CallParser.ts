@@ -20,7 +20,7 @@ import {
   type ParseContext,
   type Query,
   type ResolvedValues,
-} from '../../../plugs/webexpressions';
+} from '@frontierui/plugs/webexpressions';
 import type { CallExpression } from '../types';
 
 /**

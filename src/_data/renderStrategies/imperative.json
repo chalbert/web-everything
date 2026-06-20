@@ -1,0 +1,5 @@
+{
+  "id": "imperative",
+  "name": "Imperative",
+  "summary": "Direct, hand-written createElement manipulation. The escape hatch when no declarative form fits."
+}

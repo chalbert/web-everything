@@ -1,0 +1,10 @@
+{
+  "id": "custompositioningregistry",
+  "name": "CustomPositioningRegistry",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Exposes window.customPositioning for registering named positioning providers (native CSS Anchor, Floating UI, …) so any component delegates anchoring to one shared engine resolved through the injector chain.",
+  "projects": [
+    "webpositioning"
+  ]
+}

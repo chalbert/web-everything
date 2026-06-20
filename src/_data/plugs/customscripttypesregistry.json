@@ -1,0 +1,11 @@
+{
+  "id": "customscripttypesregistry",
+  "name": "CustomScriptTypesRegistry",
+  "status": "experimental",
+  "type": "Global",
+  "summary": "Allows defining custom behavior for script tags with custom type attributes, enabling declarative scripting patterns.",
+  "projects": [
+    "webinjectors",
+    "webcontexts"
+  ]
+}

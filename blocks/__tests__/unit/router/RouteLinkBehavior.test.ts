@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import RouteLinkBehavior from '../../../router/behaviors/RouteLinkBehavior';
-import CustomAttribute from '../../../../plugs/webbehaviors/CustomAttribute';
+import CustomAttribute from '@frontierui/plugs/webbehaviors/CustomAttribute';
 
 describe('RouteLinkBehavior', () => {
   beforeEach(() => {

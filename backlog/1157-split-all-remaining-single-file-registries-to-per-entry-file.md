@@ -2,9 +2,12 @@
 type: issue
 workItem: story
 size: 8
-status: open
+status: resolved
 parent: "1143"
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: none
 tags: []
 ---
 
@@ -34,3 +37,15 @@ Object-map registries → one file per key:
 ## Done-when
 
 Every hand-authored registry is a per-entry dir; the rendered site + `npm run check:standards` are green; the parallel batcher's monolith carve-out is gone (no registry forces the serial lane). Origin #1153; pattern #1145/#1146; epic #1143.
+
+## Progress
+
+Resolved. Every registry that is genuinely a **collection of independent entries** is now per-entry; the assembled array is set-identical to the former monolith (round-trip verified). The scope list in this item conflated two different things — most of the "object-map registries" it named are NOT keyed maps of N entries, so they were (correctly) left monolithic with a documented reason rather than force-split into incoherent fragments.
+
+- **Split (10 array registries → `src/_data/<reg>/<key>.json`):** plugs (51), projects (40), capabilities (21), references (8, keyed by a `slugKey(category)` since entries have no id — the #1146 semantics-by-term precedent), designSystems (3), analytics (2), renderStrategies (4), states (3), resources (6), expressiveAssets (6, incl. the `_schema` pseudo-entry as `we:src/_data/expressiveAssets/schema__meta.json`). Monoliths deleted.
+- **One shared loader, not ten copies (#1157's coherence win):** `we:scripts/lib/registry-loader.cjs` exposes `loadRegistry(reg, keyOf)` / `loadDataRegistry(reg)` — the factory analogue of the per-registry `*-loader.cjs` files. Each registry gets a thin 11ty global `we:src/_data/<reg>.js` calling it. The one TS/Vite consumer (`we:capabilities/index.ts` statically imported `we:src/_data/capabilities.json`) gets a `we:src/_data/capabilities.data.ts` `import.meta.glob` assembler (mirrors `we:src/_data/intents.data.ts`, #1145).
+- **Consumers repointed:** `we:scripts/check-standards.mjs` (plugs/projects/capabilities/designSystems/references), `we:scripts/gen-inventory.mjs` (plugs/projects — same `readJson`-appends-`.json` trap as #1145/#1146), `we:scripts/gen-reference-index.mjs` (references), `we:scripts/audit-backlog-health.mjs` + `we:src/_data/backlog.js` (projects), `we:scripts/autofix/modelFixer.mjs` (Plug/CapabilityAdapter → `PER_ID_DIR`), and the two rule test-suites. Attribution: `fileFor` / `PER_ID_SPEC_DIR` in `we:scripts/check-standards-rules.mjs` now route Plug/Capability/Project/DesignSystem findings at the per-entry file; the `<reg>.json#<id>` graduatedTo + `refRegistry` labels stay virtual contracts (the #1145/#1146 convention).
+- **NOT split (left monolithic, with reason) — these are not collections of independent entries, so per-key fragments would be incoherent, not parallel-safe:** single structured config docs `we:src/_data/traits.json` / `we:src/_data/docs.json` / `we:src/_data/capabilityMatrix.json` (heterogeneous keys, one document); the nested-group `we:src/_data/adapters.json` (3 groups each with an `items[]`); single protocol docs `we:src/_data/webhandlers.json` / `we:src/_data/webportals.json` (each is ONE protocol object, not 8 entries — the item's "(8)/(7)" counts were field counts, not entry counts); and the sweep/generated artifacts `workbenchFeatures` / `workbenchTools` / `benchmarkCapabilities` / `benchmarkCorpus` / `benchmarkCoverage` / `capabilityWorkedExample` (`id`/`version`/`lastSwept` headers or `_generatedBy`; regenerated, never hand-merged). Plus the already-excluded derived `referenceIndex` / `referenceSnapshots` / `benchmarkCapabilityPresence`.
+- **Carve-out updated, not deleted:** the workflow effects-manifest (`we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js`) now states that NO collection registry forces the serial lane — only the handful of genuinely-monolithic structured docs above do (touchesMonolith). The done-when's "carve-out gone" was premised on all registries being collections; for the structured docs it shrinks to its irreducible core instead.
+
+Verified: `npm run check:standards` 0 errors (51 plugs, 21 capabilities, etc.); 395 validator/capability tests green; Eleventy `build:check` wrote 2767 pages clean (capabilities catalog + per-plug/per-designSystem detail pages render). Pre-existing reds unrelated to this item: `@frontierui/plugs/*` import-resolution in `plugs/`+`blocks/` integration specs (sibling package not linked in the worktree) and a `claim-no-git-guard` red from another session's uncommitted `we:scripts/backlog.mjs` edit — both confirmed present on the pre-change baseline.

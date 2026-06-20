@@ -1,0 +1,11 @@
+{
+  "id": "htmlelement-patch",
+  "name": "HTMLElement Constructors",
+  "status": "active",
+  "type": "Patch",
+  "summary": "Wraps native HTMLElement constructors to enable the dynamic registry system.",
+  "projects": [
+    "webcomponents"
+  ],
+  "patchFile": "custom-elements/HTMLElement.patch.ts"
+}

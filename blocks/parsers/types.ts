@@ -7,7 +7,7 @@
  * @module blocks/parsers
  */
 
-import type { ParsedExpression } from '../../plugs/webexpressions';
+import type { ParsedExpression } from '@frontierui/plugs/webexpressions';
 
 /**
  * Types of parsed value references

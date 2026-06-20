@@ -1,0 +1,8 @@
+{
+  "id": "request-submit",
+  "label": "requestSubmit()",
+  "webFeaturesKey": "requestsubmit",
+  "baseline": "2022",
+  "polyfill": "polyfillable",
+  "summary": "Programmatic submit that <em>runs</em> constraint validation, unlike <code>form.submit()</code>."
+}

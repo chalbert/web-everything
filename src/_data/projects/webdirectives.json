@@ -1,0 +1,10 @@
+{
+  "id": "webdirectives",
+  "name": "Web Directives",
+  "description": "Structural directives (loops, conditionals), comment markers, and template extensions for powerful DOM logic.",
+  "status": "poc",
+  "category": "standard",
+  "icon": "/assets/icons/webdirectives.svg",
+  "details": "Extends HTML with structural controls like loops and conditionals. Includes 'Comment Directives' for attaching logic without wrapper elements (formerly Web Figments) and 'Template Directives' for advanced content projection.",
+  "isSvg": true
+}

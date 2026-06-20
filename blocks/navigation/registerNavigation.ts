@@ -4,7 +4,7 @@
  * with default names.
  */
 
-import type CustomAttributeRegistry from '../../plugs/webbehaviors/CustomAttributeRegistry';
+import type CustomAttributeRegistry from '@frontierui/plugs/webbehaviors/CustomAttributeRegistry';
 import NavListBehavior from './NavListBehavior';
 import NavSectionBehavior from './NavSectionBehavior';
 

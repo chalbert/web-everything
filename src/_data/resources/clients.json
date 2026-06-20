@@ -1,0 +1,7 @@
+{
+  "id": "clients",
+  "name": "Custom Clients",
+  "status": "draft",
+  "summary": "Standard for abstracting data fetchers (HTTP, GQL, WS).",
+  "description": "<h3>Design Philosophy</h3><p>A <strong>CustomResourceClient</strong> decouples the application from the transport layer. It aligns with the <strong>Apollo Link</strong> pattern but generalized for any request type.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">interface CustomResourceClient {\n    // Returns a cold observable (Consumable)\n    execute(\n        operation: ResourceOperation\n    ): Consumable&lt;ResourceResult&gt;;\n}\n\ninterface ResourceOperation {\n    kind: 'query' | 'mutation' | 'subscription';\n    key: unknown[]; // Normalized ID\n    context: Record&lt;string, unknown&gt;;\n}</code></pre>"
+}

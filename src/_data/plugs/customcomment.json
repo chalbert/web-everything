@@ -1,0 +1,10 @@
+{
+  "id": "customcomment",
+  "name": "CustomComment",
+  "status": "active",
+  "type": "Global",
+  "summary": "Base class for enhanced comments with lifecycle callbacks for comment-based directives.",
+  "projects": [
+    "webdirectives"
+  ]
+}

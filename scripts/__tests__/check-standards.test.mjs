@@ -18,6 +18,7 @@ import { loadBlocks } from '../lib/blocks-loader.cjs';
 import { loadIntents } from '../lib/intents-loader.cjs';
 import { loadProtocols } from '../lib/protocols-loader.cjs';
 import { loadDemos } from '../lib/demos-loader.cjs';
+import { loadDataRegistry } from '../lib/registry-loader.cjs';
 import { buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -170,11 +171,11 @@ describe('validateBacklogItem — real backlog stays clean', () => {
   const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
   const intents = loadIntents(); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
   const protocols = loadProtocols(); // per-protocol specs src/_data/protocols/<id>.json, assembled (#1146)
-  const projects = loadJson('projects.json');
-  const plugs = loadJson('plugs.json');
+  const projects = loadDataRegistry('projects'); // per-project specs src/_data/projects/<id>.json (#1157)
+  const plugs = loadDataRegistry('plugs'); // per-plug specs src/_data/plugs/<id>.json (#1157)
   const adapters = loadJson('adapters.json');
   const demos = loadDemos(); // per-demo specs src/_data/demos/<id>.json, assembled (#1146)
-  const capabilityIds = new Set(loadJson('capabilities.json').map((c) => c.id));
+  const capabilityIds = new Set(loadDataRegistry('capabilities').map((c) => c.id)); // per-cap specs (#1157)
   const loadBacklog = require(join(ROOT, 'src/_data/backlog.js'));
   const backlog = typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog;
 

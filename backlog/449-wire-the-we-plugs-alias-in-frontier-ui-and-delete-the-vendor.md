@@ -3,13 +3,26 @@ type: issue
 workItem: story
 size: 5
 parent: "170"
-status: open
+status: resolved
 locus: webeverything
 blockedBy: ["1045"]
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: "we:vite.config.mts"
 tags: [plugs, dedup, migration, webeverything]
 ---
+
+> **Resolved 2026-06-19 (`/workflow` serial lane).** WE-side repoint landed: wired the
+> `@frontierui/plugs` sibling-alias (dev-time → `../frontierui/plugs`, mirroring FUI's proven
+> `@webeverything/*` → `../webeverything` pattern) into `we:vite.config.mts`, `we:vitest.config.ts`,
+> `we:tsconfig.json`, and `we:tsconfig.plugs.json`, then rewrote all **42** block-runtime files' relative
+> `../plugs/*` imports (67 import lines) to `@frontierui/plugs/*`. Verified: the 79 block test files
+> (1169 tests) pass resolving against the sibling FUI source; `tsc -p we:tsconfig.plugs.json` adds zero new
+> errors (the 53 TS6059 `rootDir` warnings pre-exist this slice); `check:standards` green. Scope honored:
+> the local `we:plugs/` dir stays present-but-dead (demos/test-pages still serve from it via absolute
+> `/plugs/*` — its deletion + the gap-domain demo repoint is **#1047**). Sibling slices: #1045 (package,
+> resolved), #1046 (plateau-app repoint), #1047 (delete WE plugs + relocate #726 tests).
 
 > **blockedBy `950` added 2026-06-18 (batch pre-flight).** This terminal dedup packages the FUI plugs
 > tree as `@frontierui/plugs` and deletes WE's `plugs/` — but active **#950** is mid-porting

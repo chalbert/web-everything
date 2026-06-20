@@ -12,8 +12,8 @@
 
 import TransientElement from './TransientElement';
 import { calculateHeadingLevel } from './calculateHeadingLevel';
-import InjectorRoot from '../../plugs/webinjectors/InjectorRoot';
-import type { ProviderTypeMap } from '../../plugs/webinjectors/InjectorRoot';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
+import type { ProviderTypeMap } from '@frontierui/plugs/webinjectors/InjectorRoot';
 
 /**
  * Auto-heading custom element.

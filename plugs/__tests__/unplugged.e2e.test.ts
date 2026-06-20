@@ -110,7 +110,7 @@ describe('unplugged e2e', () => {
 
       class DynamicAttribute extends CustomAttribute {
         attachedCallback() {
-          attached.push(this.target!.id);
+          attached.push(this.ownerElement!.id);
         }
       }
 
@@ -137,7 +137,7 @@ describe('unplugged e2e', () => {
 
       class RemovableAttribute extends CustomAttribute {
         detachedCallback() {
-          detached.push(this.target!.id);
+          detached.push(this.ownerElement!.id);
         }
       }
 
@@ -170,13 +170,13 @@ describe('unplugged e2e', () => {
         private hideHandler = () => tooltipHidden();
 
         attachedCallback() {
-          this.target!.addEventListener('mouseenter', this.showHandler);
-          this.target!.addEventListener('mouseleave', this.hideHandler);
+          this.ownerElement!.addEventListener('mouseenter', this.showHandler);
+          this.ownerElement!.addEventListener('mouseleave', this.hideHandler);
         }
 
         detachedCallback() {
-          this.target!.removeEventListener('mouseenter', this.showHandler);
-          this.target!.removeEventListener('mouseleave', this.hideHandler);
+          this.ownerElement!.removeEventListener('mouseenter', this.showHandler);
+          this.ownerElement!.removeEventListener('mouseleave', this.hideHandler);
         }
       }
 
@@ -210,7 +210,7 @@ describe('unplugged e2e', () => {
 
       class ClickOutsideAttribute extends CustomAttribute {
         private handler = (e: Event) => {
-          if (!this.target!.contains(e.target as Node)) {
+          if (!this.ownerElement!.contains(e.target as Node)) {
             clickedOutside();
           }
         };
@@ -249,13 +249,13 @@ describe('unplugged e2e', () => {
     it('should implement a form validation attribute', () => {
       class RequiredAttribute extends CustomAttribute {
         attachedCallback() {
-          const input = this.target as HTMLInputElement;
+          const input = this.ownerElement as HTMLInputElement;
           input.required = true;
           input.setAttribute('aria-required', 'true');
         }
 
         detachedCallback() {
-          const input = this.target as HTMLInputElement;
+          const input = this.ownerElement as HTMLInputElement;
           input.required = false;
           input.removeAttribute('aria-required');
         }
@@ -309,7 +309,7 @@ describe('unplugged e2e', () => {
 
       class SuccessAttribute extends CustomAttribute {
         attachedCallback() {
-          successCalls.push(this.target!.id);
+          successCalls.push(this.ownerElement!.id);
         }
       }
 

@@ -33,6 +33,7 @@ import { loadProtocols } from './lib/protocols-loader.cjs';
 import { loadDemos } from './lib/demos-loader.cjs';
 import { loadSemantics } from './lib/semantics-loader.cjs';
 import { loadPresets } from './lib/presets-loader.cjs';
+import { loadDataRegistry } from './lib/registry-loader.cjs';
 import {
   BACKLOG_STATUSES, BACKLOG_TYPES, WORK_ITEMS, FIB, FILE, blockSpecFile,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated,
@@ -110,15 +111,15 @@ const BLOCK_TYPES = new Set(['Store', 'Parser', 'Behavior', 'Directive', 'Compon
 
 // ── Load specs ───────────────────────────────────────────────────────────────
 const blocks = arr(loadBlocks()); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
-const plugs = arr(readJson('plugs.json'));
+const plugs = arr(loadDataRegistry('plugs')); // per-plug specs src/_data/plugs/<id>.json, assembled (#1157)
 const semantics = arr(loadSemantics()); // per-term specs src/_data/semantics/<slug>.json, assembled (#1146)
 const research = arr(loadResearch()); // per-topic specs src/_data/researchTopics/<id>.json, assembled (#1145)
 const protocols = arr(loadProtocols()); // per-protocol specs src/_data/protocols/<id>.json, assembled (#1146)
 const presets = arr(loadPresets()); // per-preset specs src/_data/assemblerPresets/<name>.json, assembled (#1146)
-const designSystems = arr(readJson('designSystems.json'));
-const projects = arr(readJson('projects.json'));
+const designSystems = arr(loadDataRegistry('designSystems')); // per-entry src/_data/designSystems/<id>.json (#1157)
+const projects = arr(loadDataRegistry('projects')); // per-project specs src/_data/projects/<id>.json (#1157)
 const intents = arr(loadIntents()); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
-const capabilities = arr(readJson('capabilities.json'));
+const capabilities = arr(loadDataRegistry('capabilities')); // per-capability specs src/_data/capabilities/<id>.json (#1157)
 const adapters = arr(readJson('adapters.json'));
 const demos = arr(loadDemos()); // per-demo specs src/_data/demos/<id>.json, assembled (#1146)
 const capabilityMatrix = readJson('capabilityMatrix.json') || {};
@@ -303,8 +304,8 @@ dupCheck(protocols, 'protocols.json');
   // 1) Corpus sources — the seed home (#546); supersededBy resolves to a sibling source id.
   for (const s of benchCorpus.sources || [])
     runShape(s, `benchmarkCorpus source "${s.id}"`, { resolveSupersededBy: inCorpus });
-  // 2) references.json links.
-  for (const group of readJson('references.json') || [])
+  // 2) references links — per-entry specs src/_data/references/<slug>.json, assembled (#1157).
+  for (const group of loadDataRegistry('references') || [])
     for (const link of group.links || [])
       runShape(link, `references.json link "${link.title || link.url}"`);
   // 3) designSystemResearch refs on blocks + intents.

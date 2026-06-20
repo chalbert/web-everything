@@ -1,0 +1,10 @@
+{
+  "id": "customrecoveryhandlerregistry",
+  "name": "CustomRecoveryHandlerRegistry",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Exposes window.customRecovery for registering named recovery handlers tried in priority order — the first handler whose tryRecover() returns a non-null result owns the recovery. Any system (Resource Loader, form submission, background task) resolves the registry and delegates failure handling without knowing which handlers are registered.",
+  "projects": [
+    "webreliability"
+  ]
+}

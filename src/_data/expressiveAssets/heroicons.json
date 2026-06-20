@@ -1,0 +1,12 @@
+{
+  "id": "heroicons",
+  "kind": "icon-set",
+  "label": "Heroicons",
+  "provider": "Tailwind Labs",
+  "license": "MIT",
+  "approxCount": 300,
+  "axes": [
+    "style:outline|solid|mini"
+  ],
+  "summary": "A small, opinionated set shipped in outline / solid / mini styles — illustrates that an icon set may carry its own style variants the icon intent's `style` dimension selects."
+}

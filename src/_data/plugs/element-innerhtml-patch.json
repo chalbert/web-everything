@@ -1,0 +1,11 @@
+{
+  "id": "element-innerhtml-patch",
+  "name": "Element.innerHTML",
+  "status": "active",
+  "type": "Patch",
+  "summary": "Intercepts innerHTML setter to propagate injector scope to newly created nodes.",
+  "projects": [
+    "webinjectors"
+  ],
+  "patchFile": "custom-elements/Element.patch.ts"
+}

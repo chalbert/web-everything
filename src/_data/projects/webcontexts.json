@@ -1,0 +1,9 @@
+{
+  "id": "webcontexts",
+  "name": "Web Contexts",
+  "description": "Protocol enabling hierarchical data flow and service provision across component trees, effectively solving prop-drilling natively.",
+  "status": "poc",
+  "category": "standard",
+  "icon": "/assets/icons/webcontexts.svg",
+  "isSvg": true
+}

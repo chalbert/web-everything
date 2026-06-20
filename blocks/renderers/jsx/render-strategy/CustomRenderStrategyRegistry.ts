@@ -1,4 +1,4 @@
-import CustomRegistry, { type CustomRegistryOptions } from '../../../../plugs/core/CustomRegistry';
+import CustomRegistry, { type CustomRegistryOptions } from '@frontierui/plugs/core/CustomRegistry';
 import type {
   CustomRenderStrategy,
   RenderHandle,

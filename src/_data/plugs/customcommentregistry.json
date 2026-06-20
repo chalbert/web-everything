@@ -1,0 +1,10 @@
+{
+  "id": "customcommentregistry",
+  "name": "CustomCommentRegistry",
+  "status": "active",
+  "type": "Global",
+  "summary": "Enables attaching behavior to comment nodes, useful for structural directives like virtual elements.",
+  "projects": [
+    "webdirectives"
+  ]
+}

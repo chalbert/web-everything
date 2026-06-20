@@ -20,7 +20,7 @@ import type { LoaderIntent, ResourceStateChangeDetail } from '../../resource-loa
 import { DEFAULT_INTENT } from '../../resource-loader/types';
 
 // Import plugs
-import InjectorRoot from '../../../plugs/webinjectors/InjectorRoot';
+import InjectorRoot from '@frontierui/plugs/webinjectors/InjectorRoot';
 
 describe('ResourceLoader integration', () => {
   let injectorRoot: InjectorRoot;

@@ -1,0 +1,9 @@
+{
+  "id": "webexpressions",
+  "name": "Web Expressions",
+  "description": "Parser-agnostic infrastructure for dynamic content interpolation in HTML, supporting custom template syntax.",
+  "status": "poc",
+  "category": "standard",
+  "icon": "/assets/icons/webexpressions.svg",
+  "isSvg": true
+}

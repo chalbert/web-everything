@@ -1,0 +1,9 @@
+{
+  "id": "webregistries",
+  "name": "Web Registries",
+  "description": "Allow creation of custom registries, similar to <code>customElementsRegistry</code>, for many purposes.",
+  "status": "poc",
+  "category": "standard",
+  "icon": "/assets/icons/webregistries.svg",
+  "isSvg": true
+}

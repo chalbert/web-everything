@@ -40,7 +40,7 @@ export default class ScopedRegistryAttribute extends CustomAttribute {
   bound = false;
 
   #bind(): void {
-    const host = this.target;
+    const host = this.ownerElement;
     const result = getActiveRegistryResult();
     if (!host || !result) {
       this.bound = false;

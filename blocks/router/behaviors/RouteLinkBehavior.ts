@@ -13,7 +13,7 @@
  * ```
  */
 
-import CustomAttribute from '../../../plugs/webbehaviors/CustomAttribute';
+import CustomAttribute from '@frontierui/plugs/webbehaviors/CustomAttribute';
 
 export default class RouteLinkBehavior extends CustomAttribute {
   #clickHandler: ((event: MouseEvent) => void) | null = null;

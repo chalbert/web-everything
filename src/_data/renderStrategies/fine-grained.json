@@ -1,0 +1,5 @@
+{
+  "id": "fine-grained",
+  "name": "Fine-grained",
+  "summary": "Expressions become reactive computations tracked at read-time; surgical DOM updates, no diff."
+}

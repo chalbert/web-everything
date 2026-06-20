@@ -1,0 +1,8 @@
+{
+  "id": "sanitizer-api",
+  "label": "Sanitizer API",
+  "webFeaturesKey": "sanitizer",
+  "baseline": false,
+  "polyfill": "polyfillable",
+  "summary": "<code>Element.setHTML()</code> + <code>Sanitizer</code> — parse-time XSS-safe HTML insertion against a configurable allow-list, native. Polyfillable via DOMPurify. Guards rich-text paste/insertion."
+}

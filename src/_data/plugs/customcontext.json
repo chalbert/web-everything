@@ -1,0 +1,10 @@
+{
+  "id": "customcontext",
+  "name": "CustomContext",
+  "status": "active",
+  "type": "Global",
+  "summary": "Base class for defining context providers with lifecycle callbacks and consumption tracking.",
+  "projects": [
+    "webcontexts"
+  ]
+}
