@@ -3,9 +3,12 @@ type: decision
 workItem: story
 size: 3
 parent: "904"
-status: open
+status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-20"
 relatedReport: reports/2026-06-20-renderer-export-shape-coverage.md
 tags: []
@@ -85,6 +88,63 @@ ruling is the end-state (B), the *schedule* is ordering.
   scheduling, not a design end-state (report Finding 5).
 
 ---
+
+## Ruling (ratified 2026-06-20) — **B**: curated per-dir barrel + re-point, named re-exports only
+
+**Fork 1 → B.** A renderer block's "actual export surface" is the symbols re-exported through a **curated
+per-dir barrel** (one per renderer, e.g. `fui:blocks/renderers/data-table/index.ts`) — *published* API, not "defined somewhere." Renderers re-point their
+`implementedBy` at it and ride the **one uniform** `getExportsOfModule` TS-program path the 7 barrel blocks
+already take. A (dir-walk) rejected on merit: its only edge is "no FUI change" (cost, not merit, per
+*fork-is-not-a-prioritization-tool*), and it forks the resolver into a second looser semantic. C (exempt)
+rejected (permanent coverage hole). B′ (re-point at the existing `fui:blocks/renderers/index.ts` family
+barrel) is a **scheduling shortcut only** (union-imprecise + excludes draft `data-grid`), never the end-state.
+
+**Anti-drift is part of the ruling** (per the discussion): **named re-exports only — never `export *`**.
+That makes B drift-proof both ways — compiler (TS2305) locks barrel→impl, the enforced §8e arm locks
+contract→barrel. Subset semantics kept uniform (extras allowed), *not* exact-match. Confidence: high.
+
+**Graduation** (composition order, carved to the items below): 5 FUI barrels → 5 `implementedBy` re-points
++ §8e filter extension → resolve the surfaced renderer `*Module` drifts → then the `EXPORT_SHAPE_ENFORCED`
+flip (also gated on #1165).
+
+## Grounding update (verified 2026-06-20, at claim)
+
+The prepared body said the renderer dirs have **no** enumerable barrel. Half-true and it matters:
+
+- **No *per-dir* barrel** (`fui:blocks/renderers/data-table/index.ts` etc. — confirmed absent). ✓ as stated.
+- **But a *parent* barrel already exists** — [`fui:blocks/renderers/index.ts`](../../frontierui/blocks/renderers/index.ts)
+  re-exports the published triple of **4 of the 5** renderers: `collection-operations`, `data-table`,
+  `pagination`, `reorderable-list` (the exact `<Name>Behavior`/`register<Name>` symbols + render fns).
+  `data-grid` is **not** re-exported (leaf `DataGridBehavior`/`registerDataGrid` exist but unpublished — a draft).
+
+Two consequences:
+1. **The genuine drifts are confirmed real:** `DataTableModule`, `PaginationModule`, `DataGridModule` exist
+   **nowhere** in `fui:blocks/` (grep = 0); `CollectionOperationsModule` is present. The contract's `*Module`
+   naming is the drift — surfaces the moment coverage lands (resolved under #1165's sibling space, renderer arm).
+2. **A cheaper variant of B appears — B′: re-point each `implementedBy` at the *existing* parent barrel**
+   (`fui:blocks/renderers/index.ts`), zero new FUI files. *But it's union-imprecise:* all 5 would resolve against one
+   shared surface, so a block declaring a *sibling's* symbol would wrongly pass — it loses the per-block
+   isolation that is B's whole merit. So B′ is a **scheduling shortcut** (and excludes data-grid anyway),
+   not the end-state. The finding therefore *strengthens* B on merit: a per-block entry point = a precise
+   per-block published surface, which the shared family barrel cannot give.
+
+## Anti-drift requirement (raised in discussion 2026-06-20 — part of what B means)
+
+A curated barrel is a new artifact, so it must not become its own drift surface. B is drift-proof in
+**both** directions only under one rule:
+
+- **Named re-exports only — never `export *`.** `export *` would silently republish every internal symbol
+  a refactor adds; the published surface must be an explicit curated list, or "reachable through the public
+  entry point" means nothing. This is the non-negotiable authoring rule for the 5 barrels.
+- **Barrel → impl: guarded by the compiler (free).** A named `export { X } from './leaf'` is a TS error
+  (TS2305) if the leaf stops exporting `X` → FUI's typecheck fails. The barrel can never over-claim vs impl
+  — strictly stronger than A, which has no entry point asserting the surface.
+- **Contract → barrel: guarded by this gate.** Re-point + extend the §8e `barrelBlocks` filter so the 5
+  renderers ride the same `getExportsOfModule` TS-program path, then flip `EXPORT_SHAPE_ENFORCED` →
+  contract↔barrel drift becomes a **hard error**, permanently. (Subset semantics kept uniform — extras
+  allowed, same as the 7 barrel blocks; do **not** fork to exact-match, which would re-split the resolver.)
+
+Net: today renderers are un-coverable (zero drift detection); B closes both directions with a hard gate.
 
 ## Context
 
