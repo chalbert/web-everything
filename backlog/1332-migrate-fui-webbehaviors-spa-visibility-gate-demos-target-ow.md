@@ -19,14 +19,14 @@ Flip inline-behavior this.target → this.ownerElement in fui:demos/declarative-
 ## Progress
 
 - Flipped `this.target` → `this.ownerElement` (38 occurrences) across the 5 demo files. Confirmed all
-  inline behaviors extend the **real plug** `CustomAttribute` (bootstrap/`window` in the .html/.tsx;
-  `import … from '/plugs/index.ts'` in the unplugged demo) which carries the `ownerElement` getter
+  inline behaviors extend the **real plug** `CustomAttribute` (bootstrap/`window` in the HTML/TSX demos;
+  `import … from fui:plugs/index.ts` in the unplugged demo) which carries the `ownerElement` getter
   (#1299) — so the alias is available in every file.
-- **Browser-verified on live :3001:** `declarative-spa.html` + `declarative-spa-unplugged.html` load
-  with **zero** console/page errors and render content; the existing e2e specs pass —
-  `plugs/__tests__/e2e/visibility-gate.spec.ts` (reveal/pulse/heavy activate on view) and
-  `plugs/__tests__/e2e/declarative-spa.spec.ts`.
+- **Browser-verified on live :3001:** `fui:demos/declarative-spa.html` + `fui:demos/declarative-spa-unplugged.html`
+  load with **zero** console/page errors and render content; the existing e2e specs pass —
+  `fui:plugs/__tests__/e2e/visibility-gate.spec.ts` (reveal/pulse/heavy activate on view) and
+  `fui:plugs/__tests__/e2e/declarative-spa.spec.ts`.
 - Note: `ownerElement` and the deprecated `target` getter both `return this.#target` (byte-identical),
   so the flip is behavior-neutral by construction. Two pre-existing smoke-test failures on the unrelated
-  `for-each-demo.html` (a page-module load hang that reproduces on the pre-migration code too) are
+  `fui:demos/for-each-demo.html` (a page-module load hang that reproduces on the pre-migration code too) are
   external to this changeset.

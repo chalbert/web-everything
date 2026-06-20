@@ -22,7 +22,8 @@ Flip this.target → this.ownerElement across fui:blocks/droplist/* (8 CustomAtt
   `fui:blocks/droplist/Clearable.ts`, `fui:blocks/droplist/Filter.ts`,
   `fui:blocks/droplist/FocusDelegation.ts`, `fui:blocks/droplist/LiveStatus.ts`,
   `fui:blocks/droplist/Selection.ts`, `fui:blocks/droplist/Windowed.ts`. Spot-checked that
-  `event.target` (Anchor.ts) and prose comments were untouched (literal `this.target` only).
+  `event.target` (`fui:blocks/droplist/Anchor.ts`) and prose comments were untouched (literal
+  `this.target` only).
 - No droplist test referenced `.target`, so no test edits were needed. Droplist suites green: 108/108
   (`npx vitest run blocks/droplist/`).
 - FUI `check:standards`: the only 2 errors are pre-existing catalog-completeness drift in
