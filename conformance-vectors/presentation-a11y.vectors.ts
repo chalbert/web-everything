@@ -31,7 +31,9 @@ export const presentationA11ySuite: ConformanceVectorSuite = {
         liveRegionAnnounced: true,
         aria: { 'aria-live': 'polite' },
       },
-      observeVia: ['liveRegion', 'aria'],
+      // observeVia surface names must be the keys `expect` reads — the #1176 driver samples ONLY these
+      // surfaces, so a surface the expectation asserts on (here `liveRegionAnnounced`) must be listed.
+      observeVia: ['liveRegionAnnounced', 'aria'],
     },
     {
       // Focus management — after a slide change, focus must land on the new slide's region/heading, not be
@@ -49,7 +51,7 @@ export const presentationA11ySuite: ConformanceVectorSuite = {
         activeElementWithin: 'slide-2',
         neverObserved: [{ activeElement: 'body' }],
       },
-      observeVia: ['activeElement'],
+      observeVia: ['activeElement', 'activeElementWithin'],
     },
     {
       // Reading order — the off-screen / not-current slides must not be in the tab order or accessibility
@@ -65,9 +67,12 @@ export const presentationA11ySuite: ConformanceVectorSuite = {
       expect: {
         finalState: 'slide-2-shown',
         focusablesAllWithin: 'slide-2',
-        neverObserved: [{ focusedSlide: 'slide-1' }],
+        // A non-current slide's focusables must NEVER stay reachable (tab order / a11y tree). Scanned across
+        // the whole run — phrased as a positional invariant (not "focus on slide-1"), since the deck
+        // legitimately starts on slide 1 before the change.
+        neverObserved: [{ focusableOutsideCurrent: true }],
       },
-      observeVia: ['activeElement', 'tabSequence'],
+      observeVia: ['focusablesAllWithin', 'focusableOutsideCurrent'],
     },
     {
       // Reduced-motion gate — composes #1183: under prefers-reduced-motion the slide transition is gated
