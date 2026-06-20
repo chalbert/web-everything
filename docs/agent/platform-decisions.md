@@ -59,15 +59,19 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    WE-side conformance gate** (`check.ts`) → **Web Everything**. Code that **delivers a capability
    at runtime** (registry-dispatching, artifact-producing, a running handler — incl. `assert*`,
    constants, engines, native-default strategies) → **Frontier UI**. A served, credential-holding
-   product → **Plateau**. **No reference-runtime impl in WE (#1246, reverses #1078 + #697).** WE holds
-   **zero** runtime implementation — *including* for its own conformance. The former #1078
-   "reference-implementation tier" (a non-published WE-repo reference runtime hosted "additionally"
-   alongside the contract) is **withdrawn**: a standard's executable demo is **FUI-hosted and
-   iframe-embedded** (or consumed as a mode-C runtime URL-bundle — [we-fui-embed-boundary](#we-fui-embed-boundary)
-   rules 4/6), and conformance that needs a runtime to exercise becomes **WE-owned conformance
-   *vectors* executed FUI-side** (#817/#899) — data, not impl. WE keeps protocols + vectors + types
-   only; the `@webeverything` *package* stays types-only (rule 3, unchanged); the source arrow stays
-   WE→FUI, never inverts.
+   product → **Plateau**. **Reference-implementation tier (#1078) — blocks carved OUT by #1246.** The
+   WE *repo* may host a **non-published reference runtime** for a **non-rendered contract/logic**
+   standard (e.g. `we:webpolicy/enforcement.ts` — a headless DMN/proof conformance the `fuiDemo` iframe
+   convention does not fit, and #1078's standards-body precedent: wpt/test262 live in the standards
+   repo) — an executable spec consumed only by WE's own conformance demos/tests; FUI still ships the
+   *production* impl, the reference impl carries no lock-in, and the `@webeverything` *package* stays
+   types-only (rule 3). The carve-out is the **repo**, never the **published package**, never inverts
+   the WE→FUI arrow. **But block runtime is excluded from this tier (#1246, reverses #697):** a *block*
+   (rendered UI) never keeps a WE reference copy — its demo is FUI-hosted + iframe-embedded
+   ([we-fui-embed-boundary](#we-fui-embed-boundary) rule 4), because the iframe path fits rendered UI.
+   *(Open: whether the tier should be withdrawn **wholesale** — "zero impl in WE, full stop" — is a
+   broader call than #1246's block scope; it reverses #1078's webpolicy runtime + ~10 others and is
+   gated on the #899 vector-runner being built. Not yet decided.)*
 2. **The file seam is the cut:** `contract.ts` (pure types, compile-erased) → WE; `provider.ts` +
    `registry.ts` (runtime) → FUI. Split mixed modules *mid-file* at this seam.
 3. **Distribution end-state:** FUI consumes WE contracts via a WE-published type-only package
@@ -94,9 +98,10 @@ plateau-app / exercise-app); items gate in their own locus so cross-repo batches
 #1248 (relocating the runtime does not retire the contract-owning project — `webplugs` survives #606) ·
 #641 (block-protocol impl boundary) · #779 #426 #799 #497 #834 · #804 #872 #239 (contract package) ·
 #091 (managed-offering decomposition) · #020→#291 (impl-is-not-a-standard) · #1078 (reference-impl
-tier — refines #817: published-package purity vs repo-internal reference runtime) →
-**superseded by #1246 (WE holds zero impl; the reference-runtime tier is withdrawn — conformance
-demos are FUI-hosted/iframe-embedded, conformance-needing-runtime becomes WE-owned vectors run FUI-side)**.
+tier — refines #817: published-package purity vs repo-internal reference runtime; **stands for
+non-rendered contract/logic runtimes**) · #1246 (**carves blocks OUT of the #1078 tier** — rendered-UI
+block runtime is FUI-hosted + iframe-embedded, never a WE reference copy; reverses #697. Does *not*
+withdraw the tier wholesale — webpolicy et al. unaffected).
 
 ### WE ↔ Frontier UI rendering & embed boundary {#we-fui-embed-boundary}
 
@@ -110,8 +115,10 @@ display (its own site + demos, FUI branding).
    renders) — only the iframe *mechanism* requirement relaxes. iframe stays the default.
 3. **Escape/overlay** (modals breaking the iframe box) is host-side over an origin-validated
    `postMessage` channel via a **FUI-owned embed SDK**; seed transport is URL-canonical + additive.
-4. **No block runtime in WE (#1246, reverses #697/#1078):** **every** block's runtime is
-   FUI-canonical — *none* stays in WE, not even one whose demo exercises a WE standard. Its demo is
+4. **No block runtime in WE (#1246, reverses #697; carves blocks out of the #1078 reference-impl
+   tier):** **every** block's runtime is FUI-canonical — *none* stays in WE, not even one whose demo
+   exercises a WE standard (the iframe path fits rendered UI; this does **not** touch #1078's
+   non-rendered logic runtimes like webpolicy). Its demo is
    **FUI-hosted and iframe-embedded** (or consumed as a mode-C runtime URL-bundle per rule 6); WE owns
    only the block **protocol + conformance vectors** (#817/#899, data not impl). The former "stays in
    WE *iff* it is the standard's reference runtime" partition is **withdrawn** — the headline above
@@ -130,7 +137,8 @@ display (its own site + demos, FUI branding).
    cross the boundary?" is answered *no* by construction — don't re-open it.
 
 **Lineage:** #604 #701 #707 (iframe boundary; "WE renders real FUI blocks" is mis-framed) · #700 ·
-#1246 (reverses the rule-4 reference-vs-impl partition + #697/#1078: no block runtime stays in WE) ·
+#1246 (withdraws the rule-4 reference-vs-impl partition + reverses #697: no block runtime stays in WE;
+carves blocks out of the #1078 tier, which still stands for non-rendered logic runtimes) ·
 #705 · #732 (escape SDK) · #765 (mode-C relaxation) · #788 (seed transport) · #791 (reference-vs-impl
 partition) · #809 (workbench locus) · #932 (website≠standard; consumer may run WE runtimes in-document).
 
@@ -190,6 +198,37 @@ candidates promote only through the human-ratified `/new-standard` flow.
 
 **Lineage:** #475 #488 (#488: on-device fixed-cost floor + BYO-key bridge) · #396 · #086 + #314
 (exercise-app conformance loop as the forcing function).
+
+### Vision capability tiers — the on-device-first cascade {#vision-tiers}
+
+The vision service (a [no-leakage client](#no-leakage-client)) ships as **three layered tiers**, not
+interchangeable models — pick by job, and let the cheap tier gate the expensive one:
+
+1. **Tier 1 — verdict classifier** (≤10 MB, on-device, free at any volume, **benchmarkable/gateable**):
+   the always-on triage/router. Reach for it when the work is high-volume, must run everywhere/offline,
+   must be instant, or needs a deterministic gate. Closed label set, whole-screen only — no "why/where".
+2. **Tier 2 — small VLM** (device-gated, an opt-in download in the dev browser): open-ended describe /
+   localize / tag — the "what's wrong and where" a real review needs. Generative → no clean agreement
+   metric, so it is **never** deterministically gated the way Tier 1 is.
+3. **Hosted** — richest, but **per-call cost**, so never the free floor: a dev tool / BYO-key bridge /
+   premium upgrade only (the [linear-cost rule](#monetization)).
+
+**The cascade is the load-bearing rule:** Tier 1 runs on every frame and decides *whether it's even
+worth* an expensive call; only escalated frames reach Tier 2 / hosted. That filter is what makes the
+heavy tier affordable under flat pricing. **Deployment floor:** Tier 1 bundled, on by default (in-browser
+via ONNX Runtime Web + WebGPU); Tier 2 an opt-in dev-browser download on capable devices only; hosted
+BYO-key / premium, never on mobile. Every tier registers behind the one `registerVisionProvider` seam —
+swapping a tier is a provider swap, not new plumbing. The design-critique rubric (#1034) is the service's
+*output contract*, not a published `@webeverything` artifact, and rides the same seam.
+
+**Still deferred (a later call, not a fork):** whether a Tier-2-class critique model is ever built
+on-device vs. stays hosted — the architecture holds either way and the provider seam absorbs the choice.
+
+**Lineage:** #1033 (interactive design-review loop) #1034 (critique rubric) #490 (build epic) · #475
+#488 (on-device fixed-cost floor) · #511/#512/#513 (Tier 1 tooling/training) #1073 (Tier 2 epic) #485
+(hosted teacher bridge) #141 (dev-browser home) #514 (ONNX/WebGPU runtime). Promoted from
+[vision-tiers.md](vision-tiers.md) per #1244. *Confidence: architecture firm; on-device-vs-hosted for
+the rich tier provisional.*
 
 ### Custom-element tagName naming {#tagname-naming}
 

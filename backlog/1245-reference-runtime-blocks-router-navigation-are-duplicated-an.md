@@ -3,7 +3,6 @@ kind: epic
 size: 8
 status: open
 dateOpened: "2026-06-20"
-blockedBy: ["1246"]
 childlessReason: undecided
 tags: [blocks, duplication, drift, single-source, frontierui, maintenance, runtime]
 relatedProject: webblocks
@@ -43,30 +42,40 @@ multiple files** (router alone: all 5 source files differ — import style `@fro
 `we-route-view` tag defaults, the `registerRouteView/Outlet` split, plus WE's #365 `entry`-URL normalization
 and the `RoutePrefetchBehavior` viewport-presence refactor missing in FUI).
 
-## Open question — canonical home → carved to [#1246](/backlog/1246-canonical-home-for-the-reference-runtime-stay-subset-blocks-/)
+## Canonical home — RESOLVED by [#1246](/backlog/1246-canonical-home-for-the-reference-runtime-stay-subset-blocks-/) (2026-06-20)
 
-The embedded fork — *are the router et al. "reference-runtime, canonical in WE, FUI consumes" or "pure
-impl, FUI-canonical, WE holds only contract types"?* — is its own decision and gates everything below, so
-it now lives as **[#1246](/backlog/1246-canonical-home-for-the-reference-runtime-stay-subset-blocks-/)**
-(`type: decision`), with this epic `blockedBy` it. The tension is real and unreconciled: `#606`/`#817`
-ruled runtime impl FUI-canonical and `#641` ruled WE holds no block-impl copy (every spec'd block already
-declares `implementedBy: @frontierui`), yet `#697` (resolved *after* #641) deliberately kept a
-reference-runtime subset in WE. Either way a blind file-copy is wrong — the copies carry deliberate FUI
-adaptations (import style, tag defaults, the #365/#423 deltas), so the seam needs the `#817`
-contract/runtime split or a real import. **Do not start dedup before #1246 rules.**
+**Ruling: WE holds zero implementation — delete *all* WE block runtime copies; FUI is the sole home.**
+Codified `we:docs/agent/platform-decisions.md#constellation-placement` (rule 1 reference-impl tier
+*withdrawn*) + `#we-fui-embed-boundary` (rule 4 reference-vs-impl partition *withdrawn*); reverses #1078
++ #697. The "reference-runtime stays in WE" premise this epic was built on is gone — so the duplication
+is resolved by **elimination, not by a dedup-to-track + drift-gate**. Consequences for this epic:
 
-## Proposed shape (mirror #170)
+- **There is no second copy to keep in sync** → the drift gate (old step 3) is **moot**; with one home
+  there is nothing to drift. (The `#659` gate still hard-fails a *missing* FUI impl — unchanged.)
+- The ~14 WE demos/tests that consume the WE copies today (`we:plugs/bootstrap.ts` + `we:demos/*` +
+  `we:blocks/__tests__/unit/*`) lose their in-repo runtime, so their consumption must **relocate**, not
+  break — that relocation is the bulk of the new work.
 
-1. **Decide the canonical home** per `#817` (likely: split each block at the `we:contract.ts`/types seam — types
-   stay WE, runtime → FUI — consistent with the plugs reversal; confirm against the `#697` reference-runtime
-   carve-out).
-2. **Dedupe** to one source per the ruling (delete the redundant tree; wire the seam — import or `#872`
-   `@webeverything/contracts` for the type halves).
-3. **Add a drift gate** — the plugs side already has one (trait-enforcer / byte-diff in `check:standards`);
-   extend or mirror it for `blocks/` so a future one-sided fix fails the gate instead of silently rotting.
+## Re-scoped plan (per the #1246 ruling)
+
+1. **Delete the 16 WE block runtime copies** (`we:blocks/{router,navigation,parsers,text-nodes,for-each,
+   transient,attributes,draft-persistence,view,tabs,wizard,workflow-engine,resource-loader,data-transfer,
+   renderers,stores}/`), leaving the WE-side **protocol spec + conformance vectors + types** only. FUI is
+   canonical (every block already declares `implementedBy: @frontierui/…`).
+2. **Re-host the consuming demos as FUI-hosted** — the ~14 `we:demos/*` + `we:plugs/bootstrap.ts`-driven
+   pages become **FUI-hosted demos embedded via the #701 `fuiDemo` iframe** (or consumed as a mode-C
+   runtime URL-bundle per `#we-fui-embed-boundary` rule 6); `we:plugs/bootstrap.ts` itself follows the
+   runtime to FUI (the #606 move it was a leftover of).
+3. **Convert the WE block unit tests to conformance vectors** (`we:blocks/__tests__/unit/{parsers,
+   text-nodes,…}` → WE-owned vector data executed FUI-side, per #817/#899) — WE keeps the *vectors*, FUI
+   runs them against its impl.
+4. **Router first** (live evidence, load-bearing): its WE copy + the #365/#423 deltas already landed
+   FUI-side (the 2026-06-20 hotfix), so deleting `we:blocks/router/` is now safe and removes the
+   recurrence surface for that bug class outright.
 
 ## Slices (to carve on pickup)
 
-Likely per-family or per-layer slices once the canonical-home call lands (router first — it has live evidence
-and is load-bearing for every consuming app). Until then this is an umbrella; do not start dedup before the
-direction decision.
+Per-family or per-layer slices: (a) delete + spec/vector retention per block; (b) demo re-host to
+FUI/#701 per consuming page; (c) `we:plugs/bootstrap.ts` → FUI; (d) unit-test → vector conversion. Router
+is the first slice. This is now an **unblocked** epic (the gating decision resolved); size may grow past 8
+on slice-out — re-estimate at split.

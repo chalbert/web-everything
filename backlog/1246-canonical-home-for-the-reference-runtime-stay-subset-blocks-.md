@@ -1,9 +1,12 @@
 ---
 kind: decision
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-06-20"
 relatedReport: reports/2026-06-20-1246-reference-runtime-canonical-home.md
 tags: [blocks, duplication, drift, constellation-placement, frontierui]
@@ -19,6 +22,20 @@ ruled WE holds **no** block-impl copy, yet [#697](/backlog/697-delete-we-s-vendo
 kept a **reference-runtime copy in WE** — and full runtime still lives in *both* repos, drifted. This
 decision must rule **before** any dedup in [#1245](/backlog/1245-reference-runtime-blocks-router-navigation-are-duplicated-an/)
 can start. Grounding: `we:reports/2026-06-20-1246-reference-runtime-canonical-home.md`.
+
+> **⚑ RATIFIED 2026-06-20: DELETE ALL 16 BLOCK COPIES — no block runtime stays in WE.**
+> Per the user's deciding direction "we should not keep any implementation in WE," the ruling for the
+> **block** reference-runtime subset is **FUI = sole home for all 16; WE keeps only protocols +
+> conformance vectors + types**, demos FUI-hosted via the #701 iframe (the iframe path fits rendered
+> UI). This **reverses #697** and **carves blocks OUT of the #1078 reference-impl tier**; codified in
+> `we:docs/agent/platform-decisions.md#we-fui-embed-boundary` (rule 4 reference-vs-impl partition
+> withdrawn) + a blocks-carve note on `#constellation-placement` rule 1.
+> **Scope guard:** this does **not** withdraw the #1078 tier wholesale — #1078 (resolved 2026-06-20)
+> keeps `we:webpolicy/enforcement.ts` + ~10 other **non-rendered logic** reference runtimes in WE,
+> where the iframe path doesn't fit and the #899 vector-runner isn't built. Whether to go *fully* "zero
+> impl in WE" is a **separate, broader decision** (see the spin-off filed at close-out). Everything from
+> here down to the "⚑ Ruling" section is the prior **14-retain/2-delete** analysis, **superseded, audit
+> only**.
 
 ## Grounding digest (verified against the tree, 2026-06-20)
 
@@ -71,10 +88,13 @@ table with `file:line` in `we:reports/2026-06-20-1246-reference-runtime-canonica
 
 ## Recommended path at a glance
 
-| Fork | Question | Options | **Default** | Conf. |
+> **Superseded table (audit) — the "Default" column below reflects the prior 14-retain analysis, NOT
+> the active ruling.** Active ruling: **delete all 16** (see the ⚑ banner above and the Reframe section).
+
+| Fork | Question | Prior options | ~~Prior default~~ → **Active** | Conf. |
 |---|---|---|---|---|
-| 1 | Per-block disposition of the 16 WE copies | retain-as-reference · delete-as-stale | **14 retain / 2 delete (`draft-persistence`, `data-transfer`), by WE-consumer evidence** | ~85% |
-| 2 | Does `we:plugs/bootstrap.ts` consumption qualify as a #1078 reference runtime? | qualifies (retain its 6) · #606 leftover (delete its 6, move bootstrap→FUI) | **Qualifies — retain** | ~65% |
+| 1 | Per-block disposition of the 16 WE copies | retain-as-reference · delete-as-stale | ~~14 retain / 2 delete~~ → **delete all 16 (WE holds zero impl)** | ~80% |
+| 2 | Does `we:plugs/bootstrap.ts` consumption qualify as a #1078 reference runtime? | qualifies (retain its 6) · #606 leftover (delete its 6) | ~~Qualifies — retain~~ → **Dissolved: bootstrap moves to FUI** | ~80% |
 
 *Supported by default (not forks):* production-canonical = FUI; `@webeverything` package = types-only;
 source arrow = WE→FUI (original branch B excluded by statute); the **dedup/drift-resolution mechanism**
@@ -120,11 +140,78 @@ unfinished #606 move — its disposition flips 6 rows of Fork 1.
 - **B — #606 leftover: `we:plugs/bootstrap.ts` should follow the plugs runtime to FUI.** Then the 6 lose their WE
   consumer → delete their WE copies too. Requires confirming #606's scope intended bootstrap to move.
 
-**Default — A**, ~65%. The residual: #606's exact scope for `we:plugs/` — whether bootstrap was meant
-to stay as WE's reference entry or follow the runtime. **High-leverage red-team target** — flag for the
-deciding agent's skeptic sub-pass to trace #606's resolution before ratifying; a B ruling moves 6 of
-Fork 1's "retain" rows to "delete."
+~~**Default — A**, ~65% → revised **~90%** post-verification (below).~~ **SUPERSEDED** — the retain
+default is reversed by the reframe (delete all 16). The verification below stands only as evidence that
+the 14 *are* consumed today; under the reframe that consumption relocates to FUI-hosted demos (#701),
+so it no longer argues for a WE-resident copy.
 
-> Prepared (DoR), not ratified. Run `/decision 1246` to rule it — the deciding pass owes a skeptic trace
-> of #606's scope (Fork 2) and a planned-consumer grep for the 2 delete candidates (Fork 1). Blocks all
-> dedup + drift-gate slices under #1245.
+## Verification (deciding pass, 2026-06-20) — both named residuals closed
+
+**Fork 2 / #606-scope skeptic trace — branch B fails to land; A strengthened to ~90%.**
+- **#606 (resolved 2026-06-14, B = FUI owns the plugs *runtime* as `@frontierui/plugs`)** explicitly
+  classifies `we:plugs/bootstrap.ts` as a **"POC/demo"** (`we:backlog/606-…md:38`: "the plugged
+  `we:plugs/bootstrap.ts` (patches `window`/`Node`/`Element`) is a POC/demo"), distinct from the
+  *unplugged library* (`we:plugs/index.ts` / `we:plugs/unplugged.ts`) it named the "real product surface" that
+  moved to FUI. #606's "plugged showcase → `@frontierui/plugs`" was never executed — bootstrap still
+  lives in WE.
+- **bootstrap is not orphaned — it is THE plugged-mode reference entry for WE's demo suite:** loaded by
+  14+ live demo pages via a `<script type="module">` import of `we:plugs/bootstrap.ts`
+  (`we:demos/for-each-demo.html:71`, `we:demos/declarative-spa.html:166`, `we:demos/navigation-demo.html:73`,
+  `we:demos/declarative-spa-router.html:225`, `we:demos/text-interpolation-demo.html:117`, +9 more),
+  **auto-injected into every demo by `we:vite.config.mts`**,
+  and exercised by `we:plugs/__tests__/e2e/*` + the 6 blocks' own unit tests under
+  `we:blocks/__tests__/unit/{router,navigation,parsers,text-nodes,transient}/`.
+- **#1078 postdates and governs #606.** #1078 ("the WE *repo* may host a non-published reference
+  runtime … consumed only by WE's own conformance demos/tests") is the later statute that legitimizes
+  exactly this. Moving bootstrap → FUI would break 14 WE demos that **cannot legally import FUI
+  runtime** (npm-scope-mirrors-layer + types-only contracts). So branch B is **architecturally broken,
+  not merely costlier** — the same shape as Fork 1's branch B. The 6 bootstrap-consumed blocks retain.
+
+**Fork 1 / delete-candidate planned-consumer grep — both confirmed unconsumed.**
+- `draft-persistence`: **0** runtime refs in `we:demos/`/`we:plugs/`; every hit is spec/doc
+  (`we:src/_includes/block-descriptions/draft-persistence.njk` code *example*,
+  `we:src/_data/referenceIndex.json`, `we:src/_data/blocks/draft-persistence.json`).
+- `data-transfer`: **0** runtime refs in `we:demos/`/`we:plugs/`; every hit is doc/intent prose
+  (`we:src/_includes/block-descriptions/{data-transfer,code-view,reorderable-list}.njk`, `/intents/data-transfer/`).
+- Both safe to delete; FUI sole home. ~~Default A (14 retain / 2 delete) holds at ~90%.~~ **SUPERSEDED**
+  — under the reframe *all 16* delete (the 14's consumption relocates to FUI-hosted #701 demos), so this
+  evidence no longer argues for any WE-resident copy.
+
+## ⚑ Ruling — RATIFIED 2026-06-20 (supersedes the forks above)
+
+**User direction in the deciding discussion: "we should not keep any implementation in WE."** This
+rejects the *premise* the two forks above rested on — that a WE conformance demo/test *forces* a
+WE-resident reference runtime. It **reverses #1078's reference-implementation-tier carve-out and #697**,
+not just their conclusion.
+
+**Why the premise dissolves (the carve-out's only prop is met elsewhere):**
+- The "WE demos need runtime" objection is already answered by **#701 `fuiDemo` iframe** — WE embeds
+  *FUI-hosted* demos and never imports FUI block code. The current WE demos importing
+  `we:plugs/bootstrap.ts` + `we:blocks/<id>/` runtime are **legacy pre-#701 state**, not the end-state;
+  #1078 blessed that legacy as a standing tier instead of finishing the migration.
+- WE conformance that needs a runtime to test against becomes **WE-owned vectors executed FUI-side**
+  (#817/#899) — `we:blocks/__tests__/unit/*` convert to vectors; no WE impl required.
+
+**Ruling:**
+- **FUI = sole home for ALL runtime** — all 16 block copies + `we:plugs/bootstrap.ts` + the executable demos.
+- **WE = block protocols + conformance vectors + types. Zero implementation.**
+- WE docs embed FUI-hosted demos via the **#701** iframe.
+- **Fork 1 collapses to "delete all 16"** (not 14-retain/2-delete). **Fork 2 dissolves** (bootstrap moves to FUI).
+- Lineage: *"reverses #697; carves **blocks** out of the #1078 reference-impl tier — a block's
+  demos-need-runtime prop is met by the #701 iframe (fits rendered UI). #1078's tier still stands for
+  non-rendered logic runtimes (webpolicy et al.)."*
+- **Scope guard (added at ratify, after tracing #1078):** #1078 resolved 2026-06-20 keeping
+  `we:webpolicy/enforcement.ts` + ~10 non-rendered reference runtimes in WE, with reasoning the block
+  case does **not** rebut (the `fuiDemo` iframe is built for rendered FUI components, not headless
+  logic/proof conformance; the #899 FUI-side vector-runner is **not built**, so deleting those would
+  "replace executable proof with nothing"). Going *fully* zero-impl-in-WE is therefore a **separate,
+  broader decision** that reverses #1078 wholesale and is gated on #899 — filed as a spin-off, not
+  decided here.
+
+**Downstream scope change:** #1245 grows from "dedup WE copies to track FUI" → **"delete all WE copies +
+re-host the ~14 demos as FUI-hosted (#701) + convert WE unit tests to vectors."** The residual ~20% is
+purely the demo re-hosting feasibility/sequencing — #1245's staging problem, not this decision's.
+
+> The 14-retain/2-delete forks + verification above are **superseded** by this reframe and retained for
+> audit only. Not yet ratified — awaiting explicit go. Blocks all dedup + drift-gate slices under #1245
+> (now re-scoped as above) and amends statute #1078.
