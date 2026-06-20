@@ -38,6 +38,7 @@ module.exports = {
         label: 'Explore',
         links: [
           { href: '/demos/', label: 'Demos' },
+          { href: '/conformance/', label: 'Conformance' },
           { href: '/validation-rules/', label: 'Validation' },
           { href: '/research/', label: 'Research' },
           { href: '/backlog/', label: 'Backlog' },

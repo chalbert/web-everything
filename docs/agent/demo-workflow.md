@@ -95,12 +95,26 @@ src/_data/demos.json   # registry entry (the only file that *surfaces* the demo)
   "summary": "One line for the index card.",
   "description": "<h2>Concept</h2><p>…</p><h3>Scope</h3><p>POC/tier note…</p>",
   "status": "draft",
-  "kind": "playground",                                       // optional — marks conformance playgrounds (vs showcases)
+  "kind": "playground",                                       // marks a conformance playground; omit for a showcase
   "liveUrl": "http://localhost:3000/demos/{id}.html",
   "projects": ["webadapters"]
 }
 ```
 `projects[]` must resolve in `projects.json`. `npx @11ty/eleventy` should add one page at `/demos/{id}/`.
+
+### The `kind` field routes the surface (#1216)
+
+Every demo still gets a detail page at `/demos/{id}/`, but the two **index surfaces** are split by `kind`:
+
+- **`kind: "playground"`** → listed on **`/conformance/`** (the conformance-status page). A playground is a
+  headless, in-browser proof that a protocol is satisfied — framed as *project strength*, not a demo. This
+  is the home for the conformance suite (`*-conformance-demo`, `*-conformance`, etc.).
+- **no `kind`** (or `"showcase"`) → listed on **`/demos/`**. A showcase is WE protocols in *real action* —
+  a compelling, real-usage experience integrating multiple standards.
+
+So pick `kind` honestly: it decides which audience surface advertises the demo. `kind: "demo"` and other
+stray values are **invalid** — a missing `kind` already means showcase. Don't conflate the two surfaces on
+one index (the pre-#1216 `/demos/` mixed 36 playgrounds with 9 showcases, burying the real-action work).
 
 ## 2. Bootstrap (the `.html` shell)
 Load the platform bootstrap, then the demo module:

@@ -5,17 +5,21 @@ title: Web Everything - Demos
 
 {% from "project-status.njk" import projectStatus %}
 
+{% set showcases = demos | rejectattr("kind", "equalto", "playground") %}
+
 <div class="page-header">
     <h1>Demos</h1>
     <p class="page-description">
-        End-to-end demonstrations integrating multiple Web Everything standards to showcase real-world use cases and implementation patterns.
+        Web Everything protocols in real action — compelling, real-usage showcases that integrate multiple
+        standards into working experiences. Looking for headless proofs that a standard is satisfied? Those
+        live on the <a href="/conformance/">Conformance status</a> page.
     </p>
 </div>
 
 <div class="container">
-    {% if demos.length > 0 %}
+    {% if showcases.length > 0 %}
     <div class="standards-grid">
-        {% for demo in demos %}
+        {% for demo in showcases %}
         <a href="/demos/{{ demo.id }}/" class="standard-card">
             <div class="flex justify-between items-start mb-3">
                 <h2 id="demo-{{ demo.id }}" class="text-lg font-bold m-0 text-gray-900">{{ demo.name }}</h2>

@@ -1,0 +1,70 @@
+---
+layout: base.njk
+title: Web Everything - Conformance status
+permalink: "conformance/"
+---
+
+{% from "project-status.njk" import projectStatus %}
+
+{% set playgrounds = demos | selectattr("kind", "equalto", "playground") %}
+
+<div class="page-header">
+    <h1>Conformance status</h1>
+    <p class="page-description">
+        Project strength, made observable. Each card below is a runnable <strong>conformance playground</strong> —
+        a headless, in-browser proof that a Web Everything protocol is satisfied (contract honoured, vectors
+        covered, gate green). These aren't showcases; they're the evidence the standards hold. For real-action
+        demonstrations of the protocols in use, see <a href="/demos/">Demos</a>.
+    </p>
+</div>
+
+<div class="container">
+    {% if playgrounds.length > 0 %}
+    <div class="section-card" style="margin-bottom: 1.5rem; display: flex; gap: 2.5rem; flex-wrap: wrap;">
+        <div>
+            <div style="font-size: 2rem; font-weight: 700; line-height: 1;">{{ playgrounds.length }}</div>
+            <div class="text-sm text-gray-500">conformance playgrounds</div>
+        </div>
+        <div>
+            <div style="font-size: 2rem; font-weight: 700; line-height: 1;">{{ playgrounds | selectattr("status", "equalto", "active") | list | length }}</div>
+            <div class="text-sm text-gray-500">active &amp; green</div>
+        </div>
+    </div>
+
+    <div class="standards-grid">
+        {% for demo in playgrounds %}
+        <a href="/demos/{{ demo.id }}/" class="standard-card">
+            <div class="flex justify-between items-start mb-3">
+                <h2 id="conformance-{{ demo.id }}" class="text-lg font-bold m-0 text-gray-900">{{ demo.name }}</h2>
+            </div>
+            <p class="text-gray-600 text-sm leading-relaxed mb-4">{{ demo.summary or demo.description | striptags | truncate(180) }}</p>
+            {% set demoProjects = demo.projects or [demo.project] %}
+            {% if demoProjects and demoProjects[0] %}
+            <div class="mb-3">
+                <div class="text-xs text-gray-500 mb-1">Proves:</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 0.25rem;">
+                    {% for projectId in demoProjects %}
+                    {% if projectId %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+                        {{ projectId }}
+                    </span>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            <div style="margin-bottom: 1rem;">
+                {{ projectStatus(demo.status) }}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="section-card" style="text-align: center; padding: 3rem 2rem;">
+        <h3 style="font-size: 1.25rem; margin-bottom: 0.5rem; color: var(--color-text-muted);">No conformance playgrounds yet</h3>
+        <p style="color: var(--color-text-muted); max-width: 500px; margin: 0 auto;">
+            Conformance playgrounds prove a standard is satisfied. They'll appear here as protocols ship.
+        </p>
+    </div>
+    {% endif %}
+</div>
