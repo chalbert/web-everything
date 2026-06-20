@@ -81,7 +81,10 @@ export async function generateCase(
     const validation = validateRequirement(record, registries);
     attempts.push({ record, validation });
     if (validation.valid) {
-      return { accepted: true, record, validation, cases: compileRequirement(record), attempts };
+      // Pass the live protocols so the compiler threads each observable's `kind` into the assert directive
+      // (#1160/#1201) — the #1162 bridge reads it to pick read-a-state vs await-an-event.
+      const cases = compileRequirement(record, { protocols: registries.protocols });
+      return { accepted: true, record, validation, cases, attempts };
     }
     previousFindings = validation.findings;
   }
@@ -108,12 +111,16 @@ export function heuristicProposer(nl: string, { registries }: { registries: Requ
   const value = values.find((v) => mentions(v)) ?? values[0] ?? '';
 
   const term = registries.semantics.find((t) => mentions(t.term))?.term ?? registries.semantics[0]?.term ?? '';
-  const protocol = registries.protocols.find((p) => mentions(p.id))?.id ?? registries.protocols[0]?.id ?? '';
+  const protocolRecord = registries.protocols.find((p) => mentions(p.id)) ?? registries.protocols[0];
+  const protocol = protocolRecord?.id ?? '';
+  // Propose a GROUNDED observe token when the protocol now declares observables (#1160/#1201) — else the
+  // legacy soft-grounded placeholder (a protocol with no observables still accepts any token as info).
+  const observe = protocolRecord?.observables?.[0]?.id ?? 'state-observed';
 
   return {
     description: nl.trim(),
     given: { intent: intent?.id ?? '', dimension, value },
     when: { event: term },
-    then: { protocol, observe: 'state-observed', tier: 'L1' },
+    then: { protocol, observe, tier: 'L1' },
   };
 }

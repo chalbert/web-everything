@@ -15,13 +15,29 @@
  * Grounding coverage today: `role` (against the injected roster), `given.{intent,dimension,value}`
  * (intents.json), `when.event` (semantics.json term), `then.protocol` (protocols.json id), and `then.tier`
  * (the fixed conformance-tier vocabulary) all ground **hard** (an unresolved reference is an `error`).
- * `then.observe` has no registry yet — protocols.json does not model observable states — so it grounds to
- * an `info` finding rather than a hard error; minting an observable registry is a separate future artifact.
+ * `then.observe` grounds **progressively** (#1160/#1201): a protocol now co-locates an `observables` list
+ * (`src/_data/protocols/<id>.json`), and once the resolved protocol declares observables the token must
+ * name one — a hard `error` otherwise. A protocol that declares none still grounds soft (an `info`), so the
+ * observable registry rolls out one protocol at a time without breaking requirements against the rest.
  */
 
 /** The fixed WE conformance-tier vocabulary a `then` outcome is asserted at. */
 export const CONFORMANCE_TIERS = ['L1', 'L2', 'L3'] as const;
 export type ConformanceTier = (typeof CONFORMANCE_TIERS)[number];
+
+/** An observable's nature: a readable state vs a fired event (the #1162 bridge reads-a-state vs awaits-an-event). */
+export type ObservableKind = 'state' | 'event';
+
+/**
+ * A protocol-declared observable — the typed grounding target for a requirement's `then.observe`
+ * (#1160/#1201). Co-located on the protocol record (`src/_data/protocols/<id>.json#observables`); `platform`
+ * names the surface it's read through (`aria`, `validity`, `event`, …) when relevant.
+ */
+export interface ProtocolObservable {
+  readonly id: string;
+  readonly kind: ObservableKind;
+  readonly platform?: string;
+}
 
 /**
  * The typed requirement record — the authored source (#714's worked example shape). Authors write it
@@ -46,7 +62,7 @@ export interface RequirementRecord {
 export interface RequirementRegistries {
   readonly intents: ReadonlyArray<{ id: string; dimensions?: Record<string, { values?: readonly string[] }> }>;
   readonly semantics: ReadonlyArray<{ term: string }>;
-  readonly protocols: ReadonlyArray<{ id: string }>;
+  readonly protocols: ReadonlyArray<{ id: string; observables?: readonly ProtocolObservable[] }>;
   /** Governance persona roster (plateau-app-owned, #141/#166). Omit to skip `role` resolution. */
   readonly personas?: readonly string[];
 }
@@ -106,21 +122,33 @@ export function validateRequirement(
   }
 
   // then → a protocol-observable state/event at a conformance tier.
-  if (!registries.protocols.some((p) => p.id === req.then.protocol)) {
+  const thenProtocol = registries.protocols.find((p) => p.id === req.then.protocol);
+  if (!thenProtocol) {
     err('then.protocol', req.then.protocol, `no protocol "${req.then.protocol}" in protocols.json`);
   }
   if (!(CONFORMANCE_TIERS as readonly string[]).includes(req.then.tier)) {
     err('then.tier', req.then.tier, `tier "${req.then.tier}" is not a conformance tier (${CONFORMANCE_TIERS.join(', ')})`);
   }
-  // then.observe has no registry yet (protocols.json models no observable states) — an info, not a hard fail.
+  // then.observe → progressive-hard grounding (#1160/#1201): once the resolved protocol DECLARES
+  // observables, the token must name one (hard error otherwise); a protocol that declares none still
+  // grounds soft (an info), so the registry rolls out per-protocol without breaking ungrounded ones.
+  const observables = thenProtocol?.observables ?? [];
   if (req.then.observe.trim() === '') {
     err('then.observe', req.then.observe, 'observe is empty');
+  } else if (observables.length > 0) {
+    if (!observables.some((o) => o.id === req.then.observe)) {
+      err(
+        'then.observe',
+        req.then.observe,
+        `no observable "${req.then.observe}" on protocol "${req.then.protocol}" (declares: ${observables.map((o) => o.id).join(', ')})`,
+      );
+    }
   } else {
     findings.push({
       slot: 'then.observe',
       reference: req.then.observe,
       severity: 'info',
-      message: 'observable-state grounding is pending an observable registry; protocol + tier are grounded',
+      message: 'observable-state grounding is pending — the resolved protocol declares no observables; protocol + tier are grounded',
     });
   }
 

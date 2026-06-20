@@ -5,5 +5,10 @@
   "status": "concept",
   "ownedByProject": "webvalidation",
   "realizesIntent": "validation",
-  "anchor": "protocol-validation"
+  "anchor": "protocol-validation",
+  "observables": [
+    { "id": "invalid-state-announced", "kind": "event", "platform": "aria" },
+    { "id": "valid-state-announced", "kind": "event", "platform": "aria" },
+    { "id": "validity-state", "kind": "state", "platform": "validity" }
+  ]
 }

@@ -5,5 +5,9 @@
   "status": "draft",
   "ownedByProject": "webaudit",
   "realizesIntent": "audit-timeline",
-  "anchor": "protocol-audit-trail"
+  "anchor": "protocol-audit-trail",
+  "observables": [
+    { "id": "audit-event-appended", "kind": "event" },
+    { "id": "entity-timeline", "kind": "state" }
+  ]
 }

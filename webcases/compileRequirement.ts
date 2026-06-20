@@ -14,7 +14,7 @@
  * observable outcomes, each projecting to its own check. The slice-A schema carries a single `then`, so a
  * single-outcome record compiles 1:1; the array return + the per-outcome fan-out keep it 1:N-ready.
  */
-import type { RequirementRecord } from './requirementValidator';
+import type { ProtocolObservable, RequirementRecord } from './requirementValidator';
 
 /** A compiled webcase artifact — the in-memory shape `src/_data/cases.js` parses from `src/cases/*`. */
 export interface WebCase {
@@ -23,6 +23,16 @@ export interface WebCase {
   description: string;
   /** The scenario source: a `WEB CASE` header comment carrying the typed Given/When/Then references. */
   code: string;
+}
+
+/**
+ * The protocol view the compiler resolves an observable's `kind` from — injected, never imported (mirrors
+ * the validator's injected registries). Supply it to thread `kind="state|event"` into the assert directive
+ * so the #1162 case→test bridge knows whether to read a state or await an event; omit it for a pure,
+ * registry-free compile (the directive then carries no `kind`, byte-identical to the pre-#1201 output).
+ */
+export interface ObservableLookup {
+  readonly protocols: ReadonlyArray<{ id: string; observables?: readonly ProtocolObservable[] }>;
 }
 
 /** Deterministic kebab-case slug for a stable webcase id (no randomness, no clock). */
@@ -44,7 +54,7 @@ function outcomes(record: RequirementRecord): RequirementRecord['then'][] {
  * Each `then` outcome becomes a machine-checkable scenario asserting it under the requirement's
  * `given` precondition and `when` trigger.
  */
-export function compileRequirement(record: RequirementRecord): WebCase[] {
+export function compileRequirement(record: RequirementRecord, lookup?: ObservableLookup): WebCase[] {
   const givenLine = `Given ${record.given.intent}.${record.given.dimension} = ${record.given.value}`;
   const whenLine = `When ${record.when.event}`;
   const base = slugify(record.description);
@@ -53,6 +63,12 @@ export function compileRequirement(record: RequirementRecord): WebCase[] {
     const thenLine = `Then ${then.protocol} observes ${then.observe} at ${then.tier}`;
     const suffix = outcomes(record).length > 1 ? `-${i + 1}` : '';
     const title = `${record.description} — ${then.observe} (${then.tier})`;
+    // The observable's kind (state vs event), when the protocol declares it (#1160/#1201) — threaded into
+    // the assert directive for the #1162 bridge. Absent lookup / unknown observable ⇒ no `kind` attribute.
+    const kind = lookup?.protocols
+      .find((p) => p.id === then.protocol)
+      ?.observables?.find((o) => o.id === then.observe)?.kind;
+    const kindAttr = kind ? ` kind="${kind}"` : '';
     const code = [
       '<!--',
       `  WEB CASE: ${record.description}`,
@@ -62,7 +78,7 @@ export function compileRequirement(record: RequirementRecord): WebCase[] {
       `  ${thenLine}`,
       `  role: ${record.role ?? '—'}`,
       '-->',
-      `<!-- assert: protocol="${then.protocol}" observe="${then.observe}" tier="${then.tier}" -->`,
+      `<!-- assert: protocol="${then.protocol}" observe="${then.observe}" tier="${then.tier}"${kindAttr} -->`,
     ].join('\n');
 
     return {

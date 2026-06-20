@@ -37,8 +37,29 @@ describe('requirement-as-code validator (#100 slice A)', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('still grounds protocol + tier, surfacing observe as info (no observable registry yet)', () => {
+  it('grounds then.observe HARD once the protocol declares the observable (#1160/#1201)', () => {
+    // `validation` now declares `invalid-state-announced` as an observable, so it resolves with no finding —
+    // not the old soft `info` fall-through.
     const result = validateRequirement(grounded, registries);
+    expect(result.valid).toBe(true);
+    expect(result.findings.find((f) => f.slot === 'then.observe')).toBeUndefined();
+  });
+
+  it('flags an undeclared observe token on an observable-declaring protocol as a hard error (#1201)', () => {
+    const bad = { ...grounded, then: { ...grounded.then, observe: 'no-such-observable' } };
+    const result = validateRequirement(bad, registries);
+    const observe = result.findings.find((f) => f.slot === 'then.observe');
+    expect(observe?.severity).toBe('error');
+    expect(result.valid).toBe(false);
+  });
+
+  it('still grounds observe SOFT (info) on a protocol that declares no observables yet — progressive rollout', () => {
+    const bare = registries.protocols.find((p) => !p.observables || p.observables.length === 0);
+    expect(bare).toBeDefined();
+    const result = validateRequirement(
+      { ...grounded, then: { protocol: bare!.id, observe: 'anything', tier: 'L1' } },
+      registries,
+    );
     const observe = result.findings.find((f) => f.slot === 'then.observe');
     expect(observe?.severity).toBe('info');
   });

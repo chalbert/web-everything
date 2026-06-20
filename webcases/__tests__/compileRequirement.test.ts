@@ -46,4 +46,18 @@ describe('compileRequirement — typed record → webcase(s)', () => {
     expect(other[0].code).toContain('at L2');
     expect(other[0].code).not.toContain('at L1');
   });
+
+  it('threads the observable kind into the assert directive when a lookup is supplied (#1160/#1201)', () => {
+    const lookup = {
+      protocols: [{ id: 'validation', observables: [{ id: 'invalid-state-announced', kind: 'event' as const }] }],
+    };
+    const [c] = compileRequirement(requirement, lookup);
+    expect(c.code).toContain('assert: protocol="validation" observe="invalid-state-announced" tier="L1" kind="event"');
+  });
+
+  it('omits kind when no lookup (or no matching observable) is supplied — byte-identical to pre-#1201', () => {
+    expect(compileRequirement(requirement)[0].code).not.toContain('kind=');
+    const noMatch = { protocols: [{ id: 'validation', observables: [{ id: 'other', kind: 'state' as const }] }] };
+    expect(compileRequirement(requirement, noMatch)[0].code).not.toContain('kind=');
+  });
 });
