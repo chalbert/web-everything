@@ -1,43 +1,48 @@
 ---
 kind: story
-size: 13
+size: 5
 parent: "1250"
 locus: frontierui
 status: open
+blockedBy: ["1345", "1358"]
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 tags: []
 ---
 
-> **Outgrew — not batchable as one (sized 5 → 13, batch-2026-06-20).** The investigation below
-> (diffed-only, nothing modified) shows a byte-copy would REGRESS FUI: it needs a hand-merge that
-> preserves FUI's `@webeverything/*` index imports + observed-attributes/runner bits, and an unencoded
-> prerequisite — new `@webeverything/commitment-policy` / `@webeverything/error-summary` aliases must be
-> wired before the 2 WE-only files can port. Needs a focused session, not a batch slot.
+> **Sliced 2026-06-20 (`we:reports/2026-06-20-backlog-split-analysis.md`).** The size-13 lump split
+> into 4: the alias prereq → #1344, the 2 WE-only file port + index exports → #1345, the independent
+> `AsyncValidatorField` reconcile → #1346, and this card now scoped to its **core** — the
+> `ValidityMergeField` hand-merge (the +151-line commitment-policy/interaction-state body). Re-sized
+> 13 → 5, `blockedBy` #1345 (this file imports the ported `CustomCommitmentPolicyRegistry`).
 
-# Reconcile fui:plugs/webvalidation UP to WE (contract-anchored) + consume published @webeverything/* contracts
+# Reconcile fui:plugs/webvalidation/ValidityMergeField.ts UP to WE (contract-anchored core)
 
-Audit fui:plugs/webvalidation vs contract+vectors, then port 2 WE-only files + reconcile 3 diffs (AsyncValidatorField, ValidityMergeField, index), and align FUI to consume the published @webeverything/* contracts (#700/#872).
+Hand-merge `fui:plugs/webvalidation/ValidityMergeField.ts` (192 lines) up to
+`we:plugs/webvalidation/ValidityMergeField.ts` (343 lines) — contract-anchored audit first (#1270
+principle 1), preserving FUI's observed-attributes/runner bits.
 
-## Investigation 2026-06-20 (batch-2026-06-20) — NOT a clean reconcile; carried forward (#1304 class)
+The WE-only delta (+151) is:
+- **#1113 commitment scope** — `resolveCommitmentRegistry()` (`we:plugs/webvalidation/ValidityMergeField.ts:47-52`),
+  `static observedAttributes = ['strategy', 'commitment']` (`:59`, vs FUI's `['strategy']`),
+  `#resolveCommitment` / `#reflectStaleness` (`:163-191`). Imports the ported
+  `CustomCommitmentPolicyRegistry` (`:28`) — hence `blockedBy` #1345.
+- **interaction-state tracking** — `#interaction`/`#unsubInteraction`/`#prevFocused`/etc. fields
+  (`:73-83`), subscription + `#reflectInteraction` (`:267-296`).
+- **#1111 transition events** — became-valid / became-invalid + commitment staleness reconciliation in
+  `#reflectValidity` (`:299-324`).
 
-Audited `fui:plugs/webvalidation` vs WE. This is genuinely larger/forkier than "port 2 + reconcile 3"
-and a byte-copy from WE would REGRESS FUI (nothing modified — diffed only):
+The alias prereq (#1344), the 2 WE-only file port + index exports (#1345), and the `AsyncValidatorField`
+reconcile (#1346) are carved as siblings under #1250; FUI's `@webeverything/*` index alias imports are
+already correct (#700/#872) and must be preserved.
 
-1. **`fui:plugs/webvalidation/index.ts` FUI-only lines are CORRECT, not drift.** FUI already consumes the published contracts —
-   it imports from `@webeverything/capability-manifest` + `@webeverything/validation-generation/{provider,
-   cel,registry,fieldError,service}` (the #700/#872 contract-distribution arrow). WE's index uses relative
-   `../../…` paths because WE is the source. Copying WE's index "up" would undo FUI's published-contract
-   consumption — the opposite of the card's own "align FUI to consume @webeverything/*" goal.
-2. **`fui:plugs/webvalidation/ValidityMergeField.ts` is a 109-line WE addition over a divergent FUI base** (FUI has its own
-   `static observedAttributes = ['strategy']` + `#onControlEvent` handler). A careful merge, not a copy.
-3. **`fui:plugs/webvalidation/AsyncValidatorField.ts`** diverges (FUI's `#ensureRunner().validate(...)` vs WE's +18 lines).
-4. **The 2 WE-only files** (`fui:plugs/webvalidation/CustomCommitmentPolicyRegistry.ts`, `fui:plugs/webvalidation/ValidationErrorSummary.ts`) import WE
-   root modules `we:commitment-policy/registry.ts` and `we:error-summary/index.ts` — FUI has no local copy,
-   so the port needs new `@webeverything/commitment-policy` / `@webeverything/error-summary` aliases (or
-   FUI-local copies) wired first.
+## Blocked on a second, unencoded alias prereq → #1358 (batch-2026-06-20-1344-1342)
 
-Proper reconcile = a focused merge that (a) PRESERVES FUI's `@webeverything/*` index imports, (b) hand-merges
-ValidityMergeField/AsyncValidatorField keeping FUI's observed-attributes/runner bits, (c) adds the
-commitment-policy + error-summary contract aliases before porting the 2 files. Carried forward from
-batch-2026-06-20 — outgrew the "port 2 + reconcile 3" framing and intersects the #700/#872 contract-distribution model.
+Pre-flighted during the batch: the WE `ValidityMergeField` also imports `InteractionStateTracker` from
+`../../interaction-state/model`, but FUI has **no local `interaction-state/` dir and no
+`@webeverything/interaction-state` alias** — so the hand-merge cannot resolve that import. The `/split`
+that scoped this card carved #1344 for commitment-policy/error-summary but **missed** this third
+WE-resident model. Filed the prereq as **#1358** (wire the `@webeverything/interaction-state` alias,
+mirroring #1344) and added it to `blockedBy`. The port itself is otherwise ready (the +151 delta is
+diffed and clean; the commitment-policy import retargets onto the #1344 `@webeverything/commitment-policy`
+alias, and `CustomCommitmentPolicyRegistry` is the #1345-ported local file). Resume once #1358 lands.
