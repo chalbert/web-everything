@@ -1,8 +1,8 @@
 {
   "id": "invokers",
   "label": "Invoker Commands",
-  "webFeaturesKey": "command",
-  "baseline": false,
+  "webFeaturesKey": "invoker-commands",
+  "baseline": "2025",
   "polyfill": "polyfillable",
-  "summary": "<code>command</code> / <code>commandfor</code> — declare a button's effect on another element in markup."
+  "summary": "<code>command</code> / <code>commandfor</code> — declare a button's effect on another element in markup. Native-first resolver for the command intent (#299); the scripted keybinding/handler path is the polyfill fallback. Baseline newly-available 2025-12-12."
 }

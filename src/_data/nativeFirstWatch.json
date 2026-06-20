@@ -22,7 +22,8 @@
       "standard": "command intent (webcommands #016, #299)",
       "nativeApi": "invoker commands (command / commandfor attributes)",
       "baseline": "newly",
-      "registered": false,
+      "registered": true,
+      "registeredIn": "src/_data/capabilities/invokers.json",
       "trackingItem": "1263"
     },
     {
