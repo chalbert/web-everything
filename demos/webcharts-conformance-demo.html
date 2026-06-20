@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Charts Conformance Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/webcharts-conformance-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Web Charts Conformance Demo</h1>
+      <p>
+        The runnable proof of the <code>CustomChartRenderer</code> contract
+        (<a href="/backlog/1334-author-the-webcharts-contract-ts-file-chartspec-customchartr/">#1334</a>):
+        a semantic Vega-Lite&nbsp;L1 <code>ChartSpec</code> plus resolved <a href="/projects/webtheme/">Web
+        Theme</a> tokens in, themed and accessible SVG out. Scored on the three conformance axes —
+        <strong>semantic fidelity</strong>, <strong>theme application</strong>, and
+        <strong>accessibility</strong>.
+      </p>
+      <p class="play-caveat">
+        The contract is type-only (<code>charts/contract.ts</code>); the native-first SVG renderer, every
+        adapter, and the <code>customChartRenderers</code> swap registry are impl and live in Frontier UI
+        (<a href="/backlog/1292-native-first-svg-renderer-default-impl/">#1292</a>). So this demo supplies
+        its <strong>own</strong> in-demo SVG renderer — honest for a browser demo — to prove the contract
+        is realizable. The section below scores each axis live against the
+        <code>src/cases/webcharts/*</code> cases.
+      </p>
+    </header>
+
+    <div id="play-root">Loading demo&hellip;</div>
+  </main>
+
+  <!-- Unplugged: the demo imports the charts contract types only (no global patch, no FUI impl). -->
+  <script type="module" src="/demos/webcharts-conformance-demo.ts"></script>
+</body>
+</html>

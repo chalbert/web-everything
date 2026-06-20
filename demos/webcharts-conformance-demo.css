@@ -1,0 +1,79 @@
+/* Web Charts conformance demo (#1293) — gallery + scored conformance list. */
+
+.wc-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.wc-card {
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 8px;
+  background: var(--color-surface, #fff);
+}
+
+.wc-card figcaption {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--color-text, #0f172a);
+}
+
+.wc-card .wc-chart svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* The derived data-table fallback rides under each chart — perceivable, compact. */
+.wc-card table {
+  width: 100%;
+  margin-top: 0.75rem;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.wc-card caption {
+  caption-side: bottom;
+  text-align: left;
+  color: var(--color-text-muted, #64748b);
+  font-size: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.wc-card th,
+.wc-card td {
+  border: 1px solid var(--color-border, #e2e8f0);
+  padding: 0.2rem 0.45rem;
+  text-align: left;
+}
+
+.wc-summary {
+  margin-top: 2rem;
+}
+
+.wc-checks {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.wc-checks li {
+  padding: 0.45rem 0.7rem;
+  border-radius: 6px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.82rem;
+}
+
+.wc-checks li.pass {
+  background: color-mix(in srgb, #10b981 12%, transparent);
+  color: #065f46;
+}
+
+.wc-checks li.fail {
+  background: color-mix(in srgb, #ef4444 12%, transparent);
+  color: #991b1b;
+}

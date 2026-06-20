@@ -1,0 +1,12 @@
+{
+  "id": "webcharts-conformance-demo",
+  "name": "Web Charts Conformance Demo",
+  "summary": "The runnable proof of the CustomChartRenderer contract (#1334) in a real browser: a semantic Vega-Lite L1 ChartSpec + resolved webtheme tokens in, themed and accessible SVG out, scored on the three conformance axes (semantic-fidelity, theme-application, accessibility). The contract is type-only (charts/contract.ts); the native-first SVG renderer, adapters, and the customChartRenderers swap registry are impl in Frontier UI (#1290/#1292), so the demo supplies its own in-demo SVG renderer to prove the contract is realizable. Scored live against the src/cases/webcharts/* cases: one mark per data row at the encoded position/scale, color resolved semantically from the theme palette in token order (no spec hex) and re-themeable, a labelled <figure><table> data fallback derived from the spec, and WAI-ARIA Graphics roles (graphics-document/object/symbol) with labels derived from the encoding.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runnable proof of the <code>CustomChartRenderer</code> contract (<a href=\"/backlog/1334-author-the-webcharts-contract-ts-file-chartspec-customchartr/\">#1334</a>). A semantic Vega-Lite&nbsp;L1 <code>ChartSpec</code> plus resolved <a href=\"/projects/webtheme/\">Web Theme</a> tokens in, themed and accessible SVG out — scored on the three conformance axes.</p><h3>In-demo renderer, not the FUI impl</h3><p>The contract is type-only (<code>charts/contract.ts</code>); the native-first SVG renderer, every adapter, and the <code>customChartRenderers</code> swap registry are impl and live in Frontier UI (<a href=\"/backlog/1292-native-first-svg-renderer-default-impl/\">#1292</a>). So this demo supplies its <strong>own</strong> in-demo SVG renderer — honest for a browser demo — to prove the contract is realizable.</p><h3>Scored axes</h3><p>The conformance section scores each axis live against the <code>src/cases/webcharts/*</code> cases: <strong>semantic fidelity</strong> (one mark per data row, in order, heights proportional to the value), <strong>theme application</strong> (<code>color</code> resolved from the theme palette in token order, no spec hex, re-themeable), and <strong>accessibility</strong> (a labelled <code>&lt;figure&gt;&lt;table&gt;</code> data fallback derived from the spec + WAI-ARIA Graphics roles with labels derived from the encoding).</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webcharts-conformance-demo.html",
+  "projects": [
+    "webcharts"
+  ]
+}
