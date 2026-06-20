@@ -5,7 +5,6 @@
   "type": "Behavior",
   "summary": "Attribute-based behavior that enforces Trusted Types policies on an element's innerHTML mutations.",
   "extendsClass": "CustomAttribute",
-  "implementedBy": "@frontierui/blocks/trusted-html/index.ts",
   "exports": [
     "TrustedHtmlBehavior",
     "registerTrustedHtml"

@@ -51,7 +51,10 @@ export const meta = {
 // Returns: { integrationBranch, ledger, concurrentItems, serialItems, conflictsReplayed, multiLaneFiles, … }
 // ─────────────────────────────────────────────────────────────────────────────
 
-const a = args || {};
+// `args` may arrive as a parsed object OR as a JSON string (the Workflow runtime serializes it in some
+// environments — caught by the #1153 first-real-run validation). Tolerate both so `items` is never
+// silently empty.
+const a = (typeof args === 'string' ? (() => { try { return JSON.parse(args); } catch { return {}; } })() : (args || {}));
 const items = Array.isArray(a.items) ? a.items : [];
 const batchSlug = a.batchSlug || 'batch-parallel';
 const budgetPoints = Number.isFinite(a.budgetPoints) ? a.budgetPoints : Infinity;
