@@ -31,6 +31,7 @@ import {
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
   validateBlockImplConformance, BLOCK_IMPL_DRIFT_ENFORCED,
+  validateBlockExportShape, EXPORT_SHAPE_ENFORCED,
   validateBlockComposesTraits, COMPOSE_TRAITS_ENFORCED,
   scanRepoLocusPrefixes,
   validateTemplateA11y, NAV_ACTIVE_STATE_ENFORCED,
@@ -925,6 +926,37 @@ describe('validateBlockImplConformance — block contract↔impl drift (#659, th
     const res = validateBlockImplConformance([{ id: 'composite-widget', implPresent: true }]);
     expect(res.errors).toEqual([]);
     expect(res.warnings).toEqual([]);
+    expect(res.checked).toBe(0);
+  });
+});
+
+describe('validateBlockExportShape — CEM surface ↔ impl export drift (#927, the deeper #170 arm)', () => {
+  it('passes a block whose declared exports are all present in the resolved barrel (extras OK)', () => {
+    const res = validateBlockExportShape([
+      { id: 'router', implementedBy: '@frontierui/blocks/router/index.ts', declaredExports: ['A', 'B'], actualExports: ['A', 'B', 'Extra'] },
+    ]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+    expect(res.checked).toBe(1);
+  });
+
+  it('flags a declared export missing from the barrel as drift (warn until enforced)', () => {
+    const res = validateBlockExportShape([
+      { id: 'tabs', implementedBy: '@frontierui/blocks/tabs/index.ts', declaredExports: ['TabsComponent', 'Present'], actualExports: ['Present'] },
+    ]);
+    const bucket = EXPORT_SHAPE_ENFORCED ? res.errors : res.warnings;
+    expect(bucket.map((e) => e.message).join(' ')).toMatch(/tabs.*TabsComponent.*#170\/#927/);
+    const other = EXPORT_SHAPE_ENFORCED ? res.warnings : res.errors;
+    expect(other).toEqual([]);
+  });
+
+  it('skips when the barrel could not be resolved (actualExports null) — FUI absent / no barrel', () => {
+    const res = validateBlockExportShape([
+      { id: 'view', implementedBy: '@frontierui/blocks/view/index.ts', declaredExports: ['X'], actualExports: null },
+    ]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+    expect(res.skipped).toBe(1);
     expect(res.checked).toBe(0);
   });
 });

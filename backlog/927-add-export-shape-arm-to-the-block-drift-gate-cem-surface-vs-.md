@@ -3,11 +3,13 @@ type: issue
 workItem: story
 size: 5
 parent: "904"
-status: open
+status: resolved
 locus: webeverything
 blockedBy: ["916", "917", "918", "919", "920", "921", "922", "923", "924", "925", "948"]
 dateOpened: "2026-06-18"
-dateStarted: "2026-06-18"
+dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: "we:scripts/check-standards-rules.mjs"
 tags: []
 ---
 
@@ -54,3 +56,13 @@ of an `implementedBy`↔`exports` modeling mismatch (now fixed by **#948**) and 
 (now carved to **#1164**/**#1165**). With those removed, the residual is the warn-first resolver arm above
 — re-sized **13 → 5**, batchable. The full prior investigation lives in the git history of this file and
 the post-#948 map it carried.
+
+## Resolution (batch-2026-06-19)
+
+Added the warn-first export-shape arm:
+
+- `validateBlockExportShape` + `EXPORT_SHAPE_ENFORCED = false` in `we:scripts/check-standards-rules.mjs` (pure rule: a declared export ABSENT from the resolved barrel is the drift; extras are fine; `actualExports === null` → skip).
+- Wired as §8e in `we:scripts/check-standards.mjs`: a **real TS program** (typescript dep, not regex) over the 7 barrel entry files using FUI's `fui:tsconfig.json`, resolving each barrel's actual exports via `checker.getExportsOfModule` — so `export type *` and `@webeverything/contracts/…` package re-exports are **followed** (proven: `router`/`for-each`/`type-ahead`/`resource-loader` pass; a regex would false-fail the contract-re-exporting ones). Detect-or-skip when `../frontierui` is absent.
+- Scoped to the 7 barrel blocks (`implementedBy …/index.ts` + declared `exports`); non-barrel/renderer blocks logged un-coverable (#1164).
+
+Outcome (matches the prediction): `npm run check:standards` runs **green (0 errors)**, surfacing the **3 genuine drift warnings** — `tabs` / `transient-component` / `view` (the #1165 targets) — plus the un-coverable note. 3 pure-rule unit tests in `we:scripts/__tests__/check-standards-rules.test.mjs`. The `EXPORT_SHAPE_ENFORCED` flip waits on #1164 (renderers) + #1165 (resolve the 3 drifts). Slice of #904.

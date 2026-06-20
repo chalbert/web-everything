@@ -46,6 +46,7 @@ import {
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, validateTemplateA11y, validateBlockImplConformance,
   validateBlockComposesTraits, COMPOSE_DENY_LIST,
+  validateBlockExportShape,
   scanRepoLocusPrefixes, REPO_LOCUS_PREFIX_ENFORCED,
 } from './check-standards-rules.mjs';
 
@@ -810,6 +811,66 @@ const allCompileFiles = COMPILE_ROOTS.flatMap((r) => walk(r));
     const { errors: ce, warnings: cw } = validateBlockComposesTraits(composeInput);
     for (const e of ce) err(e.message, e.descriptor);
     for (const w of cw) warn(w.message, w.descriptor);
+  }
+
+  // ── 8e. Block export-shape drift (#927) — declared `exports` vs the resolved FUI barrel surface ──
+  // The deeper #170 arm #659 deferred: not just "does the impl resolve?" (8c) but "does it export the
+  // surface the contract declares?". Scoped to barrel blocks (implementedBy `…/index.ts` + a declared
+  // `exports`); a real TS program resolves the barrel's actual exports so `export type *` and
+  // `@webeverything/contracts/…` re-exports are FOLLOWED (a regex can't). Detect-or-skip when FUI is
+  // absent. Warn-first (the pure rule gates on EXPORT_SHAPE_ENFORCED). Renderer/file-pointer blocks have
+  // no enumerable barrel → un-coverable here (#1164).
+  {
+    const barrelBlocks = blocks.filter(
+      (b) => b.implementedBy && /\/index\.ts$/.test(b.implementedBy) && Array.isArray(b.exports) && b.exports.length,
+    );
+    // Build ONE TS program over all barrel entry files, using FUI's tsconfig so the path-mappings
+    // (@webeverything/contracts/*, @core/*, …) resolve the re-export specifiers. Wrapped so any TS/FS
+    // failure degrades to skip (actualExports=null), never crashes the gate.
+    let resolveExports = () => null;
+    if (fuiPresent) {
+      try {
+        const ts = createRequire(import.meta.url)('typescript');
+        const fuiRoot = join(ROOT, '..', 'frontierui');
+        const entries = barrelBlocks.map((b) =>
+          join(fuiRoot, b.implementedBy.replace(/^@frontierui\/blocks\//, 'blocks/')),
+        );
+        const cfgPath = join(fuiRoot, 'tsconfig.json');
+        const cfg = ts.readConfigFile(cfgPath, ts.sys.readFile);
+        const parsed = ts.parseJsonConfigFileContent(cfg.config ?? {}, ts.sys, fuiRoot);
+        const program = ts.createProgram(entries, {
+          ...parsed.options,
+          noEmit: true,
+          skipLibCheck: true,
+          allowJs: true,
+        });
+        const checker = program.getTypeChecker();
+        resolveExports = (absPath) => {
+          const sf = program.getSourceFile(absPath);
+          if (!sf) return null;
+          const sym = checker.getSymbolAtLocation(sf);
+          if (!sym) return null;
+          return checker.getExportsOfModule(sym).map((s) => s.getName());
+        };
+      } catch {
+        resolveExports = () => null; // TS unavailable / config unreadable → skip the whole arm
+      }
+    }
+    const exportInput = barrelBlocks.map((b) => ({
+      id: b.id,
+      implementedBy: b.implementedBy,
+      declaredExports: b.exports,
+      actualExports: resolveExports(join(ROOT, '..', 'frontierui', b.implementedBy.replace(/^@frontierui\/blocks\//, 'blocks/'))),
+    }));
+    const { errors: ee, warnings: ew } = validateBlockExportShape(exportInput);
+    for (const e of ee) err(e.message, e.descriptor);
+    for (const w of ew) warn(w.message, w.descriptor);
+    // Renderer / file-pointer blocks have no enumerable barrel — logged un-coverable (#1164), not failed.
+    const uncoverable = blocks.filter(
+      (b) => b.implementedBy && Array.isArray(b.exports) && b.exports.length && !/\/index\.ts$/.test(b.implementedBy),
+    );
+    if (fuiPresent && uncoverable.length)
+      warn(`Block export-shape arm (#927): ${uncoverable.length} non-barrel block(s) are un-coverable (no enumerable index barrel) — renderer/file-pointer impls, tracked by #1164.`);
   }
 }
 

@@ -1408,6 +1408,47 @@ export function validateBlockComposesTraits(blocks) {
   return { errors, warnings, skipped, checked };
 }
 
+// ── Block export-shape drift conformance (#927, the deeper #170 arm #659 deferred) ──
+// #659 shipped impl-EXISTENCE only (validateBlockImplConformance: does the implementedBy path resolve?).
+// This second arm goes deeper: does the impl actually EXPORT the surface the contract DECLARES? It compares
+// each barrel block's declared `exports` (`we:src/_data/blocks/<id>.json`) against the RESOLVED actual
+// exports of its FUI barrel — gathered by a real TS program (not regex) so `export type *` and
+// `@webeverything/contracts/…` package re-exports are followed (a regex can't; that's why resource-loader /
+// type-ahead, which re-export contract types, would false-fail a textual scan).
+//
+// Warn-first (EXPORT_SHAPE_ENFORCED=false), mirroring the #840/#937/BLOCK_IMPL_DRIFT warn→flip precedent:
+// the two embedded forks are carved to #1164 (renderer coverage) / #1165 (resolve the genuine drifts), and
+// the flip waits on them. Scope is the 7 barrel blocks (implementedBy `…/index.ts` + a declared `exports`);
+// renderer/file-pointer blocks have no enumerable barrel and are skipped (logged un-coverable, #1164).
+// A declared export ABSENT from the resolved barrel is the drift (the impl can export MORE — extras are
+// fine). Cross-repo detect-or-skip: `actualExports === null` (FUI absent / barrel unresolved) → skip.
+export const EXPORT_SHAPE_ENFORCED = false; // #927: warn-first; flip once #1164 (renderers) + #1165 (the 3 drifts) land
+
+// `blocks` = [{ id, implementedBy, declaredExports: string[], actualExports: string[] | null }].
+// Returns { errors, warnings, skipped, checked }.
+export function validateBlockExportShape(blocks) {
+  const errors = [];
+  const warnings = [];
+  let skipped = 0;
+  let checked = 0;
+  for (const b of blocks) {
+    if (b.actualExports === null || b.actualExports === undefined) {
+      skipped++; // FUI absent, or no enumerable barrel (#1164) — the export-shape arm can't run
+      continue;
+    }
+    checked++;
+    const actual = new Set(b.actualExports);
+    const missing = (b.declaredExports || []).filter((name) => !actual.has(name));
+    if (missing.length) {
+      const msg = `Block "${b.id}" declares export(s) [${missing.join(', ')}] that the resolved FUI barrel (${b.implementedBy}) does not export — CEM surface ↔ impl export drift (#170/#927). Correct the contract \`exports\` or build the missing FUI surface (#1165).`;
+      const d = dUnresolvedRef('Block', b.id, blockSpecFile(b.id), 'exports', missing[0], 'export-shape');
+      if (EXPORT_SHAPE_ENFORCED) errors.push({ message: msg, descriptor: d });
+      else warnings.push({ message: msg, descriptor: d });
+    }
+  }
+  return { errors, warnings, skipped, checked };
+}
+
 // ── Static template a11y lint (#772, ratified #763 supported-not-decided) ──────
 // The structural a11y rules a headless axe run (the #770/#771 rendered-DOM gate) CANNOT observe from the
 // computed page — they live in the .njk SOURCE and must be caught at authoring time, before render. Scoped
