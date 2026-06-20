@@ -125,6 +125,31 @@ swallow every visual difference. Three tiers, distinguished by *how far down* th
 structure layer. This stops the open-numbered rule from sprawling into "everything visual is a
 variant," and it routes the structural cases to the sectioning/layout generalization rather than here.
 
+## Orientation: variant axes recur — per-intent instantiation of one shared meta-contract
+
+*(Raised as an afterthought in discussion; recorded here because it sets the system-wide direction, not
+just Action's.)* A `variant`-shaped axis recurs across intents — Input already has it
+(we:src/_data/intents/input.json:11-18), Action now gets it, Badge would want one (`soft`/`solid`), and
+the same is true of other recurring action axes (placement, ordering). The natural question — *"are we
+just going to add `variant` onto other intents too?"* — has a deliberate answer that this ruling fixes:
+
+- **Yes — each owning intent declares its own `variant` dimension**, with its own intent-specific value
+  set. This is the go-forward pattern, applied per-intent as each is built.
+- **What is shared is the *contract*, not an intent.** The cross-cutting thing is the
+  open-numbered-variant meta-contract codified in
+  we:docs/agent/platform-decisions.md#open-numbered-variants — every intent's `variant` axis
+  *instantiates* that one rule. So we are not duplicating a pattern N times; we are applying one named
+  statute N times.
+- **Why not a single shared "Variant/Emphasis Intent"** holding one value list (Fork 1 B): the value
+  sets diverge per intent (`borderless` ≠ `ghost`/`link` ≠ `soft`/`solid`), so a shared list flattens
+  lossily or is an empty meta-pattern. Sharing happens at the *meta-schema* layer (the contract), never
+  at the *value* layer.
+- **Reversible (the residual restated).** If a future survey shows **≥3 intents wanting an *identical*
+  variant vocabulary with identical semantics**, a shared intent would cut real duplication — flip then,
+  recording the supersede. Current evidence (divergent value sets) says per-intent + shared-contract
+  wins. Same logic governs the other recurring axes (placement/ordering): shared meta-pattern, per-intent
+  instantiation.
+
 ## Recommended path at a glance
 
 | Fork | Axis | Recommended default | Main alternative (excluded branch) | Confidence |
@@ -144,7 +169,7 @@ descriptive name of the concept in prose below.*
 
 **Supported by default (not forks):** emphasis is an intent dimension, not a theme token (input
 precedent); optional, most-permissive *unspecified* default (the `level` implies the treatment); resolves
-`explicit ⊕ ambient ⊕ default`; open vocabulary — standardize the `emphasis` dimension + a recommended
+`explicit ⊕ ambient ⊕ default`; open vocabulary — standardize the `variant` dimension + a recommended
 core set, authors may extend (Intents Open Design). *Broken branches (named, so not forks):* fold emphasis
 into `level` (shadcn proves orthogonal — can't); make it a `trait` (traits are structural composition per
 #030 — emphasis composes nothing, it selects a treatment).
