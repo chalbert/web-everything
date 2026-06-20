@@ -25,3 +25,9 @@ It is also a deep cross-repo integration into the 947-line `fui:workbench/mount.
 error boundary + `window.onerror`/`unhandledrejection` surfacing + inspector/event/anatomy panel wiring) that
 wants a focused `fui:` session. Resume via `/next 1030` in frontierui where the dev server can be restarted
 after `npm install`.
+
+**Re-confirmed 2026-06-20 (batch-2026-06-20):** still blocked-in-fact. The frontierui dev server is live
+on :3001 (HTTP 200) and `react`/`react-dom`/`vue` are still absent from `fui:package.json` — adding them
+pre-bundles on that running server (the forbidden restart), and the acceptance is a live-on-:3001 mount
+verification. Left for a focused frontierui session that owns the server lifecycle; not reattempted in the
+batch.
