@@ -18,15 +18,15 @@ Audit fui:plugs/webvalidation vs contract+vectors, then port 2 WE-only files + r
 Audited `fui:plugs/webvalidation` vs WE. This is genuinely larger/forkier than "port 2 + reconcile 3"
 and a byte-copy from WE would REGRESS FUI (nothing modified — diffed only):
 
-1. **`index.ts` FUI-only lines are CORRECT, not drift.** FUI already consumes the published contracts —
+1. **`fui:plugs/webvalidation/index.ts` FUI-only lines are CORRECT, not drift.** FUI already consumes the published contracts —
    it imports from `@webeverything/capability-manifest` + `@webeverything/validation-generation/{provider,
    cel,registry,fieldError,service}` (the #700/#872 contract-distribution arrow). WE's index uses relative
    `../../…` paths because WE is the source. Copying WE's index "up" would undo FUI's published-contract
    consumption — the opposite of the card's own "align FUI to consume @webeverything/*" goal.
-2. **`ValidityMergeField.ts` is a 109-line WE addition over a divergent FUI base** (FUI has its own
+2. **`fui:plugs/webvalidation/ValidityMergeField.ts` is a 109-line WE addition over a divergent FUI base** (FUI has its own
    `static observedAttributes = ['strategy']` + `#onControlEvent` handler). A careful merge, not a copy.
-3. **`AsyncValidatorField.ts`** diverges (FUI's `#ensureRunner().validate(...)` vs WE's +18 lines).
-4. **The 2 WE-only files** (`CustomCommitmentPolicyRegistry.ts`, `ValidationErrorSummary.ts`) import WE
+3. **`fui:plugs/webvalidation/AsyncValidatorField.ts`** diverges (FUI's `#ensureRunner().validate(...)` vs WE's +18 lines).
+4. **The 2 WE-only files** (`fui:plugs/webvalidation/CustomCommitmentPolicyRegistry.ts`, `fui:plugs/webvalidation/ValidationErrorSummary.ts`) import WE
    root modules `we:commitment-policy/registry.ts` and `we:error-summary/index.ts` — FUI has no local copy,
    so the port needs new `@webeverything/commitment-policy` / `@webeverything/error-summary` aliases (or
    FUI-local copies) wired first.

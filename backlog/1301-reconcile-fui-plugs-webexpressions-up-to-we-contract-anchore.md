@@ -19,13 +19,13 @@ Audit fui:plugs/webexpressions vs contract+vectors, then port ExplicitHTMLInsert
 
 Reconciled `fui:plugs/webexpressions` UP to WE — FUI was behind on three additive features:
 
-- **Ported** `fui:plugs/webexpressions/ExplicitHTMLInsertion.patch.ts` (WE-only) — wired into `index.ts`
+- **Ported** `fui:plugs/webexpressions/ExplicitHTMLInsertion.patch.ts` (WE-only) — wired into `fui:plugs/webexpressions/index.ts`
   applyPatches/removePatch (came with WE's index).
-- **`CustomTextNodeRegistry.ts`** → WE's version: cloak-attribute removal after upgrade (#1124),
+- **`fui:plugs/webexpressions/CustomTextNodeRegistry.ts`** → WE's version: cloak-attribute removal after upgrade (#1124),
   parser `excludedElements` + `#isInsideExcludedElement` skip, and the MutationObserver `addedNodes`
   dynamic-insertion upgrade (#1125). These are additive — they do NOT touch the core upgrade/`instanceof`
   wiring.
-- **`CustomTextNodeParser.ts`**, **`UndeterminedTextNode.ts`**, **`index.ts`** → byte-identical to WE.
+- **`fui:plugs/webexpressions/CustomTextNodeParser.ts`**, **`fui:plugs/webexpressions/UndeterminedTextNode.ts`**, **`fui:plugs/webexpressions/index.ts`** → byte-identical to WE.
 - Ported the 5 WE-only tests (addedNodes, excludedElements, ExplicitHTMLInsertion.patch, cloakRemoval,
   unplugged). FUI webexpressions tests green (104, 2 skipped).
 

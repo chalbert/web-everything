@@ -3,6 +3,7 @@ kind: story
 size: 3
 parent: "1259"
 locus: webeverything
+relatedReport: reports/2026-06-20-on-device-vision-tier-evaluation.md
 status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"

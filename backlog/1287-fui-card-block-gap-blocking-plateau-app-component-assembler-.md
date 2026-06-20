@@ -24,7 +24,7 @@ Shipped the FUI card block, closing the gap that blocked the plateau Component A
   footer. `CARD_CSS` exported for composing hosts; consumes the host's surface/border/radius custom
   properties with literal fallbacks. Satisfies the `EmbedMountModule` mode-C contract.
 - `fui:blocks/card/index.ts`, `fui:blocks/__tests__/unit/card/Card.test.ts` (7 tests green),
-  `fui:demos/card-demo.html`, `fui:src/_data/blocks.json` (registered: type Module, demoFile card-demo.html).
+  `fui:demos/`fui:demos/card-demo.html`, `fui:src/_data/blocks.json` (registered: type Module, demoFile `fui:demos/card-demo.html`).
 
 Verified at :3001 (Playwright): the mode-C showcase + an actions card mount 4 `.fui-card` articles in a
 shadow root (titles, footer, header-action button), zero console errors. FUI `check:standards` clean for

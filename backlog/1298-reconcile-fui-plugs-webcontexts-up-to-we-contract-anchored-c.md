@@ -29,7 +29,7 @@ strict/flexible work (WE is a clean superset). Brought all 4 files to byte-ident
   `<script type="context">` body, warns + falls back on invalid JSON) + the async `attach(element,
   futureRoot)` path (was a bare `new Context(); attach(element)`).
 - `fui:plugs/webcontexts/index.ts` — exports the `ContextQuery` type.
-- Ported `__tests__/CustomContext.claim.test.ts`. FUI webcontexts tests green (64, incl. existing
+- Ported `fui:plugs/webcontexts/__tests__/CustomContext.claim.test.ts`. FUI webcontexts tests green (64, incl. existing
   edge-cases/integration/unit — the superset is additive).
 
 FUI `check:standards` red only on the 2 pre-existing notification/signature-pad catalog errors (unrelated,

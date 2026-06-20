@@ -28,7 +28,7 @@ front-A ledger):
   accurate enough that the product never silently falls back to an uncapped hosted call. Baselines from
   the 2026-06-20 watch report; `maturity` moves the program L0 (no metric) → L1 (metric defined).
 
-Placed with the watch machinery (sibling of nativeFirstWatch.json, both in `we:src/_data`, both read by
+Placed with the watch machinery (sibling of we:src/_data/nativeFirstWatch.json, both in `we:src/_data`, both read by
 the WE watch program) — fixed `locus` (was `plateau-app`) → `webeverything` to match: the artifact is a
 WE watch ledger about Plateau's tiers, not plateau-app code. Makes the next #1259 run quantitative; L2
 (a measured eval harness filling `current`) is gated on the #514/#490 vision build.

@@ -39,18 +39,18 @@ selection is a build refinement of #1082 (provider) / #1084 (training data); thi
 ## #1277 — WebNN/NPU path + faster WebGPU runtimes
 
 **Question:** add a WebNN/NPU execution path and/or a faster runtime to the in-browser provider (#514 ONNX
-Runtime Web + WebGPU, #1082 Transformers.js)?
+Runtime Web + WebGPU, #1082 Transformers JS)?
 
 **Finding:** the browser-inference ceiling rose on two axes — **WebNN** now targets NPUs (Intel Core Ultra,
 Snapdragon X, Apple M-series) at far lower power, and faster WebGPU runtimes (WeInfer ~3.76× over WebLLM;
-Transformers.js; WebLLM) raise throughput. These map cleanly onto the two tiers' different needs: the
+Transformers JS; WebLLM) raise throughput. These map cleanly onto the two tiers' different needs: the
 **always-on Tier-1 classifier** is power-bound (favours NPU/WebNN), while **Tier-2 VLM** is
 throughput-bound (favours the fastest WebGPU runtime).
 
 **Recommendation (confidence ~70%):** add **WebNN as a capability-gated additional execution provider** to
 the ONNX Runtime Web provider (#514), native-first per #031 — **probe and select** the best available EP per
 device (WebNN/NPU → WebGPU → Wasm), prioritising the WebNN path for the **always-on Tier-1 classifier**
-(power) and keeping WebGPU the default for **Tier-2** (throughput). Benchmark WeInfer/Transformers.js/WebLLM
+(power) and keeping WebGPU the default for **Tier-2** (throughput). Benchmark WeInfer/Transformers JS/WebLLM
 to pick the Tier-2 runtime. The residual: WebNN op-coverage for VLMs is still uneven, so it's an *additive*
 EP behind a probe, never the sole path. **Filed:** a provider-enhancement build on #514/#1082 (add the
 WebNN EP + the runtime benchmark); not a contract change.
@@ -68,7 +68,7 @@ stable; image input is rolling out), so it cannot serve the whole vision tier to
 
 **Recommendation (confidence ~80%):** add the Prompt API as the **top of the on-device cascade**, behind a
 capability probe — route the tasks it supports (and, as multimodal Prompt API matures, vision tasks) to it
-first, and **degrade to the bundled ONNX / Transformers.js tiers** (the #1276 ladder) for browsers without
+first, and **degrade to the bundled ONNX / Transformers JS tiers** (the #1276 ladder) for browsers without
 it. This is the cleanest expression of native-first + cost-linearity: the bundled tiers become the
 guaranteed floor, the native built-in the zero-cost fast path where present. The residual: don't let the
 cascade's correctness depend on the Prompt API (it's absent on most browsers today). **Filed:** a
@@ -80,7 +80,7 @@ fall back).
 ## Net
 
 All three point the same way — **push more onto fixed-cost on-device paths** (richer small VLMs, NPU/WebNN
-for power, native Prompt API for zero-cost), with the bundled ONNX/Transformers.js tiers as the always-works
+for power, native Prompt API for zero-cost), with the bundled ONNX/Transformers JS tiers as the always-works
 floor. This strengthens the #1279 cost-linearity guard. None changes a ratified contract; each files a build
 refinement of the existing #488/#514/#1082/#1084/#490 vision work. The next #1259 watch run should re-check
 these against the model landscape and fill the #1279 ledger's `current` values once the #490 eval harness lands.

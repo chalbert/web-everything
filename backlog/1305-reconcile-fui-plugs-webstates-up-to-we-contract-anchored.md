@@ -21,7 +21,7 @@ Reconciled `fui:plugs/webstates` UP to WE — a clean additive port (FUI lacked 
 entirely; WE's index only adds their exports, no FUI-ahead lines):
 
 - Ported 4 WE-only files byte-identical: `fui:plugs/webstates/CustomChangeStrategy.ts`,
-  `CustomChangeStrategyRegistry.ts`, `CustomStorageStrategy.ts`, `CustomStorageStrategyRegistry.ts`
+  `fui:plugs/webstates/CustomChangeStrategyRegistry.ts`, `fui:plugs/webstates/CustomStorageStrategy.ts`, `fui:plugs/webstates/CustomStorageStrategyRegistry.ts`
   (change-tracking + storage-strategy registries; imports resolve to FUI's `../core/CustomRegistry`).
 - `fui:plugs/webstates/index.ts` → WE's full export surface.
 - Ported the 6 WE-only tests (the 4 strategy tests + `webstates-protocols.unplugged` +

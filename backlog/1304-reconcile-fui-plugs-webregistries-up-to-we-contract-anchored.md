@@ -28,7 +28,7 @@ The card frames this as "port ScopedRegistryAttribute + declarativeRegistry + re
    (a FUI-architecture change, possibly its own decision item) or the registry keeps a FUI-only `downgrade`
    stub while adopting WE's #1101 `whenDefined` + #1102 duplicate-name/constructor checks + `#getStandInElement`.
 2. **The new `ScopedRegistryAttribute` MOMENT-2 binding (#854) does not bind in FUI's env** — WE's
-   `declarativeRegistry.test.ts` "binds the host to its declared registry on attach" fails (bound=false)
+   `fui:plugs/webregistries/__tests__/unit/declarativeRegistry.test.ts` "binds the host to its declared registry on attach" fails (bound=false)
    when run against FUI, so the scoped-registration runtime needs FUI-side integration work, not just a copy.
 
 What IS clean and deferred to the focused merge: WE's `whenDefined` (#1101), the duplicate-define DOMException

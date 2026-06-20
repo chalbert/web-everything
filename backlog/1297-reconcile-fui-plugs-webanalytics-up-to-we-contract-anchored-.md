@@ -29,7 +29,7 @@ into FUI (sibling of the already-FUI `CustomGuardRegistry`):
   Segment routing helpers. Throws `UnknownTrackerError` rather than silently substituting (the #1014 gap).
 - `fui:plugs/webanalytics/index.ts` — exports the registry/error/factory/NoopTracker + contract types;
   doc updated (registry now FUI's, WE copy retires under #449). FUI's ga4/mixpanel/segment trackers kept.
-- Ported the registry unit test (`__tests__/CustomTrackerRegistry.test.ts`, NoopTracker import repointed
+- Ported the registry unit test (`fui:plugs/webanalytics/__tests__/CustomTrackerRegistry.test.ts`, NoopTracker import repointed
   to `./provider`). FUI webanalytics tests green (21). This connects to #1303's `customTrackers` slot in
   `InjectorRoot.ProviderTypeMap`.
 

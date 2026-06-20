@@ -25,8 +25,8 @@ migration slice (#1254):
   `aria-label` (meaning never colour-only). `BADGE_CSS` exported for composing hosts. Satisfies the
   `EmbedMountModule` mode-C contract.
 - `fui:blocks/badge/index.ts`, `fui:blocks/__tests__/unit/badge/Badge.test.ts` (8 tests green),
-  `fui:demos/badge-demo.html` (mode-C showcase + live `setBadgeTone` flip), `fui:src/_data/blocks.json`
-  (registered: type Module, demoFile badge-demo.html).
+  `fui:demos/`fui:demos/badge-demo.html` (mode-C showcase + live `setBadgeTone` flip), `fui:src/_data/blocks.json`
+  (registered: type Module, demoFile `fui:demos/badge-demo.html`).
 
 Verified at :3001 (Playwright): the mode-C showcase mounts 5 tone badges in a shadow root, the status
 badge's `aria-label` is "success: Healthy", zero console errors. FUI `check:standards` clean for badge

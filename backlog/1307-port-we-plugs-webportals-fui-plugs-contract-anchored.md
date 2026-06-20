@@ -19,8 +19,8 @@ Full port of the 5-file webportals domain (PortalDirective, PortalOutlet, Event.
 
 Ported the full webportals domain into FUI (FUI had no webportals plug):
 
-- `fui:plugs/webportals/` — byte-replicated all 5 source files (`PortalDirective.ts`, `PortalOutlet.ts`,
-  `Event.logical.patch.ts`, `Node.logical.patch.ts`, `index.ts`) + `conformance/ssrVectors.ts` + the 4
+- `fui:plugs/webportals/` — byte-replicated all 5 source files (`fui:plugs/webportals/PortalDirective.ts`, `fui:plugs/webportals/PortalOutlet.ts`,
+  `fui:plugs/webportals/Event.logical.patch.ts`, `fui:plugs/webportals/Node.logical.patch.ts`, `fui:plugs/webportals/index.ts`) + `fui:plugs/webportals/conformance/ssrVectors.ts` + the 4
   unit tests (event/portal/ssr/logical). Cross-deps resolve to FUI's existing `../webinjectors/HTMLInjector`
   and `../webdirectives/CustomTemplateDirective` (the latter just reconciled in #1300). No `@webeverything`
   alias needed — the tests are self-contained with a local conformance vectors file.

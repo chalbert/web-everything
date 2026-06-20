@@ -24,10 +24,10 @@ Group) token layer — plateau's own tokens (NOT a rebase onto FUI/webtheme; FUI
   `space` / `radius` / `shadow` / `transition` + top-level `ease` / `ease-out` / `sidebar-width` /
   `header-height`, each leaf `{ $type, $value }`. Cross-token wiring uses DTCG `{group.token}` refs
   (e.g. `color.info → {color.primary}`, `transition.fast → "0.14s {ease}"`).
-- `plateau:scripts/gen-tokens.mjs` — dependency-free generator: flattens tokens.json to CSS custom
+- `plateau:scripts/gen-tokens.mjs` — dependency-free generator: flattens plateau:src/styles/tokens.json to CSS custom
   properties wrapped in `@layer tokens { :root { … } }`. A token's var name is `--` + its dot-path
   joined by `-`, which **preserves every existing variable name** (`--color-primary-hover`, `--space-1`,
-  `--ease`, …) so layout.css/pages.css/reset.css keep working unchanged. `{refs}` → `var(--…)`.
+  `--ease`, …) so plateau:src/styles/{layout,pages,reset}.css keep working unchanged. `{refs}` → `var(--…)`.
 - `plateau:package.json` — `gen:tokens` script; `plateau:src/styles/theme.css` is now GENERATED (57
   tokens) with a do-not-edit header.
 

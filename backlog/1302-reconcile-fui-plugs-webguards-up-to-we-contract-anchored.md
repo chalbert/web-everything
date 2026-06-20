@@ -21,7 +21,7 @@ Audited `fui:plugs/webguards` (CustomGuardRegistry + index) against the WE contr
 (`we:plugs/webguards/*`). The behavioral surface is **byte-identical**: same
 `define` / `defaultKey` / `resolve` / `evaluateRegion` / `createDefaultGuardRegistry`, same
 `CustomGuardProvider` contract. The only diffs are **correct per-repo structure**, NOT contract drift:
-FUI imports the standalone half from `fui:blocks/guard/provider.js` / `registry.js` (the guard model
+FUI imports the standalone half from `fui:blocks/guard/provider.js` / `fui:blocks/guard/registry.js` (the guard model
 lives at `blocks/guard/` in FUI, `guard/` in WE) and carries the #170/#950 port-provenance doc comments.
 Changing those would *break* FUI, so the "2 content diffs" the card anticipated are already-settled
 structural correctness — there is nothing to bring "FUI-up". No code change.
