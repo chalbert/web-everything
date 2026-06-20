@@ -2,7 +2,8 @@
 type: issue
 workItem: story
 size: 5
-status: active
+status: open
+blockedBy: ["1250"]
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 tags: []
@@ -53,8 +54,8 @@ reconciliation and FUI was not kept in step. A non-test `*.ts` diff WE-local vs 
 | webregistries | 2 | 2 | |
 | webstates | 1 | 4 | |
 | webvalidation | 3 | 2 | also now consumes `@webeverything/*` contracts (#700/#872) FUI's copy doesn't |
-| **webportals** | — | all (10) | **no FUI home** (#1148/#1149/#1150 built into WE local) → #1235 |
-| **webtraces** | — | all (3) | **no FUI home** (sessionReplayEnvelope) → #1236 |
+| **webportals** | — | all (10) | **no FUI home** (#1148/#1149/#1150 built into WE local) → port under #1250 |
+| **webtraces** | — | all (3) | **no FUI home** (sessionReplayEnvelope) → port under #1250 |
 
 Proven by browser probe on the running `:3000` after a trial repoint: repointing
 `analytics-conformance-demo` → FUI fails (`UnknownTrackerError` not exported by FUI), and
@@ -72,7 +73,12 @@ The repoint **cannot land** until FUI's plugs tree is re-reconciled up to WE's c
 (port the drifted/WE-only files — incl. webportals + webtraces — into FUI), because today FUI is a
 lossy subset. This is the un-done substance behind #449's on-paper close. A trial repoint + config
 wiring was made and **fully reverted** (it regressed the analytics + webcontexts demos against stale
-FUI); the working tree is unchanged. Pending the user's call on direction (re-reconcile FUI up vs
-revisit the #606 canonical-home direction now that WE has remained the de-facto dev tree), the
-mechanical follow-ups are: a FUI plugs re-reconciliation item, the #1235 webportals + #1236 webtraces
-ports, all blocking #1047. **#1234 is blocked on that reconciliation** — flipped back to `open`.
+FUI); the working tree is unchanged.
+
+**Direction (user-confirmed 2026-06-20): re-reconcile FUI UP to WE, contract-anchored** — WE being
+ahead does not mean WE is correct; reconcile each domain to its contract, and fix contract holes rather
+than work around them. That reconciliation is filed as epic **#1250** (under #170), which carves the
+per-domain reconciliation + webportals/webtraces ports + a real plugs drift gate. **This item (#1234)
+is the FINAL WE-side repoint** — finishing the `we:demos`/`we:test-pages`/bootstrap/config repoint +
+the `@webeverything/*` mirror-alias map once FUI is the superset — so it is now `blockedBy: #1250` and
+flipped back to `open`. #1047 (delete `we:plugs/`) stays blocked behind #1234.
