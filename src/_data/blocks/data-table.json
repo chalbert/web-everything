@@ -21,7 +21,7 @@
   "dependsOn": [
     "resource-loader"
   ],
-  "implementedBy": "@frontierui/blocks/renderers/data-table/",
+  "implementedBy": "@frontierui/blocks/renderers/data-table/index.ts",
   "webStandards": {
     "apgSortableTable": {
       "status": "W3C WAI-ARIA APG",

@@ -100,7 +100,7 @@
   "dependsOn": [
     "resource-loader"
   ],
-  "implementedBy": "@frontierui/blocks/renderers/pagination/",
+  "implementedBy": "@frontierui/blocks/renderers/pagination/index.ts",
   "webStandards": {
     "paginationNavLandmark": {
       "status": "W3C WAI-ARIA APG",
