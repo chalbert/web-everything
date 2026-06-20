@@ -1,8 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#data-shape-vs-mechanism-failure"
 preparedDate: "2026-06-20"
 relatedReport: "reports/2026-06-20-client-storage-schema-versioning.md"
 tags: []
@@ -12,13 +15,43 @@ tags: []
 
 A standard for evolving **persisted client state** safely: detect when a stored shape predates the
 schema that reads it, and either run a registered migration or safely discard to defaults — so a
-renamed/changed key never silently breaks the UI. **Grounding:** no design exists yet; the forks below
-are grounded in a prior-art survey published as the [Client Storage Schema Versioning &
+renamed/changed key never silently breaks the UI. **Grounding:** the forks below are grounded in a
+prior-art survey published as the [Client Storage Schema Versioning &
 Migration](/research/client-storage-schema-versioning/) research topic (session report linked via
-`relatedReport`), and each carries a recommended default in **bold**. This is *prepared, not ratified* —
-the call is `/next decision`'s job. Distinct from the storage **mechanism** (the durable-store contract
+`relatedReport`). **RATIFIED 2026-06-20** — see *Ruling* below. Distinct from the storage **mechanism** (the durable-store contract
 #503, `CustomStorageStrategy` + native strategies #1106, the per-scope registry + IndexedDB→localStorage
 degradation #1108) — that owns *where* state persists; this owns *how the shape evolves over time*.
+
+## Ruling — ratified 2026-06-20
+
+The decision exposed a clean partition: **two WE-internal architecture forks** (which the developer never
+sees — WE must pick) and **three developer-facing behavior axes** (which WE supports both of, picking a
+default). No axis is a *mandate* on the developer.
+
+- **Fork 1 — Home → webstates** (A). Versioning operates directly on persisted state = webstates' domain.
+  webreliability's seed premise is verified false: its ratified mission is *mechanism-failure recovery,
+  explicitly "not input invalidity"* ([we:src/_data/projects/webreliability.json](../src/_data/projects/webreliability.json)) —
+  a schema-shape mismatch is data evolution, outside that boundary. ~80%.
+- **Fork 2 — Form → thin versioning facet above `CustomStorageStrategy`** (A). Wrap the strategy read/write
+  path once → every engine gets versioning for free, riding the registry's existing IndexedDB→localStorage
+  degrading read path ([we:plugs/webstates/CustomStorageStrategyRegistry.ts:98](../plugs/webstates/CustomStorageStrategyRegistry.ts#L98)).
+  Standalone intent over-separates a facet of an existing contract; baking per-strategy violates DRY and
+  wouldn't cover the localStorage floor uniformly. ~70%.
+- **Fork 3 — Granularity → dissolved into a developer-configurable dimension, default per-key.** Per-store
+  and per-key are both legitimate on-disk end-states for different store topologies (dimension-vs-fixed-mechanic
+  test passes), so granularity is **not** a WE-mandated single shape — the author configures it, defaulting
+  to the **per-key `{v,data}` envelope**. Rationale for the default: webstates' real topology is many small
+  independent persisted values (the #487 footgun world), and the per-store prior-art consensus
+  (redux-persist/Zustand) is an artifact of those ecosystems having a single root store; the localStorage
+  floor has no native versioning, so per-key is the shape that covers both engines uniformly and removes the
+  shared-counter coupling (changing key X must not force-invalidate unrelated key Y). Per-store stays
+  available for cohesive single-`T` scopes. Most-flexible default. ~65%.
+
+**Developer-facing axes — all support-both, defaults recorded** (none is a fork): detection = **version
+stamp** default (structural `safeParse` opt-in); mismatch policy = **discard→defaults** default (registered
+migration is the author's opt-in); granularity = **per-key** default (per-store opt-in, per Fork 3).
+
+Successor build (now agent-ready): **#1295** (see *Related*).
 
 ## Motivation — the concrete footgun
 
@@ -50,14 +83,15 @@ The research decomposes the concern into independent axes, each pinned to the re
 
 ## Recommended path at a glance
 
-| Fork | Recommended default | Main alternative | Confidence |
-|---|---|---|---|
-| **1 — Home** | **webstates** (storage-facet) | webreliability (resilience) | High (~80%) |
-| **2 — Form** | **thin versioning facet *above* `CustomStorageStrategy`** | standalone new intent · baked per-strategy | Med-high (~70%) |
-| **3 — Granularity + envelope** | **per-store version, single sidecar record** | per-key `{v,data}` envelope | **Low — divergent** |
+| Fork | Ratified outcome | Confidence |
+|---|---|---|
+| **1 — Home** | **webstates** (storage-facet) | High (~80%) |
+| **2 — Form** | **thin versioning facet *above* `CustomStorageStrategy`** | Med-high (~70%) |
+| **3 — Granularity + envelope** | **dissolved → developer-configurable dimension, default per-key `{v,data}` envelope** (per-store opt-in) | ~65% |
 
 *Support-both (no fork):* detection defaults to a **version stamp** (structural-validation opt-in);
-mismatch policy supports both migrate and discard, defaulting to **discard→defaults**.
+mismatch policy supports both migrate and discard, defaulting to **discard→defaults**; granularity is
+configurable, defaulting to **per-key** (Fork 3).
 
 ## Fork 1 — Home: which project owns it
 
@@ -101,13 +135,13 @@ version-check+migrate cannot live in three places at once.
   floor uniformly); violates decouple/DRY. Native intrinsic versioning is an *implementation that can
   satisfy* the facet, not the standard's shape.
 
-## Fork 3 — Granularity + envelope (the one real call)
+## Fork 3 — Granularity + envelope (RESOLVED → configurable dimension)
 
-*Fork-existence:* per-store and per-key are coherent end-states that cannot both be the default shape on
-disk — a store is versioned at one granularity or the other.
+*Outcome:* both per-store and per-key are coherent end-states for different store topologies, so this
+dissolved from a single-default fork into a **developer-configurable dimension defaulting to per-key**
+(see *Ruling*). The branches below are retained as the design rationale for that default.
 
-- **A — per-store version, single sidecar record** *(recommended but LOW confidence — flag for the
-  decider's skeptic pass)*. One integer for the whole persisted scope, mirroring the overwhelming prior
+- **A — per-store version, single sidecar record** *(retained as the per-store opt-in)*. One integer for the whole persisted scope, mirroring the overwhelming prior
   art: native IndexedDB DB `version`, redux-persist `_persist.version`, Zustand `version`, SW cache names.
   Bumping the scope version re-evaluates every key in it. Simpler bookkeeping; aligns with the platform.
 - **B — per-key `{v,data}` envelope**. Each persisted shape is self-describing and evolves independently —
@@ -133,6 +167,8 @@ disk — a store is versioned at one granularity or the other.
 
 - webstates storage protocol #503, `StoragePersistence`/`CustomStorageStrategy` contract #1106,
   `CustomStorageStrategyRegistry` + degradation #1108
+- Successor build (this decision's agent-ready outcome): **#1295** — webstates: build the client-storage
+  schema-versioning facet (per-key envelope default).
 - Origin: the #487 single-kind-axis migration's stale-filter-state break.
 - Research: [Client Storage Schema Versioning & Migration](/research/client-storage-schema-versioning/);
   report `we:reports/2026-06-20-client-storage-schema-versioning.md`.

@@ -374,6 +374,27 @@ is load-bearing only there and for **correlation**, never for journaled-state de
 determinism anchor = state-diff A; ratified 2026-06-19). Kin to [constellation-placement](#constellation-placement),
 [compose-dont-handroll](#compose-dont-handroll), [surface-contract-not-computation](#surface-contract-not-computation).
 
+### Data-shape evolution is a storage facet, not a reliability concern {#data-shape-vs-mechanism-failure}
+
+When persisted client state **outlives the schema that reads it** (a stored value predates the shape the
+current code expects — a renamed key, a changed field), the capability that detects + migrates/discards it
+is a **webstates storage facet**, *not* a webreliability concern. webreliability owns **mechanism /
+operation failures** (network timeout, server error, DB unreachable, computation crash) and is ratified
+"distinct from validation — not input invalidity"; a schema-shape mismatch is **data evolution**, which
+falls on the same far side of that line. The discard-to-defaults fallback merely *rhymes* with graceful
+degradation — that resemblance does not move the home. **Test:** if the trigger is "the stored shape
+changed", it's webstates; if the trigger is "an operation failed", it's webreliability.
+
+Corollary (decision shape): such a placement question splits cleanly into **WE-internal architecture forks**
+the developer never sees (which project owns it; how it attaches to the contract — WE must pick one on merit)
+and **developer-facing behavior axes** with two legitimate end-states each (detection, mismatch policy,
+on-disk granularity — *support both, record a most-flexible default*, never a mandate). Don't promote a
+support-both axis to a fork. See [config-extends-platform-default](#config-extends-platform-default).
+
+**Lineage:** #1251 (client-storage schema versioning + migration; home = webstates, granularity = configurable
+dimension defaulting to per-key envelope; ratified 2026-06-20). Kin to [constellation-placement](#constellation-placement),
+[composition-artifact-ownership](#composition-artifact-ownership), [config-extends-platform-default](#config-extends-platform-default).
+
 ### Mandate the surface contract, not the computation {#surface-contract-not-computation}
 
 A WE standard normatively pins the **observable surface contract** — the hand-off shape, the regions,
