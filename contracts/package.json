@@ -15,6 +15,7 @@
     "./credential-management": "./credential-management.ts",
     "./guard": "./guard.ts",
     "./positioning": "./positioning.ts",
+    "./push-delivery": "./push-delivery.ts",
     "./validity-merge": "./validity-merge.ts",
     "./validator-resolution": "./validator-resolution.ts",
     "./audit": "./audit.ts",
