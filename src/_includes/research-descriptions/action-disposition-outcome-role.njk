@@ -1,0 +1,110 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  <a href="/intents/">Action Intent</a> (<code>src/_data/intents/action.json</code>) documents
+  <code>level</code> — <code>primary | secondary | tertiary | destructive</code> — as
+  <em>"the semantic weight determining visual prominence."</em> But primary/secondary buttons routinely
+  carry an <strong>outcome-role</strong> — primary = continue/confirm, secondary = back/cancel — that
+  prominence alone does not capture. <a href="/backlog/1318-action-intent-emphasis-style-axis-fill-outline-ghost-link-or/">#1318</a>
+  just ratified that prominence (<code>level</code>) and box-treatment (<code>variant</code>) are
+  orthogonal and must not be conflated. This is the sibling question: is there a <em>third</em> axis —
+  action <strong>disposition</strong> — that <code>level</code> is being overloaded to imply, or does
+  <code>level</code> already adequately stand in?
+</p>
+
+<h2>Finding 1 — "outcome-role" is two things, and one is already native</h2>
+<p>
+  The word "role" bundles two concerns that pull apart cleanly:
+</p>
+<ul>
+  <li>
+    <strong>Behavioral outcome</strong> — what the button <em>does</em> (submit, reset, dismiss a dialog,
+    navigate back). The web platform <strong>already expresses all of this</strong>, and Action Intent
+    already pulls the capability in (<code>requiresCapabilities: ["invokers"]</code>): <code>&lt;button
+    type="submit | reset | button"&gt;</code>; <code>&lt;form method="dialog"&gt;</code> + button
+    <code>value</code> &rarr; the dialog's <code>returnValue</code> (<code>"cancel"</code> is the
+    canonical dismiss signal); and the <strong>Invoker Commands API</strong> — <code>command="show-modal
+    | close | request-close"</code> + <code>commandfor</code>, where <code>request-close</code> fires the
+    dialog's cancel event then closes it, no JavaScript. So WE must <strong>not</strong> re-model
+    behavioral outcome as an intent dimension — that duplicates native vocabulary and breaks
+    <em>intents-are-UX-only</em>; the block maps disposition &rarr; the right native mechanism.
+  </li>
+  <li>
+    <strong>Disposition</strong> — the <em>abstract</em> "this is the affirmative action vs. the
+    dismissive one vs. a neutral one," independent of <em>which</em> native mechanism enacts it. This is a
+    UX "what," and it is the part <code>level</code> is overloaded to carry.
+  </li>
+</ul>
+
+<h2>Finding 2 — every platform models disposition as an axis <em>separate from</em> prominence</h2>
+<p>
+  Native UI toolkits do not fold disposition into visual weight — they give it its own enum:
+  <strong>SwiftUI</strong> <code>ButtonRole = { cancel, destructive }</code> (no "confirm" — the
+  affirmative is the <em>preferred / default</em> action); <strong>Android Material</strong> AlertDialog
+  positive / negative / neutral; <strong>WinUI</strong> <code>ContentDialog</code> Primary / Secondary /
+  <strong>Close</strong> plus a <code>DefaultButton</code> enum <code>{ None, Primary, Secondary, Close
+  }</code>. The decisive observations: SwiftUI's <code>cancel</code> role <strong>drives ordering</strong>
+  ("pushed to the bottom of a confirmation dialog"), not its prominence; and the <strong>affirmative is
+  frequently not the most prominent</strong> — in a destructive-confirm dialog the safe "Cancel" is often
+  the highest-weight default while "Delete" is <code>destructive</code>. So prominence
+  <strong>cannot stand in</strong> for disposition — the same orthogonality proof
+  <a href="/backlog/1318-action-intent-emphasis-style-axis-fill-outline-ghost-link-or/">#1318</a> used for
+  <code>variant</code>, one axis over.
+</p>
+
+<h2>Finding 3 — the in-tree gap is concrete: <code>groupOrdering: platform</code> is unsatisfiable today</h2>
+<p>
+  Action Intent already declares <code>groupOrdering: dom | reverse | platform</code>
+  (<code>action.json:26-32</code>). The <code>platform</code> value means "order per OS convention" —
+  macOS/iOS put the affirmative <strong>last</strong>, Windows <strong>first</strong>. A renderer
+  <strong>cannot apply <code>platform</code> ordering without knowing which action is affirmative vs.
+  dismissive</strong>, and DOM order + <code>level</code> prominence do not tell it (the affirmative can
+  be any level). So <code>groupOrdering: platform</code> is a <em>declared but unsatisfiable</em> value,
+  and <strong>default-button</strong> emphasis (WinUI <code>DefaultButton</code>, native autofocus/ENTER)
+  is blocked the same way. This is the fork-existence proof — "<code>level</code> already stands in" is
+  the <strong>broken branch</strong> for the platform-ordering and default-button use-cases.
+</p>
+
+<h2>Finding 4 — WE precedent: name the orthogonal UX axis on the owning intent</h2>
+<p>
+  This mirrors #1318 exactly. Action Intent is already multi-axis
+  (<code>level &middot; busy &middot; groupOrdering &middot; groupSizing</code>); #1318 added
+  <code>variant</code> as a fifth orthogonal dimension rather than overloading <code>level</code>, because
+  folding reproduces the conflation incumbents suffer. Disposition is the same shape: a real, orthogonal,
+  UX-level axis. The consistent move is a <strong>sixth dimension</strong>
+  (<code>disposition: affirmative | dismissive | neutral</code>), open-numbered under the same contract
+  #1318 established, with behavior delegated to native (Finding 1).
+</p>
+
+<h2>The prepared forks</h2>
+<ul>
+  <li>
+    <strong>Fork 1 — does WE add a <code>disposition</code> dimension?</strong> Add a thin
+    <code>disposition</code> dimension to Action Intent (default) vs leave it un-modeled and infer from
+    native <code>type</code>/<code>command</code>/<code>value</code>. The "infer" branch is broken: the
+    abstract disposition is not recoverable from a plain <code>type="button"</code> + JS-handler action
+    (the common case), so <code>groupOrdering: platform</code> can't work.
+  </li>
+  <li>
+    <strong>Fork 2 — what is the value set?</strong> A minimal abstract triple
+    <code>affirmative | dismissive | neutral</code> (default — open-numbered per the #1318 contract) vs a
+    literal <code>continue | confirm | cancel | back</code> enum. The literal enum reproduces the
+    behavior-vs-disposition conflation invariant B forbids — "continue" and "confirm" both <em>are</em>
+    affirmative; "back" and "cancel" both <em>are</em> dismissive.
+  </li>
+  <li>
+    <strong>Out of scope (carved, not decided here):</strong> whether <code>destructive</code> migrates
+    off <code>level</code> to a disposition/role axis (SwiftUI models it as a <code>ButtonRole</code>, not
+    a prominence). That touches a <em>shipped</em> <code>level</code> value with its own blast radius —
+    the broader "<code>level</code> is overloaded" cleanup, filed as a follow-up.
+  </li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/intents/">Web Intents catalog</a> — where Action Intent and its dimensions render.</li>
+  <li>Backlog <a href="/backlog/1318-action-intent-emphasis-style-axis-fill-outline-ghost-link-or/">#1318</a> — the ratified <code>variant</code> axis; this item's sibling and orthogonality template.</li>
+  <li>Research <a href="/research/action-emphasis-axis/">action-emphasis-axis</a> — the #1318 survey (same method).</li>
+  <li>Backlog <a href="/backlog/315-competitive-coverage-gap-analysis-program/">#315</a> — the gap-sweep program this feeds.</li>
+</ul>
+{% endraw %}

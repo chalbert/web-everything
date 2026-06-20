@@ -15,13 +15,15 @@ tags: []
 ## Progress (batch-2026-06-20) — DONE
 
 Plug core landed in FUI (fui:plugs/webbehaviors):
-- **`ownerElement` getter** added to `CustomAttribute.ts` (mirrors native `Attr.ownerElement`, #1121),
-  with the existing **`target` getter kept as a `@deprecated` back-compat alias** returning the same
-  `#target` — zero consumer breaks; the alias is removed by the enforcement tail #1333.
-- **`whenDefined(name)`** added to `CustomAttributeRegistry.ts` (#1119): a `#whenDefinedResolvers` map,
-  a single drain point in `define()` covering both eager and lazy (`#loadLazy → define`) paths, resolves
-  immediately for already-defined names, never rejects.
-- Doc-comment follow-through in `index.ts` (`this.target` → `this.ownerElement` in the usage example).
+- **`ownerElement` getter** added to `fui:plugs/webbehaviors/CustomAttribute.ts` (mirrors native
+  `Attr.ownerElement`, #1121), with the existing **`target` getter kept as a `@deprecated` back-compat
+  alias** returning the same `#target` — zero consumer breaks; the alias is removed by the enforcement
+  tail #1333.
+- **`whenDefined(name)`** added to `fui:plugs/webbehaviors/CustomAttributeRegistry.ts` (#1119): a
+  `#whenDefinedResolvers` map, a single drain point in `define()` covering both eager and lazy
+  (`#loadLazy → define`) paths, resolves immediately for already-defined names, never rejects.
+- Doc-comment follow-through in `fui:plugs/webbehaviors/index.ts` (`this.target` → `this.ownerElement`
+  in the usage example).
 - Plug unit tests extended: `ownerElement` + deprecated-`target`-alias parity assertions, and 3
   `whenDefined` cases (already-defined / pending / multi-awaiter). **68 tests green.**
 
@@ -30,8 +32,8 @@ throwing name-validation is NOT in this slice — it's the enforcement tail (#13
 #1328–#1332 (`blockedBy: 1299`) now unblocked to flip `.target` → `.ownerElement` per area.
 
 Gate: FUI `check:standards` is red on 2 pre-existing catalog-completeness errors
-(`blocks/notification/`, `blocks/signature-pad/` missing blocks.json entries) — unrelated to this
-webbehaviors changeset; not caused here.
+(`fui:blocks/notification/`, `fui:blocks/signature-pad/` missing `fui:src/_data/blocks.json` entries) —
+unrelated to this webbehaviors changeset; not caused here.
 
 
 Add the `ownerElement` getter + a deprecated `target` alias + `whenDefined` to FUI's webbehaviors plug — the foundational core of the webbehaviors reconcile, with the cross-cutting consumer migration carved into sibling slices under #1250.
