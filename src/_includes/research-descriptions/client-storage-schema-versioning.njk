@@ -1,0 +1,116 @@
+<h3>Context</h3>
+<p>
+    This research grounds decision <a href="/backlog/1251-client-storage-schema-versioning-migration-migrate-or-discar/">#1251</a> —
+    a standard for evolving <strong>persisted client state</strong> safely. The concrete footgun: the
+    <a href="/backlog/487-single-kind-axis-migration/">#487</a> kind-axis rename changed the board's
+    filter-state <code>localStorage</code> keys; the new code defaults to "no filter" when its key is
+    missing, so the <em>server</em> was fine, but a returning browser carrying the <strong>old</strong>
+    saved shape rendered a broken table until a hard refresh. The generic failure mode: <strong>persisted
+    client state outlives the schema that wrote it.</strong> The goal is to find which versioning/migration
+    patterns are universal (belong in a contract) vs. engine-specific (belong in an implementation), and
+    which detection + policy defaults the prior art converges on.
+</p>
+
+<h3>Web-platform native — IndexedDB versioning</h3>
+<p>
+    The platform already ships a canonical model. An IndexedDB database carries an integer
+    <code>version</code>; opening with a higher version fires
+    <code>onupgradeneeded(event)</code> with <code>event.oldVersion</code> / <code>event.newVersion</code>,
+    and you run schema migrations imperatively inside a single <code>versionchange</code> transaction
+    (create/delete object stores, transform records). Key properties: <strong>migrate-forward</strong>
+    (no discard), <strong>per-database/store granularity</strong> (one integer for the whole DB, not
+    per-record), <strong>applied at open time</strong>, and a <code>blocked</code> event when an older tab
+    still holds the DB. webstates' own <code>IndexedDBStrategy</code> already uses this — it bumps the
+    version to lazily create a new object store
+    (<a href="/backlog/1106-webstates-storage-contract/">#1106</a>,
+    <code>onupgradeneeded</code>). The platform vocabulary to borrow: <code>version</code>,
+    <code>oldVersion</code>/<code>newVersion</code>, <code>versionchange</code>, <code>blocked</code>.
+</p>
+
+<h3>Library survey</h3>
+<table>
+    <tr><th>Library</th><th>Detection</th><th>Mismatch policy</th><th>Granularity / shape</th><th>What it tells us</th></tr>
+    <tr>
+        <td><strong>redux-persist</strong></td>
+        <td>Explicit <code>version</code> in config; stored <code>_persist: { version, rehydrated }</code> meta envelope</td>
+        <td><code>createMigrate({ [v]: (state)=>next }, {debug})</code> runs migrations <strong>sequentially</strong> from stored+1 → current; no path ⇒ falls through to reducer defaults (discard)</td>
+        <td>Per-store (one version for the whole persisted blob); envelope co-locates version + data</td>
+        <td>The closest prior art to #1251's sketch: <strong>envelope + ordered migration registry + discard fallback</strong></td>
+    </tr>
+    <tr>
+        <td><strong>Zustand persist</strong></td>
+        <td>Explicit <code>version</code> number</td>
+        <td><code>migrate(persistedState, fromVersion)</code>; on mismatch with no <code>migrate</code> ⇒ discards (uses store defaults)</td>
+        <td>Per-store; version stored alongside state</td>
+        <td>Second independent witness to version + migrate-or-discard, discard as the no-handler fallback</td>
+    </tr>
+    <tr>
+        <td><strong>TanStack Query</strong> <code>persistClient</code></td>
+        <td><code>buster</code> string (a cache-buster) + <code>maxAge</code></td>
+        <td><strong>Discard-only</strong> — if persisted <code>buster</code> ≠ current, the <em>entire</em> cache is dropped; no migration concept</td>
+        <td>Per whole cache</td>
+        <td>Validates <strong>discard→defaults</strong> as a legitimate standalone policy; migration is opt-in sophistication, not a requirement</td>
+    </tr>
+    <tr>
+        <td><strong>localForage</strong></td>
+        <td>—</td>
+        <td>—</td>
+        <td>Unified async API over IndexedDB/WebSQL/localStorage</td>
+        <td>Mechanism-only, like webstates' existing strategies — confirms versioning is an <strong>orthogonal layer</strong> storage libs do <em>not</em> provide</td>
+    </tr>
+    <tr>
+        <td><strong>idb</strong> (Archibald)</td>
+        <td>IndexedDB integer version</td>
+        <td><code>openDB(name, version, { upgrade(db, oldV, newV, tx) })</code> — migrate-forward</td>
+        <td>Per-database</td>
+        <td>Ergonomic wrapper over the native model; same shape, nicer API</td>
+    </tr>
+    <tr>
+        <td><strong>Zod / valibot</strong> <code>safeParse</code></td>
+        <td><strong>Structural</strong> — re-validate the parsed value against the current schema (no version stamp needed)</td>
+        <td>On parse failure ⇒ discard→defaults</td>
+        <td>Per-shape</td>
+        <td>The alternative <em>detection</em> mechanism: structure-as-contract instead of a version integer. Catches drift a version bump forgot to record</td>
+    </tr>
+    <tr>
+        <td><strong>Service Worker</strong> Cache Storage</td>
+        <td>Versioned cache name (<code>cache-v2</code>)</td>
+        <td>Discard old caches on <code>activate</code></td>
+        <td>Per cache</td>
+        <td>Coarse discard-by-rename; reinforces discard as the floor policy</td>
+    </tr>
+</table>
+
+<h3>What the survey settles</h3>
+<ul>
+    <li>
+        <strong>Two orthogonal axes.</strong> <em>Detection</em> (explicit version stamp — redux/zustand/native —
+        vs. structural re-validation — Zod). <em>Mismatch policy</em> (migrate-forward through an ordered
+        registry vs. discard→defaults). Every library is one cell of that 2&times;2; they are independent and a
+        standard should support both columns, defaulting to one.
+    </li>
+    <li>
+        <strong>Convergent ergonomic pattern:</strong> an <strong>envelope</strong> co-locating version with
+        data, an <strong>ordered migration registry</strong> run <strong>lazily on read</strong>, and
+        <strong>discard→defaults</strong> when no migration path exists. redux-persist and Zustand are
+        independent witnesses; TanStack shows discard-only is viable on its own.
+    </li>
+    <li>
+        <strong>Granularity splits.</strong> The overwhelming prior art versions <strong>per store</strong>
+        (one integer for the whole persisted scope — native IndexedDB, redux, zustand, SW caches). Per-key
+        envelopes are rarer and suit loose, independently-evolving keys (exactly the #487
+        <code>localStorage</code> filter-state case). This is the axis with the least consensus.
+    </li>
+    <li>
+        <strong>Versioning is a facet of the persistence layer, not a separate product.</strong> The native
+        platform makes it intrinsic to opening the store; the libraries layer it <em>above</em> the storage
+        mechanism (engine-agnostic) rather than inside each engine. That argues for a thin versioning facet
+        over webstates' <code>CustomStorageStrategy</code> rather than baking it per-strategy.
+    </li>
+    <li>
+        <strong>Not a reliability concern.</strong> A schema-version mismatch is <em>data-shape evolution</em>,
+        not an operation failure (timeout / crash / unreachable). It does not fit
+        <a href="/projects/webreliability/">Web Reliability</a>'s ratified "mechanism failure recovery" scope,
+        even though the discard fallback rhymes with graceful degradation.
+    </li>
+</ul>

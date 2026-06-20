@@ -1,0 +1,22 @@
+{
+  "id": "client-storage-schema-versioning",
+  "title": "Client Storage Schema Versioning & Migration",
+  "status": "open",
+  "summary": "How established libraries and the web platform evolve PERSISTED client state safely when the schema that wrote it changes. Surveys the native IndexedDB version/onupgradeneeded model, redux-persist (version + createMigrate + _persist envelope), Zustand persist (version + migrate, discard-on-miss), TanStack Query persistClient (buster string = discard-only, no migration), localForage (mechanism-only, no versioning), and the idb wrapper. Two orthogonal axes fall out: DETECTION (an explicit version stamp vs. structural re-validation à la Zod safeParse) and MISMATCH POLICY (migrate-forward through an ordered registry vs. discard→defaults). The dominant ergonomic pattern is an envelope + ordered migration registry run lazily on read, with discard→defaults as the safe fallback when no migration path exists — and the native platform (IndexedDB) shows versioning is intrinsically a facet of the persistence layer, applied per store/scope at read/open time, not a separate product. Grounds decision #1251 (placement + shape of a webstates schema-versioning facet) — why webstates (storage domain) over webreliability (whose ratified scope is operation-failure recovery, not data-shape evolution), why a thin engine-agnostic layer above CustomStorageStrategy over baking it per-strategy, and why discard→defaults is the most-resilient default.",
+  "dateOpened": "2026-06-20",
+  "relatedReport": "reports/2026-06-20-client-storage-schema-versioning.md",
+  "tags": [
+    "storage",
+    "persistence",
+    "schema-version",
+    "migration",
+    "indexeddb",
+    "localstorage",
+    "redux-persist",
+    "zustand",
+    "tanstack-query",
+    "resilience",
+    "graceful-degradation"
+  ],
+  "relatedProject": "webstates"
+}
