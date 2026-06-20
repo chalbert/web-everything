@@ -121,4 +121,17 @@ export const defaultTokens: DtcgDocument = {
     width: { $type: 'dimension', $value: '2px' },
     offset: { $type: 'dimension', $value: '2px' },
   },
+
+  surface: {
+    $type: 'color',
+    $description:
+      'Neutral surface roles (#1317) — shadcn `--border` / `--input` / `--muted` / `--muted-foreground` ' +
+      'parity. The neutral border / muted-bg / muted-text affordances that bg/fg/accent did not cover; ' +
+      'each aliases the neutral gray scale so it tracks the theme. Token home for these roles — the ' +
+      'surface intent stays UX-only (#403).',
+    border: { $value: '{color.gray.6}' },
+    input: { $value: '{surface.border}' }, // input outline = the border role (shadcn --input ≈ --border)
+    muted: { $value: '{color.gray.1}' }, // muted surface background (light neutral)
+    'muted-foreground': { $value: '{color.gray.9}' }, // muted/secondary text
+  },
 };

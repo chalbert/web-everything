@@ -190,6 +190,11 @@ describe('the platform default token set', () => {
     // Focus-ring role (#1316): color tracks the accent; offset is a literal dimension.
     expect(css).toContain('--ring-color: var(--color-accent);');
     expect(css).toContain('--ring-offset: 2px;');
+    // Neutral surface roles (#1317): each aliases the gray scale (input → the border role).
+    expect(css).toContain('--surface-border: var(--color-gray-6);');
+    expect(css).toContain('--surface-input: var(--surface-border);');
+    expect(css).toContain('--surface-muted: var(--color-gray-1);');
+    expect(css).toContain('--surface-muted-foreground: var(--color-gray-9);');
   });
 
   it('a project extends the default and recompiles with only its overrides changed', () => {
