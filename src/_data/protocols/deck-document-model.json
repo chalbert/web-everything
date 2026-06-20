@@ -1,0 +1,8 @@
+{
+  "id": "deck-document-model",
+  "name": "Deck Document Model",
+  "summary": "Content/interchange schema for what a slide and a deck carry at the contract level: deck > sections > slides, with per-slide id, title, speaker-notes ref, fragment list, layout-template ref, and background. A semantic interchange schema (NOT a runtime engine) — the load-bearing data model every other deck slice references and the portable form a deck serializes to / imports from. Composes webexpressions for slot/section content interpolation; redefines none of the referenced schemas (notes ride webresources, theming rides design-tokens). Homed in webcomponents per the ratified distributed placement (#1175 — no webdecks project); revisit the home only if a genuine deck-specific provider seam later emerges.",
+  "status": "draft",
+  "ownedByProject": "webcomponents",
+  "anchor": "protocol-deck-document-model"
+}

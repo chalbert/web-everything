@@ -511,6 +511,38 @@ function defineElement(tag: string, ctor: CustomElementConstructor): void {
     </p>
 </section>
 
+<section id="protocol-deck-document-model" class="section-card">
+    <h3>Protocol — Deck Document Model</h3>
+    <p class="text-gray-600 text-sm">
+        A <strong>content/interchange schema</strong> for what a slide and a deck carry, defined at the
+        contract level — not a runtime engine. The shape is a three-level tree: a <code>deck</code> holds
+        ordered <code>sections</code>, each section holds ordered <code>slides</code>. The model is the
+        load-bearing data structure every other deck contract references (fragments, layout templates,
+        speaker notes, theming, navigation all key off a slide's identity), and it is the portable form a
+        deck serializes to and imports from.
+    </p>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <tr><th>Field</th><th>Level</th><th>Carries</th></tr>
+            <tr><td><code>id</code></td><td>deck / section / slide</td><td>stable identity for deep-linking and addressing (a slide's id anchors <code>navigation</code> + the 2D addressing extension).</td></tr>
+            <tr><td><code>title</code></td><td>deck / section / slide</td><td>human label; feeds the outline / overview-grid and analytics.</td></tr>
+            <tr><td><code>notes</code></td><td>slide</td><td>reference to per-slide speaker-notes content (the notes payload itself rides webresources).</td></tr>
+            <tr><td><code>fragments</code></td><td>slide</td><td>ordered list of incremental-reveal steps within the slide.</td></tr>
+            <tr><td><code>layout</code></td><td>slide</td><td>reference to a slide layout-template (title / two-column / code / image / quote …).</td></tr>
+            <tr><td><code>background</code></td><td>slide / section</td><td>per-slide / per-section background, scoped via the design-tokens override mechanism.</td></tr>
+        </table>
+    </div>
+    <p class="text-gray-600 text-sm mt-3">
+        Slot and section content interpolates via <a href="../webexpressions/">Web Expressions</a>
+        (<code>{% raw %}{{ }}{% endraw %}</code>). The model <em>redefines none</em> of the referenced
+        schemas — speaker notes are webresources, theme overrides are <code>design-tokens</code>,
+        navigation is the <code>navigation</code> intent — it only binds them to a slide identity. Homed
+        here per the ratified distributed placement (<a href="/backlog/1175/">#1175</a> — no
+        <code>webdecks</code> project); Web Components ships the schema, <a href="../frontierui/">Frontier
+        UI</a> renders it, plateau adds import / versioning.
+    </p>
+</section>
+
 <section id="standards" class="section-card">
     <h3 id="web-standards">Web Standards Alignment</h3>
     <table>
