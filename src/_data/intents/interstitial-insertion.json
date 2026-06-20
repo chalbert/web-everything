@@ -1,0 +1,21 @@
+{
+  "id": "interstitial-insertion",
+  "name": "Interstitial / Scheduled-Insertion Intent",
+  "status": "draft",
+  "summary": "Content scheduled into a sequence at positions other than the authored items — a pre-roll before it starts, a mid-roll between items, a post-roll at the end, or an overlay banner during playback. The shared model behind video ad-breaks, an interstitial slide in a deck, and a between-items promo in a carousel: where it inserts, whether it is skippable / forced / dismissible, and whether the sequence resumes where it left off afterward. A member of the advanceable-sequence family (#1179), cross-media (the canonical case is video ad insertion). Owns the scheduling + the dismissal contract; the inserted content itself is the consumer's. Homed in webintents per the ratified distributed placement (#1175).",
+  "dimensions": {
+    "position": {
+      "description": "Where the content inserts relative to the sequence. pre-roll = before the first item; mid-roll = between two items at a scheduled point; post-roll = after the last item; overlay = on top of the current item without pausing the position (a banner).",
+      "values": ["pre-roll", "mid-roll", "post-roll", "overlay"]
+    },
+    "dismissal": {
+      "description": "How the viewer can get past it. skippable = a skip becomes available (optionally after a delay); forced = it must complete before the sequence continues; dismissible = an overlay the viewer can close at any time.",
+      "values": ["skippable", "forced", "dismissible"]
+    },
+    "resume": {
+      "description": "What happens after the interstitial. resume = return to exactly where the sequence was (mid-roll continues the interrupted item); advance = proceed to the next item.",
+      "values": ["resume", "advance"]
+    }
+  },
+  "description": "<h3>Inserted, not authored</h3><p class=\"text-sm text-gray-600 mb-2\">Sometimes content is scheduled <em>into</em> a sequence at a position the author didn't place in the item list: an ad before a video, a sponsor slide mid-deck, a promo banner over a carousel. The Interstitial intent models that insertion — where it goes, how the viewer gets past it, and whether the sequence resumes afterward.</p><h3>Cross-media, video-canonical</h3><p class=\"text-sm text-gray-600 mb-2\">The canonical case is <strong>video ad-breaks</strong> (pre/mid/post-roll, skippable countdown, resume-after), and the same contract serves a deck interstitial and a carousel promo — which is why it homes in the <a href=\"/intents/advanceable-sequence/\">advanceable-sequence family</a> (#1179) rather than a deck contract. It owns the <em>scheduling</em> and the <em>dismissal</em> contract; the inserted content is the consumer's concern.</p><h3>Composition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Overlay surface:</strong> the <code>overlay</code> position composes <a href=\"/projects/webportals/\">Web Portals</a> (out-of-flow surface).</li><li><strong>Advance kernel:</strong> mid-roll insertion pauses the family's advance, then <code>resume</code>/<code>advance</code> decides re-entry.</li></ul>"
+}
