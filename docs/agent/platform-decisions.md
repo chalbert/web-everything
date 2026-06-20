@@ -77,11 +77,20 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    standard→WE, primitives/adapters→FUI, served product→Plateau, open-core by usage.
 5. **An impl/substrate is not a standard** (e.g. a native `base-select`): it registers as a
    `capabilityMatrix` resolver impl, not a new protocol; the work it implies is a deferred build.
+6. **Relocating the runtime does not retire the WE project that owns the contract.** When a
+   standard/impl split moves a subsystem's *runtime* to FUI (the #606 move), the WE project
+   *survives* on its contract surface (spec page + interface defs + conformance) — you reconcile its
+   status drift, you do not delete it. A project whose surface ships as **spec + data defs** (not a
+   `relatedProject`-tagged resolved item) can read as `concept` despite being live; bump it **off**
+   `concept` (`poc` is the convention — project `status` is not enum-validated; the `LIFECYCLE` set
+   governs *descriptors*, not projects). *Retire* is only on the table if WE owns **no** contract
+   surface distinct from the moved runtime.
 
 *Soft sub-rule — locus tagging:* backlog items carry an explicit `locus:` field (WE / frontierui /
 plateau-app / exercise-app); items gate in their own locus so cross-repo batches stay locus-agnostic.
 
 **Lineage:** #730 #817 (the per-file define-vs-deliver holding) · #606 (plugs runtime → FUI) ·
+#1248 (relocating the runtime does not retire the contract-owning project — `webplugs` survives #606) ·
 #641 (block-protocol impl boundary) · #779 #426 #799 #497 #834 · #804 #872 #239 (contract package) ·
 #091 (managed-offering decomposition) · #020→#291 (impl-is-not-a-standard) · #1078 (reference-impl
 tier — refines #817: published-package purity vs repo-internal reference runtime).
@@ -519,4 +528,8 @@ one place:
 - **Backlog & decision workflow** (fork-existence test, fork-is-not-prioritization, support-all,
   prepared=DoR, reversibility, no decision+epic conflation, resolve-by-parent-edges) →
   [backlog-workflow.md](backlog-workflow.md).
+- **Program definition — the strict bar for a perpetual `ongoing` epic** (four-part Program Test:
+  standing goal + conformance front + currency front + cadence; watch mode is a lifecycle state;
+  L0→L2 maturity ladder; "evergreen" = the property a program maintains) →
+  [backlog-workflow.md#program-definition](backlog-workflow.md#program-definition).
 - **Prove claims by observation** → AGENTS.md hard rule 7 / [testing.md](testing.md).
