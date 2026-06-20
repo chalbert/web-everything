@@ -321,13 +321,19 @@ module.exports = function backlog() {
     // pills), or non-open. `human-gate`/`oversized`/`decision` already have dedicated pills elsewhere, so
     // this drives only the three that lacked one — `stop-the-world`, `project-pending`, `blocked`.
     item.openBlockers = (item.blockers || []).filter((b) => b.status !== 'resolved').map((b) => b.num);
+    // Precedence matters: the BLOCKING reasons (blocked / project-pending / human-gate) come before the
+    // `decision` short-circuit so that **every Tier-C ("Not ready") item carries a reason pill** — a blocked
+    // *decision* is Tier C and must show "blocked by #NNN", not fall through to the bare `decision` case
+    // (which is reserved for a Tier-B, ready-to-ratify decision the decision-ready badge already explains).
+    // By construction a Tier-C issue/idea always has open blockers, projectPending, or a humanGate, and a
+    // Tier-C decision always has open blockers — so this chain yields a non-null reason for every not-ready item.
     item.notBatchableReason = (() => {
       if (item.status !== 'open' || item.batchable || item.workItem === 'epic') return null;
       if (item.stopTheWorld) return 'stop-the-world';
       if (item.humanGate) return 'human-gate';        // rendered by the humanGate pill
-      if (item.type === 'decision') return 'decision';  // rendered by the tier-B badge
-      if (item.openBlockers.length) return 'blocked';
+      if (item.openBlockers.length) return 'blocked';   // any blocked item — issue/idea OR a Tier-C decision
       if (item.projectPending) return 'project-pending';
+      if (item.type === 'decision') return 'decision';  // Tier-B, ready to ratify — decision-ready badge covers it
       if (item.workItem === 'story' && typeof item.size === 'number' && item.size > 8) return 'oversized'; // split pill
       return null;
     })();
