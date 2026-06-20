@@ -39,11 +39,19 @@ export const slugify = (s) =>
  * @returns {string} the file content
  */
 export function renderItem(spec) {
-  const { kind, size, title, today, blockedBy = [], parent, digest } = spec;
+  const { kind, size, title, today, blockedBy = [], parent, digest, scaffoldedBy } = spec;
   const fm = ['---', `kind: ${kind}`];
   if (kind === 'story' || (kind === 'epic' && typeof size === 'number')) fm.push(`size: ${size}`);
   if (parent) fm.push(`parent: "${parent}"`);
-  fm.push('status: open');
+  // Born-active when a creating session owns it (#670): scaffold --session stamps `scaffoldedBy`, marking
+  // the item owned-until-settled so a concurrent batch can't claim a half-authored spin-off (born-public
+  // race). It carries NO `dateStarted` (that is the claim signal) — so a born-active item is
+  // distinguishable from a claim-active one for the orphan-recovery check. `settle` later flips it → open.
+  if (scaffoldedBy) {
+    fm.push('status: active', `scaffoldedBy: "${scaffoldedBy}"`, `dateScaffolded: "${today}"`);
+  } else {
+    fm.push('status: open');
+  }
   if (blockedBy.length) fm.push(`blockedBy: [${blockedBy.map((n) => `"${n}"`).join(', ')}]`);
   fm.push(`dateOpened: "${today}"`, 'tags: []', '---', '');
   const lead = digest || 'TODO digest — one ≤100-word paragraph: what this item does and why (replace this line).';

@@ -1,14 +1,38 @@
 ---
 kind: story
 size: 5
-status: active
+status: resolved
 dateOpened: "2026-06-15"
-dateStarted: "2026-06-15"
+dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: "we:scripts/backlog.mjs"
 tags: []
 ---
 
 # Scaffold new items as active-until-settled (close the born-public claim race)
 
+## Progress (batch-2026-06-20) — DONE
+
+Implemented born-active scaffolding + the `settle` verb + orphan recovery, **backward-compatibly** (gated
+on `--session`, so the ~10 existing `scaffold` callers that don't pass it keep born-open):
+
+- `we:scripts/backlog/scaffold.mjs` (`renderItem`) — a `scaffoldedBy` spec field emits `status: active` +
+  `scaffoldedBy` + `dateScaffolded` and **omits `dateStarted`** (the claim signal), so born-active is
+  distinguishable from claim-active for orphan recovery.
+- `we:scripts/backlog.mjs` — `scaffold --session=<slug>` → born-active+owned (else born-open, the
+  default). New **`settle <NNN>`** verb flips a born-active scaffold `active → open` and clears the
+  ownership stamps (refuses a non-`scaffoldedBy` item — claim-active is closed by `resolve`). Dispatch +
+  help + header docs updated.
+- `we:scripts/audit-backlog-health.mjs` — new **O1** check flags a born-active scaffold lingering past its
+  creating day (`dateScaffolded < today`, no `dateStarted`) as a likely stranded session — recover via
+  `settle` or revert to open (the orphan-recovery requirement).
+- `we:docs/agent/backlog-workflow.md` — documented `--session`/`settle` + the born-public-race rationale.
+
+Verified: scaffold `--session` → `active`+`scaffoldedBy`, `settle` → `open` (round-trip on a throwaway
+item, then removed); both gates green (`check:standards` 0 errors, `check:health` runs with O1=0). Scope:
+the narrow shippable slice per the card's scope-boundary (#083 process-isolation stays separate). The
+`--select` pool already excludes `active`, so a born-active spin-off is invisible to other batches until
+settled — the race is closed.
 scaffold creates a new item as status:open, so an agent-scaffolded spin-off is born PUBLIC — surfaced + claimable by a concurrent session before its digest / blockedBy / body are authored (verified this session: the other agent's #667 sat status:open mid-authoring). Mirror the claim lifecycle: scaffold -> active (owned by the creating session) and flip to open only when SETTLED (body + edges done), via an explicit settle verb. Agent-scaffold only; hand-created items stay born-open. Needs orphan recovery so a crashed agent can't strand an item active. Closes a real agent-separation hole; complements the unguarded file-level gap (#083).
 
 ## The hole (verified)

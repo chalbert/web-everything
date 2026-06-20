@@ -17,7 +17,8 @@
  *   node scripts/backlog.mjs claim   <NNN> [--as=preparing] [--force]  # open    → active (or preparing, for /prepare) + dateStarted=today; prints rename slug. Refuses if the item's own file is dirty (claim-first guard); --force overrides
  *   node scripts/backlog.mjs resolve <NNN> [--graduated-to=X] [--codified-to=Y] [--force]  # active → resolved + dateResolved=today (+ graduatedTo); a kind:decision REQUIRES --codified-to=<doc#anchor|one-off> (#911 gate); an epic with open children is refused unless --force (#658 no-open-slice guard)
  *   node scripts/backlog.mjs release <NNN>                       # active|preparing → open (abandon/redirect; stamps untouched)
- *   node scripts/backlog.mjs scaffold --kind=story --size=3 --title="..." [--digest="..."] [--blocked-by=NNN,NNN] [--parent=NNN]   # --kind ∈ story|epic|task|decision (#466/#487)
+ *   node scripts/backlog.mjs scaffold --kind=story --size=3 --title="..." [--digest="..."] [--blocked-by=NNN,NNN] [--parent=NNN] [--session=<slug>]   # --kind ∈ story|epic|task|decision (#466/#487). --session ⇒ born `active`+`scaffoldedBy` (owned until settle, #670); without it, born `open` (default)
+ *   node scripts/backlog.mjs settle   <NNN>                         # born-active scaffold (--session) → open: publish it once digest+edges+body are authored (#670)
  *   node scripts/backlog.mjs reserve   <NNN...> --session=<slug>     # soft-hold planned items (#083 cross-session deprioritize)
  *   node scripts/backlog.mjs unreserve [--session=<slug>] [<NNN...>] # release soft holds (whole session, or specific items)
  *   add --json to any verb for machine-readable output.
@@ -254,12 +255,47 @@ function scaffold() {
     finalName = `${finalNum}-${slug}.md`;
     finalAbs = join(DIR, finalName);
   }
-  const content = renderItem({ kind, size, slug, title, today: today(), blockedBy, parent, digest: flag('digest') });
+  // Born-active when a creating session owns it (#670): `scaffold --session=<slug>` stamps the item
+  // `status: active` + `scaffoldedBy`, so it is excluded from every OTHER session's batch pool until the
+  // author `settle`s it (closes the born-public, half-authored-item race). Without `--session` (ad-hoc /
+  // hand / non-batch callers) it stays born-open, the long-standing default.
+  const session = flag('session');
+  const content = renderItem({ kind, size, slug, title, today: today(), blockedBy, parent, digest: flag('digest'), scaffoldedBy: session });
   writeFileSync(finalAbs, content);
   const id = finalName.replace(/\.md$/, '');
   const filled = !!flag('digest');
-  ok({ verb: 'scaffold', id, num: finalNum, file: `backlog/${finalName}`, digestFilled: filled },
-    `${GRN}✓ scaffolded${RST} ${BLD}#${finalNum}${RST} ${DIM}backlog/${finalName}${RST}\n${YEL}→ ${filled ? 'add the body (digest set), then re-run check:standards' : 'fill the digest (TODO line) and body, then re-run check:standards'}${RST}`);
+  const nextStep = session
+    ? `owned by ${session} (born active) — author digest + edges + body, then \`settle ${finalNum}\` to publish it (→ open)`
+    : (filled ? 'add the body (digest set), then re-run check:standards' : 'fill the digest (TODO line) and body, then re-run check:standards');
+  ok({ verb: 'scaffold', id, num: finalNum, file: `backlog/${finalName}`, digestFilled: filled, status: session ? 'active' : 'open', scaffoldedBy: session ?? null },
+    `${GRN}✓ scaffolded${RST} ${BLD}#${finalNum}${RST} ${DIM}backlog/${finalName}${RST}\n${YEL}→ ${nextStep}${RST}`);
+}
+
+/**
+ * settle <NNN> — publish a born-active scaffold (#670): flip a `scaffold --session` item from
+ * `active` (owned, half-authored, pool-excluded) to `open` (claimable by anyone), once its digest +
+ * `blockedBy`/`parent` edges + body are written. Explicit, not auto-on-digest-fill, because only the
+ * author knows the edges are final. Refuses an item that is not a born-active scaffold (no `scaffoldedBy`)
+ * — a claim-active item is settled by `resolve`, not this.
+ */
+function settle() {
+  const id = positional[0];
+  if (!id) die('settle needs <NNN> — the born-active scaffold to publish (→ open)');
+  const padded = String(id).padStart(3, '0');
+  const file = files().find((f) => f.startsWith(`${padded}-`));
+  if (!file) die(`settle: no backlog item #${padded}`);
+  const abs = join(DIR, file);
+  let src = readFileSync(abs, 'utf8');
+  if (!/^scaffoldedBy:/m.test(src))
+    die(`settle: #${padded} is not a born-active scaffold (no scaffoldedBy) — a claimed item is closed by \`resolve\`, not \`settle\``);
+  // active → open, and drop the ownership stamps (settled = published, no longer session-owned).
+  src = src.replace(/^status: active$/m, 'status: open')
+           .replace(/^scaffoldedBy: .*\n/m, '')
+           .replace(/^dateScaffolded: .*\n/m, '');
+  writeFileSync(abs, src);
+  const rel = `backlog/${file}`;
+  ok({ verb: 'settle', id: file.replace(/\.md$/, ''), file: rel, status: 'open' },
+    `${GRN}✓ settled${RST} ${file.replace(/\.md$/, '')} ${DIM}→ open (published; ownership stamps cleared)${RST}`);
 }
 
 /**
@@ -322,6 +358,7 @@ function calibrate() {
 switch (verb) {
   case 'claim': case 'resolve': case 'release': transition(verb); break;
   case 'scaffold': scaffold(); break;
+  case 'settle': settle(); break;
   case 'calibrate': calibrate(); break;
   case 'reserve': reserve(); break;
   case 'unreserve': unreserve(); break;
@@ -330,7 +367,8 @@ switch (verb) {
       `  ${GRN}claim${RST} <NNN> [--as=preparing] [--force]   open → active (or preparing, /prepare) + dateStarted; refuses on a dirty item file (claim-first), --force overrides\n` +
       `  ${GRN}resolve${RST} <NNN> [--graduated-to=X] [--codified-to=Y] [--force]   active → resolved + dateResolved (decision REQUIRES --codified-to=<doc#anchor|one-off>; an epic with open children is refused unless --force)\n` +
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
-      `  ${GRN}scaffold${RST} --kind=story|epic|task|decision --size= --title= [--digest=] [--blocked-by=] [--parent=]\n` +
+      `  ${GRN}scaffold${RST} --kind=story|epic|task|decision --size= --title= [--digest=] [--blocked-by=] [--parent=] [--session=<slug>]   --session ⇒ born active+owned (#670), publish with settle\n` +
+      `  ${GRN}settle${RST} <NNN>               born-active scaffold (--session) → open (publish once authored)\n` +
       `  ${GRN}calibrate${RST} --points= --context-pct= [--stop-reason=budget|context|empty-pool|fork|gate|outgrew|manual|abort]   fold a session into the batch point-budget estimate\n` +
       `  ${GRN}reserve${RST} <NNN...> --session=<slug>    soft-hold planned items (deprioritize for other sessions)\n` +
       `  ${GRN}unreserve${RST} [--session=<slug>] [<NNN...>]  release soft holds (clear a session, or specific items)\n` +
