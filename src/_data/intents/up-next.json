@@ -1,0 +1,21 @@
+{
+  "id": "up-next",
+  "name": "Up-Next Intent",
+  "status": "draft",
+  "summary": "A what-comes-next preview over an ordered sequence — surface the upcoming item (or items) so the viewer can anticipate it or skip ahead. The cross-media affordance shared by a slide deck's next-slide peek, a video player's up-next overlay, and a carousel's adjacent-item peek; a member of the advanceable-sequence family (#1179), not deck-specific. Owns only the preview surface and the skip-ahead action — the underlying ordering and advance mechanics belong to advanceable-sequence. Distinct from the overview-grid (the whole deck at once); up-next is forward-looking and bounded to the near future of the sequence.",
+  "dimensions": {
+    "depth": {
+      "description": "How much of the future is shown. next = just the immediately-upcoming item (the presenter next-slide peek); queue = an ordered list of upcoming items (a video playlist / a kiosk schedule).",
+      "values": ["next", "queue"]
+    },
+    "surface": {
+      "description": "When the preview appears. persistent = always visible (presenter view's next-slide pane); on-approach = surfaces as the current item nears its end (the video up-next card before autoplay continues), composing timed-advance.",
+      "values": ["persistent", "on-approach"]
+    },
+    "action": {
+      "description": "What the viewer can do with it. preview = look-ahead only; skip = act on it to jump ahead to the previewed item (skip the remainder of the current one).",
+      "values": ["preview", "skip"]
+    }
+  },
+  "description": "<h3>What's coming next</h3><p class=\"text-sm text-gray-600 mb-2\">Across media, viewers want to see what comes next: a presenter glances at the next-slide pane, a video viewer sees the up-next card, a carousel peeks the adjacent item. The Up-Next intent names that shared affordance — a forward-looking preview of the near future of an ordered sequence.</p><h3>Cross-media, not deck-specific</h3><p class=\"text-sm text-gray-600 mb-2\">A member of the <a href=\"/intents/advanceable-sequence/\">advanceable-sequence family</a> (#1179): the same contract serves deck, video playlist, and carousel. It owns only the preview surface and the skip action; ordering and advance belong to the family kernel, and the appears-near-the-end behavior composes <a href=\"/intents/timed-advance/\">timed-advance</a>.</p><h3>Not the overview</h3><p class=\"text-sm text-gray-600\">Distinct from the <a href=\"/intents/overview-grid/\">overview-grid</a> (a spatial view of the <em>whole</em> deck) — up-next is bounded to what follows now, and is the natural complement to it.</p>"
+}
