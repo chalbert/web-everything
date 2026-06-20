@@ -27,7 +27,7 @@
  */
 import { readFileSync, existsSync, readdirSync, writeFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, relative, extname } from 'node:path';
+import { dirname, join, relative, resolve, extname } from 'node:path';
 import { buildConformanceReport } from './lib/conformanceReport.mjs';
 import { loadBlocks } from './lib/blocks-loader.cjs';
 import { loadIntents } from './lib/intents-loader.cjs';
@@ -40,8 +40,20 @@ const STRICT = argv.includes('--strict');
 const BURNDOWN = argv.includes('--burndown');
 const appArg = argv.find((a) => a.startsWith('--app='));
 const APP_REL = (appArg ? appArg.slice(6) : 'demos/loan-origination').replace(/\/$/, '');
-const APP_DIR = join(ROOT, APP_REL);
-if (!existsSync(APP_DIR)) { console.error(`✗ app not found: ${APP_REL}`); process.exit(2); }
+// The app may live in a SIBLING repo: #823 relocated the exercise apps to frontierui, but standards
+// (the only things we validate against) still load from the WE ROOT. So the app-root and the
+// standards-root are decoupled. --app-root=<path> sets the repo holding the app (relative to ROOT or
+// absolute); default ROOT, with an automatic fallback to ../frontierui for relocated exercise apps so
+// the loop tooling just works without remembering the flag.
+const appRootArg = argv.find((a) => a.startsWith('--app-root='));
+let APP_ROOT = appRootArg ? resolve(ROOT, appRootArg.slice(11)) : ROOT;
+let APP_DIR = join(APP_ROOT, APP_REL);
+if (!existsSync(APP_DIR) && !appRootArg) {
+  const fuiDir = resolve(ROOT, '../frontierui', APP_REL); // #823 relocation target
+  if (existsSync(fuiDir)) { APP_ROOT = resolve(ROOT, '../frontierui'); APP_DIR = fuiDir;
+    if (!JSON_MODE) console.error(`\x1b[2m· app not under WE root — using relocated copy at ${relative(ROOT, APP_DIR)} (#823)\x1b[0m`); }
+}
+if (!existsSync(APP_DIR)) { console.error(`✗ app not found: ${APP_REL} (looked under ${relative(ROOT, APP_ROOT) || '.'} and ../frontierui)`); process.exit(2); }
 
 // ── Registries (the only things we can validate against) ────────────────────────
 const readJson = (p, dflt) => { try { return JSON.parse(readFileSync(join(ROOT, p), 'utf8')); } catch { return dflt; } };
@@ -99,7 +111,7 @@ function walk(dir) {
   });
 }
 const files = walk(APP_DIR).filter((f) => ['.ts', '.tsx', '.js', '.jsx', '.css', '.html'].includes(extname(f)));
-const rel = (p) => relative(ROOT, p);
+const rel = (p) => relative(APP_ROOT, p); // app-repo-relative display (clean whether app is in WE or FUI)
 const allText = files.map((f) => readFileSync(f, 'utf8')).join('\n');
 const tagFiles = new Set(); // files carrying a live PLATFORM-GAP tag
 for (const f of files) for (const m of readFileSync(f, 'utf8').matchAll(/PLATFORM-GAP:\s*#?(\d{3})/g)) if (backlogIds.has(m[1])) tagFiles.add(rel(f));
@@ -118,7 +130,7 @@ for (const c of CONCEPTS) {
 }
 
 // ── Manifest (optional — declared mode for our apps) ────────────────────────────
-const manifest = readJson(`${APP_REL}/conformance.json`, null);
+const manifest = (() => { try { return JSON.parse(readFileSync(join(APP_DIR, 'conformance.json'), 'utf8')); } catch { return null; } })();
 const declared = manifest?.standards ?? [];
 const declaredEvidence = new Map(declared.map((d) => [d.id, d.evidence ? new RegExp(d.evidence) : null]));
 
