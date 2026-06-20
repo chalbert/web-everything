@@ -4,5 +4,5 @@
   "webFeaturesKey": "form-associated-custom-elements",
   "baseline": "2023",
   "polyfill": "polyfillable",
-  "summary": "<code>static formAssociated</code> + <code>ElementInternals</code> make a custom element a real form control (value, validity, lifecycle)."
+  "summary": "<code>static formAssociated</code> + <code>ElementInternals</code> make a custom element a real form control (value, validity, lifecycle). Native-first form-participation resolver for WE form-participating blocks (droplist, inputs, selection controls, #1272): blocks own value + validity through ElementInternals, demoting any polyfilled or wrapper-based form-value path to opt-in. Broadly available (all engines since Safari 16.4 / 2023)."
 }
