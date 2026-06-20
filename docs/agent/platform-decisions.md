@@ -59,7 +59,14 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    WE-side conformance gate** (`check.ts`) → **Web Everything**. Code that **delivers a capability
    at runtime** (registry-dispatching, artifact-producing, a running handler — incl. `assert*`,
    constants, engines, native-default strategies) → **Frontier UI**. A served, credential-holding
-   product → **Plateau**.
+   product → **Plateau**. **Reference-implementation tier (#1078):** the WE *repo* may
+   *additionally* host a **non-published reference runtime** — an executable spec consumed only by
+   WE's own conformance demos/tests (a standard's DoD-mandated playground; generalises the block
+   reference-runtime carve-out in [we-fui-embed-boundary](#we-fui-embed-boundary) rule 4 to
+   subsystem engines) — even though it "delivers at runtime"; FUI still ships the *production* impl,
+   the reference impl carries no lock-in (swappable; the contract is the only lock), and the
+   `@webeverything` *package* stays types-only (rule 3, unchanged). The carve-out is the **repo**,
+   never the **published package**, and never inverts the WE→FUI source arrow.
 2. **The file seam is the cut:** `contract.ts` (pure types, compile-erased) → WE; `provider.ts` +
    `registry.ts` (runtime) → FUI. Split mixed modules *mid-file* at this seam.
 3. **Distribution end-state:** FUI consumes WE contracts via a WE-published type-only package
@@ -76,7 +83,8 @@ plateau-app / exercise-app); items gate in their own locus so cross-repo batches
 
 **Lineage:** #730 #817 (the per-file define-vs-deliver holding) · #606 (plugs runtime → FUI) ·
 #641 (block-protocol impl boundary) · #779 #426 #799 #497 #834 · #804 #872 #239 (contract package) ·
-#091 (managed-offering decomposition) · #020→#291 (impl-is-not-a-standard).
+#091 (managed-offering decomposition) · #020→#291 (impl-is-not-a-standard) · #1078 (reference-impl
+tier — refines #817: published-package purity vs repo-internal reference runtime).
 
 ### WE ↔ Frontier UI rendering & embed boundary {#we-fui-embed-boundary}
 

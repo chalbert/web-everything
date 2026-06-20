@@ -3,12 +3,15 @@ type: decision
 workItem: story
 size: 5
 parent: "1028"
-status: open
+status: resolved
 blockedBy: ["1077"]
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: "we:webpolicy/enforcement.ts"
 preparedDate: "2026-06-20"
 relatedReport: reports/2026-06-20-we-resident-reference-runtime-placement.md
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 tags: []
 ---
 
@@ -31,6 +34,22 @@ The DMN engine + proof-of-compliance runtime the card asks for **already exists 
 **This is not isolated to webpolicy.** Ten WE standard dirs carry runtime today — `we:reliability/`, `we:intl/`, `we:analytics/`, `we:process/` (provider/registry/driver), `we:webpolicy/`, `we:webcompliance/`, `we:webtheme/`, `we:webcases/`, `we:webtraits/`, and the active webexpressions interpreter — and the precedent chain is recent and ratified (#1052/#1055 landed, **#1071 resolved** graduatedTo `we:process/provider.ts` "mirroring the landed reliability + intl provider precedent"). Five newer siblings (webidentity/webnotifications/webrealtime/webresources/webanalytics) + plugs (#606) went FUI-side. So the statute and every `we:contract.ts` header *say* `→ FUI`; the landed tree and the most recent decisions *do* WE.
 
 **Prior art that names Option A.** Standards bodies separate three artifacts: the **normative spec** (the lock), the **conformance test suite** (`wpt`, `test262` — the vectors), and a **reference implementation** — an executable that proves the contract is implementable and gives the suite something real to run, carrying *no lock-in* (vendors ship their own optimized engines; the contract is the only lock). `wpt`/`test262` live in the standards repo yet are never the shipped normative deliverable. A WE-resident runtime consumed by WE's conformance demos + vitest is exactly a reference implementation — orthogonal to the `@webeverything` *package* staying types-only (#239/#872).
+
+## Scope — what #1078 does and doesn't decide (discussion 2026-06-20)
+
+The decision touches exactly one of **three** distinct conformance artifacts. Two are already settled and move regardless of Fork 1:
+
+| Artifact | What it is | Audience | Home |
+|---|---|---|---|
+| 1. Spec-integrity gate | validates WE's *own content* is well-formed (contract type-checks, vectors consistent, locus/naming) | private to WE | `we:check:standards` — already WE, **uncontested** |
+| 2. Implementer conformance suite | behavioral **vectors + harness** an implementer points at *their own* engine (the `wpt`/`test262` role) | FUI + forward-adapter targets | **vectors → WE (shared); harness → plateau tool** (#899) — **settled, not #1078** |
+| 3. Reference implementation | executable that proves the contract is implementable + fuels WE's own conformance playground | WE-internal (dogfood) | **← the only thing #1078 decides** (A WE-resident · B FUI) |
+
+Implementers never run `we:webpolicy/enforcement.ts`; they run the **vectors** (artifact 2) against *their* engine. So "keeps WE's conformance proof" is **not** the argument for A — that proof is vectors + the #899 plateau harness, which survive B. A's real value is narrower: a dogfood/executable spec, fuel for WE's conformance playground, and a known-good oracle to author the vectors against.
+
+**Two kinds of "demo" — WE does delegate, but not this one.** WE delegates **component/block** demos to FUI (never imports FUI block code; embeds via the `fuiDemo` iframe — #701/#700/#604, `we:docs/agent/block-standard.md:75`, `we:docs/agent/platform-decisions.md:84-85`). But **standard/contract conformance playgrounds are WE-owned and in-repo**, and the **Definition of Done mandates one per standard feature** (`we:docs/agent/backlog-workflow.md:142`). `we:demos/webpolicy-conformance-demo.ts` is this kind — a *headless* DMN/proof-chain proof, not rendered UI — so its WE residence is required, not a boundary leak. This is a **structural argument for A**: under B the mandated demo can only import FUI runtime (**forbidden**) or become a `fuiDemo` iframe — but that convention is built for *rendered FUI components with branding chrome*, which a headless logic/proof contract does not fit. Under A the demo just imports the in-repo reference runtime.
+
+This surfaces the **sharpened sub-question inside Fork 1**: *should a headless-logic standard have a WE-resident conformance playground at all, or is headless conformance the #899 plateau tool's job?* The component→FUI relocation precedent (`we:docs/agent/demo-workflow.md:184`, #823/#824) is all about *rendered UI* and does not obviously reach a logic/proof contract. WE-playground stands → A near-forced; headless conformance belongs in the plateau tool → B gets cleaner.
 
 ## Axis-framing
 
@@ -55,7 +74,7 @@ The single axis is **where the reference implementation of a WE standard lives**
 - **A — accept WE-resident (recommended).** Resolve as-is against `we:webpolicy/enforcement.ts` + `we:webpolicy/proof.ts`; classify the runtime as the standard's **reference implementation** (executable spec / dogfood), consumed by `we:demos/webpolicy-conformance-demo.ts` + the 23 tests. Matches the dominant + most recent ratified practice (#1071/#1052/#1055), keeps WE's executable conformance proof, creates no lock-in, churns nothing. Correct the `we:contract.ts` header's "→ FUI" annotation to "→ FUI production impl; reference impl in WE".
 - **B — relocate WE→FUI.** Honor the strict statute + the header intent: move `we:enforcement.ts`/`we:proof.ts` (and the 23 tests) to FUI, add the `@webeverything/contracts/policy` distribution entry, repoint the demo to a FUI-hosted runtime (iframe per the embed boundary), and stand up the #899 plateau conformance tool so WE retains *some* behavioral proof. Boundary-purest, but high churn and presupposes unbuilt infrastructure.
 
-*Default rationale / red-team:* the strongest attack — "#817/#855 are recent ratified **standards** (high reversal bar), and every `we:contract.ts` header documents the FUI intent" — is answered by the published-seam-vs-repo distinction: A does **not** touch the published seam #817 actually protects, and refines a clause whose own premise (#899) was never built. If the decider rejects that distinction, Fork 1 → B and Fork 2 → a relocation cleanup epic. **High-leverage — flag for the deciding agent's skeptic pass.**
+*Default rationale / red-team:* the strongest attack — "#817/#855 are recent ratified **standards** (high reversal bar), and every `we:contract.ts` header documents the FUI intent" — is answered by the published-seam-vs-repo distinction: A does **not** touch the published seam #817 actually protects, and refines a clause whose own premise (#899) was never built. The **DoD-mandated conformance playground** (`we:docs/agent/backlog-workflow.md:142`) adds a structural leg: WE must ship a webpolicy conformance demo and may not import FUI code, so B forces that headless demo into the `fuiDemo` iframe convention — built for *rendered* FUI components, not a logic/proof contract. The genuine open sub-question (see *Scope* §): **does a headless-logic standard get a WE-resident conformance playground (→A near-forced), or is headless conformance the #899 plateau tool's job (→B cleaner)?** If the decider rejects the published-seam distinction *and* routes headless conformance to the plateau tool, Fork 1 → B and Fork 2 → a relocation cleanup epic. Confidence held ~70–75% post-discussion. **High-leverage — flag for the deciding agent's skeptic pass.**
 
 ## Fork 2 — the rule this establishes (statute scope)
 
@@ -68,4 +87,13 @@ The single axis is **where the reference implementation of a WE standard lives**
 
 ---
 
-Released `open` for ratification — NOT resolved unilaterally (per *decisions are work items* + *wait for explicit ratification*). On ratify: if 1-A, resolve against `we:webpolicy/enforcement.ts`; if 1-B, relocate + add the `@webeverything/contracts/policy` entry + repoint the demo. Stamp `codifiedIn` per Fork 2.
+## Ruling — RATIFIED 2026-06-20
+
+- **Fork 1 → A (accept WE-resident).** `we:webpolicy/enforcement.ts` + `we:webpolicy/proof.ts` are the standard's **reference implementation** — an executable spec consumed by `we:demos/webpolicy-conformance-demo.ts` + the 23 tests, while FUI ships the production impl. No churn; WE keeps its executable proof; no lock-in. Corrected the `we:webpolicy/contract.ts` header "→ FUI" annotation to "production impl → FUI; WE copy is the reference implementation per #1078".
+- **Fork 2 → 2a (canonical rule, codified).** Refined `we:docs/agent/platform-decisions.md#constellation-placement` rule 1 with the **reference-implementation tier** (lineage: refines #817 — published-package purity vs repo-internal reference runtime; generalises the embed-boundary rule-4 block carve-out to subsystem engines). `codifiedIn` stamped. Divergent FUI-side siblings (webidentity/webnotifications/webrealtime/webresources/webanalytics) reconcile toward the rule as ordinary prioritized work — not blocking.
+- **Decided by discussion (not a fork):** #1078 decides only the **reference implementation** (artifact 3); the spec-integrity gate (`we:check:standards`) and the implementer conformance suite (vectors → WE, harness → #899 plateau tool) are separate and unchanged. WE owns standard conformance *playgrounds* (DoD-mandated, in-repo) but delegates *component* demos to FUI — the structural leg under A.
+- **Follow-up filed:** the demo-surface reframe (conformance = a project-strength **status** surface; `/demos/` = WE protocols in *real action*) → #1216.
+
+## Progress
+
+- **Status:** resolved — ratified A + 2a, statute + contract header + item updated, all gates green.
