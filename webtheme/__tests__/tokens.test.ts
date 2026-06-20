@@ -10,6 +10,8 @@ import {
   extendTokens,
   isAlias,
   aliasTarget,
+  isTemplated,
+  templatedRefs,
   cssVarName,
   TokenResolutionError,
   type DtcgDocument,
@@ -59,6 +61,59 @@ describe('alias helpers + resolveTokens', () => {
     expect(() => resolveTokens(flattenTokens({ a: { $value: '{nope.gone}' } }))).toThrow(TokenResolutionError);
     const cyclic: DtcgDocument = { a: { $value: '{b}' }, b: { $value: '{a}' } };
     expect(() => resolveTokens(flattenTokens(cyclic))).toThrow(/cycle/);
+  });
+});
+
+describe('calc-derived offset tokens (#1315 — templated values)', () => {
+  it('distinguishes a templated value from a bare alias and a literal', () => {
+    expect(isTemplated('calc({radius.base} - 2px)')).toBe(true);
+    expect(isTemplated('{radius.md}')).toBe(false); // a bare alias, not templated
+    expect(isTemplated('0.5rem')).toBe(false);
+    expect(templatedRefs('calc({radius.base} - 2px)')).toEqual(['radius.base']);
+  });
+
+  it('resolves a calc-derived offset to a concrete-literal calc (for @property), aliasOf stays null', () => {
+    const doc: DtcgDocument = {
+      radius: {
+        $type: 'dimension',
+        base: { $value: '0.5rem' },
+        sm: { $value: 'calc({radius.base} - 0.25rem)' },
+      },
+    };
+    const sm = resolveTokens(flattenTokens(doc)).find((t) => t.path.join('.') === 'radius.sm')!;
+    expect(sm.aliasOf).toBeNull();
+    expect(sm.resolved).toBe('calc(0.5rem - 0.25rem)');
+  });
+
+  it('compiles a calc-derived offset to native calc() with var(--ref), tracking the base at runtime', () => {
+    const doc: DtcgDocument = {
+      radius: {
+        $type: 'dimension',
+        base: { $value: '0.5rem' },
+        lg: { $value: 'calc({radius.base} + 0.5rem)' },
+      },
+    };
+    const { css } = compileToCss(doc);
+    expect(css).toContain('--radius-lg: calc(var(--radius-base) + 0.5rem);');
+    // @property initial-value uses the resolved literal calc, not the var form.
+    expect(css).toContain('initial-value: calc(0.5rem + 0.5rem);');
+  });
+
+  it('guards a templated value against a dangling ref and a cycle', () => {
+    expect(() => resolveTokens(flattenTokens({ a: { $value: 'calc({nope.gone} - 1px)' } }))).toThrow(
+      TokenResolutionError,
+    );
+    const cyclic: DtcgDocument = { a: { $value: 'calc({b} + 1px)' }, b: { $value: 'calc({a} - 1px)' } };
+    expect(() => resolveTokens(flattenTokens(cyclic))).toThrow(/cycle/);
+  });
+
+  it('the default radius scale is now base-derived but preserves prior computed values', () => {
+    const resolved = resolveTokens(flattenTokens(defaultTokens));
+    const r = (k: string) => resolved.find((t) => t.path.join('.') === `radius.${k}`)!;
+    expect(r('base').resolved).toBe('0.5rem');
+    expect(r('sm').resolved).toBe('calc(0.5rem - 0.25rem)'); // = 0.25rem
+    expect(r('md').aliasOf).toBe('radius.base'); // bare alias → 0.5rem
+    expect(r('lg').resolved).toBe('calc(0.5rem + 0.5rem)'); // = 1rem
   });
 });
 
@@ -124,7 +179,9 @@ describe('the platform default token set', () => {
     const { css } = compileToCss(defaultTokens);
     // Primitive tier present.
     expect(css).toContain('--space-4: 1rem;');
-    expect(css).toContain('--radius-md: 0.5rem;');
+    // Radius is now base-derived (#1315): base is the literal, md aliases it (= 0.5rem).
+    expect(css).toContain('--radius-base: 0.5rem;');
+    expect(css).toContain('--radius-md: var(--radius-base);');
     // Component tier aliases a primitive.
     expect(css).toContain('--button-radius: var(--radius-md);');
     expect(css).toContain('--card-elevation: var(--elevation-1);');

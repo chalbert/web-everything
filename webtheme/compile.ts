@@ -14,6 +14,8 @@ import {
   type ResolvedToken,
   cssVarName,
   flattenTokens,
+  isTemplated,
+  mapTemplatedRefs,
   resolveTokens,
 } from './tokens';
 
@@ -41,8 +43,15 @@ const PROPERTY_SYNTAX: Record<DtcgType, string | null> = {
   shadow: null,
 };
 
-/** The CSS value a token compiles to: a direct alias → `var(--ref)`; otherwise its literal value. */
+/**
+ * The CSS value a token compiles to: a templated/calc value (#1315) → each `{ref}` substituted with
+ * `var(--ref)` (so e.g. `calc({radius.base} - 2px)` emits `calc(var(--radius-base) - 2px)` and tracks its
+ * base at runtime); a direct alias → `var(--ref)`; otherwise its literal value.
+ */
 function declaredValue(token: ResolvedToken): string {
+  if (isTemplated(token.value)) {
+    return mapTemplatedRefs(String(token.value), (path) => `var(${cssVarName(path.split('.'))})`);
+  }
   if (token.aliasOf) return `var(${cssVarName(token.aliasOf.split('.'))})`;
   return String(token.value);
 }

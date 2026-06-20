@@ -61,11 +61,15 @@ export const defaultTokens: DtcgDocument = {
 
   radius: {
     $type: 'dimension',
-    $description: 'Corner-radius scale.',
+    $description:
+      'Corner-radius scale — derived from a single `base` (#1315, shadcn-style): sm/md/lg are calc() ' +
+      'offsets of `base`, so re-theming `base` shifts the whole scale instead of drifting. Computed ' +
+      'values match the prior flat scale (base 0.5rem → sm 0.25rem, md 0.5rem, lg 1rem).',
     none: { $value: '0' },
-    sm: { $value: '0.25rem' },
-    md: { $value: '0.5rem' },
-    lg: { $value: '1rem' },
+    base: { $value: '0.5rem' },
+    sm: { $value: 'calc({radius.base} - 0.25rem)' },
+    md: { $value: '{radius.base}' },
+    lg: { $value: 'calc({radius.base} + 0.5rem)' },
     full: { $value: '9999px' },
   },
 

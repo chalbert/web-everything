@@ -66,6 +66,30 @@ export function aliasTarget(value: string): string {
   return value.slice(1, -1);
 }
 
+/** Global matcher for an embedded `{group.token}` reference (used by templated/calc values). */
+const EMBEDDED_REF = /\{([A-Za-z0-9_.-]+)\}/g;
+
+/**
+ * True for a **templated** value — a string carrying one or more embedded `{group.token}` refs but which
+ * is *not* a bare alias (#1315). The canonical case is a calc-derived offset of a base token,
+ * `calc({radius.base} - 2px)` → `calc(var(--radius-base) - 2px)`, so a scale provably tracks its base
+ * (shadcn's radius-derivation pattern) instead of drifting. Distinct from {@link isAlias} (a whole-value
+ * `{ref}`, compiled to `var(--ref)`); a templated value substitutes each ref in place.
+ */
+export function isTemplated(value: unknown): value is string {
+  return typeof value === 'string' && !isAlias(value) && /\{[A-Za-z0-9_.-]+\}/.test(value);
+}
+
+/** The dot-paths of every embedded `{group.token}` ref in a templated value, in source order. */
+export function templatedRefs(value: string): string[] {
+  return [...value.matchAll(EMBEDDED_REF)].map((m) => m[1]);
+}
+
+/** Replace each embedded `{group.token}` ref in a templated value via `replacer(dotPath)`. Pure. */
+export function mapTemplatedRefs(value: string, replacer: (path: string) => string): string {
+  return value.replace(/\{([A-Za-z0-9_.-]+)\}/g, (_m, ref: string) => replacer(ref));
+}
+
 /** The CSS custom-property name for a token path — `['radius','md']` → `--radius-md`. */
 export function cssVarName(path: readonly string[]): string {
   return `--${path.join('-')}`;
@@ -126,6 +150,15 @@ export function resolveTokens(flat: readonly FlatToken[]): ResolvedToken[] {
   const resolveValue = (key: string, seen: Set<string>): string | number => {
     const token = byPath.get(key);
     if (!token) throw new TokenResolutionError(`alias points at unknown token "{${key}}"`);
+    // A templated/calc value (#1315): substitute each embedded {ref} with its resolved literal so the
+    // @property initial-value is a concrete literal (e.g. `calc(0.5rem - 2px)`), cycle/dangling-guarded
+    // exactly like a bare alias.
+    if (isTemplated(token.value)) {
+      return token.value.replace(EMBEDDED_REF, (_m, ref: string) => {
+        if (seen.has(ref)) throw new TokenResolutionError(`alias cycle: ${[...seen, ref].join(' → ')}`);
+        return String(resolveValue(ref, new Set(seen).add(ref)));
+      });
+    }
     if (!isAlias(token.value)) return token.value;
     const next = aliasTarget(token.value);
     if (seen.has(next)) throw new TokenResolutionError(`alias cycle: ${[...seen, next].join(' → ')}`);
