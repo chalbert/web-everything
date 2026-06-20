@@ -1,0 +1,17 @@
+{
+  "id": "slide-layout-template",
+  "name": "Slide Layout-Template Intent",
+  "status": "draft",
+  "summary": "A slot-based layout-template vocabulary for slides — title, section-divider, two-column, code, image-and-caption, quote — that a named slide fills by projecting content into the template's slots. Every surveyed deck framework (Slidev, mdx-deck, Spectacle) ships this finite set; the standard names the vocabulary and the slot contract per template, not the visual styling (FUI owns the components). Composes webcomponents (slot projection) + webexpressions (slot/section interpolation), and references a slide's layout via the deck document model. A vocabulary contract, not a runtime — the layout an author picks per slide.",
+  "dimensions": {
+    "template": {
+      "description": "The named layout a slide uses, each exposing a fixed slot set. title = deck/section opener (title + subtitle); section = a divider between sections; two-column = side-by-side regions; code = a focused code surface (composes code-view); image = image with optional caption; quote = a pull-quote with attribution; blank = author-controlled free layout.",
+      "values": ["title", "section", "two-column", "code", "image", "quote", "blank"]
+    },
+    "content": {
+      "description": "How a slot is filled. slot = light-DOM content projected into a named <slot> (the default, framework-free); expression = interpolated via webexpressions when the slide is data-driven (a for-each over a slide array).",
+      "values": ["slot", "expression"]
+    }
+  },
+  "description": "<h3>A finite, named vocabulary</h3><p class=\"text-sm text-gray-600 mb-2\">Authors do not hand-build slide layouts each time — they pick from a small, recurring set: a <strong>title</strong> opener, a <strong>section</strong> divider, a <strong>two-column</strong> split, a <strong>code</strong> focus, an <strong>image</strong> with caption, a <strong>quote</strong>. Slidev, mdx-deck, and Spectacle all ship exactly this set. The Slide Layout-Template intent names the vocabulary and the <em>slot contract</em> each template exposes, so a slide declares its layout and projects content by slot name.</p><h3>Slot contract, not styling</h3><p class=\"text-sm text-gray-600 mb-2\">Each template exposes named slots (<code>title</code>, <code>subtitle</code>, <code>left</code>/<code>right</code>, <code>code</code>, <code>caption</code>, <code>quote</code>/<code>cite</code>). Content is projected via Shadow-DOM <code>&lt;slot&gt;</code> (framework-free) or interpolated via <a href=\"/projects/webexpressions/\">Web Expressions</a> when slides are data-driven. The <em>visual</em> realization of each template — type scale, spacing, the code surface — is a <a href=\"../frontierui/\">Frontier UI</a> component concern, not part of this contract.</p><h3>Composition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Document model:</strong> a slide references its template via the <a href=\"/projects/webcomponents/#protocol-deck-document-model\">Deck Document Model</a>'s <code>layout</code> field.</li><li><strong>Code template:</strong> composes the <a href=\"/blocks/code-view/\">code-view block</a> (and its step-through extension).</li></ul>"
+}
