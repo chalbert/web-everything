@@ -13,7 +13,7 @@
   "composesIntents": [
     "focus-delegation"
   ],
-  "implementedBy": "@frontierui/blocks/renderers/data-grid/",
+  "implementedBy": "@frontierui/blocks/renderers/data-grid/index.ts",
   "fuiDemo": {
     "file": "data-grid-demo.html",
     "title": "Data Grid Playground — APG grid navigation + editable cells",
