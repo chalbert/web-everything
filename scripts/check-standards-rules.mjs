@@ -223,6 +223,24 @@ export function detectClassificationCollapse(items) {
   return { openCount: open.length, batchable, tierB, sliceable, kindlessOpen };
 }
 
+// ── Front-A native-first conformance metric (#1267) ───────────────────────────
+// The platform-standards watch (#1257) front A: every WE standard with a SHIPPED native equivalent should
+// defer to it (native-first, #031). This turns that from a one-time assertion into a living, QUANTITATIVE
+// check — the metric the next watch run reads. Pure over the `nativeFirstWatch.json` ledger (one row per
+// tracked native equivalent, each carrying a `registered` flag the watch flips when the standard repoints).
+// Returns the totals + the still-unregistered rows; the script surfaces them as a nudge (not an error —
+// the registrations are tracked open work, so red-gating would just block the batch fixing them).
+export function computeNativeFirstConformance(watch) {
+  const entries = (watch && Array.isArray(watch.entries)) ? watch.entries : [];
+  const pending = entries.filter((e) => e && e.registered !== true);
+  return {
+    total: entries.length,
+    registered: entries.length - pending.length,
+    pending: pending.length,
+    pendingList: pending.map((e) => `${e.id}${e.trackingItem ? ` (#${e.trackingItem})` : ''}`),
+  };
+}
+
 // ── Raw-HTML-in-backlog-body lint (#290) ──────────────────────────────────────
 // An un-backticked HTML tag in a backlog markdown body is passed through verbatim by 11ty and parsed
 // by the browser as a live element. A void/unclosed interactive one (`<select>`, `<dialog>`,

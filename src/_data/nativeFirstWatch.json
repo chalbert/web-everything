@@ -1,0 +1,53 @@
+{
+  "description": "Front-A conformance ledger for the platform-standards watch (backlog #1257 / #1267). One row per WE standard that has a SHIPPED native platform equivalent, tracking whether the standard yet registers that native API as its resolver impl (native-first, #031). The metric the gate surfaces is the count of rows where `registered: false` — WE standards that have a native equivalent but do not yet defer to it. The watch program maintains this ledger: each front-A registration item (e.g. #1261 popover) flips its row to `registered: true` and records the registration locus when it lands; each front-B run adds a row when a new native capability ships. Baseline is the cross-browser availability lens (widely | newly | limited | none). This is a curated tracking ledger, not a derived view — keep it honest at close-out of each watch item.",
+  "entries": [
+    {
+      "id": "popover",
+      "standard": "overlay / disclosure / dialog / tooltip / menu intents",
+      "nativeApi": "Popover API (popover attribute, popovertarget)",
+      "baseline": "widely",
+      "registered": false,
+      "trackingItem": "1261"
+    },
+    {
+      "id": "anchor-positioning",
+      "standard": "droplist overlay positioning strategy",
+      "nativeApi": "CSS anchor positioning (anchor(), position-area)",
+      "baseline": "limited",
+      "registered": false,
+      "trackingItem": "1262"
+    },
+    {
+      "id": "invokers",
+      "standard": "command intent (webcommands #016, #299)",
+      "nativeApi": "invoker commands (command / commandfor attributes)",
+      "baseline": "newly",
+      "registered": false,
+      "trackingItem": "1263"
+    },
+    {
+      "id": "view-transitions",
+      "standard": "view-transitions protocol",
+      "nativeApi": "View Transitions API (same-document)",
+      "baseline": "widely",
+      "registered": false,
+      "trackingItem": "1264"
+    },
+    {
+      "id": "scroll-driven-animations",
+      "standard": "webscroll",
+      "nativeApi": "scroll-driven animations (animation-timeline, scroll/view-timeline)",
+      "baseline": "limited",
+      "registered": false,
+      "trackingItem": "1265"
+    },
+    {
+      "id": "customizable-select",
+      "standard": "droplist / dropdown (base-select)",
+      "nativeApi": "customizable <select> (appearance: base-select)",
+      "baseline": "limited",
+      "registered": false,
+      "trackingItem": "291"
+    }
+  ]
+}

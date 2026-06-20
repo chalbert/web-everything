@@ -37,6 +37,7 @@ import {
   validateTemplateA11y, NAV_ACTIVE_STATE_ENFORCED,
   lintBacklogItemRendering,
   detectClassificationCollapse,
+  computeNativeFirstConformance,
 } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -1202,5 +1203,31 @@ describe('detectClassificationCollapse — loud-fail when the kind axis is unpop
   it('does not count resolved items toward the open population', () => {
     const items = [{ status: 'resolved', kind: undefined }, open()];
     expect(detectClassificationCollapse(items)).toBeNull();
+  });
+});
+
+// ── #1267 front-A native-first conformance metric ────────────────────────────
+describe('computeNativeFirstConformance — front-A watch metric (#1267)', () => {
+  it('counts unregistered native equivalents and lists them with their tracking item', () => {
+    const watch = { entries: [
+      { id: 'popover', registered: false, trackingItem: '1261' },
+      { id: 'view-transitions', registered: true, trackingItem: '1264' },
+      { id: 'anchor-positioning', registered: false, trackingItem: '1262' },
+    ] };
+    const m = computeNativeFirstConformance(watch);
+    expect(m.total).toBe(3);
+    expect(m.registered).toBe(1);
+    expect(m.pending).toBe(2);
+    expect(m.pendingList).toEqual(['popover (#1261)', 'anchor-positioning (#1262)']);
+  });
+
+  it('treats only registered===true as registered (missing/false/other all pend)', () => {
+    const watch = { entries: [{ id: 'a' }, { id: 'b', registered: false }, { id: 'c', registered: true }] };
+    expect(computeNativeFirstConformance(watch).pending).toBe(2);
+  });
+
+  it('degrades on a missing/empty ledger', () => {
+    expect(computeNativeFirstConformance(undefined)).toEqual({ total: 0, registered: 0, pending: 0, pendingList: [] });
+    expect(computeNativeFirstConformance({ entries: [] }).pending).toBe(0);
   });
 });

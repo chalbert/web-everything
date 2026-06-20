@@ -36,7 +36,7 @@ import { loadPresets } from './lib/presets-loader.cjs';
 import { loadDataRegistry } from './lib/registry-loader.cjs';
 import {
   BACKLOG_STATUSES, BACKLOG_KINDS, FIB, FILE, blockSpecFile,
-  dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated, detectClassificationCollapse,
+  dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated, detectClassificationCollapse, computeNativeFirstConformance,
   checkStatus, validateProtocol, validatePreset, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock,
@@ -508,6 +508,16 @@ for (const it of backlog) {
 }
 if (humanGated.length)
   warn(`${humanGated.length} open item(s) held by a HUMAN GATE — the only residual is a human-only action (credentialed deploy / agent-training feedback / setup / review), not a \`blockedBy\` edge, so the loader demotes them out of Tier A and the selector lists them under "Held — awaiting a human action". Do the action, then remove \`humanGate\`. Items: ${humanGated.join(', ')}`);
+
+// #1267 — FRONT-A native-first conformance metric (platform-standards watch #1257). Count the tracked
+// native equivalents that a WE standard has not yet repointed to (native-first, #031), so the next watch
+// run is quantitative. A nudge, not an error: the registrations are tracked open work (#1261-#1265, #291).
+try {
+  const watch = JSON.parse(readFileSync(join(ROOT, 'src/_data/nativeFirstWatch.json'), 'utf8'));
+  const m = computeNativeFirstConformance(watch);
+  if (m.pending > 0)
+    warn(`Front-A native-first conformance (platform-standards watch #1257): ${m.registered}/${m.total} tracked native equivalents are registered as their standard's resolver; ${m.pending} still pending — ${m.pendingList.join(', ')}. Each lands when its registration item flips \`registered: true\` in src/_data/nativeFirstWatch.json.`);
+} catch { /* ledger missing/malformed → skip the metric (degrade, don't crash the gate) */ }
 
 // #1275 — CTA INVARIANT (hard gate). Every OPEN item MUST carry a call-to-action: a pill on the
 // Prioritisation table telling whoever picks it up what to do next, or a passive reason it's parked.
