@@ -109,4 +109,16 @@ export const defaultTokens: DtcgDocument = {
     padding: { $type: 'dimension', $value: '{space.6}' },
     elevation: { $type: 'shadow', $value: '{elevation.1}' },
   },
+
+  // ── Role tier — cross-cutting affordances (not per-component) ────────────────────
+  ring: {
+    $description:
+      'Focus-ring affordance (#1316) — shadcn `--ring` / `--ring-offset` parity. The focus-visible ' +
+      'outline a themed control draws; `color` aliases the accent so the ring tracks the theme. The ' +
+      'focus affordance now has a token home (webtheme owns the role tokens; the interaction intent ' +
+      'stays UX-only per #403).',
+    color: { $type: 'color', $value: '{color.accent}' },
+    width: { $type: 'dimension', $value: '2px' },
+    offset: { $type: 'dimension', $value: '2px' },
+  },
 };

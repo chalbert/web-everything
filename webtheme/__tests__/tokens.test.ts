@@ -187,6 +187,9 @@ describe('the platform default token set', () => {
     expect(css).toContain('--card-elevation: var(--elevation-1);');
     // The accent seed is itself an alias into the blue scale.
     expect(css).toContain('--color-accent: var(--color-blue-9);');
+    // Focus-ring role (#1316): color tracks the accent; offset is a literal dimension.
+    expect(css).toContain('--ring-color: var(--color-accent);');
+    expect(css).toContain('--ring-offset: 2px;');
   });
 
   it('a project extends the default and recompiles with only its overrides changed', () => {
