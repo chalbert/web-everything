@@ -31,10 +31,12 @@
     },
     {
       "id": "view-transitions",
-      "standard": "view-transitions protocol",
-      "nativeApi": "View Transitions API (same-document)",
-      "baseline": "widely",
-      "registered": false,
+      "standard": "view-transitions protocol (#015, not yet materialized as a registry def)",
+      "nativeApi": "View Transitions API (same-document: startViewTransition + ::view-transition-* CSS)",
+      "baseline": "newly",
+      "registered": true,
+      "registeredIn": "this ledger — the front-A native-first registry; the protocol has no materialized def to host a resolver field, and view-transitions is out of the droplist-substrate capabilityMatrix domain",
+      "note": "cross-document view transitions tracked separately as they advance",
       "trackingItem": "1264"
     },
     {
