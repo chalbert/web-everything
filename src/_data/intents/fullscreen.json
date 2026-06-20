@@ -1,0 +1,21 @@
+{
+  "id": "fullscreen",
+  "name": "Fullscreen Presentation-Surface Intent",
+  "status": "draft",
+  "summary": "A surface that takes over the whole display for an immersive, distraction-free presentation — the Fullscreen API to fill the viewport, cursor auto-hide after idle, and a Screen Wake Lock so the screen does not sleep. General, not deck-specific: a video player, an image lightbox, a kiosk app, and a slide deck all want the same capability. Owns the presentation-surface concern; what plays inside it (slides, video) is the consumer's. Homed in webportals per the ratified distributed placement (#1175) — it is a surface/portal capability, not a deck contract.",
+  "dimensions": {
+    "scope": {
+      "description": "What goes fullscreen. element = a specific surface element fills the screen (the deck/video container — the default, keeps the rest of the app addressable); document = the whole document element.",
+      "values": ["element", "document"]
+    },
+    "cursor": {
+      "description": "Pointer behavior in fullscreen. auto-hide = the cursor hides after a short idle and reappears on movement (the presentation default); visible = the cursor always shows (when controls must stay discoverable).",
+      "values": ["auto-hide", "visible"]
+    },
+    "wakeLock": {
+      "description": "Whether a Screen Wake Lock is held while the surface is fullscreen. held = keep the display awake (presentation/kiosk); none = allow system sleep per policy.",
+      "values": ["held", "none"]
+    }
+  },
+  "description": "<h3>An immersive presentation surface</h3><p class=\"text-sm text-gray-600 mb-2\">Going fullscreen for a presentation is more than the Fullscreen API: the pointer should fade when idle, and the screen must not sleep mid-talk. The Fullscreen intent bundles those three platform concerns — <strong>Fullscreen API</strong>, <strong>cursor auto-hide</strong>, <strong>Screen Wake Lock</strong> — into one declarable surface capability.</p><h3>General, not deck-specific</h3><p class=\"text-sm text-gray-600 mb-2\">A slide deck wants it, but so do a video player, an image lightbox, and a kiosk app — which is why it homes in <a href=\"/projects/webportals/\">Web Portals</a> as a surface capability rather than in a deck contract (it patches a coverage gap the deck survey first surfaced). It owns the <em>surface</em>; the content inside is the consumer's concern.</p><h3>Platform notes</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>User gesture:</strong> entering fullscreen requires a user activation (the API rejects programmatic entry) — the intent is declared, but armed by a gesture.</li><li><strong>Wake Lock lifecycle:</strong> the lock is released automatically on exit / tab-hide and must be re-requested on return.</li></ul>"
+}
