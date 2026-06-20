@@ -1,0 +1,5 @@
+{
+  "term": "slide addressing",
+  "definition": "A two-level deep-link scheme for a deck: a URL that encodes both the horizontal slide position and a second axis (a vertical/section slide or a fragment step), e.g. #/3/2 = the 3rd slide, 2nd vertical. Extends the deep-link / route / navigation semantics with a second ordinal so any point in a deck is directly addressable, not just the top-level slide.",
+  "usage": "Composes the Navigation Intent's <code>persistence: url</code> with the Advanceable-Sequence and Fragment-Reveal intents (the second ordinal targets a fragment or vertical). Pairs with an <strong>instant-jump restore</strong> mode: landing on a deep-linked address jumps straight to that slide without replaying every intervening View Transition (no transition storm on reload) — the conformant restore behavior, distinct from a step-by-step traversal to the same address."
+}
