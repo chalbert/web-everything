@@ -3,7 +3,7 @@
   "name": "Code View",
   "status": "concept",
   "type": "Component",
-  "summary": "Renders syntax-highlighted component source with a copy affordance — the source-code-view feature from the workbench inventory (#625), ratified by #626 as a forced block mint. The copy affordance composes the data-transfer copy intent (the copy-out half). Native-first: highlighting paints token ranges via the CSS Custom Highlight API over a tokenizer rather than wrapping every token in a <span>, with library highlighters (Prism/Shiki/highlight.js) as opt-in adapters. A live-editable sandbox embed is explicitly out of scope (that is the assembler/playground concern).",
+  "summary": "Renders syntax-highlighted component source with a copy affordance — the source-code-view feature from the workbench inventory (#625), ratified by #626 as a forced block mint. The copy affordance composes the data-transfer copy intent (the copy-out half). Native-first: highlighting paints token ranges via the CSS Custom Highlight API over a tokenizer rather than wrapping every token in a <span>, with library highlighters (Prism/Shiki/highlight.js) as opt-in adapters. A live-editable sandbox embed is explicitly out of scope (that is the assembler/playground concern). Extended for code presentation (#1196) with line-focus (a stepped emphasis range that dims unfocused lines) and magic-move (a token-level View Transition that morphs code spans between steps when the source changes) — the deck/walkthrough step-through over code, layered on the same Highlight API ranges.",
   "composesIntents": [
     "data-transfer"
   ],
@@ -26,6 +26,12 @@
       "pattern": "Async Clipboard API (navigator.clipboard.writeText) behind the data-transfer copy intent",
       "adoption": "The copy button writes the verbatim source via the data-transfer copy-out (emit) half, so the affordance is the shared intent, not a bespoke clipboard call.",
       "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API"
+    },
+    "viewTransitions": {
+      "status": "Baseline 2025",
+      "pattern": "View Transitions API for token-level magic-move — morph code spans between steps via view-transition-name on stable token identities",
+      "adoption": "Magic-move assigns a view-transition-name to tokens shared between two code states, so changing the source animates a morph (insert/move/delete) rather than a hard swap; honors prefers-reduced-motion (instant when reduced).",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/View_Transitions_API"
     }
   },
   "designDecisions": {
@@ -40,6 +46,10 @@
     "noLiveEditor": {
       "description": "Read-only highlighted source with copy; no editable sandbox",
       "rationale": "A live-editable embed is the assembler/playground concern (#646), deliberately out of scope to keep the catalog block focused and lock-in-free."
+    },
+    "codeStepThrough": {
+      "description": "Line-focus (a stepped emphasis range dimming unfocused lines) + magic-move (a token-level View Transition morphing spans between source states) — code presentation, #1196",
+      "rationale": "Both ride the same CSS Custom Highlight ranges the highlighter already paints: line-focus is an additional emphasis Highlight stepped per presentation step; magic-move adds view-transition-name to stable tokens so a source change animates a morph. The deck/walkthrough composes these as the code template's step-through (#1191 code layout), honoring prefers-reduced-motion (instant when reduced, per #1183/#1195)."
     }
   }
 }
