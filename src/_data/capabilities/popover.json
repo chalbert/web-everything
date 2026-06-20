@@ -4,5 +4,5 @@
   "webFeaturesKey": "popover",
   "baseline": "2024",
   "polyfill": "polyfillable",
-  "summary": "<code>popover</code> attribute + <code>popovertarget</code> — top-layer, light-dismiss, focus management with no JS."
+  "summary": "<code>popover</code> attribute + <code>popovertarget</code> — top-layer, light-dismiss, focus management with no JS. Native-first resolver for the overlay-shaped surfaces (dialog / tooltip / menu, via the anchor intent); a hand-rolled/polyfilled overlay path is the opt-in fallback (#1261)."
 }

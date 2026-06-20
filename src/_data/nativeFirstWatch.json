@@ -6,7 +6,8 @@
       "standard": "overlay / disclosure / dialog / tooltip / menu intents",
       "nativeApi": "Popover API (popover attribute, popovertarget)",
       "baseline": "widely",
-      "registered": false,
+      "registered": true,
+      "registeredIn": "src/_data/capabilities/popover.json",
       "trackingItem": "1261"
     },
     {
