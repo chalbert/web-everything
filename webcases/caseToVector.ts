@@ -50,22 +50,40 @@ function observeSurface(kind: ObservableKind | undefined, platform?: string): st
 }
 
 /**
- * Lower a (validated) requirement to a minimal **reachability** conformance vector (#1233-A). The vector
- * asserts the named observable was reached/fired at its tier — never a value (B/#1235). `steps` replay the
- * requirement's precondition then trigger; `expect` is the reachability assertion derived from `kind`
- * (`{ reached: <observe> }` for a state, `{ fired: <observe> }` for an event); `tier` rides the new schema
- * field. The observable's `kind` is resolved from the same injected `lookup` the compiler uses (omit it and
- * an unknown observable falls back to `state` reachability — the most-flexible default).
+ * Lower a (validated) requirement to a behavioral conformance vector. Two layers:
+ *
+ *  - **Reachability (#1233-A, the floor):** the vector asserts the named observable was reached/fired at
+ *    its tier — `{ reached: <observe> }` for a state, `{ fired: <observe> }` for an event.
+ *  - **Value-equality (#1235, the B-layer):** for the value-bearing minority of STATE observables
+ *    (`valueBearing: true`) where reaching != the right value, when the requirement authors an expected
+ *    `then.value` the vector additionally asserts the literal — `{ reached: <observe>, equals: <value> }`
+ *    (value-equality subsumes reachability). Per-observable opt-in: never applies to an `event` observable
+ *    (firing IS the value) nor to a non-`valueBearing` state observable (reachability suffices).
+ *
+ * `steps` replay the requirement's precondition then trigger; `tier` rides the schema field. The observable's
+ * `kind` + `valueBearing` are resolved from the same injected `lookup` the compiler uses (omit it and an
+ * unknown observable falls back to `state` reachability — the most-flexible default).
  */
 export function lowerRequirementToVector(record: RequirementRecord, lookup?: ObservableLookup): ConformanceVector {
-  const { protocol, observe, tier } = record.then;
+  const { protocol, observe, tier, value } = record.then;
   const observable = lookup?.protocols
     .find((p) => p.id === protocol)
     ?.observables?.find((o) => o.id === observe);
   const kind = observable?.kind;
   const platform = (observable as { platform?: string } | undefined)?.platform;
+  // Value-equality only for a value-bearing STATE observable with an authored expected literal (#1235);
+  // everything else stays on the reachability floor.
+  const valueEquality = kind === 'state' && observable?.valueBearing === true && value !== undefined;
 
-  const expect = kind === 'event' ? { fired: observe } : { reached: observe };
+  const expect = kind === 'event'
+    ? { fired: observe }
+    : valueEquality
+      ? { reached: observe, equals: value }
+      : { reached: observe };
+
+  const description = valueEquality
+    ? `Value-equality: ${protocol} ${observe} equals "${value}" at ${tier} when ${record.when.event}.`
+    : `Reachability: ${protocol} ${kind === 'event' ? 'fires' : 'reaches'} ${observe} at ${tier} when ${record.when.event}.`;
 
   return {
     id: `${protocol}/${slugify(observe)}/${slugify(record.description)}`,
@@ -77,6 +95,6 @@ export function lowerRequirementToVector(record: RequirementRecord, lookup?: Obs
     expect,
     observeVia: [observeSurface(kind, platform)],
     tier,
-    description: `Reachability: ${protocol} ${kind === 'event' ? 'fires' : 'reaches'} ${observe} at ${tier} when ${record.when.event}.`,
+    description,
   };
 }

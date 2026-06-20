@@ -98,3 +98,48 @@ describe('compiler ↔ bridge round-trip', () => {
     expect(vector.expect).toEqual({ reached: directive.observe });
   });
 });
+
+describe('lowerRequirementToVector — value-equality lowering (#1235, B-layer)', () => {
+  const valueBearingLookup: ObservableLookup = {
+    protocols: [{ id: 'text-state', observables: [{ id: 'current-value', kind: 'state', platform: 'value', valueBearing: true }] }],
+  };
+  const valueRecord: RequirementRecord = {
+    description: 'committed value equals the typed text',
+    given: { intent: 'text-input', dimension: 'validity', value: 'invalid' },
+    when: { event: 'change' },
+    then: { protocol: 'text-state', observe: 'current-value', tier: 'aa', value: 'hello' },
+  };
+
+  it('lowers a value-bearing state observable + expected value to a value-equality vector', () => {
+    const v = lowerRequirementToVector(valueRecord, valueBearingLookup);
+    expect(v.expect).toEqual({ reached: 'current-value', equals: 'hello' });
+    expect(v.description).toMatch(/Value-equality/);
+  });
+
+  it('stays reachability when the observable is NOT valueBearing, even if a value is authored', () => {
+    const plain: ObservableLookup = {
+      protocols: [{ id: 'text-state', observables: [{ id: 'current-value', kind: 'state', platform: 'value' }] }],
+    };
+    const v = lowerRequirementToVector(valueRecord, plain);
+    expect(v.expect).toEqual({ reached: 'current-value' });
+  });
+
+  it('never value-equality on an event observable (firing IS the value)', () => {
+    const ev: ObservableLookup = {
+      protocols: [{ id: 'text-state', observables: [{ id: 'current-value', kind: 'event', valueBearing: true }] }],
+    };
+    const v = lowerRequirementToVector(valueRecord, ev);
+    expect(v.expect).toEqual({ fired: 'current-value' });
+  });
+
+  it('stays reachability when valueBearing but no expected value is authored', () => {
+    const noValue: RequirementRecord = { ...valueRecord, then: { ...valueRecord.then, value: undefined } };
+    const v = lowerRequirementToVector(noValue, valueBearingLookup);
+    expect(v.expect).toEqual({ reached: 'current-value' });
+  });
+
+  it('still emits a structurally-valid ConformanceVector', () => {
+    const v = lowerRequirementToVector(valueRecord, valueBearingLookup);
+    expect(() => assertConformanceSuite({ standard: 'text-state', contract: v.contract, vectors: [v] })).not.toThrow();
+  });
+});

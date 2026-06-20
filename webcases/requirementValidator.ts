@@ -37,6 +37,14 @@ export interface ProtocolObservable {
   readonly id: string;
   readonly kind: ObservableKind;
   readonly platform?: string;
+  /**
+   * Value-equality opt-in (#1235, the B-layer over the #1162/#1233-A reachability floor). `true` marks the
+   * minority of value-bearing STATE observables (current-value, validity-state, entity-timeline) where
+   * *reaching* the observable is not enough — the right *value* must be asserted. Absent/false ⇒ the
+   * observable lowers to a reachability vector (the floor). Never set on an `event` observable (firing IS
+   * the value) nor on a value-as-identity observable (distinct observables, reachability suffices).
+   */
+  readonly valueBearing?: boolean;
 }
 
 /**
@@ -54,8 +62,12 @@ export interface RequirementRecord {
   readonly given: { readonly intent: string; readonly dimension: string; readonly value: string };
   /** Trigger: a semantic event/term (`semantics.json#<term>`). */
   readonly when: { readonly event: string };
-  /** Outcome: a protocol-observable state/event at a conformance tier (`protocols.json#<protocol>`). */
-  readonly then: { readonly protocol: string; readonly observe: string; readonly tier: string };
+  /**
+   * Outcome: a protocol-observable state/event at a conformance tier (`protocols.json#<protocol>`).
+   * `value` is the optional **expected literal** (#1235): authored only for a value-bearing state
+   * observable, it lowers the requirement to a value-equality vector instead of a reachability one.
+   */
+  readonly then: { readonly protocol: string; readonly observe: string; readonly tier: string; readonly value?: string };
 }
 
 /** The live registries the resolver grounds slots against — injected, never imported (no `_data` coupling). */
@@ -136,12 +148,23 @@ export function validateRequirement(
   if (req.then.observe.trim() === '') {
     err('then.observe', req.then.observe, 'observe is empty');
   } else if (observables.length > 0) {
-    if (!observables.some((o) => o.id === req.then.observe)) {
+    const matched = observables.find((o) => o.id === req.then.observe);
+    if (!matched) {
       err(
         'then.observe',
         req.then.observe,
         `no observable "${req.then.observe}" on protocol "${req.then.protocol}" (declares: ${observables.map((o) => o.id).join(', ')})`,
       );
+    } else if (req.then.value !== undefined) {
+      // Value-equality opt-in guard (#1235): an authored expected `value` is only meaningful for a
+      // value-bearing STATE observable. On a reachability-only or event observable it would silently never
+      // lower to a value-equality vector, so reject it rather than drop it.
+      if (matched.kind !== 'state' || matched.valueBearing !== true)
+        err(
+          'then.value',
+          req.then.value,
+          `observable "${req.then.observe}" on "${req.then.protocol}" is not a value-bearing state observable (kind="${matched.kind}", valueBearing=${matched.valueBearing ?? false}) — an expected \`then.value\` only lowers to a value-equality vector for a \`valueBearing: true\` state observable (#1235); drop the value or mark the observable value-bearing`,
+        );
     }
   } else {
     findings.push({

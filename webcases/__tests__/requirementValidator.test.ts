@@ -87,3 +87,44 @@ describe('requirement-as-code validator (#100 slice A)', () => {
     expect(result.valid).toBe(true);
   });
 });
+
+describe('value-equality opt-in guard (#1235)', () => {
+  // Synthetic registry so the value-bearing observable is under test control (live protocols may not yet
+  // declare one). given/when/then all resolve; only the value-bearing opt-in varies.
+  const synthetic: RequirementRegistries = {
+    intents: [{ id: 'text-input', dimensions: { mode: { values: ['plain'] } } }],
+    semantics: [{ term: 'change' }],
+    protocols: [{ id: 'text-state', observables: [
+      { id: 'current-value', kind: 'state', platform: 'value', valueBearing: true },
+      { id: 'plain-state', kind: 'state', platform: 'aria' },
+      { id: 'changed', kind: 'event' },
+    ] }],
+  };
+  const base: RequirementRecord = {
+    description: 'committed value equals the typed text',
+    given: { intent: 'text-input', dimension: 'mode', value: 'plain' },
+    when: { event: 'change' },
+    then: { protocol: 'text-state', observe: 'current-value', tier: 'L1', value: 'hello' },
+  };
+
+  it('accepts an expected value on a value-bearing state observable', () => {
+    const r = validateRequirement(base, synthetic);
+    expect(r.findings.filter((f) => f.severity === 'error')).toEqual([]);
+    expect(r.valid).toBe(true);
+  });
+
+  it('rejects an expected value on a non-valueBearing state observable', () => {
+    const r = validateRequirement({ ...base, then: { ...base.then, observe: 'plain-state' } }, synthetic);
+    expect(r.findings.find((f) => f.slot === 'then.value')?.severity).toBe('error');
+  });
+
+  it('rejects an expected value on an event observable', () => {
+    const r = validateRequirement({ ...base, then: { ...base.then, observe: 'changed' } }, synthetic);
+    expect(r.findings.find((f) => f.slot === 'then.value')?.severity).toBe('error');
+  });
+
+  it('a reachability requirement (no value) still validates green', () => {
+    const r = validateRequirement({ ...base, then: { protocol: 'text-state', observe: 'plain-state', tier: 'L1' } }, synthetic);
+    expect(r.valid).toBe(true);
+  });
+});
