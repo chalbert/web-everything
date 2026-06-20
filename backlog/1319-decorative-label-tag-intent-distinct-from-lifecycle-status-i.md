@@ -1,8 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#decompose-overloaded-vocabulary-by-semantic-source"
 preparedDate: "2026-06-20"
 tags: [reproduction, gap-sweep, shadcn, intent, candidate-standard]
 relatedProject: webintents
@@ -128,11 +131,29 @@ options + a default rather than a bare "human call."
   *folksonomy/tagging-input* — disambiguated by the intent summary.
 - **B — `badge`.** Most literal to shadcn, but **collides**: `badge` is already the `shape` token on
   Status Indicator (`:18`) and the count-marker family — rejected.
-- **C — `label`.** Collides with form-label / accessible-name. **D — `lozenge`.** Atlassian-idiomatic
-  but obscure outside it.
+- **C — `label`.** Collides twice — with the form-label / accessible-name intent *and* with the HTML
+  `<label>` element itself (a decorative tag is not a form caption); doubly rejected. **D — `lozenge`.**
+  Atlassian-idiomatic but obscure outside it.
 
 ---
 
-Surfaced by reproduction #1243, feeds gap-sweep #315. **Prepared 2026-06-20** — forks at DoR;
-ratify via `/next decision`. On ratify (Fork 1 = A), mint the intent via `/new-standard` and file the
-build; the dimensions above are the seed spec.
+## Ruling — ratified 2026-06-20
+
+All three forks resolved to **A** (red-team passed inline; the excluded branches are genuinely flawed
+— widening *dilutes* Status Indicator, owning interactivity *duplicates* Action/Selection):
+
+- **Fork 1 — Home: A — mint a distinct decorative intent.** Family-1 (decorative/categorical label) is
+  the unhomed remainder; it earns its own home, mirroring the Notification-Marker split (#009).
+- **Fork 2 — Interactivity: A — decorative-only; compose Action / Selection / remove-Action.** No
+  baked interactive axis.
+- **Fork 3 — Name: A — `tag` ("Tag Intent").** `label` doubly rejected (form-label intent + `<label>`
+  element); `badge` collides with the `shape` token; `lozenge` obscure.
+
+**Seed spec for the build** — dimensions (most-permissive defaults): `tone`
+(`neutral|info|positive|caution|critical` + categorical/brand tone, default `neutral`), `emphasis`
+(`subtle|solid|outline`, default `subtle`), `shape` (`badge|pill|tag`, reusing Status Indicator's
+vocabulary). a11y: inert text, earns an accessible-name when it conveys meaning beyond color, not
+announced via Live Region Status.
+
+Build filed as **#1325** (mint the `tag` intent via `/new-standard`). Surfaced by reproduction #1243,
+feeds gap-sweep #315.

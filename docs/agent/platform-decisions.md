@@ -537,6 +537,30 @@ builds **only the one genuinely-missing intent** (command invocation), not a fre
 
 **Lineage:** #124 (Resource → Loader Intent) · #173 (Menu → existing intents + the one missing `command`). Sibling of [compose-dont-handroll](#compose-dont-handroll).
 
+### Decompose an overloaded incumbent word by semantic source; never widen one intent to absorb a foreign family {#decompose-overloaded-vocabulary-by-semantic-source}
+
+The split-side complement of [compose-intent-dont-duplicate](#compose-intent-dont-duplicate). Incumbent
+design systems overload a single word (classically **"badge"**) across **distinct semantic families** —
+a decorative/categorical label (author-supplied tone, static, no provider), a lifecycle/state status (an
+entity's state machine), a count/dot notification marker (a number overlaid on a host). The word lands in
+a *different* family per system (shadcn's Badge is decorative; Ant's Badge is a count marker). The rule:
+**carve one intent per semantic family along the semantic-source axis**, and **never widen an existing
+intent to admit a foreign family** — widening *dilutes* the absorbing intent (a decorative label has no
+provider/transition/state, so a lifecycle intent's machinery would have to go optional and hollow,
+falsifying its own contract). The unhomed family earns its **own** home; the name must avoid colliding
+with a token or element already owned by a sibling family (`badge` is a `shape` token; `label` collides
+with the form-label intent **and** the HTML `<label>` element). Interactivity is **composed** (Action /
+Selection), not baked in.
+
+**Tell:** an incumbent component maps "close enough" onto an existing intent but supplies none of that
+intent's defining inputs (no provider, no state, no transitions) — that's a foreign family asking for its
+own home, not a widening candidate.
+
+**Lineage:** #009 (Notification Marker — split the count/dot family off "badge") · #1319 (Tag Intent —
+split the decorative label family off "badge"; Status Indicator keeps lifecycle). Inverse face of
+[compose-intent-dont-duplicate](#compose-intent-dont-duplicate); kin to [reproduction-conformance](#reproduction-conformance)
+(the gap sweeps that surface these overloads) and [intents-ux-only](#intents-ux-only).
+
 ### Configurability partition — declarative vocabulary is the portable standard; imperative is the per-impl escape hatch {#configurability-partition}
 
 A runtime-agnostic standard's **author-facing configuration** splits along the **declarative/imperative
