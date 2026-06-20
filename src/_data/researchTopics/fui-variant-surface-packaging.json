@@ -1,0 +1,22 @@
+{
+  "id": "fui-variant-surface-packaging",
+  "title": "FUI variant-surface packaging — one polymorphic block vs per-variant elements",
+  "status": "open",
+  "summary": "Prep research for decision #1321 (the FUI-locus packaging follow-up to #1318). #1318 ratified the WE side — the Action-Intent `variant` axis (fill | outline | ghost | link, open vocabulary) renders as a plain attribute consumed by CSS (button[variant='ghost']) and the statute records 'no wrapper required, because a behavior-free axis needs none' (we:docs/agent/platform-decisions.md:588-589). #1318 deferred HOW FUI packages the block: bare <button variant> + CSS (no wrapper) vs per-variant custom elements (<ghost-button>, the Material Web shape) vs an autonomous element wrapping a real <button>. This is an FUI impl call (the variant contract is WE's; the packaging is FUI's); WE never imports/renders FUI block code (docs-rendering boundary), so no WE artifact changes. SURVEY (new axis = packaging shape, not vocabulary which #1318 covered): the convergent benchmark shape is ONE custom element with the variant as an ATTRIBUTE — Shoelace <sl-button variant>, Adobe Spectrum <sp-button variant treatment>, Fluent UI WC <fluent-button appearance>, Carbon <cds-button kind>. shadcn ships the most native-first shape — a real <button> with a class computed from a variant prop (buttonVariants({variant})), which in the DOM is indistinguishable from FUI's bare-CSS option. Material Web is the LONE per-variant-tag outlier (<md-filled-button>/<md-outlined-button>/<md-text-button>/...) and its only rationale is tree-shaking per-variant modules — weak for WE/FUI because the variant axis is behavior-free CSS, so there is no per-variant MODULE to shake, only a few CSS rules, against the cost of an unbounded tag namespace. IN-TREE FACTS THAT SHRINK THE FORK: (1) the open-numbered statute already pre-decides the variant axis needs no element — a tag-per-value is a CLOSED namespace, the opposite of the ratified open attribute value set, so element-granularity is a forced invariant against per-variant tags; (2) native <button> gives keyboard/focus/disabled/form participation FREE, a custom element must re-forward all of it (role=button is necessary-but-insufficient; formAssociated + ElementInternals); (3) modern CSS lets a bare <button> be a flex/grid container so layout no longer forces a wrapper; (4) FUI's elements are sparse + bare-kebab with no fui- prefix (5 of 75 blocks register as elements; custom-element-tag-naming #841), so 'no element, styled native button' fits the grain; (5) per-variant LOADING has no per-variant code — 'load only what is needed' is ordinary CSS bundling, a build optimization (prioritization), not an architectural fork. TWO PREPARED FORKS: Fork 1 element granularity = one element with variant-as-attribute (forced invariant ~95%) vs per-variant tags (broken by the open-numbered statute + dynamic-binding + native-a11y); Fork 2 (the one genuine dimension) = bare native <button variant> + CSS/theme with NO custom element (recommended ~75%, native-first floor — free a11y, zero JS, modern-CSS layout, fits FUI's grain) vs a single autonomous <fui-button variant> wrapper (Shoelace shape — encapsulation + typed DevX surface + a host for the block's non-variant behaviors, but must re-forward native a11y/form participation and adds JS). Residual on Fork 2 = the button block's NON-variant complexity (busy/loading, slots, group) earning an element independently. Full grounding in we:reports/2026-06-20-1321-fui-variant-surface-packaging.md.",
+  "dateOpened": "2026-06-20",
+  "lastReviewed": "2026-06-20",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "frontierui",
+    "action-intent",
+    "variant",
+    "packaging",
+    "custom-elements",
+    "native-first",
+    "reproduction",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

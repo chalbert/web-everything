@@ -1,0 +1,100 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  <a href="/backlog/1318-action-intent-emphasis-style-axis-fill-outline-ghost-link-or/">#1318</a> ratified
+  the WE side: the <a href="/intents/">Action Intent</a> <code>variant</code> axis
+  (<code>fill | outline | ghost | link</code>, open vocabulary) renders as a <strong>plain attribute
+  consumed by CSS</strong> (<code>button[variant="ghost"]</code>), and the statute records
+  &ldquo;<em>no wrapper required, because a behavior-free axis needs none</em>&rdquo;
+  (<code>docs/agent/platform-decisions.md:588-589</code>). What #1318 deferred — and this research
+  prepares — is <strong>how FUI packages the block</strong>: bare <code>&lt;button variant&gt;</code> +
+  CSS (no wrapper) · per-variant custom elements (<code>&lt;ghost-button&gt;</code>, the Material Web
+  shape) · or an autonomous element wrapping a real <code>&lt;button&gt;</code>. This is an
+  <strong>FUI impl call</strong> — the variant <em>contract</em> is WE's, the <em>packaging</em> is FUI's;
+  WE never imports or renders FUI block code (the docs-rendering boundary), so no WE artifact changes.
+</p>
+
+<h2>Finding 1 — the convergent benchmark shape is one element, variant as an attribute</h2>
+<p>
+  #1318's report surveyed the variant <em>vocabulary</em>; the new axis here is <strong>packaging
+  shape</strong> — how each library exposes that vocabulary in the DOM. The dominant pattern is
+  <strong>a single custom element with the variant as an attribute</strong>: Shoelace
+  <code>&lt;sl-button variant&gt;</code>, Adobe Spectrum <code>&lt;sp-button variant treatment&gt;</code>
+  (splitting semantic <code>variant</code> from presentational <code>treatment</code>), Fluent UI WC
+  <code>&lt;fluent-button appearance&gt;</code>, Carbon <code>&lt;cds-button kind&gt;</code>. The variant
+  is <em>data on one stable element</em> — dynamically bindable, autocompletable, and a natural fit for an
+  <em>open</em> value set.
+</p>
+<p>
+  <strong>shadcn</strong> ships the most native-first shape of all: a real <code>&lt;button&gt;</code> with
+  a class computed from a <code>variant</code> prop (<code>buttonVariants({variant})</code>). In the DOM it
+  is <em>indistinguishable</em> from FUI's bare-CSS option — the React prop is just a class selector.
+</p>
+
+<h2>Finding 2 — Material Web's per-variant tags are the lone outlier, and the reason doesn't apply here</h2>
+<p>
+  <strong>Material Web</strong> (<code>@material/web</code>) is the one benchmark that mints a
+  <strong>tag per variant</strong> — <code>&lt;md-filled-button&gt;</code>,
+  <code>&lt;md-outlined-button&gt;</code>, <code>&lt;md-text-button&gt;</code>,
+  <code>&lt;md-elevated-button&gt;</code>, <code>&lt;md-filled-tonal-button&gt;</code>. Its sole rationale
+  is <strong>tree-shaking</strong>: importing <code>&lt;md-text-button&gt;</code> pulls only that variant's
+  module. That argument is <strong>weak for WE/FUI</strong>, because WE's variant axis is
+  <strong>behavior-free CSS</strong> — there is no per-variant <em>module</em> to shake, only a few CSS
+  rules, set against the cost of an <em>unbounded tag namespace</em>. And a tag-per-value is a
+  <strong>closed</strong> namespace, the exact opposite of the ratified <em>open-numbered attribute</em>
+  value set — so per-variant tags contradict the statute outright.
+</p>
+
+<h2>Finding 3 — native &lt;button&gt; gives for free what a wrapper must re-implement</h2>
+<p>
+  <code>role=button</code> is necessary-but-insufficient. A bare native <code>&lt;button&gt;</code>
+  carries keyboard activation, focus, <code>disabled</code>, and form participation
+  <strong>for free</strong>; a custom element must re-implement all of it (and, for forms,
+  <code>formAssociated</code> + <code>ElementInternals</code>) just to break even. The item's own a11y
+  note — &ldquo;most devs will not re-implement it&rdquo; — is the native-first argument. Two more in-tree
+  facts reinforce the bare-native default: modern CSS lets a <code>&lt;button&gt;</code> be a
+  <code>display: flex</code>/<code>grid</code> container (the old &ldquo;buttons can't be flex
+  containers&rdquo; footgun is gone), so layout no longer forces a wrapper; and FUI's existing elements are
+  sparse and bare-kebab with <strong>no <code>fui-</code> prefix</strong> (5 of 75 blocks register as
+  elements — <code>custom-element-tag-naming</code> research, #841), so &ldquo;no element, styled native
+  button&rdquo; fits the grain while <code>&lt;ghost-button&gt;</code> would be a sharp departure.
+</p>
+
+<h2>Per-variant loading is not a fork</h2>
+<p>
+  Because the variant axis is CSS-only, &ldquo;load only what is needed&rdquo; is ordinary CSS
+  bundling/tree-shaking of a few rules — there is <strong>no per-variant JS module</strong> to lazy-load.
+  That makes per-variant loading a <em>build optimization</em> (prioritization), not an architectural fork;
+  any <em>measured</em> code-splitting is filed as a deferred build item.
+</p>
+
+<h2>The prepared forks</h2>
+<ul>
+  <li>
+    <strong>Fork 1 — element granularity.</strong> One element with the variant as the open-numbered
+    attribute <em>(forced invariant, ~95%)</em> vs per-variant custom elements (the Material Web shape).
+    The latter is the <strong>broken</strong> branch — it contradicts the open-numbered statute (closed
+    tag namespace vs open attribute set), cannot express a dynamically-bound variant (changing it recreates
+    the element), and forfeits native <code>&lt;button&gt;</code> a11y. Reopens only on
+    <em>materially-different-DOM</em> evidence — which is block polymorphism, not a variant (statute
+    ceiling), so it routes elsewhere.
+  </li>
+  <li>
+    <strong>Fork 2 — wrapper or bare native? (the one genuine dimension).</strong> Bare native
+    <code>&lt;button variant&gt;</code> + CSS/theme with <strong>no custom element</strong>
+    <em>(recommended, ~75%)</em> — the native-first floor: free a11y, zero JS, modern-CSS layout, fits
+    FUI's grain, indistinguishable in the DOM from shadcn — vs a single autonomous
+    <code>&lt;fui-button variant&gt;</code> wrapper (the Shoelace shape) buying encapsulation, a typed DevX
+    surface, and a host for the block's non-variant behaviors, but paying to re-forward native a11y/form
+    participation and adding JS. The residual that flips it is the button block's <em>non-variant</em>
+    complexity (busy/loading, slots, group) earning an element independent of the variant axis.
+  </li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/intents/">Web Intents catalog</a> — where Action Intent and its <code>variant</code> dimension render.</li>
+  <li>Backlog <a href="/backlog/1321-variant-component-surface-and-per-variant-loading-one-polymo/">#1321</a> — the decision this research prepares.</li>
+  <li>Backlog <a href="/backlog/1318-action-intent-emphasis-style-axis-fill-outline-ghost-link-or/">#1318</a> — the ratified <code>variant</code> axis this packages.</li>
+</ul>
+{% endraw %}
