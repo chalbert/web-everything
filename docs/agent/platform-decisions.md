@@ -563,6 +563,38 @@ per-impl escape hatch; FUI = reference impl). Composes [surface-contract-not-com
 meta-schema, not the list), and the minimize-lock-in / escapable-lock principle; the config-surface analogue
 of [forward-generation-adapters](#forward-generation-adapters) (contract is the authority, code crosses no seam).
 
+### Presentational variants are an open-numbered axis off one semantic contract {#open-numbered-variants}
+
+When two things differ **only in presentation** — same semantics, same behavior, same DOM — that
+variation is an **open-numbered axis**, never a closed enum. WE standardizes the **variant contract**
+(*a value names a purely-presentational treatment that leaves the semantic meaning and behavior
+unchanged*) **plus a recommended core set**; authors **mint as many members as they want from that
+contract** (Intents-Open-Design applied to the presentational axis — standardize the meta-schema, not
+the list). Membership is a **semantic test**, not a vote: *differs only in presentation* → a valid
+member; *differs in semantics* (changes role, behavior, navigation) → a **different contract**
+(different intent/dimension), never folded in. The axis lives **on its owning intent** (value sets are
+intent-specific — a button's `ghost`/`link` ≠ an input's `borderless`), never as a shared cross-cutting
+intent that would flatten the divergent vocabularies. Name the axis for the *treatment*, not the
+attention it draws (`variant`/`treatment`, not `emphasis` — prominence is a separate semantic axis).
+
+**Ceiling — variant vs block polymorphism.** The rule is bounded to **presentational treatment of one
+rendering**. Three tiers: (1) **intent** = the semantic contract; (2) **variant** = a value the *same
+block, same DOM* renders differently, CSS/token-reachable; (3) **block polymorphism** = when materially
+**different DOM/markup** is required (one single-select intent as radios *vs* a segmented control *vs*
+card-tiles), which is interchangeable *blocks* under one intent or a *structural/layout* axis — **not**
+a variant value. **Diagnostic:** *can I reach it with CSS/tokens on the same markup?* — yes → variant;
+no → block/structure layer. This stops "everything visual is a variant" sprawl. Generalizes beyond
+Action to **sectioning and layout**: define the semantic contract once, expose presentational variants
+as an open-numbered axis. Surface is a **plain attribute consumed by CSS** (`button[variant]`) — no
+wrapper required, because a behavior-free axis needs none.
+
+**Lineage:** #1318 (Action Intent `variant` axis — `fill | outline | ghost | link`, open vocabulary;
+`link` in the core set; named `variant` not `emphasis`; renders via plain attribute, no wrapper).
+Composes [intents-ux-only](#intents-ux-only) + Intents-Open-Design, [compose-intent-dont-duplicate](#compose-intent-dont-duplicate)
+(divergent vocabularies stay on their owning intent), and the most-permissive-default / native-first
+floor. Follow-ups: #1320 (build) · #1321 (FUI variant-surface packaging) · #1323 (sectioning/layout
+application) · #1324 (`level`-as-outcome-role).
+
 ### Reproduction-conformance: reproduce incumbents as theme+intents; the copy is a forcing function {#reproduction-conformance}
 
 Reproducing a third-party design system (Material, Ant, Carbon, Fluent, shadcn…) on the constellation is a
