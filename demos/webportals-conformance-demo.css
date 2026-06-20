@@ -1,0 +1,84 @@
+/* Web Portals conformance demo (#1152) — chrome only; .badge/.summary/.play-card come from playground.css. */
+.wp-stage,
+.wp-card-section {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.6rem;
+  padding: 1rem 1.25rem;
+  margin-top: 1rem;
+}
+.wp-stage h2,
+.wp-card-section h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+/* The clipped, transformed ancestor the modal must visually escape. */
+.wp-clip {
+  position: relative;
+  transform: scale(1);
+  overflow: hidden;
+  border: 1px dashed #cbd5e1;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  background: #f8fafc;
+}
+.wp-clip-label {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-bottom: 0.5rem;
+}
+.wp-inner {
+  padding-left: 1rem;
+  border-left: 2px solid #e2e8f0;
+}
+.wp-card {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin-top: 0.5rem;
+}
+.wp-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+/* portal-outlet — the top-level escape target (sibling of the clip). */
+portal-outlet {
+  display: block;
+  margin-top: 0.75rem;
+  min-height: 2.5rem;
+  border: 2px solid #6366f1;
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+}
+.wp-modal {
+  background: #eef2ff;
+  border: 1px solid #6366f1;
+  border-radius: 0.4rem;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.85rem;
+  color: #1e1b4b;
+}
+.wp-modal-btn {
+  margin-top: 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #6366f1;
+  border-radius: 0.35rem;
+  background: #fff;
+  cursor: pointer;
+}
+
+.wp-check {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+}
+.wp-check-title {
+  font-size: 0.88rem;
+  color: #334155;
+}

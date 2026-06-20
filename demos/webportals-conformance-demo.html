@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Portals Conformance Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/webportals-conformance-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Web Portals Conformance Demo</h1>
+      <p>The runnable proof of the Web Portals runtime contract (<a href="/backlog/1001-implement-web-portals-logical-tree-polyfill-portal-directive/">#1001</a>) in a real browser: a deeply nested component portals a modal to a top-level outlet that <strong>escapes its stacking context</strong>, while <strong>context preservation</strong> (resolved via logical ancestry) and <strong>logical event bubbling</strong> (a click inside the portal firing a handler on the logical ancestor via <code>composedLogical</code>) both verifiably hold.</p>
+      <p class="play-caveat">
+        This exercises the actual <code>webportals</code> plug in the browser — the directive projects the
+        modal into the outlet, <code>logicalParent</code> links the projection to its declaration site, and
+        <code>dispatchLogical</code> walks the logical chain. The section below asserts each contract
+        invariant live.
+      </p>
+    </header>
+
+    <div id="play-root">Loading demo&hellip;</div>
+  </main>
+
+  <script type="module" src="/demos/webportals-conformance-demo.ts"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "id": "webportals-conformance-demo",
+  "name": "Web Portals Conformance Demo",
+  "summary": "The runnable proof of the Web Portals runtime contract (#1001) in a real browser: a deeply nested component portals a modal to a top-level outlet that escapes its clipped, transformed stacking context, while CONTEXT preservation (resolved via logical ancestry, not the physical DOM) and LOGICAL event bubbling (a click inside the portal firing a handler on the logical ancestor via composedLogical) both verifiably hold. Exercises the actual webportals plug (plugs/webportals/) in the browser — the directive projects the modal into the outlet, logicalParent links the projection to its declaration site, and dispatchLogical walks the logical chain. A runtime-conformance section asserts each invariant live: the modal relocates into the outlet and escapes the clip, its logicalParent is the declaration site, context resolves via logical ancestry but NOT via the physical DOM ancestry, and a click inside the portal bubbles to a handler on the logical ancestor.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runnable proof of the Web Portals runtime contract (<a href=\"/backlog/1001-implement-web-portals-logical-tree-polyfill-portal-directive/\">#1001</a>) in a real browser. A deeply nested component portals a modal to a top-level outlet that <strong>escapes its stacking context</strong>, while context preservation and logical event bubbling both hold.</p><h3>The actual plug, in the browser</h3><p>This exercises the real <code>webportals</code> plug (<code>plugs/webportals/</code>): the directive projects the modal into the outlet, <code>logicalParent</code> links the projection to its declaration site, and <code>dispatchLogical</code> walks the logical chain. It doubles as the platform-first forcing function for #1148/#1149/#1150.</p><h3>Verified contract</h3><p>The runtime-conformance section asserts each invariant live: the modal relocates into the outlet and escapes the clip, its <code>logicalParent</code> is the declaration site, context resolves via logical ancestry but <em>not</em> via the physical DOM ancestry, and a click inside the portal bubbles to a handler on the logical ancestor via <code>composedLogical</code>.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webportals-conformance-demo.html",
+  "projects": [
+    "webportals"
+  ]
+}
