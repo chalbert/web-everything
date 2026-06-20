@@ -29,6 +29,14 @@ module.exports = {
     review: { label: 'needs review', bg: '#fef3c7', fg: '#92400e', tip: 'Held on a human review / sign-off. Approve (or request changes), then it proceeds.' },
     setup: { label: 'needs setup', bg: '#ede9fe', fg: '#5b21b6', tip: 'Held on a one-time human setup (external account, hosted resource). Do it once, then the item is agent-workable.' },
   },
+  // Non-batchable reason pills (#487/#1137 rigor) — an open item that is NOT in the batch pool carries a
+  // pill naming WHY, so "looks ready but isn't" never reads as unexplained. `human-gate` is rendered by the
+  // dedicated humanGate pill, `oversized` by the split pill, `decision` by the tier-B badge — so only these
+  // three need an entry here. `blocked` interpolates the open blocker list at render (so no static label).
+  notBatchableMeta: {
+    'stop-the-world': { label: 'migration', bg: '#fef2f2', fg: '#991b1b', tip: 'Stop-the-world migration — touches the whole backlog, so it can only run when the backlog is QUIESCENT (no active claims / reservations) in a dedicated run. Never packed into a routine batch.' },
+    'project-pending': { label: 'project pending', bg: '#ede9fe', fg: '#5b21b6', tip: 'Held by D3-readiness — its relatedProject is a `concept` with no shipped surface; the standard must exist first. Ship/graduate the project, then it becomes agent-ready.' },
+  },
   // Tier labels & one-line meaning — kept in one place so the chip, the card badge, and its tooltip stay in sync.
   tierLabel: { A: 'Agent-ready', B: 'Decision-ready', C: 'Not ready' },
   tierMeaning: {

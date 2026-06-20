@@ -307,7 +307,30 @@ module.exports = function backlog() {
     // decided from fields, so this flag is the size+tier gate; selection still skims the body for a fork.
     const batchShape = item.workItem === 'task'
       || (item.workItem === 'story' && typeof item.size === 'number' && item.size <= 8);
-    item.batchable = item.tier === 'A' && batchShape;
+    // A `stop-the-world` migration (e.g. #487 schema migration) is shape-batchable and Tier A, but it can
+    // NEVER ride a routine batch: it needs the whole backlog drained (quiescent) + a dedicated run, so the
+    // selector already refuses to pack it. Encode that in `batchable` itself so the flag — and the tab's
+    // "Batchable" filter that keys off it — only ever shows GENUINELY batchable work, not a migration that
+    // merely looks shape-eligible. (Its run-precondition is quiescence, surfaced as a stop-the-world pill.)
+    item.stopTheWorld = Array.isArray(item.tags) && item.tags.includes('stop-the-world');
+    item.batchable = item.tier === 'A' && batchShape && !item.stopTheWorld;
+
+    // Why an OPEN item is not in the batch pool — the single reason a tab pill renders so a non-batchable
+    // item never looks unexplained (the #1137/#487 rigor: every "looks ready but isn't" carries its reason
+    // in data, not just in a body note). Ordered by precedence; null when batchable, an epic (own slice
+    // pills), or non-open. `human-gate`/`oversized`/`decision` already have dedicated pills elsewhere, so
+    // this drives only the three that lacked one — `stop-the-world`, `project-pending`, `blocked`.
+    item.openBlockers = (item.blockers || []).filter((b) => b.status !== 'resolved').map((b) => b.num);
+    item.notBatchableReason = (() => {
+      if (item.status !== 'open' || item.batchable || item.workItem === 'epic') return null;
+      if (item.stopTheWorld) return 'stop-the-world';
+      if (item.humanGate) return 'human-gate';        // rendered by the humanGate pill
+      if (item.type === 'decision') return 'decision';  // rendered by the tier-B badge
+      if (item.openBlockers.length) return 'blocked';
+      if (item.projectPending) return 'project-pending';
+      if (item.workItem === 'story' && typeof item.size === 'number' && item.size > 8) return 'oversized'; // split pill
+      return null;
+    })();
 
     // Active batchable — a batch-shaped item already CLAIMED (status:active). It carries no tier (tier is
     // open-only, deriveTier above), so it drops out of `batchable` and the open-only Prioritisation table.
