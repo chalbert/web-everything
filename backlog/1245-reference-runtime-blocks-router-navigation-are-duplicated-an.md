@@ -2,6 +2,8 @@
 kind: epic
 status: open
 dateOpened: "2026-06-20"
+childlessReason: blocked
+blockedBy: [1353]
 tags: [blocks, duplication, drift, single-source, frontierui, maintenance, runtime]
 relatedProject: webblocks
 ---
