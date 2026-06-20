@@ -1,10 +1,10 @@
 ---
 type: idea
 workItem: epic
-size: 8
 status: open
 locus: plateau-app
 dateOpened: "2026-06-20"
+relatedReport: reports/2026-06-20-1237-split-analysis.md
 tags: [plateau, plateau-app, logged-off, unauthenticated, auth, landing, marketing, pricing, product-build]
 ---
 
@@ -20,17 +20,19 @@ The auth machinery is **scaffolded but switched off** — this epic finishes and
 - [plateau:index.html](../../plateau-app/index.html) — a `/login` route template (line ~180-200) and one guarded route `/settings` (`route:guard="requireAuth"`, line ~161). Every other route is ungated; `/` is the authenticated Dashboard.
 - **No public shell, no landing/marketing page, no sign-up/reset, no pricing page** exist. The sidebar layout assumes a logged-in user throughout.
 
-## Scope — candidate child slices (UNSLICED — `/slice 1237` before working)
+## Scope — child slices (SLICED 2026-06-20, `/slice 1237`, [report](../reports/2026-06-20-1237-split-analysis.md))
 
-1. **Public shell + routing split** (root) — a logged-off layout distinct from the authenticated sidebar shell; re-enable `requireAuth` to gate the product routes; redirect anonymous→landing and logged-in→app. The other slices depend on this.
-2. **Landing / marketing page** — public `/` (or `/home`) hero + value prop + product overview; the visitor's first screen.
-3. **Auth flows** — finish & enable sign-in, add sign-up/registration, sign-out, password reset. (Open question: real identity backend vs. continued mock `authStore` — see below.)
-4. **Pricing page** — public pricing surface; consumes the open-core tiering rulings (#089–#093, #775 monetization) rather than re-deciding them.
-5. **Supporting public pages** — legal (terms/privacy), public 404, any nav/footer chrome for the logged-off shell.
+Phase-1 steer: **login is simulated** so both spaces are navigable locally — no real identity backend (deferred follow-on). #1238 is the root; #1239–#1242 each depend only on it and are mutually independent (true parallel fan-out).
+
+1. **#1238 — Public/app shell split + simulated login** (root) — logged-off layout distinct from the authenticated sidebar shell; re-enable `requireAuth`; mock sign-in/out toggle to navigate both spaces.
+2. **#1239 — Landing / marketing page** — public `/` hero + value prop + product overview; the visitor's first screen. (blockedBy #1238)
+3. **#1240 — Sign-up + password-reset screens** — registration + reset on the mock `authStore` (sign-in/out itself lands in #1238). (blockedBy #1238)
+4. **#1241 — Pricing page** — public pricing surface; reads the open-core rulings (#089–#093, #775) rather than re-deciding them. (blockedBy #1238)
+5. **#1242 — Supporting public pages** — legal (terms/privacy), public 404, logged-off nav/footer chrome. (blockedBy #1238)
 
 ## Slicing guidance (settle at `/slice 1237` / per-slice prep)
 
 - **Dogfooding:** the public surface is a prime candidate to render from FUI components per the WE-on-FUI dogfood goal (epic #777) — net-new screens with no legacy to migrate. Worth fixing as a constraint when slicing.
 - **Auth backend:** the slice-3 prep must settle whether this introduces a real identity provider / session backend or stays on the mock `authStore` (no real credentials). Recommendation: mock-first (POC pragmatism), with a real backend tracked as a separately-prioritised follow-on. If that turns into a genuine fork, carve a `type:decision` item that blocks slice 3 rather than deciding it here.
 - **Pricing source of truth:** the pricing slice should *read* the open-core monetization rulings (#089–#093, #775), not re-decide them — monetization is soft-accepted & revisitable, so cite, don't fork.
-- This umbrella stays `open`; it is not yet sliced into on-disk child items.
+- This umbrella stays `open` until all five child slices (#1238–#1242) resolve.
