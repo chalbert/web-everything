@@ -1,10 +1,11 @@
 ---
 kind: story
-size: 8
+size: 13
 parent: "1250"
 locus: frontierui
 status: open
 dateOpened: "2026-06-20"
+dateStarted: "2026-06-20"
 tags: []
 ---
 
@@ -45,3 +46,23 @@ mechanical 3-file copy. Best worked as a focused single item, not as batch fodde
 > the reconcile slices **cannot be done by copying WE files over FUI** (that breaks FUI's imports); each
 > needs a per-file audit to separate repo-structural diffs from genuine drift. Re-scope the family
 > (per-domain audit) before treating any as a clean size-2/3 batch item.
+
+## Re-size 8 → 13 (grounded 2026-06-20, batch-2026-06-20) — epic-scale, drops from the batch pool
+
+Measured the real blast radius of the `target` → `ownerElement` rename (#1121, where the `target` branch
+is ruled broken — no alias). Across `fui:` **96 files** reference `.target`: **36 FUI source block-behaviors**
+(every droplist trait, all 3 navigation behaviors, the view directives, data-grid, for-each, tabs, type-ahead,
+router RouteLinkBehavior, temporal traits, workflow engine, OnEventAttribute, …) plus the 2 CustomAttribute
+unit-test files (~54 assertions) and ~8 demos. Renaming the `CustomAttribute` getter without a back-compat
+alias breaks all 96 at once. Compounding it, #1120's `#assertValidName` hyphen/`:`-namespace check **throws**
+on bare names, so any FUI attribute registered under a bare name would start erroring on adoption.
+
+This is not a `story·8` and not batch fodder — it is an epic-scale cross-cutting migration. Set `size: 13`
+so it drops from the batchable pool. Suggested split for a focused session:
+- a plug slice that adds `ownerElement` and keeps a **deprecated `target` alias** (so the 96 consumers don't
+  break in one commit), + `whenDefined` (#1119);
+- per-area consumer-migration slices (droplist / navigation / view / data-grid / router / temporal / demos /
+  tests) flipping `.target` → `.ownerElement`;
+- a final slice that flips on #1120's throwing name-validation after auditing every `define()` call for bare
+  names, then removes the `target` alias.
+Carried forward from batch-2026-06-20 — outgrew (real scope 96 files, not the re-scoped 8).
