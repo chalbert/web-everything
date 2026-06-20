@@ -1,0 +1,121 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The #927 export-shape arm compares each block's declared CEM <code>exports</code>
+  (<code>src/_data/blocks/&lt;id&gt;.json</code>) against the <strong>actual</strong> export surface of its
+  Frontier UI impl. The resolver is a real TypeScript program that reads the impl's <code>index.ts</code>
+  barrel via <code>checker.getExportsOfModule</code> (<code>check-standards.mjs:847</code>), so it is
+  <strong>scoped to the 7 barrel blocks</strong> — it needs an enumerable <em>entry module</em> to read.
+  The <strong>5 renderer blocks</strong> — <code>collection-operations</code>, <code>data-grid</code>,
+  <code>data-table</code>, <code>pagination</code>, <code>reorderable-list</code> — keep a dir-style
+  <code>implementedBy</code> (<code>@frontierui/blocks/renderers/&lt;id&gt;/</code>) and ship only leaf
+  modules with <strong>no <code>index.ts</code> barrel</strong>, so they are logged
+  <strong>un-coverable</strong> rather than checked (<code>check-standards.mjs:869-873</code>). This topic
+  decides how the resolver covers them: <strong>A</strong> walk the leaf modules, <strong>B</strong> add a
+  curated <code>index.ts</code> barrel per renderer (the #948 pattern), or <strong>C</strong> exempt them.
+</p>
+
+<h2>Finding 1 — the rule is asymmetric, which voids the dir-walk "looseness" worry</h2>
+<p>
+  The pure rule flags <strong>only</strong> declared exports <strong>absent</strong> from the actual
+  surface; <em>extras are explicitly fine</em> — "the impl can export MORE"
+  (<code>check-standards-rules.mjs:1441</code>):
+</p>
+<pre><code>const missing = (b.declaredExports || []).filter((name) =&gt; !actual.has(name)); // only "declared ∉ actual"</code></pre>
+<p>
+  The original framing lists dir-walk's risk as <em>"looser than a curated barrel — picks up internal
+  helpers as exports."</em> Under an asymmetric rule that ignores extras, those extra internal symbols
+  <strong>never fail anything</strong> — a dir-walk surface is a strict <strong>superset</strong> of any
+  barrel surface (a barrel re-exports a curated subset of the same leaf symbols), so it can never produce a
+  <em>false drift</em> a barrel would avoid. That stated downside is <strong>largely void</strong>; the real
+  difference is elsewhere.
+</p>
+
+<h2>Finding 2 — dir-walk is not toothless: it already surfaces 3 genuine drifts</h2>
+<p>
+  Enumerating the named exports of every leaf <code>*.ts</code> per renderer dir and comparing to the
+  declared <code>exports</code>:
+</p>
+<ul>
+  <li><code>collection-operations</code> (active) — all 3 declared present (<code>CollectionOperationsModule</code> is a class in <code>CollectionOperationsBehavior.ts:160</code>). <strong>Pass.</strong></li>
+  <li><code>data-table</code> (active) — <code>DataTableBehavior</code>/<code>registerDataTable</code> present, <strong><code>DataTableModule</code> absent</strong>. Drift.</li>
+  <li><code>pagination</code> (active) — <code>PaginationBehavior</code>/<code>registerPagination</code> present, <strong><code>PaginationModule</code> absent</strong>. Drift.</li>
+  <li><code>data-grid</code> (draft) — none of the declared <code>DataGridModule</code>/<code>DataGridBehavior</code>/<code>registerDataGrid</code> present (dir ships <code>renderDataGrid</code>/<code>auditDataGrid</code>/…). Drift.</li>
+  <li><code>reorderable-list</code> (draft) — all 6 declared present. <strong>Pass.</strong></li>
+</ul>
+<p>
+  Both A and B surface the <strong>same</strong> drifts — exactly the <code>#1165</code>-class findings the
+  gate exists to catch. <strong>Coverage value is not what separates A from B.</strong>
+</p>
+
+<h2>Finding 3 — the real difference: "defined somewhere" vs "published through the entry point"</h2>
+<p>
+  The renderer contracts already declare a <strong>barrel-shaped</strong> triple —
+  <code>&lt;Name&gt;Module</code> / <code>&lt;Name&gt;Behavior</code> / <code>register&lt;Name&gt;</code> —
+  the same convention the 7 barrel blocks expose, where <code>&lt;Name&gt;Module</code> is the aggregate the
+  <strong>index barrel</strong> publishes (<code>fui:blocks/router/index.ts</code>). The two mechanisms
+  disagree on what "the block's public surface" <em>means</em>:
+</p>
+<ul>
+  <li>
+    <strong>B (curated <code>index.ts</code> barrel)</strong> — verifies a declared export is reachable
+    <strong>through the block's public entry point</strong>, i.e. genuinely part of the <em>published</em>
+    API, not an internal symbol that happens to share the name. It is the <strong>same one TS-program
+    path</strong> the 7 barrel blocks already use — one uniform resolver semantic.
+  </li>
+  <li>
+    <strong>A (directory walk)</strong> — verifies a declared export is merely <strong>defined
+    somewhere</strong> in the dir. An internal helper never meant to be public satisfies the check (a
+    <strong>false negative</strong> B catches), and it forces a <strong>second, looser resolver path</strong>
+    so a block's coverage semantic depends on which path it takes.
+  </li>
+</ul>
+
+<h2>Finding 4 — prior art: the ecosystem defines "public surface" by entry point, never a dir glob</h2>
+<ul>
+  <li>
+    <strong>Feature-Sliced Design — Public API</strong>: a module's public API <em>is</em> its
+    <code>index</code> barrel; the named failure mode — "that helper you meant to keep private is now used
+    elsewhere" — is exactly A's false negative.
+  </li>
+  <li>
+    <strong>Microsoft API Extractor</strong> traces all exports <strong>from the package's main entry
+    point</strong>; path-based imports that "fish around in folder trees" are explicitly
+    <strong>incompatible</strong> — the entry point, not the directory, defines the surface.
+  </li>
+  <li>
+    <strong>Barrel-file linters</strong> (FSD/Nx public-API rules) enforce that the barrel is the
+    <em>intentional</em> public API — re-exporting controls what is public.
+  </li>
+</ul>
+<p>
+  The one famous barrel downside — <strong>broken tree-shaking</strong> — is a <em>runtime bundling</em>
+  concern and does <strong>not transfer</strong> to a build-time gate that only <em>reads</em> the export
+  surface and emits nothing into a bundle. The ecosystem's reason to define the surface <em>by entry
+  point</em> applies directly; its reason to sometimes avoid barrels does not.
+</p>
+
+<h2>Finding 5 — C ("exempt") is prioritization wearing a fork's clothing</h2>
+<p>
+  Fork C is described only as "cheapest; leaves renderer export-drift unguarded." Its sole appeal is
+  <strong>cost</strong> and its merit is strictly <strong>worse</strong> (a permanent coverage hole on real
+  <code>status:active</code> contracts whose consumers depend on <code>registerDataTable</code> /
+  <code>DataTableBehavior</code> resolving). By the <em>fork-is-not-a-prioritization-tool</em> rule, "do less
+  because it's cheaper" is not a merit branch — and the interim reality (the flip stays scoped to the 7
+  barrel blocks until coverage ships) is <strong>scheduling</strong>, not a design end-state. So C is
+  <strong>demoted</strong> to the null/defer option; the on-merit call is <strong>A vs B</strong>.
+</p>
+
+<h2>Recommendation</h2>
+<p>
+  <strong>Adopt B</strong> — add a curated <code>index.ts</code> barrel per renderer and re-point each
+  <code>implementedBy</code> at it (the #948 pattern), covering all 12 blocks through one entry-point
+  semantic. <strong>Confidence: med-high.</strong> A's only advantage is "no FUI change," which is
+  <strong>cost, not merit</strong> (its build size, not a fork con); on merit A is strictly weaker
+  (false-negative on internal symbols + a second looser resolver path). The residual that keeps this a
+  <em>weighed</em> fork rather than a bare ratify: A's coverage is degraded-but-functional, so a decider may
+  legitimately use A — or the interim barrel-scoped flip — as a <strong>scheduling</strong> lever while the
+  5 FUI barrels are prioritized. The <code>EXPORT_SHAPE_ENFORCED</code> flip remains gated on
+  <strong>#1165</strong> (the 3 barrel-block drifts) <em>and</em> this renderer coverage.
+</p>
+{% endraw %}

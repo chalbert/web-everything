@@ -1,0 +1,27 @@
+{
+  "id": "renderer-export-shape-coverage",
+  "title": "Renderer-block export-shape coverage — entry-point vs directory-walk as the definition of a block's public surface",
+  "status": "open",
+  "summary": "Prep research for decision #1164 (slice of epic #904, de-buried from the #927 export-shape arm). The #927 gate compares each block's declared CEM `exports` against the ACTUAL export surface of its FUI impl, resolved by a real TS program over the impl's `index.ts` barrel (we:scripts/check-standards.mjs:847) — and is scoped to the 7 barrel blocks because the resolver needs an enumerable entry module. The 5 renderer blocks (collection-operations / data-grid / data-table / pagination / reorderable-list) keep a dir-style `implementedBy` (@frontierui/blocks/renderers/<id>/) and ship only leaf modules with no `index.ts`, so they are logged un-coverable (check-standards.mjs:869-873). The fork: how does the resolver cover them — A dir-walk the leaf modules, B add a curated `index.ts` barrel per renderer (the #948 pattern), or C exempt them. FINDING 1 — the rule is ASYMMETRIC: it flags only declared exports ABSENT from actual; extras are explicitly fine (check-standards-rules.mjs:1441). So a dir-walk surface (a strict SUPERSET of any barrel surface) can never produce a false drift a barrel would avoid — the original framing's 'dir-walk is looser, picks up internal helpers' downside is largely VOID. FINDING 2 — dir-walk is not toothless: empirically it would already surface 3 genuine drifts (data-table & pagination missing their declared `*Module` aggregate; data-grid missing its whole triple), so both A and B catch the same #1165-class findings — coverage value is not what separates them. FINDING 3 — the real merit difference is the definition of 'public surface': B verifies a declared export is reachable through the block's PUBLIC ENTRY POINT (genuinely published API, one uniform resolver semantic shared with the 7 barrel blocks); A verifies it is merely DEFINED SOMEWHERE in the dir (an internal helper sharing the name passes — a false negative B catches) and forces a second, looser resolver path. The renderer contracts already declare a barrel-shaped `<Name>Module`/`<Name>Behavior`/`register<Name>` triple, implying a barrel was the intended shape. FINDING 4 — prior art: the JS/TS ecosystem defines a module's public surface BY ENTRY POINT, never a directory glob — Feature-Sliced Design ('the index barrel IS the public API'; the named failure mode 'that private helper is now used elsewhere' is exactly A's false negative), Microsoft API Extractor (traces exports from the main entry point; path-based 'fishing around in folder trees' is explicitly incompatible), barrel-file linters (the barrel is the intentional public API). The one famous barrel downside — broken tree-shaking — is a runtime-bundling concern that does NOT transfer to a build-time gate that only reads the surface. FINDING 5 — C (exempt) is prioritization wearing a fork's clothing: its only appeal is 'cheapest', its merit is strictly worse (a permanent coverage hole on real status:active contracts), so it is demoted to the null/defer option, not a co-equal branch. Ruling: ONE genuine fork (A vs B) → adopt B, med-high confidence; A's sole advantage is 'no FUI change' = cost, not merit (its build size, not a fork con). Full grounding in reports/2026-06-20-renderer-export-shape-coverage.md.",
+  "dateOpened": "2026-06-20",
+  "lastReviewed": "2026-06-20",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "conformance",
+    "block-contract",
+    "export-shape",
+    "barrel",
+    "public-api-surface",
+    "renderers",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "collection-operations",
+    "data-grid",
+    "data-table",
+    "pagination",
+    "reorderable-list"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webeverything"
+}
