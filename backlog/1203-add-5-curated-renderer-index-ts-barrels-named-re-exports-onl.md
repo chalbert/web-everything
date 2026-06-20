@@ -5,6 +5,7 @@ size: 3
 parent: "904"
 locus: frontierui
 status: open
+blockedBy: ["1218"]
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 tags: []
