@@ -3,8 +3,10 @@ type: idea
 workItem: story
 size: 3
 parent: "1143"
+blockedBy: ["1159"]
 status: open
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-20"
 tags: []
 ---
 
@@ -52,3 +54,7 @@ Ran a 20-item parallel batch (77-pt budget): **17 resolved / 2 carried (#1013 ou
 **Landing friction (not an orchestrator bug):** the first `git merge --no-ff` aborted on a dirty tree (the uncommitted arg-fix + a pre-existing dirty `we:audits/backlog-health-audit.md`), and the chained `git branch -D` ran before the merge succeeded — recovered from the commit sha, no loss. Close-out should clean/commit the workflow-file fix before landing.
 
 **Verdict: do NOT settle yet — fix #1's red-in-worktree fallback is the open follow-up.** Fixes #2/#3 are validated. The next investigation: make the concurrent worktree's local gate **context-aware** (scope it to the item's own files / skip global-consistency checks that can't pass in isolation) so genuinely-independent items don't false-red into serial replay. Keep this item **open** (and #1143) until that lands and a third run shows concurrent items gating green in-worktree.
+
+## Blocked-in-fact (batch-2026-06-19-1150-1141 serial close-out)
+
+The fix-#1 follow-up above is carved to **#1159** (scope `check:standards --local --files` to skip global-consistency rules in isolation), which is still `open` — added `blockedBy: 1159`. A meaningful **third** `/workflow` run only makes sense AFTER #1159 lands (else the same false-red fallback recurs). Also: this item's acceptance is a *parallel `/workflow` run + close audit*, which a **serial `/batch`** session cannot perform (wrong tool; a parallel batch needs its own session and the closing-session skill audits it). So it cannot be resolved from a serial lane — released back to `open`, correctly blocked on #1159.
