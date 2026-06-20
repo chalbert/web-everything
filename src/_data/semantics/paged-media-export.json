@@ -1,0 +1,5 @@
+{
+  "term": "paged-media export",
+  "definition": "A separate, un-scaled layout path for exporting a deck to paged media (PDF/print): one slide per page via CSS Paged Media (@page + break-after: page), with all fragments materialized (every reveal step shown at once) and optional notes pages — rather than printing the live, viewport-scaled runtime. The reason every deck framework special-cases PDF: the on-screen fit-to-viewport transform produces blurry, mis-paginated output, so export needs its own unscaled flow.",
+  "usage": "Shipped as authoring rules now (a CSS Paged Media recipe + a Block), NOT yet a protocol — per the #project-protocol-bar statute, a protocol is extracted only once a second independent implementation exists. Homed in webresources. Composes the Fragment-Reveal intent (export forces all fragments visible) and the Speaker-Notes semantic (notes pages). Distinct from the live runtime: same content, a different, print-only layout path."
+}
