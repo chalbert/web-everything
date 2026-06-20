@@ -1,5 +1,5 @@
 ---
-type: idea
+type: decision
 workItem: story
 size: 8
 parent: "1033"
