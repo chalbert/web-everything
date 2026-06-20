@@ -1,0 +1,8 @@
+{
+  "id": "embedded-deck",
+  "name": "Embedded-Deck postMessage Contract",
+  "summary": "A postMessage contract for embedding a live, interactive deck inside another document (an iframe) with state isolation and cross-boundary sync: the host can drive navigation (go-to-slide, next/prev) and the embedded deck reports its state (current address, fragment, ended) back across the frame boundary, deep-linkable independently of the host URL. Composes the navigation intent and Web Portals (it does not duplicate the navigation model — it bridges it across the iframe). State stays isolated in the embedded document; only the typed message envelope crosses. Homed in webportals per the ratified distributed placement (#1175).",
+  "status": "draft",
+  "ownedByProject": "webportals",
+  "anchor": "protocol-embedded-deck"
+}

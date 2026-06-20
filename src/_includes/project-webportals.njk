@@ -1321,3 +1321,30 @@ function Modal(props) {
         </p>
     </div>
 </section>
+
+<section id="protocol-embedded-deck" class="section-card">
+    <h3>Protocol — Embedded-Deck postMessage Contract</h3>
+    <p class="text-gray-600 text-sm">
+        Embeds a <strong>live, interactive deck</strong> inside another document via an iframe, with state
+        isolation and a typed <code>postMessage</code> envelope as the only thing that crosses the frame
+        boundary. The host page can drive the deck (go-to-slide, next/prev) and the embedded deck reports
+        its state back (current address, active fragment, ended), so an embedded deck is deep-linkable
+        independently of its host URL.
+    </p>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <tr><th>Direction</th><th>Message</th><th>Carries</th></tr>
+            <tr><td>host → deck</td><td><code>goto</code></td><td>a slide address (slide + optional fragment/vertical) to navigate to.</td></tr>
+            <tr><td>host → deck</td><td><code>advance</code> / <code>retreat</code></td><td>step the sequence forward / back (fragment-aware).</td></tr>
+            <tr><td>deck → host</td><td><code>state</code></td><td>current address, active fragment, total slides — emitted on every change.</td></tr>
+            <tr><td>deck → host</td><td><code>ended</code></td><td>the sequence reached its final position (for host-driven autoplay chaining).</td></tr>
+        </table>
+    </div>
+    <p class="text-gray-600 text-sm mt-3">
+        Composes the <a href="../webintents/">Navigation</a> intent and the slide-addressing semantic — it
+        <em>bridges</em> the navigation model across the iframe rather than duplicating it. State stays
+        isolated in the embedded document; the host never reaches into the deck's DOM. Web Portals ships
+        this specification; <a href="../frontierui/">Frontier UI</a> renders the embeddable deck. Homed
+        here per the ratified distributed placement (<a href="/backlog/1175/">#1175</a>).
+    </p>
+</section>
