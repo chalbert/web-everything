@@ -1422,7 +1422,7 @@ export function validateBlockComposesTraits(blocks) {
 // renderer/file-pointer blocks have no enumerable barrel and are skipped (logged un-coverable, #1164).
 // A declared export ABSENT from the resolved barrel is the drift (the impl can export MORE — extras are
 // fine). Cross-repo detect-or-skip: `actualExports === null` (FUI absent / barrel unresolved) → skip.
-export const EXPORT_SHAPE_ENFORCED = false; // #927: warn-first; flip once #1164 (renderers) + #1165 (the 3 drifts) land
+export const EXPORT_SHAPE_ENFORCED = true; // #927: ENFORCED (#1206) — #1164 renderer coverage (#1203/#1204) + #1165/#1205 drifts landed; contract↔barrel drift is now a hard gate error
 
 // `blocks` = [{ id, implementedBy, declaredExports: string[], actualExports: string[] | null }].
 // Returns { errors, warnings, skipped, checked }.
