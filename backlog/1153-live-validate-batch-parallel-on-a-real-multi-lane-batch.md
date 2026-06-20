@@ -4,6 +4,7 @@ workItem: story
 size: 3
 parent: "1143"
 status: open
+humanGate: { kind: review, what: "A human must run a real parallel `/workflow` batch that spawns ≥1 concurrent item, then confirm the partition / per-item gating / one-at-a-time integration / conflict-replay / single landing merge / once-only derived regen via the closing-session close audit. A serial `/batch` cannot perform this (wrong tool)." }
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
 tags: []

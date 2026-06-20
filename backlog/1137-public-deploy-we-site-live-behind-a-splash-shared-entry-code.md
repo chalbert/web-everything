@@ -4,6 +4,7 @@ workItem: story
 size: 3
 parent: "1104"
 status: open
+humanGate: { kind: deploy, what: "Run the credentialed `wrangler pages deploy _site` + `wrangler pages secret put GATE_CODE / GATE_COOKIE_SECRET` from a Cloudflare-authenticated session (runbook: we:functions/README.md) — outside the automated commit-only lane (never-push)." }
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
 tags: []
