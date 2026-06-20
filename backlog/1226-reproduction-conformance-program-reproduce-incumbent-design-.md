@@ -1,6 +1,7 @@
 ---
 kind: epic
 status: open
+ongoing: true
 dateOpened: "2026-06-20"
 tags: []
 ---
