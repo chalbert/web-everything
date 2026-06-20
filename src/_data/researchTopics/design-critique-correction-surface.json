@@ -1,0 +1,24 @@
+{
+  "id": "design-critique-correction-surface",
+  "title": "Design-critique correction surface — HITL labeling & correction-provenance prior art",
+  "status": "open",
+  "summary": "Prep research for decision #1036 (epic #1033, the interactive design-review loop): the plateau-app surface that shows a page's auto-generated design critique (the #1034 rubric output — 8 closed scored axes 1–5 + open localized findings {dimension, element-ref, problem, severity 0–4}), lets a human comment + correct it, and persists the result as a labeled {frame, critique} training pair that un-parks the on-device model (#513). NOT greenfield: the output contract is ratified (#1034) and a STRUCTURAL TWIN already ships in plateau-app — plateau:src/vision-review/ (#1084, epic #1073), whose own README calls itself 'the Tier-2 analogue of the design-critique review surface (#1036)' (queue → proposed RichOutput over the screenshot → human corrects incl. drag-to-draw region → save labeled pair to localStorage). SURVEY of HITL annotation/correction tools (Label Studio/HumanSignal, Prodigy, CVAT, Labelbox, SageMaker Ground Truth + A2I, Supervisely, LangSmith) + the active-learning / knowledge-distillation literature. Load-bearing findings: (Q1 UX) model-proposes/human-corrects is the dominant paradigm, framed as CORRECTION not authoring (Labelbox MAL loads predictions as editable annotations, 50–70% time saved); the 'one item at a time, accept/correct/skip' REVIEW QUEUE is a named cross-tool convention (Label Studio 'Fix & Accept' vs 'Reject' over a Label Stream; LangSmith annotation queue; Prodigy binary stream); bbox findings land as draggable/resizable editable boxes (CVAT/Labelbox); rich-edit-in-place beats pure binary for boxed multi-attribute findings, with a binary fast-path only for the whole-critique gate — and vision-review/ already implements this skeleton. (Q2 PROVENANCE) preserve-both is UNANIMOUS — Label Studio: 'Predictions cannot be modified and are always read-only', a correction is a NEW annotation coexisting with the prediction; A2I stores the original inference plus the human output; disagreement is an active-learning selector (Query-by-Committee, BALD); edit-distance-from-proposal is an established effort/difficulty/quality signal (genome AED; compression-based edit distance predicts human edit time); for distillation specifically the KD literature warns teacher predictions are noisy and retaining teacher-prediction + human-gold IS the noise-correction signal #513 needs. The in-tree twin diverges: vision-review/'s ReviewRecord OVERWRITES (does not retain the model proposal) — so adopting preserve-both either diverges from the sibling or argues for retrofitting it. Maps to #1036's two forks: F1 reuse boundary → shared review harness (queue/screenshot-canvas/persist/no-leakage extracted, critique editor composes it; folding into vision-review rejected — conflates two output contracts); F2 correction-record provenance → preserve-both (proposed read-only + corrected gold + provenance metadata). Supported-by-default: correct values-not-vocabulary (axis set is versioned config, #1034 F3 comparability invariant); Phase-1 localStorage now (plateau.design-review.v1), corpus write-back parked to Phase-2 #554; seed queue now, design-refs/ corpus read endpoint later; no-leakage (#475); critique-only scope (a unified correct-any-vision-output surface is a separate epic-level call). Full grounding in reports/2026-06-20-design-critique-correction-surface.md.",
+  "dateOpened": "2026-06-20",
+  "lastReviewed": "2026-06-20",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "design-reference",
+    "vision",
+    "design-critique",
+    "human-in-the-loop",
+    "annotation",
+    "labeling",
+    "active-learning",
+    "knowledge-distillation",
+    "training-data",
+    "plateau"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

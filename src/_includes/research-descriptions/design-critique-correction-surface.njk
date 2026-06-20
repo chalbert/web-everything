@@ -1,0 +1,152 @@
+<h2>Purpose</h2>
+<p>
+  Prior-art grounding for the <strong>design-critique correction surface</strong>
+  (<a href="/backlog/1036-plateau-review-surface-view-a-page-critique-comment-correct-/">backlog #1036</a>,
+  under the interactive design-review epic
+  <a href="/backlog/1033-interactive-design-review-loop-analyse-a-page-get-a-critique/">#1033</a>):
+  the plateau-app surface that shows a page's auto-generated design critique, lets a human comment and
+  correct it, and persists the result as a labeled <code>{frame, critique}</code> training pair — the
+  corpus accumulator that un-parks the on-device verdict model (#513). Session report:
+  <code>reports/2026-06-20-design-critique-correction-surface.md</code>.
+</p>
+
+<h2>This surface is not greenfield — two pieces already exist</h2>
+<table>
+  <thead><tr><th>Piece</th><th>What it fixes</th><th>Where</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>The output contract being corrected</strong> (#1034, ratified)</td>
+      <td>8 <em>closed</em> scored axes (1–5) + an <em>open</em> list of localized findings
+        <code>{dimension, element-ref, problem, severity 0–4}</code>, versioned axis set. The surface
+        corrects values <em>within</em> this contract — never the contract itself.</td>
+      <td><code>docs/agent/vision-tiers.md</code> §Design-critique rubric</td>
+    </tr>
+    <tr>
+      <td><strong>A structural twin already ships</strong> (#1084, epic #1073)</td>
+      <td>The Tier-2 <code>vision-review/</code> surface — its README calls itself
+        <em>"the Tier-2 analogue of the design-critique review surface (#1036)."</em> Queue → proposed
+        <code>RichOutput</code> over the screenshot → human corrects (incl. drag-to-draw a region) → save a
+        labeled pair to <code>localStorage</code>.</td>
+      <td><code>plateau:src/vision-review/</code> (<code>data.ts</code>, <code>vision-review.ts</code>)</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  So #1036 is <strong>the same review/correct/persist loop as <code>vision-review/</code>, for a different
+  output contract</strong> (critique axes + findings vs description + tags + regions). The prep is about the
+  <em>reuse boundary</em> and the <em>correction-record provenance</em>, not about inventing a UI.
+</p>
+
+<h2>Q1 — HITL correction UX patterns</h2>
+<table>
+  <thead><tr><th>Source</th><th>What it shows</th><th>What we borrow</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Labelbox MAL</strong> / <strong>Label Studio</strong> ML backend</td>
+      <td>Model predictions load as <strong>editable</strong> annotations; the task is "review and
+        correction of AI model output rather than creating labels from scratch" (50–70% time saved).</td>
+      <td>Pre-fill the canvas with the model's proposed critique as editable objects; frame the human task as
+        <em>correction</em>, not authoring.</td>
+    </tr>
+    <tr>
+      <td><strong>Label Studio Enterprise</strong> · <strong>LangSmith</strong> · <strong>Supervisely</strong> · <strong>Prodigy</strong></td>
+      <td>The "one item at a time, accept / correct / skip" <strong>review queue</strong> is a named
+        cross-tool convention: "Fix &amp; Accept" vs "Reject" over a Label Stream; annotation queue;
+        labeling queue; the binary accept/reject/ignore stream.</td>
+      <td>A one-screenshot-at-a-time queue with explicit <strong>Accept / Fix-&amp;-Accept / Reject(Skip)</strong>
+        verbs (Label Studio naming).</td>
+    </tr>
+    <tr>
+      <td><strong>CVAT</strong> / <strong>Labelbox</strong> / <strong>V7</strong></td>
+      <td>Region/bbox predictions land as <strong>draggable/resizable editable boxes</strong>: adjust,
+        relabel, add a missed box, delete a hallucinated one.</td>
+      <td>Each localized finding renders as a pre-drawn editable box with per-region attributes
+        (dimension / problem / severity) — <code>vision-review/</code> already implements the drag-to-draw shell.</td>
+    </tr>
+    <tr>
+      <td><strong>SageMaker Ground Truth + A2I</strong></td>
+      <td>Confidence-gated routing: high-confidence predictions auto-accept; low-confidence route to a human
+        "verify or adjust" step; jobs chain.</td>
+      <td>Optional confidence fast-path: a binary gate for the whole critique, rich-edit only where the human
+        disagrees.</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  <strong>Synthesis:</strong> the convention is near-universal and the in-tree twin already matches it —
+  pre-fill the proposal as editable objects inside a one-item review queue with Accept / Fix-&amp;-Accept /
+  Reject verbs. Pure binary is too thin for boxed multi-attribute findings, so <em>rich-edit-in-place</em> is
+  the default, with a binary fast-path only for the whole-critique accept gate.
+</p>
+
+<h2>Q2 — Provenance: overwrite vs preserve-both</h2>
+<ul>
+  <li><strong>Preserve-both is unanimous.</strong> Label Studio is explicit: <em>"Predictions cannot be
+    modified and are always read-only"</em> — a correction creates a <em>new</em> annotation that coexists
+    with the prediction (dual-track). SageMaker A2I stores the original inference <strong>plus</strong> the
+    human output, with the triggering confidence.</li>
+  <li><strong>Disagreement is signal.</strong> Active learning selects the next examples to label by
+    disagreement (Query-by-Committee; <strong>BALD</strong> — Bayesian Active Learning by Disagreement).
+    You can only compute model-vs-human disagreement if you kept the model's prediction.</li>
+  <li><strong>Edit-distance-from-proposal is an established effort / difficulty / quality signal</strong>
+    (genome AED; compression-based edit distance predicts human edit time; interactive-segmentation
+    clicks-to-correct). It exists only if the proposal is retained, and doubles as a quality filter and an
+    ambiguous-axis detector.</li>
+  <li><strong>For distillation specifically</strong> (#513's ≤10 MB student learning from the hosted
+    teacher's labels): the KD literature warns teacher predictions are noisy and "inaccurate teacher
+    predictions… could harm the student"; noise-corrected KD uses human-corrected labels to fix teacher
+    errors before training. Retaining teacher-prediction + human-gold <em>is</em> that noise-correction
+    signal — and it keeps open the later (separate) KD fork of whether to feed the student teacher
+    <em>soft</em>-labels too.</li>
+  <li><strong>Typical stored metadata:</strong> model version + per-element confidence + the full payload on
+    the proposal; annotator id, timestamp, time-spent, and per-element verdict on the correction.</li>
+  <li><strong>The in-tree twin diverges:</strong> <code>vision-review/</code>'s
+    <code>ReviewRecord extends RichOutput</code> is an <em>overwrite</em> record — it does not retain the
+    model's proposal. Adopting preserve-both for #1036 either diverges from the sibling or argues for
+    retrofitting it (a coupling the decision calls out).</li>
+</ul>
+<p>
+  <strong>Synthesis:</strong> <strong>preserve-both</strong> is a settled convention. Persist each pair as
+  <code>{ proposed (read-only: axes + findings + per-element confidence + provider/model version), corrected
+  (the human gold), comment, annotator/timestamp/time-spent, per-element verdict (accept|fix|reject) }</code>,
+  and derive an edit-distance/disagreement measure from the pair.
+</p>
+
+<h2>How this maps to #1036's forks</h2>
+<table>
+  <thead><tr><th>Fork</th><th>Call</th><th>Default</th><th>Confidence</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>1 · Reuse boundary</td>
+      <td>shared review harness vs independent siblings (vs fold into <code>vision-review/</code>)</td>
+      <td><strong>Shared harness</strong> — extract queue / screenshot-canvas / persist / no-leakage; the
+        critique editor composes it. Folding-into-<code>vision-review/</code> rejected (conflates two output
+        contracts).</td>
+      <td>~75%</td>
+    </tr>
+    <tr>
+      <td>2 · Correction-record provenance</td>
+      <td>overwrite (the <code>vision-review/</code> precedent) vs preserve-both</td>
+      <td><strong>Preserve-both</strong> — proposal read-only + corrected gold + provenance.</td>
+      <td>~85%</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  <strong>Forced invariants / supported-by-default (not forks):</strong> correct <em>values not
+  vocabulary</em> (the axis set is versioned config, #1034 Fork 3's comparability invariant); Phase-1
+  <code>localStorage</code> now (<code>plateau.design-review.v1</code>), corpus write-back parked to
+  Phase-2 #554; seed queue now, <code>design-refs/</code> corpus read endpoint later; no-leakage
+  (screenshots in, labels out, never the model — #475); critique-only scope (a unified
+  correct-any-vision-output surface across #475 / #396 / #1034 is a separate epic-level call).
+</p>
+
+<h2>Sources</h2>
+<ul>
+  <li>Label Studio / HumanSignal — ML backend &amp; predictions (read-only), review workflow, quality/lead-time.</li>
+  <li>Labelbox — model-assisted labeling (editable predictions); SAM-assisted boxes. Prodigy — active-learning binary stream.</li>
+  <li>CVAT — serverless auto-annotation, editable boxes; SageMaker Ground Truth + A2I — confidence-gated routing, stores inference + human output.</li>
+  <li>Supervisely labeling queues; LangSmith annotation queues.</li>
+  <li>Active learning: Query-by-Committee, BALD; survey arXiv 2210.10109. Edit-effort: AED; compression-based edit distance arXiv 2412.17321.</li>
+  <li>Distillation noise-correction: ACM 2025 (Robust KD via Noise Correction); arXiv 1811.03331 (label correction).</li>
+</ul>
