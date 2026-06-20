@@ -4,7 +4,7 @@ workItem: story
 size: 3
 parent: "1038"
 status: open
-blockedBy: ["1233"]
+blockedBy: []
 dateOpened: "2026-06-20"
 tags: []
 relatedProject: webcases

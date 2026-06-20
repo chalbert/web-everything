@@ -2,9 +2,12 @@
 type: decision
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-20"
 relatedReport: reports/2026-06-20-cases-to-test-bridge.md
 relatedProject: webcases
@@ -34,6 +37,36 @@ semantics*, default **→ A (reachability lowering)**.
 
 Two **ratify** lines (forced invariants) and the support-list are below the divider; the single genuine
 call is Fork 1.
+
+## Ruling — ratified 2026-06-20 (A, ~90%)
+
+**Fork 1 → A (reachability lowering).** The assert-directive lowers to a minimal `ConformanceVector`
+whose required `expect` is derived from `kind`: a `state` observable asserts its surface is *reached*
+(present/non-empty) at its tier; an `event` observable asserts it *fired* (appears in the run trace).
+No registry or authoring-surface change — so the #1162 build ships standalone. The two forced
+invariants ratify as written: runtime drive stays FUI (#817/#899 + WE↛FUI); the bridge is a second
+declarative front-end onto the **one** `ConformanceVector` contract (#855), the schema gaining only an
+optional `tier` field.
+
+**Why A is the floor, not a placeholder (the red-team).** B's residual was "the first webcases assert
+exact values." It does not land: neither the directive, nor `ProtocolObservable`
+(`{id, kind, platform?}`), nor the authored requirement `then` (`{protocol, observe, tier}`,
+[we:webcases/requirementValidator.ts:57-58](../webcases/requirementValidator.ts#L57-L58)) carries a
+value *anywhere*. B is therefore a **three-layer** change (authoring `then` grows a value slot →
+observable registry grows a literal → lowering reads it), not a registry tweak — the directive can't
+even *express* what B would check. A is the only semantics the current contract can mean (the directive
+names *what* to observe and *where*, never *what value*), and *most-flexible-default* points at it (the
+permissive floor; the value literal is the author's opt-in). The "#1162 builds standalone" merit is a
+prioritization bonus, not the deciding reason — A wins on correctness.
+
+**B is a sanctioned future layer, scoped by the registry.** The observable registry already encodes
+values into observable *identity* (`invalid-state-announced` vs `valid-state-announced` are distinct
+ids) and models firings as events — for those, reaching the named observable **is** the value check, so
+A is permanently complete. B's genuine targets are the minority of value-bearing **state** observables
+(`current-value`, `validity-state`, `entity-timeline`) where reaching ≠ right value. B layers on
+per-observable, opt-in; ratifying A does not preclude it. Filed as the tracked follow-up
+[#1235](/backlog/1235-value-equality-lowering-for-value-bearing-state-observables-/)
+(`blockedBy: #1162`) so the option is prioritisable, not buried in this resolved doc.
 
 ## Fork 1 — Bridge checking semantics: coarse reachability vs full value-equality
 
