@@ -1,0 +1,21 @@
+{
+  "id": "fragment-reveal",
+  "name": "Fragment / Incremental-Reveal Intent",
+  "status": "draft",
+  "summary": "A finer-than-slide step-reveal: content within a single slide appears in ordered steps as the presenter advances, rather than all at once. Declares the reveal order (document order, or an explicit fragment index that reorders), the per-step transition (each step is its own View Transition without re-animating the whole slide), and reverse traversal on back-navigation (a step un-reveals). Composes the view + view-transition semantics and is a member of the advanceable-sequence family (#1179). The subtle part — and why this is its own contract — is the overloaded 'next': advancing must reveal the next fragment if one remains, else change slide.",
+  "dimensions": {
+    "order": {
+      "description": "The sequence steps are revealed in. source = document order (the default); index = an explicit per-fragment index that reorders reveal independent of DOM position (a later element revealing first).",
+      "values": ["source", "index"]
+    },
+    "traversal": {
+      "description": "Back-navigation behavior. bidirectional = reverse traversal un-reveals the last step (back-nav steps fragments backward before changing slide — the default for a deck); forward = steps only reveal, never un-reveal (back-nav jumps straight to the previous slide).",
+      "values": ["bidirectional", "forward"]
+    },
+    "step": {
+      "description": "How each step animates. view-transition = each reveal is its own View Transition over just the affected element (no whole-slide re-animation); none = instant appearance (and the conformance default under prefers-reduced-motion).",
+      "values": ["view-transition", "none"]
+    }
+  },
+  "description": "<h3>Step reveal within a slide</h3><p class=\"text-sm text-gray-600 mb-2\">A slide often reveals its content in steps — a bullet at a time, a diagram building up — as the presenter advances. This is <em>finer</em> than slide-to-slide change: the slide stays, its pieces appear in order. The Fragment intent declares that order, the per-step transition, and what back-navigation does.</p><h3>The overloaded 'next'</h3><p class=\"text-sm text-gray-600 mb-2\">The load-bearing subtlety: a single 'advance' action must <strong>reveal the next fragment if one remains, otherwise change slide</strong>. Symmetrically, 'back' un-reveals the last fragment before stepping to the previous slide (under <code>bidirectional</code> traversal). This dual meaning is why fragments are a contract, not just a CSS animation — the navigation model and the reveal model are entangled.</p><h3>Composition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>View / View-Transition:</strong> each step composes the <code>view</code> + <code>view-transition</code> semantics, scoped to the revealed element so the rest of the slide does not re-animate.</li><li><strong>Advanceable-Sequence:</strong> a member of the <a href=\"/intents/advanceable-sequence/\">advanceable-sequence family</a> (#1179) — fragments are the deck's added layer over the shared advance kernel.</li><li><strong>Reduced motion:</strong> the <code>step: none</code> path is the conforming fallback under <code>prefers-reduced-motion</code> (the View Transitions gate the native API omits — folded into the a11y vector set #1195).</li></ul>"
+}
