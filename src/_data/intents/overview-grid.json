@@ -1,0 +1,17 @@
+{
+  "id": "overview-grid",
+  "name": "Overview / Slide-Sorter Intent",
+  "status": "draft",
+  "summary": "A spatial zoom-out to a grid of all slides — the slide-sorter — where the user scans the whole deck at once, selects a slide to jump to it, and optionally drags to reorder. Distinct from the Navigation intent: navigation is hierarchical/lateral/linear traversal between views, whereas this is a spatial overview of equivalent ordered items (it composes collection-operations for the grid, selection, and reorder). The always-on core is select-to-jump; reorder is the authoring layer. Homed in webintents per the ratified distributed placement (#1175).",
+  "dimensions": {
+    "grouping": {
+      "description": "How the grid arranges slides. flat = one grid of every slide in order; sectioned = grids grouped by the deck's sections (mirrors the document model's deck > sections > slides).",
+      "values": ["flat", "sectioned"]
+    },
+    "reorder": {
+      "description": "Whether the overview supports drag-reorder. none = read-only overview (navigate only — the presenter/viewer case); drag = drag-to-reorder slides (the authoring case), composing collection-operations move semantics.",
+      "values": ["none", "drag"]
+    }
+  },
+  "description": "<h3>Zoom out to see the whole deck</h3><p class=\"text-sm text-gray-600 mb-2\">The slide-sorter: a spatial overview where every slide is shrunk into a grid so the user can scan the entire deck at once, click a slide to jump straight to it, and — when authoring — drag to reorder. Every desktop deck tool ships this view; on the web it is a distinct interaction mode, not just a smaller render.</p><h3>Spatial, not hierarchical</h3><p class=\"text-sm text-gray-600 mb-2\">This is deliberately <em>not</em> the <a href=\"/intents/navigation/\">Navigation intent</a>. Navigation models hierarchical/lateral/linear view changes with history and URL semantics; the overview is a <strong>spatial</strong> rearrangement of equivalent ordered items. It composes <a href=\"/intents/collection-operations/\">Collection Operations</a> for the grid layout, selection, and drag-reorder.</p><h3>Core vs layer</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Always on:</strong> select-to-jump — tapping a thumbnail navigates to that slide.</li><li><strong>Authoring layer:</strong> <code>reorder: drag</code> mutates slide order in the <a href=\"/projects/webcomponents/#protocol-deck-document-model\">document model</a>.</li></ul>"
+}
