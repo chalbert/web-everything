@@ -1,0 +1,25 @@
+{
+  "id": "advanceable-sequence",
+  "name": "Advanceable-Sequence Intent",
+  "status": "draft",
+  "summary": "The shared UX vocabulary for a set of discrete, ordered items traversed one position at a time — current/next/prev, timed advance, loop, and an up-next preview. The cross-media kernel that a slide deck, a video player, and a carousel all compose, each adding only its own layer (deck → fragments + presenter; video → scrubbing + buffering; carousel → peek + dots). Factored once in webintents rather than re-specified per consumer; the carousel block already owns the advance/sequence mechanics, so this generalises that kernel. Distinct from navigation (hierarchical/lateral view changes) — this is strictly positional traversal over equivalent ordered items.",
+  "dimensions": {
+    "advance": {
+      "description": "What drives a move to the next position. manual = user action only (click/key/swipe); timed = an interval auto-advances (autoplay/kiosk); on-complete = the current item signals it is done (a video ends, an animation finishes).",
+      "values": ["manual", "timed", "on-complete"]
+    },
+    "traversal": {
+      "description": "Which directions the sequence can move. forward = next-only (a linear walkthrough); bidirectional = next and prev, with reverse traversal restoring prior state (deck back-nav, video step-back).",
+      "values": ["forward", "bidirectional"]
+    },
+    "boundary": {
+      "description": "What happens at the ends of the sequence. stop = clamp at the last/first item; loop = wrap around to the other end; rewind = on reaching the end, return to the start (autoplay restart).",
+      "values": ["stop", "loop", "rewind"]
+    },
+    "preview": {
+      "description": "Whether the next item is surfaced ahead of arrival. none = no preview; up-next = a what-comes-next affordance (deck next-slide peek, video playlist up-next, carousel peek) so the user can anticipate or skip ahead.",
+      "values": ["none", "up-next"]
+    }
+  },
+  "description": "<h3>One family, three consumers</h3><p class=\"text-sm text-gray-600 mb-2\">The headline harvest from the deck placement decision (<a href=\"/backlog/1175/\">#1175</a>): a <strong>deck</strong>, a <strong>video player</strong>, and a <strong>carousel</strong> are one family. They share <em>advance · timed-autoplay · up-next · present-surface · boundary behavior</em> over a set of discrete, ordered items. Rather than re-specify those per consumer, the Advanceable-Sequence intent factors the shared kernel once; each medium composes it and adds only its own layer.</p><h3>What each consumer adds</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Deck</strong> — fragments (finer-than-item reveal), 2D addressing, presenter mode.</li><li><strong>Video</strong> — a continuous scrub timeline, buffering, captions.</li><li><strong>Carousel</strong> — peek of adjacent items, dot markers, loop.</li></ul><h3>Prior art it generalises</h3><p class=\"text-sm text-gray-600 mb-2\">The <a href=\"/blocks/carousel/\">carousel block</a> already owns the advance/sequence mechanics (scroll-snap paging, APG rotation, opt-in autoplay paused on hover/focus, reduced-motion). This intent lifts that kernel to a cross-media contract so the three consumers cite it instead of reinventing it.</p><h3>Boundary</h3><p class=\"text-sm text-gray-600\">Strictly <em>positional</em> traversal over equivalent ordered items — distinct from the <a href=\"/intents/navigation/\">Navigation intent</a> (hierarchical/lateral/linear view changes with history + URL semantics). A wizard is navigation; a slide deck is an advanceable sequence whose <em>items</em> may each be a view.</p>"
+}

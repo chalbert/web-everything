@@ -1,9 +1,12 @@
 ---
 type: idea
 workItem: story
-status: open
+status: resolved
 size: 5
 dateOpened: "2026-06-20"
+dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: "intent:advanceable-sequence"
 relatedProject: webintents
 tags: [advanceable-media, sequence, webintents, deck, video, carousel, harvest]
 relatedReport: reports/2026-06-20-backlog-split-analysis.md
@@ -32,3 +35,7 @@ the one atomic deliverable: **mint the `advanceable-sequence` kernel intent** in
 [we:carousel](../src/_data/blocks/carousel.json) owns informally today (no sequence intent exists under
 [we:src/_data/intents/](../src/_data/intents/) yet — the `temporal` intent there is date/time selection,
 unrelated). Re-scoped from `epic` (it had no children and was sized like a single story).
+
+## Progress (batch-2026-06-20-deck)
+
+Authored intent `advanceable-sequence` in **webintents** (`we:src/_data/intents/advanceable-sequence.json`): the cross-media kernel (advance · traversal · boundary · preview) that deck, video, and carousel compose, each adding only its layer. Generalises the existing carousel advance/sequence mechanics rather than re-specifying per consumer. Auto-renders at `/intents/advanceable-sequence/`. The shared family that #1181 (fragments), #1188 (timed-advance), #1199 (up-next), #1200 (interstitial) extend.
