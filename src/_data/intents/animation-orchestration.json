@@ -1,0 +1,21 @@
+{
+  "id": "animation-orchestration",
+  "name": "Animation-Orchestration Intent",
+  "status": "draft",
+  "summary": "Intra-element build-in animations and how multiple of them relate in time — SVG draw-on, staggered list reveals, a chart growing in — distinct from slide-to-slide transition (#1183) and fragment step-reveal (#1181). Those are about navigation between or within slides; this is about how the content of a single moment animates into place: the sequencing (parallel / stagger / chain), the trigger (on-view / on-step / on-scroll), and composing the Motion intent so all of it honors prefers-reduced-motion. General, not deck-specific — any content surface (a marketing page, a dashboard) wants orchestrated build-ins. Homed in webintents per the ratified distributed placement (#1175).",
+  "dimensions": {
+    "sequence": {
+      "description": "How multiple element animations relate in time. parallel = all start together; stagger = each starts a fixed offset after the previous (a cascading list); chain = each starts when the previous finishes (a strict timeline).",
+      "values": ["parallel", "stagger", "chain"]
+    },
+    "trigger": {
+      "description": "What starts the orchestration. on-view = when the element scrolls/transitions into view (Intersection Observer); on-step = driven by an advance/fragment step (a deck build); on-scroll = scroll-linked progress (Scroll-driven Animations).",
+      "values": ["on-view", "on-step", "on-scroll"]
+    },
+    "replay": {
+      "description": "Whether the build-in repeats. once = play a single time and stay (the default); re-enter = replay each time the element re-enters view / the step is revisited.",
+      "values": ["once", "re-enter"]
+    }
+  },
+  "description": "<h3>How content arrives</h3><p class=\"text-sm text-gray-600 mb-2\">Beyond moving between slides, content <em>builds in</em>: an SVG path draws itself, a list staggers in, a chart grows. The Animation-Orchestration intent names how those intra-element build-ins are sequenced and triggered — a layer distinct from navigation.</p><h3>Not transition, not fragment</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Slide transition</strong> (<a href=\"/intents/fragment-reveal/\">#1183</a>) animates the change <em>between</em> slides.</li><li><strong>Fragment reveal</strong> (<a href=\"/intents/fragment-reveal/\">#1181</a>) reveals slide content step-by-step under navigation.</li><li><strong>This intent</strong> orchestrates how a single revealed element <em>animates into place</em> — the build-in itself, and how several relate in time.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600\">Composes the <a href=\"/intents/motion/\">Motion intent</a>: every orchestrated build-in honors <code>prefers-reduced-motion</code> (instant placement when reduced). General across content surfaces — the deck is one consumer, not the owner.</p>"
+}
