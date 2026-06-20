@@ -1,0 +1,25 @@
+{
+  "id": "cases-to-test-bridge",
+  "title": "Cases-to-test bridge — lowering a webcase assert-directive onto the conformance-vector driver (executable-spec glue prior art)",
+  "status": "open",
+  "summary": "Prep research for decision #1233: the webcases compiler (we:webcases/compileRequirement.ts) emits a `<!-- assert: protocol/observe/tier/kind -->` directive in each compiled webcase's HTML, but nothing consumes it. The 'case-to-test bridge' that turns it into a pass/fail (parse directive + Given/When/Then, drive the component, read the named observable at its tier, judge) is EXACTLY what the #899/#1176 conformance-vector driver already does (fui:tools/explorer/oracles/conformanceVectors.ts — runConformanceVector + judgeConformanceTrace + ConformanceBinding + VirtualClock; #1176 built, FUI-owned per #899 Fork-1 default A). So: reuse that driver, or build a separate WE-side mechanism? SURVEYED the executable-specification GLUE/FIXTURE prior art (distinct from #899's conformance-CORPUS survey of WPT/ARIA-AT/JSON-Schema-Test-Suite): (1) Cucumber/Gherkin — a declarative .feature corpus is SEPARATE from step-definitions (the verb-dispatching 'glue'); one corpus, many runners; the glue IS a ConformanceBinding. (2) Concordion — the instrumented-HTML style: spec is HTML with embedded `concordion:` commands invisible to the browser, processed by impl-side FIXTURE code that drives the system-under-test; this is the webcases `<!-- assert: … -->` directive pattern EXACTLY, and Concordion's stated goal is to DECOUPLE spec from system (corpus ⊥ fixture). (3) Concordion's vocabulary splits `execute`/`set` (run + observe an outcome surface) from `assertEquals` (compare to a literal) — grounding the reachability-vs-value-equality fork. UNANIMOUS lesson: the declarative spec/corpus is one thing; the verb-dispatching glue/fixture that drives the SUT is a separate impl-side thing — i.e. the #899 split (WE corpus/schema ⊥ FUI driver), and the directive is simply a SECOND declarative front-end lowering to the same driver (Cucumber's 'many dialects, one step-runner'). GROUNDING in tree: the FUI driver imports ConformanceVector type-only from @webeverything/conformance-vectors/schema (already a path-mapped type-only seam; #239 forbids WE importing FUI, so reuse = a contract seam, never a direct import); ConformanceBinding is declared INSIDE the FUI file (runtime-adapter shape → correctly FUI); the directive UNDER-specifies a vector — it carries protocol/observe/tier/kind but NO concrete expected value, and ProtocolObservable={id,kind,platform?} carries none either, while ConformanceVector.expect REQUIRES a concrete value; the directive carries `tier` (L1/L2/L3) which the vector schema lacks. SYNTHESIS handed to #1233: the stated 'reuse vs separate' collapses to TWO forced invariants + ONE genuine fork. Invariant 1 (#817/#899/#239): runtime drive → FUI; WE owns only the deterministic directive→check LOWERING (next compile stage after compileRequirement.ts); broken branch = a WE-side runtime driver. Invariant 2 (#855/DRY): the lowering target is the EXISTING WE ConformanceVector contract reused (directive = second front-end), the schema gaining an optional additive `tier` field — NOT a new parallel case-check contract + second FUI runner (broken branch). THE ONE GENUINE FORK — the bridge's checking SEMANTICS: A reachability lowering (recommended, ~80%) — lower to a minimal vector whose expect asserts the observable was reached (state present) / fired (event in trace) at its tier, derived from `kind`; no registry change, #1162 builds standalone; Concordion execute/set precedent; the breadth layer (every requirement gets a cheap executable check) while the hand-authored vector corpus stays the depth layer (exact-value + temporal). VS B value-equality lowering (rejected default) — extend ProtocolObservable / the requirement `then` with an expected value so the directive lowers to a full value-equality vector; stronger but forces a registry+schema extension + author burden and BLOCKS #1162; Concordion assertEquals precedent; defer until reachability proves too weak. Full grounding in reports/2026-06-20-cases-to-test-bridge.md.",
+  "dateOpened": "2026-06-20",
+  "lastReviewed": "2026-06-20",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "conformance",
+    "conformance-vectors",
+    "cases-to-test-bridge",
+    "executable-specification",
+    "cucumber",
+    "gherkin",
+    "concordion",
+    "step-definitions",
+    "fixture-glue",
+    "webcases",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcases"
+}

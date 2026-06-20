@@ -1,0 +1,121 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for decision
+  <a href="/backlog/1233-decide-cases-to-test-bridge-reuses-the-899-1176-conformance-/">#1233</a> — the
+  webcases compiler emits an <code>&lt;!-- assert: protocol/observe/tier/kind --&gt;</code> directive in
+  every compiled webcase, but <strong>nothing consumes it</strong>. The "case-to-test bridge" that turns
+  that directive into a pass/fail is <strong>exactly</strong> what the
+  <a href="/backlog/899-behavioral-conformance-vectors-in-browser-implementer-valida/">#899</a>/<a href="/backlog/1176-layer-2-conformance-vector-oracle-layer-3-advisory-llm-judge/">#1176</a>
+  conformance-vector driver already does. This survey grounds the
+  <em>reuse-the-driver vs separate-WE-mechanism</em> call in the executable-specification glue/fixture
+  prior art and the constellation rulings. Full grounding in
+  <code>reports/2026-06-20-cases-to-test-bridge.md</code>.
+</p>
+
+<h2>The question</h2>
+<p>
+  <code>we:webcases/compileRequirement.ts</code> <em>produces</em> a directive naming what to check
+  (<code>protocol</code>, <code>observe</code>, <code>tier</code>, and the
+  <a href="/backlog/1201-/">#1201</a> <code>kind="state|event"</code> token — read-a-state vs
+  await-an-event). The bridge is whatever consumes it: parse the directive + the <code>WEB CASE</code>
+  Given/When/Then, drive the component, read the named observable at its tier, judge. That runtime job —
+  mount + dispatch action verbs + advance a clock + read an observable surface — is precisely
+  <code>runConformanceVector</code> + <code>judgeConformanceTrace</code> + <code>ConformanceBinding</code>
+  + <code>VirtualClock</code> in <code>fui:tools/explorer/oracles/conformanceVectors.ts</code>. So before
+  <a href="/backlog/1162-cases-spec-completion-case-to-test-bridge-conformance-valida/">#1162</a> builds:
+  reuse the driver, or a separate WE-side mechanism?
+</p>
+
+<h2>Prior art — executable-specification bridges (the glue/fixture seam)</h2>
+<p>
+  Distinct from #899's <em>conformance-corpus</em> survey (WPT, ARIA-AT, JSON Schema Test Suite), the
+  "directive&nbsp;→&nbsp;runtime driver" pattern is the executable-spec <strong>glue/fixture</strong> seam:
+</p>
+<ul>
+  <li>
+    <strong>Cucumber / Gherkin</strong> — a declarative <code>.feature</code> corpus (Given/When/Then) is
+    <strong>separate</strong> from <em>step definitions</em>, the "glue" that pattern-matches each step to a
+    verb-dispatching function. One corpus, many runners; the glue is exactly a
+    <code>ConformanceBinding</code>.
+  </li>
+  <li>
+    <strong>Concordion</strong> — the <em>instrumented-HTML</em> style: the spec is HTML with embedded
+    <code>concordion:</code> commands, <strong>invisible to the browser, processed by fixture code</strong>
+    that finds the commands and verifies the system under test. This is the webcases
+    <code>&lt;!-- assert: … --&gt;</code> directive pattern <strong>exactly</strong> — a declarative
+    artifact with inline check-commands + a separate impl-side fixture that drives them. Concordion's stated
+    goal is to <strong>decouple the spec from the system</strong>.
+  </li>
+  <li>
+    <strong>Concordion's vocabulary</strong> splits <code>execute</code>/<code>set</code> (run + observe an
+    outcome surface) from <code>assertEquals</code> (compare to a literal). The webcases directive as it
+    stands is the <em>former</em> style; a literal-value check is the <em>latter</em> and needs the literal
+    to live somewhere — grounding the fork below.
+  </li>
+</ul>
+<p>
+  <strong>The unanimous lesson:</strong> the declarative spec/corpus is one thing; the verb-dispatching
+  glue/fixture that drives the SUT is a separate, impl-side thing. That <em>is</em> the #899 split (WE
+  corpus/schema ⊥ FUI driver), and the webcases directive is simply a <strong>second declarative
+  front-end</strong> that lowers to the same driver — Cucumber's "many feature dialects, one step-runner".
+</p>
+
+<h2>Grounding in the tree</h2>
+<ul>
+  <li>
+    The FUI driver imports <code>ConformanceVector</code> <strong>type-only</strong> from
+    <code>@webeverything/conformance-vectors/schema</code> (already a path-mapped type-only seam). #239
+    forbids WE importing FUI, so a "reuse" path is a <strong>contract seam, never a direct import</strong>.
+  </li>
+  <li>
+    <code>ConformanceBinding</code> is declared <strong>inside the FUI file</strong> — runtime-adapter
+    shape, consumed only by the runner, so it correctly stays FUI.
+  </li>
+  <li>
+    The directive <strong>under-specifies a vector</strong>: it names
+    <code>protocol/observe/tier/kind</code> but carries <strong>no concrete expected value</strong>, and
+    the observable registry carries none either (<code>ProtocolObservable = { id, kind, platform? }</code>)
+    — while <code>ConformanceVector.expect</code> <em>requires</em> a concrete value. This is the real
+    residual fork.
+  </li>
+  <li>
+    The directive carries <code>tier</code> (<code>L1/L2/L3</code>); the vector schema has no tier field —
+    lowering needs an <strong>additive optional <code>tier</code></strong>, not a new contract.
+  </li>
+</ul>
+
+<h2>Synthesis handed to #1233</h2>
+<p>
+  Running the constellation rulings over the stated "reuse vs separate" call collapses it to
+  <strong>two forced invariants + one genuine fork</strong>:
+</p>
+<ul>
+  <li>
+    <strong>Invariant 1 (ratify) — runtime → FUI; WE owns only the lowering.</strong> Mount + dispatch +
+    clock + read-observable <em>is</em> the #899 driver (#817/#899 put runtime → FUI; #239 forbids WE
+    importing FUI). WE owns the deterministic directive→check lowering — the next compile stage after
+    <code>compileRequirement.ts</code>. <em>Broken branch:</em> a WE-side runtime driver.
+  </li>
+  <li>
+    <strong>Invariant 2 (ratify) — reuse the existing <code>ConformanceVector</code> contract.</strong> The
+    directive is a second front-end lowering to <code>@webeverything/conformance-vectors/schema</code>
+    (gaining an additive optional <code>tier</code>), run by the existing
+    <code>runConformanceVector</code>/<code>judgeConformanceTrace</code>. <em>Broken branch:</em> minting a
+    second parallel "case-check" contract + a second FUI runner — cuts #855 and DRY.
+  </li>
+  <li>
+    <strong>Fork 1 (the genuine call) — the bridge's checking semantics.</strong>
+    <strong>A — reachability lowering (recommended, ~80%):</strong> lower to a minimal vector whose
+    <code>expect</code> asserts the observable was <em>reached</em> (state present) / <em>fired</em> (event
+    in trace) at its tier, derived from <code>kind</code>; no registry change, #1162 builds standalone;
+    Concordion <code>execute</code>/<code>set</code> precedent; the <em>breadth</em> layer while the
+    hand-authored vector corpus stays the <em>depth</em> layer (exact-value + temporal).
+    <strong>B — value-equality lowering (rejected default):</strong> extend
+    <code>ProtocolObservable</code> / the requirement <code>then</code> with an expected value so the
+    directive lowers to a full value-equality vector; stronger but forces a registry+schema extension +
+    author burden and <strong>blocks #1162</strong>; Concordion <code>assertEquals</code> precedent; defer
+    until reachability proves too weak.
+  </li>
+</ul>
+{% endraw %}
