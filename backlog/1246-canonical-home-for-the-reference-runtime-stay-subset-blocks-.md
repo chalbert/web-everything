@@ -30,10 +30,11 @@ can start. Grounding: `we:reports/2026-06-20-1246-reference-runtime-canonical-ho
 > UI). This **reverses #697** and **carves blocks OUT of the #1078 reference-impl tier**; codified in
 > `we:docs/agent/platform-decisions.md#we-fui-embed-boundary` (rule 4 reference-vs-impl partition
 > withdrawn) + a blocks-carve note on `#constellation-placement` rule 1.
-> **Scope guard:** this does **not** withdraw the #1078 tier wholesale — #1078 (resolved 2026-06-20)
-> keeps `we:webpolicy/enforcement.ts` + ~10 other **non-rendered logic** reference runtimes in WE,
-> where the iframe path doesn't fit and the #899 vector-runner isn't built. Whether to go *fully* "zero
-> impl in WE" is a **separate, broader decision** (see the spin-off filed at close-out). Everything from
+> **Scope note:** #1246 ruled the *block* subset. The broader "fully zero-impl in WE" question was
+> filed as #1282 and **has since been ratified** (2026-06-20): the WE project holds **zero
+> implementation** as the rule (`we:docs/agent/platform-decisions.md#constellation-placement`); the
+> #1078 reference-impl tier is withdrawn wholesale, with pre-existing logic runtimes (webpolicy et al.)
+> relocating to FUI as **tracked debt** gated on a FUI home + #899 (epic #1294). Everything from
 > here down to the "⚑ Ruling" section is the prior **14-retain/2-delete** analysis, **superseded, audit
 > only**.
 
@@ -204,9 +205,9 @@ not just their conclusion.
   `we:webpolicy/enforcement.ts` + ~10 non-rendered reference runtimes in WE, with reasoning the block
   case does **not** rebut (the `fuiDemo` iframe is built for rendered FUI components, not headless
   logic/proof conformance; the #899 FUI-side vector-runner is **not built**, so deleting those would
-  "replace executable proof with nothing"). Going *fully* zero-impl-in-WE is therefore a **separate,
-  broader decision** that reverses #1078 wholesale and is gated on #899 — filed as a spin-off, not
-  decided here.
+  "replace executable proof with nothing"). That broader call was filed as #1282 and **since ratified**:
+  WE = zero implementation is the rule; #1078's tier is withdrawn wholesale; the logic runtimes relocate
+  as **gated debt** (epic #1294), so nothing is stranded today.
 
 **Downstream scope change:** #1245 grows from "dedup WE copies to track FUI" → **"delete all WE copies +
 re-host the ~14 demos as FUI-hosted (#701) + convert WE unit tests to vectors."** The residual ~20% is

@@ -16,6 +16,14 @@ tags: []
 
 # webpolicy engine — DMN engine plus proof-of-compliance runtime in FUI
 
+> **⚑ SUPERSEDED 2026-06-20 by #1282 (rule lives in `we:docs/agent/platform-decisions.md#constellation-placement`).**
+> This item established a "WE-resident reference-implementation tier" keeping the webpolicy engine in
+> WE. That tier is **withdrawn**: the WE project holds **zero implementation** — the engine is delivery
+> runtime → FUI, and the "WE conformance demo needs it" justification was a *website* concern (the site
+> surfaces FUI, not a WE copy). The engine currently still sits in WE as **tracked relocation debt**
+> (not a sanctioned tier), gated on a FUI home + a headless surface-FUI path / the #899 runner —
+> relocation epic **#1294**. Retained below for history only; do not cite the tier as standing rule.
+
 Slice B of webpolicy impl epic #1028 (blockedBy slice A contract). Implement the DMN engine + proof-of-compliance runtime in FUI (evaluate DMN decision tables, emit a signed proof-of-compliance), conforming to the WE contract.
 
 > **Prepared 2026-06-20** (`/prepare`). Grounding report: `we:reports/2026-06-20-we-resident-reference-runtime-placement.md`. This ratifies *shipped* code (the runtime exists), so the web prior-art survey is skipped per backlog-workflow → Fork-readiness pass; no new `/research/` topic — the load-bearing prior art (the standards-body reference-implementation tier) is captured as the grounding digest below.

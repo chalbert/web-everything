@@ -14,6 +14,18 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
 > the same axis instead of citing it. The worst offender was constellation placement (10 decisions
 > re-deciding one test). The fix is this file plus a promotion discipline, below.
 
+> **⚖️ THIS DOC IS THE SINGLE SOURCE OF TRUTH FOR SETTLED ORIENTATION — read and cite _it_, not the
+> backlog decision chain.** When you need to know *the rule* (a placement / naming / boundary /
+> monetization orientation), read **this file** and cite the **named anchor**
+> (`platform-decisions.md#<anchor>`). **Do NOT reason from, or cite, the `backlog/*.md` `type:decision`
+> items (`#NNN`) unless you specifically need the _history_** — the deliberation, the forks, the
+> lineage behind a rule. The case-law items are an **archive**, not the reference; a bare `#NNN`
+> citation of an already-codified rule is a smell (swap it for the anchor). This doc **must be kept
+> complete and current** — if a settled rule is missing or stale here, that is a **codification gap to
+> fix** (promote/repair the rule in this file, per the discipline below), never a licence to fall back
+> to citing the work item. `#NNN` is correct in exactly two places: this doc's own **`Lineage:`**
+> footers, and when you *genuinely mean the historical call* (e.g. a reversal that supersedes it).
+
 ## How to use this file
 
 1. **Before opening a new `type: decision` for a placement / naming / monetization / boundary
@@ -59,19 +71,27 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    WE-side conformance gate** (`check.ts`) → **Web Everything**. Code that **delivers a capability
    at runtime** (registry-dispatching, artifact-producing, a running handler — incl. `assert*`,
    constants, engines, native-default strategies) → **Frontier UI**. A served, credential-holding
-   product → **Plateau**. **Reference-implementation tier (#1078) — blocks carved OUT by #1246.** The
-   WE *repo* may host a **non-published reference runtime** for a **non-rendered contract/logic**
-   standard (e.g. `we:webpolicy/enforcement.ts` — a headless DMN/proof conformance the `fuiDemo` iframe
-   convention does not fit, and #1078's standards-body precedent: wpt/test262 live in the standards
-   repo) — an executable spec consumed only by WE's own conformance demos/tests; FUI still ships the
-   *production* impl, the reference impl carries no lock-in, and the `@webeverything` *package* stays
-   types-only (rule 3). The carve-out is the **repo**, never the **published package**, never inverts
-   the WE→FUI arrow. **But block runtime is excluded from this tier (#1246, reverses #697):** a *block*
-   (rendered UI) never keeps a WE reference copy — its demo is FUI-hosted + iframe-embedded
-   ([we-fui-embed-boundary](#we-fui-embed-boundary) rule 4), because the iframe path fits rendered UI.
-   *(Open: whether the tier should be withdrawn **wholesale** — "zero impl in WE, full stop" — is a
-   broader call than #1246's block scope; it reverses #1078's webpolicy runtime + ~10 others and is
-   gated on the #899 vector-runner being built. Not yet decided.)*
+   product → **Plateau**. **WE holds zero implementation — contract / protocol / interface only.** WE
+   never hosts delivery runtime, not even as a "reference implementation." The former
+   reference-implementation tier (a WE-repo reference runtime kept so WE conformance demos had something
+   real to run) is **withdrawn** — it conflated the WE *website* with the WE *project*. A conformance
+   demo is a **website** artifact: the WE-docs site is a downstream *consumer* that **surfaces FUI**
+   (mode-C runtime bundle / `fuiDemo` iframe — [we-fui-embed-boundary](#we-fui-embed-boundary) rule 6),
+   so it exercises **FUI's** runtime, never a WE-project copy. Delivery runtime
+   (`we:webpolicy/enforcement.ts`, block engines, parser/proof logic, …) is **FUI-canonical**; the WE
+   project keeps the **contract + conformance vectors (data)** only. The `@webeverything` *package*
+   stays types-only (rule 3); the source arrow is WE→FUI, never inverts. **The one runtime-ish thing
+   that stays WE is conformance *tooling* a WE-side `check.ts` gate consumes** (e.g.
+   `we:capability-manifest/check.ts` + its `assert*`) — it *checks* conformance, it does not *deliver* a
+   capability, so it is interface/conformance, not implementation. **Interim state (honest):** a set of
+   WE-resident logic reference runtimes predate this rule and currently **violate** it —
+   `we:webpolicy/enforcement.ts`/`proof.ts` (consumed by `we:demos/webpolicy-conformance-demo.ts` via a
+   build-time local import) and the ~10 subsystems #1078 covered. They are **tracked relocation debt**,
+   **not** a sanctioned standing tier: their move to FUI is gated on (a) a FUI home existing and (b) a
+   working way for the WE-website conformance demo to surface FUI runtime for *headless* logic (the
+   `fuiDemo` iframe serves only rendered components today; the #899 vector-runner is designed, not
+   built). Until both clear they stay put **as debt under this rule** — and crucially **no _new_
+   WE-resident delivery runtime may be added.** Relocation tracked by #1294; the rule is #1282.
 2. **The file seam is the cut:** `contract.ts` (pure types, compile-erased) → WE; `provider.ts` +
    `registry.ts` (runtime) → FUI. Split mixed modules *mid-file* at this seam.
 3. **Distribution end-state:** FUI consumes WE contracts via a WE-published type-only package
@@ -97,11 +117,11 @@ plateau-app / exercise-app); items gate in their own locus so cross-repo batches
 **Lineage:** #730 #817 (the per-file define-vs-deliver holding) · #606 (plugs runtime → FUI) ·
 #1248 (relocating the runtime does not retire the contract-owning project — `webplugs` survives #606) ·
 #641 (block-protocol impl boundary) · #779 #426 #799 #497 #834 · #804 #872 #239 (contract package) ·
-#091 (managed-offering decomposition) · #020→#291 (impl-is-not-a-standard) · #1078 (reference-impl
-tier — refines #817: published-package purity vs repo-internal reference runtime; **stands for
-non-rendered contract/logic runtimes**) · #1246 (**carves blocks OUT of the #1078 tier** — rendered-UI
-block runtime is FUI-hosted + iframe-embedded, never a WE reference copy; reverses #697. Does *not*
-withdraw the tier wholesale — webpolicy et al. unaffected).
+#091 (managed-offering decomposition) · #020→#291 (impl-is-not-a-standard) · #1078 (introduced a
+WE-resident reference-implementation tier — **superseded by #1282**: conflated WE-website with
+WE-project; WE holds zero implementation) · #1246 (blocks → FUI, reverses #697) · #1282 (**withdraws
+the reference-implementation tier wholesale** — webpolicy + all delivery runtimes → FUI; WE = contract +
+vectors only; demos are a *website* concern that surfaces FUI).
 
 ### WE ↔ Frontier UI rendering & embed boundary {#we-fui-embed-boundary}
 
@@ -115,10 +135,10 @@ display (its own site + demos, FUI branding).
    renders) — only the iframe *mechanism* requirement relaxes. iframe stays the default.
 3. **Escape/overlay** (modals breaking the iframe box) is host-side over an origin-validated
    `postMessage` channel via a **FUI-owned embed SDK**; seed transport is URL-canonical + additive.
-4. **No block runtime in WE (#1246, reverses #697; carves blocks out of the #1078 reference-impl
-   tier):** **every** block's runtime is FUI-canonical — *none* stays in WE, not even one whose demo
-   exercises a WE standard (the iframe path fits rendered UI; this does **not** touch #1078's
-   non-rendered logic runtimes like webpolicy). Its demo is
+4. **No block runtime in WE (#1246, reverses #697):** **every** block's runtime is FUI-canonical —
+   *none* stays in WE, not even one whose demo exercises a WE standard. (This is the rendered-UI
+   instance of the general rule in [constellation-placement](#constellation-placement) rule 1 — *WE
+   holds zero implementation*, #1282.) Its demo is
    **FUI-hosted and iframe-embedded** (or consumed as a mode-C runtime URL-bundle per rule 6); WE owns
    only the block **protocol + conformance vectors** (#817/#899, data not impl). The former "stays in
    WE *iff* it is the standard's reference runtime" partition is **withdrawn** — the headline above
@@ -137,8 +157,8 @@ display (its own site + demos, FUI branding).
    cross the boundary?" is answered *no* by construction — don't re-open it.
 
 **Lineage:** #604 #701 #707 (iframe boundary; "WE renders real FUI blocks" is mis-framed) · #700 ·
-#1246 (withdraws the rule-4 reference-vs-impl partition + reverses #697: no block runtime stays in WE;
-carves blocks out of the #1078 tier, which still stands for non-rendered logic runtimes) ·
+#1246 (withdraws the rule-4 reference-vs-impl partition + reverses #697: no block runtime stays in WE) ·
+#1282 (general rule — WE holds zero implementation; demos are a website concern that surfaces FUI) ·
 #705 · #732 (escape SDK) · #765 (mode-C relaxation) · #788 (seed transport) · #791 (reference-vs-impl
 partition) · #809 (workbench locus) · #932 (website≠standard; consumer may run WE runtimes in-document).
 

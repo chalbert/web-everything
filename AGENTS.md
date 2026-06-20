@@ -44,7 +44,7 @@
 
 | Task | Read |
 |------|------|
-| **Where does X live? / a placement, naming, monetization, or WE↔FUI-boundary question** — the standing cross-cutting rulings (the "statute" promoted from ratified decisions); **cite a named rule instead of re-opening a decision** | [docs/agent/platform-decisions.md](docs/agent/platform-decisions.md) |
+| **Where does X live? / a placement, naming, monetization, or WE↔FUI-boundary question** — the standing cross-cutting rulings (the "statute" promoted from ratified decisions). **This doc is the SINGLE source of truth for settled orientation: read & cite its named anchor — do NOT reason from or cite the `backlog/` `#NNN` decision chain unless you need the _history_ (the chain is an archive, not the reference). A missing/stale rule here is a codification gap to fix, not a licence to cite the work item.** | [docs/agent/platform-decisions.md](docs/agent/platform-decisions.md) |
 | Naming, glossary, code style, icons | [docs/agent/conventions.md](docs/agent/conventions.md) |
 | Writing/changing tests, web cases | [docs/agent/testing.md](docs/agent/testing.md) |
 | Plugs/blocks, injectors, registries, parsers, debugging | [docs/agent/architecture.md](docs/agent/architecture.md) |
