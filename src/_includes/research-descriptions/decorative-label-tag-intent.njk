@@ -1,0 +1,109 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    Gap <strong>#6</strong> of the shadcn first reproduction-conformance delta
+    (<a href="/backlog/1243-reproduction-parity-shadcn-foundational-harness-first-gap-de/">#1243</a>)
+    mapped shadcn's <code>badge</code> onto Web Everything's
+    <a href="/intents/status-indicator/">Status Indicator</a> intent. But Status Indicator is
+    <strong>lifecycle-state-driven</strong> — "the visual member of the Web Lifecycle protocol", which
+    <em>reads a provider's</em> current state and surfaces the available next transitions. shadcn's
+    badge is a <strong>decorative, standalone label</strong> with author-supplied tone variants
+    (<code>default</code>/<code>secondary</code>/<code>destructive</code>/<code>outline</code>) and
+    <em>no</em> lifecycle. Mapping a decorative badge onto a lifecycle chip over-constrains it. This
+    survey grounds decision
+    <a href="/backlog/1319-decorative-label-tag-intent-distinct-from-lifecycle-status-i/">#1319</a>:
+    should WE <strong>mint a distinct decorative label/tag intent</strong>, or <strong>widen Status
+    Indicator</strong> to cover the decorative case? Per design-first step&nbsp;1, prior art is gathered
+    first so the dimensions reuse platform vocabulary.
+</p>
+
+<h3>Recommendation (to ratify in #1319)</h3>
+<ol>
+    <li><strong>Mint a distinct decorative label/tag intent</strong> (Fork&nbsp;1, med-high). The
+        separate-and-decouple bias plus an <em>in-repo precedent</em>: WE has already split this family
+        once by semantic source. Widening Status Indicator is the <em>flawed</em> branch — it dilutes the
+        lifecycle contract that <em>defines</em> the intent.</li>
+    <li><strong>Decorative-only; compose Action / Selection for interactivity</strong> (Fork&nbsp;2,
+        med-high). A clickable label is <a href="/intents/action/">Action</a>, a filter chip is
+        <a href="/intents/selection/">Selection</a>, a removable token composes a remove Action — baking
+        a <code>closable</code>/<code>clickable</code> axis would duplicate existing intents. Mirrors
+        <a href="/intents/reaction/">Reaction</a>&nbsp;→&nbsp;<a href="/intents/expressive-symbol/">Expressive
+        Symbol</a>.</li>
+    <li><strong>Name it <code>tag</code> ("Tag Intent")</strong> (Fork&nbsp;3, med). "Badge" is taken —
+        it is the <em>shape</em> token on both Status Indicator and the count-marker family; "tag" is the
+        common non-colliding decorative name (Ant, Carbon).</li>
+    <li><strong>Dimensions are supported by default</strong> — not forks: <code>tone</code> (reuse the
+        severity scale <code>neutral|info|positive|caution|critical</code> + a categorical/brand tone),
+        <code>emphasis</code> (<code>subtle|solid|outline</code>, default <code>subtle</code>),
+        <code>shape</code> (<code>badge|pill|tag</code>, reuse Status Indicator's vocabulary). A decorative
+        label is inert text — accessible-name when it conveys meaning, and it is <em>not</em> announced
+        via <a href="/intents/live-region-status/">Live Region Status</a> (no state change to announce).</li>
+</ol>
+
+<h3>Finding 1 — every system splits "badge" by <em>semantic source</em>, not by visuals</h3>
+<p>
+    The benchmarked design systems each carve the badge/tag/chip/label family into three recurring
+    families distinguished by <strong>what supplies the meaning</strong> — and the word "badge" lands in
+    a <em>different</em> family per system:
+</p>
+<ul>
+    <li><strong>Decorative / categorical label</strong> (author-supplied tone, static, no provider):
+        shadcn <strong>Badge</strong>, Ant Design <strong>Tag</strong>, Carbon <strong>Tag</strong>,
+        Fluent&nbsp;2 <strong>Badge</strong>, MUI <strong>Chip</strong>, Atlassian
+        <strong>Lozenge</strong>, Primer <strong>Label</strong>/<strong>Token</strong>, Bootstrap
+        <strong>Badge</strong>.</li>
+    <li><strong>Lifecycle / state status</strong> (an entity's state machine): WE's Status Indicator;
+        Ant's status <strong>Badge</strong> dot; Fluent <strong>PresenceBadge</strong>.</li>
+    <li><strong>Count / dot notification marker</strong> (a count overlaid on a host): Ant/MUI
+        <strong>Badge</strong>, Fluent <strong>CounterBadge</strong>, Primer <strong>CounterLabel</strong>,
+        Bootstrap pill <strong>Badge</strong>.</li>
+</ul>
+<p>
+    shadcn's Badge is family&nbsp;1 (decorative); Ant's Badge is family&nbsp;3 (count overlay). The stable
+    concept is the <em>source</em>, not the word.
+</p>
+
+<h3>Finding 2 — WE already split this family once, by the same axis</h3>
+<p>
+    WE has already carved family&nbsp;3 into its own intent:
+    <a href="/intents/notification-marker/">Notification Marker</a> — "the unread/attention MARKER family
+    … a marker, not a message … Spun out of #009." So the WE precedent <em>is</em> the split this decision
+    proposes: when one industry word ("badge") carries multiple semantic sources, WE homes each source in
+    its own intent rather than overloading one. Family&nbsp;3 is already carved; Status Indicator owns
+    family&nbsp;2 (lifecycle); <strong>family&nbsp;1 (decorative) is the unhomed remainder.</strong>
+</p>
+
+<h3>Finding 3 — widening Status Indicator <em>dilutes</em> it</h3>
+<p>
+    Status Indicator is defined <em>by</em> its lifecycle tie: its summary calls it "the visual member of
+    the Web Lifecycle protocol"; its description says it "reads the same lifecycle provider"; its
+    <code>affordance</code> axis surfaces "the available next <em>transitions</em> (from the provider)";
+    it emits a <code>transition</code> event. A decorative label has <strong>no provider, no transitions,
+    no state machine</strong> — its tone is author-asserted. Widening Status Indicator to cover it would
+    force its provider/transition machinery to be optional, hollow out the <code>affordance</code> axis,
+    and falsify the intent's own one-line identity. Read correctly, the gap's "over-constrains" cuts the
+    other way: it is <em>Status Indicator</em> that gets diluted, not just the badge over-constrained.
+</p>
+
+<h3>Finding 4 — the interactivity seam composes, it doesn't bake</h3>
+<p>
+    Several systems fold interaction into the same component (Ant Tag closable, Carbon operational tags,
+    Material filter chips, MUI Chip deletable/clickable, Primer Token removable). But each of those is
+    <em>already</em> a WE intent — a clickable label is <a href="/intents/action/">Action</a>, a filter
+    chip is <a href="/intents/selection/">Selection</a>, a removable token composes a remove Action. WE's
+    standing pattern keeps the new intent decorative-only and <strong>composes</strong> the interaction
+    intent — exactly how Reaction composes Expressive Symbol and Text-Formatting Controls compose
+    button/droplist. A baked <code>closable</code>/<code>clickable</code> axis would duplicate
+    Action/Selection and break the separate-and-decouple bias.
+</p>
+
+<h3>Open forks for #1319</h3>
+<ul>
+    <li><strong>Fork&nbsp;1 — mint vs widen.</strong> Default: <strong>mint a distinct intent</strong>
+        (med-high).</li>
+    <li><strong>Fork&nbsp;2 — interactivity ownership.</strong> Default: <strong>decorative-only +
+        compose Action/Selection</strong> (med-high).</li>
+    <li><strong>Fork&nbsp;3 — name.</strong> Default: <strong><code>tag</code> ("Tag Intent")</strong>
+        (med).</li>
+</ul>
+{% endraw %}

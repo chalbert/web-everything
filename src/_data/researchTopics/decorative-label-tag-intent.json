@@ -1,0 +1,26 @@
+{
+  "id": "decorative-label-tag-intent",
+  "title": "Decorative label/tag intent distinct from the lifecycle Status Indicator",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #1319 (gap #6 of the shadcn reproduction-conformance delta #1243): shadcn's `badge` maps onto WE's Status Indicator, but Status Indicator is lifecycle-state-driven — the visual member of the Web Lifecycle protocol that reads a provider's current state + next transitions — while shadcn's badge is a decorative/standalone label with author-supplied tone and no lifecycle. Mapping one onto the other over-constrains it. The survey finds every benchmarked system (shadcn, Ant, Carbon, Fluent 2, MUI, Atlassian, Primer, Bootstrap) splits the overloaded 'badge' word along a SEMANTIC-SOURCE axis into three families: (1) decorative/categorical label (author-supplied tone, static, no provider — shadcn Badge, Ant Tag, Carbon Tag, Atlassian Lozenge, Primer Label, Bootstrap Badge); (2) lifecycle/state status (an entity's state machine — WE's Status Indicator); (3) count/dot notification marker (a count overlaid on a host — Ant/MUI/Fluent Badge). The word 'badge' lands in a different family per system; the stable concept is the source, not the word. Decisive: WE has ALREADY split this family once by semantic source — Notification Marker (notification-marker.json, spun out of #009) carved family 3 — so the in-repo precedent is exactly the split proposed; Status Indicator owns family 2; family 1 (decorative) is the unhomed remainder. A decorative label has no provider/transitions/`transition` event/state machine, so widening Status Indicator would hollow out its affordance axis and falsify its own identity ('the visual member of the Web Lifecycle protocol') — it is Status Indicator that gets diluted, not just the badge over-constrained. Recommendation: (Fork 1, med-high) MINT a distinct decorative label/tag intent — separate-and-decouple + the notification-marker precedent; widening is the flawed branch. (Fork 2, med-high) decorative-only; COMPOSE Action (clickable) / Selection (filter chip) for interactivity rather than baking a closable/clickable axis — mirrors reaction→expressive-symbol and text-formatting→button/droplist. (Fork 3, med) name it `tag` ('Tag Intent') — 'badge' is taken by the shape token on both Status Indicator and the count marker; 'tag' is the common non-colliding decorative name. Dimensions are supported-by-default (not forks): tone (reuse the severity scale neutral|info|positive|caution|critical + a categorical/brand tone), emphasis (subtle|solid|outline, default subtle), shape (badge|pill|tag, reuse Status Indicator's vocabulary); a11y: inert text, accessible-name when meaningful, never announced via live-region-status. Report: reports/2026-06-20-decorative-label-tag-intent.md.",
+  "dateOpened": "2026-06-20",
+  "tags": [
+    "intent",
+    "candidate-standard",
+    "reproduction",
+    "gap-sweep",
+    "shadcn",
+    "badge",
+    "tag",
+    "status-indicator"
+  ],
+  "relatedIntents": [
+    "status-indicator",
+    "notification-marker",
+    "action",
+    "selection"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}
