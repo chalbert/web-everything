@@ -56,6 +56,7 @@ Already-existing machinery this epic gathers under one roof:
 - **[#166](/backlog/166-governance-persona-roster-charter-schema/)** — gate-severity enum + persona-scoped views.
 - **[#089](/backlog/089-monetization-product-ideas/)** — the propose-and-verify moat / monetization.
 - **[#563](/backlog/563-ai-driven-agile-methodology-as-a-shareable-approach/)** — the methodology this may rebrand (per #665 Fork 3).
+- **[#1249](/backlog/1249-define-program-strictly-the-four-part-bar-for-a-perpetual-on/)** (the *program* discipline) + the **currency-watch portfolio** — [#1257](/backlog/1257-platform-standards-watch-keep-we-current-as-the-web-platform/) platform-standards, [#1258](/backlog/1258-framework-churn-watch-keep-we-s-forward-adapters-current-as-/) framework-churn, [#1259](/backlog/1259-model-capability-watch-plateau-keep-on-device-cost-linearity/) model-capability (siblings #315/#192) — the **monitor / upgrade autonomy** rows of the step-tree made real: the project keeps itself current via the `/review-program` watch runner, no human driving each step. "Program"/"watch" are the internal mechanism; **Self-Driven Project** is the outward name they roll up into.
 
 ## Working practice — self-refining, capture friction (per #665 ruling)
 

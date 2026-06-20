@@ -1,6 +1,7 @@
 ---
 kind: epic
 ongoing: true
+relatedReport: reports/2026-06-20-program-platform-standards-watch.md
 status: open
 dateOpened: "2026-06-20"
 tags: []
