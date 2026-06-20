@@ -1,10 +1,13 @@
 ---
 kind: decision
 size: 3
-status: open
+status: resolved
 blockedBy: ["1318"]
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-20"
 tags: [webintents, action-intent, disposition, native-first]
 relatedProject: webintents
@@ -22,6 +25,19 @@ modelling, or whether `level` already adequately stands in. **Prepared** — for
 prior-art survey published as the `/research/action-disposition-outcome-role/` topic (session report
 we:reports/2026-06-20-action-disposition-outcome-role.md); each carries a recommended default in
 **bold**. Exploratory / low-priority; the ruling is the end-state, the build is separately prioritized.
+
+## Ruling (ratified 2026-06-20)
+
+- **Fork 1 → A.** WE adds a thin **`disposition`** dimension to Action Intent (a 6th dimension:
+  `level · variant · busy · groupOrdering · groupSizing · disposition`). `level` stays prominence-only.
+- **Fork 2 → A, open-numbered.** Value set is the abstract triple **`affirmative | dismissive | neutral`**
+  as the *recommended core* — explicitly **NOT a closed enum**. Per the user's ratification constraint, WE
+  must not rely on a closed/finite disposition set: authors may mint additional members per the #1318
+  open-numbered-variants contract (consistent with intents-open-design — standardize the meta-schema, not
+  the list). The block maps each member to the native mechanism (`command`/`value`/default-button).
+- **Settled:** behavioral outcome stays native; `destructive`-relocation off `level` carved to a follow-up.
+- **Build is separately prioritized** (single edit to we:src/_data/intents/action.json) — filed as a
+  follow-up, not done in this exploratory decision.
 
 ## Recommended path at a glance
 
