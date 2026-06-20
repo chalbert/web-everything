@@ -51,8 +51,16 @@ highest-leverage blocker* directly, even if Tier-A items exist:
 - **Claim before discussing** — a decision discussion *is* claimable work; an unclaimed,
   never-flipped, unlabelled discussion is exactly the race this guards against. Claim per step 4,
   *before* presenting the decision's substance.
-- **Then present exactly one (next turn) per the decision rule below.** If the user redirects to a
-  different decision, **release the claim** (`active → open`) and claim the one they want instead.
+- **Then present exactly one (next turn) per the decision rule below.** The user picking off the
+  shortlist — a `go`, or naming an item — is the trigger to **claim + present for discussion**, *never*
+  ratification authority. There are **two distinct `go`s**: the *selection* go (claim + STOP + present)
+  and a later *ratification* go (resolve + close), separated by the discussion and red-team. Claiming is
+  its own turn (claim, emit the slug, STOP per step 4); the discussion + red-team are the next turn(s);
+  ratify + close (step 7) **only on a separate, explicit go** after the fork is actually discussed. Do
+  **not** collapse claim → present → discuss → red-team → ratify → commit into the pick turn — this is
+  the exact trap the step-0 named-item note warns of, and it applies to a shortlist pick just as much.
+  If the user redirects to a different decision, **release the claim** (`active → open`) and claim the
+  one they want instead.
 - **The item is the source of truth.** As the discussion exposes a clear new element (a finding, a
   reframed fork, a dissolved option, a changed recommendation), write it into the decision item first
   — update by default, no permission needed — then ratify against the item; never ratify chat-only
