@@ -2,8 +2,11 @@
 type: idea
 workItem: epic
 parent: "1008"
-status: open
+status: resolved
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: "we:manifests/changelog-contract.ts"
 tags: []
 ---
 
