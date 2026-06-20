@@ -1,0 +1,37 @@
+{
+  "description": "Front-A conformance ledger for the model-capability watch (backlog #1259 / #1279) — the Plateau-side analogue of nativeFirstWatch.json. Defines and tracks the on-device tier accuracy/cost FLOOR: the thresholds Plateau's vision tier cascade (#488 — Tier-1 on-device classifier, Tier-2 on-device VLM, Tier-3 hosted BYO-key) must meet so the cost-linearity rule (cost scales ~linearly with revenue; no uncapped per-call hosted SDK in flat-rate pricing) holds WITHOUT falling back to uncapped hosted calls. One row per tier plus the aggregate cost-linearity guard. `meets` is the curated verdict each watch run re-asserts against the current model landscape; `current` is the measured/estimated value, `floor` the threshold it must clear. This is a curated tracking ledger (keep honest at watch close-out), not a derived view — it makes the next #1259 watch run quantitative (was L0: no floor metric). Baselines sourced from the 2026-06-20 model-capability watch (reports/2026-06-20-program-model-capability-watch.md).",
+  "maturity": "L1 — floor metric defined with baseline thresholds; L2 is wiring a measured eval harness (#514/#490 vision build) that fills `current` from real runs.",
+  "costLinearityRule": "Every vision task must resolve at a FIXED on-device cost (Tier-1/Tier-2) unless the user supplies their own key (Tier-3 BYO-key). The floor exists so the on-device tiers are accurate enough that the product never has to silently fall back to an uncapped hosted call to stay correct.",
+  "entries": [
+    {
+      "id": "tier-1-classifier",
+      "tier": "Tier-1 — on-device UI classifier (#514 / #1084 training)",
+      "metric": "top-1 accuracy on the design-ref classification task (distilled from the #086/#475 verdict-cache dataset)",
+      "floor": "≥ 0.85 top-1",
+      "current": "unmeasured (build in-flight #514/#1084)",
+      "costClass": "fixed on-device (zero per-call cost)",
+      "meets": "pending-measurement",
+      "note": "Below the floor, classification must escalate to Tier-2 on-device — never straight to hosted Tier-3."
+    },
+    {
+      "id": "tier-2-vlm",
+      "tier": "Tier-2 — on-device VLM (#488 cascade)",
+      "metric": "task success on UI vision tasks (describe / locate / verify) at an interactive latency + RAM budget",
+      "floor": "≥ 0.75 task-success AND ≤ 5 GB RAM @ 4-bit AND first-result < 3 s on a mid-tier laptop GPU/NPU",
+      "current": "favorable — small VLMs (Gemma 3n E2B/E4B @ 5GB/4-bit, Phi-4 multimodal, Qwen 3.5, SmolVLM, UI-specialized ScreenAI/Ferret-UI) now clear this; Chrome built-in Prompt API (Gemini Nano) is the zero-download path (#1278)",
+      "costClass": "fixed on-device (zero per-call cost)",
+      "meets": "yes (per 2026-06-20 sweep; revisit each run)",
+      "note": "The model landscape moved toward on-device-fixed-cost, strengthening cost-linearity. Re-evaluate the chosen model each watch run (#1276)."
+    },
+    {
+      "id": "aggregate-cost-linearity-guard",
+      "tier": "Aggregate (Tier-1 + Tier-2 vs hosted Tier-3)",
+      "metric": "share of vision tasks resolved on-device (Tier-1+2) without an uncapped hosted fallback",
+      "floor": "≥ 0.95 of flat-rate-tier vision tasks served on-device (the remaining ≤5% require an explicit BYO-key Tier-3 opt-in, never a silent flat-rate hosted call)",
+      "current": "unmeasured (gated on the #514/#490 vision build shipping the cascade)",
+      "costClass": "the cost-linearity invariant itself",
+      "meets": "pending-measurement",
+      "note": "This is the metric the watch ultimately defends: if it dips below the floor, either the on-device tiers regressed or task scope grew — both are watch signals, not reasons to uncap hosted spend."
+    }
+  ]
+}
