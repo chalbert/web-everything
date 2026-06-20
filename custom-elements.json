@@ -387,7 +387,7 @@
             ],
             "webStandards": {
               "ariaCombobox": {
-                "usage": "An `<input role=\"combobox\">` with `aria-autocomplete=\"list\"`, `aria-expanded`, and `aria-controls` bound to a separate `role=\"listbox\"`; the active option is tracked with `aria-activedescendant` as the input filters.",
+                "usage": "An `<input role=\"combobox\">` with `aria-autocomplete=\"list\"`, `aria-expanded`, and `aria-controls` bound to a separate `role=\"listbox\"`; the active option is tracked with `aria-activedescendant` as the input filters. Reconciled with the 2025 APG combobox guidance (#1266): the popup is wired via `aria-controls` (the 2025 APG recommendation over the older `aria-owns`), which this block already does. APG recognizes four popup types — `listbox` (this block's default), `grid`, `tree`, and `dialog` (set via `aria-haspopup`); the editable-combobox-with-grid-popup variant the 2025 update added is not yet a WE member (a future carve), but the vocabulary here stays the listbox profile.",
                 "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/combobox/"
               }
             },
