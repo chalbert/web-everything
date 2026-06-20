@@ -13,6 +13,7 @@ export { validatorResolutionSuite } from './validator-resolution.vectors.js';
 export { sessionReplayEnvelopeSuite } from './session-replay-envelope.vectors.js';
 export { slideTransitionReducedMotionSuite } from './slide-transition-reduced-motion.vectors.js';
 export { presentationA11ySuite } from './presentation-a11y.vectors.js';
+export { textNodeSuite } from './text-node.vectors.js';
 // The Doc Spec suite (#1163) is a pure (manifest, cases) → DocsSite golden-vector suite, a different shape
 // from the interaction-script ConformanceVectorSuite — exported on its own, not in `conformanceSuites`.
 export { webdocsDocSpecSuite, assertDocSpecSuite, DocSpecSchemaError } from './webdocs.vectors.js';
@@ -22,6 +23,7 @@ import { validatorResolutionSuite } from './validator-resolution.vectors.js';
 import { sessionReplayEnvelopeSuite } from './session-replay-envelope.vectors.js';
 import { slideTransitionReducedMotionSuite } from './slide-transition-reduced-motion.vectors.js';
 import { presentationA11ySuite } from './presentation-a11y.vectors.js';
+import { textNodeSuite } from './text-node.vectors.js';
 
 /** The registry of shipped per-standard suites — what the #899 driver enumerates. */
 export const conformanceSuites: ReadonlyArray<ConformanceVectorSuite> = [
@@ -29,4 +31,5 @@ export const conformanceSuites: ReadonlyArray<ConformanceVectorSuite> = [
   sessionReplayEnvelopeSuite,
   slideTransitionReducedMotionSuite,
   presentationA11ySuite,
+  textNodeSuite,
 ];
