@@ -1,0 +1,5 @@
+{
+  "term": "scoped token override",
+  "definition": "A design-tokens scoping extension that lets a subtree override theme tokens (and background) at a finer grain than the project/section level — for a deck, per-slide or per-section. Realized as a CSS custom-property cascade scope: a slide/section element redeclares the token custom properties for its subtree, so a single deck can carry distinct token sets (a dark title slide, a branded section) without forking the theme.",
+  "usage": "Extends the <code>design-tokens</code> protocol's scoping. The override binds to a slide/section identity from the Deck Document Model (<code>background</code> and per-slide token sets), homed in webtheme. The cascade is the mechanism — an inner scope's custom-property redeclaration wins for its subtree, restoring the outer theme outside it — so overrides compose rather than replace the project theme."
+}
