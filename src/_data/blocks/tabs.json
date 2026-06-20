@@ -37,10 +37,10 @@
   "implementedBy": "@frontierui/blocks/tabs/index.ts",
   "summary": "Accessible tab interface component built on View (ViewBehavior for panel switching), providing tab triggers, panels, and ARIA semantics.",
   "exports": [
-    "TabsComponent",
-    "TabListAttribute",
-    "TabTriggerAttribute",
-    "TabPanelAttribute"
+    "TabGroupBehavior",
+    "TabActivationMode",
+    "TabOrientation",
+    "TabChangeEventDetail"
   ],
   "implementsIntent": "navigation",
   "intentDimensions": {

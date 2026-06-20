@@ -49,7 +49,7 @@
   },
   "exports": [
     "ViewEngine",
-    "ViewEngineOptions",
+    "ViewOptions",
     "ViewBehavior",
     "ViewShowBehavior",
     "ViewIfDirective",

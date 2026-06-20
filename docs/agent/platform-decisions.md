@@ -311,6 +311,25 @@ always: mandate neither, pin the surface, register both as strategies.
 **Lineage:** #4 (validation validity-model & conformance-tier). Relates to [native-first-baseline](#native-first-baseline),
 [forward-generation-adapters](#forward-generation-adapters) (both are "contract is the authority, impl is swappable").
 
+### Export-shape drift: classify by coherence, resolve per-symbol by trim-or-build {#export-shape-drift}
+
+When the export-shape gate (#170/#927) flags a `we:` contract `exports` symbol absent from the resolved
+FUI barrel, it is a **source-of-truth call decided per symbol** — never one verdict for the whole block.
+Classify each declared-but-absent symbol on **merit**: is it **load-bearing to the block's promised
+coherence** — it delivers a capability the shipped core lacks (a *different mechanism*, not the same one
+re-wrapped) → **build** the `locus: frontierui` impl and keep it declared — or is it
+**additive/superseded/aspirational over an already-complete core** — sugar the impl never chose, or a
+design it superseded → **trim** the contract `exports` array in place? The tell: a symbol that re-exposes
+the *same* mechanism the core already ships (an optional element wrapper, a mixin form of a shipped base
+class) is additive → trim; a symbol that adds a *capability the core cannot do* is load-bearing → build.
+Cost (build size) is **excluded** from the classification — it only schedules a spawned build, never
+selects the branch (an instance of *fork-is-not-a-prioritization-tool*). Reverse drift — the barrel exports
+a symbol the contract omits — is a forced **add** (contract = barrel in both directions).
+
+**Lineage:** #1165 (`tabs`/`transient-component` → trim; `view` show/if/switch → build via #1217; under
+#904). Specializes [surface-contract-not-computation](#surface-contract-not-computation) for the
+#1164/#927 export-shape arm.
+
 ### Native-first baseline floor {#native-first-baseline}
 
 Standards **assume modern web-platform primitives are present** (Baseline-2024: FACE/`ElementInternals`,

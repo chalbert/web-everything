@@ -3,9 +3,13 @@ type: decision
 workItem: story
 size: 3
 parent: "904"
-status: open
+status: resolved
 relatedReport: reports/2026-06-19-backlog-split-analysis.md
 dateOpened: "2026-06-20"
+dateStarted: "2026-06-20"
+dateResolved: "2026-06-20"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#export-shape-drift"
 preparedDate: "2026-06-20"
 tags: []
 ---
@@ -33,22 +37,24 @@ prior-art survey; the concrete-refs evidence is the table below.
 | `transient-component` | `TransientElement` · `AutoHeading` · `SmartLink` · `withSelfReplacement` · `calculateHeadingLevel` (`we:src/_data/blocks/transient-component.json:35`) | `TransientElement` · `AutoHeading` · `calculateHeadingLevel` · `registerTransient` (`fui:blocks/transient/index.ts:1`) | `SmartLink` + `withSelfReplacement` absent; FUI also ships an **un-declared** `registerTransient` |
 | `view` | `ViewEngine` · `ViewEngineOptions` · `ViewBehavior` · `ViewShowBehavior` · `ViewIfDirective` · `ViewSwitchDirective` (`we:src/_data/blocks/view.json:50`) | `ViewEngine` · `ViewBehavior` + types `ViewHiddenMode`/`ViewState`/`ViewOptions`/`ViewToggleEventDetail` (`fui:blocks/view/index.ts:1`) | `ViewEngineOptions` shipped **renamed** to `ViewOptions`; `ViewShowBehavior`/`ViewIfDirective`/`ViewSwitchDirective` absent |
 
-**Axis of the decision.** For every declared-but-absent symbol the question is one binary:
-*is the contract aspirational (the symbol names a design FUI superseded or never chose → **trim** the
-`we:` `exports`) or is FUI genuinely under-built (the symbol is intended product surface FUI just hasn't
-shipped → **build** a `locus: frontierui` impl)?* The two branches are mutually exclusive per symbol — you
+**Axis of the decision.** For every declared-but-absent symbol the question is one binary on **merit**:
+*is the symbol **load-bearing to the block's canonical/coherent surface** (the block is gutted or
+incomplete without it → **build** a `locus: frontierui` impl) or is it **additive/superseded/aspirational
+over an already-complete core** (the block works without it; it names sugar FUI never chose or a design it
+superseded → **trim** the `we:` `exports`)?* The two branches are mutually exclusive per symbol — you
 cannot both re-spec `exports` to match the shipped barrel **and** treat the missing symbols as the
-canonical surface; one side is authoritative. The classification turns on reading the impl's own design
-intent, not on which is cheaper (cost is prioritization, applied when the spawned build is scheduled —
-never a branch of the source-of-truth call). One fork per block below; where a block's symbols split on
-intent (`transient-component`, `view`), the verdict is per-symbol.
+canonical surface; one side is authoritative. The classification turns on **coherence** — does the block's
+own promised architecture *require* the symbol — never on which branch is cheaper. Cost is prioritization,
+applied only when a spawned build is scheduled; "the build is small/large" is **not** a fork argument and
+must not appear as one. One fork per block below; where a block's symbols split (`transient-component`,
+`view`), the verdict is per-symbol.
 
 ## Recommended path at a glance
 
 | Fork | Block | Excluded branch (why a fork) | Default | Confidence |
 | --- | --- | --- | --- | --- |
 | 1 | `tabs` | can't both re-spec to `TabGroupBehavior` **and** keep the Component+attribute surface as canonical | **Trim contract → `["TabGroupBehavior"]`** | ~85% |
-| 2 | `transient-component` | can't both drop `withSelfReplacement`/`SmartLink` **and** treat them as the impl surface | **Trim both + add `registerTransient`** (flag `SmartLink` build as a defensible override) | ~70% |
+| 2 | `transient-component` | can't both drop `withSelfReplacement`/`SmartLink` **and** treat them as the impl surface | **Trim both + add `registerTransient`** (both are additive/superseded over a complete core) | ~85% |
 | 3 | `view` | can't both rename/trim **and** keep show/if/switch as canonical-but-unbuilt | **Rename `ViewEngineOptions`→`ViewOptions` (trim) + build the show/if/switch family** | ~70% |
 
 **Supported by default (not forks — forced corrections, no excluded branch):**
@@ -87,30 +93,33 @@ gate red on 4 symbols that name an unchosen path. Red-team note: B's strongest c
 the spec and FUI is the laggard," but the contract *itself* names attribute-based as the chosen core, so B
 argues against the contract's own ruling.
 
-## Fork 2 — `transient-component`: trim the unbuilt mixin/element vs build them
+## Fork 2 — `transient-component`: trim additive/superseded symbols vs build them
 
-**Fork-existence:** real either/or on `SmartLink` specifically — it is a fully-specified product element
-(`href` present → `<a>`, absent → `<button>`; `we:src/_data/blocks/transient-component.json`) that FUI
-simply never built, so "drop it" and "build it" are both coherent and exclude each other. (`withSelfReplacement`
-is the weaker, near-forced half — see below.)
+**Fork-existence:** real either/or per symbol — both `SmartLink` and the `withSelfReplacement` mixin name
+designs FUI declined or superseded, so "drop it from the contract" and "treat it as the canonical surface"
+exclude each other. Run both through the load-bearing test: the block already ships a **complete, coherent
+transient system** — abstract base `TransientElement` + the concrete `AutoHeading` subclass +
+`calculateHeadingLevel` + `registerTransient` registrar. Neither missing symbol is load-bearing to that
+core, so both trim on merit; cost (small or large build) is *not* what decides either.
 
-- **`withSelfReplacement` → Trim. [DEFAULT, ~90%]** FUI built self-replacement as an **abstract base
-  class** `TransientElement` (`fui:blocks/transient/TransientElement.ts` — `queueMicrotask`-deferred
+- **`withSelfReplacement` → Trim. [DEFAULT, ~90%]** Superseded. FUI built self-replacement as the
+  **abstract base class** `TransientElement` (`fui:blocks/transient/TransientElement.ts` — `queueMicrotask`-deferred
   `replaceWith`, attribute transfer, child migration), *not* a mixin factory. The base class is already
   declared and present in `exports`. `withSelfReplacement` names a superseded mixin form of the same
-  mechanism — redundant with the shipped base class. Barely a fork (the excluded "build the mixin" branch
-  is dominated — it would duplicate `TransientElement`).
-- **`SmartLink` → Trim now, build is a defensible override. [DEFAULT trim, ~65%]** Genuinely absent; FUI
-  built only `AutoHeading` as a concrete `TransientElement` subclass (`fui:blocks/transient/AutoHeading.ts`).
-  The block's shipped reality is base-class + `AutoHeading` + `calculateHeadingLevel` + `registerTransient`;
-  `SmartLink` is designed-but-unbuilt. Default trims it for a contract = impl end-state, **but** the design
-  is complete and the build is small (one `TransientElement` subclass resolving `<a>`/`<button>`), so a
-  decider electing **build** (spawn a `locus: frontierui` story) is well-grounded — this is the symbol most
-  likely to flip. Flag for the deciding agent's skeptic pass.
+  mechanism — its "build the mixin" branch is dominated (it would duplicate `TransientElement`).
+- **`SmartLink` → Trim. [DEFAULT, ~80%]** Additive sugar over a complete core, **not** load-bearing.
+  FUI built `AutoHeading` as its one concrete `TransientElement` subclass
+  (`fui:blocks/transient/AutoHeading.ts`); the transient system is whole without a second `<a>`/`<button>`
+  link subclass. This is the same shape as the `tabs` optional wrapper (Fork 1): a designed-but-unbuilt
+  *additional* element, so the contract over-declares it → trim now; if `SmartLink` is later wanted as
+  product, file it as an **additive** `locus: frontierui` build under #904 (a separate prioritization, not
+  a reason to hold the gate red or keep the symbol in `exports` today). Residual is whether `SmartLink` is
+  genuinely sugar vs a promised core element — flag for the skeptic pass, but its build was never argued on
+  load-bearing-coherence, only on completeness, so it lands with the tabs wrapper, not view's directives.
 - **`registerTransient` → Add to `exports`** (supported by default, above).
 
-**Net default:** trim `withSelfReplacement` + `SmartLink`, add `registerTransient`. ~70% blended; the
-residual is entirely the `SmartLink` build/trim coin-flip.
+**Net default:** trim `withSelfReplacement` + `SmartLink`, add `registerTransient`. ~85% blended; the
+residual is the narrow `SmartLink` sugar-vs-core-element read, not a cost coin-flip.
 
 ## Fork 3 — `view`: rename + trim vs build the show/if/switch family
 
@@ -149,3 +158,34 @@ latter, trim. This is the largest build candidate of the three findings (3 direc
 purpose). Resolving them (+ #1164) is the prerequisite to flipping `EXPORT_SHAPE_ENFORCED`. Slice of #904.
 A "build" verdict on any symbol spawns its own `locus: frontierui` story under #904; a "trim" verdict edits
 the block's `we:src/_data/blocks/<id>.json` `exports` array in place.
+
+---
+
+## RATIFIED 2026-06-20
+
+Merit axis applied: **load-bearing-to-coherence → build; additive/superseded/aspirational over a complete
+core → trim.** Cost excluded from every fork (it only schedules a spawned build). Skeptic pass run on the
+one high-leverage tension (Fork 3): the "engine+behavior is already a complete core, directives are sugar"
+trim case **fails** — `ViewBehavior` is imperative show/hide of one element; `view:if`/`switch` are
+*structural* (add/remove subtrees, branch selection over `CustomTemplateDirective`) — a capability the core
+lacks, not the same mechanism re-wrapped. That capability gap is exactly what separates view's directives
+(build) from the `tabs` wrapper and `SmartLink` (both the same mechanism re-exposed → trim).
+
+**Rulings (applied in place):**
+- **Fork 1 `tabs` → TRIM.** `we:src/_data/blocks/tabs.json` `exports` → `["TabGroupBehavior",
+  "TabActivationMode", "TabOrientation", "TabChangeEventDetail"]` (the shipped barrel surface). The 4
+  declared `TabsComponent`/`Tab*Attribute` symbols named the *optional wrapper* the contract's own
+  `designDecisions.syntax.chosen` never made canonical. Clears the tabs export-shape warning.
+- **Fork 2 `transient-component` → TRIM + add.** `exports` → `["TransientElement", "AutoHeading",
+  "calculateHeadingLevel", "registerTransient"]`. Dropped `withSelfReplacement` (superseded by the abstract
+  `TransientElement` base class) and `SmartLink` (additive sugar over a complete core — same shape as the
+  tabs wrapper, *not* load-bearing); added the under-declared `registerTransient`. Clears the transient
+  export-shape warning.
+- **Fork 3 `view` → RENAME + BUILD.** `exports` `ViewEngineOptions` → `ViewOptions` (pure rename, ships at
+  `fui:blocks/view/ViewEngine.ts:22`). Kept `ViewShowBehavior`/`ViewIfDirective`/`ViewSwitchDirective`
+  declared (load-bearing, build verdict) → filed **#1217** (`locus: frontierui`, parent #904) to build the
+  family. View's export-shape warning persists on those 3 symbols until #1217 lands — expected.
+
+**Net:** 2 of 3 findings cleared by trim; 1 reduced (view 4→3 symbols, rename resolved) pending the #1217
+build. `SmartLink` deliberately *not* spawned as a build (trim verdict); if later wanted it is an additive
+`locus: frontierui` build under #904 (separate prioritization). No symbol both trimmed and built.
