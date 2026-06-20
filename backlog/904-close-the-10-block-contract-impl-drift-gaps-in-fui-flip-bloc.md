@@ -1,8 +1,10 @@
 ---
 type: issue
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-18"
+dateResolved: "2026-06-20"
+graduatedTo: none
 relatedReport: reports/2026-06-18-backlog-split-analysis.md
 tags: []
 ---
