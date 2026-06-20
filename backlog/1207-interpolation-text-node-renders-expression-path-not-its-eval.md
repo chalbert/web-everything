@@ -137,3 +137,29 @@ log the parsed node's constructor vs the registry's `CustomTextNode` (`weClass==
 completion (one `CustomTextNode` class at runtime) — verify by forcing both the parser and the registry
 onto the same `fui:plugs/webexpressions/CustomTextNode` import, then add the real-browser regression test
 (acceptance #2). Carried forward — still outgrew the batch slot.
+
+## Investigation 2026-06-20 (batch-2026-06-20b, round 3) — static trace pins the class split; `outgrew` again (3rd carry-forward)
+
+Static import trace (no live probe needed) confirms the class-identity split is **live and exact** in
+the current (reverted) tree:
+
+- **Demo registry = WE-local.** `we:plugs/bootstrap.ts:43` imports `CustomTextNodeRegistry` from
+  `./webexpressions` (the WE-local plug), and `we:plugs/webexpressions/CustomTextNodeRegistry.ts:8`'s
+  `instanceof` guard uses the WE-local `./CustomTextNode`. So `window.customTextNodes` guards on
+  **WE-local** `CustomTextNode`.
+- **Parser + node = FUI.** `we:blocks/parsers/text-node/double-curly/DoubleCurlyBracketParser.ts:17`
+  extends `@frontierui/plugs/webexpressions/CustomTextNodeParser` (its `UndeterminedTextNode` is FUI's),
+  and `we:blocks/text-nodes/interpolation/InterpolationTextNode.ts:23` extends FUI's `CustomTextNode`.
+- ⇒ parser-produced node is `instanceof` **FUI** `CustomTextNode`, guard checks **WE-local** →
+  `false` → node never upgraded → raw path renders. This is precisely the round-0 diagnosis.
+
+**The real blocker is the round-1 contradiction, not the diagnosis.** Round 1 applied the canonical fix
+(flip `we:plugs/bootstrap.ts:43` → `@frontierui/plugs/webexpressions`, completing #449 so the registry
+guards on the SAME FUI `CustomTextNode` the parser produces) and reported the symptom **still remained**,
+then reverted. A static trace says that flip *should* close the guard. So the residual is almost
+certainly a **warm-server / singleton artifact**: `window.customTextNodes` is a registered singleton on
+the injector chain, and a prior WE-local registry instance (or a cached provider) can survive an HMR
+full-reload, so the flip's effect isn't observed without a **cold start** — which the don't-restart-the-
+dev-server rule forbids mid-batch. Resolving this needs a focused session that can cold-start :3000,
+apply the bootstrap flip, verify `weClass===fuiClass` live, then land acceptance #2's real-browser test.
+Not batch fodder (3rd `outgrew`). Released, untouched.
