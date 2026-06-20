@@ -1,7 +1,7 @@
 {
   "id": "benchmark-coverage",
-  "version": 1,
-  "lastSwept": "2026-06-12",
+  "version": 2,
+  "lastSwept": "2026-06-20",
   "capabilities": "benchmark-capabilities",
   "description": "Phase 3 of the gap-analysis program (backlog #347): each extracted capability (#346) joined to a Web Everything entity and labelled covered / partial / missing / native-covered, weighed native-first. Partial/missing rows carry the gap-# triage (nativeFirst / gap / effort / rank) and an alreadyTracked flag (deduped against the backlog). The `gaps` array — un-tracked partial/missing rows — is the direct input to phase 4 (#348), which files them as candidate backlog items.",
   "labels": {
@@ -17,13 +17,13 @@
   },
   "summary": {
     "total": 96,
-    "covered": 57,
-    "partial": 20,
+    "covered": 59,
+    "partial": 18,
     "missing": 10,
     "nativeCovered": 9,
-    "fileableGaps": 2,
+    "fileableGaps": 0,
     "alreadyTracked": 9,
-    "note": "fileableGaps: 11 at phase-3 -> 7 at phase-4 file-time dedup (menu+context-menu #173/#300, command-palette #299/#016, accordion #008) -> 6 when fill-time review found range-slider already covered by block:slider's dual-thumb range variant (#361). The sweep self-corrects: dedup and fill-verification both demote false gaps."
+    "note": "fileableGaps: 11 at phase-3 -> 7 at phase-4 file-time dedup (menu+context-menu #173/#300, command-palette #299/#016, accordion #008) -> 6 when fill-time review found range-slider already covered by block:slider's dual-thumb range variant (#361). 2026-06-20 re-run: the 2 standing fileable gaps closed by resolved WE work and re-kinded partial->covered — date-picker by block:date-picker/datetime-picker/date-range-picker + intent:temporal (#359, resolved 2026-06-15) and design-tokens-theming by project:webtheme (#364, resolved). fileableGaps -> 0; 0 new items filed (idempotent). Corpus + capability matrix unchanged this run. The sweep self-corrects: dedup, fill-verification, and resolved-work re-kinding all demote false/closed gaps."
   },
   "coveredHighlights": [
     {
@@ -141,6 +141,14 @@
     {
       "id": "carousel",
       "we": "block:carousel (scroll-snap + CSS carousel pseudo-elements, #363)"
+    },
+    {
+      "id": "date-picker",
+      "we": "block:date-picker / datetime-picker / date-range-picker / temporal + intent:temporal (#359 resolved 2026-06-15; was gap-3, closed since last sweep)"
+    },
+    {
+      "id": "design-tokens-theming",
+      "we": "project:webtheme — DTCG-to-native-CSS token system (#364 resolved, graduatedTo project:webtheme; was gap-4)"
     }
   ],
   "alreadyTracked": [
@@ -208,41 +216,7 @@
       "note": "disclosure intent (gap-12) tracked in #008; accordion is a thin composition over it + native details."
     }
   ],
-  "gaps": [
-    {
-      "id": "date-picker",
-      "coverage": "partial",
-      "we": "intent:temporal",
-      "nativeAnchor": "input[type=date|time]",
-      "gapNote": "intent:temporal defines the UX, but no calendar / date / time / range picker block exists; native input[type=date] is the anchor for the simple case.",
-      "triage": {
-        "nativeFirst": "medium",
-        "gap": "medium",
-        "effort": "high",
-        "rank": 3
-      }
-    },
-    {
-      "id": "design-tokens-theming",
-      "coverage": "partial",
-      "capabilityRefs": [
-        "spacing-scale",
-        "radius",
-        "elevation",
-        "color-tokens",
-        "dark-mode"
-      ],
-      "we": "intent:typography + intent:density + intent:surface",
-      "nativeAnchor": "CSS custom properties + color-scheme",
-      "gapNote": "No unified design-token / theming system (spacing, radius, elevation, semantic color roles, light/dark). Several intents touch slices; relates to theme-color #010.",
-      "triage": {
-        "nativeFirst": "medium",
-        "gap": "medium",
-        "effort": "high",
-        "rank": 4
-      }
-    }
-  ],
+  "gaps": [],
   "skippedLowValue": [
     "split-button",
     "fab",

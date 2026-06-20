@@ -1,7 +1,7 @@
 {
   "id": "benchmark-corpus",
-  "version": 1,
-  "lastSwept": "2026-06-12",
+  "version": 2,
+  "lastSwept": "2026-06-20",
   "description": "The canonical input to the competitive coverage gap-analysis program (backlog #315). An explicit, reproducible list of the leading design systems and UI libraries to benchmark, each with the metadata phase 2 (extraction) and phase 3 (mapping) join against. Membership is governed by the stated selectionCriteria below so a re-run lands on a comparable list. The references.json 'Reference Design Systems' set is the curated docs-surface subset of this corpus (flagged inReferences).",
   "selectionCriteria": [
     {

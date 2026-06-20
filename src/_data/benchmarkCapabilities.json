@@ -1,7 +1,7 @@
 {
   "id": "benchmark-capabilities",
-  "version": 1,
-  "lastSwept": "2026-06-12",
+  "version": 2,
+  "lastSwept": "2026-06-20",
   "corpus": "benchmark-corpus",
   "description": "Phase 2 of the gap-analysis program (backlog #346): the normalized capability matrix extracted from the benchmark corpus (#316). Each row is one capability the corpus exposes, deduped across sources into a stable id (e.g. Material 'Menu', Fluent 'Menu', Radix 'Dropdown Menu' -> one `menu` capability). Phase 3 (#347) joins each row to a Web Everything entity and labels coverage. This is a FIRST PASS keyed for diffability, not an exhaustive per-source enumeration (see method.scope).",
   "method": {
