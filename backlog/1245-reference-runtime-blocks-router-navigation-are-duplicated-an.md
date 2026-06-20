@@ -4,6 +4,8 @@ workItem: epic
 size: 8
 status: open
 dateOpened: "2026-06-20"
+blockedBy: ["1246"]
+childlessReason: undecided
 tags: [blocks, duplication, drift, single-source, frontierui, maintenance, runtime]
 relatedProject: webblocks
 ---
@@ -42,15 +44,17 @@ multiple files** (router alone: all 5 source files differ — import style `@fro
 `we-route-view` tag defaults, the `registerRouteView/Outlet` split, plus WE's #365 `entry`-URL normalization
 and the `RoutePrefetchBehavior` viewport-presence refactor missing in FUI).
 
-## Open question — canonical home (the embedded decision)
+## Open question — canonical home → carved to [#1246](/backlog/1246-canonical-home-for-the-reference-runtime-stay-subset-blocks-/)
 
-`#606`/`#817` ruled **runtime impl is FUI-canonical** (plugs → FUI). But `#697` deliberately **kept a
-reference-runtime subset in WE** (blocks whose demos exercise a WE *standard*). So the router et al. sit in
-genuine tension: are they "reference-runtime, canonical in WE, FUI consumes" or "pure impl, FUI-canonical,
-WE holds only contract types"? This must be settled **before** dedup, because it sets the direction. Note the
-copies are **not** clean replicas (the import-style + tag-default deltas above are deliberate FUI adaptations),
-so whichever way it resolves, a blind file-copy is wrong — the seam needs the `#817` contract/runtime split
-or a real import.
+The embedded fork — *are the router et al. "reference-runtime, canonical in WE, FUI consumes" or "pure
+impl, FUI-canonical, WE holds only contract types"?* — is its own decision and gates everything below, so
+it now lives as **[#1246](/backlog/1246-canonical-home-for-the-reference-runtime-stay-subset-blocks-/)**
+(`type: decision`), with this epic `blockedBy` it. The tension is real and unreconciled: `#606`/`#817`
+ruled runtime impl FUI-canonical and `#641` ruled WE holds no block-impl copy (every spec'd block already
+declares `implementedBy: @frontierui`), yet `#697` (resolved *after* #641) deliberately kept a
+reference-runtime subset in WE. Either way a blind file-copy is wrong — the copies carry deliberate FUI
+adaptations (import style, tag defaults, the #365/#423 deltas), so the seam needs the `#817`
+contract/runtime split or a real import. **Do not start dedup before #1246 rules.**
 
 ## Proposed shape (mirror #170)
 

@@ -62,3 +62,71 @@ selection — unrelated). That kernel is one atomic intent-authoring story (~siz
 No on-disk **split**. The honest move is a one-item **re-scope**: convert #1179 `epic → story` (size 5),
 de-stale its body to reference the already-standalone composers. This is a backlog edit, not a slice,
 so it's outside `/slice`'s auto-mutation mandate — flagged here, applied only on a "go".
+
+---
+
+# Focused: #1245 — reference-runtime blocks duplicated/drifting between WE and FUI
+
+`/slice 1245` — single-item run. Candidate: **#1245** (`type: issue`, `workItem: epic`, `size: 8`,
+`relatedProject: webblocks`, no children → unsliced-epic candidate kind **b**).
+
+## Verdict: **could not split** — the epic buries a live canonical-home decision (rubric condition 1)
+
+| # | Title | Kind | Verdict |
+|---|---|---|---|
+| #1245 | Reference-runtime blocks (router, navigation, …) are duplicated and drifting between WE and FUI | unsliced `epic` (`size 8`, no children) | **Could NOT split** — embedded canonical-home decision gates all build work |
+
+### Investigation (the real tree, 2026-06-20)
+
+- **The duplication is real.** `we:blocks/` holds full runtime `.ts` for the STAY subset
+  (`router/`, `navigation/`, `parsers/`, `text-nodes/`, `for-each/`, `transient/`, `attributes/`,
+  `draft-persistence/`, plus `view/`, `tabs/`, `wizard/`, `workflow-engine/`, `resource-loader/`,
+  `data-transfer/`, `renderers/*`, `stores/`), and `fui:blocks/` holds a parallel copy of each.
+- **The contract already says FUI-canonical.** Every STAY block with a spec declares
+  `implementedBy: @frontierui/blocks/<id>/…`, `status: active` (the per-block spec files
+  router/view/for-each/draft-persistence/tabs/wizard/workflow-engine/resource-loader under
+  `we:src/_data/blocks/`). Per **#641**
+  (resolved 2026-06-15, codified `we:docs/agent/platform-decisions.md#constellation-placement`):
+  *WE blocks are pure protocols; impl lives in FUI; WE holds NO block-impl copy.*
+- **But #697 (resolved 2026-06-17, AFTER #641) deliberately kept a reference-runtime subset in WE**
+  ("blocks whose demos exercise a WE *standard*"). The later ruling carved an exception to the earlier
+  one, and the filesystem reflects both at once: the contract says FUI-canonical while a full WE
+  runtime copy persists. **That contradiction is the open decision the epic buries.**
+- **Five dirs have no spec at all:** `navigation`, `parsers`, `text-nodes`, `transient`, `attributes`
+  — no entry under `we:src/_data/blocks/`, so they aren't even declared WE protocols and the **#659**
+  drift gate (`validateBlockImplConformance`, `we:scripts/check-standards-rules.mjs:1326`) never sees
+  them. Pure undeclared duplicates.
+- **The existing drift gate covers only the MOVED families.** #659 checks an `implementedBy` pointer
+  *resolves* in FUI; it does **not** flag a WE `blocks/<id>/` runtime copy *existing* for an
+  `implementedBy`-declared block, and can't see the five unspec'd dirs. So the hazard #1245 names is
+  genuinely untracked.
+
+### Could-not-split table
+
+| # | Failed condition | Why | Unblocking action |
+|---|---|---|---|
+| #1245 | **(1) Volume, not uncertainty** — the body holds a live `type: decision` fork ("canonical home", §"Open question") that sets the *direction* for every dedup and the drift-gate shape; slicing now just scatters the same fork across children. (Also (5): the gate's form — byte-diff vs contract-seam vs no-WE-copy — is undefined until the seam is chosen.) | #641 (FUI-canonical, no WE copy) vs #697 (kept reference-runtime STAY subset in WE) are in unreconciled tension; the filesystem reflects both. A blind file-copy is wrong either way (copies carry deliberate FUI adaptations: import style, tag defaults, the #365/#423 deltas). | **Resolve the canonical-home decision first.** Carve it out of the epic body into its own `type: decision` card, de-bury the parent (inline fork → pointer), set epic `blockedBy` the card. Once ruled, the slices below become batchable. |
+
+### Slices that become carvable once the decision resolves (proposed, not filed)
+
+1. **`router` dedup** (`story`, ~3) — first; has live evidence + load-bearing for every consuming app.
+   Reconcile per the ruling (delete WE copy + wire seam, *or* formalize the WE reference-runtime home),
+   regression-guard the #365/#423 fixes.
+2. **Per-family dedup** (`story`/`task`, ~2 each) — `navigation`, `parsers`, `text-nodes`, `for-each`,
+   `transient`, `attributes`, `draft-persistence`, then the remaining #697 STAY families
+   (`view`, `tabs`, `wizard`, `workflow-engine`, `resource-loader`, `data-transfer`, `renderers/*`,
+   `stores/simple`). Each blocked by slice 1's seam pattern.
+3. **Declare the five unspec'd dirs** (`task`, ~2) — add `we:src/_data/blocks/{navigation,parsers,
+   text-nodes,transient,attributes}.json` (or fold into siblings) so #659 can see them.
+4. **Extend the drift gate** (`story`, ~3) — extend `validateBlockImplConformance` to *also* fail when a
+   WE `blocks/<id>/` runtime dir exists for an `implementedBy`-declared block (no WE impl copy),
+   mirroring the plugs byte-diff guard. Blocked by the dedup slices (enforced once the tree is clean).
+
+DAG: `decision → slice 1 (router) → slices 2/3 (parallel per family) → slice 4 (gate, enforced last)`.
+
+## Recommended action (gated on approval — not a split)
+
+No on-disk split. The honest move per the could-not-split handling: **file the buried fork as its own
+`type: decision` card** (next free `#1246`), register it Tier-B, and **de-bury #1245** (inline
+"Open question — canonical home" § → a pointer; epic `blockedBy: ["1246"]`, `childlessReason: undecided`,
+`size 8` kept — still unsliced). Gated on one "go".
