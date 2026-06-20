@@ -6,8 +6,9 @@
 >
 > **Status:** *working architecture* — the tier capabilities, limits, the cascade pattern, and the
 > **critique rubric** (§Design-critique rubric, ratified #1034) below are settled; whether the richer
-> tier is ever built on-device vs. stays hosted is a later call. Promote the stable parts into
-> [platform-decisions.md](platform-decisions.md) once #1033 ratifies.
+> tier is ever built on-device vs. stays hosted is a later call. The stable cascade is now **codified in
+> the statute** at [platform-decisions.md#vision-tiers](platform-decisions.md#vision-tiers) (#1244) — cite
+> that rule rather than re-deriving the tier picks; this doc remains the detailed reference behind it.
 >
 > **Lineage:** #475 / #488 (the on-device ruling) · #490 (the build epic) · #1033 (the interactive
 > design-review loop) · report [`reports/2026-06-13-on-device-ui-vision-capability.md`](../../reports/2026-06-13-on-device-ui-vision-capability.md).
