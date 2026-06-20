@@ -1,9 +1,7 @@
 ---
 kind: epic
-size: 8
 status: open
 dateOpened: "2026-06-20"
-childlessReason: undecided
 tags: [blocks, duplication, drift, single-source, frontierui, maintenance, runtime]
 relatedProject: webblocks
 ---
@@ -73,9 +71,30 @@ is resolved by **elimination, not by a dedup-to-track + drift-gate**. Consequenc
    FUI-side (the 2026-06-20 hotfix), so deleting `we:blocks/router/` is now safe and removes the
    recurrence surface for that bug class outright.
 
-## Slices (to carve on pickup)
+## Slices — sliced 2026-06-20 (`/slice 1245`, post-#1246)
 
-Per-family or per-layer slices: (a) delete + spec/vector retention per block; (b) demo re-host to
-FUI/#701 per consuming page; (c) `we:plugs/bootstrap.ts` → FUI; (d) unit-test → vector conversion. Router
-is the first slice. This is now an **unblocked** epic (the gating decision resolved); size may grow past 8
-on slice-out — re-estimate at split.
+Investigation of the **real runtime import graph** (code imports, not the doc-text refs the Scope section
+counts) split the work into *deliverable-in-WE-now* vs *gated-on-FUI-build*. Full analysis:
+`we:reports/2026-06-20-backlog-split-analysis.md` (§"RE-RUN — post-#1246").
+
+**Carved (deliverable now — independent, batchable):**
+- **A — delete `we:blocks/draft-persistence/`** ([#1310](/backlog/1310-delete-we-blocks-draft-persistence-runtime-copy-fui-canonica/)) — 0 runtime importers, 0 unit tests, FUI canonical.
+- **B — delete `we:blocks/data-transfer/`** ([#1311](/backlog/1311-delete-we-blocks-data-transfer-runtime-copy-fui-canonical/)) — same shape.
+- **C — pilot block-test → conformance-vector conversion on `text-nodes`** ([#1312](/backlog/1312-pilot-block-unit-test-to-conformance-vector-conversion-text-/)) — establishes the
+  vector pattern items (a)/(d) below reuse; does *not* delete runtime yet.
+
+**Deferred — could-not-split-here (gated on FUI build, not a decision — re-`/slice` as each gate clears):**
+- **7 bootstrap families** (`router`, `navigation`, `parsers`, `text-nodes`·runtime, `for-each`,
+  `transient`, `attributes`) — imported only by `we:plugs/bootstrap.ts`; the embed boundary
+  (`we:docs/agent/platform-decisions.md#we-fui-embed-boundary`) forbids repointing WE at `@frontierui/*`,
+  so they can drop only after FUI hosts the ~12 bootstrap-consuming demos and `we:plugs/bootstrap.ts`
+  relocates (#606). Then bulk-delete in one follow-up.
+- **`wizard`+`workflow-engine`, `resource-loader`, `stores`, `renderers` (×11 demos)** — deleting breaks the
+  consuming demo and no FUI-hosted equivalent exists yet. Action: FUI builds each hosted demo → WE swaps the
+  local page to a `#701 fuiDemo` iframe → delete the family. One slice per demo as FUI ships it.
+- **`view`+`tabs`** — **carved (now unblocked)** as [#1326](/backlog/1326-delete-we-blocks-view-tabs-runtime-copies-swap-we-view-tabs-/): **C** (#1312) has landed and
+  `fui:demos/view-tabs-demo.html` self-bootstraps for iframe embed, so deleting `we:blocks/{view,tabs}` +
+  swapping `we:demos/view-tabs-demo.html` to a `#701 fuiDemo` iframe is now deliverable.
+
+The `#701 fuiDemo` iframe vs mode-C URL-bundle choice is a **settled per-demo menu**
+(`#we-fui-embed-boundary` rule 6), not an open fork — no decision card.
