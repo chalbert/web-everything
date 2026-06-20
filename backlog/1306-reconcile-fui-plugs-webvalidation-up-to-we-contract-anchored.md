@@ -1,6 +1,6 @@
 ---
 kind: story
-size: 5
+size: 13
 parent: "1250"
 locus: frontierui
 status: open
@@ -8,6 +8,12 @@ dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 tags: []
 ---
+
+> **Outgrew — not batchable as one (sized 5 → 13, batch-2026-06-20).** The investigation below
+> (diffed-only, nothing modified) shows a byte-copy would REGRESS FUI: it needs a hand-merge that
+> preserves FUI's `@webeverything/*` index imports + observed-attributes/runner bits, and an unencoded
+> prerequisite — new `@webeverything/commitment-policy` / `@webeverything/error-summary` aliases must be
+> wired before the 2 WE-only files can port. Needs a focused session, not a batch slot.
 
 # Reconcile fui:plugs/webvalidation UP to WE (contract-anchored) + consume published @webeverything/* contracts
 

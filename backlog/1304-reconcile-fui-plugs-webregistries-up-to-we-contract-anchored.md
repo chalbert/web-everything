@@ -1,6 +1,6 @@
 ---
 kind: story
-size: 3
+size: 13
 parent: "1250"
 locus: frontierui
 status: open
@@ -8,6 +8,12 @@ dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 tags: []
 ---
+
+> **Outgrew — not batchable as one (sized 3 → 13, batch-2026-06-20).** The investigation below
+> (carried forward from a prior attempt that reverted to keep FUI green) shows this is not a clean
+> reconcile: it carries a genuine **FUI Plug-interface fork** (drop the `downgrade()` requirement — a
+> FUI-architecture decision — vs keep a FUI-only `downgrade` stub) plus #854 scoped-binding integration
+> work. Needs a focused session: carve the downgrade-requirement decision first, then the merge.
 
 # Reconcile fui:plugs/webregistries UP to WE (contract-anchored)
 
