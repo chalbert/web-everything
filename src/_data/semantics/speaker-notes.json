@@ -1,0 +1,5 @@
+{
+  "term": "speaker notes",
+  "definition": "Per-slide note content (text or markdown) authored alongside a slide, hidden in the presentation render and surfaced only in the presenter view. A content-and-storage contract: the notes are a resource attached to a slide's identity (via the deck document model's notes ref), authored through a component, and persisted independently of the slide's visible content.",
+  "usage": "Homed in webresources (the note content/resource), composing webstates for persistence and webcomponents for the authored element. A slide references its notes via the Deck Document Model <code>notes</code> field; the presenter view (a second window or pane) is the only surface that renders them, never the audience display."
+}
