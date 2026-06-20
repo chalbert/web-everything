@@ -1,0 +1,103 @@
+{#
+  backlog-badges.njk — the SINGLE source of truth for every backlog item badge / chip / circle.
+
+  Imported (with context, so the global `backlogMeta` resolves) by BOTH backlog item surfaces so they
+  cannot drift:
+    {% import "backlog-badges.njk" as bk with context %}
+  and called as bk.typeBadge(...), bk.statusBadge(...), etc.
+    • src/backlog.njk        — /backlog/ tile + Prioritisation table   (scale 'sm', the dense card grid)
+    • src/backlog-pages.njk  — /backlog/{id}/ detail page              (scale 'md', the full page)
+
+  The vocabulary (colours/labels/tooltips) lives in src/_data/backlogMeta.js (global `backlogMeta`); these
+  macros only render it. `scale` ∈ 'sm' | 'md' sizes the pill while the colour/branch/label logic stays
+  identical across surfaces — so a status like `preparing` or an epic state like `program` is coloured the
+  same everywhere by construction. Each macro is SELF-CONTAINED (inlines its own scale) so it survives
+  `import`. check:standards forbids re-defining these macros locally (anti-drift).
+
+  Dogfood seam (#777): when FUI ships `badge`/`filter-chip` (#778 map, #658 gap) and the Mode-C in-document
+  render lands (#765/#728), these macro bodies swap to render via the FUI components — one seam, not five
+  duplicated definitions across two files.
+#}
+
+{% macro typeBadge(type, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
+<span style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
+  background: {% if type == 'idea' %}#ede9fe{% elif type == 'issue' %}#fee2e2{% elif type == 'decision' %}#e0e7ff{% else %}#f1f5f9{% endif %};
+  color: {% if type == 'idea' %}#5b21b6{% elif type == 'issue' %}#991b1b{% elif type == 'decision' %}#3730a3{% else %}#475569{% endif %};">{{ type }}</span>
+{% endmacro %}
+
+{# Includes the `preparing` → "Prepping" branch on BOTH surfaces (was missing on the detail page). #}
+{% macro statusBadge(status, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.75em' %}
+<span style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 600; white-space: nowrap;
+  background: {% if status == 'open' %}#fef3c7{% elif status == 'active' %}#dbeafe{% elif status == 'preparing' %}#ede9fe{% elif status == 'resolved' %}#dcfce7{% else %}#f1f5f9{% endif %};
+  color: {% if status == 'open' %}#92400e{% elif status == 'active' %}#1e40af{% elif status == 'preparing' %}#6d28d9{% elif status == 'resolved' %}#166534{% else %}#475569{% endif %};">{% if status == 'preparing' %}Prepping{% else %}{{ status | title }}{% endif %}</span>
+{% endmacro %}
+
+{% macro sizeBadge(size, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
+<span title="Estimate: {{ size }} agile point{% if size != 1 %}s{% endif %}" style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569);">{{ size }} pt{% if size != 1 %}s{% endif %}</span>
+{% endmacro %}
+
+{# Stand-in for the size badge on an UNSIZED item (an epic rolls its children's points; a task's roll up
+   to its parent) so every surface shows something in the size slot. #}
+{% macro workItemBadge(workItem, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
+<span title="{{ workItem }} — unsized ({% if workItem == 'epic' %}rolls up its child stories{% else %}points roll up to its parent{% endif %})" style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569);">{{ workItem }}</span>
+{% endmacro %}
+
+{# Agent-readiness chip. Heuristic HINT (loader-derived from structured fields), not authoritative. #}
+{% macro tierBadge(tier, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
+{% if tier %}<span title="Agent-readiness hint — {{ backlogMeta.tierMeaning[tier] }}. Heuristic from structured fields only (type + resolved prerequisites); not authoritative — the selection pass still refines it." style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
+  background: {% if tier == 'A' %}#dcfce7{% elif tier == 'B' %}#fef3c7{% else %}#f1f5f9{% endif %};
+  color: {% if tier == 'A' %}#166534{% elif tier == 'B' %}#92400e{% else %}#475569{% endif %};">{{ backlogMeta.tierLabel[tier] }}</span>{% endif %}
+{% endmacro %}
+
+{# The "unsliced" badge for a childless epic — "unsliced · <why>" (colour/tooltip from backlogMeta) or a bare "unsliced". #}
+{% macro unslicedBadge(reason, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}{% set m = backlogMeta.childlessReasonMeta[reason] %}
+{% if m %}<span title="{{ m.tip }}" style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: {{ m.bg }}; color: {{ m.fg }};">unsliced &middot; {{ m.label }}</span>{% else %}<span title="Unsliced epic — no child stories cut yet, and no reason recorded (add a childlessReason)." style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #f1f5f9; color: #475569;">unsliced</span>{% endif %}
+{% endmacro %}
+
+{# A labelled meta pill (e.g. "PARENT #314", "STARTED 2026-06-11") — detail-page header chips. #}
+{% macro metaBadge(label, value, scale='md') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
+<span style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 600; white-space: nowrap; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569);"><span style="text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.7;">{{ label }}</span>&nbsp;{{ value }}</span>
+{% endmacro %}
+
+{# The epic-status badge cluster — picks exactly one of: ongoing program / unsliced·why / all slices done /
+   ⚠ open slice. ONE place so the tile and the detail page read identically. #}
+{% macro epicStatusBadge(item, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
+{% if item.workItem == 'epic' %}
+{%- if item.ongoing and item.status != 'resolved' -%}
+<span title="Ongoing program — a continuous effort, not a fixed deliverable. It legitimately has every child resolved between slices and is NEVER a resolve cue; the next slice is added as the program advances." style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #e0f2fe; color: #075985;">ongoing program</span>
+{%- elif not (item.children | length) -%}{{ unslicedBadge(item.childlessReason, scale) }}
+{%- elif item.openChildCount == 0 and (item.status == 'open' or item.status == 'active') -%}
+<span title="Every child slice is resolved but the epic is still open — its scope looks delivered. Resolve it, or add the remaining child work." style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #dcfce7; color: #166534;">all slices done</span>
+{%- elif item.openChildCount and item.status == 'resolved' -%}
+<span title="The epic is resolved but {{ item.openChildCount }} child slice(s) are still open — a contradiction. Reopen the epic, re-parent, or resolve the children." style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #fef2f2; color: #991b1b;">&#9888; {{ item.openChildCount }} open slice{% if item.openChildCount != 1 %}s{% endif %}</span>
+{%- endif -%}
+{% endif %}
+{% endmacro %}
+
+{# The item's topic tags row (the `tags:` frontmatter) — identical pill styling on every surface. #}
+{% macro tagsRow(tags, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.8em' if scale == 'md' else '0.75em' %}
+{% if tags %}<div style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0 0 0.75rem;">{% for tag in tags %}<span style="display: inline-block; padding: {{ pad }}; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: {{ fs }};">{{ tag }}</span>{% endfor %}</div>{% endif %}
+{% endmacro %}
+
+{# A child of an epic, drawn as a numbered circle coloured by the agent-readiness palette (resolved=grey ·
+   active=blue · preparing=purple · ready=green · decision=amber · not-ready=slate). z-index keeps it
+   clickable above a card overlay (harmless on the detail page). #}
+{% macro childCircle(child) %}
+{% set bg = "#f1f5f9" %}{% set bd = "#94a3b8" %}{% set fg = "#475569" %}
+{% if child.status == 'resolved' %}{% set bg = "#f8fafc" %}{% set bd = "#cbd5e1" %}{% set fg = "#475569" %}
+{% elif child.status == 'active' %}{% set bg = "#dbeafe" %}{% set bd = "#2563eb" %}{% set fg = "#1e40af" %}
+{% elif child.status == 'preparing' %}{% set bg = "#ede9fe" %}{% set bd = "#7c3aed" %}{% set fg = "#6d28d9" %}
+{% elif child.tier == 'A' %}{% set bg = "#dcfce7" %}{% set bd = "#16a34a" %}{% set fg = "#166534" %}
+{% elif child.tier == 'B' %}{% set bg = "#fef3c7" %}{% set bd = "#d97706" %}{% set fg = "#92400e" %}{% endif %}
+<a href="/backlog/{{ child.id }}/" title="#{{ child.num }} {{ child.title }} · {% if child.size %}{{ child.size }} pt{% if child.size != 1 %}s{% endif %}{% else %}{{ child.workItem }}{% endif %} · {{ child.status }}" style="position: relative; z-index: 2; display: inline-flex; align-items: center; justify-content: center; min-width: 1.7rem; height: 1.7rem; padding: 0 0.35rem; border-radius: 9999px; background: {{ bg }}; border: 1.5px solid {{ bd }}; color: {{ fg }}; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none;">{{ child.num }}</a>
+{% endmacro %}
+
+{# A prerequisite (`blockedBy`) drawn as a pill: a still-open blocker is red with ⛔, a resolved one green
+   with ✓ (kept so the dependency reads in full). z-index keeps it clickable above a card overlay. #}
+{% macro blockerChip(b) %}
+{% if b.status == 'resolved' %}
+<a href="/backlog/{{ b.id }}/" title="#{{ b.num }} {{ b.title }} · resolved — cleared" style="position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.05rem 0.45rem; border-radius: 9999px; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none; background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;">&#10003; #{{ b.num }}</a>
+{% else %}
+<a href="/backlog/{{ b.id }}/" title="#{{ b.num }} {{ b.title }} · {{ b.status }} — still blocking" style="position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.05rem 0.45rem; border-radius: 9999px; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca;">&#9940; #{{ b.num }}</a>
+{% endif %}
+{% endmacro %}

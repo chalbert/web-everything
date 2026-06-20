@@ -10,58 +10,10 @@ eleventyComputed:
     title: "Backlog - {{ item.title }}"
 ---
 
-{% macro typeBadge(type) %}
-<span style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
-  background: {% if type == 'idea' %}#ede9fe{% elif type == 'issue' %}#fee2e2{% elif type == 'decision' %}#e0e7ff{% else %}#f1f5f9{% endif %};
-  color: {% if type == 'idea' %}#5b21b6{% elif type == 'issue' %}#991b1b{% elif type == 'decision' %}#3730a3{% else %}#475569{% endif %};">{{ type }}</span>
-{% endmacro %}
-
-{% macro statusBadge(status) %}
-<span style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.8em; font-weight: 600; white-space: nowrap;
-  background: {% if status == 'open' %}#fef3c7{% elif status == 'active' %}#dbeafe{% elif status == 'resolved' %}#dcfce7{% else %}#f1f5f9{% endif %};
-  color: {% if status == 'open' %}#92400e{% elif status == 'active' %}#1e40af{% elif status == 'resolved' %}#166534{% else %}#475569{% endif %};">{{ status | title }}</span>
-{% endmacro %}
-
-{% macro metaBadge(label, value) %}
-<span style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 600; white-space: nowrap; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569);"><span style="text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.7;">{{ label }}</span>&nbsp;{{ value }}</span>
-{% endmacro %}
-
-{# Epic-status badge — the same at-a-glance cue the /backlog/ tile shows (unsliced·why / all slices done /
-   ⚠ open slice). Colours + tooltips mirror backlog.njk's childlessReasonMeta and epic badges so the two
-   surfaces read identically. PARITY RULE: anything the tile exposes is also exposed here — see the comment
-   at the foot of this file. #}
-{% set childlessReasonMeta = {
-  "blocked":   { label: "blocked",         bg: "#fef2f2", fg: "#991b1b", tip: "No child stories yet — it's waiting on the prerequisites in the Blocked-by section. The slices can't be cut until those clear." },
-  "undecided": { label: "needs decisions", bg: "#fef3c7", fg: "#92400e", tip: "No child stories yet — open design decisions determine where the slices fall. Resolve them and it splits into stories." },
-  "untriaged": { label: "needs triage",    bg: "#ede9fe", fg: "#5b21b6", tip: "No child stories yet — a holding-pen of candidates; each must be triaged (promote / fold / drop) before any become stories." },
-  "program":   { label: "ongoing program", bg: "#e0f2fe", fg: "#075985", tip: "No child stories by design — a continuous program measured by progress, not a fixed set of child stories." }
-} %}
-{% macro unslicedBadge(reason) %}
-{% set m = childlessReasonMeta[reason] %}
-{% if m %}<span title="{{ m.tip }}" style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: {{ m.bg }}; color: {{ m.fg }};">unsliced &middot; {{ m.label }}</span>{% else %}<span title="Unsliced epic — no child stories cut yet, and no reason recorded (add a childlessReason)." style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #f1f5f9; color: #475569;">unsliced</span>{% endif %}
-{% endmacro %}
-
-{# A child slice of an epic, drawn as a clickable numbered circle coloured by the SAME agent-readiness
-   palette as the tile circles + graph nodes (resolved=grey · active=blue · ready=green · decision=amber ·
-   not-ready=slate) — identical to backlog.njk's childCircle so the tile and the detail header read alike. #}
-{% macro childCircle(child) %}
-{% set bg = "#f1f5f9" %}{% set bd = "#94a3b8" %}{% set fg = "#475569" %}
-{% if child.status == 'resolved' %}{% set bg = "#f8fafc" %}{% set bd = "#cbd5e1" %}{% set fg = "#475569" %}
-{% elif child.status == 'active' %}{% set bg = "#dbeafe" %}{% set bd = "#2563eb" %}{% set fg = "#1e40af" %}
-{% elif child.tier == 'A' %}{% set bg = "#dcfce7" %}{% set bd = "#16a34a" %}{% set fg = "#166534" %}
-{% elif child.tier == 'B' %}{% set bg = "#fef3c7" %}{% set bd = "#d97706" %}{% set fg = "#92400e" %}{% endif %}
-<a href="/backlog/{{ child.id }}/" title="#{{ child.num }} {{ child.title }} · {% if child.size %}{{ child.size }} pt{% if child.size != 1 %}s{% endif %}{% else %}{{ child.workItem }}{% endif %} · {{ child.status }}" style="display: inline-flex; align-items: center; justify-content: center; min-width: 1.7rem; height: 1.7rem; padding: 0 0.35rem; border-radius: 9999px; background: {{ bg }}; border: 1.5px solid {{ bd }}; color: {{ fg }}; font-size: 0.78em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none;">{{ child.num }}</a>
-{% endmacro %}
-
-{# A prerequisite (`blockedBy`) drawn as a pill — IDENTICAL to backlog.njk's blockerChip so the top-of-detail
-   row reads the same as the tile: a still-open blocker is red with ⛔, a resolved one green with ✓. #}
-{% macro blockerChip(b) %}
-{% if b.status == 'resolved' %}
-<a href="/backlog/{{ b.id }}/" title="#{{ b.num }} {{ b.title }} · resolved — cleared" style="display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.05rem 0.45rem; border-radius: 9999px; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none; background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;">&#10003; #{{ b.num }}</a>
-{% else %}
-<a href="/backlog/{{ b.id }}/" title="#{{ b.num }} {{ b.title }} · {{ b.status }} — still blocking" style="display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.05rem 0.45rem; border-radius: 9999px; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca;">&#9940; #{{ b.num }}</a>
-{% endif %}
-{% endmacro %}
+{% import "backlog-badges.njk" as bk with context %}
+{# Badge macros + vocabulary are shared with the /backlog/ tile via src/_includes/backlog-badges.njk
+   + src/_data/backlogMeta.js — ONE source so the two surfaces cannot drift. Detail uses scale "md".
+   check:standards forbids re-defining these locally. #}
 
 <div class="plug-detail-header">
     <div class="plug-detail-header-inner">
@@ -74,34 +26,34 @@ eleventyComputed:
             <h1 class="plug-title">{% if item.num %}<span style="color: var(--color-text-muted, #94a3b8); font-weight: 600; font-variant-numeric: tabular-nums;">#{{ item.num }}</span> {% endif %}{{ item.title }}</h1>
         </div>
         <div class="plug-status" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; width: 100%; margin-top: 0.5rem;">
-            {{ typeBadge(item.type) }}
-            {{ statusBadge(item.status) }}
-            {% if item.workItem %}{{ metaBadge('Work', item.workItem) }}{% endif %}
-            {% if item.size %}{{ metaBadge('Size', item.size) }}{% endif %}
-            {% if item.tier %}{{ metaBadge('Tier', item.tier) }}{% endif %}
-            {% if item.batchable %}{{ metaBadge('Batchable', 'yes') }}{% endif %}
-            {% if item.batchCost %}{{ metaBadge('Cost', item.batchCost) }}{% endif %}
-            {% if item.leverageScore %}{{ metaBadge('Leverage', item.leverageScore) }}{% endif %}
-            {% if item.directUnblocks %}{{ metaBadge('Unblocks', item.directUnblocks) }}{% endif %}
-            {% if item.transitiveUnblocks %}{{ metaBadge('Unblocks (transitive)', item.transitiveUnblocks) }}{% endif %}
-            {% if item.unblocksToReady %}{{ metaBadge('Unblocks→ready', item.unblocksToReady) }}{% endif %}
-            {% if item.parent %}{% set parentItem = null %}{% for p in backlog %}{% if p.num == item.parent %}{% set parentItem = p %}{% endif %}{% endfor %}{% if parentItem %}<a href="/backlog/{{ parentItem.id }}/" style="text-decoration: none;" title="{{ parentItem.title }}">{{ metaBadge('Parent', '#' + item.parent) }}</a>{% else %}{{ metaBadge('Parent', '#' + item.parent) }}{% endif %}{% endif %}
-            {% if item.dateStarted %}{{ metaBadge('Started', item.dateStarted) }}{% endif %}
-            {% if item.dateResolved %}{{ metaBadge('Resolved', item.dateResolved) }}{% endif %}
-            {% if item.workItem == 'epic' %}{% if item.ongoing and item.status != 'resolved' %}<span title="Ongoing program — a continuous effort, not a fixed deliverable. It legitimately has every child resolved between slices and is NEVER a resolve cue; the next slice is added as the program advances." style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #e0f2fe; color: #075985;">ongoing program</span>{% elif not (item.children | length) %}{{ unslicedBadge(item.childlessReason) }}{% elif item.openChildCount == 0 and (item.status == 'open' or item.status == 'active') %}<span title="Every child slice is resolved but the epic is still open — its scope looks delivered. Resolve it, or add the remaining child work." style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #dcfce7; color: #166534;">all slices done</span>{% elif item.openChildCount and item.status == 'resolved' %}<span title="The epic is resolved but {{ item.openChildCount }} child slice(s) are still open — a contradiction. Reopen the epic, re-parent, or resolve the children." style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #fef2f2; color: #991b1b;">&#9888; {{ item.openChildCount }} open slice{% if item.openChildCount != 1 %}s{% endif %}</span>{% endif %}{% endif %}
+            {{ bk.typeBadge(item.type, 'md') }}
+            {{ bk.statusBadge(item.status, 'md') }}
+            {% if item.workItem %}{{ bk.metaBadge('Work', item.workItem) }}{% endif %}
+            {% if item.size %}{{ bk.metaBadge('Size', item.size) }}{% endif %}
+            {% if item.tier %}{{ bk.metaBadge('Tier', item.tier) }}{% endif %}
+            {% if item.batchable %}{{ bk.metaBadge('Batchable', 'yes') }}{% endif %}
+            {% if item.batchCost %}{{ bk.metaBadge('Cost', item.batchCost) }}{% endif %}
+            {% if item.leverageScore %}{{ bk.metaBadge('Leverage', item.leverageScore) }}{% endif %}
+            {% if item.directUnblocks %}{{ bk.metaBadge('Unblocks', item.directUnblocks) }}{% endif %}
+            {% if item.transitiveUnblocks %}{{ bk.metaBadge('Unblocks (transitive)', item.transitiveUnblocks) }}{% endif %}
+            {% if item.unblocksToReady %}{{ bk.metaBadge('Unblocks→ready', item.unblocksToReady) }}{% endif %}
+            {% if item.parent %}{% set parentItem = null %}{% for p in backlog %}{% if p.num == item.parent %}{% set parentItem = p %}{% endif %}{% endfor %}{% if parentItem %}<a href="/backlog/{{ parentItem.id }}/" style="text-decoration: none;" title="{{ parentItem.title }}">{{ bk.metaBadge('Parent', '#' + item.parent) }}</a>{% else %}{{ bk.metaBadge('Parent', '#' + item.parent) }}{% endif %}{% endif %}
+            {% if item.dateStarted %}{{ bk.metaBadge('Started', item.dateStarted) }}{% endif %}
+            {% if item.dateResolved %}{{ bk.metaBadge('Resolved', item.dateResolved) }}{% endif %}
+            {{ bk.epicStatusBadge(item, 'md') }}
         </div>
         {% if item.children and item.children.length %}
         {# Same "Contains" circles as the tile, at the very top — a mini constellation of this epic's slices. #}
         <div class="plug-epic-children" style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; width: 100%; margin-top: 0.6rem;">
             <span style="font-size: 0.72em; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600;">Contains</span>
-            {% for child in item.children %}{{ childCircle(child) }}{% endfor %}
+            {% for child in item.children %}{{ bk.childCircle(child) }}{% endfor %}
         </div>
         {% endif %}
         {% if item.blockers and item.blockers.length %}
         {# Same "Blocked by" chips as the tile, at the top — open prerequisites red (⛔), cleared ones green (✓). #}
         <div class="plug-blockers" style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; width: 100%; margin-top: 0.6rem;">
             <span style="font-size: 0.72em; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600;">Blocked by</span>
-            {% for b in item.blockers %}{{ blockerChip(b) }}{% endfor %}
+            {% for b in item.blockers %}{{ bk.blockerChip(b) }}{% endfor %}
         </div>
         {% endif %}
     </div>
@@ -116,13 +68,7 @@ eleventyComputed:
             <p class="mb-4 text-slate-600" style="font-size: 1.1em; line-height: 1.6;">{{ item.summary }}</p>
             {% endif %}
 
-            {% if item.tags %}
-            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1.25rem 0 1rem;">
-                {% for tag in item.tags %}
-                <span style="display: inline-block; padding: 0.15rem 0.6rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.8em;">{{ tag }}</span>
-                {% endfor %}
-            </div>
-            {% endif %}
+            {{ bk.tagsRow(item.tags, 'md') }}
 
             <p style="font-size: 0.85em; color: var(--color-text-muted, #94a3b8);">Opened: {{ item.dateOpened }}</p>
         </div>
@@ -134,10 +80,10 @@ eleventyComputed:
             <ul style="list-style: none; padding: 0; margin: 0.75rem 0 0; display: flex; flex-direction: column; gap: 0.6rem;">
                 {% for child in item.children %}
                 <li style="display: flex; gap: 0.5rem; align-items: center;">
-                    {{ childCircle(child) }}
+                    {{ bk.childCircle(child) }}
                     <a href="/backlog/{{ child.id }}/" style="color: var(--color-primary); font-weight: 600; text-decoration: none;">{{ child.title }}</a>
-                    {% if child.size %}{{ metaBadge('Size', child.size) }}{% elif child.workItem %}{{ metaBadge('Work', child.workItem) }}{% endif %}
-                    {{ statusBadge(child.status) }}
+                    {% if child.size %}{{ bk.metaBadge('Size', child.size) }}{% elif child.workItem %}{{ bk.metaBadge('Work', child.workItem) }}{% endif %}
+                    {{ bk.statusBadge(child.status, 'md') }}
                 </li>
                 {% endfor %}
             </ul>
@@ -152,7 +98,7 @@ eleventyComputed:
                 {% for blocker in item.blockers %}
                 <li style="display: flex; gap: 0.5rem; align-items: center;">
                     <a href="/backlog/{{ blocker.id }}/" style="color: var(--color-primary); font-weight: 600; text-decoration: none;"><span style="color: var(--color-text-muted, #94a3b8); font-variant-numeric: tabular-nums;">#{{ blocker.num }}</span> {{ blocker.title }}</a>
-                    {{ statusBadge(blocker.status) }}
+                    {{ bk.statusBadge(blocker.status, 'md') }}
                 </li>
                 {% endfor %}
             </ul>

@@ -995,6 +995,27 @@ try {
   err(`Demo operational-wiring check failed: ${e.message}`);
 }
 
+// ── Backlog badge single-source (anti-drift) ────────────────────────────────────
+// The /backlog/ tile + Prioritisation table (src/backlog.njk) and the /backlog/{id}/ detail page
+// (src/backlog-pages.njk) must render every badge/chip from the ONE shared macro file
+// (src/_includes/backlog-badges.njk) over the ONE shared vocabulary (src/_data/backlogMeta.js) — never a
+// local copy. A re-declared macro is exactly how the two surfaces drifted before (a `preparing`/`program`
+// colour added to one but not the other). So: each surface MUST import the shared file, and MUST NOT
+// define any of the shared badge macros locally. Mechanical guard so the parity rule isn't just a comment.
+{
+  const SHARED_BADGE_MACROS = ['typeBadge', 'statusBadge', 'sizeBadge', 'workItemBadge', 'tierBadge', 'unslicedBadge', 'metaBadge', 'epicStatusBadge', 'tagsRow', 'childCircle', 'blockerChip'];
+  for (const rel of ['src/backlog.njk', 'src/backlog-pages.njk']) {
+    const file = join(ROOT, rel);
+    if (!existsSync(file)) continue;
+    const src = readFileSync(file, 'utf8');
+    if (!/\{%\s*import\s+["']backlog-badges\.njk["']/.test(src))
+      err(`${rel} must \`{% import "backlog-badges.njk" as bk with context %}\` — backlog badges render from the one shared macro source (anti-drift), not inline markup.`);
+    const localDefs = SHARED_BADGE_MACROS.filter((m) => new RegExp(`\\{%\\s*macro\\s+${m}\\s*\\(`).test(src));
+    if (localDefs.length)
+      err(`${rel} re-defines shared badge macro(s) locally: ${localDefs.join(', ')}. Delete the local copy and call bk.<name>() — these live only in src/_includes/backlog-badges.njk so the tile and detail page can't drift (#777 dogfood seam).`);
+  }
+}
+
 // ── 10. Backlog type-filter UI must cover every BACKLOG_TYPE ───────────────────
 // The /backlog/ board hides any card whose `data-type` is not an *active filter chip*
 // (src/assets/js/home-display.js → `failType`). The chip set is built from hard-coded type

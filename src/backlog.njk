@@ -45,80 +45,11 @@ title: Backlog
 .bk-collapse[data-persist="intro"] > summary { margin-top: 0.25rem; }
 </style>
 
-{% macro typeBadge(type) %}
-<span style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
-  background: {% if type == 'idea' %}#ede9fe{% elif type == 'issue' %}#fee2e2{% elif type == 'decision' %}#e0e7ff{% else %}#f1f5f9{% endif %};
-  color: {% if type == 'idea' %}#5b21b6{% elif type == 'issue' %}#991b1b{% elif type == 'decision' %}#3730a3{% else %}#475569{% endif %};">{{ type }}</span>
-{% endmacro %}
-
-{% macro statusBadge(status) %}
-<span style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.75em; font-weight: 600; white-space: nowrap;
-  background: {% if status == 'open' %}#fef3c7{% elif status == 'active' %}#dbeafe{% elif status == 'preparing' %}#ede9fe{% elif status == 'resolved' %}#dcfce7{% else %}#f1f5f9{% endif %};
-  color: {% if status == 'open' %}#92400e{% elif status == 'active' %}#1e40af{% elif status == 'preparing' %}#6d28d9{% elif status == 'resolved' %}#166534{% else %}#475569{% endif %};">{% if status == 'preparing' %}Prepping{% else %}{{ status | title }}{% endif %}</span>
-{% endmacro %}
-
-{% macro sizeBadge(size) %}
-<span title="Estimate: {{ size }} agile point{% if size != 1 %}s{% endif %}" style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569);">{{ size }} pt{% if size != 1 %}s{% endif %}</span>
-{% endmacro %}
-
-{# Stand-in for the size badge on an UNSIZED item (an epic rolls its children's points; a task's roll up
-   to its parent) so every tile shows something in the size slot — mirrors the Prioritisation cell. #}
-{% macro workItemBadge(workItem) %}
-<span title="{{ workItem }} — unsized ({% if workItem == 'epic' %}rolls up its child stories{% else %}points roll up to its parent{% endif %})" style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569);">{{ workItem }}</span>
-{% endmacro %}
-
-{# A child of an epic, drawn as a numbered circle coloured by the SAME agent-readiness palette as the
-   dependency graph nodes (resolved=grey · active=blue · ready=green · decision=amber · not-ready=slate),
-   so the epic tile reads at a glance like a mini constellation of its slices. Sits above the card's
-   overlay link (z-index 2) so each circle is independently clickable. #}
-{% macro childCircle(child) %}
-{% set bg = "#f1f5f9" %}{% set bd = "#94a3b8" %}{% set fg = "#475569" %}
-{% if child.status == 'resolved' %}{% set bg = "#f8fafc" %}{% set bd = "#cbd5e1" %}{% set fg = "#475569" %}
-{% elif child.status == 'active' %}{% set bg = "#dbeafe" %}{% set bd = "#2563eb" %}{% set fg = "#1e40af" %}
-{% elif child.status == 'preparing' %}{% set bg = "#ede9fe" %}{% set bd = "#7c3aed" %}{% set fg = "#6d28d9" %}
-{% elif child.tier == 'A' %}{% set bg = "#dcfce7" %}{% set bd = "#16a34a" %}{% set fg = "#166534" %}
-{% elif child.tier == 'B' %}{% set bg = "#fef3c7" %}{% set bd = "#d97706" %}{% set fg = "#92400e" %}{% endif %}
-<a href="/backlog/{{ child.id }}/" title="#{{ child.num }} {{ child.title }} · {% if child.size %}{{ child.size }} pt{% if child.size != 1 %}s{% endif %}{% else %}{{ child.workItem }}{% endif %} · {{ child.status }}" style="position: relative; z-index: 2; display: inline-flex; align-items: center; justify-content: center; min-width: 1.7rem; height: 1.7rem; padding: 0 0.35rem; border-radius: 9999px; background: {{ bg }}; border: 1.5px solid {{ bd }}; color: {{ fg }}; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none;">{{ child.num }}</a>
-{% endmacro %}
-
-{# A prerequisite (`blockedBy`) drawn as a pill: a still-open blocker is red with ⛔ (it's what's holding
-   this item back), a resolved one is green with ✓ (cleared — kept so the dependency reads in full). Sits
-   above the card overlay (z-index 2) so it stays clickable. #}
-{% macro blockerChip(b) %}
-{% if b.status == 'resolved' %}
-<a href="/backlog/{{ b.id }}/" title="#{{ b.num }} {{ b.title }} · resolved — cleared" style="position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.05rem 0.45rem; border-radius: 9999px; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none; background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;">&#10003; #{{ b.num }}</a>
-{% else %}
-<a href="/backlog/{{ b.id }}/" title="#{{ b.num }} {{ b.title }} · {{ b.status }} — still blocking" style="position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.05rem 0.45rem; border-radius: 9999px; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca;">&#9940; #{{ b.num }}</a>
-{% endif %}
-{% endmacro %}
-
-{# The "unsliced" badge for a childless epic — when the author has recorded a `childlessReason` it reads
-   "unsliced · <why>" with a colour + tooltip from childlessReasonMeta; otherwise a bare "unsliced". #}
-{% macro unslicedBadge(reason) %}
-{% set m = childlessReasonMeta[reason] %}
-{% if m %}<span title="{{ m.tip }}" style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: {{ m.bg }}; color: {{ m.fg }};">unsliced &middot; {{ m.label }}</span>{% else %}<span title="Unsliced epic — no child stories cut yet, and no reason recorded (add a childlessReason)." style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #f1f5f9; color: #475569;">unsliced</span>{% endif %}
-{% endmacro %}
-
-{# Why a childless epic has no child stories yet — author-supplied (`childlessReason`), since the reason
-   lives in the body, not in derivable fields. Rendered as an at-a-glance badge on the tile. `blocked` is
-   the one case also shown structurally (the red Blocked-by row), so its badge stays muted. #}
-{% set childlessReasonMeta = {
-  "blocked":   { label: "blocked",         bg: "#fef2f2", fg: "#991b1b", tip: "No child stories yet — it's waiting on the prerequisites in the Blocked-by row. The slices can't be cut until those clear." },
-  "undecided": { label: "needs decisions", bg: "#fef3c7", fg: "#92400e", tip: "No child stories yet — open design decisions determine where the slices fall. Resolve them and it splits into stories." },
-  "untriaged": { label: "needs triage",    bg: "#ede9fe", fg: "#5b21b6", tip: "No child stories yet — a holding-pen of candidates; each must be triaged (promote / fold / drop) before any become stories." },
-  "program":   { label: "ongoing program", bg: "#e0f2fe", fg: "#075985", tip: "No child stories by design — a continuous program measured by progress, not a fixed set of child stories." }
-} %}
-
-{# Tier labels & one-line meaning — kept in one place so the chip, the card badge, and its tooltip stay in sync. #}
-{% set tierLabel = { "A": "Agent-ready", "B": "Decision-ready", "C": "Not ready" } %}
-{% set tierMeaning = { "A": "issue/idea with all prerequisites resolved — nothing structural blocks an agent starting", "B": "a decision awaiting a nod — ratify it, then it's a quick build", "C": "needs design or is blocked — an issue/idea with an unresolved prerequisite" } %}
-
-{# Agent-readiness chip. Heuristic HINT, not authoritative: derived in the loader from structured fields only (type + resolved blockers), so it's deterministic across rebuilds but cannot see the two prose signals the LLM selection pass weighs. #}
-{% macro tierBadge(tier) %}
-{% if tier %}<span title="Agent-readiness hint — {{ tierMeaning[tier] }}. Heuristic from structured fields only (type + resolved prerequisites); not authoritative — the selection pass still refines it." style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
-  background: {% if tier == 'A' %}#dcfce7{% elif tier == 'B' %}#fef3c7{% else %}#f1f5f9{% endif %};
-  color: {% if tier == 'A' %}#166534{% elif tier == 'B' %}#92400e{% else %}#475569{% endif %};">{{ tierLabel[tier] }}</span>{% endif %}
-{% endmacro %}
+{% import "backlog-badges.njk" as bk with context %}
+{# Badge/chip/circle macros + the childlessReasonMeta/tierLabel/tierMeaning vocabulary now live in
+   src/_includes/backlog-badges.njk + src/_data/backlogMeta.js — ONE source shared with the detail
+   page (backlog-pages.njk) so the two surfaces cannot drift. check:standards forbids re-defining
+   these locally. #}
 
 <section class="intro">
     <h1>Backlog</h1>
@@ -178,7 +109,7 @@ title: Backlog
             {% if tierChips | length %}
             <div class="status-filter" role="group" aria-label="Filter by agent-readiness">
                 {% for t in tierChips %}
-                <button type="button" class="status-filter-chip" data-tier-chip="{{ t }}" aria-pressed="true" title="{{ tierMeaning[t] }}">{{ tierLabel[t] }}</button>
+                <button type="button" class="status-filter-chip" data-tier-chip="{{ t }}" aria-pressed="true" title="{{ backlogMeta.tierMeaning[t] }}">{{ backlogMeta.tierLabel[t] }}</button>
                 {% endfor %}
             </div>
             {% endif %}
@@ -218,7 +149,7 @@ title: Backlog
     <summary>Epic status legend</summary>
     <div class="unsliced-legend" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem 1rem; margin:0.5rem 0 1rem; font-size:0.8em; color:var(--color-text-muted);">
         <span style="flex-basis:100%; font-weight:600;">An <strong style="text-transform:uppercase; letter-spacing:0.03em; font-weight:700;">unsliced</strong> epic has no child stories cut yet; the tag says <em>why</em>:</span>
-        {% for key, m in childlessReasonMeta %}
+        {% for key, m in backlogMeta.childlessReasonMeta %}
         <span style="display:inline-flex; align-items:center; gap:0.4rem;" title="{{ m.tip }}"><span style="padding:0.05rem 0.45rem; border-radius:9999px; font-size:0.92em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:{{ m.bg }}; color:{{ m.fg }};">{{ m.label }}</span><span>{% if key == 'blocked' %}waiting on prerequisites (see Blocked-by){% elif key == 'undecided' %}open decisions set where the slices fall{% elif key == 'untriaged' %}candidates to promote / fold / drop first{% else %}continuous program — no fixed child stories{% endif %}</span></span>
         {% endfor %}
         <span style="flex-basis:100%; font-weight:600; margin-top:0.2rem;">A <em>storied</em> epic (one with child slices) may also flag its completion state:</span>
@@ -234,31 +165,25 @@ title: Backlog
             <div class="project-header" style="margin-bottom: 0.4rem;">
                 <h3 class="project-title" style="margin: 0; font-size: 1.05em;">{% if item.num %}<span style="color: var(--color-text-muted, #94a3b8); font-weight: 600; font-variant-numeric: tabular-nums;">#{{ item.num }}</span> {% endif %}{{ item.title }}</h3>
             </div>
-            <div class="backlog-badges" style="margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">{{ typeBadge(item.type) }}{{ statusBadge(item.status) }}{% if item.workItem == 'epic' %}{{ workItemBadge('epic') }}{% if item.size %}{{ sizeBadge(item.size) }}{% endif %}{% elif item.size %}{{ sizeBadge(item.size) }}{% elif item.workItem %}{{ workItemBadge(item.workItem) }}{% endif %}{{ tierBadge(item.tier) }}{% if item.workItem == 'epic' %}{% if item.ongoing and item.status != 'resolved' %}<span title="Ongoing program — a continuous effort, not a fixed deliverable. It legitimately has every child resolved between slices and is NEVER a resolve cue; the next slice is added as the program advances." style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #e0f2fe; color: #075985;">ongoing program</span>{% elif not (item.children | length) %}{{ unslicedBadge(item.childlessReason) }}{% elif item.openChildCount == 0 and (item.status == 'open' or item.status == 'active') %}<span title="Every child slice is resolved but the epic is still open — its scope looks delivered. Resolve it, or add the remaining child work." style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #dcfce7; color: #166534;">all slices done</span>{% elif item.openChildCount and item.status == 'resolved' %}<span title="The epic is resolved but {{ item.openChildCount }} child slice(s) are still open — a contradiction. Reopen the epic, re-parent, or resolve the children." style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #fef2f2; color: #991b1b;">&#9888; {{ item.openChildCount }} open slice{% if item.openChildCount != 1 %}s{% endif %}</span>{% endif %}{% endif %}</div>
+            <div class="backlog-badges" style="margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">{{ bk.typeBadge(item.type) }}{{ bk.statusBadge(item.status) }}{% if item.workItem == 'epic' %}{{ bk.workItemBadge('epic') }}{% if item.size %}{{ bk.sizeBadge(item.size) }}{% endif %}{% elif item.size %}{{ bk.sizeBadge(item.size) }}{% elif item.workItem %}{{ bk.workItemBadge(item.workItem) }}{% endif %}{{ bk.tierBadge(item.tier) }}{{ bk.epicStatusBadge(item) }}</div>
             {% if item.blockers | length %}
             {# Prerequisites (`blockedBy`) on every tile — open ones (red ⛔) are why an item is Not-ready;
                for an unsliced epic they double as "why it's empty". Resolved ones (green ✓) show the edge
                was satisfied. #}
             <div class="backlog-blockers" style="position: relative; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin: 0 0 0.6rem;">
                 <span style="font-size: 0.72em; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600;">Blocked by</span>
-                {% for b in item.blockers %}{{ blockerChip(b) }}{% endfor %}
+                {% for b in item.blockers %}{{ bk.blockerChip(b) }}{% endfor %}
             </div>
             {% endif %}
             <p class="backlog-summary" style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ item.summary }}</p>
             {% if item.children | length %}
             <div class="epic-children" style="position: relative; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin: 0 0 0.75rem;">
                 <span style="font-size: 0.72em; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600;">Contains</span>
-                {% for child in item.children %}{{ childCircle(child) }}{% endfor %}
+                {% for child in item.children %}{{ bk.childCircle(child) }}{% endfor %}
             </div>
             {% endif %}
             <div class="backlog-meta">
-                {% if item.tags %}
-                <div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
-                    {% for tag in item.tags %}
-                    <span style="display: inline-block; padding: 0.1rem 0.5rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.75em;">{{ tag }}</span>
-                    {% endfor %}
-                </div>
-                {% endif %}
+                {{ bk.tagsRow(item.tags) }}
                 <div style="display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8em;">
                     {% if item.crossRef %}
                     <a href="{{ item.crossRef.url }}" style="color: var(--color-primary); text-decoration: none;">&rarr; {{ item.crossRef.label }}</a>
@@ -424,9 +349,9 @@ title: Backlog
                 <td style="text-align:left;" data-sort-val="{{ item.num }}">
                     <a href="/backlog/{{ item.id }}/" style="color: var(--color-primary); text-decoration: none; font-weight: 600;"><span style="color: var(--color-text-muted, #94a3b8); font-variant-numeric: tabular-nums;">#{{ item.num }}</span> {{ item.title }}</a>{% if item.reservedBy %} <span title="Held by a running batch ({{ item.reservedBy }}). Soft reservation — a concurrent batch deprioritizes it; the real lock is the status:open→active flip at claim." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#eef2ff; color:#3730a3; border:1px solid #c7d2fe; white-space:nowrap;">⊘ in batch</span>{% endif %}
                 </td>
-                <td data-sort-val="{{ item.type }}">{{ typeBadge(item.type) }}</td>
-                <td data-sort-val="{{ item.size if item.size else (item.batchCost if item.workItem == 'task' else 0) }}">{% if item.size %}{{ sizeBadge(item.size) }}{% elif item.workItem == 'task' %}<span title="task — unsized; weighted at a nominal {{ item.batchCost }} pts (TASK_COST) for batch budgeting. Real points roll up to its parent." style="font-size:0.78em; color:var(--color-text-muted, #94a3b8); font-variant-numeric:tabular-nums;">~{{ item.batchCost }} pts</span>{% else %}<span title="{{ item.workItem }} — unsized (rolls up its child stories)" style="font-size:0.78em; color:var(--color-text-muted, #94a3b8);">{{ item.workItem }}</span>{% endif %}</td>
-                <td data-sort-val="{{ 2.9 if isActiveDecision else (4 if item.batchable else (2.8 if (item.sliceable and (item.epicState == 'unsliced' or item.epicState == 'done')) else (2.6 if item.sliceable else (2.5 if (item.tier == 'B' and item.preparedDate) else (tierRank[item.tier] if item.tier else 0))))) }}">{% if isActiveDecision %}{{ tierBadge('B') }} <span title="In flight — this decision is claimed (status:active) and being made in a live /decision turn. Pinned to the top of the decision-ready view so the call in progress stays visible." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#1e40af; color:#fff; white-space:nowrap;">deciding now</span>{% else %}{{ tierBadge(item.tier) }}{% if item.batchable %} <span title="Batchable — a Tier-A task or story ≤8; a points-budgeted batch packs from this pool when the remaining budget fits." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#166534; color:#fff; white-space:nowrap;">batch</span>{% elif item.sliceable %}{% if item.epicState == 'unsliced' %} <span title="Unsliced epic — no child slices cut yet, and no reason recorded. /slice it into child stories/tasks, or record a childlessReason saying why not." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#155e75; color:#fff; white-space:nowrap;">slice</span>{% elif item.epicState == 'done' %} <span title="Every child slice is resolved but the epic is still open — its scope looks delivered. Resolve it (a status update), or add the remaining child work." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#15803d; color:#fff; white-space:nowrap;">resolve</span>{% elif item.epicState == 'parked' %}{% set rm = childlessReasonMeta[item.childlessReason] %} <span title="Parked — decomposition is gated, so this is NOT a slice to-do. {{ rm.tip if rm else 'A childlessReason is recorded; clear it before slicing.' }}" style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:{{ rm.bg if rm else '#ede9fe' }}; color:{{ rm.fg if rm else '#5b21b6' }}; white-space:nowrap;">{{ rm.label if rm else 'parked' }}</span>{% elif item.epicState == 'program' %} <span title="Ongoing program — a continuous effort, not a fixed deliverable. NOT a resolve to-do: it legitimately has every child resolved between slices, and the next slice is added as the program advances." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#e0f2fe; color:#075985; white-space:nowrap;">ongoing program</span>{% else %} <span title="Tracking — open child slices remain. No epic-level action: its work is those children, which are already in the agent-ready/batch pool. The epic resolves once they finish." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#e2e8f0; color:#475569; white-space:nowrap;">tracking</span>{% endif %}{% endif %}{% if item.splittable %} <span title="Oversized story (size &gt; 8, the 13 band) — real buildable work, but too big to chain in a batch. /split it into ≤5-pt agent-ready slices first, then batch those. An orthogonal flag on top of the tier: the story stays agent-ready (or not-ready if still blocked)." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#9a3412; color:#fff; white-space:nowrap;">split</span>{% endif %}{% if item.tier == 'B' and item.preparedDate %} <span title="Prepared — its forks are researched (research published as a /research/ topic), each with options + a bold default, and preparedDate is set. Ready to ratify, not research; sorts above un-prepared decisions." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#15803d; color:#fff; white-space:nowrap;">✓ ready</span>{% endif %}{% endif %}</td>
+                <td data-sort-val="{{ item.type }}">{{ bk.typeBadge(item.type) }}</td>
+                <td data-sort-val="{{ item.size if item.size else (item.batchCost if item.workItem == 'task' else 0) }}">{% if item.size %}{{ bk.sizeBadge(item.size) }}{% elif item.workItem == 'task' %}<span title="task — unsized; weighted at a nominal {{ item.batchCost }} pts (TASK_COST) for batch budgeting. Real points roll up to its parent." style="font-size:0.78em; color:var(--color-text-muted, #94a3b8); font-variant-numeric:tabular-nums;">~{{ item.batchCost }} pts</span>{% else %}<span title="{{ item.workItem }} — unsized (rolls up its child stories)" style="font-size:0.78em; color:var(--color-text-muted, #94a3b8);">{{ item.workItem }}</span>{% endif %}</td>
+                <td data-sort-val="{{ 2.9 if isActiveDecision else (4 if item.batchable else (2.8 if (item.sliceable and (item.epicState == 'unsliced' or item.epicState == 'done')) else (2.6 if item.sliceable else (2.5 if (item.tier == 'B' and item.preparedDate) else (tierRank[item.tier] if item.tier else 0))))) }}">{% if isActiveDecision %}{{ bk.tierBadge('B') }} <span title="In flight — this decision is claimed (status:active) and being made in a live /decision turn. Pinned to the top of the decision-ready view so the call in progress stays visible." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#1e40af; color:#fff; white-space:nowrap;">deciding now</span>{% else %}{{ bk.tierBadge(item.tier) }}{% if item.batchable %} <span title="Batchable — a Tier-A task or story ≤8; a points-budgeted batch packs from this pool when the remaining budget fits." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#166534; color:#fff; white-space:nowrap;">batch</span>{% elif item.sliceable %}{% if item.epicState == 'unsliced' %} <span title="Unsliced epic — no child slices cut yet, and no reason recorded. /slice it into child stories/tasks, or record a childlessReason saying why not." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#155e75; color:#fff; white-space:nowrap;">slice</span>{% elif item.epicState == 'done' %} <span title="Every child slice is resolved but the epic is still open — its scope looks delivered. Resolve it (a status update), or add the remaining child work." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#15803d; color:#fff; white-space:nowrap;">resolve</span>{% elif item.epicState == 'parked' %}{% set rm = backlogMeta.childlessReasonMeta[item.childlessReason] %} <span title="Parked — decomposition is gated, so this is NOT a slice to-do. {{ rm.tip if rm else 'A childlessReason is recorded; clear it before slicing.' }}" style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:{{ rm.bg if rm else '#ede9fe' }}; color:{{ rm.fg if rm else '#5b21b6' }}; white-space:nowrap;">{{ rm.label if rm else 'parked' }}</span>{% elif item.epicState == 'program' %} <span title="Ongoing program — a continuous effort, not a fixed deliverable. NOT a resolve to-do: it legitimately has every child resolved between slices, and the next slice is added as the program advances." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#e0f2fe; color:#075985; white-space:nowrap;">ongoing program</span>{% else %} <span title="Tracking — open child slices remain. No epic-level action: its work is those children, which are already in the agent-ready/batch pool. The epic resolves once they finish." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#e2e8f0; color:#475569; white-space:nowrap;">tracking</span>{% endif %}{% endif %}{% if item.splittable %} <span title="Oversized story (size &gt; 8, the 13 band) — real buildable work, but too big to chain in a batch. /split it into ≤5-pt agent-ready slices first, then batch those. An orthogonal flag on top of the tier: the story stays agent-ready (or not-ready if still blocked)." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#9a3412; color:#fff; white-space:nowrap;">split</span>{% endif %}{% if item.tier == 'B' and item.preparedDate %} <span title="Prepared — its forks are researched (research published as a /research/ topic), each with options + a bold default, and preparedDate is set. Ready to ratify, not research; sorts above un-prepared decisions." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#15803d; color:#fff; white-space:nowrap;">✓ ready</span>{% endif %}{% endif %}</td>
                 <td style="font-weight: 700;{% if item.unblocksToReady %} color: #166534;{% endif %}" data-sort-val="{{ item.unblocksToReady }}">{{ item.unblocksToReady }}</td>
                 <td data-sort-val="{{ item.transitiveUnblocks }}">{{ item.transitiveUnblocks }}</td>
                 <td data-sort-val="{{ item.directUnblocks }}">{{ item.directUnblocks }}</td>
