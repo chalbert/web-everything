@@ -12,9 +12,11 @@ tags: [plugs, dedup, drift, reconciliation, frontierui, contract-anchored]
 
 `fui:plugs/` has drifted BEHIND `we:plugs/` across ~11 of 14 domains +2 WE-only (webportals,
 webtraces), so the #449/#1234 repoint onto FUI is lossy (regresses #1014 analytics + #1117 webcontexts
-demos) and #1047 can't delete `we:plugs/`. Canonical home is already FUI (#606/#817) and
-re-reconcile-up is user-confirmed, so NO decision needed — pure execution: bring FUI up to WE per
-domain. Contract-anchored (see principles); plugs analog of the blocks-side #1245.
+demos) and #1047 can't delete `we:plugs/`. The direction (reconcile FUI UP, not repoint WE down) and the
+two governing reconciliation principles are ruled in the carved-out decision
+[#1270](/backlog/1270-reconcile-fui-plugs-up-to-we-contract-anchored-not-repoint-d/) (resolved,
+user-confirmed) — so this epic is pure execution: bring FUI up to WE per domain, contract-anchored.
+Plugs analog of the blocks-side #1245 (whose direction fork is carved as #1246).
 
 ## Origin
 
@@ -25,15 +27,13 @@ the analytics (#1014 `UnknownTrackerError`) + webcontexts (#1117 `resolveContext
 FUI and was fully reverted. The #606/#817 "FUI is the canonical plugs superset" premise had decayed:
 WE stayed the de-facto plugs dev tree and FUI fell behind, with no working drift gate to catch it.
 
-## Two governing principles (user-set, 2026-06-20)
+## Governing decision
 
-1. **Contract-anchored — WE-ahead ≠ WE-correct.** Do NOT blind-copy `we:plugs/<domain>` → FUI. For each
-   domain the source of truth is its **contract + conformance vectors** (the `@webeverything/*` contract
-   packages, `we:conformance-vectors/*`). Reconcile both impls to the contract; where WE and FUI
-   disagree, the contract decides — WE's version may be the wrong one.
-2. **Holes in contracts get FIXED, not worked around.** If reconciliation exposes a behavior the contract
-   doesn't specify (a gap), fix the contract (add the spec/vector) — never paper over it in the impl.
-   Contract completeness is part of this epic's deliverable, not a side effect.
+Direction + the two reconciliation principles (contract-anchored; holes-get-fixed) are ruled in
+**[#1270](/backlog/1270-reconcile-fui-plugs-up-to-we-contract-anchored-not-repoint-d/)** — read it before
+starting any slice. Summary: reconcile FUI **up** to WE (never blind-copy); the **contract + conformance
+vectors** decide where WE and FUI disagree; contract holes get fixed (spec/vector added), never papered
+over in the impl.
 
 ## Drift map (non-test `*.ts`, WE-local vs FUI, 2026-06-20)
 
@@ -53,7 +53,8 @@ WE stayed the de-facto plugs dev tree and FUI fell behind, with no working drift
 | **webportals** | — | all (10) | no FUI home — needs a full port |
 | **webtraces** | — | all (3) | no FUI home — needs a full port |
 
-"differ" is direction-agnostic — the per-domain contract audit (principle 1) determines who is right.
+"differ" is direction-agnostic — the per-domain contract audit (#1270 principle 1, contract-anchored)
+determines who is right.
 
 ## Slices to carve on pickup
 
@@ -71,5 +72,5 @@ Per-domain (or grouped) reconciliation slices once the contract audit scopes eac
    this-repo` mirror-alias map (so FUI plugs that consume contracts resolve when served by WE), then
    #1047 deletes `we:plugs/`. **#1234 is `blockedBy` this epic.**
 
-> Umbrella — do not start dedup before the per-domain contract audit (principle 1). `childlessReason:
+> Umbrella — do not start dedup before the per-domain contract audit (#1270 principle 1). `childlessReason:
 > undecided` until the audit carves the slices above.
