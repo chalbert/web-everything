@@ -3,6 +3,8 @@ kind: epic
 status: open
 locus: plateau-app
 dateOpened: "2026-06-20"
+childlessReason: blocked
+blockedBy: [1286, 1289]
 relatedReport: reports/2026-06-20-1254-split-analysis.md
 tags: [dogfood, fui, plateau-app, theme, intents, site-rework, epic]
 ---
