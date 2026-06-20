@@ -29,6 +29,14 @@ like `100`, or a full `NNN-slug`), do **not** run the ranking flow (steps 1–3)
   → confirm before reopening to `active`.
 - Skip the shortlist and `AskUserQuestion` (the user already chose). Steps 4–7 still apply unchanged.
 
+  **Naming an item skips *selection*, not the claim — and the claim is still its own turn.** This is
+  the easy-to-miss trap: a named item (especially a `type:decision`) tempts you to dive straight into
+  reading, grounding, and presenting the substance. Do **not**. For an `open` item the *only* action
+  this turn is `claim` (step 4) — which STOPs to emit the rename slug — and the work begins next turn.
+  In particular, do **not read or edit the item before claiming**: `backlog.mjs claim` refuses on a
+  dirty file, so a pre-claim edit silently breaks the canonical claim. Claim first, ground/edit/present
+  after.
+
 **0b. Invocation is the keyword `decision`/`review` → decision-mode.** The caller wants the
 highest-leverage *call to make*, not an agent-ready build. **Invert the Tier-A bias**: skip the
 agent-ready ranking and run *backlog-workflow.md → When nothing is agent-ready — surface the one
