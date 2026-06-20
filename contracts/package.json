@@ -16,6 +16,7 @@
     "./guard": "./guard.ts",
     "./positioning": "./positioning.ts",
     "./push-delivery": "./push-delivery.ts",
+    "./transport-negotiation": "./transport-negotiation.ts",
     "./validity-merge": "./validity-merge.ts",
     "./validator-resolution": "./validator-resolution.ts",
     "./audit": "./audit.ts",
