@@ -1,7 +1,7 @@
 ---
 kind: epic
-size: 3
-childlessReason: program
+ongoing: true
+relatedReport: reports/2026-06-20-program-model-capability-watch.md
 locus: plateau-app
 status: open
 dateOpened: "2026-06-20"
@@ -19,4 +19,8 @@ Candidate front-B watch program (Plateau-side): track the AI/LLM model landscape
 
 ## Status — L0 / candidate
 
-Plateau-side; reaches the WE-consumed vision service only through the no-leakage client boundary. Recorded so the watch is not lost; lower priority. Patterned after the platform-standards watch ([#1257](/backlog/1257-platform-standards-watch-keep-we-current-as-the-web-platform/)); classified per the [Program Test](/backlog/1249-define-program-strictly-the-four-part-bar-for-a-perpetual-on/).
+Plateau-side; reaches the WE-consumed vision service only through the no-leakage client boundary. Recorded so the watch is not lost; lower priority. Patterned after the platform-standards watch ([#1257](/backlog/1257-platform-standards-watch-keep-we-current-as-the-web-platform/)); classified per the [Program Test](/backlog/1249-define-program-strictly-the-four-part-bar-for-a-perpetual-on/). Rolls up under the **Self-Driven Project** ([#666](/backlog/666-self-driven-project/)) as part of its monitor/upgrade autonomy.
+
+## Review log
+
+- **2026-06-20 — first run (L0→L1).** Swept the on-device model frontier (small VLMs, browser inference, native browser models). Front-B delta is **favorable** — the model world moved *toward* Plateau's on-device-fixed-cost thesis: small VLMs got far better/smaller (Gemma 3n/4 E2B, Phi-4 mm, Qwen 3.5, SmolVLM, UI-specialized ScreenAI/Ferret-UI), browser inference matured (WebNN/NPU, WeInfer ~3.76×), and Chrome ships a native built-in model (Prompt API / Gemini Nano). Filed 4 slices: #1276 re-eval Tier-2 model choice · #1277 WebNN/NPU + faster runtimes · #1278 defer to native Prompt API · #1279 front-A cost/accuracy floor metric. Front-A floor not yet defined (carved as #1279). Report: `we:reports/2026-06-20-program-model-capability-watch.md`. **Next run:** re-sweep deltas since 2026-06-20.
