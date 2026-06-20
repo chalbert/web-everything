@@ -1,7 +1,9 @@
 ---
 kind: epic
-status: open
+status: resolved
 dateOpened: "2026-06-19"
+dateResolved: "2026-06-20"
+graduatedTo: none
 relatedProject: webcharts
 tags: [webcharts, build]
 ---
@@ -23,16 +25,18 @@ implementation**.
 that ships as the default*, plus the renderer-swap registry runtime — neither exists (no chart renderer
 under `plugs/`/`blocks/`; no capability-matrix entry). `status:concept` is therefore accurate.
 
-Anticipated slices:
-- **CustomChartRenderer registry runtime** — the renderer-swap registry the protocol specifies (native
-  default + pluggable adapters), same impl-swap shape as CustomPositioner.
-- **Native-first SVG renderer (default impl, FUI).** Consumes a Vega-Lite L1 `ChartSpec` + resolved
-  webtheme tokens → SVG; honours the semantic/theme plane split.
-- **Optional adapters** — Vega / Plotly / ECharts behind the one contract.
-- **Conformance demo** — run the existing `src/cases/webcharts/*` against the SVG default and score the
-  three axes (semantic fidelity / theme application / a11y).
+Sliced 2026-06-20 (`we:reports/2026-06-20-backlog-split-analysis.md`) — sibling template #1018/#1048
+(webpositioning: same CustomPositioner-family shape, contract→WE / runtime→FUI):
+- **#1290 (decision)** — SVG renderer placement reconciliation (FUI vs `we:blocks/renderers/chart/`).
+  De-buried from the old body NB below; blocks #1292.
+- **#1291 (story·3)** — CustomChartRenderer registry runtime + contract → `@webeverything` (settled).
+- **#1292 (story·5, blockedBy #1291,#1290)** — native-first SVG renderer (default impl).
+- **#1293 (story·3, blockedBy #1292)** — conformance demo running `we:src/cases/webcharts/*` × 3 axes.
 
-Placement: registry/protocol contract → `@webeverything`; the SVG renderer + adapters (runtime) → FUI
-(per the native-first-default-is-still-impl rule). NB: the protocol's "SVG renderer ships *with the
-standard*" wording may want a small placement reconciliation against WE=contracts when the registry
-slice is carved — flag, don't pre-decide.
+Deferred (could-not-split): **optional adapters** (Vega / Plotly / ECharts behind the one contract) —
+three impls as one slice is another `size·8` lump; carve per-adapter once #1291 lands and real demand
+exists.
+
+Placement: registry/protocol contract → `@webeverything` (settled). The SVG renderer placement —
+the protocol's "SVG renderer ships *with the standard*" wording reconciled against WE=contracts — is
+**#1290**, not pre-decided here.
