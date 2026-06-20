@@ -1,44 +1,48 @@
 ---
 kind: story
-size: 13
+size: 2
 parent: "1250"
 locus: frontierui
 status: open
-blockedBy: ["1299", "1328", "1329", "1330", "1331", "1332"]
 dateOpened: "2026-06-20"
 tags: []
 ---
 
-# Enforce #1120 name-validation throw + drop the deprecated target alias (fui:webbehaviors)
+# Drop the deprecated CustomAttribute `target` alias (fui:webbehaviors)
 
-After every fui:webbehaviors consumer has drained the target alias (#1299 + the migration slices), audit every define('…') call for bare names, rename bare → hyphenated (markup + companion *-when attrs + querySelectors), turn on the throwing #assertValidName (#1120), and remove the deprecated target alias from fui:plugs/webbehaviors/CustomAttribute.ts. Closes the #1299 webbehaviors carve (we:reports/2026-06-20-backlog-split-analysis.md).
+Drain the last `this.target` alias consumers in `fui:plugs/webbehaviors` and remove the `@deprecated
+target` getter, completing the #1121 `target` → `ownerElement` rename in FUI. The behaviour subclasses
+were already drained by the migration slices (#1330–1332); what remains is the base class's own
+self-consumption plus the test/e2e surface. Closes the #1299 `target`-alias carve
+(`we:reports/2026-06-20-backlog-split-analysis.md`).
 
-## Pre-flight (batch-2026-06-20b) — premise is FALSE; size 3 → 13; surfaces a naming-scope decision
+## Scope (the complete remaining FUI alias surface — `/slice` 2026-06-20)
 
-Re-packed after the 5 migration slices (#1328–#1332, all resolved). The card's premise — "after every
-`fui:webbehaviors` consumer has drained the target alias" — does **not** hold; the migrations covered only
-the droplist / navigation+router+tabs+type-ahead / view+for-each+data-grid+attributes / traits+temporal
-/ demos families. A repo-wide grep finds **~42 remaining `this.target` alias consumers**, including ones
-the slices never touched:
+- **Base class self-consumption** — `fui:plugs/webbehaviors/CustomAttribute.ts` (5 uses: `:156-157`
+  `this.target.setAttribute(...)`, `:265,:268` in `localName`). Switch these to `this.#target` /
+  `this.ownerElement`. The `@deprecated target` getter (`:221`) can't be removed until the class stops
+  self-consuming it.
+- **Test/e2e surface** defining inline behaviours on `this.target`:
+  `fui:plugs/__tests__/unplugged.e2e.test.ts` (10), `fui:plugs/__tests__/unplugged.integration.test.ts`
+  (5), `fui:plugs/__tests__/e2e/webbehaviors-simple.spec.ts` (4),
+  `fui:plugs/webbehaviors/__tests__/unit/CustomAttributeRegistry.test.ts` (2).
+- Then **delete the `@deprecated target` getter** at `fui:plugs/webbehaviors/CustomAttribute.ts:221`.
 
-- **The base class itself** still uses its own deprecated alias —
-  `fui:plugs/webbehaviors/CustomAttribute.ts:156-157,265,268` (`this.target.setAttribute(...)` etc.). The
-  alias can't be removed until the class stops self-consuming it.
-- **A large test/e2e surface** defines inline behaviors on `this.target`
-  (`fui:plugs/__tests__/unplugged.integration.test.ts`, `fui:plugs/__tests__/e2e/webbehaviors-simple.spec.ts`,
-  `fui:plugs/webbehaviors/__tests__/unit/CustomAttributeRegistry.test.ts`, …).
-- (Note: `fui:plugs/webinjectors/*` `this.target` is the **Injector's own** `target`, a different
-  field — out of scope for the CustomAttribute alias drop.)
+A `extends CustomAttribute` ∧ `this.target` sweep of `fui:blocks/` returns **zero** un-migrated consumers
+(#1330–1332 drained every behaviour subclass), so this is bounded to the base class + 4 test files — not
+the repo-wide drain the original (batch-2026-06-20b) framing implied. Out of scope: `Injector.target`
+(`fui:plugs/webinjectors/*`), `CustomContext#target`, the `portal-directive` `target` IDREF attr, and
+xstate transition `target` (`fui:blocks/workflow-engine/*`) — all distinct fields, not the CustomAttribute
+alias.
 
-**Buried decision (stop-rule fork): does #1120 hyphenation apply to non-attribute registries?** Turning on
-the throwing `#assertValidName` would reject the many **bare** `define()` names in use — `clock` (temporal
-trait), `call`/`value`/`pipe` (on-event + expression), `mustache`/`polymer` (text-node parsers), `loan`
-(lifecycle/audit demos), `anchor`/`anchored`/`selection` (droplist, just added by #1335). Some of these are
-**CustomAttribute** names (should hyphenate) but others are **parser/expression/text-node registry** names
-in a different namespace where single-word tokens (`value`, `pipe`, `mustache`) are the established grammar.
-Whether #1120's hyphenation rule applies to those registries — or only to CustomAttribute names — is an
-**undecided design call** that gates the rename scope. Needs a `/decision` before the enforcement build.
+Demo: webbehaviors unit/e2e suite green with no `target`-getter reference remaining.
 
-So this is **not batchable as one**: it bundles a repo-wide alias drain (incl. the base class + tests) +
-a cross-registry rename + a naming-scope decision + the throw flip. Reclassified size 3 → 13; surface the
-fork via `/decision`, then `/slice`.
+## Split note (`/slice` 2026-06-20)
+
+Re-scoped from `size 13 → 2`. The original card welded **two orthogonal concerns** plus a buried fork:
+the **#1121 alias drop** (this item) and the **#1120 throw flip** (rename bare `define()` names + turn on
+the throwing `#assertValidName`). The throw flip was carved to
+[#1348](/backlog/1348-enforce-1120-name-validation-throw-in-fui-webbehaviors-renam/), gated by the
+naming-scope decision [#1347](/backlog/1347-does-1120-define-name-validation-apply-beyond-customattribut/)
+(*does #1120 validation apply beyond CustomAttribute to the parser/expression registries?*). This item is
+fork-free and independent — its `blockedBy` (#1299, #1328–1332) are all resolved, so it proceeds now.
