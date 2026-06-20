@@ -59,14 +59,15 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    WE-side conformance gate** (`check.ts`) → **Web Everything**. Code that **delivers a capability
    at runtime** (registry-dispatching, artifact-producing, a running handler — incl. `assert*`,
    constants, engines, native-default strategies) → **Frontier UI**. A served, credential-holding
-   product → **Plateau**. **Reference-implementation tier (#1078):** the WE *repo* may
-   *additionally* host a **non-published reference runtime** — an executable spec consumed only by
-   WE's own conformance demos/tests (a standard's DoD-mandated playground; generalises the block
-   reference-runtime carve-out in [we-fui-embed-boundary](#we-fui-embed-boundary) rule 4 to
-   subsystem engines) — even though it "delivers at runtime"; FUI still ships the *production* impl,
-   the reference impl carries no lock-in (swappable; the contract is the only lock), and the
-   `@webeverything` *package* stays types-only (rule 3, unchanged). The carve-out is the **repo**,
-   never the **published package**, and never inverts the WE→FUI source arrow.
+   product → **Plateau**. **No reference-runtime impl in WE (#1246, reverses #1078 + #697).** WE holds
+   **zero** runtime implementation — *including* for its own conformance. The former #1078
+   "reference-implementation tier" (a non-published WE-repo reference runtime hosted "additionally"
+   alongside the contract) is **withdrawn**: a standard's executable demo is **FUI-hosted and
+   iframe-embedded** (or consumed as a mode-C runtime URL-bundle — [we-fui-embed-boundary](#we-fui-embed-boundary)
+   rules 4/6), and conformance that needs a runtime to exercise becomes **WE-owned conformance
+   *vectors* executed FUI-side** (#817/#899) — data, not impl. WE keeps protocols + vectors + types
+   only; the `@webeverything` *package* stays types-only (rule 3, unchanged); the source arrow stays
+   WE→FUI, never inverts.
 2. **The file seam is the cut:** `contract.ts` (pure types, compile-erased) → WE; `provider.ts` +
    `registry.ts` (runtime) → FUI. Split mixed modules *mid-file* at this seam.
 3. **Distribution end-state:** FUI consumes WE contracts via a WE-published type-only package
@@ -93,7 +94,9 @@ plateau-app / exercise-app); items gate in their own locus so cross-repo batches
 #1248 (relocating the runtime does not retire the contract-owning project — `webplugs` survives #606) ·
 #641 (block-protocol impl boundary) · #779 #426 #799 #497 #834 · #804 #872 #239 (contract package) ·
 #091 (managed-offering decomposition) · #020→#291 (impl-is-not-a-standard) · #1078 (reference-impl
-tier — refines #817: published-package purity vs repo-internal reference runtime).
+tier — refines #817: published-package purity vs repo-internal reference runtime) →
+**superseded by #1246 (WE holds zero impl; the reference-runtime tier is withdrawn — conformance
+demos are FUI-hosted/iframe-embedded, conformance-needing-runtime becomes WE-owned vectors run FUI-side)**.
 
 ### WE ↔ Frontier UI rendering & embed boundary {#we-fui-embed-boundary}
 
@@ -107,8 +110,12 @@ display (its own site + demos, FUI branding).
    renders) — only the iframe *mechanism* requirement relaxes. iframe stays the default.
 3. **Escape/overlay** (modals breaking the iframe box) is host-side over an origin-validated
    `postMessage` channel via a **FUI-owned embed SDK**; seed transport is URL-canonical + additive.
-4. **Reference-vs-impl partition:** a block stays in WE *iff* its demo exercises a WE standard (it
-   *is* that standard's reference runtime); a block-impl demo moves to FUI and is iframe-embedded.
+4. **No block runtime in WE (#1246, reverses #697/#1078):** **every** block's runtime is
+   FUI-canonical — *none* stays in WE, not even one whose demo exercises a WE standard. Its demo is
+   **FUI-hosted and iframe-embedded** (or consumed as a mode-C runtime URL-bundle per rule 6); WE owns
+   only the block **protocol + conformance vectors** (#817/#899, data not impl). The former "stays in
+   WE *iff* it is the standard's reference runtime" partition is **withdrawn** — the headline above
+   ("WE never imports or renders FUI block code") now holds without exception.
 5. **Chrome / workbench is FUI-owned**, decoupled from distribution; WE keeps only its
    standards-panel overlay.
 6. **The WE *website* ≠ the WE *standard*.** The boundary constrains the *standard artifacts* and
@@ -123,6 +130,7 @@ display (its own site + demos, FUI branding).
    cross the boundary?" is answered *no* by construction — don't re-open it.
 
 **Lineage:** #604 #701 #707 (iframe boundary; "WE renders real FUI blocks" is mis-framed) · #700 ·
+#1246 (reverses the rule-4 reference-vs-impl partition + #697/#1078: no block runtime stays in WE) ·
 #705 · #732 (escape SDK) · #765 (mode-C relaxation) · #788 (seed transport) · #791 (reference-vs-impl
 partition) · #809 (workbench locus) · #932 (website≠standard; consumer may run WE runtimes in-document).
 
@@ -509,6 +517,34 @@ learn nothing. Three consequences, all forced:
 [we-fui-embed-boundary](#we-fui-embed-boundary) (FUI owns impl + render, WE consumes outputs),
 [constellation-placement](#constellation-placement), and the backlog *fork-is-not-prioritization* rule
 (sequencing demoted out of the fork set). Sibling forcing-function to the exercise-app conformance loop (#314).
+
+### First-party dogfood: our own products render only from FUI components + WE intents, differentiated solely by a theme {#first-party-dogfood}
+
+The internal twin of [reproduction-conformance](#reproduction-conformance). Where that program proves the
+`theme + intents` thesis against **incumbents**, this rule proves it on **our own product surfaces**. A
+first-party product (plateau-app today; the same bar reaches any served product) composes its UI **only** from
+FUI components driven by WE intents; the **sole** thing distinguishing its look from WE-docs or any other
+first-party surface is its **theme (DTCG tokens) + intent set** — nothing structural or behavioral is
+hand-authored. Three consequences:
+
+1. **Hand-rolled UI is a conformance defect, not a style choice.** Reaching for `document.createElement` /
+   bespoke CSS to build an interaction a FUI component already provides is the product-layer analogue of
+   [exercise-app *active-bypass = FAIL*](#) and [compose-don't-hand-roll](#compose-dont-handroll). The
+   residue — anything the product *can't* build from `theme + intents` — is a **standards/FUI gap to file,
+   never a hack to keep** (the forcing-function thesis: the product is a probe for FUI + intent coverage).
+2. **Preserve once it lands (the load-bearing clause).** Once a surface migrates onto FUI, regressing it back
+   to hand-rolled UI is a **gated defect, not a tradeoff**. This is *why* the goal is codified to the statute
+   layer rather than living only as epic scope: the epic delivers the state, the rule keeps it durable.
+3. **Unblocked by the WE↔FUI boundary.** Unlike the WE-docs dogfood (#777, which waits on a mode-C relaxation),
+   a served product is the **product layer** and already consumes FUI directly ([constellation-placement](#constellation-placement)
+   — served product → Plateau, free to render FUI). No boundary gate applies; the only gate is FUI shipping
+   the parts (#658 promoted `@frontierui/blocks` canonical, so the floor exists).
+
+**Lineage:** #1253 (charter — plateau-app dogfooding mandate; ratified 2026-06-20; lands via epic #1254).
+Internal twin of [reproduction-conformance](#reproduction-conformance); parallel to the WE-docs dogfood
+mandate #777; kin to the exercise-app conformance loop (#314). Composes [compose-don't-hand-roll](#compose-dont-handroll)
+and [constellation-placement](#constellation-placement). Enforcement (a `check:`-style plateau-app render
+conformance gate giving "preserve once landed" teeth) is a filed follow-up, not a precondition for the rule.
 
 ---
 
