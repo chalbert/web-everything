@@ -36,6 +36,7 @@ import {
   scanRepoLocusPrefixes,
   validateTemplateA11y, NAV_ACTIVE_STATE_ENFORCED,
   lintBacklogItemRendering,
+  detectClassificationCollapse,
 } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -1161,5 +1162,45 @@ describe('lintBacklogItemRendering (#845 — the shared per-item rendering lint)
       const body = '# T\n\n```\n- [ ] this is sample text, not scope\n```\n';
       expect(lintBacklogItemRendering({ item: epic(), body }).errors).toEqual([]);
     });
+  });
+});
+
+// ── #1247 classification-axis loud-fail ──────────────────────────────────────
+describe('detectClassificationCollapse — loud-fail when the kind axis is unpopulated (#1247)', () => {
+  const open = (over = {}) => ({ status: 'open', kind: 'story', size: 3, tier: 'A', batchable: true, sliceable: false, ...over });
+
+  it('returns null on a healthy board (at least one classified pool is non-empty)', () => {
+    const items = [open(), open({ kind: 'decision', tier: 'B', batchable: false }), { status: 'resolved' }];
+    expect(detectClassificationCollapse(items)).toBeNull();
+  });
+
+  it('returns null for an all-resolved backlog (nothing open to classify)', () => {
+    expect(detectClassificationCollapse([{ status: 'resolved' }, { status: 'resolved' }])).toBeNull();
+  });
+
+  it('flags the #487-class collapse: open items but kind undefined everywhere → all pools zero', () => {
+    // consumers ahead of producer: kind undefined → not batchable / not Tier B / not sliceable, yet
+    // deriveTier still hands an unblocked item Tier A (so tier alone would NOT catch it).
+    const items = [
+      { status: 'open', kind: undefined, tier: 'A', batchable: false, sliceable: false },
+      { status: 'open', kind: undefined, tier: 'A', batchable: false, sliceable: false },
+    ];
+    const res = detectClassificationCollapse(items);
+    expect(res).not.toBeNull();
+    expect(res.openCount).toBe(2);
+    expect(res.batchable + res.tierB + res.sliceable).toBe(0);
+    expect(res.kindlessOpen).toBe(2);
+  });
+
+  it('flags a bucketing-logic break: kind present but every pool empty', () => {
+    const items = [open({ batchable: false }), open({ kind: 'epic', batchable: false, sliceable: false })];
+    const res = detectClassificationCollapse(items);
+    expect(res).not.toBeNull();
+    expect(res.kindlessOpen).toBe(0); // kinds are valid — the break is downstream of the field
+  });
+
+  it('does not count resolved items toward the open population', () => {
+    const items = [{ status: 'resolved', kind: undefined }, open()];
+    expect(detectClassificationCollapse(items)).toBeNull();
   });
 });

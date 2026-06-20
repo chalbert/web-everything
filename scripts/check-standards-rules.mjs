@@ -198,6 +198,31 @@ export function validateBacklogItem(item, ctx) {
   return { errors, warnings };
 }
 
+// ── Classification-axis loud-fail (#1247) ─────────────────────────────────────
+// The Prioritisation board buckets every open item onto the merged `kind` axis (#487): a `task`/small
+// `story` → `batchable`, a `decision` → Tier B, an open `epic` → `sliceable`. Each of those three pools
+// keys off `item.kind`. So if the kind axis is ever UNPOPULATED for the whole collection — the #487
+// near-miss, where consumers were switched to `item.kind` ahead of the producer, leaving `kind`
+// undefined everywhere — all three pools collapse to zero AT ONCE while the board still renders (a
+// silent empty Prioritisation tab: "0 batchable / 0 decision / 0 program"), because `deriveTier` still
+// hands an undefined-kind item Tier A. A per-item "missing kind" error catches the field being absent;
+// this aggregate canary additionally catches a *bucketing-logic* break that leaves `kind` present but
+// every classified pool empty. Both failure modes share one observable signature: open items exist but
+// {batchable, tierB, sliceable} are all zero. That is the loud-fail — never a quiet zero board.
+//
+// Pure over the loaded + enriched collection (items carry `.status`, `.kind`, `.tier`, `.batchable`,
+// `.sliceable`); returns null when healthy, else a diagnosis object the script turns into one error.
+export function detectClassificationCollapse(items) {
+  const open = (items || []).filter((it) => it && it.status === 'open');
+  if (open.length === 0) return null; // an all-resolved backlog legitimately classifies nothing
+  const batchable = open.filter((it) => it.batchable === true).length;
+  const tierB = open.filter((it) => it.tier === 'B').length;
+  const sliceable = open.filter((it) => it.sliceable === true).length;
+  if (batchable + tierB + sliceable > 0) return null;
+  const kindlessOpen = open.filter((it) => !BACKLOG_KINDS.has(it.kind)).length;
+  return { openCount: open.length, batchable, tierB, sliceable, kindlessOpen };
+}
+
 // ── Raw-HTML-in-backlog-body lint (#290) ──────────────────────────────────────
 // An un-backticked HTML tag in a backlog markdown body is passed through verbatim by 11ty and parsed
 // by the browser as a live element. A void/unclosed interactive one (`<select>`, `<dialog>`,

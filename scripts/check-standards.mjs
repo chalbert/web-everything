@@ -36,7 +36,7 @@ import { loadPresets } from './lib/presets-loader.cjs';
 import { loadDataRegistry } from './lib/registry-loader.cjs';
 import {
   BACKLOG_STATUSES, BACKLOG_KINDS, FIB, FILE, blockSpecFile,
-  dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated,
+  dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated, detectClassificationCollapse,
   checkStatus, validateProtocol, validatePreset, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock,
@@ -456,6 +456,16 @@ for (const item of backlog) {
   for (const e of itemErrors) err(e.message, e.descriptor);
   for (const w of itemWarnings) warn(w.message, w.descriptor);
 }
+// #1247 — classification-axis loud-fail. If the merged `kind` axis is unpopulated for the whole
+// collection (the #487 near-miss: consumers ahead of the producer → `kind` undefined everywhere), all
+// three Prioritisation pools collapse to zero at once while the board still renders a silent empty
+// tab. Catch that observable signature (open items exist but {batchable, tierB, sliceable} all zero) as
+// a hard error rather than a quiet zero board — the during-migration window #487's after-cutover
+// leftover-field backstop does not cover.
+const collapse = detectClassificationCollapse(backlog);
+if (collapse)
+  err(`Backlog classification axis is unpopulated — ${collapse.openCount} open item(s) but 0 batchable / 0 Tier-B decision / 0 sliceable epic (the Prioritisation board would render a silent all-zero tab). ${collapse.kindlessOpen} open item(s) have no resolvable \`kind\`. This is the #487-class collapse: a consumer reading \`item.kind\`/\`item.tier\`/\`item.batchable\` ahead of the loader populating it, or a break in the batchable/tier derivation. Fix the producer (src/_data/backlog.js) before the board ships empty.`);
+
 // #614 — aggregated non-canonical graduatedTo nudge. Per-item would flood (≈90 resolved items still
 // carry narrative); one summary line points at the normalizer + the tracking item instead.
 const nonCanonGrad = backlog
