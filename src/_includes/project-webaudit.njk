@@ -116,6 +116,60 @@ lifecycleProvider.subscribe((ev) =>
   </ul>
 </section>
 
+<section id="protocol-reproduction-parity" class="section-card">
+  <h3 id="reproduction-parity">Reproduction-Parity Verdict/Delta Protocol</h3>
+  <p>
+    A second, cross-repo conformance surface Web Audit hosts: the thin contract the <strong>Plateau</strong>
+    vision-judgment service emits and the Web Everything project ingests when an incumbent design system is
+    reproduced as <strong>theme + intents over Frontier UI primitives</strong>. WE never renders Frontier UI
+    nor runs the judge &mdash; per the <a href="/backlog/475/">no-leakage</a> posture it consumes
+    <em>outputs only</em>: a per-target <strong>pass/fail</strong> verdict plus a structured
+    <strong>gap delta</strong> (what theme + intents could not express). The gap list, not the copy, is the
+    deliverable &mdash; it feeds the <a href="/backlog/315/">coverage gap-sweep</a>.
+  </p>
+  {% highlight "typescript" %}
+// A verdict judges one component × state × scheme, backed by the layered oracle.
+interface ReproductionVerdict {
+  target: { system: string; component: string; state: string; scheme: string };
+  pass: boolean;                                  // the single gate
+  oracle: {                                       // observable readings only — never the judge's internals
+    pixel: { pass: boolean; score?: number };     // fuzzy-pixel comparison
+    structural: { pass: boolean; note?: string }; // structural DOM/ARIA diff
+    vlm?: { pass: boolean; note?: string };       // advisory — annotates, never flips `pass` alone
+  };
+}
+
+// A gap: what theme + intents could NOT express — a gap-sweep #315 intake line, not a fix.
+interface GapDelta {
+  target: { system: string; component: string; state: string; scheme: string };
+  kind: 'token' | 'intent' | 'behavior' | 'primitive';   // which expressive layer fell short
+  description: string;
+  suggested?: string;                             // a suggested intent name / token path / primitive
+}
+
+// The whole payload that crosses the seam — pass/fail + gaps, nothing more.
+interface ReproductionParityReport {
+  system: string;
+  generatedAt: string;                            // ISO; the producer stamps the time
+  verdicts: ReproductionVerdict[];
+  gaps: GapDelta[];
+  summary: { passed: number; failed: number; gaps: number };
+}
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>Thin, not fat:</strong> pass/fail per target + a gap list &mdash; never a rich diff schema.
+      The advisory VLM leg annotates; the quantitative pixel + structural legs gate.</li>
+    <li><strong>No-leakage client (#475):</strong> only the reduced readings cross the seam &mdash; no
+      screenshots, renderer handles, or oracle internals. The judge is a Plateau service.</li>
+    <li><strong>The gap list is the product:</strong> each <code>GapDelta</code> is a gap-sweep #315
+      backlog-intake line, attributed to the expressive layer (token/intent/behavior/primitive) that fell
+      short &mdash; the exercise-app active-bypass=FAIL analogue for reproduction.</li>
+    <li><strong>Distribution:</strong> ships as <code>@webeverything/contracts/reproduction-parity</code>
+      (type-only, zero runtime emit); Plateau depends on it &mdash; the one new cross-repo surface the
+      reproduction-conformance charter mints.</li>
+  </ul>
+</section>
+
 <section id="composition" class="section-card">
   <h3 id="composition">Composition With Other Standards</h3>
   <ul style="font-size: 0.9rem;">

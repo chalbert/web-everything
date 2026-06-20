@@ -26,6 +26,7 @@
     "./selection": "./selection.ts",
     "./stepper": "./stepper.ts",
     "./tree-select": "./tree-select.ts",
-    "./webdocs": "./webdocs.ts"
+    "./webdocs": "./webdocs.ts",
+    "./reproduction-parity": "./reproduction-parity.ts"
   }
 }

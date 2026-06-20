@@ -1,0 +1,8 @@
+{
+  "id": "reproduction-parity",
+  "name": "Reproduction-Parity Verdict/Delta",
+  "summary": "The deliberately-thin contract the Plateau vision-judgment service emits and the Web Everything project ingests for reproduction-conformance (charter #1225, epic #1226). Fixes one seam — a per-target verdict (pass/fail per component × state × scheme, backed by a layered oracle: fuzzy-pixel + structural DOM/ARIA diff + advisory VLM) plus a structured GAP DELTA (what theme + intents could NOT express, in WE vocabulary, attributed to the layer that fell short — token/intent/behavior/primitive). The gap list, not the copy, is the deliverable; it feeds gap-sweep #315 backlog intake. Minimal by ruling: pass/fail + gaps, never a fat diff schema, and the advisory VLM leg annotates but never flips a verdict alone. No-leakage (#475): WE never renders FUI nor runs the judge — it consumes outputs only, so the contract carries no screenshots, renderer handles, or oracle internals. The one genuine new cross-repo surface the charter mints; the per-target reproduction slices and the AI-Playwright validator chain (#1167/#1219/#1220/#1221) live behind it.",
+  "status": "draft",
+  "ownedByProject": "webaudit",
+  "anchor": "protocol-reproduction-parity"
+}
