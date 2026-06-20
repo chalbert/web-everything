@@ -311,3 +311,60 @@ After #1042 was sliced into 8 per-standard sub-epics, each was investigated (per
 | #1098 webdirectives | #1130 CustomComment·2, #1131 CustomCommentRegistry·3 (⊃#1130), #1132 parser+registry·3, #1133 multi-template helper·task (⊃#1131), #1134 demo·3 (⊃#1130,#1131,#1132) | #1130, #1132 independent roots | spec is complete enough to build (no fork); Safari customized-built-in polyfill out-of-scope (separate Web Plugs decision) |
 
 **Net:** 30 new items. Batchable now (no blocker, no open fork, ≤3/task): #1105, #1106, #1110, #1111, #1112, #1115, #1116, #1119, #1120, #1123, #1124, #1125, #1127, #1128, #1129, #1130, #1132 (+#1088's #1100/#1101/#1102). Gated: dependents above; #1122 (decision #1121); #1126 (mechanism nod).
+
+---
+
+# `/split 1038` — webdocs spec-surface completeness (Doc + Manifest + Cases)
+
+**Date:** 2026-06-19
+**Scope:** focused split of story [#1038](../backlog/1038-webdocs-spec-surface-completeness-doc-manifest-cases-specs-w.md) (`workItem: story`, `size: 13`, the *should-split* band).
+**Source:** #991 audit §8 — the webdocs served product is built (#424/#425/#427) but its three declared specs have no WE-layer owning item. Distinct from the parked hosted-product items #184/#428.
+
+## Verdict: partial split — **3 child stories** (one per spec/project) + **1 carved decision**; Doc-Spec child is design-first (Tier-C), not batchable-now
+
+The parent bundles three genuinely-distinct spec areas, each its own project — a clean 3-way seam (rubric (2)/(4)/(5) ✓: distinct homes, fully independent, each demoable on its own project page). But the per-slice investigation shows the three are **not equally ready**, so it converts to a storied epic with three children of differing readiness rather than three batchable lumps.
+
+### Investigation — each spec's real WE-layer surface
+
+| Spec → project | Surface (file:line) | State |
+|---|---|---|
+| **Cases Spec** → `webcases` | [we:webcases/requirementValidator.ts:1-20](../webcases/requirementValidator.ts) (structure validation, #100), [we:webcases/compileRequirement.ts](../webcases/compileRequirement.ts) (case→test bridge, #797), [we:webcases/generateCase.ts](../webcases/generateCase.ts) (#868), [we:webcases/driftCheck.ts](../webcases/driftCheck.ts) (#334) | **Largely built.** Residual small + **buries a fork**: `we:webcases/requirementValidator.ts` notes `then.observe` has no registry — *"minting an observable registry is a separate future artifact."* |
+| **Manifest Spec** → `webmanifests` | CEM derivation in [we:blocks/renderers/module-service/generation/generate.ts:1-15](../blocks/renderers/module-service/generation/generate.ts) + `we:blocks/renderers/module-service/definitionRegistry.ts`; changelog thread [we:manifests/reader.ts](../manifests/reader.ts) (#1057/#1058/#1021) | Real surface; "hardening + forward-compat" = volume. Story-ready. |
+| **Doc Spec** → `webdocs` | **none in WE** — generator is FUI (`#424 → fui:webdocs/generator.ts`); [we:src/_data/projects/webdocs.json](../src/_data/projects/webdocs.json) is a POC stub | Greenfield *contract* (generation layout + options). Constrained by #091 docs-as-code but **no seams to cite** → work-investigation pass step 3 fails. |
+
+### Could split
+
+| Slice | Title | Size·workItem | parent | blockedBy | Independent / demoable state |
+|---|---|---|---|---|---|
+| **A** | Manifest Spec completion — CEM-derivation hardening + forward-compat richer fields | 3·story | 1038 | — | Harden the CEM→manifest derivation ([we:blocks/renderers/module-service/generation/generate.ts](../blocks/renderers/module-service/generation/generate.ts)) and add forward-compat tolerance for richer declared fields. **Demo:** derivation unit/golden tests green on `webmanifests`. |
+| **B** | Cases Spec completion — case→test bridge conformance + validator coverage | 3·story | 1038 | D (decision) | Close the case-structure-validation + case-to-test bridge residual on the existing `we:webcases/*` surface (validator + `compileRequirement`). **Demo:** webcases conformance suite green. *(Observable-state grounding for `then.observe` is carved to decision **D**, not buried here.)* |
+| **D** | DECISION — observable-state registry semantics (`then.observe` grounding) | —·decision | 1038 | — | The deferred fork the validator names: model an observable-state registry so `then.observe` grounds *hard* (vs the current `info` finding). What vocabulary / where it lives. Resolve → B's last coverage gap becomes a ≤2 task. |
+
+### Could not split (filed as a child, but not batchable-now)
+
+| Slice | Title | Failed condition | Unblocking action |
+|---|---|---|---|
+| **C** | Doc Spec — generation layout + options contract (`webdocs`) | **(3) + work-investigation step 3** — no WE code surface exists; the generator is FUI, the project is a POC stub. Seams aren't `file:line`-citable, so it can't be re-estimated as an agent-ready story. | **Design-first the Doc Spec contract** (what a webdocs generation config/options surface is, constrained by #091 docs-as-code + the #424 generator it must drive), publish a `/research/` topic, *then* the build slices become groundable. File C as a Tier-C story child; it is **not** batch-eligible until designed. |
+
+**DAG:**
+```
+A (Manifest)  — independent, ready now
+D (decision)  ─▶ B (Cases)            B ready once D resolves (most of B is already built)
+C (Doc Spec)  — Tier-C, design-first before any build slice
+```
+
+**Why the structure is safe (rubric):**
+- **(1) volume, not one fork at the parent level** — the parent isn't a single decision; it's three independent spec areas. The *one* genuine buried fork (observable-registry) is **carved to D**, not scattered.
+- **(2) ≥2 nameable slices, real homes** — three distinct projects (`webmanifests`/`webcases`/`webdocs`), each with its own page.
+- **(3) lands small** — A/B land `≤3`; C **fails** (greenfield, ungroundable) → could-not-split-as-batchable, filed Tier-C with a design-first action.
+- **(4) clean DAG / independence** — A fully independent; B gated only on its own decision D; C independent. No rigid useless chain.
+- **(5) demoable per slice** — A: derivation tests; B: webcases conformance; C: a contract + research topic (design slice). No half-broken intermediate.
+
+## Proposed mutation (on "go")
+
+1. **#1038** → `workItem: epic`, **drop `size: 13`** (storied epic; children carry points). Refresh digest to umbrella framing ("Umbrella for webdocs spec-surface completeness; sliced per spec into Manifest/Cases/Doc + observable-registry decision"). Keep `status: open`, keep the NNN.
+2. Scaffold **A** (`story·3`, `parent=1038`, `relatedProject=webmanifests`), **B** (`story·3`, `parent=1038`, `relatedProject=webcases`, `blocked-by=<D>`), **C** (`story·3`, `parent=1038`, `relatedProject=webdocs` — body flags design-first / Tier-C).
+3. Scaffold **D** as a `type:decision` child (`parent=1038`) capturing the observable-state registry fork.
+4. `npm run check:standards` green; backlog count **+4**.
+
+*(Confidence ~75%. Residuals: (i) whether C should be filed as a story child at all vs left as a could-not-split note until the Doc-Spec design lands — I lean "file it so the scope is tracked, tagged Tier-C"; (ii) whether B's built-already residual is even worth a separate story or folds into D's follow-up task — I lean separate story since the case→test bridge conformance is real coverage work independent of the fork.)*
