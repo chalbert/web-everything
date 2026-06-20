@@ -53,3 +53,13 @@ export type {
   StoragePersistence,
   StorageBulkOp,
 } from './CustomStorageStrategy';
+
+export {
+  VersionedStorageStrategy,
+  versioned,
+  isVersionedEnvelope,
+} from './VersionedStorageStrategy';
+export type {
+  VersionedEnvelope,
+  VersioningOptions,
+} from './VersionedStorageStrategy';
