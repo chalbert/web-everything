@@ -1,12 +1,12 @@
 ---
 type: idea
-workItem: epic
+workItem: story
 status: open
 size: 5
 dateOpened: "2026-06-20"
 relatedProject: webintents
 tags: [advanceable-media, sequence, webintents, deck, video, carousel, harvest]
-relatedReport: reports/2026-06-19-deck-slide-standards.md
+relatedReport: reports/2026-06-20-backlog-split-analysis.md
 crossRef: { url: /backlog/1173/, label: deck/slide standards epic (a consumer) }
 ---
 
@@ -21,6 +21,14 @@ presenter; video → scrubbing; carousel → peek/loop). The real cross-media no
 deck-specific); [we:carousel](../src/_data/blocks/carousel.json) already owns the advance/sequence
 kernel, so this generalises it.
 
-Unsliced umbrella; slice into the member intents (advance, autoplay, up-next, interstitial, present-surface)
-once the deck carve (#1173) confirms the concrete shape each consumer needs. The deck slices that
-compose this family: fragment-reveal, overview, autoplay, up-next, interstitial (filed as standalone slices from the #1173 carve).
+**Single story (not an umbrella) — re-scoped 2026-06-20** (`/slice` analysis,
+[we:reports/2026-06-20-backlog-split-analysis.md](../reports/2026-06-20-backlog-split-analysis.md)). The
+deck carve (#1173, resolved; #1175 ratified B = fully distributed) already scattered the named member
+intents as **standalone** slices that *compose* this kernel — they are downstream consumers, not children
+to slice out: autoplay → #1188, up-next → #1199, interstitial → #1200, present-surface (fullscreen) →
+#1198, plus deck-layer composers fragment-reveal → #1181, overview → #1187. What remains uniquely here is
+the one atomic deliverable: **mint the `advanceable-sequence` kernel intent** in webintents — the
+`current/next/prev` + sequence-position vocabulary and family meta-schema that
+[we:carousel](../src/_data/blocks/carousel.json) owns informally today (no sequence intent exists under
+[we:src/_data/intents/](../src/_data/intents/) yet — the `temporal` intent there is date/time selection,
+unrelated). Re-scoped from `epic` (it had no children and was sized like a single story).
