@@ -40,7 +40,10 @@ export const defaultTokens: DtcgDocument = {
     'bg-dark': { $value: 'oklch(0.18 0.01 256)' },
     'text-light': { $value: 'oklch(0.20 0 0)' },
     'text-dark': { $value: 'oklch(0.96 0 0)' },
-    // The single accent seed a derived accent scale (#405) is built from.
+    // The single accent seed a derived accent scale (#405) is built from. A project may add an optional
+    // `accent-dark` anchor (#1314) to make the scale scheme-paired — each accent step then flips between
+    // the two seeds via light-dark(), expressing a distinct dark-mode primary from one theme. Omitted from
+    // the platform default (the default scale stays single-seed, tracking this one seed across schemes).
     accent: { $value: '{color.blue.9}' },
   },
 

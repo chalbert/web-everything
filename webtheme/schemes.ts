@@ -188,6 +188,12 @@ export interface AccentStep {
   readonly css: string;
   /** The literal sRGB this resolves to, computed here ONLY to validate contrast. */
   readonly value: Rgb;
+  /**
+   * When the theme is **scheme-paired** (#1314 — a `color.accent-dark` anchor present), the dark-scheme
+   * literal this step resolves to (derived from the dark seed), validated against the dark background.
+   * Absent on single-seed themes, where `value` serves both schemes.
+   */
+  readonly valueDark?: Rgb;
 }
 
 export interface SchemeRoles {
@@ -223,6 +229,12 @@ export interface SchemeRuntime {
   readonly validation: StepValidation[];
   /** True iff every accent step cleared the policy on at least one scheme background. */
   readonly accessible: boolean;
+  /**
+   * True when a `color.accent-dark` anchor is present (#1314): the accent scale flips per scheme via
+   * `light-dark(...)` so a system's dark-mode primary surface is expressible from one theme. False for a
+   * single scheme-invariant `color.accent` seed (the scale then tracks that one seed across both schemes).
+   */
+  readonly schemePaired: boolean;
 }
 
 const DEFAULT_POLICY: Required<ContrastPolicy> = { wcagMin: 4.5, apcaMin: 60 };
@@ -252,6 +264,13 @@ function tokenValue(doc: DtcgDocument, path: string): string {
   return String(hit.resolved);
 }
 
+/** Like {@link tokenValue}, but returns undefined for an absent token (an optional anchor) instead of throwing. */
+function tokenValueOptional(doc: DtcgDocument, path: string): string | undefined {
+  const resolved = resolveTokens(flattenTokens(doc));
+  const hit = resolved.find((t) => t.path.join('.') === path);
+  return hit ? String(hit.resolved) : undefined;
+}
+
 /**
  * Derive the scheme + accent runtime from a (resolved) token document — the platform default extended by
  * a project (see {@link ./tokens.extendTokens}). Reads the scheme anchors (`color.bg-light/.bg-dark`,
@@ -268,6 +287,12 @@ export function deriveSchemeRuntime(doc: DtcgDocument, opts: DeriveOptions = {})
   const textLight = tokenValue(doc, 'color.text-light');
   const textDark = tokenValue(doc, 'color.text-dark');
   const seed = tokenValue(doc, 'color.accent');
+  // #1314: an optional dark-scheme accent seed. When present, the accent scale becomes scheme-paired —
+  // each step flips between the two seeds via light-dark(), so a system's dark-mode primary surface is
+  // expressible from ONE theme (shadcn flips --primary per scheme; a single seed could not). When absent
+  // the scale tracks the one seed across both schemes (unchanged single-seed behavior).
+  const seedDark = tokenValueOptional(doc, 'color.accent-dark');
+  const schemePaired = seedDark !== undefined;
 
   const scheme: SchemeRoles = {
     bg: `light-dark(${bgLight}, ${bgDark})`,
@@ -279,6 +304,9 @@ export function deriveSchemeRuntime(doc: DtcgDocument, opts: DeriveOptions = {})
     fg: 'light-dark(#000000, #ffffff)',
   };
 
+  const seedRgb = parseColor(seed);
+  const seedDarkRgb = seedDark !== undefined ? parseColor(seedDark) : undefined;
+
   const accent: AccentStep[] = Object.entries(ramp).map(([id, lightness]) => {
     const override = curated[id];
     if (override !== undefined) {
@@ -287,40 +315,60 @@ export function deriveSchemeRuntime(doc: DtcgDocument, opts: DeriveOptions = {})
     }
     // Derived natively: relative-color keeps the seed's chroma + hue, sets this step's lightness, so the
     // whole scale re-tints when the seed token changes — no rebuild. The literal is computed for the gate.
-    const css = `oklch(from var(--color-accent) ${lightness} c h)`;
-    const seedRgb = parseColor(seed);
+    const lightExpr = `oklch(from var(--color-accent) ${lightness} c h)`;
     const value = recolorLightness(seedRgb, lightness);
-    return { id, lightness, css, value };
+    if (schemePaired && seedDarkRgb) {
+      // Scheme-paired: each step flips per scheme — the light seed under `light`, the dark seed under
+      // `dark` — so the same step is one custom property the browser resolves to the active scheme.
+      const darkExpr = `oklch(from var(--color-accent-dark) ${lightness} c h)`;
+      return {
+        id,
+        lightness,
+        css: `light-dark(${lightExpr}, ${darkExpr})`,
+        value,
+        valueDark: recolorLightness(seedDarkRgb, lightness),
+      };
+    }
+    return { id, lightness, css: lightExpr, value };
   });
 
   const bgLightRgb = parseColor(bgLight);
   const bgDarkRgb = parseColor(bgDark);
   const validation: StepValidation[] = [];
+  const pushValidation = (stepId: string, against: 'bg-light' | 'bg-dark', value: Rgb, bg: Rgb): void => {
+    const wcag = wcagContrast(value, bg);
+    const apca = apcaLc(value, bg);
+    const wcagOk = wcag >= policy.wcagMin;
+    const apcaOk = Math.abs(apca) >= policy.apcaMin;
+    validation.push({
+      step: stepId,
+      against,
+      wcag: round2(wcag),
+      apca: round2(apca),
+      passes: wcagOk && apcaOk,
+      reason: wcagOk ? (apcaOk ? 'ok' : 'apca-below-min') : 'wcag-below-min',
+    });
+  };
   for (const step of accent) {
-    // Each step is validated against BOTH scheme backgrounds; it "passes" if it reads on at least one
-    // (a light-end step reads on dark bg, a dark-end step on light bg — the scale spans both schemes).
-    for (const [against, bg] of [['bg-light', bgLightRgb], ['bg-dark', bgDarkRgb]] as const) {
-      const wcag = wcagContrast(step.value, bg);
-      const apca = apcaLc(step.value, bg);
-      const wcagOk = wcag >= policy.wcagMin;
-      const apcaOk = Math.abs(apca) >= policy.apcaMin;
-      validation.push({
-        step: step.id,
-        against,
-        wcag: round2(wcag),
-        apca: round2(apca),
-        passes: wcagOk && apcaOk,
-        reason: wcagOk ? (apcaOk ? 'ok' : 'apca-below-min') : 'wcag-below-min',
-      });
+    if (schemePaired && step.valueDark) {
+      // Scheme-paired: validate each scheme's variant against ITS OWN background — the light accent on
+      // the light bg, the dark accent on the dark bg (the context it actually renders in).
+      pushValidation(step.id, 'bg-light', step.value, bgLightRgb);
+      pushValidation(step.id, 'bg-dark', step.valueDark, bgDarkRgb);
+    } else {
+      // Single-seed: validate the one value against BOTH backgrounds; it "passes" if it reads on at least
+      // one (a light-end step reads on dark bg, a dark-end step on light bg — the scale spans both schemes).
+      pushValidation(step.id, 'bg-light', step.value, bgLightRgb);
+      pushValidation(step.id, 'bg-dark', step.value, bgDarkRgb);
     }
   }
 
-  // Accessible ⇔ every step clears the policy on at least one of the two scheme backgrounds.
+  // Accessible ⇔ every step clears the policy on at least one of its scheme backgrounds.
   const accessible = accent.every((s) =>
     validation.some((v) => v.step === s.id && v.passes),
   );
 
-  return { scheme, highContrast, accent, validation, accessible };
+  return { scheme, highContrast, accent, validation, accessible, schemePaired };
 }
 
 /** Recompute a color at a target oklch lightness, preserving its chroma + hue (mirrors the CSS `from`). */

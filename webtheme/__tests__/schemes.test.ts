@@ -219,3 +219,51 @@ describe('emitted-CSS golden (accent ramp + scheme + HC, regression-locked)', ()
     `);
   });
 });
+
+describe('scheme-paired accent (#1314 — light/dark primary flip)', () => {
+  // shadcn flips --primary between schemes (light vs dark seed); a single scheme-invariant accent seed
+  // can't express that. A `color.accent-dark` anchor opts the scale into scheme-pairing from one theme.
+  const paired: DtcgDocument = {
+    color: {
+      $type: 'color',
+      accent: { $value: 'oklch(0.55 0.18 264)' },
+      'accent-dark': { $value: 'oklch(0.80 0.16 264)' },
+    },
+  };
+  const runtime = deriveSchemeRuntime(extendTokens(defaultTokens, paired));
+
+  it('flags the runtime as scheme-paired when color.accent-dark is present', () => {
+    expect(runtime.schemePaired).toBe(true);
+  });
+
+  it('emits each accent step as a light-dark() of the two seeds', () => {
+    const step9 = runtime.accent.find((s) => s.id === 'accent-9')!;
+    expect(step9.css).toBe(
+      'light-dark(oklch(from var(--color-accent) 0.55 c h), oklch(from var(--color-accent-dark) 0.55 c h))',
+    );
+  });
+
+  it('derives a distinct dark-scheme literal per step (the dark seed, not the light one)', () => {
+    const step9 = runtime.accent.find((s) => s.id === 'accent-9')!;
+    expect(step9.valueDark).toBeDefined();
+    // Same lightness target, different seed lightness/chroma → the dark variant differs from the light one.
+    expect(step9.valueDark).not.toEqual(step9.value);
+  });
+
+  it('validates each scheme variant against its OWN background (light→bg-light, dark→bg-dark)', () => {
+    expect(runtime.validation.length).toBe(runtime.accent.length * 2);
+    const step9 = runtime.validation.filter((v) => v.step === 'accent-9');
+    expect(step9.map((v) => v.against).sort()).toEqual(['bg-dark', 'bg-light']);
+  });
+
+  it('compileSchemeCss emits the light-dark accent custom property', () => {
+    const css = compileSchemeCss(runtime);
+    expect(css).toContain(
+      '--color-accent-9: light-dark(oklch(from var(--color-accent) 0.55 c h), oklch(from var(--color-accent-dark) 0.55 c h));',
+    );
+  });
+
+  it('a single-seed theme stays unpaired (no regression)', () => {
+    expect(deriveSchemeRuntime(defaultTokens).schemePaired).toBe(false);
+  });
+});
