@@ -1,9 +1,9 @@
 ---
-type: idea
+type: decision
 workItem: story
 size: 5
 parent: "1028"
-status: open
+status: preparing
 blockedBy: ["1077"]
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
