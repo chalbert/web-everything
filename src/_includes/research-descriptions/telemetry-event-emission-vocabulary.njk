@@ -1,0 +1,144 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The app-infrastructure cross-cutting lens
+  (<a href="/backlog/1402-discovery-lens-app-infrastructure-cross-cutting-concerns-inv/">#1402</a>)
+  surfaced that every product app emits <strong>analytics / telemetry events</strong> — track a click,
+  an impression, a funnel step — against a swappable sink, and filed
+  <a href="/backlog/1415-telemetry-analytics-events-declarative-event-emission-vocabu/">#1415</a> as a
+  greenfield <em>"telemetry/analytics-event vocabulary standard: placement."</em> Reading the tree
+  reshapes the question: the WE <a href="/projects/webanalytics/">Web Analytics</a> standard
+  <strong>already ships most of it</strong>. So the real question is narrower:
+  <strong>given the existing webanalytics transport, sink, and vocabulary, should WE add a declarative
+  <em>emission seam</em> (a <code>data-track</code>-style annotation), and where does it live?</strong>
+</p>
+
+<h2>Finding 1 — the transport, sink, and vocabulary already exist and are resolved</h2>
+<p>
+  Three of the four layers #1415 names are built and <strong>resolved</strong> under
+  <a href="/projects/webanalytics/">webanalytics</a>:
+</p>
+<ul>
+  <li>
+    <strong>The swappable sink (runtime-DI provider).</strong>
+    <a href="/plugs/customtrackerregistry/"><code>CustomTrackerRegistry</code></a>
+    (<code>we:plugs/webanalytics/CustomTrackerRegistry.ts</code>, slice
+    <a href="/backlog/1012-webanalytics-canonical-customtracker-contract-registry-di-no/">#1012</a>) —
+    <code>define</code>/<code>resolve(key?)</code> + a default key, a <code>NoopTracker</code>
+    native-first floor, wired into <code>ProviderTypeMap</code>. This <strong>is</strong> the
+    #052/#081 runtime-DI provider seam, and it passes the test by construction: the running app calls
+    <code>resolve().track(…)</code>, so the sink is consulted at runtime.
+  </li>
+  <li>
+    <strong>The contract.</strong> <code>CustomTracker</code> / <code>CustomAnalyticsEvent</code>
+    (<code>we:analytics/contract.ts</code>; <code>identify</code>/<code>track</code>/<code>page</code>/<code>group</code>,
+    <code>page()</code> arg order aligned to the Segment SDK).
+  </li>
+  <li>
+    <strong>The controlled vocabulary.</strong> The Analytics Event Vocabulary
+    <a href="/protocols/">protocol</a> (<code>we:src/_data/protocols/analytics-vocabulary.json</code>,
+    <code>ownedByProject: webanalytics</code>) — Segment Spec verbs + a deck-event layer
+    (<a href="/backlog/1193/">#1193</a>). The glossary term #1415 cites
+    (<code>we:src/_data/semantics/analytics-event-vocabulary.json</code>) is the surfaced face of this
+    already-registered protocol.
+  </li>
+  <li>
+    <strong>Vendor adapters (impl, FUI)</strong> — <code>fui:plugs/webanalytics/{segment,mixpanel,ga4}.ts</code>
+    (<a href="/backlog/1013-webanalytics-reference-vendor-adapters-segment-mixpanel-ga4-/">#1013</a>) —
+    plus a conformance demo (<a href="/backlog/1014/">#1014</a>).
+  </li>
+</ul>
+<p>
+  So <em>"the concept is named, the standard is unbuilt"</em> is stale. The <strong>one piece
+  genuinely unbuilt</strong> is the declarative author-facing <strong>emission seam</strong> — and the
+  <a href="/backlog/1003-implement-web-analytics-customtracker-contract-reference-ada/">#1003</a> epic
+  foresaw it exactly, deferring an "optional Web Events subscription so adapters can instrument off
+  typed events instead of <strong>sprinkled <code>track()</code> calls</strong>" (epic lines 46-47;
+  echoed at <code>we:src/_includes/project-webanalytics.njk:96</code>).
+</p>
+
+<h2>Finding 2 — the convergent prior-art shape is a thin declarative binding over a sink</h2>
+<table>
+  <thead><tr><th>System</th><th>Declarative emission shape</th><th>Controlled vocabulary</th></tr></thead>
+  <tbody>
+    <tr><td>OpenTelemetry (semconv)</td><td>an <em>Event</em> = a name that uniquely identifies its structure + typed attributes (distinct from logs/metrics)</td><td>Semantic Conventions — named events + attribute keys</td></tr>
+    <tr><td>Snowplow</td><td><strong>element tracking + data selectors</strong> — declarative <code>data-*</code> config bound at the document level, no per-element code</td><td>Iglu schema registry (typed/versioned)</td></tr>
+    <tr><td>GitLab Internal Events</td><td><strong><code>data-event-tracking</code> + <code>data-event-label/property/value</code></strong> declarative attributes; a Single Instrumentation Layer</td><td>event definitions as the SSOT</td></tr>
+    <tr><td>GA4</td><td><code>gtag('event', …)</code> + zero-code enhanced-measurement</td><td>recommended events (35+ named)</td></tr>
+    <tr><td>Segment / Amplitude</td><td><code>track(event, props)</code></td><td>Segment Spec (what WE adopted) / governed taxonomy (verb_noun)</td></tr>
+  </tbody>
+</table>
+<p>
+  The convergent shape: a <strong>declarative annotation</strong> — event name + typed payload from a
+  controlled vocabulary — placed on an element, bound once at runtime, <strong>routed to a swappable
+  sink</strong>. Every scaled system treats the <em>sink</em> and the <em>vocabulary</em> as the
+  durable contracts and the <code>data-*</code> annotation as a <strong>thin binding over them</strong>,
+  never its own standard. WE already shipped the two durable contracts — so the emission seam is a thin
+  binding, not a new transport or vocabulary, and the fork shrinks accordingly.
+</p>
+
+<h2>Finding 3 — distinct from the audit family, and from Web Events</h2>
+<p>
+  The <strong>audit family</strong> —
+  <a href="/intents/decision-trace/">Decision Trace</a>
+  (<code>we:src/_data/intents/decision-trace.json:5</code>, "why a rules evaluation reached its
+  outcome") and <a href="/intents/audit-timeline/">Audit Timeline</a>
+  (<code>we:src/_data/intents/audit-timeline.json:5</code>, "who did what, when, and before→after") —
+  are <strong>rendering</strong> intents over a <strong>governance/decision</strong> provider; they own
+  a display surface. Telemetry emission <strong>renders nothing</strong> and targets a
+  <em>product-analytics</em> sink. No overlap, no fold. And <a href="/projects/webevents/">Web
+  Events</a> is DOM-event <em>discrimination</em> (<code>listenForScoped</code> + <code>instanceof</code>),
+  not analytics emission — an adapter <em>may</em> subscribe to typed events, but that is orthogonal to
+  the author-facing <code>data-track</code> seam.
+</p>
+
+<h2>Classification (per-fork pass)</h2>
+<ul>
+  <li><strong>Layer</strong> — a <strong>behavior/directive</strong> (invisible declarative
+    annotation). <strong>Not an Intent</strong> — it renders nothing, contradicting intents-are-UX-only
+    (every shipped intent renders a surface). <strong>Not a new Protocol</strong> — the vocabulary +
+    contract already exist.</li>
+  <li><strong>DI-injectable?</strong> — <strong>Yes, and the seam already exists</strong>: the emitter
+    resolves the sink via <code>CustomTrackerRegistry.resolve(key?)</code> at emit time (#052/#081,
+    built/resolved). The new piece <em>consumes</em> the DI seam; it does not create one.</li>
+  <li><strong>Most-permissive default</strong> — unannotated → no emission; annotated + no sink →
+    <code>NoopTracker</code> silent floor (<code>we:analytics/provider.ts</code>). Zero lock-in.</li>
+  <li><strong>Owner</strong> — <strong>webanalytics</strong> (the standard it binds to), not
+    webintents — mirroring the audit intents living under <code>webaudit</code>/<code>webdecisions</code>.</li>
+  <li><strong>Seam to #1414</strong> — <strong>composition</strong>: the experiment intent emits its
+    exposure event <em>through</em> this seam, not a merge.</li>
+</ul>
+
+<h2>The prepared forks</h2>
+<ul>
+  <li>
+    <strong>Fork 1 — Add a declarative emission seam at all?</strong>
+    <em>(a) Ship it (recommended, ~80%)</em> — a <code>data-track</code>-style annotation over the
+    existing <code>CustomTracker</code> sink + vocabulary; closes the gap #1003 deferred; matches every
+    scaled prior-art system. vs <em>(b) imperative-<code>track()</code>-only</em> — coherent, not
+    broken, but reproduces the "sprinkled <code>track()</code> calls" pain WE itself named.
+  </li>
+  <li>
+    <strong>Fork 2 — Behavior/directive, or a presentational Intent?</strong>
+    <em>(a) a behavior/directive (recommended, ~75%)</em> — invisible annotation bound at the document
+    level. vs <em>(b) a presentational Intent</em> <strong>(rejected — miscategorized)</strong>: an
+    intent that renders nothing contradicts intents-are-UX-only and would be the catalog's only
+    non-rendering member.
+  </li>
+  <li>
+    <strong>Fork 3 — Fold telemetry + #1414's experiment-exposure under an "observability" umbrella?</strong>
+    <em>(a) two separate homes that compose (recommended, ~85%)</em> — telemetry owns the seam, the
+    experiment intent emits <em>through</em> it. vs <em>(b) a shared umbrella</em>
+    <strong>(rejected — conflates two providers</strong>: analytics sink vs flag evaluator, against
+    bias-toward-separation with no broken branch).
+  </li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/projects/webanalytics/">Web Analytics</a> — the standard this seam binds to (sink + vocabulary + adapters, all shipped).</li>
+  <li><a href="/plugs/customtrackerregistry/"><code>CustomTrackerRegistry</code></a> — the runtime-DI swappable sink the seam consumes.</li>
+  <li><a href="/backlog/1414-feature-flags-experiments-declarative-gating-variant-assignm/">#1414</a> — feature-flags/experiments; its exposure events compose with this seam (Fork 3).</li>
+  <li>Backlog <a href="/backlog/1415-telemetry-analytics-events-declarative-event-emission-vocabu/">#1415</a> — the decision this research prepares.</li>
+</ul>
+{% endraw %}

@@ -1,0 +1,28 @@
+{
+  "id": "telemetry-event-emission-vocabulary",
+  "title": "Telemetry / analytics events — does WE need a declarative emission seam (`data-track`) over its existing webanalytics transport, and where does it live?",
+  "summary": "Prep research for decision #1415 (placement), surfaced by the app-infrastructure cross-cutting lens #1402. LOAD-BEARING REFRAME from reading the tree: the item was filed as a greenfield 'telemetry/analytics-event vocabulary standard: placement', but the WE webanalytics standard already ships most of it. Built + RESOLVED: the swappable sink (CustomTrackerRegistry, we:plugs/webanalytics/CustomTrackerRegistry.ts — this IS the #052/#081 runtime-DI provider; the running app calls resolve().track(), so the sink registry is consulted at runtime; #1012); the contract (CustomTracker/CustomAnalyticsEvent, we:analytics/contract.ts, page() arg order = Segment SDK); the controlled vocabulary (Analytics Event Vocabulary protocol, we:src/_data/protocols/analytics-vocabulary.json, Segment Spec Identify/Track/Page/Group + deck events #1193, ownedByProject webanalytics); the vendor adapters (fui:plugs/webanalytics/{segment,mixpanel,ga4}.ts, #1013); and a conformance demo (#1014). So the glossary term the item cites (we:src/_data/semantics/analytics-event-vocabulary.json) is the surfaced face of an ALREADY-REGISTERED protocol, and 'the standard is unbuilt' is stale. The ONE piece genuinely unbuilt is the declarative author-facing EMISSION SEAM — how an element declares 'emit event E on interaction I' WITHOUT sprinkled imperative track() calls — which the #1003 epic explicitly foresaw and deferred ('optional Web Events subscription so adapters can instrument off typed events instead of sprinkled track() calls', epic lines 46-47; webanalytics spec line 96). PRIOR-ART SURVEY (convergent shape): OpenTelemetry semconv Events = a named event uniquely identifying its structure + typed attributes, distinct from logs/metrics; Snowplow element tracking + data selectors = declarative data-* config bound at the document level (no per-element code); GitLab Internal Events = data-event-tracking/label/property/value declarative attributes over a Single Instrumentation Layer with event definitions as SSOT; GA4 = recommended-event vocabulary + zero-code enhanced-measurement; Segment Spec (the exact vocab WE adopted) + Amplitude governed taxonomy (verb_noun, past tense). CONVERGENT BORROW: a declarative annotation (event name + typed payload from a controlled vocabulary) bound once at runtime → routed to a swappable sink. Every scaled system treats the sink + vocabulary as the durable contracts and the data-* annotation as a thin binding over them — never its own standard. WE already shipped the two durable contracts, so the seam is a THIN BINDING, not a new transport/vocabulary. CLASSIFICATION: layer = behavior/directive (invisible declarative annotation), NOT an Intent (renders nothing → fails intents-are-UX-only; every shipped intent renders a surface) and NOT a new Protocol; consumes the already-built CustomTracker runtime-DI sink (#052/#081, built/resolved) + the already-registered Analytics Event Vocabulary protocol; owner = webanalytics; most-permissive default = unannotated → no emission, annotated + no sink → NoopTracker silent floor (we:analytics/provider.ts). PREPARED FORKS: Fork 1 — add a declarative emission seam at all (recommended ~80%) vs imperative-track()-only (coherent, not broken — just lower-leverage; reproduces the sprinkled-call pain WE itself named); Fork 2 — a behavior/directive (recommended ~75%) vs a presentational Intent (REJECTED — miscategorized: an intent that renders nothing contradicts intents-are-UX-only); Fork 3 — two separate homes that compose (recommended ~85%, telemetry owns the seam, #1414's experiment intent emits THROUGH it) vs a shared 'observability' umbrella (REJECTED — conflates two providers, analytics sink vs flag evaluator, against bias-toward-separation with no broken branch). DISTINCT from the audit family (we:src/_data/intents/decision-trace.json + audit-timeline.json render governance/decision history; telemetry renders nothing, targets a product-analytics sink) and from Web Events (DOM-event discrimination, not emission). Net: thin declarative emission behavior under webanalytics over the existing sink+vocabulary; no migration. Full grounding in we:reports/2026-06-21-telemetry-event-emission-vocabulary.md.",
+  "status": "open",
+  "dateOpened": "2026-06-21",
+  "lastReviewed": "2026-06-21",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webanalytics",
+    "telemetry",
+    "analytics",
+    "declarative-emission",
+    "data-track",
+    "event-vocabulary",
+    "opentelemetry",
+    "segment-spec",
+    "runtime-di",
+    "cross-cutting",
+    "native-first",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [
+    "customtrackerregistry"
+  ],
+  "relatedProject": "webanalytics"
+}
