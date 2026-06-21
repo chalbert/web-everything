@@ -142,6 +142,17 @@ for (const r of research)
   if (r.id && !hasDesc('research-descriptions', r.id))
     err(`Research topic "${r.id}" has no src/_includes/research-descriptions/${r.id}.njk`,
       dMissingDescription('Research', r.id, `src/_includes/research-descriptions/${r.id}.njk`));
+// Adapters render via src/adapter-pages.njk, which `include`s adapter-descriptions/<id>.njk by id (NOT
+// "ignore missing") — a new adapter without its partial crashes the WHOLE Eleventy build. The gate is
+// otherwise blind to that njk render, so a missing partial would only surface as a build crash (#1388,
+// hit by the #1374 graph plugs). Mirror the block/plug/research coverage so the failure shifts left to a
+// gate error. The page paginates collections.flatAdapters = adapters.flatMap(c => c.items), so iterate
+// the same flat item set (adapters.json is [ { id, items: [ { id, … } ] } ]).
+for (const cat of adapters)
+  for (const a of (Array.isArray(cat.items) ? cat.items : []))
+    if (a.id && !hasDesc('adapter-descriptions', a.id))
+      err(`Adapter "${a.id}" has no src/_includes/adapter-descriptions/${a.id}.njk (src/adapter-pages.njk includes it by id; a missing partial crashes the Eleventy build, #1388)`,
+        dMissingDescription('Adapter', a.id, `src/_includes/adapter-descriptions/${a.id}.njk`));
 
 // ── 2. Spec ↔ implementation ──────────────────────────────────────────────────
 // Per #641 (block protocol/impl boundary, A/A/A): a WE block entry is a *protocol*,
@@ -714,6 +725,20 @@ for (const item of backlog) {
   // stated steady state — its remaining scope can't be carved yet (it's blocked) or isn't a "done" signal —
   // so it's exempt from the resolve nudge too. Otherwise a blocked epic clears branch A (it gave its reason)
   // only to be told by branch C to resolve — the contradiction of "stalled" and "done" at once.
+}
+
+// A program's title is a short bare NAME, not a one-line pitch (docs/agent/backlog-workflow.md →
+// "Naming — a program's title is a short bare name, no subtitle"). A program (an epic with `ongoing:
+// true` or `childlessReason: program`) is cited for the life of the constellation, so its H1 must read
+// as a name — no `—`/`–`/`:` subtitle clause. The elaboration (lens shape, front-A/B mechanics, the
+// "cards only" discipline) belongs in the body, not the title. (User directive 2026-06-21.)
+for (const item of backlog) {
+  if (item.kind !== 'epic') continue;
+  if (!(item.ongoing === true || item.childlessReason === 'program')) continue;
+  const m = (item.title || '').match(/\s+[—–:]\s+/);
+  if (m)
+    err(`Backlog item "${item.id}" is a program but its title carries a subtitle ("${m[0].trim()}" separator) — a program's H1 must be a short bare name. Fold the trailing clause into the opening paragraph and keep the title a name (docs/agent/backlog-workflow.md → Programs → Naming).`,
+        { kind: 'program-title-subtitle', file: `backlog/${item.id}.md` });
 }
 
 // No epic may embed "needs a decision" as its childless reason. An open design decision that gates an
