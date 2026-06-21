@@ -1,6 +1,5 @@
 ---
-kind: story
-size: 13
+kind: epic
 parent: "1250"
 locus: frontierui
 status: open
@@ -9,15 +8,47 @@ dateStarted: "2026-06-20"
 tags: []
 ---
 
+> **Split into a storied epic — 3 slices (`/slice 1304`, 2026-06-21,
+> [we:reports/2026-06-21-backlog-split-analysis.md](../reports/2026-06-21-backlog-split-analysis.md)
+> §"focused: #1304").** A finer seam than the same-day sweep saw: the work is a mechanical port + one
+> bounded debug with a clean one-way DAG **D1 → {D2, P}** (green at every step). Children:
+> - **D1** declarative core — port `we:declarativeRegistry.ts` (parse/compose/define/resolve/map-through)
+>   onto FUI's already-reconciled `CustomElementRegistry` (#1354) + non-attribute tests. *(root)*
+> - **D2** MOMENT-2 binding — port `we:ScopedRegistryAttribute.ts` + fix the FUI `CustomAttribute`
+>   divergence so `bound=true` + its test block. *(blocked-by D1)*
+> - **P** plugged-mode patching — copy WE's written `applyPatches`/`removePatches`/`isPatched`/`attachShadow`
+>   + `we:globalPatching.test.ts`. *(blocked-by D1)*
+>
+> Scope now lives in the children; this item is the umbrella. The investigation below is retained as the
+> shared grounding the slices draw on.
+
 > **Outgrew — not batchable as one (sized 3 → 13, batch-2026-06-20).** The investigation below
 > (carried forward from a prior attempt that reverted to keep FUI green) shows this is not a clean
-> reconcile: it carries a genuine **FUI Plug-interface fork** (drop the `downgrade()` requirement — a
-> FUI-architecture decision — vs keep a FUI-only `downgrade` stub) plus #854 scoped-binding integration
-> work. Needs a focused session: carve the downgrade-requirement decision first, then the merge.
+> reconcile: it carries a genuine Plug-lifecycle fork plus #854 scoped-binding integration work.
+>
+> **The fork is carved — see [#1350](/backlog/1350-shared-plug-lifecycle-requirement-upgrade-downgrade-vs-1103-/)**
+> (`/split` 2026-06-20, [we:reports/2026-06-20-backlog-split-analysis.md](../reports/2026-06-20-backlog-split-analysis.md)
+> § "Focused: #1304"). Correction to the body below: the fork is **not FUI-only** — `we:plugs/core/Plug.ts`
+> / `we:plugs/core/HTMLRegistry.ts` / `we:plugs/unplugged.ts` are byte-identical in both repos and **WE itself is RED** because
+> #1103 dropped `downgrade()` from the registry but left the shared contract requiring it. And this reconcile
+> is **NOT blocked by #1350**: it proceeds **preserving FUI's `downgrade`** (the clean #1101/#1102 + #854
+> work below); #1350's convergence only gates the final byte-parity + the #1309 drift gate.
+>
+> **Split executed 2026-06-20 (size 13→8).** The clean `CustomElementRegistry` improvements (#1101/#1102)
+> were carved to sibling **[#1354](/backlog/1354-reconcile-fui-plugs-webregistries-customelementregistry-clea/)**
+> and the Plug-lifecycle fork to decision **[#1350](/backlog/1350-shared-plug-lifecycle-requirement-upgrade-downgrade-vs-1103-/)**.
+> This item is now the **focused declarative-scoped-registration + global-patching core** (scope below).
 
-# Reconcile fui:plugs/webregistries UP to WE (contract-anchored)
+# Reconcile fui:plugs/webregistries UP to WE — declarative scoped registration + global patching (core)
 
-Audit fui:plugs/webregistries vs contract+vectors, then port ScopedRegistryAttribute + declarativeRegistry + reconcile CustomElementRegistry (2 diffs) FUI-up.
+Port the #854 declarative scoped registration (`we:plugs/webregistries/ScopedRegistryAttribute.ts` +
+`we:plugs/webregistries/declarativeRegistry.ts` + index exports) into `fui:plugs/webregistries/`, port the
+#1100 global patching (`applyPatches`/`removePatches`/`isPatched`/`attachShadow` scoped-init — all TODO
+stubs in `fui:plugs/webregistries/index.ts`) FUI-up, and **fix the MOMENT-2 binding** so the ported
+`we:plugs/webregistries/__tests__/unit/declarativeRegistry.test.ts` binds (`bound=true`) in FUI's env. Internally entangled (the index patch
+imports `applyScopedRegistryToHost` from `declarativeRegistry`) → one focused story, not batch fodder.
+Preserves FUI's `downgrade` (the #1350 decision owns that). The clean `CustomElementRegistry` #1101/#1102
+improvements are carved to **#1354**; the Plug-lifecycle fork to **#1350**.
 
 ## Investigation 2026-06-20 (batch-2026-06-20) — NOT a clean reconcile; carried forward (genuine divergence)
 
