@@ -1,0 +1,81 @@
+<section class="intro-section mb-12">
+    <h3 id="mission">Mission</h3>
+    <p>
+        <strong>Durable Range Anchor</strong> standardizes the genuinely hard, recurring, <em>unowned</em>
+        problem behind annotation, deep-linking, citations, <code>#:~:text=</code>-style scroll-to-text, and
+        durable test selectors: <strong>capture a <code>Range</code></strong>, serialize it to a form that
+        survives the document being re-fetched or lightly edited, and <strong>re-resolve it later</strong> with
+        a fuzzy fallback and a first-class orphan state. It was carved out by
+        <a href="/backlog/1408-decision-content-annotation-anchor-payload-placement/">#1408</a> (Fork&nbsp;2
+        split) as a <strong>target-agnostic</strong> standard in its own right &mdash; the
+        <a href="/intents/annotation/">annotation</a> intent merely composes it &mdash; because the same
+        anchoring machinery is reusable far beyond annotation.
+    </p>
+</section>
+
+<section id="scope" class="section-card">
+    <h3 id="scope-heading">Scope</h3>
+    <p>
+        The standard owns the <strong>anchoring seam only</strong>: <code>Range</code> &rarr; serialized
+        selector bundle &rarr; re-resolution. Highlight rendering (the CSS Custom Highlight API), the
+        payload/comment UI (composed from <a href="/intents/anchor/">anchor</a> / popover /
+        <a href="/intents/rich-text/">rich-text</a> / <a href="/intents/selection/">selection</a>), and the
+        comment-thread product are explicitly <em>out</em> of scope &mdash; compose, never merge.
+    </p>
+    <div class="standards-grid">
+        <div class="standard-card flex flex-col">
+            <h4 id="scope-vocab" class="text-lg font-bold m-0 text-gray-900">W3C selector vocabulary, wholesale</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                The wire layer adopts the
+                <a href="https://www.w3.org/TR/annotation-model/#selectors">W3C Web Annotation</a> selectors
+                verbatim &mdash; <code>TextQuoteSelector</code> (context-robust),
+                <code>TextPositionSelector</code> (offset-exact), <code>RangeSelector</code> (cross-element).
+                Standards-bodies are upstream; nothing is re-minted.
+            </p>
+        </div>
+        <div class="standard-card flex flex-col">
+            <h4 id="scope-bundle" class="text-lg font-bold m-0 text-gray-900">Bundle + fuzzy + orphan</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                Robustness comes from storing <em>several</em> selectors together (a
+                <code>SelectorBundle</code>) and re-resolving against the best survivor, falling back to a
+                <strong>fuzzy</strong> match and surfacing a <strong>first-class orphan</strong> state when the
+                text is gone (the Hypothesis / RecogitoJS precedent) &mdash; never a thrown error or a silent
+                drop.
+            </p>
+        </div>
+        <div class="standard-card flex flex-col">
+            <h4 id="scope-strategy" class="text-lg font-bold m-0 text-gray-900">anchorStrategy dimension</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                <code>quote | position | bundle</code>, default <strong><code>bundle</code></strong> &mdash; the
+                most-flexible / most-robust value (mandating a single strategy was the rejected, less-robust
+                branch). Homed here per <a href="/backlog/1408-decision-content-annotation-anchor-payload-placement/">#1408</a>
+                Fork&nbsp;3.
+            </p>
+        </div>
+    </div>
+</section>
+
+<section id="contract" class="section-card">
+    <h3 id="contract-heading">Contract &amp; placement</h3>
+    <p>
+        The <code>RangeAnchor</code> serialize/resolve interface is the <strong>only lock</strong>; the runtime
+        &mdash; the offset math and the fuzzy matcher &mdash; is impl and lives in
+        <a href="/projects/frontierui/">Frontier UI</a>, never the WE repo (constellation-placement rule&nbsp;1).
+        The contract is its own <strong>foundational slice</strong> (<code>@webeverything/contracts/range-anchor</code>):
+        the <code>annotation</code> intent and any FUI behavior block can't import it until it lands, so it ships
+        first. Re-resolution outcomes are a closed set &mdash; <code>anchored</code> | <code>fuzzy</code> |
+        <code>orphan</code>.
+    </p>
+</section>
+
+<section id="protocol-durable-range-anchor" class="section-card">
+    <h3 id="protocol-heading">Protocol &mdash; <code>DurableRangeAnchor</code></h3>
+    <p>
+        The conformance reference fixes the <code>RangeAnchor</code> serialize/resolve contract, the W3C
+        selector wire vocabulary (<code>TextQuoteSelector</code> / <code>TextPositionSelector</code> /
+        <code>RangeSelector</code>), the <code>anchorStrategy</code> dimension (<code>quote | position |
+        bundle</code>, default <code>bundle</code>), and the closed <code>AnchorResolution</code> outcome set
+        (<code>anchored | fuzzy | orphan</code>). The serializer/resolver + fuzzy matcher are impl in
+        <a href="/projects/frontierui/">Frontier UI</a>; the contract is the only lock.
+    </p>
+</section>

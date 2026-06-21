@@ -1,0 +1,8 @@
+{
+  "id": "durable-range-anchor",
+  "name": "Durable Range Anchor",
+  "summary": "Conformance reference for the Durable Range Anchor seam — serialize a DOM Range to a robust W3C selector bundle (TextQuoteSelector / TextPositionSelector / RangeSelector, adopted wholesale) and re-resolve it later against a possibly-changed document, with a fuzzy fallback and a first-class orphan outcome. The protocol fixes the serialize/resolve contract (the RangeAnchor interface), the selector wire vocabulary, the anchorStrategy dimension (quote | position | bundle, default bundle — the most-flexible/most-robust value), and the AnchorResolution outcome set (anchored | fuzzy | orphan). It is the foundational slice the annotation intent and any FUI behavior block import (contract-ts-is-a-separate-slice); the runtime — the offset math + fuzzy matcher — is impl in Frontier UI, never the WE repo (the contract is the only lock). Target-agnostic: the same anchor serves annotation, deep-linking, citations, #:~:text= scroll-to-text, and durable test selectors. A technical interchange contract, not a UX preference — a Protocol, not an Intent. Ratified #1408 Fork 2 split.",
+  "status": "concept",
+  "ownedByProject": "range-anchor",
+  "anchor": "protocol-durable-range-anchor"
+}

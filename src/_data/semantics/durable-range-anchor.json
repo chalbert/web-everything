@@ -1,0 +1,5 @@
+{
+  "term": "Durable Range Anchor",
+  "definition": "A target-agnostic standard for capturing a DOM Range and re-resolving it later. A selection is serialized to a robust W3C Web Annotation selector bundle (TextQuote / TextPosition / Range, adopted wholesale) and re-resolved against a possibly-changed document with a fuzzy fallback and a first-class orphan state. Homes the anchorStrategy dimension (quote | position | bundle, default bundle). Reusable beyond annotation — deep-linking, citations, #:~:text= scroll-to-text, durable test selectors. The contract is the only lock; the serializer/resolver + fuzzy matcher are impl (Frontier UI).",
+  "usage": "Standardized by the Durable Range Anchor protocol."
+}

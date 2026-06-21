@@ -17,7 +17,7 @@ Ratified by #1414 (Forks 1+2). Author a new experiment / variant-assignment inte
 ## Progress (batch-2026-06-21-1429-1487)
 
 Authored **both forks together** (no split — they are tightly coupled and the contract is authored
-*here*, not deferred, so the [[project_contract_ts_is_separate_slice]] concern "FUI can't import till it
+*here*, not deferred, so the contract-ts-is-a-separate-slice concern "FUI can't import till it
 lands" is satisfied; the contract exists for FUI to import):
 
 - **`we:experiment/contract.ts`** (new, Fork 2) — the **pure-contract half**, type-only/compile-erased
