@@ -2,7 +2,7 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: active
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
 preparedDate: "2026-06-21"

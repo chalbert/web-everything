@@ -3,6 +3,7 @@ kind: decision
 size: 2
 parent: "479"
 status: parked
+parkedReason: deferred
 dateOpened: "2026-06-15"
 tags: []
 ---

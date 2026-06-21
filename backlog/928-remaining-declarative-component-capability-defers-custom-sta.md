@@ -2,6 +2,7 @@
 kind: story
 size: 3
 status: parked
+parkedReason: deferred
 dateOpened: "2026-06-18"
 tags: [webcomponents, component, declarative, deferred]
 relatedProject: webcomponents

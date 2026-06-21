@@ -3,6 +3,7 @@ kind: story
 size: 3
 parent: "125"
 status: parked
+parkedReason: deferred
 dateOpened: "2026-06-09"
 priority: low
 tags: [component, adapters, compiler, build-tooling, strategy-axis, deferred, swc, tsc]

@@ -3,14 +3,28 @@ kind: story
 size: 5
 locus: frontierui
 status: open
-blockedBy: ["1362"]
+blockedBy: ["1362", "1377"]
 dateOpened: "2026-06-21"
 tags: []
 ---
 
 # webisolation L2: build-transform impl (unique-class light DOM, transform-primary)
 
-The default/transform-primary conformant impl of the #1362 webisolation contract: a zero-runtime build transform that keys a component's CSS to a machine-generated unique scope class (vanilla-extract/CSS-Modules pattern) — native a11y free, SSR-trivial, total inter-view isolation. Strategy S1 by default; not immune to external hostile CSS (that is S2/shadow, the Configurator opt-in). Conforms to the Layer-1 contract ratified in #1349.
+The default/transform-primary conformant impl of the #1362 webisolation contract: a zero-runtime transform that keys a component's CSS to a machine-generated unique scope class — native a11y free, SSR-trivial, total inter-view isolation. Strategy S1 by default; not immune to external hostile CSS (that is S2/shadow, the Configurator opt-in). Conforms to the Layer-1 contract ratified in #1349. **Per the #1377 seam ruling this item is the _pure, bundler-agnostic PostCSS core_** (consumes FUI's authored base `@scope {}`; emits unique-class CSS) — the per-bundler adapter family is #1416, serve-time (MaaS) is #1417, the runtime polyfill is #1364; all wrap this one core.
+
+## Resolved by #1377 (2026-06-21) — integration seam settled
+
+The integration-seam fork the pre-flight note below opened is now **ratified** in #1377 (codified at
+`we:docs/agent/platform-decisions.md#standard-consumability`):
+- **Authoring SoT** = the standard form — FUI authors **base `@scope {}`** (out-scoping only, which matches
+  L2/S1 exactly), *not* a CSS-Modules/vanilla-extract tooling format.
+- **Lowering core** = a **pure, bundler-agnostic PostCSS** transform (`@scope`→unique-class). This item.
+- **Hosts** = thin adapters around the core: build-time per-bundler family **#1416** (vite/rspack/webpack/
+  esbuild/rollup — rspack/uncompiled-source first-class, no Vite lock-in), serve-time/MaaS **#1417**,
+  runtime polyfill **#1364**.
+
+Both blockers (#1362 contract, #1377 seam) are resolved → this is now unblocked and agent-ready. The
+pre-flight note below is retained as historical context (its "open fork" is the one #1377 closed).
 
 ## Pre-flight note — locus fixed (impl→FUI) + an unresolved integration-seam design question (batch-2026-06-20-1358-1357)
 

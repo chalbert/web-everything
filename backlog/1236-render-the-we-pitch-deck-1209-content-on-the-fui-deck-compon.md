@@ -1,6 +1,6 @@
 ---
 kind: story
-size: 13
+size: 3
 parent: "1210"
 status: open
 locus: plateau-app
@@ -12,7 +12,7 @@ tags: [deck, dogfood, conformance, fui]
 
 # Render the WE pitch deck (#1209 content) on the FUI deck components + plateau hosting
 
-The actual deck dogfood, now unblocked by the FUI deck-component build (#1228, resolved). Assemble the real WE/constellation pitch deck — content from #1209 — on the shipped fui:blocks/deck/ components (DeckBehavior realizing #1180 doc-model / #1191 layout-template / #1179 advance), themed via webtheme tokens and hosted on plateau, so 'our own pitch runs on our own stack' becomes live conformance proof (mirrors the #777 dogfood). The #1215 readiness map confirmed all 19 deck contracts spec'd and the #765/#777 mount boundary relaxed; #1228 delivered the critical-path FUI build + green vector suites. This slice composes content+components+hosting into the rendered deck.
+The **foundational deck integration shell** (re-scoped from the full dogfood — audience content carved to siblings #1424/#1359/#1360). Build the net-new plateau deck page (`plateau:src/marketing/deck.ts` `mountDeck`) mounting the shipped `fui:blocks/deck/` `DeckBehavior` (#1180 doc-model / #1191 layout-template / #1179 advance, #1228 resolved) over a minimal 2-slide `[data-slide]` placeholder, themed via `we:webtheme/tokens.ts`, wired to a `/deck` public route in `plateau:src/main.ts` (#1239 `mountLanding` pattern), and browser-verified to mount + advance on the live plateau gate. This is the shared shell all four audience decks render on; once it lands, the content slices become parallel. Mirrors the #777 dogfood ('our own pitch on our own stack' as live conformance proof).
 
 ## Split (2026-06-20 — `/split 1236`, re-sized 13 → 5)
 
@@ -28,7 +28,24 @@ The shell is the hard part — once it lands, the two sibling slices add their a
 
 Carved siblings: developer/technical deck + design-system/enterprise deck (both `blockedBy: 1236`).
 
-## Re-sized 5 → 13 (2026-06-21, batch pre-flight)
+## Re-split — strategic content carved off; this story is now the pure shell (2026-06-21, `/split 1236`, re-sized 13 → 3)
+
+The size-13 bundled the **deck integration shell** + the **strategic/vision deck content**. The prior
+split (below) had already carved the developer (#1359) and design-system/enterprise (#1360) decks as
+`size:3` siblings `blockedBy: 1236` — so the architecture is *one shared shell → parallel audience decks*,
+and strategic content was the one audience deck never lifted off the shell. This pass carves it out into a
+new `size:3` sibling under #1210 (`blockedBy: 1236`), mirroring #1359/#1360. See
+`we:reports/2026-06-21-backlog-split-analysis.md` (focused `/split 1236` section).
+
+**This story's scope now (shell only, `size:3`):** build the net-new plateau deck page
+(`plateau:src/marketing/deck.ts` `mountDeck` module mounting `fui:blocks/deck/` `DeckBehavior` over a
+minimal 2-slide `[data-slide]` placeholder), theme it via `we:webtheme/tokens.ts`, wire a `/deck` public
+route in `plateau:src/main.ts` (add to `PUBLIC_ROUTES` + a robust-timing mount, the #1239
+`mountLanding` pattern), and browser-verify the deck mounts + advances + green plateau gate. The placeholder
+is throwaway markup the first audience-content slice replaces. Once this lands, all four audience decks
+(strategic / #1359 / #1360) become parallel content slices over the shared shell.
+
+## Re-sized 5 → 13 (2026-06-21, batch pre-flight) — superseded by the re-split above
 
 The post-split scoping note below (added the same day as the `/split` re-size to 5) found the **shell
 itself** is greenfield across three repos — content authoring from four outlines + a net-new plateau page

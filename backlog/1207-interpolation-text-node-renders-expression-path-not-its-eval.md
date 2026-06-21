@@ -2,6 +2,7 @@
 kind: story
 status: open
 locus: webeverything
+humanGate: { kind: setup, what: "Needs a focused session that can cold-start :3000: the proven fix (the #449 single-plug-copy completion — one CustomTextNode class at runtime) only becomes observable after a dev-server cold start (a registered customTextNodes singleton survives HMR full-reload), and acceptance #1/#2 require browser-verifying rendered values + a real-browser regression test on a fresh server. Both violate the standing don't-restart-the-dev-server rule. Carried forward 3× as outgrew across batch-2026-06-20 / -20b." }
 dateOpened: "2026-06-20"
 size: 5
 dateStarted: "2026-06-20"

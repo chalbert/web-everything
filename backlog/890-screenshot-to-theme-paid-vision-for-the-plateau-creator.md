@@ -3,6 +3,7 @@ kind: story
 size: 3
 parent: "746"
 status: parked
+parkedReason: external-infra
 locus: plateau-app
 relatedProject: webdocs
 dateOpened: "2026-06-17"

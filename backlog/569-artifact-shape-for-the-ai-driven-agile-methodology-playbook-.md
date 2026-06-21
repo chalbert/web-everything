@@ -3,6 +3,7 @@ kind: decision
 size: 2
 parent: "563"
 status: parked
+parkedReason: deferred
 dateOpened: "2026-06-14"
 tags: [methodology, agile, ai, ways-of-working, enablement, positioning, decision, deferred, pre-release]
 crossRef: { url: /backlog/143-ai-approach-page/, label: "Public approach page (#143)" }

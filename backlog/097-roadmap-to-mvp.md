@@ -8,7 +8,7 @@ tags: [roadmap, mvp, go-to-market, strategy, emergent, monetization, solo-founde
 crossRef: { url: /backlog/089-monetization-product-ideas/, label: "Product ideas (#089)" }
 ---
 
-# Emergent MVP strategy — work many product candidates; let the MVP emerge
+# Emergent MVP strategy
 
 > **Reopened 2026-06-20 (`ongoing: true`).** Resolving this 2026-06-15 was premature — it is a *living strategy doc* for a perpetual, emergent process, not a finite deliverable. It legitimately sits `open` with all child slices resolved between rounds; the next candidate/round is added as the strategy advances.
 

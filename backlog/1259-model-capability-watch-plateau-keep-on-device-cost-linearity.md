@@ -8,7 +8,7 @@ dateOpened: "2026-06-20"
 tags: []
 ---
 
-# Model-capability watch (Plateau) — keep on-device cost-linearity current as the AI model landscape moves
+# Model-capability watch
 
 Candidate front-B watch program (Plateau-side): track the AI/LLM model landscape so Plateau's on-device cost-linearity assumptions and vision tiers stay current. Front A: the on-device classifier still meets its accuracy/cost floor. Front B: a new model changes what is feasible or affordable on-device → re-evaluate the vision-tier cascade and the cost-linearity calculus (no uncapped per-call SDK inside flat-rate pricing). L0/candidate. Affects the WE-consumed vision service only through Plateau's no-leakage client boundary. Lower priority; recorded so the watch is not lost.
 

@@ -1,10 +1,12 @@
 ---
 kind: story
 size: 5
-status: active
+status: resolved
 parent: "314"
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-12"
+dateResolved: "2026-06-20"
+graduatedTo: "scripts/check-app-conformance.mjs"
 tags: [exercise-app, conformance, tooling, benchmark, conformity]
 crossRef: { url: /backlog/317-exercise-app-loan-origination/, label: "First consumer: loan app (#317)" }
 ---

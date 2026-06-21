@@ -7,7 +7,7 @@ dateOpened: "2026-06-20"
 tags: []
 ---
 
-# Framework-churn watch — keep WE's forward adapters current as vendor framework APIs move
+# Framework-churn watch
 
 Candidate front-B watch program: track API churn across the major vendor frameworks (React/Vue/Svelte/Solid) so WE's forward/generation adapters (#463) do not silently rot, and new adapter targets get discovered. Front A: adapters still generate conformant output against current framework APIs. Front B: a framework ships a breaking API change or a new framework gains traction → file adapter-maintenance or new-target items. L0/candidate — filed now to record the watch; build the discovery mechanism once the platform-standards watch proves the pattern. Lighter priority than the platform-standards keystone.
 

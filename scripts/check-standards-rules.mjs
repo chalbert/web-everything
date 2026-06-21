@@ -18,6 +18,9 @@
 // `preparing` (#375) — a decision being researched by /prepare: non-open + in-flight (drops from
 // selection like `active`) but distinct on the board from a story mid-build.
 export const BACKLOG_STATUSES = new Set(['open', 'active', 'preparing', 'parked', 'resolved']);
+// Valid `parkedReason` values (#1392) — the machine-readable WHY a non-epic item is parked, mirror of an
+// epic's childlessReason. Vocab + pill colours live in backlogMeta.js `parkedReasonMeta`.
+export const PARKED_REASONS = new Set(['blocked', 'deferred', 'external-infra', 'superseded']);
 // One `kind` axis (#466/#487) — the merged nature+hierarchy field that replaced the former two
 // correlated axes (`type ∈ idea|issue|decision` + `workItem ∈ story|epic|task`). `story|epic|task` keep
 // the sizing/hierarchy semantics; `decision` keeps Tier-B + fork validation. `size` stays a separate
@@ -138,6 +141,20 @@ export function validateBacklogItem(item, ctx) {
     err(`Backlog item "${item.id}" has invalid kind "${item.kind}" (expected ${[...BACKLOG_KINDS].join(' / ')})`);
   if (item.status && !BACKLOG_STATUSES.has(item.status))
     err(`Backlog item "${item.id}" has invalid status "${item.status}" (expected ${[...BACKLOG_STATUSES].join(' / ')})`);
+  // Parked items must carry a machine-readable reason (#1392) — parking is a deliberate hold and the WHY
+  // must be first-class + surfaced as a pill, never buried in prose. A reason is derivable from a real
+  // `blockedBy` edge (pills "blocked by #N"), a `humanGate`, a `parkedReason`, or — for an epic — a
+  // `childlessReason`. None of those → hard error.
+  if (item.status === 'parked') {
+    if (item.parkedReason && !PARKED_REASONS.has(item.parkedReason))
+      err(`Backlog item "${item.id}" has invalid parkedReason "${item.parkedReason}" (expected ${[...PARKED_REASONS].join(' / ')})`);
+    const hasEdge = Array.isArray(item.blockedBy) && item.blockedBy.length > 0;
+    if (!hasEdge && !item.humanGate && !item.parkedReason && !item.childlessReason)
+      err(`Backlog item "${item.id}" is \`status: parked\` but carries no machine-readable reason — add a ` +
+        `\`parkedReason\` (${[...PARKED_REASONS].join(' / ')}), a real \`blockedBy\` edge (file the prereq/decision if missing), ` +
+        `a \`humanGate\`, or — for an epic — a \`childlessReason\`. Parking is a deliberate hold; its WHY must be ` +
+        `first-class, not prose (#1392). See docs/agent/backlog-workflow.md → Parking.`);
+  }
   // Repo-locus: an AUTHORED `locus:` must be a known registry key (a typo'd locus → the batch runs the
   // wrong/nonexistent gate at close-out → hard error). An item whose tags INFERRED a cross-repo locus but
   // never declared it gets a nudge (warning) to make the gate home explicit — so which repo's gate closes

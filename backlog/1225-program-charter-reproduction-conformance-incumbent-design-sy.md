@@ -10,9 +10,9 @@ preparedDate: "2026-06-20"
 tags: []
 ---
 
-# Program charter — reproduction-conformance: incumbent design systems rebuilt as theme+intents over WE/FUI, parity-gated by the AI-Playwright validator
+# Parity Loop
 
-**Charter, not greenfield.** This program rides five existing pillars; the only genuinely new thing is a
+**Program charter — charter, not greenfield.** This program rides five existing pillars; the only genuinely new thing is a
 **reproduction-conformance loop** — a sibling forcing function to the exercise-app loop, where the target is
 an *existing design system's exact rendered + behavioral output* rather than a business app. The hypothesis
 under test: **the difference between any two top design systems is `theme tokens + intents` and nothing

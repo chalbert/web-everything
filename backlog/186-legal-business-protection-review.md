@@ -3,6 +3,7 @@ kind: story
 size: 3
 parent: "181"
 status: parked
+parkedReason: deferred
 dateOpened: "2026-06-08"
 tags: [monetization, legal, trademark, entity, eula, privacy, gdpr, insurance, compliance, solo-founder]
 crossRef: { url: /backlog/098-licensing-strategy/, label: "Licensing strategy (#098)" }

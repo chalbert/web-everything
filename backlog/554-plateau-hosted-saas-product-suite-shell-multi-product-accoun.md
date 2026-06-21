@@ -2,6 +2,7 @@
 kind: epic
 parent: "089"
 status: parked
+parkedReason: deferred
 dateOpened: "2026-06-14"
 dateParked: "2026-06-14"
 tags: [monetization, plateau, saas, hosted, product-suite, live-serve, deferred]

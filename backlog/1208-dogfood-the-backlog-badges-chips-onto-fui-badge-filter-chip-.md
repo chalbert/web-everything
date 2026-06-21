@@ -3,6 +3,7 @@ kind: story
 size: 8
 parent: "777"
 status: parked
+parkedReason: deferred
 dateOpened: "2026-06-20"
 tags: [dogfood, fui, badge, site-rework]
 ---

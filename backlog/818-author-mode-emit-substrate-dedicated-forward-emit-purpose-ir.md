@@ -2,6 +2,7 @@
 kind: story
 size: 3
 status: parked
+parkedReason: deferred
 parent: "746"
 locus: frontierui
 relatedProject: webdocs

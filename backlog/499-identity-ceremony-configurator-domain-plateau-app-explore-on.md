@@ -1,6 +1,7 @@
 ---
 kind: task
 status: parked
+parkedReason: deferred
 blockedBy: []
 dateOpened: "2026-06-13"
 tags: []

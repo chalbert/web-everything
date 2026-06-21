@@ -2,8 +2,11 @@
 kind: story
 size: 3
 parent: "1353"
-status: open
+status: resolved
 dateOpened: "2026-06-20"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "fui:demos/wizard-demo.html"
 tags: []
 ---
 
@@ -28,3 +31,32 @@ the tests `we:tests/a11y/__tests__/sitemap-routes.test.ts` + `we:scripts/__tests
 Plus the WE page must be browser-verified rendering the fuiDemo iframe after the swap. A focused session
 with both dev servers; verify the FUI copies are complete and no other WE consumer imports these blocks
 before deleting.
+
+## Progress (2026-06-21 — batch-2026-06-20-1358-1357, RESOLVED)
+
+Executed the #1326-pattern swap. **Verified preconditions first:** `fui:demos/wizard-demo.html` already
+self-bootstraps the wizard over a portable `WorkflowGraph` through `customWorkflowEngine` (#925) — covers
+the wizard + workflow-engine combination — and serves 200 on :3001. WE-local dependency graph confirmed
+safe: `we:blocks/wizard` imports only `we:blocks/workflow-engine` (both deleted together) and the demo
+(`we:demos/wizard-flow-demo.ts`, deleted); there is **no `we:blocks/workflow` dir** (its catalog/CEM entries
+already point at FUI) and no external WE runtime importer.
+
+**Changes (all webeverything):**
+- Swapped `we:demos/wizard-flow-demo.html` to a #701 fuiDemo iframe shell embedding `fui:demos/wizard-demo.html`
+  (served on :3001; mirrors the `we:demos/view-tabs-demo.html` #1326 model).
+- Deleted the WE-local runtime + demo assets: `we:blocks/wizard/`, `we:blocks/workflow-engine/`,
+  `we:demos/wizard-flow-demo.{ts,css}`, and the runtime e2e `we:blocks/__tests__/e2e/wizard-flow-demo.spec.ts`
+  (the runtime — and its tests — now live in FUI; WE holds zero delivery runtime).
+- Rewrote `we:src/_data/demos/wizard-flow-demo.json` to the iframe-hosted framing (status `draft`→`active`,
+  dropped the in-page-runtime / spec-drift claims), matching the view-tabs entry.
+
+**Kept (correct per the #1326 precedent — WE owns the standard, FUI the runtime):** the catalog entries
+`we:src/_data/blocks/{wizard,workflow-engine}.json` (already `implementedBy: @frontierui/...`), the CEM
+`we:custom-elements.json` (regenerated → no diff; `gen-cem` sources the kept catalog), the doc descriptions
+`we:src/_includes/block-descriptions/{wizard,workflow-engine}.njk`, and the `/blocks/wizard/` sitemap route
+test (it asserts the catalog-driven **block page**, which still renders). The card's pre-flight list of these
+as deletions was over-specified.
+
+**Verified:** `npm run check:standards` → 0 errors. Playwright on the served `we:demos/wizard-flow-demo.html`
+(:3000) → iframe shell renders, FUI demo loads (:3001), `<wizard-flow>` mounted and live ("Current: account ·
+status process"), no page errors.

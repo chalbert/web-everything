@@ -12,11 +12,24 @@ module.exports = {
   // Why a childless epic has no child stories yet — author-supplied (`childlessReason`), since the reason
   // lives in the body, not in derivable fields. `blocked` is also shown structurally (the red Blocked-by
   // row), so its badge stays muted. `program` mirrors the `ongoing: true` epicState (continuous program).
+  // NOTE: `undecided` is RETIRED — an epic never holds its open decision inline as a reason. The decision is
+  // its own `kind: decision` item and the epic depends on it via `blockedBy` (childlessReason: blocked);
+  // "slices not yet scoped" is the unsliced state (no childlessReason). `check:standards` errors on `undecided`.
   childlessReasonMeta: {
     blocked: { label: 'blocked', bg: '#fef2f2', fg: '#991b1b', tip: "No child stories yet — it's waiting on the prerequisites in the Blocked-by row. The slices can't be cut until those clear." },
-    undecided: { label: 'needs decisions', bg: '#fef3c7', fg: '#92400e', tip: 'No child stories yet — open design decisions determine where the slices fall. Resolve them and it splits into stories.' },
     untriaged: { label: 'needs triage', bg: '#ede9fe', fg: '#5b21b6', tip: 'No child stories yet — a holding-pen of candidates; each must be triaged (promote / fold / drop) before any become stories.' },
     program: { label: 'ongoing program', bg: '#e0f2fe', fg: '#075985', tip: 'No fixed child stories by design — a continuous program measured by progress, not a fixed set of child stories.' },
+  },
+  // Why a non-epic item is `status: parked` — a machine-readable hold reason, the story/task/decision mirror
+  // of an epic's `childlessReason` (#1392). Parking is a deliberate hold and the WHY must be first-class:
+  // `check:standards` errors on a parked item with no derivable reason (no `blockedBy` edge AND no
+  // `humanGate` AND no `parkedReason`). A real `blockedBy` edge pills as "blocked by #N" via `reasonPill`
+  // and needs no `parkedReason`; these values cover the reasons an edge can't express.
+  parkedReasonMeta: {
+    blocked: { label: 'blocked', bg: '#fef2f2', fg: '#991b1b', tip: 'Held on a prerequisite — prefer a real `blockedBy` edge when the blocker is a tracked item; use this only when the blocker is not a single backlog node.' },
+    deferred: { label: 'deferred', bg: '#fef9c3', fg: '#854d0e', tip: 'Deliberately held pending an external signal — usage/funnel data, a launch, a future decision, or a prerequisite landing elsewhere. Revisit when that arrives.' },
+    'external-infra': { label: 'external infra', bg: '#ede9fe', fg: '#5b21b6', tip: 'Held on infrastructure or a capability a person/other-build must provision first (hosted resource, external account, an unbuilt service). Provision it, then it’s workable.' },
+    superseded: { label: 'superseded', bg: '#f1f5f9', fg: '#475569', tip: 'Held pending a reframe — a newer direction may absorb or replace it; revisit once the reframe settles.' },
   },
   // Why an oversized story (size > 8) is NOT a /split candidate after analysis — author-supplied
   // (`unsplittableReason`), the story-side mirror of an epic's `childlessReason`. Recording it clears the
@@ -24,8 +37,9 @@ module.exports = {
   // "atomic · <label>" pill instead, naming WHY + the action that would unblock a future split. Values track
   // the /split could-not-split rubric failures (docs/agent/backlog-workflow.md → "Splitting").
   unsplittableReasonMeta: {
+    // `undecided` is RETIRED here too — a buried fork that blocks splitting is its own `kind: decision`
+    // item the story `blockedBy`-depends on, not an inline reason. `check:standards` errors on it.
     foundational: { label: 'foundational first', bg: '#ede9fe', fg: '#5b21b6', tip: 'Could-not-split: the reproduction/impl surface does not exist yet — a foundational slice must land first to expose the seams. This story IS that slice; re-run /split once it ships.' },
-    undecided: { label: 'needs decision', bg: '#fef3c7', fg: '#92400e', tip: 'Could-not-split: a buried fork would just scatter across the slices. Resolve the decision first (carve it to a type:decision card), then re-run /split.' },
     atomic: { label: 'atomic', bg: '#f1f5f9', fg: '#475569', tip: 'Could-not-split: genuinely one coherent deliverable — no clean seam where one slice ends and the next begins. Build it as-is (just beyond the batch pool).' },
     fixture: { label: 'needs fixture', bg: '#e0f2fe', fg: '#075985', tip: 'Could-not-split: the slices can only demo independently once a shared fixture is authored up front. Author the fixture first, then re-run /split.' },
   },

@@ -7,7 +7,7 @@ tags: [exercise-app, requirements, validation, financial, insurance, healthcare,
 crossRef: { url: /backlog/100-requirement-as-code/, label: "Requirement-as-code (#100)" }
 ---
 
-# Flagship exercise apps — full, complex apps that stress the whole standard end-to-end
+# Flagship exercise apps
 
 A program to pick a small slate of **full, complex line-of-business apps** and
 build them against the standard — not toy demos, but apps with real, derivable

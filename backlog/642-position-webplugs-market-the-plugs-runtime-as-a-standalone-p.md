@@ -2,6 +2,7 @@
 kind: decision
 size: 2
 status: parked
+parkedReason: deferred
 dateOpened: "2026-06-14"
 tags: []
 ---

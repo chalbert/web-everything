@@ -3,6 +3,7 @@ kind: story
 size: 5
 parent: "912"
 status: open
+humanGate: { kind: setup, what: "Needs a frontierui session where the live :3001 dev server can be stopped/restarted: adding react/react-dom/vue as workbench devDeps forces a Vite dependency pre-bundle reload, and the acceptance is mounting a wrapper into the live workbench — both violate the standing don't-restart-the-dev-server rule. Re-confirmed blocked-in-fact twice (2026-06-19, 2026-06-20)." }
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
 locus: frontierui

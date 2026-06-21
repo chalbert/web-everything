@@ -1,12 +1,13 @@
 ---
 kind: epic
-size: 5
 status: open
 dateOpened: "2026-06-20"
+dateStarted: "2026-06-20"
+relatedReport: reports/2026-06-20-1255-split-analysis.md
 tags: []
 ---
 
-# FUI convergence — umbrella coordinating the scattered WE↔Frontier UI alignment epics
+# FUI convergence
 
 Coordinating umbrella for the WE↔Frontier UI convergence effort, today scattered across seven sibling epics with nothing tracking the whole. Goal: WE and FUI converge to one plugs runtime plus canonical blocks with zero drift, so 'how close are we to convergence?' becomes answerable. Finite convergence (has a Definition of Done) with a standing drift-guard tail (keep the deduped runtime in sync forever) that is its own front-A program candidate. Coordinates the facet epics by reference rather than re-parenting them (deferred until the #487 schema migration settles).
 
@@ -27,6 +28,6 @@ The convergence effort surfaced in the 2026-06-20 program review: ~440 items ref
 
 WE imports no vendored block/runtime that FUI owns; the plugs runtime is single-sourced (#170 closed) with a drift gate that stays green; WE-docs renders from FUI components (#777 closed). The **standing drift-guard** (the gate that keeps the single-sourced runtime from re-drifting) outlives this epic — carve it as its own `ongoing` front-A item before resolving, don't fold it in here.
 
-## Open structural decision (deferred)
+## Open structural decision
 
-Whether to **re-parent** the open facet epics under this umbrella (true parent edges) or keep the by-reference map above. Deferred until the [#487](/backlog/487-migrate-backlog-schema-to-single-kind-axis-per-466-ruling/) `kind`-axis migration settles, since epic-under-epic parenting interacts with the burndown/sizing rules.
+Whether to **re-parent** the open facet epics under this umbrella (true parent edges) or keep the by-reference map above is now a standalone card: **[#1281](/backlog/1281-re-parent-the-fui-convergence-facet-epics-under-1255-or-keep/)** — de-buried here once its blocker [#487](/backlog/487-migrate-backlog-schema-to-single-kind-axis-per-466-ruling/) (`kind`-axis migration) resolved 2026-06-20. The 2026-06-20 [split analysis](/reports/2026-06-20-1255-split-analysis.md) found #1255 itself does not split — its decomposition already exists as the facet epics above; #1281 is the only actionable structural seam.

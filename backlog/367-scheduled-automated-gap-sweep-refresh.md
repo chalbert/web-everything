@@ -3,6 +3,7 @@ kind: story
 size: 3
 parent: "315"
 status: parked
+parkedReason: deferred
 blockedBy: []
 dateOpened: "2026-06-12"
 tags: []
