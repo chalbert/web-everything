@@ -1,0 +1,5 @@
+{
+  "term": "EditContext API",
+  "definition": "The low-level EditContext API that decouples text-input handling (IME composition, selection, undo) from the DOM, letting a custom editor receive composition and input events correctly without contenteditable’s quirks.",
+  "usage": "Resolved via the capabilityMatrix as the IME-correct substrate for advanced custom editing surfaces; contentEditable is the broadly-available fallback."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "CustomStateSet / :state()",
+  "definition": "The platform API (ElementInternals.states, a CustomStateSet) plus the :state() pseudo-class that let a custom element expose its own boolean states to CSS, the way native controls expose :checked or :disabled — without leaking implementation classes.",
+  "usage": "Resolved via the capabilityMatrix as the state-reflection substrate for custom-element styling; a data-attribute / class mirror is the fallback."
+}

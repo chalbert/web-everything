@@ -1,0 +1,5 @@
+{
+  "term": "contentEditable",
+  "definition": "The HTML attribute (contenteditable, plus plaintext-only) that makes an element directly user-editable, turning a node into a rich-text or plain-text editing surface managed by the browser.",
+  "usage": "Resolved via the capabilityMatrix as the editing substrate for in-place / rich-text editing surfaces; EditContext is the lower-level successor for IME-correct custom editors."
+}

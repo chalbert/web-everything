@@ -1,0 +1,5 @@
+{
+  "term": "Hidden Until Found",
+  "definition": "The hidden=\"until-found\" attribute value that hides content while keeping it discoverable by in-page find (Ctrl+F), scroll-to-text, and anchor navigation — which auto-reveal the content and fire a beforematch event.",
+  "usage": "Resolved native-first via the capabilityMatrix as the find-in-page substrate for collapsed disclosure / accordion content; a scripted reveal-on-find shim is the fallback."
+}

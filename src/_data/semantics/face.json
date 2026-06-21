@@ -1,0 +1,5 @@
+{
+  "term": "Form-Associated Custom Elements",
+  "definition": "The ElementInternals form-association feature (formAssociated = true) that lets a custom element participate in a <form> like a native control — submitting a value, exposing validity, and reacting to form reset and disabled state.",
+  "usage": "Resolved via the capabilityMatrix as the form-participation substrate for custom form-control blocks; a hidden-input mirror is the fallback."
+}

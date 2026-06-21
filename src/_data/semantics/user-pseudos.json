@@ -1,0 +1,5 @@
+{
+  "term": ":user-valid / :user-invalid",
+  "definition": "The :user-valid and :user-invalid CSS pseudo-classes that reflect a form control's validity only after the user has interacted with it — avoiding the premature error styling that :valid / :invalid cause on untouched fields.",
+  "usage": "Resolved native-first via the capabilityMatrix as the interaction-aware validity-styling substrate for form controls; a scripted touched-state class is the fallback."
+}

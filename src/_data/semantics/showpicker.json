@@ -1,0 +1,5 @@
+{
+  "term": "showPicker()",
+  "definition": "The HTMLInputElement.showPicker() method that opens a control's native picker (date, color, file, datalist) from script in response to a user gesture, instead of relying on the user clicking the control directly.",
+  "usage": "Resolved native-first via the capabilityMatrix as the picker-invocation substrate for custom-triggered inputs; a focus/click shim is the fallback."
+}

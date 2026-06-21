@@ -1,0 +1,5 @@
+{
+  "term": "Invoker Commands",
+  "definition": "The command / commandfor attributes that declare a button's effect on another element in markup (open a dialog, toggle a popover, run a registered command) without an event handler.",
+  "usage": "Resolved native-first via the capabilityMatrix as the substrate for the command intent; a scripted keybinding/handler path is the fallback."
+}

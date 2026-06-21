@@ -1,0 +1,5 @@
+{
+  "term": "field-sizing: content",
+  "definition": "The CSS field-sizing: content property that makes a form control (textarea, input, select) size itself to its content, giving auto-growing textareas and intrinsically-sized inputs with no JS measurement.",
+  "usage": "Resolved native-first via the capabilityMatrix as the auto-size substrate for text inputs; a scripted scroll-height resizer is the fallback."
+}

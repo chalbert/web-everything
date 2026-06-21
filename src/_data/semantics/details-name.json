@@ -1,0 +1,5 @@
+{
+  "term": "Exclusive Accordion (details name)",
+  "definition": "The name attribute on <details> that groups several disclosures so opening one closes its siblings — a native exclusive-accordion behavior with no JS coordination.",
+  "usage": "Resolved native-first via the capabilityMatrix as the substrate for the exclusive-accordion variant of the disclosure intent; a scripted single-open coordinator is the fallback."
+}

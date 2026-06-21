@@ -1,0 +1,5 @@
+{
+  "term": "Sanitizer API",
+  "definition": "The native HTML Sanitizer API (setHTML / Element.setHTMLUnsafe with a Sanitizer config) that parses and strips untrusted markup to a safe allowlist as a built-in, replacing hand-rolled sanitizers for XSS-safe HTML injection.",
+  "usage": "Resolved native-first via the capabilityMatrix as the substrate for safe HTML insertion in renderers / rich content; a library sanitizer is the fallback."
+}

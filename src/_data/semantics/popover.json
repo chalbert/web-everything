@@ -1,0 +1,5 @@
+{
+  "term": "Popover API",
+  "definition": "The popover attribute plus popovertarget that promote an element to the top layer with light-dismiss and focus management, no JS — the native primitive for transient overlay surfaces.",
+  "usage": "Resolved native-first via the capabilityMatrix for the overlay-shaped surfaces (dialog / tooltip / menu via the anchor intent); a hand-rolled overlay is the opt-in fallback."
+}

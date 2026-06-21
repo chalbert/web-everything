@@ -1,0 +1,5 @@
+{
+  "term": "<dialog closedby>",
+  "definition": "The closedby attribute on <dialog> declaring how a modal may be light-dismissed (closedby=any / closerequest / none), bringing popover-style dismiss semantics to the native dialog without script.",
+  "usage": "Resolved native-first via the capabilityMatrix as the dismiss-policy substrate for the dialog / modal intent; a scripted backdrop/Escape handler is the fallback."
+}

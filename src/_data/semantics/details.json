@@ -1,0 +1,5 @@
+{
+  "term": "Details / Summary",
+  "definition": "The native <details>/<summary> disclosure element: a built-in, accessible expand/collapse widget with the open state, toggle event, and keyboard handling provided by the browser with no script.",
+  "usage": "Resolved native-first via the capabilityMatrix as the substrate for the disclosure intent; a scripted ARIA disclosure is the fallback."
+}

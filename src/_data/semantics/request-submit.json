@@ -1,0 +1,5 @@
+{
+  "term": "requestSubmit()",
+  "definition": "The form.requestSubmit() method that programmatically submits a form as if a submit button were pressed — running constraint validation and firing the submit event, unlike the legacy submit() which bypasses both.",
+  "usage": "Resolved native-first via the capabilityMatrix as the validating-submit substrate for form behaviors; a synthesized submit-button click is the fallback."
+}

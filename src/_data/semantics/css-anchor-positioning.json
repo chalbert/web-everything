@@ -1,0 +1,5 @@
+{
+  "term": "CSS Anchor Positioning",
+  "definition": "The native CSS feature for tethering one element to another (anchor-name / position-anchor / anchor()) and reflowing it on overflow with position-try, no JS. The platform substrate behind the Anchor Positioning Protocol; distinct from the protocol concept (the swappable meaning) — this names the engine.",
+  "usage": "Resolved native-first via the capabilityMatrix as the substrate for the Anchor Positioning Protocol (Web Positioning); a JS positioner is the polyfill fallback."
+}

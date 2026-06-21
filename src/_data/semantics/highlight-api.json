@@ -1,0 +1,5 @@
+{
+  "term": "CSS Custom Highlight API",
+  "definition": "The CSS Custom Highlight API (Highlight, CSS.highlights, ::highlight()) that styles arbitrary text ranges without inserting wrapper elements, for search hits, annotations, or live-region highlighting driven from script.",
+  "usage": "Resolved via the capabilityMatrix as the range-styling substrate for highlight / annotation surfaces; wrapper-span injection is the fallback."
+}

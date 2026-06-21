@@ -1,0 +1,5 @@
+{
+  "term": "Cross-root ARIA / Reference Target",
+  "definition": "The emerging platform mechanism (reference target / cross-root ARIA delegation) for letting an ARIA relationship (aria-labelledby, aria-controls, aria-activedescendant) point across a shadow-DOM boundary, so a component can wire accessibility to elements inside another component’s shadow root.",
+  "usage": "Resolved via the capabilityMatrix as the accessibility substrate for composed shadow-DOM components; a manual id-reflection shim is the fallback until it is Baseline."
+}
