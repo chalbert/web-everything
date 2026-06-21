@@ -279,6 +279,12 @@ per-block *mechanism pick* for the button (the worked example) is carved to
    (B). Tag applies to both A and B (transient registers a global tag to upgrade-then-erase). The remaining
    block conversions are a separately-prioritized build epic
    ([#1442](/backlog/1442-block-model-conversion-register-remaining-blocks-as-custom-e/)), not authored here.
+   - *Worked example — form-control family
+     ([#1456](/backlog/1456-grouped-form-control-packaging-mechanism-transient-a-vs-pers/)):* a **single**
+     control (single checkbox, text-field, number-input) → **(A)** transient → native `<input>`; a
+     **grouped** control (checkbox-group, radio-group) → **(B)** persistent light-DOM, because the group's
+     composite `value`/`values` is a live two-way-binding surface and a group has no native single-element
+     to erase into.
 
 ## What this home does *not* cover
 
