@@ -40,6 +40,7 @@
     "check:readiness": "node scripts/check-readiness.mjs",
     "check:health": "node scripts/audit-backlog-health.mjs",
     "lint:locus": "node scripts/lint-locus-prefix.mjs --staged",
+    "prepare": "node scripts/install-git-hooks.mjs",
     "fix:readiness": "node scripts/check-readiness.mjs --apply",
     "propose:readiness": "node scripts/propose-readiness.mjs",
     "normalize:graduated": "node scripts/normalize-graduated.mjs",
