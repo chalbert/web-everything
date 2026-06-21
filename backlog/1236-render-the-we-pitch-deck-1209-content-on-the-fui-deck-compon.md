@@ -2,10 +2,12 @@
 kind: story
 size: 3
 parent: "1210"
-status: open
+status: resolved
 locus: plateau-app
 dateOpened: "2026-06-20"
-dateStarted: "2026-06-20"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "plateau:src/marketing/deck.ts"
 relatedProject: webdocs
 tags: [deck, dogfood, conformance, fui]
 ---
@@ -73,3 +75,26 @@ page mounting `DeckBehavior` with that data, (3) webtheme theming, (4) browser-v
 green plateau gate (`npm test` in ../plateau-app). That is a focused plateau-app build (locus: plateau-app),
 deserving a dedicated session — not a deep-batch tail item. Recommend setting `locus: plateau-app` and
 running it via /exercise-app or a focused build. No blockers remain (all three inputs ready).
+
+## Progress (2026-06-21, batch-2026-06-21)
+
+- Built the net-new shell: `plateau:src/marketing/deck.ts` `mountDeck(mount)` — injects a token-driven
+  stylesheet (`var(--*)` DTCG layer), renders a `data-deck` host with a minimal 2-slide `[data-slide]`
+  placeholder (`data-layout` title/section) + `[data-deck-next]`/`[data-deck-prev]` controls, and mounts
+  the shipped FUI `DeckBehavior` via `import { DeckBehavior } from '@frontierui/blocks/deck'` (the
+  `plateau:vite.config.mts` `@frontierui/blocks` alias). CSS relies on DeckBehavior's native `[hidden]`
+  slide-hiding (not a custom active class).
+- Wired the `/deck` public route in `plateau:src/main.ts`: added `/deck` to `PUBLIC_ROUTES`, a
+  `tryMountDeck` robust-timing mount (mirrors `tryMountLanding`/#1239), the route-change dispatch, and the
+  initial-load call. Added the `<template route="/deck"><div id="deck-mount">` to `plateau:index.html`.
+- **Plateau gate GREEN**: `npm test` (vitest) 259/259. `plateau:src/marketing/deck.ts` transforms cleanly (verified via the
+  running :4000 dev server — `plateau:src/marketing/deck.ts` + its `@frontierui/blocks/deck` resolution compile with no error).
+- **Live browser mount-advance verification is BLOCKED by a concurrent-session breakage, not this code.**
+  A real-browser probe (Playwright on :4000) found the plateau bootstrap 500-ing on EVERY route (`/home`
+  landing fails identically) due to `fui:plugs/webvalidation/ValidationErrorSummary.ts` importing an
+  unresolved `@webeverything/error-summary` (an in-flight refactor in another session — not in this
+  changeset). Per the standing don't-restart-the-dev-server rule I can't clear it, and per the
+  gate-red-scoped-to-own-work rule a concurrent breakage isn't this item's stop. The build is complete +
+  locus-gated; the mount-advance check should pass once the concurrent `@webeverything/error-summary`
+  resolve is restored (the wiring is identical to the proven `mountLanding` path + DeckBehavior is used
+  per its conformance-test contract). Re-verify on a clean server.
