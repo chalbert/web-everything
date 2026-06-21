@@ -5,12 +5,12 @@
   "summary": "A purely-decorative label/tag — a small inline chip that categorizes or annotates (a topic, a category, a keyword), distinct from the lifecycle Status Indicator and the count-bearing Notification Marker. Minted by #1319 (decompose-overloaded-vocabulary-by-semantic-source): same visual family, different semantic source. Decorative-only — it carries no lifecycle, no count, and no interaction; interactivity composes Action / Selection rather than being baked in.",
   "dimensions": {
     "tone": {
-      "description": "The semantic colour family — a category/severity hue, not an ad-hoc hex (the theme resolves it). Beyond the severity set, an open categorical/brand tone covers topic/keyword tags that map to no severity.",
+      "description": "The canonical semantic `tone` colour family (#1427) — not an ad-hoc hex (the theme resolves it). Synonyms normalized: success (≡ positive), warning (≡ caution); `critical` is a distinct severity token. Beyond the severity set, the intent-local `categorical` tone covers topic/keyword tags that map to no severity (not in the shared palette, #1427 roster).",
       "values": [
         "neutral",
         "info",
-        "positive",
-        "caution",
+        "success",
+        "warning",
         "critical",
         "categorical"
       ]

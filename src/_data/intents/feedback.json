@@ -2,7 +2,7 @@
   "id": "feedback",
   "name": "Feedback Intent",
   "status": "draft",
-  "summary": "Protocol defining transient, non-blocking messaging (Toasts/Snackbars) and their queuing logic. Severity dimension participates in the unified severity/tone vocabulary shared with Message and Validation intents.",
+  "summary": "Protocol defining transient, non-blocking messaging (Toasts/Snackbars) and their queuing logic. Tone dimension participates in the unified tone vocabulary shared with Message and Validation intents (#1427 canonical names).",
   "dimensions": {
     "placement": {
       "description": "Positioning strategy for the notification",
@@ -15,13 +15,13 @@
         "bottom-center"
       ]
     },
-    "severity": {
-      "description": "Semantic weight of the message. Part of unified severity vocabulary: info (informational), success (confirmation), warning (advisory), error (failure).",
+    "tone": {
+      "description": "Semantic weight of the message — the canonical `tone` vocabulary (#1427, renamed from `severity`). Synonyms normalize to one token: info (informational), success (confirmation; ≡ positive), warning (advisory; ≡ caution), danger (failure; ≡ error ≡ negative). neutral and info stay distinct.",
       "values": [
         "info",
         "success",
         "warning",
-        "error"
+        "danger"
       ]
     },
     "duration": {
@@ -33,5 +33,5 @@
       ]
     }
   },
-  "description": "<h3>Placement Logic</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>top-end</code>: Standard for Desktop notifications (Toasts).</li><li><code>bottom-start</code>: Standard for Material Design (Snackbars). Avoids FAB interaction.</li><li><code>top-center</code>: Mobile alerts.</li></ul><h3>Severity Semantics</h3><p class=\"text-sm text-gray-600 mb-2\"><code>severity</code> is part of a <strong>unified severity/tone vocabulary</strong> shared across Feedback (transient), Message (structural), and Validation (input states). All three use the same semantic set:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>info</code>: Informational. Neutral tone. No action required.</li><li><code>success</code>: Confirmation. Positive outcome achieved.</li><li><code>warning</code>: Advisory. Issue detected but not blocking. User may act.</li><li><code>error</code>: Failure. Problem occurred. User action required.</li></ul><h3>Timing & Duration</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>short</code>: ~4000ms. For simple confirmations (\"Saved\").</li><li><code>long</code>: ~10000ms. If text > 60 chars.</li><li><code>indefinite</code>: Remains until dismissed. Required if an Action is present (Accessibility).</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type FeedbackPlacement = 'top-start' | 'top-end' | 'bottom-start' | 'bottom-end' | 'top-center' | 'bottom-center';\ntype FeedbackSeverity = 'info' | 'success' | 'warning' | 'error';\n\ninterface FeedbackAction {\n    label: string;\n    intent: string;\n}\n\ninterface FeedbackIntent {\n    // Positioning strategy\n    placement: FeedbackPlacement;\n    // Semantic weight (shared severity vocabulary)\n    severity: FeedbackSeverity;\n    // Persistence\n    duration: 'short' | 'long' | 'indefinite';\n    // Queue Management (1 = Single/Replace, >1 = Stack)\n    stackLimit: number;\n    // Optional interactive element (e.g. \"Undo\")\n    action?: FeedbackAction;\n}</code></pre>"
+  "description": "<h3>Placement Logic</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>top-end</code>: Standard for Desktop notifications (Toasts).</li><li><code>bottom-start</code>: Standard for Material Design (Snackbars). Avoids FAB interaction.</li><li><code>top-center</code>: Mobile alerts.</li></ul><h3>Tone Semantics</h3><p class=\"text-sm text-gray-600 mb-2\"><code>tone</code> is part of a <strong>unified tone vocabulary</strong> (#1427 canonical names, renamed from <code>severity</code>) shared across Feedback (transient), Message (structural), and Validation (input states). All three use the same semantic set:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>info</code>: Informational. Neutral tone. No action required.</li><li><code>success</code>: Confirmation. Positive outcome achieved.</li><li><code>warning</code>: Advisory. Issue detected but not blocking. User may act.</li><li><code>danger</code>: Failure. Problem occurred. User action required (≡ error ≡ negative).</li></ul><h3>Timing & Duration</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>short</code>: ~4000ms. For simple confirmations (\"Saved\").</li><li><code>long</code>: ~10000ms. If text > 60 chars.</li><li><code>indefinite</code>: Remains until dismissed. Required if an Action is present (Accessibility).</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type FeedbackPlacement = 'top-start' | 'top-end' | 'bottom-start' | 'bottom-end' | 'top-center' | 'bottom-center';\ntype FeedbackTone = 'info' | 'success' | 'warning' | 'danger';\n\ninterface FeedbackAction {\n    label: string;\n    intent: string;\n}\n\ninterface FeedbackIntent {\n    // Positioning strategy\n    placement: FeedbackPlacement;\n    // Semantic weight (shared tone vocabulary, #1427)\n    tone: FeedbackTone;\n    // Persistence\n    duration: 'short' | 'long' | 'indefinite';\n    // Queue Management (1 = Single/Replace, >1 = Stack)\n    stackLimit: number;\n    // Optional interactive element (e.g. \"Undo\")\n    action?: FeedbackAction;\n}</code></pre>"
 }
