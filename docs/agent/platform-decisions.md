@@ -711,6 +711,22 @@ Composes [intents-ux-only](#intents-ux-only) + Intents-Open-Design, [compose-int
 floor. Follow-ups: #1320 (build) · #1321 (FUI variant-surface packaging) · #1323 (sectioning/layout
 application) · #1324 (`level`-as-outcome-role).
 
+**Tone extension (#1427).** Applied a third time, to the cross-intent **`tone`** axis (semantic
+color/severity). Same holding — the **value enum stays per-intent** (action `neutral | danger`; message
+`neutral | positive | caution | negative`; status-indicator `+progress`; tag `+categorical`;
+feedback/sys-notif `info | success | warning | error`), a flat shared enum is **rejected** (flattens; the
+Bootstrap `btn-warning` smell). The tone axis adds **one nuance variant lacks: a shared DRY token layer.**
+Because tone *is* color, the shared layer is two things, not one: (1) a shared tone **meta-contract** (*a tone
+value names a semantic color/severity family the theme resolves — never a hex; open-numbered; membership test
+= differs only in semantic color, not behavior/lifecycle*), and (2) a shared **`--tone-*` token palette** in
+webtheme. The palette is **severity-family only** (`neutral · danger · success · warning · info · critical`);
+values that fail the membership test stay **intent-local tokens** — `progress` (a lifecycle state) and
+`categorical` (non-severity identity color) never enter the shared palette. Dimension name standardized to
+**`tone`** with a canonical synonym table (`danger ≡ negative ≡ critical ≡ error`; `success ≡ positive`;
+`warning ≡ caution`); `info` and `neutral` stay **distinct** (collapsing them is lossy). Action keeps
+`neutral | danger` regardless (#1337, non-negotiable). Realized by #1458 (palette + statute) / #1459 (rename
+sweep). Composes [intents-ux-only](#intents-ux-only) (tone is UX-only; the theme owns the hex).
+
 ### Reproduction-conformance: reproduce incumbents as theme+intents; the copy is a forcing function {#reproduction-conformance}
 
 Reproducing a third-party design system (Material, Ant, Carbon, Fluent, shadcn…) on the constellation is a

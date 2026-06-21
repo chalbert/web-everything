@@ -1,8 +1,10 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+codifiedIn: "docs/agent/platform-decisions.md#open-numbered-variants"
 tags: [webintents, tone, semantic-tone, cross-intent, placement, gap]
 relatedProject: webintents
 relatedReport: reports/2026-06-21-cross-intent-tone-vocabulary.md
@@ -17,6 +19,37 @@ ruling, which seated an open-numbered `tone` dimension on Action Intent with an 
 vocabulary** exist — one semantic-tone axis (`neutral | danger | success | warning | info`) consumed by
 badges, alerts/banners, status indicators *and* action — versus per-intent tone dimensions that diverge
 ([prior-art survey](/research/cross-intent-tone-vocabulary/)).
+
+## Ruling — RATIFIED 2026-06-21
+
+**Fork 1 → (a).** Per-intent blessed value enum + a shared tone **CONTRACT** (meta-schema) + a shared tone
+**TOKEN palette** in webtheme. The #1318 statute applied a second time (variant → tone): DRY where it's real
+(palette + contract), divergent where it's real (the per-intent enums). Branches (b) flat-enum and (c)
+fully-independent are **rejected**. Treated as an **invariant**, not a live fork — #1337's frozen action core
+(`neutral | danger`) + #1318's holding ("sharing happens at the meta-schema layer, never the value layer") +
+the in-tree divergence (6 intents, 4 value sets) leave no coherent alternative. *Confidence ~90%.*
+
+**Roster ruled now — closes the Fork-1 residual.** The shared `--tone-*` palette is the **severity family
+only**: `neutral · danger · success · warning · info · critical`. `progress` (status-indicator) and
+`categorical` (tag) **FAIL the tone membership test** ("differs only in semantic color, not behavior/
+lifecycle") — `progress` is a lifecycle state, `categorical` is non-severity identity color — so they remain
+**intent-local tokens** and never enter the shared palette. Ruled here (not deferred to the webtheme build) so
+the shared palette can't silently re-flatten by absorbing the union of every intent's values. *Confidence ~80%.*
+
+**Fork 2 → (a), amended.** Standardize the dimension name **`tone`** + a canonical synonym table
+(`danger ≡ negative ≡ critical ≡ error`; `success ≡ positive`; `warning ≡ caution`) so the theme resolves any
+synonym to one token. **Amendment:** the prep's `info ≡ neutral` mapping is **dropped** — `neutral` (no
+semantic) and `info` (informational) stay **distinct tokens**; collapsing them is lossy (a `btn-info` smell).
+#1427 *rules* the canonical names; the per-intent rename sweep is a separately-prioritized build. *Confidence
+~80%.*
+
+**Non-negotiable (#1337 residual):** Action keeps `neutral | danger` regardless; #1427 cannot widen it.
+
+**Realizing builds filed (post-ratification, separately prioritized):**
+- [#1458](/backlog/1458-webtheme-shared-tone-token-palette-tone-meta-contract-statut/) — webtheme `--tone-*`
+  token palette (severity-family only) + tone meta-contract statute in `we:docs/agent/platform-decisions.md`.
+- [#1459](/backlog/1459-per-intent-severity-level-tone-rename-synonym-normalization-/) — per-intent
+  `severity`/`level` → `tone` rename + synonym normalization sweep (`info`/`neutral` kept distinct).
 
 The axis the prep pins to the real tree: this is a **near-false-dichotomy resolved by separating the shared
 *token/contract* layer from the per-intent *value enum*.** The precedent is
