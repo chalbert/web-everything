@@ -1,0 +1,36 @@
+{
+  "id": "gesture",
+  "name": "Gesture Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "summary": "A standalone recognized-gesture vocabulary (placement ratified #1396) — the declarative layer between raw Pointer Events and the UX action a gesture drives (swipe to dismiss, long-press to act, pinch to zoom). Per-element and plural (mirrors focus-delegation / hover-intent), composing the Interaction Intent gated to pointer/touch modality. UX-only: the recognizer engine (native Pointer-Events math vs Hammer vs @use-gesture) is a DI/behavioral seam + a Technical Configurator card, NOT part of this intent. Carries one FIXED a11y invariant (WCAG 2.5.1): every gesture binding declares a single-pointer / keyboard equivalent — a gesture is never the only path.",
+  "dimensions": {
+    "vocabulary": {
+      "description": "The recognized gesture an element binds — the declarative \"what\" (this card is swipe-dismissable, this image is pinch-zoomable, this row is long-press-actionable). The listed values are the convergent core set across web (Hammer.js, @use-gesture, interact.js) and native (UIGestureRecognizer, SwiftUI Gesture, RN Gesture Handler, Compose), not a closed enum — this is an open-numbered axis (intents are open-design), so authors may mint additional recognizers per the variant contract. A binding is opt-in; no gesture is mandated and the a11y equivalent is always present (the restriction — \"gesture-only\" — is forbidden, never a value here).",
+      "values": [
+        "tap",
+        "double-tap",
+        "long-press",
+        "pan",
+        "swipe",
+        "pinch",
+        "rotate",
+        "two-finger-pan",
+        "edge-swipe",
+        "pull-to-refresh"
+      ]
+    },
+    "direction": {
+      "description": "The constraint on a path-based gesture (swipe / pan / edge-swipe) — which axis or heading the recognizer accepts, mirroring the convergent Hammer DIRECTION_* / @use-gesture axis lock. Optional with a most-permissive default: absent → unconstrained (any direction). The listed values are the recommended core; open-numbered per the variant contract. Only meaningful for path gestures; ignored by discrete gestures (tap, long-press, pinch, rotate).",
+      "values": [
+        "horizontal",
+        "vertical",
+        "up",
+        "down",
+        "left",
+        "right"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">A standalone <strong>recognized-gesture vocabulary</strong> (placement ratified in <a href=\"/backlog/1396-pointer-gestures-swipe-long-press-pinch-pull-to-refresh-plac/\">#1396</a>): the declarative layer between raw <strong>Pointer Events</strong> and the UX action a gesture drives. The platform ships the raw input (Pointer Events) and the opt-out (<code>touch-action</code>) but <strong>no native gesture recognizer and no gesture-event vocabulary</strong> — every incumbent ships a JS recognizer, the library tell. This intent owns the <em>declaration</em> (<em>this element swipes / pinches / long-presses</em>); the recognizer <em>engine</em> is a swappable impl.</p><h3>Per-element &amp; plural — why a standalone intent</h3><p class=\"text-sm text-gray-600 mb-2\">A gesture binding is a <strong>per-element, plural</strong> declaration (this card swipes, that image pinches), whereas <a href=\"/intents/interaction/\">Interaction</a>'s <code>modality</code> is an <strong>ambient, document-level, singular</strong> value (what device the user is on). Folding plural per-element bindings into the ambient-singular modality intent conflates two scopes — so gesture is its own intent that <strong>composes</strong> <code>interaction</code> (gated to pointer/touch modality), exactly as <a href=\"/intents/focus-delegation/\">Focus Delegation</a> and <a href=\"/intents/hover-intent/\">Hover Intent</a> carve interaction-adjacent concerns into their own intents.</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>vocabulary</code>: the recognized gesture — <code>tap · double-tap · long-press · pan · swipe · pinch · rotate · two-finger-pan · edge-swipe · pull-to-refresh</code>, the convergent core, open-numbered (authors extend).</li><li><code>direction</code>: for path gestures, the accepted axis/heading (<code>horizontal · vertical · up · down · left · right</code>); absent → unconstrained (the most-permissive default).</li></ul><h3>Fixed a11y invariant (not a dimension)</h3><p class=\"text-sm text-gray-600 mb-2\">A gesture is <strong>never the only path</strong>. Every binding declares a single-pointer / keyboard equivalent — codified, not invented: <strong>WCAG 2.1 SC 2.5.1 Pointer Gestures</strong> (multipoint/path-based gestures need a single-pointer non-path equivalent), <strong>SC 2.5.2 Pointer Cancellation</strong> (fire on <em>up</em>, abortable), <strong>SC 2.5.4 Motion Actuation</strong> (a conventional-control equivalent). This rhymes with <code>hover-intent</code>'s <code>touch</code> dimension, which exists precisely because hover has no touch equivalent — gestures carry the mirror obligation. Because it is a fixed invariant (a ratify), it is <strong>not</strong> exposed as a dimension.</p><h3>UX-only &rarr; the engine is a Configurator card</h3><p class=\"text-sm text-gray-600 mb-2\">The <em>how</em> — native Pointer-Events math vs Hammer.js vs @use-gesture, plus the <code>touch-action</code> / <code>overscroll-behavior</code> opt-outs — is a technical strategy, <strong>not</strong> part of this intent. The recognizer is <strong>behavioral</strong> (resolvable via the Ambient Intent / DI channel, native-first default) and authored as a <strong>Technical Configurator</strong> domain, mirroring <code>hover-intent</code>. A full Gesture Recognizer Protocol is a <em>deferred, separately-prioritized</em> candidate (no interop need today), not minted here.</p><h3>The recognition &harr; effect seam</h3><p class=\"text-sm text-gray-600 mb-2\">Gesture owns <strong>recognition</strong>; the <em>effect</em> a gesture drives lives elsewhere and composes: pinch &rarr; <a href=\"/backlog/1393-pinch-zoom-pan-viewport-transform-placement/\">viewport transform (#1393)</a>, swipe &rarr; carousel paging, long-press &rarr; <a href=\"/intents/command/\">command</a> / <code>contextmenu</code>, pan/drag &rarr; <a href=\"/intents/data-transfer/\">data-transfer</a> / <a href=\"/intents/reorder/\">reorder</a>. None is a conflict; all are compositions. Grounded in the placement sweep (<a href=\"/research/pointer-gesture-vocabulary-placement/\">pointer-gesture-vocabulary placement</a>).</p>"
+}

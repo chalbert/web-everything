@@ -1,0 +1,5 @@
+{
+  "term": "Gesture Intent",
+  "definition": "A standalone recognized-gesture vocabulary — the declarative layer between raw Pointer Events and the UX action a gesture drives (swipe to dismiss, long-press to act, pinch to zoom). Per-element and plural, composing the Interaction Intent (gated to pointer/touch), with a fixed WCAG 2.5.1 invariant: every gesture binding declares a single-pointer/keyboard equivalent.",
+  "usage": "Standardized by the Gesture Intent."
+}
