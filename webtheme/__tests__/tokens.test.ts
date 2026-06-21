@@ -140,6 +140,23 @@ describe('extendTokens (config-extends-platform-default)', () => {
   });
 });
 
+describe('shared tone palette (#1427/#1458)', () => {
+  it('compiles the severity family to --tone-* custom properties, scheme-aware via light-dark()', () => {
+    const { css } = compileToCss(defaultTokens);
+    for (const name of ['neutral', 'info', 'success', 'warning', 'danger', 'critical']) {
+      expect(css).toContain(`--tone-${name}:`);
+    }
+    // scheme-aware: the dark step is a distinct, lighter value via the native light-dark()
+    expect(css).toMatch(/--tone-danger:\s*light-dark\(/);
+  });
+
+  it('keeps the palette to the severity family — no progress/categorical (the #1427 roster)', () => {
+    const { css } = compileToCss(defaultTokens);
+    expect(css).not.toContain('--tone-progress');
+    expect(css).not.toContain('--tone-categorical');
+  });
+});
+
 describe('compileToCss', () => {
   it('emits one custom property per token, an alias as var(--ref), and @property for typed numerics', () => {
     const doc: DtcgDocument = {

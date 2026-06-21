@@ -47,6 +47,23 @@ export const defaultTokens: DtcgDocument = {
     accent: { $value: '{color.blue.9}' },
   },
 
+  // The shared semantic tone palette (#1427 Fork-1a / #1458) — the severity family ONLY
+  // (neutral · danger · success · warning · info · critical). `progress`/`categorical` stay
+  // intent-local and never enter this palette (the #1427 roster ruling). Each token is scheme-aware via
+  // the native `light-dark()` (the dark step is lighter, to read on a dark surface) — zero extra wiring,
+  // same mechanism as the bg/fg roles. A tone value names a semantic color the theme resolves; never a
+  // per-component hex. Consumers read `var(--tone-<name>)` (e.g. the meter block's zone colours).
+  tone: {
+    $type: 'color',
+    $description: 'Shared semantic tone palette (severity family) — #1427/#1458.',
+    neutral: { $value: 'light-dark(oklch(0.55 0 0), oklch(0.68 0 0))' },
+    info: { $value: 'light-dark(oklch(0.55 0.16 256), oklch(0.72 0.14 256))' },
+    success: { $value: 'light-dark(oklch(0.52 0.15 150), oklch(0.70 0.15 150))' },
+    warning: { $value: 'light-dark(oklch(0.64 0.15 75), oklch(0.80 0.15 85))' },
+    danger: { $value: 'light-dark(oklch(0.55 0.20 25), oklch(0.70 0.19 25))' },
+    critical: { $value: 'light-dark(oklch(0.45 0.22 18), oklch(0.60 0.21 18))' },
+  },
+
   space: {
     $type: 'dimension',
     $description: 'Spacing scale (rem, modular).',

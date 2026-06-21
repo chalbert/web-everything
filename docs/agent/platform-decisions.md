@@ -888,6 +888,29 @@ build #1468 (`meter` intent + FUI block). Sibling progress placement #1469 (rati
 gets its own thin intent; `loader.progress`/`flow-progress` are consumers); realizing build #1488. Composes
 [native-first-baseline](#native-first-baseline) (adopt `<meter>`/`<progress>` vocabulary verbatim).
 
+### Tone is a shared token palette + a meta-contract, never a flattened cross-intent enum {#tone-meta-contract}
+
+A semantic **tone** (an intent's `neutral`/`danger`/`success`/… value) names a **semantic color/severity
+family the theme resolves — never a per-component hex** and never a behavior. Sharing happens at **two**
+layers, and only those: (1) a shared **token palette** in webtheme — `--tone-{neutral · danger · success ·
+warning · info · critical}`, the **severity family only**, scheme-aware via native `light-dark()`; and (2) a
+shared **meta-contract** (the dimension is named `tone`; a canonical synonym table normalizes spellings —
+`danger ≡ negative ≡ error`, `success ≡ positive`, `warning ≡ caution` — so the theme resolves any synonym
+to one token; `neutral` and `info` stay **distinct**, collapsing them is lossy). The **value enum stays
+per-intent** — never a single flat cross-intent vocabulary (the Bootstrap `btn-warning` smell). **Membership
+test for the shared palette:** a value enters `--tone-*` only if it *differs only in semantic color, not in
+behavior/lifecycle* — so `progress` (a lifecycle state, status-indicator) and `categorical` (non-severity
+identity color, tag) **fail it** and stay **intent-local tokens**, never absorbed into the palette. This is
+[open-numbered-variants](#open-numbered-variants) applied a second time (variant → tone): DRY where it's real
+(palette + contract), divergent where it's real (the per-intent enums). **Test:** *does the value differ only
+in color, or also in behavior/lifecycle? and is the difference a synonym of a canonical token?* — color-only +
+synonym → the shared palette; behavior/lifecycle → intent-local.
+
+**Lineage:** #1427 (cross-intent tone vocabulary — ratified 2026-06-21; #1337 spinoff, surfaced by the #1400
+ARIA-APG lens). Realizing builds: #1458 (the `--tone-*` webtheme palette + this statute), #1459 (the per-intent
+`severity`→`tone` rename + synonym normalization sweep). Second application of
+[open-numbered-variants](#open-numbered-variants); composes [native-first-baseline](#native-first-baseline).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
