@@ -1,9 +1,18 @@
 {
   "id": "composite-widget",
   "name": "Composite Widget",
-  "status": "concept",
+  "status": "active",
   "type": "Behavior",
-  "summary": "Focus management and navigation protocol for complex widgets like Grids, Trees, and Menus, implementing the Roving Tabindex pattern.",
+  "summary": "Focus management and navigation protocol for complex widgets like Grids, Trees, and Menus, implementing the Roving Tabindex pattern. The reusable roving container behind the webdocs toolbar assemblerPreset (#1409) — set role=toolbar to realize a toolbar with no new block.",
+  "implementsIntent": "focus-delegation",
+  "parameters": {
+    "role": {
+      "description": "The ARIA role applied to the roving container, so one consumer can repurpose the same single-Tab-stop roving-tabindex container for a specific composite pattern. Set role=\"toolbar\" to realize the toolbar preset (#1409 ruling: toolbar = focus-delegation intent + this block, consumed via the webdocs toolbar assemblerPreset — no new toolbar artifact). Other container roles reuse the identical focus-delegation mechanics.",
+      "default": null,
+      "examples": ["toolbar", "menubar", "tablist", "listbox", "tree", "grid", "radiogroup"],
+      "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/"
+    }
+  },
   "webStandards": {
     "rovingTabindex": {
       "usage": "Implements the Roving Tabindex focus model for composite widgets (grids, trees, menus): exactly one descendant is `tabindex=\"0\"`, all others `tabindex=\"-1\"`, and the value moves with focus so the widget is a single Tab stop.",

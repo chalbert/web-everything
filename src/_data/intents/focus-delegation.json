@@ -4,7 +4,7 @@
   "requiresCapabilities": [
     "cross-root-aria"
   ],
-  "status": "draft",
+  "status": "active",
   "summary": "Protocol for composite-widget focus — roving tabindex vs. virtual focus (active descendant), arrow-key navigation within a widget, and whether selection follows focus.",
   "dimensions": {
     "strategy": {
