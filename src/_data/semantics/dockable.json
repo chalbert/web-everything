@@ -1,0 +1,5 @@
+{
+  "term": "Dockable Intent",
+  "definition": "The recursive partition-tree docking / tiling layout model — a node is a row, column, or stack, nesting arbitrarily with space fully partitioned (no gaps, no overlaps). Splits are the resizable divider applied recursively; stack leaves are tabbed; panels drag-to-dock between stacks via the reorder substrate. A standalone intent composing resizable + tabs + reorder (distinct from arrangeable's flat free-placement grid), adding no new gesture, with composed APG Window Splitter (splits) + APG Tabs (stacks) a11y invariants.",
+  "usage": "Standardized by the Dockable Intent."
+}
