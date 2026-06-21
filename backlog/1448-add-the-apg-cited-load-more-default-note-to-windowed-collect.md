@@ -1,8 +1,11 @@
 ---
 kind: task
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "we:src/_data/intents/windowed-collection.json"
 tags: []
 ---
 
