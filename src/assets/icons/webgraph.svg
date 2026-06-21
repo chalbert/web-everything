@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Reuse colors from other icons to ensure consistency (cf. webcharts) -->
+    <linearGradient id="graphNodeSky" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#0284c7" /> <!-- From Registries/Behaviors -->
+      <stop offset="100%" stop-color="#38bdf8" />
+    </linearGradient>
+    <linearGradient id="graphNodeIndigo" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#4f46e5" /> <!-- From Blocks/Contexts -->
+      <stop offset="100%" stop-color="#818cf8" />
+    </linearGradient>
+    <linearGradient id="graphNodePink" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#be185d" /> <!-- From Candies -->
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+
+    <filter id="graphFloatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <!-- Metaphor: a node-link diagram laid out as a layered DAG (the deterministic default layout) -->
+  <g filter="url(#graphFloatShadow)">
+      <!-- Edges (semantic relations) drawn first, behind the nodes -->
+      <g fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round">
+          <path d="M64 40 L44 70" />
+          <path d="M64 40 L84 70" />
+          <path d="M44 70 L64 96" />
+          <path d="M84 70 L64 96" />
+          <path d="M44 70 L84 70" stroke-dasharray="3 5" stroke-opacity="0.6" />
+      </g>
+
+      <!-- Nodes (positions invented by the layout algorithm, not derived from a datum) -->
+      <circle cx="64" cy="40" r="9" fill="url(#graphNodeIndigo)" stroke="white" stroke-width="2.5" />
+      <circle cx="44" cy="70" r="9" fill="url(#graphNodeSky)" stroke="white" stroke-width="2.5" />
+      <circle cx="84" cy="70" r="9" fill="url(#graphNodePink)" stroke="white" stroke-width="2.5" />
+      <circle cx="64" cy="96" r="9" fill="url(#graphNodeSky)" stroke="white" stroke-width="2.5" />
+  </g>
+</svg>

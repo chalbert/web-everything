@@ -1,0 +1,74 @@
+<section class="intro-section mb-12">
+    <h3 id="mission">Mission</h3>
+    <p>
+        <strong>Web Graph</strong> brings the graph / node-link visualization domain into the platform on the
+        same terms as every other Web Everything standard, and as a sibling of
+        <a href="/projects/webcharts/">Web Charts</a> in the viz family: a graph is declared by its
+        <em>semantic intent</em> &mdash; the nodes and edges and what they mean &mdash; kept strictly separate
+        from its <em>presentation</em>, which is laid out and drawn natively and themed through
+        <a href="/projects/webtheme/">Web Theme</a> tokens. The standard was surfaced by a real gap: the
+        plateau-app Platform Map hand-rolls node/graph drawing
+        (<code>plateau:src/platform-manager/platform-map.ts</code>), and
+        <a href="/backlog/1289-fui-graph-node-viz-block-gap-blocking-plateau-app-platform-m/">#1289</a> ruled
+        the gap needs a contract before any Frontier UI build slice &mdash; this project authors that contract.
+    </p>
+</section>
+
+<section id="scope" class="section-card">
+    <h3 id="scope-heading">Scope</h3>
+    <p>
+        What sets a graph apart from a chart is a positioning <strong>degree of freedom</strong>: a chart
+        <em>derives</em> a mark's position from its datum via scales (<code>x = f(field)</code>), but a graph
+        <em>invents</em> position via a layout algorithm (layered / force / tree / radial). That extra axis is
+        why graph earns its <strong>own project</strong> rather than riding as a webcharts sub-profile, and why
+        its renderer seam <strong>splits in two</strong>. The shape is settled &mdash; ratified in
+        <a href="/backlog/1352-webgraph-standard-shape-own-project-protocol-seam-count-a11y/">#1352</a>
+        (codified at <a href="/docs/agent/platform-decisions.md">platform-decisions &sect; viz-family-shape</a>)
+        and scaffolded under epic
+        <a href="/backlog/1351-scaffold-the-webgraph-standard-project-graphspec-profile-lay/">#1351</a>.
+    </p>
+    <div class="standards-grid">
+        <div class="standard-card flex flex-col">
+            <h4 id="scope-semantic" class="text-lg font-bold m-0 text-gray-900">Semantic plane</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                A presentation-free <code>GraphSpec</code> profile describes the graph's meaning &mdash; nodes,
+                edges, and their fields &mdash; grounded on the existing
+                <code>plateau:src/platform-manager/types.ts</code> <code>GraphNode</code>/<code>GraphEdge</code>
+                shapes. <span class="text-gray-400">(Authored in slice B,
+                <a href="/backlog/1373-webgraph-slice-b-graphspec-semantic-profile-terms/">#1373</a>.)</span>
+            </p>
+        </div>
+        <div class="standard-card flex flex-col">
+            <h4 id="scope-presentation" class="text-lg font-bold m-0 text-gray-900">Presentation plane (two seams)</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                Because position is <em>invented</em>, the seam splits: a <code>CustomGraphLayout</code> Protocol
+                (spec &rarr; positioned coordinates) is independently swappable from a
+                <code>CustomGraphRenderer</code> Protocol (positioned + <a href="/projects/webtheme/">Web Theme</a>
+                tokens &rarr; output). Defaults are a <strong>deterministic layered-DAG</strong> layout and a
+                <strong>native-first SVG</strong> renderer; D3-force / ELK / Cytoscape are adapters behind the
+                contracts. <span class="text-gray-400">(Authored in slice C,
+                <a href="/backlog/1374-webgraph-slice-c-two-seam-swap-protocol-customgraphlayout-cu/">#1374</a>.)</span>
+            </p>
+        </div>
+        <div class="standard-card flex flex-col">
+            <h4 id="scope-conformance" class="text-lg font-bold m-0 text-gray-900">Conformance</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                A suite scores three axes &mdash; semantic fidelity, theme application, and
+                <strong>accessibility</strong> as a first-class axis, with an <strong>adjacency
+                description-table</strong> floor (the tier-2 graph-a11y model is researched first).
+                <span class="text-gray-400">(Cases in slice D,
+                <a href="/backlog/1376-webgraph-slice-d-conformance-cases-3-axes-benchmark-refs/">#1376</a>;
+                a11y research in slice E,
+                <a href="/backlog/1375-webgraph-slice-e-graph-a11y-model-research-topic-tier-2-grou/">#1375</a>.)</span>
+            </p>
+        </div>
+    </div>
+    <div class="bg-blue-50 border-l-4 border-blue-400 p-3 mt-6 text-xs text-blue-800">
+        <strong>Status:</strong> concept &mdash; this is the project skeleton (slice A of epic
+        <a href="/backlog/1351-scaffold-the-webgraph-standard-project-graphspec-profile-lay/">#1351</a>). The
+        <code>GraphSpec</code> profile, the <code>CustomGraphLayout</code> &amp; <code>CustomGraphRenderer</code>
+        protocols, the graph-a11y research, and the conformance suite land in the following slices (B&ndash;E).
+        Per the constellation rule the contract lives here in <code>@webeverything</code> and the renderer
+        runtime ships in Frontier UI.
+    </div>
+</section>
