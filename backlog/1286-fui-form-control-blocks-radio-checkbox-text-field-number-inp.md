@@ -1,21 +1,18 @@
 ---
-kind: story
-size: 13
+kind: epic
 locus: frontierui
-status: open
+status: resolved
 dateOpened: "2026-06-20"
+dateResolved: "2026-06-21"
+graduatedTo: none
 tags: [fui, gap, dogfood, plateau-app]
 ---
 
-> **Not batchable as one — needs slicing (sized 5 → 13, batch-2026-06-20 pre-flight).** This is **4
-> greenfield a11y form-control components** (radio / checkbox / single-line text-field / number input),
-> and FUI ships **no** existing simple-form-control to scaffold from (only `fui:blocks/rich-text-editor`
-> + `fui:blocks/text-nodes`) — each control is built from scratch (CustomElement + a11y + the
-> `we:src/_data/intents/input.json` / `we:src/_data/intents/selection.json` contract it implements + unit/e2e tests + a
-> `fui:src/_data/blocks.json` catalog entry to pass the #784 completeness gate + a demo). The card is also
-> a **pure gap-marker** (zero per-control spec/acceptance — below DoR). Slice into per-control builds
-> (one item each, mapping to the input/selection intents) — same class as sibling gap #1289. Then each
-> slice is a clean batchable build.
+> **Sliced 2026-06-20 (`/slice 1286`).** Umbrella for the 4 greenfield a11y form-control builds FUI is
+> missing — carved into per-control story slices, each `size 3`, mapping to the ratified WE input/selection
+> intents: **#1339 radio · #1340 checkbox · #1341 text-field · #1342 number-input** (4-wide parallel, no
+> inter-slice edges). Split rationale in `we:reports/2026-06-20-backlog-split-analysis.md`. All four shipped
+> unblocks the two #1254 configurator-migration slices.
 
 # FUI form-control blocks (radio, checkbox, text-field, number input) — gap blocking plateau-app configurator dogfood
 
