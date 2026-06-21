@@ -1,0 +1,23 @@
+{
+  "id": "pointer-gesture-vocabulary-placement",
+  "title": "Pointer gestures — a recognized-gesture vocabulary (swipe / long-press / pinch / pull-to-refresh): intent placement",
+  "status": "open",
+  "summary": "Prep research for decision #1396 (verb-axis gap lens #1390). Web Everything owns input MODALITY (we:src/_data/intents/interaction.json:6-15, pointer|touch|gamepad) but no recognized-GESTURE vocabulary — the layer between raw Pointer Events and the UX action a gesture triggers. FINDING 1 (substrate) — the platform ships the raw input (Pointer Events: pointerId, pressure, multi-pointer for pinch) and the opt-out (touch-action: none, overscroll-behavior for native pull-to-refresh) but NO native high-level gesture recognizer and NO gesture event vocabulary; Safari's GestureEvent is non-standard/deprecated. Every incumbent ships a JS recognizer — the library tell that the middle is unhomed. FINDING 2 (a11y is a fixed invariant, not a fork) — WCAG 2.1 SC 2.5.1 Pointer Gestures (Level A) requires every multipoint/path gesture to have a single-pointer equivalent; SC 2.5.2 cancellation + 2.5.4 motion-actuation reinforce it. 'A gesture is never the only path' is a ratify, mirroring hover-intent's `touch` dimension that exists because hover has no touch equivalent (we:src/_data/intents/hover-intent.json:22-28). FINDING 3 (convergent vocabulary) — Hammer.js, @use-gesture, interact.js, and the native frameworks (RN Gesture Handler, SwiftUI Gesture, Flutter GestureDetector, Compose detect*Gestures, iOS UIGestureRecognizer) converge on ONE set: tap, double-tap, long-press, pan/drag, swipe/fling, pinch, rotate, two-finger-pan, edge-swipe, pull-to-refresh — and all separate RECOGNITION from the EFFECT (dismiss/page/zoom/refresh). FINDING 4 (decisive in-tree precedent) — WE consistently carves interaction-ADJACENT concerns into their OWN intents that COMPOSE interaction rather than folding them in: Focus Delegation Intent (we:src/_data/intents/focus-delegation.json) and Hover Intent (we:src/_data/intents/hover-intent.json) are both standalone. The merit reason: interaction's modality is an AMBIENT, document-level, SINGULAR value; a gesture binding is a PER-ELEMENT, PLURAL declaration — folding plural per-element bindings into the ambient-singular intent conflates scopes and dilutes modality with a verb. Classification: intent layer, OPEN-vocabulary dimension (not protocol/block); recognizer engine is a DI/behavioral seam + Technical Configurator card (NOT a protocol minted now, minimize-lock-in), mirroring hover-intent's mechanic-is-a-Configurator-card split; most-permissive default = no gesture mandated, equivalent fallback always present. ONE genuine fork: HOME = a separate `gesture` intent composing interaction (default, med-high) vs a `gestures` dimension on interaction. Plus a forced invariant (a11y parity) and supported-by-default items (open vocab, native-first DI recognizer, recognition/effect seams to #1393 pinch / carousel swipe / data-transfer drag / command long-press). Full grounding in we:reports/2026-06-21-pointer-gestures-placement.md.",
+  "dateOpened": "2026-06-21",
+  "lastReviewed": "2026-06-21",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webintents",
+    "interaction",
+    "gestures",
+    "pointer",
+    "touch",
+    "a11y",
+    "native-first",
+    "verb-axis",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

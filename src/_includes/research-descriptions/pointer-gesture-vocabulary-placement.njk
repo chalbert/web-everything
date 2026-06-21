@@ -1,0 +1,90 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  <a href="/intents/">Interaction Intent</a> (<code>src/_data/intents/interaction.json</code>) owns the
+  input <strong>modality</strong> — <code>pointer | touch | gamepad</code>, the device/coarseness that
+  shapes patterns. But it owns <strong>no recognized-gesture vocabulary</strong>: swipe, long-press,
+  pinch, rotate, pull-to-refresh, two-finger pan — the layer between raw Pointer Events and the UX action
+  a gesture triggers. The verb-axis gap lens (<a href="/backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi/">#1390</a>)
+  flagged it as a partial-owner row, so decision
+  <a href="/backlog/1396-pointer-gestures-swipe-long-press-pinch-pull-to-refresh-plac/">#1396</a> asks
+  <strong>where a gesture vocabulary lives</strong>: a new <code>gesture</code> intent, or a
+  <code>gestures</code> dimension on Interaction?
+</p>
+
+<h2>Finding 1 — the platform ships the input, not a gesture recognizer</h2>
+<p>
+  <strong>Pointer Events</strong> (Baseline) are the substrate — unified mouse/touch/pen, with
+  <code>pointerId</code>, <code>pressure</code>, and multi-pointer tracking (two pointers → pinch/rotate
+  math) — and <code>touch-action: none</code> / <code>overscroll-behavior</code> are the opt-outs that
+  stop the browser consuming a gesture (scroll, pinch-zoom, native pull-to-refresh) before a recognizer
+  sees it. But there is <strong>no native high-level gesture recognizer</strong> and <strong>no gesture
+  event vocabulary</strong>: there is no <code>swipe</code> / <code>longpress</code> / <code>pinch</code>
+  event. Safari's <code>GestureEvent</code> (scale + rotation) is <strong>non-standard, deprecated, and
+  Safari-only</strong> — the tell that no cross-browser gesture event exists. Every incumbent therefore
+  ships a JS recognizer, which is the library tell that the reusable middle is unhomed.
+</p>
+
+<h2>Finding 2 — a11y parity is a fixed invariant, not a fork</h2>
+<p>
+  The "a gesture must never be the only path" rule the gap calls out is <strong>codified by
+  WCAG</strong>, so the vocabulary is borrowed: <strong>SC 2.5.1 Pointer Gestures (Level A)</strong> —
+  any multipoint or path-based gesture must also be operable with a single pointer without a path;
+  <strong>SC 2.5.2 Pointer Cancellation</strong> (fire on up, abortable); <strong>SC 2.5.4 Motion
+  Actuation</strong> (a conventional-control equivalent). So every gesture binding declaring a
+  single-pointer / keyboard equivalent is a <strong>ratify</strong>, not a weigh. This mirrors
+  <a href="/intents/hover-intent/">Hover Intent</a>'s <code>touch</code> dimension, which exists
+  precisely <em>because hover has no touch equivalent</em> — gestures carry the mirror obligation.
+</p>
+
+<h2>Finding 3 — the gesture set converges across web and native, recognition split from effect</h2>
+<p>
+  Surveyed across <strong>Hammer.js</strong> (per-gesture Recognizer objects with a state machine and
+  <code>requireFailure</code>/<code>recognizeWith</code> relations), <strong>@use-gesture</strong> (a
+  framework-agnostic core + React/Vue bindings over Pointer Events), <strong>interact.js</strong>, and
+  the native frameworks (<strong>React Native Gesture Handler</strong>, <strong>SwiftUI Gesture</strong>,
+  <strong>Flutter GestureDetector</strong>, <strong>Jetpack Compose <code>detect*Gestures</code></strong>,
+  <strong>iOS UIGestureRecognizer</strong>), the vocabulary converges on one set:
+  <code>tap · double-tap · long-press · pan/drag · swipe/fling · pinch · rotate · two-finger-pan ·
+  edge-swipe · pull-to-refresh</code>. Every system separates <strong>recognition</strong> (the gesture)
+  from the <strong>effect</strong> it drives (dismiss, page, zoom, refresh) — the seam WE should adopt.
+  The cross-platform convergence is strong evidence the set is a standardizable axis, not a per-library
+  invention.
+</p>
+
+<h2>Finding 4 (decisive) — WE carves interaction-adjacent concerns into their own intents</h2>
+<p>
+  The in-tree precedent settles the placement: WE has <strong>consistently homed interaction-adjacent
+  concerns as their own intents that <em>compose</em> Interaction</strong>, never folded them in.
+  <a href="/intents/focus-delegation/">Focus Delegation Intent</a>
+  (<code>src/_data/intents/focus-delegation.json</code>) and <a href="/intents/hover-intent/">Hover
+  Intent</a> (<code>src/_data/intents/hover-intent.json</code>) are both standalone, and both name the
+  Interaction-Intent composition seam in their descriptions. The merit reason behind the precedent:
+  Interaction's <code>modality</code> is an <strong>ambient, document-level, singular</strong> value
+  (what device is the user on); a gesture binding is a <strong>per-element, plural</strong> declaration
+  (this card swipes, that image pinches). Folding plural per-element bindings into the ambient-singular
+  modality intent conflates two scopes and dilutes modality with a verb. So the recommended default is a
+  <strong>separate <code>gesture</code> intent that composes Interaction</strong> (gated to
+  pointer/touch), <strong>confidence med-high</strong> — the residual is only whether the
+  ambient-vs-per-element scope argument outweighs "one fewer intent," which the precedent resolves. The
+  "dimension on Interaction" branch is not broken, just inferior on merit, so this stays a genuine fork
+  with a strong default.
+</p>
+
+<h2>Classification</h2>
+<p>
+  <strong>Intent</strong> layer (the declarative UX "what"; no single component owns gestures, so not a
+  block; the recognizer impl is runtime behavior, not the standard surface). The gesture
+  <strong>vocabulary is an open dimension</strong> (standardize the set + a recommended core, authors
+  extend); the <strong>a11y equivalent is a fixed mechanic</strong>. The <strong>recognizer engine</strong>
+  (native Pointer-Events math vs Hammer vs @use-gesture) is a <strong>DI/behavioral seam + a Technical
+  Configurator card</strong>, not a protocol minted now (minimize-lock-in: no interop need today) —
+  mirroring how Hover Intent keeps its <em>mechanic</em> (delay vs CSS safe-area vs JS polygon) in a
+  Configurator card rather than the intent. Most-permissive default: no gesture mandated, the equivalent
+  fallback always present. Seams (recognition → effect): pinch →
+  <a href="/backlog/1393-zoom-pan-a-surface-viewport-scale-translate-standard-placeme/">#1393</a>
+  viewport transform; swipe → carousel paging; long-press → <code>contextmenu</code>/<code>command</code>;
+  pan/drag → <code>data-transfer</code>/<code>reorder</code>. Full grounding in
+  <code>reports/2026-06-21-pointer-gestures-placement.md</code>.
+</p>
+{% endraw %}
