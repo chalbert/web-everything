@@ -1,0 +1,41 @@
+<!--
+  WEB CASE 3: Accessibility — adjacency description-table (tier-1 floor, required)
+  Accessibility is a FIRST-CLASS axis. A conformant renderer derives, FROM THE SPEC ITSELF: (a) a text
+  description, and (b) a per-node adjacency table (each node and the nodes it links to) — so the graph is
+  perceivable with zero custom authoring and degrades to a real table when SVG/graphics are unavailable.
+  Richer keyboard-traversal is the deferred tier-2 (the graph-a11y-model research topic).
+-->
+<script type="application/vnd.webgraph+json">
+{
+  "description": "The constellation: Frontier UI implements Web Everything; Plateau consumes Frontier UI.",
+  "directed": true,
+  "layout": "layered",
+  "nodes": [
+    { "id": "webeverything", "label": "Web Everything" },
+    { "id": "frontierui",    "label": "Frontier UI" },
+    { "id": "plateau",       "label": "Plateau" }
+  ],
+  "edges": [
+    { "from": "frontierui", "to": "webeverything", "kind": "implements" },
+    { "from": "plateau",    "to": "frontierui",    "kind": "consumes" }
+  ]
+}
+</script>
+
+<!--
+  EXPECTED accessible fallback, derived mechanically from the spec (nodes → rows; each node's outgoing edges →
+  its adjacency list with the relation kind; `description` → caption + label). No hand-authoring:
+-->
+<figure role="group" aria-label="The constellation: Frontier UI implements Web Everything; Plateau consumes Frontier UI.">
+  <table>
+    <caption>The constellation: Frontier UI implements Web Everything; Plateau consumes Frontier UI.</caption>
+    <thead>
+      <tr><th scope="col">Node</th><th scope="col">Connects to</th></tr>
+    </thead>
+    <tbody>
+      <tr><th scope="row">Web Everything</th><td>&mdash;</td></tr>
+      <tr><th scope="row">Frontier UI</th><td>Web Everything (implements)</td></tr>
+      <tr><th scope="row">Plateau</th><td>Frontier UI (consumes)</td></tr>
+    </tbody>
+  </table>
+</figure>

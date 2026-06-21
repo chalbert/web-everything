@@ -1,0 +1,26 @@
+<!--
+  WEB CASE 2: Theme Application (kind → palette token, weight → stroke scale)
+  The presentation plane resolves from webtheme tokens, never literals in the spec. A node's `kind` selects a
+  categorical palette token; an edge's `weight` selects a stroke scale — so one GraphSpec re-themes with zero
+  edits. A renderer that bakes a hex literal or a fixed pixel width fails this axis.
+-->
+<script type="application/vnd.webgraph+json">
+{
+  "directed": true,
+  "layout": "layered",
+  "nodes": [
+    { "id": "a", "label": "Service A", "kind": "primary" },
+    { "id": "b", "label": "Service B", "kind": "secondary" }
+  ],
+  "edges": [
+    { "from": "a", "to": "b", "kind": "depends-on", "weight": 3 }
+  ]
+}
+</script>
+
+<!--
+  EXPECTED (theme-application axis): each node's fill resolves from the webtheme categorical palette keyed by
+  `kind` (primary and secondary map to distinct palette tokens, never a literal hex); the edge's stroke-width
+  resolves from a webtheme scale keyed by `weight`. Swapping the theme re-colours and re-weights the graph
+  with no change to the GraphSpec — the spec is the only lock.
+-->

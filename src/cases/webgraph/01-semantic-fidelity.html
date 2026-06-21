@@ -1,0 +1,30 @@
+<!--
+  WEB CASE 1: Semantic Fidelity (nodes/edges → positioned marks)
+  The first conformance axis. A conformant renderer must draw what the GraphSpec MEANS: every node becomes
+  one mark and every edge one link between its declared endpoints — none dropped, duplicated, or mis-connected.
+  Position is INVENTED by the layout (not derived from a datum), so fidelity scores that the STRUCTURE is
+  preserved, not where each node lands. This is the constellation graph (a dogfood): Frontier UI implements
+  Web Everything; Plateau consumes Frontier UI.
+-->
+<script type="application/vnd.webgraph+json">
+{
+  "directed": true,
+  "layout": "layered",
+  "nodes": [
+    { "id": "webeverything", "label": "Web Everything", "kind": "standard" },
+    { "id": "frontierui",    "label": "Frontier UI",    "kind": "impl" },
+    { "id": "plateau",       "label": "Plateau",        "kind": "product" }
+  ],
+  "edges": [
+    { "from": "frontierui", "to": "webeverything", "kind": "implements" },
+    { "from": "plateau",    "to": "frontierui",    "kind": "consumes" }
+  ]
+}
+</script>
+
+<!--
+  EXPECTED (semantic-fidelity axis): exactly three node marks (one per node) and two edge links, each
+  connecting its declared endpoints — frontierui→webeverything and plateau→frontierui — in spec order. The
+  layered layout places a source above its target (a DAG column ordering). Node colour and edge thickness are
+  NOT asserted here (that is the theme-application axis, case 2).
+-->

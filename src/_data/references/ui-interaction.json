@@ -31,6 +31,36 @@
       "title": "Popover API",
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Popover_API",
       "context": "Top-layer rendering and light dismiss (Baseline 2024). Composes with anchoring; layering is orthogonal to positioning."
+    },
+    {
+      "title": "D3-force",
+      "url": "https://d3js.org/d3-force",
+      "context": "Force-directed graph layout (non-deterministic) — a webgraph CustomGraphLayout adapter, never the deterministic default."
+    },
+    {
+      "title": "ELK (Eclipse Layout Kernel)",
+      "url": "https://www.eclipse.org/elk/",
+      "context": "Layered / orthogonal graph layout — the layered-DAG family the webgraph native-first default mirrors; a CustomGraphLayout adapter."
+    },
+    {
+      "title": "dagre",
+      "url": "https://github.com/dagrejs/dagre",
+      "context": "Directed-graph layered (Sugiyama) layout — a webgraph CustomGraphLayout adapter."
+    },
+    {
+      "title": "Cytoscape.js",
+      "url": "https://js.cytoscape.org/",
+      "context": "Graph rendering + analysis library — a webgraph CustomGraphRenderer adapter candidate."
+    },
+    {
+      "title": "Mermaid",
+      "url": "https://mermaid.js.org/",
+      "context": "Declarative diagram / node-link rendering — node-link prior art; accTitle/accDescr a11y the webgraph a11y axis borrows."
+    },
+    {
+      "title": "reaflow",
+      "url": "https://reaflow.dev/",
+      "context": "React node-based diagram library — node-link diagram prior art for the webgraph renderer."
     }
   ]
 }
