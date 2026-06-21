@@ -2,8 +2,11 @@
 kind: story
 size: 3
 locus: frontierui
-status: open
+status: resolved
 dateOpened: "2026-06-21"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "fui:tools/explorer/cli.ts"
 tags: []
 ---
 
@@ -21,4 +24,23 @@ Reproduced 2026-06-21: `npm run explore -- http://localhost:8080/` (the live WE 
 
 - FUI-owned explorer (epic #1167); `locus: frontierui`. CLI is #1219; nav-aware sweep is #1171.
 - Surfaced while validating the explorer against the WE-site overflow (#1412) at the user's request. The engine *can* sweep a multi-page site (#1171); the runnable CLI wires the wrong harness, so `npm run explore <site-url>` crashes today.
+
+## Progress
+
+- Scope 1 (the minimal fix): fui:tools/explorer/cli.ts now routes multi-page sites to the existing
+  nav-aware `sweepSite` (#1171) instead of `stressTestComponent`. Routing decision factored into a pure
+  fui:tools/explorer/cliRouting.ts `shouldSweepSite(url, siteFlag)` — true on an explicit `--site` flag
+  OR when the target is a site root (`/`), since a component stress-test always points at a specific
+  component path, never the bare root. So `npm run explore -- http://localhost:8080/` (the exact repro)
+  now sweeps instead of crashing on the first navigating link click.
+- Also fixed an adjacent bug: the CLI built `profile` with `undefined` maxStates/maxDepth, which on
+  spread would clobber `SITE_SWEEP_PROFILE`'s defaults — now only defined overrides are passed.
+- Scope 3 (regression guard): fui:tools/explorer/__tests__/cliRouting.test.ts pins the routing (site
+  root → sweep, component path → workbench, `--site` override, malformed-URL safety). 4/4 green; FUI gate
+  0 errors. (The multi-page *fixture* for the #1421 self-regression gallery is folded into #1421, the
+  next slice, which builds that suite.)
+- Scope 2 (make stressTestComponent itself navigation-tolerant) deliberately NOT done — it is the
+  optional hardening; the minimal correct fix is the routing, and over-broadening the workbench harness
+  risks regressing in-place SPA-state detection. Left for a follow-up if the workbench ever needs to
+  tolerate a navigating click.
 </content>
