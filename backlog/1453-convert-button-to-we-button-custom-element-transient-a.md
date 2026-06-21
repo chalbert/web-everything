@@ -27,7 +27,7 @@ Apply #1381's ratified mechanism A to the button: replace the createButton/mount
   *behavior* rides a CustomAttribute on the surviving native control — the element does the structural
   transform only. `createButton` kept for programmatic use.
 - `fui:blocks/button/registerButton.ts` — `registerButton(tag='we-button')`, idempotent; exported from
-  `blocks/button/index.ts` (+ `BASE_CLASS`/`BUTTON_VARIANTS`); wired into `fui:plugs/bootstrap.ts`.
+  `fui:blocks/button/index.ts` (+ `BASE_CLASS`/`BUTTON_VARIANTS`); wired into `fui:plugs/bootstrap.ts`.
 - Tested `fui:blocks/__tests__/unit/button/ButtonTransientElement.test.ts` — 4 tests (button+type=button,
   href→`<a>` + icon-only aria-label, toggle aria, unknown-variant fallback). 13/13 button suite; FUI
   `check:standards` → 0 errors.
