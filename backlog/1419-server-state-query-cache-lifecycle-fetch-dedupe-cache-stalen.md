@@ -2,15 +2,40 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#decompose-overloaded-vocabulary-by-semantic-source"
 tags: [decision, book-candidate, data-lifecycle, server-state, cache, gap]
 relatedReport: reports/2026-06-21-server-state-cache-lifecycle.md
 preparedDate: "2026-06-21"
 ---
 
 # Server-state query/cache lifecycle — fetch/dedupe/cache/staleness/invalidate standard: placement
+
+## Ruling — ratified 2026-06-21 (~85%)
+
+**Fork 1 (a):** mint a first-class **`query` (server-state) intent** as the home for the cross-query
+cache lifecycle. Extending `resource-loader`/`loader` is rejected — single-fetch UI ≠ cross-query store
+(the homonym trap #1395 untangled on the write side). **Name: `query`** (symmetric to the write-path
+lifecycle, matches `useQuery`).
+
+**Fork 1-sub (a):** the cache is a **swappable runtime-DI provider behind the `key → {data, staleness,
+revalidate}` contract** (protocol). Baking one impl is rejected (forecloses Cache API / in-memory /
+normalized — protocol-is-the-only-lock).
+
+**Amendment (ratified, red-team result):** the **`query` intent surface is UX-only** per
+*Intent UX-Only, Technical→Configurator*. The intent owns only what the user observes —
+**`fetchPolicy`** (cache-first / network-only / `cache-and-network`) and the **staleness display**
+(composing `loader`). The **technical lifecycle knobs ride the provider contract / Technical
+Configurator**, not the intent: `dedupe`, exact `freshWindow`/`evictAfter` ms, `revalidateOn`,
+`dependsOn` query-graph gating. (`loader`'s injector-resolved threshold ms are precedent for a thin
+intent carrying a little tuning, but `dedupe`/`dependsOn` are clearly below the UX line.)
+
+**Placement only** (graduatedTo: none) — mirrors #1395: the entity is authored as separately-prioritized
+realizing work, filed below.
 
 Surfaced by the data-lifecycle lens
 ([#1403](/backlog/1403-discovery-lens-data-lifecycle-paradigms-load-cache-mutate-sy/)): the **server-state
