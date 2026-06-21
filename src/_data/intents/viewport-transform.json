@@ -1,0 +1,40 @@
+{
+  "id": "viewport-transform",
+  "name": "Viewport Transform Intent",
+  "status": "draft",
+  "summary": "The shared scale + translate surface model: pan and zoom one content surface (image, map, canvas, diagram, zoomable timeline) under a viewport transform, owning the transform-vocabulary (bounds, focal point, live input axes) — not the gesture recognition or the apply. Keyboard parity + zoom-to-fit/reset are a fixed mechanic, not an add-on. The transform mirror of Viewport Presence's observe.",
+  "dimensions": {
+    "bounds": {
+      "description": "Whether scale and pan are limited. The exact min/max scale and pan extent are config values the surface (or the platform config it extends) sets; the dimension names the two intents",
+      "values": [
+        "unbounded",
+        "clamped"
+      ]
+    },
+    "focal": {
+      "description": "The point a zoom keeps fixed as scale changes",
+      "values": [
+        "pointer",
+        "center",
+        "fit"
+      ]
+    },
+    "input": {
+      "description": "Which input axes drive the transform. A set, not a single value — any combination is valid. Keyboard is non-optional (it is part of the fixed mechanic below), so it is always live regardless of which pointer axes a surface enables",
+      "values": [
+        "wheel",
+        "drag-pan",
+        "pinch",
+        "dblclick",
+        "keyboard"
+      ]
+    }
+  },
+  "description": "<h3>What Viewport Transform Is</h3><p class=\"text-sm text-gray-600 mb-2\">Viewport Transform is the shared <strong>scale + translate surface model</strong> — the answer to \"what is the current pan/zoom of this surface, and how does an input change it?\", carried as a viewport transform <code>{ translate:[x,y], scale:k }</code>. It is the mirror of <a href=\"/intents/viewport-presence/\">Viewport Presence</a>: presence <em>observes</em> a surface's relationship to a frame, transform <em>changes</em> the surface within its frame.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>It owns the vocabulary, not the apply — and not the gesture.</strong> The reusable middle model is the transform-state plus <code>scaleExtent</code>/<code>translateExtent</code> bounds, the focal point, and keyboard parity — exactly d3-zoom's reusable abstraction. It does <em>not</em> recognize the pinch/pan gesture (it composes <a href=\"/intents/interaction/\">Interaction</a> for modality and the Gesture intent for recognition) and it does <em>not</em> own the render mechanism (the transform-state is applied via CSS <code>transform</code>). This intent exists so image-viewer, map, canvas and diagram surfaces <em>compose</em> one transform model instead of each re-implementing clamp + focal + keyboard.</p><h3>Bounds</h3><p class=\"text-sm text-gray-600 mb-2\">Whether scale and pan are limited — the IntersectionObserver-style config knob pair <code>scaleExtent</code> (min/max zoom) and <code>translateExtent</code> (pan extent).</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>unbounded</code>: Zoom and pan freely (no clamp) — the most-permissive default.</li><li><code>clamped</code>: Scale is held within <code>scaleExtent</code> and pan within <code>translateExtent</code>; the surface cannot escape its content box.</li></ul><h3>Focal</h3><p class=\"text-sm text-gray-600 mb-2\">The point a zoom keeps fixed as scale changes — the difference between zoom-to-cursor and zoom-to-center.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>pointer</code>: The point under the cursor/pinch stays put (zoom-to-cursor) — the natural, most-flexible default.</li><li><code>center</code>: The surface center stays put.</li><li><code>fit</code>: Zoom-to-content — scale and translate so the content fills the viewport (the basis for zoom-to-fit).</li></ul><h3>Input</h3><p class=\"text-sm text-gray-600 mb-2\">Which input axes drive the transform — a set, any combination is valid. <code>touch-action: none</code> on the surface cedes native pinch so the intent can map it.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>wheel</code>: Wheel/trackpad scroll zooms about the focal point.</li><li><code>drag-pan</code>: Pointer drag translates the surface.</li><li><code>pinch</code>: Two-finger pinch zooms (recognized by the Gesture intent, mapped to a scale delta here).</li><li><code>dblclick</code>: Double-click/tap zooms in a step about the focal point.</li><li><code>keyboard</code>: Always live — see the fixed mechanic below.</li></ul><h3>Fixed mechanic — keyboard + reset (non-negotiable)</h3><p class=\"text-sm text-gray-600 mb-2\">Keyboard parity and reset are <strong>not a dimension</strong> — every conforming surface ships them, mirroring <a href=\"/intents/reorder/\">Reorder</a>'s keyboard-parity contract. <code>+</code>/<code>-</code> zoom about the center, <code>0</code> resets to the identity (or fit) transform, and arrow keys pan. Each transform change is announced to assistive tech. A pointer-only pan/zoom surface is non-conforming.</p><h3>What this is NOT</h3><p class=\"text-sm text-gray-600 mb-2\">Not page-level / browser pinch-zoom — the <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/VisualViewport\">VisualViewport</a> API is whole-document and read-only. Viewport Transform is <strong>element-scoped</strong>: it transforms one surface within the page. It is also not CSS <code>zoom</code> (which reflows layout and cannot animate) — the substrate is CSS <code>transform: scale()/translate()</code> (a GPU compositor transform, paint-only, animatable); SVG/canvas surfaces apply the same transform-state to <code>viewBox</code>/context.</p><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Consumers <em>compose</em> Viewport Transform rather than inline a zoom library: <a href=\"/intents/interaction/\">Interaction</a> supplies the input modality, the Gesture intent recognizes pinch/pan, and CSS <code>transform</code> applies the result. This intent owns only the middle model.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type TransformBounds = 'unbounded' | 'clamped';type TransformFocal = 'pointer' | 'center' | 'fit';type TransformInput = 'wheel' | 'drag-pan' | 'pinch' | 'dblclick' | 'keyboard';interface ViewportTransform {    // The current surface transform applied via CSS transform: scale()/translate()    translate: [number, number];    scale: number;}interface ViewportTransformIntent {    // Whether scale (scaleExtent) and pan (translateExtent) are clamped    bounds: TransformBounds;    // The point a zoom keeps fixed as scale changes    focal: TransformFocal;    // Which input axes are live (a set); keyboard is always included    input: TransformInput[];}</code></pre>",
+  "events": [
+    "transform-start",
+    "transform-change",
+    "transform-end",
+    "reset"
+  ]
+}

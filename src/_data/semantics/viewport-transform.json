@@ -1,0 +1,5 @@
+{
+  "term": "Viewport Transform",
+  "definition": "The pan/zoom state of a single content surface — a viewport transform { translate, scale } applied to one element (image, map, canvas, diagram) within its frame. The shared scale + translate model, owning the transform-vocabulary (bounds / focal / live input axes, plus keyboard parity and zoom-to-fit/reset) but never the gesture recognition or the apply. The transform mirror of Viewport Presence's observe.",
+  "usage": "Standardized by the Viewport Transform Intent. Composes Interaction (modality) and the Gesture intent (pinch/pan recognition), and renders via CSS <code>transform: scale()/translate()</code> — element-scoped, distinct from the whole-document read-only VisualViewport API."
+}
