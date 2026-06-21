@@ -189,8 +189,18 @@ coin away from native terms. Intents are an **open, never-finished system**: cus
 intents must coexist conflict-free — standardize the meta-schema, not the list. Defaults are the
 **most permissive** value; restriction is the author's opt-in.
 
+**Corollary — technical machinery splits off into a composed contract, and an upstream-bundled data
+model does not force a monolithic one.** When a UX intent needs durable/technical machinery
+(serialize/re-resolve/fuzzy/orphan, etc.), that machinery is its own contract the intent *composes*
+(referenced, not owned) — the same seam an intent already uses for a native capability. A canonical
+upstream model that bundles several concerns into one object (e.g. W3C Web Annotation's
+`target`+`selector`+`body`) is a **serialization-vocabulary** fact, *orthogonal to the runtime
+ownership seam*: adopt the wire format wholesale while still splitting which artifact owns the
+machinery. #1408 (annotation = UX intent composing a separate durable-range-anchor contract; the
+platform itself split quote-anchoring into `#:~:text=`).
+
 **Lineage:** #030 (intent-vs-trait channel split) · #063 (native vocabulary) · #129 (guard intent
-re-framed) · #634 · intents-open-design.
+re-framed) · #634 · #1408 (durable-anchor contract split) · intents-open-design.
 
 ### Monetization line *(soft — explicitly revisitable)* {#monetization}
 

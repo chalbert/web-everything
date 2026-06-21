@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#intents-ux-only"
 tags: [decision, book-candidate, annotation, highlight, selection, gap]
 relatedReport: reports/2026-06-21-content-annotation-anchor-payload.md
 preparedDate: "2026-06-21"
@@ -42,11 +45,11 @@ and the popover UI (existing `anchor`/popover intents) are already covered.
 
 Ratify all rows, or override just the one you'd change. **Confidence** says where judgment is actually needed.
 
-| Fork | Recommended default | Main alternative | Confidence |
+| Fork | Ratified | Main alternative | Confidence |
 |---|---|---|---|
 | **1 · in or out of scope** | **in-scope as a WE standard** | out-of-scope / app-specific *(rejected — native substrate + W3C model + pervasiveness)* | **~88%** — Custom Highlight API + W3C Recommendation + `#:~:text=` |
-| **2 · shape** | an **`annotation` intent** (anchor + payload + overlay) composing `selection`/`rich-text`/`anchor`/`highlight-api` | fold into `rich-text` *(rejected — excludes read-only/foreign/PDF targets)* | **~80%** — anchoring is target-agnostic |
-| **3 · `anchorStrategy`** *(dimension)* | expose `quote \| position \| bundle`, default **`bundle`** | mandate one *(rejected — less robust)* | **~75%** — both legitimate; most-flexible default |
+| **2 · shape** | **SPLIT** — an **`annotation` intent** (UX) composing a separate **durable-range-anchor contract** (technical) it references like `highlight-api` | unified single intent that *owns* the anchor model *(rejected — intent-UX-only)*; fold into `rich-text` *(rejected — excludes read-only/foreign/PDF)* | **~80%** — anchor machinery is technical, not UX |
+| **3 · `anchorStrategy`** *(dimension, homed on the anchor contract)* | expose `quote \| position \| bundle`, default **`bundle`** | mandate one *(rejected — less robust)* | **~75%** — both legitimate; most-flexible default |
 
 ## Fork 1 — is this a WE standard at all?
 
@@ -92,6 +95,38 @@ Both `quote` (robust, content-addressed), `position` (fast, brittle) and `bundle
 write) are legitimate end-states, so the axis is a configurable dimension. **Most-flexible default =
 `bundle`** (most robust, Hypothesis default); the restriction is the author's opt-in.
 
+## Ruling — 2026-06-21 (RATIFIED)
+
+- **Fork 1 → in-scope** as a WE standard (~88%; no objection).
+- **Fork 2 → SPLIT** (~80%) — *not* the prepared unified single-intent default. Two composable homes:
+  - an **`annotation` intent** (UX-only): select → attach payload (highlight | comment | tag | suggestion)
+    → overlay; composes `selection` / `rich-text` / `anchor`+popover / `highlight-api`.
+  - a **durable-range-anchor contract** (technical capability): `Range` → serialize to a W3C selector
+    bundle → re-resolve with fuzzy fallback + orphan detection. Target-agnostic; the `annotation` intent
+    **composes** it (references, doesn't own) — the same seam the card already accepts for `highlight-api`.
+- **Fork 3 → `anchorStrategy` (`quote | position | bundle`, default `bundle`)** homes on the
+  **durable-range-anchor contract** as *its* dimension — not an annotation-intent knob. (No objection on
+  the default value; this call settled only its location.)
+
+**Decisive ground (the split):** *intent-UX-only* — the serialize / re-resolve / fuzzy / orphan machinery
+is technical, so it cannot live on a UX intent; it must be a separate contract the intent composes. Reuse
+beyond annotation (deep-linking, citations, `#:~:text=`-style scroll-to-text, durable test selectors) and
+separation-bias (burden on combining) confirm the seam but are not load-bearing — even with zero external
+reuse, the unified default would still park technical code on a UX intent.
+
+**Red-team (W3C counter, rejected):** the Web Annotation Data Model bundles `target`+`selector`+`body` as
+one object, so the split looks like diverging from the upstream vocab the card adopts wholesale. This
+conflates the **serialization vocabulary** (stays a W3C-conformant bundle — see "Supported by default")
+with the **runtime ownership seam** (where the split lives). The emitted annotation JSON is unchanged; the
+split only decides which WE artifact owns the resolve machinery. The platform itself already split
+quote-anchoring out of annotation into `#:~:text=` — precedent for the anchor's standalone value. Attack
+fails; the only thing it earns is the explicit note that **W3C vocab is adopted wholesale at the
+serialization layer** so the build does not fork the wire format.
+
+*Residual ~20%:* if the anchor contract proves to have a single consumer forever and intent-UX-only were
+read loosely, the unified single-intent default would be simpler — weighted low because intent-UX-only is
+a hard rule.
+
 ---
 
 ### Supported by default (not forks)
@@ -120,6 +155,16 @@ write) are legitimate end-states, so the axis is a configurable dimension. **Mos
 
 ### Realizing work (post-ratification, separately prioritized)
 
-If Fork 1 (a) + Fork 2 (a) ratify: author the `annotation` intent JSON (`anchorStrategy`, `motivation`,
-overlay disposition, the W3C selector serialization contract) + the FUI behavior block + a demo (highlight
-+ comment over read-only HTML). File via `/new-standard`. Not part of this placement call.
+Per the ratified split, the build is **two homed entities** (file each via `/new-standard`, separately
+prioritized — not part of this placement call):
+
+1. **durable-range-anchor contract** (foundational; the `annotation` intent depends on it) — `Range` ↔ W3C
+   selector-bundle serialization, re-resolution (fuzzy fallback + orphan), and the `anchorStrategy`
+   (`quote | position | bundle`, default `bundle`) dimension. Adopts the W3C selector vocab wholesale at
+   the wire layer. Target-agnostic; reusable beyond annotation.
+2. **`annotation` intent JSON** (+ FUI behavior block + demo: highlight + comment over read-only HTML) —
+   UX: select → attach `motivation` payload → overlay disposition; *composes* the anchor contract +
+   `selection` / `rich-text` / `anchor`+popover / `highlight-api`. Owns no anchor machinery.
+
+The anchor contract's `we:contract.ts` is its own foundational slice (the intent/FUI block can't import it
+until it lands) — see the contract-ts-is-a-separate-slice rule.
