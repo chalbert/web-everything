@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-21"
 tags: [webintents, feature-flags, experiments, variant-assignment, openfeature, access-control, cross-cutting, decision-prep]
 relatedProject: webintents
@@ -27,6 +30,28 @@ its **exposure event**. The forks below are grounded in a prior-art survey publi
 `/research/feature-flag-gating-variant-assignment/` topic (session report
 we:reports/2026-06-21-feature-flag-gating-variant-assignment.md); each carries a recommended default in
 **bold**. Exploratory / cross-cutting — the ruling is the end-state, the build is separately prioritized.
+
+## Ruling — RATIFIED 2026-06-21
+
+All three prepared defaults ratified as-is (user `ratified`, 2026-06-21; inline red-team cleared each
+alternative as genuinely flawed, not merely less-preferred):
+
+1. **Home = a separate `experiment` (variant-assignment) intent** under Web Intents (Fork 1a, ~75%).
+   Pick-one-of-N is a different outcome family than access-control's allow/deny deny-set, so it gets its
+   own home; the boolean gate stays on `authority: feature-flag` (access-control), untouched.
+2. **Provider = a distinct evaluation provider reusing the Guard *seam pattern*** (Fork 2a, ~70%) —
+   same native-first → project override → custom-plug mechanics (we:src/_data/projects/webguards.json:4),
+   a separate contract returning `{value, variant, reason}` (OpenFeature vocab), **no security semantics**.
+   The seam pattern is reused; the instance and contract are not (a variant arm is not an authz verdict).
+3. **Exposure event = route through #1415's telemetry sink** (Fork 3a, ~80%) — the `experiment` intent
+   *declares* the exposure; #1415's swappable sink *delivers* it (mirrors OpenFeature's Tracking⊥Evaluation
+   split). A named seam, not a merge.
+
+The decision graduates to no entity (`graduatedTo: none`); the entity (the `experiment` intent) is authored
+by follow-up **#1479**. Follow-ups filed: **#1479** (author intent + evaluation-provider contract, Forks 1+2);
+**#1480** (wire exposure → #1415 sink, Fork 3; blocked on #1415 + #1479); **#1481** (doc note: boolean-gate=
+access-control / multivariate=experiment split, so the two aren't re-conflated). Codified as a one-off
+placement ruling (this item is the record); the generalizable split is captured prose-side by #1481.
 
 ## Recommended path at a glance
 
