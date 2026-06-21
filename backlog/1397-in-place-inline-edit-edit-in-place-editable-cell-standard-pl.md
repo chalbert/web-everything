@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: one-off
 tags: [decision, book-candidate, inline-edit, edit-in-place, editing, gap]
 relatedReport: reports/2026-06-21-edit-in-place-lifecycle-placement.md
 preparedDate: "2026-06-21"
@@ -12,13 +15,24 @@ preparedDate: "2026-06-21"
 
 # In-place / inline edit — edit-in-place + editable cell standard: placement
 
+> **RATIFIED 2026-06-21.** Both forks resolved as recommended.
+> - **Fork 1 → (a):** mint a dedicated **`edit-in-place` intent** (~80%). The lifecycle recurs without a
+>   grid (standalone click-to-edit field, tree-rename), so `data-grid` is the *first consumer*, not the home.
+> - **Fork 2 → (a):** the intent owns only the **thin residual** — activation gesture + display-renderer⇄
+>   editor-renderer swap for one atomic value + commit/cancel-revert (adopting the WAI-ARIA APG Enter/F2/Esc
+>   vocabulary) — and **composes** `input` (editor), `validation` (commit gate), `focus-delegation` (cell
+>   focus), opt. `rich-text` (flowed editor). Mirrors `accessible-name` (#596): own the thin recurring policy.
+> - Red-team failed (over-minting / too-thin attacks both don't land — a 3-system standalone primitive at the
+>   `accessible-name`/`focus-delegation` altitude). Realizing build carved as **#1439** (intent JSON + FUI
+>   behavior block + demo + `data-grid` wiring), unblocked.
+
 Candidate latent standard surfaced by the verb-axis lens
 ([#1390](/backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi/)): turn a displayed
 value into an editor **in place** — click-to-edit field, editable table cell, rename-in-tree — with the
 display ⇄ edit mode swap, commit (blur / Enter) / cancel (Esc reverts to baseline), validation, and
 keyboard + a11y semantics. WE owns the editor (`input`), the gate (`validation`), flowed-content editing
 (`rich-text`) and a `data-grid` block — but **none owns the display→edit→commit/cancel lifecycle** as a
-reusable concern ([prior-art survey](/research/edit-in-place-lifecycle/)).
+reusable concern ([prior-art survey](../reports/2026-06-21-edit-in-place-lifecycle-placement.md)).
 
 The concern decomposes into orthogonal axes the survey pins to the real tree. The **lifecycle** —
 *activate* (a gesture swaps display→editor), *edit*, *commit* (write back) *or cancel* (revert to the
