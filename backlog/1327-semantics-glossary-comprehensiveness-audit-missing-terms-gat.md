@@ -1,7 +1,7 @@
 ---
-kind: story
-size: 13
+kind: epic
 status: open
+relatedReport: reports/2026-06-21-backlog-split-analysis.md
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 tags: []
@@ -9,13 +9,15 @@ tags: []
 
 # Semantics glossary comprehensiveness — audit missing terms + gate to maintain ubiquitous language
 
-Track all named language in `/semantics/` for one consistent vocabulary. GAP (found via #1319/#1325):
-the glossary (we:src/_data/semantics/, rendered by we:src/semantics.njk) holds cross-cutting terms but
-omits most named standards — Status Indicator, Notification Marker, Action, Selection, and the new Tag
-intent (#1325) have `/intents/` definitions yet no glossary term, so coverage drifts. Two streams:
-**(1) audit + backfill** every named intent/block/protocol/plug/capability, preferring to *derive* each
-term from its source JSON (so it can't drift); **(2) harden the gate** — a `check:standards` rule
-flagging any named standard with no glossary entry. Derive-vs-hand-author is decided in stream 1.
+**Umbrella** — bring the `/semantics/` glossary up to the #1343-ratified scope (the concept categories
+required wholesale + `isConcept` opt-in for contested-name blocks/plugs) and keep it there with a gate.
+GAP (found via #1319/#1325): the glossary (we:src/_data/semantics/, rendered by we:src/semantics.njk)
+omits ~75 in-scope concept terms — Status Indicator, Notification Marker, Selection, the new Tag intent
+(#1325), … have `/intents/` definitions yet no glossary term, so coverage drifts. Sliced 2026-06-21
+(we:reports/2026-06-21-backlog-split-analysis.md) into: **A1** backfill intent terms (46) · **A2**
+backfill protocol terms (29) · **B** the scoped coverage gate (+ `isConcept` honoring) · **C** the
+block/plug curation pass (#1368). The audit table + resolved scope below are preserved as the slices'
+shared grounding.
 
 ## Audit (batch-2026-06-20b, stream-1 measurement) — gap is ~188 entries across 5 categories
 
