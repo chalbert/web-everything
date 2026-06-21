@@ -1,8 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-20"
-dateStarted: "2026-06-20"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-20"
 relatedReport: reports/2026-06-20-semantics-glossary-scope.md
 researchTopic: semantics-glossary-scope
@@ -36,11 +39,26 @@ Grounding (real tree, 2026-06-20):
   **missing a term** = 46 / 60 / 29 / 53 / 0. Concept set (intents+protocols+capabilities) ≈ **75**;
   every-named-standard ≈ **188**.
 
-## Recommended path at a glance
+## RATIFIED 2026-06-21 — A (concept categories) + per-item `isConcept` opt-in
 
-| Fork | Options | Recommended default | Confidence |
+**Ruling:** the glossary is the ubiquitous-language vocabulary of the **concept categories**
+(intents + protocols + capabilities), required **wholesale** by source registry (~75) — **plus** any
+block/plug carrying a load-bearing naming choice, required **per-item** via an `isConcept: true`
+opt-in. Concrete impls / registry class names stay un-required (catalogue → `/blocks/`, `/plugs/`).
+B (every named standard, ~188) rejected: requiring a glossary term for `CustomAttributeParserRegistry`
+or a concrete `Button` is catalogue noise, not ubiquitous language.
+
+**Amendment to the prepared A (user input, this turn):** the prep parked `isConcept` as "later if the
+gap proves real." The gap is already real — WE picks **one name among competing industry terms**
+(`tag` vs chip / pill / token; `we:src/_data/semantics/token.json` already a term), and disambiguating a contested name is
+precisely the glossary's job. So the opt-in is **baked in from the start**, not deferred: the gate
+*honors* a per-item `isConcept` flag (Most-Flexible-Default — required categories wholesale, the
+block/plug restriction relaxed by author opt-in). This does **not** flip toward B: still ~75 wholesale
+floor, not 188.
+
+| Fork | Options | Ruling | Confidence |
 | --- | --- | --- | --- |
-| **1 — what categories the glossary (and its gate) covers** | A concept categories (intents + protocols + capabilities) · B every named standard (+ blocks + plugs) | **A — concept categories** (gate scopes by source registry; blocks/plugs allowed but not required) | ~75% |
+| **1 — what categories the glossary (and its gate) covers** | A concept categories (intents + protocols + capabilities) · B every named standard (+ blocks + plugs) | **A + `isConcept` opt-in** — intents/protocols/capabilities required wholesale; blocks/plugs required only when flagged `isConcept: true` | ~80% |
 
 ## Fork 1 — what categories is the glossary the vocabulary _of_?
 
@@ -83,18 +101,26 @@ conceding.
   (`we:src/_data/semantics/ambient-intent.json`) that no `name`-field transform produces. The "derive"
   is only the **coverage requirement** (does an in-scope standard have a term?); the content stays
   authored. So there is no derive-vs-hand-author choice to make.
-- **The gate scopes by source registry, not a per-item flag.** Term JSON has no provenance field, so the
-  gate iterates the in-scope dirs (`intents/` + `protocols/` + `capabilities/`) and requires a term per
-  entry. A per-item `isConcept` flag is only needed under a curated-conceptual-block policy, which the
-  default avoids — so this falls out of Fork 1, it is not its own fork.
-- **Blocks/plugs allowed but not required.** A genuinely-conceptual abstract block *family* may carry a
-  hand-authored term; the gate just doesn't force one (most-permissive on the author side, where the
-  permissive default genuinely applies).
+- **The gate scopes by source registry for the wholesale set, AND honors a per-item `isConcept` flag.**
+  Term JSON has no provenance field, so the wholesale rule iterates the in-scope dirs (`we:src/_data/intents/`
+  + `we:src/_data/protocols/` + `we:src/_data/capabilities/`) and requires a term per entry. Per the
+  ratified amendment, the gate *additionally* requires a term for any block/plug entry flagged
+  `isConcept: true` — the curated-conceptual policy the prep had parked is now adopted (the `tag` case
+  proved the gap real).
+- **Blocks/plugs un-required by default, opt-in via `isConcept`.** A block/plug carrying a load-bearing
+  naming choice (WE picked one name among contested industry terms) is flagged `isConcept: true` and the
+  gate then enforces its term; everything else stays un-required (catalogue → `/blocks/`, `/plugs/`). This
+  is the Most-Flexible-Default: required categories wholesale, the block/plug restriction relaxed by author
+  opt-in.
 - **Capabilities folded into the required set.** Already 0-gap (21/21); including them costs nothing and
   keeps them maintained.
 
 ## On resolve
 
-Unblocks #1327, which then `/slice`s into **(1a)** backfill the in-scope categories (presence per source
-registry; definitions authored) + **(1b)/(2)** the scoped coverage gate at
-`we:scripts/check-standards.mjs:248`.
+Unblocks #1327, which then `/slice`s into:
+- **(1a)** backfill the in-scope categories (presence per source registry; definitions authored).
+- **(1b)/(2)** the scoped coverage gate at `we:scripts/check-standards.mjs:248` — required wholesale for
+  intents/protocols/capabilities + required for any `isConcept: true` block/plug.
+- **(1c)** a **block/plug curation pass** to surface which names are load-bearing ubiquitous language
+  (contested industry term WE disambiguated, e.g. `tag`) and flag them `isConcept: true` + author their
+  terms. Filed as #1368 (`blockedBy: 1327`).

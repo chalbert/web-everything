@@ -32,23 +32,29 @@ stripping the `Intent`/`Protocol`/`Plug`/`Capability`/`Block` suffix). Gap per c
 
 (`Action` already HAS a term — the body's example was stale; the real intent gap is the other 46.)
 
-## Surfaced scope decision (NOT pre-resolved by the body) — blocks both streams
+## Surfaced scope decision → carved to [#1343](/backlog/1343-what-is-the-semantics-glossary-the-vocabulary-of-concept-onl/)
 
-The body says "backfill **every** named intent/block/protocol/plug/capability." Taken literally that is
-~188 entries (well past a size-8 story) **and** it conflates two different things:
+The load-bearing fork — **what the semantics glossary is the vocabulary _of_** (concept-only
+{intents + protocols} vs every-named-standard) — sets both the backfill volume (~75 vs ~188) and the
+stream-2 gate's fire-set. It is a real design call with competing end-states, **not** the "derive-vs-
+hand-author" sub-call. De-buried into its own decision card **#1343** (`/split 1327`,
+we:reports/2026-06-20-backlog-split-analysis.md); this story is `blockedBy: 1343` and cannot be sliced
+until it resolves.
 
-- **Concept vocabulary** (intents, protocols) — genuine *semantic* terms; drift-prone; high value. This
-  is the actual #1319/#1325 gap (overloaded-vocabulary decomposition needs the glossary to track the
-  split). Deriving these from source JSON is coherent.
-- **API class names** (the 53 `Custom*` plugs) and **concrete impls** (most of the 60 blocks: Button,
-  Date Picker, …) — these are catalogued on `/plugs/` and `/blocks/`, not *ubiquitous language*. Minting
-  a "Custom­AttributeParserRegistry" glossary *term* is noise, and a stream-2 gate that **fires on all
-  188** would be all-warn-noise unless its fire-set is scoped to the category(ies) the glossary is for.
+## Scope resolved 2026-06-21 — #1343 ratified A + `isConcept` opt-in
 
-So the load-bearing fork is **what the semantics glossary is the vocabulary _of_** — concept-only
-(intents + protocols) vs every-named-standard — and it determines (a) the backfill volume and (b) the
-gate's fire-set. That is a real design call with competing end-states, not the body's stated
-"derive-vs-hand-author" sub-call. Surfaced and **not** decided here.
+**Unblocked.** [#1343](/backlog/1343-what-is-the-semantics-glossary-the-vocabulary-of-concept-onl/)
+ruled: glossary = ubiquitous-language vocabulary of the **concept categories** (intents + protocols +
+capabilities), required **wholesale** by source registry (~75) — **plus** any block/plug flagged
+`isConcept: true` (a load-bearing naming choice WE disambiguated, e.g. `tag`). B (every named standard,
+~188) rejected. So the audit table above is the *measurement*, but the **fire-set is ~75 wholesale +
+opt-in blocks/plugs**, not 188. `/slice` this into:
+- **(1a)** backfill the in-scope categories (intents + protocols; capabilities 0-gap) — terms authored,
+  presence enforced per source registry.
+- **(1b)/(2)** the scoped coverage gate at `we:scripts/check-standards.mjs:248` — wholesale for the
+  concept categories + per-item for `isConcept: true` blocks/plugs.
+- **(1c)** the block/plug curation pass to surface + flag `isConcept` names → carved to **#1368**
+  (`blockedBy: 1327`).
 
 ## Reclassified (batch-2026-06-20b): size 8 → 13, released
 
