@@ -1,0 +1,77 @@
+{
+  "id": "undo-history",
+  "name": "Undo History",
+  "status": "draft",
+  "type": "Module",
+  "summary": "Navigable mutation history (the #011 navigable-time facet of webstates, symmetric to draft-persistence's storage facet): a past/present/future cursor over Change Patches that undoes via CustomChangeStrategy.applyInverse and redoes by forward re-apply, with bounded stacks, a transact() grouping/coalescing API for undo-step granularity, per-scope selection read from CustomChangeStrategyRegistry, and a bridge from the native historyUndo/historyRedo InputEvent for editable surfaces. A history layer COMPOSING the Change Tracking Protocol — it does not extend CustomChangeStrategy or mint a new inverse contract (#1394 ratified). Shares the reversible-op primitive with optimistic mutation (#1395) but runs a SEPARATE runtime: an optimistic rollback must never land on the user's undo stack.",
+  "dependsOn": [],
+  "exports": [],
+  "webStandards": {
+    "inputEventHistory": {
+      "status": "Baseline",
+      "pattern": "The beforeinput/input `historyUndo` / `historyRedo` inputType on editable surfaces",
+      "adoption": "For contenteditable / form-control surfaces the block bridges the native historyUndo/historyRedo InputEvent rather than re-binding Ctrl/Cmd-Z — native-first, a fixed mechanic (#1394 Fork 4 sibling). The browser's own undo affordance drives the same history cursor.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/InputEvent/inputType"
+    },
+    "structuredClone": {
+      "status": "Baseline",
+      "pattern": "structuredClone() for snapshotting a Change Record's oldValue/newValue payload",
+      "adoption": "Each Change Patch carries a deep-cloned baseline so an inverse apply restores exact prior state (RFC 6902 ops are not self-inverting — the oldValue snapshot is what undo applies).",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/structuredClone"
+    }
+  },
+  "events": {
+    "history-changed": {
+      "description": "The history cursor moved or the stacks changed — fired after any push / undo / redo / transact commit so a downstream control can re-read canUndo/canRedo and the depth",
+      "taxonomy": "notification",
+      "detail": {
+        "canUndo": "boolean",
+        "canRedo": "boolean",
+        "pastDepth": "number",
+        "futureDepth": "number"
+      },
+      "bubbles": false,
+      "cancelable": false
+    },
+    "history-reverted": {
+      "description": "An undo or redo applied an inverse / forward Change Patch — surfaces which patch moved and the direction, composing the Change Tracking Protocol's change-reverted event (change-source undo/replay)",
+      "taxonomy": "notification",
+      "detail": {
+        "direction": "'undo' | 'redo'",
+        "patch": "ChangePatch"
+      },
+      "bubbles": false,
+      "cancelable": false
+    }
+  },
+  "designDecisions": {
+    "navigableTimeFacetOfWebstates": {
+      "description": "Undo history is the navigable-time facet of webstates, sibling to draft-persistence (the storage facet) — a block, not a behavior",
+      "rationale": "#1394 realizing shape: webstates' Change Tracking Protocol already ships the reversible-operation contract; undo is that data made navigable in time. By the draft-persistence precedent the standard artifact is a `type: Module` block homed in #011, behind the pluggable CustomChangeStrategy rather than any concrete store."
+    },
+    "composesProtocolNotExtends": {
+      "description": "A history layer that COMPOSES the Change Tracking Protocol; it does not extend CustomChangeStrategy",
+      "rationale": "#1394 Fork 1(a)/2(a): reuse the shipped Change Patch + CustomChangeStrategy.applyInverse. Undo = applyInverse of the past patch; redo = forward re-apply of the future patch. The command-pattern invert() case folds in as a custom strategy supplying applyInverse — nothing lost, no new inverse contract minted."
+    },
+    "transactGroupsUndoSteps": {
+      "description": "A transact() API on the block groups/coalesces a run of changes into one undo step",
+      "rationale": "#1394 Fork 3(a): undo-step granularity is a UX concern the history block owns, distinct from a strategy's detection-batching. transact(fn) opens a group, collects the patches fn produces, and commits them as a single coalesced entry — so one user gesture is one undo, even when the underlying strategy batches detection differently."
+    },
+    "scopeFromRegistry": {
+      "description": "Per-scope history selection reads the active strategy from CustomChangeStrategyRegistry",
+      "rationale": "#1394: scope reuses the CustomChangeStrategyRegistry (a fixed mechanic) resolved through the injector chain — different subtrees can track under different strategies, and each scope's history cursor follows its resolved strategy. No new scoping mechanism."
+    },
+    "separateRuntimeFromOptimisticRollback": {
+      "description": "Shares the reversible-op primitive with optimistic mutation (#1395) but a separate runtime — rollbacks never enter the undo stack",
+      "rationale": "#1394 Fork 4(a): an optimistic-mutation rollback (#1395) and a user undo both apply an inverse Change Patch, but a failed-write rollback must NOT become a user-undoable step. Same primitive, two runtimes — the history block's stack is fed only by committed user-intent changes, never by reconcile/rollback churn."
+    },
+    "boundedStacks": {
+      "description": "Past and future stacks are bounded; oldest entries drop past the bound",
+      "rationale": "Memory safety for long-lived sessions — a configurable maxDepth caps retained patches; pushing a new change past the bound evicts the oldest past entry, and any new change clears the future (redo) stack."
+    },
+    "uiControlIsSeparate": {
+      "description": "The undo/redo UI control is a SEPARATE downstream block — out of scope here",
+      "rationale": "#1394: the visible undo/redo control composes command (invoke) + status-indicator (canUndo/canRedo) + feedback/notification (\"undone X\") and is never folded into the history engine — keeping the layer fork closed at build time. This block exposes the API + history-changed event the control consumes."
+    }
+  }
+}
