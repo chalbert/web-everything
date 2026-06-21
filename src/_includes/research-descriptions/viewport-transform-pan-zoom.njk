@@ -1,0 +1,126 @@
+<h2>Purpose</h2>
+<p>
+  Prep research for decision
+  <a href="/backlog/1393-zoom-pan-a-surface-viewport-scale-translate-standard-placeme/">#1393</a> —
+  where the <strong>zoom / pan a surface</strong> concern lives and what shape it takes. Scaling and
+  translating a content surface (image viewer, map, canvas, diagram, zoomable timeline) under pointer /
+  wheel / pinch / keyboard, with a viewport transform, bounds, and zoom-to-fit / zoom-to-point. Web
+  Everything owns no zoom/pan concern today. Surfaced by the verb-axis gap lens
+  (<a href="/backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi/">#1390</a>). Full
+  grounding in <code>we:reports/2026-06-21-viewport-transform-pan-zoom.md</code>.
+</p>
+
+<h2>The question</h2>
+<p>
+  Its own intent, a behavior composing <a href="/intents/interaction/">interaction</a> (modality) + a
+  transform model, or a block — and how it relates to gestures
+  (<a href="/backlog/1396-pointer-gestures-swipe-long-press-pinch-pull-to-refresh-plac/">#1396</a>),
+  to spatial manipulation
+  (<a href="/backlog/1384-spatial-manipulation-arrangeable-surfaces-resizable-splitter/">#1384</a>),
+  and to CSS transforms / the <code>zoom</code> property.
+</p>
+
+<h2>Native substrate (checked, not asserted)</h2>
+<table>
+  <thead><tr><th>Primitive</th><th>Status</th><th>Verdict for pan/zoom</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>transform: scale()/translate()</code> + the <code>scale</code>/<code>translate</code> properties</td>
+      <td>Baseline; a <strong>GPU compositor transform</strong> — paint-only, <strong>no reflow</strong>, animatable</td>
+      <td><strong>The render substrate.</strong> Smooth zoom needs this — animating <code>scale</code> bypasses layout/paint.</td>
+    </tr>
+    <tr>
+      <td>CSS <code>zoom</code> property</td>
+      <td><strong>Newly Baseline</strong> (Chrome 126 standardized the layout-affecting behavior; Firefox added it last) — scales <strong>layout</strong> (reflows) and is <strong>not animatable</strong></td>
+      <td><strong>Wrong primitive</strong> for a viewport: it reflows and can't tween. Good for UI scaling, not surface transform.</td>
+    </tr>
+    <tr>
+      <td>Pointer Events + <code>wheel</code></td>
+      <td>Baseline</td>
+      <td>The input source: wheel = zoom-to-point; drag = pan; two pointers = pinch (distance ratio → scale).</td>
+    </tr>
+    <tr>
+      <td><code>touch-action: none</code></td>
+      <td>Baseline</td>
+      <td>Opt out of the browser's native pinch/pan so the app can take it over.</td>
+    </tr>
+    <tr>
+      <td><code>VisualViewport</code> API</td>
+      <td>Baseline</td>
+      <td><strong>Page-level</strong> pinch observation only — read-only, whole-document, not element-scoped.</td>
+    </tr>
+    <tr>
+      <td>Native <strong>element-scoped</strong> pan/zoom primitive</td>
+      <td><strong>None</strong></td>
+      <td>The library tell — every incumbent ships JS; no native gesture recognizer either (overlaps #1396).</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Prior art surveyed</h2>
+<table>
+  <thead><tr><th>Library</th><th>Model</th><th>What it proves</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>d3-zoom</strong></td>
+      <td>A <code>zoom</code> <strong>behavior</strong> maintaining a transform <code>{x, y, k}</code>
+        (translate + scale <code>k</code>); <code>scaleExtent</code> (zoom bounds),
+        <code>translateExtent</code> (pan bounds), a <code>constrain</code> fn; continuous update on
+        wheel / drag / dblclick / touch; programmatic <code>zoomTo</code> / <code>zoomIdentity</code>.
+        <strong>Separates the transform STATE from how it's APPLIED</strong> (CSS transform, SVG
+        <code>viewBox</code>, canvas).</td>
+      <td><strong>The canonical model.</strong> Mirrors WE's <a href="/intents/viewport-presence/">viewport-presence</a>
+        charter — owns the vocabulary, not the apply. Gives the dimension set: bounds, focal point,
+        input-axes, transitions.</td>
+    </tr>
+    <tr>
+      <td><strong>panzoom</strong>, <strong>svg-pan-zoom</strong>, <strong>react-zoom-pan-pinch</strong></td>
+      <td>Generic transform-matrix pan+zoom over a DOM/SVG element; min/max scale; bounds; optional pinch.</td>
+      <td>The same <code>{translate, scale}</code> + bounds shape is the reusable abstraction across content types.</td>
+    </tr>
+    <tr>
+      <td><strong>OpenSeadragon</strong>, <strong>Leaflet / MapLibre</strong></td>
+      <td>Tiled deep-zoom (image / map) with zoom <em>levels</em>, bounds, zoom-to-point.</td>
+      <td>Specializations of one model; the transform-state contract is shared, tiling is content-specific (a consumer concern).</td>
+    </tr>
+    <tr>
+      <td><strong>Hammer.js / pinch-zoom-js</strong></td>
+      <td>Gesture recognizers feeding a transform.</td>
+      <td>The <em>recognition</em> half — overlaps
+        <a href="/backlog/1396-pointer-gestures-swipe-long-press-pinch-pull-to-refresh-plac/">#1396</a>;
+        the standard should <strong>compose</strong> it, not re-implement it.</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  <strong>Convergent vocabulary:</strong> a viewport <strong>transform</strong> =
+  <code>{ translate: [x,y], scale: k }</code>; <strong>scaleExtent</strong> (zoom bounds);
+  <strong>translateExtent</strong> (pan bounds); a <strong>focal</strong> point (to-cursor / to-center /
+  fit); <strong>input axes</strong> (wheel, drag, pinch, dblclick, keyboard); programmatic
+  <strong>transitions</strong>. d3-zoom exists <em>because</em> clamping + focal math + keyboard parity is
+  non-trivial and reusable — that is the irreducibly-new vocabulary WE would own.
+</p>
+
+<h2>Recommendation</h2>
+<p>
+  A <strong>distinct standard earns a home</strong> as its own <code>viewport-transform</code> intent
+  (working name) + a realizing <code>pan-zoom-surface</code> block, modeled on d3-zoom's
+  <code>{translate, scale}</code> + <code>scaleExtent</code>/<code>translateExtent</code>, mirroring
+  <a href="/intents/viewport-presence/">viewport-presence</a>'s observe-vocabulary charter, composing
+  <a href="/intents/interaction/">interaction</a> (modality) +
+  <a href="/backlog/1396-pointer-gestures-swipe-long-press-pinch-pull-to-refresh-plac/">#1396</a> (gesture
+  recognition), rendered via CSS <code>transform: scale()</code>. The rejected alternatives: folding it
+  under <code>interaction</code> (dilutes the modality intent with a manipulation verb) and dissolving it
+  into #1396 + CSS (leaves the reusable middle model unhomed). Distinct from
+  <a href="/backlog/1384-spatial-manipulation-arrangeable-surfaces-resizable-splitter/">#1384</a>
+  spatial-manipulation — placement of <em>many</em> elements vs. transform of <em>one</em> surface.
+</p>
+
+<h2>Sources</h2>
+<ul>
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/zoom">zoom CSS property — MDN</a></li>
+  <li><a href="https://modern-css.com/scaling-elements-without-transform-hacks/">CSS zoom vs transform: scale() — modern-css.com</a></li>
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/transform-function/scale">scale() CSS function — MDN</a></li>
+  <li><a href="https://d3js.org/d3-zoom">d3-zoom — D3 by Observable</a></li>
+  <li><a href="https://www.datamake.io/blog/d3-zoom/">D3 zoom — the missing manual (datamake)</a></li>
+</ul>

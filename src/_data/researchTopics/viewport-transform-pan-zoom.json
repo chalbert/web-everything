@@ -1,0 +1,23 @@
+{
+  "id": "viewport-transform-pan-zoom",
+  "title": "Zoom / pan a surface — viewport-transform placement & shape",
+  "status": "open",
+  "summary": "Prep survey for decision #1393 — where the zoom/pan-a-surface concern (scale + translate a content surface: image viewer, map, canvas, diagram, zoomable timeline) lives and what shape it takes. No design exists yet; WE owns no zoom/pan concern today. Native substrate (checked): CSS `transform: scale()/translate()` is the render primitive — a GPU compositor transform, paint-only, no reflow, animatable; the newly-Baseline CSS `zoom` property is the WRONG primitive here (it scales layout/reflows and is not animatable). Pointer Events + wheel are the input; `touch-action: none` takes over native pinch; there is NO native element-scoped pan/zoom primitive and no native gesture recognizer — every incumbent ships JS. Prior art converges on d3-zoom's model: a transform STATE `{translate, scale}` separated from how it's APPLIED, with `scaleExtent` (zoom bounds), `translateExtent` (pan bounds), a constrain fn, a focal point (to-cursor / to-center / fit), and programmatic transitions — directly mirroring WE's viewport-presence 'owns the vocabulary, not the apply' charter. Classification: no provider seam / interchange schema → intent, not project/protocol (#409 'not every gap is a project'); keyboard parity + zoom-to-fit are a fixed mechanic, bounds + focal are dimensions. Recommendation: a distinct `viewport-transform` intent (+ a realizing pan-zoom-surface block) composing `interaction` (modality) + #1396 (gesture recognition), rendered via CSS transform — over folding it under `interaction` (dilutes modality with a verb) or dissolving it into #1396 + CSS (leaves the reusable middle model unhomed). Distinct from #1384 spatial-manipulation (placement of many elements vs. transform of one surface).",
+  "dateOpened": "2026-06-21",
+  "lastReviewed": "2026-06-21",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "research",
+    "zoom",
+    "pan",
+    "viewport",
+    "transform",
+    "interaction",
+    "gesture",
+    "gap",
+    "verb-axis"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}
