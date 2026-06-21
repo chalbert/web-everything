@@ -47,6 +47,7 @@ import {
   validatePlugDualMode, validateTemplateA11y, validateBlockImplConformance,
   validateBlockComposesTraits, COMPOSE_DENY_LIST,
   validateBlockExportShape,
+  validatePlugWeFuiDrift, PLUG_SHARED_CORE_FILES,
   scanRepoLocusPrefixes, REPO_LOCUS_PREFIX_ENFORCED,
 } from './check-standards-rules.mjs';
 
@@ -1040,6 +1041,38 @@ const allCompileFiles = COMPILE_ROOTS.flatMap((r) => walk(r));
     if (fuiPresent && uncoverable.length)
       warn(`Block export-shape arm (#927): ${uncoverable.length} non-barrel block(s) are un-coverable (no enumerable index barrel) — renderer/file-pointer impls, tracked by #1164.`);
   }
+}
+
+// ── 8f. Plug contract↔impl drift conformance (#1309, the §8c/#659 plugs analogue) ──
+// WE owns the plug platform layer; FUI ports each plug domain UP to the WE contract (#1250 reconcile
+// epic). Two arms, both detect-or-skip when ../frontierui is absent (mirrors 8c): (1) every we:plugs/
+// <domain> must have a fui:plugs/<domain> impl dir; (2) the declared byte-identical plug-core contract
+// files (PLUG_SHARED_CORE_FILES, #1304/#1350) must match FUI byte-for-byte. The fs reads live here; the
+// pure rule is `validatePlugWeFuiDrift`. Lands after the reconciliation slices, so it is green.
+{
+  const wePlugsDir = join(ROOT, 'plugs');
+  const fuiPlugsDir = join(ROOT, '..', 'frontierui', 'plugs');
+  const fuiPresent = existsSync(fuiPlugsDir);
+  // Infrastructure entries under plugs/ that are not reconcilable WE↔FUI domains.
+  const INFRA = new Set(['core', '__tests__', 'utils']);
+  const domains = existsSync(wePlugsDir)
+    ? readdirSync(wePlugsDir, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && !INFRA.has(e.name))
+        .map((e) => ({ domain: e.name, implPresent: fuiPresent ? existsSync(join(fuiPlugsDir, e.name)) : null }))
+    : [];
+  const parityFiles = PLUG_SHARED_CORE_FILES.map((rel) => {
+    const weFile = join(ROOT, rel);
+    const fuiFile = join(ROOT, '..', 'frontierui', rel);
+    let identical = null; // FUI absent, or the WE file itself is missing → skip
+    if (fuiPresent && existsSync(weFile)) {
+      // A declared-shared file missing on the FUI side is itself drift; else compare bytes.
+      identical = existsSync(fuiFile) && readFileSync(weFile, 'utf8') === readFileSync(fuiFile, 'utf8');
+    }
+    return { file: rel, identical };
+  });
+  const { errors: pe, warnings: pw } = validatePlugWeFuiDrift({ domains, parityFiles });
+  for (const e of pe) err(e.message, e.descriptor);
+  for (const w of pw) warn(w.message, w.descriptor);
 }
 
 // ── 9. Vite dev-proxy allowlist must cover every 11ty catalog route ────────────

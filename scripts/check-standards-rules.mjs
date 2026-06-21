@@ -1409,6 +1409,55 @@ export function validateBlockImplConformance(blocks) {
   return { errors, warnings, skipped, checked };
 }
 
+// ── validatePlugWeFuiDrift — plug contract↔impl drift conformance (#1309, the §8c/#659 plugs analogue) ──
+// WE owns the plug platform layer; FUI ports each plug domain UP to the WE contract (the #1250 reconcile
+// epic + its per-domain slices #1297–#1308/#1350/#1354). This is the regression guard so a reconciled
+// domain can't silently re-drift — the plugs edition of #170/#659. Two arms, both cross-repo and
+// detect-or-skip when ../frontierui is absent (mirrors validateBlockImplConformance's null→skip):
+//   (1) DOMAIN PRESENCE — every we:plugs/<domain> must have a matching fui:plugs/<domain> impl dir;
+//   (2) SHARED-CORE BYTE PARITY — the plug-core contract files declared byte-identical across both repos
+//       (PLUG_SHARED_CORE_FILES, per #1304/#1350) must match FUI byte-for-byte.
+// Enforced from landing: #1309 lands AFTER the reconciliation slices, so both arms are green.
+//
+// `domains` = [{ domain, implPresent }] — implPresent true/false when FUI was walked, null when FUI is
+// absent (→ skip). `parityFiles` = [{ file, identical }] — identical true/false when both copies were
+// read, null when FUI is absent or the file is WE-only (→ skip). Returns { errors, warnings, skipped, checked }.
+export const PLUG_DRIFT_ENFORCED = true; // #1309: lands after the #1250 reconciliation slices, so green; a re-drift now hard-fails
+
+// The plug-core files contractually required to be byte-identical across WE and FUI (#1304/#1350). NOT
+// the whole core/ — `plugs/core/CustomRegistry.ts` carries the #1350-governed lifecycle divergence, and
+// `plugs/index.ts` / `plugs/bootstrap.ts` are per-repo domain-registration wiring; all three legitimately
+// differ, so gating them would false-positive. This curated list is exactly the shared contract substrate.
+export const PLUG_SHARED_CORE_FILES = [
+  'plugs/core/Plug.ts',
+  'plugs/core/HTMLRegistry.ts',
+  'plugs/unplugged.ts',
+];
+
+export function validatePlugWeFuiDrift({ domains = [], parityFiles = [] } = {}) {
+  const errors = [];
+  const warnings = [];
+  let skipped = 0;
+  let checked = 0;
+  for (const d of domains) {
+    if (d.implPresent === null || d.implPresent === undefined) { skipped++; continue; }
+    checked++;
+    if (d.implPresent === false) {
+      const msg = `WE plug domain "we:plugs/${d.domain}" has no matching fui:plugs/${d.domain} impl in ../frontierui (plug contract↔impl drift, #170/#1309). Port the domain to FUI or retire the WE contract.`;
+      (PLUG_DRIFT_ENFORCED ? errors : warnings).push({ message: msg });
+    }
+  }
+  for (const p of parityFiles) {
+    if (p.identical === null || p.identical === undefined) { skipped++; continue; }
+    checked++;
+    if (p.identical === false) {
+      const msg = `Shared plug-core contract file "${p.file}" has drifted between WE and FUI — it must be byte-identical (#1304/#1350; plug contract↔impl drift, #170/#1309). Re-converge the two copies.`;
+      (PLUG_DRIFT_ENFORCED ? errors : warnings).push({ message: msg });
+    }
+  }
+  return { errors, warnings, skipped, checked };
+}
+
 // ── validateBlockComposesTraits — compose-don't-hand-roll deny-list (#937, Fork 1 of #933) ──
 // Sibling of validateBlockImplConformance (same cross-repo, source-null→skip precedent). Where the
 // #936 §3b resolution arm asserts a block's *declared* `composesBehaviors` resolve, THIS arm catches

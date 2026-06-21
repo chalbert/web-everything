@@ -32,6 +32,7 @@ import {
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
   validateBlockImplConformance, BLOCK_IMPL_DRIFT_ENFORCED,
   validateBlockExportShape, EXPORT_SHAPE_ENFORCED,
+  validatePlugWeFuiDrift, PLUG_DRIFT_ENFORCED,
   validateBlockComposesTraits, COMPOSE_TRAITS_ENFORCED,
   scanRepoLocusPrefixes,
   validateTemplateA11y, NAV_ACTIVE_STATE_ENFORCED,
@@ -928,6 +929,41 @@ describe('validateBlockImplConformance — block contract↔impl drift (#659, th
     const res = validateBlockImplConformance([{ id: 'composite-widget', implPresent: true }]);
     expect(res.errors).toEqual([]);
     expect(res.warnings).toEqual([]);
+    expect(res.checked).toBe(0);
+  });
+});
+
+describe('validatePlugWeFuiDrift — plug contract↔impl drift (#1309, the §8c/#659 plugs analogue)', () => {
+  it('passes when every WE domain has a FUI impl and shared-core files match', () => {
+    const res = validatePlugWeFuiDrift({
+      domains: [{ domain: 'webguards', implPresent: true }, { domain: 'webstates', implPresent: true }],
+      parityFiles: [{ file: 'plugs/core/Plug.ts', identical: true }],
+    });
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+    expect(res.checked).toBe(3);
+  });
+
+  it('flags a WE domain with no FUI impl as drift', () => {
+    const res = validatePlugWeFuiDrift({ domains: [{ domain: 'webportals', implPresent: false }] });
+    const bucket = PLUG_DRIFT_ENFORCED ? res.errors : res.warnings;
+    expect(bucket.map((e) => e.message).join(' ')).toMatch(/webportals.*no matching fui:plugs.*#170\/#1309/);
+  });
+
+  it('flags a drifted shared-core contract file', () => {
+    const res = validatePlugWeFuiDrift({ parityFiles: [{ file: 'plugs/core/Plug.ts', identical: false }] });
+    const bucket = PLUG_DRIFT_ENFORCED ? res.errors : res.warnings;
+    expect(bucket.map((e) => e.message).join(' ')).toMatch(/Plug\.ts.*drifted.*byte-identical/);
+  });
+
+  it('skips both arms when FUI is absent (null) — never a failure', () => {
+    const res = validatePlugWeFuiDrift({
+      domains: [{ domain: 'webguards', implPresent: null }],
+      parityFiles: [{ file: 'plugs/core/Plug.ts', identical: null }],
+    });
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+    expect(res.skipped).toBe(2);
     expect(res.checked).toBe(0);
   });
 });
