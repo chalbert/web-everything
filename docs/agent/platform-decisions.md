@@ -416,7 +416,15 @@ movement-engine seam; hierarchy's flatten-to-visible projection is referenced, n
 2026-06-21) · #1423 (bulk-action = a thin `bulk-action` **intent** composing `selection` + `command` over a
 target set, not an assemblerPreset/trait — the new substance a preset can't carry is fan-out across the live
 selection set + the select-all `matching` predicate + the partial-failure outcome + the count-announce
-binding; selection/command/#1409 toolbar are referenced and stay home; ratified 2026-06-21). Kin to [constellation-placement](#constellation-placement),
+binding; selection/command/#1409 toolbar are referenced and stay home; ratified 2026-06-21) · #1420
+(offline-first sync = a composition over four already-ratified orthogonal axes — webrealtime transport +
+webreliability durable outbox + change-tracking merge-strategy + `mutation` apply/rollback — so **no new
+WE artifact**; the replay-on-reconnect *choreography* (FIFO + exactly-once + sync-cursor) rides a FUI
+`sync-coordinator` **block** the `draft-persistence` way, never a 5th standard. **Deferral-bar corollary:**
+don't mint an orchestrator over already-homed axes until a *real cross-cutting consumer* appears — that is
+`storage.json`'s own bar, and it is unmet by the current exercise-app roadmap (loan/insurance/healthcare/
+government/logistics are form/workflow apps, not collaborative-realtime). Presence stays its own render
+intent (bias-to-separation; `CoEditCoordinator` "does not merge state"); ratified 2026-06-21). Kin to [constellation-placement](#constellation-placement),
 [compose-dont-handroll](#compose-dont-handroll), [surface-contract-not-computation](#surface-contract-not-computation).
 
 ### Data-shape evolution is a storage facet, not a reliability concern {#data-shape-vs-mechanism-failure}

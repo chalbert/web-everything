@@ -2,16 +2,52 @@
 kind: decision
 size: 5
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
 preparedDate: "2026-06-21"
 relatedReport: reports/2026-06-21-offline-sync-realtime-conflict-resolution.md
 relatedProject: webrealtime
+codifiedIn: docs/agent/platform-decisions.md#composition-artifact-ownership
 tags: [decision, book-candidate, data-lifecycle, offline-first, sync, realtime, conflict-resolution, crdt, collaboration, presence, gap]
 ---
 
 # Offline-first sync + realtime/conflict resolution standard: placement
+
+## ✅ Ruling (ratified 2026-06-21)
+
+**Crux → SPLIT. Fork 1 → (a) no new WE artifact. Fork 2 → (a) presence is its own render intent (moot under 1a).**
+Codified in [we:docs/agent/platform-decisions.md#composition-artifact-ownership](/docs/agent/platform-decisions.md#composition-artifact-ownership)
+(deferral-bar corollary).
+
+Offline-first sync is a **composition** over four already-ratified orthogonal homes — **webrealtime**
+transport, **webreliability** durable outbox/replay, **change-tracking** `CustomChangeStrategy` merge
+(LWW default, CRDT opt-in), and the **`mutation`** apply/reconcile/rollback intent — so **no new WE
+standard is minted**. The one piece that spans homes — the replay-on-reconnect *choreography* (FIFO +
+exactly-once + sync-cursor) — rides a **FUI `sync-coordinator` block** the `draft-persistence` way, not a
+fifth standard. **Presence stays its own render intent** (ephemeral / many-at-once / render-shaped;
+`CoEditCoordinator` "does not merge state").
+
+**Grounding that decided it (all citations traced to the live tree):** every "already homed" claim
+verified — `we:src/_data/protocols/transport-negotiation.json` ("does NOT own any UX render", #455),
+`we:src/_data/intents/mutation.json` (apply→reconcile→rollback, pessimistic default, #1395),
+`we:src/_data/protocols/change-tracking.json` (CRDT among configurable strategies),
+`we:src/_data/intents/reaction.json` ("multi-user sync is a composed webrealtime concern, never baked
+in", #370 Fork 5), `we:src/_data/blocks/draft-persistence.json` (`resolveLww` + `CoEditCoordinator`). The
+deferral bar in `we:src/_data/protocols/storage.json` (*"graduate … only if a real cross-cutting
+sync-orchestration consumer appears"*) is
+**unmet**: the flagship exercise-app roadmap (#314/#317 — loan/insurance/healthcare/government/logistics)
+holds no collaborative-realtime app. **Confidence ~70%** (raised from the prepared 65% by the roadmap
+check + the `draft-persistence` block precedent). **Residual:** if a future app needs cross-cutting
+replay, Fork 1(b) becomes right — but the platform's own rule says wait, and the FUI block absorbs it
+meanwhile (re-open then). Inline red-team of (a) failed: the choreography is not homeless (it composes
+four homes + can live in a block), so (a) violates no principle.
+
+**Follow-up filed:** the optional FUI `sync-coordinator` block (#1478, `locus: frontierui`).
+
+---
 
 **No design is greenfield here — the premise that WE has "no sync/conflict contract" is largely false.**
 The write-path/realtime half of the data lifecycle was surfaced as unowned (by the data-lifecycle lens
