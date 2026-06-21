@@ -223,6 +223,45 @@ well" note look like a hard edge.
 > machine-checked. A future slice may add a `dependsOn`-cycle / unresolved-ref gate and an
 > `implementsIntent`-uniqueness gate; until then this section is the source of truth for the rules.
 
+## Packaging governance (#1321)
+
+How a block is *packaged* — its authoring surface, runtime DOM shape, and CSS isolation. Ratified by
+[#1321](/backlog/1321-variant-component-surface-and-per-variant-loading-one-polymo/) (2026-06-21). The
+per-block *mechanism pick* for the button (the worked example) is carved to
+[#1381](/backlog/1381-button-packaging-pick-runtime-shape-mechanism-transient-vs-p/).
+
+1. **Uniform authoring surface.** Every block is authored the same way — one custom-element spelling
+   (`<we-button variant>`) across the catalog, consumed identically. **Uniformity binds the *authoring*
+   surface, not the runtime DOM shape.**
+2. **Nothing is forbidden — compliance is a spectrum, not a gate.** WE mandates nothing
+   (*support-all-coherent*, *minimize-lock-in*). A block that deviates from the conformant shape isn't
+   *prohibited* — it **forgoes specific compliance guarantees**, and the consequence is that an integration
+   relying on them may break. Never a hard blocker; a risk the author accepts. (So the *no-element / CSS-only*
+   pattern — classes on a bare native element — and `is="…"` customized built-ins are *lower-compliance*
+   choices, not disallowed ones.)
+3. **Runtime shape is a per-block impl choice — three families**, all behind the same authoring surface:
+   - **(A) Transient → native** (`TransientElement` self-replacement, `fui:blocks/transient/`): authored as a
+     custom element, self-replaces with a native element, **zero wrapper**. Native form/a11y free; no
+     `ElementInternals`. *Cost:* element gone after replacement (no post-render re-resolution / tag-inspection).
+   - **(B) Persistent light-DOM element**: a custom element owns a real light-DOM control. Native semantics
+     free; no `ElementInternals`; wrapper persists (use when post-render reactivity / stable identity matters).
+   - **(C) Shadow**: a runtime DOM boundary. Use for hostile-CSS immunity / hiding internals. **Pays
+     `ElementInternals`** (form participation can't cross the boundary) **+ `::part`** (theming). The
+     `ElementInternals` tax is a *shadow-only* cost.
+4. **Encapsulation is available in both light DOM and shadow.** Light-DOM families (A/B) get in-leak
+   isolation from the **#1349 `webisolation` contract** (`@scope isolated`, csswg #11002, or a keying
+   transform until baseline); shadow (C) gets it from its own boundary. Encapsulation is **not**
+   shadow-exclusive. Keeps #1349's support-both (no amend).
+5. **Variant / styling-hook surface.** A behavior-free style axis is a plain attribute consumed by CSS
+   (bare `variant`, #1318) + **token DI** read source-blind (`var(--btn-bg, …)`). One element, the
+   open-numbered attribute — **never** per-variant tags. The *no-conflict* guarantee is enforced by the
+   boundary (C) or `webisolation` (A/B).
+6. **Tag name is a contract artifact.** WE may define a **default, customizable** `we-*` tagName (a *name*,
+   like an attribute name — consistent with *contracts-only*; customizable per
+   *config-extends-platform-default* + *most-flexible-default*). Base examples are standard-anchored
+   (`we-button`), not implementer-spelled (FUI uses bare-kebab, no `fui-` prefix, #841; names need a hyphen,
+   #1120).
+
 ## What this home does *not* cover
 
 The three governance areas this schema reference sliced out — **lifecycle** (#1092), **taxonomy** (#1093),
