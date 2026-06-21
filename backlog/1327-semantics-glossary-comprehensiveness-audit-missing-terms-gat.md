@@ -1,9 +1,11 @@
 ---
 kind: epic
-status: open
+status: resolved
 relatedReport: reports/2026-06-21-backlog-split-analysis.md
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
+dateResolved: "2026-06-21"
+graduatedTo: none
 tags: []
 ---
 
