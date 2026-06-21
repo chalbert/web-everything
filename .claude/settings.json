@@ -7,7 +7,40 @@
       "Bash(npm run check:standards:*)",
       "Edit(/.claude/skills/batch-backlog-items/**)",
       "Edit(~/.claude/skills/closing-session/**)",
-      "Edit(/.claude/skills/next-backlog-item/**)"
+      "Edit(/.claude/skills/next-backlog-item/**)",
+      "Bash(cd /Users/nicolasgilbert/workspace/webeverything; git add scripts/backlog.mjs .claude/commands/resolve.md scripts/backlog/__tests__/resolve-epic-guard.test.mjs && git commit -F .git/COMMIT_EDITMSG_TMP && rm -f .git/COMMIT_EDITMSG_TMP && git log --oneline -1)",
+      "Bash([ -s \"$f\" ])",
+      "Edit(/.claude/skills/review-program/**)",
+      "Bash(rm -f .git/GAPSWEEP_MSG.txt)",
+      "Bash(git status *)",
+      "Edit(/.claude/skills/prepare-decision-item/**)"
+    ],
+    "additionalDirectories": [
+      "/Users/nicolasgilbert/workspace/webeverything/.git"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/lint-locus-prefix.mjs --pre"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/lint-locus-prefix.mjs"
+          }
+        ]
+      }
     ]
   }
 }

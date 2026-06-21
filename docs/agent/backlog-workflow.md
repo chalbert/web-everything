@@ -76,6 +76,15 @@ cross-repo paths are plain text with the prefix (`fui:blocks/…`, `plateau:src/
 (`we:`/`fui:`/`plateau:`) are the default; full names accepted. Full rule + carve-outs: *conventions.md →
 Repo-locus code-path references* (gated by #884/#885).
 
+*Enforced at write time so an in-work item never breaks the shared gate for a concurrent agent.* A
+**`PreToolUse(Edit|Write)` hook** (`scripts/lint-locus-prefix.mjs --pre`) scans the *proposed* content
+**before it is written to disk** and **denies the edit** if it would introduce a bare ref — so the working
+tree never holds a gate-breaking ref mid-edit, and a concurrent agent's whole-repo `check:standards` can't
+go red because of your unfinished work. (A `PostToolUse` lint + the `--staged` sweep / `npm run lint:locus`
+remain as backstops for the rare paths the pre-write hook can't see — e.g. `cat >>`/heredoc body-appends
+that fire no Edit/Write tool.) To unblock a denied edit, just add the `we:`/`fui:`/`plateau:` prefix and
+retry.
+
 **`blockedBy` — a directional prerequisite edge, not a "see also".** `blockedBy: ["NNN", …]` declares that this item *cannot start until each listed item is `resolved`*. It is a distinct relation from the two existing link fields: `crossRef` is a non-directional "see also" URL/label, and `parent` is epic grouping (which item rolls up under which) — neither carries the "blocks / is-blocked-by" direction. Lifting prerequisites out of prose ("blocked on…", "after #NNN") into this field turns the backlog into a real **DAG**, the prerequisite for any *deterministic* readiness scoring (#249/#250) that doesn't need an LLM to read sentences. Keep a short human note in the body too; the field is the machine-readable half. The loader resolves it to a `blockers` array (linked on the detail page), and `check:standards` **errors** if an edge is unresolvable, self-referential, or forms a cycle (the readiness function assumes acyclicity).
 
 **2 — Pointer item** (mirrors a report): omit the body entirely. With a `relatedReport` and no body, the item's title, summary, and detail-page content are loaded *from the report md itself* — so the backlog shows the report, with nothing restated by hand.
