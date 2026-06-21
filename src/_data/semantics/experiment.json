@@ -1,0 +1,5 @@
+{
+  "term": "Experiment Intent",
+  "definition": "Declarative variant-assignment — a subtree renders the arm assigned to the current unit. The variant dimension is open (the arm set is author-defined; A/B or multivariate) with a most-permissive default of the control/default arm (OpenFeature DEFAULT). UX-only: which arm shows is the concern, while bucketing lives behind a distinct, swappable evaluation provider (the @webeverything/contracts/experiment seam, reusing the Guard pattern, returning {value, variant, reason} in OpenFeature vocabulary with no security semantics). Distinct from a boolean access-control gate.",
+  "usage": "Standardized by the Experiment Intent."
+}

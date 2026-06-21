@@ -1,0 +1,17 @@
+{
+  "id": "experiment",
+  "name": "Experiment Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "summary": "Declarative variant-assignment: 'this subtree renders the arm assigned to the current unit'. Ratified #1414 Fork 1. The variant dimension is OPEN — the arm set is author-defined (A/B, multivariate) — with the most-permissive default = the control/default arm (OpenFeature DEFAULT), so a subtree with no live experiment renders control. UX-only: which arm shows is the concern here; HOW a unit is bucketed is impl behind a swappable evaluation provider (the DISTINCT @webeverything/contracts/experiment seam, reusing the Guard PATTERN, returning {value, variant, reason} in OpenFeature vocab, with NO security semantics — a variant arm is not an authz verdict). A BOOLEAN feature flag is the separate access-control gate (#1481), not this intent.",
+  "dimensions": {
+    "variant": {
+      "description": "Which arm of the experiment renders. An OPEN dimension — the arm set is author-defined per experiment (a 2-arm A/B, or multivariate control/treatment-a/treatment-b/…); the values below are only the canonical example. Most-permissive default: the control/default arm (OpenFeature DEFAULT), rendered when no live assignment resolves.",
+      "values": [
+        "control",
+        "treatment"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">Declarative <strong>variant assignment</strong> (ratified <a href=\"/backlog/1414-decision-feature-flags-experiments-placement/\">#1414</a> Fork 1): a subtree declares that it renders <em>the arm assigned to the current unit</em>, and the assigned arm is resolved by a swappable provider. The <strong>variant</strong> dimension is <strong>open</strong> — the arm set is author-defined (A/B or multivariate) — and the most-permissive default is the <strong>control / default arm</strong> (OpenFeature <code>DEFAULT</code>): a subtree with no live experiment renders control, never breaks.</p><h3>UX-only — the mechanic lives behind a provider</h3><p class=\"text-sm text-gray-600 mb-2\">This intent is <strong>UX-only</strong>: <em>which</em> arm shows is its concern; <em>how</em> a unit is bucketed (hash-bucket, server SDK, sticky override) is impl behind a <strong>distinct evaluation-provider contract</strong> (<code>@webeverything/contracts/experiment</code>) that <strong>reuses the <a href=\"/projects/webguards/\">Guard</a> seam pattern</strong> — native-first default → project override → custom plug. The provider returns <code>{ value, variant, reason }</code> (the <strong>OpenFeature</strong> evaluation-details vocabulary, borrowed verbatim), and its <code>evaluate</code> is async + a UX mirror, never the source of truth.</p><h3>Not an authorization verdict</h3><p class=\"text-sm text-gray-600 mb-2\">A variant arm carries <strong>no security semantics</strong> — it is a pick-one-of-N rendering choice, not an allow/deny decision. A <strong>boolean</strong> feature flag (one-of-two where one arm is \"off\") IS the access-control gate on the Guard provider seam (<a href=\"/intents/access-control/\">access-control</a>, #1481); a <strong>multivariate</strong> flag is this experiment intent. Same provider <em>shape</em>, different outcome families and trust boundaries — OpenFeature's own typed-flag distinction (boolean = gate, string/object = selector) is the upstream precedent.</p>"
+}
