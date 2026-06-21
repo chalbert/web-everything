@@ -3,7 +3,7 @@ kind: story
 size: 5
 parent: "1353"
 status: open
-blockedBy: ["1467"]
+blockedBy: ["1494"]
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-21"
 tags: []
@@ -23,3 +23,16 @@ demo that faithfully reproduces the 216-line `we:demos/data-table-demo.ts` + bro
 **then** the swap + delete. Recommend splitting the demo build (the #1312-analog) into its own prereq and
 making this card the delete+swap `blockedBy` it; both need a focused session with the FUI dev server for
 live render verification before the WE source is deleted.
+
+## Re-scope from #1467 ruling (ratified 2026-06-21 → b)
+
+The delete is confirmed **but bounded by #899's vector-conformance split** — impl → FUI, not a clean wipe:
+
+- **Leave in WE:** `auditDataTable` (the assertion-semantics **verifier** = #899's WE gate) + the vector
+  corpus `we:blocks/renderers/data-table/__fixtures__/data-table-cases.ts` + the contract **types**. The WE
+  conformance suite asserts the **stored golden output** (data), no live WE render.
+- **Move to FUI:** the runnable backend `renderDataTable`/`cellContent`/`cellDisplayText` + the backend
+  semantics `applyPipeline`/`aggregate`/`summaryText`/sort-state/`announce`.
+- **Precondition:** `we:blocks/renderers/collection-operations/CollectionOperationsBehavior.ts` value-imports
+  `applyPipeline, aggregate` from this renderer — its re-home to FUI is a **separate prereq slice** (filed
+  per #1467); this card is `blockedBy` it, since the import must move before the renderer can leave WE.

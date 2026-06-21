@@ -1,9 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 blockedBy: []
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-06-21"
 relatedReport: reports/2026-06-21-we-reference-renderer-disposition.md
 tags: [decision, renderers, conformance, webblocks, constellation]
@@ -11,92 +13,109 @@ tags: [decision, renderers, conformance, webblocks, constellation]
 
 # Disposition of WE reference renderers (data-table/pagination) — deletable per #1353, or kept as WE conformance references + CollectionOperationsBehavior dependency?
 
-**Prepared 2026-06-21 — ready to ratify.** A **ratify-shipped-code** disposition call (no greenfield
-design, so no web survey) grounded in the **concrete-refs check** — every import / test / demo-copy
-claim below was traced on disk 2026-06-21 (session report
-`we:reports/2026-06-21-we-reference-renderer-disposition.md`). The governing rule
-([#817](/backlog/817-constellation-placement-of-guard-validity-merge-validator-re/)'s
-conformance-gate carve-out) already settles the one fork; the recommended default carries a **bold**
-pick. **Blocks #1355 / #1356** (size 5 each) — both are `blockedBy: [1467]`; resolving this unblocks
-10 pts of demo-swap work.
+**Prepared 2026-06-21. Recommended ruling CORRECTED in discussion + RATIFIED 2026-06-21 → (b).**
+A **ratify-shipped-code** disposition call (no greenfield design, so no web survey) grounded in the
+**concrete-refs check** — every import / test / export claim below was traced on disk 2026-06-21
+(session report `we:reports/2026-06-21-we-reference-renderer-disposition.md`). The prepared default (keep
+the renderers in WE under #817's carve-out) **was wrong**: it conflated the WE **verifier** with the
+**renderer** the verifier tests, and it predates applying **resolved [#899]**, which decides this axis
+directly. Corrected recommended default is now **(b)** — the renderer + backend semantics + coordinator
+are impl → FUI; WE keeps the contract types + vector corpus + the assertion-semantics verifier.
+**Blocks #1355 / #1356** (size 5 each, both `blockedBy: [1467]`).
 
-## The axis — is data-table/pagination the #1326 *delete* case, or the conformance-reference case?
+## The axis — is the *renderer* a WE conformance reference, or a runnable backend that belongs in FUI?
 
 #1355/#1356 (slices of epic [#1353]) were scoped on the **#1326 pattern**: build the FUI demo, swap the
 WE page to a #701 `fuiDemo` iframe, then **delete** `we:blocks/renderers/data-table` /
-`we:blocks/renderers/pagination`. That pattern is correct only for **pure delivery runtime** with no
-WE-side consumer (the resolved [#1326] `view`/`tabs` case). The single axis this decision turns on is
-whether these two renderers are that case. They are not — they sit on the WE side of two consumers:
+`we:blocks/renderers/pagination`. The prepared analysis argued these two renderers are *not* that case
+because two WE consumers import them — a coordinator and the CI conformance suite — so #817's carve-out
+("a runtime symbol stays in WE iff a WE-side conformance gate consumes it") keeps them. That reasoning
+**over-reads the carve-out**. The carve-out covers the conformance gate's *own machinery* (the verifier),
+not the *subject the verifier renders and inspects*. "A WE test imports it" cannot be the test for
+staying in WE — by that logic every FUI impl WE exercises would migrate into WE.
 
-- **A WE runtime coordinator hard-imports both** —
-  `we:blocks/renderers/collection-operations/CollectionOperationsBehavior.ts:23-27`: `applyPipeline,
-  aggregate` are a **value** import from `../data-table/renderDataTable` (L23-26) and `PageState` a type
-  import from `../pagination/renderPagination` (L27). Deleting `data-table` breaks WE compilation of a WE
-  file *not in the delete scope*.
-- **Both are the shared CI conformance reference** —
-  `we:blocks/__tests__/unit/renderers/data-table.test.ts`,
-  `we:blocks/__tests__/unit/renderers/pagination.test.ts`,
-  `we:blocks/__tests__/unit/renderers/collection-operations.test.ts` run against these exact files.
-- **The demo copy declares them references, not delivery** —
-  `we:src/_data/demos/data-table-demo.json:6`: *"the one shared source the CI conformance suite runs …
-  The renderer is a deterministic reference; concrete strategies … live in Frontier UI."*
+**What the file actually contains.** [we:blocks/renderers/data-table/renderDataTable.ts](../blocks/renderers/data-table/renderDataTable.ts)
+(444 lines) staples four distinct concerns into one file:
 
-**Classification (per-fork pass).** Layer → WE **conformance-reference** layer (not FUI impl, not the
-zero-runtime #1326 delivery case). [#817](/backlog/817-constellation-placement-of-guard-validity-merge-validator-re/)
-ruled the constellation cut at the contract-file seam — types → WE, all runtime → FUI — **with one
-explicit exception: a runtime symbol stays in WE iff a WE-side conformance gate consumes it.** These
-renderers are the textbook case of that carve-out (a WE conformance suite *and* a WE coordinator consume
-them), so #817's own test keeps them in WE. The standing *separate/decouple* bias does not favour delete:
-the renderer is already a decoupled reference; deleting it would *couple* WE conformance to a FUI build it
-cannot import.
+1. **Contract types** (L25–96) — `DataTableConfig`, `PipelineResult`, `GroupResult`, … → WE (already a contract).
+2. **Backend semantics** (L134–255) — `applyPipeline`, `aggregate`, `summaryText`, `nextSortState`, `sortStateOf`, `applySortClick`, `announce` (the filter/sort/group/aggregate compute the coordinator imports).
+3. **DOM renderer** (L304–373) — `renderDataTable`, `cellContent`, `cellDisplayText` (config → `HTMLTableElement`).
+4. **The verifier** (L390) — `auditDataTable(root: HTMLElement, rows, config)` — inspects a rendered DOM tree against the APG / Intl.Collator / SQL contract.
+
+The CI test [we:blocks/__tests__/unit/renderers/data-table.test.ts](../blocks/__tests__/unit/renderers/data-table.test.ts:13-26)
+imports `dataTableCases` (the **vectors** — already a separate data file,
+`we:blocks/renderers/data-table/__fixtures__/data-table-cases.ts`), then `renderDataTable` **and**
+`auditDataTable`. **Why the renderer is imported by the gate:** only because `auditDataTable` needs a
+live-rendered `<table>` to inspect and the sole producer sits in the same file — co-location, not
+gate-membership.
+
+**Resolved [#899] decides this directly.** #899 (status: resolved, codified in
+`we:docs/agent/platform-decisions.md#constellation-placement`) ratified the behavioral-conformance model:
+WE owns **the vector corpus (JSON) + vector schema + the assertion-semantics verifier**; the verifier
+**consumes an observed trace as DATA** (read through DOM/ARIA), **never a live render/clock**; **ALL
+runnable backends (mount/dispatch + clock impl) → FUI.** Live-rendering *inside* the WE gate is the exact
+pattern #899 eliminated. So the carve-out keeps the **verifier (`auditDataTable`) + vectors**, not the
+**renderer**. The renderer being imported by the WE test today is interim live-render scaffolding, not a
+sanctioned WE reference.
+
+**Classification (per-fork pass).** Renderer + backend semantics + coordinator → **runnable backend**
+(FUI). Verifier + vector corpus + contract types → **WE conformance plane**. The standing
+*separate/decouple* bias agrees: keeping an impl renderer in WE *couples* the standard to one concrete
+backend; #899's split decouples them (one contract, many backends, conformance over data).
 
 ### Recommended path at a glance
 
-| Fork | Recommended default | Main alternative | Confidence |
+| Fork | Recommended default (corrected) | Rejected | Confidence |
 |---|---|---|---|
-| 1 — disposition of the data-table/pagination renderers | **(a) Keep in WE as conformance references; re-scope #1355/#1356 to the demo-page iframe swap only (no renderer delete)** | (b) Delete per #1353, after re-homing CollectionOperationsBehavior + relocating the conformance reference to FUI | High (~90%) |
+| 1 — disposition of the data-table/pagination renderers | **(b) Impl → FUI: `renderDataTable`/`cellContent` (backend) + `applyPipeline`/`aggregate`/sort-state (semantics) + `CollectionOperationsBehavior` (coordinator) move to FUI; WE keeps contract types + vector corpus + `auditDataTable` verifier; conformance runs over vectors per #899** | (a) Keep the renderers in WE as permanent conformance references | High (~90%) |
 
-## Fork 1 — keep the renderers in WE as conformance references (a) vs delete them per #1353 (b)
+## Fork 1 — renderer is impl → FUI (b) vs keep renderer in WE as conformance reference (a)
 
 *Fork-existence (genuine either/or):* the renderer **files** either remain in `we:blocks/renderers/` or
-are deleted — they cannot do both, and the choice changes the scope of #1355/#1356. Neither branch is
-incoherent ((b) is achievable *if* the coordinator + conformance are first re-homed to FUI), so this is a
-real merit call, not a forced invariant.
+move to FUI — the choice changes the scope of #1355/#1356. Both branches are coherent, so this is a merit
+call settled by a higher ruling (#899), not a forced invariant.
 
-**Crux:** is data-table/pagination the #1326 zero-runtime-delivery case the delete targeted, or a
-WE-owned conformance reference under #817's carve-out? The traced refs above answer it: they have WE-side
-consumers `view`/`tabs` never had.
+**Crux:** does the WE conformance gate audit a **live render** (renderer must stay WE) or a **stored
+observed trace / golden vector** (renderer → FUI)? **Resolved #899 already answered: vectors.** The WE
+verifier reads observed DOM/ARIA as data; it does not host the backend that produces it.
 
-- **(a) Keep them in WE as conformance references.** The demo *page* still swaps to the FUI `fuiDemo`
-  iframe for the interactive surface, but the WE renderer + fixtures stay as the conformance source.
-  #1355/#1356 reduce to demo-page-swap only — no renderer delete, no coordinator move.
-  *Tradeoff:* WE retains a small runtime reference (by design — #817 endorses exactly this).
-- **(b) Delete them per #1353.** First re-home `CollectionOperationsBehavior`'s dependency (move the
-  coordinator + its conformance to FUI, or have it consume the FUI renderer) and relocate the conformance
-  reference, then delete. *Tradeoff:* a larger constellation move with no benefit the reference shape
-  lacks; turns two clean per-demo slices into a multi-file re-home. *Rejected as the default* — it
-  contradicts #817's conformance-gate carve-out and couples WE conformance to an un-importable FUI build.
+- **(b) Renderer + semantics + coordinator → FUI (recommended).** WE keeps the contract **types**, the
+  **vector corpus** (`we:blocks/renderers/data-table/__fixtures__/data-table-cases.ts` — already separate
+  data, plus golden/expected outputs), and `auditDataTable` (the assertion-semantics **verifier** =
+  #899's WE gate). FUI receives the runnable backend (`renderDataTable`/`cellContent`), the backend
+  semantics (`applyPipeline`/`aggregate`/sort-state), and `CollectionOperationsBehavior` (also a runnable
+  backend). *Tradeoff:* a multi-file constellation move — but it is exactly #899's ratified shape, and the
+  vectors are already extracted.
+- **(a) Keep the renderers in WE as conformance references.** *Rejected* — contradicts resolved #899
+  (live-render inside the WE gate is the eliminated pattern) and #817's main holding (runtime → FUI); the
+  carve-out it leaned on covers the verifier, not the rendered subject.
 
-**Recommended default: (a)** — high confidence (~90%). #817's carve-out applies directly; (b) buys
-nothing the reference shape lacks. *Red-team:* the attack is "#1245/#1326 mandate zero-runtime-in-WE —
-delete the delivery copies." The rebuttal is #817's *explicit* exception: runtime consumed by a WE
-conformance gate stays WE; these renderers are that case, `view`/`tabs` were not. The residual ~10% is
-the longer-horizon question of whether behavioral conformance should run from a plateau in-browser tool
-over WE vectors ([#899]) — that would revisit *where the gate runs*, not whether the reference is
-WE-owned, so it does not move this call.
+**Recommended default: (b)** — high confidence (~90%). *Red-team:* the attack on (b) is "the WE CI badge
+needs *something* to render today — deleting the renderer reds the suite." Rebuttal: #899's model has the
+verifier assert the **stored golden output** (data) against the contract, with the live render exercised
+in FUI against the same WE vectors — no WE-side renderer required; the vectors are already a separate
+file. Residual ~10%: confirming `auditDataTable` can assert against stored output without recomputing via
+`applyPipeline` (a refactor the build does), and that the golden outputs are captured as vector data.
 
-On ratify: resolve, then re-scope #1355/#1356 to **demo-page iframe swap only** (drop the renderer-delete
-step from both).
+On ratify: resolve (codified-to #899's vector-conformance model), then **re-scope #1355/#1356**: keep the
+demo-page iframe swap **and** the renderer delete, but each must (1) leave `auditDataTable` + the vector
+corpus + types in WE, and (2) the `CollectionOperationsBehavior` coordinator re-home to FUI is a **third
+slice** (not folded into the two demo swaps). File the coordinator re-home as a new item on ratify.
 
 ---
 
 ## Context
 
 - Surfaced while working #1355 in batch-2026-06-21; the #1353 split analysis batched #1354/#1355/#1356 on
-  a *"no shared importer"* premise that is **false** for data-table/pagination (true only for the
-  resolved #1354/`view`/`tabs` line).
-- [#1326] (resolved) is the precedent the delete pattern came from — and the contrast that proves the
-  point: it deleted `view`/`tabs` precisely because they had no WE-side consumer.
+  a *"no shared importer"* premise that is **false** for data-table/pagination — but the fix is not "keep
+  the renderer in WE" (the first-pass read), it is "the shared importers are themselves impl that re-home
+  to FUI under #899."
+- [#1326] (resolved) deleted `view`/`tabs` because they had no WE-side consumer; here the consumers exist
+  but are *also* impl, so they move too rather than anchoring the renderer in WE.
+- Reusable lesson (→ memory): a WE conformance gate is the **verifier** that reads observed output as
+  data; the impl it renders/tests is the **subject under test** and lives in FUI. Being imported by a WE
+  test does not make code WE — resolved #899 codifies exactly this (verifier + vectors → WE, runnable
+  backend → FUI).
 
 [#1353]: /backlog/1353-fui-host-the-three-remaining-reference-renderer-demos-data-t/
 [#1326]: /backlog/1326-delete-we-blocks-view-tabs-runtime-copies-swap-we-view-tabs-/
