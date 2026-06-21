@@ -50,5 +50,6 @@
       "usage": "Native `<input type=\"checkbox\">` with `role=\"switch\"`: a boolean on/off control whose change takes effect immediately; Space/Enter toggle `aria-checked`.",
       "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/switch_role"
     }
-  }
+  },
+  "isConcept": true
 }

@@ -27,5 +27,6 @@
       "usage": "The abstract substrate every list-selection member conforms to: a `role=\"listbox\"` of `role=\"option\"` items with single/multi selection and managed focus, realized concretely by Dropdown / Multi-dropdown / Autocomplete / Tree-select.",
       "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/"
     }
-  }
+  },
+  "isConcept": true
 }

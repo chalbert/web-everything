@@ -1,0 +1,5 @@
+{
+  "term": "Dialog",
+  "definition": "A focus-trapping surface that interrupts the main flow to demand a response — WE's name for what the industry also calls a 'modal'. WE follows the platform: the native <dialog> element with showModal() is the substrate, and 'modal' is a MODE (modal vs non-modal) of a dialog, not a separate component. Distinct from a non-blocking drawer or notification.",
+  "usage": "Standardized by the Dialog block; the overlay/focus-containment surface on the native <dialog> element."
+}

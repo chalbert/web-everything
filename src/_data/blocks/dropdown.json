@@ -91,5 +91,6 @@
       "usage": "Printable-key type-ahead jumps to the next option whose label starts with the typed buffer, matching native `<select>` behaviour.",
       "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/select"
     }
-  }
+  },
+  "isConcept": true
 }

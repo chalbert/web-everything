@@ -20,5 +20,6 @@
       "usage": "A `role=\"region\"` with `aria-roledescription=\"carousel\"`, slide-picker controls, an accessible label, and a rotation pause control, following the APG carousel pattern.",
       "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/carousel/"
     }
-  }
+  },
+  "isConcept": true
 }

@@ -1,0 +1,5 @@
+{
+  "term": "Toggle / Switch",
+  "definition": "A binary on/off control whose change takes effect immediately — WE pins the contested pair 'toggle' vs 'switch' as one concept (the ARIA switch role over a native checkbox). The load-bearing distinction is the immediate-effect semantics: distinct from a checkbox (which stages a value for later form submission) and from a segmented control (more than two options).",
+  "usage": "Standardized by the Toggle / Switch block."
+}

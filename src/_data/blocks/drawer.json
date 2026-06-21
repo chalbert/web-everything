@@ -61,5 +61,6 @@
       "usage": "While open as a modal, the rest of the page is made `inert` so focus and the accessibility tree are confined to the drawer.",
       "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/inert"
     }
-  }
+  },
+  "isConcept": true
 }

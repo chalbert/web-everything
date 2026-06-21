@@ -99,5 +99,6 @@
       "description": "Clear the character buffer after an idle timeout (default 500ms)",
       "intentDimension": "type-ahead.reset.debounced"
     }
-  ]
+  ],
+  "isConcept": true
 }

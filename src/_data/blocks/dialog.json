@@ -76,5 +76,6 @@
       "usage": "Realizes the APG modal-dialog keyboard model: focus moves into the dialog on open, Tab cycles within it, Escape closes, and focus returns to the trigger.",
       "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/"
     }
-  }
+  },
+  "isConcept": true
 }

@@ -15,5 +15,6 @@
       "usage": "Projects an entity’s lifecycle status as a labelled badge; status changes are surfaced through a `role=\"status\"` live region.",
       "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/status_role"
     }
-  }
+  },
+  "isConcept": true
 }

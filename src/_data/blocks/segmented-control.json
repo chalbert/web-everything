@@ -22,5 +22,6 @@
       "usage": "A single-select row of adjacent buttons exposed as a `role=\"radiogroup\"` of `role=\"radio\"` segments — arrow keys move selection, one segment is `aria-checked`.",
       "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/radio/"
     }
-  }
+  },
+  "isConcept": true
 }
