@@ -1,0 +1,6 @@
+{
+  "id": "s1-unique-class",
+  "name": "S1 — unique-class light DOM",
+  "default": true,
+  "summary": "The native-first floor (#1349). A machine-generated unique scope class keys each component's CSS in the light DOM — no shadow root, so native <button> a11y + form participation stay intact, SSR is trivial, and the L2 build-transform realizes it with zero runtime. Total inter-view isolation, but NOT immune to externally-authored hostile CSS targeting the element. The flavor default; restriction (S2) is the author's opt-in."
+}

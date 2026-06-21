@@ -1,0 +1,6 @@
+{
+  "id": "s2-shadow-per-component",
+  "name": "S2 — shadow-per-component",
+  "default": false,
+  "summary": "The author's opt-in for external-CSS immunity (#1349). Each component gets its own shadow root, so externally-authored CSS cannot reach in — true in+out isolation. The cost: form participation must be re-forwarded via ElementInternals and native light-DOM a11y is no longer free. A per-deployment behavioral choice (soft/revisitable, #1349); pick it when immunity to hostile/unknown ambient CSS outweighs the native-DOM simplicity of S1."
+}
