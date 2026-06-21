@@ -2,8 +2,11 @@
 kind: story
 size: 5
 parent: "1399"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "we:.claude/skills/gap-sweep-rerun/SKILL.md"
 tags: [method, gap, coverage, interaction-paradigm, verb-axis, book-candidate, gap-sweep]
 ---
 
@@ -76,9 +79,20 @@ Each becomes its own placement `decision` item (à la #1384) when worked:
 - [ ] **Progressive loading** — infinite-scroll / load-more / pagination-on-scroll; may be a composition
   pattern over existing intents rather than a new one.
 
+> **Harvest fully filed (2026-06-21):** zoom/pan → [#1393](/backlog/1393-zoom-pan-a-surface-viewport-scale-translate-standard-placeme/);
+> undo/redo → [#1394](/backlog/1394-undo-redo-reversible-mutation-history-standard-placement/);
+> optimistic-mutation → [#1395](/backlog/1395-optimistic-mutation-apply-reconcile-rollback-standard-placem/);
+> pointer-gestures → [#1396](/backlog/1396-pointer-gestures-swipe-long-press-pinch-pull-to-refresh-plac/);
+> in-place/inline-edit → [#1397](/backlog/1397-in-place-inline-edit-edit-in-place-editable-cell-standard-pl/);
+> progressive-loading → [#1398](/backlog/1398-progressive-loading-infinite-scroll-load-more-standard-place/).
+
 ## Done when
 
-- The verb-checklist + matrix live in the gap-sweep skill (or a sibling skill) so the verb axis reruns
-  with the component axis.
-- Each harvested candidate above is either filed as a placement decision or explicitly dismissed with a
-  one-line reason (covered / not-a-standard).
+- ✅ The verb-checklist + matrix live in the gap-sweep skill so the verb axis reruns with the component axis
+  — wired into `we:.claude/skills/gap-sweep-rerun/SKILL.md` step 4b (#1390, 2026-06-21).
+- ✅ Each harvested candidate filed as a placement decision (#1393–#1398; + the second-pass #1406–#1408) or
+  routed to another lens with a reason (Web Share → #1257; collaboration → #1402/#1403; media-scrubbing →
+  `slider`+`temporal`).
+
+**Round 1 complete (2026-06-21, batch-2026-06-21-1385-1392)** — verb axis completeness-swept, all candidates
+filed/routed, and the lens is now part of every /gap-sweep run.

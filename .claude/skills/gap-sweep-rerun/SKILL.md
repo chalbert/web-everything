@@ -48,6 +48,15 @@ must produce a no-op delta and open 0 new backlog items. `scripts/gap-sweep-stat
    Intent's `placement=start|end`). Demote such rows to covered/already-tracked. This fill-time verification
    is a self-correction pass on par with the backlog dedup.
 
+4b. **Verb-axis cross-check** (#1390 — the second lens). The component diff benchmarks design-system
+   *catalogs*; it can't see interaction **verbs** (gestures/behaviors no one component owns) — the gap that
+   found the resize/snap cluster (#1384) while the catalog axis ran dry. So each sweep also walks the
+   universal direct-manipulation verb checklist (full matrix + owners in
+   [/backlog/1390-…/](/backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi/)), mapping
+   each verb to an intent in `src/_data/intents/` — ✓ owned / ~ partial / ❌ none. Each ❌/~ with no owner or
+   tracking item → file a placement `decision` (`--parent=099`), after deduping vs open+parked backlog
+   (idempotent). The axis was completeness-swept 2026-06-21; re-walk it and append newly-surfaced verbs.
+
 5. **Delta + gate.** `node scripts/gap-sweep-status.mjs --baseline=reports/gap-sweep-snapshots/<that-date>.json`
    prints what changed (corpus ±, capabilities ±, re-kinded, fileable-gaps ±, newly-tracked) and fails on any
    invariant violation (unknown capability ids, count mismatches, missing triage). A no-op delta is the
