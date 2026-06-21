@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#declarative-seam-over-existing-provider"
 preparedDate: "2026-06-21"
 relatedReport: reports/2026-06-21-telemetry-event-emission-vocabulary.md
 relatedProject: webanalytics
@@ -18,7 +21,30 @@ Surfaced by the app-infrastructure cross-cutting lens
 prior-art survey + tree-grounding published as the `/research/telemetry-event-emission-vocabulary/` topic
 (session report
 [we:reports/2026-06-21-telemetry-event-emission-vocabulary.md](../reports/2026-06-21-telemetry-event-emission-vocabulary.md)).
-Each fork below carries a recommended default in **bold**. **This is prep — no ruling.**
+Each fork below carries a recommended default in **bold**.
+
+## RULING (ratified 2026-06-21)
+
+All three forks ratified **as prepared** (defaults adopted), after an inline red-team in which each
+attack failed:
+
+- **Fork 1 → (a) ship a declarative emission seam.** A `data-track`-style behavior/directive over the
+  already-built `CustomTracker` sink + Analytics Event Vocabulary. *Red-team:* the "convenience over an
+  existing API → defer" attack is a *when* (prioritization), not a *whether* — this fork decides the
+  end-state and files the build separately (fork-is-not-a-prioritization-tool). No new lock-in (degrades
+  to `NoopTracker`, sink stays the only lock); standardizes the *mechanism*, not which events to emit;
+  `data-*` is native (native-first). ~80%.
+- **Fork 2 → (a) a behavior/directive, NOT an intent.** Intents are UX-only and render a surface
+  (verified: `decision-trace` renders a criteria-trace table); telemetry renders nothing, so an intent
+  would be the catalog's lone non-rendering member. The Web Directives vs Web Behaviors sub-home is left
+  to the build. ~85% on not-an-intent.
+- **Fork 3 → (a) two homes that compose, no umbrella.** Telemetry owns the seam under `webanalytics`;
+  #1414's experiment-exposure emits *through* it (an exposure *is* a `track()` call). Distinct providers
+  (analytics sink vs flag evaluator) + bias-toward-separation, no broken branch to justify merging. ~85%.
+
+**Net:** the swappable sink and controlled vocabulary are settled prior art (not re-decided); the one
+unbuilt piece — the declarative emission seam — is approved as a non-rendering behavior/directive under
+`webanalytics`. Build + vocabulary-entry + conformance-demo filed as follow-ups (see below).
 
 **Reframe (load-bearing).** The item was filed greenfield, but the WE
 [webanalytics](/projects/webanalytics/) standard **already ships most of it**. Built + **resolved**: the
@@ -160,11 +186,13 @@ home; #1414 references it for exposure events once both land.
 webanalytics transport/sink/vocabulary, so it belongs with the standard it binds to (mirroring the
 audit-family intents living under `webaudit`/`webdecisions`, not `webintents`).
 
-**Follow-ups to file at resolution (if Fork 1 → (a)):** (1) build — the declarative emission
-behavior/directive (`data-track`-style annotation → resolve `CustomTrackerRegistry` → `track()`), with
-document-level binding + the trigger set (click/submit/view/focus/custom); (2) a vocabulary entry for
-experiment-exposure events in the Analytics Event Vocabulary protocol, consumed by #1414; (3) a conformance
-demo extending `we:src/_data/demos/analytics-conformance-demo.json` with declarative annotations.
+**Follow-ups filed at resolution (Fork 1 → (a)):** (1) [#1475](/backlog/1475-declarative-telemetry-emission-seam-data-track-behavior-dire/)
+build — the declarative emission behavior/directive (`data-track`-style annotation → resolve
+`CustomTrackerRegistry` → `track()`), document-level binding + trigger set (click/submit/view/focus/custom);
+(2) [#1476](/backlog/1476-analytics-event-vocabulary-add-experiment-exposure-event-ent/) a vocabulary entry
+for experiment-exposure events in the Analytics Event Vocabulary protocol, consumed by #1414; (3)
+[#1477](/backlog/1477-conformance-demo-declarative-telemetry-annotations-over-anal/) a conformance demo
+extending `we:src/_data/demos/analytics-conformance-demo.json` with declarative annotations.
 
 **Genuine residual for the skeptic pass (Fork 1).** The strongest counter: the declarative seam is
 *convenience over an existing imperative API*, not a missing capability — a skeptic could defer it as
