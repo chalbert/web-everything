@@ -2,15 +2,39 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#composition-artifact-ownership"
 tags: [decision, book-candidate, treegrid, data-grid, tree, apg, gap]
 relatedReport: reports/2026-06-21-treegrid-hierarchical-data-grid.md
 preparedDate: "2026-06-21"
 ---
 
 # Treegrid — hierarchical interactive data grid standard: placement
+
+## Ruling (ratified 2026-06-21) — Fork 1 (a)
+
+**Treegrid is a `hierarchy` projection/dimension on `data-grid`, not a new block.** data-grid's row
+axis is fed by the hierarchy intent's flatten-to-visible-rows projection; rows carry
+`aria-level`/`aria-expanded`; the movement-engine seam gains the **Right/Left arbitration rule** (on a
+collapsed parent row, Right = expand / Left = collapse; otherwise the cell-movement fallback); the
+block adds `role="treegrid"` + `composesIntents: [..., "hierarchy"]`. **No new block, no new engine.**
+
+*Rationale:* both halves are already owned — data-grid (`contractsOnly`, the movement/active-cell
+seams) and the hierarchy intent (flatten-to-visible projection + Right/Left traversal, which already
+names treegrid as a composer). The one genuine **contract delta** is the Right/Left arbitration rule,
+which is emergent from the composition (hierarchy's Right/Left is 1-D with no cell axis; data-grid's is
+2-D with no expand concept) and so needs a named home + conformance vector — this is what lifts the
+ruling from (b) doc-only to (a). Matches the AG Grid / MUI X / TanStack consensus that treegrid is a
+grid *mode*. Fork 1 (c) "its own block" rejected (~90%) as over-minting (re-derives both owned halves,
+violates separate-and-decouple + impl-is-not-a-standard). **Confidence ~80%.**
+
+*Residual (~20%):* if authoring shows the arbitration is expressible purely as hierarchy-intent config
+with zero data-grid contract change, (a) collapses gracefully into (b)'s doc note — low-cost either
+way since both are "no new block." Realizing build filed separately as [#1461](/backlog/1461-treegrid-add-hierarchy-projection-to-data-grid-contract-righ/) (blocked by this ruling, now lifted).
 
 Surfaced by the ARIA-APG lens ([#1400](/backlog/1400-discovery-lens-aria-authoring-practices-apg-pattern-diff-aga/)):
 a **treegrid** is a 2-D grid whose rows form an expand/collapse hierarchy (file explorers, grouped data

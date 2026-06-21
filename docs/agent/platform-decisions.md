@@ -400,7 +400,10 @@ purity the platform can't guarantee); it is a valid *optional* behavioral-replay
 is load-bearing only there and for **correlation**, never for journaled-state determinism.
 
 **Lineage:** #992 (trace/replay substrate — envelope owned by webtraces, journal stays webstates,
-determinism anchor = state-diff A; ratified 2026-06-19). Kin to [constellation-placement](#constellation-placement),
+determinism anchor = state-diff A; ratified 2026-06-19) · #1411 (treegrid = a `hierarchy` projection on
+`data-grid`, not a new block — the new substance is the Right/Left arbitration rule, homed on data-grid's
+movement-engine seam; hierarchy's flatten-to-visible projection is referenced, not duplicated; ratified
+2026-06-21). Kin to [constellation-placement](#constellation-placement),
 [compose-dont-handroll](#compose-dont-handroll), [surface-contract-not-computation](#surface-contract-not-computation).
 
 ### Data-shape evolution is a storage facet, not a reliability concern {#data-shape-vs-mechanism-failure}
