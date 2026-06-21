@@ -261,6 +261,24 @@ per-block *mechanism pick* for the button (the worked example) is carved to
    *config-extends-platform-default* + *most-flexible-default*). Base examples are standard-anchored
    (`we-button`), not implementer-spelled (FUI uses bare-kebab, no `fui-` prefix, #841; names need a hyphen,
    #1120).
+7. **Per-block mechanism selection — the decision rule (#1381).** Within the default **S1** strategy, pick a
+   block's runtime family by what its *primary* consumer needs, not by effort. Ratified by
+   [#1381](/backlog/1381-button-packaging-pick-runtime-shape-mechanism-transient-vs-p/) (2026-06-21), the
+   button as the worked example (→ **transient**):
+   - **Behavior-free presentational control** (button, badge, …) → **(A) transient self-erase → native**. The
+     reference shape. Behaviors ride `CustomAttribute`s on the *surviving* native element, which carry the
+     full lifecycle (observe-attribute, connect/disconnect, form participation) — so attribute-shaped
+     reactivity and native events are **kept**; only **imperative non-serializable property writes on a
+     persistent element ref** are given up (and for these blocks that surface is near-empty).
+   - **Framework-bound / reactive** block (a consumer holding a JS ref that sets object/function properties
+     post-mount) → **(B) persistent light-DOM element**. The only family that keeps a persistent element to
+     bind to; also the shape a deployment upgrades to C when it opts into S2.
+   - **Block facing hostile / unknown host CSS** that opts into **#1349 S2** → **(C) shadow** (pays the
+     `ElementInternals` + `::part` tax, per item 3).
+   A persistent "property-forwarding" wrapper over a transient element is **not** a fourth option — it *is*
+   (B). Tag applies to both A and B (transient registers a global tag to upgrade-then-erase). The remaining
+   block conversions are a separately-prioritized build epic
+   ([#1442](/backlog/1442-block-model-conversion-register-remaining-blocks-as-custom-e/)), not authored here.
 
 ## What this home does *not* cover
 

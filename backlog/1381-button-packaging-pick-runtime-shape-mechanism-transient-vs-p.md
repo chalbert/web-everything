@@ -1,9 +1,12 @@
 ---
 kind: decision
-status: open
+status: resolved
 blockedBy: ["1321"]
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: "docs/agent/block-standard.md#packaging-governance-1321"
 preparedDate: "2026-06-21"
 locus: frontierui
 relatedProject: webcomponents
@@ -12,6 +15,36 @@ tags: [packaging, button, custom-elements, transient-element, native-first, fron
 ---
 
 # Button packaging: pick the button's runtime-shape mechanism (transient vs persistent light-DOM)
+
+## Ruling (ratified 2026-06-21)
+
+**Fork 1 → A — transient self-erase → native `<button>`** *(~80%)*. The button's S1 reference shape is the
+`TransientElement` pattern (`fui:blocks/transient/TransientElement.ts`): `<we-button variant>` upgrades,
+transfers its attributes to a real native `<button>`, and erases itself — end-state byte-identical to the
+native-`<button>`+computed-class shape, with a real native control (keyboard/focus/form/SR free, never pays
+`ElementInternals`), wrapper-less, S1-isolatable via #1349 L2.
+
+*Lifecycle & events are kept, relocated to the surviving native button, not lost.* The discussion that
+ratified this established the cost boundary precisely: declarative behaviors ride `CustomAttribute`s on the
+native button, which carry the full lifecycle suite (observe-attribute, connect/disconnect, form
+participation — `fui:plugs/webbehaviors/CustomAttribute.ts:286-363`); native events bind to the surviving
+`<button>` and child listeners survive (TransientElement *moves* nodes). **Attribute-shaped reactivity is
+forwarded by default** (it never lived on the `we-button` element). The *only* surface A gives up is
+**imperative non-serializable property writes on a persistent element ref** — and that cannot be "forwarded"
+without keeping the element alive, which *is* fork B (a forwarding wrapper is not a third option). For a
+button that lost surface is near-empty (its framework inputs are primitive/attribute-shaped), which is why
+confidence rose from the prepared ~75% to **~80%** at ratification.
+
+**B (persistent light-DOM) stays explicitly allowed** for the genuine framework-property-bound consumer
+(#463), and is the shape that upgrades to **C** (#1349 S2). Clean mapping: **A = native-first floor · B =
+persistent middle · C = S2 opt-in.** Tag is **`we-button`** (#841); `we-button` applies to both A and B.
+
+*Codified:* the per-block **mechanism-selection guideline** is now a statute in
+`we:docs/agent/block-standard.md` (Packaging governance §7). The remaining ~68 block conversions are spun out
+as separately-prioritized epic **#1442** (`blockedBy` this decision) — prioritization, not a fork
+(*fork-is-not-a-prioritization-tool*).
+
+---
 
 **Prepared 2026-06-21 — ready to ratify.** A *consumer refinement* of three already-ratified contracts —
 [#1321](/backlog/1321-variant-component-surface-and-per-variant-loading-one-polymo/) (general block-packaging),
