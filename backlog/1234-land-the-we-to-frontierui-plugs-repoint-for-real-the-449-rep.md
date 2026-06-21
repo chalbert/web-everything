@@ -1,10 +1,10 @@
 ---
 kind: story
-size: 5
+size: 8
 status: open
-blockedBy: ["1250"]
+blockedBy: []
 dateOpened: "2026-06-20"
-dateStarted: "2026-06-20"
+dateStarted: "2026-06-21"
 tags: []
 ---
 
@@ -81,3 +81,30 @@ per-domain reconciliation + webportals/webtraces ports + a real plugs drift gate
 is the FINAL WE-side repoint** — finishing the `we:demos`/`we:test-pages`/bootstrap/config repoint +
 the `@webeverything/*` mirror-alias map once FUI is the superset — so it is now `blockedBy: #1250` and
 flipped back to `open`. #1047 (delete `we:plugs/`) stays blocked behind #1234.
+
+## Pre-flight (batch-2026-06-21-1429-1487) — unblocked by #1250, but outgrew → re-sized 5 → 8
+
+Claimed and grounded the live tree. **#1250 resolved** ("FUI plugs reconciled up to WE + drift gate,
+all slices done"), and the WE scoped `check:standards` is green (the #1309 plugs drift gate would fire
+red otherwise) — so repointing onto FUI is **no longer lossy**. `blockedBy: 1250` cleared (NOT
+blocked-in-fact anymore).
+
+But the grounded scope is materially larger than a story·5 batch-tail edit, so it **outgrew** (re-sized
+5 → 8, routes to a focused session — not carried as a gut "looks big"):
+- **The `we:plugs/` paths are absolute dev-server URLs, not bare specifiers** — the `@frontierui/plugs`
+  alias does **not** catch them. Repointing means either a Vite middleware mapping the `we:plugs/` URL
+  prefix to the `fui:plugs/` tree **or** rewriting every absolute plug import across **~23 `we:demos/*` +
+  5 `we:test-pages/*`**.
+- **The bootstrap injector is a literal URL.** `webEverythingPatches` injects a
+  `<script type="module" src="…bootstrap…">` tag (`we:vite.config.mts:40`) + 11 hard-coded bootstrap
+  script tags in demos — an alias can't rewrite a literal `src`; the plugin + those tags must change (and
+  FUI must serve its `fui:plugs/bootstrap.ts` at that URL).
+- **8 vestigial config aliases** (`@core`/`@webregistries`/`virtual:trait-manifest`/… at
+  `we:vite.config.mts:170-176`) still point at the `we:plugs/` tree and must be re-homed to FUI.
+- **Acceptance is live-only:** the deliverable is **23 demos + 5 test-pages still rendering** after the
+  repoint, and the change is a **`we:vite.config.mts` edit that forces a dev-server restart** — which the
+  dev-server-lifecycle constraint forbids me from doing to the running server. Landing a surface-wide
+  repoint **without** live verification would be reckless (silently breaking the whole demo surface is
+  worse than carrying it). So it wants a focused WE session that owns the dev-server lifecycle.
+
+Carry-forward reason: **outgrew**. #1047 (delete `we:plugs/`) stays blocked behind this. Released to `open`.
