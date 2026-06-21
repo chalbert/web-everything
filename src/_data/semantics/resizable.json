@@ -1,0 +1,5 @@
+{
+  "term": "Resizable Intent",
+  "definition": "A standalone linear-split divider — grab a separator between two panes and resize them, recursable, with no collision (resizing one pane reflows its sibling). Carries the APG Window Splitter a11y contract (role=separator + aria-valuenow/min/max + arrow/Home/End) over a Pointer Events substrate; composed by the layout intent's pane.",
+  "usage": "Standardized by the Resizable Intent."
+}

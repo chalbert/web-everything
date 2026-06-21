@@ -1,0 +1,31 @@
+{
+  "id": "resizable",
+  "name": "Resizable Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "summary": "A standalone linear-split divider — grab a separator between two panes and resize them, recursable (Fork 1 of #1384, the spatial-manipulation placement). The 'linear split' layout model: a 1-D draggable divider whose drag reflows its sibling, no collision. Any block + the layout intent's `pane` compose it. Carries the APG Window Splitter a11y contract as a fixed invariant (role=separator + aria-valuenow/min/max + arrow/Home/End keys), over a Pointer Events substrate. Distinct from arrangeable (2-D grid placement) and from a recursive partition/dock tree (deferred, #1437).",
+  "dimensions": {
+    "orientation": {
+      "description": "Which axis the divider runs along — `vertical` is a vertical divider that resizes left/right panes (the common side-by-side split); `horizontal` resizes top/bottom panes. Most-permissive default: absent → inferred from the pane layout's main axis.",
+      "values": [
+        "vertical",
+        "horizontal"
+      ]
+    },
+    "unit": {
+      "description": "How the divider position is expressed and persisted — `percent` keeps the split ratio stable across container resizes (the sensible default for responsive panes); `pixel` fixes one pane's size and lets the other absorb the slack.",
+      "values": [
+        "percent",
+        "pixel"
+      ]
+    },
+    "collapse": {
+      "description": "Whether a pane can collapse fully to its edge — `none` clamps to the pane's min size; `edge` lets the divider snap the pane closed at an edge (and a double-click / keyboard toggle restores it), the collapsible-sidebar pattern. Most-permissive default: `none`.",
+      "values": [
+        "none",
+        "edge"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">The <strong>linear-split</strong> layout model (Fork 1 of <a href=\"/backlog/1384-spatial-manipulation-arrangeable-surfaces-resizable-splitter/\">#1384</a>): a 1-D draggable <strong>divider</strong> between two panes, recursable. Resizing one pane reflows its sibling; there is no collision or free placement (that is <a href=\"/intents/arrangeable/\">arrangeable</a>). The <code>layout</code> intent already names a <code>pane</code> as a \"resizable subdivision\" but ships no divider — this intent is that divider, composed by <code>layout.pane</code> and by any block that subdivides space.</p><h3>Dimensions</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>orientation</code>: <code>vertical</code> (resizes left/right) vs <code>horizontal</code> (resizes top/bottom).</li><li><code>unit</code>: <code>percent</code> (stable ratio across container resize — default) vs <code>pixel</code> (fixed size on one pane).</li><li><code>collapse</code>: <code>none</code> (clamp to min — default) vs <code>edge</code> (snap a pane closed at its edge, restorable).</li></ul><p class=\"text-sm text-gray-600 mb-2\">Per-pane <strong>min / max</strong> size constraints are numeric properties of the binding (not an enum axis) — they bound the divider's travel and feed <code>aria-valuemin</code>/<code>aria-valuemax</code>.</p><h3>Fixed a11y invariant — APG Window Splitter</h3><p class=\"text-sm text-gray-600 mb-2\">Keyboard operability is part of the contract, not an enhancement. Borrowed verbatim from the <strong>WAI-ARIA APG Window Splitter</strong> pattern: the divider is <code>role=\"separator\"</code> with <code>aria-valuenow</code>/<code>aria-valuemin</code>/<code>aria-valuemax</code> and <code>aria-controls</code>; <strong>Arrow keys</strong> move it by a step, <strong>Home/End</strong> jump to min/max, <strong>Enter</strong> toggles a collapse. (react-resizable-panels and react-split-pane are the rare incumbents that ship this; most do not — the gap WE closes.) Because it is a fixed invariant, it is not a dimension.</p><h3>Substrate &amp; composition</h3><p class=\"text-sm text-gray-600 mb-2\">Built on <strong>Pointer Events</strong> (unified mouse/touch/pen, pointer capture) with <code>touch-action: none</code> so the browser doesn't consume the drag. The pointer drag itself is recognized via the <a href=\"/intents/gesture/\">gesture</a> intent (<code>pan</code>); the divider is the recognition's <em>effect</em>. Composes <code>layout.pane</code> (the subdivision it resizes). Grounded in the spatial-manipulation survey (<a href=\"/research/spatial-manipulation-arrangeable-surfaces/\">spatial-manipulation arrangeable surfaces</a>).</p>"
+}
