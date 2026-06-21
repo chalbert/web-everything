@@ -622,7 +622,11 @@ intent's defining inputs (no provider, no state, no transitions) — that's a fo
 own home, not a widening candidate.
 
 **Lineage:** #009 (Notification Marker — split the count/dot family off "badge") · #1319 (Tag Intent —
-split the decorative label family off "badge"; Status Indicator keeps lifecycle). Inverse face of
+split the decorative label family off "badge"; Status Indicator keeps lifecycle) · #1395 (Mutation Intent —
+the word **"optimistic"** is overloaded across two axes: a *read/blocking* strategy on `loader` ("don't
+block the UI, sync in background") vs a *write apply-then-rollback* lifecycle; carve a first-class `mutation`
+intent (symmetric to `loader` for reads) rather than widen the visual-weight `action` intent — `action`
+supplies none of the write-lifecycle's inputs, the foreign-family tell). Inverse face of
 [compose-intent-dont-duplicate](#compose-intent-dont-duplicate); kin to [reproduction-conformance](#reproduction-conformance)
 (the gap sweeps that surface these overloads) and [intents-ux-only](#intents-ux-only).
 

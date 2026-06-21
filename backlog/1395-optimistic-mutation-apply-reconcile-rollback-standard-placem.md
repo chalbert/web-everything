@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#decompose-overloaded-vocabulary-by-semantic-source"
 preparedDate: "2026-06-21"
 tags: [decision, book-candidate, optimistic, mutation, data-lifecycle, gap]
 relatedReport: reports/2026-06-21-optimistic-mutation-placement.md
@@ -20,6 +23,42 @@ topic [optimistic-mutation-lifecycle](/research/optimistic-mutation-lifecycle/) 
 `relatedReport`). Two genuine forks remain, each with a **bold** default below; everything else is *supported
 by default*. Shares a reversibility primitive with undo/redo
 ([#1394](/backlog/1394-undo-redo-reversible-mutation-history-standard-placement/)).
+
+## Ruling (ratified 2026-06-21)
+
+**Fork 1 → (a) mint a first-class `mutation` intent** *(~85%)*. The write-lifecycle axis gets its own
+intent (`strategy` optimistic/pessimistic · rollback · reconcile · `doubleSubmit` · `busy`), **symmetric to
+`loader` for reads**. Grounding sharpened the case: `loader.strategy.optimistic`
+([we:src/_data/intents/loader.json](../src/_data/intents/loader.json)) genuinely means *"don't block the UI,
+sync in background"* — a **read/pending** concept; the write meaning *"apply a predicted result, roll back on
+error"* is a different axis wearing the same word. Minting `mutation` separates the homonyms cleanly — loader
+keeps `optimistic` for non-blocking reads, `mutation.strategy.optimistic` owns apply/rollback. `command`
+([we:src/_data/intents/command.json:5](../src/_data/intents/command.json#L5), *"orthogonal to the Action
+Intent (visual weight)"*) is the precedent. **(b) fold into `action`** and **(c) into `reliability`** rejected
+as written (action = visual weight; reliability = failure-path only, cannot own the optimistic *happy* path).
+**Name = `mutation`** (the whole write axis, matching `useMutation` ≠ `useQuery`; optimistic is one value of
+`strategy`, so not `optimistic-mutation`). `resource-action` retargets `implementsIntent: mutation` (still
+drawing on `action` for trigger weight).
+
+**Fork 2 → (a) share the reversibility primitive over `change-record` / Change Tracking** *(~75%)*. Optimistic
+revert restores a record's `oldValue` (carried *"because RFC 6902 ops are not self-inverting"*,
+[we:src/_data/semantics/change-record.json:4](../src/_data/semantics/change-record.json#L4)) — the same
+inverse-data #1394's undo stack replays. One inverse-data contract, not two drifting ones. `resource-action`
+**MAY keep its 1-deep `previousState` snapshot as a permitted fast-path**. Scope chosen in discussion:
+**ratify (a) as "align on `change-record`" here; #1394 inherits it** (same end-state, lower joint-ratification
+coupling). The ~75% (vs Fork 1's ~85%) is the 1-deep↔N-deep coupling — the one place over-generalization could
+bite, mitigated by the fast-path carve-out.
+
+**Red-team outcome.** Fork 1's "loader already has `optimistic`, so `mutation` is redundant" attack *fails* —
+they are homonyms on different axes (read-blocking vs write-apply), which argues *for* the split. Fork 2's
+1-deep↔N-deep coupling risk is handled by letting #1394 inherit rather than co-ratifying, plus the fast-path.
+No principle violated (impl-is-not-a-standard holds: the running lifecycle stays in `resource-action`/FUI;
+only the intent + reversibility *contracts* move).
+
+**Spin-out builds (blockedBy chain):** [#1431](/backlog/1431-mint-the-mutation-intent-write-lifecycle-axis-symmetric-to-l/)
+mint the `mutation` intent → [#1432](/backlog/1432-retarget-resource-action-to-implementsintent-mutation-fix-op/)
+retarget `resource-action` + fix `intentDimension` → [#1433](/backlog/1433-wire-optimistic-revert-rollback-onto-change-record-change-tr/)
+wire the change-record rollback contract (jointly with #1394).
 
 ## Axis framing — what's actually open
 
