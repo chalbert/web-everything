@@ -99,8 +99,8 @@
       "rationale": "Every mutation UI needs double-submit prevention. Building it into the directive avoids repetitive boilerplate."
     },
     "optimisticRevert": {
-      "description": "Optimistic updates are automatically reverted on error",
-      "rationale": "Optimistic UI is the happy path; revert-on-error is the safety net. The directive manages both sides of the lifecycle."
+      "description": "Optimistic updates are automatically reverted on error, restoring the change-record `oldValue` (#1395 Fork 2a)",
+      "rationale": "Optimistic UI is the happy path; revert-on-error is the safety net. The rollback contract is aligned on the `change-record` semantic / Change Tracking protocol — a revert restores the record's `oldValue` (the inverse data change-record centralizes because RFC 6902 ops are not self-inverting), the SAME reversibility primitive the undo-history block (#1438/#1394) replays for undo. A failed-write rollback runs a SEPARATE runtime from the user undo stack (#1394 Fork 4a) — a rollback must never land as a user-undoable step. The `resource-action-revert` event's 1-deep `previousState` snapshot is a permitted fast-path over that shared contract, not a divergent second mechanism."
     },
     "virtualElement": {
       "description": "Uses comment-based markers like Resource Loader for layout preservation",
