@@ -25,9 +25,12 @@ export interface Plug {
    * Downgrade a root node to deactivate this plug's behavior.
    * Called during the unified downgrade process.
    *
+   * Optional (#1350): a plug whose behavior has no teardown step need not implement it.
+   * `upgrade` stays mandatory; call sites null-guard with `plug.downgrade?.(root)`.
+   *
    * @param root - The root node to downgrade
    */
-  downgrade(root: RootNode): void;
+  downgrade?(root: RootNode): void;
 }
 
 /**
@@ -38,7 +41,6 @@ export function isPlug(obj: unknown): obj is Plug {
     typeof obj === 'object' &&
     obj !== null &&
     typeof (obj as Plug).localName === 'string' &&
-    typeof (obj as Plug).upgrade === 'function' &&
-    typeof (obj as Plug).downgrade === 'function'
+    typeof (obj as Plug).upgrade === 'function'
   );
 }

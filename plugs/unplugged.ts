@@ -36,7 +36,7 @@ const upgradedRoots = new Set<RootNode>();
 export function register(plug: Plug): void {
   if (!isPlug(plug)) {
     throw new Error(
-      `Cannot register plug: object must implement the Plug interface (localName, upgrade, downgrade)`
+      `Cannot register plug: object must implement the Plug interface (localName, upgrade; downgrade optional)`
     );
   }
 
@@ -60,7 +60,7 @@ export function unregister(plug: Plug | string): void {
   if (existingPlug) {
     // Downgrade all roots before removing
     for (const root of upgradedRoots) {
-      existingPlug.downgrade(root);
+      existingPlug.downgrade?.(root);
     }
     plugs.delete(localName);
   }
@@ -157,7 +157,7 @@ export function downgrade(root?: RootNode): void {
     // Downgrade all plugs in reverse registration order
     const plugList = Array.from(plugs.values()).reverse();
     for (const plug of plugList) {
-      plug.downgrade(currentRoot);
+      plug.downgrade?.(currentRoot);
     }
 
     upgradedRoots.delete(currentRoot);

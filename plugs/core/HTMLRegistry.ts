@@ -24,7 +24,8 @@ export default abstract class HTMLRegistry<Definition extends ConstructorDefinit
   #constructors = new Map<Function, string>();
 
   abstract upgrade(node: Node): void;
-  abstract downgrade(node: Node): void;
+  // Optional per the Plug contract (#1350): a registry with no teardown step may omit it.
+  downgrade?(node: Node): void;
 
   getLocalNameOf(constructor: ConstructorDefinition<Type>['constructor']) {
     return this.#constructors.get(constructor);
