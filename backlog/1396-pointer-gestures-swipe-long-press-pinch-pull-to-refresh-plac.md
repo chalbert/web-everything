@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#decompose-overloaded-vocabulary-by-semantic-source"
 preparedDate: "2026-06-21"
 tags: [decision, book-candidate, gestures, pointer, touch, interaction, gap]
 relatedReport: reports/2026-06-21-pointer-gestures-placement.md
@@ -19,6 +22,48 @@ action a gesture triggers. The one fork below is grounded in a prior-art survey 
 [/research/ topic](/research/pointer-gesture-vocabulary-placement/) (session report linked via
 `relatedReport`); the recommended default is in **bold**. Surfaced by the verb-axis lens
 ([#1390](/backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi/)).
+
+## Ruling (ratified 2026-06-21)
+
+**Fork 1 → (a): a separate `gesture` intent that composes `interaction`** (gated to pointer/touch
+modality), mirroring `focus-delegation` and `hover-intent`. *(~85%.)* The decisive crux is
+scope/cardinality: `interaction.modality` is **ambient / document-level / singular** (one
+`pointer|touch|gamepad` value per page), whereas a gesture binding is **per-element / plural** (this card
+swipes, that image pinches). Folding plural per-element bindings into a singular ambient intent is a
+genuine category error, not just untidy — it is exactly the "never widen one intent to absorb a foreign
+family" rule ([we:docs/agent/platform-decisions.md#decompose-overloaded-vocabulary-by-semantic-source](../docs/agent/platform-decisions.md#decompose-overloaded-vocabulary-by-semantic-source);
+the "tell" matches — a gesture binding supplies *none* of modality's defining inputs). The precedent is
+doubled and exact: WE already gave two interaction-adjacent concerns their own homes composing
+`interaction` (`focus-delegation`, `hover-intent` — the latter exists *because hover has no touch
+equivalent*, the same "platform ships raw input, not the recognized layer" shape). Consistent with the
+#1393 zoom/pan prep, which rejects the same dilution.
+
+**(b) — a `gestures` dimension on `interaction` — rejected.** Coherent but inferior on merit: its sole
+upside is "one fewer intent," an effort argument, not a fork branch (fork-is-not-prioritization). It
+conflates two scopes and breaks the established separation precedent.
+
+*Residual (~15%):* once authored the `gesture` intent may itself want a further split (discrete
+tap/long-press vs continuous pan/pinch) or a recognizer **protocol** sooner than "deferred" — both are
+*downstream* of (a), not arguments against it.
+
+**Ratified ride-alongs (settled at prep, blessed here):**
+
+- **Forced invariant — a11y parity.** Every gesture binding declares a single-pointer / keyboard
+  equivalent; a gesture is never the only path. **WCAG 2.1 SC 2.5.1** (+ 2.5.2 cancellation, 2.5.4
+  motion-actuation), borrowed verbatim. Mirrors `hover-intent`'s `touch` fallback.
+- **Open gesture vocabulary** — standardize the convergent core (`tap · double-tap · long-press · pan ·
+  swipe · pinch · rotate · two-finger-pan · edge-swipe · pull-to-refresh`), authors extend
+  (intents-are-open-design).
+- **Recognizer engine = native-first + DI override + Configurator card**, *not* a protocol minted now
+  (minimize-lock-in). A full Gesture Recognizer Protocol is a deferred, separately-prioritized candidate.
+- **Recognition / effect seams stay separate** (pinch → #1393 viewport; swipe → carousel paging;
+  long-press → `contextmenu`/`command`; pan/drag → `data-transfer`/`reorder`).
+
+**Graduation chain filed at resolution** (`blockedBy`):
+[#1428](/backlog/1428-gesture-intent-spec-mint-we-src-data-intents-gesture-json-co/) gesture intent spec
+→ [#1429](/backlog/1429-native-first-gesture-recognizer-behavior-compute-recognition/) native-first
+recognizer behavior → [#1430](/backlog/1430-gesture-recognizer-engine-technical-configurator-card-native/)
+Technical Configurator card for the engine choice.
 
 ## The axis
 
