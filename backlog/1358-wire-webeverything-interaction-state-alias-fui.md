@@ -3,8 +3,11 @@ kind: story
 size: 2
 parent: "1250"
 locus: frontierui
-status: open
+status: resolved
 dateOpened: "2026-06-20"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
 tags: []
 ---
 
@@ -18,3 +21,11 @@ Foundational and unencoded: discovered during #1306 (batch-2026-06-20-1344-1342)
 hand-merge up to WE imports `InteractionStateTracker`, but FUI has no local `interaction-state/` dir and
 no alias, so the import can't resolve. The #1306-creating `/split` carved #1344 for commitment-policy/error-summary
 but missed this third WE-resident model. Unblocks #1306.
+
+## Progress (2026-06-21 — batch-2026-06-20-1358-1357)
+
+Added the `@webeverything/interaction-state` → `we:interaction-state/index.ts` alias to all three FUI
+configs (`fui:tsconfig.json`, `fui:vite.config.mts`, `fui:vitest.config.ts`), mirroring the #1344
+commitment-policy/error-summary entries exactly. Confirmed the WE barrel re-exports
+`InteractionStateTracker` (value) + `InteractionState` (type), so the
+`fui:plugs/webvalidation/ValidityMergeField.ts` import now resolves. Green FUI gate.
