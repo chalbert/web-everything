@@ -25,7 +25,22 @@ a11y-first — `role=separator` is exactly what implied the splitter in
 - For each: covered (name the intent/block) / partial / ❌.
 - File a `book-candidate` card per ❌ or partial; dismiss with a one-line reason otherwise.
 
+## Run 1 — 2026-06-21 (WAI-ARIA APG pattern index)
+
+Diffed the ~30 APG patterns against the registry.
+
+**Covered** (named owner): accordion → `disclosure`/`disclosure-nav`; alert / alertdialog → `notification`/`live-region-status`/`modal`; breadcrumb → `breadcrumb`; button → `button`/`action`; carousel → `carousel`; checkbox → `checkbox`; combobox → `type-ahead`/`autocomplete`+`dropdown`; dialog → `dialog`/`modal`; disclosure → `disclosure`; grid → `data-grid`; landmarks → `sectioning`/`app-shell`; link → `navigation`; listbox → `selection`+`droplist`; menu / menubar / menu-button → `menu`; radio-group → `radio-group`; slider → `slider`; spinbutton → `stepper`; switch → `toggle-switch`; table → `data-table`; tabs → `tabs`; tooltip → `tooltip`; tree → `tree-select`; **window splitter → already filed [#1384](/backlog/1384-spatial-manipulation-arrangeable-surfaces-resizable-splitter/)**.
+
+**Gaps filed** (placement-unsure → decision):
+- **Toolbar** (roving-tabindex control group) → [#1409](/backlog/1409-toolbar-roving-tabindex-control-group-standard-placement/).
+- **Meter / gauge** (bounded scalar readout) → [#1410](/backlog/1410-meter-gauge-quantitative-readout-standard-placement/).
+- **Treegrid** (hierarchical grid) → [#1411](/backlog/1411-treegrid-hierarchical-interactive-data-grid-standard-placeme/).
+
+**Dismissed with reason:** *feed* → covered by progressive-loading [#1398](/backlog/1398-progressive-loading-infinite-scroll-load-more-standard-place/); *multi-thumb slider* → a `slider` dimension, not its own standard.
+
+Next round: re-diff when the APG index version changes, or when new blocks ship.
+
 ## Done when
 
 Every APG pattern has a covered / partial / ❌ verdict, and each non-covered verdict is a filed card or a
-dismissed-with-reason line.
+dismissed-with-reason line. **Round 1 complete (2026-06-21).**

@@ -52,6 +52,14 @@ axes get checked every run.
 | **pointer gestures (swipe / long-press / pinch / pull-to-refresh)** | `interaction` = modality, not gestures | ~ candidate (likely extend `interaction`) |
 | **in-place / inline edit (editable cell, edit-in-place)** | — | ❌ candidate (verify vs data-grid) |
 | **progressive load / infinite-scroll / load-more** | composes `viewport-presence` + `windowed-collection` | ~ candidate (no explicit pattern) |
+| **marquee / rubber-band select (2-D)** | `selection` = choice, not spatial | ❌ → [#1406](/backlog/1406-marquee-rubber-band-selection-2-d-drag-select-standard-place/) (sweep) |
+| **scroll-driven UI (progress / scroll-spy)** | `viewport-presence` = enter/leave only | ~ → [#1407](/backlog/1407-scroll-driven-ui-scroll-progress-scroll-spy-scroll-linked-an/) (sweep) |
+| **content annotation / highlight** | — | ❌ → [#1408](/backlog/1408-content-annotation-highlight-comment-on-selection-standard-p/) (sweep) |
+
+> **Verb axis completeness-swept 2026-06-21.** Second pass added the three rows above (#1406–#1408).
+> Adjacent verbs routed to other lenses, not filed here: Web Share → platform-API ([#1257](/backlog/1257-platform-standards-watch-keep-we-current-as-the-web-platform/));
+> collaboration / presence / multiplayer → data-lifecycle ([#1403](/backlog/1403-discovery-lens-data-lifecycle-paradigms-load-cache-mutate-sy/)) / app-infra ([#1402](/backlog/1402-discovery-lens-app-infrastructure-cross-cutting-concerns-inv/));
+> media scrubbing → partial via `slider` + `temporal`. The verb axis is considered exhausted for this round.
 
 ## Harvest — candidate standards to carve (not yet filed)
 
