@@ -1,0 +1,5 @@
+{
+  "term": "Edit-in-Place Intent",
+  "definition": "The display→edit→commit/cancel lifecycle as a reusable thin primitive — turn a displayed value into an editor in place and back (click-to-edit field, editable cell, rename-in-tree). Owns only the activation gesture, the display⇄editor renderer swap for one atomic value, and commit/cancel-revert (APG Enter/F2/Esc); composes input, validation, focus-delegation, optionally rich-text.",
+  "usage": "Standardized by the Edit-in-Place Intent; data-grid is the first consumer."
+}

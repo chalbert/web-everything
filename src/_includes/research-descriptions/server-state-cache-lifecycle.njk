@@ -1,0 +1,91 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    The <strong>server-state cache lifecycle</strong> that TanStack Query / SWR / RTK Query / Apollo all
+    converged on — a keyed query cache with staleness/TTL, in-flight de-dupe, invalidate/refresh,
+    background-refetch, and query dependency — has no WE owner. This survey grounds decision
+    <a href="/backlog/1419-server-state-query-cache-lifecycle-fetch-dedupe-cache-stalen/">#1419</a>
+    (surfaced by the data-lifecycle lens
+    <a href="/backlog/1403-discovery-lens-data-lifecycle-paradigms-load-cache-mutate-sy/">#1403</a>):
+    a <code>query</code>/<code>server-state</code> intent over a swappable cache provider, vs extending
+    <a href="/intents/loader/">resource-loader/loader</a> with cache traits, vs a headless store-adjacent
+    block? It is the read-path counterpart to optimistic mutation
+    (<a href="/backlog/1395-optimistic-mutation-apply-reconcile-rollback-standard-placem/">#1395</a>,
+    prepared).
+</p>
+
+<h3>Recommendation (to ratify in #1419)</h3>
+<ol>
+    <li><strong>Mint a <code>query</code> (server-state) intent</strong> (Fork&nbsp;1, ~85%) abstracting the
+        cache-lifecycle contract <code>key → {data, staleness, revalidate}</code>. Extending
+        <code>resource-loader</code>/<code>loader</code> is the broken branch — those model <em>one fetch's
+        UI state</em>; a cross-query shared keyed store is a store, not a fetch. This is the symmetric
+        mistake #1395 untangled on the write side.</li>
+    <li><strong>The cache is a swappable runtime-DI provider behind the contract</strong> (Fork&nbsp;1-sub,
+        ~85%): baking one impl forecloses the Cache API / an in-memory map / a normalized entity store
+        (protocol-is-the-only-lock). The <code>key → {data, staleness, revalidate}</code> interface is the
+        lock.</li>
+    <li><strong>Read-path symmetric counterpart to #1395</strong> (supported, not a fork): a mutation
+        invalidates <code>query</code> cache entries and optimistically writes into the cache — completing a
+        three-way: <code>loader</code> (single-fetch UI), <code>query</code> (cross-query cache, reads), the
+        proposed mutation lifecycle (writes).</li>
+</ol>
+
+<h3>Native grounding — borrow the platform vocabulary</h3>
+<p>
+    The platform standardizes this at the HTTP layer: <code>Cache-Control</code> (RFC&nbsp;9111 +
+    RFC&nbsp;5861) — <code>max-age</code> = the fresh window (TanStack <code>staleTime</code>);
+    <strong><code>stale-while-revalidate</code></strong> = serve stale immediately while revalidating in the
+    background (the exact SWR pattern, named at the protocol level); <code>stale-if-error</code> maps to the
+    reliability failure seam. The <a href="https://developer.mozilla.org/en-US/docs/Web/API/Cache">Cache
+    API</a> is the keyed store model for a swappable provider; <code>AbortController</code> is the dedupe
+    primitive. <a href="https://swr.vercel.app/">SWR is literally named after</a>
+    <code>stale-while-revalidate</code> (RFC&nbsp;5861) — native-first alignment is the lineage.
+</p>
+
+<h3>Finding 1 — four libraries converged on one model with different vocabulary</h3>
+<table>
+    <thead><tr><th>Concept</th><th>TanStack</th><th>SWR</th><th>RTK Query</th><th>Apollo</th></tr></thead>
+    <tbody>
+        <tr><td>Cache key</td><td><code>queryKey</code></td><td><code>key</code></td><td>endpoint+args</td><td>normalized ID</td></tr>
+        <tr><td>Fresh window</td><td><code>staleTime</code></td><td>dedupe window</td><td>(tags)</td><td>(policy)</td></tr>
+        <tr><td>Unused-entry GC</td><td><code>gcTime</code></td><td>unmount</td><td><code>keepUnusedDataFor</code></td><td><code>cache.gc()</code></td></tr>
+        <tr><td>Invalidate</td><td><code>invalidateQueries</code></td><td><code>mutate(key)</code></td><td><code>invalidatesTags</code></td><td><code>evict</code></td></tr>
+        <tr><td>Dependent query</td><td><code>enabled</code></td><td>conditional key</td><td><code>skip</code></td><td><code>skip</code></td></tr>
+    </tbody>
+</table>
+<p>
+    The model: a keyed store of <code>{data, status, freshUntil}</code> entries, with de-duped in-flight
+    fetches, staleness-driven background revalidation, on-demand invalidation, and unused-entry GC. Same
+    model, four vocabularies — textbook intent-abstraction (the
+    <a href="https://tanstack.com/query/latest/docs/reference/QueryClient">QueryClient</a> /
+    <a href="https://swr.vercel.app/docs/api">SWR</a> /
+    <a href="https://redux-toolkit.js.org/rtk-query/usage/automated-refetching">RTK Query</a> /
+    <a href="https://www.apollographql.com/docs/react/data/queries/">Apollo</a> convergence).
+</p>
+
+<h3>Finding 2 — fresh/stale is two independent timers; Finding 3 — invalidation is the read↔write seam</h3>
+<p>
+    <code>staleTime</code>/<code>max-age</code> (when to revalidate) is orthogonal to
+    <code>gcTime</code>/<code>keepUnusedDataFor</code> (when to evict) — both must be distinct dimensions.
+    On the write side, <a href="/specs/resource-action/">resource-action</a> already lists
+    <code>invalidateQueries</code> as a pattern it mirrors but has <em>no cache to invalidate</em> —
+    confirming the residual is a real named gap the write side points at.
+</p>
+
+<h3>WE-tree decomposition — WE owns one-fetch UI state, not a cross-query cache</h3>
+<ul>
+    <li><a href="/intents/loader/">loader</a> — pending-state UX; its <code>stale</code> state is the
+        <em>display</em> of staleness for one operation (a version-token race guard), no key, no store.</li>
+    <li><a href="/specs/resource-loader/">resource-loader</a> — the single-fetch orchestrator;
+        <code>withStaleWhileRevalidate</code> keeps previously-rendered content visible during one refresh;
+        does not cache across calls.</li>
+    <li><a href="/intents/prefetch/">prefetch</a> — eagerness only. <a href="/specs/simple-store/">simple-store</a>
+        — generic reactive client state (no keys/staleness/fetch).</li>
+</ul>
+<p>
+    The unowned residual is a <strong>shared, keyed, staleness-aware cache across queries</strong>:
+    <code>key → {data, freshUntil, status, revalidate()}</code> with in-flight dedupe, background
+    revalidation, on-demand invalidation, dependent-query gating, and unused-entry GC.
+</p>
+{% endraw %}

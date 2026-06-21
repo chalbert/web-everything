@@ -1,0 +1,41 @@
+{
+  "id": "edit-in-place",
+  "name": "Edit-in-Place Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "summary": "The display→edit→commit/cancel lifecycle as a reusable thin primitive (placement ratified #1397): turn a displayed value into an editor in place and back — click-to-edit field, editable table cell, rename-in-tree. Owns ONLY the thin residual — the activation gesture, the display-renderer⇄editor-renderer swap for one atomic value, and commit / cancel-revert-to-baseline (adopting the WAI-ARIA APG Enter/F2/Esc vocabulary) — and COMPOSES input (the editor), validation (the commit gate), focus-delegation (cell focus), optionally rich-text (flowed editor) rather than re-owning them. The lifecycle recurs without a grid, so data-grid is the first consumer, not the home. Mirrors accessible-name (#596): own the thin recurring policy.",
+  "dimensions": {
+    "activation": {
+      "description": "The gesture that swaps the read-only display for the editor. `click` (single-click, the field default) · `dblclick` (the cell default per APG) · `affordance` (an explicit edit button/icon) · `programmatic` (the host opens it, e.g. on row-add). Open-numbered; most-permissive default is the union the consumer picks — a sensible single default is `click` for standalone fields and `dblclick`/F2 for grid cells.",
+      "values": [
+        "click",
+        "dblclick",
+        "affordance",
+        "programmatic"
+      ]
+    },
+    "commitOn": {
+      "description": "When the edited value is written back (the lifecycle's commit trigger). `blur` (focus leaves the editor) · `enter` (Enter key) · `explicit` (an Ok button / confirm affordance). Composes — does not duplicate — validation: this dimension fires the WRITE-BACK; whether that write is permitted is validation's `execution`/`commitment`. Default for fields is `blur`+`enter`; cells typically `enter`.",
+      "values": [
+        "blur",
+        "enter",
+        "explicit"
+      ]
+    },
+    "cancelOn": {
+      "description": "How an edit is abandoned, reverting the value to its baseline (the snapshot taken at activation). `escape` is adopted from the WAI-ARIA APG and is effectively FIXED — Escape always reverts; the dimension exists to name the baseline-revert contract, not to offer alternatives.",
+      "values": [
+        "escape"
+      ]
+    },
+    "editor": {
+      "description": "Which editor the edit view renders — a COMPOSITION POINTER, not a new mechanism. `input` (a single-line/select input — the default) · `rich-text` (a flowed rich-text surface, composing the rich-text intent's editing mode) · `custom` (a host-supplied editor element). The intent points at the editor; it never re-implements text entry.",
+      "values": [
+        "input",
+        "rich-text",
+        "custom"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">The <strong>display&rarr;edit&rarr;commit/cancel</strong> lifecycle as a reusable thin primitive (placement ratified in <a href=\"/backlog/1397-in-place-inline-edit-edit-in-place-editable-cell-standard-pl/\">#1397</a>): turn a <em>displayed value</em> into an <em>editor in place</em> and back — click-to-edit field, editable table cell, rename-in-tree. The lifecycle recurs <strong>without a grid</strong> (Atlassian <code>@atlaskit/inline-edit</code>, PrimeReact <code>Inplace</code>, tree-rename), so <a href=\"/blocks/data-grid/\">data-grid</a> is the <strong>first consumer</strong>, not the home.</p><h3>Owns the thin residual — composes the rest</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns <strong>only</strong>: the <strong>activation</strong> gesture, the <strong>display-renderer&rarr;editor-renderer swap</strong> for one atomic value, and <strong>commit / cancel-revert-to-baseline</strong> (the APG <strong>Enter / F2 / Esc</strong> vocabulary). It <strong>composes</strong> — and never re-owns — <a href=\"/intents/input/\">input</a> (the editor), <a href=\"/intents/validation/\">validation</a> (the commit gate), <a href=\"/intents/focus-delegation/\">focus-delegation</a> (cell focus), and optionally <a href=\"/intents/rich-text/\">rich-text</a> (a flowed editor). Re-owning text entry or validation would duplicate/drift shipped standards (native-first). It sits at the <a href=\"/intents/accessible-name/\">accessible-name</a> altitude — a thin recurring policy, not a mega-widget.</p><h3>Dimensions (draft)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>activation</code>: <code>click</code> / <code>dblclick</code> / <code>affordance</code> / <code>programmatic</code> — how the swap is triggered.</li><li><code>commitOn</code>: <code>blur</code> / <code>enter</code> / <code>explicit</code> — when the write-back fires.</li><li><code>cancelOn</code>: <code>escape</code> (revert to baseline) — adopted from APG, effectively fixed.</li><li><code>editor</code>: <code>input</code> / <code>rich-text</code> / <code>custom</code> — a composition pointer to the edit view.</li></ul><h3>commitOn vs validation — the one-sentence boundary</h3><p class=\"text-sm text-gray-600 mb-2\"><strong>edit-in-place's <code>commitOn</code> decides <em>when the write-back is attempted</em> (blur / Enter / explicit), while <a href=\"/intents/validation/\">validation</a>'s <code>execution</code>/<code>commitment</code> decides <em>whether that attempt is permitted</em> — the gesture fires the commit, validation gates it, so they never both \"own commit on blur.\"</strong></p><h3>Fixed a11y vocabulary — APG</h3><p class=\"text-sm text-gray-600 mb-2\">Borrowed from the WAI-ARIA APG: <strong>Enter</strong> or <strong>F2</strong> enters edit mode (per the consumer's <code>activation</code>), <strong>Escape</strong> reverts to baseline, <strong>Enter</strong> commits. Cell focus during the swap is delegated to <a href=\"/intents/focus-delegation/\">focus-delegation</a>, so focus survives the renderer swap.</p><h3>Realization</h3><p class=\"text-sm text-gray-600 mb-2\">The contract (this intent) and its realization (a FUI behavior block + demo + <code>data-grid</code> editable-cell wiring) coexist at different layers — the same intent+block split <code>data-transfer</code>/<code>reorder</code>/<code>selection</code> each ship. Grounded in the lifecycle survey (<a href=\"/research/edit-in-place-lifecycle/\">edit-in-place lifecycle placement</a>).</p>"
+}

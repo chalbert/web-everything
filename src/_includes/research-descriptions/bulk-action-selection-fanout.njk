@@ -1,0 +1,70 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    Selecting several rows reveals a <strong>contextual action bar</strong> offering operations applied to
+    the <strong>whole selection</strong> (move, assign, label, delete), with select-all / clear affordances
+    and an "N selected" announcement. Recurs across Gmail, Linear, Google Drive, Notion. WE owns the pieces
+    but not the composition. This survey grounds decision
+    <a href="/backlog/1423-bulk-actions-over-a-multi-selection-selection-action-bar-bat/">#1423</a>
+    (production-app teardown lens
+    <a href="/backlog/1404-discovery-lens-production-app-teardown-inventory-real-apps-d/">#1404</a>):
+    a <code>bulk-action</code> intent composing <a href="/intents/selection/">selection</a> +
+    <a href="/intents/command/">command</a>, a <code>selection</code> extension, or a headless behavior?
+</p>
+
+<h3>Recommendation (to ratify in #1423)</h3>
+<ol>
+    <li><strong>A thin <code>bulk-action</code> intent</strong> composing <code>selection</code> +
+        <code>command</code> over a target set (Fork&nbsp;1, ~85%), realized by a FUI behavior block. The
+        <code>selection</code>-trait branch is broken — it forces selection (the choice) to own command
+        fan-out, contradicting its scope and command-orthogonality. A headless behavior with no intent is
+        broken as the <em>sole</em> home (WE owns contracts) — it is correct only as the impl half.</li>
+    <li><strong>Select-all = a <code>scope: visible | matching</code> dimension, default
+        <code>visible</code></strong> (Fork&nbsp;2, ~80%); <code>matching</code> carries a
+        predicate/exclusion-set, not an id-list. Mandating one is broken (both ship deliberately).</li>
+</ol>
+
+<h3>Native grounding</h3>
+<p>
+    The batch-apply surface decomposes onto native/ARIA primitives: "N selected" → an ARIA live region
+    (<code>aria-live="polite"</code>); the action bar → <code>role="toolbar"</code> (WE already owns this);
+    the select-all header → a tri-state checkbox <code>aria-checked="mixed"</code>; the selectable set →
+    listbox/grid multi-select (<code>aria-multiselectable</code>, what <code>SelectionBehavior</code> already
+    projects); post-action focus return → a focus-delegation concern.
+</p>
+
+<h3>Finding 1 — Polaris and Carbon ship bulk-actions as a first-class, named API</h3>
+<ul>
+    <li><a href="https://polaris-react.shopify.com/components/tables/index-table">Shopify Polaris</a> names
+        <code>bulkActions</code> + <code>promotedBulkActions</code> (1–2 promoted out of the overflow
+        menu).</li>
+    <li><a href="https://carbondesignsystem.com/components/data-table/usage/">IBM Carbon</a> names
+        <code>TableBatchActions</code> — a batch bar overlaying the toolbar the moment ≥1 row is selected,
+        <code>getBatchActionProps</code> exposing <code>selectedRows</code> + a live count.</li>
+</ul>
+<p>The composition is the standardizable thing; it recurs identically across Gmail / Linear / Drive / Notion.</p>
+
+<h3>Finding 2 — select-all is two-scope: visible vs matching</h3>
+<p>
+    <a href="https://support.google.com/mail/answer/7190">Gmail</a> selects the page, then surfaces "select
+    all that match this search"; <a href="https://mui.com/x/react-data-grid/row-selection/">MUI X</a> encodes
+    it as <code>checkboxSelectionVisibleOnly</code> + <code>keepNonExistentRowsSelected</code>. So the set a
+    bulk action fans across may be materialized rows OR a predicate over an unmaterialized set.
+</p>
+
+<h3>WE-tree decomposition</h3>
+<ul>
+    <li><a href="/intents/selection/">selection</a> owns <em>the choice</em>; it does not model applying an
+        operation to the chosen set. <a href="/specs/selection/">SelectionBehavior</a> owns multi-select +
+        <code>aria-multiselectable</code> (the input).</li>
+    <li><a href="/intents/command/">command</a> owns <em>a single invocation</em> (one
+        <code>CommandEvent</code>); it does not fan across N targets.</li>
+    <li>The action-bar container is already homed (the <code>toolbar</code> assemblerPreset +
+        focus-delegation + composite-widget — the #1409 placement).</li>
+</ul>
+<p>
+    The unowned residual is the <strong>batch-apply binding/semantics</strong>: fan one command across the
+    live selection set's N targets (id-set OR matching predicate); select-all scope + the
+    <code>mixed</code> header + clear; the "N selected" live count; post-action focus return.
+</p>
+{% endraw %}

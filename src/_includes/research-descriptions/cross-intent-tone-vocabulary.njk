@@ -1,0 +1,80 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    <a href="/backlog/1337-revisit-whether-destructive-belongs-on-level-prominence-or-i/">#1337</a> seated an
+    open-numbered <code>tone</code> dimension on Action with an action-scoped core of
+    <code>neutral | danger</code> and deferred the broader question: should a <strong>shared cross-intent
+    <code>tone</code> vocabulary</strong> exist — one semantic-tone axis consumed by badges, alerts/banners,
+    status indicators <em>and</em> action — versus per-intent tone dimensions that diverge? This survey
+    grounds decision
+    <a href="/backlog/1427-shared-cross-intent-tone-axis-one-tone-vocabulary-for-action/">#1427</a>. The
+    precedent: <a href="/backlog/1318-action-intent-emphasis-style-axis-fill-outline-ghost-link-or/">#1318/#1324</a>
+    rejected a shared <strong>Emphasis Intent</strong> ("vocabularies diverge per intent → don't flatten").
+</p>
+
+<h3>Recommendation (to ratify in #1427)</h3>
+<ol>
+    <li><strong>Per-intent blessed value enum + a shared tone <em>contract</em> + a shared tone <em>token
+        palette</em> in webtheme</strong> (Fork&nbsp;1, ~85%). The shared <em>value enum</em> (one flat list
+        every intent consumes) is the broken branch — six intents already carry four value sets with
+        <code>progress</code>/<code>categorical</code>/<code>danger</code>-only members meaningless on
+        others; #1337 freezes action to <code>neutral | danger</code>; #1318 says "sharing happens at the
+        meta-schema layer, never the value layer"; Bootstrap is the lone flattener and a known smell. This is
+        the #1318 statute applied a second time (variant → tone) — DRY where real (palette + contract),
+        divergent where real (the enums).</li>
+    <li><strong>Standardize the dimension name <code>tone</code> + a canonical synonym table</strong>
+        (Fork&nbsp;2, ~65%): <code>danger</code>≡<code>negative</code>≡<code>critical</code>≡<code>error</code>,
+        <code>success</code>≡<code>positive</code>, <code>warning</code>≡<code>caution</code>, so the theme
+        resolves any synonym to one token. File the per-intent rename sweep as a separate build.</li>
+    <li><strong>Flag for the skeptic pass:</strong> reading "shared axis" as the flat enum is exactly the
+        trap #1318 already sprang; confirm the #1337 freeze (action stays <code>neutral | danger</code>)
+        holds.</li>
+</ol>
+
+<h3>Current tone vocabularies in the WE tree (the divergence is the evidence)</h3>
+<table>
+    <thead><tr><th>Intent</th><th>Dimension</th><th>Values</th></tr></thead>
+    <tbody>
+        <tr><td>Action (per #1337)</td><td><code>tone</code></td><td>neutral · danger</td></tr>
+        <tr><td>Status Indicator</td><td><code>tone</code></td><td>neutral · info · progress · positive · caution · critical</td></tr>
+        <tr><td>Tag</td><td><code>tone</code></td><td>neutral · info · positive · caution · critical · categorical</td></tr>
+        <tr><td>Message (alert/banner)</td><td><code>tone</code></td><td>neutral · positive · caution · negative</td></tr>
+        <tr><td>Feedback (toast)</td><td><code>severity</code></td><td>info · success · warning · error</td></tr>
+        <tr><td>System Notification</td><td><code>severity</code></td><td>info · success · warning · error</td></tr>
+    </tbody>
+</table>
+<p>
+    Three different dimension names for one concept; four different value sets across six intents. Even the
+    intents whose prose claims a "unified vocabulary" disagree — the claim is aspirational, not realized.
+    <code>progress</code> (status-indicator) and <code>categorical</code> (tag) exist only because those
+    intents need them: the strongest in-tree "blessed subset diverges" evidence.
+</p>
+
+<h3>Prior-art findings</h3>
+<ul>
+    <li><strong>(Load-bearing)</strong> <a href="https://spectrum.adobe.com/page/color/">Adobe Spectrum</a> —
+        one semantic palette, but Badge and StatusLight bless <em>different subsets</em>.</li>
+    <li><a href="https://chakra-ui.com/docs/components/alert">Chakra</a> splits the layers literally —
+        <code>status</code> (blessed subset) vs <code>colorScheme</code> (full palette).</li>
+    <li><a href="https://ant.design/components/alert">Ant Design</a> — one palette, three vocabularies; the
+        Button gets only a <code>danger</code> boolean, mirroring #1337's action core.</li>
+    <li><a href="https://getbootstrap.com/docs/5.3/components/alerts/">Bootstrap</a> — the one flattener;
+        <code>btn-warning</code>/<code>btn-info</code> are a known smell.</li>
+    <li><a href="https://www.radix-ui.com/colors">Radix Colors</a> — a pure token layer + thin aliasing, no
+        component vocabulary — the cleanest proof the token layer is separable.</li>
+</ul>
+<p>
+    Every mature system separates a shared color/token palette from a per-component value enum; the blessed
+    subset provably diverges per component even when the palette is shared.
+</p>
+
+<h3>Seams — three separable layers (the separation is the decision)</h3>
+<ol>
+    <li>The shared tone <strong>token palette</strong> in <strong>webtheme</strong> (<code>--tone-{danger,
+        success,…}</code>, light/dark-aware).</li>
+    <li>The shared tone <strong>meta-contract</strong> as a platform-decisions statute (the #1318 statute,
+        second application).</li>
+    <li>The per-intent blessed <strong>value enum</strong>, intent-owned and divergent — sharing never
+        reaches this layer (#1318 holding).</li>
+</ol>
+{% endraw %}

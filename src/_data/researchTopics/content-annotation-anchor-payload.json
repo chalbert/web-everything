@@ -1,0 +1,25 @@
+{
+  "id": "content-annotation-anchor-payload",
+  "title": "Content annotation — placement of the durable span-anchor + payload contract",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #1408 (verb-axis straggler of #1390): select a span of content and attach something to it — highlight, comment, footnote, suggestion — anchored so it survives re-render and (ideally) edits. Pervasive (docs, PDFs, review tools, e-readers); WE owns nothing for it. Native grounding: the CSS Custom Highlight API paints a Range with NO DOM mutation (new Highlight(range) -> CSS.highlights.set() -> ::highlight() pseudo; generalizes ::selection to arbitrary author ranges; cross-browser as of mid-2025 with Firefox 140) — so highlight RENDERING is a solved platform problem; the W3C Web Annotation Data Model (2017 Recommendation) is the canonical anchoring vocabulary (an Annotation has a body=payload + a target carrying Selectors: TextQuoteSelector exact+prefix+suffix content-addressed/robust, TextPositionSelector char offsets/brittle, RangeSelector, FragmentSelector; composed via refinedBy, typically stored as MULTIPLE selectors at once for robustness); Range/Selection/StaticRange bridge user selection -> Range -> paint or serialize; Scroll-To-Text-Fragment (#:~:text=prefix-,exact,-suffix; Chrome/Safari/Firefox) already shipped quote-based anchoring at the URL layer + ::target-text styling. Load-bearing finding: the anchoring/selector model IS the standard and robust-to-edit anchoring is the UNOWNED residual — Hypothesis (the reference client) stores each target as a BUNDLE of selectors (Range+TextPosition+TextQuote), tries them in order on load, falls back to fuzzy text search over the quote, and an annotation with no resolvable quote becomes an ORPHAN; TextQuoteSelector is the foundation. This is exactly what WE owns nothing for: a durable, re-render-and-edit-surviving anchor contract, distinct from selection (transient) and rich-text (in-model). Finding 2: editor-side annotations split on a real axis — marks (in-model, positions auto-map through edits, ride undo/collab) vs decorations (external overlay) (ProseMirror/CodeMirror/Remirror); inside an editable surface the anchor can be an in-model mark, over read-only/foreign content (PDF, published HTML) it must be a selector-anchored external overlay; the annotation contract sits ABOVE this mark-vs-decoration impl choice (a rich-text-editor engine concern). Finding 3: reference clients (RecogitoJS/Annotorious) + products (Google Docs/Notion/Medium) converge on the W3C model (target/selector/body/motivation: highlighting|commenting|tagging). WE-tree: selection intent is form/choice selection (variant:range is a numeric slider range), NOT text-range-to-anchor; rich-text intent decorates ranges without mutating the model for spellcheck/collab cursors (editor-internal, transient), requiresCapabilities includes highlight-api; the highlight-api capability is recorded; no intent/block models a span-anchored payload. Precise unowned residual: a durable span anchor + payload contract — capture a Range, serialize to a robust W3C selector set, re-resolve to a live Range later incl. fuzzy fallback + orphan state, carry an arbitrary payload (highlight/comment/footnote/suggestion); rendering (Custom Highlight API) and popover UI (existing popover/anchor intents) are already covered. Recommendation: (Fork 1, ~88%) IN-SCOPE — out-of-scope/app-specific is the broken branch (contradicts a native substrate + a W3C Recommendation + #:~:text= + pervasiveness; only the comment-thread product UI is app-specific, and it composes existing intents); (Fork 2, ~80%) an annotation (content-annotation) INTENT owning the anchor model (W3C selector vocabulary) + payload/body + overlay disposition, composing selection (capture) / rich-text (in-model mark when editable) / anchor+popover (payload UI) / highlight-api (paint) — folding into rich-text is the broken branch (annotation must work over read-only/foreign content where there is no editable model; a FUI behavior block realizes it, intent+block coexist, not a fork); (Fork 3, dimension not a fork) anchorStrategy quote|position|bundle, most-flexible default bundle (Hypothesis default). Seams: anchoring (W3C selectors — load-bearing unowned seam) vs highlight rendering (Custom Highlight API, native) vs payload/comment UI (composes popover/anchor/rich-text/selection); in-editor mark vs external overlay is a rich-text-editor engine concern below the intent; orphaned-annotation state is first-class; motivation payload kinds are an open enum. Report: reports/2026-06-21-content-annotation-anchor-payload.md.",
+  "dateOpened": "2026-06-21",
+  "tags": [
+    "annotation",
+    "anchoring",
+    "web-annotation-data-model",
+    "text-quote-selector",
+    "custom-highlight-api",
+    "range-selection",
+    "text-fragment",
+    "orphaned-annotation",
+    "overlay-vs-mark",
+    "selection"
+  ],
+  "relatedBlocks": [
+    "selection",
+    "rich-text-editor"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

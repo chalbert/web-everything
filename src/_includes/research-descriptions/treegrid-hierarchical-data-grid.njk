@@ -1,0 +1,73 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    A <strong>treegrid</strong> is a 2-D grid whose rows form an expand/collapse hierarchy (file explorers,
+    grouped data tables, nested org views) — the
+    <a href="https://www.w3.org/WAI/ARIA/apg/patterns/treegrid/">APG Treegrid pattern</a>, with 2-D arrow
+    navigation <em>plus</em> row expand/collapse. WE has <a href="/specs/data-grid/">data-grid</a> (2-D
+    grid nav) and <a href="/specs/tree-select/">tree-select</a> (hierarchy) but no standard for their
+    combination. This survey grounds decision
+    <a href="/backlog/1411-treegrid-hierarchical-interactive-data-grid-standard-placeme/">#1411</a>
+    (the lowest-confidence ARIA-APG harvest item): composition, a <code>data-grid</code> dimension, or its
+    own block?
+</p>
+
+<h3>Recommendation (to ratify in #1411)</h3>
+<ol>
+    <li><strong>A <code>hierarchy</code> projection/dimension on <code>data-grid</code></strong>
+        (Fork&nbsp;1, ~70%): data-grid's row axis is fed by the
+        <a href="/intents/hierarchy/">hierarchy</a> intent's flatten-to-visible-rows projection, rows carry
+        <code>aria-level</code>/<code>aria-expanded</code>, and the movement-engine seam gains the Right/Left
+        disclosure-vs-cell arbitration rule (adds <code>role="treegrid"</code> + a composed
+        <code>hierarchy</code> intent; no new block). Own-block is the broken/over-minting branch — it
+        re-mints data-grid's 2-D engine and re-derives the hierarchy intent, which already <em>names</em>
+        treegrid as a composer. Doc-only composition under-delivers (the arbitration rule is a real contract
+        delta) and is the fallback only if authoring shows zero contract change.</li>
+    <li><strong>Row-grouping vs tree-data is not a fork</strong> (Fork&nbsp;2): two data adapters onto the
+        one hierarchy projection, not two contracts.</li>
+</ol>
+
+<h3>Native grounding</h3>
+<p>
+    <a href="https://www.w3.org/WAI/ARIA/apg/patterns/treegrid/">APG Treegrid</a>: <code>role="treegrid"</code>
+    over <code>role="row"</code>; parent rows carry <code>aria-expanded</code> (omitted on leaves),
+    <code>aria-level</code>, <code>aria-posinset</code>/<code>aria-setsize</code>. The keyboard model is the
+    <em>union</em> WE already owns: <strong>Right</strong> expands a collapsed parent row or moves a cell
+    right; <strong>Left</strong> collapses or moves left; <strong>Up/Down</strong> move across visible
+    rows/cells. APG ships treegrid as its own pattern because it combines tree + grid — an a11y-<em>role</em>
+    distinction, not evidence it must be a distinct <em>block</em>.
+</p>
+
+<h3>Finding 1 — industry treats treegrid as a grid mode/feature, not a separate component</h3>
+<ul>
+    <li><strong>AG Grid</strong> — Tree Data + row grouping are modes of the grid; no separate TreeGrid
+        component.</li>
+    <li><a href="https://mui.com/x/react-data-grid/tree-data/">MUI&nbsp;X DataGrid</a> —
+        <code>treeData</code> + <code>getTreeDataPath</code> + row grouping are props on the same grid.</li>
+    <li><strong>TanStack Table</strong> — expansion is <code>expanded</code> state +
+        <code>getSubRows</code>/<code>getExpandedRowModel</code> on the one table model.</li>
+    <li><strong>Counter-example:</strong> <a href="https://primereact.org/treetable/">PrimeReact
+        TreeTable</a> is a distinct component from DataTable — but the split is driven by input
+        <em>data shape</em> (<code>TreeNode[]</code> vs flat rows), an impl convenience, not a different
+        a11y contract.</li>
+</ul>
+
+<h3>WE-tree decomposition — both halves are already owned</h3>
+<p>
+    <a href="/specs/data-grid/">data-grid</a> owns the 2-D half and is <strong>contractsOnly</strong> — its
+    decision names "the movement engine, the active-cell projection" as the seams against which competing
+    implementations register without changing the contract; it composes Focus-Delegation (orientation
+    <code>both</code>) and does not anticipate hierarchy (flat row axis only).
+    <a href="/intents/hierarchy/">hierarchy</a> owns the disclosure/hierarchy half and <strong>explicitly
+    names treegrid as a composer</strong> — <code>aria-level</code>/<code>setsize</code>/<code>posinset</code>,
+    the Right/Left expand-then-descend / collapse-then-ascend traversal, and the flatten-to-visible-rows
+    projection ("Windowed Collection needs zero tree-specific changes").
+</p>
+<p>
+    The unowned residual is <em>the composition itself</em>: a 2-D grid whose rows are the hierarchy's
+    flattened-visible projection and whose <strong>Right/Left arbitrates row-disclosure vs
+    cell-movement</strong> (collapsed parent row + Right = expand; otherwise = move cell). That rule + the
+    "rows = projection feeding the grid's row axis" wiring is the only genuinely new contract — a projection
+    over two existing seams, not a new engine.
+</p>
+{% endraw %}

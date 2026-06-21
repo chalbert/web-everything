@@ -1,0 +1,80 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    Select a span of content and attach something to it — highlight, comment, footnote, suggestion —
+    anchored so it survives re-render and (ideally) edits. Pervasive across docs, PDFs, review tools and
+    e-readers, yet Web Everything owns nothing for it. This survey grounds decision
+    <a href="/backlog/1408-content-annotation-highlight-comment-on-selection-standard-p/">#1408</a>
+    (verb-axis straggler of
+    <a href="/backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi/">#1390</a>):
+    is this a WE standard <em>at all</em>, and if so its shape — an <code>annotation</code> intent
+    (anchor + payload + overlay), a behavior over text selection, or out-of-scope?
+</p>
+
+<h3>Recommendation (to ratify in #1408)</h3>
+<ol>
+    <li><strong>In-scope</strong> (Fork&nbsp;1, ~88%). Out-of-scope is the broken branch — it contradicts a
+        native substrate (Custom Highlight API), a W3C Recommendation defining the exact vocabulary,
+        <code>#:~:text=</code> shipping quote-anchoring into the URL layer, and the pattern's pervasiveness.
+        Only the comment-thread <em>product</em> UI is app-specific, and it composes existing intents.</li>
+    <li><strong>An <code>annotation</code> intent</strong> (Fork&nbsp;2, ~80%) owning the anchor model (W3C
+        selector vocabulary) + payload/body + overlay disposition, composing
+        <a href="/intents/selection/">selection</a> (capture),
+        <a href="/intents/rich-text/">rich-text</a> (the in-model mark path when the target is editable),
+        <a href="/intents/anchor/">anchor</a>/popover (payload UI) and the <code>highlight-api</code>
+        capability (paint). Folding into rich-text is the broken branch — annotation must work over
+        read-only/foreign content (PDF, published HTML) where there is no editable model. A FUI behavior
+        block realizes it (intent + block coexist, not a fork).</li>
+    <li><strong><code>anchorStrategy</code> is a dimension, not a fork</strong> (Fork&nbsp;3):
+        <code>quote | position | bundle</code>, most-flexible default <code>bundle</code>.</li>
+</ol>
+
+<h3>Native grounding</h3>
+<p>
+    The <a href="https://developer.mozilla.org/en-US/docs/Web/API/CSS_Custom_Highlight_API">CSS Custom
+    Highlight API</a> paints a <code>Range</code> with no DOM mutation (<code>new Highlight(range)</code> →
+    <code>CSS.highlights.set()</code> → <code>::highlight()</code>) — highlight rendering is a solved
+    platform problem. The <a href="https://www.w3.org/TR/annotation-model/">W3C Web Annotation Data
+    Model</a> is the canonical anchoring vocabulary: a <code>body</code> (payload) + a <code>target</code>
+    carrying Selectors (<code>TextQuoteSelector</code> exact+prefix+suffix, <code>TextPositionSelector</code>
+    offsets, <code>RangeSelector</code>, <code>FragmentSelector</code>), typically stored as several at once
+    for robustness. <a href="https://wicg.github.io/scroll-to-text-fragment/">Scroll-to-Text-Fragment</a>
+    (<code>#:~:text=</code>) already shipped quote-based anchoring into the URL layer.
+</p>
+
+<h3>Finding 1 — anchoring is the standard, and robust-to-edit anchoring is the unowned residual</h3>
+<p>
+    <a href="https://web.hypothes.is/blog/fuzzy-anchoring/">Hypothesis</a> stores each target as a
+    <em>bundle</em> of selectors (Range + TextPosition + TextQuote), tries them in order on load, falls back
+    to fuzzy text search over the quote, and turns an unresolvable annotation into an <strong>orphan</strong>.
+    A durable, re-render-and-edit-surviving anchor contract is exactly what WE owns nothing for — distinct
+    from selection (transient) and rich-text (in-model).
+</p>
+
+<h3>Finding 2 — marks (in-model) vs decorations (overlay)</h3>
+<p>
+    ProseMirror / CodeMirror / Remirror converged that annotations modeled as <strong>marks</strong> ride
+    edits/undo/collab, while <strong>decorations</strong> are an external overlay. Inside an editable
+    surface the anchor can be an in-model mark; over read-only/foreign content it must be a
+    selector-anchored overlay. The annotation contract sits <em>above</em> this impl choice (a
+    <a href="/specs/rich-text-editor/">rich-text-editor</a> engine concern).
+</p>
+
+<h3>Finding 3 — reference clients + products converge on the W3C model</h3>
+<p>
+    <a href="https://recogito.github.io/">RecogitoJS</a> / Annotorious emit and consume W3C Web Annotation
+    JSON (<code>target</code>/<code>selector</code>/<code>body</code>/<code>motivation</code>); Google Docs,
+    Notion and Medium all implement the same select → anchor → attach → overlay → reconcile shape.
+</p>
+
+<h3>WE-tree decomposition</h3>
+<p>
+    <a href="/intents/selection/">selection</a> is form/choice selection (its <code>range</code> variant is
+    a numeric slider range), not text-range-to-anchor; <a href="/intents/rich-text/">rich-text</a> decorates
+    ranges without mutating the model for spellcheck/collab cursors (transient, editor-internal) and already
+    requires the <code>highlight-api</code> capability. The unowned residual is a <strong>durable span
+    anchor + payload contract</strong>: capture a Range, serialize to a robust W3C selector set, re-resolve
+    later (incl. fuzzy fallback + orphan state), carry an arbitrary payload. Rendering (Custom Highlight API)
+    and the popover UI (existing popover/anchor intents) are already covered.
+</p>
+{% endraw %}
