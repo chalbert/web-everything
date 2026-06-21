@@ -292,6 +292,35 @@ dispatch/observation (`Event`, `MutationRecord`), not persistent ownership, and 
 (sibling `Injector`/`CustomContext` → `host`, open) · derived from [native-first
 baseline](#native-first-baseline).
 
+### Registry name-validation guards the host-shared namespace, not every `define()` {#registry-name-guard-namespace}
+
+A `CustomRegistry.define()` name-validation throw is justified **iff the registry's keys enter a
+namespace shared with the host platform** — never by a flat "every `define()` call validates the
+same way" rule.
+
+1. **The test is namespace sharing, not the `define()` call.** A key is guard-worthy iff it lands in
+   a namespace where a bare name collides with a host built-in. Today that is the **HTML-attribute**
+   namespace (`CustomAttributeRegistry` → DOM attributes, where `title`/`value`/`type` are taken).
+   Element tags are the other host-shared namespace, but the platform **already** hyphen-forces them.
+2. **Framework-internal keys are not guarded.** Parser / expression / text-node / store / context
+   registry keys never reach the DOM, so their bare grammar tokens (`value`, `pipe`, `call`,
+   `mustache`, `polymer`) stay bare — no guard, no rename. The base `CustomRegistry` stays guard-less;
+   the throw is a deliberate per-registry override, not a base invariant.
+3. **This is the web platform's own rule.** Native `customElements.define` guards *only* element tags
+   (the one host-shared namespace) and imposes nothing on internal JS registries — so scoping the
+   guard generalizes the platform; a flat uniformity rule would be **stricter than the platform's
+   own**, on namespaces it never guards.
+4. **The separator set tracks what each namespace permits** (not uniformity): tags are hyphen-only
+   (a colon isn't a valid tag char); attributes accept hyphen **or** colon (`xml:lang`, `nav:list`).
+5. **One-line statement to cite:** *guard the namespace you share with the host.* This is an instance
+   of the same "name/guard by semantics, not by uniformity" discipline as
+   [host back-reference naming](#host-backreference-naming) and derives from the [native-first
+   baseline](#native-first-baseline).
+
+**Lineage:** #1347 (scope of #1120's guard → `CustomAttributeRegistry` only; sets #1348 rename
+scope) · #1120 (the `CustomAttributeRegistry` `#assertValidName` guard) · derived from [native-first
+baseline](#native-first-baseline).
+
 ### Guard / Gate vocabulary {#guard-gate}
 
 **Guard** gates a *transition*; **Gate** gates *presence*. Protocolize only the **provider +

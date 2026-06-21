@@ -2,9 +2,11 @@
 kind: decision
 parent: "1250"
 locus: frontierui
-status: open
+status: resolved
 dateOpened: "2026-06-20"
-dateStarted: "2026-06-20"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+codifiedIn: "docs/agent/platform-decisions.md#registry-name-guard-namespace"
 preparedDate: "2026-06-20"
 relatedProject: webplugs
 relatedReport: reports/2026-06-20-define-name-validation-scope.md
@@ -73,11 +75,30 @@ separator regardless of namespace).
   (a). Burden of proof is on combining into one uniform rule; (b) has not met it (no collision surface to
   justify the restriction).
 
+## Native precedent — `customElements.define` *is* the canonical instance of (a)
+
+The web platform already applies principle (a) and nothing wider. Native `customElements.define` guards
+exactly one namespace — **element tags**, the one shared with built-in elements (`div`, `span`…) — throwing
+`SyntaxError` for a tag that carries no hyphen, and imposes **no** naming rule on internal JS registries.
+That is (a) verbatim: *guard the host-shared namespace, leave the rest alone.* So (a) does not merely
+resemble the platform — it **generalizes the platform's own rule** to WE's attribute namespace, while (b)
+would invent a uniformity rule the platform itself never applies.
+
+The **separator-set difference is itself native-consistent**, not a deviation: native tags are
+hyphen-only because a colon is *not* a valid custom-element-name character (colons in markup denote
+foreign/namespaced elements, never custom elements); WE `CustomAttributeRegistry` accepts hyphen **or**
+colon because attributes legitimately carry colons (`xml:lang`, `xlink:href`) and `nav:list`-style
+namespacing is an established convention. Each guard tracks what its own namespace actually permits — the
+guard's doc-comment says exactly this (`we:plugs/webbehaviors/CustomAttributeRegistry.ts:190-192`:
+*"Element names are hyphen-only because tags can't carry a colon; attributes can"*). Net effect: choosing
+(b) would impose a uniformity rule **stricter than the web platform's own**, on namespaces the platform
+never guards — which lifts confidence on (a) from ~85% to **~90%**.
+
 ## Recommended path at a glance
 
 | Fork | Options | Recommended default | Confidence |
 |---|---|---|---|
-| Rename scope of #1120's guard | (a) namespace-collision-scoped → `CustomAttributeRegistry` only · (b) flat syntactic rule across all `define()` registries | **(a)** — keep grammar registries' bare tokens | ~85% |
+| Rename scope of #1120's guard | (a) namespace-collision-scoped → `CustomAttributeRegistry` only · (b) flat syntactic rule across all `define()` registries | **(a)** — keep grammar registries' bare tokens | ~90% |
 
 ## Fork 1 — does the #1120 guard generalize beyond `CustomAttributeRegistry`?
 
@@ -113,3 +134,28 @@ is purely that someone may still prefer flat syntax for its own sake; flag this 
 skeptic sub-pass.
 
 The ruling sets the **rename scope** of [#1348](/backlog/1348-enforce-1120-name-validation-throw-in-fui-webbehaviors-renam/).
+
+## Ruling (ratified 2026-06-21) — (a) namespace-collision-scoped, ~90%
+
+**Decision: (a).** #1120's `define()`-name guard does **not** generalize beyond `CustomAttributeRegistry`.
+The throw applies only where a registry's keys enter a namespace shared with the host platform — today the
+HTML-attribute namespace (`CustomAttributeRegistry`) alone. The parser / expression / text-node grammar
+registries keep their bare single-word tokens (`value`, `pipe`, `call`, `mustache`, `polymer`); no
+`#assertValidName` is added to them or to the base `CustomRegistry`.
+
+*Rule of record (one line):* **guard the namespace you share with the host.** A registry's keys are
+guard-worthy iff they enter a host-shared namespace (HTML attributes, element tags); framework-internal
+keys that never reach the DOM are not. This is the web platform's own rule — native `customElements.define`
+guards only element tags and nothing else (see *Native precedent* above) — so (a) generalizes the
+platform, where (b) would impose a uniformity stricter than the platform's own.
+
+*Red-team result:* the consistency attack ("a contributor expects one rule across all `define()` calls")
+fails — the rule *is* uniform once stated as the namespace-sharing invariant above; surprise is cured by
+documenting that invariant, not by churning grammar tokens that have no collision surface. No principle
+violated by (a); (b) violates most-permissive-default and separate-and-decouple. Residual ~10% is bare
+preference for flat syntax, which carries no safety argument.
+
+**Sets #1348 rename scope:** only bare *CustomAttribute* names (if any) rename — the parser/grammar
+registries are untouched. #1348 should also add the one-line *"guard the namespace you share with the
+host"* note to the base `we:plugs/core/CustomRegistry.ts` `define()` doc-comment so the rule is discoverable
+where a future contributor would look. This unblocks the #1333/#1120 throw flip.

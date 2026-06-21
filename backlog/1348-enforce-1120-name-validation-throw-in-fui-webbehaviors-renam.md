@@ -4,7 +4,6 @@ size: 2
 parent: "1250"
 locus: frontierui
 status: open
-blockedBy: ["1347"]
 dateOpened: "2026-06-20"
 tags: [plugs, webbehaviors, naming, validation]
 ---
@@ -18,10 +17,15 @@ Then rename whichever bare CustomAttribute names
 markup + companion `*-when` attrs + `querySelector` call sites. Carved out of #1333 (`/slice`
 2026-06-20).
 
-**Blocked by [#1347](/backlog/1347-does-1120-define-name-validation-apply-beyond-customattribut/)** —
-the naming-scope decision sets the rename set: under its lean (a, CustomAttribute-only) the parser/
-expression registry names (`value`/`pipe`/`mustache`) stay bare and only bare *CustomAttribute* names
-rename; under (b) the parser-registry names rename too.
+**Scope settled by [#1347](/backlog/1347-does-1120-define-name-validation-apply-beyond-customattribut/)
+(resolved 2026-06-21 → ruling (a), [we:docs/agent/platform-decisions.md#registry-name-guard-namespace](/docs/agent/platform-decisions.md)).**
+Rename set is **CustomAttribute-only**: the parser / expression / text-node registry names
+(`value`/`pipe`/`call`/`mustache`/`polymer`) **stay bare and are untouched**. This story therefore (i)
+turns on the `#assertValidName` throw in `fui:plugs/webbehaviors/CustomAttributeRegistry.ts`, (ii)
+renames only whichever bare *CustomAttribute* names exist (markup + companion `*-when` attrs +
+`querySelector` call sites), and (iii) adds the one-line *"guard the namespace you share with the host"*
+note to the base `we:plugs/core/CustomRegistry.ts` `define()` doc-comment so the rule is discoverable
+there.
 
 Demo: unit — `define('nohyphen')` throws `SyntaxError`, a hyphenated/colon name succeeds; full
 `fui:plugs/webbehaviors` suite green.
