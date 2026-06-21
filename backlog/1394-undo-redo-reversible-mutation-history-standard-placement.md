@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#compose-dont-handroll"
 preparedDate: "2026-06-21"
 tags: [decision, book-candidate, undo, redo, history, command, change-tracking, webstates, gap]
 relatedReport: reports/2026-06-21-reversible-mutation-history-undo-redo.md
@@ -12,6 +15,45 @@ crossRef: { url: /research/reversible-history-model/, label: "Prep survey — re
 ---
 
 # Decision — Undo / redo (reversible mutation history) standard: placement
+
+## Ruling — RATIFIED 2026-06-21 (confidence: high)
+
+Undo/redo is **not** greenfield: Web States' Change Tracking Protocol already ships the entire
+reversible-operation contract (verified in-tree — `Change Record.oldValue` "because RFC 6902 ops are
+not self-inverting", the optionally-invertible `Change Patch` "enabling undo/replay",
+`CustomChangeStrategy.applyInverse`, `change-source` `undo`/`replay`, the `change-reverted` event
+applying an inverse patch). Placement therefore **collapses to a forced ratify**, with the four
+sub-forks all resolving to reuse/separation:
+
+- **Fork 1 → (a)** a history layer **composing** the protocol, *not* extending `CustomChangeStrategy`.
+- **Fork 2 → (a)** **reuse** `Change Patch` + `applyInverse`; the command-pattern `invert()` case folds
+  in as a custom strategy supplying `applyInverse` (nothing lost), so no new inverse contract is minted.
+- **Fork 3 → (a)** undo-step grouping is a **`transact()` API on the history block** — a UX-granularity
+  concern the block owns even when a strategy also batches *detection* (the red-team clarification:
+  detection-batching ≠ undo-step policy; two surfaces sharing one strategy must differ in granularity).
+- **Fork 4 → (a)** **share the reversible-op primitive with #1395, separate runtimes** — an optimistic
+  rollback must never land on the user's undo stack. This is the coordinated position to carry into #1395.
+
+**Realizing shape pinned (the tightening agreed at ratification):**
+- The standard artifact is a **block** — `undo-history` (working name), `type: Module`, homed in Web
+  States (#011), mirroring its sibling **`draft-persistence`** (the *storage* facet; undo is the
+  symmetric *navigable-time* facet), behind the pluggable `CustomChangeStrategy` rather than any concrete
+  store. Not "behavior/block" — a **block**, by the draft-persistence precedent.
+- The undo/redo **UI control is a *separate* downstream block composing `command`** (invoke) +
+  `status-indicator` (`canUndo`/`canRedo`) + `feedback`/`notification` ("undone X") — never folded into
+  the history engine. This keeps the layer fork closed at build time.
+- **Scope** reuses `CustomChangeStrategyRegistry` (fixed mechanic). **Editable-surface undo** bridges the
+  native `historyUndo`/`historyRedo` `InputEvent` (native-first, fixed mechanic).
+
+**Red-team result:** the excluded branches in Forks 1–2 are *broken* (re-mint or mis-couple a shipped,
+already-consumed contract), not merely weaker; Fork 3's strongest counter lands only as the clarification
+above, not a reversal; the chosen branches are the ones *consistent* with Intent-UX-only,
+bias-toward-separation, and native-first — no violated principle found. Default survives.
+
+**Graduates to:** the placement decision is resolved; the realizing build is deferred to
+[#1438](/backlog/1438-build-undo-history-block-web-states-navigable-mutation-histo/).
+
+---
 
 **Prepared 2026-06-21 — ready to ratify.** Candidate latent standard surfaced by the verb-axis lens
 ([#1390](/backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi/)): a reversible
