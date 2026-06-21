@@ -254,6 +254,45 @@ for (const t of semantics) {
   seenTerms.set(key, true);
 }
 
+// ── 5a. Semantics glossary COVERAGE (#1371 slice B of #1327; scope ratified #1343) ───────────────
+// The glossary is the project's ubiquitous vocabulary of CONCEPTS. The concept-bearing registries —
+// intents + protocols + capabilities — should each have a matching glossary term; a block/plug earns
+// a term only when it opts in via `isConcept: true` (the #1343 contested-name carve, consumed by the
+// #1368 curation pass). WARN-only (matches the other coverage warnings) so partial coverage is a valid
+// state and the gate stays green while A1 (#1369 intents) / A2 (#1370 protocols) backfill it.
+{
+  // Normalize a name/term to its concept key: drop a trailing standard-kind suffix word, lowercase.
+  // Mirrors the #1327 audit join (term vs name, suffix-stripped) so "Action Intent" ↦ term "Action".
+  const KIND_SUFFIX = /\s+(Intent|Protocol|Plug|Capability|Block)$/i;
+  const conceptKey = (s) => String(s || '').replace(KIND_SUFFIX, '').trim().toLowerCase();
+  const termSet = new Set(semantics.map((t) => conceptKey(t.term)).filter(Boolean));
+  const hasTerm = (name) => { const k = conceptKey(name); return !!k && termSet.has(k); };
+
+  // Wholesale-scope concept registries — every in-scope entry should carry a term.
+  for (const [label, list, getName] of [
+    ['intent', intents, (x) => x.name],
+    ['protocol', protocols, (x) => x.name],
+    ['capability', capabilities, (x) => x.label || x.name],
+  ]) {
+    for (const item of list) {
+      const nm = getName(item);
+      if (!nm) continue;
+      if (!hasTerm(nm))
+        warn(`Glossary coverage: ${label} "${item.id}" ("${nm}") has no matching semantics term — add src/_data/semantics/<slug>.json { term, definition, usage } (warn-level, #1327)`);
+    }
+  }
+
+  // isConcept opt-in — a block/plug flagged `isConcept: true` MUST have a glossary term (#1343 / #1368).
+  for (const [label, list] of [['block', blocks], ['plug', plugs]]) {
+    for (const item of list) {
+      if (item.isConcept !== true) continue;
+      const nm = item.name || item.id;
+      if (!hasTerm(nm))
+        warn(`Glossary coverage: ${label} "${item.id}" ("${nm}") is flagged isConcept:true but has no matching semantics term — add one (#1343 isConcept opt-in)`);
+    }
+  }
+}
+
 // ── 6. Unique ids per registry ────────────────────────────────────────────────
 const dupCheck = (list, label) => {
   const seen = new Set();
@@ -677,15 +716,30 @@ for (const item of backlog) {
   // only to be told by branch C to resolve — the contradiction of "stalled" and "done" at once.
 }
 
+// No epic may embed "needs a decision" as its childless reason. An open design decision that gates an
+// epic's slicing is a first-class `kind: decision` work item (the plan of record — never plan mode, never
+// an inline body fork), and the epic depends on it through a `blockedBy` edge — NOT a `childlessReason:
+// undecided` shortcut that hides the fork inside the umbrella. (User directive 2026-06-20; mirrors the
+// "No Decision+Epic Conflation" rule. docs/agent/backlog-workflow.md → decisions are work items.)
+for (const item of backlog) {
+  if (item.childlessReason === 'undecided')
+    err(`Backlog item "${item.id}" has childlessReason: undecided — an epic must not embed an open decision as its slicing blocker. Carve the fork into its own \`kind: decision\` item and point this epic's \`blockedBy\` at it (then drop childlessReason). If the decision is already resolved, just drop childlessReason so the epic shows as ready to slice.`);
+}
+
 // `unsplittableReason` — the story-side mirror of an epic's `childlessReason` (src/_data/backlogMeta.js
 // → unsplittableReasonMeta). A `/split` run that rules an oversized story could-not-split records the
 // reason to clear the split flag (so the board stops re-flagging it). It's only meaningful on an OPEN
 // story in the should-split band (size > 8) — anywhere else it's a misplaced field that would silently
 // do nothing — and its value must be a known reason. (docs/agent/backlog-workflow.md → "Splitting".)
-const UNSPLITTABLE_REASONS = new Set(['foundational', 'undecided', 'atomic', 'fixture']);
+// `undecided` is intentionally NOT a valid unsplittable reason: a story that can't be split because a
+// buried fork would scatter across the slices must carve that fork into a `kind: decision` item and gate
+// on it via `blockedBy` — same rule as the epic side above — not park behind an inline "needs decision".
+const UNSPLITTABLE_REASONS = new Set(['foundational', 'atomic', 'fixture']);
 for (const item of backlog) {
   if (item.unsplittableReason === undefined) continue;
-  if (!UNSPLITTABLE_REASONS.has(item.unsplittableReason))
+  if (item.unsplittableReason === 'undecided')
+    err(`Backlog item "${item.id}" has unsplittableReason: undecided — a buried fork that blocks splitting is a first-class \`kind: decision\` item, not an inline reason. Carve the decision and point this story's \`blockedBy\` at it, then re-run /split once it's resolved.`);
+  else if (!UNSPLITTABLE_REASONS.has(item.unsplittableReason))
     err(`Backlog item "${item.id}" has unsplittableReason: "${item.unsplittableReason}" — not a known reason. Use one of: ${[...UNSPLITTABLE_REASONS].join('|')}.`);
   else if (item.kind !== 'story' || typeof item.size !== 'number' || item.size <= 8 || item.status === 'resolved')
     err(`Backlog item "${item.id}" has unsplittableReason but is not an open oversized story (kind: story, size > 8) — the field only clears the /split flag there. Drop it, or re-size/re-kind the item.`);
