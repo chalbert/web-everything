@@ -285,6 +285,24 @@ per-block *mechanism pick* for the button (the worked example) is carved to
      **grouped** control (checkbox-group, radio-group) → **(B)** persistent light-DOM, because the group's
      composite `value`/`values` is a live two-way-binding surface and a group has no native single-element
      to erase into.
+   - *Element-over-behavior — coordinator blocks
+     ([#1457](/backlog/1457-behavior-blocks-do-stepper-deck-tabs-get-a-we-element-or-sta/)):* a block that
+     coordinates a set of authored native semantic children (stepper, deck, tabs) ships **both facades over
+     one kernel**, divided by the **"can do" vs "is a"** test. A behavior (`CustomAttribute`) is a *"can do
+     that"* — a headless capability attached to a host the author owns; an element/block is an *"is a"* — the
+     styled, packaged, nameable, framework-flavorable component. So the **styled FUI component is a `we-`
+     element** (`<we-stepper>`/`<we-deck>`/`<we-tabs>`): a **(B)** persistent light-DOM element hosting the
+     coordination kernel, carrying the styling **and** the **CEM** surface the polyglot generator (#463/#855)
+     reads — **no element ⇒ no CEM ⇒ no turnkey styled component and no framework flavor.** The behavior is
+     *retained* as the headless `can-do` floor (attach coordination to your own markup, the #1381
+     "behaviors riding native elements" end-state). **Even though a behavior *can* technically apply style
+     classes, it should not** — owning a styled identity is an `is-a` concern; folding it into a `can-do`
+     behavior is a category error (the trap #1457's prep fell into by classifying these as
+     "coordinators → no element"). Children stay light-DOM (never shadowed by default), so native semantics
+     are preserved; in-leak isolation rides the #1349 `webisolation` contract, shadow (C) only on an S2
+     opt-in. **Generalizable rule:** *is it a thing or a capability?* A thing you instantiate / style / name
+     / generate flavors of → **element/block**; a capability you attach to enhance a host → **behavior**;
+     they compose, the element is the styled product, the behavior the floor.
 
 ## What this home does *not* cover
 
