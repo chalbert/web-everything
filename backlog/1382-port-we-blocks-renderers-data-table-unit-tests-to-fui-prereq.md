@@ -18,13 +18,14 @@ Buried prereq found in #1355 pre-flight (batch-2026-06-20-1372-1369): deleting w
 ## Progress (2026-06-21, batch-2026-06-21-1385-1392)
 
 - Ported the two data-table suites → `fui:blocks/renderers/data-table/__tests__/data-table.test.ts`
-  (renderer + pipeline/aggregate/announce helpers, 34 tests) + `…/data-table-behavior.test.ts` (behavior,
+  (renderer + pipeline/aggregate/announce helpers, 34 tests) +
+  `fui:blocks/renderers/data-table/__tests__/data-table-behavior.test.ts` (behavior,
   4 tests). **38 tests pass verbatim** — the FUI renderer matches the WE APG/Intl.Collator/SQL-aggregate
   contract exactly (markup, group `tbody[data-group]`, `aria-sort`, summary wording, live announce). FUI
   gate green.
 - Behavior FUI deltas: `DataTableModule` (FUI export) under the WE-spec tag `we-data-table` (WE source
   used `data-table`); renderer test ported with no logic change, only import paths.
-- **`collection-operations.test.ts` deliberately NOT ported** — it is NOT orphaned. The WE file targets an
+- **`we:blocks/__tests__/unit/renderers/collection-operations.test.ts` deliberately NOT ported** — it is NOT orphaned. The WE file targets an
   older WE `CollectionOperationsBehavior` API (`{rows,config,pageSize}` + `CollectionWindow`); the FUI impl
   evolved to a `windowCollection` + event-wiring shape and **already carries equivalent coverage** of the
   same whole-book-then-window contract (#369) in
