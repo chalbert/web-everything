@@ -2,15 +2,26 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#readout-placement-by-value-type"
 tags: [decision, book-candidate, meter, gauge, apg, gap]
 relatedReport: reports/2026-06-21-bounded-scalar-readout-meter.md
 preparedDate: "2026-06-21"
 ---
 
 # Meter / gauge — quantitative readout standard: placement
+
+> **RATIFIED 2026-06-21.** Both rows ratified as recommended.
+> - **Fork 1 → 1(a):** the bounded-scalar readout is its **own tiny `meter` intent (+ FUI block)**, adopting
+>   `<meter>` / `role=meter` vocabulary verbatim (`value`/`min`/`max`/`low`/`high`/`optimum`/`valuetext`).
+>   Gauge = a radial `presentation` value, not a separate intent. Branches (b) `status-indicator` dimension
+>   and (c) extend `loader` rejected (mis-type a continuous scalar / task-over-time). Realizing build → #1468.
+> - **Fork 2 → 2(a):** **file the scoped `progress` sibling placement decision now** → #1469 (default lean:
+>   covered by `loader.progress` + `flow-progress`, ~60%).
 
 Surfaced by the ARIA-APG lens ([#1400](/backlog/1400-discovery-lens-aria-authoring-practices-apg-pattern-diff-aga/)):
 a **meter** is a static quantitative readout within a known range (disk usage, score, capacity, password

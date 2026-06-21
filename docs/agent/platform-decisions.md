@@ -828,6 +828,28 @@ or *invented* by an algorithm?**
 webcharts family (`CustomChartRenderer`). Composes [constellation-placement](#constellation-placement),
 [config-extends-platform-default](#config-extends-platform-default), [native-first-baseline](#native-first-baseline).
 
+### A readout's home keys on its value-type; presentation is a dimension, not a home {#readout-placement-by-value-type}
+
+A status/quantity readout gets its **own** intent for each distinct **value-type**, and the native ARIA
+roles draw the lines: a **discrete-state enum** (`status-indicator` — `tone`/`shape`/`affordance`, a
+lifecycle state), a **position in a known range** (`meter` / `role=meter` — `value`/`min`/`max`/`low`/
+`high`/`optimum`, always determinate, has zones), and **task completion over time** (`role=progressbar`
+— may be indeterminate, drops `aria-valuenow`; owned today by `loader.progress`). These are
+**incompatible contracts** — folding a continuous bounded scalar into the discrete-state enum or the
+task-over-time progress role **mis-types it** (the documented Chakra defect: a measurement that renders
+`role="progressbar"`), so a home that has to mis-type the value is the genuine either/or. **Test:** *is
+the value an enum, a position in `[min,max]`, or a completion fraction over time?* — three answers, three
+homes. **Presentation is never a home:** a gauge (radial) is the meter contract rendered as an arc — a
+`presentation` dimension value, not a separate intent (rating / password-strength are likewise meter
+*presentations*, consumers not standards). This is [open-numbered-variants](#open-numbered-variants) +
+[decompose-overloaded-vocabulary-by-semantic-source](#decompose-overloaded-vocabulary-by-semantic-source)
+applied to the readout family, with WE owning the intent contract and FUI the block per
+[constellation-placement](#constellation-placement).
+
+**Lineage:** #1410 (meter placement — ratified 2026-06-21; surfaced by the #1400 ARIA-APG lens). Realizing
+build #1468 (`meter` intent + FUI block); sibling progress placement #1469. Composes
+[native-first-baseline](#native-first-baseline) (adopt `<meter>` vocabulary verbatim).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
