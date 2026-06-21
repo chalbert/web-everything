@@ -10,7 +10,7 @@ tags: [exercise-app, insurance, policy-lifecycle, claims, requirements, configur
 crossRef: { url: /backlog/314-flagship-exercise-apps/, label: "Flagship exercise apps (#314)" }
 ---
 
-# Exercise app B — Personal auto insurance lifecycle + claims: derive requirements & scope the build
+# Exercise app B (personal auto insurance lifecycle + claims)
 
 Candidate **B** (insurance) from the flagship-exercise-apps epic ([#314](/backlog/314-flagship-exercise-apps/)).
 Derive a full, complex requirements set for a **personal auto insurance** app covering the whole

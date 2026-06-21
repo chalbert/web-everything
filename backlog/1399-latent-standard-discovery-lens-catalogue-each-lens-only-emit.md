@@ -1,6 +1,5 @@
 ---
 kind: epic
-size: 3
 parent: "099"
 status: open
 ongoing: true
@@ -8,9 +7,9 @@ dateOpened: "2026-06-21"
 tags: [program, discovery, coverage, latent-standards, gap, book-candidate, method]
 ---
 
-# Latent-standard discovery program — multi-axis lens catalogue (each lens only emits candidate cards)
+# Latent-standard discovery program
 
-A standing program to surface **latent standards** — patterns that recur across web pages / apps but
+A multi-axis lens catalogue — each lens only emits candidate cards. A standing program to surface **latent standards** — patterns that recur across web pages / apps but
 aren't yet in the WE registry. One principle underneath every lens: *a latent standard is a pattern that
 recurs along some **axis**; you find it by enumerating that axis from an authoritative source and
 **diffing it against the intent / block registry**.* This program is the catalogue of those axes. It is

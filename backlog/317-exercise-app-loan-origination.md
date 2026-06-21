@@ -10,7 +10,7 @@ tags: [exercise-app, financial, loan-origination, requirements, validation, busi
 crossRef: { url: /backlog/314-flagship-exercise-apps/, label: "Flagship exercise apps (#314)" }
 ---
 
-# Exercise app A — Loan / mortgage origination: derive requirements & scope the build
+# Exercise app A (loan / mortgage origination)
 
 Candidate **A** (financial) from the flagship-exercise-apps epic ([#314](/backlog/314-flagship-exercise-apps/)).
 Derive a full, complex requirements set for a **loan / mortgage origination platform** and
