@@ -3,10 +3,12 @@ kind: story
 size: 5
 parent: "1289"
 locus: frontierui
-status: active
+status: resolved
 blockedBy: ["1443"]
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "fui:graphs/SvgGraphRenderer.ts"
 tags: []
 ---
 
