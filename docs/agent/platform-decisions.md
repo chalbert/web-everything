@@ -470,10 +470,17 @@ surface — it mirrors what the platform deliberately *omits*, not just what it 
 the platform refuses to (e.g. no `downgrade()` on a `CustomElementRegistry` polyfill: native upgrade is
 one-way and the registry is append-only with no `undefine`, so the symmetry the name implies doesn't
 exist). A real per-subtree/teardown need is designed *then* as a **named, explicitly non-standard
-extension** with documented semantics — never a mystery method whose name overpromises.
+extension** with documented semantics — never a mystery method whose name overpromises. The fidelity rule
+applies **one level up too**: a *shared contract* that polyfills implement (an interface, a type guard, an
+abstract base) must not **mandate** a method the platform omits — relax the requirement to optional
+(`downgrade?`) so the native-faithful implementation is conformant, even when API symmetry (`upgrade`/`downgrade`
+"look like a pair") tempts otherwise. Real implementers that genuinely need the method still ship it; only the
+*requirement* relaxes.
 
-**Lineage:** #31 (polyfill baseline floor); #1103 (polyfill-surface fidelity / `downgrade()` omission).
-Mirrors `AGENTS.md` rule 6 + the native-first authoring default.
+**Lineage:** #31 (polyfill baseline floor); #1103 (polyfill-surface fidelity / `downgrade()` omission on the
+`CustomElementRegistry` surface); #1350 (the corollary at the shared `Plug` contract — `isPlug`/`HTMLRegistry`
+drop the `downgrade` *requirement*, `downgrade?` optional; build #1413). Mirrors `AGENTS.md` rule 6 + the
+native-first authoring default.
 
 ### Shape a new contract's surface by platform idiom, not capability {#contract-surface-platform-idiom}
 
@@ -518,6 +525,35 @@ standard artifact; the generated origins are ecosystem impl, and any served prod
 
 **Lineage:** #463 (ratified — polyglot MaaS origin generation) · builds #505/#506/#507. Relates to
 [surface-contract-not-computation](#surface-contract-not-computation) (neutral contract is the SoT).
+
+### Standard consumability: author to the standard, ship removable agnostic adapters {#standard-consumability}
+
+**How a WE standard reaches consumers with zero lock-in.** A standard is a *guarantee*; making it work today
+is a separable, removable concern. **Three layers, never conflated:** **(1) contract** = the guarantee (WE);
+**(2) authoring source-of-truth** = the standard's *own form* — write to the platform (e.g. `@scope` CSS),
+**never a tooling/impl format**; when the native form ships, the adapters drop and the authored source is
+unchanged (minimize-lock-in / graceful-degradation applied to *authoring*, not just runtime); **(3)
+impl/lowering** = removable *make-it-work-today* adapters (build-transform / runtime polyfill).
+
+The lowering is **one pure, agnostic transform core + thin adapters**, and the adapters span every
+consumption axis — which are **orthogonal**: **timing** (build / serve / runtime) ⟂ **host/bundler** (vite /
+rspack / webpack / esbuild / rollup / CLI — *none privileged*; a project must consume **uncompiled** source
+with **its own** bundler) ⟂ **guarantee-strength** (the Configurator dimensions). Expose these as **config**,
+never as authoring choices — that is what "more than one valid way available to the user" means. The
+trait-enforcer is the reference shape (pure functions + per-bundler shims over a WE-resident contract).
+
+The **only lock is the contract + conformance** (the single escapable protocol lock); reference tools are
+optional and swappable. **Placement:** contract + conformance vectors → WE; the reference transform + adapter
+family → published impl/tooling (FUI-owned, zero-lock-in), **never `@webeverything`** — the contract crosses
+the seam, the tool does not. Conformance is what makes the standard adoptable *independent of* the reference
+tool.
+
+**Lineage:** synthesizes [forward-generation-adapters](#forward-generation-adapters),
+[framework-free-core-vendor-segregation](#framework-free-core-vendor-segregation) (the bundler-agnostic
+axis), [native-first-baseline](#native-first-baseline),
+[config-extends-platform-default](#config-extends-platform-default), and the #855 generator-is-a-tool /
+npm-scope-mirrors-layer rules under [constellation-placement](#constellation-placement). First worked
+instance: #1377 (webisolation L2 — author base `@scope`; pure PostCSS core + per-bundler adapter family).
 
 ### Framework-free core; vendor frameworks segregated at the package boundary {#framework-free-core-vendor-segregation}
 
