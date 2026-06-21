@@ -5,6 +5,7 @@ status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
+codifiedIn: one-off
 tags: [plugs, dedup, drift, reconciliation, frontierui, contract-anchored, constellation-placement]
 relatedProject: webplugs
 ---

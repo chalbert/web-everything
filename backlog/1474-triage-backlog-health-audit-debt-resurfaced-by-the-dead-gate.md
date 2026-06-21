@@ -1,8 +1,11 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-21"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
 tags: []
 ---
 
@@ -14,3 +17,27 @@ Fixing the dead kind-field gate in we:scripts/audit-backlog-health.mjs (G3-G7 ha
 - **Codification-hygiene lane (G6 resolved decision with no codifiedIn + G7 cites a codified rule's #N but not its we:docs/agent/platform-decisions.md statute anchor).** Mechanical-ish: promote a case-law-only rule to a named guideline / set codifiedIn, and re-point #N citations to the statute anchor (cite the rule, not the case). The G7 sweep is the bulk.
 
 Independent of the isExec/G2-G3 vocabulary decision (#1473), which re-enables the still-dead G2/G3 gates.
+
+## Triage (batch-2026-06-21-1429-1487) — classified, quick win done, lanes routed
+
+Ran the live audit (`we:audits/backlog-health-audit.md`): **G4=0 · G5=1 · G6=1 · G7=77** (the filing's
+~75 G7 / 1 G6 / 1 G5 / 1 G4 confirmed, G4 now drained). Triaged each lane:
+
+- **Fork-existence lane (G4=0, G5=1) → routed to decision turns, not fixed here.** G4 is empty (the
+  worked example #1457 ratified). The lone G5 is **#428** (open-core tiering — *Fork 2, the free/paid
+  threshold*). Per the item's own rule (*"#1457 is handled at its own /next decision turn, not here"*), a
+  fork-existence re-run is a **decision-turn judgment**, not a mechanical batch fix — left for #428's
+  `/prepare`/`/next` turn (add the fork-existence justification line or dissolve to the #088 support-both
+  shape there). Filing no edge: #428 is already an open decision the ranker surfaces.
+- **Codification-hygiene lane → quick win done + the bulk filed as its own item.**
+  - **G6 (1) — done inline:** **#1270** (reconcile-direction ruling) had no `codifiedIn`; it is a
+    situation-specific operational decision (the two reconciliation principles live in #1250's epic body,
+    not a broadly-cited named statute) → marked **`codifiedIn: one-off`** (the G6 flag's own "or mark
+    one-off" branch).
+  - **G7 (77) — filed as #1502.** The bulk (re-point bare `#N` citations → their statute anchor; the
+    audit pre-computes every mapping). 77 mostly-concurrent backlog files is a voluminous broad mutation —
+    a **focused single-item mechanical sweep**, not a story·3 triage slot. Carved out as **#1502**
+    (`/codification-hygiene sweep`, size 5).
+
+Triage complete: candidates classified, the one mechanical singleton fixed, the fork lane routed to its
+decision turn, the G7 bulk routed to a dedicated sweep (#1502). Resolving the triage.
