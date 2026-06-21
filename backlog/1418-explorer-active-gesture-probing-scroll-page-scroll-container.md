@@ -2,8 +2,11 @@
 kind: story
 size: 5
 locus: frontierui
-status: open
+status: resolved
 dateOpened: "2026-06-21"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "fui:tools/explorer/playwrightDriver.ts"
 tags: []
 ---
 
@@ -27,4 +30,30 @@ The WE-site fix (`we:src/css/style.css` → `html { overflow-x: hidden }`) *mask
 
 - Underlying tool is the FUI-owned explorer (epic #1167); `locus: frontierui`.
 - Complements #1412 (refine the static `no-broken-layout` heuristic). #1412 fixes the *signal*; this adds the *gestures* that generate richer signals. They share the same oracle/probe files.
+
+## Progress
+
+- Extended the candidate model with a `kind` (fui:tools/explorer/stateFlowGraph.ts `CandidateKind =
+  click|scroll|reveal|drag`, optional ⇒ click, back-compat — the engine's existing tests stay green).
+- fui:tools/explorer/playwrightDriver.ts now emits + fires the full gesture repertoire:
+  - **scroll** (scope 1): the document is always a scroll candidate; plus every user-scrollable container
+    (`scroll*/client*` over + computed overflow `auto|scroll|overlay`). `fire` scrolls it through range.
+  - **reveal** (scope 2): selector matches that are in-DOM but fail the viewport gate are kept (not
+    dropped) and fired via `scrollIntoViewIfNeeded` → click.
+  - **drag** (scope 3): sliders / resizers / `[role=separator]` splitters / `[draggable=true]` /
+    `[data-pannable]` fired via a deterministic bounded pointer press→move→release.
+  - **bounded & deterministic** (scope 5): candidates deduped by (kind,id) and sorted by a fixed kind
+    priority then id (fui:tools/explorer/gestureProbes.ts `gestureSortKey`); the drag delta is fixed (no
+    randomness/timing flake).
+- **Post-gesture observation comes for free** (scope 4, the "after" half): the explorer's `onState` seam
+  already runs the Layer-1 oracles on the settled state after EVERY fired candidate — including the new
+  scroll/drag/reveal ones. Added the pure `clippedOverflowResidue` signal (the #1412-complement: a clipped
+  axis with programmatically-scrollable residue, e.g. the WE-site 49px) + `isScrollable` in
+  fui:tools/explorer/gestureProbes.ts.
+- Tests: fui:tools/explorer/__tests__/gestureProbes.test.ts (10) + the engine suite still green (20 total
+  in the two files); FUI gate 0 errors.
+- **Carved the residual scope-4 (the "during"-gesture observation + wiring residue/scroll-jump/
+  drag-drags-page as live oracles over a new Observation field) into #1465** — that is a distinct
+  observation-pipeline concern; the repertoire + post-gesture observation + the pure residue helper land
+  here.
 </content>
