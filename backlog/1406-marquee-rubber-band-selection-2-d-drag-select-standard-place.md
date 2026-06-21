@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: one-off
 tags: [decision, book-candidate, selection, marquee, spatial, gap, interaction]
 relatedReport: reports/2026-06-21-marquee-rubber-band-selection-placement.md
 preparedDate: "2026-06-21"
@@ -91,6 +94,22 @@ the author's opt-in, never the floor).
 **Fork 2 (b) — `contain` default (rejected).** Less permissive; violates most-flexible-default.
 
 *The residual:* none material — both values ship as the dimension; only the default is chosen.
+
+## Ruling — ratified 2026-06-21
+
+- **Fork 1 → (a):** the rectangle-sweep-to-selection residual lives in a **`marquee-select` behavior block**
+  composing [we:src/_data/intents/selection.json](../src/_data/intents/selection.json) + the resolved
+  `gesture` pan recognizer ([#1396](/backlog/1396-pointer-gestures-swipe-long-press-pinch-pull-to-refresh-plac/)).
+  `selection` stays the pure choice contract; `scope: spatial` (1c) stays **rejected**
+  (`decompose-overloaded-vocabulary-by-semantic-source`). Red-team of 1(b) (standalone intent) failed —
+  one rectangle/one algorithm is a surface-bound mechanic, not a cross-cutting intent (YAGNI).
+- **Fork 2 → (a):** default selection-mode is **`intersect`** (touch-to-select); `mode: intersect | contain |
+  center` exposed (most-flexible-default).
+- **Fork-1 residual collected → parked [#1463](/backlog/1463-marquee-recognizer-shape-vocabulary-promote-to-a-region-sele/)**:
+  promote to a `region-select` intent (`shape: rect | lasso | …`) **iff a second recognizer shape recurs**;
+  not lost as prose.
+- **Realizing build** (author the `marquee-select` block + keyboard-equivalent + `mode` dimension + demo)
+  is separately prioritized below — not part of this placement call.
 
 ---
 
