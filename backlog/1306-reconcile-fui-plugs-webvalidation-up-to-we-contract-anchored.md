@@ -3,10 +3,12 @@ kind: story
 size: 5
 parent: "1250"
 locus: frontierui
-status: open
+status: resolved
 blockedBy: ["1345", "1358"]
 dateOpened: "2026-06-20"
-dateStarted: "2026-06-20"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "fui:plugs/webvalidation/ValidityMergeField.ts"
 tags: []
 ---
 
@@ -46,3 +48,27 @@ WE-resident model. Filed the prereq as **#1358** (wire the `@webeverything/inter
 mirroring #1344) and added it to `blockedBy`. The port itself is otherwise ready (the +151 delta is
 diffed and clean; the commitment-policy import retargets onto the #1344 `@webeverything/commitment-policy`
 alias, and `CustomCommitmentPolicyRegistry` is the #1345-ported local file). Resume once #1358 lands.
+
+## Progress (2026-06-21 — batch-2026-06-20-1358-1357, RESOLVED)
+
+Both blockers landed (#1345 ported `CustomCommitmentPolicyRegistry`; #1358 wired the
+`@webeverything/interaction-state` alias — same batch). Contract-anchored audit first: diffed
+`fui:plugs/webvalidation/ValidityMergeField.ts` (192) against `we:plugs/webvalidation/ValidityMergeField.ts`
+(343) and confirmed **FUI is a strict subset of WE** — the only FUI-unique lines were the two upgrade
+targets themselves (`observedAttributes = ['strategy']` and the param-less `#onControlEvent`), i.e. no
+FUI-specific observed-attributes/runner divergence to preserve. So the merge adopted the WE body verbatim
+with exactly **two import retargets** onto FUI's sibling aliases:
+`CommitmentPolicy` from `@webeverything/commitment-policy` (#1344) and `InteractionStateTracker` from
+`@webeverything/interaction-state` (#1358) — every other import (`./CustomCommitmentPolicyRegistry`
+#1345-ported, `./applyMergedValidity`, `../../validity-merge/*`, `../webinjectors/InjectorRoot`) is an
+identical relative path across the two repos.
+
+Landed the +151 delta: commitment scope (#1113 — `resolveCommitmentRegistry`, `commitment` observed attr,
+`#resolveCommitment`/`#reflectStaleness`/`#markCommitmentCurrent` + the deferred-policy suppress guard),
+interaction-state tracking (`#interaction`/`#reflectInteraction` → `data-dirty/-touched/-focused`), and the
+#1111 stable-id transition events (`validation.control.value-input/focus/blur/validity-changed/became-valid/
+became-invalid`). **No #1304-style FUI-env divergence** — the byte-merge bound first try.
+
+**Verified:** FUI `npx vitest run plugs/webvalidation` → 50/50 pass (incl. 13 `ValidityMergeField`),
+`tsc --noEmit` → no errors touching the file (alias imports type-resolve), `npm run check:standards` → 0
+errors. Siblings #1344/#1345 done; #1346 (`AsyncValidatorField` reconcile) remains the last open #1250 slice.
