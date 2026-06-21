@@ -2,8 +2,11 @@
 kind: story
 size: 3
 locus: frontierui
-status: open
+status: resolved
 dateOpened: "2026-06-21"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "fui:tools/explorer/oracles/layoutOverflow.ts"
 tags: []
 ---
 
@@ -28,5 +31,28 @@ Real use-case captured 2026-06-21: the WE docs site (:8080) had a ~40px horizont
 
 - Underlying gap is in the FUI-owned explorer (epic #1167); this is a refinement story, `locus: frontierui`.
 - The WE-site symptom itself was fixed separately in `we:src/css/style.css` (`html { overflow-x: hidden }`) — that fix is the very thing that exposes the oracle's false-positive, so it doubles as the test fixture above.
+
+## Progress
+
+- New pure decision module fui:tools/explorer/oracles/layoutOverflow.ts: `isGenuineOverflow` (overflow is
+  real only if `scrollWidth > clientWidth+1` AND neither `<html>` nor `<body>` clips x via
+  `overflow-x:hidden|clip`), `pickWidestCulprit` (widest element past the viewport), `describeCulprit`.
+  The in-page probe now only READS metrics; the decision is pure TS, so the two can't drift.
+- Refined fui:tools/explorer/oracles/playwrightCollector.ts `#domProbes`: gathers raw metrics
+  (scrollWidth/clientWidth/computed overflow-x of html+body) + the spilling-element rects in-page, then
+  applies the pure decision. `layoutOverflow` now means *genuine* overflow; threads `overflowCulprit`.
+- Added `overflowCulprit?` to the Observation type (fui:tools/explorer/oracles/observation.ts); the
+  `noBrokenLayout` oracle (fui:tools/explorer/oracles/genericInvariants.ts) now names the widest
+  offending element (`tag.class @ right=Npx`) — actionable, not just "layout overflows".
+- Regression fixtures (scope 3) as pure unit tests in
+  fui:tools/explorer/oracles/__tests__/layoutOverflow.test.ts mirroring the exact WE-site case:
+  translated off-canvas panel with NO clip = flagged; same with `overflow-x:hidden` (the shipped WE fix)
+  = NOT flagged; body-clip variant; 1px rounding tolerance; culprit-naming. + an actionability assertion
+  in fui:tools/explorer/oracles/__tests__/genericInvariants.test.ts. 37/37 explorer-oracle tests green;
+  FUI gate 0 errors.
+- Scope 4 (sweep target): the CLI `PROBE_BASES` was `[:3001 FUI-demo, :8082 FUI-docs]` — it did NOT
+  include `:8080` (the WE Eleventy docs server where the overflow lived, and docsSiteHarness's stated
+  target). Added `http://localhost:8080` to fui:tools/explorer/cli.ts PROBE_BASES so a relative docs
+  sweep can actually reach the live WE docs.
 </content>
 </invoke>
