@@ -2,15 +2,43 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#composition-artifact-ownership"
 tags: [decision, book-candidate, bulk-actions, selection, gap]
 relatedReport: reports/2026-06-21-bulk-action-selection-fanout.md
 preparedDate: "2026-06-21"
 ---
 
 # Bulk actions over a multi-selection — selection action bar + batch operations standard: placement
+
+## Ruling (ratified 2026-06-21)
+
+Both forks ratified **as recommended**:
+
+- **Fork 1 → (a)** — the batch-apply concern is a thin **`bulk-action` intent** composing
+  `selection` + `command` over a target set, realized by a FUI behavior block. (b) a `selection` trait
+  and (c) a headless behavior with no intent are both *broken* — (b) forces selection→command coupling
+  against `we:src/_data/intents/command.json`'s declared orthogonality; (c) leaves the recurring named pattern un-contracted
+  (correct only as the impl half of (a)). Net-new residual owned by no neighbor: fan-out across the live
+  selection set, the select-all `matching` predicate, the partial-failure outcome, and the count-announce
+  binding. Confidence ~85%.
+- **Fork 2 → (a)** — expose `scope: visible | matching`, default **`visible`** (accident-protected;
+  `matching` is the author opt-in carrying a predicate). Mandating one is broken under most-flexible-default
+  (both ship deliberately). The predicate *shape* stays impl-ish — the intent names the axis. Confidence ~80%.
+
+**Red-team** (Fork 1, "it's just toolbar+selection+command, home it as an assemblerPreset"): lands partially
+— most of the bar is reuse — but fails on the load-bearing residual a preset can't carry (fan-out, the
+`matching` predicate, partial-failure, count binding). Attack does not break (a).
+
+**Seam to watch:** the partial-failure outcome (per-target success/fail) *names* the contract and *delegates*
+apply/rollback to a future #1395-style optimistic-mutation home — no forward dependency created, but the
+seam most likely to need revisiting if #1395 lands differently.
+
+Realizing work (separately prioritized) carved as a follow-up build item.
 
 Surfaced by the production-app teardown lens
 ([#1404](/backlog/1404-discovery-lens-production-app-teardown-inventory-real-apps-d/), Linear walk): selecting

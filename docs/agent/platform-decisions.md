@@ -403,7 +403,10 @@ is load-bearing only there and for **correlation**, never for journaled-state de
 determinism anchor = state-diff A; ratified 2026-06-19) · #1411 (treegrid = a `hierarchy` projection on
 `data-grid`, not a new block — the new substance is the Right/Left arbitration rule, homed on data-grid's
 movement-engine seam; hierarchy's flatten-to-visible projection is referenced, not duplicated; ratified
-2026-06-21). Kin to [constellation-placement](#constellation-placement),
+2026-06-21) · #1423 (bulk-action = a thin `bulk-action` **intent** composing `selection` + `command` over a
+target set, not an assemblerPreset/trait — the new substance a preset can't carry is fan-out across the live
+selection set + the select-all `matching` predicate + the partial-failure outcome + the count-announce
+binding; selection/command/#1409 toolbar are referenced and stay home; ratified 2026-06-21). Kin to [constellation-placement](#constellation-placement),
 [compose-dont-handroll](#compose-dont-handroll), [surface-contract-not-computation](#surface-contract-not-computation).
 
 ### Data-shape evolution is a storage facet, not a reliability concern {#data-shape-vs-mechanism-failure}
