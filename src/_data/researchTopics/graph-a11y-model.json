@@ -1,0 +1,24 @@
+{
+  "id": "graph-a11y-model",
+  "title": "Graph (Node-Link) Accessibility Model",
+  "status": "open",
+  "summary": "Tier-2 grounding for the webgraph standard (epic #1351, shape #1352 fork 3): how to make a node-link diagram accessible beyond the ratified tier-1 floor (an adjacency description-table, mirroring webcharts' a11y-description-table case). Graph a11y has no settled platform pattern — a graph is neither a list nor a tree, so the ARIA treegrid/treeview pattern fits only partially and the WAI-ARIA Graphics Module (graphics-document / graphics-object / graphics-symbol) names roles without prescribing traversal. The strongest prior art is structure-based keyboard navigation generated from the spec: Olli (UW IDL) renders a keyboard-navigable ARIA tree/treegrid alongside a viz, Data Navigator (Elavsky et al.) generalizes structure-driven node/edge traversal, Chartability is the rubric to score against, and Highcharts' a11y module is the mature commercial reference (keyboard graph navigation + screen-reader regions + sonification). Recommendation to spec later: tier-2 = WAI-ARIA Graphics roles on the SVG render + a structure-derived keyboard traversal model (focus a node → arrow to neighbours) generated from GraphSpec adjacency, with sonification a tier-3 additive — NOT decided here; this topic grounds the eventual webgraph conformance a11y axis.",
+  "dateOpened": "2026-06-21",
+  "reviewHorizon": "P1Y",
+  "tags": [
+    "webgraph",
+    "graph",
+    "node-link",
+    "accessibility",
+    "aria",
+    "treegrid",
+    "graphics-aria",
+    "keyboard-navigation",
+    "sonification",
+    "conformance",
+    "tier-2"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webgraph"
+}

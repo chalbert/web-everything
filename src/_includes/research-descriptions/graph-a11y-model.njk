@@ -1,0 +1,111 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    The <a href="/backlog/1352-webgraph-standard-shape-own-project-protocol-seam-count-a11y/">#1352</a> ruling
+    settled the webgraph a11y <em>floor</em> — a tier-1 <strong>adjacency description-table</strong>, mirroring
+    webcharts' <code>a11y-description-table</code> conformance case — but explicitly deferred the
+    <strong>tier-2 model</strong> (richer traversal) to research, because <em>graph accessibility has no settled
+    platform pattern</em>. A node-link diagram is neither a list nor a tree: it has cycles, multiple edges per
+    node, and no single root, so the patterns that work for tabular and hierarchical data only partially
+    transfer. This topic surveys the prior art so the eventual webgraph conformance a11y axis (slice D,
+    <a href="/backlog/1376-webgraph-slice-d-conformance-cases-3-axes-benchmark-refs/">#1376</a>) can be specced
+    on evidence rather than invented. <strong>It decides nothing</strong> — the tier-1 floor already stands.
+</p>
+
+<h2>Why the obvious patterns only half-fit</h2>
+<table>
+    <thead>
+        <tr><th>Candidate</th><th>What it gives</th><th>Where it breaks for graphs</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Adjacency description-table</strong> (tier-1 floor)</td>
+            <td>A plain <code>&lt;table&gt;</code> / edge-list textual alternative derived from <code>GraphSpec</code>;
+                works in every screen reader today, zero new pattern.</td>
+            <td>Linear — it conveys the relations but not <em>locality</em> (you can't "walk" from a node to its
+                neighbours), so it scales poorly past a few dozen edges.</td>
+        </tr>
+        <tr>
+            <td><strong>ARIA <code>treegrid</code> / <code>treeview</code></strong></td>
+            <td>A keyboard-navigable, expand/collapse 2-D structure that screen readers announce well; the
+                APG documents the interaction model.</td>
+            <td>A tree has one parent per node; a graph has many. A DAG can be projected to a spanning tree
+                (lossy: cross-edges become annotations), but a cyclic graph cannot without duplication.</td>
+        </tr>
+        <tr>
+            <td><strong>WAI-ARIA Graphics Module</strong> (<code>graphics-document</code> /
+                <code>graphics-object</code> / <code>graphics-symbol</code>)</td>
+            <td>Standard roles to label the SVG render's parts so AT treats the drawing as structured graphics,
+                not one opaque image. A W3C Recommendation.</td>
+            <td>Names roles but prescribes <em>no traversal</em> — it makes nodes/edges labellable, not
+                <em>navigable</em>. Needs a keyboard model layered on top.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>The strongest prior art — structure-derived navigation</h2>
+<p>
+    The most promising line isn't a single role but <strong>generating a keyboard-navigable structure from the
+    semantic spec</strong> — exactly what webgraph already has in <code>GraphSpec</code> (nodes + adjacency):
+</p>
+<ul>
+    <li><strong>Olli</strong> (UW Interactive Data Lab) — renders an accessible <em>structure</em> (an ARIA
+        tree/treegrid) <em>alongside</em> a visualization, letting a screen-reader user navigate the data
+        hierarchically with the keyboard. Directly applicable: a graph's adjacency can drive a navigable
+        neighbour-by-neighbour structure rather than a flat table.</li>
+    <li><strong>Data Navigator</strong> (Frank Elavsky et al.) — a toolkit-agnostic engine for
+        <em>structure-based</em> keyboard navigation of any data graphic, modelling the viz as nodes + edges and
+        moving focus along them. It is, almost literally, a graph-navigation a11y engine — the closest existing
+        thing to what tier-2 needs.</li>
+    <li><strong>Highcharts Accessibility module</strong> — the mature commercial reference: keyboard navigation
+        across series/points, a screen-reader information region, and <strong>sonification</strong> (data as
+        audio). Demonstrates the full stack a tier-2/tier-3 spec could mirror.</li>
+    <li><strong>Mermaid</strong> — for declarative diagrams, sets <code>aria-roledescription</code> plus
+        accessible title/description (<code>accTitle</code> / <code>accDescr</code>) on the SVG; a low-cost
+        baseline that composes with the Graphics Module roles.</li>
+    <li><strong>Cytoscape.js / sigma.js / force-graph</strong> — the dominant graph renderers ship
+        <em>no</em> built-in a11y (canvas-based ones can't even be labelled); accessibility is left to the
+        consumer. This is the gap the standard exists to close, and the reason the native-first default renders
+        <strong>SVG</strong> (labellable) not canvas.</li>
+</ul>
+
+<h2>The rubric to score against</h2>
+<p>
+    <strong>Chartability</strong> (Frank Elavsky) is the established, testable a11y rubric for data
+    visualization — a set of principles (keyboard operability, structure, text alternatives, visual contrast,
+    etc.) that the webgraph conformance a11y axis should be scored against rather than re-deriving its own
+    criteria. Pairing Chartability (the <em>what</em>) with Data Navigator / Olli (the <em>how</em>) gives the
+    standard a grounded, non-invented tier-2 target.
+</p>
+
+<h2>Provisional tiering (to spec in slice D, #1376 — not decided here)</h2>
+<ol>
+    <li><strong>Tier 1 (settled floor):</strong> adjacency description-table + accessible name/description on the
+        SVG render.</li>
+    <li><strong>Tier 2 (this research grounds):</strong> WAI-ARIA Graphics roles on the SVG render + a
+        structure-derived <strong>keyboard traversal</strong> model — focus a node, arrow to its neighbours,
+        announce degree/edges — generated from <code>GraphSpec</code> adjacency (the Olli / Data Navigator
+        pattern).</li>
+    <li><strong>Tier 3 (additive):</strong> sonification and richer spatial cues (the Highcharts reference),
+        never required for conformance.</li>
+</ol>
+
+<h2>Sources</h2>
+<ul>
+    <li><a href="https://www.w3.org/TR/graphics-aria-1.0/">W3C — WAI-ARIA Graphics Module 1.0</a></li>
+    <li><a href="https://www.w3.org/WAI/ARIA/apg/patterns/treegrid/">W3C ARIA APG — Treegrid pattern</a></li>
+    <li><a href="https://mitvis.github.io/olli/">Olli — accessible visualization structures (UW Interactive Data Lab)</a></li>
+    <li><a href="https://www.datanavigator.dev/">Data Navigator — structure-based keyboard navigation for data graphics</a></li>
+    <li><a href="https://chartability.fizz.studio/">Chartability — accessibility rubric for data visualization (Frank Elavsky)</a></li>
+    <li><a href="https://www.highcharts.com/docs/accessibility/accessibility-module">Highcharts — Accessibility module (keyboard nav, screen-reader regions, sonification)</a></li>
+    <li><a href="https://mermaid.js.org/config/accessibility.html">Mermaid — accessibility (accTitle / accDescr, aria-roledescription)</a></li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+    <li>Shape ruling: <a href="/backlog/1352-webgraph-standard-shape-own-project-protocol-seam-count-a11y/">#1352</a> fork 3 (tier-1 floor + tier-2 deferred to this topic).</li>
+    <li>Scaffold epic: <a href="/backlog/1351-scaffold-the-webgraph-standard-project-graphspec-profile-lay/">#1351</a>; this is slice E (<a href="/backlog/1375-webgraph-slice-e-graph-a11y-model-research-topic-tier-2-grou/">#1375</a>).</li>
+    <li>Consumes this grounding: conformance cases slice D (<a href="/backlog/1376-webgraph-slice-d-conformance-cases-3-axes-benchmark-refs/">#1376</a>), 3-axis a11y axis.</li>
+    <li>Sibling viz family: <a href="/projects/webcharts/">webcharts</a> (the <code>a11y-description-table</code> precedent this floor mirrors).</li>
+</ul>
+{% endraw %}
