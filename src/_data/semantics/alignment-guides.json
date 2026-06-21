@@ -1,0 +1,5 @@
+{
+  "term": "Alignment Guides Intent",
+  "definition": "Peer-relative magnetic alignment (Figma smart guides) — as an element moves or resizes it snaps to the edges/centers of peer elements (and the container), rendering transient guide lines within a snap threshold. Standalone because its reference frame is peer-relative and needs no grid; distinct from arrangeable's grid-snap.",
+  "usage": "Standardized by the Alignment Guides Intent."
+}

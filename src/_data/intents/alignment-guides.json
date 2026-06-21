@@ -1,0 +1,33 @@
+{
+  "id": "alignment-guides",
+  "name": "Alignment Guides Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "summary": "Peer-relative magnetic alignment — Figma-style smart guides: as an element is moved or resized, it snaps to the edges/centers of its peer elements (and the container), rendering transient guide lines at the match (Fork 3b of #1384). A STANDALONE concern because its reference frame is peer-relative and needs no grid — distinct from grid-snap (a dimension of arrangeable, which quantizes to fixed cells). Composes with resizable, arrangeable, and free-canvas drag: it observes the moving element against its peers and biases the position toward alignment within a snap threshold.",
+  "dimensions": {
+    "reference": {
+      "description": "What the moving element aligns against — `peers` snaps to sibling elements' edges/centers (Figma smart guides); `container` snaps to the bounding container's edges/center/margins; `both` (default) considers peers and the container together. The reference frame is relative, never a fixed grid (that is arrangeable's `snap`).",
+      "values": [
+        "peers",
+        "container",
+        "both"
+      ]
+    },
+    "edges": {
+      "description": "Which features of the elements participate in a match — `bounds` aligns left/right/top/bottom edges; `centers` aligns horizontal/vertical centerlines; `both` (default) matches edges and centers, the Figma behavior. Equal-spacing/distribution guides extend this set.",
+      "values": [
+        "bounds",
+        "centers",
+        "both"
+      ]
+    },
+    "guides": {
+      "description": "Whether the transient alignment lines are rendered while dragging — `shown` (default) draws the guide line + (optionally) the equal-spacing pips at the match; `hidden` snaps silently with no rendered line (the magnetism still applies). The snap THRESHOLD (how near a match must be to engage, in px) is a numeric property of the binding, not an enum value.",
+      "values": [
+        "shown",
+        "hidden"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\"><strong>Magnetic peer alignment</strong> — Figma-style smart guides (Fork 3b of <a href=\"/backlog/1384-spatial-manipulation-arrangeable-surfaces-resizable-splitter/\">#1384</a>). As an element is moved or resized, it snaps to the <strong>edges and centers of its peer elements</strong> (and the container), and a transient <strong>guide line</strong> is drawn at each match. The single most load-bearing finding of the spatial survey: this is a <strong>standalone</strong> capability, not a facet of the 2-D grid model.</p><h3>Why standalone — peer-relative, needs no grid</h3><p class=\"text-sm text-gray-600 mb-2\">\"Snap\" is two structurally different things. <strong>Grid-snap</strong> quantizes a position to fixed cells — it is a dimension of <a href=\"/intents/arrangeable/\">arrangeable</a>. <strong>Magnetic alignment</strong> has a <em>peer-relative reference frame</em> (this element vs those elements) and works on a free canvas with no grid at all. The two never reduce to each other, so alignment-guides is its own intent that <em>composes</em> the spatial models rather than living inside one.</p><h3>Dimensions</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>reference</code>: <code>peers</code> / <code>container</code> / <code>both</code> (default) — what to align against.</li><li><code>edges</code>: <code>bounds</code> / <code>centers</code> / <code>both</code> (default) — which features match.</li><li><code>guides</code>: <code>shown</code> (default, draw the line) vs <code>hidden</code> (snap silently). The snap <strong>threshold</strong> (engage distance, px) is a numeric binding property, not an enum.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Composes with <a href=\"/intents/resizable/\">resizable</a> (align a dragged divider/edge), <a href=\"/intents/arrangeable/\">arrangeable</a> (alignment on a free-placement canvas, orthogonal to its grid-snap), and free-canvas drag generally. The drag itself is recognized via the <a href=\"/intents/gesture/\">gesture</a> intent (<code>pan</code>); alignment-guides bias the resulting position. Lead incumbents: moveable, interact.js. Grounded in the spatial-manipulation survey (<a href=\"/research/spatial-manipulation-arrangeable-surfaces/\">spatial-manipulation arrangeable surfaces</a>).</p>"
+}
