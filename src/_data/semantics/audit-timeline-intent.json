@@ -1,0 +1,5 @@
+{
+  "term": "Audit Timeline Intent",
+  "definition": "The canonical rendering of a domain entity's history: a chronological feed of who did what, when, and the before→after, with filtering. The visual member of the Web Audit family.",
+  "usage": "Standardized by the Audit Timeline Intent (Web Audit)."
+}

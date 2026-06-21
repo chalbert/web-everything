@@ -1,0 +1,5 @@
+{
+  "term": "Notification Marker Intent",
+  "definition": "The unread / attention marker family — an ambient count or dot shown on app chrome rather than in a message (a favicon badge, a dock badge, a nav dot).",
+  "usage": "Standardized by the Notification Marker Intent (Web Notifications)."
+}

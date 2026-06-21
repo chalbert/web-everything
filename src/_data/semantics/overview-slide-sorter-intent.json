@@ -1,0 +1,5 @@
+{
+  "term": "Overview / Slide-Sorter Intent",
+  "definition": "A spatial zoom-out to a grid of all slides — the slide-sorter — where a user scans the whole deck at once, selects a slide to jump to it, and optionally reorders.",
+  "usage": "Standardized by the Overview / Slide-Sorter Intent."
+}

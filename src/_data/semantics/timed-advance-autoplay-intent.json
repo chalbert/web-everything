@@ -1,0 +1,5 @@
+{
+  "term": "Timed-Advance / Autoplay Intent",
+  "definition": "Unattended auto-advance through an ordered sequence — per-item timing, pause-on-interaction, resume, loop, and a Screen Wake Lock to keep the display awake.",
+  "usage": "Standardized by the Timed-Advance / Autoplay Intent."
+}

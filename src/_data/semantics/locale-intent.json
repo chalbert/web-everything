@@ -1,0 +1,5 @@
+{
+  "term": "Locale Intent",
+  "definition": "The application's active locale, writing direction, and locale-bound format preferences — the app-wide preference axis the Localization standard reads.",
+  "usage": "Standardized by the Locale Intent (Web Intl)."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Live Region Status Intent",
+  "definition": "Announcing transient status to assistive technology via a live region: urgency, the semantic container (status, alert, log), and what gets announced.",
+  "usage": "Standardized by the Live Region Status Intent."
+}

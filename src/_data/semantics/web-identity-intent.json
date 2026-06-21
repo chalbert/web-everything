@@ -1,0 +1,5 @@
+{
+  "term": "Web Identity Intent",
+  "definition": "A thin, UX-only seam for credential mediation: a credential-request surface and an auth-state signal (signed-in / out plus an identity descriptor).",
+  "usage": "Standardized by the Web Identity Intent (Web Identity)."
+}

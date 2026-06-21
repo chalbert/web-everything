@@ -1,0 +1,5 @@
+{
+  "term": "Focus Delegation Intent",
+  "definition": "Composite-widget focus: roving tabindex vs. virtual focus (active descendant), arrow-key navigation within a widget, and whether selection follows focus.",
+  "usage": "Standardized by the Focus Delegation Intent."
+}

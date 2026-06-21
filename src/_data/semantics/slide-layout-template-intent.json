@@ -1,0 +1,5 @@
+{
+  "term": "Slide Layout-Template Intent",
+  "definition": "A slot-based layout-template vocabulary for slides (title, section-divider, two-column, code, image-and-caption, quote) that a named slide fills by slotting content.",
+  "usage": "Standardized by the Slide Layout-Template Intent."
+}

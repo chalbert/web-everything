@@ -1,0 +1,5 @@
+{
+  "term": "Fragment / Incremental-Reveal Intent",
+  "definition": "A finer-than-slide step-reveal: content within a single slide appears in ordered steps as the presenter advances, rather than all at once.",
+  "usage": "Standardized by the Fragment / Incremental-Reveal Intent."
+}

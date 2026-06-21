@@ -1,0 +1,5 @@
+{
+  "term": "Fullscreen Presentation-Surface Intent",
+  "definition": "A surface that takes over the whole display for immersive, distraction-free presentation — the Fullscreen API filling the viewport, with cursor auto-hide and presentation chrome.",
+  "usage": "Standardized by the Fullscreen Presentation-Surface Intent."
+}

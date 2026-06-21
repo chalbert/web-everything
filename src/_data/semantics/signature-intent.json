@@ -1,0 +1,5 @@
+{
+  "term": "Signature Intent",
+  "definition": "Declarative capture of a deliberate signature commitment: a signer affirms identity and intent, producing an immutable Signature Record (signer, method, timestamp).",
+  "usage": "Standardized by the Signature Intent."
+}

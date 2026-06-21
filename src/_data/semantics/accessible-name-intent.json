@@ -1,0 +1,5 @@
+{
+  "term": "Accessible Name Intent",
+  "definition": "The cross-cutting policy for an element's accessible name — whether it carries meaning at all and where its label comes from (content, aria-label, a labelling element) — so naming is a declared decision rather than incidental.",
+  "usage": "Standardized by the Accessible Name Intent."
+}

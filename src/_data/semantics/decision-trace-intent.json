@@ -1,0 +1,5 @@
+{
+  "term": "Decision Trace Intent",
+  "definition": "The canonical explanation of why a rules/criteria evaluation reached its outcome — a criteria-trace table giving each criterion's input, operator, threshold, and contribution — so a decision is auditable.",
+  "usage": "Standardized by the Decision Trace Intent (Web Decisions)."
+}

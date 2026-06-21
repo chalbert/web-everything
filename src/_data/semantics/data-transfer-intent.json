@@ -1,0 +1,5 @@
+{
+  "term": "Data-Transfer Intent",
+  "definition": "The typed-payload-plus-accepts contract behind the native DataTransfer object shared by clipboard and drag-and-drop: a payload (text, rich content, files) and what a target will accept.",
+  "usage": "Standardized by the Data-Transfer Intent."
+}

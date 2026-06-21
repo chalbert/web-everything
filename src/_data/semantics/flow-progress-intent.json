@@ -1,0 +1,5 @@
+{
+  "term": "Flow Progress Intent",
+  "definition": "The canonical, accessible presentation of where a user is in a multi-step workflow: the current position, each step's status, and what remains before completion.",
+  "usage": "Standardized by the Flow Progress Intent (Web Workflows)."
+}

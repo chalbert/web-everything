@@ -1,0 +1,5 @@
+{
+  "term": "Access Control Intent",
+  "definition": "The UX vocabulary for declarative app-level authorization: gating entry to a route or a rendered subtree through one shared authz provider, with a deny-outcome family (hide / redirect / forbid / cloak). A UX mirror of server-authoritative access, never the enforcement point.",
+  "usage": "Standardized by the Access Control Intent (Web Guards)."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Collection Operations Intent",
+  "definition": "The four data operations on a collection — filter, sort, group, page — composed as a configurable pipeline (default filter → sort → group → page), expressed as UX intent independent of any data source.",
+  "usage": "Standardized by the Collection Operations Intent."
+}

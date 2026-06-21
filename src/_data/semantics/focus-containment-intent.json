@@ -1,0 +1,5 @@
+{
+  "term": "Focus Containment Intent",
+  "definition": "Overlay focus: confining keyboard focus to an active surface, making the rest of the page inert, and defining where focus lands on open and returns on close.",
+  "usage": "Standardized by the Focus Containment Intent."
+}

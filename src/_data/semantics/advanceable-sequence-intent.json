@@ -1,0 +1,5 @@
+{
+  "term": "Advanceable-Sequence Intent",
+  "definition": "The shared UX vocabulary for a set of discrete, ordered items traversed one position at a time: current/next/prev, timed advance, loop, and an up-next preview. The common spine under carousels, slideshows, and steppers.",
+  "usage": "Standardized by the Advanceable-Sequence Intent."
+}

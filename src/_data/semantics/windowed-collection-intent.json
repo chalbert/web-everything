@@ -1,0 +1,5 @@
+{
+  "term": "Windowed Collection Intent",
+  "definition": "Rendering only the visible window of a large collection (virtualization) while preserving set-size and position semantics and keeping keyboard navigation correct.",
+  "usage": "Standardized by the Windowed Collection Intent."
+}

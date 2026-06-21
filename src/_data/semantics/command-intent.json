@@ -1,0 +1,5 @@
+{
+  "term": "Command Intent",
+  "definition": "The declarative surface for invoking an action: which commands exist, their keybindings, and command-palette behaviour, grounded on the platform Invoker Commands baseline.",
+  "usage": "Standardized by the Command Intent."
+}

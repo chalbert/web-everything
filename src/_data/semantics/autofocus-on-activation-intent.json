@@ -1,0 +1,5 @@
+{
+  "term": "Autofocus-on-Activation Intent",
+  "definition": "Where initial keyboard/AT focus lands when a surface becomes active (a route swap, tab change, or overlay open), chosen from a closed set (heading | target | none) so focus is intentional, not accidental.",
+  "usage": "Standardized by the Autofocus-on-Activation Intent."
+}

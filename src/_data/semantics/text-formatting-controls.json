@@ -1,0 +1,5 @@
+{
+  "term": "Text-Formatting Controls",
+  "definition": "The formatting-controls axis: which format operations a surface exposes, where the controls sit, and how they overflow.",
+  "usage": "Standardized by the Text-Formatting Controls intent (Web Editing)."
+}

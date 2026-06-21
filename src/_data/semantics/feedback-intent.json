@@ -1,0 +1,5 @@
+{
+  "term": "Feedback Intent",
+  "definition": "Transient, non-blocking messaging (toasts / snackbars) and its queuing logic, with a severity dimension participating in the unified severity scale.",
+  "usage": "Standardized by the Feedback Intent."
+}

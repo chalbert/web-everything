@@ -1,0 +1,5 @@
+{
+  "term": "Hover Intent",
+  "definition": "A standalone trigger-transition concern: opening or closing a revealed surface on hover with intent — tolerating the diagonal trigger→panel path and a close delay — so hover menus don't flicker.",
+  "usage": "Standardized by the Hover Intent."
+}

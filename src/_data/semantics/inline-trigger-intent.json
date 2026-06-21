@@ -1,0 +1,5 @@
+{
+  "term": "Inline Trigger Intent",
+  "definition": "The declarative dimensions of an inline trigger-character picker (e.g. @-mentions, slash-commands): an open trigger-set registry plus boundary, query, and insertion-mode axes.",
+  "usage": "Standardized by the Inline Trigger Intent."
+}

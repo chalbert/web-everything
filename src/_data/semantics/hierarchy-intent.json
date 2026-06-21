@@ -1,0 +1,5 @@
+{
+  "term": "Hierarchy Intent",
+  "definition": "The nesting paradigm — role=tree › treeitem › group with aria-level / setsize / posinset and expand-then-descend / collapse-then-ascend keyboard traversal — for hierarchical data.",
+  "usage": "Standardized by the Hierarchy Intent."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Permission Intent",
+  "definition": "The presentation of the W3C Permissions API tri-state (granted | denied | prompt): the current status, its change events, and the request flow.",
+  "usage": "Standardized by the Permission Intent."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Rich-Text Surface",
+  "definition": "The editable rich-text surface: an editable or read-only region that hosts flowed, formatted content and negotiates with an editing engine.",
+  "usage": "Standardized by the Rich-Text Surface intent (Web Editing)."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Translation Intent",
+  "definition": "How a locale change is delivered to the UI: instant (catalogs preloaded, synchronous switch) vs. async (lazy-loaded), from a UX standpoint.",
+  "usage": "Standardized by the Translation Intent (Web Intl)."
+}

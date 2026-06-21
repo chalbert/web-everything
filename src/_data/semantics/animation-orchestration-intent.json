@@ -1,0 +1,5 @@
+{
+  "term": "Animation-Orchestration Intent",
+  "definition": "Intra-element build-in animations and how multiple relate in time — SVG draw-on, staggered list reveals, a chart growing in — as a declared timeline, distinct from page-to-page transitions.",
+  "usage": "Standardized by the Animation-Orchestration Intent."
+}

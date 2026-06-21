@@ -1,0 +1,5 @@
+{
+  "term": "Master-Detail Intent",
+  "definition": "Coordination between a collection (the master list) and a coupled detail region: which item is selected, how focus and announcement flow, and how the two stay in sync.",
+  "usage": "Standardized by the Master-Detail Intent."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "File Revision Intent",
+  "definition": "The distinguishing trait of a file-update control over a plain upload: a value already exists, so the control owns revert-to-original and replace semantics.",
+  "usage": "Standardized by the File Revision Intent."
+}

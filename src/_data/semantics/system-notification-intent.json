@@ -1,0 +1,5 @@
+{
+  "term": "System Notification Intent",
+  "definition": "The OS-surface notification render — the platform Notifications API surface that renders outside the page and survives the tab closing.",
+  "usage": "Standardized by the System Notification Intent (Web Notifications)."
+}

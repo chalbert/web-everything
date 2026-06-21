@@ -1,0 +1,5 @@
+{
+  "term": "Status Indicator Intent",
+  "definition": "The canonical display of a domain entity's lifecycle state — a semantic status chip / badge plus the available next transitions — so an entity's current state is legible.",
+  "usage": "Standardized by the Status Indicator Intent."
+}
