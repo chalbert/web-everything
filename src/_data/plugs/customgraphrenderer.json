@@ -1,0 +1,10 @@
+{
+  "id": "customgraphrenderer",
+  "name": "CustomGraphRenderer",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Base contract a graph renderer implements — render(positioned, resolvedTheme, target) consuming a PositionedGraph (coordinates from a CustomGraphLayout) plus resolved webtheme tokens and returning a GraphHandle. Satisfied alike by the native-first SVG default (Frontier UI's canonical impl) and by every adapter (Cytoscape, sigma, canvas). Consumes coordinates + theme, never the GraphSpec directly, so swapping impls leaves both spec and layout untouched.",
+  "projects": [
+    "webgraph"
+  ]
+}

@@ -144,3 +144,91 @@ type LayoutStrategy = 'layered' | 'force' | 'tree' | 'radial';
             consumer rather than inventing a shape.</li>
     </ul>
 </section>
+
+<section id="protocol-custom-graph-layout" class="section-card">
+    <h3 id="layout-protocol">CustomGraphLayout Protocol</h3>
+    <p>
+        Because a graph's position is <em>invented</em>, not derived, the renderer seam <strong>splits in
+        two</strong> (<a href="/backlog/1352-webgraph-standard-shape-own-project-protocol-seam-count-a11y/">#1352</a>) —
+        and the first half is <code>CustomGraphLayout</code>, the layout-swap contract. A layout takes a
+        semantic <a href="#graphspec"><code>GraphSpec</code></a> and produces a <strong>PositionedGraph</strong>
+        (node coordinates + optional edge waypoints + bounds) — it computes <em>where</em>, never <em>what</em>
+        or <em>how it's drawn</em>. The <strong>native-first default</strong> is a <strong>deterministic
+        layered / columnar DAG</strong> (pure: same spec in, same coordinates out, so it is
+        conformance-assertable) that Frontier UI ships as the canonical default impl behind this WE contract;
+        non-deterministic engines (force-directed) and richer layered engines (ELK / dagre) register as
+        adapters — the same impl-swap shape as
+        <a href="/projects/webpositioning/#protocol-anchor-positioning">CustomPositioner</a>.
+    </p>
+    {% highlight "typescript" %}
+// The intermediate the two seams hand off — COORDINATES, never semantics. A GraphSpec becomes a
+// PositionedGraph; the renderer draws that. Splitting here lets any layout pair with any renderer.
+interface PositionedGraph {
+  nodes: PositionedNode[];
+  edges: PositionedEdge[];
+  bounds: { width: number; height: number };
+}
+interface PositionedNode { id: string; x: number; y: number; width?: number; height?: number; }
+interface PositionedEdge { from: string; to: string; waypoints?: { x: number; y: number }[]; }
+
+// The layout-swap contract — the first seam. Consumes the SEMANTIC spec; emits coordinates only.
+interface CustomGraphLayout {
+  readonly strategy: LayoutStrategy;            // which family this layout implements
+  // Deterministic layouts (layered) are the conformance-assertable default; non-deterministic ones
+  // (force-directed) ship as adapters, never as the default — same input must give same coordinates.
+  readonly deterministic: boolean;
+  layout(spec: GraphSpec): PositionedGraph;     // SPEC → coordinates; never draws
+}
+    {% endhighlight %}
+    <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+        <li><strong>The split is the point:</strong> an independently swappable layout (ELK layered) can pair
+            with any renderer, because <code>PositionedGraph</code> is the only thing crossing between the two
+            seams — a chart's single-seam <code>CustomChartRenderer</code> precedent does <em>not</em> transfer
+            to an invented-position family.</li>
+        <li><strong>Deterministic default:</strong> the layered/columnar DAG is pure and assertable; force-directed
+            (non-deterministic, hard to test) is an adapter behind this contract, never the baseline.</li>
+        <li><strong>Spec is the only lock:</strong> swapping the layered default for an ELK / dagre / D3-force
+            adapter leaves the <a href="#graphspec"><code>GraphSpec</code></a> untouched.</li>
+    </ul>
+</section>
+
+<section id="protocol-custom-graph-renderer" class="section-card">
+    <h3 id="renderer-protocol">CustomGraphRenderer Protocol</h3>
+    <p>
+        The second seam: <code>CustomGraphRenderer</code> takes a <strong>PositionedGraph</strong> (coordinates
+        from a <a href="#protocol-custom-graph-layout"><code>CustomGraphLayout</code></a>) plus resolved
+        <a href="/projects/webtheme/">Web Theme</a> tokens and produces output. It consumes <em>coordinates +
+        theme</em> and never the <a href="#graphspec"><code>GraphSpec</code></a> directly, so swapping the
+        renderer leaves both the spec and the layout untouched. The <strong>native-first default</strong> is an
+        SVG renderer (labellable — so the a11y axis is reachable, unlike canvas) Frontier UI ships as the
+        canonical default impl behind this WE contract; Cytoscape / sigma / canvas adapters register as
+        alternatives. Conformance scores <strong>semantic fidelity</strong>, <strong>theme application</strong>,
+        and <strong>accessibility</strong> first-class (the tier-1 adjacency description derivable via
+        <code>describe()</code>; tier-2 grounded in the
+        <a href="/research/graph-a11y-model/">graph-a11y-model</a> research).
+    </p>
+    {% highlight "typescript" %}
+// The draw-swap contract — the second seam. Consumes COORDINATES + theme; never the GraphSpec directly.
+interface CustomGraphRenderer {
+  render(positioned: PositionedGraph, theme: ResolvedTheme, target: Element): GraphHandle;
+}
+
+interface GraphHandle {
+  update(positioned: PositionedGraph): void;    // re-draw on a re-layout
+  destroy(): void;
+  // The adjacency-description a11y text, derivable from the graph — the tier-1 conformance floor.
+  describe(): string;
+}
+    {% endhighlight %}
+    <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+        <li><strong>Native-first, labellable default:</strong> the SVG renderer draws with zero adapters and
+            keeps nodes/edges labellable so the a11y axis is reachable; Cytoscape / sigma / canvas are opt-in
+            impls behind the same contract.</li>
+        <li><strong>Reads coordinates, not the spec:</strong> the renderer never sees the
+            <a href="#graphspec"><code>GraphSpec</code></a>, only the <code>PositionedGraph</code> + theme — so
+            layout and drawing evolve independently.</li>
+        <li><strong>Three-axis conformance:</strong> semantic fidelity (draws every positioned node/edge) +
+            theme application (honours <a href="/projects/webtheme/">Web Theme</a> tokens) + accessibility as a
+            first-class axis (the <code>describe()</code> adjacency floor).</li>
+    </ul>
+</section>

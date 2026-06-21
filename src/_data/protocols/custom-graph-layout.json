@@ -1,0 +1,8 @@
+{
+  "id": "custom-graph-layout",
+  "name": "CustomGraphLayout",
+  "summary": "Conformance reference for the FIRST of the Web Graph standard's two renderer seams — the layout-swap contract that turns a semantic GraphSpec into a PositionedGraph (node coordinates + optional edge waypoints + bounds), inventing the positions a node-link diagram has no datum for. The seam exists because a graph's position is INVENTED by an algorithm, not derived from data (the #1352 ruling that splits the graph renderer in two, unlike the single-seam CustomChartRenderer of a chart). A CustomGraphLayout declares its LayoutStrategy family and whether it is deterministic; the NATIVE-FIRST DEFAULT is a deterministic layered/columnar DAG (pure: same spec in, same coordinates out, so it is conformance-assertable) that Frontier UI ships as the canonical default impl behind the WE contract (per #1290 / constellation-placement rule 1 — runtime in FUI, never the WE repo). Non-deterministic engines (force-directed) register as adapters behind this contract, never as the default. The spec is the only lock: swapping the layered default for an ELK/dagre/D3-force adapter leaves the GraphSpec untouched. The protocol fixes the layout contract + the strategy/determinism declaration; it owns neither the GraphSpec schema (the semantic profile) nor the drawing (that is CustomGraphRenderer). Technical contract, not a UX preference — a Protocol, not an Intent.",
+  "status": "concept",
+  "ownedByProject": "webgraph",
+  "anchor": "protocol-custom-graph-layout"
+}

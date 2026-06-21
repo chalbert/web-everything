@@ -1,0 +1,5 @@
+{
+  "term": "CustomGraphLayout",
+  "definition": "The layout-swap contract of the Web Graph standard — the first of its two renderer seams. A CustomGraphLayout turns a semantic GraphSpec into a PositionedGraph (node coordinates + optional edge waypoints), inventing the positions a node-link diagram has no datum for. It declares its layout-strategy family and whether it is deterministic; the deterministic layered-DAG default is conformance-assertable, force-directed engines are adapters.",
+  "usage": "Standardized by the CustomGraphLayout Protocol (Web Graph)."
+}

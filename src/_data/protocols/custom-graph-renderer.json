@@ -1,0 +1,8 @@
+{
+  "id": "custom-graph-renderer",
+  "name": "CustomGraphRenderer",
+  "summary": "Conformance reference for the SECOND of the Web Graph standard's two renderer seams — the draw-swap contract that takes a PositionedGraph (coordinates from a CustomGraphLayout) plus resolved webtheme tokens and produces output. Split from layout (the #1352 two-seam ruling) so an independently swappable layout (e.g. ELK layered) can pair with any renderer; the NATIVE-FIRST DEFAULT is an SVG renderer Frontier UI ships as the canonical default impl behind the WE contract (per #1290 / constellation-placement rule 1 — runtime in FUI, never the WE repo), with pluggable adapters (Cytoscape, sigma, a canvas renderer) as alternative impls — the same impl-swap shape as CustomChartRenderer / CustomPositioner. The renderer consumes coordinates + theme and never the GraphSpec directly, so swapping it leaves both the spec and the layout untouched. Conformance is scored on semantic fidelity (does it draw every positioned node/edge), theme application (does it honour webtheme tokens), and accessibility as a first-class axis — the tier-1 adjacency description-table derivable from the graph (richer tier-2 traversal grounded in the graph-a11y-model research). The protocol fixes the render contract + the conformance axes; it owns neither the GraphSpec schema nor the layout. Technical contract, not a UX preference — a Protocol, not an Intent.",
+  "status": "concept",
+  "ownedByProject": "webgraph",
+  "anchor": "protocol-custom-graph-renderer"
+}

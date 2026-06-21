@@ -1,0 +1,5 @@
+{
+  "term": "CustomGraphRenderer",
+  "definition": "The draw-swap contract of the Web Graph standard — the second of its two renderer seams. A CustomGraphRenderer takes a PositionedGraph (coordinates from a CustomGraphLayout) plus resolved Web Theme tokens and produces output, never reading the GraphSpec directly. The native-first SVG default is the canonical impl; Cytoscape / sigma / canvas adapters swap in behind the same contract.",
+  "usage": "Standardized by the CustomGraphRenderer Protocol (Web Graph)."
+}

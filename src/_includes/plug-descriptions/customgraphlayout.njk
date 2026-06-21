@@ -1,0 +1,40 @@
+<h3 id="overview">Overview</h3>
+<p>
+    <code>CustomGraphLayout</code> is the first of the <a href="/projects/webgraph/">Web Graph</a> standard's
+    two renderer seams — the layout-swap contract. Its one method, <code>layout()</code>, consumes a
+    <em>semantic</em> <a href="/projects/webgraph/#graphspec"><code>GraphSpec</code></a> and returns a
+    <code>PositionedGraph</code> (node coordinates + optional edge waypoints + bounds). It exists because a
+    node-link diagram has no positional datum — position is <em>invented</em> by an algorithm, not derived
+    from data — so layout is split from drawing (the
+    <a href="/backlog/1352-webgraph-standard-shape-own-project-protocol-seam-count-a11y/">#1352</a> two-seam
+    ruling). The native-first default is a <strong>deterministic layered / columnar DAG</strong> (pure: same
+    spec in, same coordinates out, so it is conformance-assertable), shipped by Frontier UI as the canonical
+    impl; non-deterministic engines (force-directed) and richer layered engines (ELK / dagre) register behind
+    the same contract as adapters. The spec is the only lock — swapping impls leaves the
+    <code>GraphSpec</code> untouched.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://www.eclipse.org/elk/">ELK</a> / <a href="https://github.com/dagrejs/dagre">dagre</a></td>
+        <td>De-facto layered-DAG engines</td>
+        <td>The layered default mirrors their column-DAG model; both can register as adapters behind the contract.</td>
+    </tr>
+    <tr>
+        <td><a href="https://d3js.org/d3-force">D3-force</a></td>
+        <td>De-facto force engine</td>
+        <td>A non-deterministic adapter — never the default, because the default must be conformance-assertable.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+// The layout-swap contract — GraphSpec → coordinates. Never draws.
+interface CustomGraphLayout {
+  readonly strategy: LayoutStrategy;            // 'layered' | 'force' | 'tree' | 'radial'
+  readonly deterministic: boolean;              // layered = true (assertable default); force = false
+  layout(spec: GraphSpec): PositionedGraph;     // coordinates + optional edge waypoints + bounds
+}
+{% endhighlight %}

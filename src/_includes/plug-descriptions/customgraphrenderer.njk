@@ -1,0 +1,43 @@
+<h3 id="overview">Overview</h3>
+<p>
+    <code>CustomGraphRenderer</code> is the second of the <a href="/projects/webgraph/">Web Graph</a>
+    standard's two renderer seams — the draw-swap contract. Its one method, <code>render()</code>, consumes a
+    <code>PositionedGraph</code> (coordinates produced by a
+    <a href="/plugs/customgraphlayout/"><code>CustomGraphLayout</code></a>) plus the resolved
+    <a href="/projects/webtheme/">webtheme</a> tokens, and returns a <code>GraphHandle</code> for updates,
+    teardown, and the derivable adjacency-description a11y text. It reads <em>coordinates + theme</em> and
+    never the <a href="/projects/webgraph/#graphspec"><code>GraphSpec</code></a> directly, so layout and
+    drawing evolve independently. The native-first default is an <strong>SVG renderer</strong> (labellable, so
+    the accessibility axis is reachable — unlike canvas), shipped by Frontier UI as the canonical impl; library
+    adapters (<a href="https://js.cytoscape.org/">Cytoscape</a>, sigma, a canvas renderer) satisfy the same
+    interface. The spec is the only lock — swapping renderers leaves both the spec and the layout untouched.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/SVG">SVG</a></td>
+        <td>Baseline</td>
+        <td>The native-first default draws with plain SVG + theme tokens, no library dependency, nodes/edges labellable.</td>
+    </tr>
+    <tr>
+        <td><a href="https://www.w3.org/TR/graphics-aria-1.0/">WAI-ARIA Graphics</a></td>
+        <td>W3C Recommendation</td>
+        <td>The SVG output carries Graphics roles; the tier-1 adjacency description is derivable via <code>describe()</code>.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+// The draw-swap contract — coordinates + theme → output. Never reads the GraphSpec directly.
+interface CustomGraphRenderer {
+  render(positioned: PositionedGraph, theme: ResolvedTheme, target: Element): GraphHandle;
+}
+
+interface GraphHandle {
+  update(positioned: PositionedGraph): void;    // re-draw on a re-layout
+  destroy(): void;
+  describe(): string;                           // the adjacency-description a11y floor
+}
+{% endhighlight %}

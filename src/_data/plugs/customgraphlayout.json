@@ -1,0 +1,10 @@
+{
+  "id": "customgraphlayout",
+  "name": "CustomGraphLayout",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Base contract a graph layout implements — layout(spec) consuming a semantic GraphSpec and returning a PositionedGraph (node coordinates + optional edge waypoints + bounds), declaring its LayoutStrategy family and whether it is deterministic. Satisfied by the native-first deterministic layered-DAG default (Frontier UI's canonical impl) and by every adapter (ELK/dagre, D3-force, Cytoscape). The spec is the only lock: swapping impls leaves the GraphSpec untouched.",
+  "projects": [
+    "webgraph"
+  ]
+}
