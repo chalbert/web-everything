@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: src/_data/researchTopics/progressive-load-composition.json
+codifiedIn: one-off
 tags: [decision, book-candidate, infinite-scroll, load-more, progressive-loading, gap]
 relatedReport: reports/2026-06-21-progressive-load-composition.md
 preparedDate: "2026-06-21"
@@ -50,6 +53,38 @@ Ratify the row, or override the placement you'd change. **Confidence** says wher
 | Fork | Recommended default | Main alternative | Confidence |
 |---|---|---|---|
 | **1 · placement** | **publish a composition-pattern `/research/` topic** over the four existing homes (no new standard) | a new intent *(rejected — owns no unowned dimension)* · a `pagination` dimension *(rejected — `append+auto` already covers it)* | **~88%** — pieces all shipped + cross-referencing; benchmarks unanimous |
+| **1·residual · UX-policy anchor** | **optional but tracked** — file the one additive APG-cited note as a separately-prioritized follow-up; placement does not block on it | land it inline now *(viable, ~85% — but the decider chose to keep the decision light)* · leave as research-topic prose with no tracked follow-up *(rejected — re-scatters the very prose this card flags as the unowned residual)* | **~85%** — note is advisory + upstream-grounded either way; "tracked" (not vague-optional) keeps it from evaporating |
+
+## Ruling — RATIFIED 2026-06-21
+
+**Chosen path: Fork 1(a); the UX-policy note is optional-but-tracked.** Two moves:
+
+1. **Placement = 1(a) (firm).** Publish the composition-pattern `/research/` topic over the four existing
+   homes (viewport-presence sentinel · windowed-collection windowing+a11y · loader `loadingMore` row ·
+   pagination `append+auto` mechanism). **No new standard.** Branches (b) new intent and (c) new
+   `pagination` dimension are **rejected** — both fail the fork-existence test (re-mint owned vocabulary
+   or mis-home the cross-block a11y/state concerns).
+
+2. **The UX-policy note is optional, but filed as a tracked follow-up** (not left as vague "someday"
+   prose). Placement ratifies without it. The deferred item lands **one additive `designDecision`-style
+   note on [we:src/_data/intents/windowed-collection.json](../src/_data/intents/windowed-collection.json)
+   `dataSource`**, phrased as an upstream-cited *recommendation*, not a mandate:
+
+   > *"For `dataSource: infinite`, load-more is the a11y-safe default per the WAI-ARIA APG Feed pattern;
+   > pure auto-advance infinite scroll is discouraged. Advisory, not restrictive — `dataSource: infinite`
+   > with auto-advance stays fully supported (`pagination.mode: append` × `advance: auto`)."*
+
+   *Why tracked and not just "optional":* the card's own "unowned residual" is this policy *scattered as
+   prose*; a `/research/` topic with no contract anchor re-scatters it. Filing the note as a small
+   separately-prioritized item keeps the path to citeability (authors read the intent, not `/research/`)
+   and machine-visibility (generators / conformance / design-ref) open without weighing down this decision.
+   When landed it is **advisory + APG-grounded**, so it does not violate *WE-mandates-nothing* /
+   *most-flexible-default* — WE cites an upstream standards body's vocabulary, the permissive value stays
+   fully supported.
+
+*Confidence:* placement ~88%, optional-but-tracked note ~85%. *The residual:* exact wording/home of the
+note is editorial (could sit on a `pagination` designDecision instead) — settled when the follow-up item is
+worked, not now.
 
 ## Fork 1 — where does the progressive-load pattern live?
 

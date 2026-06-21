@@ -65,8 +65,8 @@
 <!-- AUTO-GENERATED:inventory — run `npm run gen:inventory`; do not edit by hand -->
 - **Plugs** 55 — 31 active · 22 concept · 2 experimental
 - **Blocks** 80 — 38 active · 13 concept · 29 draft
-- **Intents** 68 — 1 active · 14 concept · 53 draft
-- **Glossary terms** 305 · **Research topics** 163 (159 open)
+- **Intents** 74 — 1 active · 18 concept · 55 draft
+- **Glossary terms** 311 · **Research topics** 168 (164 open)
 - **Projects** 42: webadapters, webanalytics, webaudit, webbehaviors, webblocks, webcases, webcharts, webcompliance, webcomponents, webcontexts, webdecisions, webdirectives, webdocs, webediting, webevents, webexpressions, webgraph, webguards, webidentity, webinjectors, webintents, webintl, webisolation, weblifecycle, webmanifests, webnotifications, webplugs, webpolicy, webportals, webpositioning, webprocess, webrealtime, webregistries, webreliability, webreporting, webresources, webstates, webtheme, webtraces, webtraits, webvalidation, webworkflows
 <!-- /AUTO-GENERATED:inventory -->
 
