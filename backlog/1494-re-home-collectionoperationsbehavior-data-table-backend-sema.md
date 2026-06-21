@@ -1,10 +1,11 @@
 ---
 kind: story
-size: 5
+size: 8
 parent: "1353"
 status: open
 blockedBy: []
 dateOpened: "2026-06-21"
+dateStarted: "2026-06-21"
 tags: []
 ---
 
@@ -28,3 +29,32 @@ prereq that unblocks #1355's renderer delete — file #1355 `blockedBy` this.
 - WE conformance suite (`we:blocks/__tests__/unit/renderers/data-table.test.ts`) asserts `auditDataTable`
   against the stored vector golden output — green without importing a WE `renderDataTable`.
 - `npm run check:standards` green in both repos; FUI gate green for the moved backend.
+
+## Pre-flight (batch-2026-06-21-1429-1487) — outgrew (5 → 8): verifier redesign, not a file move
+
+Claimed and grounded both trees. FUI **already has** the full backend (`fui:blocks/renderers/data-table/`
++ `fui:blocks/renderers/collection-operations/` — `renderDataTable`, `DataTableBehavior`,
+`CollectionOperationsBehavior`, `windowCollection`, fixtures, tests), so the "move to FUI" is really
+"delete the WE runtime + reduce WE to types + verifier + vectors." But the acceptance's verifier shape is
+**not yet built**, and getting there is materially more than a story·5 move:
+
+- **`auditDataTable` is NOT a data-reader — it re-runs the backend.** It calls
+  `applyPipeline(rows, config)` + `cellDisplayText` + `summaryText` to compute the *expected* result and
+  compares against the rendered DOM (`we:blocks/renderers/data-table/renderDataTable.ts:390`). The
+  #1467/#899 ruling requires the verifier to **assert the stored golden output as data (no live render,
+  no backend recompute)** — so `auditDataTable` must be **redesigned** into a pure golden-reader, else
+  "backend → FUI" and "verifier stays WE" contradict (the verifier currently *depends* on the backend it
+  must shed).
+- **No golden output exists.** `we:blocks/renderers/data-table/__fixtures__/data-table-cases.ts` cases are
+  **input-only** (rows + config); the "golden" is computed live. The data-reading verifier needs **stored
+  goldens generated and committed** per case — net-new vector infra (the #899 model), not present.
+- **No WE conformance test file exists.** `find blocks/__tests__` returns no `data-table*`/
+  `collection-op*` test — the acceptance's `we:blocks/__tests__/unit/renderers/data-table.test.ts` must be
+  (re)created against goldens.
+- **A live demo imports the WE backend.** `we:demos/data-table-demo.ts` value-imports the runtime; deleting
+  it breaks the demo/typecheck until the #1355 swap (which `blockedBy` this) — needs careful sequencing.
+
+So this is a **conformance-verifier redesign + golden generation + cross-repo move + demo handling**, a
+focused session — re-sized 5 → 8, carry-forward reason **outgrew**. No new design fork (the #899 model +
+#1467 placement are ruled — golden format is an impl detail). #1355's delete stays `blockedBy` this.
+Released to `open`.
