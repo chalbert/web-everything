@@ -1,0 +1,24 @@
+{
+  "id": "feature-flag-gating-variant-assignment",
+  "title": "Feature flags & experiments — where does declarative gating + variant assignment land, given access-control already owns the gate?",
+  "summary": "Prep research for decision #1414 (app-infrastructure cross-cutting lens, #1402). Nearly every non-trivial app ships feature flags (gate a route/subtree on a runtime-evaluated flag) and experiments / A-B variant assignment (deterministically bucket a user, render the assigned arm, emit an exposure event). The item framed three placements for THE GATE — a new `feature-flag` intent vs fold into access-control vs a pure provider — but a survey of the upstream standard (OpenFeature/CNCF) traced against the real WE tree RESHAPES that framing. FINDING 1 — OpenFeature (CNCF Incubating, backed by LaunchDarkly/GitLab/Split/Dynatrace) is the vendor-neutral upstream standard; WE aligns to it, never re-invents it. A flag evaluation returns `{ value, variant, reason }` where `reason` is a standardized enum (`STATIC | DEFAULT | TARGETING_MATCH | SPLIT | CACHED | DISABLED | ...`); flags are TYPED (boolean = the binary gate, string/object = the multivariate variant selector); a swappable `provider` (global singleton, init/evaluate/shutdown, per-domain) resolves against an evaluation CONTEXT — the running app consults it on every evaluation (a genuine runtime-DI seam, #052/#081). FINDING 2 — the GATE HALF IS ALREADY STANDARDIZED IN WE: access-control declares `feature-flag` as a first-class AUTHORITY KIND (we:src/_data/intents/access-control.json:24-30) on the Guard provider seam (we:src/_data/projects/webguards.json:4), with a deny-outcome family (hide | redirect | forbid | cloak) and a server-authoritative trust boundary. So 'a new feature-flag intent for the gate' and 'fold the gate into access-control' both DISSOLVE — the boolean gate is done. The genuinely unhomed concept is MULTIVARIATE VARIANT ASSIGNMENT (a flag resolving to one of N arms, which access-control's allow/deny gate cannot express) plus its EXPOSURE EVENT. FINDING 3 — OpenFeature's TRACKING API is a SEPARATE spec section from evaluation: the exposure ('which arm they saw') comes from evaluation, the conversion ('what they did') from tracking — the upstream's own ratification of the flag↔telemetry seam (#1415). So the exposure is an emit-to-a-sink COMPOSE, not new gate machinery. FINDING 4 — incumbents converge (LaunchDarkly flag-variations-as-arms + feature-event exposure + salt bucketing; Statsig deterministic SHA256(salt+unit)%10000; Unleash activation strategies; GrowthBook Safe Rollout; Flagsmith multivariate) and deterministic bucketing is an IMPL DETAIL behind the provider — never UX (Impl Is Not A Standard; intents-are-UX-only). CLASSIFICATION (per-element): the binary gate = settled (access-control authority kind, Guard provider, runtime-DI, most-permissive default); variant assignment = intent layer, dimension, expose whole axis (N arms all legitimate end-states), DI-injectable (consults an evaluation provider), most-permissive default = the control/default arm (mirrors OpenFeature DEFAULT), seam = variant→provider + variant→telemetry; exposure event = telemetry emit-to-a-sink (compose with #1415); bucketing = impl behind provider (excluded from UX). PREPARED FORKS: Fork 1 home for variant assignment — a separate `experiment` intent (recommended) vs a third `surface` on access-control vs no-intent (no-intent is broken: render-the-arm is a UX declaration); Fork 2 same Guard provider vs a distinct evaluation provider (recommended distinct — a variant arm is not a security verdict, conflating them risks a client gate masquerading as authz); Fork 3 exposure event own family vs routed through #1415's telemetry sink (recommended routed — OpenFeature splits tracking from evaluation). SETTLED BY DEFAULT: the binary gate (already on access-control), deterministic bucketing (impl), typed-flag distinction + OpenFeature `reason`/`variant` vocabulary (borrowed). Full grounding in we:reports/2026-06-21-feature-flag-gating-variant-assignment.md.",
+  "status": "open",
+  "dateOpened": "2026-06-21",
+  "lastReviewed": "2026-06-21",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webintents",
+    "feature-flags",
+    "experiments",
+    "variant-assignment",
+    "openfeature",
+    "access-control",
+    "guard-provider",
+    "cross-cutting",
+    "native-first",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

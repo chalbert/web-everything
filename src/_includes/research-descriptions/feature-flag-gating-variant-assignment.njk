@@ -1,0 +1,125 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Nearly every non-trivial app ships <strong>feature flags</strong> (gate a route/subtree on a
+  runtime-evaluated flag) and <strong>experiments / A-B variant assignment</strong> (deterministically
+  bucket a user, render the assigned arm, emit an exposure event), yet the
+  <a href="/backlog/1414-feature-flags-experiments-declarative-gating-variant-assignm/">decision (#1414)</a>
+  asks where this lands in the Web Everything constellation. The item framed three placements for
+  <em>the gate</em> — a new <code>feature-flag</code> intent, vs folding it into
+  <a href="/intents/access-control/">access-control</a>, vs a pure provider with no intent. But a survey of
+  the upstream standard traced against the real tree <strong>reshapes the framing</strong>: the gate half
+  is already standardized, and the genuinely unhomed concept is multivariate <strong>variant
+  assignment</strong> and its exposure event.
+</p>
+
+<h2>Finding 1 — OpenFeature (CNCF) is the upstream standard; its typed-flag + provider shape is the convergent model</h2>
+<p>
+  <a href="https://openfeature.dev/specification/">OpenFeature</a> is the vendor-neutral, CNCF-Incubating
+  standard for feature flagging (backed by LaunchDarkly, GitLab, Split, Dynatrace and others). Per the
+  <a href="/intents/">standards-bodies-are-upstream</a> principle, WE aligns to it and borrows its
+  vocabulary rather than re-inventing. Its shape:
+</p>
+<ul>
+  <li><strong>Resolution structure</strong> — a flag evaluation returns
+    <code>{ value, variant, reason, errorCode }</code>. <code>variant</code> names which arm was returned;
+    <code>reason</code> is a <em>standardized enum</em>:
+    <code>STATIC · DEFAULT · TARGETING_MATCH · SPLIT · CACHED · DISABLED · UNKNOWN · STALE · ERROR</code>.</li>
+  <li><strong>Typed flags</strong> — boolean / string / number / object. The <em>boolean</em> case is the
+    binary gate; the <em>string / object</em> case is the multivariate variant selector. This typed split
+    is the load-bearing distinction below.</li>
+  <li><strong>Provider</strong> — a swappable implementation resolving values from a source of truth,
+    registered in a global singleton (init/evaluate/shutdown, bindable per logical domain). The running app
+    <strong>consults</strong> it on every evaluation — a genuine runtime-DI seam (cf.
+    <a href="/backlog/052-jsx-rendering-strategy-axis/">#052</a>/<a href="/backlog/081-module-as-a-service-provider/">#081</a>),
+    and the only lock (the impl stays escapable).</li>
+  <li><strong>Evaluation context</strong> — arbitrary contextual data (user id, locale) is the targeting
+    basis, mirroring the predicate-context the Guard provider already takes.</li>
+</ul>
+
+<h2>Finding 2 — the gate half is ALREADY standardized in WE; only variant assignment is unhomed</h2>
+<p>
+  <a href="/intents/access-control/">Access Control</a> already declares
+  <code>feature-flag</code> as a first-class <strong>authority kind</strong>
+  (<code>src/_data/intents/access-control.json:24-30</code>) on the
+  <a href="/projects/webguards/">Guard</a> provider seam
+  (<code>src/_data/projects/webguards.json:4</code>) — <em>"feature-flag = temporary entitlement/rollout
+  (same provider seam, materially different stakes)."</em> It carries the deny-outcome family
+  (<code>hide | redirect | forbid | cloak</code>) and a server-authoritative trust boundary. So the
+  <strong>binary gate is done</strong>: both "a new feature-flag intent for the gate" and "fold the gate
+  into access-control" dissolve — the latter is already the shipped answer. What access-control's
+  <em>allow/deny</em> gate <strong>cannot</strong> express is a flag that resolves to <em>one of N
+  variants</em>. That multivariate selector — plus its exposure event — is the genuinely unhomed concept,
+  and the real subject of the decision.
+</p>
+
+<h2>Finding 3 — OpenFeature splits Tracking from Evaluation; the exposure event is a telemetry compose</h2>
+<p>
+  OpenFeature's <a href="https://openfeature.dev/specification/sections/tracking/">Tracking API</a> is a
+  <strong>separate spec section</strong> from evaluation: the <em>exposure</em> ("which arm they saw")
+  comes from the evaluation, the <em>conversion</em> ("what they did") from a
+  <code>track(eventName, context, details)</code> call. This is the upstream's own ratification of the
+  flag&harr;telemetry seam: the exposure is an <strong>emit-to-a-sink compose</strong>, not new gate
+  machinery. WE routes it through the telemetry sink prepared in
+  <a href="/backlog/1415-telemetry-analytics-events-declarative-event-emission-vocabu/">#1415</a> — the
+  variant intent <em>declares</em> the exposure, telemetry <em>delivers</em> it (a named seam, not a merge
+  of the two items).
+</p>
+
+<h2>Finding 4 — incumbents converge; deterministic bucketing is impl behind the provider, never UX</h2>
+<p>
+  The provider models converge: LaunchDarkly treats flag variations as experiment arms and sends a
+  <em>feature-event</em> exposure on evaluation; Statsig's evaluation is deterministic
+  (<code>SHA256(salt + unit) % 10000</code>); Unleash stacks activation strategies; GrowthBook's Safe
+  Rollout ramps on the same statistical engine as experiments; Flagsmith adds multivariate testing.
+  Crucially, <strong>deterministic bucketing is an implementation detail behind the provider</strong> — a
+  hash of a salt and a unit id. Per <a href="/intents/">intents-are-UX-only</a> and
+  <a href="/backlog/020-base-select-as-customrenderer/">Impl-Is-Not-A-Standard</a>, it is never a UX value
+  and never a WE artifact beyond the provider contract.
+</p>
+
+<h2>Classification (per-element pass)</h2>
+<ul>
+  <li><strong>Binary gate</strong> — Intent, already shipped as <code>authority: feature-flag</code> on
+    access-control / the Guard provider; runtime-DI; most-permissive default. <em>Settled — no fork.</em></li>
+  <li><strong>Variant assignment</strong> — Intent layer; a dimension (N arms are all legitimate
+    simultaneous end-states); expose the whole axis; DI-injectable (consults an evaluation provider);
+    most-permissive default = the control/default arm (mirrors OpenFeature <code>DEFAULT</code>); seam =
+    variant&rarr;provider and variant&rarr;telemetry.</li>
+  <li><strong>Exposure event</strong> — a telemetry emit-to-a-sink; composes with #1415; default no-op
+    sink. <em>Supported by default + a named seam, not a fork.</em></li>
+  <li><strong>Deterministic bucketing</strong> — impl behind the provider; excluded from UX. <em>Supported
+    by default.</em></li>
+</ul>
+
+<h2>The prepared forks</h2>
+<ul>
+  <li>
+    <strong>Fork 1 — Home for variant assignment.</strong> A separate <code>experiment</code> intent
+    <em>(recommended)</em> vs a third <code>surface</code> on access-control vs no-intent. No-intent is the
+    <strong>broken</strong> branch (render-the-assigned-arm is a UX declaration an author needs to write
+    against — a bare provider gives nothing to declare); and the access-control deny-outcome family
+    (allow/deny) cannot carry a pick-one-of-N resolution.
+  </li>
+  <li>
+    <strong>Fork 2 — Provider identity.</strong> A distinct evaluation provider reusing the Guard seam
+    <em>pattern</em> <em>(recommended)</em> vs the same Guard provider instance. A variant arm is
+    <strong>not</strong> a security verdict; routing both through one provider risks a client-side gate
+    masquerading as authorization, breaking access-control's server-authoritative trust boundary.
+  </li>
+  <li>
+    <strong>Fork 3 — Exposure event routing.</strong> Routed through #1415's telemetry sink
+    <em>(recommended)</em> vs its own event family. OpenFeature's separate Tracking API is the upstream
+    precedent for the compose.
+  </li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/intents/access-control/">Access Control intent</a> — already owns the binary gate as an authority kind.</li>
+  <li><a href="/projects/webguards/">Web Guards</a> — the swappable provider seam the gate composes.</li>
+  <li><a href="/backlog/1415-telemetry-analytics-events-declarative-event-emission-vocabu/">#1415</a> — the telemetry sink the exposure event routes through (a named seam, not a merge).</li>
+  <li><a href="/backlog/1402-discovery-lens-app-infrastructure-cross-cutting-concerns-inv/">#1402</a> — the app-infrastructure cross-cutting lens that surfaced this.</li>
+  <li>Backlog <a href="/backlog/1414-feature-flags-experiments-declarative-gating-variant-assignm/">#1414</a> — the decision this research prepares.</li>
+</ul>
+{% endraw %}
