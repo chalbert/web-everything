@@ -12,6 +12,9 @@ if (typeof window !== 'undefined') {
 export { default as CustomTrackerRegistry } from './CustomTrackerRegistry';
 export { createDefaultTrackerRegistry, UnknownTrackerError } from './CustomTrackerRegistry';
 
+// The `data-track` declarative emission seam (#1475) — author-facing binding over the tracker sink.
+export { default as TrackAttribute, type TrackInteraction } from './TrackAttribute';
+
 // Re-export the analytics-protocol vocabulary (#1003) from one entry point, mirroring the guard
 // re-exports: the tracker contract, the event/identity/options surface, and the native-first no-op default.
 export {

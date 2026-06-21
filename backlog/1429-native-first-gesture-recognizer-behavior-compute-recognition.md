@@ -59,7 +59,7 @@ Built Slice A in frontierui:
   `resolveGestureRecognizerEngine` swap an incumbent (Hammer.js / @use-gesture) wholesale. Recognizes
   the three discrete single-pointer gestures (tap · double-tap · long-press) on Pointer Events with
   native-first thresholds (`DEFAULT_THRESHOLDS`: longPress 500ms, doubleTap 300ms, move-tol 10px),
-  deterministic (same input → same gestures). Models `viewportPresence.ts` (factory seam, recognition
+  deterministic (same input → same gestures). Models `fui:plugs/webbehaviors/viewportPresence.ts` (factory seam, recognition
   only — no effect baked in).
 - **`fui:plugs/webbehaviors/GestureAttribute.ts`** (new) — the `gesture` `CustomAttribute` (e.g.
   `gesture="tap longpress"`; bare ⇒ all three). Interaction-driven surface ⇒ honours `inert`
@@ -74,6 +74,6 @@ Built Slice A in frontierui:
 - **`fui:demos/gesture-tap-press-demo.{html,ts}`** (new) — three pads (tap/double-tap, long-press,
   all-three) reflecting recognized-gesture events into a live log; self-bootstraps the registry.
 
-`CustomAttributeRegistry.ts` needed no change — registration is the consumer's `registry.define('gesture',
+`fui:plugs/webbehaviors/CustomAttributeRegistry.ts` needed no change — registration is the consumer's `registry.define('gesture',
 GestureAttribute)` (the demo does this); the seam the siblings (B/C/D) consume is the exported engine,
 which lands here. Siblings #1430 (B) / C / D stay `blockedBy: 1429`.
