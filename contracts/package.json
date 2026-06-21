@@ -13,6 +13,7 @@
   "exports": {
     "./analytics": "./analytics.ts",
     "./charts": "./charts.ts",
+    "./graph": "./graph.ts",
     "./credential-management": "./credential-management.ts",
     "./guard": "./guard.ts",
     "./positioning": "./positioning.ts",
