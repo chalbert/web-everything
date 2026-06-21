@@ -4,7 +4,7 @@
   "status": "draft",
   "type": "Directive",
   "summary": "Manages async mutation lifecycle (POST/PUT/DELETE) — busy state on triggers, double-submit prevention, optimistic updates with automatic rollback on error.",
-  "implementsIntent": "action",
+  "implementsIntent": "mutation",
   "dependsOn": [
     "resource-loader"
   ],
@@ -152,7 +152,7 @@
     {
       "name": "withOptimisticMutation",
       "description": "Applies predicted result immediately, reverts on error",
-      "intentDimension": "loader.strategy.optimistic"
+      "intentDimension": "mutation.strategy.optimistic"
     },
     {
       "name": "withFeedbackOnComplete",
