@@ -71,10 +71,22 @@ output is the rewritten body, not a message:
    Only genuine forks get a
    preview-table row — support-both concerns from pass 0 go in the "Supported by default" list, not the
    table. A row whose "main alternative" isn't actually *excluded* is a pass-0 miss — demote it. Author
-   the default to survive a red-team (*backlog-workflow.md → Red-team the default*): at ratify time the
-   decider argues the alternative + names the principle the default violates, so ground the default's
-   rationale against the real tree now and flag high-leverage forks for the deciding agent's skeptic
-   sub-agent pass; prep that only *asserts* a default leaves the attack to land at decision time.
+   the default to survive a red-team (*backlog-workflow.md → Red-team the default*): ground the default's
+   rationale against the real tree now.
+4. **Run the skeptic pass *now*, in prep — don't defer the attack to the decision turn** (*backlog-workflow.md
+   → Red-team the default*: prep is the primary skeptic seat). Prep that only *asserts* a default and tags
+   "flag for the skeptic" leaves the attack to land at ratify time — the exact failure #1437 hit (prep
+   asserted a Fork-2 default, the decision turn wobbled it, and only the ratify-time skeptic recovered it).
+   Close it at the source: after authoring each fork's default, **spin up a throwaway skeptic sub-agent
+   (prompted *only* to refute — `general-purpose`, default "this default is wrong") and have it attack the
+   recommended branch of every fork, hardest on the high-leverage / high-`gates` ones.** Then **resolve its
+   findings into the item before stamping**: REFUTED → flip the default + rewrite the rationale; SURVIVES →
+   record the surviving rationale (the attack it beat); SURVIVES-WITH-AMENDMENT → fold the amendment in.
+   The durable output is a one-line **`Skeptic: <verdict + what changed>`** note under each `## Fork N`, so
+   the decision turn sees an already-attacked default, not a raw assertion. Never leave a bare "flag for the
+   skeptic" marker — running it *is* prep's job. (The decision-turn red-team in *backlog-workflow.md* stays,
+   but as a *confirmation* + a re-attack only if the discussion surfaced something new — no longer the first
+   time a skeptic sees the fork.)
 
 ## Close out — mark prepared, release back to open
 
@@ -90,7 +102,12 @@ A prepared decision is **still open** — the call hasn't been made. So `release
    carrying a bare "needs a human call" / "confirm X" / "TBD" / slash-name (`webpush`/`webpermissions`)
    fork is not prepared — do not stamp it. Walk every `## Fork N` and confirm each has its fork-existence
    justification line (#819), named options,
-   tradeoffs, and a bold default. Then set `preparedDate: "YYYY-MM-DD"` (today) in the item's frontmatter
+   tradeoffs, a bold default, **and a `Skeptic:` verdict line** (the pass-4 attack was run and its findings
+   folded in — a fork with no `Skeptic:` note is un-attacked, so not at DoR; do not stamp it). **Use the
+   fixed fork-labeling convention** (*backlog-workflow.md → the
+   prepared-decision shape*): numbered `## Fork N` section headings, lowercase `(a)`/`(b)`/`(c)` options
+   referenced as "Fork N (a)", a second-level choice as a "Fork N sub-fork" — never `## Fork (a)` or
+   `A1`/`B2` aliases. Then set `preparedDate: "YYYY-MM-DD"` (today) in the item's frontmatter
    via an Edit — the one flag that makes readiness rank it `✓ ready to ratify`, so stamping a
    half-prepared item is a false "ready" the next decision turn will trust.
 2. **Gate:** `npm run check:standards` green (and the new `/research/` topic renders — confirm the
