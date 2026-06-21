@@ -1,0 +1,5 @@
+{
+  "term": "Arrangeable Intent",
+  "definition": "The 2-D grid-placement model — independent widgets on one shared N-column plane, each with an {x,y,w,h} cell, dragged and resized with collision/compaction. Reuses the reorderable-list substrate (Pointer drag, roving-tabindex keyboard, live-region, moveBefore) rather than overloading reorder's 1-D order contract; grid-snap is a dimension.",
+  "usage": "Standardized by the Arrangeable Intent."
+}

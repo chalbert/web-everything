@@ -1,0 +1,33 @@
+{
+  "id": "arrangeable",
+  "name": "Arrangeable Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "summary": "The 2-D grid-placement layout model — independent widgets on one shared N-column plane, each with an {x,y,w,h} cell, dragged and resized with collision/compaction (Fork 2 + Fork 3a of #1384, the draggable-dashboard model). REUSES the shipped reorderable-list substrate (Pointer Events drag, roving-tabindex keyboard path, live-region announcement, atomic moveBefore) rather than overloading the `reorder` intent's 1-D order contract — 2-D placement is a distinct state shape (a flat `Array<{x,y,w,h}>`), not a sequence. Grid-snap is a dimension here (not a separate entity); magnetic peer alignment is the separate alignment-guides intent. Carries the APG Grid a11y contract.",
+  "dimensions": {
+    "compaction": {
+      "description": "How widgets settle when one is dropped or resized into another's cell — the collision policy. `vertical` floats widgets up to fill gaps (react-grid-layout default); `horizontal` compacts leftward; `none` leaves widgets where dropped, displacing collided neighbors; `allow-overlap` permits widgets to stack on the same cells (free placement). Most-permissive default: `vertical`.",
+      "values": [
+        "vertical",
+        "horizontal",
+        "none",
+        "allow-overlap"
+      ]
+    },
+    "snap": {
+      "description": "Whether positions quantize to the grid — `grid` snaps {x,y,w,h} to whole column/row cells (the dashboard default, structurally part of THIS model — grid-snap is a dimension, not a standalone concern); `free` allows sub-cell pixel placement (a free canvas). Peer-relative magnetic alignment is a different concern entirely — the standalone alignment-guides intent.",
+      "values": [
+        "grid",
+        "free"
+      ]
+    },
+    "resize": {
+      "description": "Whether widgets can be resized in place (grow/shrink their w/h via an edge/corner handle) in addition to being moved. `enabled` (default) exposes resize handles; `disabled` makes widgets move-only (fixed footprint).",
+      "values": [
+        "enabled",
+        "disabled"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">The <strong>flat 2-D grid</strong> layout model (Fork 2 + Fork 3a of <a href=\"/backlog/1384-spatial-manipulation-arrangeable-surfaces-resizable-splitter/\">#1384</a>): independent widgets on one shared N-column plane, each holding an <code>{x, y, w, h}</code> cell, freely <strong>dragged and resized</strong> with <strong>collision/compaction</strong> — the draggable-dashboard model (react-grid-layout, gridstack). Its state is a clean flat <code>Array&lt;{i,x,y,w,h}&gt;</code>, structurally distinct from a 1-D sequence (<a href=\"/intents/reorder/\">reorder</a>) and from a recursive partition tree (dock/tile, deferred #1437).</p><h3>Reuses the reorder substrate, doesn't overload it</h3><p class=\"text-sm text-gray-600 mb-2\">2-D placement <strong>composes</strong> the shipped <a href=\"/blocks/reorderable-list/\">Reorderable List</a> substrate — the <strong>Pointer Events</strong> drag, the <strong>roving-tabindex keyboard</strong> path, the <strong>live-region</strong> announcement, and the atomic <code>Element.moveBefore()</code> relocation (preserves focus/animation/connection) — rather than bending <code>reorder</code>'s 1-D <em>order</em> contract into a 2-D coordinate model. Same mechanics, different state shape: a new intent, not a new dimension on reorder.</p><h3>Dimensions</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>compaction</code>: <code>vertical</code> (float up — default) / <code>horizontal</code> / <code>none</code> (displace) / <code>allow-overlap</code> (stack).</li><li><code>snap</code>: <code>grid</code> (quantize to cells — default; grid-snap is a dimension of this model) vs <code>free</code> (sub-cell pixel placement).</li><li><code>resize</code>: <code>enabled</code> (resize handles — default) vs <code>disabled</code> (move-only).</li></ul><h3>Fixed a11y invariant — APG Grid</h3><p class=\"text-sm text-gray-600 mb-2\">Keyboard parity is part of the contract: the surface follows the <strong>WAI-ARIA APG Grid</strong> pattern (arrow navigation between widgets, a grab/move/drop key model with live-region announcement of each move and the final placement), inherited from the reorder substrate. A pointer-only arrangeable is non-conforming.</p><h3>The snap seam</h3><p class=\"text-sm text-gray-600 mb-2\">Per the spatial survey, \"snap\" is two things: <strong>grid-snap</strong> is this intent's <code>snap</code> dimension; <strong>magnetic peer alignment</strong> (Figma smart guides) is the separate <a href=\"/intents/alignment-guides/\">alignment-guides</a> intent that composes arrangeable. <code>scroll-snap</code> (carousel paging) is a third, unrelated platform feature. Grounded in the spatial-manipulation survey (<a href=\"/research/spatial-manipulation-arrangeable-surfaces/\">spatial-manipulation arrangeable surfaces</a>).</p>"
+}
