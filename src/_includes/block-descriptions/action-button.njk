@@ -161,7 +161,7 @@
 {% highlight "html" %}
 <div action-group="confirm" action-ordering="platform">
     <button action-intent="secondary" command="cancel">Cancel</button>
-    <button action-intent="destructive"
+    <button action-intent="primary" tone="danger"
             resource-action="deleteItem"
             resource-action-confirm="Are you sure?"
             action-busy="disabled">
@@ -196,7 +196,8 @@
     <tbody>
         <tr><td><code>[aria-disabled="true"]</code></td><td>Button is in busy-disabled state</td></tr>
         <tr><td><code>[data-action-busy]</code></td><td>Button is in any busy state (disabled or interactive)</td></tr>
-        <tr><td><code>[data-action-intent="primary|secondary|destructive"]</code></td><td>Visual priority tier</td></tr>
+        <tr><td><code>[data-action-intent="primary|secondary|tertiary"]</code></td><td>Visual priority tier (#1337: a clean ordinal scale)</td></tr>
+        <tr><td><code>[data-tone="danger"]</code></td><td>Consequence semantic, orthogonal to the level (#1337; replaces the former <code>destructive</code> level)</td></tr>
         <tr><td><code>--action-min-width</code></td><td>Captured width during width lock (set by JS)</td></tr>
         <tr><td><code>--action-opacity</code></td><td>Opacity during busy-interactive state (default: 0.7)</td></tr>
     </tbody>
