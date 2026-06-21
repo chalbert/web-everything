@@ -1,8 +1,10 @@
 ---
 kind: epic
 parent: "170"
-status: open
+status: resolved
 dateOpened: "2026-06-20"
+dateResolved: "2026-06-21"
+graduatedTo: none
 tags: [plugs, dedup, drift, reconciliation, frontierui, contract-anchored]
 ---
 
