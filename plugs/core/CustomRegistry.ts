@@ -32,6 +32,12 @@ export default abstract class CustomRegistry<Definition, Key extends string | sy
   // Registry, CustomValidatorResolutionRegistry). For those overrides to be valid (TS checks method
   // params bivariantly), the first parameter is typed `unknown` rather than `string` — a `string`
   // base param admits neither direction against a value-shaped override and yields a TS2416 mismatch.
+  //
+  // Guard the namespace you share with the host: a registry whose keys collide with a built-in namespace
+  // (custom-attribute names vs standard HTML attributes) should override `define`/`defineLazy` to throw a
+  // `SyntaxError` on a bare name lacking a `-`/`:` separator — mirroring `customElements.define` (#1120;
+  // FUI mirror #1348). Registries with a private key space (parser/expression/store names) stay bare
+  // (#1347 ruling (a), docs/agent/platform-decisions.md#registry-name-guard-namespace).
   define(name: unknown, ...args: unknown[]): void {
     this.set(name as Key, args[0] as Definition);
   }

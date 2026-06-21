@@ -3,9 +3,11 @@ kind: story
 size: 5
 parent: "1250"
 locus: frontierui
-status: open
+status: resolved
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "frontierui:plugs/webbehaviors/CustomAttributeRegistry.ts"
 tags: [plugs, webbehaviors, naming, validation]
 ---
 
@@ -67,3 +69,34 @@ define — leave it.
 5. Task (iii): add the one-line *"guard the namespace you share with the host"* note to the base
    `we:plugs/core/CustomRegistry.ts` `define()` doc-comment (a WE-side edit — gate + commit to WE).
 6. Gate: full `fui` `npm run test:unit` green + `npm run check:standards` in `../frontierui`.
+
+## Resolved (2026-06-21, batch-2026-06-21-1385-1392)
+
+Executed the recipe end-to-end. The guard's blast radius was **wider** than the body's "4 webbehaviors test
+files / 9 names" estimate (the reason it had outgrown twice) — a full-suite run found bare CustomAttribute
+registrations across **7 sites**. All renamed (CustomAttributeRegistry-only per #1347 (a); parser/expression/
+store names left bare):
+
+- **Guard** — added `#assertValidName` (hyphen-OR-colon → `SyntaxError`) to `define` + `defineLazy` in
+  `fui:plugs/webbehaviors/CustomAttributeRegistry.ts` (mirrors `we:plugs/webbehaviors/CustomAttributeRegistry.ts`).
+- **webbehaviors test fixtures** (`my-*`) — 4 files: `fui:CustomAttributeRegistry.test.ts` (tooltip/clickable),
+  `fui:traitManifest.test.ts` (sortable/highlight), `fui:CustomAttributeRegistry.visibility.test.ts`
+  (reveal/poll/auto/sticky), `fui:CustomAttributeRegistry.inert.test.ts` (toggle/ambient — the `activationSurface`
+  *value* `'ambient'` left untouched).
+- **Production droplist** — `fui:blocks/droplist/registerDroplistMenu.ts` registered bare PUBLIC names
+  `anchor`/`anchored`/`selection` → `droplist-anchor`/`droplist-anchored`/`droplist-selection` (block-prefix;
+  `focus-delegation` already valid). Updated its test expectations + the `registeredNames` array in
+  `fui:src/_data/blocks.json` (the #783 sibling-drift catalog). No external markup/consumer uses them
+  (`registerDroplistMenu` has no live caller), so this is contained — **not a public-API fork** (an #1428
+  decision was briefly filed then deleted once that was confirmed).
+- **Other test fixtures** (`my-*`) — `fui:blocks/temporal/traits/__tests__/Clock.test.ts` (clock; `data-clock*`
+  output markers left), `fui:plugs/__tests__/unplugged.e2e.test.ts` (counter/observer/dynamic/removable/tooltip/
+  failing/success/test + their `[attr]` selectors; `id="test"` value left).
+- **Demo** — `fui:demos/visibility-gate.ts` + `fui:visibility-gate.html` (reveal/pulse/heavy + `-when` companions;
+  `id=` values left).
+- **Guard test** — new `fui:plugs/webbehaviors/__tests__/unit/hyphenValidation.test.ts` (mirror of the WE one).
+- **WE note** — added the *"guard the namespace you share with the host"* doc note to
+  `we:plugs/core/CustomRegistry.ts` `define()`.
+
+**Gates:** full FUI suite **2563 passing** (225 files) + FUI `check:standards` **0 errors**; WE
+`check:standards` 0 errors.
