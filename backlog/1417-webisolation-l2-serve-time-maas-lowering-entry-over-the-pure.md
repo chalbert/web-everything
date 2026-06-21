@@ -1,10 +1,13 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 locus: frontierui
 blockedBy: ["1363"]
 dateOpened: "2026-06-21"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "fui:tools/scope-isolator/serve.ts"
 relatedProject: webisolation
 tags: [webisolation, css-isolation, frontierui, maas, adapters]
 ---
@@ -26,3 +29,18 @@ constellation-placement); contract+conformance stay WE.
   pre-scoped (unique-class) CSS — no consumer build step, no in-browser runtime cost.
 - Shares the exact core with the build adapters (#1416) and the L3 runtime (#1364) — one transform, three
   timings; no logic duplicated.
+
+## Progress (batch-2026-06-21)
+
+- Built `fui:tools/scope-isolator/serve.ts` — the serve-timing host over the shipped #1363 core, two
+  layers mirroring the MaaS wrapper-serve path (`fui:tools/maas/`):
+  - `serveScopedCss(css, options)` — pure data-in/bytes-out producer (analog of `produceWrapperBytes`):
+    runs `transform()` at delivery, returns `{ css, scopeClass, contentType: 'text/css', producerVersion }`.
+  - `scopeIsolatorServeHandler(request)` — framework-agnostic Fetch origin (analog of
+    `wrapperServeHandler`): authored CSS in the body, `scope`/`prefix` in the query; responds with lowered
+    CSS, the generated class in `X-Scope-Class`, and an immutable cache policy (deterministic → cacheable).
+- Verified "one transform, three timings, no logic duplicated": a test asserts `serveScopedCss` output is
+  **byte-identical** to a direct `transform()` call (no forked second transform).
+- Tested `fui:tools/scope-isolator/__tests__/serve.test.ts` — 4 tests (core reuse + no `@scope` leak,
+  Fetch headers/cache, prefix param, 400 on missing scope). scope-isolator suite 21/21; FUI
+  `check:standards` → 0 errors.
