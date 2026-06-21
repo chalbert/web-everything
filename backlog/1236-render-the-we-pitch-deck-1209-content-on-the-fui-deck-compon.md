@@ -1,6 +1,6 @@
 ---
 kind: story
-size: 5
+size: 13
 parent: "1210"
 status: open
 locus: plateau-app
@@ -27,6 +27,14 @@ plateau deck page (`plateau:src/marketing/deck*.ts` `mountDeck` module + `[data-
 The shell is the hard part — once it lands, the two sibling slices add their audience markup on top.
 
 Carved siblings: developer/technical deck + design-system/enterprise deck (both `blockedBy: 1236`).
+
+## Re-sized 5 → 13 (2026-06-21, batch pre-flight)
+
+The post-split scoping note below (added the same day as the `/split` re-size to 5) found the **shell
+itself** is greenfield across three repos — content authoring from four outlines + a net-new plateau page
++ webtheme theming + `/deck` route + browser-verify against the live plateau server. That exceeds a size-5
+batch-tail item; bumped to 13 so it drops Tier-A and routes to a focused **/exercise-app** session, not a
+deep-batch chain. No design fork — purely effort/locus (build is real, just larger than the estimate).
 
 ## Scoping (2026-06-20 — carried forward, `outgrew`)
 
