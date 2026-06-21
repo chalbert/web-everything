@@ -868,8 +868,10 @@ webcharts family (`CustomChartRenderer`). Composes [constellation-placement](#co
 A status/quantity readout gets its **own** intent for each distinct **value-type**, and the native ARIA
 roles draw the lines: a **discrete-state enum** (`status-indicator` — `tone`/`shape`/`affordance`, a
 lifecycle state), a **position in a known range** (`meter` / `role=meter` — `value`/`min`/`max`/`low`/
-`high`/`optimum`, always determinate, has zones), and **task completion over time** (`role=progressbar`
-— may be indeterminate, drops `aria-valuenow`; owned today by `loader.progress`). These are
+`high`/`optimum`, always determinate, has zones), and **task completion over time** (`progress` /
+`role=progressbar` — `value`/`max`, may be indeterminate, drops `aria-valuenow`, no zones; its **own thin
+intent** per #1469, with `loader.progress` and `flow-progress` as *consumers* — a determinate bar shown
+*during* a pending op is a `progress` readout under a loader strategy, not `loader`'s to define). These are
 **incompatible contracts** — folding a continuous bounded scalar into the discrete-state enum or the
 task-over-time progress role **mis-types it** (the documented Chakra defect: a measurement that renders
 `role="progressbar"`), so a home that has to mis-type the value is the genuine either/or. **Test:** *is
@@ -882,8 +884,9 @@ applied to the readout family, with WE owning the intent contract and FUI the bl
 [constellation-placement](#constellation-placement).
 
 **Lineage:** #1410 (meter placement — ratified 2026-06-21; surfaced by the #1400 ARIA-APG lens). Realizing
-build #1468 (`meter` intent + FUI block); sibling progress placement #1469. Composes
-[native-first-baseline](#native-first-baseline) (adopt `<meter>` vocabulary verbatim).
+build #1468 (`meter` intent + FUI block). Sibling progress placement #1469 (ratified 2026-06-21 → `progress`
+gets its own thin intent; `loader.progress`/`flow-progress` are consumers); realizing build #1488. Composes
+[native-first-baseline](#native-first-baseline) (adopt `<meter>`/`<progress>` vocabulary verbatim).
 
 ---
 
