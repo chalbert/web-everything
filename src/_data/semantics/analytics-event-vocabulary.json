@@ -1,0 +1,5 @@
+{
+  "term": "Analytics Event Vocabulary",
+  "definition": "A vendor-neutral vocabulary for analytics instrumentation — the canonical event kinds (Identify, Track, Page, plus a deck-event layer) a single call site emits so any conformant backend (Segment, Mixpanel, GA4) can consume them. It standardizes the meaning of an analytics event, not the transport.",
+  "usage": "Standardized by the Analytics Event Vocabulary Protocol (Web Analytics)."
+}

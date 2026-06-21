@@ -1,0 +1,5 @@
+{
+  "term": "Typed Event",
+  "definition": "Typed, self-describing event classes with provider-based scoping — a TypedEventClass plus scoped listening — so cross-tree events carry their own contract instead of relying on stringly-typed names.",
+  "usage": "Standardized by the Typed Event Protocol (Web Events)."
+}

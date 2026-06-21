@@ -1,0 +1,5 @@
+{
+  "term": "Design Tokens (DTCG ↔ CSS)",
+  "definition": "The interchange and runtime mapping for design tokens — named design decisions (color, spacing, type) authored in the W3C DTCG format and resolved to CSS custom properties — so one token source themes any consumer.",
+  "usage": "Standardized by the Design Tokens (DTCG ↔ CSS) Protocol (Web Theme)."
+}

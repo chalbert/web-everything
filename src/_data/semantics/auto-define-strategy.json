@@ -1,0 +1,5 @@
+{
+  "term": "Auto-Define Strategy",
+  "definition": "The policy for how and when a custom element is registered with customElements.define (eager, lazy, on-visible, on-import), expressed as a swappable strategy so registration timing is a declared decision, not hard-coded.",
+  "usage": "Standardized by the Auto-Define Strategy Protocol (Web Components)."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Changelog Manifest",
+  "definition": "A machine-readable description of what changed in a release — the structured dual of a prose CHANGELOG.md — with per-module entries a tool can diff, gate, or surface, decoupling change facts from their human narration.",
+  "usage": "Standardized by the Changelog Manifest Protocol (Web Manifests)."
+}

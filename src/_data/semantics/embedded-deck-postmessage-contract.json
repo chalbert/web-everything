@@ -1,0 +1,5 @@
+{
+  "term": "Embedded-Deck postMessage Contract",
+  "definition": "A postMessage contract for embedding a live, interactive deck in another document (an iframe) with state isolation and cross-boundary sync — the messages a host and an embedded deck exchange to stay in step without sharing a runtime.",
+  "usage": "Standardized by the Embedded-Deck postMessage Contract Protocol (Web Portals)."
+}

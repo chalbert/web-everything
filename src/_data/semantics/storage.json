@@ -1,0 +1,5 @@
+{
+  "term": "Storage",
+  "definition": "Durable client-side persistence of the state an app holds — the storage facet of application state, fixing how state is persisted and retrieved across sessions behind one contract.",
+  "usage": "Standardized by the Storage Protocol (Web States)."
+}

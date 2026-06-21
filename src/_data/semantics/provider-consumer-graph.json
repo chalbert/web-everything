@@ -1,0 +1,5 @@
+{
+  "term": "Provider–Consumer Graph",
+  "definition": "An introspectable dependency graph over the platform's providers and consumers — the open, self-hostable record of who provides and who consumes each capability — so the wiring of an app is queryable rather than implicit.",
+  "usage": "Standardized by the Provider–Consumer Graph Protocol (Web Registries)."
+}

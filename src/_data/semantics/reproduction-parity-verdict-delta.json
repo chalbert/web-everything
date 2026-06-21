@@ -1,0 +1,5 @@
+{
+  "term": "Reproduction-Parity Verdict/Delta",
+  "definition": "The thin contract a vision-judgment service emits and the standard ingests for reproduction conformance — a verdict (does the reproduction match the reference?) plus a structured delta of where it diverges.",
+  "usage": "Standardized by the Reproduction-Parity Verdict/Delta Protocol (Web Audit)."
+}

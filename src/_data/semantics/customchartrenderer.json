@@ -1,0 +1,5 @@
+{
+  "term": "CustomChartRenderer",
+  "definition": "The renderer-swap contract of the chart domain — the single lock that lets any drawing engine render a semantic chart spec (Vega-Lite L1) into output, so SVG, Vega, Plotly, and ECharts are interchangeable behind one interface.",
+  "usage": "Standardized by the CustomChartRenderer Protocol (Web Charts)."
+}

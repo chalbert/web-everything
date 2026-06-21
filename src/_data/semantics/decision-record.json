@@ -1,0 +1,5 @@
+{
+  "term": "Decision Record",
+  "definition": "An explainable, reproducible record of a decision — a normalized DecisionRecord { subject, ruleSet {id, version}, inputs, outcome } — capturing not just what was decided but the versioned rules and inputs that produced it.",
+  "usage": "Standardized by the Decision Record Protocol (Web Decisions)."
+}

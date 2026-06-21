@@ -1,0 +1,5 @@
+{
+  "term": "MaaS Served-Artifact Versioning",
+  "definition": "The version identity of a Module-as-a-Service served artifact — the invariant that a served artifact's identity is fixed at publish and never mutates — so consumers can pin, cache, and reproduce a specific served version.",
+  "usage": "Standardized by the MaaS Served-Artifact Versioning Protocol (Web Adapters)."
+}

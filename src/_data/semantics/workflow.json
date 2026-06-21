@@ -1,0 +1,5 @@
+{
+  "term": "Workflow",
+  "definition": "Step-intents in directed progression toward one goal, with threaded state and a single completion criterion — the meaning of a multi-step process, kept separate from any particular UI or engine that runs it.",
+  "usage": "Standardized by the Workflow Protocol (Web Workflows)."
+}

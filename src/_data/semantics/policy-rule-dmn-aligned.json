@@ -1,0 +1,5 @@
+{
+  "term": "Policy Rule (DMN-aligned)",
+  "definition": "The rule meta-schema of declarative domain policy, adopting OMG DMN as the vocabulary — standardizing how a rule (inputs, decision logic, outcome) is expressed, not the specific rules — so policy is portable and explainable.",
+  "usage": "Standardized by the Policy Rule (DMN-aligned) Protocol (Web Policy)."
+}

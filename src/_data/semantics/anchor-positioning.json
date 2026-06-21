@@ -1,0 +1,5 @@
+{
+  "term": "Anchor Positioning",
+  "definition": "Tethering one element's position to another (its anchor) and reflowing it on overflow, behind a single swappable positioning provider. The meaning — place this relative to that, flip when it won't fit — is kept separate from the engine that computes it (native CSS Anchor Positioning or a JS fallback).",
+  "usage": "Standardized by the Anchor Positioning Protocol (Web Positioning) via the CustomPositioner contract."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "Audit Trail",
+  "definition": "A domain entity's immutable, append-only operational history — a normalized sequence of AuditEvent { target, action, actor, … } records — kept as a first-class, queryable contract rather than ad-hoc logging.",
+  "usage": "Standardized by the Audit Trail Protocol (Web Audit)."
+}

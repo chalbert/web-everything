@@ -1,0 +1,5 @@
+{
+  "term": "Custom Elements Manifest",
+  "definition": "A block's machine-readable structural contract — the de-facto multi-vendor manifest (custom-elements.json) describing its tags, attributes, slots, and events — so tooling can understand a component without parsing its source.",
+  "usage": "Standardized by the Custom Elements Manifest Protocol (Web Docs)."
+}

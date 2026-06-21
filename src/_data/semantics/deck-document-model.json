@@ -1,0 +1,5 @@
+{
+  "term": "Deck Document Model",
+  "definition": "The content/interchange schema of a slide deck at the contract level: deck > sections > slides, each slide carrying id, title, speaker notes, and addressable content — the presentation-independent meaning of a deck.",
+  "usage": "Standardized by the Deck Document Model Protocol (Web Components)."
+}

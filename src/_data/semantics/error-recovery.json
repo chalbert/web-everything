@@ -1,0 +1,5 @@
+{
+  "term": "Error Recovery",
+  "definition": "Recovering from a mechanism failure through pluggable handlers — a CustomRecoveryHandler contract plus registry resolution — that turns what to do when this fails into a declared, swappable policy rather than scattered try/catch.",
+  "usage": "Standardized by the Error Recovery Protocol (Web Reliability)."
+}

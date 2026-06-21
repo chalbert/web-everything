@@ -1,0 +1,5 @@
+{
+  "term": "App Shell Compatibility",
+  "definition": "A flat, declarative manifest each micro-app publishes so an app shell can decide, on navigation, whether the next app can mount in place or needs a full load. It captures the compatibility facts (shared deps, isolation needs) a host reads to coexist with an app it didn't build.",
+  "usage": "Standardized by the App Shell Compatibility Protocol (Web Manifests)."
+}

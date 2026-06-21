@@ -1,0 +1,5 @@
+{
+  "term": "Trace Observability",
+  "definition": "Trace propagation and instrumentation aligned with W3C Trace Context and OpenTelemetry — header propagation and span emission — so a request's path through a system is observable across boundaries.",
+  "usage": "Standardized by the Trace Observability Protocol (Web Traces)."
+}

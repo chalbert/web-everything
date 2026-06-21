@@ -1,0 +1,5 @@
+{
+  "term": "Push Delivery",
+  "definition": "Closed-app push-notification delivery — the server→client transport that survives the tab being closed (the Web Push / service-worker anchor) — defining how a message reaches a user who isn't currently in the app.",
+  "usage": "Standardized by the Push Delivery Protocol (Web Notifications)."
+}

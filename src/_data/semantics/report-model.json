@@ -1,0 +1,5 @@
+{
+  "term": "Report Model",
+  "definition": "A normalized report — the single pivot shape every producer targets and every renderer or adapter agrees on — so reports from different sources share one structure and can be rendered or exported uniformly.",
+  "usage": "Standardized by the Report Model Protocol (Web Reporting)."
+}

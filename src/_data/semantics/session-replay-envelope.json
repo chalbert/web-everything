@@ -1,0 +1,5 @@
+{
+  "term": "Session-Replay Envelope",
+  "definition": "A thin binding and ordering contract for local session replay — an ordered session of trace spans plus correlated references — so a session can be reconstructed and replayed from its captured envelope.",
+  "usage": "Standardized by the Session-Replay Envelope Protocol (Web Traces)."
+}

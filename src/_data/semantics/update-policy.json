@@ -1,0 +1,5 @@
+{
+  "term": "Update Policy",
+  "definition": "An app's declared auto-update policy — the committed, portable config that says when a new dependency or standard version may be adopted — turning update timing into an explicit, reviewable decision.",
+  "usage": "Standardized by the Update Policy Protocol (Web Manifests)."
+}

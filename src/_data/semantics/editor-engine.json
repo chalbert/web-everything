@@ -1,0 +1,5 @@
+{
+  "term": "Editor Engine",
+  "definition": "The swap contract for a rich-text editing engine — the seam that lets any engine (native contentEditable, ProseMirror, Slate, Lexical) back an editor behind one interface, so the editing surface is decoupled from the engine that powers it.",
+  "usage": "Standardized by the Editor Engine Protocol (Web Editing)."
+}

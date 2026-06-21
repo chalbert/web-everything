@@ -1,0 +1,5 @@
+{
+  "term": "Transport Negotiation",
+  "definition": "Open-app realtime server→client delivery — the live channel an open app holds for presence, live data, and server-pushed updates — negotiating the best transport (WebSocket, SSE, …) behind one contract.",
+  "usage": "Standardized by the Transport Negotiation Protocol (Web Realtime)."
+}
