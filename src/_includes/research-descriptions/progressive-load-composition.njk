@@ -1,0 +1,109 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    A collection loads incrementally as the user reaches its end — infinite scroll, a load-more button,
+    scroll-triggered pagination — with a sentinel/threshold, loading + end-of-list states,
+    scroll-position preservation, and an a11y-safe alternative to pure infinite scroll. This survey grounds
+    decision
+    <a href="/backlog/1398-progressive-loading-infinite-scroll-load-more-standard-place/">#1398</a>
+    (surfaced by the verb-axis lens
+    <a href="/backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi/">#1390</a>):
+    is progressive loading a <strong>new intent</strong>, a <strong>composition pattern</strong> over the
+    existing pieces, or a <strong>dimension of <code>pagination</code></strong>? Per design-first step&nbsp;1,
+    prior art is gathered first so the dimensions reuse platform vocabulary.
+</p>
+
+<h3>Recommendation (to ratify in #1398)</h3>
+<p>
+    <strong>This is "just composition" (~88%).</strong> Publish this pattern doc over the four existing
+    homes; do <em>not</em> mint a new intent or a new dimension. The candidate homes both fail:
+</p>
+<ul>
+    <li><strong>A new intent is the broken branch.</strong> A new intent must own a dimension no neighbour
+        owns; progressive-load owns <em>none</em> — every dimension is already homed — so minting a fifth
+        intent would re-mint the very triggers <a href="/intents/viewport-presence/">viewport-presence</a>
+        was created to de-triplicate.</li>
+    <li><strong>A new <code>pagination</code> dimension is broken too.</strong>
+        <a href="/specs/pagination/">pagination</a> already <em>has</em> the dimensions
+        (<code>mode</code>&nbsp;×&nbsp;<code>advance</code>) and already declares "infinite scroll =
+        append&nbsp;+&nbsp;auto"; a "progressive-load" dimension is a redundant alias and would mis-home the
+        cross-block a11y/state concerns that live in windowed-collection / loader.</li>
+    <li><strong>The only residual is editorial:</strong> where to anchor the "prefer load-more, keep the
+        footer reachable" UX policy — this research topic, or a one-line citeable note on
+        <code>windowed-collection.dataSource</code> / a <code>pagination</code> designDecision. Additive,
+        not a fork.</li>
+</ul>
+
+<h3>Native grounding</h3>
+<p>
+    The substrate is <strong><code>IntersectionObserver</code></strong> (the scroll sentinel —
+    <code>root</code> / <code>rootMargin</code> / <code>threshold</code>), the <strong>History API
+    <code>scrollRestoration</code></strong> (position preservation), and the <strong>WAI-ARIA
+    <a href="https://www.w3.org/WAI/ARIA/apg/patterns/feed/">APG Feed pattern</a></strong>
+    (<code>role="feed"</code>, <code>aria-busy</code> during batch insert, <code>aria-setsize="-1"</code>
+    for unknown totals, <code>aria-posinset</code>). All three are already cited by the WE pieces — the
+    vocabulary is adopted, not re-minted.
+</p>
+
+<h3>Finding 1 — every benchmark models progressive-load as a <em>derived composition</em></h3>
+<ul>
+    <li><a href="https://tanstack.com/query/latest/docs/framework/react/reference/useInfiniteQuery">TanStack
+        Query + Virtual</a> — <code>useInfiniteQuery</code> (<code>fetchNextPage</code> /
+        <code>hasNextPage</code> / <code>isFetchingNextPage</code> / <code>getNextPageParam</code>)
+        <em>plus</em> a separate windowing engine; "fire <code>fetchNextPage</code> when the last virtual
+        item is visible."</li>
+    <li><a href="https://mui.com/x/react-data-grid/server-side-data/infinite-loading/">MUI&nbsp;X
+        DataGrid</a> — a <em>mode of the grid's pagination</em> (<code>rowsLoadingMode="server"</code>,
+        unknown <code>rowCount</code> → infinite loading, <code>onRowsScrollEnd</code>), not a separate
+        component.</li>
+    <li><a href="https://ant.design/components/list/">Ant <code>List</code></a> — a plain
+        <code>loadMore</code> render slot (button); infinite scroll delegated to
+        <code>rc-virtual-list</code>.</li>
+    <li><a href="https://primereact.org/scroller/">PrimeReact</a> — <code>Scroller</code> /
+        <code>VirtualScroller</code> (<code>lazy</code> + <code>onLazyLoad</code>) split from the
+        <code>Paginator</code>.</li>
+</ul>
+<p>
+    The load-more affordance, the windowing engine, and the async-state machine are consistently
+    <em>different</em> units composed together. No major system ships a single "progressive-load"
+    primitive.
+</p>
+
+<h3>Finding 2 — load-more is the a11y-safe alternative</h3>
+<p>
+    <a href="https://www.nngroup.com/articles/infinite-scrolling-tips/">NN/G</a> recommends <em>against</em>
+    pure infinite scroll for goal-oriented / backtracking tasks (broken scrollbar, unreachable footer,
+    keyboard tab-through). <code>role="feed"</code> is the only native scaffold but is
+    <a href="https://www.deque.com/blog/infinite-scrolling-rolefeed-accessibility-issues/">under-supported</a>,
+    so the safe floor is the primitives (<code>aria-busy</code>, <code>aria-setsize="-1"</code>, an
+    announced loader row) with feed as progressive enhancement. Append-mode content needs a crawlable /
+    back-restorable URL (<a href="https://developers.google.com/search/docs/specialty/ecommerce/pagination-and-incremental-page-loading">Google incremental-loading guidance</a>) — already encoded in
+    <a href="/specs/pagination/">pagination</a>'s <code>urlSync</code> / self-canonical
+    <code>?page=n</code>.
+</p>
+
+<h3>Finding 3 — the tie already exists across four cross-referencing homes</h3>
+<ul>
+    <li><a href="/intents/viewport-presence/">viewport-presence</a> owns the <strong>scroll-sentinel
+        trigger</strong> (<code>reference</code> = IO <code>root</code>, <code>margin</code> =
+        <code>rootMargin</code>, <code>coverage</code> = <code>threshold</code>; <code>enter</code> /
+        <code>leave</code>) — explicitly <em>not</em> the fetch decision.</li>
+    <li><a href="/intents/windowed-collection/">windowed-collection</a> owns
+        <strong>virtualization + end-of-list / unknown-total a11y</strong> (<code>dataSource</code>
+        bounded | infinite, <code>aria-setsize="-1"</code> + <code>aria-busy</code> per the APG Feed
+        pattern, ratified in #018 Fork&nbsp;4; <code>rangechange</code> / <code>loadmore</code>).</li>
+    <li><a href="/intents/loader/">loader</a> owns the progressive-load <strong>state</strong>
+        (<code>loadingMore</code> — an announced progress row at the list end, composing
+        windowed-collection).</li>
+    <li><a href="/specs/pagination/">pagination</a> owns the realized <strong>mechanism</strong>
+        (<code>mode</code> paged | append × <code>advance</code> manual | auto; the
+        <code>pageModeXAdvance</code> designDecision states "infinite scroll = append + auto, never a peer
+        mode"; <code>withAutoAdvance</code> wires the IO sentinel; <code>withUrlSync</code> does History-API
+        restoration; <code>seoLoadBearing</code>).</li>
+</ul>
+<p>
+    <strong>Precise unowned residual: essentially nothing structural.</strong> Only a single discoverable
+    narrative ("compose these four this way") plus the "prefer load-more" UX policy is currently
+    un-anchored — which is why the answer is a pattern doc, not a new home.
+</p>
+{% endraw %}

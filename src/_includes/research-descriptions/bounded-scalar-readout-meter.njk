@@ -1,0 +1,97 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    A <strong>meter</strong> is a static quantitative readout within a <em>known range</em> (disk usage,
+    score, capacity, password strength) — <code>role=meter</code> / native <code>&lt;meter&gt;</code> —
+    distinct from a <em>progress</em> indicator (task completion over time, <code>&lt;progress&gt;</code>)
+    and from <a href="/intents/status-indicator/">status-indicator</a> (discrete state). WE has
+    status-indicator and <a href="/intents/loader/">loader</a> but <strong>no bounded-scalar-value
+    readout</strong>. This survey grounds decision
+    <a href="/backlog/1410-meter-gauge-quantitative-readout-standard-placement/">#1410</a>
+    (surfaced by the ARIA-APG lens
+    <a href="/backlog/1400-discovery-lens-aria-authoring-practices-apg-pattern-diff-aga/">#1400</a>):
+    is meter covered by status-indicator, a new dimension of it, or its own tiny standard — and is
+    <code>progress</code> a sibling gap to file alongside it?
+</p>
+
+<h3>Recommendation (to ratify in #1410)</h3>
+<ol>
+    <li><strong>Mint a tiny <code>meter</code> intent (+ FUI block)</strong> (Fork&nbsp;1, ~90%), adopting
+        <code>&lt;meter&gt;</code> / <code>role=meter</code> vocabulary verbatim (<code>value</code>,
+        <code>min</code>, <code>max</code>, <code>low</code>, <code>high</code>, <code>optimum</code>,
+        <code>valuetext</code>). Folding into <a href="/intents/status-indicator/">status-indicator</a> is
+        the broken branch — it is a discrete-state enum, so carrying a continuous bounded scalar mis-types it
+        (the exact Chakra defect). Extending <a href="/intents/loader/">loader</a> is excluded too (loader is
+        task-over-time; ARIA separates the roles).</li>
+    <li><strong>File a scoped <code>progress</code> sibling decision</strong> (Fork&nbsp;2, ~75%): WE already
+        partly owns determinate task progress as <code>loader</code>'s <code>progress</code> dimension, so the
+        sibling asks whether <code>&lt;progress&gt;</code> / <code>role=progressbar</code> needs a first-class
+        home or stays a loader dimension. Folding meter + progress into one "readout" standard is broken —
+        ARIA defines them as distinct, incompatible roles.</li>
+    <li><strong>Gauge = a radial <em>presentation</em> of the meter contract</strong> (a
+        <code>presentation</code> dimension value), never a separate intent. Rating / password-strength are
+        specialized meter presentations (consumers, not forks). Intent + FUI block coexist.</li>
+</ol>
+
+<h3>Native grounding — <code>&lt;meter&gt;</code> vs <code>&lt;progress&gt;</code></h3>
+<p>
+    <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/meter">MDN
+    <code>&lt;meter&gt;</code></a>: a scalar measurement within a known range —
+    <code>value</code>, <code>min</code>, <code>max</code>, <code>low</code> / <code>high</code>,
+    <code>optimum</code>, where low/high/optimum derive three semantic value-zones.
+    <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/progress">MDN
+    <code>&lt;progress&gt;</code></a>: <code>value</code> + <code>max</code> only; omitting
+    <code>value</code> makes it indeterminate; no zones. The
+    <a href="https://www.w3.org/WAI/ARIA/apg/patterns/meter/">ARIA meter role</a> requires
+    <code>aria-valuenow</code>/<code>min</code>/<code>max</code> (+ optional <code>aria-valuetext</code>) and
+    a meaningful <code>max</code>; the progressbar role omits <code>aria-valuenow</code> when indeterminate.
+    The load-bearing line, quoted: "The meter should not be used to indicate progress … use the progressbar
+    role instead." Two separate roles by design.
+</p>
+
+<h3>Finding 1 — meter is a measurement, progress is task-over-time; ARIA and Carbon keep them distinct</h3>
+<p>
+    ARIA ships <code>meter</code> and <code>progressbar</code> as distinct roles with different required
+    props.
+    <a href="https://v10.carbondesignsystem.com/components/progress-bar/usage/">Carbon ProgressBar</a> is
+    "percent-complete status of a long-running process," while
+    <a href="https://carbondesignsystem.com/data-visualization/simple-charts/">Carbon Meter / Gauge</a> live
+    in the data-visualization family — two homes, deliberately.
+</p>
+
+<h3>Finding 2 — gauge = radial presentation of the same contract</h3>
+<p>
+    <a href="https://mui.com/x/react-charts/gauge/">MUI&nbsp;X Gauge</a> takes <code>value</code> /
+    <code>valueMin</code> / <code>valueMax</code> — the same scalar-in-a-range as <code>&lt;meter&gt;</code>,
+    rendered as an arc; open issues for gauge segments (radial low/high zones) and a linear gauge confirm one
+    model, many presentations. <a href="https://ant.design/components/progress/">Ant</a>
+    <code>Progress type="dashboard"/"circle"</code> renders gauges as a presentation knob (over-folding via
+    "Progress").
+</p>
+
+<h3>Finding 3 — folding meter into a progress/state component is a known defect</h3>
+<p>
+    <a href="https://chakra-ui.com/docs/components/progress">Chakra</a> has Progress but no Meter; its
+    Progress applies <code>role="progressbar"</code>, and a standing issue ("Allow using Progress as a
+    meter") exists precisely because the wrong ARIA role is applied to a measurement.
+    <a href="https://shoelace.style/components/rating">Rating</a> and password-strength are bounded-scalar
+    readouts in disguise — one model, many presentations. Material/Spectrum/Fluent ship only progress and
+    have no meter — a market gap.
+</p>
+
+<h3>WE-tree decomposition — status-indicator does NOT cover a bounded scalar</h3>
+<ul>
+    <li><a href="/intents/status-indicator/">status-indicator</a> dimensions are <code>tone</code> /
+        <code>shape</code> / <code>affordance</code> — "the canonical display of a domain entity's
+        <em>lifecycle state</em>." Discrete enumerated states; no value/min/max/low/high/optimum.</li>
+    <li><a href="/intents/loader/">loader</a>'s <code>progress: determinate | indeterminate</code> dimension
+        is explicitly a progress bar reflecting transfer over time — <code>role=progressbar</code> territory,
+        not a standing measurement.</li>
+    <li>Grep across intents + blocks for meter/gauge/rating in any value/range sense: zero hits.</li>
+</ul>
+<p>
+    The unowned residual is <code>role=meter</code> / <code>&lt;meter&gt;</code>: a static quantitative
+    readout within a known range, with semantic value-zones. Neither loader (task-over-time) nor
+    status-indicator (discrete state) types it.
+</p>
+{% endraw %}

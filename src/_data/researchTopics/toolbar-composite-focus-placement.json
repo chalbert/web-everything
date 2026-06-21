@@ -1,0 +1,31 @@
+{
+  "id": "toolbar-composite-focus-placement",
+  "title": "Toolbar — placement of the roving-tabindex control group (it's focus-delegation + a thin container)",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #1409 (surfaced by the ARIA-APG lens #1400): a toolbar groups related controls (buttons, toggles, menu-buttons, separators) under one tab stop with roving tabindex + arrow-key navigation between members — the APG Toolbar pattern. The card asks: own a toolbar intent/block, vs a reusable roving-tabindex BEHAVIOR shared across toolbar/menubar/radio-group/tabs, vs a segmented-control extension. Native grounding: WAI-ARIA APG Toolbar (role=toolbar is a container grouping a set of controls; one tab stop; arrow keys move focus among members; aria-orientation declares the axis; label via aria-label; advised for 3+ controls; separators are presentational, not a focus stop). The TWO focus-management techniques are NOT a toolbar concept — APG's general 'Developing a Keyboard Interface' guide defines roving tabindex (one descendant tabindex=0, others -1, the 0 moves with focus; real DOM focus) and aria-activedescendant (virtual focus; DOM focus stays on the container), and the SAME managed-focus mechanic is reused by toolbar/radiogroup/tablist/menu/menubar/listbox/grid/treegrid/tree — the whole composite-widget family. Load-bearing finding: roving focus is a SHARED PRIMITIVE across N patterns, not a toolbar thing — Radix ships an internal @radix-ui/react-roving-focus (RovingFocusGroup; orientation/loop/dir) powering Toolbar/Tabs/RadioGroup/Menu/Menubar/DropdownMenu/ToggleGroup (toolbar is a thin role wrapper); Ariakit Composite is explicitly 'inspired by the WAI-ARIA Composite Role… only one tab stop', supports both techniques behind one flag, and tells you to build Toolbar/Menu/TabList on top of it; React Aria splits useFocusManager+FocusScope (the engine) from a thin useToolbar consumer; Adobe Spectrum ships a standalone roving-tab-index tool. Toolbar-the-container is genuinely thin (role=toolbar + aria-orientation + separators + label; MUI Toolbar is just a flex container; MDN toolbar role says the toolbar DELEGATES to roving tabindex, does not define it). WE-tree: the focus mechanic ALREADY EXISTS — focus-delegation intent (status draft) owns the entire roving-tabindex/managed-focus contract (strategy roving|virtual|native, orientation vertical|horizontal|both, selectionFollowsFocus, wrap?) and EXPLICITLY lists toolbar as a consumer; composite-widget block (status concept, type Behavior) is its realization twin ('implementing the Roving Tabindex pattern'); and a toolbar assemblerPreset (ownedByProject webdocs, status active) ALREADY EXISTS, declaring composesIntents [action,command,focus-delegation,navigation] and intentStrategies {focus-delegation: roving-tabindex}. Members all present and delegating focus (segmented-control composes focus-delegation roving/horizontal; radio-group/menu/tabs/data-grid/dropdown reference it — 16 blocks); keyboard-shortcuts is orthogonal (global chord normalization across shadow boundaries). Unowned residual is tiny: (a) a toolbar intent/block capturing the CONTAINER semantics (role=toolbar, orientation-as-grouping, separators, 3+/avoid-arrow-pair guidance) as a contract rather than only an assembled preset; (b) promoting focus-delegation from draft and composite-widget from concept. Recommendation: (Fork A, ~95%, NOT a real fork) the roving unit IS focus-delegation + composite-widget; toolbar is a consumer — a toolbar-specific roving standard is BROKEN/redundant (duplicates a shipped intent; the factoring Radix/Ariakit/React Aria all rejected). (Fork B, ~70%, real) toolbar container semantics: default = NO new intent, toolbar = the existing toolbar assemblerPreset consuming focus-delegation (roving) + action/command, promote composite-widget for shared container behavior; alternative = a thin toolbar BLOCK (Component, no new intent) owning only role=toolbar + separators + orientation so menubar/future consumers can reference it; a toolbar INTENT is rejected (no UX dimension of its own). Residual: the moment a 2nd container consumer (menubar/tabs) needs shared container semantics, graduate the preset into the thin block (low-regret hedge, matches Radix/Ariakit thin-toolbar-over-shared-focus). Card understates current state (focus-delegation intent + composite-widget block + toolbar preset all exist); the decision is placement/promotion, not greenfield. Maturation residual: focus-delegation is draft, composite-widget is concept, 2D-grid mechanics flagged as an open research gap. Report: reports/2026-06-21-toolbar-composite-focus-placement.md.",
+  "dateOpened": "2026-06-21",
+  "tags": [
+    "toolbar",
+    "composite-widget",
+    "roving-tabindex",
+    "aria-activedescendant",
+    "focus-delegation",
+    "apg",
+    "focus-management",
+    "orientation",
+    "control-group",
+    "placement"
+  ],
+  "relatedBlocks": [
+    "composite-widget",
+    "segmented-control",
+    "menu",
+    "tabs",
+    "radio-group",
+    "button",
+    "toggle-switch",
+    "keyboard-shortcuts"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

@@ -1,0 +1,99 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    UI driven by scroll <em>position / progress</em> — scroll-spy (highlight the active nav section),
+    scroll-linked animation (progress bars, reveals, parallax), sticky-on-scroll. Web Everything owns
+    <a href="/intents/viewport-presence/">viewport-presence</a> (enter/leave observation) and
+    <a href="/intents/animation-orchestration/">animation-orchestration</a> (intra-element build-ins), but
+    <strong>neither owns continuous scroll-progress as a driver</strong>. This survey grounds decision
+    <a href="/backlog/1407-scroll-driven-ui-scroll-progress-scroll-spy-scroll-linked-an/">#1407</a>
+    (verb-axis straggler of
+    <a href="/backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi/">#1390</a>):
+    a <strong>new intent</strong>, an <strong>extension of <code>viewport-presence</code></strong>, or a
+    <strong>composition pattern</strong>?
+</p>
+
+<h3>Recommendation (to ratify in #1407)</h3>
+<ol>
+    <li><strong>Mint one new <code>scroll-progress</code> driver intent</strong> (Fork&nbsp;1, ~85%),
+        homed in <code>webintents</code> and composed by <code>animation-orchestration</code> and others.
+        Extending <a href="/intents/viewport-presence/">viewport-presence</a> is the <em>broken</em> branch
+        — its charter is the boolean IntersectionObserver trigger, the wrong native substrate for a
+        continuous ScrollTimeline value. Folding the value into
+        <a href="/intents/animation-orchestration/">animation-orchestration</a> over-couples, because
+        scroll-progress also drives non-animation consumers (scroll-spy nav, a reading-progress indicator,
+        sticky-progress) — so per bias-toward-separation it earns its own composable home and
+        animation-orchestration <em>composes</em> it.</li>
+    <li><strong>Scroll-spy stays a composition</strong> (Fork&nbsp;2 sub-fork, ~80%): observe N sections via
+        <a href="/intents/viewport-presence/">viewport-presence</a> + the consumer chooses the active one —
+        no new vocabulary. Folding the discrete active-section into the continuous driver is broken (it
+        would mis-model a "most-present of N" reducer as a 0..1 value).</li>
+    <li><strong>Net:</strong> #1407 builds <em>one</em> new intent (<code>scroll-progress</code>);
+        scroll-spy and sticky stay compositions of existing intents + native CSS.</li>
+</ol>
+
+<h3>Native grounding — CSS Scroll-driven Animations is the substrate</h3>
+<p>
+    <a href="https://drafts.csswg.org/scroll-animations-1/">CSS Scroll-driven Animations Module L1</a> turns
+    an animation's progress from a <em>time</em> basis to a <em>scroll-position</em> basis. The intent adopts
+    its vocabulary: <code>animation-timeline</code> binds <code>scroll()</code> (progress of a scroll
+    container — the continuous driver for progress bars / parallax / sticky-progress) or <code>view()</code>
+    (progress of an element through the viewport — the per-element reveal driver), with named ranges
+    <code>cover</code> / <code>contain</code> / <code>entry</code> / <code>exit</code> scoped via
+    <code>animation-range</code>. Progress is a normalized <strong>0..1</strong> value — the single
+    primitive. Support (June&nbsp;2026): Chrome/Edge/Opera full,
+    <a href="https://caniuse.com/mdn-css_properties_animation-timeline_scroll">Safari&nbsp;26 shipped
+    full</a>, Firefox behind a flag. <code>animation-timeline</code> is silently ignored where unsupported,
+    so the lowering path is clean: declare intent → emit native <code>scroll()</code>/<code>view()</code> →
+    <code>@supports (animation-timeline: scroll())</code> guard → JS fallback (IntersectionObserver / a
+    scroll listener writing a <code>--progress</code> custom property, or WAAPI
+    <code>ScrollTimeline</code>/<code>ViewTimeline</code>) only where absent. The intent composes
+    <a href="/intents/motion/">motion</a> for <code>prefers-reduced-motion</code> (reduced → static
+    end-state).
+</p>
+
+<h3>Finding 1 — continuous scroll-progress is a distinct driver, not an enter/leave boolean</h3>
+<p>
+    Every consumer consumes a <em>0..1 progress value</em>:
+    <a href="https://motion.dev/docs/react-scroll-animations">Motion <code>useScroll</code> →
+    <code>scrollYProgress</code></a> is "a value between 0 and 1";
+    <a href="https://gsap.com/docs/v3/Plugins/ScrollTrigger/">GSAP ScrollTrigger</a> exposes
+    <code>scrub</code> + a <code>progress</code> 0..1 + <code>pin</code>/parallax; CSS
+    <code>scroll()</code>/<code>view()</code> <em>are</em> a normalized progress timeline. This is
+    categorically distinct from <a href="/intents/viewport-presence/">viewport-presence</a>'s
+    <code>enter</code>/<code>leave</code> — IntersectionObserver answers "in or out," never a continuous
+    position. The residual recurs across progress bar, parallax/reveal and sticky-progress.
+</p>
+
+<h3>Finding 2 — scroll-spy is a discrete active-section concern</h3>
+<p>
+    <a href="https://getbootstrap.com/docs/5.3/components/scrollspy/">Bootstrap ScrollSpy</a> was rewritten
+    onto IntersectionObserver; it emits <em>which section is current</em> — a discrete winner =
+    viewport-presence's <code>enter</code>/<code>leave</code> + a "pick the most-present" reducer, not a
+    continuous driver.
+</p>
+
+<h3>Finding 3 — sticky / "stuck" state is native and separable</h3>
+<p>
+    <code>position: sticky</code> plus the new
+    <a href="https://developer.mozilla.org/en-US/docs/Web/CSS/@container"><code>scroll-state(stuck:)</code></a>
+    container query gives stuck-state styling with no JS; Lenis/Locomotive wrap <em>native</em> scroll so
+    sticky keeps working. Sticky-on-scroll is a layout/CSS concern that <em>optionally</em> feeds the
+    progress driver, not part of it. Smooth-scroll/parallax libraries (Lenis, Locomotive, GSAP, AOS) are
+    impls of the same driver — FUI-side adapters, not WE vocabulary.
+</p>
+
+<h3>WE-tree decomposition</h3>
+<p>
+    <a href="/intents/viewport-presence/">viewport-presence</a> owns the discrete in/out trigger over
+    IntersectionObserver (boolean edge, "owns the trigger not the UX decision");
+    <a href="/intents/animation-orchestration/">animation-orchestration</a> owns intra-element build-in
+    sequencing and already <em>names</em> a <code>trigger: on-scroll</code> value but consumes it as an
+    opaque start condition — it never models the scroll-progress value/range/axis vocabulary. The prior
+    <code>web-scroll-observation</code> topic already classified "scroll-driven animations
+    (<code>animation-timeline</code> — a motion concern)" and left the motion-side continuous driver
+    <strong>unbuilt</strong> — that gap is exactly #1407. The unowned residual is a <strong>continuous
+    scroll-progress driver</strong>: a normalized 0..1 value from <code>scroll()</code> or
+    <code>view()</code>, scoped by <code>animation-range</code> on an axis.
+</p>
+{% endraw %}

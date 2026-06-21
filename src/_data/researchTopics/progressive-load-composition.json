@@ -1,0 +1,25 @@
+{
+  "id": "progressive-load-composition",
+  "title": "Progressive loading is a composition of four existing homes, not a new standard",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #1398 (surfaced by the verb-axis lens #1390): incrementally loading more of a collection as the user reaches the end — infinite scroll, load-more button, scroll-triggered pagination — with a sentinel/threshold, loading + end-of-list states, scroll-position preservation, and an a11y-safe alternative to pure infinite scroll. Native grounding: IntersectionObserver (the scroll sentinel — root/rootMargin/threshold), the History API scrollRestoration, and the WAI-ARIA APG Feed pattern (role=feed, aria-busy during batch insert, aria-setsize=-1 for unknown totals, aria-posinset) — all already cited by the WE pieces, so the vocabulary is adopted not re-minted. Load-bearing finding: every benchmark models progressive-load as a DERIVED COMPOSITION, never a standalone primitive — TanStack pairs useInfiniteQuery (fetchNextPage/hasNextPage/isFetchingNextPage/getNextPageParam) with a separate Virtual windowing engine; MUI X DataGrid exposes it as a MODE of the grid's pagination (rowsLoadingMode=server, unknown rowCount); Ant List splits a plain loadMore render slot from rc-virtual-list; PrimeReact splits Scroller/VirtualScroller from Paginator. a11y guidance (NN/G) is to PREFER load-more over pure infinite scroll (broken scrollbar, unreachable footer, keyboard tab-through); role=feed is under-supported (Deque) so the safe floor is the primitives (aria-busy/aria-setsize=-1/announced loader row) with feed as progressive enhancement. URL/scroll restoration is load-bearing (Google incremental-loading guidance) — already encoded in pagination's urlSync/self-canonical ?page=n. WE-tree decomposition: the tie ALREADY EXISTS across four cross-referencing homes — viewport-presence owns the scroll-sentinel TRIGGER (reference=IO root, margin=rootMargin, coverage=threshold, enter/leave; explicitly NOT the fetch decision); windowed-collection owns virtualization + end-of-list/unknown-total a11y (dataSource bounded|infinite, aria-setsize=-1+aria-busy per the APG Feed pattern, ratified #018 Fork 4, rangechange/loadmore); loader owns the progressive-load STATE (loadingMore — an announced progress row, composes windowed-collection); pagination owns the realized MECHANISM (mode paged|append x advance manual|auto, designDecision pageModeXAdvance states 'infinite scroll = append+auto, never a peer mode', withAutoAdvance wires the IO sentinel, withUrlSync does History-API restoration, seoLoadBearing). Precise unowned residual: essentially nothing structural — only a single discoverable narrative + the UX policy (prefer load-more, keep the footer reachable) currently scattered as prose. Conclusion (~88%): this is JUST COMPOSITION — a research/pattern doc over the existing four, NOT a new intent (broken: owns no unowned dimension; re-mints viewport-presence's triggers) and NOT a pagination dimension (broken: append+auto already covers it, would mis-home cross-block a11y/state). The only residual is editorial: where to anchor the 'prefer load-more' UX policy (this topic vs a one-line note on windowed-collection.dataSource / a pagination designDecision). Report: reports/2026-06-21-progressive-load-composition.md.",
+  "dateOpened": "2026-06-21",
+  "tags": [
+    "progressive-loading",
+    "infinite-scroll",
+    "load-more",
+    "intersection-observer",
+    "role-feed",
+    "virtualization",
+    "native-first",
+    "composition-pattern",
+    "accessibility",
+    "verb-axis"
+  ],
+  "relatedBlocks": [
+    "pagination",
+    "resource-loader"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

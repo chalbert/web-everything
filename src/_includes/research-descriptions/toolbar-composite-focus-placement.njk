@@ -1,0 +1,95 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    A <strong>toolbar</strong> groups related controls (buttons, toggles, menu-buttons, separators) under
+    one tab stop with <strong>roving tabindex</strong> + arrow-key navigation between members — the
+    <a href="https://www.w3.org/WAI/ARIA/apg/patterns/toolbar/">APG Toolbar pattern</a>. This survey grounds
+    decision
+    <a href="/backlog/1409-toolbar-roving-tabindex-control-group-standard-placement/">#1409</a>
+    (surfaced by the ARIA-APG lens
+    <a href="/backlog/1400-discovery-lens-aria-authoring-practices-apg-pattern-diff-aga/">#1400</a>):
+    own a <strong><code>toolbar</code> intent/block</strong>, a reusable
+    <strong>roving-tabindex behavior</strong> shared across toolbar / menubar / radio-group / tabs, or a
+    <strong><code>segmented-control</code> extension</strong>?
+</p>
+
+<h3>Recommendation (to ratify in #1409)</h3>
+<ol>
+    <li><strong>The roving unit already exists</strong> (Fork&nbsp;A, ~95% — not a real fork). It is the
+        <a href="/intents/focus-delegation/">focus-delegation</a> intent (+ its
+        <a href="/specs/composite-widget/">composite-widget</a> behavior block); toolbar is a
+        <em>consumer</em>. A toolbar-specific roving standard is the broken branch — it would duplicate a
+        shipped intent, exactly the factoring Radix / Ariakit / React&nbsp;Aria all rejected.</li>
+    <li><strong>Toolbar container semantics: no new intent</strong> (Fork&nbsp;B, ~70%). Toolbar = the
+        existing <code>toolbar</code> assemblerPreset consuming <code>focus-delegation</code>
+        (strategy=roving) + <code>action</code>/<code>command</code>; promote <code>composite-widget</code>
+        for shared container behavior. A thin <code>toolbar</code> <em>block</em> is the low-regret hedge —
+        graduate the preset into it the moment a second container consumer (menubar / tabs) needs shared
+        container semantics. A <code>toolbar</code> <em>intent</em> is rejected (no UX dimension of its
+        own).</li>
+    <li><strong>The card understates current state:</strong> the <code>focus-delegation</code> intent, the
+        <code>composite-widget</code> behavior block, AND a <code>toolbar</code> assemblerPreset (with
+        <code>intentStrategies.focus-delegation = roving-tabindex</code>) already exist — the decision is
+        placement/promotion, not greenfield.</li>
+</ol>
+
+<h3>Native grounding</h3>
+<p>
+    <a href="https://www.w3.org/WAI/ARIA/apg/patterns/toolbar/">APG Toolbar</a>: <code>role="toolbar"</code>
+    is a container grouping a set of controls under one tab stop; arrow keys move focus among members;
+    <code>aria-orientation</code> declares the axis; advised for 3+ controls; separators are presentational.
+    The <strong>two focus-management techniques</strong> are not a toolbar concept — APG's general
+    <a href="https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/">Developing a Keyboard
+    Interface</a> guide defines <strong>roving tabindex</strong> (one descendant <code>tabindex="0"</code>,
+    others <code>-1</code>; real DOM focus) and <strong><code>aria-activedescendant</code></strong> (virtual
+    focus), and the same mechanic is reused by toolbar, radiogroup, tablist, menu/menubar, listbox, grid,
+    tree — the whole composite-widget family.
+</p>
+
+<h3>Finding 1 — roving focus is a shared primitive across N patterns</h3>
+<ul>
+    <li><a href="https://www.radix-ui.com/primitives/docs/components/toolbar">Radix UI</a> ships an internal
+        <code>@radix-ui/react-roving-focus</code> (<code>RovingFocusGroup</code>;
+        <code>orientation</code>/<code>loop</code>/<code>dir</code>) powering Toolbar, Tabs, RadioGroup,
+        Menu/Menubar, DropdownMenu, ToggleGroup — toolbar is a thin role wrapper over it.</li>
+    <li><a href="https://ariakit.org/reference/composite">Ariakit <code>Composite</code></a> is "inspired by
+        the WAI-ARIA Composite Role … only one tab stop," supports both techniques behind one flag, and
+        tells you to build Toolbar / Menu / TabList on top of it.</li>
+    <li><a href="https://react-spectrum.adobe.com/react-aria/useToolbar.html">React Aria</a> splits
+        <code>useFocusManager</code> + <code>FocusScope</code> (the engine) from a thin
+        <code>useToolbar</code> consumer; Adobe Spectrum ships a standalone
+        <code>roving-tab-index</code> tool.</li>
+</ul>
+
+<h3>Finding 2 — toolbar-the-container is genuinely thin</h3>
+<p>
+    What "toolbar" adds beyond the shared focus group is small: <code>role="toolbar"</code>,
+    <code>aria-orientation</code>, separators, a label. MUI <code>&lt;Toolbar&gt;</code> is a flex layout
+    container with no roving by default; the
+    <a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/toolbar_role">MDN toolbar
+    role</a> confirms the toolbar <em>delegates to</em> roving tabindex, it does not define it.
+</p>
+
+<h3>WE-tree decomposition — the focus mechanic already exists</h3>
+<ul>
+    <li><a href="/intents/focus-delegation/">focus-delegation</a> (status <code>draft</code>) already owns
+        the roving-tabindex/managed-focus contract (<code>strategy</code> roving|virtual|native,
+        <code>orientation</code>, <code>selectionFollowsFocus</code>, <code>wrap?</code>) and explicitly
+        lists toolbar as a consumer.</li>
+    <li><a href="/specs/composite-widget/">composite-widget</a> (status <code>concept</code>, a Behavior) is
+        its realization twin — "implementing the Roving Tabindex pattern."</li>
+    <li>A <code>toolbar</code> assemblerPreset (<code>ownedByProject: webdocs</code>, status
+        <code>active</code>) already exists, declaring
+        <code>composesIntents: [action, command, focus-delegation, navigation]</code> and
+        <code>intentStrategies: { focus-delegation: roving-tabindex }</code>.</li>
+    <li>Members already delegate focus: <a href="/specs/segmented-control/">segmented-control</a> composes
+        focus-delegation (roving, horizontal); radio-group / menu / tabs / data-grid / dropdown reference it
+        (16 blocks). <a href="/specs/keyboard-shortcuts/">keyboard-shortcuts</a> is orthogonal (global chord
+        normalization, not within-widget arrow nav).</li>
+</ul>
+<p>
+    The unowned residual is tiny: capturing the toolbar <em>container</em> semantics as a contract rather
+    than only an assembled preset, and promoting <code>focus-delegation</code> / <code>composite-widget</code>
+    out of draft/concept.
+</p>
+{% endraw %}

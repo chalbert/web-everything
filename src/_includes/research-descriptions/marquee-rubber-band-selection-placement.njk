@@ -1,0 +1,88 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    Drag a rectangle over a 2-D surface (canvas, file grid, board, diagram) to select everything it
+    intersects, with additive (Shift) / toggle (Ctrl) modifiers and a keyboard equivalent. The
+    <a href="/intents/selection/">selection</a> intent owns single/multi <em>choice</em> over a
+    collection, but <strong>not</strong> the spatial drag-select gesture. This survey grounds decision
+    <a href="/backlog/1406-marquee-rubber-band-selection-2-d-drag-select-standard-place/">#1406</a>
+    (verb-axis straggler of
+    <a href="/backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi/">#1390</a>):
+    is marquee a <strong>dimension of <code>selection</code></strong>, its <strong>own intent</strong>, or
+    a <strong>behavior composing <code>selection</code> + a pointer drag</strong>?
+</p>
+
+<h3>Recommendation (to ratify in #1406)</h3>
+<ol>
+    <li><strong>A <code>marquee-select</code> behavior block</strong> composing
+        <a href="/intents/selection/">selection</a> (the output set) + the resolved
+        <a href="/backlog/1396-pointer-gestures-swipe-long-press-pinch-pull-to-refresh-plac/">gesture</a>
+        pan recognizer, with the keyboard equivalent routing into <code>selection.model = multiple</code>
+        (Fork&nbsp;1, ~80%). <code>selection</code> stays the pure choice contract — a
+        <code>scope: spatial</code> dimension is the <em>broken</em> branch: it would force the choice
+        contract to own <code>getBoundingClientRect</code> hit-testing, AABB math and edge auto-scroll, and
+        implicate non-spatial consumers (a radio group) with geometry they cannot satisfy.</li>
+    <li><strong>Selection-mode default = <code>intersect</code></strong> (touch-to-select, the forgiving
+        Finder/Figma default), with <code>mode: intersect | contain | center</code> exposed as a dimension
+        (Fork&nbsp;2, ~85%, most-permissive default).</li>
+    <li><strong>Baked invariants</strong> (not forks): a keyboard equivalent is mandatory (no ARIA marquee
+        pattern exists, so it is the only conformant path — WCAG&nbsp;2.5.1); native Pointer Events + AABB
+        over <code>getBoundingClientRect</code>; the modifier vocabulary; drag threshold + edge auto-scroll;
+        the recognizer engine = native default + DI override + Configurator card, no protocol minted now.</li>
+</ol>
+
+<h3>Native grounding — there is no native marquee primitive</h3>
+<p>
+    The platform ships only the substrate: <strong>Pointer Events + <code>setPointerCapture()</code></strong>
+    (<code>pointerdown</code> starts the band, <code>pointermove</code> grows it, <code>pointerup</code>
+    commits; capture keeps events flowing while the pointer leaves the surface), hand-rolled <strong>AABB
+    geometry</strong> over <code>getBoundingClientRect()</code> (there is no <code>Element.intersects()</code>;
+    <code>IntersectionObserver</code> is viewport-relative, not rect-vs-rect, so it does <em>not</em>
+    apply), and convention-only drag threshold (~10px) + <code>requestAnimationFrame</code> edge
+    auto-scroll. <strong>a11y is load-bearing:</strong> there is <strong>no WAI-ARIA APG pattern for
+    rubber-band/marquee</strong> — the accessible model is APG Listbox/Grid multi-select via keyboard
+    (arrows, Shift+Arrow range-extend, Ctrl+Space toggle, Ctrl+A, <code>aria-multiselectable</code>), which
+    is the only conformant path to the same outcome and lands on the contract <code>selection</code> already
+    owns.
+</p>
+
+<h3>Finding 1 — every benchmark decouples the gesture from the selection set</h3>
+<ul>
+    <li><a href="https://learn.microsoft.com/en-us/javascript/api/react-internal/marqueeselection">Fluent
+        UI <code>MarqueeSelection</code></a> — a distinct component that wraps content and <em>feeds</em> a
+        separate <code>Selection</code> object; geometry and selection-state are two things, composed.</li>
+    <li><a href="https://github.com/daybrush/selecto">react-selecto</a> — a standalone component that emits
+        selected elements; the app owns what "selected" means.</li>
+    <li><a href="https://www.joshuawootonn.com/react-drag-to-select">@air/react-drag-to-select</a> — the
+        canonical algorithm: track the band as a <em>vector</em> (works in all four drag directions),
+        <code>setPointerCapture</code>, 10px threshold, AABB <code>intersect</code>, edge auto-scroll within
+        20px.</li>
+    <li><a href="https://retejs.org/examples/lasso-marquee-selection/">tldraw "brush" / Rete.js
+        lasso-marquee</a> — box-select is a <em>tool/behavior</em> layered on a surface that yields a
+        selection, not a widget config.</li>
+</ul>
+<p>The decisive signal: the spatial gesture and the selection set are universally <strong>decoupled</strong>.</p>
+
+<h3>Finding 2 — selection-mode (intersect vs contain) is a first-class named knob</h3>
+<p>
+    CAD/design tools (Chief Architect "window vs crossing", AutoCAD, Figma, Miro, tldraw) expose: object
+    must be <em>fully contained</em> by the band, <em>intersected</em> by it, or its <em>center point</em>
+    contained. This is the one non-trivial dimension marquee adds beyond the gesture.
+</p>
+
+<h3>WE-tree decomposition + cluster boundaries</h3>
+<p>
+    <a href="/intents/selection/">selection</a> is a pure choice contract (<code>model</code>,
+    <code>immediacy</code>, <code>variant</code>, <code>grouping</code>) with no geometry. The pointer
+    family beside it is <a href="/intents/reorder/">reorder</a> (1-D order),
+    <a href="/intents/data-transfer/">data-transfer</a> (typed-payload drag) and the resolved
+    <a href="/backlog/1396-pointer-gestures-swipe-long-press-pinch-pull-to-refresh-plac/">gesture</a>
+    intent. Cluster:
+    <a href="/backlog/1384-spatial-manipulation-arrangeable-surfaces-resizable-splitter/">#1384</a>
+    manipulates position/size (verb = manipulate) while marquee's verb = choose; marquee is a
+    gesture-recognized <strong>pan</strong> whose <em>effect</em> is a selection — the missing fourth
+    effect-seam in #1396's "pan → data-transfer / reorder" list. The unowned residual is the
+    <strong>rectangle-sweep-to-selection behavior</strong> itself; <code>selection</code> owns the resulting
+    set, nothing owns the spatial gesture that computes it.
+</p>
+{% endraw %}
