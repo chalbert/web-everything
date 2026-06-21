@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: one-off
 tags: [decision, book-candidate, scroll, scroll-driven, scroll-spy, gap, interaction]
 relatedReport: reports/2026-06-21-scroll-progress-driver-placement.md
 preparedDate: "2026-06-21"
@@ -88,9 +91,37 @@ IntersectionObserver + an argmax the consumer already owns.
 **Fork 2 (c) — a separate small `active-section` intent.** Likely overkill — it's `viewport-presence` + an
 argmax reducer.
 
-*The residual (~20%):* if "which section is active" needs shared cross-consumer vocabulary (a standard
-`scrollspy`/`active` event contract), a thin `viewport-presence` "most-present" selection mode could be
-warranted — flagged as a watch item; the default keeps it a composition.
+*The residual (~20%):* the watch item is a shared **`active` event *contract*** (an `aria-current`-shaped
+signal two independently-authored consumers — e.g. an FUI nav component + a separate content area — can
+interoperate on), **not** a reducer/selection mode. No such consumer pair exists yet ⇒ it stays a watch
+item, triggered only by a real two-consumer interop need.
+
+### Merit re-derivation (discussion 2026-06-21)
+
+Promoting the residual to a first-class `viewport-presence` "most-present" *selection mode* (so the argmax
+isn't re-implemented per consumer) was raised and **rejected on the merits**. The decisive split: the part
+that genuinely *recurs and bugs out* in scroll-spy — the last-short-section-can't-reach-top rule, tie-break
+order, the activation offset — is **UX policy, not mechanism**. viewport-presence's charter keeps the UX
+decision with the consumer; a standardized mode would have to bake one policy (picking a UX winner the
+standard shouldn't pick — violates most-flexible-default). The genuinely *shared mechanism* (observe N +
+their `coverage` values) viewport-presence already provides, and the divergent policies (docs-sidebar ≠ TOC
+≠ form-step) are not a single reducer to hoist — so the anti-triplication rationale doesn't transfer. **Net:
+Fork 2a (composition, no new vocabulary) stands; the only standards-worthy residual is the `active` event
+contract above, not a reducer.**
+
+> **Ruling — RATIFIED 2026-06-21.** **Fork 1:** mint a new **`scroll-progress` driver intent**
+> (homed in `webintents`), owning the driver vocabulary (`reference` = `scroll()`/`view()`, `axis`,
+> `range`), emitting a normalized 0..1 value, lowering to native CSS Scroll-driven Animations with a
+> `@supports` + JS fallback; `animation-orchestration` *composes* it (its opaque `on-scroll` becomes
+> "driven by `scroll-progress`"). **Fork 2:** scroll-spy stays a **composition** of `viewport-presence`
+> + a consumer-owned reducer — **no new vocabulary** (the recurring/buggy part is UX policy the charter
+> keeps with the consumer; the shared mechanism is already in `viewport-presence`). The only
+> standards-worthy residual is a shared **`active` event *contract*** (aria-current-shaped), kept a
+> **watch item**, triggered only by a real two-independently-authored-consumer interop need.
+> **Red-team:** both attacks (1b fold-into-animation; promote-residual-to-selection-mode) were run and
+> **failed** — nothing amended. **Realizing work:** `scroll-progress` intent authoring filed separately;
+> sticky-on-scroll stays native (`position: sticky` + `scroll-state(stuck:)`); Lenis/GSAP/AOS = FUI
+> adapters, never WE contract.
 
 ---
 
