@@ -1,0 +1,22 @@
+{
+  "id": "bulk-action",
+  "name": "Bulk Action Intent",
+  "status": "active",
+  "summary": "Fan out one command across an N-item selection — the contextual action-bar pattern (select rows, a bar appears, 'Delete 12'). Composes Selection (the live target set) + Command (the action) over a target collection; the net-new residual it owns is the fan-out across the selection, the select-all `matching` predicate, the per-target partial-failure outcome, the 'N selected' aria-live count, and post-action focus return. Ratified #1423; WE owns the intent, FUI the behavior block. Apply/rollback mechanics delegate to a future optimistic-mutation home (#1395-style); bulk-action only NAMES the partial-failure contract.",
+  "dimensions": {
+    "scope": {
+      "description": "Which targets a select-all spans. `visible` (default, accident-protected) = only the rows currently realized/visible; `matching` is the author opt-in carrying a predicate (e.g. 'all 4,210 rows matching this filter', beyond the DOM). Mandating one is broken under most-flexible-default, so the axis is exposed with the safe default.",
+      "values": ["visible", "matching"]
+    },
+    "onPartialFailure": {
+      "description": "How the fan-out reports a per-target outcome when some targets fail. `continue-and-report` (default) runs every target and reports the per-target success/fail set (the contextual bar shows 'X done, Y failed'); `abort-on-first` stops at the first failure. bulk-action only NAMES this contract — the apply/rollback mechanics delegate to the optimistic-mutation home (#1395).",
+      "values": ["continue-and-report", "abort-on-first"]
+    }
+  },
+  "events": [
+    "selection-count-change",
+    "bulk-action-start",
+    "bulk-action-settle"
+  ],
+  "description": "<h3>What this is</h3><p class=\"text-sm text-gray-600 mb-2\">The <strong>contextual action-bar</strong> pattern: select N items, a bar appears, fire one command across all of them (\"Delete 12\", \"Archive 30\"). It <strong>composes</strong> the <a href=\"/intents/selection/\">Selection</a> intent (the live target set) and the <a href=\"/intents/command/\">Command</a> intent (the action) over a target collection — it does not redefine either. Realizing build for the ratified <a href=\"/backlog/1423-/\">#1423</a> placement.</p><h3>The residual it owns</h3><p class=\"text-sm text-gray-600 mb-2\">What no neighbor carries (so a toolbar+selection assemblerPreset can't cover it): the <strong>fan-out</strong> across the live selection set, the select-all <code>matching</code> predicate (beyond the visible DOM), the <strong>per-target partial-failure</strong> outcome, the <strong>\"N selected\" <code>aria-live=\"polite\"</code> count</strong>, and <strong>post-action focus return</strong> (focus moves to a stable anchor when the acted-on rows leave the DOM).</p><h3>Scope — visible vs matching</h3><p class=\"text-sm text-gray-600 mb-2\"><code>scope: visible</code> (default) acts only on realized rows — accident-protected. <code>scope: matching</code> is the author opt-in: a predicate selects every row matching a filter, even unrealized ones (the \"select all 4,210\" affordance), with a <code>mixed</code> header state and an explicit clear.</p><h3>Partial failure</h3><p class=\"text-sm text-gray-600 mb-2\">A fan-out over N targets may partly fail. This intent <strong>names</strong> the per-target success/fail contract (<code>onPartialFailure</code>) and the bar reports it; it <strong>delegates</strong> the apply/rollback mechanics (optimistic write, revert) to the mutation home (#1395), never re-implementing them here.</p><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Selection (target set) + Command (the action) + the #1409 toolbar bar (the surface) + Live Region Status (the count announce). FUI ships the behavior block that binds the bar to the live selection set (#1462).</p>"
+}
