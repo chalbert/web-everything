@@ -1,0 +1,24 @@
+{
+  "id": "scroll-progress",
+  "name": "Scroll Progress Intent",
+  "status": "active",
+  "summary": "A continuous 0..1 scroll-progress driver: bind an element's animation/effect to how far a scroll container (or an element's pass through the viewport) has progressed. Owns the reference (scroll() track vs view() element), the axis (block default, exposed), and the range (named animation-range: entry/exit/cover/contain). The opaque `on-scroll` start condition of animation-orchestration becomes a real, driven progress value. Native-first: lowers to CSS Scroll-driven Animations (animation-timeline) where supported, @supports + JS (ScrollTimeline / IntersectionObserver) fallback elsewhere. Homed in webintents per the ratified distributed placement (#1407 / #1175).",
+  "dimensions": {
+    "reference": {
+      "description": "What the 0..1 progress is measured against. `scroll` tracks a scroll container's own scroll position (the CSS `scroll()` timeline); `view` tracks a subject element's pass through the scrollport (the CSS `view()` timeline). `scroll` drives page-level effects (a reading-progress bar); `view` drives element-relative reveals (parallax, fade-in as a section enters).",
+      "values": ["scroll", "view"]
+    },
+    "axis": {
+      "description": "The scroll axis the progress is read from. Default `block` (the document's block-flow axis — vertical in horizontal writing modes); `inline` for horizontal scrollers; `x` / `y` pin a physical axis regardless of writing mode. Exposed (not fixed) so a horizontal carousel or an RTL surface can drive progress correctly.",
+      "values": ["block", "inline", "x", "y"]
+    },
+    "range": {
+      "description": "Which slice of the reference's travel maps to 0..1, borrowing the CSS `animation-range` named ranges. `cover` (default for `view`): the whole time the subject overlaps the scrollport. `contain`: only while the subject is fully within it. `entry` / `exit`: just the entering / leaving phase. For `scroll` the range is the container's full scrollable length unless narrowed. Named ranges are the standard vocabulary — never re-invented as pixel offsets.",
+      "values": ["cover", "contain", "entry", "exit"]
+    }
+  },
+  "events": [
+    "scrollprogress"
+  ],
+  "description": "<h3>What this is</h3><p class=\"text-sm text-gray-600 mb-2\">A <strong>continuous 0..1 driver</strong> sourced from scroll position. It does not decide <em>what</em> animates — it produces the <em>progress value</em> that something else is bound to (a progress bar's width, a parallax layer's transform, a fade's opacity). Realizing work for the ratified <a href=\"/backlog/1407-/\">#1407</a> placement call.</p><h3>Reference — <code>scroll()</code> vs <code>view()</code></h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>scroll</code>: progress along a scroll <em>container</em> — page or a nested scroller. The reading-progress-bar case.</li><li><code>view</code>: progress of a <em>subject element</em> through the scrollport — the parallax / reveal case, where 0..1 is relative to that element, not the page.</li></ul><h3>Axis &amp; range</h3><p class=\"text-sm text-gray-600 mb-2\">The <code>axis</code> (default <code>block</code>, exposed) picks which scroll axis is read; the <code>range</code> borrows CSS <a href=\"https://developer.mozilla.org/en-US/docs/Web/CSS/animation-range\"><code>animation-range</code></a> named ranges (<code>cover</code> / <code>contain</code> / <code>entry</code> / <code>exit</code>) rather than inventing pixel offsets — the official platform vocabulary.</p><h3>Native-first lowering</h3><p class=\"text-sm text-gray-600 mb-2\">Where supported, this lowers to <strong>CSS Scroll-driven Animations</strong> — <code>animation-timeline: scroll()</code> / <code>view()</code> with <code>animation-range</code> — a compositor-driven, main-thread-free effect with zero JS. Behind an <code>@supports (animation-timeline: scroll())</code> guard, the fallback drives the same progress with the JS <code>ScrollTimeline</code> polyfill or an <code>IntersectionObserver</code> + scroll handler. The intent is the contract; the timing host (native vs JS) is an impl detail.</p><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Composes the <a href=\"/intents/motion/\">Motion intent</a>: under <code>prefers-reduced-motion</code> a scroll-driven effect resolves to its <strong>static end-state</strong> (the progress bar still reports position; the parallax simply doesn't translate). It is the driven realization of <a href=\"/intents/animation-orchestration/\">animation-orchestration</a>'s <code>trigger: on-scroll</code> — that opaque start condition becomes this continuous progress value.</p>"
+}

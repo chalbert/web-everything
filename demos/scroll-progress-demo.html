@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scroll Progress — Driver Demo · Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/scroll-progress-demo.css">
+</head>
+<body>
+  <!-- reference: scroll · the document scroll container drives a 0..1 reading-progress bar -->
+  <div class="reading-progress" role="progressbar" aria-label="Reading progress" aria-valuemin="0"
+       aria-valuemax="100" aria-valuenow="0" data-test="reading-progress"></div>
+
+  <header class="page-head">
+    <h1>Scroll Progress — the 0..1 driver</h1>
+    <p>
+      The <a href="/intents/scroll-progress/">Scroll Progress intent</a> produces a continuous
+      <code>0..1</code> value from scroll position. This page drives two effects from it, native-first:
+      a <strong>reading-progress bar</strong> (<code>reference: scroll</code>) and a
+      <strong>parallax reveal</strong> (<code>reference: view</code>). Where the browser supports CSS
+      Scroll-driven Animations the work is compositor-driven with zero JS; otherwise the
+      <code>@supports</code> fallback drives the same progress from a scroll handler /
+      <code>IntersectionObserver</code>. Under <code>prefers-reduced-motion</code> both resolve to a
+      static end-state.
+    </p>
+    <p class="mode" data-test="lowering-mode">Lowering: <strong id="mode">detecting…</strong></p>
+  </header>
+
+  <main>
+    <section class="spacer"><p>Scroll down — the bar at the top fills as you go.</p></section>
+
+    <section class="reveal-section" data-test="parallax">
+      <div class="parallax-layer" aria-hidden="true"></div>
+      <div class="reveal-card" data-test="reveal-card">
+        <h2><code>reference: view</code> — parallax reveal</h2>
+        <p>
+          This card fades and lifts as it passes through the viewport (<code>range: cover</code>). The
+          progress here is relative to <em>this element</em>, not the page — the <code>view()</code>
+          timeline, distinct from the page-level <code>scroll()</code> bar above.
+        </p>
+      </div>
+    </section>
+
+    <section class="spacer"><p>More content, so there is something to scroll through.</p></section>
+    <section class="spacer alt"><p>Keep scrolling to fill the reading-progress bar to 100%.</p></section>
+  </main>
+
+  <script type="module">
+    // Native-first: CSS does the work when `animation-timeline` is supported (see the @supports block in
+    // the stylesheet). This script only (a) reports which lowering is active and (b) supplies the
+    // ScrollTimeline-less fallback that drives the same 0..1 progress where native is unavailable.
+    const supportsSDA = CSS.supports('animation-timeline: scroll()');
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const modeEl = document.getElementById('mode');
+    modeEl.textContent = reduced
+      ? 'reduced-motion → static end-state'
+      : supportsSDA
+        ? 'native CSS Scroll-driven Animations (animation-timeline)'
+        : 'JS fallback (scroll handler + IntersectionObserver)';
+
+    const bar = document.querySelector('.reading-progress');
+    const driveVisual = !supportsSDA || reduced; // native path lets CSS fill the bar; else JS drives --p
+    const progress = () => {
+      const max = document.documentElement.scrollHeight - innerHeight;
+      return max > 0 ? scrollY / max : 0;
+    };
+    // The progressbar role is a STATUS — its aria-valuenow must track regardless of which path paints
+    // the visual fill, so the screen-reader value stays correct on the native (CSS-driven) path too.
+    const onScroll = () => {
+      const p = progress();
+      if (driveVisual) bar.style.setProperty('--p', String(p));
+      bar.setAttribute('aria-valuenow', String(Math.round(p * 100)));
+    };
+    addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+
+    // view()-equivalent for the parallax card via IntersectionObserver thresholds (fallback path only;
+    // the native @supports block binds animation-timeline: view() directly).
+    if (!supportsSDA && !reduced) {
+      const card = document.querySelector('.reveal-card');
+      const io = new IntersectionObserver((entries) => {
+        for (const e of entries) card.style.setProperty('--view', String(e.intersectionRatio));
+      }, { threshold: Array.from({ length: 21 }, (_, i) => i / 20) });
+      io.observe(card);
+    }
+  </script>
+</body>
+</html>

@@ -9,7 +9,7 @@
       "values": ["parallel", "stagger", "chain"]
     },
     "trigger": {
-      "description": "What starts the orchestration. on-view = when the element scrolls/transitions into view (Intersection Observer); on-step = driven by an advance/fragment step (a deck build); on-scroll = scroll-linked progress (Scroll-driven Animations).",
+      "description": "What starts the orchestration. on-view = when the element scrolls/transitions into view (Intersection Observer); on-step = driven by an advance/fragment step (a deck build); on-scroll = scroll-linked progress, the continuous 0..1 driver owned by the Scroll Progress intent (/intents/scroll-progress/ — reference/axis/range, lowering to CSS Scroll-driven Animations). This trigger names the start condition; scroll-progress supplies the driven value.",
       "values": ["on-view", "on-step", "on-scroll"]
     },
     "replay": {

@@ -1,0 +1,12 @@
+{
+  "id": "scroll-progress-demo",
+  "name": "Scroll Progress Driver",
+  "summary": "The runnable home for the Scroll Progress intent (#1452) — a continuous 0..1 driver sourced from scroll position. Drives two effects native-first: a reading-progress bar (reference: scroll) and a parallax reveal card (reference: view, range: cover). Where CSS Scroll-driven Animations are supported the work is compositor-driven with zero JS (animation-timeline: scroll()/view() + animation-range); otherwise an @supports fallback drives the same progress from a scroll handler / IntersectionObserver. prefers-reduced-motion resolves both to a static end-state (the progressbar still reports position). Backlog #1452, ratified #1407.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>A live surface for the <a href=\"/intents/scroll-progress/\">Scroll Progress intent</a> — the continuous <code>0..1</code> driver that realizes <a href=\"/intents/animation-orchestration/\">animation-orchestration</a>'s <code>trigger: on-scroll</code>. Two consumers of the same driver: a page-level <strong>reading-progress bar</strong> (<code>reference: scroll</code>, <code>axis: block</code>) and an element-relative <strong>parallax reveal</strong> (<code>reference: view</code>, <code>range: cover</code>).</p><h3>Native-first lowering</h3><p>Behind an <code>@supports (animation-timeline: scroll())</code> guard the effects bind <code>animation-timeline: scroll(root block)</code> / <code>view(block)</code> with <code>animation-range: cover</code> — main-thread-free, zero JS. The fallback drives the identical progress via a passive scroll handler + <code>IntersectionObserver</code>. The page reports which lowering is active.</p><h3>Composition — Motion</h3><p>Under <code>prefers-reduced-motion: reduce</code> both effects resolve to their static end-state: the parallax never translates, and the progress bar still reports scroll position (a status, not motion).</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/scroll-progress-demo.html",
+  "projects": [
+    "webintents"
+  ]
+}
