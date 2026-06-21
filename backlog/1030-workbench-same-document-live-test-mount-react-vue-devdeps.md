@@ -3,9 +3,9 @@ kind: story
 size: 5
 parent: "912"
 status: open
-humanGate: { kind: setup, what: "Needs a frontierui session where the live :3001 dev server can be stopped/restarted: adding react/react-dom/vue as workbench devDeps forces a Vite dependency pre-bundle reload, and the acceptance is mounting a wrapper into the live workbench — both violate the standing don't-restart-the-dev-server rule. Re-confirmed blocked-in-fact twice (2026-06-19, 2026-06-20)." }
+blockedBy: ["1501"]
 dateOpened: "2026-06-19"
-dateStarted: "2026-06-20"
+dateStarted: "2026-06-21"
 locus: frontierui
 relatedProject: webdocs
 tags: [webdocs, block-explorer, workbench, polyglot]
@@ -13,7 +13,7 @@ tags: [webdocs, block-explorer, workbench, polyglot]
 
 # Workbench same-document live-test mount + react/vue devDeps
 
-fui:workbench/live-test/: await import('/_maas/<block>.js?form=react-wrapper'), mount into the workbench document (no iframe — #955-A2), React error boundary + window.onerror/unhandledrejection runtime-error surfacing, wired to inspector/event/anatomy panels; add react/react-dom/vue as workbench devDeps (never the shipped @frontierui bundle — framework-free, #955-B).
+fui:workbench/live-test/: await import('/_maas/<block>.js?form=react-wrapper'), mount into the workbench document (no iframe — #955-A2), React error boundary + window.onerror/unhandledrejection runtime-error surfacing, wired to inspector/event/anatomy panels; add react/react-dom/vue as devDeps of the **workbench sub-package's own `fui:workbench/package.json`** (granular-sub-package convention, #658/#693) — never root `fui:package.json`, never the shipped @frontierui bundle (framework-free, #955-B).
 
 ## Dropped from batch-2026-06-19 (cascade-freed by #1029, but live FUI dev server)
 
@@ -28,7 +28,58 @@ wants a focused `fui:` session. Resume via `/next 1030` in frontierui where the 
 after `npm install`.
 
 **Re-confirmed 2026-06-20 (batch-2026-06-20):** still blocked-in-fact. The frontierui dev server is live
-on :3001 (HTTP 200) and `react`/`react-dom`/`vue` are still absent from `fui:package.json` — adding them
+on :3001 (HTTP 200) and `react`/`react-dom`/`vue` are still absent — adding them
 pre-bundles on that running server (the forbidden restart), and the acceptance is a live-on-:3001 mount
 verification. Left for a focused frontierui session that owns the server lifecycle; not reattempted in the
 batch.
+
+**Corrected 2026-06-21 — setup gate REMOVED, now agent-doable (#1499 ruling).** Two errors in the notes
+above, plus the gate itself was wrong. (1) **Manifest home** — the deps go in the workbench sub-package's own
+`fui:workbench/package.json`, NOT root `fui:package.json` (granular-sub-package convention, #658/#693; vendor
+framework deps stay quarantined to the one sub-package that live-tests wrappers). The earlier notes tracking
+them against root `fui:package.json` were wrong. (2) **No :3001 disturbance** — per #1499, the wrapper module
+is served from a **separate origin and cross-origin-imported** (`await import('http://localhost:<port>/…')`
+— ES import is origin-agnostic; #955-A2 forbids only the iframe, not a cross-origin fetch, and the module
+still mounts same-document). `fui:workbench/mount.ts` imports a URL and never does `import 'react'` itself, so
+the framework dep lives only on the serving origin — the main :3001 tree never resolves react/vue, never
+pre-bundles, never reloads. The prior 2026-06-19/-20 "blocked-in-fact" confirmations assumed same-origin
+serving; that was the excluded fork.
+
+**Build now (topology verified 2026-06-21):** `/_maas/` is currently same-origin — `maasWrapperServe` is
+registered in the MAIN dev config (`fui:vite.config.mts:110`, `server.port: 3001`), the excluded fork. So:
+1. **Relocate the wrapper serve to its own origin** — register `maasWrapperServe` on a second Vite/Node
+   process (dev-only port, CORS-enabled), not the :3001 plugins array.
+2. Add react/react-dom/vue to that serving sub-package's own `fui:workbench/package.json` (never root, never
+   the shipped bundle).
+3. Make the served module self-contained — esbuild-**bundle** react/vue into the wrapper bytes
+   (`fui:produceWrapperBytes.mjs` currently uses `transform`, leaving a bare `import 'react'`; switch the
+   wrapper path to a bundle so the cross-origin module needs no import-map).
+4. Cross-origin-import + same-document mount in `fui:workbench/mount.ts` with the React error boundary +
+   `window.onerror`/`unhandledrejection` surfacing, wired to inspector/event/anatomy panels.
+
+Precedent: `fui:packages/rich-text-editor-slate/package.json` already quarantines its own `react`/`react-dom`.
+Residuals (two framework copies, CORS) are benign — see #1499.
+
+## Pre-flight (batch-2026-06-21-1429-1487) — split into infra + integration; now `blockedBy: 1501`
+
+Claimed and grounded the live frontierui tree. The 2026-06-21 "now agent-doable" note is right about the
+*topology* (cross-origin import avoids the :3001 pre-bundle) but its build steps 1–3 are **net-new infra
+that does not exist yet**, verified at claim:
+- **No second origin.** `maasWrapperServe` is still registered ONLY on the main :3001 config
+  (`fui:vite.config.mts:110`) — the same-origin "excluded fork". The second dev-only Vite/Node process the
+  approach requires has not been stood up.
+- **`fui:tools/maas/produceWrapperBytes.mjs` still uses esbuild `transform`** (line 36, `jsx: 'transform'`),
+  leaving a bare `import 'react'` — so a cross-origin module is **not** self-contained yet; the
+  transform→bundle rework is unbuilt.
+- **No `fui:workbench/package.json`** (react/react-dom/vue absent); **no `fui:workbench/live-test/` dir.**
+
+`#1499` is a **resolved *decision*** (`graduatedTo: none`, codified one-off) — it *ruled* cross-origin
+serving is allowed, it did **not** build the serving process. So steps 1–3 are a real, currently-absent
+**prerequisite**, now filed as **#1501** (the cross-origin wrapper-serve dev process: second origin + CORS
++ esbuild-bundle react/vue into wrapper bytes). This item is the **mount-integration half** (steps 4–5:
+`fui:workbench/live-test/` + the deep `fui:workbench/mount.ts` integration + React error boundary +
+`window.onerror`/`unhandledrejection` surfacing + panel wiring), whose acceptance is a **live in-browser
+mount** that needs #1501's running second origin. Set `blockedBy: 1501`; released back to `open`.
+Carry-forward reason: **blocked-in-fact** (prerequisite infra verified absent, now encoded as a real edge,
+not a gut "looks big" call) — the live-mount-on-a-running-second-origin acceptance also wants a focused FUI
+session that owns the dev-server lifecycle.
