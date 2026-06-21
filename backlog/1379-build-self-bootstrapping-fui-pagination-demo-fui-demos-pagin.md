@@ -24,5 +24,5 @@ and the harness/CSS paths resolve in FUI — so copied `we:demos/pagination-demo
 
 **Browser-verified on :3001 (Playwright):** all **6/6** cases render `✓ conformant` (summary `pass`, 6 pass /
 0 fail); no console/page errors. FUI `check:standards` 0 errors. (`pagination` is a renderer, not a FUI
-catalog block — no `blocks.json`/`DEMO_PENDING` wiring; the WE-side swap+delete is the parent #1356, now
+catalog block — no `fui:blocks.json`/`DEMO_PENDING` wiring; the WE-side swap+delete is the parent #1356, now
 unblocked.)

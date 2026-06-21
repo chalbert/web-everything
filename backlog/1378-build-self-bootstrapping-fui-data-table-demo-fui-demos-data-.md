@@ -19,7 +19,7 @@ Prereq for #1355 swap+delete: fui:demos/data-table-demo.html does not exist yet.
 
 Done. FUI's `fui:blocks/renderers/data-table/renderDataTable.ts` exposes a **byte-identical public API** to
 WE's (`renderDataTable`/`auditDataTable`/`applySortClick`/`announce` + `DataTableConfig`/`Row`/`AuditResult`)
-and FUI already ships `fui:demos/playground-harness.ts` + `playground.css` + the `__fixtures__/data-table-cases`
+and FUI already ships `fui:demos/playground-harness.ts` + `fui:playground.css` + the `__fixtures__/data-table-cases`
 at the same `/blocks/...` and `/demos/...` paths — so the WE playground reproduces faithfully against the FUI
 renderer with zero import changes. Copied `we:demos/data-table-demo.{html,ts,css}` →
 `fui:demos/data-table-demo.{html,ts,css}` (self-bootstrapping, absolute imports resolve in FUI).
@@ -27,5 +27,5 @@ renderer with zero import changes. Copied `we:demos/data-table-demo.{html,ts,css
 **Browser-verified on :3001 (Playwright):** all **9/9** cases render `✓ conformant` (summary `pass`, 9 pass /
 0 fail badges); the interactive card's header click cycles `aria-sort` and announces *"Sorted by Name,
 descending; 6 rows."*; no console/page errors. FUI `check:standards` 0 errors. (`data-table` is a renderer,
-not a FUI catalog block, so no `blocks.json`/`DEMO_PENDING` wiring — the WE-side swap+delete is the parent
+not a FUI catalog block, so no `fui:blocks.json`/`DEMO_PENDING` wiring — the WE-side swap+delete is the parent
 #1355, now unblocked.)

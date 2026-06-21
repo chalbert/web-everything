@@ -18,17 +18,17 @@ webgraph epic #1351 slice C: author the TWO protocol seams ratified in #1352 —
 
 Done (mirrors webcharts slice #573, adapted to the #1352 two-seam split). Authored both seams:
 - **Protocols:** `we:src/_data/protocols/custom-graph-layout.json` (GraphSpec → PositionedGraph; declares
-  LayoutStrategy + determinism; deterministic layered-DAG default) + `custom-graph-renderer.json`
+  LayoutStrategy + determinism; deterministic layered-DAG default) + `we:custom-graph-renderer.json`
   (PositionedGraph + webtheme → output; SVG default; 3-axis conformance), both `ownedByProject: webgraph`.
-- **Plugs:** `we:src/_data/plugs/customgraphlayout.json` + `customgraphrenderer.json` (base contracts).
+- **Plugs:** `we:src/_data/plugs/customgraphlayout.json` + `we:customgraphrenderer.json` (base contracts).
 - **Project page:** two protocol sections in `we:src/_includes/project-webgraph.njk` with the shared
   `PositionedGraph` / `CustomGraphLayout` / `CustomGraphRenderer` / `GraphHandle` interfaces (the seam the two
   protocols hand off across), anchored `protocol-custom-graph-layout` / `-renderer`.
 - **Plug-description partials:** `we:src/_includes/plug-descriptions/customgraphlayout.njk` +
-  `customgraphrenderer.njk` (Overview + Standards Alignment + Interface) — REQUIRED: `plug-pages.njk` includes
+  `we:customgraphrenderer.njk` (Overview + Standards Alignment + Interface) — REQUIRED: `we:plug-pages.njk` includes
   the partial without `ignore missing`, so a new plug without one crashes the whole Eleventy build (caught
   here — `check:standards` is green but the live build froze until the partials landed).
-- **Coverage terms:** `we:src/_data/semantics/customgraphlayout.json` + `customgraphrenderer.json` (so the
+- **Coverage terms:** `we:src/_data/semantics/customgraphlayout.json` + `we:customgraphrenderer.json` (so the
   #1371 protocol-coverage gate stays clean, consistent with CustomChartRenderer having a term).
 
 Renders at `/projects/webgraph/#protocol-custom-graph-layout` + `#protocol-custom-graph-renderer`; both list

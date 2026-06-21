@@ -20,11 +20,11 @@ Done (mirrors webcharts slice #574 / `we:src/cases/webcharts/`). Authored **3 co
 `we:src/cases/webgraph/` — static declarations (a `<script type="application/vnd.webgraph+json">` GraphSpec +
 an EXPECTED-output comment per axis, the webcharts pattern; no renderer is run, so they stand without the
 not-yet-built FUI runtime):
-- `01-semantic-fidelity.html` — every node→one mark, every edge→one link between its declared endpoints
+- `we:01-semantic-fidelity.html` — every node→one mark, every edge→one link between its declared endpoints
   (structure preserved; position is the layout's, not asserted).
-- `02-theme-application.html` — node `kind`→palette token, edge `weight`→stroke scale, all from webtheme, no
+- `we:02-theme-application.html` — node `kind`→palette token, edge `weight`→stroke scale, all from webtheme, no
   literals.
-- `03-a11y-adjacency-description.html` — the tier-1 adjacency description-table floor, derived mechanically
+- `we:03-a11y-adjacency-description.html` — the tier-1 adjacency description-table floor, derived mechanically
   from the spec (nodes→rows, outgoing edges→adjacency list, `description`→caption).
 
 All three use the real **constellation graph** as a dogfood (FUI implements WE; Plateau consumes FUI). Added

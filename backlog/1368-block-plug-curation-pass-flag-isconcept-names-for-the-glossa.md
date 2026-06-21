@@ -25,7 +25,7 @@ ubiquitous-language concepts). Flagged **9 blocks `isConcept: true`** (the genui
 sidebar/sheet/off-canvas), `segmented-control` (vs button-group/radio), `carousel` (vs slider/slideshow),
 `status-indicator` (vs badge/chip/pill/tag), `type-ahead` (vs autocomplete), `dialog` (vs modal),
 `toggle-switch` (toggle vs switch). Seven already had glossary terms; authored the **2 missing** —
-`we:src/_data/semantics/dialog.json` + `toggle-switch.json`. Deliberately **left settled names unflagged**
+`we:src/_data/semantics/dialog.json` + `we:toggle-switch.json`. Deliberately **left settled names unflagged**
 (button, checkbox, breadcrumb, slider, tooltip, notification, tabs, …) so the `isConcept` set stays the
 contested-name subset, not "every block."
 
