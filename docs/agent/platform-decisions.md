@@ -619,6 +619,12 @@ When a standard **already ships the transport** — a contract + a runtime-DI pr
 
 **Lineage:** #1415 (telemetry declarative emission seam → behavior/directive over the built `CustomTracker` sink + Analytics Event Vocabulary; #1414 experiment-exposure composes through it). Sibling of [runtime-DI-vs-devtools-provider-seam](#runtime-di-vs-devtools-provider-seam) and [intents-ux-only](#intents-ux-only).
 
+### A boolean flag is an access-control gate; a multivariate flag is the experiment intent — same provider shape, different outcome family {#flag-gate-vs-experiment-selector}
+
+"Feature flag" is an **overloaded incumbent word** that splits by outcome family ([decompose-overloaded-vocabulary](#decompose-overloaded-vocabulary-by-semantic-source)). A **boolean** flag (on/off) **IS the access-control gate**: it is `authority: feature-flag` on the [access-control](/intents/access-control/) intent over the **Guard** provider seam — its outcome is **allow/deny**, a trust-crossing authz mirror. A **multivariate** flag (one of N arms) is the separate **[experiment](/intents/experiment/) / variant-assignment intent**: its outcome is **pick-one-of-N** (a rendering choice, **no security semantics** — an arm is not an authz verdict), resolved by a *distinct* evaluation provider (`@webeverything/contracts/experiment`, returning `{value, variant, reason}`). The two **reuse the same provider *shape*** (native-first default → project override → custom plug) but must **never re-conflate**: different outcome families, different trust boundaries. OpenFeature's own typed-flag distinction is the upstream precedent — a **boolean** flag is a gate, a **string/object** flag is a selector.
+
+**Lineage:** #1414 (placement: feature-flags vs experiments) · #1481 (this note) · #1479 (experiment intent + evaluation-provider contract). Sibling of [decompose-overloaded-vocabulary](#decompose-overloaded-vocabulary-by-semantic-source) and [intents-ux-only](#intents-ux-only).
+
 ### A multi-strategy concern is a configurable dimension; default extends the platform {#config-extends-platform-default}
 
 When a concern has **more than one legitimate end-state** (e.g. auto-define: explicit / eager-barrel /

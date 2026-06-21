@@ -7,7 +7,7 @@ dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
 dateResolved: "2026-06-21"
 graduatedTo: none
-codifiedIn: one-off
+codifiedIn: "docs/agent/platform-decisions.md#flag-gate-vs-experiment-selector"
 preparedDate: "2026-06-21"
 tags: [webintents, feature-flags, experiments, variant-assignment, openfeature, access-control, cross-cutting, decision-prep]
 relatedProject: webintents
