@@ -87,6 +87,26 @@ interface AnalyticsBackend {
     backend; the deck layer adds the vocabulary, not a new transport. Homed in webanalytics per the
     ratified distributed placement (<a href="/backlog/1175/">#1175</a>).
   </p>
+
+  <h4 id="experiment-events">Experiment Exposure Event</h4>
+  <p>
+    A single <code>track</code> event so an <a href="/backlog/1414/">experiment / feature-flag exposure</a>
+    is recorded through the existing sink — per the <a href="/backlog/1415/">#1415</a> Fork-3 ruling, an
+    exposure <em>is</em> a <code>track()</code> call, so experiment-exposure composes with telemetry by
+    emitting <em>through</em> this emission seam rather than minting a second transport.
+  </p>
+  <table>
+    <thead>
+      <tr><th>Event</th><th>Purpose</th><th>Key Properties</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>Experiment Exposed</code></td><td>The subject was exposed to a variant of an experiment / feature flag (the exposure event ad-hoc analyses key on).</td><td><code>experimentId</code> · <code>variant</code> · <code>subjectId</code> (the assignment unit)</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Vocabulary addition only — the running app calls <code>resolve().track('Experiment Exposed', …)</code>
+    against the same conformant sink; #1414's experiment intent records exposure this way (#1476).
+  </p>
 </section>
 
 <section id="composition" class="section-card">

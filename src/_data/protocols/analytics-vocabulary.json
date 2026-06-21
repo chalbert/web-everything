@@ -1,7 +1,7 @@
 {
   "id": "analytics-vocabulary",
   "name": "Analytics Event Vocabulary",
-  "summary": "Vendor-neutral analytics instrumentation contract using the Segment Spec vocabulary (Identify, Track, Page). One call site routes to any conformant backend (Segment, Mixpanel, GA4, custom). Extended with a standard deck event vocabulary (Slide Viewed / Dwell / Deck Completed-Abandoned / Slide Interaction) layered on Track — impressions, dwell, and drop-off keyed by a Deck Document Model slide address, adding vocabulary rather than a new transport (#1193).",
+  "summary": "Vendor-neutral analytics instrumentation contract using the Segment Spec vocabulary (Identify, Track, Page). One call site routes to any conformant backend (Segment, Mixpanel, GA4, custom). Extended with a standard deck event vocabulary (Slide Viewed / Dwell / Deck Completed-Abandoned / Slide Interaction) layered on Track — impressions, dwell, and drop-off keyed by a Deck Document Model slide address, adding vocabulary rather than a new transport (#1193). Also carries an Experiment Exposed event (experimentId / variant / subjectId) so a feature-flag/experiment exposure (#1414) records through this same sink as a standard track() call — per the #1415 Fork-3 ruling an exposure IS a track(), composing through the emission seam, not a second transport (#1476).",
   "status": "draft",
   "ownedByProject": "webanalytics",
   "anchor": "protocol-analytics-vocabulary"
