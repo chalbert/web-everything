@@ -2,8 +2,11 @@
 kind: story
 size: 3
 parent: "1399"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
 tags: [discovery, lens, aria, apg, accessibility, gap, book-candidate]
 ---
 
@@ -44,3 +47,11 @@ Next round: re-diff when the APG index version changes, or when new blocks ship.
 
 Every APG pattern has a covered / partial / ❌ verdict, and each non-covered verdict is a filed card or a
 dismissed-with-reason line. **Round 1 complete (2026-06-21).**
+
+## Resolved (2026-06-21, batch-2026-06-21-1385-1392)
+
+Round 1 done-when verified: ~30 APG patterns each carry a verdict; the three ❌/gap verdicts are filed as
+open `decision` cards (#1409 toolbar / #1410 meter / #1411 treegrid, all present + open) and the two
+dismissals (feed → #1398, multi-thumb → slider dimension) carry reasons. Output is cards-only per the
+[#1399](/backlog/1399-latent-standard-discovery-lens-catalogue-each-lens-only-emit/) discipline. Resolving
+this round; a future APG-index change re-opens the lens as a new round (idempotent re-run).
