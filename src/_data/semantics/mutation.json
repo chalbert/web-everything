@@ -1,0 +1,5 @@
+{
+  "term": "Mutation Intent",
+  "definition": "The write-lifecycle intent — the apply→reconcile→rollback axis, symmetric to the Loader Intent for reads. Owns optimistic-vs-pessimistic apply (default pessimistic), how a success reconciles against the source of truth, snapshot rollback on a failed optimistic apply, double-submit prevention, and trigger busy-state.",
+  "usage": "Standardized by the Mutation Intent; the running lifecycle ships as the resource-action block."
+}
