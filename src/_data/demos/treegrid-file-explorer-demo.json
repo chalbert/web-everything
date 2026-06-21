@@ -1,0 +1,13 @@
+{
+  "id": "treegrid-file-explorer-demo",
+  "name": "Treegrid File Explorer",
+  "summary": "The runnable home for the treegrid hierarchy projection on the Data Grid (#1461, ratified #1411) — treegrid is a projection on the grid, not a new block. A file-explorer role=treegrid: rows carry aria-level + aria-expanded, and the Right/Left arbitration rule (Right expands a collapsed folder / else moves a cell; Left collapses an expanded folder / else moves a cell) layers over the unchanged grid cell-navigation. Rows are the Hierarchy intent's flatten-to-visible projection. Backlog #1461.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>A live <code>role=\"treegrid\"</code> over the <a href=\"/blocks/data-grid/\">Data Grid block</a>: per the <a href=\"/backlog/1411-/\">#1411</a> ruling, treegrid is a <strong>hierarchy projection</strong> on the grid — same role=row/gridcell, same roving cell navigation — with the single net-new <strong>Right/Left arbitration</strong> rule. The rows are the <a href=\"/intents/hierarchy/\">Hierarchy intent</a>'s flatten-to-visible projection, each carrying <code>aria-level</code> + <code>aria-expanded</code>.</p><h3>Arbitration</h3><p>On a <strong>collapsed</strong> folder's first cell, <kbd>Right</kbd> expands it; on an <strong>expanded</strong> folder, <kbd>Left</kbd> collapses it; otherwise Right/Left fall back to cell-movement. Up/Down move between visible rows. Conformance vector: <code>treegrid-arbitration</code>.</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/treegrid-file-explorer-demo.html",
+  "projects": [
+    "webblocks",
+    "webintents"
+  ]
+}

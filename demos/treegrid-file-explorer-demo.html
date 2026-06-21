@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Treegrid File Explorer — Demo · Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; color: #1f2430; max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+    table[role="treegrid"] { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #d0d7de; padding: .35rem .6rem; text-align: left; }
+    tr[aria-selected="true"] td { background: #eef1ff; }
+    td:focus { outline: 2px solid #6d5efc; outline-offset: -2px; }
+    .twisty { display: inline-block; width: 1.1em; color: #50526a; }
+    .lead { color: #50526a; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>Treegrid — file explorer</h1>
+  <p class="lead">A <code>role="treegrid"</code> over the Data Grid (#1461, ratified #1411) — treegrid is a
+    hierarchy projection on the grid, not a new block. Rows carry <code>aria-level</code> +
+    <code>aria-expanded</code>. <strong>Right</strong> on a collapsed folder expands it (else moves a cell);
+    <strong>Left</strong> on an expanded folder collapses it (else moves a cell). Up/Down move rows.</p>
+
+  <table role="treegrid" aria-label="Files" id="tg">
+    <thead><tr role="row"><th role="columnheader">Name</th><th role="columnheader">Size</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <script type="module">
+    // The hierarchy intent's flatten-to-visible projection + the #1461 Right/Left arbitration, inline.
+    const tree = [
+      { id: 'src', name: 'src', level: 1, kind: 'dir', expanded: true, children: [
+        { id: 'index', name: 'index.ts', level: 2, kind: 'file', size: '2 KB' },
+        { id: 'blocks', name: 'blocks', level: 2, kind: 'dir', expanded: false, children: [
+          { id: 'grid', name: 'data-grid.ts', level: 3, kind: 'file', size: '9 KB' },
+          { id: 'tree', name: 'treegrid.ts', level: 3, kind: 'file', size: '3 KB' },
+        ]},
+      ]},
+      { id: 'readme', name: 'README.md', level: 1, kind: 'file', size: '1 KB' },
+    ];
+    const tbody = document.getElementById('rows');
+    let active = { row: 0, col: 0 };
+
+    // Flatten to the visible rows (collapsed dirs hide their subtree) — the projection.
+    function flatten(nodes, out = []) {
+      for (const n of nodes) {
+        out.push(n);
+        if (n.kind === 'dir' && n.expanded && n.children) flatten(n.children, out);
+      }
+      return out;
+    }
+    function render() {
+      const rows = flatten(tree);
+      tbody.replaceChildren(...rows.map((n, i) => {
+        const tr = document.createElement('tr');
+        tr.setAttribute('role', 'row');
+        tr.setAttribute('aria-level', String(n.level));
+        if (n.kind === 'dir') tr.setAttribute('aria-expanded', String(!!n.expanded));
+        const name = document.createElement('td');
+        name.setAttribute('role', 'gridcell');
+        const twisty = n.kind === 'dir' ? (n.expanded ? '▾ ' : '▸ ') : '';
+        name.innerHTML = `<span class="twisty">${twisty}</span>${' '.repeat(n.level - 1)}${n.name}`;
+        const size = document.createElement('td');
+        size.setAttribute('role', 'gridcell');
+        size.textContent = n.size ?? '';
+        tr.append(name, size);
+        for (const td of [name, size]) td.tabIndex = -1;
+        tr.dataset.id = n.id;
+        return tr;
+      }));
+      focusActive(rows);
+      return rows;
+    }
+    function focusActive(rows) {
+      active.row = Math.max(0, Math.min(active.row, rows.length - 1));
+      const tr = tbody.children[active.row];
+      const cell = tr?.children[active.col];
+      if (cell) cell.tabIndex = 0, cell.focus();
+    }
+    function nodeAt(rows) { return rows[active.row]; }
+
+    tbody.addEventListener('keydown', (e) => {
+      let rows = flatten(tree);
+      const n = nodeAt(rows);
+      if (e.key === 'ArrowDown') { active.row++; }
+      else if (e.key === 'ArrowUp') { active.row--; }
+      else if (e.key === 'ArrowRight') {
+        // arbitration: collapsed dir on first cell → expand; else cell-move.
+        if (n.kind === 'dir' && !n.expanded && active.col === 0) { n.expanded = true; rows = render(); e.preventDefault(); return; }
+        active.col = Math.min(1, active.col + 1);
+      } else if (e.key === 'ArrowLeft') {
+        if (n.kind === 'dir' && n.expanded && active.col === 0) { n.expanded = false; rows = render(); e.preventDefault(); return; }
+        active.col = Math.max(0, active.col - 1);
+      } else return;
+      e.preventDefault();
+      render();
+    });
+    render();
+    tbody.children[0]?.children[0]?.focus();
+  </script>
+</body>
+</html>

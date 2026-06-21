@@ -11,7 +11,8 @@
   ],
   "implementsIntent": "focus-delegation",
   "composesIntents": [
-    "focus-delegation"
+    "focus-delegation",
+    "hierarchy"
   ],
   "implementedBy": "@frontierui/blocks/renderers/data-grid/index.ts",
   "fuiDemo": {
@@ -37,6 +38,12 @@
       "pattern": "`aria-rowcount` / `aria-colcount` on the grid and `aria-rowindex` / `aria-colindex` on rows and cells declare the full extent and a cell's position",
       "adoption": "The grid declares `aria-rowcount` / `aria-colcount` (header row included) and each row/cell carries its 1-based `aria-rowindex` / `aria-colindex`, so the position is announced even when not every row is realized in the DOM",
       "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-colindex"
+    },
+    "apgTreeGrid": {
+      "status": "W3C WAI-ARIA APG",
+      "pattern": "`role=\"treegrid\"` — a grid whose rows form a hierarchy: each row carries `aria-level`, expandable parent rows carry `aria-expanded`, and Right/Left arrow expand/collapse before falling back to cell movement",
+      "adoption": "Treegrid is a HIERARCHY PROJECTION on this same grid (#1411, not a new block): the rows are the Hierarchy intent's flatten-to-visible projection (each row carries `aria-level` + `aria-expanded`), the grid switches `role=\"grid\"`→`role=\"treegrid\"`, and the movement engine layers the Right/Left arbitration rule below over the unchanged cell-navigation model",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/treegrid/"
     }
   },
   "designDecisions": {
@@ -60,6 +67,16 @@
     "contractsOnly": {
       "description": "This block defines the contract (grid roles, the roving-tabindex invariant, the keyboard movement model, the audit); concrete strategies live in Frontier UI",
       "rationale": "Web Everything is the standard. The block names the seams (the movement engine, the active-cell projection); competing implementations (virtualized rows, editable cells, server paging, two-dimensional selection) register against them without changing the contract."
+    },
+    "treegridIsAProjectionNotABlock": {
+      "description": "Treegrid is a hierarchy projection on the Data Grid (compose the Hierarchy intent + flip role=grid→treegrid), NOT a new block or a new movement engine (#1411 Fork 1a)",
+      "rationale": "APG's treegrid IS the grid pattern with hierarchical rows — same role=row/gridcell, same roving tabindex, same arrow cell-navigation. The only net-new behaviour is the Right/Left arbitration; everything else is the unchanged grid. A separate block would duplicate the entire movement engine for one extra rule. The rows are the Hierarchy intent's flatten-to-visible projection, each carrying aria-level + aria-expanded; Windowed Collection can virtualize them unchanged.",
+      "default": "hierarchy projection on this block, role=treegrid"
+    },
+    "rightLeftArbitration": {
+      "description": "Right/Left arrows arbitrate between hierarchy expand/collapse and cell movement: on a COLLAPSED parent row's first interactive position, Right expands (and Left on an EXPANDED parent collapses); otherwise Right/Left fall back to the grid's cell-movement",
+      "rationale": "The APG treegrid rule: Right on a collapsed parent expands it; Right on an already-expanded parent (or a leaf) moves to the next cell; Left on an expanded parent collapses it, Left on a collapsed/leaf row moves to the previous cell (and, at the row start, to the parent row). This makes one key set serve both the tree axis and the grid axis without a mode switch — the single net-new behaviour over the base grid. Conformance vector: `treegrid-arbitration`.",
+      "default": "expand/collapse when the focused parent's state changes; else cell-movement fallback"
     }
   },
   "frameworkComparison": {
@@ -88,6 +105,11 @@
       "name": "withGridRoles",
       "description": "Projects the tabular data onto the `role=\"grid\"` / `role=\"row\"` / `role=\"columnheader\"` / `role=\"gridcell\"` structure with `aria-rowcount` / `aria-colcount` and per-cell `aria-rowindex` / `aria-colindex`.",
       "intentDimension": "orientation"
+    },
+    {
+      "name": "withHierarchyProjection",
+      "description": "Projects the Hierarchy intent's flatten-to-visible rows onto the grid as a `role=\"treegrid\"` (each row carrying `aria-level` + `aria-expanded`), and arbitrates Right/Left between expand/collapse and cell-movement — the treegrid projection (#1411), no new engine.",
+      "intentDimension": "strategy"
     }
   ]
 }
