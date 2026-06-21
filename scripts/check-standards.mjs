@@ -825,23 +825,24 @@ const backlogReportRefs = new Set(
 // ── 6f. Repo-locus prefix on code-path references (#884, enforces #883; #880 slice B) ─
 // Every code-path reference in backlog/*.md + reports/*.md must carry a `<repo>:` locus marker so its
 // constellation repo is unambiguous in chat / raw markdown. The fs reads stay here; the carve-out scan
-// is the pure `scanRepoLocusPrefixes`. WARN-level (one aggregate line — the un-migrated corpus has
-// hundreds, so per-token would flood) until the #885 corpus migration flips it to ERROR.
+// is the pure `scanRepoLocusPrefixes`.
+//
+// Emit ONE finding PER FILE (#1389), each keyed to its own `descriptor.file`. The earlier single
+// aggregate line carried a `files: [...]` list spanning the whole corpus, which `--scope` (#952) could
+// only classify all-or-nothing: if ANY bundled file was the session's, every other session's bare ref
+// blocked too (false red); if none was dirty-attributable (e.g. the session already committed its file),
+// the session's OWN breakage demoted to a note (false green — the #1389 masking). Per-file keying lets
+// `--scope` attribute each correctly — the session's files block, concurrent files demote.
 {
   const docs = [];
   for (const f of readdirSync(join(ROOT, 'backlog')).filter((n) => n.endsWith('.md')))
     docs.push({ file: `backlog/${f}`, content: readFileSync(join(ROOT, 'backlog', f), 'utf8') });
   for (const f of reportFiles) docs.push({ file: `reports/${f}`, content: readFileSync(join(REPORTS, f), 'utf8') });
-  const findings = scanRepoLocusPrefixes(docs);
-  if (findings.length) {
-    const total = findings.reduce((n, x) => n + x.count, 0);
-    const sample = findings.slice(0, 5).map((x) => `${x.file} (${x.sample})`).join(', ');
+  for (const finding of scanRepoLocusPrefixes(docs)) {
     const msg =
-      `${total} code-path reference(s) across ${findings.length} file(s) in backlog/ + reports/ lack a ` +
-      `<repo>: locus prefix (#883 convention; #884 detection, #885 enforces) — e.g. ${sample}${findings.length > 5 ? ', …' : ''}`;
-    // Carry the per-file list so `--scope` (#952) can attribute this aggregate across sessions — it's
-    // the canonical concurrent-red case (one finding spanning several sessions' files).
-    const descriptor = { kind: 'repo-locus', files: findings.map((f) => f.file) };
+      `${finding.count} code-path reference(s) in ${finding.file} lack a <repo>: locus prefix ` +
+      `(#883 convention; #884 detection, #885 enforces) — e.g. ${finding.sample}`;
+    const descriptor = { kind: 'repo-locus', file: finding.file };
     if (REPO_LOCUS_PREFIX_ENFORCED) err(msg, descriptor);
     else warn(msg, descriptor);
   }
