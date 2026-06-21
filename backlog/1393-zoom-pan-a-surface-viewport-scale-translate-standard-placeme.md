@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "099"
-status: active
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#decompose-overloaded-vocabulary-by-semantic-source"
 preparedDate: "2026-06-21"
 relatedReport: reports/2026-06-21-viewport-transform-pan-zoom.md
 tags: [decision, book-candidate, zoom, pan, viewport, gap, interaction]
@@ -50,6 +53,47 @@ user-mutable **collection order** ([we:src/_data/intents/reorder.json:5](../src/
 | Fork | Recommended default | Main alternative (rejected) | Confidence |
 |---|---|---|---|
 | **Fork 1** — placement & shape | **Own `viewport-transform` intent + a realizing `pan-zoom-surface` block** | Fold under `interaction` / dissolve into #1396 + CSS | High (med-high on the working name + whether the block ships now vs. as a deferred build) |
+
+## Ruling (ratified 2026-06-21)
+
+**Fork 1 → (a): a standalone `viewport-transform` intent (working name) + a deferred realizing
+`pan-zoom-surface` block.** *(~85%.)* The decisive crux is that the **middle model** — the viewport
+transform vocabulary (`scaleExtent`/`translateExtent` bounds, focal mode pointer/center/fit, which input
+axes are live, keyboard parity) — is genuinely cross-surface (image viewer, map, canvas, diagram all
+re-decide it today) and is **UX-observable**, so it earns an intent home exactly as `viewport-presence`
+does. It survives **impl-is-not-a-standard** cleanly: the *intent* owns the UX dimensions, while the
+matrix/clamp/focal math is the *block* (deferred impl), never the intent. The intent **composes**
+`interaction` (modality) + [#1396](/backlog/1396-pointer-gestures-swipe-long-press-pinch-pull-to-refresh-plac/)
+(gesture recognition) and renders via CSS `transform` — *compose-don't-duplicate*, not re-implementation.
+
+**(b) fold under `interaction` — rejected.** `interaction` owns input **modality** (an ambient,
+document-level, singular value); admitting a transform-carrying manipulation verb dilutes the modality
+contract — the "never widen one intent to absorb a foreign family" rule
+([we:docs/agent/platform-decisions.md#decompose-overloaded-vocabulary-by-semantic-source](../docs/agent/platform-decisions.md)).
+Consistent with the sibling #1396 ruling, which rejected the same dilution.
+
+**(c) dissolve into #1396 + CSS `transform` — rejected.** #1396 recognizes the pinch/pan *gesture* and
+CSS `transform` *renders*, but neither homes the middle model (bounds, focal, keyboard parity). The
+red-team case — "this is just d3-zoom, grab a JS lib" — fails: the failure mode it ignores is that the
+UX vocabulary stays unhomed and every surface re-decides it. This is *compose-don't-duplicate* in
+reverse: there **is** irreducibly-new vocabulary, so it earns a home.
+
+**Sub-fork — intent name + block timing:** working name `viewport-transform` confirmed at authoring
+(noted residual: it sits awkwardly next to `viewport-presence` and the page-level `VisualViewport` —
+`pan-zoom` / `surface-transform` are alternatives to weigh when the spec is written). The block is a
+**deferred, separately-prioritized build**, not part of this placement call.
+
+**Ratified ride-alongs (settled at prep, blessed here):** layer = standalone **intent**, not
+Project/Protocol (no provider seam / interchange schema); render substrate = CSS `transform:
+scale()/translate()`, **not** CSS `zoom`; **keyboard parity + zoom-to-fit/reset = a fixed mechanic**
+(non-negotiable), while `bounds` and `focal` are dimensions with most-permissive defaults (unbounded
+zoom, focal = pointer); `touch-action: none` cedes native pinch on the surface; element-scoped, **not**
+page-level `VisualViewport`.
+
+**Graduation chain filed at resolution** (`blockedBy`):
+[#1440](/backlog/1440-viewport-transform-intent-spec-mint-we-src-data-intents-view/)
+`viewport-transform` intent spec → [#1441](/backlog/1441-pan-zoom-surface-block-realizing-build-for-the-viewport-tran/)
+`pan-zoom-surface` realizing block.
 
 ## Fork 1 — placement & shape: own intent (+ block), fold under `interaction`, or dissolve into #1396 + CSS?
 
