@@ -39,10 +39,12 @@ Gate in frontierui (the smoke/e2e lane + `npm run check:standards`). Minimal, de
   fixture and asserts the fired oracles ⊇ the manifest's `expectOracles`, proving the collector→oracle
   wiring (not just the pure decision layer); clean controls must not trip any structural oracle (the #1412
   false-positive guard). Plus the multi-page nav guard (#1422 end-to-end). **9/9 pass on :3001 (7.9s).**
-- **New browser-needing fixtures** `fui:tools/explorer/fixtures/`: `axe-a11y-violation.html` (real axe
-  `image-alt`), `focus-trap.html` (dead-end stuck focus), `scroll-residue.html` (clipped-but-scrollable
-  y-residue, #1418/#1465), `multi-page-hub.html` + `multi-page-leaf.html` (nav-crash guard). Existing
-  console-error/overflow/clean fixtures also marked `browserLane`.
+- **New browser-needing fixtures** under `fui:tools/explorer/fixtures/`:
+  `fui:tools/explorer/fixtures/axe-a11y-violation.html` (real axe image-alt),
+  `fui:tools/explorer/fixtures/focus-trap.html` (dead-end stuck focus),
+  `fui:tools/explorer/fixtures/scroll-residue.html` (clipped-but-scrollable y-residue, #1418/#1465),
+  `fui:tools/explorer/fixtures/multi-page-hub.html` + `fui:tools/explorer/fixtures/multi-page-leaf.html`
+  (nav-crash guard). Existing console-error/overflow/clean fixtures also marked `browserLane`.
 - **Manifest** `fui:tools/explorer/fixtures/manifest.ts` — extended `FixtureSignals` with `clippedResidue`,
   `FixtureScenario` with `browserLane`, and added the 4 new scenarios; the unit-lane `observationFor`
   (`fui:tools/explorer/__tests__/fixtures.test.ts`) now carries `clippedResidue` through. Unit lane 12/12.
