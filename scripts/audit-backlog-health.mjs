@@ -27,8 +27,9 @@
  *                           prose (a `#N` resolving to a resolved `type: decision`). The
  *                           plugs class: an architectural call with no governing decision.
  *   G4  false-prepared-fork a `type: decision` carrying `preparedDate` whose `## Fork` sections
- *                           contain prioritization/effort tells ("premature", "no second consumer",
- *                           "not broken … but", "more to build/maintain", "cheaper/expensive") — the
+ *                           contain prioritization/effort tells ("premature", "no second/other consumer",
+ *                           "no consumer need", "not broken … but", "more to build/maintain",
+ *                           "avoids the drift/maintenance of B", "keep … in sync", "cheaper/expensive") — the
  *                           fork-existence test was skipped at prep, so the stamp is false. CANDIDATE:
  *                           the claim-time re-run confirms; collapsing to the #088 shape clears it.
  *   G5  missing-fork-existence-justification a `type: decision` carrying `preparedDate` with a `## Fork`
@@ -95,7 +96,10 @@ const items = new Map();          // id -> {id, file, type, status, fm, body}
 for (const f of files) {
   const src = readFileSync(join(BL, f), 'utf8');
   const { fm, body } = parseFrontmatter(src);
-  items.set(num(f), { id: num(f), file: f, fm, body, type: fm.type, status: fm.status });
+  // Items declare their type via `kind:` (the `type:` field was renamed in the kind-axis migration);
+  // fall back to `type` for any legacy item. Without this, every `it.type === 'decision'` gate
+  // (G3–G7) and the exec gate silently never fire — the whole decision-governance audit goes dead.
+  items.set(num(f), { id: num(f), file: f, fm, body, type: fm.kind ?? fm.type, status: fm.status });
 }
 
 // ---- ref extractors ------------------------------------------------------
@@ -116,7 +120,10 @@ const FORK_TELLS = [
   /\bpremature(ly)?\b/i,
   /\bsequencing,?\s+not\s+exclusion\b/i,
   /\bno\s+(?:second|other)\s+consumer\b/i,
-  /\b(?:more|extra|a\s+second|another)\s+(?:to\s+)?(?:build|maintain|entry|entries|schema|feed)\b/i,
+  /\bno\s+consumer\s+(?:need|for|that)\b/i,                          // "no consumer need" (#1457 — search, don't assert)
+  /\b(?:more|extra|a\s+second|another)\s+(?:to\s+)?(?:build|maintain|entry|entries|schema|feed|manifest|artifact|surface)\b/i,
+  /\bavoids?\b[^.]*\b(?:cost|maintenance|overhead|drift|surface)\b/i, // "avoids the drift surface / maintenance of B" — cost as merit
+  /\bkeep\b[^.]*\bin\s+sync\b/i,                                     // "another manifest to keep in sync"
   /\bnot\s+broken\b[^.]*\bbut\b/i,        // "Not broken — … but premature/expensive"
   /\b(?:too\s+)?expensive\b/i,
   /\bcheaper\b/i,
