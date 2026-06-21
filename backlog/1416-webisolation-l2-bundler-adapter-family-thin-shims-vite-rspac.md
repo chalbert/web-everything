@@ -1,10 +1,13 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 locus: frontierui
 blockedBy: ["1363"]
 dateOpened: "2026-06-21"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "fui:tools/scope-isolator/adapter-core.ts"
 relatedProject: webisolation
 tags: [webisolation, css-isolation, frontierui, build-transform, adapters]
 ---
@@ -29,3 +32,21 @@ not scope — the end-state is the full family.
   no Vite in the toolchain** (the explicit no-lock-in requirement).
 - Adapters published as zero-lock-in tooling (not `@webeverything`); scope-key naming is a config option,
   not bespoke per-adapter logic.
+
+## Progress (batch-2026-06-21)
+
+- `fui:tools/scope-isolator/adapter-core.ts` — the shared shim core: `lowerCss(id, css, options)` routes
+  every adapter through the pure #1363 `transform` (no logic forked); `ScopeAdapterOptions.resolveScope`
+  makes scope-key naming a config option (default `defaultScopeFromId` = file basename); `include` gates
+  which ids are processed.
+- Five thin per-bundler shims, none privileged: `fui:tools/scope-isolator/vite-plugin.ts` +
+  `fui:tools/scope-isolator/rollup-plugin.ts` (`transform` hook), `fui:tools/scope-isolator/esbuild-plugin.ts`
+  (`onLoad` over `.css`), `fui:tools/scope-isolator/webpack-plugin.ts` (a webpack **loader**, context typed
+  minimally → no `webpack` dep), `fui:tools/scope-isolator/rspack-plugin.ts` (re-exports the webpack loader —
+  rspack runs webpack-compatible loaders).
+- **No-lock-in requirement met:** the rspack adapter applies L2 to uncompiled CSS via the webpack-loader
+  signature with **no Vite in the toolchain** — a test exercises `scopeIsolatorRspackLoader.call({resourcePath},
+  css)` and asserts it is the same loader fn as webpack's, producing the core output.
+- 8 unit tests `fui:tools/scope-isolator/__tests__/adapters.test.ts` — every adapter's output is
+  byte-identical to a direct `transform()` (proves no fork), plus skip-non-CSS / resolveScope / the
+  rspack-no-Vite path. scope-isolator suite 29/29; FUI `check:standards` → 0 errors; adapters typecheck clean.
