@@ -1,0 +1,5 @@
+{
+  "term": "Adjacency Description",
+  "definition": "The tier-1 accessibility floor for a node-link diagram — a textual / tabular alternative listing each node and the nodes adjacent to it (its edges), so a screen-reader user gets the graph's relations without the visual rendering. Mirrors the webcharts a11y description-table; richer keyboard-traversal models are the deferred tier-2.",
+  "usage": "The tier-1 a11y conformance axis of the Web Graph project; the tier-2 model is grounded in the graph-a11y-model research topic."
+}

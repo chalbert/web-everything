@@ -72,3 +72,75 @@
         runtime ships in Frontier UI.
     </div>
 </section>
+
+<section id="graphspec" class="section-card">
+    <h3 id="graphspec-profile">GraphSpec Profile</h3>
+    <p>
+        The portable webgraph artifact is a <strong>GraphSpec</strong> — the thin <strong>semantic core</strong>.
+        It declares <em>what the graph means</em> (nodes, edges, and the kind of each) and nothing about
+        <em>where anything is drawn</em>: concrete coordinates are <em>invented</em> by a
+        <a href="#protocol-custom-graph-layout"><code>CustomGraphLayout</code></a> and the pixels by a
+        <a href="#protocol-custom-graph-renderer"><code>CustomGraphRenderer</code></a> consuming
+        <a href="/projects/webtheme/">Web Theme</a> tokens. The schema is grounded on the real consumer it
+        must reproduce — the <code>GraphNode</code> / <code>GraphEdge</code> shapes in
+        <code>plateau:src/platform-manager/types.ts</code> that the Platform Map already hand-rolls. Node
+        <code>kind</code>, edge <code>kind</code>, and <code>weight</code> are <strong>semantic</strong>
+        encodings — they say <em>"this node is a project, this edge is a dependency, weight this relation"</em>,
+        never <code>#3b82f6</code> or an <code>x</code>/<code>y</code>; the resolved palette and size range are
+        theme.
+    </p>
+    {% highlight "typescript" %}
+// The portable webgraph artifact — a GraphSpec. SEMANTIC plane ONLY: what the nodes/edges mean. The
+// presentation plane (where each node sits, how it is drawn) is invented downstream by CustomGraphLayout
+// + CustomGraphRenderer and never appears here. Grounded on plateau's GraphNode/GraphEdge (the Platform
+// Map consumer this standard exists to reproduce).
+interface GraphSpec {
+  nodes: GraphNodeSpec[];
+  edges: GraphEdgeSpec[];
+  directed?: boolean;          // default true — the layered-DAG default assumes edge direction
+  layout?: LayoutStrategy;     // a SEMANTIC hint (which algorithm FAMILY), never coordinates
+}
+
+interface GraphNodeSpec {
+  id: string;                  // stable join key (project id / provider key / protocol id)
+  label?: string;              // the accessible/displayed name — a11y-derivable
+  kind?: string;               // semantic category; drives grouping/encoding, resolved style = theme
+  group?: string;              // optional cluster/partition membership (a semantic grouping)
+}
+
+interface GraphEdgeSpec {
+  from: string;                // GraphNodeSpec id
+  to: string;                  // GraphNodeSpec id
+  label?: string;
+  kind?: string;               // semantic relation type (e.g. "depends-on", "provides")
+  directed?: boolean;          // per-edge override of the graph-level default
+  weight?: number;             // semantic magnitude; the resolved thickness/scale is theme
+}
+
+// The native-first default layout family. Position is INVENTED by the algorithm, so the family is a
+// swappable dimension: the deterministic `layered` DAG is the conformance-assertable default; `force`
+// (non-deterministic) ships as an adapter behind CustomGraphLayout, never as the default.
+type LayoutStrategy = 'layered' | 'force' | 'tree' | 'radial';
+    {% endhighlight %}
+    <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+        <li><strong>Semantic plane, kept separate:</strong> the spec carries meaning (node/edge <code>kind</code>,
+            <code>group</code>, <code>weight</code>), never positions or pixels. A layout + renderer +
+            <a href="/projects/webtheme/">Web Theme</a> resolve the presentation, so one spec re-lays-out and
+            re-themes without edits.</li>
+        <li><strong>Position is <em>invented</em>, not derived:</strong> unlike a chart (where a mark's position
+            is <code>x = f(field)</code>), a graph has no positional datum — <code>layout</code> only names the
+            algorithm <em>family</em>; <code>CustomGraphLayout</code> computes the coordinates. That extra
+            degree of freedom is why the renderer seam splits in two (<a href="/backlog/1352-webgraph-standard-shape-own-project-protocol-seam-count-a11y/">#1352</a>).</li>
+        <li><strong>Thin core, additive tiers:</strong> nodes + edges + <code>kind</code> (+ optional
+            <code>group</code>/<code>weight</code>) is all the core requires. Nested/compound graphs, ports, and
+            multi-edges are additive — a conformant core renderer ignores higher-tier fields gracefully.</li>
+        <li><strong>Accessibility is derivable:</strong> node <code>label</code>s + edge relations let the
+            tier-1 <a href="#scope-conformance">adjacency description-table</a> a11y floor be generated straight
+            from the semantic spec (the tier-2 model is researched in
+            <a href="/research/graph-a11y-model/">graph-a11y-model</a>).</li>
+        <li><strong>Grounded, not greenfield:</strong> mirrors the shipped
+            <code>plateau:src/platform-manager/types.ts</code> <code>GraphNode {id, kind, label}</code> /
+            <code>GraphEdge {from, to, kind, confidence, seam}</code> so the standard reproduces a real
+            consumer rather than inventing a shape.</li>
+    </ul>
+</section>

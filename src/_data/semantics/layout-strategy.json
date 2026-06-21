@@ -1,0 +1,5 @@
+{
+  "term": "Layout Strategy",
+  "definition": "The algorithm family that invents node positions for a node-link diagram (layered / force / tree / radial) — the positioning degree of freedom that distinguishes a graph from a chart. Because position is invented rather than derived, the strategy is an independently swappable dimension: the deterministic layered-DAG default is conformance-assertable, while non-deterministic families (force-directed) ship as adapters, never as the default.",
+  "usage": "The swappable dimension behind the CustomGraphLayout protocol (Web Graph)."
+}

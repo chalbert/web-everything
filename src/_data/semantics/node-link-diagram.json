@@ -1,0 +1,5 @@
+{
+  "term": "Node-Link Diagram",
+  "definition": "A visualization of a graph as nodes (points) joined by edges (links) — the node-link form the Web Graph standard covers, distinct from a chart. A chart derives a mark's position from its datum via scales; a node-link diagram has no positional datum, so a node's position is invented by a layout algorithm.",
+  "usage": "The visualization family of the Web Graph project; rendered from a GraphSpec through a layout + renderer."
+}

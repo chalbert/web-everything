@@ -1,0 +1,5 @@
+{
+  "term": "GraphSpec",
+  "definition": "The portable, presentation-free semantic artifact of the Web Graph standard — a declaration of a graph's nodes and edges and the kind/weight of each, carrying no coordinates or pixels. Position is invented downstream by a layout and drawn by a renderer; the spec carries only meaning, so one spec re-lays-out and re-themes without edits.",
+  "usage": "The semantic core of the Web Graph project (#1351), consumed by the CustomGraphLayout and CustomGraphRenderer protocols. Grounded on plateau's GraphNode/GraphEdge shapes."
+}
