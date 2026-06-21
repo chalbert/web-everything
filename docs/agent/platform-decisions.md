@@ -602,6 +602,29 @@ builds **only the one genuinely-missing intent** (command invocation), not a fre
 
 **Lineage:** #124 (Resource → Loader Intent) · #173 (Menu → existing intents + the one missing `command`). Sibling of [compose-dont-handroll](#compose-dont-handroll).
 
+### A thin role-container over a shared primitive stays a preset/parameter until a 2nd consumer; graduate to a block then {#thin-container-graduation-trigger}
+
+The placement face of [compose-intent-dont-duplicate](#compose-intent-dont-duplicate), for APG
+composite-widget *containers* (toolbar, menubar, tabs-container). The roving/managed-focus algorithm is
+**not** the container's — it is the owned `focus-delegation` intent + its `composite-widget` behavior
+block, which the container *consumes* (`strategy=roving; orientation=…`). What the container actually adds
+is a thin role surface — a `role` value (`role="toolbar"`), separators, a label, grouping — too small to
+justify a first-class artifact on its **first** consumer. **The rule:** carry that role surface as
+**assemblerPreset config + a `role` parameter on `composite-widget`**, *not* a new intent (no UX dimension
+of its own) and *not* yet a new block. **Graduation trigger:** the moment a **second** container consumer
+wants shared *container* concerns (separators, overflow, label), promote the preset into a **thin block**
+composing `focus-delegation` + `action`. One consumer → preset; two → block. Matches Radix/Ariakit/React
+Aria (thin role wrapper over one shared focus primitive; the algorithm is never re-homed per container).
+
+**Tell:** a candidate "new roving control-group standard" names a role but supplies no focus mechanic of
+its own (it delegates arrow-nav wholesale) — that's a consumer of `focus-delegation`, not a new standard.
+
+**Lineage:** #1409 (Toolbar — roving unit = `focus-delegation`+`composite-widget` consumer (Fork A,
+resolved invariant); container semantics = the webdocs `toolbar` assemblerPreset + promoted
+`composite-widget`, thin `toolbar` block gated on a 2nd container consumer (Fork B)). Surfaced by the
+ARIA-APG lens #1400; sibling of [compose-intent-dont-duplicate](#compose-intent-dont-duplicate) and
+[intents-ux-only](#intents-ux-only).
+
 ### Decompose an overloaded incumbent word by semantic source; never widen one intent to absorb a foreign family {#decompose-overloaded-vocabulary-by-semantic-source}
 
 The split-side complement of [compose-intent-dont-duplicate](#compose-intent-dont-duplicate). Incumbent

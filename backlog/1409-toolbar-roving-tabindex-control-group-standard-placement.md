@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#thin-container-graduation-trigger"
 tags: [decision, book-candidate, toolbar, roving-tabindex, apg, accessibility, gap]
 relatedReport: reports/2026-06-21-toolbar-composite-focus-placement.md
 preparedDate: "2026-06-21"
@@ -44,6 +47,33 @@ Ratify both rows, or override just the one you'd change. **Confidence** says whe
 |---|---|---|---|
 | **A · the roving unit** | it **is** the existing `focus-delegation` intent + `composite-widget` block; toolbar is a consumer | a toolbar-specific roving standard *(rejected — duplicates a shipped intent)* | **~95%** — Radix/Ariakit/React Aria all factored it shared |
 | **B · toolbar container semantics** | **no new intent**; toolbar = the existing `toolbar` assemblerPreset over `focus-delegation`; promote `composite-widget` | a thin `toolbar` *block* (low-regret hedge) · a `toolbar` *intent* *(rejected — no UX dimension)* | **~70%** — graduate to a block when a 2nd container consumer appears |
+
+## Ruling — ratified 2026-06-21 (both forks as recommended)
+
+- **Fork A → (a), resolved invariant (~95%).** The roving unit **is** the existing `focus-delegation`
+  intent + its `composite-widget` behavior block; toolbar is a *consumer*. The toolbar-specific roving
+  branch is broken/redundant (duplicates a shipped intent that already names toolbar as a consumer, and
+  that 16 blocks already delegate to) — the exact shared factoring Radix/Ariakit/React Aria all chose.
+  No toolbar-owned focus algorithm.
+- **Fork B → (a), ~72%.** **No new intent and no new block now.** Toolbar = the existing `toolbar`
+  assemblerPreset over `focus-delegation`(strategy=roving) + `action`/`command`; **promote
+  `composite-widget`** (concept→) to own the shared roving-container behavior (incl. a `role` parameter
+  so a consumer sets `role="toolbar"`). Container "semantics" are the preset's APG conformance + that
+  block, not a new contract. `toolbar` *intent* rejected (no UX dimension of its own).
+- **Explicit graduation trigger.** The moment a **second** container consumer (menubar / tabs container)
+  wants shared container concerns (separators, overflow, label), graduate the preset into a thin
+  `toolbar` *block* per Fork B (b) — composing `focus-delegation` + `action`, owning only role=toolbar +
+  separators. Until then, first-classing toolbar is premature-artifact proliferation.
+- **Red-team that did not flip the call:** the `toolbar` preset is `ownedByProject: webdocs`, so one
+  might argue the WE *standard* ships no toolbar artifact — but the WE-side carrier is `composite-widget`
+  (a WE block) which (a) promotes; `role="toolbar"` is one ARIA value the consumer sets and separators
+  are members, leaving almost no toolbar-specific *contract* to standardize (which is also why the intent
+  branch is empty). Attack lands on "is there a WE artifact?" (yes), not on "does toolbar need its own one
+  yet" (no).
+
+**Realizing work** (separately prioritized): promote `focus-delegation` (draft→) and `composite-widget`
+(concept→) — filed as a follow-up; keep the `toolbar` assemblerPreset as the recipe. The thin `toolbar`
+block is *not* filed as ready — it is gated on the 2nd-consumer trigger above.
 
 ## Fork A — is the unit a shared managed-focus behavior, or a toolbar-specific thing?
 
