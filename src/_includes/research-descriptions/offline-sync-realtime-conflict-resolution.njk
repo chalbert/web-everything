@@ -1,0 +1,156 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The <a href="/backlog/1403-discovery-lens-data-lifecycle-paradigms-load-cache-mutate-sy/">data-lifecycle
+  lens</a> surfaced the <strong>write-path / realtime</strong> half of the data lifecycle as unowned, naming
+  four sub-concerns: <strong>(1)</strong> an offline mutation <strong>queue + replay</strong> on reconnect
+  (the inverse of the read-path cache <a href="/backlog/1419-server-state-query-cache-lifecycle-fetch-dedupe-cache-stalen/">#1419</a>);
+  <strong>(2)</strong> <strong>realtime subscription / live-update</strong>; <strong>(3)</strong>
+  <strong>conflict resolution</strong> (last-write-wins / merge / CRDT); <strong>(4)</strong>
+  <strong>presence / collaboration</strong>. The filed crux: <strong>ONE <code>sync</code> intent</strong>
+  spanning all four, vs <strong>splitting</strong> offline-sync from realtime-collaboration (different actor
+  models &mdash; self-over-time vs many-at-once), vs <strong>a conflict-resolution behavior</strong> reusable
+  by both.
+</p>
+
+<h2>Finding 0 (load-bearing) — this is NOT greenfield; three of the four sub-concerns already have ratified WE homes</h2>
+<p>
+  The card's premise (&ldquo;none owns the sync/conflict contract&rdquo;) is <strong>largely false</strong>.
+  WE has already decomposed this exact problem, and the <code>storage</code> protocol summary states the
+  decomposition verbatim: <em>&ldquo;the durable outbox/replay is webreliability, and conflict-merge is the
+  change-tracking protocol's sync dimension &mdash; each tracked under its own owner&rdquo;</em>
+  (<code>src/_data/protocols/storage.json:4</code>, ratified from #011).
+</p>
+<table>
+  <thead><tr><th>Sub-concern</th><th>Already-ruled home</th><th>Evidence (real tree)</th></tr></thead>
+  <tbody>
+    <tr><td>offline queue + replay</td><td><strong>webreliability</strong> outbox + the <code>mutation</code> intent (apply/reconcile/rollback)</td><td><code>storage.json:4</code>; <code>mutation.json:6</code> (#1395); running queue = <code>resource-action</code>'s <code>withOptimisticMutation</code></td></tr>
+    <tr><td>realtime transport</td><td><strong>webrealtime</strong> &mdash; transport-negotiation protocol (#455, by-purpose)</td><td><code>transport-negotiation.json:4-6</code> (&ldquo;CustomTransportProvider &hellip; <strong>does NOT own any UX render</strong>&rdquo;)</td></tr>
+    <tr><td>conflict resolution (LWW/merge/CRDT)</td><td><strong>change-tracking</strong> protocol &mdash; <code>CustomChangeStrategy</code></td><td><code>change-tracking.json:4</code> (&ldquo;<strong>CRDT</strong> strategies &hellip; configurable and interoperable&rdquo;); LWW ships as <code>resolveLww</code> in <code>draft-persistence.json:83</code></td></tr>
+    <tr><td>presence / collaboration</td><td>render = a UX intent; transport = webrealtime; a co-edit presence primitive already ships</td><td><code>draft-persistence.json:54,88</code> (<code>CoEditCoordinator</code>, &ldquo;does not merge state&rdquo;); <code>reaction.json:5</code> (&ldquo;multi-user sync is a <strong>composed webrealtime concern, never baked in</strong>&rdquo;)</td></tr>
+  </tbody>
+</table>
+<p>
+  So the question is not &ldquo;where does a homeless sync standard live.&rdquo; It is: should WE mint a
+  <em>new</em> orchestration owner that <em>composes</em> these four ratified homes, or is offline-first sync
+  simply their <strong>composition</strong> (no new artifact)? The same reframe
+  <a href="/backlog/1395-optimistic-mutation-apply-reconcile-rollback-standard-placem/">#1395</a> and
+  <a href="/backlog/1398-progressive-loading-skeleton-streaming-progressive-hydration/">#1398</a> (progressive-loading
+  = composition over existing homes, no new standard) both hit.
+</p>
+
+<h2>Finding 1 — leading systems treat offline-sync and realtime-collab as SEPARATE composable layers, not ONE primitive</h2>
+<p>
+  The card's first key question &mdash; do the leaders treat offline-sync and realtime-collab as ONE
+  primitive or TWO? &mdash; the survey answers <strong>decisively: separate, composable layers</strong>, with
+  conflict-resolution a <em>third</em> swappable thing under both:
+</p>
+<ul>
+  <li><strong>Liveblocks</strong> decomposes a room into <strong>distinct primitives: Presence, Broadcast,
+    Storage, Threads</strong> &mdash; presence (ephemeral) is a different primitive from durable storage and
+    from broadcast.</li>
+  <li><strong>PowerSync</strong> separates a persistent <strong>upload queue</strong> (FIFO + retry +
+    checkpoints) from the read sync-stream, and <strong>leaves conflict resolution to your backend</strong>.</li>
+  <li><strong>TanStack Query</strong> ships offline mutation persistence (pause &rarr; dehydrate &rarr;
+    <code>resumePausedMutations()</code>) &mdash; queue + replay, and <strong>not a CRDT model at all</strong>.</li>
+  <li><strong>Replicache</strong> uses mutator + push/pull/poke + <strong>server-authoritative rebase</strong>
+    &mdash; distinct from CRDT merge.</li>
+  <li><strong>CRDTs (Yjs / Automerge)</strong> are a swappable <strong>merge algorithm</strong> with idempotent
+    exactly-once replay; the queue + transport around them is the same regardless of merge strategy.</li>
+  <li><strong>PartyKit</strong> is transport-only &mdash; &ldquo;integrate Yjs yourself.&rdquo;</li>
+</ul>
+<p>
+  The convergent factoring &mdash; <strong>(a) transport, (b) write outbox/queue with replay, (c) swappable
+  conflict-merge strategy, (d) presence/awareness</strong> &mdash; maps <strong>one-to-one</strong> onto WE's
+  already-ratified homes. The single <code>sync</code> intent is the <strong>broken</strong> branch (it fuses
+  four orthogonal, already-homed axes); &ldquo;a conflict-resolution behavior reusable by both&rdquo; is
+  <strong>already true</strong> (<code>change-tracking</code>'s <code>CustomChangeStrategy</code>).
+</p>
+
+<h2>Finding 2 — the two actor models ARE different end-states, but the split is along EXISTING seams</h2>
+<p>
+  <strong>self-over-time</strong> (offline-first) = durable outbox (webreliability) + a checkpoint/cursor +
+  replay on <code>online</code> + the <code>mutation</code> apply/rollback lifecycle; conflict =
+  server-authoritative rebase or LWW. <strong>many-at-once</strong> (realtime-collab) = a live transport
+  (webrealtime) + a shared document with a <em>concurrent</em> merge strategy (change-tracking CRDT/OT) +
+  <strong>presence</strong> (ephemeral, never persisted). They share the merge-strategy contract and the
+  transport but differ in actor model &mdash; and <em>neither needs a new owner</em>. Fusing them would force
+  one artifact to span an ephemeral presence channel, a durable outbox, a transport negotiation, and a merge
+  algorithm &mdash; four axes WE keeps in four homes (the orthogonality break #1318/#1324/#1337 found one
+  intent over; the homonym trap #1395 untangled on <code>loader.strategy.optimistic</code>).
+</p>
+
+<h2>Finding 3 — presence/collaboration UX is a thin render intent; the primitive partly already ships</h2>
+<p>
+  &ldquo;Who-else-is-here / live cursors&rdquo; splits into <strong>transport</strong> (webrealtime, ephemeral
+  awareness), <strong>presence state</strong> (a roster of peers), and <strong>render</strong> (avatars /
+  cursors / &ldquo;X is editing&rdquo;). The render is a UX intent;
+  <a href="/intents/live-region-status/">live-region-status</a> already announces a <em>local</em> presence
+  change, and a dedicated presence/roster intent could own the multi-peer roster UX. The co-edit presence
+  primitive <strong>already exists</strong>: <code>CoEditCoordinator</code>
+  (<code>draft-persistence.json:54,88</code>) surfaces &ldquo;X also editing&rdquo; over BroadcastChannel and
+  <strong>explicitly does not merge state</strong> &mdash; detection and policy already separated.
+</p>
+
+<h2>Finding 4 — WE precedent is unanimous: compose existing homes, mint only the thin missing seam</h2>
+<p>
+  #455 (transport homed by purpose), #011 (outbox &rarr; webreliability, conflict-merge &rarr;
+  change-tracking, named explicitly), #1395 (the <code>mutation</code> intent; running queue stays FUI),
+  #1419 (the read-path <code>query</code> cache a mutation invalidates), and #1398 (progressive-loading ruled
+  a composition over existing homes, <strong>no new standard</strong>). The unanimous move: <strong>name the
+  orthogonal axis in its own home; compose, don't fuse.</strong> The only thing that could be new is a
+  <strong>thin orchestration seam</strong> sequencing the four homes (queue &rarr; detect conflict &rarr;
+  pick strategy &rarr; transport-publish &rarr; replay) &mdash; gated on <code>storage.json:4</code>'s own
+  bar: <em>&ldquo;graduate into a webpersistence project only if a real cross-cutting sync-orchestration
+  consumer appears.&rdquo;</em>
+</p>
+
+<h2>Classification (per-fork pass)</h2>
+<ul>
+  <li><strong>Layer</strong> &mdash; <em>no single layer</em>: transport = Protocol (webrealtime), outbox =
+    Protocol (webreliability) + Intent (<code>mutation</code>), merge = Protocol (change-tracking), presence =
+    Intent + Protocol. A <code>sync</code> <em>intent</em> spanning all four is a category error (mixes
+    protocol interop with UX).</li>
+  <li><strong>Protocol vs dimension</strong> &mdash; swappable pieces (transport, merge, storage) = Protocols
+    (the lock); author-facing pieces (apply strategy, presence render) = Intent dimensions.</li>
+  <li><strong>DI-injectable</strong> &mdash; yes, three-fold and already so:
+    <code>CustomTransportProvider</code>, <code>CustomChangeStrategy</code>,
+    <code>CustomStorageStrategy</code>/<code>CustomRecoveryHandler</code> &mdash; the minimize-lock-in win
+    (swappable strategy + transport, not a baked &ldquo;sync engine&rdquo;).</li>
+  <li><strong>Default</strong> &mdash; conflict = <strong>last-write-wins</strong> (already
+    <code>resolveLww</code>); CRDT is the opt-in. Apply = <strong>pessimistic</strong> (inherited from
+    <code>mutation</code>). Replay = FIFO + idempotent exactly-once (fixed mechanics).</li>
+  <li><strong>Seams</strong> &mdash; #1419 <code>query</code> cache &middot; #1395 <code>mutation</code>
+    &middot; <code>change-tracking</code> &middot; <code>webrealtime</code> &middot;
+    <code>webreliability</code> &middot; <code>broadcast</code> &middot; <code>reliability</code>.</li>
+</ul>
+
+<h2>The prepared forks</h2>
+<ul>
+  <li>
+    <strong>Crux (single-vs-split) &rarr; SPLIT, decisively.</strong> The single <code>sync</code> intent is
+    the <strong>broken</strong> branch (fuses four orthogonal, already-homed axes; mixes protocol with UX).
+    &ldquo;A conflict-resolution behavior reusable by both&rdquo; is <strong>already realized</strong> as
+    <code>change-tracking</code>'s <code>CustomChangeStrategy</code>.
+  </li>
+  <li>
+    <strong>Fork 1 &mdash; a thin sync-orchestration seam, or no new artifact?</strong> Mint a thin
+    <code>sync</code> orchestration intent that <em>composes</em> the four homes + adds only replay-on-reconnect
+    choreography <em>(recommended only if a real consumer appears)</em>, vs <strong>no new WE artifact</strong>
+    &mdash; offline-first sync = pure composition, the #1398 outcome <em>(recommended default)</em>.
+  </li>
+  <li>
+    <strong>Fork 2 (only if a seam is minted) &mdash; does presence/collaboration ride it or stay its own
+    render intent?</strong> Its own intent <em>(recommended, bias-to-separation)</em> &mdash; presence is
+    ephemeral render, structurally unlike a durable replay queue.
+  </li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/projects/webrealtime/">Web Realtime</a> &mdash; transport-negotiation protocol (#455), the realtime home.</li>
+  <li><a href="/research/server-state-cache-lifecycle/">Server-state cache</a> (#1419) &mdash; the read-path counterpart.</li>
+  <li><a href="/research/optimistic-mutation-lifecycle/">Optimistic mutation</a> (#1395) &mdash; the write-lifecycle <code>mutation</code> intent.</li>
+  <li>Backlog <a href="/backlog/1420-offline-first-sync-realtime-conflict-resolution-standard-pla/">#1420</a> &mdash; the decision this research prepares.</li>
+</ul>
+{% endraw %}

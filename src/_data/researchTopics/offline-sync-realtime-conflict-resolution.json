@@ -1,0 +1,29 @@
+{
+  "id": "offline-sync-realtime-conflict-resolution",
+  "title": "Offline-first sync + realtime / conflict-resolution: a single `sync` standard, or a composition over homes WE already ratified?",
+  "summary": "Prep research for decision #1420 (surfaced by the data-lifecycle lens #1403, routed from the app-infra lens #1402 + the verb-axis collaboration line). The card asks where the write-path/realtime half of the data lifecycle lives, naming four sub-concerns: (1) offline mutation queue + replay on reconnect; (2) realtime subscription/live-update; (3) conflict resolution (LWW/merge/CRDT); (4) presence/collaboration. The filed crux: ONE `sync` intent spanning all four vs SPLIT offline-sync from realtime-collab (self-over-time vs many-at-once actor models) vs a conflict-resolution BEHAVIOR reusable by both. LOAD-BEARING FINDING 0 — this is NOT greenfield; the card's premise ('none owns the sync/conflict contract') is largely false. WE has ALREADY decomposed this exact problem across four ratified rulings, and we:src/_data/protocols/storage.json:4 states the decomposition verbatim: 'the durable outbox/replay is webreliability, and conflict-merge is the change-tracking protocol's sync dimension — each tracked under its own owner.' Mapping: (1) offline queue+replay → webreliability durable outbox (storage.json:4) + the `mutation` intent's apply/reconcile/rollback (mutation.json:6, #1395) whose running queue ships as resource-action's withOptimisticMutation; (2) realtime transport → webrealtime / transport-negotiation protocol, ratified by-purpose #455 (transport-negotiation.json:4-6, which explicitly 'does NOT own any UX render'); (3) conflict-merge → change-tracking protocol's CustomChangeStrategy, where 'CRDT strategies become configurable and interoperable' (change-tracking.json:4) and LWW already ships as resolveLww in draft-persistence.json:83; (4) presence → a render UX intent + webrealtime transport, with a co-edit presence primitive ALREADY shipping (CoEditCoordinator 'X also editing' over BroadcastChannel, draft-persistence.json:54,88, which explicitly 'does not merge state'), and reaction.json:5 already ruling 'multi-user sync is a composed webrealtime concern, never baked in (#370 Fork 5).' FINDING 1 (load-bearing) — the field treats offline-sync and realtime-collab as SEPARATE composable layers, never ONE primitive: Liveblocks decomposes a room into distinct primitives (Presence, Broadcast, Storage, Threads); PowerSync separates a persistent upload queue (FIFO+retry+checkpoints) from the read stream and LEAVES conflict resolution to the backend; TanStack Query's offline mutation persistence (pause/dehydrate/resumePausedMutations) is queue+replay and is NOT a CRDT model; Replicache uses mutator + push/pull/poke + server-authoritative rebase; CRDTs (Yjs/Automerge) are a swappable MERGE ALGORITHM with idempotent exactly-once replay; PartyKit is transport-only ('integrate Yjs yourself'). Convergent factoring: (a) transport, (b) write outbox/queue with replay, (c) swappable conflict-merge strategy, (d) presence/awareness — one-to-one onto WE's already-ratified homes. FINDING 2 — the two actor models ARE different end-states (self-over-time = durable outbox+replay+rebase/LWW; many-at-once = live transport+concurrent CRDT/OT merge+ephemeral presence) but they split along EXISTING seams and neither needs a new owner. FINDING 3 — presence/collab UX is a thin render intent (live-region-status announces local presence; a roster intent could own multi-peer UX); the primitive partly already ships (CoEditCoordinator). FINDING 4 — WE precedent is unanimous: name the orthogonal axis in its own home, compose don't fuse (#455 transport, #011 outbox/merge split, #1395 mutation, #1419 query, and #1398 progressive-loading = composition over existing homes, NO new standard). VERDICT — single-vs-split → SPLIT, decisively (~85%): the single `sync` intent is the BROKEN branch (fuses four orthogonal already-homed axes; mixes protocol-interop with UX = a category error per the 7-question classification); the 'conflict-resolution behavior reusable by both' is ALREADY realized as change-tracking's CustomChangeStrategy. The genuine remaining call is narrow (Fork 1): mint a THIN sync-ORCHESTRATION seam that composes the four homes + adds only replay-on-reconnect choreography, vs NO new WE artifact (offline-first sync = pure composition, the #1398 outcome) — gated on storage.json:4's own bar ('graduate to a webpersistence project only if a real cross-cutting sync-orchestration consumer appears'). Fork 2 (if a seam is minted): does presence/collaboration ride it or stay its own render intent (bias-to-separation → own intent). CLASSIFICATION: no single layer (transport=Protocol/webrealtime, outbox=Protocol/webreliability + Intent/mutation, merge=Protocol/change-tracking, presence=Intent+Protocol); swappable lock-points = CustomTransportProvider + CustomChangeStrategy + CustomStorageStrategy (minimize-lock-in win, not a baked sync engine); conflict default = last-write-wins (resolveLww), CRDT opt-in; replay FIFO + idempotent exactly-once = fixed mechanics. Full grounding in we:reports/2026-06-21-offline-sync-realtime-conflict-resolution.md.",
+  "status": "open",
+  "dateOpened": "2026-06-21",
+  "lastReviewed": "2026-06-21",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "data-lifecycle",
+    "offline-first",
+    "sync",
+    "realtime",
+    "conflict-resolution",
+    "crdt",
+    "collaboration",
+    "presence",
+    "webrealtime",
+    "webreliability",
+    "change-tracking",
+    "decision-prep"
+  ],
+  "relatedBlocks": [
+    "draft-persistence",
+    "resource-action"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webrealtime"
+}
