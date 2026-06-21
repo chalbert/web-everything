@@ -1,7 +1,9 @@
 ---
 kind: epic
-status: open
+status: resolved
 dateOpened: "2026-06-20"
+dateResolved: "2026-06-21"
+graduatedTo: webgraph (src/_data/projects/webgraph.json) — webgraph standard project scaffolded by slices #1372-1376
 locus: webeverything
 tags: [webgraph, viz, build]
 ---
