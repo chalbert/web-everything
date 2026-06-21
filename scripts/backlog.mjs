@@ -155,7 +155,7 @@ function transition(v) {
     const claimedStatus = as === 'preparing' ? 'preparing' : 'active';
     const verbWord = claimedStatus === 'preparing' ? 'prepping' : 'claimed';
     ok({ verb: v, id, file: rel, slug, status: claimedStatus },
-      `${GRN}✓ ${verbWord}${RST} ${id} ${DIM}→ ${claimedStatus} (dateStarted ${today()})${RST}\n\n${DIM}Rename this chat via the tab menu to label this session — copy:${RST}\n\`\`\`\n${slug}\n\`\`\``);
+      `${GRN}✓ ${verbWord}${RST} ${id} ${DIM}→ ${claimedStatus} (dateStarted ${today()})${RST}\n\n${DIM}Rename this chat via the tab menu to label this session — copy:${RST}\n\`\`\`\n${slug}\n\`\`\`\n\n${YEL}⏸ This is the claim turn — it ends here.${RST} Do NOT ground, present, or discuss the item's substance now. Stop, let the chat be renamed, and begin the work next turn (the claim and its substance are two distinct turns — collapsing them races concurrent sessions and skips the two-go arc).`);
   }
   if (v === 'resolve') {
     const g = flag('graduated-to');
