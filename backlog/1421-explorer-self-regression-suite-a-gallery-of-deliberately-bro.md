@@ -2,8 +2,11 @@
 kind: story
 size: 8
 locus: frontierui
-status: open
+status: resolved
 dateOpened: "2026-06-21"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "fui:tools/explorer/__tests__/fixtures.test.ts"
 tags: []
 ---
 
@@ -31,4 +34,25 @@ Running the explorer against the live WE docs (`npm run explore -- http://localh
 - FUI-owned explorer (epic #1167); `locus: frontierui`.
 - Directly supports #1412 (the clipped-off-canvas clean control is its regression test) and #1418 (gesture fixtures land as those gestures ship). File those defect fixtures alongside each feature.
 - A "full regression suite" may outgrow one story — if so, slice per defect-class family via /split. Sized 8 as the umbrella build.
+
+## Progress
+
+- **Fixture gallery** (scope 1) under fui:tools/explorer/fixtures/: real minimal HTML — overflow-unclipped
+  (broken: 2000px element, real horizontal scroll), overflow-clipped-clean (CLEAN control: off-canvas
+  panel clipped by `html{overflow-x:hidden}` — the #1412 false-positive guard), console-error (broken),
+  clean-baseline (clean).
+- **Data-driven expectation manifest** (scope 2): fui:tools/explorer/fixtures/manifest.ts pairs each
+  fixture with the raw signals the collector would gather + the oracle(s) it MUST / MUST-NOT fire.
+- **The suite** (scope 3): fui:tools/explorer/__tests__/fixtures.test.ts derives each Observation by
+  running the REAL pure decision functions (`isGenuineOverflow`/`pickWidestCulprit`) over the signals,
+  runs the OracleBus, and asserts fired oracles == manifest — in the fast happy-dom `check:standards`/unit
+  lane, continuous not manual. Also asserts each fixture file exists + contains its defect marker (gallery
+  can't drift from the manifest). 8/8 green; FUI gate 0 errors.
+- **Negative coverage first-class** (scope 4): the clean controls are asserted to produce ZERO findings —
+  this is the exact regression that would have caught the #1412 clipped-overflow false positive.
+- **Minimal & deterministic** (scope 5): no network, pure decision layer, bounded.
+- **Carved the browser smoke-lane end-to-end run** (the LIVE explorer over the *served* fixtures with real
+  getComputedStyle/axe, + the axe-a11y / focus-trap / HTTP-5xx / multi-page fixtures that need a real
+  browser) **into #1466** — per this item's own "may outgrow one story, slice per defect-class family"
+  guidance. The unit-lane decision-level guard (the heuristic-regression risk) lands here.
 </content>
