@@ -1,0 +1,115 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The <a href="/backlog/1451-library-adapter-watch-keep-incumbent-lib-adapters-current/">library-adapter
+  watch (#1451)</a> surfaced a public-positioning decision: WE should publish a
+  <strong>capability × impl compatibility table</strong> — one row per WE
+  <a href="/protocols/">protocol</a> / <a href="/intents/">intent</a>, one column per implementation
+  (native · FUI · Floating UI · Mousetrap · TanStack · focus-trap · …), each cell a support tier. This is
+  the existing native-substrate matrix (<code>src/_data/capabilityMatrix.json</code>)
+  <em>broadened from native substrates to incumbent libraries</em> and surfaced as a public
+  <a href="/capabilities/">catalog</a> mirroring <code>/protocols/</code> and <code>/intents/</code>. Its
+  strategic purpose: make it self-evident that <strong>WE is a standard for the web in general, not a
+  front-end for one library</strong> — every lib, FUI included, is just a column. The one genuine fork:
+  <strong>how does FUI appear in that table — a peer column, or a privileged "reference / recommended impl"
+  column?</strong>
+</p>
+
+<h2>Finding 1 — the rendering mechanism already exists; this broadens the rows and decides the positioning</h2>
+<p>
+  <code>src/_data/capabilityMatrix.json</code> (lines 8–66) is the registered capability-adapter table:
+  one row per impl, each declaring a capability-id → 3-state tier map
+  (<code>native-ok</code> / <code>polyfill-ok</code> / <code>capability-hard</code>, lines 3–7). Today it
+  holds <strong>native substrates only</strong> — <code>face</code> (lines 9–36) and
+  <code>base-select</code> (lines 37–65, <code>native:true</code>). And <code>src/capabilities.njk</code>
+  (lines 21–39) <strong>already renders that matrix as a grid with one column per impl</strong>. So the
+  column-per-impl compat-grid mechanism is built; #1450 broadens the <em>rows</em> (native substrate →
+  incumbent lib — Floating UI, Mousetrap, TanStack, FUI) and decides the public <em>positioning</em> of
+  FUI's column. "Adding a new impl is a single-row registration"
+  (<a href="/backlog/206-capability-adapter-registration-table/">#206</a>).
+</p>
+
+<h2>Finding 2 — every neutral compat artifact lists impls as peer columns, none flagged "official"</h2>
+<p>
+  Treating standards bodies as <strong>upstream collaborators, not competitors</strong> (align, don't
+  compete), the canonical multi-implementation compat artifacts converge on one shape: a feature-row ×
+  impl-column grid with per-cell support tiers and <strong>no column flagged official.</strong>
+</p>
+<table>
+  <thead><tr><th>Artifact</th><th>Rows</th><th>Columns</th><th>Privileged column?</th></tr></thead>
+  <tbody>
+    <tr><td>MDN Browser Compat Data (BCD)</td><td>~15,000 web features</td><td>browsers / JS runtimes</td><td><strong>No</strong> — every engine a peer</td></tr>
+    <tr><td>caniuse.com</td><td>per-feature</td><td>per-engine</td><td><strong>No</strong> (merged BCD: ~500 → ~10,500 tables)</td></tr>
+    <tr><td>wpt.fyi (Web Platform Tests)</td><td>per-test</td><td>per-engine</td><td><strong>No</strong> — pass-rate %, strength earned</td></tr>
+    <tr><td>ECMAScript / Kangax tables</td><td>per-feature</td><td>per-engine/runtime</td><td><strong>No</strong></td></tr>
+    <tr><td>OpenFeature providers</td><td>per-technology</td><td>per-provider</td><td><strong>No</strong> (coverage %; see Finding 3)</td></tr>
+    <tr><td>W3C/WHATWG process</td><td>per-feature</td><td>"N independent impls"</td><td><strong>No</strong> — independence is the bar</td></tr>
+  </tbody>
+</table>
+<p>
+  BCD + caniuse are the web's most-consulted compat surface, and no engine column is ever marked
+  "recommended" — support is shown, not editorialized. <strong>wpt.fyi</strong> shows per-engine
+  pass-rates side by side: a green engine is green because it <em>passes the tests</em>, not because the
+  dashboard endorses it — strength <strong>earned and visible</strong>, never declared. That is exactly
+  default (A)'s model: FUI's coverage breadth shows as the column green across the most rows.
+</p>
+
+<h2>Finding 3 — OpenFeature: even a standard with a reference impl keeps the matrix neutral</h2>
+<p>
+  OpenFeature is the instructive near-counter-example. It <em>does</em> bless a reference implementation
+  (<code>flagd</code>), yet its provider table still lists every provider with a coverage % (DevCycle 76%,
+  flagd 53%, ConfigCat 47% — peer rows). The reference impl is named in <em>docs / concepts</em>, not by
+  privileging its row in the support matrix. So even a standard that has a reference impl keeps the
+  <strong>compat matrix itself neutral</strong> — the "recommended" pointer lives in editorial
+  getting-started prose, not the grid. This is precisely #1450's recommended split: ratify A and put any
+  adoption pointer in a clearly-editorial place (the ~20% residual). W3C/WHATWG reinforce it structurally —
+  a feature is normative only with <strong>≥2 independent conforming implementations</strong>; the process
+  sources status from caniuse / wpt.fyi annotations and marks single-impl features "at risk." No impl is
+  ever "official"; independence is the whole point.
+</p>
+
+<h2>Classification (per-fork pass)</h2>
+<ul>
+  <li><strong>Layer / shape</strong> — <strong>not</strong> a Protocol or an Intent. A
+    <strong>public catalog surface</strong> over <code>src/_data/capabilityMatrix.json</code> (a
+    rendering / positioning decision), mirroring <code>/protocols/</code> and <code>/intents/</code>
+    (auto-render from JSON). New surface = page + nav + authoring note + validator.</li>
+  <li><strong>Principle already settled; only positioning open</strong> — impl-neutrality (FUI is one
+    conforming implementation; the capabilityMatrix resolver-impl rule) is statute in
+    <a href="/docs/agent/platform-decisions.md">platform-decisions.md</a> (lines 104, 264). #1450 does
+    <em>not</em> re-open the principle — the single open question is the positioning of FUI's column
+    (peer vs privileged).</li>
+  <li><strong>Ownership</strong> — the table + contracts + conformance vectors are <strong>WE</strong>;
+    the impl columns reference FUI-owned and third-party-owned adapter impls (locus stays with the
+    impl), mirroring #1451's WE-coordinates / FUI-locus split.</li>
+</ul>
+
+<h2>The prepared fork</h2>
+<ul>
+  <li>
+    <strong>A — FUI is a peer column</strong> <em>(recommended, ~80%)</em>. FUI is listed exactly like
+    every other impl; its strength is <em>earned and visible</em> as the column green across the most
+    rows, never declared by status. Matches every neutral compat artifact surveyed (BCD, caniuse,
+    wpt.fyi, OpenFeature) and aligns native-first + minimize-lock-in.
+  </li>
+  <li>
+    <strong>B — FUI is a privileged "reference / recommended impl" column</strong>
+    <em>(Rejected — anti-pattern)</em>. Re-introduces the exact single-lib perception the table exists to
+    dispel; the lone anti-pattern across the survey, and conflicts with minimize-lock-in.
+  </li>
+</ul>
+<p>
+  <strong>Recommended: A.</strong> <em>(~80%. Residual: a curated "recommended impl" can lower adoption
+  friction — but, per OpenFeature, that belongs in a clearly-editorial getting-started pointer, not in a
+  neutrality artifact's columns; the reference-impl idea is not wrong, it is mis-placed if it privileges a
+  matrix column.)</em>
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/capabilities/">Capabilities catalog</a> — where the matrix already renders column-per-impl.</li>
+  <li><a href="/backlog/1451-library-adapter-watch-keep-incumbent-lib-adapters-current/">#1451</a> — parent watch; this table is its front-A surface.</li>
+  <li><a href="/backlog/206-capability-adapter-registration-table/">#206</a> — "adding an impl stays one row" (resolved → the capabilityMatrix table).</li>
+  <li>Backlog <a href="/backlog/1450-public-multi-impl-compatibility-table-fui-as-peer-column/">#1450</a> — the decision this research prepares.</li>
+</ul>
+{% endraw %}

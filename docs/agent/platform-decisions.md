@@ -110,6 +110,14 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    `concept` (`poc` is the convention — project `status` is not enum-validated; the `LIFECYCLE` set
    governs *descriptors*, not projects). *Retire* is only on the table if WE owns **no** contract
    surface distinct from the moved runtime.
+7. **The public compat table lists every impl as a peer — no privileged/reference column.** The
+   `capabilityMatrix` catalog (capability-row × impl-column, rendered publicly) broadens from native
+   substrates to incumbent libraries (Floating UI, Mousetrap, TanStack, FUI, …); **FUI is one column
+   like any other**, its strength *earned and visible* (greenest column), never status-declared. No
+   "reference / recommended impl" column — that reintroduces the single-lib perception the table
+   exists to dispel and conflicts with minimize-lock-in. An adoption pointer, if wanted, lives in
+   clearly-editorial getting-started prose, not the neutrality grid (matches BCD / caniuse /
+   wpt.fyi / OpenFeature). Ruling #1450.
 
 *Soft sub-rule — locus tagging:* backlog items carry an explicit `locus:` field (WE / frontierui /
 plateau-app / exercise-app); items gate in their own locus so cross-repo batches stay locus-agnostic.

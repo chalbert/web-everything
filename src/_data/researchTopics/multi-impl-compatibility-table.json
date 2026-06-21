@@ -1,0 +1,23 @@
+{
+  "id": "multi-impl-compatibility-table",
+  "title": "Public multi-impl compatibility table — is FUI a peer column, or a privileged \"reference impl\" column?",
+  "summary": "Prep research for decision #1450 (carved under the library-adapter watch #1451). WE should publish a public capability × impl compatibility table — one row per WE protocol/intent, one column per implementation (native · FUI · Floating UI · Mousetrap · TanStack · focus-trap · …), each cell a support tier. This is the existing native-substrate matrix (we:src/_data/capabilityMatrix.json) broadened from native substrates to incumbent libraries and surfaced as a public catalog mirroring /protocols/ and /intents/. Strategic purpose: make it self-evident that WE is a standard for the web in general, not a front-end for one library — every lib, FUI included, is just a column. THE TABLE IS NOT A PROTOCOL OR INTENT — it is a public catalog surface over we:src/_data/capabilityMatrix.json (a rendering/positioning decision); the rendering mechanism already exists (we:src/capabilities.njk:21-39 renders the matrix as a column-per-impl grid), so #1450 broadens the ROWS (substrate → incumbent lib) and decides the public POSITIONING of FUI's column. The impl-neutrality PRINCIPLE is already statute (we:docs/agent/platform-decisions.md:264 'FUI is one conforming implementation'; :104 capabilityMatrix resolver-impl rule), so the ONLY open question is positioning of the column, not the principle. THE FORK: (A, bold default ~80%) FUI is a peer column — listed exactly like every other impl, its strength earned-and-visible as the column green across the most rows, never declared by status; (B, rejected) FUI is a privileged 'reference/recommended impl' column flagged as the canonical impl WE points adopters to. PRIOR-ART SURVEY (standards bodies treated as upstream, align-not-compete): every neutral multi-implementation compat artifact converges on a feature-row × impl-column grid with per-cell support tiers and NO column flagged official. MDN Browser Compat Data (BCD, ~15,000 features) + caniuse.com list browser engines as flat peer columns (caniuse merged BCD, ~500→~10,500 tables) — no engine ever marked 'recommended'. wpt.fyi shows per-engine pass-rates side by side — a green engine is green because it passes the tests, strength earned not declared (exactly default A's model). OpenFeature is the instructive near-counter-example: it HAS a reference impl (flagd) yet still lists every provider with a coverage % (DevCycle 76%, flagd 53%, ConfigCat 47% — peer rows); the reference impl is named in docs/concepts, NOT by privileging its matrix row — so even a standard that blesses a reference impl keeps the compat matrix itself neutral, putting the 'recommended' pointer in editorial getting-started prose (precisely #1450's recommended ~20% residual split). W3C/WHATWG 'N independent conforming implementations' is structurally impl-neutral: a feature is normative only with ≥2 independent impls, status sourced from caniuse/wpt.fyi annotations, single-impl features marked 'at risk' — independence is the whole point, no impl is ever 'official'. CONVERGENT PATTERN: a neutral compat matrix lists impls as PEERS; a 'recommended' column is the anti-pattern that reintroduces single-vendor perception and conflicts with minimize-lock-in. Residual (~20%): a curated 'recommended impl' can lower adoption friction — but, per OpenFeature, that belongs in a clearly-editorial getting-started pointer, NOT in a neutrality artifact's columns. SUPPORTED BY DEFAULT (settle as written): public placement = a /compat/ (or /impls/) catalog auto-rendered from we:src/_data/capabilityMatrix.json (Catalogs Auto-Render From JSON: page + nav + authoring note + validator); broaden capabilityMatrix from native substrates to incumbent libs (admit Floating UI / Mousetrap / TanStack / FUI as rows; adding an impl stays one row per #206); the red/missing-cell count is #1451's front-A metric; table+contracts+vectors are WE while impl columns reference FUI- and third-party-owned adapter impls (locus stays with the impl). Full grounding in we:reports/2026-06-21-multi-impl-compatibility-table.md.",
+  "status": "open",
+  "dateOpened": "2026-06-21",
+  "lastReviewed": "2026-06-21",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "capabilityMatrix",
+    "compatibility-table",
+    "impl-neutrality",
+    "library-adapters",
+    "native-first",
+    "minimize-lock-in",
+    "public-catalog",
+    "positioning",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webadapters"
+}
