@@ -2,9 +2,12 @@
 kind: story
 size: 5
 locus: frontierui
-status: open
-blockedBy: ["1362", "1377"]
+status: resolved
+blockedBy: []
 dateOpened: "2026-06-21"
+dateStarted: "2026-06-21"
+dateResolved: "2026-06-21"
+graduatedTo: "fui:tools/scope-isolator/index.ts"
 tags: []
 ---
 
@@ -45,3 +48,19 @@ the pre-flight stopped the batch here for two reasons:
   standalone codegen). #1349 ratified the *contract* + that L2 is transform-primary, not the *integration
   mechanism*. Resolve that (a small `/decision`, or fold it into a focused FUI build session that picks the
   native Vite-plugin default) before building — it is not a clean batch-seam item as written.
+
+## Progress
+
+- Built the pure, bundler-agnostic PostCSS core in fui:tools/scope-isolator/index.ts (mirrors the
+  trait-enforcer pure-functions-exported split): `scopeIsolator(opts)` PostCSS plugin + `transform(css,
+  opts)` runner + `generateScopeClass`/`scopeSelector`/`hashSeed` helpers. Lowers authored base
+  `@scope {}` (the standard form per #1377) to CSS keyed to a deterministic unique scope class
+  (`<scope>-<fnv1a-base36>`). `:scope` → the class; bare nested selectors → descendants of the class;
+  loose decls → a root rule; rules inside `@media`/`@supports` recursed; `@scope (start)` accepted as
+  out-scoping (S1, start ignored). Zero-runtime, SSR-stable (deterministic class), idempotent.
+- Scope held to the #1377 seam ruling: this is ONLY the core. Per-bundler adapters (#1416), serve-time
+  MaaS (#1417), runtime polyfill (#1364) are downstream wrappers — not built here.
+- Declared `postcss ^8.5.6` as an explicit fui devDependency (was transitive-only; no reinstall — already
+  in node_modules). Tests: fui:tools/scope-isolator/__tests__/scope-isolator.test.ts (11/11 green).
+  FUI gate `npm run check:standards` 0 errors; `tsc --noEmit` clean. Cleared the stale
+  `blockedBy: ["1362","1377"]` (both resolved).
