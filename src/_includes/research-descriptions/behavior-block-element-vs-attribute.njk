@@ -1,0 +1,80 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The <a href="/backlog/1442-block-model-conversion-register-remaining-blocks-as-custom-e/">#1442</a>
+  block-model conversion registers the remaining blocks as custom elements, applying the
+  <a href="/backlog/1381-button-packaging-pick-runtime-shape-mechanism-transient-vs-p/">#1381</a>
+  mechanism-selection guideline (transient&nbsp;A / persistent&nbsp;B / shadow&nbsp;C). But three blocks —
+  <strong>stepper, deck, tabs</strong> — already ship as <strong>behavior coordinators over a native
+  container</strong>, registering <em>no</em> custom element. The question:
+  <strong>do they gain a <code>we-</code> element, or stay <code>CustomAttribute</code> / host-driven
+  behaviors?</strong> Unlike a single control (<code>&lt;we-button&gt;</code>), each coordinates a
+  <em>set</em> of authored native semantic children — tabs+panels, <code>[data-step]</code> steps,
+  <code>[data-slide]</code> slides — so a wrapper is a different proposition.
+</p>
+
+<h2>What ships today</h2>
+<p>
+  All three register <strong>no custom element</strong> (verified 2026-06-21):
+</p>
+<ul>
+  <li><code>fui:blocks/stepper/StepperBehavior.ts:22</code> — a class constructed over a
+    <code>host: HTMLElement</code>, reading <code>[data-step]</code> light-DOM children; owns linear
+    progression, <code>aria-current="step"</code>, "Step N of M".</li>
+  <li><code>fui:blocks/deck/DeckBehavior.ts:25-26</code> states it verbatim:
+    <em>"Behavior-only … no custom element is registered, the host is driven directly, so there is no
+    observed-attribute surface to drift against the CEM (#840)."</em></li>
+  <li><code>fui:blocks/tabs/TabGroupBehavior.ts:21</code> — a <code>CustomAttribute</code> on
+    <code>&lt;div tab-group&gt;</code>, discovering <code>[tab-trigger]</code> / <code>[tab-panel]</code>
+    children, delegating visibility to <code>ViewEngine</code>.</li>
+</ul>
+<p>
+  The common shape: each <strong>enhances a native semantic container</strong> of authored native
+  children. The coordination is <em>over</em> the native structure, not a replacement of it.
+</p>
+
+<h2>Prior art — the platform enhances native containers; the wrapping element is the reflow exception</h2>
+<ul>
+  <li><strong>ARIA APG (Tabs)</strong> puts <code>role="tablist"</code>/<code>tab</code>/<code>tabpanel</code>
+    on <em>existing native elements</em> — no bespoke tabs element; an enhancement of native containers,
+    exactly the <code>tab-group</code>-attribute shape.</li>
+  <li><strong>Exclusive accordions</strong> shipped as
+    <a href="https://developer.mozilla.org/en-US/blog/html-details-exclusive-accordions/"><code>&lt;details name&gt;</code></a>
+    — native elements + an attribute, not a new generic tag.</li>
+  <li><strong>Open UI</strong> separates application-tabs (APG) from
+    <a href="https://github.com/openui/open-ui/issues/559">panelset</a> — the <code>&lt;panelset&gt;</code>
+    ("spicy-sections") <em>wrapping</em> element whose <em>raison d'être</em> is responsive
+    <strong>reflow</strong> between tabs and a linear/accordion presentation.</li>
+</ul>
+<p>
+  So <strong>enhance-native-container</strong> is the native-first default for non-reflow coordinators;
+  the <strong>wrapping element</strong> is the <em>reflow</em> exception — a distinct capability exposable
+  per-block later, not a reason to wrap all three now.
+</p>
+
+<h2>The #1321 tension (the red-team)</h2>
+<p>
+  <a href="/backlog/1321-variant-component-surface-and-per-variant-loading-one-polymo/">#1321</a> ruled the
+  end-state "every block becomes a custom element," which read literally mandates a <code>we-</code>
+  element here too. But #1381 resolves the mechanism so even an element-authored block (transient&nbsp;A)
+  <strong>erases the element</strong>, ending as native + <code>CustomAttribute</code> — and #1381
+  explicitly names "behaviors riding native elements" a legitimate end-state. The reconciliation: #1321's
+  mandate is about the <strong>single-control authoring affordance</strong> (<code>&lt;we-button&gt;</code>
+  is sugar the mechanism lowers); a multi-child <strong>coordinator</strong>'s children <em>must</em> be
+  authored as native semantic elements, so a <code>&lt;we-tabs&gt;</code> wrapper would either hide them
+  (an a11y/semantics regression) or be a no-op around them (pointless — and it reintroduces the
+  observed-attribute → CEM-drift surface <code>DeckBehavior</code> deliberately avoids, #840).
+</p>
+
+<h2>Recommendation</h2>
+<p>
+  <strong>(a) Behavior blocks stay <code>CustomAttribute</code> / host-driven — no <code>we-</code>
+  element; mark them an explicit "coordinator" classification in #1442's guideline (already-at-end-state,
+  not "unconverted").</strong> Confidence ~85% — grounded in native-first (APG / <code>&lt;details
+  name&gt;</code> enhance native containers), #1381's endorsed "behaviors riding native elements"
+  end-state, and #840 (no element ⇒ no CEM-drift surface). Residual ~15%: a future panelset-style
+  <em>reflow</em> need could motivate a wrapping element for one block (likely deck/presentation) — a
+  per-block opt-in to a distinct capability, decided then, not a blanket wrap now. Full grounding in
+  <code>reports/2026-06-21-behavior-block-element-vs-attribute.md</code>.
+</p>
+{% endraw %}

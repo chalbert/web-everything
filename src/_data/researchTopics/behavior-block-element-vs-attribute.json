@@ -1,0 +1,28 @@
+{
+  "id": "behavior-block-element-vs-attribute",
+  "title": "Multi-child coordinator blocks (stepper / deck / tabs) — we- custom element vs CustomAttribute behavior over a native container",
+  "status": "open",
+  "summary": "Prep research for decision #1457: do the behavior-coordinator blocks (stepper, deck, tabs) gain a we- custom element under the #1442 block-model conversion, or stay CustomAttribute / host-driven behaviors? Already-researched ground — the packaging-mechanism families (A transient / B persistent / C shadow) were surveyed for #1381 (button-packaging-runtime-shape) and the 'every block becomes a custom element' end-state ruled by #1321; this topic adds the one new angle those priors did not cover: a block that coordinates a SET of authored native semantic children (tabs+panels, [data-step] steps, [data-slide] slides) rather than wrapping a single control. What ships today (verified 2026-06-21): all three register NO custom element — fui:blocks/stepper/StepperBehavior.ts:22 (class over a host, reads [data-step]), fui:blocks/deck/DeckBehavior.ts:25-26 (states verbatim 'Behavior-only … no custom element is registered … no observed-attribute surface to drift against the CEM (#840)'), fui:blocks/tabs/TabGroupBehavior.ts:21 (a CustomAttribute on <div tab-group> discovering [tab-trigger]/[tab-panel]). Prior art splits cleanly: ARIA APG Tabs puts role=tablist/tab/tabpanel ON existing native elements (no bespoke tabs element — an enhancement of native containers, exactly the tab-group-attribute shape); exclusive accordions shipped as <details name> (native element + attribute, not a new generic tag); and Open UI separates application-tabs (APG) from panelset (the <panelset>/'spicy-sections' WRAPPING element whose raison d'être is RESPONSIVE REFLOW between tabs and a linear/accordion presentation — openui issue #559). So enhance-native-container is the native-first default for non-reflow coordinators; the wrapping element is the reflow EXCEPTION, a distinct capability exposable per-block later, not a reason to wrap all three now. The #1321 tension (red-team): 'every block is a custom element' reads as mandating a we- element here too, but #1381 resolves the mechanism so even an element-authored block (transient/A) ERASES the element, ending as native + CustomAttribute — and #1381 explicitly names 'behaviors riding native elements' a legitimate end-state. Reconciliation: #1321's mandate is about the single-control authoring affordance (<we-button> is sugar the mechanism lowers); a multi-child coordinator's children MUST be authored as native semantic elements, so a <we-tabs> wrapper would either hide them (a11y/semantics regression) or be a no-op (pointless, and reintroduces the #840 CEM-drift surface DeckBehavior deliberately avoids). Classification: FUI impl/packaging call (locus frontierui; the navigation/sequence contracts are WE's), a per-block classification not a user dimension, most-permissive default = stay attribute (keeps native-semantic authoring, does not foreclose a later per-block opt-in to B persistent for a framework-property-bound consumer #463). Recommended: (a) behavior blocks stay CustomAttribute/host-driven — no we- element; mark them an explicit 'coordinator' classification in #1442's guideline (already-at-end-state, not unconverted). Confidence ~85%; residual = a future panelset-style reflow need could motivate a wrapping element for one block (likely deck), decided then as a per-block opt-in. Full grounding in reports/2026-06-21-behavior-block-element-vs-attribute.md.",
+  "dateOpened": "2026-06-21",
+  "lastReviewed": "2026-06-21",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "custom-elements",
+    "block-model",
+    "conversion",
+    "behaviors",
+    "custom-attribute",
+    "tabs",
+    "stepper",
+    "deck",
+    "native-first",
+    "open-ui",
+    "aria-apg",
+    "panelset",
+    "frontierui",
+    "decision-prep"
+  ],
+  "relatedBlocks": ["stepper", "deck", "tabs"],
+  "relatedPlugs": ["webbehaviors"],
+  "relatedProject": "webcomponents"
+}
