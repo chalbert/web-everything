@@ -1,7 +1,7 @@
 ---
 kind: story
 size: 5
-parent: "099"
+parent: "1399"
 status: open
 dateOpened: "2026-06-21"
 tags: [method, gap, coverage, interaction-paradigm, verb-axis, book-candidate, gap-sweep]
