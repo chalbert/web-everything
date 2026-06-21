@@ -174,10 +174,13 @@ partition) · #809 (workbench locus) · #932 (website≠standard; consumer may r
 4. A paradigm with no provider seam and no UX dimensions is a **semantics term**, not a
    protocol/intent.
 
+**Temporal-rule clarification — "a second independent impl" counts _external convergent_ impls, not only WE-internal ones (#1437).** Rule 3 exists to avoid freezing an *unvalidated* contract; for an **interchange schema** (not a provider seam) that validation can come from **convergent prior art in the world**. When N≥2 independent incumbents already emit the same shape (dockview / FlexLayout / golden-layout all serialize a `row→column→stack-of-tabs` tree), the temporal rule's "second impl + stabilised contract" precondition is **already met** — mint the **core schema now + an open extension slot** for the parts that still diverge (don't wait for WE itself to ship two impls). The deck case (#1175) is the contrast that proves the rule: it got "no protocol" precisely because it had **no** convergent external interchange schema. Caught when a decision-turn flip to "protocol-later" mis-read the rule as requiring WE-internal impls; the skeptic refuted it.
+
 **Lineage:** #015 #016 #011 #014 #409 #616 #634 · #041 (protocol-extraction timing) · #258
 (paradigm → semantics) · #020→#291 · #1175 (deck placement: a deck is composition, not a domain —
 no `webdecks` project; novel surface is a *cross-media advanceable-sequence* family homed in webintents,
-shared with video/carousel; rule 2 + temporal rule 3 applied).
+shared with video/carousel; rule 2 + temporal rule 3 applied) · #1437 (temporal rule counts external convergent
+impls; `dockable` layout-tree minted core-schema-now + extension-slot).
 
 ### Intents are UX-only; technical strategy → Configurator {#intents-ux-only}
 

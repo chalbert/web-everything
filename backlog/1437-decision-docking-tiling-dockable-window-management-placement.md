@@ -1,11 +1,14 @@
 ---
 kind: decision
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
 preparedDate: "2026-06-21"
 size: 5
+dateResolved: "2026-06-21"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#project-protocol-bar"
 tags: [decision, docking, tiling, partition-tree, dockable, spatial-manipulation, layout, native-first]
 relatedReport: reports/2026-06-21-docking-tiling-partition-tree.md
 relatedProject: webintents
@@ -31,7 +34,7 @@ set; the realizing build is deferred at ratification.
 | Fork | Recommended default | Main alternative | Confidence |
 |---|---|---|---|
 | **1 — Placement of the recursive-tree model** | Standalone `dockable` intent **composing** `resizable` + `tabs` + the arrangeable substrate | A configuration / dimension of `arrangeable` | ~85% |
-| **2 — Serialized layout tree** | A first-class WE **Protocol** (escapable interchange schema) | The intent's internal persisted state (no protocol) | ~70% |
+| **2 — Serialized layout tree** | A first-class WE **Protocol** (escapable interchange schema) — *core schema + extension slot* | The intent's internal persisted state (no protocol) | ~85% (raised by skeptic) |
 | **3 — Popout-to-OS-window scope** | An **optional `dockable` dimension**, deferred to the realizing build | In the core now / its own separate decision | ~75% |
 
 **Settled without a fork** (see *Supported by default* + *Context*): **intent + composing block, no project**
@@ -88,8 +91,16 @@ between siblings) with different mechanics (re-tile + drag-to-dock, not cell-dra
 
 **Recommended: (a).** *(~85%. Residual: a `dockable` that composes `resizable` + `tabs` is thin enough that
 one could argue it is "just a block, not an intent" — but the recursive-container model + drag-to-dock
-semantics are a reusable declarative contract, not a single widget, so the intent home holds; flag for the
-skeptic.)*
+semantics are a reusable declarative contract, not a single widget, so the intent home holds.)*
+
+**Skeptic: SURVIVES** *(conceded after attack).* The skeptic pressed two real angles: (1) the thin-ness —
+`tabs` already ships `withReorderableTabs` and `reorderable-list` ships `withCrossListReorder`, so "drag-to-dock"
+looked reducible to existing cross-list reorder. It is **not**: cross-list reorder moves an item into a *peer*
+list; docking *splits a leaf into a new row/column*, **mutating tree topology** — that re-tiling contract is the
+irreducible new vocabulary, so the thin-container graduation tell does not bite. (2) A hidden third option —
+`dockable` as a *block on `layout`* rather than a new intent. Resolves the same way #1384 already ruled
+(we:backlog/1384-spatial-manipulation-arrangeable-surfaces-resizable-splitter.md:152): `layout` is a
+`concept`-status *region-anatomy* intent, not an *interaction* intent; docking is interaction. Intent home holds.
 
 ## Fork 2 — Serialized layout tree: a first-class Protocol, or the intent's internal shape?
 
@@ -112,10 +123,23 @@ they must be escapable).
   private impl state; a project's persisted dock layout becomes non-portable across impls, the exact
   project-facing-format lock-in WE refuses.
 
-**Recommended: (a).** *(~70%. Residual: whether the tree schema is rich enough across impls to standardize
-without lossiness — popout-state, per-panel metadata, and constraint encodings diverge; the protocol may
-need to standardize a *core* tree + an open extension slot, which is a build-shape detail, not a placement
-reversal. The lower confidence is genuine — flag for the skeptic whether protocol-now vs protocol-later.)*
+**Recommended: (a), confidence raised to ~85% after the skeptic pass.** *(Residual: the divergent
+popout-state / per-panel-metadata / constraint encodings, handled by the core+extension-slot shape below — a
+build-shape detail, not a placement reversal.)*
+
+**Skeptic: REFUTED a proposed flip → reverted to (a), the prepared default.** At the decision turn the deciding
+agent floated a flip to *protocol-**later*** (don't mint the protocol now), citing the `#project-protocol-bar`
+**temporal rule** (rule 3: "extract a Protocol only once a *second* independent impl exists and the contract has
+stabilised"). The skeptic refuted the flip: the temporal rule's trigger is a *second **independent** impl* —
+**impls in the world, not WE-internal** — and the convergent prior art (dockview `toJSON/fromJSON`, FlexLayout
+`Model.toJson/fromJson`, golden-layout — all emitting the same `row→column→stack-of-tabs` tree) **already
+satisfies it**; #1175 applied the same rule to a *deck* and got "no protocol" precisely because a deck had **no**
+such convergent external schema, the distinguishing dimension. So the placement answer is **(a), Protocol** (the
+prepared default), refined: **mint the *core* interchange schema now** (the 4-impl-validated `node = {type,
+children|tabs, size}` skeleton) **+ an open extension slot** for the divergent popout/metadata/constraint
+encodings — the `protocols/*.json` entry materializes *with* the deferred realizing build, not as a hedge but
+because the build is when WE's own conforming impl lands. The lock-in concern of branch (b) is answered (the
+schema is escapable); the lossiness residual is absorbed by the extension slot.
 
 ## Fork 3 — Popout-to-OS-window: an optional dimension, in-core, or its own decision?
 
@@ -127,9 +151,11 @@ strongly with weak/optional popout), and popout is a **generic capability** (mov
 Baking it in would widen the core with a capability most consumers won't use.
 
 - **(a) An optional `dockable` dimension, deferred to the realizing build** *(recommended)*. The core
-  `dockable` contract is the in-page tree; `popout: none | window` is an opt-in dimension (most-permissive
-  default `none`), specified when the build lands. Keeps the core minimal; bias-toward-separation without
-  over-fragmenting (it *is* a docking affordance, just optional).
+  `dockable` contract is the in-page tree; `popout: none | window` is an opt-in dimension (**minimal-core**
+  default `none` — note: *minimal-core*, not "most-permissive"; the most-permissive value would be `window`,
+  more capability, so `none` is justified by keeping the core minimal, not by the permissiveness rule),
+  specified when the build lands. Keeps the core minimal; bias-toward-separation without over-fragmenting
+  (it *is* a docking affordance, just optional).
 - **(b) In the core now** *(Rejected — widens)*. Forces a cross-window capability into every consumer's
   contract; orthogonal to the tree model.
 - **(c) Its own separate decision.** Coherent but over-fragments — popout is a one-dimension knob on
@@ -138,6 +164,43 @@ Baking it in would widen the core with a capability most consumers won't use.
 **Recommended: (a).** *(~75%. Residual: popout's cross-window state sync + the `moveBefore`-across-windows
 edge cases may prove heavyweight enough to re-carve later; if so it splits out as a build, not a placement
 change — the dimension stays the home.)*
+
+**Skeptic: SURVIVES-WITH-AMENDMENT.** The skeptic confirmed the placement (a deferred dimension, not its own
+decision) but sharpened the cost: cross-window relocation **breaks two inherited invariants** — `Element.moveBefore()`
+cannot move a node across documents (so popout falls back to adopt+reconnect, losing the focus/connection state
+the substrate exists to preserve), and the live-region / roving-tabindex / `aria-controls` wiring assumes one
+document. That is real, but it lands as the *separately-scheduled realizing build*'s problem (already provided
+for: "if heavyweight it splits out as a build, not a placement change"), not a placement reversal or a
+ratification blocker. **Amendment folded in:** the default `none` is justified as **minimal-core**, not
+"most-permissive" (the most-permissive value is `window`) — corrected in option (a) above.
+
+## Ruling — RATIFIED 2026-06-21
+
+*(The skeptic sub-agent ran at the decision turn — `general-purpose`, refute-only — because prep deferred it
+(now corrected: the skeptic's primary seat moved to prep, see `we:docs/agent/backlog-workflow.md` → *Red-team
+the default* and back-fill item #1482). Its verdicts are folded into each `## Fork N` above.)*
+
+- **Fork 1 — RULED (a):** standalone **`dockable` intent** composing `resizable` + `tabs` + the reorder
+  grab/move/drop substrate. *Skeptic SURVIVES — the tree-topology mutation (split a leaf into a row/column) is
+  the irreducible new vocabulary; the `layout`-block third option resolves as #1384 already ruled (region-anatomy
+  ≠ interaction).*
+- **Fork 2 — RULED (a):** the serialized layout tree **is a first-class WE Protocol** — **core
+  `node = {type: row|column|stack, children|tabs, size}` schema + open extension slot**; the `protocols/*.json`
+  entry materializes *with* the realizing block build, gated on a second conforming impl per the temporal rule.
+  *Skeptic REFUTED a mid-discussion flip to protocol-later — the `#project-protocol-bar` temporal rule is already
+  satisfied by convergent external prior art (dockview/FlexLayout/golden-layout), so the prepared Protocol default
+  holds; #1175 (deck → no protocol) is distinguished by having no such convergent schema.*
+- **Fork 3 — RULED (a):** popout-to-OS-window is an **optional `popout: none|window` dimension** on `dockable`,
+  **minimal-core** default `none`, deferred to the realizing build. *Skeptic SURVIVES-WITH-AMENDMENT — cross-window
+  relocation breaks the `moveBefore`/live-region invariants, but that lands as the build's problem, not a placement
+  reversal; default re-justified minimal-core, not most-permissive.*
+
+**Follow-up builds filed (all `blockedBy` this decision):**
+- **#1484** — mint the `dockable` intent (Fork 1a).
+- **#1485** — realizing `dockable` block (recursive container + drag-to-dock + serialization + the `popout`
+  dimension); `blockedBy` #1484 (needs the intent contract).
+- **#1486** — mint the layout-tree interchange Protocol (core + extension slot, Fork 2a); `blockedBy` #1485 per
+  the temporal rule (extract once a second conforming impl validates the core schema).
 
 ---
 
