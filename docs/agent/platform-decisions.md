@@ -684,6 +684,38 @@ conformance gate giving "preserve once landed" teeth) is a filed follow-up, not 
 
 ---
 
+### Visualization-family shape: placement & seam count key on whether position is *derived* or *invented* {#viz-family-shape}
+
+A visualization standard (charts, graphs, maps, timelines, …) is a family with a settled skeleton: a
+**semantic profile** (data + meaning, presentation-free) + a **renderer-swap protocol** with a
+**native-first SVG default** + **3-axis conformance** (semantic fidelity · theme · a11y), with
+contract→WE / runtime→FUI per [constellation-placement](#constellation-placement) and adapters deferred
+per-engine. Two recurring forks resolve by a single test — **is a mark's position *derived* from its datum,
+or *invented* by an algorithm?**
+
+1. **Own project vs sub-profile.** A family earns its **own project** iff it has a positioning **degree of
+   freedom** the host family lacks — most often a **layout-algorithm axis**. Charts derive position from
+   data via scales (`x = f(field)`); a graph *invents* position via a layout algorithm (force / layered /
+   tree / radial) — that axis can't ride as a webcharts sub-profile without bolting a foreign dimension on,
+   so graph is its **own** project. No new positioning axis → a sub-profile of the existing family.
+2. **Protocol seam count.** Position **derived** from the spec (charts) → a **single** renderer seam
+   (`CustomChartRenderer`: spec → output). Position **invented** by a swappable algorithm (graphs) →
+   **split into two seams**: a layout protocol (`CustomGraphLayout`: spec → positioned coordinates) ⟂ a
+   render protocol (`CustomGraphRenderer`: positioned + theme → output). This is
+   [dimension-vs-fixed-mechanic](#config-extends-platform-default) applied to position: an independently
+   swappable layout (ELK layered + SVG render) is a legitimate end-state, so it's its own dimension. A
+   single-seam precedent from a *derived-position* family is **not** evidence for one seam in an
+   *invented-position* family.
+3. **Native-first default.** The default layout/renderer must be **deterministic** (pure: same input →
+   same coordinates) so it is **conformance-assertable**; non-deterministic engines (force-directed) ship
+   as **adapters** behind the layout contract, never as the default. ([native-first-baseline](#native-first-baseline).)
+
+**Lineage:** #1352 (webgraph shape — ratified 2026-06-21; builds via scaffold epic #1351), generalizing the
+webcharts family (`CustomChartRenderer`). Composes [constellation-placement](#constellation-placement),
+[config-extends-platform-default](#config-extends-platform-default), [native-first-baseline](#native-first-baseline).
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
