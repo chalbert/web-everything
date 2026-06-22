@@ -3,6 +3,8 @@ kind: story
 size: 13
 status: open
 blockedBy: []
+unsplittableReason: atomic
+relatedReport: reports/2026-06-22-backlog-split-analysis.md
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-22"
 tags: []
@@ -120,3 +122,15 @@ Claimed and **actually attempted the repoint with live verification** against th
 **But the full bootstrap 500s** — a real, newly-discovered cross-repo coupling, NOT in this item's stated scope (which listed only demos/test-pages/bootstrap/8 aliases). Playwright on `we:demos/declarative-spa.html` surfaced a 500 on `fui:plugs/webvalidation/index.ts` → `"Failed to resolve import @webeverything/capability-manifest"`. FUI's plugs **transitively re-export from a ~26-entry `@webeverything/*` alias graph** that `fui:vite.config.mts` provides (mapping each back to the WE tree via `weRoot`) but `we:vite.config.mts` lacks: `@webeverything/capability-manifest`, `@webeverything/validation-generation/{provider,registry,fieldError,cel,service}`, `@webeverything/webcases/requirementValidator`, `@webeverything/contracts/{guard,analytics,charts,graph,credential-management,push-delivery,resources,transport-negotiation,validity-merge,validator-resolution,audit,lifecycle,master-detail,selection,stepper,tree-select}`, `@webeverything/commitment-policy`, `@webeverything/error-summary`, `@webeverything/interaction-state`. All targets **exist** in the WE tree (verified), so the fix is mechanical — but it is materially more than an 8-pt slice and risks iterative transitive 500s across the full 26-page surface.
 
 **Remaining work (the real #1234):** (1) replicate `fui:vite.config.mts`'s `@webeverything/*` alias block into `we:vite.config.mts` with targets `resolve(__dirname, '<pkg>')`; (2) re-apply the `/plugs`→FUI alias + sub-alias repoint + test-page rewrites (reverted this batch to keep the live surface green); (3) iteratively live-verify the full 26-demo/test-page surface until 0 transitive 500s; (4) handle the bare `@webeverything/{contracts,plugs,conformance-vectors}` specifiers FUI plugs also import (resolve via package exports or add aliases). Wants a focused WE session that owns the dev-server lifecycle. Partial changes **reverted** (the `@webeverything/*` aliases were absent so the full bootstrap broke — leaving it half-done would silently blank the demo surface). Carry-forward reason: **outgrew** (re-sized 8 → 13, drops from the batch pool); #1047 stays blocked behind it.
+
+## Split analysis (`/split 1234`, 2026-06-22 → `unsplittableReason: atomic`)
+
+Ruled **could not split** — see the [split-analysis report](../reports/2026-06-22-backlog-split-analysis.md)
+(Run 3). The remaining four points all land in one file (`we:vite.config.mts`) against one live-only
+acceptance (26 demos + 5 test-pages rendering). No seam survives the rubric: the ~26-entry
+`@webeverything/*` alias block is a verified no-op in isolation (nothing WE-side imports it until the
+`/plugs`→FUI repoint serves FUI plugs), the repoint without that block 500s and silently blanks the
+surface (an invalid demoable state — proven + reverted three times), and the transitive-alias tail is
+*discovered* by the iterative live-verify loop, not partitionable in advance. It is volume bound to a
+single live-verify loop, not separable work — keep it whole for a focused WE session that owns the
+dev-server lifecycle. The design direction is resolved (#1250), so no buried fork.
