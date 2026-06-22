@@ -13,7 +13,8 @@
         "1494-re-home-collectionoperationsbehavior-data-table-backend-sema",
         "1477-conformance-demo-declarative-telemetry-annotations-over-anal",
         "1366-plateau-configurator-isolation-strategy-s1-s2-decision-card",
-        "1430-gesture-recognizer-engine-technical-configurator-card-native"
+        "1430-gesture-recognizer-engine-technical-configurator-card-native",
+        "1446-webgraph-conformance-demo-3-axes-default-layout-renderer-end"
       ],
       "baseline": [
         ".claude/commands/resolve.md",

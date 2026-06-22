@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Graph Conformance Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/webgraph-conformance-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Web Graph Conformance Demo</h1>
+      <p>
+        The runnable proof of the Web Graph contract
+        (<a href="/backlog/1443-author-the-webgraph-contract-ts/">#1443</a>): a semantic
+        <code>GraphSpec</code> in, a deterministic layered-DAG layout invents coordinates, and an SVG
+        renderer draws themed and accessible output. Scored on the three conformance axes —
+        <strong>semantic fidelity</strong>, <strong>theme application</strong>, and
+        <strong>accessibility</strong>.
+      </p>
+      <p class="play-caveat">
+        The contract is type-only (<code>graphs/contract.ts</code>); the native-first layered-DAG layout
+        (<a href="/backlog/1444-native-first-layered-dag-layout/">#1444</a>), the SVG renderer
+        (<a href="/backlog/1445-native-first-svg-graph-renderer/">#1445</a>), every adapter, and the swap
+        registries are impl and live in Frontier UI. So this demo supplies its <strong>own</strong> in-demo
+        layout + SVG renderer — honest for a browser demo — to prove the contract is realizable. The section
+        below scores each axis live against the <code>src/cases/webgraph/*</code> cases.
+      </p>
+    </header>
+
+    <div id="play-root">Loading demo&hellip;</div>
+  </main>
+
+  <!-- Unplugged: the demo imports the webgraph contract types only (no global patch, no FUI impl). -->
+  <script type="module" src="/demos/webgraph-conformance-demo.ts"></script>
+</body>
+</html>
