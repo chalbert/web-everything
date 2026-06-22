@@ -3,7 +3,6 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './',
   testMatch: [
-    'plugs/**/__tests__/**/*.spec.ts',
     'blocks/**/__tests__/**/*.spec.ts',
     'tests/a11y/**/*.spec.ts',
     'tests/content/**/*.spec.ts',
@@ -21,44 +20,24 @@ export default defineConfig({
     baseURL: 'http://localhost:3000',
     trace: 'on-first-retry',
   },
-  // Starts the servers E2E needs. Locally each REUSES an already-running instance
-  // (never killing the user's server); in CI each boots fresh.
+  // Starts the server E2E needs. Locally it REUSES an already-running instance
+  // (never killing the user's server); in CI it boots fresh.
+  // (The service-worker fixture lane was removed with the local `plugs/` tree in #1047 — no
+  // `*.sw.spec.ts` specs and no `sw-fixtures/serve.mjs` remain, so its webServer + project are gone.)
   webServer: [
-    // The app dev server (Vite :3000 + 11ty :8080) the bulk of the e2e specs hit.
+    // The app dev server (Vite :3000 + 11ty :8080) the e2e specs hit.
     {
       command: 'npm run dev',
       url: 'http://localhost:3000',
       reuseExistingServer: !process.env.CI,
       timeout: 120 * 1000,
     },
-    // The static fixture server for the real-browser service-worker lane (#684) —
-    // serves `plugs/__tests__/e2e/sw-fixtures/public/` over http://localhost (the
-    // secure-context-equivalent origin a SW + Background Fetch require).
-    {
-      command: 'node plugs/__tests__/e2e/sw-fixtures/serve.mjs',
-      url: 'http://localhost:3210',
-      reuseExistingServer: !process.env.CI,
-      timeout: 30 * 1000,
-    },
   ],
   projects: [
     {
       name: 'chromium',
-      // The SW lane runs in its own project below (different origin + serviceWorkers).
-      testIgnore: ['**/_site/**', '**/*.sw.spec.ts'],
+      testIgnore: ['**/_site/**'],
       use: { ...devices['Desktop Chrome'] },
-    },
-    // Real-Chromium service-worker lane (#684): a context that allows SW registration
-    // and serves over the static fixture origin, for durable-tier reload-survival
-    // verification (#675). Only `*.sw.spec.ts` runs here.
-    {
-      name: 'chromium-sw',
-      testMatch: '**/*.sw.spec.ts',
-      use: {
-        ...devices['Desktop Chrome'],
-        baseURL: 'http://localhost:3210',
-        serviceWorkers: 'allow',
-      },
     },
   ],
 });

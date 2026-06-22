@@ -112,10 +112,13 @@
     </div>
   </div>
 
-  <script type="module">
-    // Bootstrap Web Everything (applies patches, registers parsers, etc.)
-    import '../plugs/bootstrap.ts';
+  <!-- Bootstrap Web Everything (applies patches, registers parsers, etc.) via the served
+       FUI plug copy — the `/plugs` Vite alias resolves to the sibling FUI tree (#1047/#1234).
+       A separate module-script tag (not an inline relative import) so it runs first and the
+       inline module below sees the registered globals. -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
 
+  <script type="module">
     const { injectors } = window;
     const documentInjector = injectors.getInjectorOf(document);
 
@@ -145,17 +148,21 @@
       lowercase: (value) => String(value).toLowerCase(),
     });
 
-    // Clone each template into its result container
-    // This triggers expression parsing + text node upgrade
+    // Clone each template into its result container, THEN upgrade.
+    // Order matters: the upgrade only *determines* (parses → evaluates) text nodes that are
+    // already connected, because determination resolves injector-provided contexts (state,
+    // theme, filters) by walking up the live DOM tree. Upgrading a detached fragment hits the
+    // registry's "not connected — just replace" path, leaving the raw expression path rendered
+    // and the nodes terminal. So insert into the connected result container first, then upgrade it.
     const templates = document.querySelectorAll('template[id^="tpl-"]');
     for (const template of templates) {
       const clone = template.content.cloneNode(true);
 
-      // Upgrade text nodes in the clone
-      window.customTextNodes.upgrade(clone);
-
-      // Insert into the result container (parent of the template)
+      // Insert into the result container (parent of the template) while connected…
       template.parentElement.appendChild(clone);
+
+      // …then upgrade the now-connected subtree so expressions evaluate.
+      window.customTextNodes.upgrade(template.parentElement);
     }
 
     // Signal demo ready for Playwright tests

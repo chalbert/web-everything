@@ -1,14 +1,56 @@
 ---
 kind: story
-status: open
+status: resolved
 locus: webeverything
 blockedBy: []
 dateOpened: "2026-06-20"
 size: 13
 unsplittableReason: atomic
 dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: none
 tags: [webexpressions, interpolation, text-node, injector, binding, demo]
 ---
+
+## RESOLVED 2026-06-22 — real root cause: TreeWalker aborts on a mid-walk `replaceWith` of leading static text
+
+The prior rounds' suspects (class-identity split, detached-fragment ordering, registry resolution) were all
+red herrings or moot post-#1047. The actual bug, found by instrumenting the live cold-start `upgrade()` on a
+throwaway `vite --port 3099` (user's :3000 untouched):
+
+`fui:plugs/webexpressions/CustomTextNodeRegistry.ts` `#applyOnTree` walked the subtree with a **live**
+`TreeWalker` while `#upgradeTextNode` mutated it. The parser
+(`fui:plugs/webexpressions/CustomTextNodeParser.ts`) returns a **fresh** text node even for a static segment
+with no delimiters, so a plain (whitespace) text node was `replaceWith`-swapped for an equal one — **detaching
+the walker's current node mid-walk**. `nextNode()` then returned null and the iteration **aborted**, silently
+skipping every expression text node that followed any static/whitespace text node in the same subtree. The
+demo's `<div class="result">` shape (leading whitespace before the expression span) hit this exactly →
+`{{name}}` never reached → raw path rendered. A post-load `upgrade()` on a fresh clone "worked" only because
+its expression node happened to be **first** in the walk (nothing after it to skip) — the false
+"load-vs-post-load" signal from earlier rounds.
+
+**Fix (3 parts):**
+1. `fui:plugs/webexpressions/CustomTextNodeRegistry.ts` `#applyOnTree` — **snapshot** all text nodes into an
+   array BEFORE processing, so a `replaceWith` during processing can never abort the walk. (The real fix; all
+   104 FUI webexpressions unit tests still green — they missed this because happy-dom doesn't model the live
+   TreeWalker/replaceWith interaction and their fixtures put the expression node first.)
+2. `we:demos/text-interpolation-demo.html` — bootstrap via the canonical served module-script tag (the
+   `/plugs` alias → `fui:plugs/bootstrap.ts`); the prior inline relative import of the #1047-deleted
+   `we:plugs/bootstrap.ts` 500'd, and that literal string also suppressed the bootstrap-injection plugin. Also
+   append each clone into its connected container BEFORE `upgrade()` so determination can resolve injector
+   contexts.
+3. `we:playwright.config.ts` — removed the #1047-dead service-worker webServer + `chromium-sw` project +
+   `plugs/**` testMatch (no `*.sw.spec.ts` specs and no `we:plugs/__tests__/e2e/sw-fixtures/serve.mjs` remain),
+   which had blocked the whole e2e lane. Needed so the new regression spec is runnable. (Two now-runnable specs
+   fail for unrelated reasons → filed #1572.)
+
+**Acceptance verified live on a cold start (Playwright):** all 8 RESULT boxes evaluate
+("Hello, World!", "Jane Doe (Platform Engineer)", "#6366f1", "WORLD", "Jane Doe", "42",
+"World / Polymer: 42", "World — Platform Engineer Items: 42"). Regression spec
+`we:blocks/__tests__/e2e/text-interpolation.spec.ts` (3 tests, real browser) green.
+
+Leftovers filed: **#1572** (triage the 2 now-runnable failing specs), **#1573** (FUI: skip the needless
+static-text `replaceWith` churn). graduatedTo: none (a bug fix, not a new entity).
 
 ## Pre-flight (batch-2026-06-22) — size 5 → 13: proven not-a-slice (4× `outgrew`)
 
@@ -134,11 +176,12 @@ reason round 1 saw no change.
 
 ## Acceptance
 
-- [ ] `we:demos/text-interpolation-demo.html` RESULT boxes show evaluated values
+- [x] `we:demos/text-interpolation-demo.html` RESULT boxes show evaluated values
       ("Hello, World!", "Jane Doe", "WORLD", "#6366f1") on a fresh server — verified in a real browser.
-- [ ] A **real-browser** test drives `customTextNodes.upgrade()` end-to-end and asserts the rendered
-      value (not a hand-rolled pipeline, not happy-dom-only).
-- [ ] No second duplicate-`CustomTextNode` split remains (one plug copy at runtime).
+- [x] A **real-browser** test drives `customTextNodes.upgrade()` end-to-end and asserts the rendered
+      value (not a hand-rolled pipeline, not happy-dom-only). → `we:blocks/__tests__/e2e/text-interpolation.spec.ts`
+- [x] No second duplicate-`CustomTextNode` split remains (one plug copy at runtime). — moot post-#1047
+      (`/plugs` alias → single `fui:plugs/` copy).
 
 ## Investigation 2026-06-20 (batch-2026-06-20) — the stated fix is necessary but NOT sufficient
 
