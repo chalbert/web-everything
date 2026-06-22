@@ -2,10 +2,10 @@
 kind: story
 status: open
 locus: webeverything
-humanGate: { kind: setup, what: "Needs a focused session that can cold-start :3000: the proven fix (the #449 single-plug-copy completion — one CustomTextNode class at runtime) only becomes observable after a dev-server cold start (a registered customTextNodes singleton survives HMR full-reload), and acceptance #1/#2 require browser-verifying rendered values + a real-browser regression test on a fresh server. Both violate the standing don't-restart-the-dev-server rule. Carried forward 3× as outgrew across batch-2026-06-20 / -20b." }
+blockedBy: ["1503"]
 dateOpened: "2026-06-20"
 size: 5
-dateStarted: "2026-06-20"
+dateStarted: "2026-06-22"
 tags: [webexpressions, interpolation, text-node, injector, binding, demo]
 ---
 
@@ -72,6 +72,40 @@ lines ~58–81), NOT the real `CustomTextNodeRegistry.upgrade()` DOM path the de
 tests run under happy-dom, which doesn't model real-browser custom-`Text`-subclass insertion. So the
 actual upgrade→DOM→evaluate path was untested. Add a **real-browser (Playwright) regression test** that
 calls `customTextNodes.upgrade()` on a connected node and asserts the rendered value.
+
+## How to run (second-port cold-start — no :3000 restart)
+
+The blocker was always observability, not the fix. A registered `customTextNodes` singleton
+survives an HMR full-reload, so the bootstrap flip's effect can't be seen on the warm :3000.
+**A second Vite instance on a fresh port is a genuine cold start** (separate process → fresh
+module graph + fresh `window.customTextNodes`) and leaves the user's :3000 untouched, so the
+standing don't-restart-the-dev-server rule is honoured. Steps:
+
+1. **Pre-check the port isn't pinned.** Grep the demo + test harness for a hardcoded
+   `localhost:3000` / `:3000` (`we:demos/text-interpolation-demo.html`, any Playwright config).
+   If the plug imports / probe URL hardcode :3000, point them at the chosen port for the run.
+   Vite auto-increments if :3000 is taken, but pick an explicit port (`--port 3001`) for clarity.
+2. **Start the throwaway instance:** run the Vite demo server with `--port 3001` (own process).
+3. **Apply the fix:** flip `we:plugs/bootstrap.ts:43` to import the webexpressions registries
+   from `@frontierui/plugs/webexpressions` (instead of WE-local `./webexpressions`) — the #449
+   single-plug-copy completion so the registry's `instanceof` guard and the parser produce the
+   **same** `CustomTextNode` class.
+4. **Verify live on :3001 via Playwright:** confirm `weClass===fuiClass` (registry's
+   `CustomTextNode` === parser's), then that the RESULT boxes render evaluated values
+   ("Hello, World!", "Jane Doe", "WORLD", "#6366f1").
+5. **Land acceptance #2:** add the real-browser regression test that drives
+   `customTextNodes.upgrade()` on a connected node and asserts the rendered value.
+6. **Scope check before landing:** confirm no other demo relies on the WE-local `CustomTextNode`
+   class (round-1 scope check found `we:plugs/webexpressions` is otherwise only cross-imported by
+   the dormant WE-local plug tree) and decide whether WE-local `plugs/webexpressions` runtime
+   should remain at all.
+7. **Tear down :3001** (the user's :3000 was never touched).
+
+If step 4 still shows the raw path on a true cold start, the round-1 "necessary but not
+sufficient" finding stands and the break is downstream in the upgrade/determine walk — re-open
+the live `#upgradeTextNode` instrumentation from the round-2 notes. But the static trace (round 3)
+says a real cold start should close the guard; the warm-singleton artifact was the most likely
+reason round 1 saw no change.
 
 ## Acceptance
 
@@ -164,3 +198,30 @@ full-reload, so the flip's effect isn't observed without a **cold start** — wh
 dev-server rule forbids mid-batch. Resolving this needs a focused session that can cold-start :3000,
 apply the bootstrap flip, verify `weClass===fuiClass` live, then land acceptance #2's real-browser test.
 Not batch fodder (3rd `outgrew`). Released, untouched.
+
+## Update (batch-2026-06-21-1429-1487) — NEW blocker found (#1503); still needs a focused session
+
+Re-grounded with a **2nd-port cold start** (a throwaway `vite --port 3001`, fresh process → fresh
+`window.customTextNodes`, leaving the user's :3000 untouched — confirming the prior "needs :3000 restart"
+was too pessimistic; a 2nd origin honours the don't-restart rule). Re-confirmed the round-3 diagnosis is
+correct on the parts that *can* be read statically: the webexpressions split is real (the FUI copy exports
+all three registries; the blocks import the FUI copy; flipping `we:plugs/bootstrap.ts:43` to
+`@frontierui/plugs/webexpressions` typechecks clean and the FUI modules import fine in a real browser; no
+`we:demos`/`we:test-pages` imports the WE-local webexpressions copy directly).
+
+**But a clean cold-start read is blocked by a SEPARATE, pre-existing crash — the new finding this pass.**
+On a fresh cold start the bootstrap throws *before* text-node upgrade: `Failed to execute 'define' on
+'CustomAttributeRegistry': "anchor" is not a valid custom attribute name` — a trait/behavior registering
+`anchor` without a hyphen. **Proven pre-existing and unrelated** by a control run (with the bootstrap flip
+reverted, the `anchor` crash and the empty render *both persist*). It halts the whole bootstrap, so the
+demo renders empty — masking *both* the original bug and whether the flip is sufficient — and the report's
+**real-browser regression test** can't run either (it needs a working bootstrap). Filed as **#1503**.
+
+This compounds the prior sessions' "necessary but **not** sufficient" finding (2026-06-20): the flip's
+end-to-end sufficiency was never cleanly observable (warm-singleton on :3000), and now a cold start is
+blocked by #1503. So the speculative one-line flip was **reverted** (kept un-committed, matching the prior
+sessions' clean-tree disposition — landing an unverified, possibly-insufficient fix would be wrong). The
+durable progress this pass is the **new `#1503` edge**: `blockedBy: 1503`. Carry-forward reason
+**blocked-in-fact** — the verification substrate (a non-crashing cold-start bootstrap) is verified-absent.
+A focused session should fix #1503 first, then cold-start-verify the flip (sufficient or not) and land the
+real-browser regression test. Released to `open`.
