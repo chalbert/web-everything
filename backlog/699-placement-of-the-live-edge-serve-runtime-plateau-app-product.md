@@ -2,8 +2,7 @@
 kind: decision
 size: 2
 parent: "479"
-status: parked
-parkedReason: deferred
+status: open
 preparedDate: "2026-06-22"
 dateOpened: "2026-06-15"
 tags: []
@@ -83,9 +82,9 @@ capability-class, cache-key, and `Vary`/`Accept-CH`/immutable directives (web-pl
 with **zero** esbuild/chunk-naming fields — enforced by a WE-side `we:check.ts` conformance vector on the
 emit-build-plan slice, so the coupling cannot creep in.
 
-## Parked — when this is ratified
+## Held open — when this is ratified
 
-Parked `deferred`: the open-core **defer-live-serve** stance defers *when* this is ratified — decide near a
+Held open (decision lane): the open-core **defer-live-serve** stance defers *when* this is ratified — decide near a
 real MaaS-distribution surface (#087/#088, the [constellation-placement](docs/agent/platform-decisions.md#constellation-placement)
 rule) — not *whether* the fork is tracked. The fork is at DoR now (prepared); the un-park trigger is a real
 live-serve distribution need surfacing on #479. Resolving it unblocks the live-serve build slices of epic

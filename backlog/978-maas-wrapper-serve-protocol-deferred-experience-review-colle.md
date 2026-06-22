@@ -1,8 +1,7 @@
 ---
 kind: decision
 size: 3
-status: parked
-parkedReason: deferred
+status: open
 dateOpened: "2026-06-18"
 parent: "746"
 relatedProject: webadapters
@@ -16,7 +15,7 @@ framework rides the catalog-gated `form` param, no new neutral contract surface)
 under-committed: we start now and collect real experience before freezing the shape. This item is the standing home for
 that experience — log concrete cases, friction, and lossiness encountered while building #912/#753/#507 against
 `servePathIR`/`maas-versioning`, plus any signal that a first-class neutral `framework` param (A2) is warranted. Revisit
-only once enough cases have accumulated; parked until then. Promotion to a neutral param would be a deliberate versioned
+only once enough cases have accumulated; held open (unratified, decision lane) until then. Promotion to a neutral param would be a deliberate versioned
 `servePathIR` bump.
 
 ## How to use this item (standing instruction)

@@ -2,8 +2,7 @@
 kind: decision
 size: 2
 parent: "099"
-status: parked
-parkedReason: deferred
+status: open
 preparedDate: "2026-06-22"
 dateOpened: "2026-06-16"
 tags: [requirement-as-code, code-generation, ai, evergreen, vision]
@@ -92,9 +91,9 @@ requirement-only**; (b) is ratified **only as the bootstrap phase** with the two
 (cutover gated on measured #797 coverage; dev edits captured as requirement amendments, never persisted
 code). Without that reframe the as-written "(b)-as-end-state" default is **refuted**.
 
-## Parked — when this is ratified
+## Held open — when this is ratified
 
-Parked `deferred`: code-from-requirement is the furthest, hardest capability of the evergreen-app vision
+Held open (decision lane): code-from-requirement is the furthest, hardest capability of the evergreen-app vision
 (#099), gated on the Plateau-served codegen capability existing. Deferral governs *when* we ratify, not
 *whether* the fork is tracked — the fork is at DoR now (prepared, end-state ruled). **Un-park** when the
 Plateau-served codegen capability is real and slice C (code-from-requirement) is picked up.

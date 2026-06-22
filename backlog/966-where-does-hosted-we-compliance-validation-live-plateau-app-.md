@@ -1,8 +1,7 @@
 ---
 kind: decision
 size: 3
-status: parked
-parkedReason: deferred
+status: open
 preparedDate: "2026-06-22"
 relatedProject: webcompliance
 dateOpened: "2026-06-18"
@@ -94,7 +93,7 @@ consumer-side engine (#891/#954) — server-side execution is a build-detail, no
 migration-tax attack is closed by mandating the #475 seam from day one, keeping the eventual (b) split
 mechanical.
 
-## On resolve (when unparked + ratified)
+## On resolve (when ratified)
 
 - Confirm layers 1–2 stay WE (restating, not deciding).
 - Apply the structural test → pick (a) or (b) for layer 3; if (a), file the plateau-app domain build
@@ -102,9 +101,9 @@ mechanical.
 - `codifiedIn`: a hosted validation product is a Plateau managed offering consuming WE vectors as a
   no-leakage client; standard/engine never leave WE.
 
-## Parked — demand-gated
+## Held open — demand-gated
 
-Parked `deferred`: no appetite demonstrated yet for a hosted compliance product distinct from Web Docs
+Held open (decision lane): no appetite demonstrated yet for a hosted compliance product distinct from Web Docs
 (#091). The fork is at DoR now (prepared, structural test stated); **un-park** when a user/market signal
 shows a standalone compliance-validation surface is wanted — the home call is then a fast ratify against
 the structural test above.

@@ -1,8 +1,7 @@
 ---
 kind: decision
 parent: "099"
-status: parked
-parkedReason: deferred
+status: open
 dateOpened: "2026-06-21"
 relatedTo: ["1406"]
 tags: [decision, parked, selection, marquee, spatial, residual, watch]
@@ -15,11 +14,11 @@ marquee shipped as a **behavior block** (composing `selection` + `gesture`), **n
 grounds — one rectangle, one algorithm bound to a surface. This card holds the open question of whether a
 broader recognizer-shape vocabulary eventually earns a cross-cutting *intent* home.
 
-**Parked — gated on an external trigger, not a backlog edge.** Revisit **iff a second recognizer shape
+**Held open (decision lane) — gated on an external trigger, not a backlog edge.** Revisit **iff a second recognizer shape
 recurs** as real demand (free-form **lasso**, **center-point / nearest** selection, **polygon**). At that
 point a `region-select` intent with a `shape: rect | lasso | …` dimension may earn its own home, with the
-`marquee-select` block as its first realization. Until a concrete second shape lands, this stays parked
-(YAGNI on the intent).
+`marquee-select` block as its first realization. Until a concrete second shape lands, this stays an
+open, unratified decision (YAGNI on the intent).
 
 Invariant regardless of outcome: **`selection` stays pure** — #1406's Fork-1c rejection (`scope: spatial`
 on `selection`) is untouched by this. Promotion to an intent would re-home the *gesture/geometry* layer,
