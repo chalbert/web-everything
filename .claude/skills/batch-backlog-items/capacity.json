@@ -1,13 +1,14 @@
 {
   "_doc": "Calibrated session capacity for POINTS-BUDGETED batches (docs/agent/backlog-workflow.md -> 'Running a batch'). Estimator = the POOLED AFFINE context-cost model (backlog #1505): a Deming/errors-in-variables fit of context% = overhead + cost*points over EVERY sample's raw (points, contextPct) in the last 12 (capacity-bound and work-bound alike — stop-reason is audit metadata only, no longer a training gate; the old exclusion gate starved the estimate since work-bound is the common case). 'fit' caches {overhead, cost, n, residualStd}; 'capacityPoints' = implied points at 100% context = (100-overhead)/cost (display/back-compat). The batch budget 'budgetPoints' = the largest P that keeps predicted context under 'contextCeiling' minus a data-driven margin marginK*residualStd: P = round((contextCeiling - overhead - marginK*residualStd)/cost) -- replacing the old capacityPoints*targetFraction. 'points' = batchCost (a story's size; a task = 2). `node scripts/backlog.mjs calibrate --points=<P> --context-pct=<C> [--stop-reason=...]` appends a sample and refits. The 12-sample window ages out old regimes (a new model); RLS-with-forgetting is the planned successor (#1516). Don't hand-edit fit/capacityPoints/budgetPoints -- let calibrate move them.",
   "fit": {
-    "overhead": 20,
-    "cost": 0.6292,
-    "n": 12,
-    "residualStd": 8.37
+    "overhead": 24.7,
+    "cost": 0.5486,
+    "n": 13,
+    "nEff": 13,
+    "residualStd": 8.88
   },
-  "capacityPoints": 127,
-  "budgetPoints": 82,
+  "capacityPoints": 137,
+  "budgetPoints": 85,
   "contextCeiling": 80,
   "marginK": 1,
   "samples": [
@@ -105,6 +106,13 @@
       "impliedCapacity": 74,
       "stopReason": "empty-pool",
       "excluded": true
+    },
+    {
+      "date": "2026-06-22",
+      "points": 16,
+      "contextPct": 46,
+      "stopReason": "manual"
     }
-  ]
+  ],
+  "forgetting": 0.99
 }
