@@ -1,10 +1,10 @@
 ---
 kind: story
-size: 8
+size: 13
 status: open
 blockedBy: []
 dateOpened: "2026-06-20"
-dateStarted: "2026-06-21"
+dateStarted: "2026-06-22"
 tags: []
 ---
 
@@ -108,3 +108,15 @@ But the grounded scope is materially larger than a story·5 batch-tail edit, so 
   worse than carrying it). So it wants a focused WE session that owns the dev-server lifecycle.
 
 Carry-forward reason: **outgrew**. #1047 (delete `we:plugs/`) stays blocked behind this. Released to `open`.
+
+## Pre-flight (batch-2026-06-22-1510-1483) — built + LIVE-verified the mechanism; a transitive `@webeverything/*` alias graph is the real remaining scope → re-sized 8 → 13
+
+Claimed and **actually attempted the repoint with live verification** against the running `:3000` (which auto-restarts on its own `we:vite.config.mts` config-watch — not a manual restart). Confirmed FUI is the reconciled superset (#1250): `fui:plugs/` has every WE domain + more (webidentity/webnotifications/webrealtime/webresources), incl. the former WE-only webportals/webtraces, and every demo entry point. Built the tractable repoint:
+
+- Repointed the 8 sub-aliases (`@core`/`@webbehaviors`/… + `virtual:trait-manifest`) from the local `/plugs/…` URLs → `${fuiPlugsRoot}/…`, and added a `'/plugs': fuiPlugsRoot` prefix alias.
+- Rewrote the 5 relative-import test-pages (`../plugs/…` → `/plugs/…`, alias-catchable).
+- **Proved the mechanism live:** the served URL for the FUI-only domain `webidentity` (absent from `we:plugs/`) returned **200** through the alias — i.e. the `/plugs/…` URL imports AND the injected bootstrap `<script src>` both resolve to FUI. The `/plugs` string alias works for URL-imports + HTML script-src.
+
+**But the full bootstrap 500s** — a real, newly-discovered cross-repo coupling, NOT in this item's stated scope (which listed only demos/test-pages/bootstrap/8 aliases). Playwright on `we:demos/declarative-spa.html` surfaced a 500 on `fui:plugs/webvalidation/index.ts` → `"Failed to resolve import @webeverything/capability-manifest"`. FUI's plugs **transitively re-export from a ~26-entry `@webeverything/*` alias graph** that `fui:vite.config.mts` provides (mapping each back to the WE tree via `weRoot`) but `we:vite.config.mts` lacks: `@webeverything/capability-manifest`, `@webeverything/validation-generation/{provider,registry,fieldError,cel,service}`, `@webeverything/webcases/requirementValidator`, `@webeverything/contracts/{guard,analytics,charts,graph,credential-management,push-delivery,resources,transport-negotiation,validity-merge,validator-resolution,audit,lifecycle,master-detail,selection,stepper,tree-select}`, `@webeverything/commitment-policy`, `@webeverything/error-summary`, `@webeverything/interaction-state`. All targets **exist** in the WE tree (verified), so the fix is mechanical — but it is materially more than an 8-pt slice and risks iterative transitive 500s across the full 26-page surface.
+
+**Remaining work (the real #1234):** (1) replicate `fui:vite.config.mts`'s `@webeverything/*` alias block into `we:vite.config.mts` with targets `resolve(__dirname, '<pkg>')`; (2) re-apply the `/plugs`→FUI alias + sub-alias repoint + test-page rewrites (reverted this batch to keep the live surface green); (3) iteratively live-verify the full 26-demo/test-page surface until 0 transitive 500s; (4) handle the bare `@webeverything/{contracts,plugs,conformance-vectors}` specifiers FUI plugs also import (resolve via package exports or add aliases). Wants a focused WE session that owns the dev-server lifecycle. Partial changes **reverted** (the `@webeverything/*` aliases were absent so the full bootstrap broke — leaving it half-done would silently blank the demo surface). Carry-forward reason: **outgrew** (re-sized 8 → 13, drops from the batch pool); #1047 stays blocked behind it.
