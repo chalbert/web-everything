@@ -24,9 +24,9 @@ greenfield, multi-artifact /new-standard build** — nothing exists yet:
   shape; transcribable from #1419) — a clean foundational artifact.
 - **Net-new contract** `we:blocks/resource-cache/contract.ts` (the `key → {data,staleness,revalidate}`
   provider + the technical knobs) + the `@webeverything/contracts/resource-cache` re-export. **No mirror** —
-  #1395 (the symmetric mutation sibling) shipped only `mutation.json`, **no provider contract.ts** — so this
-  is net-new design, and per the recurring rule *the `*/contract.ts` is always its own foundational slice*
-  (the FUI impl can't import it until it lands).
+  #1395 (the symmetric mutation sibling) shipped only `we:src/_data/intents/mutation.json`, **no provider
+  contract module** — so this is net-new design, and per the recurring rule *the contract module is always
+  its own foundational slice* (the FUI impl can't import it until it lands).
 - **Net-new FUI block** (`fui:` resource-cache, or a resource-loader extension) implementing the contract —
   cross-repo, `blockedBy` the contract slice.
 - **Demo** (keyed cache + staleness + invalidate-on-mutation) — live-verify on the FUI dev server.
@@ -34,7 +34,7 @@ greenfield, multi-artifact /new-standard build** — nothing exists yet:
 The card itself says **"File via /new-standard"** — that flow does the prior-art survey (TanStack Query / SWR /
 RTK Query / Apollo, [research](/research/server-state-cache-lifecycle/)) + the proper slice decomposition.
 Authoring a net-new standard's contract inline mid-batch would under-bake it. **Recommend routing to
-/new-standard**, which decomposes into: (1) foundational **`query.json` + `resource-cache/contract.ts`**
+/new-standard**, which decomposes into: (1) foundational **`we:src/_data/intents/query.json` + `we:blocks/resource-cache/contract.ts`**
 (WE, batchable), (2) **FUI resource-cache block** (← 1), (3) **demo** (← 2). Re-sized **8 → 13** (drops from
 the batch pool). Carry-forward reason: **outgrew / not-batchable-as-one** (full /new-standard build). No new
 design fork (placement + UX-only line ruled by #1419). Released `open`.

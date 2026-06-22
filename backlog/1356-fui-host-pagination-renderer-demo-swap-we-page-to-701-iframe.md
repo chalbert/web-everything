@@ -1,15 +1,41 @@
 ---
 kind: story
-size: 13
+size: 5
 parent: "1353"
 status: open
+locus: webeverything
 blockedBy: []
+relatedReport: reports/2026-06-22-backlog-split-analysis.md
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-22"
 tags: []
 ---
 
-# FUI-host pagination renderer demo, swap WE page to #701 iframe, delete we:blocks/renderers/pagination
+# WE pagination golden-vector conformance — redesign auditPagination into a stored-golden data-reader (per #1467/#899)
+
+**Re-scoped from a `size:13` "verifier-redesign + demo-iframe + delete" lump — see `we:reports/2026-06-22-backlog-split-analysis.md` (Run 5).** The split (mirror of #1494's Run 4) kept **only** the clean, batchable-now WE-owned verifier work here; the demo-iframe-swap + WE-backend delete + live-FUI verify carved to its sibling slice. No coordinator slice (unlike data-table's #1521): `PageState` is a **type-only** import in `we:blocks/renderers/collection-operations/CollectionOperationsBehavior.ts:27` and stays in the WE contract plane.
+
+Per ratified #1467(→b) under #899's vector-conformance split, WE keeps the **verifier + vector corpus + types** (incl. `PageState`, `we:blocks/renderers/pagination/renderPagination.ts:26`), and that verifier must assert the **stored golden output as data — no live render, no backend recompute**. Today every WE consumer feeds `auditPagination` (`we:blocks/renderers/pagination/renderPagination.ts:186`) a **live WE render** and the verifier recomputes via `rangeText(state)` (~line 224):
+
+- `we:blocks/__tests__/unit/renderers/pagination.test.ts:13` value-imports `renderPagination, auditPagination, rangeText`.
+- `we:blocks/__tests__/unit/renderers/pagination-behavior.test.ts:8-9` value-imports `auditPagination, announcePagination` + the `PaginationBehavior` runtime.
+- `we:demos/pagination-demo.ts:11` value-imports `renderPagination, auditPagination`.
+
+And the fixtures (`we:blocks/renderers/pagination/__fixtures__/pagination-cases.ts`) are **input-only (0 goldens)**. So this story:
+
+- **Redesign `auditPagination` into a pure golden-reader** — assert a rendered root against a *stored* expected projection (nav landmark / aria-current / range slice / sentinel), with no live `renderPagination` and no `rangeText` recompute (the golden serialization is an impl detail of the capture step, not the assertion).
+- **Generate + commit golden vectors** for the pagination corpus (capture rendered DOM as data → parse back → run `auditPagination` over the golden). Net-new mechanism; **share #1494's golden-vector serialization approach**.
+- **Rework `we:blocks/__tests__/unit/renderers/pagination.test.ts` + `we:blocks/__tests__/unit/renderers/pagination-behavior.test.ts`** to stop value-importing the WE backend for recompute — assert against the goldens. This is the precondition that lets the sibling slice delete the WE `renderPagination` backend without stranding the tree.
+
+Leaves a green demoable state: the WE backend still exists and the demo still renders; only the conformance source-of-truth flips to stored goldens.
+
+---
+
+## Historical pre-flight lineage (pre-split)
+
+The notes below predate the Run 5 split and are retained for lineage; they are what drove the 8→13 re-size and the `/split` recommendation that this re-scope realizes.
+
+### Original digest (pre-split)
 
 Build fui:demos/pagination-demo.html self-bootstrapping the (complete) FUI pagination renderer; swap we:demos/pagination-demo.html to a #701 fuiDemo iframe; delete we:blocks/renderers/pagination + we:demos/pagination-demo.{ts,css}. #1326 pattern.
 
@@ -67,7 +93,7 @@ Re-grounded; the prior outgrew finding holds. Two properties keep it out of a co
 Third pre-flight confirms the prior two: this is the pagination sibling of the data-table `#1467/#899`
 split, and the #1467 re-scope made it a **verifier-golden redesign + cross-repo backend move + #701 iframe
 swap + delete + live FUI render verification** — not a clean batch slice. The WE conformance tests
-(`we:blocks/__tests__/unit/renderers/pagination.test.ts` + `…/pagination-behavior.test.ts`) and
+(`we:blocks/__tests__/unit/renderers/pagination.test.ts` + `we:blocks/__tests__/unit/renderers/pagination-behavior.test.ts`) and
 `we:demos/pagination-demo.ts` still **value-import the WE `renderPagination` backend`, and the
 golden-vector mechanism (capture rendered output as data → parse → `auditPagination` over it) is **net-new**
 (`we:blocks/renderers/pagination/__fixtures__/pagination-cases.ts` is input-only). Deleting the WE backend
