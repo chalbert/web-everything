@@ -20,3 +20,22 @@ construction; **(2) Attachment** — the only workbench block today (`auto-compl
 component with no declarative `<component>` definition, so nothing carries `authorSource` live yet; register
 the `componentCases` declarative blocks (or attach author-source to blocks that have a definition). Only
 rendered text + diagnostics cross the #700 seam (FUI never imports `serve()`).
+
+## Pre-flight (batch-2026-06-22-1615-1208) — Transport is flat, but Attachment hides a fork → not claimed
+
+Traced the real tree before claiming. **(1) Transport** is flat as described — a sibling `../webeverything`
+build-read of `we:src/_data/authorModeSource.json` into `fui:workbench/registry.ts`, clear default (the
+published-artifact alternative is the #700/#907 end-state, separately tracked). **(2) Attachment is NOT
+"flat wiring (no fork)"** as the body assumed: `we:src/_data/authorModeSource.json` carries 9 declarative
+`<component>` **cases** (`user-card`, …) but they exist as **no `WorkbenchBlock`** — the workbench registers
+only the imperative `auto-complete` (`fui:workbench/registry.ts`), which has never instantiated a declarative
+`<component>`. To make a case carry `authorSource` *live*, the workbench needs **either** (a) the
+declarative-component runtime (`fui:plugs/webregistries/declarativeRegistry.ts` /
+`fui:compiler/src/component-transform/declarative.ts`) wired into `fui:workbench/registry.ts` so a `<component>` definition
+becomes a live `create()`-able block, **or** (b) a new *source-only* `WorkbenchBlock` shape (the panel is
+source-only — no live render — so a block could carry `authorSource` without a `create()`, but the current
+`WorkbenchBlock` contract requires `load`/`create`). That's a genuine design call on how the workbench hosts
+a declarative-component case — file it as a `kind: decision` (or pick the source-only-block default) before
+landing. **Not claimed** in this batch — the batch had already hit a hard stop (the #1621 badge fork), and
+this is the second buried fork, so no flat independent item remained. Transport-half stays ready; Attachment
+needs the workbench-hosting decision first.
