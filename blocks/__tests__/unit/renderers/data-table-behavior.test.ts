@@ -6,7 +6,12 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { auditDataTable, type Row, type DataTableConfig } from '../../../renderers/data-table/renderDataTable';
+import { serializeGolden } from '../../../renderers/data-table/__fixtures__/data-table-goldens';
 import { DataTableBehavior, DataTableElement, registerDataTable } from '../../../renderers/data-table/DataTableBehavior';
+
+// The verifier is a golden-reader (#1467/#899): assert a live table by serializing its projection to a
+// golden, then auditing the table against that golden — no backend recompute in the assertion.
+const auditLive = (table: HTMLElement) => auditDataTable(table, serializeGolden('behavior', table));
 
 const rows: Row[] = [
   { name: 'Bianca', team: 'Engineering', salary: 120 },
@@ -30,7 +35,7 @@ describe('DataTableBehavior', () => {
     new DataTableBehavior(host, { rows, config });
     const table = host.querySelector('table')!;
     expect(table).toBeTruthy();
-    expect(auditDataTable(table, rows, config).ok).toBe(true);
+    expect(auditLive(table).ok).toBe(true);
     // initial sort projected onto exactly one header
     expect(host.querySelectorAll('th[aria-sort="ascending"]').length).toBe(1);
   });
@@ -51,7 +56,7 @@ describe('DataTableBehavior', () => {
     expect(changes.at(-1)?.sort?.by[0]).toMatchObject({ field: 'team' });
     expect(fired).toBe(1);
     // the rendered table still passes the audit under the new config
-    expect(auditDataTable(host.querySelector('table')!, rows, changes.at(-1)!).ok).toBe(true);
+    expect(auditLive(host.querySelector('table')!).ok).toBe(true);
   });
 
   it('setRows re-renders with new data', () => {
@@ -68,6 +73,6 @@ describe('DataTableBehavior', () => {
     el.config = config;
     document.body.append(el);
     expect(el.querySelector('table')).toBeTruthy();
-    expect(auditDataTable(el.querySelector('table')!, rows, config).ok).toBe(true);
+    expect(auditLive(el.querySelector('table')!).ok).toBe(true);
   });
 });

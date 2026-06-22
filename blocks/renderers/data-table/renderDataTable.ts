@@ -382,63 +382,101 @@ export interface AuditResult {
 }
 
 /**
- * Audit a rendered data-table root against the verified APG / Intl.Collator / SQL-aggregate
- * contract for its config. Recomputes the expected pipeline result and asserts the DOM *projection*
- * (native table grounding, aria-sort state, row order, filter narrowing, group summaries) reflects
- * it — so a bug in the projection turns this red.
+ * One column header's stored expected projection — the data subset the verifier asserts per header
+ * (its label text, native `scope`, `aria-sort` expectation, whether it wraps a `<button>`). The full
+ * golden shape (`DataTableGolden`) lives with the vector corpus in
+ * `__fixtures__/data-table-goldens.ts`; this minimal structural mirror lets the verifier type its
+ * input without WE importing test fixtures into the runtime module.
  */
-export function auditDataTable(root: HTMLElement, rows: Row[], config: DataTableConfig): AuditResult {
+export interface GoldenHeaderProjection {
+  readonly label: string;
+  readonly scope: string;
+  readonly ariaSort: string | null;
+  readonly hasButton: boolean;
+}
+
+/** One group's stored expected projection — its `tbody[data-group]` key + summary cell text (if any). */
+export interface GoldenGroupProjection {
+  readonly key: string | null;
+  readonly summaryText: string | null;
+}
+
+/**
+ * The stored expected DOM projection of a rendered data-table for a case — the GOLDEN the verifier
+ * asserts against, captured ONCE as plain data (see `__fixtures__/data-table-goldens.ts`). Structurally
+ * a `DataTableGolden`; declared here so `auditDataTable` reads goldens without pulling in fixtures.
+ */
+export interface DataTableGoldenProjection {
+  readonly rootTag: string;
+  readonly headers: readonly GoldenHeaderProjection[];
+  readonly rows: readonly (readonly string[])[];
+  readonly rowCount: number;
+  readonly groups: readonly GoldenGroupProjection[];
+}
+
+/**
+ * Audit a rendered data-table root against its STORED golden projection (per ratified #1467/#899).
+ * A pure golden-reader: it asserts the DOM *projection*
+ * (native table grounding, header scope/aria-sort, row order/count, group keys + summary text) equals
+ * the committed `golden` — with NO call into `applyPipeline`/`cellDisplayText`/`summaryText`. The golden
+ * is the expected output captured once as data (`__fixtures__/data-table-goldens.ts`), so a bug in the
+ * projection turns this red without the verifier re-deriving the answer from the backend it guards.
+ */
+export function auditDataTable(root: HTMLElement, golden: DataTableGoldenProjection): AuditResult {
   const checks: AuditCheck[] = [];
   const add = (label: string, pass: boolean) => checks.push({ label, pass });
-  const expected = applyPipeline(rows, config);
 
   // ── Native grounding (APG Sortable Table) ──
-  add('renders a native <table>', root.tagName === 'TABLE');
+  add('renders a native <table>', root.tagName === golden.rootTag);
   const headers = Array.from(root.querySelectorAll('thead th'));
-  add('every column header is a <th scope="col">', headers.length === config.columns.length && headers.every((h) => h.getAttribute('scope') === 'col'));
+  add(
+    'every column header is a <th scope="col">',
+    headers.length === golden.headers.length && headers.every((h, i) => h.getAttribute('scope') === golden.headers[i].scope),
+  );
 
   // ── Sort a11y: aria-sort state per the APG recipe ──
-  const sortedCount = headers.filter((h) => {
+  const goldenSorted = golden.headers.filter((h) => h.ariaSort != null && h.ariaSort !== 'none').length;
+  const renderedSorted = headers.filter((h) => {
     const s = h.getAttribute('aria-sort');
     return s != null && s !== 'none';
   }).length;
-  add('exactly one header is aria-sort != none when a sort is active', sortedCount === (config.sort && config.sort.by.length ? 1 : 0));
+  add('exactly one header is aria-sort != none when a sort is active', renderedSorted === goldenSorted);
 
-  config.columns.forEach((col, i) => {
+  golden.headers.forEach((gh, i) => {
     const header = headers[i];
-    if (!header) return;
-    if (col.sortable) {
-      const button = header.querySelector('button');
-      add(`sortable header "${col.label}" wraps its label in a <button>`, !!button && button.textContent === col.label);
-      const primary = config.sort?.by?.[0];
-      const expectState = primary && primary.field === col.field ? primary.direction : 'none';
-      add(`sortable header "${col.label}" has aria-sort="${expectState}"`, header.getAttribute('aria-sort') === expectState);
+    if (!header) {
+      add(`header "${gh.label}" is present`, false);
+      return;
+    }
+    const button = header.querySelector('button');
+    if (gh.hasButton) {
+      add(`sortable header "${gh.label}" wraps its label in a <button>`, !!button && button.textContent === gh.label);
+      add(`sortable header "${gh.label}" has aria-sort="${gh.ariaSort}"`, header.getAttribute('aria-sort') === gh.ariaSort);
     } else {
-      add(`non-sortable header "${col.label}" carries no aria-sort`, !header.hasAttribute('aria-sort'));
+      add(`non-sortable header "${gh.label}" carries no aria-sort`, !header.hasAttribute('aria-sort'));
     }
   });
 
-  // ── Row order / filter narrowing — compare the rendered data rows to the expected sequence ──
+  // Row order / filter narrowing — compare the rendered data rows to the golden's stored sequence.
   const renderedRows = Array.from(root.querySelectorAll('tbody tr')).filter((tr) => !tr.classList.contains('group-row'));
-  const expectedRows = expected.groups.flatMap((g) => g.rows);
-  add('rendered data-row count matches the filtered/grouped result', renderedRows.length === expectedRows.length);
+  add('rendered data-row count matches the filtered/grouped result', renderedRows.length === golden.rowCount);
 
-  const cellText = (tr: Element) => Array.from(tr.querySelectorAll('td')).map((td) => td.textContent).join('');
-  const expectedText = expectedRows.map((row) => config.columns.map((c) => cellDisplayText(c, row)).join(''));
-  const orderMatches = renderedRows.length === expectedText.length && renderedRows.every((tr, i) => cellText(tr) === expectedText[i]);
+  const cellText = (tr: Element) => Array.from(tr.querySelectorAll('td')).map((td) => td.textContent ?? '').join('');
+  const goldenText = golden.rows.map((cells) => cells.join(''));
+  const orderMatches = renderedRows.length === goldenText.length && renderedRows.every((tr, i) => cellText(tr) === goldenText[i]);
   add('rendered row order matches the configured sort pipeline', orderMatches);
 
-  // ── Group summaries ──
-  if (config.group) {
+  // Group summaries — assert keys + summary text against the golden (grouped goldens only).
+  const goldenGroups = golden.groups.filter((g) => g.key != null);
+  if (goldenGroups.length) {
     const bodies = Array.from(root.querySelectorAll('tbody[data-group]'));
-    add('one <tbody> per group', bodies.length === expected.groups.length);
-    const summariesOk = expected.groups.every((g) => {
+    add('one <tbody> per group', bodies.length === goldenGroups.length);
+    const summariesOk = goldenGroups.every((g) => {
       const body = root.querySelector(`tbody[data-group="${g.key}"]`);
       const summaryCell = body?.querySelector('.group-row th[scope="rowgroup"]');
-      return !!summaryCell && summaryCell.textContent === summaryText(g.key!, g.summary!.fn, g.summary!.value);
+      return !!summaryCell && summaryCell.textContent === g.summaryText;
     });
     add('each group renders the correct SQL-aggregate summary', summariesOk);
   }
-
   return { ok: checks.every((c) => c.pass), checks };
 }

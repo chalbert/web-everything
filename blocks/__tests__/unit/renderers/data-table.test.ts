@@ -12,6 +12,13 @@
 import { describe, it, expect } from 'vitest';
 import { dataTableCases } from '../../../renderers/data-table/__fixtures__/data-table-cases';
 import {
+  dataTableGoldens,
+  goldenFor,
+  goldenToRoot,
+  buildGoldens,
+  serializeGolden,
+} from '../../../renderers/data-table/__fixtures__/data-table-goldens';
+import {
   renderDataTable,
   auditDataTable,
   applyPipeline,
@@ -39,16 +46,31 @@ function rowOrder(root: HTMLElement, field: string): string[] {
     .map((tr) => tr.querySelectorAll('td')[colIndex]?.textContent ?? '');
 }
 
-describe('Data Table reference renderer — verified contract', () => {
+describe('Data Table conformance — auditDataTable reads the stored golden as DATA (#1467/#899)', () => {
+  // Per ratified #1467/#899: the verifier asserts the STORED golden output, not a live recompute. Each
+  // case re-materializes a <table> root FROM its committed golden (`goldenToRoot`, the inverse of the
+  // capture step) and runs `auditDataTable(root, golden)` over it — GREEN WITHOUT a live WE render in
+  // the assertion path, and `auditDataTable` never touches applyPipeline/cellDisplayText/summaryText.
   for (const c of dataTableCases) {
-    it(`${c.title}: passes the APG/Intl.Collator/aggregate audit`, () => {
-      const root = renderDataTable(c.rows, c.config);
-      const result = auditDataTable(root, c.rows, c.config);
+    it(`${c.title}: asserts the stored golden projection (no live render)`, () => {
+      const golden = goldenFor(c.id);
+      const root = goldenToRoot(golden);
+      const result = auditDataTable(root, golden);
       const failed = result.checks.filter((x) => !x.pass).map((x) => x.label);
       expect(failed, `failed checks: ${failed.join('; ')}`).toEqual([]);
       expect(result.ok).toBe(true);
     });
   }
+
+  it('every fixture case has a committed golden (the #899 vector corpus is complete)', () => {
+    expect(dataTableGoldens.map((g) => g.id).sort()).toEqual(dataTableCases.map((c) => c.id).sort());
+  });
+
+  it('committed goldens do not drift — they equal a fresh capture from the reference renderer', () => {
+    // The capture step (which DOES render) is authoritative ONCE; this guard keeps the frozen JSON in
+    // sync with the renderer, mirroring the module-service golden drift test next door (#506/#505).
+    expect(dataTableGoldens).toEqual(buildGoldens());
+  });
 
   it('sortable headers wrap a <button> + carry aria-sort; non-sortable headers carry none', () => {
     const root = renderDataTable(COLS_ROWS, { columns: COLS, sort: { keys: 'single', by: [{ field: 'name', direction: 'ascending' }] } });
@@ -202,7 +224,8 @@ describe('Data Table interactive axis — sort-toggle cycle (backlog #115)', () 
     const root = renderDataTable(COLS_ROWS, cfg);
     const salaryHeader = Array.from(root.querySelectorAll('thead th'))[2];
     expect(salaryHeader.getAttribute('aria-sort')).toBe('ascending');
-    expect(auditDataTable(root, COLS_ROWS, cfg).ok).toBe(true);
+    // The verifier reads a golden as data: serialize this live root, then audit the root against it.
+    expect(auditDataTable(root, serializeGolden('click', root)).ok).toBe(true);
   });
 });
 
@@ -265,8 +288,8 @@ describe('Data Table per-column cell formatter (#368)', () => {
     );
     // Ascending by RAW number → 80500 before 502024, even though displayed formatted.
     expect(salaryCells).toEqual(['$80,500', '$502,024']);
-    // The audit (which recomputes the pipeline) stays green with a formatter present.
-    expect(auditDataTable(table, rows, config).ok).toBe(true);
+    // The verifier (now a golden-reader) stays green over a live root carrying a string formatter.
+    expect(auditDataTable(table, serializeGolden('fmt-string', table)).ok).toBe(true);
   });
 
   it('a Node formatter renders a rich cell (the node is appended, not stringified)', () => {
@@ -285,7 +308,7 @@ describe('Data Table per-column cell formatter (#368)', () => {
     const table = renderDataTable(rows, config);
     const firstSalaryCell = table.querySelectorAll('tbody tr')[0].querySelectorAll('td')[1];
     expect(firstSalaryCell.querySelector('span.chip')).not.toBeNull();
-    expect(auditDataTable(table, rows, config).ok).toBe(true);
+    expect(auditDataTable(table, serializeGolden('fmt-node', table)).ok).toBe(true);
   });
 
   it('a string formatter is escape-safe — HTML is set as text, never parsed', () => {

@@ -19,6 +19,7 @@ import {
   type Row,
 } from '/blocks/renderers/data-table/renderDataTable';
 import { dataTableCases, type DataTableCase } from '/blocks/renderers/data-table/__fixtures__/data-table-cases';
+import { goldenFor, serializeGolden } from '/blocks/renderers/data-table/__fixtures__/data-table-goldens';
 
 function el(tag: string, className?: string, text?: string): HTMLElement {
   const node = document.createElement(tag);
@@ -75,9 +76,10 @@ function buildCard(c: DataTableCase): HTMLElement {
   const grid = el('div', 'ex-grid');
   section.append(grid);
 
-  // Render the table + audit (the demo's whole point).
+  // Render the table, then audit it against the case's COMMITTED golden (#1467/#899: the verifier reads
+  // the stored expected projection as data — a green badge means the live render matches that golden).
   const root = renderDataTable(c.rows, c.config);
-  const result = auditDataTable(root, c.rows, c.config);
+  const result = auditDataTable(root, goldenFor(c.id));
   if (result.ok) passCount++;
 
   badge.className = `badge ${result.ok ? 'pass' : 'fail'}`;
@@ -169,7 +171,9 @@ function buildInteractiveCard(): HTMLElement {
   // static cards; later re-renders only refresh the badge.
   function render(countInitial = false): void {
     const root = renderDataTable(PEOPLE, config);
-    const result = auditDataTable(root, PEOPLE, config);
+    // Interactive states have no pre-committed golden, so capture this root's projection and assert the
+    // root against it — the golden-reader path over a live, just-serialized golden (no backend recompute).
+    const result = auditDataTable(root, serializeGolden('interactive', root));
     if (countInitial && result.ok) passCount++;
     badge.className = `badge ${result.ok ? 'pass' : 'fail'}`;
     badge.textContent = result.ok ? '✓ conformant' : '✗ contract violation';

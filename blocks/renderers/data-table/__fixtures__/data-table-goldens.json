@@ -1,0 +1,552 @@
+[
+  {
+    "id": "sort-text-asc",
+    "rootTag": "TABLE",
+    "headers": [
+      {
+        "label": "Name",
+        "scope": "col",
+        "ariaSort": "ascending",
+        "hasButton": true
+      },
+      {
+        "label": "Team",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Salary (k)",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Location",
+        "scope": "col",
+        "ariaSort": null,
+        "hasButton": false
+      }
+    ],
+    "rows": [
+      [
+        "Aaron",
+        "Engineering",
+        "110",
+        "Oslo"
+      ],
+      [
+        "andré",
+        "Design",
+        "95",
+        ""
+      ],
+      [
+        "Bianca",
+        "Engineering",
+        "120",
+        "Berlin"
+      ],
+      [
+        "Chloé",
+        "Design",
+        "105",
+        "Paris"
+      ],
+      [
+        "Dmitri",
+        "Engineering",
+        "",
+        "Berlin"
+      ],
+      [
+        "Émile",
+        "Sales",
+        "80",
+        "Lyon"
+      ]
+    ],
+    "rowCount": 6,
+    "groups": [
+      {
+        "key": null,
+        "summaryText": null
+      }
+    ]
+  },
+  {
+    "id": "sort-numeric",
+    "rootTag": "TABLE",
+    "headers": [
+      {
+        "label": "Name",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Level",
+        "scope": "col",
+        "ariaSort": "ascending",
+        "hasButton": true
+      }
+    ],
+    "rows": [
+      [
+        "andré",
+        "img2"
+      ],
+      [
+        "Aaron",
+        "img2"
+      ],
+      [
+        "Dmitri",
+        "img2"
+      ],
+      [
+        "Émile",
+        "img2"
+      ],
+      [
+        "Bianca",
+        "img10"
+      ],
+      [
+        "Chloé",
+        "img10"
+      ]
+    ],
+    "rowCount": 6,
+    "groups": [
+      {
+        "key": null,
+        "summaryText": null
+      }
+    ]
+  },
+  {
+    "id": "sort-empty-last",
+    "rootTag": "TABLE",
+    "headers": [
+      {
+        "label": "Name",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Team",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Salary (k)",
+        "scope": "col",
+        "ariaSort": "descending",
+        "hasButton": true
+      },
+      {
+        "label": "Location",
+        "scope": "col",
+        "ariaSort": null,
+        "hasButton": false
+      }
+    ],
+    "rows": [
+      [
+        "Bianca",
+        "Engineering",
+        "120",
+        "Berlin"
+      ],
+      [
+        "Aaron",
+        "Engineering",
+        "110",
+        "Oslo"
+      ],
+      [
+        "Chloé",
+        "Design",
+        "105",
+        "Paris"
+      ],
+      [
+        "andré",
+        "Design",
+        "95",
+        ""
+      ],
+      [
+        "Émile",
+        "Sales",
+        "80",
+        "Lyon"
+      ],
+      [
+        "Dmitri",
+        "Engineering",
+        "",
+        "Berlin"
+      ]
+    ],
+    "rowCount": 6,
+    "groups": [
+      {
+        "key": null,
+        "summaryText": null
+      }
+    ]
+  },
+  {
+    "id": "sort-multi-key",
+    "rootTag": "TABLE",
+    "headers": [
+      {
+        "label": "Name",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Team",
+        "scope": "col",
+        "ariaSort": "ascending",
+        "hasButton": true
+      },
+      {
+        "label": "Salary (k)",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Location",
+        "scope": "col",
+        "ariaSort": null,
+        "hasButton": false
+      }
+    ],
+    "rows": [
+      [
+        "Chloé",
+        "Design",
+        "105",
+        "Paris"
+      ],
+      [
+        "andré",
+        "Design",
+        "95",
+        ""
+      ],
+      [
+        "Bianca",
+        "Engineering",
+        "120",
+        "Berlin"
+      ],
+      [
+        "Aaron",
+        "Engineering",
+        "110",
+        "Oslo"
+      ],
+      [
+        "Dmitri",
+        "Engineering",
+        "",
+        "Berlin"
+      ],
+      [
+        "Émile",
+        "Sales",
+        "80",
+        "Lyon"
+      ]
+    ],
+    "rowCount": 6,
+    "groups": [
+      {
+        "key": null,
+        "summaryText": null
+      }
+    ]
+  },
+  {
+    "id": "filter-all",
+    "rootTag": "TABLE",
+    "headers": [
+      {
+        "label": "Name",
+        "scope": "col",
+        "ariaSort": "ascending",
+        "hasButton": true
+      },
+      {
+        "label": "Team",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Salary (k)",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Location",
+        "scope": "col",
+        "ariaSort": null,
+        "hasButton": false
+      }
+    ],
+    "rows": [
+      [
+        "Aaron",
+        "Engineering",
+        "110",
+        "Oslo"
+      ],
+      [
+        "Bianca",
+        "Engineering",
+        "120",
+        "Berlin"
+      ]
+    ],
+    "rowCount": 2,
+    "groups": [
+      {
+        "key": null,
+        "summaryText": null
+      }
+    ]
+  },
+  {
+    "id": "filter-any",
+    "rootTag": "TABLE",
+    "headers": [
+      {
+        "label": "Name",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Team",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Salary (k)",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Location",
+        "scope": "col",
+        "ariaSort": null,
+        "hasButton": false
+      }
+    ],
+    "rows": [
+      [
+        "Bianca",
+        "Engineering",
+        "120",
+        "Berlin"
+      ],
+      [
+        "Aaron",
+        "Engineering",
+        "110",
+        "Oslo"
+      ],
+      [
+        "Dmitri",
+        "Engineering",
+        "",
+        "Berlin"
+      ]
+    ],
+    "rowCount": 3,
+    "groups": [
+      {
+        "key": null,
+        "summaryText": null
+      }
+    ]
+  },
+  {
+    "id": "group-count",
+    "rootTag": "TABLE",
+    "headers": [
+      {
+        "label": "Name",
+        "scope": "col",
+        "ariaSort": "ascending",
+        "hasButton": true
+      },
+      {
+        "label": "Team",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Salary (k)",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Location",
+        "scope": "col",
+        "ariaSort": null,
+        "hasButton": false
+      }
+    ],
+    "rows": [
+      [
+        "Aaron",
+        "Engineering",
+        "110",
+        "Oslo"
+      ],
+      [
+        "Bianca",
+        "Engineering",
+        "120",
+        "Berlin"
+      ],
+      [
+        "Dmitri",
+        "Engineering",
+        "",
+        "Berlin"
+      ],
+      [
+        "andré",
+        "Design",
+        "95",
+        ""
+      ],
+      [
+        "Chloé",
+        "Design",
+        "105",
+        "Paris"
+      ],
+      [
+        "Émile",
+        "Sales",
+        "80",
+        "Lyon"
+      ]
+    ],
+    "rowCount": 6,
+    "groups": [
+      {
+        "key": "Engineering",
+        "summaryText": "Engineering — count: 3"
+      },
+      {
+        "key": "Design",
+        "summaryText": "Design — count: 2"
+      },
+      {
+        "key": "Sales",
+        "summaryText": "Sales — count: 1"
+      }
+    ]
+  },
+  {
+    "id": "group-average",
+    "rootTag": "TABLE",
+    "headers": [
+      {
+        "label": "Name",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Team",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Salary (k)",
+        "scope": "col",
+        "ariaSort": "none",
+        "hasButton": true
+      },
+      {
+        "label": "Location",
+        "scope": "col",
+        "ariaSort": null,
+        "hasButton": false
+      }
+    ],
+    "rows": [
+      [
+        "Bianca",
+        "Engineering",
+        "120",
+        "Berlin"
+      ],
+      [
+        "Aaron",
+        "Engineering",
+        "110",
+        "Oslo"
+      ],
+      [
+        "Dmitri",
+        "Engineering",
+        "",
+        "Berlin"
+      ],
+      [
+        "andré",
+        "Design",
+        "95",
+        ""
+      ],
+      [
+        "Chloé",
+        "Design",
+        "105",
+        "Paris"
+      ],
+      [
+        "Émile",
+        "Sales",
+        "80",
+        "Lyon"
+      ]
+    ],
+    "rowCount": 6,
+    "groups": [
+      {
+        "key": "Engineering",
+        "summaryText": "Engineering — average: 76.7"
+      },
+      {
+        "key": "Design",
+        "summaryText": "Design — average: 100"
+      },
+      {
+        "key": "Sales",
+        "summaryText": "Sales — average: 80"
+      }
+    ]
+  }
+]
