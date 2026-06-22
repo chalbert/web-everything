@@ -8,7 +8,7 @@ tags: [judge, trainable, explorer]
 
 # Trainable judge architecture — what the feedback signal is + the learning mechanism
 
-The trainable-judge epic (#1552) needs its shape settled before any build: **what does a human's feedback on a real run actually become, and how does the judge learn from it?** Today the judge is frozen and describe-only (`fui:tools/explorer/oracles/advisoryJudge.ts` — the `JudgeModel` seam; `fui:tools/explorer/oracles/tier2VlmJudgeModel.ts` — Florence-2, which the file notes "DESCRIBES / TAGS / DETECTS — it does not emit explicit defects"). Two coupled forks decide everything downstream (capture format, store, eval, on-device feasibility). Fork B follows from Fork A. **Not prepared — needs a grounded `/prepare` pass (on-device feasibility, constellation boundary #1073/#475, dataset seed #489) before ratification.** Defaults below are the author's lean, not a ruling.
+The trainable-judge epic (#1552) needs its shape settled before any build: **what does a human's feedback on a real run become, and how does the judge learn from it?** Today the judge is frozen, describe-only (`fui:tools/explorer/oracles/advisoryJudge.ts` seam; `fui:tools/explorer/oracles/tier2VlmJudgeModel.ts` Florence-2). Two coupled forks decide everything downstream (capture format, store, eval, on-device feasibility); Fork B follows from Fork A. **Not prepared — needs a grounded `/prepare` pass (on-device feasibility, constellation boundary #1073/#475, dataset seed #489) before ratification.** Defaults below are the author's lean, not a ruling.
 
 ## Fork A — what is the feedback signal?
 
