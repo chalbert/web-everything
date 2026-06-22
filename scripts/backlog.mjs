@@ -341,11 +341,18 @@ function calibrate() {
 
   const sample = { date: today(), points, contextPct: ctxPct };
   if (stopReason) sample.stopReason = stopReason;
-  const samples = [...(Array.isArray(cap.samples) ? cap.samples : []), sample].slice(-12);
+  // #1516: the hard 12-sample window is gone — the RLS forgetting factor (below) ages old samples out
+  // smoothly instead of by a cutoff, so ALL history is kept and weighted by recency. The `.slice(-200)`
+  // is a pure storage bound (the file can't grow without limit), not a statistical window: at the default
+  // forgetting ≈ 0.99 a 200-old sample already weighs 0.99^199 ≈ 0.13, well past the effective window.
+  const samples = [...(Array.isArray(cap.samples) ? cap.samples : []), sample].slice(-200);
 
   const ceiling = Number.isFinite(cap.contextCeiling) ? cap.contextCeiling : 80;
   const k = Number.isFinite(cap.marginK) ? cap.marginK : 1;
-  const fit = fitAffineCost(samples);
+  // RLS forgetting factor (#1516): tunable via capacity.json, default 0.99 (the ≈0.98–0.995 band ratified
+  // in #1505). Newest samples dominate; a regime change ages out smoothly. `1` → unweighted pooled fit.
+  const forgetting = Number.isFinite(cap.forgetting) && cap.forgetting > 0 && cap.forgetting <= 1 ? cap.forgetting : 0.99;
+  const fit = fitAffineCost(samples, { forgetting });
   const budget = budgetFromFit(fit, { ceiling, k });
   const capPts = impliedCapacity(fit);
 
@@ -356,18 +363,19 @@ function calibrate() {
 
   cap.samples = samples;
   if (fit) {
-    cap.fit = { overhead: Math.round(fit.overhead * 100) / 100, cost: Math.round(fit.cost * 10000) / 10000, n: fit.n, residualStd: Math.round(fit.residualStd * 100) / 100 };
+    cap.fit = { overhead: Math.round(fit.overhead * 100) / 100, cost: Math.round(fit.cost * 10000) / 10000, n: fit.n, nEff: Math.round(fit.nEff * 10) / 10, residualStd: Math.round(fit.residualStd * 100) / 100 };
     if (capPts != null) cap.capacityPoints = capPts;
   }
   cap.contextCeiling = ceiling;
   cap.marginK = k;
+  cap.forgetting = forgetting;
   if (nextBudget != null) cap.budgetPoints = nextBudget;
   delete cap.ema; // legacy fixed-α weight — long unused
   delete cap.targetFraction; // superseded by contextCeiling/marginK (#1505); budgetPoints is now stored directly
   writeFileSync(CAPACITY_PATH, JSON.stringify(cap, null, 2) + '\n');
 
   const note = fit
-    ? `affine fit over ${fit.n} (overhead ${cap.fit.overhead}%, cost ${cap.fit.cost}%/pt); capacity ≈ ${capPts}`
+    ? `affine fit over ${fit.n} (nEff ${cap.fit.nEff} @ forgetting ${forgetting}; overhead ${cap.fit.overhead}%, cost ${cap.fit.cost}%/pt); capacity ≈ ${capPts}`
     : `fit degenerate (need ≥2 samples) — held prior budget`;
   ok({ verb: 'calibrate', points, contextPct: ctxPct, stopReason: stopReason ?? null, fit: cap.fit ?? null, capacityPoints: cap.capacityPoints ?? null, budget: nextBudget },
     `${GRN}✓ calibrated${RST} ${DIM}— ${points} pts at ${ctxPct}% → ${note}; next batch budget ≈ ${RST}${BLD}${nextBudget ?? '?'} pts${RST}`);

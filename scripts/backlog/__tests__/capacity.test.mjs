@@ -73,6 +73,39 @@ describe('fitAffineCost', () => {
   });
 });
 
+describe('fitAffineCost — RLS forgetting factor (#1516)', () => {
+  it('forgetting = 1 reproduces the unweighted pooled fit (back-compat with #1505/#1515)', () => {
+    const samples = [10, 30, 50, 70, 90].map((x) => ({ points: x, contextPct: 20 + 0.5 * x }));
+    const fit = fitAffineCost(samples, { forgetting: 1 });
+    expect(fit.overhead).toBeCloseTo(20, 6);
+    expect(fit.cost).toBeCloseTo(0.5, 6);
+    // No discounting → effective sample size equals the raw count.
+    expect(fit.nEff).toBeCloseTo(5, 6);
+  });
+
+  it('ages out an old regime: the fit leans toward the RECENT samples after a regime change', () => {
+    // Old regime: cost 0.2 (cheap). Recent regime: cost 0.8 (expensive). Chronological, newest last.
+    const old = [10, 30, 50].map((x) => ({ points: x, contextPct: 10 + 0.2 * x }));
+    const recent = [10, 30, 50].map((x) => ({ points: x, contextPct: 10 + 0.8 * x }));
+    const samples = [...old, ...recent];
+    const pooled = fitAffineCost(samples, { forgetting: 1 });
+    const forgetful = fitAffineCost(samples, { forgetting: 0.8 });
+    // Unweighted averages the two regimes (cost ≈ 0.5); forgetting pulls the cost toward the recent 0.8.
+    expect(forgetful.cost).toBeGreaterThan(pooled.cost);
+    expect(forgetful.cost).toBeGreaterThan(0.5);
+    // Discounting shrinks the effective sample size below the raw count.
+    expect(forgetful.nEff).toBeLessThan(forgetful.n);
+  });
+
+  it('a noise-free single regime is recovered exactly at any forgetting (collinear → weight-invariant)', () => {
+    const samples = [10, 30, 50, 70, 90].map((x) => ({ points: x, contextPct: 20 + 0.5 * x }));
+    const fit = fitAffineCost(samples, { forgetting: 0.9 });
+    expect(fit.overhead).toBeCloseTo(20, 6);
+    expect(fit.cost).toBeCloseTo(0.5, 6);
+    expect(fit.residualStd).toBeCloseTo(0, 6);
+  });
+});
+
 describe('budgetFromFit', () => {
   const fit = { overhead: 20, cost: 0.5, residualStd: 4, n: 12 };
 
