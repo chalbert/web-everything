@@ -57,3 +57,7 @@ So it is a focused-session **verifier-golden redesign + cross-repo backend move 
 live FUI render verification** — re-sized 5 → 8, carry-forward reason **outgrew**. Sibling of the data-table
 pair (#1494 backend re-home, #1355 delete) under the same #1467/#899 split; they should share the
 golden-vector approach. No new design fork (placement ruled by #1467). Released to `open`.
+
+## Pre-flight (batch-2026-06-21-1501-1356) — re-confirmed not a concurrent-batch slice; co-design with #1494
+
+Re-grounded; the prior outgrew finding holds. Two properties keep it out of a concurrent batch (matching #1494, which this batch also declined): (a) the **destructive delete** of `we:blocks/renderers/pagination` strands the WE conformance tests + `we:demos/pagination-demo.ts` (which value-import `renderPagination`) until the golden-verifier redesign AND the #701 iframe swap **co-land** — a green/unbroken tree is unreachable piecemeal; (b) the delete is gated on **live FUI-dev-server render verification** of `fui:demos/pagination-demo.html` (deleting the WE source unverified is reckless). It is a focused-session **verifier-golden redesign + cross-repo backend move + iframe swap + delete + live FUI verify**, and should be co-designed with the data-table golden-vector approach (#1494/#1355). Carry-forward reason: **outgrew / not-batchable** (verifier-golden redesign + live-verify-gated destructive delete). Left at size 8 (its real size is bounded but it is a focused session, not a concurrent slice); released to `open`.
