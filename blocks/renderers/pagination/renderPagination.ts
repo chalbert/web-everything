@@ -180,49 +180,106 @@ export interface AuditResult {
 }
 
 /**
- * Audit a rendered pagination root against the verified accessibility/SEO contract for its
- * contract options. Returns per-check results so the demo can show them and the suite can assert.
+ * One `aria-current="page"` control's stored expected projection — the active-page marker the verifier
+ * asserts (its tag, its visible text, and its `?page=n` href under URL-sync, else `null`). The full
+ * golden shape (`PaginationGolden`) lives with the vector corpus in
+ * `__fixtures__/pagination-goldens.ts`; this minimal structural mirror lets the verifier type its input
+ * without WE importing test fixtures into the runtime module.
  */
-export function auditPagination(root: HTMLElement, state: PageState, opts: PaginationOptions): AuditResult {
+export interface GoldenCurrentProjection {
+  /** The active control's tagName — `"A"` under URL-sync, `"BUTTON"` under urlSync:none. */
+  readonly tag: string;
+  /** The active control's visible text (the 1-based active page number). */
+  readonly text: string;
+  /** The `href` (`?page=n`) when the control is an `<a>`, else `null`. */
+  readonly href: string | null;
+}
+
+/**
+ * The stored expected DOM projection of a rendered pagination root for a case — the GOLDEN the verifier
+ * asserts against, captured ONCE as plain data (see `__fixtures__/pagination-goldens.ts`). It carries the
+ * contract surface `auditPagination` reads: the contract axes, the nav landmark / scroll-sentinel shape,
+ * the active-page marker(s), the jump-to-page control count, the SEO rel-link absence, and the range-label
+ * slice text — never the page-state the backend would recompute from. Declared here so `auditPagination`
+ * reads goldens without pulling in fixtures.
+ */
+export interface PaginationGolden {
+  /** The fixture case id this golden was captured from (joins to `paginationCases`). */
+  readonly id: string;
+  /** Native grounding — the rendered root's tagName (expected `"DIV"`). */
+  readonly rootTag: string;
+  /** The contract `pageMode` (`data-mode` on the root) the projection was captured under. */
+  readonly mode: PageMode;
+  /** The contract `advance` (`data-advance` on the root) the projection was captured under. */
+  readonly advance: Advance;
+  /** Whether the root carries a `<nav>` landmark (false for the infinite-scroll sentinel shape). */
+  readonly hasNav: boolean;
+  /** The nav landmark's `aria-label`, or `null` when there is no nav. */
+  readonly navLabel: string | null;
+  /** Whether the root carries a `[data-role="scroll-sentinel"]` (the append+auto shape). */
+  readonly hasSentinel: boolean;
+  /** Whether the scroll sentinel is `aria-hidden="true"` (false when there is no sentinel). */
+  readonly sentinelAriaHidden: boolean;
+  /** Each rendered `aria-current="page"` control's projection — length 1 for paged+total, else 0. */
+  readonly current: readonly GoldenCurrentProjection[];
+  /** The number of `[data-action="goto"]` jump-to-page controls (0 under a cursor protocol). */
+  readonly gotoCount: number;
+  /** Whether a deprecated `[rel="next"]`/`[rel="prev"]` link is present (expected `false`). */
+  readonly hasRelLink: boolean;
+  /** The `.pagination-range` `role="status"` slice text, or `null` when no range label is rendered. */
+  readonly rangeText: string | null;
+}
+
+/**
+ * Audit a rendered pagination root against its STORED golden projection (per ratified #1467/#899).
+ * A pure golden-reader: it asserts the DOM *projection* (native grounding, nav landmark + aria-label,
+ * scroll-sentinel shape, the active-page marker(s) + their SEO href, jump-to-page control count, the
+ * range-label slice text) equals the committed `golden` — with NO call into `rangeText` and NO live
+ * `renderPagination` in the assertion path. The golden is the expected output captured once as data
+ * (`__fixtures__/pagination-goldens.ts`), so a bug in the projection turns this red without the verifier
+ * re-deriving the answer from the backend it guards.
+ */
+export function auditPagination(root: HTMLElement, golden: PaginationGolden): AuditResult {
   const checks: AuditCheck[] = [];
   const add = (label: string, pass: boolean) => checks.push({ label, pass });
+
+  // ── Native grounding ──
+  add('renders into the expected root element', root.tagName === golden.rootTag);
 
   const sentinel = root.querySelector('[data-role="scroll-sentinel"]');
   const nav = root.querySelector('nav');
   const range = root.querySelector('.pagination-range');
-  const current = root.querySelectorAll('[aria-current="page"]');
+  const current = Array.from(root.querySelectorAll('[aria-current="page"]'));
 
-  if (opts.mode === 'append' && opts.advance === 'auto') {
-    add('append+auto renders a scroll sentinel', !!sentinel);
-    add('sentinel is aria-hidden (not a nav landmark)', !!sentinel && sentinel.getAttribute('aria-hidden') === 'true');
-    add('no empty nav landmark when there are no controls', !nav);
+  if (golden.mode === 'append' && golden.advance === 'auto') {
+    add('append+auto renders a scroll sentinel', !!sentinel === golden.hasSentinel);
+    add('sentinel is aria-hidden (not a nav landmark)', (!!sentinel && sentinel.getAttribute('aria-hidden') === 'true') === golden.sentinelAriaHidden);
+    add('no empty nav landmark when there are no controls', !nav === !golden.hasNav);
   } else {
-    add('controls live in a <nav> landmark', !!nav);
-    add('nav landmark has a unique aria-label', !!nav && !!nav.getAttribute('aria-label'));
+    add('controls live in a <nav> landmark', !!nav === golden.hasNav);
+    add('nav landmark has a unique aria-label', (nav?.getAttribute('aria-label') ?? null) === golden.navLabel);
   }
 
-  if (opts.mode === 'paged' && state.pageCount != null) {
-    add('exactly one aria-current="page" marks the active page', current.length === 1);
-    const activeEl = current[0];
-    add('active control reflects the active page number', !!activeEl && activeEl.textContent === String(state.pageIndex + 1));
-    if (opts.urlSync === 'query-param') {
-      add('paged links are self-canonical ?page=n <a href> (SEO default)', !!activeEl && activeEl.tagName === 'A' && (activeEl.getAttribute('href') || '').startsWith('?page='));
-      add('no rel=next/prev emitted as primary machinery (deprecated)', !root.querySelector('[rel="next"],[rel="prev"]'));
-    } else {
-      add('urlSync:none falls back to JS-only <button> controls', !!activeEl && activeEl.tagName === 'BUTTON');
+  // ── Active-page marker(s) — assert the rendered set matches the golden's stored projection ──
+  add('aria-current="page" marks the expected active control(s)', current.length === golden.current.length);
+  golden.current.forEach((gc, i) => {
+    const el = current[i];
+    add('active control reflects the active page number', !!el && el.textContent === gc.text);
+    add('active control uses the expected element type (A under URL-sync, BUTTON otherwise)', !!el && el.tagName === gc.tag);
+    if (gc.href != null) {
+      add('paged links are self-canonical ?page=n <a href> (SEO default)', !!el && (el.getAttribute('href') ?? '') === gc.href);
     }
-  }
+  });
 
-  if (opts.mode === 'paged' && state.pageCount == null) {
-    add('cursor protocol shows prev/next only (no jump-to-page)', !!nav && nav.querySelectorAll('[data-action="goto"]').length === 0);
-    add('cursor protocol marks no aria-current page (no total)', current.length === 0);
-  }
+  // ── SEO machinery ──
+  add('no rel=next/prev emitted as primary machinery (deprecated)', !!root.querySelector('[rel="next"],[rel="prev"]') === golden.hasRelLink);
 
-  if (opts.rangeLabel === 'range') {
-    const hasTotal = state.total != null;
-    add('range label present only when a total is known', !!range === hasTotal);
-    if (hasTotal) add('range label reads the correct slice', !!range && range.textContent === rangeText(state));
-  }
+  // ── Jump-to-page control count (0 under a cursor protocol — prev/next only) ──
+  add('jump-to-page control count matches the protocol', root.querySelectorAll('[data-action="goto"]').length === golden.gotoCount);
+
+  // ── Range label slice — assert the stored text, never a live recompute ──
+  add('range label present only when a total is known', !!range === (golden.rangeText != null));
+  if (golden.rangeText != null) add('range label reads the correct slice', !!range && range.textContent === golden.rangeText);
 
   return { ok: checks.every((c) => c.pass), checks };
 }

@@ -10,6 +10,7 @@
 import { setPlaygroundReady } from '/demos/playground-harness';
 import { renderPagination, auditPagination, type AuditResult } from '/blocks/renderers/pagination/renderPagination';
 import { paginationCases, type PaginationCase } from '/blocks/renderers/pagination/__fixtures__/pagination-cases';
+import { goldenFor } from '/blocks/renderers/pagination/__fixtures__/pagination-goldens';
 
 function el(tag: string, className?: string, text?: string): HTMLElement {
   const node = document.createElement(tag);
@@ -57,9 +58,10 @@ function buildCard(c: PaginationCase): HTMLElement {
   const grid = el('div', 'ex-grid');
   section.append(grid);
 
-  // Render the controls + audit (the demo's whole point).
+  // Render the controls, then audit against the case's COMMITTED golden (#1467/#899: the verifier reads
+  // the stored expected projection as data — a green badge means the live render matches that golden).
   const root = renderPagination(c.state, c.opts);
-  const result = auditPagination(root, c.state, c.opts);
+  const result = auditPagination(root, goldenFor(c.id));
   if (result.ok) passCount++;
 
   badge.className = `badge ${result.ok ? 'pass' : 'fail'}`;

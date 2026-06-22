@@ -1,0 +1,104 @@
+[
+  {
+    "id": "numbered-seo",
+    "rootTag": "DIV",
+    "mode": "paged",
+    "advance": "manual",
+    "hasNav": true,
+    "navLabel": "pagination",
+    "hasSentinel": false,
+    "sentinelAriaHidden": false,
+    "current": [
+      {
+        "tag": "A",
+        "text": "2",
+        "href": "?page=2"
+      }
+    ],
+    "gotoCount": 0,
+    "hasRelLink": false,
+    "rangeText": null
+  },
+  {
+    "id": "numbered-range",
+    "rootTag": "DIV",
+    "mode": "paged",
+    "advance": "manual",
+    "hasNav": true,
+    "navLabel": "pagination",
+    "hasSentinel": false,
+    "sentinelAriaHidden": false,
+    "current": [
+      {
+        "tag": "A",
+        "text": "2",
+        "href": "?page=2"
+      }
+    ],
+    "gotoCount": 0,
+    "hasRelLink": false,
+    "rangeText": "Showing 21–40 of 500"
+  },
+  {
+    "id": "numbered-no-urlsync",
+    "rootTag": "DIV",
+    "mode": "paged",
+    "advance": "manual",
+    "hasNav": true,
+    "navLabel": "pagination",
+    "hasSentinel": false,
+    "sentinelAriaHidden": false,
+    "current": [
+      {
+        "tag": "BUTTON",
+        "text": "1",
+        "href": null
+      }
+    ],
+    "gotoCount": 4,
+    "hasRelLink": false,
+    "rangeText": null
+  },
+  {
+    "id": "cursor-prevnext",
+    "rootTag": "DIV",
+    "mode": "paged",
+    "advance": "manual",
+    "hasNav": true,
+    "navLabel": "pagination",
+    "hasSentinel": false,
+    "sentinelAriaHidden": false,
+    "current": [],
+    "gotoCount": 0,
+    "hasRelLink": false,
+    "rangeText": null
+  },
+  {
+    "id": "load-more",
+    "rootTag": "DIV",
+    "mode": "append",
+    "advance": "manual",
+    "hasNav": true,
+    "navLabel": "pagination",
+    "hasSentinel": false,
+    "sentinelAriaHidden": false,
+    "current": [],
+    "gotoCount": 0,
+    "hasRelLink": false,
+    "rangeText": null
+  },
+  {
+    "id": "infinite",
+    "rootTag": "DIV",
+    "mode": "append",
+    "advance": "auto",
+    "hasNav": false,
+    "navLabel": null,
+    "hasSentinel": true,
+    "sentinelAriaHidden": true,
+    "current": [],
+    "gotoCount": 0,
+    "hasRelLink": false,
+    "rangeText": null
+  }
+]

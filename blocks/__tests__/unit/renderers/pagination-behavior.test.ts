@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { auditPagination, announcePagination, type PageState, type PaginationOptions } from '../../../renderers/pagination/renderPagination';
+import { serializeGolden } from '../../../renderers/pagination/__fixtures__/pagination-goldens';
 import { PaginationBehavior, PaginationElement, registerPagination } from '../../../renderers/pagination/PaginationBehavior';
 
 const state: PageState = { pageIndex: 0, pageSize: 50, total: 500, pageCount: 10 };
@@ -17,7 +18,9 @@ describe('PaginationBehavior', () => {
 
   it('renders the audited pagination landmark', () => {
     new PaginationBehavior(host, { state, options });
-    expect(auditPagination(host, state, options).ok).toBe(true);
+    // The behavior is a LIVE runtime consumer; the verifier reads a golden as data — serialize this live
+    // root into a golden (the capture step), then audit the root against it (the golden-reader path).
+    expect(auditPagination(host, serializeGolden('mount', host, options)).ok).toBe(true);
     expect(host.querySelector('nav[aria-label="pagination"]')).toBeTruthy();
   });
 
@@ -34,8 +37,8 @@ describe('PaginationBehavior', () => {
 
     expect(seen.at(-1)?.pageIndex).toBe(2);
     expect(fired).toBe(1);
-    // re-render still passes the audit at the new page
-    expect(auditPagination(host, seen.at(-1)!, options).ok).toBe(true);
+    // re-render still passes the audit at the new page (golden-reader over the just-serialized live root)
+    expect(auditPagination(host, serializeGolden('after-goto', host, options)).ok).toBe(true);
   });
 
   it('cursor mode (total, no pageCount) steps next from the current index and clamps via total', () => {
