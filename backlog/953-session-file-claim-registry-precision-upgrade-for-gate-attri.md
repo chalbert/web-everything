@@ -1,16 +1,80 @@
 ---
 kind: decision
 status: open
+preparedDate: "2026-06-22"
 dateOpened: "2026-06-18"
+dateStarted: "2026-06-22"
 tags: []
 ---
 
 # Session file-claim registry — precision upgrade for gate attribution if claim-baseline leak bites
 
-**Decision (un-parked 2026-06-22 — parking is not a prioritisation escape):** Whether to build the Fork 2-C claim-registry precision upgrade — only if the #952 git-baseline proves leaky in practice.
+Fork 2-C from #949: should the concurrent-session gate-attribution use a precise file-claim registry, or
+accept the shipped git-baseline (#952, Fork 2-A) residual?
 
-Fork 2-C from #949 (deferred precision upgrade, not the default). If the claim-time git-baseline snapshot (#952, Fork 2-A) proves too leaky — specifically the fail-unsafe overlap where a file already dirty at my claim that I then also edit gets mis-attributed as foreign and stepped over — extend we:reservations.json (already session-keyed, TTL-pruned) to record each edited file against the session via a PostToolUse hook on Edit/Write. Most precise (no snapshot-diff race) but adds hook infrastructure + orphan-claim cleanup on a dead session (mitigated by the existing TTL prune). Only build if the baseline approach's residual actually bites.
+## Grounding digest
 
-## Parked 2026-06-18 (batch-2026-06-18)
+- **2-A is shipped** (#952): `check:standards --scope` attributes gate failures to a session via a
+  **claim-time git-baseline snapshot**. It has a known **fail-unsafe** hole ([#949:83](/backlog/949-concurrent-session-gate-attribution-scope-the-batch-gate-to-/)):
+  a file *already dirty at my claim* (so in my "theirs" baseline) that **I then also edit** is
+  mis-attributed as **foreign** and stepped over — i.e. I can build on a real gate-red I wrongly believe is
+  someone else's.
+- **2-C** would extend the session reservation registry ([`we:.claude/skills/batch-backlog-items/reservations.json`](../.claude/skills/batch-backlog-items/reservations.json),
+  already session-keyed, TTL-pruned) to record each edited file against the session via a `PostToolUse`
+  hook on Edit/Write — the most precise fix (no snapshot-diff race); orphan-claim cleanup on a dead session
+  is handled by the existing TTL prune.
+- No new `/research/` topic — this re-rules a residual-acceptance call from #949 against the real
+  concurrency model, prior-art-settled.
 
-Trigger condition has not fired: the #952 claim-time git-baseline is freshly shipped and there is no observed mis-attribution leak yet. Building this now would be speculative precision the residual doesn't (yet) warrant. Unpark only when the baseline approach demonstrably mis-attributes a dirty-then-edited file (`feedback_gate_red_stop_scoped_to_own_work` territory).
+## Axis framing — accept a silent fail-unsafe residual vs fix it
+
+#949 deferred 2-C as "the precision upgrade *if* 2-A's leak bites," on the read that the overlap is *rare*.
+The skeptic pass overturned that read on the merits: the fail-unsafe trigger lands precisely on the
+**shared data registries** (`we:capacity.json`, `we:claims.json`, `we:reservations.json`, `we:intents.json`,
+blocks data) that concurrent batch sessions touch **constantly** (claim/release/reserve is the batch
+heartbeat) — so the overlap is the *modal* case, not a corner — and those files *do* trip the gate (the
+intents-registry mixed-escaping footgun, the body-less `relatedReport` footgun). Worse, the fault is **silent**
+(you step over a real red believed foreign with no signal), so "wait until it demonstrably bites" is
+unobservable-by-design — it collapses to *never*. And the fix is **near-free** (the reservation registry is
+already session-keyed + TTL-pruned). A silent, modal-frequency, correctness fault with a near-free fix is
+not gold-plating to defer — it is a seatbelt to install.
+
+## Recommended path at a glance
+
+| Fork | Recommended default | Main alternative (excluded) | Confidence |
+|---|---|---|---|
+| **Fork 1** — accept 2-A residual vs build 2-C | **(b) build 2-C now** — the fail-unsafe hole is modal (shared registries), silent (unobservable trigger), and near-free to fix (the reservation registry is already session-keyed/TTL-pruned) | (a) accept the residual until it "demonstrably bites" — excluded: the fault is silent, so the trigger can never be observed → "never build it" in disguise | **med-high** — flipped on the modal+silent finding |
+
+## Fork 1 — accept the 2-A residual, or build the 2-C file-claim registry
+
+**Fork-existence justification:** forced invariant on a correctness hole — branch (a) "accept the residual
+until it demonstrably bites" is the *flawed* branch: the fault is **fail-unsafe and silent** (you build on a
+real red believed foreign, with no signal), so its trigger is **unobservable**, making "wait" equivalent to
+"never" for a dangerous fault on the *modal* shared-registry path. (Justification is correctness — silent
+fail-unsafe on the common path — not cost/prioritization.)
+
+**Crux:** the cheap git-baseline mis-attributes exactly the always-contended shared registries, and does so
+*silently* — so the residual cannot be safely "watched," it must be closed.
+
+**Options:**
+
+- **(b) Build 2-C now — the session file-claim registry** *(recommended default — flipped)* — extend the
+  session reservation registry (`we:.claude/skills/batch-backlog-items/reservations.json`) to record each
+  edited file against the session via a `PostToolUse` hook on Edit/Write; attribution becomes exact (no
+  snapshot-diff race), orphan claims pruned by the existing TTL. **One honest cost (skeptic-acknowledged):**
+  a hook on every Edit/Write adds latency + a small failure surface on the hottest path — bounded and
+  *observable*, unlike the silent fault it removes.
+- **(a) Accept the 2-A residual until it demonstrably bites** — *Rejected (flawed branch).* Rests on the
+  overlap being rare; it is the *modal* case (shared registries, touched every claim/release), the tripping
+  files *do* trip the gate, and the fault is **silent** so "demonstrably bites" can never be observed —
+  "wait" becomes "never" for a dangerous fault.
+
+**Recommended default: (b) build 2-C now.**
+
+**Skeptic:** REFUTED → the accept-residual default was overturned. "Bounded/rare" was a sleight of hand —
+the fail-unsafe trigger hits the shared data registries concurrent sessions edit *constantly* (the modal
+case), which *do* trip the gate; the fault is **silent**, so "build only if it demonstrably bites" requires
+observability the fault denies (→ effectively never); and 2-C's cost is near-zero (the reservation registry
+is already session-keyed + TTL-pruned). **Default flipped to (b) build 2-C now**, carrying the one honest
+counter-cost (hook latency on the Edit/Write hot path — bounded and observable). #952 (2-A) is resolved, so
+2-C is unblocked; ratifying this files the build.
