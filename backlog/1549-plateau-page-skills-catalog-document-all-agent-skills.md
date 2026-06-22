@@ -2,8 +2,11 @@
 kind: story
 size: 5
 locus: plateau-app
-status: open
+status: resolved
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: "plateau:src/development-guide/skills-catalog.ts"
 tags: [plateau-app, skills, docs, dogfood]
 ---
 
@@ -26,3 +29,14 @@ A plateau doc surface like `plateau:src/development-guide/` (the Learn Pathway) 
 ## Depends on
 
 Nothing blocking — the skills already exist as files under `we:.claude/skills/` and `fui:.claude/skills/`. The only build piece is the frontmatter reader, if generated.
+
+## Resolved (batch-2026-06-22-1545-1549)
+
+Generated `/skills` page in plateau-app: `plateau:scripts/gen-skills-catalog.mjs` scans each constellation
+repo's `.claude/skills/<slug>/SKILL.md` frontmatter (name + description, triggers split out) →
+`plateau:src/development-guide/skills-catalog.data.ts` (so it never drifts; re-run `npm run gen:skills`).
+`plateau:src/development-guide/skills-catalog.ts` renders cards grouped by repo via the `@frontierui/jsx-runtime`
+SSR primitives (dogfoods FUI #1254), mounted on the `/skills` route (nav link + `<template>` + main.ts wiring,
+mirroring the Learn Pathway #336). Read-only (running a skill is the agent's job — distinct from #1548).
+**Live-verified on :4000**: 12 skills across 2 repos (WE 10 + FUI 2), grouped cards render, 0 console errors;
+4 unit tests + full plateau suite (263) green. Chose **generated** per the body's strong lean.
