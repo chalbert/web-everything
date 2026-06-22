@@ -86,7 +86,7 @@ export default class ForEachBehavior extends CustomAttribute {
   }
 
   connectedCallback(): void {
-    const template = this.target;
+    const template = this.ownerElement;
     if (!template || !(template instanceof HTMLTemplateElement)) {
       console.warn('[ForEachBehavior] Must be attached to a <template> element');
       return;
@@ -146,7 +146,7 @@ export default class ForEachBehavior extends CustomAttribute {
 
   /** Resolve the items collection from the expression */
   #resolveItems(): unknown[] | null {
-    const template = this.target;
+    const template = this.ownerElement;
     if (!template) return null;
 
     // Try named context reference: @contextName.path
@@ -181,7 +181,7 @@ export default class ForEachBehavior extends CustomAttribute {
 
   /** Stamp all items from the resolved collection */
   #stamp(): void {
-    const template = this.target as HTMLTemplateElement | undefined;
+    const template = this.ownerElement as HTMLTemplateElement | undefined;
     if (!template || !this.#endMarker) return;
 
     const items = this.#resolveItems();

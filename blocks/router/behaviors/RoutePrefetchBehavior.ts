@@ -51,7 +51,7 @@ export default class RoutePrefetchBehavior extends CustomAttribute {
   }
 
   #setupHoverPrefetch(): void {
-    const el = this.target;
+    const el = this.ownerElement;
     if (!el) return;
 
     this.#hoverHandler = () => this.#doPrefetch();
@@ -62,7 +62,7 @@ export default class RoutePrefetchBehavior extends CustomAttribute {
   }
 
   #setupVisiblePrefetch(): void {
-    const el = this.target;
+    const el = this.ownerElement;
     if (!el) return;
 
     // Compose the shared viewport-presence trigger (#320/#321): it owns the IntersectionObserver +
@@ -91,7 +91,7 @@ export default class RoutePrefetchBehavior extends CustomAttribute {
     this.#prefetched = true;
 
     // Get the link path from a sibling route:link attribute or from href
-    const el = this.target;
+    const el = this.ownerElement;
     if (!el) return;
 
     const linkPath = el.getAttribute('href') || '';
@@ -131,7 +131,7 @@ export default class RoutePrefetchBehavior extends CustomAttribute {
   }
 
   #cleanup(): void {
-    const el = this.target;
+    const el = this.ownerElement;
 
     if (el && this.#hoverHandler) {
       el.removeEventListener('mouseenter', this.#hoverHandler);

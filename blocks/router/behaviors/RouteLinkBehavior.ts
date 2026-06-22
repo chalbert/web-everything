@@ -21,11 +21,11 @@ export default class RouteLinkBehavior extends CustomAttribute {
 
   /** Whether this link's route is currently active */
   get isActive(): boolean {
-    return this.target?.classList.contains('active') ?? false;
+    return this.ownerElement?.classList.contains('active') ?? false;
   }
 
   connectedCallback(): void {
-    const anchor = this.target;
+    const anchor = this.ownerElement;
     if (!anchor) return;
 
     // Set href on the <a> for accessibility and right-click "Copy link"
@@ -67,7 +67,7 @@ export default class RouteLinkBehavior extends CustomAttribute {
   }
 
   disconnectedCallback(): void {
-    const anchor = this.target;
+    const anchor = this.ownerElement;
     if (!anchor) return;
 
     if (this.#clickHandler) {
@@ -89,7 +89,7 @@ export default class RouteLinkBehavior extends CustomAttribute {
   }
 
   #updateActiveState(): void {
-    const anchor = this.target;
+    const anchor = this.ownerElement;
     if (!anchor) return;
 
     const currentPath = window.location.pathname;

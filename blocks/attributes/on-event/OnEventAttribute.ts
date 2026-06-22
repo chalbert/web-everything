@@ -131,7 +131,7 @@ export function createOnEventAttribute(): ImplementedAttribute {
 
     connectedCallback(): void {
       const expression = this.value;
-      if (!expression || !this.target) return;
+      if (!expression || !this.ownerElement) return;
 
       // Extract event type from attribute name (on:click → click)
       this.#eventType = this.#getEventType();
@@ -142,13 +142,13 @@ export function createOnEventAttribute(): ImplementedAttribute {
 
       // Add event listener
       if (this.#boundHandler) {
-        this.target.addEventListener(this.#eventType, this.#boundHandler);
+        this.ownerElement.addEventListener(this.#eventType, this.#boundHandler);
       }
     }
 
     disconnectedCallback(): void {
-      if (this.#boundHandler && this.#eventType && this.target) {
-        this.target.removeEventListener(this.#eventType, this.#boundHandler);
+      if (this.#boundHandler && this.#eventType && this.ownerElement) {
+        this.ownerElement.removeEventListener(this.#eventType, this.#boundHandler);
       }
       this.#boundHandler = null;
       this.#eventType = null;
@@ -159,17 +159,17 @@ export function createOnEventAttribute(): ImplementedAttribute {
      * Get the parser registry from the injector chain.
      */
     #getRegistry(): CustomExpressionParserRegistry {
-      if (!this.target) {
-        throw new MissingParsersError(this.target!);
+      if (!this.ownerElement) {
+        throw new MissingParsersError(this.ownerElement!);
       }
 
       const registry = InjectorRoot.getProviderOf(
-        this.target,
+        this.ownerElement,
         'customExpressionParsers'
       ) as CustomExpressionParserRegistry | undefined;
 
       if (!registry || typeof registry.parse !== 'function') {
-        throw new MissingParsersError(this.target);
+        throw new MissingParsersError(this.ownerElement);
       }
 
       return registry;
@@ -197,7 +197,7 @@ export function createOnEventAttribute(): ImplementedAttribute {
       const queries = result.queries;
 
       this.#boundHandler = (event: Event) => {
-        if (!this.#parsedExpression || !this.target) return;
+        if (!this.#parsedExpression || !this.ownerElement) return;
 
         // Resolve queries into ResolvedValues
         const resolved = this.#resolveQueries(queries, event);
@@ -221,7 +221,7 @@ export function createOnEventAttribute(): ImplementedAttribute {
         contexts: {},
         magic: {
           event,
-          element: this.target,
+          element: this.ownerElement,
           target: event.target,
         },
       };
@@ -255,9 +255,9 @@ export function createOnEventAttribute(): ImplementedAttribute {
      * Query a single context by name from the injector chain.
      */
     #queryContext(contextName: string): unknown {
-      if (!this.target) return undefined;
+      if (!this.ownerElement) return undefined;
       return InjectorRoot.getProviderOf(
-        this.target,
+        this.ownerElement,
         `customContexts:${contextName}` as keyof import('@frontierui/plugs/webinjectors/InjectorRoot').ProviderTypeMap
       );
     }
