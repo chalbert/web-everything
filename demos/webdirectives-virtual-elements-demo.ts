@@ -80,7 +80,10 @@ class ControlIf extends CustomComment {
     const when = String(optionsOf(this).when ?? '');
     const show = Boolean(DATA[when]);
 
-    if (this.captured === null) {
+    // `== null` (not `=== null`): these comments are upgraded via prototype-swap, so the
+    // `captured = null` field initializer never runs — on first render `this.captured` is
+    // `undefined`, which `=== null` would miss, then `this.captured[0]` below would throw.
+    if (this.captured == null) {
       // First render: remember the authored region so we can re-attach it later.
       const region: ChildNode[] = [];
       let node = this.nextSibling;

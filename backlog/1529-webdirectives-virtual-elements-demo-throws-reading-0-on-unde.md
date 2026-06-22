@@ -1,7 +1,10 @@
 ---
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: "we:demos/webdirectives-virtual-elements-demo.ts"
 tags: []
 ---
 
