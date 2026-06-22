@@ -1,16 +1,16 @@
 ---
-kind: story
-size: 13
-status: open
-blockedBy: ["1437", "1484"]
+kind: epic
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: none
 tags: []
 ---
 
 # Realizing dockable block — recursive container + drag-to-dock + serialization + popout
 
-Realizing build of #1437: the dockable block implementing the dockable intent — recursive row/column/stack container rendered via CSS Grid/Flex, drag-to-dock edge/center zone hit-testing that splits a leaf into a new row/column (the tree-topology mutation that is dockable's irreducible vocabulary), layout-tree serialization (row to column to stack-of-tabs), and the optional popout: none|window dimension. Composes #1384's Pointer-Events substrate + moveBefore relocation. Block contract in WE, impl in FUI.
+Umbrella for realizing the dockable block (#1437). Sliced into #1510 (WE dockable block contract), #1511 (FUI recursive container render), #1512 (FUI drag-to-dock hit-testing + topology mutation), #1513 (FUI layout-tree serialize/restore), and #1514 (FUI `popout: window`). Composes #1384's Pointer-Events substrate + `moveBefore`; the #1486 layout-tree interchange Protocol materializes with #1513. *(Sliced 2026-06-22; this umbrella's story→epic conversion was completed by the `/split all` sweep — the slices had landed but the parent still carried `size: 13`.)*
 
 ## Pre-flight (batch-2026-06-21-1501-1356) — re-sized 8 → 13, needs /split (not batchable as one)
 
