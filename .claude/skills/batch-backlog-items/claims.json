@@ -5,7 +5,8 @@
     {
       "session": "batch-2026-06-21-1501-1356",
       "ids": [
-        "1501-fui-cross-origin-wrapper-serve-dev-process-second-origin-cor"
+        "1501-fui-cross-origin-wrapper-serve-dev-process-second-origin-cor",
+        "1495-native-first-gesture-recognizer-continuous-single-pointer-pa"
       ],
       "baseline": [
         ".claude/commands/resolve.md",
