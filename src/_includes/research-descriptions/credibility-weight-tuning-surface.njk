@@ -1,0 +1,91 @@
+<h3>The Question</h3>
+<p>
+    <a href="/backlog/1588-source-admission-credibility-weight-criteria-for-the-design-/">#1588</a> ruled the
+    design-knowledge corpus is governed by <strong>config-extends-platform-default</strong>: Web Everything ships a
+    frozen credibility <em>meta-schema</em> + a default <em>flavor</em> of weights (graduated by
+    <a href="/backlog/1591-author-the-design-knowledge-weighting-meta-schema-computatio/">#1591</a> into
+    <code>we:src/_data/credibilityWeighting.js</code>), and a <em>project</em> may retune the tier weights and add custom
+    source-kinds/modifiers. Decision <a href="/backlog/1592-technical-configurator-card-tunable-design-knowledge-tier-we/">#1592</a>
+    asks <strong>what surface — if any — performs that retune</strong>. The card's original premise (&ldquo;add it as a
+    Technical Configurator domain&rdquo;) is broken: the Configurator is a requirements&rarr;strategy-<em>selection</em>
+    ranker (<code>Domain = {axes[], strategies[]}</code> + <code>rankStrategies</code>), not a config editor — a tuning
+    card has no rival strategies and no required axes. This survey grounds the surface choice in established
+    &ldquo;config-extends-default editing&rdquo; UI patterns, and — decisively — in the actual consumer graph of the
+    override path.
+</p>
+
+<h3>Recommendation (prepared for #1592)</h3>
+<p>
+    <strong>Defer &amp; PARK (Fork 1)</strong> behind an un-park trigger: <em>a real consumer of the override path
+    exists</em> — either a non-WE project needs a retuned flavor, or the
+    <a href="/backlog/1586-design-knowledge-corpus-ledger-front-a-conformance-metric/">#1586</a> ledger actually starts
+    calling <code>computeCredibilityWeight</code> (with modifiers) instead of carrying hand-pasted literals. The #1588
+    ruling already gives the retune mechanism for free (write an <code>opts</code> object, pass it to the pure function);
+    no surface is owed until something consumes it. <strong>If/when built (Fork 2)</strong>: a dedicated weight-tuning
+    editor (<em>not</em> a Configurator domain), emitting the <strong>portable <code>opts</code> shape</strong> — a
+    plateau-internal store is dead on minimize-lock-in. Skeptic verdict on building now: <strong>REFUTED</strong>.
+</p>
+
+<h3>Load-bearing finding — the override path has no consumer (verified, not asserted)</h3>
+<p>
+    Grep over the whole repo (excluding <code>node_modules</code>): <code>computeCredibilityWeight()</code> — the function
+    whose <code>opts</code> argument <em>is</em> the project-override mechanism — has <strong>zero production call
+    sites</strong>; its only caller is its own test (<code>we:scripts/__tests__/credibility-weighting.test.mjs</code>).
+    The sole &ldquo;consumer&rdquo; of weights, the #1586 ledger <code>we:src/_data/designKnowledgeWatch.json</code>,
+    <strong>hardcodes weight literals</strong> (<code>0.75 / 0.75 / 0.9 / 1.0</code>) with <strong>no modifiers</strong>
+    and never calls the function — the weights were computed once, by hand, and pasted in. The <code>opts</code> override
+    surface (<code>sourceKinds / weightModifiers / floor / stalenessHorizonYears</code>) is passed by <strong>nobody</strong>.
+    So a tuning editor built now would produce overrides for a function with no callers, fed into a 4-row ledger the WE
+    maintainer hand-edits in a text editor. This fact dominates the surface-model fork.
+</p>
+
+<h3>Finding 1 — VS Code settings: layer over default, persist only the deltas</h3>
+<p>
+    The canonical &ldquo;differs-from-default&rdquo; UI: Default &rarr; User &rarr; Workspace layering, a
+    <code>@modified</code> filter + a gutter marker showing what diverges, and per-setting <em>Reset to default</em>.
+    Load-bearing: it persists <strong>only the deltas</strong> to a plain committed user settings file, never a copy of
+    the spine — so the artifact stays a readable override and the default can evolve underneath it.
+    (<a href="https://code.visualstudio.com/docs/configure/settings">docs</a>) This is <em>already</em> what
+    <code>computeCredibilityWeight(source, opts)</code> does: <code>opts</code> is the delta, the <code>*Default</code>
+    exports are the spine.
+</p>
+
+<h3>Finding 2 — RJSF / JSON Forms: frozen spine vs portable override, and an add-custom-entry slot</h3>
+<p>
+    react-jsonschema-form seeds the form from the schema's <code>default</code> values; the frozen spine lives in
+    <code>schema</code>, the user's overrides in the exportable <code>formData</code>, and
+    <code>additionalProperties</code> is the established <strong>&ldquo;add an entry beyond the fixed
+    vocabulary&rdquo;</strong> mechanism — exactly &ldquo;fixed named modifiers (override-only) + custom kinds
+    (add-slot).&rdquo; (<a href="https://rjsf-team.github.io/react-jsonschema-form/docs/usage/objects/">docs</a>)
+    JSON Forms draws a harder data/schema/uischema line, keeping the edited config a standalone portable object — the
+    choice when the override must be portable across stacks. WE's data already mirrors the two-region split
+    (<code>sourceKindDefault</code> / <code>weightModifierDefault</code> are extend-not-fork maps).
+</p>
+
+<h3>Finding 3 — Promptfoo is the closest analog; LaunchDarkly is the anti-pattern</h3>
+<p>
+    Promptfoo lets you attach <strong>weights</strong> to rubric criteria and add custom criteria, all in one
+    <strong>version-controlled config the project owns</strong> — tunable weights + extensible vocabulary + a portable
+    artifact, the end-to-end match.
+    (<a href="https://www.promptfoo.dev/docs/configuration/expected-outputs/model-graded/">docs</a>) Generic
+    weighted-scoring / MCDA tools confirm the dominant UX is a flat editable weight per named criterion with a live
+    computed rollup (not a wizard). LaunchDarkly is the <em>opposite</em> portability choice — per-key override-of-default
+    stored in a hosted store read via API, not a committed file — the anti-pattern for &ldquo;project owns the config.&rdquo;
+</p>
+
+<h3>Finding 4 — dedicated editor vs config framework is a real split (and &ldquo;no GUI&rdquo; is the honest baseline)</h3>
+<p>
+    A dedicated single-purpose editor wins a tighter domain UX (live recompute, sum-to affordances) at the cost of
+    rebuilding the diff/reset/add-entry plumbing; a framework (RJSF/JSON Forms) gives that plumbing for free but a generic
+    form UX awkward for &ldquo;tune numbers with live recompute.&rdquo; Promptfoo's answer — <em>no GUI at all, just a
+    hand-edited committed config</em> — is the lowest-effort point on that axis, and is the honest baseline for a
+    five-number override blob. This is why Fork 2's surface question only matters <em>if</em> Fork 1 flips to build.
+</p>
+
+<h3>Method note</h3>
+<p>
+    External patterns surveyed via web search (VS Code, RJSF, JSON Forms, Promptfoo, MCDA/AHP tooling, LaunchDarkly); the
+    consumer-graph claim was verified by grep over the WE tree, and a skeptic sub-agent was run in prep to attack both
+    recommended defaults — it surfaced the zero-consumer fact and returned REFUTED on building any surface now. Full
+    grounding, refs, and the recommended ruling in <code>we:reports/2026-06-22-credibility-weight-tuning-surface.md</code>.
+</p>

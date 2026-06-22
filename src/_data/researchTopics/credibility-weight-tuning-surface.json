@@ -1,0 +1,25 @@
+{
+  "id": "credibility-weight-tuning-surface",
+  "title": "Credibility-weight tuning surface — build a project-override editor now, or defer until a consumer exists?",
+  "status": "open",
+  "summary": "Prep research for decision #1592 (residual of #1588 Fork-3, under design-knowledge intake program #1585): #1588 ruled the design-knowledge corpus is config-extends-platform-default — WE ships a frozen credibility meta-schema + default flavor (graduated #1591 into we:src/_data/credibilityWeighting.js), and a PROJECT may retune the tier weights + add custom source-kinds/modifiers. #1592 asks what SURFACE performs that retune. The card's original premise (add it as a Technical Configurator domain) is broken: the Configurator is a requirements→strategy-SELECTION ranker (Domain={axes[],strategies[]} + rankStrategies), not a config editor — a tuning card has no rival strategies or required axes. The LOAD-BEARING finding, verified by grep over the whole repo: the override path has NO consumer today — computeCredibilityWeight() has zero production call sites (only its own test), the sole 'consumer' ledger designKnowledgeWatch.json hardcodes weight literals (0.75/0.75/0.9/1.0) with no modifiers and never calls the function, and the opts override surface (sourceKinds/weightModifiers/floor/stalenessHorizonYears) is passed by nobody. So a tuning editor built now would feed a function with no callers and a 4-row ledger the WE maintainer hand-edits. Prior art for config-extends-default editing (VS Code settings: layer over default, persist only deltas, reset-to-default, @modified filter; RJSF: schema=frozen spine, formData=portable override, additionalProperties=add-custom-entry slot; JSON Forms: portable data object; Promptfoo: tunable rubric weights + custom criteria in one version-controlled config — the closest analog; LaunchDarkly: the anti-pattern, overrides in a hosted store not a committed file) yields two lessons that pre-resolve the output question: persist DELTAS not a copy (which is literally what computeCredibilityWeight(source, opts) already does — opts is the delta, the *Default exports are the spine), and model frozen-spine vs open-extension as two regions (which the WE data already mirrors). A skeptic tasked to refute returned REFUTED on building any surface now (no consumer), so the dominant call is TIMING (build-now vs defer), with surface-model demoted to a conditional sub-fork. Recommended: defer & PARK behind 'a real consumer of the override path exists' (a non-WE project needs a retuned flavor, OR the ledger starts calling computeCredibilityWeight with modifiers); if/when built, a dedicated weight-tuning editor (not a Configurator domain), emitting the portable opts shape (a plateau-internal store is dead on minimize-lock-in). Full grounding in reports/2026-06-22-credibility-weight-tuning-surface.md.",
+  "dateOpened": "2026-06-22",
+  "lastReviewed": "2026-06-22",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webaudit",
+    "design-knowledge",
+    "credibility-weighting",
+    "config-extends-default",
+    "technical-configurator",
+    "plateau",
+    "devtools",
+    "json-schema-forms",
+    "minimize-lock-in",
+    "premature-generalization",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webaudit"
+}
