@@ -32,4 +32,10 @@ The real FUI tree shows blocks in four families, with all three mechanism refere
 - **#1542** — convert checkbox → `we-checkbox` + `we-checkbox-group` (persistent/B, #1456).
 - **#1543** — convert radio → `we-radio` + `we-radio-group` (persistent/B, #1456).
 
-Remaining catalog blocks (single inputs, stateful/interactive blocks) are carved as later waves on pickup; headless "can-do" behaviors stay CustomAttribute behaviors (out of scope). When the last wave lands, resolve the epic.
+**Wave 3** (we:reports/2026-06-22-1442-slice-wave-3.md) — the fork-free nav/structural factory blocks:
+
+- **#1615** — convert disclosure-nav → `we-disclosure-nav` (persistent/B).
+- **#1616** — convert sectioned-nav → `we-sectioned-nav` (persistent/B).
+- **#1617** — convert app-shell → `we-app-shell` (persistent/B).
+
+Remaining catalog blocks carry per-block forks and are deferred to decisions on pickup, not flat conversion: **pan-zoom-surface** (B-vs-C shadow #1349-S2); **is-a/can-do** blocks (navigation, master-detail, marquee-select, edit-in-place) needing the #1457 call; **temporal** (A-vs-B unconfirmed). Headless "can-do" behaviors stay CustomAttribute behaviors (out of scope). When the last wave lands, resolve the epic.
