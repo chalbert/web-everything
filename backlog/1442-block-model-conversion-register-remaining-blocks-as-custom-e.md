@@ -1,7 +1,8 @@
 ---
 kind: epic
 status: open
-blockedBy: ["1381"]
+blockedBy: []
+childlessReason: program
 dateOpened: "2026-06-21"
 locus: frontierui
 relatedProject: webcomponents
