@@ -6,7 +6,7 @@ dateOpened: "2026-06-22"
 dateStarted: "2026-06-22"
 preparedDate: "2026-06-22"
 relatedReport: reports/2026-06-22-trainable-judge-architecture.md
-blockedBy: ["1565"]
+blockedBy: []
 tags: [judge, trainable, explorer]
 ---
 

@@ -170,6 +170,53 @@ display (its own site + demos, FUI branding).
 #705 · #732 (escape SDK) · #765 (mode-C relaxation) · #788 (seed transport) · #791 (reference-vs-impl
 partition) · #809 (workbench locus) · #932 (website≠standard; consumer may run WE runtimes in-document).
 
+### Dev-tool placement: the consumer test {#devtools-placement}
+
+**Where does a dev/test tool live across the constellation?** A user ruling — *dev-tools belong in
+Plateau, not FUI* — does **not** mean "move every tool." It **refines** [constellation-placement](#constellation-placement)
+into **one positive test**, the *consumer* of the surface (the same axis as
+[conformance-verifier-vs-subject](#we-fui-embed-boundary) / #1467):
+
+> **A developer-operated surface a human runs — to inspect / switch / explore / configure an
+> implementation, against your OWN build — is a developer *product* → Plateau.**
+
+The other two buckets are **pre-existing settled law, unchanged** (cited, not "moved"):
+
+1. **Reads an implementation's observable output as DATA** (verifier / golden-vector / conformance
+   trace / repo-spec linter) → **stays WE.** The standard owns its conformance machinery — the
+   WPT/Test262 archetype. Per #1467 and rule 1 of [constellation-placement](#constellation-placement).
+   *Allowed in WE despite #1282 (zero-impl): a verifier implements no standard, it judges them.*
+2. **Build-time implementation transform / reference-impl generator** (codegen, CSS lowering, bundler
+   plugins, serve-time impl) → **stays FUI.** Per impl-is-not-a-standard (#020/#291).
+3. **Operator-facing surface run against your own build** (workbench chrome¹, spec/dev-panel,
+   autonomous-explorer CLI chrome, configurators, dev-browser, mock-server) → **Plateau.**
+
+**Two carve-outs the blanket reading gets wrong** (both ratified under #1565):
+
+- ¹ **The block-explorer / workbench stays FUI** — it is *impl, not a tool*. It ships as an embeddable
+  `<iframe>` distribution showing *how FUI is consumed* on third-party / customer sites (chrome + block
+  intra-frame, **no postMessage protocol**). Routing it through Plateau re-introduces the cross-origin
+  boundary [#809](#we-fui-embed-boundary) (rule 5) dissolved — same-origin only holds *on plateau.app*.
+  The distinguishing **third-party-embed test**: *ships embedded on customer sites = FUI distribution;
+  runs against your own build = Plateau dev-tool.*
+- **A conformance ENGINE splits from its bindings.** A generic vector runner + *pure* trace judge +
+  binding interface is the standard's **implementer-agnostic verifier → WE** (it must test *any* WE
+  implementer, so it cannot belong to one). The per-component **binding** that drives a concrete
+  component is the **subject adapter → FUI** (each implementer ships its own). This is #1565's split of
+  the autonomous explorer: engine → WE, FUI bindings → FUI, vision (Layer-3) → Plateau ([#475](#no-leakage-client)),
+  product CLI chrome → Plateau. Distinct from [reproduction-conformance](#reproduction-conformance)'s
+  *deterministic-diff* engine (#1225), which is FUI (it diffs FUI's own reproductions, not a
+  cross-implementer conformance suite).
+
+**The wholesale "every developer tool → Plateau" reading is rejected (broken):** it drags the #1467
+verifiers and the conformance engine out of the standard layer, contradicting #1467 and
+[constellation-placement](#constellation-placement) rule 1.
+
+**Lineage:** #1565 (ratified 2026-06-22; research topic `/research/devtool-placement-constellation/`).
+Composes [constellation-placement](#constellation-placement), [we-fui-embed-boundary](#we-fui-embed-boundary)
+(#809), [no-leakage-client](#no-leakage-client) (#475), [reproduction-conformance](#reproduction-conformance)
+(#1225), and `project_conformance_verifier_vs_subject` (#1467). Unblocks #1553.
+
 ### Is it a Project / Protocol — or just an intent? {#project-protocol-bar}
 
 **Not every gap is a Project or a Protocol.**
