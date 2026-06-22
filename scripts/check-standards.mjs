@@ -731,18 +731,20 @@ for (const item of backlog) {
 // A program's title is a short bare NAME, not a one-line pitch (docs/agent/backlog-workflow.md →
 // "Naming — a program's title is a short bare name, no subtitle"). A program (an epic with `ongoing:
 // true` or `childlessReason: program`) is cited for the life of the constellation, so its H1 must read
-// as a name — no `—`/`–`/`:` subtitle clause. The elaboration (lens shape, front-A/B mechanics, the
-// "cards only" discipline) belongs in the body, not the title. (User directive 2026-06-21.)
+// as a name — no `—`/`–`/`:` subtitle clause AND no `(parenthetical)` aside. The elaboration (lens shape,
+// front-A/B mechanics, the "cards only" discipline) belongs in the body, not the title. (User directive
+// 2026-06-21, extended 2026-06-22 to parentheticals.)
 // Match a separator FOLLOWED by a space — `Name: clause`, `Name — clause`, `Name – clause` — regardless
 // of a leading space, so the unspaced `conversion: register …` form is caught too (the prior `\s+[—–:]\s+`
 // required spaces on BOTH sides and silently missed it; #1442). `—`/`–` are em/en dashes only, so a
-// hyphenated word (`Block-model`, `Self-Driven`) never trips it.
+// hyphenated word (`Block-model`, `Self-Driven`) never trips it. Also flag any `(` — a bare name carries
+// no parenthetical aside; the domain belongs IN the name (`Loan-origination exercise app`), not after it.
 for (const item of backlog) {
   if (item.kind !== 'epic') continue;
   if (!(item.ongoing === true || item.childlessReason === 'program')) continue;
-  const m = (item.title || '').match(/[—–:]\s/);
+  const m = (item.title || '').match(/[—–:]\s|\(/);
   if (m)
-    err(`Backlog item "${item.id}" is a program but its title carries a subtitle ("${m[0].trim()}" separator) — a program's H1 must be a short bare name. Fold the trailing clause into the opening paragraph and keep the title a name (docs/agent/backlog-workflow.md → Programs → Naming).`,
+    err(`Backlog item "${item.id}" is a program but its title carries a subtitle/aside ("${m[0].trim()}") — a program's H1 must be a short bare name (no \`—\`/\`–\`/\`:\` clause, no \`(parenthetical)\`). Fold the elaboration into the opening paragraph and keep the title a name (docs/agent/backlog-workflow.md → Programs → Naming).`,
         { kind: 'program-title-subtitle', file: `backlog/${item.id}.md` });
 }
 

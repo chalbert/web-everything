@@ -9,7 +9,7 @@ tags: [backlog, decisions, prepared-fork, definition-of-ready, readiness, resear
 relatedReport: reports/2026-06-11-decision-readiness-review.md
 ---
 
-# Prepare the open decisions to the prepared-fork shape (rollout)
+# Prepared-fork rollout
 
 Roll the prepared-fork Definition-of-Ready out across all open `type: decision`
 items so decision-mode selection draws from prepared forks. Driven by the
