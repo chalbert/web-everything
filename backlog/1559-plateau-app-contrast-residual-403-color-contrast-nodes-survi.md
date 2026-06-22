@@ -1,10 +1,13 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 locus: plateau-app
 parent: "1254"
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: none
 relatedReport: reports/2026-06-22-plateau-app-explorer-a11y-audit-rerun.md
 tags: [plateau, a11y, color-contrast, fui-migration]
 ---
@@ -47,3 +50,30 @@ Full diff + methodology: [we:reports/2026-06-22-plateau-app-explorer-a11y-audit-
 - [ ] Fix is at the theme/token layer, not per-element overrides.
 
 Relates to #1254 (FUI dogfood epic), #1527 (the re-run that found this), #1530 (CLI coverage gap).
+
+## Progress (resolved 2026-06-22, batch-2026-06-22-1556-1557-1559)
+
+Drove logged-in color-contrast **403 → 15 nodes** (~96%; live axe re-run over the running :4000, 18 routes,
+SPA-navigated after login) and cleared **aria-required-children to 0**. Triaged with a live axe probe (not
+the screenshots) to get the actual fg/bg/ratio per node, then fixed at the theme/token layer:
+
+- **Token corrections** (`plateau:src/styles/tokens.json` → `gen:tokens` → `plateau:src/styles/theme.css`):
+  `text-muted` #9698ad→#686a82 (2.65→~5:1 on light), `primary` #6d5efc→#6453f4 (4.21→~4.8; also lifts
+  white-on-primary fills; gradient start matched), `error` #ef4444→#c81e1e (3.76→4.85 on white), and a new
+  `accent-text` #0a6d7c for accent-as-text (the bright cyan #16d3e6 eyebrow was **1.7:1**).
+- **Wrong-var bug:** `plateau:src/platform-manager/governance.css` referenced `var(--text-muted, #64748b)`
+  — plateau's token is `--color-text-muted`, so it always fell back to the inaccessible #64748b. Repointed
+  to `--color-text-secondary` (7.6:1).
+- **Hardcoded greys → tokens:** compatibility-map (`plateau:src/compatibility-map/dashboard.css`) +
+  technical-configurator / platform-map / impact-analysis / contract-drift #8a94a6 → `--color-text-secondary`;
+  `.tone-warn`/`.tone-none` darkened; `.dsc-preview-btn`/CTA #3b82f6 fallback → #6453f4;
+  `.landing-eyebrow`→accent-text, `.landing-link` fallback→#6453f4, logged-off breadcrumb opacity 0.6→0.85.
+- **aria:** `role="tablist"` in `plateau:src/profiles/profiles-page.ts` + `plateau:src/control-plane/dashboard.ts`
+  held `<button>` children without `role="tab"` — added `role="tab"` + `aria-selected`.
+
+All 263 plateau-app unit tests pass. The **15 residual** nodes don't yield to a token correction (a dark
+review sub-app with a token-vocab collision, persona-accent data, a computed grey, a marginal error-on-tint)
+— each needs a distinct non-mechanical fix, captured as **#1575** (note: a blanket `#9aa3bd` swap on the dark
+review panels was tried and reverted — it regresses the light-surface muted text in the same files). Both
+acceptance targets met: materially reduced & well under the 147 ideal; aria cleared; fixes at the theme/token
+layer.
