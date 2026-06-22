@@ -83,7 +83,10 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    stays types-only (rule 3); the source arrow is WE→FUI, never inverts. **The one runtime-ish thing
    that stays WE is conformance *tooling* a WE-side `check.ts` gate consumes** (e.g.
    `we:capability-manifest/check.ts` + its `assert*`) — it *checks* conformance, it does not *deliver* a
-   capability, so it is interface/conformance, not implementation. **Interim state (honest):** a set of
+   capability, so it is interface/conformance, not implementation. **(#1566 bounds this: the carve-out
+   covers tooling that checks WE's *own declarative artifacts* — manifests, golden-corpus
+   completeness/schema-validity. A verifier that judges a running *implementation's* output is executable
+   + neutral → Plateau, not WE; see [devtools-placement](#devtools-placement).)** **Interim state (honest):** a set of
    WE-resident logic reference runtimes predate this rule and currently **violate** it —
    `we:webpolicy/enforcement.ts`/`proof.ts` (consumed by `we:demos/webpolicy-conformance-demo.ts` via a
    build-time local import) and the ~10 subsystems #1078 covered. They are **tracked relocation debt**,
@@ -180,12 +183,28 @@ into **one positive test**, the *consumer* of the surface (the same axis as
 > **A developer-operated surface a human runs — to inspect / switch / explore / configure an
 > implementation, against your OWN build — is a developer *product* → Plateau.**
 
-The other two buckets are **pre-existing settled law, unchanged** (cited, not "moved"):
+The other buckets:
 
-1. **Reads an implementation's observable output as DATA** (verifier / golden-vector / conformance
-   trace / repo-spec linter) → **stays WE.** The standard owns its conformance machinery — the
-   WPT/Test262 archetype. Per #1467 and rule 1 of [constellation-placement](#constellation-placement).
-   *Allowed in WE despite #1282 (zero-impl): a verifier implements no standard, it judges them.*
+1. **Conformance — split by *what runs* (amended 2026-06-22, #1566).** The earlier "reads output as
+   DATA → stays WE (a verifier implements no standard)" reading is **overturned**: judging is
+   executable, and WE holds **zero executable** (#1282). Split three ways:
+   - **The conformance *contract* — the verifier *interface*, the vector/golden **corpus**, and the
+     golden/vector **schema** (declarative data) → stays WE.** The standard owns the *definition* of
+     conformance — the WPT/Test262 expected-files archetype. Per #1467/#817 and rule 1 of
+     [constellation-placement](#constellation-placement).
+   - **The verifier *implementation* (the code that judges a running implementation's output) and the
+     conformance *run* → Plateau** (#1566). **Neutrality** — the reason the verifier cannot live in FUI
+     (the contestant) — is preserved by **Plateau** (a non-implementer product layer; the home of the
+     #427 conformance dashboard / #1577 explorer product), not by WE. The implementation under test is
+     reached through a per-target **binding** its owner ships (FUI is one target among many).
+   - **Carve-out (unchanged):** conformance tooling a WE-side `check.ts` gate consumes to check **WE's
+     own declarative artifacts** (e.g. `we:capability-manifest/check.ts` + `assert*` over the manifest;
+     golden-corpus completeness/schema-validity) **stays WE** — it checks WE-owned *data*, needs no
+     external implementation, delivers no capability. #1566 moves only the verifier of an
+     *implementation's runtime output*, which WE cannot run once the impl is deleted.
+   - **Load-bearing constraint:** the conformance *rules* must be expressible declaratively in WE (the
+     interface + schema) so Plateau's verifier is a faithful *interpreter*, not the *author* of "what
+     conformance means."
 2. **Build-time implementation transform / reference-impl generator** (codegen, CSS lowering, bundler
    plugins, serve-time impl) → **stays FUI.** Per impl-is-not-a-standard (#020/#291).
 3. **Operator-facing surface run against your own build** (workbench chrome¹, spec/dev-panel,
@@ -199,23 +218,30 @@ The other two buckets are **pre-existing settled law, unchanged** (cited, not "m
   boundary [#809](#we-fui-embed-boundary) (rule 5) dissolved — same-origin only holds *on plateau.app*.
   The distinguishing **third-party-embed test**: *ships embedded on customer sites = FUI distribution;
   runs against your own build = Plateau dev-tool.*
-- **A conformance ENGINE splits from its bindings.** A generic vector runner + *pure* trace judge +
-  binding interface is the standard's **implementer-agnostic verifier → WE** (it must test *any* WE
-  implementer, so it cannot belong to one). The per-component **binding** that drives a concrete
-  component is the **subject adapter → FUI** (each implementer ships its own). This is #1565's split of
-  the autonomous explorer: engine → WE, FUI bindings → FUI, vision (Layer-3) → Plateau ([#475](#no-leakage-client)),
-  product CLI chrome → Plateau. Distinct from [reproduction-conformance](#reproduction-conformance)'s
-  *deterministic-diff* engine (#1225), which is FUI (it diffs FUI's own reproductions, not a
-  cross-implementer conformance suite).
+- **A conformance ENGINE splits into contract / impl / binding / product (amended 2026-06-22, #1566).**
+  The generic vector-runner + trace-judge **interface** + the vector corpus is the standard's
+  implementer-agnostic **contract → WE** (it must define how *any* WE implementer is tested). The runner +
+  judge **implementation** (the executable engine) → **Plateau** (#1566 — neutral, non-implementer; the
+  home of the #427 dashboard / #1577 explorer product). The per-target **binding** that drives a concrete
+  implementation is the **subject adapter → the implementer** (FUI ships its own; a customer ships theirs).
+  Layer-3 vision → Plateau ([#475](#no-leakage-client)). This **re-points #1565's** autonomous-explorer
+  split: engine **interface** → WE, engine **impl** + product CLI chrome → Plateau (#1576/#1577), bindings →
+  each implementer. Distinct from [reproduction-conformance](#reproduction-conformance)'s *deterministic-diff*
+  engine (#1225), which is FUI (it diffs FUI's own reproductions, not a cross-implementer conformance suite).
 
-**The wholesale "every developer tool → Plateau" reading is rejected (broken):** it drags the #1467
-verifiers and the conformance engine out of the standard layer, contradicting #1467 and
-[constellation-placement](#constellation-placement) rule 1.
+**The "every developer tool → Plateau" reading is *mostly* right, with one WE residual:** the conformance
+**contract** — the verifier *interface* + the vector/golden corpus + schema (declarative data) — stays in
+the standard layer (#1467/#817, [constellation-placement](#constellation-placement) rule 1). What moves to
+Plateau is the verifier **implementation** + the **run** (#1566); what stays FUI is the per-target
+**binding**. The only thing the blanket reading still gets wrong is dragging the *contract/vectors* out of WE.
 
-**Lineage:** #1565 (ratified 2026-06-22; research topic `/research/devtool-placement-constellation/`).
-Composes [constellation-placement](#constellation-placement), [we-fui-embed-boundary](#we-fui-embed-boundary)
+**Lineage:** #1565 (ratified 2026-06-22; research topic `/research/devtool-placement-constellation/`);
+**amended by #1566** (ratified 2026-06-22) — verifier *implementation* + conformance *run* move WE→Plateau;
+WE keeps the declarative *contract* (interface + vectors + schema) only; this overturns the prior "verifier
+stays WE" carve-out and re-points the engine split above. Composes
+[constellation-placement](#constellation-placement), [we-fui-embed-boundary](#we-fui-embed-boundary)
 (#809), [no-leakage-client](#no-leakage-client) (#475), [reproduction-conformance](#reproduction-conformance)
-(#1225), and `project_conformance_verifier_vs_subject` (#1467). Unblocks #1553.
+(#1225), and `project_conformance_verifier_vs_subject` (#1467, amended). Unblocks #1553.
 
 ### Is it a Project / Protocol — or just an intent? {#project-protocol-bar}
 

@@ -23,6 +23,20 @@ directly. Corrected recommended default is now **(b)** — the renderer + backen
 are impl → FUI; WE keeps the contract types + vector corpus + the assertion-semantics verifier.
 **Blocks #1355 / #1356** (size 5 each, both `blockedBy: [1467]`).
 
+## Amended 2026-06-22 by #1566 — the *verifier implementation* leaves WE too
+
+This ruling kept **"WE keeps … the assertion-semantics verifier"** (the golden-reader impl). #1566
+(ratified 2026-06-22) **overturns that part**: WE holds only the **declarative contract** — the verifier
+*interface* + the vector/golden **corpus** + the golden **schema**. The verifier **implementation** and the
+conformance **run** move to **Plateau** (a neutral, non-implementer product layer; the original
+cross-impl-neutrality reason the verifier could not be FUI is satisfied by Plateau, not by WE). FUI is one
+*target* via a binding it owns. The rest of #1467 (renderer + backend semantics + coordinator → FUI; WE
+keeps contract types + vectors) **stands**. Codified at
+[we:docs/agent/platform-decisions.md#devtools-placement](../docs/agent/platform-decisions.md#devtools-placement) +
+`#constellation-placement` (both amended). Unchanged carve-out: WE conformance *tooling* a WE-side
+`we:check.ts` gate runs over WE's **own declarative artifacts** stays WE; only the verifier of an
+*implementation's runtime output* moves.
+
 ## The axis — is the *renderer* a WE conformance reference, or a runnable backend that belongs in FUI?
 
 #1355/#1356 (slices of epic [#1353]) were scoped on the **#1326 pattern**: build the FUI demo, swap the
