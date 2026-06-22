@@ -1046,6 +1046,38 @@ ARIA-APG lens). Realizing builds: #1458 (the `--tone-*` webtheme palette + this 
 `severity`→`tone` rename + synonym normalization sweep). Second application of
 [open-numbered-variants](#open-numbered-variants); composes [native-first-baseline](#native-first-baseline).
 
+### Curated-corpus credibility weighting: two-stage admission⟂weight, GRADE-shaped, config-extends-default {#credibility-weighting}
+
+When WE curates a corpus of external sources and must rank them by authority (the design-knowledge
+corpus is the first; the shape generalizes to any admitted-and-weighted source set), settle it as
+**three orthogonal axes**, never a frozen source list (open-design: custom/project sources must
+coexist). **(1) Admission ⟂ weight = two-stage.** A permissive **provenance/content admission floor**
+(identifiable + traceable-to-origin + on-topic — **not** a quality bar; "authoritative" means
+*attributable*, not *credible*) gates in/out; a **separate scalar weight** is computed only for
+admitted sources. A low-credibility custom source is *admitted-but-downweighted*, never excluded —
+collapsing admission into a weight-≥-threshold test breaks the open posture. **(2) Weight = GRADE-
+shaped.** A **baseline tier from source-`kind`** + a **small fixed, named, *optional* set** of up/down
+modifiers; each *applied* modifier records a **rationale + attribution** (only staleness is
+deterministic). Flat-tier-by-type is the *degenerate config* (no modifiers), not a rival; a free
+per-source number is rejected (un-auditable). The named-vocabulary + mandatory-rationale constraint is
+exactly what keeps it auditable rather than re-inventing the free number. **(3) Governance =
+[config-extends-platform-default](#config-extends-platform-default).** WE ships the **meta-schema**
+(kind enum + modifier vocabulary + computation function) **+ a default flavor**; a project extends
+weights / adds kinds & modifiers. **Freeze the meta-schema as the comparable spine**; **cross-project
+*absolute* weight comparability is a non-goal** (intra-corpus *ordering* is the only contract — revisit
+only if a cross-corpus consumer lands); add a **nonzero floor** on admitted sources so weight-to-zero
+can't covertly re-exclude (mirror of axis 1's guarantee). Specializes
+[surface-contract-not-computation](#surface-contract-not-computation) and
+[config-extends-platform-default](#config-extends-platform-default); internal precedent is
+`benchmarkCorpus.json`'s `selectionCriteria`+`inclusionRule` multi-criteria gate (binary inclusion for
+coverage, here extended with a weight axis for credibility).
+
+**Lineage:** #1588 (ratified 2026-06-22; child of the #1585 design-knowledge intake program; prep
+survey `reports/2026-06-22-design-knowledge-source-admission-credibility.md`). Graduating build: #1591
+(meta-schema + computation function + default flavor); tunable-weights Configurator: #1592; consumers
+#1586 (ledger weight column) #1587 (rubric provenance) #1589 (distillation). All three forks survived a
+refute-only skeptic pass.
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)

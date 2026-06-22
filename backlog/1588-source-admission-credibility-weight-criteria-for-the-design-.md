@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "1585"
-status: open
+status: resolved
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#credibility-weighting"
 preparedDate: "2026-06-22"
 relatedProject: webaudit
 relatedReport: reports/2026-06-22-design-knowledge-source-admission-credibility.md
@@ -12,15 +15,13 @@ tags: []
 
 # Source admission + credibility-weight criteria for the design-knowledge corpus
 
-The open fork at the heart of the design-knowledge intake program ([#1585](1585-design-knowledge-intake-program-a-standing-watch-that-distil.md)):
+**RESOLVED 2026-06-22** (ruling below, codified at [#credibility-weighting](../docs/agent/platform-decisions.md#credibility-weighting)).
+The core fork of the design-knowledge intake program ([#1585](1585-design-knowledge-intake-program-a-standing-watch-that-distil.md)):
 standardize the **meta-criteria** by which the curated corpus admits a source and computes its `credibilityWeight`,
-so durable peer-reviewed usability research outranks a trend blog — **not** a frozen source list (the open-design
-posture: custom/project sources must coexist). No criteria exist yet; the three forks below are grounded in a
-prior-art survey published as the [design-knowledge source-admission & credibility](/research/design-knowledge-source-admission-credibility/)
-research topic (session report linked via `relatedReport`). Each names a recommended default in **bold**, and each
-carries a `Skeptic:` verdict from the prep attack. Feeds the [#1586](1586-design-knowledge-corpus-ledger-front-a-conformance-metric.md)
-ledger's `credibilityWeight` column and the [#1587](1587-extend-the-1034-design-critique-rubric-to-carry-source-prove.md)
-rubric-provenance weighting; unblocks the [#1589](1589-distillation-pipeline-curated-weighted-sources-into-codified.md) distillation pipeline.
+so durable peer-reviewed research outranks a trend blog — **not** a frozen source list (open-design: custom/project
+sources must coexist). Three forks (grounded in a [prior-art survey](/research/design-knowledge-source-admission-credibility/)),
+all ratified at their bold defaults. Graduating build [#1591](1591-author-the-design-knowledge-weighting-meta-schema-computatio.md);
+feeds the #1586 ledger weight column + #1587 rubric provenance; unblocks #1589 distillation.
 
 The concern decomposes into three orthogonal axes the survey kept independent: **admission** (the binary in/out gate),
 **weight** (the scalar credibility a source carries once admitted), and **governance** (mandate vs. project-extensible).
@@ -125,6 +126,31 @@ locked table and the free-for-all are *configurations* of one registry, not riva
 folded in: **intra-corpus *ordering* is the only contract** (cross-project absolute-weight comparison is a non-goal —
 say so); **freeze the meta-schema** as the comparable structural spine; **add a nonzero floor** on admitted sources so
 weight-to-zero can't covertly re-exclude.
+
+## Ruling (ratified 2026-06-22)
+
+All three forks ratified at their **bold defaults**: Fork 1 = two-stage admission ⟂ weight;
+Fork 2 = GRADE-shaped (baseline tier + fixed named optional modifiers, each with recorded
+rationale + attribution; only staleness deterministic); Fork 3 = config-extends-platform-default
+(meta-schema frozen as the comparable spine, nonzero floor on admitted sources, cross-project
+*absolute* comparability a non-goal). A throwaway skeptic (prompted only to refute) attacked all
+three and **none landed a fork reversal** — the rejected arms are each forced-out (one-stage breaks
+the open posture; hardcoding is closed) or strictly dominated ((a) contains flat-by-type as its
+degenerate config). Two red-team tightenings folded in, neither a branch change:
+
+- **Fork 1 — admission floor is provenance, not quality.** Read "identifiable authoritative
+  author/body" as *identifiable + attributable + traceable-to-origin*, **not** a credibility bar. A
+  self-published practitioner blog is admissible (identifiable author, on-topic, traceable); its low
+  credibility is expressed by the Fork-2 *weight*, never by exclusion. If "authoritative" is read as
+  a quality gate, the weight smuggles back into stage 1 and two-stage collapses into one-stage.
+- **Fork 3 — the "absolute comparability is a non-goal" carries a revisit trigger.** Intra-corpus
+  *ordering* is the only contract *today* (one corpus). **Un-park trigger:** when a cross-corpus
+  consumer lands (e.g. #1589 distillation pulling from multiple corpora, or a constellation-wide
+  rubric), revisit whether a normalized/absolute weight semantics is needed — do not treat the
+  non-goal as permanently closed.
+
+The graduated build authors the meta-schema (kind enum + modifier vocabulary + weight-computation
+function) + the default flavor; the tunable tier-weight Configurator UI is its own card.
 
 ## Context
 
