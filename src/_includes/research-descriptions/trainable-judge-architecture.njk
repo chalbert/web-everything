@@ -1,0 +1,86 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  The autonomous UI explorer's Layer-3 <strong>judge</strong>
+  (<code>fui:tools/explorer/oracles/advisoryJudge.ts</code> + the on-device Tier-2 Florence-2 VLM in
+  <code>tier2VlmJudgeModel.ts</code>) is <strong>frozen and describe-only</strong> — it tags/describes a
+  state but cannot diagnose a defect, and nothing it sees updates it. Epic
+  <a href="/backlog/1552/">#1552</a> makes it <em>trainable</em>: a human's feedback on a real run
+  becomes labeled signal. <a href="/backlog/1553/">#1553</a> settles the shape before any build —
+  <strong>what the feedback signal is, how a label is anchored, the learning mechanism, and where it
+  lives in the constellation</strong>. The judge stays advisory and <strong>never gates</strong>
+  (<a href="/backlog/1172/">#1172</a>).
+</p>
+
+<h2>Recommendation (at a glance)</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>Capture both signal types.</strong> Verdict-on-a-candidate labels (real / false-positive /
+    wrong-severity) only move <em>precision</em>; every human-in-the-loop recall result shows a
+    <strong>missed-issue channel</strong> (the human authors a finding the model didn't flag) is the
+    <em>only</em> way to grow recall. Verdict-only is a strict subset and silently caps the perceptual
+    ceiling — so support both.</li>
+  <li><strong>Anchor labels composite-ly.</strong> A label must survive a re-run to be scored for eval.
+    A CSS/XPath selector is the worst anchor (~73% of locator failures are drift); a pure bounding box
+    drifts under reflow; a state-id alone can't localize. Default: the <a href="/backlog/1168/">#1168</a>
+    DOM-signature <code>stateId</code> + a unit-normalized <strong>bounding box</strong> (primary) +
+    accessibility-role/text + DOM-path as <strong>redundant re-match signals</strong>.</li>
+  <li><strong>Learn in a sequence, not a permanent pick.</strong> Exemplar/few-shot retrieval
+    <em>now</em> (zero training, on-device, and the labels <em>are</em> the seed dataset) → a
+    <strong>linear/logistic probe on cached embeddings</strong> at ~<em>tens</em> of labels (it beats
+    few-shot at that scale, trains in seconds on CPU, stays on-device) → full VLM fine-tune
+    <strong>parked</strong> past ~1k labels (server-side; breaks the ~2&nbsp;GB on-device budget).</li>
+  <li><strong>Keep no-leakage.</strong> <a href="/backlog/475/">#475</a> is categorical: vision
+    <em>judgment</em> is a Plateau service, FUI consumes only outputs. The trainable layer (store +
+    retrieval + training) extends that Plateau/WE service (<a href="/backlog/1073/">#1073</a>); the FUI
+    <code>improve-explorer</code> loop only <strong>captures</strong> labels and consumes candidates
+    through the existing <code>JudgeModel</code> seam.</li>
+</ul>
+
+<h2>How the survey reshaped the forks</h2>
+<p>
+  The item opened with "two coupled forks." The prior-art survey reshaped that into three — the expected
+  outcome of a real survey (a pass that only confirms the framing was too shallow):
+</p>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>Signal type dissolved to a support-both default</strong> — verdict-only is <em>broken for
+    recall</em>, not a coherent competing end-state.</li>
+  <li><strong>The anchor was promoted from a residual to Fork 1</strong> — it is load-bearing for the
+    epic's success metric ("a trained judge beats the frozen one on <em>held-out</em> feedback" requires
+    replaying labels against re-runs).</li>
+  <li><strong>The constellation boundary was promoted to Fork 3</strong> — #475 is categorical, but
+    FUI-side capture + a thin exemplar store is a genuine temptation to leak, so the boundary is
+    re-confirmed for this case with a named excluded branch.</li>
+  <li><strong>The learning escalation moved earlier</strong> — a linear probe beating few-shot at
+    <em>tens</em> of labels (not thousands) makes the classifier rung near-term and on-device, so
+    "exemplar-first" is really "exemplar-first, classifier-soon".</li>
+</ul>
+
+<h2>The prior art (load-bearing sources)</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>VLM-as-judge ceiling</strong> — WebVoyager (arXiv 2401.13919): a screenshot+goal judge
+    reaches human-level agreement only on a <em>closed binary</em> call with full visual context;
+    "broken + how severe" won't inherit that for free.</li>
+  <li><strong>Reliability = calibration</strong> — the LLM-as-a-Judge survey (2411.15594) and the bias
+    catalog (2410.02736): judge errors are systematic/biased, so human labels are a <em>learnable</em>
+    correction signal — the trainable loop is exactly that calibration mechanism.</li>
+  <li><strong>Few-shot plateaus, linear probes win early</strong> — ICL-vs-fine-tune (2305.16938);
+    logistic-regression probe (2408.03414) and CLIP probes (2505.10664): a linear head on embeddings
+    beats in-context prompting at the tens-of-examples scale, cheaper + explainable + CPU-trainable.</li>
+  <li><strong>Fine-tune needs scale</strong> — Bucher &amp; Martini 2024: full fine-tune pays off only
+    past ~1k labels.</li>
+  <li><strong>Recall needs a missed channel</strong> — active defect discovery (IISE 2024) and the
+    missing-annotation loop (Sensors 2025): the human must author the missed finding.</li>
+  <li><strong>Anchor: boxes &gt; selectors</strong> — Ferret-UI (2404.05719), ScreenAI/WebUI/Rico
+    grounding, and self-healing-locator work (~73% of Selenium failures are locator drift).</li>
+  <li><strong>On-device limits</strong> — Transformers.js v3 (WebGPU): ~2&nbsp;GB quantized VLM is the
+    on-device <em>inference</em> ceiling; a linear head on cached embeddings still trains locally.</li>
+</ul>
+
+<h2>Open residuals (build-time, not blocking the ratification)</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li>The exact capture-handoff seam in Fork 3 — does the exemplar store cross as data, or does FUI POST
+    labels to a Plateau endpoint?</li>
+  <li>The concrete eval metric + the held-out split that decides the exemplar→classifier graduation.</li>
+  <li>Whether the bbox primary key needs a perceptual-hash tie-breaker for states with repeated regions.</li>
+</ul>
+{% endraw %}

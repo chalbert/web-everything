@@ -1,0 +1,24 @@
+{
+  "id": "trainable-judge-architecture",
+  "title": "Trainable explorer judge — feedback signal, label anchor, learning mechanism, constellation boundary",
+  "status": "open",
+  "summary": "Grounds #1553 (child of epic #1552): how the autonomous UI explorer's frozen, describe-only Layer-3 judge (advisoryJudge.ts + Tier-2 Florence-2) becomes TRAINABLE — human feedback on real runs becomes labeled signal and the judge improves its subjective/perceptual calls without anyone hand-coding a new oracle. The prior-art survey (WebVoyager VLM-as-judge; the LLM-judge calibration/bias literature; ICL-vs-fine-tune; logistic/linear probes on (V)LM embeddings; human-in-the-loop active defect discovery; Ferret-UI/ScreenAI/Rico UI grounding; self-healing locators; Transformers.js WebGPU on-device limits) reshaped the item's original 'two coupled forks' into three. (1) SIGNAL TYPE is NOT a fork — verdict-only labels can only improve precision/severity and are categorically unable to grow RECALL (every HITL recall paper requires a 'human authors a missed finding' channel), so support BOTH (verdict + missed-issue) by default. (2) The real open question is the LABEL ANCHOR so a label survives a re-run for eval: selector-only is the broken branch (~73% of Selenium failures are locator drift), pure bbox drifts under reflow, stateId-only can't localize — default is a COMPOSITE anchor (the #1168 DOM-signature stateId + unit-normalized bounding-box primary + a11y-role/text + DOM-path as redundant re-match signals). (3) LEARNING MECHANISM is a SEQUENCE not a permanent pick: exemplar/few-shot retrieval now (zero training, runs on-device, and the labels ARE the seed dataset) → graduate to a linear/logistic-probe classifier on cached embeddings at ~TENS of labels (the survey's load-bearing finding: a linear probe beats few-shot at tens of examples, trains in seconds on CPU, stays on-device) → full VLM fine-tune parked past ~1k labels (server-side, breaks the ~2 GB on-device budget). (4) CONSTELLATION BOUNDARY: #475's no-leakage rule is categorical (vision JUDGMENT = Plateau service, FUI consumes only outputs), but label capture happens FUI-side in the improve-explorer loop and the thin exemplar v1 tempts a FUI-local home — default applies the categorical rule: the trainable layer (store + retrieval + training) is a Plateau/WE service extending #1073/#475, FUI captures labels and consumes candidates via the existing JudgeModel seam. The judge stays advisory and NEVER gates (#1172). Build slices scaffold under #1552 once ratified.",
+  "dateOpened": "2026-06-22",
+  "lastReviewed": "2026-06-22",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "judge",
+    "trainable",
+    "explorer",
+    "exploratory-testing",
+    "vlm-as-judge",
+    "active-learning",
+    "human-in-the-loop",
+    "on-device",
+    "no-leakage",
+    "ui-grounding"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webaudit"
+}
