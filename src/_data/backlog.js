@@ -529,21 +529,30 @@ module.exports = function backlog() {
     // the few epics that want attention from the many that are just live rollups (their work already sits
     // in the agent-ready/batch pool as open children, so the epic itself is nothing to "do"):
     //   'unsliced'  no child slices, NO reason recorded → ready to /slice now (cut slices, or record why)
-    //   'parked'    no child slices but a `childlessReason` IS recorded → decomposition is gated on that
-    //               reason (blocked / undecided / untriaged / program); the note IS the blocker, so it's
-    //               NOT a slice to-do — surface the reason, never prompt a slice.
-    //   'done'      every child resolved, epic open    → needs an explicit resolve (a status update)
+    //   'parked'    a `childlessReason` IS recorded (and no open children) → decomposition is gated on that
+    //               reason (blocked / undecided / untriaged); the note IS the blocker, so it's NOT a slice
+    //               to-do — surface the reason, never prompt a slice. Applies whether or not a wave was
+    //               already carved+resolved: a recorded reason means remaining scope is still uncarved.
+    //   'done'      every child resolved, epic open, AND no childlessReason → needs an explicit resolve.
     //   'tracking'  open child slices remain           → NO epic-level action; progress IS the children
-    //   'program'   an `ongoing: true` continuous program → NEVER a resolve cue, even with all children
-    //               resolved between slices; it is perpetual by design (e.g. the flagship exercise apps).
+    //   'program'   a perpetual/burndown program → NEVER a resolve cue, even with all children resolved
+    //               between slices. Two flavours, kept aligned with the gate (scripts/check-standards.mjs):
+    //               `ongoing: true` = continuous by design (e.g. flagship exercise apps); OR
+    //               `childlessReason: program` = incremental burndown whose tail drains on pickup, so the
+    //               carved wave finishing is NOT delivery (#1442). The UI used to ignore `childlessReason`
+    //               here and flag such epics 'done' while the gate stayed silent — that divergence is the
+    //               bug this branch closes: 'done' now fires iff !ongoing ∧ all children resolved ∧
+    //               no childlessReason, exactly the gate's resolve-cue predicate.
     // Only 'unsliced' + 'done' are "actionable"; 'parked' + 'tracking' + 'program' are not. Set only on
     // sliceable epics (`sliceable` is assigned in the enrichment loop above, before this one).
     if (item.sliceable) {
-      item.epicState = item.ongoing
+      item.epicState = (item.ongoing || item.childlessReason === 'program')
         ? 'program'
-        : item.children.length > 0
-          ? (item.openChildCount === 0 ? 'done' : 'tracking')
-          : (item.childlessReason ? 'parked' : 'unsliced');
+        : item.openChildCount > 0
+          ? 'tracking'
+          : item.children.length > 0
+            ? (item.childlessReason ? 'parked' : 'done')
+            : (item.childlessReason ? 'parked' : 'unsliced');
     }
   }
 
