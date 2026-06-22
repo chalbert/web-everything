@@ -1,0 +1,126 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The backlog-health audit's <strong>exec gate</strong> — the predicate that decides which backlog
+  items gate the governance checks <strong>G2</strong> (built-ahead-of-ruling) and <strong>G3</strong>
+  (ungoverned-architecture) — hardcodes
+  <code>const isExec = it.type === 'idea' || it.type === 'issue'</code>
+  (<code>we:scripts/audit-backlog-health.mjs:334</code>). The kinds <code>idea</code> and
+  <code>issue</code> were <strong>removed in the kind-axis migration</strong>: the old <code>type</code>
+  axis was renamed <code>kind</code> and the set collapsed to <code>story / decision / task / epic</code>
+  (<code>we:scripts/check-standards-rules.mjs:28</code>, <code>BACKLOG_KINDS</code>). So
+  <code>isExec</code> is <strong>always false</strong> and G2/G3 silently never fire. Commit
+  <code>e9c6fca</code> repaired only the <em>field read</em> (<code>fm.type → fm.kind ?? fm.type</code>
+  at <code>:102</code>), not the <em>predicate</em>. This survey grounds decision
+  <a href="/backlog/1473-audit-isexec-build-kind-vocabulary-which-kinds-gate-g2-g3-no/">#1473</a>:
+  which kinds are an "exec/build" kind for G2/G3, now that <code>idea</code>/<code>issue</code> are gone?
+</p>
+
+<h2>Finding — the repair is not greenfield; the canonical rule already exists</h2>
+<p>
+  The repo <strong>already has one canonical "build kind" rule</strong>, defined and consumed in three
+  consistent homes. The fix is to wire the audit's dead predicate to the rule the rest of the repo
+  already shares — not to invent a vocabulary:
+</p>
+<table>
+  <thead><tr><th>Home</th><th>Form</th><th>Role</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>we:scripts/readiness/proposer.mjs:38</code></td>
+      <td><code>const isBuildable = (it) =&gt; it.kind !== 'decision'</code></td>
+      <td>The proposer drafts a next-build for every <em>non-decision</em> kind (story/task build leaves, epic the umbrella).</td>
+    </tr>
+    <tr>
+      <td><code>we:scripts/check-standards-rules.mjs:34</code></td>
+      <td><code>export const isExecKind = (kind) =&gt; kind !== 'decision'</code></td>
+      <td>Authored beside <code>BACKLOG_KINDS</code>, with the comment that it <em>is</em> "the canonical form of proposer.mjs's <code>isBuildable</code> and the backlog-health audit's G2/G3 exec gate".</td>
+    </tr>
+    <tr>
+      <td><code>we:scripts/__tests__/exec-kind.test.mjs</code></td>
+      <td>pins <code>isExecKind</code></td>
+      <td>Covers every non-decision kind (incl. <code>epic</code>), excludes <code>decision</code>, auto-covers a hypothetical new build kind, and guards the only silent-death vector — <code>decision</code> being renamed.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Why a non-decision complement, not an <code>idea|issue</code> enumeration</h2>
+<p>
+  The failure here is the classic <strong>dead-enum drift</strong>: a hardcoded positive enumeration
+  (<code>idea|issue</code>) silently goes false when the vocabulary changes. The defended form is a
+  <strong>closed set + a test that fails when a member changes</strong> — the same discipline linters
+  use (TypeScript exhaustiveness via <code>never</code>, ESLint no-fallthrough). The
+  <code>!== 'decision'</code> form is the <em>open-complement</em> equivalent: a <strong>new build kind
+  is auto-covered</strong>, and the single remaining failure vector (renaming <code>decision</code>) is
+  pinned by <code>exec-kind.test.mjs</code>. This is exactly the silent-death the comment at
+  <code>check-standards-rules.mjs:32-41</code> calls out, and why the canonical rule is a complement,
+  not a list.
+</p>
+
+<h2>The epic-inclusion edge — the one genuine small call</h2>
+<p>
+  The live sub-decision: should the exec gate treat <strong>all</strong> non-decision kinds
+  (story/task/<strong>epic</strong>) as builds, or <strong>narrow to leaf builds</strong> (story/task)
+  and exclude epic umbrellas? Grounded against the real tree: <strong>121 epics</strong>, 37 resolved
+  with <code>graduatedTo</code> set; of those, <strong>6 graduate directly to a named standard
+  entity</strong>:
+</p>
+<table>
+  <thead><tr><th>Epic → entity</th><th>A child carrying the <em>same</em> entity noun?</th><th>Coverage</th></tr></thead>
+  <tbody>
+    <tr><td>#049 → <code>block:component</code></td><td>no — children are file-paths / decisions</td><td><strong>unique to the epic</strong></td></tr>
+    <tr><td>#351 → <code>project:webcompliance</code></td><td>yes — #436 same noun</td><td>duplicated by leaf</td></tr>
+    <tr><td>#468 → <code>project:webblocks</code></td><td>no — children carry <em>different</em> nouns (<code>block:checkbox</code>/<code>toggle</code>/<code>radio</code>)</td><td><strong>unique to the epic</strong></td></tr>
+    <tr><td>#570 → <code>project:webcharts</code></td><td>no — children carry no graduation</td><td><strong>unique to the epic</strong></td></tr>
+    <tr><td>#618 → <code>project:webediting</code></td><td>yes — #629 same noun</td><td>duplicated by leaf</td></tr>
+    <tr><td>#1023 → <code>project:webreporting</code></td><td>no — child is a demo file-path</td><td><strong>unique to the epic</strong></td></tr>
+  </tbody>
+</table>
+<p>
+  A skeptic attack argued: <em>"exclude epics — they double-count their children's graduations, losing
+  zero coverage."</em> <strong>Tested against the data, that claim is mostly false.</strong> Only
+  <strong>2 of 6</strong> (#351↔#436, #618↔#629) are duplicated by a child carrying the same entity
+  noun; the other <strong>4 are unique to the epic</strong>. Excluding epics would
+  <strong>blind G3 to <code>project:webblocks</code>, <code>project:webcharts</code>,
+  <code>project:webreporting</code> and <code>block:component</code></strong> — the highest-value "a
+  whole new project/block shipped" graduations, which legitimately live at the epic level (a project
+  <em>is</em> naturally an epic, not a leaf story). The double-count is real but small, and is a
+  <strong>subject-dedup problem</strong> (dedup entity nouns across the parent/child closure — the
+  <a href="/backlog/1498-g3-ungoverned-arch-now-fires-at-350-candidates-does-the-gate/">#1498</a>
+  subject axis), <strong>not</strong> a reason to narrow the kind gate. Narrowing the kind axis to fix a
+  subject-axis duplicate sacrifices 4 unique signals to suppress 2 harmless ones (the leaf still fires,
+  so keeping the epic loses nothing). And <strong>G2 is unaffected by epics</strong> regardless: it
+  guards <code>if (!isDecision(p)) continue</code> (<code>:356</code>), so an epic's
+  <code>blockedBy</code> edges to non-decisions never misfire.
+</p>
+
+<h2>Implementation co-dependency (surfaced by this survey)</h2>
+<p>
+  The audit script today consumes <strong>neither</strong> helper: G3 at <code>:366</code> does
+  <em>not</em> call <code>isEntityGraduation</code>, despite #1498's resolved "shipped this turn" list
+  claiming that wiring landed. So wiring <code>isExecKind</code> <strong>alone</strong> resurrects G3 at
+  full volume (~350 + epics); #1498's entity-subject scope must land in the <strong>same change</strong>
+  or G3 is un-actionable. The two predicates are orthogonal axes (which <em>kind</em> ships work vs which
+  <em>graduatedTo</em> is governable architecture) but must be wired together.
+</p>
+
+<h2>Recommendation handed to #1473</h2>
+<ul>
+  <li><strong>Fork 1 (vocabulary repair, forced invariant):</strong> the broken branch
+    (<code>idea</code>/<code>issue</code>) does not exist. Consume the canonical <code>isExecKind</code>
+    <strong>imported</strong> from <code>check-standards-rules.mjs</code> (single source already used by
+    proposer + test; the import is acyclic and side-effect-free — verified), passing the kind value
+    (<code>it.type</code>, which the audit already computes as <code>fm.kind ?? fm.type</code>).</li>
+  <li><strong>Fork 2 (epic-inclusion edge):</strong> <strong>include epics</strong> (all non-decision).
+    Route the 2-case double-count to a subject-dedup residual on the G3 <em>subject</em> scope (#1498),
+    not the kind gate.</li>
+</ul>
+
+<h2>Classification</h2>
+<p>
+  Repo-internal backlog devtools / workflow tooling — <strong>not a WE standard</strong>
+  (impl-is-not-a-standard, minimize-lock-in). No protocol minted. The reusable rule it codifies — "the
+  repo has <em>one</em> canonical build-kind predicate, <code>kind !== 'decision'</code>, with a single
+  importable home" — is statute-layer material for <code>we:docs/agent/platform-decisions.md</code> /
+  <code>we:docs/agent/backlog-workflow.md</code> on resolve.
+</p>
+{% endraw %}
