@@ -1,6 +1,7 @@
 ---
 kind: decision
-status: open
+status: parked
+parkedReason: platform-gated
 dateOpened: "2026-06-18"
 tags: [webcomponents, component, declarative, deferred]
 relatedProject: webcomponents
