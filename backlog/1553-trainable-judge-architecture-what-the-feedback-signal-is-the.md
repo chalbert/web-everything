@@ -1,12 +1,15 @@
 ---
 kind: decision
 parent: "1552"
-status: open
+status: resolved
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-22"
 preparedDate: "2026-06-22"
 relatedReport: reports/2026-06-22-trainable-judge-architecture.md
+codifiedIn: "docs/agent/platform-decisions.md#trainable-judge"
 blockedBy: []
+dateResolved: "2026-06-22"
+graduatedTo: none
 tags: [judge, trainable, explorer]
 ---
 
@@ -152,12 +155,16 @@ recipe outlive any one judge model.
 
 ## Fork 3 — Where the trainable layer lives (constellation boundary)
 
-> **⛔ Blocked by [#1565](/backlog/1565/) (dev-tool placement review).** A user ruling — *devtools belong
-> in Plateau, not FUI* — contests the "FUI repo" premise running through this fork (the explorer at
-> `frontierui/tools/explorer`). Every "FUI repo / FUI side" reference below is **provisional**: if #1565
-> relocates the explorer to Plateau, the producer/transport role stays the same but moves repos, and the
-> Plateau-owns-impl / WE-owns-contract split is *unaffected* (it never depended on the explorer's repo).
-> **Do not ratify #1553 until #1565 resolves.**
+> **✅ Unblocked — [#1565](/backlog/1565/) RESOLVED 2026-06-22** (codified at
+> `we:docs/agent/platform-decisions.md#devtools-placement`). The ruling **relocated the explorer's
+> capability seam, exactly as this fork pre-committed**: the conformance *engine* → WE, concrete
+> per-component *bindings* → FUI, **vision (Layer-3) → Plateau (#475, unchanged)**, and **product CLI
+> chrome / orchestration / report-bundling → Plateau**. The trainable judge *is* a vision capability and
+> its `JudgeModel.judge()` seam is hosted in the report-bundling tier — both land in **Plateau**. So the
+> "explorer dev-tool produces the signal + hosts the seam" role below stays identical but **its home is
+> Plateau, not the FUI repo**. The Plateau-owns-impl / WE-owns-contract split is **unaffected** (it never
+> depended on the explorer's repo), exactly as predicted. Read every "FUI repo / FUI side" reference
+> below as **"the explorer's Plateau-side orchestration/report tier."**
 
 **Fork-existence:** the `JudgeModel` seam is FUI-side and label *capture* happens in the FUI-side
 `improve-explorer` loop, so a **FUI-local judgment provider** (store + retrieval + training all in FUI)
@@ -285,14 +292,46 @@ deliberately-curated artifact than "whatever held-out labels accumulate":
 applied at ingestion and never crossed**. Scaffold the benchmark as its own slice alongside the capture
 format and the store.
 
-## Decided
+## Decided — RATIFIED 2026-06-22
 
-_**Blocked by [#1565](/backlog/1565/)** (dev-tool placement review — devtools→Plateau). Do not ratify
-until it resolves; the Fork 3 references to the explorer's "FUI repo" home are provisional on that
-outcome. Then ratify via `/next decision`. Record: the Fork 1 anchor + Fork 2 starting mechanism &
-escalation trigger + Fork 3 boundary + the **agent-portability constraint** (model-agnostic corpus;
-embeddings a re-derivable cache; encoder-parameterized recipe) + the **held-out regression benchmark**
-(variant-rich bad-pattern catalogue + false-positive traps, train-disjoint, CI-gated). Then
-`codifiedIn` a platform-decisions anchor (extending `#no-leakage-client` + `#vision-tiers`) and scaffold
-the build slices under [#1552](/backlog/1552/): capture format · training corpus store · regression
-benchmark · learning mechanism · trained-vs-frozen eval._
+Unblocked by [#1565](/backlog/1565/) (resolved same day, codified at
+`we:docs/agent/platform-decisions.md#devtools-placement`). All three forks + both riders ratified as
+prepared; Fork 3's provisional "FUI repo" home resolved to **Plateau's orchestration/report tier** per
+#1565. Codified as the persistent statute `we:docs/agent/platform-decisions.md#trainable-judge`
+(extends `#no-leakage-client` + `#vision-tiers`, cross-refs `#devtools-placement`).
+
+- **Fork 1 — label anchor: (a).** Frozen-frame eval/training corpus keyed on `stateId` (no spatial
+  replay) **+** composite spatial anchor for missed-issue authoring, with explicit precedence: `stateId`
+  gates whether to match; within a matched state **bbox is primary**, **a11y-role/text the tiebreak**,
+  **DOM-path a debug breadcrumb only** (never a re-match signal).
+- **Fork 2 — learning mechanism: (a).** k-NN over **cached DaViT vision-encoder embeddings** now
+  (cold-start, on-device, works from the first label) → **linear/logistic probe** on the same embedding
+  cache at **~tens of labels, eval-gated** → full VLM fine-tune **parked** (server-side, past ~1k labels).
+  k-NN and the probe share the whole pipeline, so v1 is not throwaway.
+- **Fork 3 — constellation boundary: (a), three-way split.** **Plateau owns the implementation**
+  (model/embeddings/label store/training/#490 distillation — extends the #1073/#475/#490 vision service).
+  **WE owns only the contract** (the `JudgeModel` interface / judgment output schema as a type-only
+  artifact *iff* a WE consumer needs it — never any impl, per #1282). **The explorer dev-tool produces the
+  signal + hosts the seam** (captures frames + human labels, calls `JudgeModel.judge()`, pipes outputs
+  into its report) — its home is **Plateau's orchestration/report-bundling tier** (#1565), and the actual
+  *consumer* is the human + `improve-explorer` loop. Only outputs cross the seam (no-leakage). v1 store may
+  co-locate on disk for operational simplicity but stays owned-by + behind the seam (locality ≠ ownership).
+  The "FUI-local judgment provider" branch is **rejected** as the fragmentation #475 forbids.
+- **Rider — agent-portability constraint.** The **asset is the model-agnostic corpus** (`{frozen-frame
+  PNG, domSnapshot, stateId, verdict, spatial anchor, label vocabulary}`). **Embeddings are a re-derivable
+  cache** keyed by `(encoder-id, frame)`. **The training recipe is encoder-parameterized** (embed → k-NN →
+  eval-gated probe), authored model-agnostically; probe weights are model-specific but disposable. The
+  parked fine-tune is the only truly agent-locked artifact.
+- **Rider — held-out regression benchmark.** A deliberately-curated catalogue of bad patterns (many
+  variants each: reflow/theme/density/locale/animation phase) **+ deliberate false-positive traps**
+  (plausible-but-correct states), **strictly train-disjoint** (split applied at ingestion, never crossed),
+  scoring *outputs* so it validates any judge agent. **CI-gated on the judge's accuracy** even though the
+  judge's *output* never gates an explored run (the two senses of "gate" stay distinct).
+- **Design-knowledge intake program — standalone.** The top-down codified-design-knowledge watch (two
+  tracks: source discovery/curation + content distillation into the #1034 rubric) is scaffolded as a
+  **standalone item, not under #1552** — the codified base feeds both the judge *and* the design-review
+  loop #1033.
+
+**Build slices scaffolded under [#1552](/backlog/1552/):** capture format · training corpus store ·
+regression benchmark · learning mechanism (k-NN→probe) · trained-vs-frozen eval. Plus the standalone
+design-knowledge intake program.

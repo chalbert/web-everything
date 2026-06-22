@@ -344,6 +344,41 @@ on-device vs. stays hosted — the architecture holds either way and the provide
 [vision-tiers.md](vision-tiers.md) per #1244. *Confidence: architecture firm; on-device-vs-hosted for
 the rich tier provisional.*
 
+### Trainable judge — portable corpus, Plateau-owned learning, advisory output {#trainable-judge}
+
+The autonomous explorer's judge ([#1552](../../backlog/1552/)) is made **trainable** from human feedback
+on real runs, without ever becoming a gate or leaking the capability. Four rulings, all extending
+[no-leakage-client](#no-leakage-client) + [vision-tiers](#vision-tiers) and cross-referencing
+[devtools-placement](#devtools-placement):
+
+1. **Two composable feedback channels, both captured.** A *verdict on a candidate* trains precision +
+   severity; a *missed-issue capture* (a human authors a finding the judge never flagged) is the **only**
+   channel that trains **recall**. Verdict-only is a strict subset that caps the perceptual ceiling — so
+   capture both. **Label anchor:** a frozen-frame corpus keyed on `stateId` for eval/training (no spatial
+   replay), plus a composite spatial anchor for missed-issue authoring — `stateId` gates the match, **bbox
+   primary, a11y-role/text tiebreak, DOM-path debug-only**.
+2. **Learning mechanism = k-NN → probe → parked fine-tune.** k-NN over **cached DaViT vision-encoder
+   embeddings** at cold-start (on-device, free, works from the first label) → **linear/logistic probe** on
+   the same cache at ~tens of labels (eval-gated) → full VLM fine-tune parked past ~1k labels (server-side).
+3. **Agent-portability is a hard constraint** (the zero-lock-in seam extended from inference to training):
+   the **asset is the model-agnostic corpus** (`{frozen frame, domSnapshot, stateId, verdict, anchor, label
+   vocab}`); **embeddings are a re-derivable cache** keyed `(encoder-id, frame)`; **the recipe is
+   encoder-parameterized**, so swapping the judge agent ⇒ re-embed + retrain, zero data loss. A
+   train-disjoint, variant-rich **held-out regression benchmark** (bad-pattern catalogue + false-positive
+   traps) scores *outputs*, so it validates any judge agent and is **CI-gated on accuracy** — distinct from
+   the judge's *output*, which stays advisory and **never gates an explored run** ([#1172](../../backlog/1172/)).
+4. **Constellation boundary (three-way split, per [devtools-placement](#devtools-placement)):** **Plateau
+   owns the implementation** (model/embeddings/store/training/#490 distillation — extends the
+   #1073/#475/#490 vision service); **WE owns only the contract** (the `JudgeModel` type / judgment schema,
+   never any impl, per [#1282](../../backlog/1282/)); **the explorer dev-tool produces the signal + hosts
+   the seam** from its Plateau-side orchestration/report tier (the human + `improve-explorer` loop is the
+   actual consumer). Only outputs cross the seam; a FUI-local judgment provider is the fragmentation #475
+   forbids.
+
+**Lineage:** #1553 (this decision) · #1552 (epic) · #1565 ([devtools-placement](#devtools-placement)) ·
+#489 (frame/verdict pairs) #1168 (DOM-signature stateId) #1034 (critique rubric) #490 (distillation) ·
+#1073/#475 (vision service). *Confidence: architecture firm; escalation-trigger label count provisional.*
+
 ### Custom-element tagName naming {#tagname-naming}
 
 1. **Element-ness is opt-in / authored:** a block declares `tagName` (0 / 1 / N tags); never
