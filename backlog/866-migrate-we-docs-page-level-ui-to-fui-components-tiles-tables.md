@@ -1,16 +1,28 @@
 ---
-kind: story
-size: 13
+kind: epic
 parent: "777"
 status: open
 dateOpened: "2026-06-17"
 dateStarted: "2026-06-22"
+relatedReport: reports/2026-06-22-backlog-split-analysis.md
 tags: []
 ---
 
 # Migrate WE-docs page-level UI to FUI components (tiles/tables/badges/code-frame)
 
-Replace catalog tiles/cards, tables, badges, and code-sample surfaces across src/*.njk with FUI component impl, mounted via the mode-C SDK. Follows the chrome migration slice (#865) and reuses its mount pattern + theme bundle (#864).
+Umbrella for migrating WE-docs page-level UI to FUI components, dogfooding the #904 blocks via the #865
+mode-C inline mount. Replace catalog tiles/cards, tables, badges, and code-sample surfaces across
+`we:src/*.njk` + `we:src/_includes/` with FUI component impl. **Sliced by surface type** (2026-06-22,
+`/slice`, see relatedReport) — each surface is independently deliverable + :8080 render-verifiable:
+
+- **#1598** — badges (~25, smallest) — *batchable now; proves the inline mode-C mount transform.*
+- **#1601** — catalog tiles/cards (~20 pages) — `blockedBy #1598`.
+- **#1599** — code-sample/code-frame (~71) — `blockedBy #1598`; 2nd-level `/slice` candidate.
+- **#1600** — tables (~225, largest, no shared macro) — `blockedBy #1598`; 2nd-level `/slice` target.
+
+The `blockedBy #1598` edges encode **pattern-precedence** (prove the inline mount once), not a hard
+data/code dep — the surfaces touch disjoint markup. Follows the chrome migration slice (#865) and reuses
+its mount pattern + theme bundle (#864).
 
 ## Unparked 2026-06-22 — FUI page-UI block impls now exist
 
