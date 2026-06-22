@@ -3,6 +3,7 @@ kind: story
 size: 8
 parent: "554"
 status: open
+humanGate: { kind: setup, what: "The operated/hosted tier (plateau-app Phase 2/3) is gated on the #554 SaaS-phase go/no-go — a founder decision to enter the SaaS phase and provision hosting/accounts. Its slice deps (#558/#559/#560) are resolved; what remains is out-of-phase behind the defer-live-serve roadmap, not agent-buildable until the operated tier is on the roadmap." }
 dateOpened: "2026-06-14"
 dateParked: "2026-06-14"
 tags: [auto-update, runner, plateau-app, hosted, dashboard, live-serve, parked, out-of-phase]

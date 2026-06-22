@@ -28,6 +28,7 @@
     "pin:references": "node scripts/pin-reference-snapshots.mjs",
     "gen:maas-openapi": "node scripts/gen-maas-openapi.mjs",
     "gen:maas-conformance": "node scripts/gen-maas-conformance.mjs",
+    "gen:author-mode-source": "node scripts/gen-author-mode-source.mjs",
     "check:maas-conformance": "node scripts/check-maas-conformance.mjs",
     "check:standards": "node scripts/check-standards.mjs",
     "check:memory": "node scripts/check-memory.mjs",

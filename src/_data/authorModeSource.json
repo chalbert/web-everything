@@ -1,0 +1,437 @@
+{
+  "generatedBy": "serve() — blocks/renderers/module-service/moduleService.ts (#818/#954)",
+  "cases": [
+    {
+      "id": "shadow-slots",
+      "name": "user-card",
+      "title": "1 · Shadow component with slots (implicit template)",
+      "definition": "<component name=\"user-card\" shadow=\"open\">\n  <style>:host { display:block } h3 { margin:0 }</style>\n  <h3><slot name=\"title\">Untitled</slot></h3>\n  <slot></slot>\n</component>",
+      "forms": [
+        {
+          "form": "declarative",
+          "label": "Declarative source",
+          "language": "html",
+          "code": "<component name=\"user-card\" shadow=\"open\">\n  <style>:host { display:block } h3 { margin:0 }</style>\n  <h3><slot name=\"title\">Untitled</slot></h3>\n  <slot></slot>\n</component>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "wc-class",
+          "label": "Web Component class",
+          "language": "javascript",
+          "code": "const TEMPLATE = document.createElement('template');\nTEMPLATE.innerHTML = `<style>:host { display:block } h3 { margin:0 }</style>\n  <h3><slot name=\"title\">Untitled</slot></h3>\n  <slot></slot>`;\n\nclass UserCard extends HTMLElement {\n  static tagName = 'user-card';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open' });\n    if (!this.#root.childNodes.length) this.#root.append(TEMPLATE.content.cloneNode(true));\n  }\n}\ncustomElements.get('user-card') ?? customElements.define('user-card', UserCard);",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "html",
+          "label": "Template HTML",
+          "language": "html",
+          "code": "<style>:host { display:block } h3 { margin:0 }</style>\n  <h3><slot name=\"title\">Untitled</slot></h3>\n  <slot></slot>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "jsx",
+          "label": "JSX",
+          "language": "jsx",
+          "code": "<><style>{`:host { display:block } h3 { margin:0 }`}</style><h3><slot name=\"title\">Untitled</slot></h3><slot /></>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "functional",
+          "label": "Functional component",
+          "language": "jsx",
+          "code": "import jsx, { defineElement } from '@frontierui/jsx-runtime';\n\nexport function UserCard() {\n  return (\n    <><style>{`:host { display:block } h3 { margin:0 }`}</style><h3><slot name=\"title\">Untitled</slot></h3><slot /></>\n  );\n}\n\nexport class UserCardElement extends HTMLElement {\n  static tagName = 'user-card';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open' });\n    if (!this.#root.childNodes.length) this.#root.append(UserCard());\n  }\n}\ndefineElement('user-card', UserCardElement);",
+          "lossy": false,
+          "diagnostics": []
+        }
+      ]
+    },
+    {
+      "id": "style-encapsulation",
+      "name": "x-callout",
+      "title": "2 · Style encapsulation (implicit template)",
+      "definition": "<component name=\"x-callout\" shadow=\"open\">\n  <style>:host { display:block; border-left:3px solid #6366f1; padding:.5rem .75rem }</style>\n  <strong><slot></slot></strong>\n</component>",
+      "forms": [
+        {
+          "form": "declarative",
+          "label": "Declarative source",
+          "language": "html",
+          "code": "<component name=\"x-callout\" shadow=\"open\">\n  <style>:host { display:block; border-left:3px solid #6366f1; padding:.5rem .75rem }</style>\n  <strong><slot></slot></strong>\n</component>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "wc-class",
+          "label": "Web Component class",
+          "language": "javascript",
+          "code": "const TEMPLATE = document.createElement('template');\nTEMPLATE.innerHTML = `<style>:host { display:block; border-left:3px solid #6366f1; padding:.5rem .75rem }</style>\n  <strong><slot></slot></strong>`;\n\nclass XCallout extends HTMLElement {\n  static tagName = 'x-callout';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open' });\n    if (!this.#root.childNodes.length) this.#root.append(TEMPLATE.content.cloneNode(true));\n  }\n}\ncustomElements.get('x-callout') ?? customElements.define('x-callout', XCallout);",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "html",
+          "label": "Template HTML",
+          "language": "html",
+          "code": "<style>:host { display:block; border-left:3px solid #6366f1; padding:.5rem .75rem }</style>\n  <strong><slot></slot></strong>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "jsx",
+          "label": "JSX",
+          "language": "jsx",
+          "code": "<><style>{`:host { display:block; border-left:3px solid #6366f1; padding:.5rem .75rem }`}</style><strong><slot /></strong></>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "functional",
+          "label": "Functional component",
+          "language": "jsx",
+          "code": "import jsx, { defineElement } from '@frontierui/jsx-runtime';\n\nexport function XCallout() {\n  return (\n    <><style>{`:host { display:block; border-left:3px solid #6366f1; padding:.5rem .75rem }`}</style><strong><slot /></strong></>\n  );\n}\n\nexport class XCalloutElement extends HTMLElement {\n  static tagName = 'x-callout';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open' });\n    if (!this.#root.childNodes.length) this.#root.append(XCallout());\n  }\n}\ndefineElement('x-callout', XCalloutElement);",
+          "lossy": false,
+          "diagnostics": []
+        }
+      ]
+    },
+    {
+      "id": "light-dom",
+      "name": "x-stamp",
+      "title": "3 · Light-DOM component (shadow=\"none\")",
+      "definition": "<component name=\"x-stamp\" shadow=\"none\">\n  <span class=\"badge info\">NEW</span>\n</component>",
+      "forms": [
+        {
+          "form": "declarative",
+          "label": "Declarative source",
+          "language": "html",
+          "code": "<component name=\"x-stamp\" shadow=\"none\">\n  <span class=\"badge info\">NEW</span>\n</component>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "wc-class",
+          "label": "Web Component class",
+          "language": "javascript",
+          "code": "const TEMPLATE = document.createElement('template');\nTEMPLATE.innerHTML = `<span class=\"badge info\">NEW</span>`;\n\nclass XStamp extends HTMLElement {\n  static tagName = 'x-stamp';\n  connectedCallback() {\n    if (!this.firstChild) this.append(TEMPLATE.content.cloneNode(true));\n  }\n}\ncustomElements.get('x-stamp') ?? customElements.define('x-stamp', XStamp);",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "html",
+          "label": "Template HTML",
+          "language": "html",
+          "code": "<span class=\"badge info\">NEW</span>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "jsx",
+          "label": "JSX",
+          "language": "jsx",
+          "code": "<span class=\"badge info\">NEW</span>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "functional",
+          "label": "Functional component",
+          "language": "jsx",
+          "code": "import jsx, { defineElement } from '@frontierui/jsx-runtime';\n\nexport function XStamp() {\n  return (\n    <span class=\"badge info\">NEW</span>\n  );\n}\n\nexport class XStampElement extends HTMLElement {\n  static tagName = 'x-stamp';\n  connectedCallback() {\n    if (!this.firstChild) this.append(XStamp());\n  }\n}\ndefineElement('x-stamp', XStampElement);",
+          "lossy": false,
+          "diagnostics": []
+        }
+      ]
+    },
+    {
+      "id": "closed-shadow",
+      "name": "x-secret",
+      "title": "4 · Closed shadow (opaque)",
+      "definition": "<component name=\"x-secret\" shadow=\"closed\">\n  <span><slot></slot></span>\n</component>",
+      "forms": [
+        {
+          "form": "declarative",
+          "label": "Declarative source",
+          "language": "html",
+          "code": "<component name=\"x-secret\" shadow=\"closed\">\n  <span><slot></slot></span>\n</component>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "wc-class",
+          "label": "Web Component class",
+          "language": "javascript",
+          "code": "const TEMPLATE = document.createElement('template');\nTEMPLATE.innerHTML = `<span><slot></slot></span>`;\n\nclass XSecret extends HTMLElement {\n  static tagName = 'x-secret';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'closed' });\n    if (!this.#root.childNodes.length) this.#root.append(TEMPLATE.content.cloneNode(true));\n  }\n}\ncustomElements.get('x-secret') ?? customElements.define('x-secret', XSecret);",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "html",
+          "label": "Template HTML",
+          "language": "html",
+          "code": "<span><slot></slot></span>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "jsx",
+          "label": "JSX",
+          "language": "jsx",
+          "code": "<span><slot /></span>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "functional",
+          "label": "Functional component",
+          "language": "jsx",
+          "code": "import jsx, { defineElement } from '@frontierui/jsx-runtime';\n\nexport function XSecret() {\n  return (\n    <span><slot /></span>\n  );\n}\n\nexport class XSecretElement extends HTMLElement {\n  static tagName = 'x-secret';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'closed' });\n    if (!this.#root.childNodes.length) this.#root.append(XSecret());\n  }\n}\ndefineElement('x-secret', XSecretElement);",
+          "lossy": false,
+          "diagnostics": []
+        }
+      ]
+    },
+    {
+      "id": "explicit-template",
+      "name": "x-explicit",
+      "title": "5 · Explicit <template> (inert escape hatch)",
+      "definition": "<component name=\"x-explicit\" shadow=\"open\">\n  <template>\n    <style>:host { display:block }</style>\n    <em><slot></slot></em>\n  </template>\n</component>",
+      "forms": [
+        {
+          "form": "declarative",
+          "label": "Declarative source",
+          "language": "html",
+          "code": "<component name=\"x-explicit\" shadow=\"open\">\n  <template>\n    <style>:host { display:block }</style>\n    <em><slot></slot></em>\n  </template>\n</component>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "wc-class",
+          "label": "Web Component class",
+          "language": "javascript",
+          "code": "const TEMPLATE = document.createElement('template');\nTEMPLATE.innerHTML = `<style>:host { display:block }</style>\n    <em><slot></slot></em>`;\n\nclass XExplicit extends HTMLElement {\n  static tagName = 'x-explicit';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open' });\n    if (!this.#root.childNodes.length) this.#root.append(TEMPLATE.content.cloneNode(true));\n  }\n}\ncustomElements.get('x-explicit') ?? customElements.define('x-explicit', XExplicit);",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "html",
+          "label": "Template HTML",
+          "language": "html",
+          "code": "<style>:host { display:block }</style>\n    <em><slot></slot></em>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "jsx",
+          "label": "JSX",
+          "language": "jsx",
+          "code": "<><style>{`:host { display:block }`}</style><em><slot /></em></>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "functional",
+          "label": "Functional component",
+          "language": "jsx",
+          "code": "import jsx, { defineElement } from '@frontierui/jsx-runtime';\n\nexport function XExplicit() {\n  return (\n    <><style>{`:host { display:block }`}</style><em><slot /></em></>\n  );\n}\n\nexport class XExplicitElement extends HTMLElement {\n  static tagName = 'x-explicit';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open' });\n    if (!this.#root.childNodes.length) this.#root.append(XExplicit());\n  }\n}\ndefineElement('x-explicit', XExplicitElement);",
+          "lossy": false,
+          "diagnostics": []
+        }
+      ]
+    },
+    {
+      "id": "delegates-focus",
+      "name": "x-field",
+      "title": "6 · Focus delegation (delegates-focus)",
+      "definition": "<component name=\"x-field\" shadow=\"open\" delegates-focus>\n  <label><slot name=\"label\">Field</slot> <input></label>\n</component>",
+      "forms": [
+        {
+          "form": "declarative",
+          "label": "Declarative source",
+          "language": "html",
+          "code": "<component name=\"x-field\" shadow=\"open\" delegates-focus>\n  <label><slot name=\"label\">Field</slot> <input></label>\n</component>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "wc-class",
+          "label": "Web Component class",
+          "language": "javascript",
+          "code": "const TEMPLATE = document.createElement('template');\nTEMPLATE.innerHTML = `<label><slot name=\"label\">Field</slot> <input></label>`;\n\nclass XField extends HTMLElement {\n  static tagName = 'x-field';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open', delegatesFocus: true });\n    if (!this.#root.childNodes.length) this.#root.append(TEMPLATE.content.cloneNode(true));\n  }\n}\ncustomElements.get('x-field') ?? customElements.define('x-field', XField);",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "html",
+          "label": "Template HTML",
+          "language": "html",
+          "code": "<label><slot name=\"label\">Field</slot> <input></label>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "jsx",
+          "label": "JSX",
+          "language": "jsx",
+          "code": "<label><slot name=\"label\">Field</slot><input /></label>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "functional",
+          "label": "Functional component",
+          "language": "jsx",
+          "code": "import jsx, { defineElement } from '@frontierui/jsx-runtime';\n\nexport function XField() {\n  return (\n    <label><slot name=\"label\">Field</slot><input /></label>\n  );\n}\n\nexport class XFieldElement extends HTMLElement {\n  static tagName = 'x-field';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open', delegatesFocus: true });\n    if (!this.#root.childNodes.length) this.#root.append(XField());\n  }\n}\ndefineElement('x-field', XFieldElement);",
+          "lossy": false,
+          "diagnostics": []
+        }
+      ]
+    },
+    {
+      "id": "clonable-serializable",
+      "name": "x-snapshot",
+      "title": "7 · Clonable + serializable shadow",
+      "definition": "<component name=\"x-snapshot\" shadow=\"open\" clonable serializable>\n  <p><slot></slot></p>\n</component>",
+      "forms": [
+        {
+          "form": "declarative",
+          "label": "Declarative source",
+          "language": "html",
+          "code": "<component name=\"x-snapshot\" shadow=\"open\" clonable serializable>\n  <p><slot></slot></p>\n</component>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "wc-class",
+          "label": "Web Component class",
+          "language": "javascript",
+          "code": "const TEMPLATE = document.createElement('template');\nTEMPLATE.innerHTML = `<p><slot></slot></p>`;\n\nclass XSnapshot extends HTMLElement {\n  static tagName = 'x-snapshot';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open', clonable: true, serializable: true });\n    if (!this.#root.childNodes.length) this.#root.append(TEMPLATE.content.cloneNode(true));\n  }\n}\ncustomElements.get('x-snapshot') ?? customElements.define('x-snapshot', XSnapshot);",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "html",
+          "label": "Template HTML",
+          "language": "html",
+          "code": "<p><slot></slot></p>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "jsx",
+          "label": "JSX",
+          "language": "jsx",
+          "code": "<p><slot /></p>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "functional",
+          "label": "Functional component",
+          "language": "jsx",
+          "code": "import jsx, { defineElement } from '@frontierui/jsx-runtime';\n\nexport function XSnapshot() {\n  return (\n    <p><slot /></p>\n  );\n}\n\nexport class XSnapshotElement extends HTMLElement {\n  static tagName = 'x-snapshot';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open', clonable: true, serializable: true });\n    if (!this.#root.childNodes.length) this.#root.append(XSnapshot());\n  }\n}\ndefineElement('x-snapshot', XSnapshotElement);",
+          "lossy": false,
+          "diagnostics": []
+        }
+      ]
+    },
+    {
+      "id": "form-associated",
+      "name": "x-rating",
+      "title": "8 · Form participation + default ARIA (attachInternals)",
+      "definition": "<component name=\"x-rating\" shadow=\"open\" form-associated default-role=\"slider\"\n           default-aria-value-min=\"0\" default-aria-value-max=\"5\" default-aria-value-now=\"3\">\n  <span><slot>★</slot></span>\n</component>",
+      "forms": [
+        {
+          "form": "declarative",
+          "label": "Declarative source",
+          "language": "html",
+          "code": "<component name=\"x-rating\" shadow=\"open\" form-associated default-role=\"slider\"\n           default-aria-value-min=\"0\" default-aria-value-max=\"5\" default-aria-value-now=\"3\">\n  <span><slot>★</slot></span>\n</component>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "wc-class",
+          "label": "Web Component class",
+          "language": "javascript",
+          "code": "const TEMPLATE = document.createElement('template');\nTEMPLATE.innerHTML = `<span><slot>★</slot></span>`;\n\nclass XRating extends HTMLElement {\n  static formAssociated = true;\n  static tagName = 'x-rating';\n  #internals = this.attachInternals();\n  #root = this.shadowRoot;\n  constructor() {\n    super();\n    this.#internals.role = 'slider';\n    this.#internals.ariaValueMax = '5';\n    this.#internals.ariaValueMin = '0';\n    this.#internals.ariaValueNow = '3';\n  }\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open' });\n    if (!this.#root.childNodes.length) this.#root.append(TEMPLATE.content.cloneNode(true));\n  }\n}\ncustomElements.get('x-rating') ?? customElements.define('x-rating', XRating);",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "html",
+          "label": "Template HTML",
+          "language": "html",
+          "code": "<span><slot>★</slot></span>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "jsx",
+          "label": "JSX",
+          "language": "jsx",
+          "code": "<span><slot>★</slot></span>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "functional",
+          "label": "Functional component",
+          "language": "jsx",
+          "code": "import jsx, { defineElement } from '@frontierui/jsx-runtime';\n\nexport function XRating() {\n  return (\n    <span><slot>★</slot></span>\n  );\n}\n\nexport class XRatingElement extends HTMLElement {\n  static tagName = 'x-rating';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open' });\n    if (!this.#root.childNodes.length) this.#root.append(XRating());\n  }\n}\ndefineElement('x-rating', XRatingElement);",
+          "lossy": false,
+          "diagnostics": []
+        }
+      ]
+    },
+    {
+      "id": "preserve-on-move",
+      "name": "x-keepalive",
+      "title": "9 · State-preserving moves (preserve-on-move)",
+      "definition": "<component name=\"x-keepalive\" shadow=\"open\" preserve-on-move>\n  <slot></slot>\n</component>",
+      "forms": [
+        {
+          "form": "declarative",
+          "label": "Declarative source",
+          "language": "html",
+          "code": "<component name=\"x-keepalive\" shadow=\"open\" preserve-on-move>\n  <slot></slot>\n</component>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "wc-class",
+          "label": "Web Component class",
+          "language": "javascript",
+          "code": "const TEMPLATE = document.createElement('template');\nTEMPLATE.innerHTML = `<slot></slot>`;\n\nclass XKeepalive extends HTMLElement {\n  static tagName = 'x-keepalive';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open' });\n    if (!this.#root.childNodes.length) this.#root.append(TEMPLATE.content.cloneNode(true));\n  }\n  connectedMoveCallback() {}\n}\ncustomElements.get('x-keepalive') ?? customElements.define('x-keepalive', XKeepalive);",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "html",
+          "label": "Template HTML",
+          "language": "html",
+          "code": "<slot></slot>",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "jsx",
+          "label": "JSX",
+          "language": "jsx",
+          "code": "<slot />",
+          "lossy": false,
+          "diagnostics": []
+        },
+        {
+          "form": "functional",
+          "label": "Functional component",
+          "language": "jsx",
+          "code": "import jsx, { defineElement } from '@frontierui/jsx-runtime';\n\nexport function XKeepalive() {\n  return (\n    <slot />\n  );\n}\n\nexport class XKeepaliveElement extends HTMLElement {\n  static tagName = 'x-keepalive';\n  #root = this.shadowRoot;\n  connectedCallback() {\n    this.#root ??= this.attachShadow({ mode: 'open' });\n    if (!this.#root.childNodes.length) this.#root.append(XKeepalive());\n  }\n}\ndefineElement('x-keepalive', XKeepaliveElement);",
+          "lossy": false,
+          "diagnostics": []
+        }
+      ]
+    }
+  ]
+}

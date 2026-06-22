@@ -1,23 +1,26 @@
 ---
 kind: story
 size: 3
-status: parked
-parkedDate: "2026-06-22"
+status: resolved
 parent: "746"
 locus: frontierui
 relatedProject: webdocs
 blockedBy: []
 relatedReport: reports/2026-06-18-backlog-split-analysis.md
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: "we:src/_data/authorModeSource.json + fui:workbench/authorMode.ts"
 tags: [webdocs, adapters, polyglot, generation, component-emit]
 ---
 
-> **PARKED 2026-06-18 (batch pre-flight) — DEMAND-GATED, not agent-ready.** The body's own gate is
-> "build only after #753's consume-mode ships **and** appetite for idiomatic source is shown." #753's
-> consume-mode is resolved (`graduatedTo fui:workbench/mount.ts`), but the appetite half is
-> unmet — no demand signal exists, and the cheap data-emit foundation is explicitly meant to ride the
-> existing channel *when* it's shown. Parked so the selector stops surfacing it as Tier-A batchable;
-> un-park (→ `status: open`) the moment appetite for author-mode source appears.
+> **UN-PARKED 2026-06-22 (→ `status: open`).** The appetite-half of the gate is now met: the maintainer
+> explicitly called for building the data-emit **foundation** (the forms `serve()` already emits —
+> `declarative | wc-class | html | jsx | functional`). Scope held to the groundable foundation only —
+> the genuinely-new idiomatic **Vue/Svelte/Angular** emitters and the Option-C emit-IR (#939) stay
+> deferred; they ride later cases, not this item.
+>
+> _Prior park (2026-06-18 batch pre-flight): demand-gated on "appetite for idiomatic source", now shown._
 
 
 > **Claimed in batch-2026-06-18, then re-blocked + released (NOT built).** The "rides what already ships"
@@ -51,3 +54,21 @@ Wire a new **author-mode / output-tabs** surface that, for the current block's d
 
 - **Per-framework idiomatic emitters** — idiomatic **Vue / Svelte / Angular** source (the genuinely-new targets with no code today). Each becomes its own batchable slice *once this foundation + its accumulated cases expose the real seams* (where flat-declarative stops stretching per framework). File them as siblings under #746 then, not now.
 - **Dedicated emit IR (Option C)** — the Phase-2 design call, **de-buried to [#939](/backlog/939-dedicated-forward-emit-ir-option-c-design-a-neutral-webevery/)** (parked, `blockedBy: 818`): made with the cases this foundation accumulates, never guessed.
+
+## Resolution (2026-06-22, batch-2026-06-22-764-1602)
+
+Landed the foundation across both repos per the #954 ruling (data-emit):
+
+- **WE build-emit half** — `we:blocks/renderers/module-service/authorModeSource.ts` projects `serve()` over
+  the canonical `componentCases` × the `ServeForm` set, emitting `{code, language, lossy, diagnostics}` per
+  case×form. `we:scripts/gen-author-mode-source.mjs` (`npm run gen:author-mode-source`) commits it to
+  `we:src/_data/authorModeSource.json`, guarded by a drift test (`we:blocks/__tests__/unit/renderers/authorModeSource.test.ts`)
+  — the same generate-and-freeze idiom as the MaaS golden vectors. "Flag, don't fake" rides `serve()`'s own
+  `lossy`/`diagnostics`.
+- **FUI consume half** — `fui:workbench/authorMode.ts` renders the output-tabs panel from an `AuthorModeSource`
+  a `WorkbenchBlock` declares; `fui:workbench/mount.ts` mounts it as the sibling of the consume-mode Polyglot
+  panel. Only rendered text + diagnostics cross the #700 seam (FUI never imports `serve()`).
+- **Residual → [#1618](/backlog/1618-wire-the-we-author-mode-source-artifact-into-the-live-fui-wo/)** (`blockedBy: 818`):
+  the WE→FUI **transport** (sync the committed artifact into the live registry) + **attachment** (the lone
+  workbench block `auto-complete` is imperative — no declarative `<component>` definition carries `authorSource`
+  live yet). Both are wiring, no fork.
