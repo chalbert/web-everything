@@ -1,6 +1,6 @@
 ---
 kind: story
-size: 8
+size: 13
 status: open
 locus: frontierui
 dateOpened: "2026-06-21"
@@ -55,6 +55,15 @@ registry since it was a no-op until #1387, so this restores prior working behavi
 
 Relates to #1387 (the regression), #1304 (the plug reconciliation epic). Byte-replicate the fix back
 to `we:plugs/webregistries/CustomElementRegistry.ts` (identical source today).
+
+> **Pre-flight (batch-2026-06-22) — size 8 → 13: needs `/split`, out of the batch pool.** Twice
+> pre-flighted and released `outgrew`/`blocked-in-fact`: the deliverable's acceptance re-enables the
+> `window.customElements` swap that white-paged the plateau site and requires confirming plateau-app + the
+> WE site + FUI demos render with no `*-is-not-a-function` crash — a high-stakes live multi-app re-enable
+> that needs an **owned** dev-server lifecycle, unavailable in a concurrent batch against the user's running
+> :3000/:4000. `/split` into **(a)** root-scope determination impl + unit test (bounded, gate-verifiable, no
+> live re-enable — batchable) and **(b)** the re-enable + live multi-app verification (focused frontierui
+> session owning the servers). No design fork; the regression + fix shape are specified above.
 
 ## Pre-flight (batch-2026-06-21-1429-1487) — outgrew (5 → 8): deep impl + a high-stakes live re-enable
 

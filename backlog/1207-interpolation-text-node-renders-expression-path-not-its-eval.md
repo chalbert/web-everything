@@ -4,10 +4,18 @@ status: open
 locus: webeverything
 blockedBy: []
 dateOpened: "2026-06-20"
-size: 5
+size: 13
 dateStarted: "2026-06-22"
 tags: [webexpressions, interpolation, text-node, injector, binding, demo]
 ---
+
+## Pre-flight (batch-2026-06-22) — size 5 → 13: proven not-a-slice (4× `outgrew`)
+
+Bumped out of the batch pool. This has been claimed, grounded, and released with carry-forward
+`outgrew`/`blocked-in-fact` across four separate batch sessions (see the investigation log below). The
+residual is an open-ended live-debugging spike — instrument the in-module `customTextNodes.upgrade()` call
+on a 2nd-port cold start to find why it resolves differently than a post-load `upgrade()` — with no proven
+fix and uncertain scope. Routes to a focused FUI/demo debugging session, not a batch tail. No design fork.
 
 ## Progress (batch-2026-06-21-1501-1356) — fix APPLIED, render verification BLOCKED by a newly-found bootstrap break (#1504)
 
