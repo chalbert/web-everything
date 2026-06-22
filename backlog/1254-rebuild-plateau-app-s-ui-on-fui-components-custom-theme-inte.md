@@ -3,8 +3,6 @@ kind: epic
 status: open
 locus: plateau-app
 dateOpened: "2026-06-20"
-childlessReason: blocked
-blockedBy: [1286, 1289]
 relatedReport: reports/2026-06-20-1254-split-analysis.md
 tags: [dogfood, fui, plateau-app, theme, intents, site-rework, epic]
 ---
@@ -52,11 +50,11 @@ Sliced 2026-06-20 (`/slice 1254`; analysis: [split-analysis report](../reports/2
 - [#1284](/backlog/1284-plateau-app-nav-sidebar-onto-fui-navigation-behaviors-the-fu/) — nav/sidebar onto FUI `navigation` behaviors (the FUI-block **integration-seam pilot**).
 - [#1285](/backlog/1285-plateau-app-auth-profile-onto-fui-droplist-type-ahead/) — auth/profile onto FUI `droplist`/`type-ahead` (blockedBy #1284).
 
-**Gated surfaces → FUI-component gaps filed (`locus: frontierui`):**
-- Intent Configurator + Technical Configurator → [#1286](/backlog/1286-fui-form-control-blocks-radio-checkbox-text-field-number-inp/) (FUI form controls).
-- Component Assembler → [#1287](/backlog/1287-fui-card-block-gap-blocking-plateau-app-component-assembler-/) (FUI `card`).
-- Control Plane dashboard → [#1288](/backlog/1288-fui-badge-status-block-gap-blocking-plateau-app-control-plan/) (FUI `badge`).
-- Platform Map → [#1289](/backlog/1289-fui-graph-node-viz-block-gap-blocking-plateau-app-platform-m/) (FUI graph/node viz).
+**Ratchet released 2026-06-22 — all four FUI-component gaps shipped, the gated surfaces are now carved migration slices:**
+- [#1506](/backlog/1506-plateau-app-intent-technical-configurator-surfaces-onto-fui-/) — Intent + Technical Configurator onto FUI form controls (gap [#1286](/backlog/1286-fui-form-control-blocks-radio-checkbox-text-field-number-inp/) ✓).
+- [#1507](/backlog/1507-plateau-app-component-assembler-onto-fui-card-block/) — Component Assembler onto FUI `card` (gap [#1287](/backlog/1287-fui-card-block-gap-blocking-plateau-app-component-assembler-/) ✓).
+- [#1508](/backlog/1508-plateau-app-control-plane-dashboard-onto-fui-badge-status-bl/) — Control Plane dashboard onto FUI `badge`/status (gap [#1288](/backlog/1288-fui-badge-status-block-gap-blocking-plateau-app-control-plan/) ✓).
+- [#1509](/backlog/1509-plateau-app-platform-map-onto-fui-graph-node-viz-block/) — Platform Map onto FUI graph/node viz (gap [#1289](/backlog/1289-fui-graph-node-viz-block-gap-blocking-plateau-app-platform-m/) ✓).
 
-Each gated surface converts to a migration slice once its FUI gap ships (the ratchet).
+The ratchet is now fully released — every gated surface from the target-list table is carved. The epic resolves once these four migration slices land (each gated on its rendered a11y/visual conformance check).
 </content>
