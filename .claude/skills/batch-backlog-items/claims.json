@@ -16,7 +16,8 @@
         "1430-gesture-recognizer-engine-technical-configurator-card-native",
         "1446-webgraph-conformance-demo-3-axes-default-layout-renderer-end",
         "1493-fui-radio-toggle-off-path-clear-affordance-deselectable",
-        "1489-convert-stepper-to-we-stepper-element-persistent-light-dom-b"
+        "1489-convert-stepper-to-we-stepper-element-persistent-light-dom-b",
+        "1490-convert-deck-to-we-deck-element-persistent-light-dom-b-over-"
       ],
       "baseline": [
         ".claude/commands/resolve.md",
