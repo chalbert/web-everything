@@ -3,8 +3,7 @@ kind: story
 size: 3
 status: open
 dateOpened: "2026-06-22"
-blockedBy: [1565]
-relatedItems: [1579]
+relatedItems: [1579, 1565]
 tags: []
 ---
 
