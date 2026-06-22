@@ -3,11 +3,14 @@
   "name": "Sectioned Nav",
   "status": "active",
   "type": "Module",
-  "implementedBy": "@frontierui/blocks/sectioned-nav/",
-  "summary": "Sectioned-disclosure navigation panel: collapsible section heads (W3C APG Disclosure Navigation) over link lists — the sectioned counterpart of the flat nav-list block. Click toggles a section, Escape collapses the focused one, and the active link carries aria-current. Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C).",
+  "implementedBy": "@frontierui/blocks/sectioned-nav/SectionedNavElement.ts",
+  "summary": "Sectioned-disclosure navigation panel: collapsible section heads (W3C APG Disclosure Navigation) over link lists — the sectioned counterpart of the flat nav-list block. Click toggles a section, Escape collapses the focused one, and the active link carries aria-current. Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C). Packaged as the persistent light-DOM `<we-sectioned-nav>` custom element (#1616, B-mechanism per block-standard §7) whose reactive `config` property re-renders the nav; the headless nav:section trait stays attachable to author markup.",
   "exports": [
+    "SectionedNavElement",
+    "registerSectionedNav",
     "createSectionedNav",
     "mountSectionedNav",
+    "mountSectionedNavLight",
     "mountInDocument"
   ],
   "implementsIntent": "navigation",
