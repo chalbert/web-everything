@@ -1,0 +1,25 @@
+{
+  "id": "workbench-live-render-target",
+  "title": "Workbench live render target — single introspected canvas vs separate preview pane",
+  "status": "open",
+  "summary": "Prep research for decision #1594 (blocks #1030, under polyglot live-test sandbox #912): when the workbench live-mounts a cross-origin React/Vue wrapper (?form=react-live, proven #1501/#1518/#1556), does the live render go INTO the stage (the slot the native custom element normally fills, so the existing inspector/event-log/anatomy panels introspect it) or into a SEPARATE Polyglot live-preview pane beside source (with its own introspection wiring)? Orthogonal to the manipulation-channel topic (#809, in-document vs iframe) and the workbench-landscape inventory (#624); this is purely the render-TARGET question. Prior art is one-sided: every major component explorer renders into ONE canonical canvas that the inspection panels read, and reads it as plain rendered DOM, framework-agnostically — Storybook (one preview iframe; a11y runs axe on the rendered DOM; interactions are explicitly 'framework-agnostic DOM APIs' over canvasElement), Histoire, Ladle (a single app with NO iframe, adding one only when an addon forces isolation), Bit ('compositions'). Where a 'preview beside source' exists (Storybook Docs Canvas, react-styleguidist editable examples) it is the SAME render re-presented, never a second introspection target; structured metadata (argTypes/propTypes/JSDoc) is sourced statically while behavioural introspection (a11y/events/computed style) reads the live DOM — the exact two-layer split WE's workbench already implements (panels gate on the block's CEM-derived declaration; reads are generic getComputedStyle/querySelector/event-delegation). A skeptic refutation of Fork A ('props != attributes, the custom element is absent, declaration-gated panels vanish, React synthetic events do not bubble') was traced to genWrapper.mjs and DISPROVEN: the live wrapper mounts the REAL custom element inside the framework root and forwards attrs+events, so the element is present, its native bubbling events reach the stage, and the block declaration exists. But the skeptic surfaced a real, narrower residual that becomes Fork A's amendment: with mount(el) doing createRoot(el) the custom element is a CHILD of the stage node, so panels keyed to `instance` must resolve the inner element; attribute-driven trait/DS control must route through instance.update(props) since the wrapper forwards mount-time props not host attributes; and renderStage's reflexive replaceChildren must yield to the wrapper's unmount() to avoid leaking a framework root. Net: Fork A (stage) is the recommended default but is NOT 'zero new wiring' as the item originally claimed — it costs three bounded amendments, materially less than Fork B's full second introspection surface, and Fork B has no precedent (its only unique value, render-beside-source, is additive not an alternative target). Skeptic verdict SURVIVES-WITH-AMENDMENT. Full grounding in reports/2026-06-22-workbench-live-render-target.md.",
+  "dateOpened": "2026-06-22",
+  "lastReviewed": "2026-06-22",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdocs",
+    "workbench",
+    "block-explorer",
+    "live-mount",
+    "render-target",
+    "polyglot",
+    "react",
+    "vue",
+    "storybook",
+    "introspection",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

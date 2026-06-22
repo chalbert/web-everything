@@ -1,0 +1,104 @@
+<h3>The Question</h3>
+<p>
+    The cross-origin React/Vue live-mount mechanism is proven end-to-end (<a href="/backlog/1518-/">#1518</a>
+    generates a <code>?form=react-live</code> wrapper that bundles the framework and exports
+    <code>mount(el, props) → {update, unmount}</code>; <a href="/backlog/1501-/">#1501</a>/<a href="/backlog/1556-/">#1556</a>
+    wired the cross-origin import). Before the workbench-side build
+    <a href="/backlog/1030-workbench-same-document-live-test-mount-react-vue-devdeps/">#1030</a> can be authored, decision
+    <a href="/backlog/1594-workbench-live-mount-render-target-into-the-stage-as-subject/">#1594</a> must rule
+    <strong>where the live render goes</strong>: into the <strong>stage</strong> (the slot the native custom element
+    normally fills, so the inspector / event-log / anatomy panels introspect it) or a <strong>separate Polyglot
+    live-preview pane</strong> beside source. This is purely the render-<em>target</em> question — orthogonal to the
+    in-document-vs-iframe manipulation channel (<a href="/backlog/809-/">#809</a>) and the tool-landscape inventory
+    (<a href="/backlog/624-inventory-the-component-workbench-docs-tool-landscape-storyb/">#624</a>). No new mechanism is
+    being designed; the survey grounds the target choice in how established component explorers structure the
+    render-surface-vs-introspection relationship.
+</p>
+
+<h3>Recommendation (prepared for #1594)</h3>
+<p>
+    <strong>Render into the stage (Fork A)</strong> — but reject the item's original "zero new wiring" rationale, which
+    tracing the code disproves. Fork A reuses the event-log, computed-style inspector, and anatomy panels
+    <em>once three bounded amendments</em> are made (resolve the nested custom element as the introspection subject;
+    route trait/design-system control through <code>instance.update(props)</code>; own teardown via the wrapper's
+    <code>unmount()</code>). That is materially less than Fork B's full second introspection surface, and Fork B has no
+    precedent — its only unique value, render-beside-source, is <em>additive</em>, not an alternative introspection
+    target. Skeptic verdict: <strong>SURVIVES-WITH-AMENDMENT</strong>.
+</p>
+
+<h3>Finding 1 — every major explorer renders into ONE canonical canvas the panels read; a second wired pane is the anti-pattern</h3>
+<p>
+    <strong>Storybook</strong> renders every story into a single preview iframe (the Canvas) split from the manager
+    chrome; selecting a story dispatches to that one preview
+    (<a href="https://storybook.js.org/docs/configure/story-rendering/">story-rendering</a>,
+    <a href="https://storybook.js.org/docs/addons/">addons</a>). <strong>Histoire</strong>'s controls mutate the
+    component "rendered in the preview canvas" (<a href="https://histoire.dev/guide/vue3/controls">controls</a>).
+    <strong>Ladle</strong> is "a single application with no iframes… careful to not affect your stories," adding an
+    iframe only for the responsive-width addon that genuinely needs isolation
+    (<a href="https://ladle.dev/blog/introducing-ladle/">intro</a>, <a href="https://ladle.dev/docs/config/">config</a>).
+    <strong>Bit</strong> renders one "compositions" surface that both the Preview tab and docs reuse
+    (<a href="https://bit.dev/reference/compositions/compositions-overview/">compositions</a>). Nobody stands up a
+    second, separately-wired introspection target for the live component.
+</p>
+
+<h3>Finding 2 — the introspection reads the live rendered DOM, framework-agnostically</h3>
+<p>
+    Storybook's accessibility addon runs <strong>axe-core on "the rendered DOM"</strong> of the active story, with the
+    explicit rationale that browser-based a11y "evaluate[s] the rendered DOM because that gives you the highest accuracy"
+    (<a href="https://storybook.js.org/docs/writing-tests/accessibility-testing">accessibility-testing</a>). Interaction
+    tests "use framework-agnostic DOM APIs… regardless of which framework you use," querying <code>canvasElement</code>
+    with Testing-Library (<a href="https://storybook.js.org/blog/interactive-stories-beta/">interactive-stories</a>).
+    Histoire, Ladle and Bit all read the rendered DOM the same way. <strong>Implication:</strong> WE's workbench panels
+    are already this shape — the inspector reads <code>getComputedStyle</code>/<code>querySelector</code>, the event-log
+    delegates native events on the stage, anatomy checks <code>hasAttribute</code> — so a framework render in the stage
+    is introspected by the same machinery a native element is, <em>provided the panels target the right node</em>
+    (Finding 4).
+</p>
+
+<h3>Finding 3 — declaration metadata is sourced statically; only behaviour is read from the render</h3>
+<p>
+    Across Storybook (<code>argTypes</code> vs canvas), react-styleguidist (<code>propTypes</code> vs live example) and
+    Bit (API-reference from JSDoc vs composition), the structured layer comes from types/CEM and the behavioural layer
+    from the DOM. WE matches this exactly: the theme/trait/anatomy/event panels gate on the block's
+    <strong>CEM-derived declaration</strong> (<code>block.tokens</code>/<code>block.traits</code>/<code>block.events</code>/<code>block.anatomy</code>),
+    which is a property of the <em>block</em>, not the render form. So the same block live-mounted via React still carries
+    its declaration — the panels do <strong>not</strong> compile themselves out.
+</p>
+
+<h3>Finding 4 — the skeptic's REFUTED verdict rested on a false premise; the real residual is narrower</h3>
+<p>
+    A throwaway skeptic (prompted only to refute) returned <strong>REFUTED</strong>: "props ≠ attributes, the custom
+    element isn't there, declaration-gated panels vanish, React synthetic events don't bubble." Tracing
+    <code>genWrapper.mjs</code> disproves the premise — the <code>live</code> wrapper "renders the existing custom element
+    and forwards props/events; it does not reimplement it" (<code>React.createElement('&lt;tag&gt;', {ref, ...attrProps})</code>).
+    So the real <code>&lt;auto-complete&gt;</code> is mounted inside the framework root: it <em>is</em> present, its native
+    bubbling events reach the stage (the event-log works), and the block declaration exists. What the skeptic correctly
+    surfaced is a <strong>narrower residual</strong> that becomes Fork A's amendment, not its refutation:
+</p>
+<ol>
+    <li><strong>Subject-node resolution.</strong> <code>mount(el)</code> does <code>createRoot(el)</code>, so the custom
+        element is a <em>child</em> of the stage node. Panels keyed to <code>instance</code>
+        (<code>instance.localName</code> in export/inspector, <code>instance.hasAttribute</code> in anatomy,
+        <code>applyTrait(instance)</code>) must resolve the inner element instead of the wrapper root.</li>
+    <li><strong>Control routing.</strong> The wrapper forwards <em>mount-time props</em>; it doesn't observe the host
+        node's attributes. So trait toggles / design-system presets that <code>setAttribute</code> on the wrapper root
+        must instead route through <code>instance.update(props)</code> (or the live <code>create()</code> re-emits host
+        attributes into the element).</li>
+    <li><strong>Lifecycle ownership.</strong> <code>renderStage</code> calls <code>cqWrap.replaceChildren(next)</code>
+        reflexively; over a framework-owned node that orphans the React/Vue root without <code>unmount()</code> → a leak.
+        The live path must own teardown via the returned <code>unmount()</code>.</li>
+</ol>
+<p>
+    These are real wiring — so "zero new wiring" is wrong — but bounded and one-time, and far less than Fork B's full
+    parallel introspection surface.
+</p>
+
+<h3>Finding 5 — "export as code" degrades for a framework subject regardless of target</h3>
+<p>
+    The Share panel's <code>exportAsCode</code> emits <code>instance.localName</code> markup; for a live render it should
+    emit the wrapper / <code>?form</code> source, not host markup — the well-known Storybook footgun where a custom
+    <code>render</code> makes the auto-snippet drift from the DOM unless overridden via <code>source.code</code>/transform
+    (<a href="https://storybook.js.org/docs/api/doc-blocks/doc-block-source">Source doc block</a>). This is a
+    <a href="/backlog/1030-workbench-same-document-live-test-mount-react-vue-devdeps/">#1030</a> build detail, not a
+    render-target fork.
+</p>

@@ -3,37 +3,96 @@ kind: decision
 parent: "912"
 status: open
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-22"
+preparedDate: "2026-06-22"
+relatedReport: reports/2026-06-22-workbench-live-render-target.md
+researchTopic: workbench-live-render-target
 tags: []
 ---
 
 # Workbench live-mount render target — into the stage as subject vs separate Polyglot live-preview
 
-Fork blocking #1030. The cross-origin React live-mount mechanism is proven end-to-end (#1501/#1518/#1556).
-Before #1030's workbench-side build can be authored, one thing must be ruled: **where does the live render go**,
-because it dictates where `mount(el, …)` points and how the inspector/event/anatomy panels introspect a
-**non-custom-element** render.
+**Prepared 2026-06-22.** No design is being invented — this rules the render *target* for an already-proven
+mechanism (cross-origin React/Vue live-mount `?form=react-live`, #1501/#1518/#1556). The one fork below is
+grounded in a prior-art survey of how component explorers structure render-surface-vs-introspection,
+published as `/research/workbench-live-render-target/` (session report linked via `relatedReport`). It
+carries a **bold** recommended default that has been attacked by a skeptic and survived with an amendment.
 
 ## What you have to decide
 
-Pick the render target for the cross-origin React/Vue live-mount in the workbench:
+Ratify where #1030's `mount(el,…)` points: **render the live React/Vue subject into the stage** (Fork 1,
+default **(a)**), accepting the three bounded panel amendments below — or stand up a separate live-preview
+pane with its own introspection wiring (Fork 1 (b)).
 
-- **Fork A — render into the STAGE, replacing the native custom element as the subject.** The inspector reads
-  computed styles / queries the stage DOM (`fui:workbench/mount.ts:7`), the event log listens on the stage, and
-  the anatomy panel reflects the block's *declaration* (not rendered DOM) — so a React render placed in the
-  stage is covered by all three panels with **no new introspection wiring**. React DOM events bubble normally;
-  computed styles work on any DOM. **Residual to verify:** nothing in the stage path hard-assumes a
-  custom-element subject (e.g. reads `.tagName`, calls `customElements.upgrade`, or expects the block's own
-  shadow root).
-- **Fork B — separate Polyglot live-preview panel.** Keep the live render beside its source (where source shows
-  today, `fui:workbench/mount.ts:633`), but add **net-new introspection wiring** to feed inspector/event/anatomy
-  from a non-custom-element render. More isolation, more code, less reuse.
+## Recommended path at a glance
 
-**Fork-existence check (do before ratifying):** confirm Fork A is genuinely viable — i.e. the stage path does
-NOT hard-require a custom element. If it does and can't be cheaply relaxed, the fork collapses to B; if it
-doesn't, A dominates on reuse and B is only justified by a separate need to see render-beside-source.
+| Fork | The call | Options | **Default** |
+|------|----------|---------|-------------|
+| 1 | Render target for the live-mount | (a) into the stage · (b) separate preview pane | **(a) into the stage** |
 
-## Downstream
+## Fork 1 — render target for the cross-origin live-mount
+
+**Fork-existence justification (case b — coherent branches that cannot coexist):** there is *one* canonical
+introspection slot. The inspector / event-log / anatomy panels can read the stage **or** a separate pane as
+"the subject," not both at once — so (a) and (b) are a genuine either/or, not a support-both. (B's
+render-beside-source *display* is separable and additive — see "Supported by default" — but B *as the
+introspection target* excludes A.)
+
+**Crux (refs into the real tree).** The stage is a plain `<div>`; `renderStage()` does
+`block.create()` → `applyTrait` → `cqWrap.replaceChildren(next)` (`fui:workbench/mount.ts:247-262`).
+The panels gate on the block's CEM-derived declaration (`fui:workbench/mount.ts:292`,
+`fui:workbench/mount.ts:535`, `fui:workbench/mount.ts:693`, `fui:workbench/mount.ts:701`) but *read* the
+DOM generically — inspector via `getComputedStyle`/`querySelector` (`fui:workbench/mount.ts:900-939`),
+event-log via native delegation on the stage (`fui:workbench/mount.ts:683-692`), anatomy via
+`instance.hasAttribute` (`fui:workbench/mount.ts:711-715`). The `live` wrapper **mounts the real custom
+element** inside the framework root and forwards attrs+events (`fui:tools/gen-wrapper/genWrapper.mjs:18`,
+`fui:tools/gen-wrapper/genWrapper.mjs:142`, `fui:tools/gen-wrapper/genWrapper.mjs:154`); `mount(el, props)`
+does `createRoot(el)` / `createApp().mount(el)` and returns `{update, unmount}`
+(`fui:tools/gen-wrapper/genWrapper.mjs:223-236`, `fui:tools/gen-wrapper/genWrapper.mjs:340-366`).
+
+**Options.**
+
+- **(a) Render into the stage — replace the native subject in the one introspection slot.** Prior art is
+  unanimous: Storybook / Histoire / Ladle / Bit all render into a single canonical canvas the panels read,
+  as plain rendered DOM, framework-agnostically (`/research/workbench-live-render-target/`, Findings 1–2).
+  Because the wrapper mounts the *real* custom element, its native bubbling events reach the stage
+  (event-log works), computed-style + ARIA inspection works, and the block declaration drives anatomy/traits
+  unchanged. **Cost — three bounded amendments folded into #1030** (this is real wiring, *not* "zero", which
+  was the item's original wrong claim): (1) **subject-node resolution** — `createRoot(el)` nests the element
+  under the stage node, so panels keyed to `instance` must resolve the inner element; (2) **control routing**
+  — the wrapper forwards mount-time props, not host attributes, so trait/DS toggles route through
+  `instance.update(props)`; (3) **lifecycle** — `renderStage`'s reflexive `replaceChildren` must yield to the
+  wrapper's `unmount()` to avoid leaking a framework root.
+- **(b) Separate Polyglot live-preview pane beside source.** *Rejected* — more isolation, but it duplicates
+  the entire introspection surface (a second event/computed-style/anatomy wiring) for **no precedent**: no
+  surveyed explorer stands up a second introspection target. Its only unique value (render *beside* its
+  source) is additive, not an alternative target, so it doesn't justify forking the introspection slot.
+
+**Recommended default: (a) render into the stage** — strongly. Prior art is one-sided; the verified
+architecture (real custom element, bubbling events, generic reads, existing declaration) makes the stage
+path reuse the panels once the subject node is resolved, at materially less cost than (b)'s parallel surface.
+
+**Skeptic:** SURVIVES-WITH-AMENDMENT. A refute-only skeptic returned REFUTED ("props ≠ attributes, the
+custom element is absent, declaration-gated panels vanish, React events don't bubble"), but tracing
+`fui:tools/gen-wrapper/genWrapper.mjs` disproved the premise — the live wrapper renders the *real* custom
+element and forwards attrs+events. The attack's *correct* residue (nested subject node, attribute-vs-prop
+control routing, `replaceChildren`-vs-`createRoot` ownership) is folded in as the three amendments above and
+killed the original "zero new wiring" rationale, but did not flip the target: (a) still dominates (b) on
+precedent and net cost.
+
+## Supported by default (not decisions)
+
+- **Render-beside-source preview is additive, not this call.** If a "live render adjacent to its source"
+  view is wanted later, it can be added as a *second, non-introspected* display beside the Share panel
+  without re-wiring the introspection panels — it does not compete with the stage as the introspection
+  target. File separately under #912 if/when a consumer needs it; it is out of scope for #1594.
+- **`exportAsCode` for a framework subject** (`fui:workbench/mount.ts:793-805`) should emit the wrapper /
+  `?form` source rather than the host `instance.localName` markup (the known Storybook custom-`render`
+  footgun). A #1030 build detail, not a render-target fork.
+
+## Context — downstream
 
 `#1030` (`blockedBy: 1594`) is the workbench-side build: cross-origin-import the `?form=react-live` module →
 same-document `mount()`/`unmount()` at the chosen target → React error boundary + `window.onerror`/
-`unhandledrejection` surfacing → panel wiring → live browser-verify against a freshly-restarted :3002.
+`unhandledrejection` surfacing → the three Fork-1(a) amendments (subject-node resolution, prop-routed
+control, `unmount()` teardown) → live browser-verify against a freshly-restarted :3002.
