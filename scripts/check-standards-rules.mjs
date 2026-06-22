@@ -26,6 +26,25 @@ export const PARKED_REASONS = new Set(['blocked', 'deferred', 'external-infra', 
 // the sizing/hierarchy semantics; `decision` keeps Tier-B + fork validation. `size` stays a separate
 // orthogonal field; fix-vs-feature, if ever wanted, is an optional `tags: [fix]` (never a field).
 export const BACKLOG_KINDS = new Set(['story', 'epic', 'task', 'decision']);
+// The repo's single "build kind" rule: every kind except `decision` ships work (story/task build leaves,
+// epic is the umbrella). This is the canonical form of proposer.mjs's `isBuildable` and the backlog-health
+// audit's G2/G3 exec gate — keeping it here, beside the kind set, means a future kind rename surfaces it.
+// Defined as `!== 'decision'` (not a positive list) on purpose: a NEW build kind is auto-covered, and the
+// only silent-death vector is `decision` itself being renamed — pinned by the kinds test (#1473).
+export const isExecKind = (kind) => kind !== 'decision';
+// G3 subject scope (#1498) — the backlog-health "ungoverned-arch" gate fires only when a build graduated
+// to a new named STANDARD ENTITY (a governable architectural noun), not a routine file-path / locus-prefixed
+// graduation (`we:`/`fui:`/`plateau:scripts/...`) or a `demo:`. The principle: a governance gate's subject is
+// governable architecture, not impl — a file landing in an existing subsystem is settled arch and needs no
+// fresh decision. The `:` anchor discriminates: entity kinds always carry `<kind>:<name>`; locus paths use a
+// repo prefix; free-text graduations have no clean prefix. Pinned by exec-kind.test.mjs so a future
+// `graduatedTo` grammar change can't silently re-broaden (back to ~350) or re-kill (to 0) G3.
+export const STANDARD_ENTITY_KINDS = new Set(['block', 'intent', 'protocol', 'project', 'plug', 'capability', 'adapter']);
+export const isEntityGraduation = (graduatedTo) => {
+  if (typeof graduatedTo !== 'string') return false;
+  const m = graduatedTo.match(/^([a-z]+):/);
+  return !!m && STANDARD_ENTITY_KINDS.has(m[1]);
+};
 // Repo-LOCUS (backlog-workflow.md → "Repo-locus") — the declarative per-locus gate registry (#498/#500).
 // An item's `locus` is its **gate home**: which repo's gate can honestly CLOSE it. A cross-locus `/batch`
 // is locus-agnostic — it packs items of any locus and gates **each in its own locus** using this record:
@@ -897,6 +916,10 @@ export function validateIntent(intent, ctx) {
 // Capability + build-matrix vocabularies (§6c-bis, #204). Exported so the script and tests share one
 // definition of the three tier states and the polyfill classes.
 export const TIER_STATES = new Set(['native-ok', 'polyfill-ok', 'capability-hard']);
+// Library impls (#1450/#1487) score on a coverage axis, not the platform-relative substrate axis — a JS
+// library does not sit on native-ok/polyfill-ok/capability-hard. A `kind: library` row tiers each capability
+// supported/partial/unsupported instead. `kind` defaults to `native` (the existing substrate rows).
+export const LIBRARY_TIER_STATES = new Set(['supported', 'partial', 'unsupported']);
 export const CAP_POLYFILL = new Set(['polyfillable', 'partial', 'capability']);
 
 /**
@@ -956,14 +979,19 @@ export function validateCapabilityMatrix(matrixImpls, ctx) {
     if (impl.native !== undefined && typeof impl.native !== 'boolean')
       err(`Capability adapter "${impl.id}" native must be a boolean (the native-first substrate marker)`);
     if (impl.native === true) nativeImplCount++;
+    // `kind` selects the tier vocabulary: `native` (default) → substrate states; `library` → coverage states.
+    const kind = impl.kind ?? 'native';
+    if (kind !== 'native' && kind !== 'library')
+      err(`Capability adapter "${impl.id}" kind must be "native" or "library" (got "${impl.kind}")`);
+    const validStates = kind === 'library' ? LIBRARY_TIER_STATES : TIER_STATES;
     const tiers = impl.tiers && typeof impl.tiers === 'object' ? impl.tiers : {};
-    // Every tier value must be one of the 3 states, and key a known capability id (no stray rows).
+    // Every tier value must be one of the kind's states, and key a known capability id (no stray rows).
     for (const [capId, tier] of Object.entries(tiers)) {
       if (!capabilityIds.has(capId))
         err(`Capability adapter "${impl.id}" tiers unknown capability "${capId}" — not in capabilities.json`,
           dUnresolvedRef('CapabilityAdapter', impl.id, FILE.CapabilityAdapter, 'tiers', capId, 'capabilities.json'));
-      if (!TIER_STATES.has(tier))
-        err(`Capability adapter "${impl.id}" capability "${capId}" has invalid tier "${tier}" (expected ${[...TIER_STATES].join(' / ')})`);
+      if (!validStates.has(tier))
+        err(`Capability adapter "${impl.id}" (kind ${kind}) capability "${capId}" has invalid tier "${tier}" (expected ${[...validStates].join(' / ')})`);
     }
     // The build-matrix is a complete grid: tier() must be total, so every row tiers every capability.
     for (const capId of capabilityIds)

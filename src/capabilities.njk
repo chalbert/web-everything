@@ -35,8 +35,8 @@ title: Web Everything — Capabilities
     <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#dc2626;margin-right:0.4em;"></span><strong>capability-hard</strong> — a UA-privileged wall no shim can reach</span>
   </div>
 
-  {% set tierBg = { 'native-ok': '#dcfce7', 'polyfill-ok': '#fef3c7', 'capability-hard': '#fee2e2' } %}
-  {% set tierFg = { 'native-ok': '#166534', 'polyfill-ok': '#92400e', 'capability-hard': '#991b1b' } %}
+  {% set tierBg = { 'native-ok': '#dcfce7', 'polyfill-ok': '#fef3c7', 'capability-hard': '#fee2e2', 'supported': '#dcfce7', 'partial': '#fef3c7', 'unsupported': '#f3f4f6' } %}
+  {% set tierFg = { 'native-ok': '#166534', 'polyfill-ok': '#92400e', 'capability-hard': '#991b1b', 'supported': '#166534', 'partial': '#92400e', 'unsupported': '#6b7280' } %}
 
   <div style="overflow-x: auto;">
     <table style="width: 100%; border-collapse: collapse; font-size: 0.9em; background: #fff;">
@@ -44,7 +44,7 @@ title: Web Everything — Capabilities
         <tr>
           <th style="text-align: left; padding: 0.6rem 0.75rem; border-bottom: 2px solid var(--color-border);">Capability</th>
           <th style="text-align: left; padding: 0.6rem 0.75rem; border-bottom: 2px solid var(--color-border);">Baseline</th>
-          {% for impl in capabilityMatrix.impls %}
+          {% for impl in capabilityMatrix.impls if impl.kind == 'native' %}
           <th style="text-align: center; padding: 0.6rem 0.75rem; border-bottom: 2px solid var(--color-border);" title="{{ impl.summary | striptags }}">
             <a href="/capabilities/adapters/{{ impl.id }}/">{{ impl.label }}</a>
             {% if impl.native %}<span style="display:inline-block; margin-left:0.35em; padding:0.05rem 0.4rem; border-radius:9999px; background:#dcfce7; color:#166534; font-size:0.7em; font-weight:600; vertical-align:middle;" title="The native substrate — native-first prefers it to break lightness ties">native</span>{% endif %}
@@ -62,7 +62,7 @@ title: Web Everything — Capabilities
           <td style="padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--color-border); white-space: nowrap;">
             {% if cap.baseline %}<span style="color:#166534;">✓ {{ cap.baseline }}</span>{% else %}<span style="color: var(--color-text-muted);">—</span>{% endif %}
           </td>
-          {% for impl in capabilityMatrix.impls %}
+          {% for impl in capabilityMatrix.impls if impl.kind == 'native' %}
           {% set t = impl.tiers[cap.id] %}
           <td style="padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--color-border); text-align: center;">
             <span style="display: inline-block; padding: 0.1rem 0.55rem; border-radius: 9999px; font-size: 0.78em; font-weight: 600; font-family: ui-monospace, monospace; background: {{ tierBg[t] }}; color: {{ tierFg[t] }};">{{ t }}</span>

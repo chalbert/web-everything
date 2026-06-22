@@ -1,0 +1,99 @@
+---
+layout: base.njk
+title: Web Everything — Compatibility (multi-impl)
+---
+
+<div class="page-sheet">
+
+<section class="intro">
+  <h1>Compatibility</h1>
+  <p>
+    A neutral, public <strong>capability &times; implementation</strong> table — one row per
+    <a href="/capabilities/">capability</a>, one column per <strong>implementation</strong>, each cell a
+    support tier. Auto-rendered from <code>we:src/_data/capabilityMatrix.json</code> (the same registered
+    capability-adapter table the <a href="/capabilities/">Capabilities</a> page renders), broadened from
+    native substrates to <strong>incumbent libraries</strong> as peer columns.
+  </p>
+  <p>
+    <strong>Every implementation — including Frontier UI — is just a column.</strong> No column is flagged
+    "reference" or "recommended" (ratified <a href="/backlog/1450-public-multi-impl-compatibility-table-fui-as-peer-column/">#1450</a> &rarr; A,
+    codified at <a href="/docs/agent/platform-decisions.md">platform-decisions</a>): impl-neutrality is
+    statute, the protocol is the only lock, and an impl's strength is <em>earned and visible</em> as the
+    column green across the most rows — never status-declared. This is the convergent shape of every neutral
+    compat artifact (MDN BCD, caniuse, wpt.fyi, OpenFeature). The point it makes plain: <strong>Web Everything
+    is a standard for the web in general, not a front-end for one library.</strong>
+  </p>
+</section>
+
+<section style="margin: 1.5rem 0 1rem;">
+  <h2 style="margin: 0 0 0.5rem;">Two tier vocabularies</h2>
+  <p style="color: var(--color-text-muted); font-size: 0.9em;">
+    A <strong>native substrate</strong> (a platform primitive) is scored on the platform-relative axis; a
+    <strong>JS library</strong> does not sit on that axis, so it is scored on a coverage axis. Each column's
+    header carries its kind.
+  </p>
+  <div style="display: flex; gap: 1.25rem; flex-wrap: wrap; margin: 0.5rem 0 0.25rem; font-size: 0.85em;">
+    <span><strong>Native substrate:</strong></span>
+    <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#16a34a;margin-right:0.3em;"></span>native-ok</span>
+    <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#d97706;margin-right:0.3em;"></span>polyfill-ok</span>
+    <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#dc2626;margin-right:0.3em;"></span>capability-hard</span>
+  </div>
+  <div style="display: flex; gap: 1.25rem; flex-wrap: wrap; margin: 0.25rem 0 1rem; font-size: 0.85em;">
+    <span><strong>Library:</strong></span>
+    <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#16a34a;margin-right:0.3em;"></span>supported</span>
+    <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#d97706;margin-right:0.3em;"></span>partial</span>
+    <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#9ca3af;margin-right:0.3em;"></span>unsupported / n/a</span>
+  </div>
+
+  {% set tierBg = { 'native-ok': '#dcfce7', 'polyfill-ok': '#fef3c7', 'capability-hard': '#fee2e2', 'supported': '#dcfce7', 'partial': '#fef3c7', 'unsupported': '#f3f4f6' } %}
+  {% set tierFg = { 'native-ok': '#166534', 'polyfill-ok': '#92400e', 'capability-hard': '#991b1b', 'supported': '#166534', 'partial': '#92400e', 'unsupported': '#6b7280' } %}
+
+  <div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em; background: #fff;">
+      <thead>
+        <tr>
+          <th style="text-align: left; padding: 0.6rem 0.75rem; border-bottom: 2px solid var(--color-border);">Capability</th>
+          {% for impl in capabilityMatrix.impls %}
+          <th style="text-align: center; padding: 0.6rem 0.75rem; border-bottom: 2px solid var(--color-border);" title="{{ impl.summary | striptags }}">
+            <a href="/capabilities/adapters/{{ impl.id }}/">{{ impl.label }}</a>
+            <div style="font-size: 0.7em; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.03em;">{{ impl.kind }}</div>
+          </th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for cap in capabilities %}
+        <tr>
+          <td style="padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--color-border);">
+            <a href="/capabilities/{{ cap.id }}/"><code>{{ cap.id }}</code></a>
+            <div style="font-size: 0.85em; color: var(--color-text-muted);">{{ cap.label }}</div>
+          </td>
+          {% for impl in capabilityMatrix.impls %}
+          {% set t = impl.tiers[cap.id] %}
+          <td style="padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--color-border); text-align: center;">
+            {% if t %}<span style="display: inline-block; padding: 0.1rem 0.55rem; border-radius: 9999px; font-size: 0.78em; font-weight: 600; font-family: ui-monospace, monospace; background: {{ tierBg[t] }}; color: {{ tierFg[t] }};">{{ t }}</span>{% else %}<span style="color: #d1d5db;">&middot;</span>{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section style="margin: 1.5rem 0 1rem;">
+  <h2 style="margin: 0 0 0.5rem;">Scope of the axis (a known limitation)</h2>
+  <p style="color: var(--color-text-muted); font-size: 0.9em;">
+    The capability rows above are the <strong>native-platform-feature</strong> set (dialog, popover,
+    anchor-positioning, customizable-select, …). Incumbent libraries in <em>other</em> domains —
+    <strong>focus-trap</strong> (focus containment), <strong>Mousetrap</strong> (keyboard shortcuts),
+    <strong>TanStack</strong> (data-grid / query) — do not map onto this axis, so they are not yet
+    meaningful columns: a column is only useful once the matrix carries rows for the capabilities that
+    library serves. Growing the capability <em>axis</em> to those domains (so those libraries become
+    real peer columns) is the ongoing work of the
+    <a href="/backlog/1451-library-adapter-watch-keep-incumbent-lib-adapters-current/">library-adapter watch (#1451)</a>;
+    library coverage shown here is v1 and is refined there.
+  </p>
+</section>
+
+</div>

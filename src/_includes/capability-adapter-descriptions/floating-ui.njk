@@ -1,0 +1,35 @@
+<p style="font-size:1.05em;">
+  <strong>Floating UI</strong> (the successor to Popper.js) is a <strong>positioning-only</strong> library: it
+  computes the coordinates for a floating element relative to an anchor — tooltips, popovers, dropdown menus —
+  with collision detection, flipping, and shifting. It is listed here as an ordinary <strong>peer column</strong>
+  (no impl is privileged), and it deliberately illustrates a <strong>single-domain</strong> incumbent.
+</p>
+
+<h3>Why the tiers fall where they do</h3>
+<p class="text-slate-600">
+  Floating UI is scored on the <strong>library coverage axis</strong> (<code>supported</code> /
+  <code>partial</code> / <code>unsupported</code>), not the native-substrate axis — a JS library does not sit on
+  <code>native-ok</code>/<code>polyfill-ok</code>/<code>capability-hard</code>.
+</p>
+<ul class="list-disc pl-5 text-slate-600">
+  <li>
+    <strong><code>anchor-positioning</code> — <span style="color:#166534;">supported</span>.</strong> This is its
+    entire domain: it is the canonical JS implementation of anchored positioning, the behavior CSS
+    <code>anchor-positioning</code> is standardizing.
+  </li>
+  <li>
+    <strong><code>popover</code> — <span style="color:#92400e;">partial</span>.</strong> It positions a popover
+    surface, but it does not own the popover <em>semantics</em> (top-layer, light-dismiss, the
+    <code>popover</code> attribute) — those remain the platform's.
+  </li>
+  <li>
+    <strong>Everything else — <span style="color:#6b7280;">unsupported</span>.</strong> Forms, dialogs,
+    customizable selects, rich-text, sanitization — all outside a positioning library's scope. The mostly-grey
+    column is the point: a compat table is <em>per capability</em>, and breadth is earned, not assumed.
+  </li>
+</ul>
+<p class="text-slate-600">
+  Incumbents in other domains (focus-trap, Mousetrap, TanStack) do not map onto the current native-feature
+  capability axis at all — growing that axis so they become meaningful columns is the
+  <a href="/backlog/1451-library-adapter-watch-keep-incumbent-lib-adapters-current/">library-adapter watch (#1451)</a>.
+</p>

@@ -1,5 +1,5 @@
 {
-  "description": "The static build-matrix — the default capability-provider implementation (D4′). Its <code>impls[]</code> array is the central <strong>registered capability adapter table</strong> (#206): one row per impl, authored by that impl but registered centrally, declaring its capability id → 3-state tier map: native-ok (the platform serves it directly) / polyfill-ok (a shim recovers the behavior) / capability-hard (a UA-privileged capability no shim can reach). The adapter table <em>is</em> the matrix's row source — one source of truth, no duplicated capability facts; adding a new impl is a single-row registration. Capability ids key off src/_data/capabilities.json. Grounded in reports/2026-06-02-native-platform-substrate.md. Paired with the default <code>build</code> venue; runtime + edge venues swap in their own provider impls (#208).",
+  "description": "The static build-matrix — the default capability-provider implementation (D4′). Its <code>impls[]</code> array is the central <strong>registered capability adapter table</strong> (#206): one row per impl, authored by that impl but registered centrally, declaring its capability id → 3-state tier map: native-ok (the platform serves it directly) / polyfill-ok (a shim recovers the behavior) / capability-hard (a UA-privileged capability no shim can reach). The adapter table <em>is</em> the matrix's row source — one source of truth, no duplicated capability facts; adding a new impl is a single-row registration. Capability ids key off src/_data/capabilities.json. Grounded in reports/2026-06-02-native-platform-substrate.md. Paired with the default <code>build</code> venue; runtime + edge venues swap in their own provider impls (#208). <strong>#1450/#1487:</strong> broadened from native substrates to <strong>incumbent libraries</strong> as peer columns (the public <a href=\"/compat/\">/compat/</a> catalog) — every impl, including FUI, is just a column (no privileged/reference column; impl-neutrality is statute). Native-substrate impls use the native-first tiers (native-ok/polyfill-ok/capability-hard); library impls use a second vocabulary (supported/partial/unsupported) since a JS lib does not sit on the platform-relative axis. Library coverage is v1 and refined by the library-adapter watch (#1451).",
   "tiers": [
     "native-ok",
     "polyfill-ok",
@@ -32,7 +32,8 @@
         "editcontext": "capability-hard",
         "sanitizer-api": "polyfill-ok",
         "highlight-api": "polyfill-ok"
-      }
+      },
+      "kind": "native"
     },
     {
       "id": "base-select",
@@ -61,7 +62,71 @@
         "editcontext": "native-ok",
         "sanitizer-api": "native-ok",
         "highlight-api": "native-ok"
+      },
+      "kind": "native"
+    },
+    {
+      "id": "floating-ui",
+      "kind": "library",
+      "label": "Floating UI",
+      "summary": "A positioning-only library (the successor to Popper.js): computes anchored coordinates for floating elements (tooltips, popovers, menus). Covers the <code>anchor-positioning</code> capability; it does not own the popover/dialog/select semantics those surfaces also need — a single-domain incumbent, illustrating why the compat axis is per-capability.",
+      "tiers": {
+        "dialog": "unsupported",
+        "request-submit": "unsupported",
+        "showpicker": "unsupported",
+        "face": "unsupported",
+        "user-pseudos": "unsupported",
+        "declarative-shadow-dom": "unsupported",
+        "popover": "partial",
+        "custom-state": "unsupported",
+        "anchor-positioning": "supported",
+        "invokers": "unsupported",
+        "field-sizing": "unsupported",
+        "dialog-closedby": "unsupported",
+        "customizable-select": "unsupported",
+        "cross-root-aria": "unsupported",
+        "details": "unsupported",
+        "details-name": "unsupported",
+        "hidden-until-found": "unsupported",
+        "contenteditable": "unsupported",
+        "editcontext": "unsupported",
+        "sanitizer-api": "unsupported",
+        "highlight-api": "unsupported"
+      }
+    },
+    {
+      "id": "frontier-ui",
+      "kind": "library",
+      "label": "Frontier UI (FUI)",
+      "summary": "The Web Everything reference component library — a comprehensive, framework-free component set realizing the WE intents/blocks over the native substrate. Listed as a PEER column like every other impl (#1450 ratified A): its strength is earned and visible as the column green across the most rows, never status-declared. Coverage derived from its block set (droplist/select, dialog/notification surfaces, rich-text-editor, FACE-based form controls, anchor/pan-zoom positioning, …).",
+      "tiers": {
+        "dialog": "supported",
+        "request-submit": "supported",
+        "showpicker": "partial",
+        "face": "supported",
+        "user-pseudos": "supported",
+        "declarative-shadow-dom": "supported",
+        "popover": "supported",
+        "custom-state": "supported",
+        "anchor-positioning": "supported",
+        "invokers": "supported",
+        "field-sizing": "partial",
+        "dialog-closedby": "partial",
+        "customizable-select": "supported",
+        "cross-root-aria": "partial",
+        "details": "supported",
+        "details-name": "partial",
+        "hidden-until-found": "partial",
+        "contenteditable": "supported",
+        "editcontext": "partial",
+        "sanitizer-api": "partial",
+        "highlight-api": "supported"
       }
     }
+  ],
+  "libraryTiers": [
+    "supported",
+    "partial",
+    "unsupported"
   ]
 }

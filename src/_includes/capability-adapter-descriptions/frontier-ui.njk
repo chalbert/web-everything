@@ -1,0 +1,33 @@
+<p style="font-size:1.05em;">
+  <strong>Frontier UI (FUI)</strong> is the Web Everything <strong>reference component library</strong> — a
+  comprehensive, framework-free component set realizing the WE intents and blocks over the native substrate.
+  Crucially, it appears here as an ordinary <strong>peer column</strong>, exactly like every other impl
+  (ratified <a href="/backlog/1450-public-multi-impl-compatibility-table-fui-as-peer-column/">#1450</a> &rarr; A):
+  its strength is <em>earned and visible</em> — the column green across the most rows — never status-declared.
+  Impl-neutrality is statute; the protocol is the only lock.
+</p>
+
+<h3>Why the tiers fall where they do</h3>
+<p class="text-slate-600">
+  FUI is scored on the <strong>library coverage axis</strong> (<code>supported</code> / <code>partial</code> /
+  <code>unsupported</code>). Its breadth comes from its block set: droplist / tree-select
+  (<code>customizable-select</code>), notification / master-detail surfaces (<code>dialog</code>,
+  <code>popover</code>), the rich-text editor (<code>contenteditable</code>, <code>highlight-api</code>),
+  FACE-based form controls (<code>face</code>, <code>custom-state</code>, <code>request-submit</code>), and its
+  pan-zoom / droplist positioning (<code>anchor-positioning</code>) — all <strong>supported</strong>.
+</p>
+<ul class="list-disc pl-5 text-slate-600">
+  <li>
+    <strong><span style="color:#92400e;">partial</span></strong> cells (<code>showpicker</code>,
+    <code>field-sizing</code>, <code>dialog-closedby</code>, <code>cross-root-aria</code>,
+    <code>details-name</code>, <code>hidden-until-found</code>, <code>editcontext</code>,
+    <code>sanitizer-api</code>) are where FUI approximates the capability or relies on a polyfill rather than
+    owning it end-to-end.
+  </li>
+</ul>
+<p class="text-slate-600">
+  Coverage shown is <strong>v1</strong>, derived from the block set and refined by the
+  <a href="/backlog/1451-library-adapter-watch-keep-incumbent-lib-adapters-current/">library-adapter watch (#1451)</a>.
+  That FUI is the greenest column is the table working as intended — it shows, rather than declares, the
+  reference impl's reach.
+</p>
