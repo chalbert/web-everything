@@ -1,0 +1,5 @@
+{
+  "term": "Progress Intent",
+  "definition": "A determinate task/completion readout — how far a task has advanced toward done (profile % complete, course progress, fundraising goal). Adopts the native <progress> / role=progressbar vocabulary verbatim (value, max; omit value → indeterminate, drops aria-valuenow); NO min and NO zones (that is meter). Decoupled from any pending/blocking lifecycle — loader.progress and flow-progress compose it as consumers, never its home. Presentation (bar | circular) is a dimension, not a separate intent. WE owns the intent; FUI ships the rendered block.",
+  "usage": "Standardized by the Progress Intent."
+}
