@@ -1,0 +1,22 @@
+{
+  "id": "identity-ceremony-authoring",
+  "title": "Identity-ceremony authoring — what a passkey/FedCM enrollment Configurator domain would expose",
+  "status": "open",
+  "summary": "Grounds decision #499 (identity-ceremony Configurator domain). The credential-acquisition build (#483/#496, resolved) deliberately OMITS a Configurator domain — technical defaults ride the CustomCredentialProvider registry + config-flavors. #499 asks whether, on a real authoring need, an identity domain should be added to the plateau-app Technical Configurator (data-driven: seed + provider entry, like the webvalidation/file-upload domain #725) and what it would expose. The #499 review classified this seam as RESEARCH-GATED — not priority:low (a guessed enrollment-config default would be wrong) and not a maturityGated park (it waits on a prior-art survey we can do now, not on adoption). SCOPE: this subject is AUTHORING (how a non-coder configures an enrollment ceremony), distinct from the credential-acquisition PROTOCOL (we:src/_data/researchTopics/credential-acquisition-protocol.json) and the webidentity PROJECT (we:src/_data/researchTopics/web-identity-project.json), which are their own subjects. PRIOR ART TO SURVEY: (1) Web platform (authoritative) — WebAuthn/passkeys registration ceremony (navigator.credentials.create; PublicKeyCredentialCreationOptions: RP, user, authenticatorSelection, attestation, residentKey/discoverable-credential, userVerification) + FedCM (navigator.credentials.get + IdP config endpoint); these define the author-facing AXES. (2) Low-code identity tooling (benchmark) — the SHAPE hosted identity platforms use to expose enrollment-flow config to non-coders (knob-form vs visual flow vs policy matrix). (3) In-repo — the plateau-app Technical Configurator data-driven domain pattern (seed + provider entry) shipped for webvalidation/file-upload (#725), the candidate home. OPEN QUESTIONS (a fuller pass closes): which creation-options/FedCM axes are author-facing vs impl-only; policy-surface vs flow-surface UI shape; clean instance of the existing domain pattern vs a new seam; and whether an authoring CONSUMER exists yet (the #499 demand gate) or it stays research-only. Full framing in we:reports/2026-06-22-identity-ceremony-authoring.md.",
+  "dateOpened": "2026-06-22",
+  "lastReviewed": "2026-06-22",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "identity",
+    "webidentity",
+    "passkey",
+    "webauthn",
+    "fedcm",
+    "configurator",
+    "authoring",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webidentity"
+}

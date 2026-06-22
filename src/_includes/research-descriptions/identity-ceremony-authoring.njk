@@ -1,0 +1,59 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The credential-acquisition build
+  (<a href="/backlog/483-webidentity-project-credential-management-protocol/">#483</a> /
+  <a href="/backlog/496-webidentity-build-design-credential-acquisition-protocol-con/">#496</a>, both
+  resolved) deliberately <strong>omits</strong> a Configurator domain — technical defaults ride the
+  <code>CustomCredentialProvider</code> registry + config-flavors.
+  <a href="/backlog/499-identity-ceremony-configurator-domain-plateau-app-explore-on/">#499</a> asks:
+  <em>if a real authoring need emerges — authors tuning passkey / FedCM enrollment flows
+  <strong>without writing a plug</strong> — what would an identity-ceremony domain in the plateau-app
+  Technical Configurator expose, and is the data-driven domain pattern (seed + provider entry, like the
+  <code>webvalidation</code> / file-upload domain
+  <a href="/backlog/725-port-the-webvalidation-plug-domain-its-subsystems-into-fronti/">#725</a>) the
+  right shape?</em>
+</p>
+
+<h2>Why this is a research subject (not a park, not low-priority)</h2>
+<p>
+  The #499 review classified this seam as <strong>research-gated</strong>: it is <em>not</em>
+  <code>priority: low</code> (a guessed enrollment-config default would be wrong, not merely low-value) and
+  <em>not</em> a <code>maturityGated</code> park (it is not waiting on adoption — it is waiting on a
+  prior-art survey we can do <strong>now</strong>). The seam here is <strong>authoring</strong> — how a
+  non-coder configures an enrollment ceremony — which is distinct from the credential-acquisition
+  <em>protocol</em> and the <code>webidentity</code> <em>project</em>, each already its own research
+  subject.
+</p>
+
+<h2>Prior art to survey</h2>
+<ul>
+  <li>
+    <strong>Web platform (authoritative).</strong> WebAuthn / passkeys registration ceremony
+    (<code>navigator.credentials.create</code> and the <code>PublicKeyCredentialCreationOptions</code>
+    surface: RP, user, <code>authenticatorSelection</code>, <code>attestation</code>,
+    resident-key / discoverable-credential, <code>userVerification</code>) and <strong>FedCM</strong>
+    (<code>navigator.credentials.get</code> with an IdP config endpoint). These define the author-facing
+    <em>axes</em>. Survey which options are author-meaningful vs impl-detail, and which are policy
+    (UV required vs preferred) vs branding (RP name / icon).
+  </li>
+  <li>
+    <strong>Low-code identity tooling (benchmark).</strong> The <em>shape</em> hosted identity platforms use
+    to expose enrollment-flow configuration to non-coders — knob-form vs visual flow vs policy matrix —
+    surveying the author-surface shape, not the vendor.
+  </li>
+  <li>
+    <strong>In-repo (the candidate home).</strong> The plateau-app <strong>Technical Configurator</strong>
+    data-driven domain (seed + provider entry), as shipped for <code>webvalidation</code> / file-upload
+    (#725). Confirm whether an identity domain is a clean instance of that pattern or needs a new seam.
+  </li>
+</ul>
+
+<h2>Open questions a fuller pass closes</h2>
+<ol>
+  <li>Which <code>PublicKeyCredentialCreationOptions</code> / FedCM-config axes are <strong>author-facing</strong> vs impl-only?</li>
+  <li>Is enrollment-ceremony authoring a <strong>policy</strong> surface (toggles / matrix) or a <strong>flow</strong> surface (ordered steps)? This decides the domain's UI shape.</li>
+  <li>Does it fit the existing data-driven Configurator domain with <strong>zero</strong> new mechanism, or does ceremony-authoring need a seam the file-upload / webvalidation domains didn't?</li>
+  <li>Is there an actual authoring <strong>consumer</strong> yet (the #499 demand gate), or does this stay research-only until one appears?</li>
+</ol>
+{% endraw %}
