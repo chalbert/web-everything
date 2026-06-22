@@ -3,7 +3,7 @@ kind: story
 size: 5
 parent: "912"
 status: open
-blockedBy: ["1518"]
+blockedBy: ["1556"]
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-22"
 locus: frontierui
@@ -97,3 +97,26 @@ Claimed + ground the live frontierui tree to actually build it (the prior "needs
 - Therefore a live mount **requires a served mount form** (e.g. `?form=react-live`) that bundles **react + react-dom + an ErrorBoundary together** and exports `mount(el, props)` / `unmount()`. That is forced design (per #955, not an open fork) but is **net-new producer/generator/endpoint work** outside this item's stated "steps 4–5 workbench-side" scope.
 
 Filed that prerequisite as **#1518** (`fui:tools/gen-wrapper/genWrapper.mjs` live-mount variant + `fui:tools/maas/produceWrapperBytes.mjs` react-dom bundle + `fui:tools/maas/vite-plugin.mjs` form-serve) and set `blockedBy: 1518`. This item stays the **workbench-side half** (cross-origin-import the `react-live` module → same-document mount → `window.onerror`/`unhandledrejection` surfacing → inspector/event/anatomy wiring + live :3002 browser verification). Carry-forward reason: **blocked-in-fact** (forced prerequisite verified absent, now a real edge). Released to `open`.
+
+## Pre-flight (batch-2026-06-22-1545-1549) — #1518 landed; built toward it, hit a verified CORS gap on the serve origin → `blockedBy: 1556`
+
+Claimed and **built toward the live mount** rather than re-declining (the "needs a focused session" framing
+is the gut stop the batch rule kills). The producer side from #1518 is real and correct: workbench
+`fui:workbench/package.json` quarantines react/react-dom/vue; the catalog declares `react-live`/`vue-live`
+(`fui:tools/gen-wrapper/wrapperFormCatalog.mjs`); the contract is `mount(el, props?) => {update, unmount}` +
+`unmount()` with `createRoot` + a bundled ErrorBoundary (`fui:tools/gen-wrapper/genWrapper.mjs:223`). A
+throwaway maas origin on a fresh port (current code, user's stale :3002 untouched — it predates #1518 and
+reports the old `declarative/wc-class/html/jsx/functional` form set) **serves the live module correctly over
+same-origin curl** (200, ~1 MB, `export { …, mount, unmount }`, react-dom bundled, 25 createRoot/boundary
+hits).
+
+**But the cross-origin browser import — this item's whole premise — FAILS.** Real Playwright arbiter: a page
+on the running :3001 host doing a cross-origin `import()` of the `?form=react-live` module throws
+`TypeError: Failed to fetch dynamically imported module`. The serve origin emits **no CORS headers** (no
+`Access-Control-Allow-Origin` on the `302` pin redirect or the `200`; `OPTIONS` → `302`), so
+`server: { cors: true }` in `fui:vite.maas.config.mts` is not reaching the custom `maasWrapperServe`
+middleware route. This is a **producer-side (serve-origin) gap, not the consumer's scope** — #1499/#1501
+ruled+stood-up cross-origin serving but never verified a cross-origin browser import (only same-origin
+handler unit tests). Filed as **#1556** (maas-origin CORS fix) and set `blockedBy: 1556`. Carry-forward
+reason: **blocked-in-fact** (the cross-origin import the consumer needs is browser-verified to fail until the
+serve origin emits CORS). No consumer code written (nothing to land until #1556). Released to `open`.
