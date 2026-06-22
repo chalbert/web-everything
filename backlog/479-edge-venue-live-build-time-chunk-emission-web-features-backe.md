@@ -27,11 +27,18 @@ Sliced 2026-06-15 — see [we:reports/2026-06-15-backlog-split-analysis.md](../r
   `BaselineLookup` ([`we:edge-io.ts:69`](../capabilities/edge-io.ts#L69)), unit-tested against the injection
   seam.
 
-- **#699 — placement of the live edge serve runtime** (`type:decision`, **parked**). The live SERVE
-  runtime (bundle + serve real module bytes at `componentUrl` over HTTP; `EdgeChunkCache.serve` returns a
-  `Resolution`, not bytes — [`we:edge.ts:169`](../capabilities/edge.ts#L169)) is a live-serve product
-  surface that collides with the standing **defer-live-serve** + **no-leakage layering** stances. The
-  fork (A: plateau-app product + WE pure-logic emit-plan · B: WE in-repo reference esbuild demo) is
-  tracked in **#699**, parked until a real MaaS-distribution surface forces the call. **Resolving #699
-  unblocks the live-serve build slices** (under A: a WE emit-build-plan slice + a plateau-app
-  serve-consumer slice) — re-`/slice` this epic once #699 lands; those seams are unknowable until then.
+- **#699 — placement of the live edge serve runtime** (`type:decision`, **resolved 2026-06-22**).
+  Ratified **(a)**: live-serve = plateau-app product; WE ships only the contract + a pure, bundler-neutral
+  emit-build-plan (no HTTP server, no bundler dep), with a WE-side neutrality vector. Branch B (WE in-repo
+  reference esbuild server) was statute-foreclosed by
+  [constellation-placement](docs/agent/platform-decisions.md#constellation-placement). Resolution sliced the
+  live-serve build into the two children below.
+
+- **#1624 — EdgeChunkCache emits a bundler-neutral build-plan** (`story·3`, agent-doable). WE-side slice:
+  add a deterministic emit-build-plan (capability-class, cache-key, declarative `Vary`/`Accept-CH`/immutable
+  headers) to [`we:edge.ts`](../capabilities/edge.ts#L160), with a [`we:capabilities/check.ts`](../capabilities/check.ts)
+  vector pinning bundler-neutrality. No server, no bundler dep in WE.
+
+- **#1625 — plateau-app consumes the emit-build-plan to bundle + serve** (`story·3`,
+  `relatedProject: plateau-app`, `blockedBy: 1624`). The actual live-serve runtime (HTTP server + bundler)
+  in plateau-app. Deferred by **defer-live-serve** until a real MaaS-distribution surface forces it.

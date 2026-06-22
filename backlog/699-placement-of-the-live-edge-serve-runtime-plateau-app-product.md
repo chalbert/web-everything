@@ -2,9 +2,13 @@
 kind: decision
 size: 2
 parent: "479"
-status: open
+status: resolved
 preparedDate: "2026-06-22"
 dateOpened: "2026-06-15"
+dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 tags: []
 ---
 
@@ -26,6 +30,19 @@ live, and does the WE repo take the HTTP-server + bundler deps?**
   holds contract/protocol/interface only.
 - No new `/research/` topic — this ratifies the existing constellation-placement + defer-live-serve
   stances against the real tree, a prior-art-settled call.
+
+## Ruling (ratified 2026-06-22)
+
+**Resolved (a) + the bundler-neutrality amendment.** The live edge serve runtime is a **plateau-app
+product surface**; WE ships only the contract plus a **pure, bundler-neutral emit-build-plan** (capability-class,
+cache-key, declarative `Vary`/`Accept-CH`/immutable header directives — no HTTP server, no bundler dep),
+enforced bundler-neutral by a WE-side [`we:capabilities/check.ts`](../capabilities/check.ts) conformance vector.
+Branch (b) (WE in-repo reference esbuild server) is **statute-foreclosed** by
+[constellation-placement](docs/agent/platform-decisions.md#constellation-placement) — the reference-runtime tier is withdrawn.
+
+Filed the two build slices of epic #479:
+- [#1624](/backlog/1624-edge-venue-edgechunkcache-emits-a-bundler-neutral-build-plan/) — WE emit-build-plan + neutrality vector (agent-doable; `parent: 479`).
+- [#1625](/backlog/1625-edge-venue-live-serve-plateau-app-consumes-the-we-emit-build/) — plateau-app serve-consumer (`relatedProject: plateau-app`, `blockedBy: 1624`); the actual live-serve product, deferred by defer-live-serve.
 
 ## Axis framing — where the bytes are built/served
 
