@@ -9,11 +9,11 @@
   
   <script type="module">
     // Import all plugs
-    import { cloneHandlerRegistry } from '../plugs/core/CloneHandlerRegistry.ts';
-    import * as cloneUtils from '../plugs/core/cloneUtils.ts';
-    import CustomElement from '../plugs/webcomponents/CustomElement.ts';
-    import { registerCloneHandlers } from '../plugs/webcomponents/cloneHandlers.ts';
-    import { applyCloneNodePatch } from '../plugs/webcomponents/Node.cloneNode.patch.ts';
+    import { cloneHandlerRegistry } from '/plugs/core/CloneHandlerRegistry.ts';
+    import * as cloneUtils from '/plugs/core/cloneUtils.ts';
+    import CustomElement from '/plugs/webcomponents/CustomElement.ts';
+    import { registerCloneHandlers } from '/plugs/webcomponents/cloneHandlers.ts';
+    import { applyCloneNodePatch } from '/plugs/webcomponents/Node.cloneNode.patch.ts';
     
     // Apply patches
     applyCloneNodePatch();

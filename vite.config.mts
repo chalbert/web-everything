@@ -163,25 +163,68 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // #1234 (per #449/#606): the residual local-plugs consumers (the injected bootstrap
+      // `<script src="/plugs/bootstrap.ts">`, the hard-coded demo bootstrap tags, the test-pages, and
+      // the sub-aliases below) all resolve to the sibling FUI `plugs/` tree now that #1250 reconciled
+      // FUI up to a superset. The `/plugs` prefix alias is the linchpin: Vite applies it to bare
+      // `/plugs/…` URL imports AND to the HTML `<script type="module" src="/plugs/…">` the dev server
+      // fetches, so the whole demo surface lands on FUI without per-file rewrites. Release builds use the
+      // published `@frontierui/plugs` package.
+      '/plugs': fuiPlugsRoot,
+
       // The Enforcer relocated to FUI (#894), so `virtual:trait-manifest` is no longer provided by a
-      // plugin here. Alias it to the empty static manifest — the byte-identical fallback vitest.config.ts
-      // already uses (#116/#448) — so bootstrap's `import 'virtual:trait-manifest'` still resolves and the
-      // manifest stays empty (WE authors no trait modules, docs-rendering boundary).
-      'virtual:trait-manifest': '/plugs/webbehaviors/traitManifest',
-      '@core': '/plugs/core',
-      '@webregistries': '/plugs/webregistries',
-      '@webinjectors': '/plugs/webinjectors',
-      '@webcomponents': '/plugs/webcomponents',
-      '@webcontexts': '/plugs/webcontexts',
-      '@webbehaviors': '/plugs/webbehaviors',
-      '@webstates': '/plugs/webstates',
-      '@webexpressions': '/plugs/webexpressions',
+      // plugin here — alias it to FUI's empty static manifest so bootstrap's `import 'virtual:trait-manifest'`
+      // still resolves (WE authors no trait modules, docs-rendering boundary).
+      'virtual:trait-manifest': `${fuiPlugsRoot}/webbehaviors/traitManifest`,
+      // The vestigial sub-aliases bare specifiers still use — repointed off the local `/plugs/…` URLs
+      // onto the FUI tree (an alias substitution is single-pass, so these must target FUI directly, not
+      // re-route through the `/plugs` prefix alias above).
+      '@core': `${fuiPlugsRoot}/core`,
+      '@webregistries': `${fuiPlugsRoot}/webregistries`,
+      '@webinjectors': `${fuiPlugsRoot}/webinjectors`,
+      '@webcomponents': `${fuiPlugsRoot}/webcomponents`,
+      '@webcontexts': `${fuiPlugsRoot}/webcontexts`,
+      '@webbehaviors': `${fuiPlugsRoot}/webbehaviors`,
+      '@webstates': `${fuiPlugsRoot}/webstates`,
+      '@webexpressions': `${fuiPlugsRoot}/webexpressions`,
 
       // #449 (per #606): WE's block runtime imports the plug platform layer as the `@frontierui/plugs`
       // package — FUI owns the impl, WE consumes it as a no-leakage client. Dev-time-resolved to the
       // sibling FUI source (Vite object aliases prefix-match, so this also resolves the deep subpaths
       // `@frontierui/plugs/webbehaviors/CustomAttribute` etc.). Release builds use the published package.
       '@frontierui/plugs': fuiPlugsRoot,
+
+      // #1234: FUI's plugs transitively re-export from the WE-resident `@webeverything/*` contract graph
+      // (the #872/#804 contract-distribution end-state). FUI's own vite.config provides these via a
+      // `weRoot`-anchored map; serving FUI plugs through WE's dev server needs the mirror image, anchored
+      // at this repo root. Mirrors `frontierui/vite.config.mts`'s `@webeverything/*` block exactly — keep
+      // the two in step. Release builds use the published `@webeverything/*` packages.
+      '@webeverything/capability-manifest': resolve(__dirname, 'capability-manifest/index.ts'),
+      '@webeverything/validation-generation/provider': resolve(__dirname, 'validation-generation/provider.ts'),
+      '@webeverything/validation-generation/registry': resolve(__dirname, 'validation-generation/registry.ts'),
+      '@webeverything/validation-generation/fieldError': resolve(__dirname, 'validation-generation/fieldError.ts'),
+      '@webeverything/validation-generation/cel': resolve(__dirname, 'validation-generation/cel.ts'),
+      '@webeverything/validation-generation/service': resolve(__dirname, 'validation-generation/service.ts'),
+      '@webeverything/webcases/requirementValidator': resolve(__dirname, 'webcases/requirementValidator.ts'),
+      '@webeverything/contracts/guard': resolve(__dirname, 'contracts/guard.ts'),
+      '@webeverything/contracts/analytics': resolve(__dirname, 'contracts/analytics.ts'),
+      '@webeverything/contracts/charts': resolve(__dirname, 'contracts/charts.ts'),
+      '@webeverything/contracts/graph': resolve(__dirname, 'contracts/graph.ts'),
+      '@webeverything/contracts/credential-management': resolve(__dirname, 'contracts/credential-management.ts'),
+      '@webeverything/contracts/push-delivery': resolve(__dirname, 'contracts/push-delivery.ts'),
+      '@webeverything/contracts/resources': resolve(__dirname, 'contracts/resources.ts'),
+      '@webeverything/contracts/transport-negotiation': resolve(__dirname, 'contracts/transport-negotiation.ts'),
+      '@webeverything/contracts/validity-merge': resolve(__dirname, 'contracts/validity-merge.ts'),
+      '@webeverything/contracts/validator-resolution': resolve(__dirname, 'contracts/validator-resolution.ts'),
+      '@webeverything/contracts/audit': resolve(__dirname, 'contracts/audit.ts'),
+      '@webeverything/contracts/lifecycle': resolve(__dirname, 'contracts/lifecycle.ts'),
+      '@webeverything/contracts/master-detail': resolve(__dirname, 'contracts/master-detail.ts'),
+      '@webeverything/contracts/selection': resolve(__dirname, 'contracts/selection.ts'),
+      '@webeverything/contracts/stepper': resolve(__dirname, 'contracts/stepper.ts'),
+      '@webeverything/contracts/tree-select': resolve(__dirname, 'contracts/tree-select.ts'),
+      '@webeverything/commitment-policy': resolve(__dirname, 'commitment-policy/index.ts'),
+      '@webeverything/error-summary': resolve(__dirname, 'error-summary/index.ts'),
+      '@webeverything/interaction-state': resolve(__dirname, 'interaction-state/index.ts'),
     },
   },
 });

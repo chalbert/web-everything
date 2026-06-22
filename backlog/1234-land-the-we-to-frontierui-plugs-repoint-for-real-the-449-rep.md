@@ -1,12 +1,13 @@
 ---
 kind: story
 size: 13
-status: open
+status: resolved
 blockedBy: []
-unsplittableReason: atomic
 relatedReport: reports/2026-06-22-backlog-split-analysis.md
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: "we:vite.config.mts"
 tags: []
 ---
 
@@ -122,6 +123,40 @@ Claimed and **actually attempted the repoint with live verification** against th
 **But the full bootstrap 500s** — a real, newly-discovered cross-repo coupling, NOT in this item's stated scope (which listed only demos/test-pages/bootstrap/8 aliases). Playwright on `we:demos/declarative-spa.html` surfaced a 500 on `fui:plugs/webvalidation/index.ts` → `"Failed to resolve import @webeverything/capability-manifest"`. FUI's plugs **transitively re-export from a ~26-entry `@webeverything/*` alias graph** that `fui:vite.config.mts` provides (mapping each back to the WE tree via `weRoot`) but `we:vite.config.mts` lacks: `@webeverything/capability-manifest`, `@webeverything/validation-generation/{provider,registry,fieldError,cel,service}`, `@webeverything/webcases/requirementValidator`, `@webeverything/contracts/{guard,analytics,charts,graph,credential-management,push-delivery,resources,transport-negotiation,validity-merge,validator-resolution,audit,lifecycle,master-detail,selection,stepper,tree-select}`, `@webeverything/commitment-policy`, `@webeverything/error-summary`, `@webeverything/interaction-state`. All targets **exist** in the WE tree (verified), so the fix is mechanical — but it is materially more than an 8-pt slice and risks iterative transitive 500s across the full 26-page surface.
 
 **Remaining work (the real #1234):** (1) replicate `fui:vite.config.mts`'s `@webeverything/*` alias block into `we:vite.config.mts` with targets `resolve(__dirname, '<pkg>')`; (2) re-apply the `/plugs`→FUI alias + sub-alias repoint + test-page rewrites (reverted this batch to keep the live surface green); (3) iteratively live-verify the full 26-demo/test-page surface until 0 transitive 500s; (4) handle the bare `@webeverything/{contracts,plugs,conformance-vectors}` specifiers FUI plugs also import (resolve via package exports or add aliases). Wants a focused WE session that owns the dev-server lifecycle. Partial changes **reverted** (the `@webeverything/*` aliases were absent so the full bootstrap broke — leaving it half-done would silently blank the demo surface). Carry-forward reason: **outgrew** (re-sized 8 → 13, drops from the batch pool); #1047 stays blocked behind it.
+
+## Progress — repoint LANDED + LIVE-verified (2026-06-22, session 1234)
+
+Owned the dev-server lifecycle (Vite auto-restarts on its own `we:vite.config.mts` config-watch — no
+manual kill) and landed the full repoint with a real-browser verify loop.
+
+**Done:**
+- **`/plugs`→FUI prefix alias** added (`'/plugs': fuiPlugsRoot` in `we:vite.config.mts`) — the linchpin.
+  Vite applies it to bare `/plugs/…` URL imports AND to the injected/​hard-coded bootstrap `<script
+  type="module" src>` tags, so the whole demo surface lands on FUI with no per-file rewrite. Proven live:
+  the bootstrap URL serves from the `fui:plugs/` tree, and FUI-only `webidentity` resolves 200.
+- **8 sub-aliases + `virtual:trait-manifest`** repointed off the local `/plugs/…` URLs → `${fuiPlugsRoot}/…`
+  (a Vite alias is single-pass, so they target FUI directly).
+- **26-entry `@webeverything/*` alias graph** mirrored from `fui:vite.config.mts` into `we:vite.config.mts`
+  (`resolve(__dirname, …)` targets, all verified present) — resolves the transitive contract re-exports
+  FUI plugs pull in (`capability-manifest`, `validation-generation/*`, `contracts/*`, `commitment-policy`,
+  `error-summary`, `interaction-state`). This was the 500 the prior pre-flight hit; it's gone.
+- **5 test-pages** rewritten `../plugs/…` → `/plugs/…` (alias-catchable).
+- **FUI gap closed (cross-repo, #1234):** FUI's webanalytics plug lacked the whole `TrackAttribute` module
+  (#1475/#1415 was authored WE-side after the #1297/#1014 registry move and never carried). Ported it to
+  `fui:plugs/webanalytics/TrackAttribute.ts` (one adaptation: the provider import moves from WE's repo-root
+  `we:analytics/provider` to FUI's co-located `./provider`) + a re-export from `fui:plugs/webanalytics/index.ts`.
+  The only genuine repoint regression; everything else FUI already had (#1250 superset held).
+- **Bare specifiers** (`@webeverything/{plugs,conformance-vectors}`) the pre-flight flagged turned out to be
+  **comment/test-only** (JSDoc examples in `fui:plugs/index.ts`/`fui:plugs/unplugged.ts`; a
+  `fui:plugs/webtraces/__tests__/` import) — never hit by the served surface, so no wiring needed.
+
+**Verified:** full-browser probe over all 50 demos + 5 test-pages → **52/55 clean, 0 transitive 500s**. The
+3 non-clean are pre-existing, plug-independent demo bugs filed as #1528 (declarative-spa fetches a deleted
+`we:demos/declarative-spa-jsx.tsx`) and #1529 (webdirectives demo `reading '0'` on undefined `this.captured`);
+their plug files are byte-identical WE↔FUI.
+
+**Downstream:** #1047 (delete `we:plugs/`) is now unblocked — the dir has no remaining live consumer (block
+runtime on `@frontierui/plugs`, demos/test-pages/bootstrap/sub-aliases all on the `/plugs`→FUI alias).
 
 ## Split analysis (`/split 1234`, 2026-06-22 → `unsplittableReason: atomic`)
 
