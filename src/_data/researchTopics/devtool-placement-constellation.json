@@ -1,0 +1,22 @@
+{
+  "id": "devtool-placement-constellation",
+  "title": "Where do developer tools live — with the reference implementation or with the product layer?",
+  "status": "open",
+  "summary": "Grounds decision #1565 (a user ruling: 'dev-tools belong in Plateau, not FUI'). The question is the precise, codifiable rule for placing every dev-tool across the constellation (WE = standard/contracts, zero impl; FUI = reference implementation; Plateau = product layer), given the ruling collides with two ratified placements — #809 (block-explorer workbench is FUI-owned) and #1225 ('the deterministic diff engine is FUI (impl/devtool)') — and a blanket reading would wrongly drag WE's own conformance verifiers (#1467) out of the standard. Five external precedents converge on ONE principle that matches the project's own ratified project_conformance_verifier_vs_subject (#1467): the dividing line is the CONSUMER. (1) Chrome DevTools vs Blink/V8 — DevTools is a separate web app (own repo, builds without the engine) that talks to the engine only over the CDP protocol; the inspector is not the thing inspected. (2) Storybook vs the component library vs Chromatic — Storybook is a dev-dependency 'frontend workshop' operating ON your components; Chromatic is the same team's commercial product consuming the story format (open-core layered over a stable format, exactly WE/FUI/Plateau). (3) Material Web vs Material Theme Builder vs m3.material.io — three homes: components, a configurator that emits tokens as DATA, the docs site. (4) WPT reftests / testharness / Test262 — conformance suites live WITH the standard, shared by every impl, reading observable output as DATA (pixels, a PASS/FAIL enum, behavioral asserts), never embedding engine internals; this IS #1467/WPT externally confirmed. (5) Monorepo packages-vs-apps (Radix/MUI/Chakra/shadcn/Turborepo/Nx) — the publishable library is the packages layer; every deployable surface that consumes it (docs, playground, Storybook, tooling, CLIs) is the apps layer. Synthesized cut (the consumer/embed test): reads output as DATA -> conformance machinery -> WE (untouched by the ruling); build-time impl transform / reference-impl generator -> FUI (untouched); developer-operated surface you run against your OWN build (workbench, inspector, explorer CLI chrome, configurator, dev-panel) -> Plateau (the ruling's target); ships embedded on THIRD-PARTY/customer sites as a distribution/showcase of the impl -> FUI distribution (Plateau-routing re-introduces the cross-origin boundary #809 dissolved — the #809 carve-out). Three hostile skeptics attacked the initial defaults: Fork 1 (the rule) SURVIVES-WITH-AMENDMENT — state it as ONE positive test, not a 3-prong sort relisting settled law; Fork 2 (block-explorer) FLIPPED to carve-OUT (stays FUI, #809 not reversed) because its driver is third-party embedding; Fork 3 (explorer) FLIPPED to split — conformance harness (Layer-1/2 reads output as data, runs WE vectors) stays FUI, vision (Layer-3) stays Plateau (no-leakage #475), only the product CLI chrome -> Plateau. Net: the ruling is honored (every operated-surface-against-your-own-build moves to Plateau) but is a REFINEMENT of the constellation-placement statute, not a wholesale override; it disturbs neither #1467, impl-is-not-a-standard, nor #809. Full grounding in reports/2026-06-22-devtool-placement-constellation.md.",
+  "dateOpened": "2026-06-22",
+  "lastReviewed": "2026-06-22",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "constellation",
+    "devtools",
+    "placement",
+    "standard-vs-impl",
+    "conformance-verifier",
+    "storybook",
+    "devtools-protocol",
+    "architecture",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

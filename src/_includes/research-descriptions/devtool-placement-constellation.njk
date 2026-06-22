@@ -1,0 +1,144 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    <a href="/backlog/1565/">#1565</a> turns a user ruling — <strong>&ldquo;dev-tools belong in Plateau, not
+    FUI&rdquo;</strong> — into a precise, codifiable placement rule across the constellation:
+    <strong>WE</strong> (the standard / contracts, zero implementation), <strong>Frontier UI</strong> (the
+    reference <em>implementation</em> of the standards), <strong>Plateau</strong> (the <em>product</em> layer).
+    The ruling is not free-standing: it collides with two <em>ratified</em> placements —
+    <a href="/backlog/809/">#809</a> (the block-explorer workbench is FUI-owned) and the
+    reproduction-conformance program <a href="/backlog/1225/">#1225</a> (&ldquo;the deterministic diff engine
+    is <strong>FUI</strong> (impl/devtool)&rdquo;) — and a blanket &ldquo;move every tool to Plateau&rdquo;
+    reading would also drag WE&rsquo;s own conformance verifiers (<a href="/backlog/1467/">#1467</a>) out of the
+    standard layer. So the open question is the <em>exact cut</em>, not the direction.
+</p>
+
+<h2>The load-bearing finding — the dividing line is the consumer</h2>
+<p>
+    Five external precedents were surveyed, and they converge on one principle that <strong>matches the
+    project&rsquo;s own ratified <code>project_conformance_verifier_vs_subject</code> (#1467) exactly</strong>: a
+    surface a <strong>human operates</strong> (workbench / inspector / configurator) is a developer
+    <strong>product</strong>, separate from the implementation it inspects; a tool that <strong>reads an
+    implementation&rsquo;s observable output as DATA</strong> (a conformance verifier) is <strong>machinery that
+    lives with the standard</strong>. &ldquo;The inspector is not the thing inspected.&rdquo;
+</p>
+
+<table>
+    <thead>
+        <tr><th>Precedent</th><th>Arrangement</th><th>Transferable principle</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Chrome DevTools vs Blink/V8</strong></td>
+            <td>DevTools is a separate web app (own repo, builds without the engine); talks to the engine only over
+                the CDP protocol (JSON commands out, JSON events back).</td>
+            <td><strong>The inspector is not the thing inspected.</strong> A human-operated surface observes the
+                impl&rsquo;s output over a contract; it never <em>is</em> the impl.</td>
+        </tr>
+        <tr>
+            <td><strong>Storybook vs the component library vs Chromatic</strong></td>
+            <td>Storybook is a dev-dependency &ldquo;frontend workshop&rdquo; operating <em>on</em> your components
+                (they live in your repo); Chromatic is the same team&rsquo;s commercial cloud product consuming the
+                <strong>story</strong> format.</td>
+            <td>OSS dev-tool + commercial product layered over a stable format — exactly the open-core
+                WE/FUI/Plateau shape. The tool is separate from its subject; the format is the only lock.</td>
+        </tr>
+        <tr>
+            <td><strong>Material Web / Theme Builder / m3.material.io</strong></td>
+            <td>Three distinct homes: the components, a configurator that <strong>emits tokens as data</strong>, and
+                the docs/spec site. The token namespace is the contract.</td>
+            <td>A configurator emits <strong>config as data</strong> which the impl consumes — zero lock-in, lives in
+                the tooling/product layer, not the component library.</td>
+        </tr>
+        <tr>
+            <td><strong>WPT reftests / testharness / Test262</strong></td>
+            <td>Conformance suites live <strong>with the standard</strong> (tc39, web-platform-tests orgs), shared by
+                every implementation; they read observable output as <strong>data</strong> (rendered pixels, a
+                PASS/FAIL enum, behavioral asserts) and never embed engine internals.</td>
+            <td><strong>A verifier that reads output as data is conformance machinery — it pairs with the standard,
+                not the product.</strong> This <em>is</em> #1467 / WPT, externally confirmed.</td>
+        </tr>
+        <tr>
+            <td><strong>Monorepo packages-vs-apps</strong> (Radix, MUI, Chakra, shadcn, Turborepo, Nx)</td>
+            <td>The publishable <strong>library</strong> is the packages/libs layer; every <strong>deployable
+                surface that consumes it</strong> — docs, playground, Storybook, tooling, CLIs — is the apps layer.
+                (Turborepo: &ldquo;Library Packages … aren&rsquo;t independently deployable&rdquo;; Nx 80/20.)</td>
+            <td>Developer tooling and product surfaces are <strong>apps-layer (&rarr; Plateau)</strong>, structurally
+                separated from the reference library (<strong>&rarr; FUI</strong>). Naming varies; the split holds.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>The synthesized cut (the consumer/embed test, to ratify in #1565)</h2>
+<ol>
+    <li><strong>Reads an implementation&rsquo;s observable output as DATA</strong> (verifier / golden-vector /
+        trace) &rarr; <strong>conformance machinery &rarr; stays WE</strong> (per #1467, WPT/Test262).
+        <em>Untouched by the new ruling.</em></li>
+    <li><strong>Build-time implementation transform / reference-impl generator</strong> (codegen, CSS lowering,
+        bundler plugins) &rarr; <strong>impl &rarr; stays FUI</strong> (per impl-is-not-a-standard #020/#291).
+        <em>Untouched.</em></li>
+    <li><strong>Developer-operated surface you run against your OWN build</strong> (workbench, inspector, explorer
+        CLI chrome, configurator, dev-panel) &rarr; <strong>product tooling &rarr; Plateau.</strong>
+        <em>This is the ruling&rsquo;s target.</em></li>
+    <li><strong>Ships embedded on THIRD-PARTY / customer sites as a distribution/showcase of the impl</strong>
+        &rarr; <strong>FUI distribution</strong> (Plateau-routing would re-introduce the cross-origin boundary
+        #809 dissolved). <em>The #809 carve-out.</em></li>
+</ol>
+
+<h2>How the survey + skeptics reshaped the forks</h2>
+<p>
+    Three throwaway skeptics attacked the initial defaults; <strong>two flipped</strong> — the expected outcome
+    of a real attack, not a rubber-stamp:
+</p>
+<ul>
+    <li><strong>Fork 1 (the rule) — SURVIVES-WITH-AMENDMENT.</strong> The initial 3-way sort <em>relisted settled
+        law</em> (#1467, impl-is-not-a-standard) as if the ruling needed it, diluting a clear directive. Amended to
+        ONE positive test (operated-surface &rarr; Plateau) plus the third-party-embed carve-out, citing the
+        existing rules as <em>unchanged</em>.</li>
+    <li><strong>Fork 2 (block-explorer #809) — FLIPPED to carve-OUT.</strong> The #809 driver is
+        <em>third-party-site embedding</em>; &ldquo;Plateau renders FUI same-origin&rdquo; is <strong>false</strong>
+        for the customer-site case — it re-introduces the very cross-origin boundary #809 dissolved. The
+        block-explorer is &ldquo;reference-impl that only looks like tooling.&rdquo; It <strong>stays FUI</strong>;
+        #809 is the cited precedent, <em>not</em> reversed.</li>
+    <li><strong>Fork 3 (explorer) — FLIPPED to split.</strong> The explorer&rsquo;s Layer-1/Layer-2 oracles
+        <strong>read output as data</strong> and Layer-2 drives WE conformance vectors through FUI bindings (the
+        runtime half of #899/#1467 machinery) &mdash; moving them to Plateau is inconsistent with the refined rule.
+        Split: conformance harness stays FUI, vision (Layer-3) stays Plateau (no-leakage #475), only the product
+        CLI chrome &rarr; Plateau.</li>
+</ul>
+<p>
+    Net: the user&rsquo;s ruling <strong>stands and is honored</strong> (every human-operated surface you run
+    against your own build moves to Plateau), but it is a <em>refinement</em> of the constellation-placement
+    statute, not a wholesale override — disturbing neither #1467 (verifiers), impl-is-not-a-standard (codegen),
+    nor #809 (the third-party-embed carve-out).
+</p>
+
+<h2>Sources</h2>
+<ul>
+    <li>Chrome DevTools / CDP: <a href="https://chromedevtools.github.io/devtools-protocol/">devtools-protocol</a> ·
+        <a href="https://github.com/ChromeDevTools/devtools-frontend">devtools-frontend</a> ·
+        <a href="https://v8.dev/docs/inspector">V8 Inspector Protocol</a></li>
+    <li>Storybook / Chromatic: <a href="https://storybook.js.org/">storybook.js.org</a> ·
+        <a href="https://github.com/storybookjs/storybook">github</a> ·
+        <a href="https://www.chromatic.com/">chromatic.com</a></li>
+    <li>Material: <a href="https://github.com/material-components/material-web">material-web</a> ·
+        <a href="https://github.com/material-foundation/material-theme-builder">material-theme-builder</a> ·
+        <a href="https://m3.material.io/">m3.material.io</a></li>
+    <li>WPT / Test262: <a href="https://web-platform-tests.org/">web-platform-tests.org</a> ·
+        <a href="https://web-platform-tests.org/writing-tests/reftests.html">reftests</a> ·
+        <a href="https://github.com/tc39/test262">test262</a></li>
+    <li>Monorepo conventions:
+        <a href="https://turborepo.dev/docs/core-concepts/package-types">Turborepo package types</a> ·
+        <a href="https://nx.dev/concepts/more-concepts/applications-and-libraries">Nx apps &amp; libraries</a> ·
+        <a href="https://ui.shadcn.com/docs/registry">shadcn registry</a></li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+    <li>Decision: <a href="/backlog/1565/">#1565 — dev-tool placement across the constellation</a> (this prep).
+        Blocks <a href="/backlog/1553/">#1553</a> (trainable-judge constellation boundary).</li>
+    <li>Codified rules touched: <code>constellation-placement</code>, <code>we-fui-embed-boundary</code>
+        (#809 rule 5), <code>no-leakage-client</code> (#475), <code>reproduction-conformance</code> (#1225).</li>
+    <li>Full grounding: <code>reports/2026-06-22-devtool-placement-constellation.md</code>.</li>
+</ul>
+{% endraw %}
