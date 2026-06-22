@@ -12,7 +12,7 @@
   ],
   "winner": "base-select",
   "winnerLabel": "base-select — native progressive enhancement",
-  "reason": "native-first over [customizable-select, custom-state, anchor-positioning, popover]; 1/2 impls eligible; \"base-select\" lightest (0 polyfills)",
+  "reason": "native-first over [customizable-select, custom-state, anchor-positioning, popover]; 3/4 impls eligible; \"base-select\" lightest (0 polyfills); native wins the tie",
   "candidates": [
     {
       "impl": "face",
@@ -65,6 +65,58 @@
         {
           "capabilityId": "popover",
           "tier": "native-ok"
+        }
+      ]
+    },
+    {
+      "impl": "floating-ui",
+      "label": "Floating UI",
+      "native": false,
+      "eligible": true,
+      "cost": 0,
+      "blockers": [],
+      "tiers": [
+        {
+          "capabilityId": "customizable-select",
+          "tier": "unsupported"
+        },
+        {
+          "capabilityId": "custom-state",
+          "tier": "unsupported"
+        },
+        {
+          "capabilityId": "anchor-positioning",
+          "tier": "supported"
+        },
+        {
+          "capabilityId": "popover",
+          "tier": "partial"
+        }
+      ]
+    },
+    {
+      "impl": "frontier-ui",
+      "label": "Frontier UI (FUI)",
+      "native": false,
+      "eligible": true,
+      "cost": 0,
+      "blockers": [],
+      "tiers": [
+        {
+          "capabilityId": "customizable-select",
+          "tier": "supported"
+        },
+        {
+          "capabilityId": "custom-state",
+          "tier": "supported"
+        },
+        {
+          "capabilityId": "anchor-positioning",
+          "tier": "supported"
+        },
+        {
+          "capabilityId": "popover",
+          "tier": "supported"
         }
       ]
     }
