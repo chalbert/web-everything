@@ -22,5 +22,5 @@ Build the conformance demo for the query (server-state) intent: a keyed cache ex
 real `InMemoryResourceCache` (#1534) through five read-path invariants: cache-first, staleness (freshWindow
 fresh→stale, SWR), cache-and-network (serve stale + revalidate), network-only (forced refetch), and
 invalidate-on-mutation (dependsOn cascade). **Live-verified on :3001**: `playgroundReady`, 5/5 badges green,
-0 console errors. Auto-registers in `/demos/` (demos.js scan). Read-path symmetric to the #1395 mutation
+0 console errors. Auto-registers in `/demos/` (the `fui:src/_data/demos.js` scan). Read-path symmetric to the #1395 mutation
 demo. frontierui `check:standards` 0 errors.

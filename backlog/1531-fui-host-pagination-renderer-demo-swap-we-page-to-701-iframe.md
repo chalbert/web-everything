@@ -18,7 +18,7 @@ The original blocker #1356 (verifier redesign) is **resolved** — `auditPaginat
 data-reader. But grounding the delete shows that does **not** unblock it: `we:blocks/__tests__/unit/renderers/pagination.test.ts`
 still value-imports `renderPagination` to **render a root** (the capture step the audit runs over) and to run
 the **golden-drift guard** (`committed goldens == fresh capture from the reference renderer`), and
-`pagination-behavior.test.ts` renders via the runtime. Deleting `renderPagination` strands both. This is the
+`we:blocks/__tests__/unit/renderers/pagination-behavior.test.ts` renders via the runtime. Deleting `renderPagination` strands both. This is the
 **same unresolved mechanism fork** as the data-table sibling #1355 — how WE produces a root / guards golden
 drift without the renderer — filed as **#1566**. Re-pointed `blockedBy: 1356 → 1566`. Carry-forward reason:
 **not-batchable** (fork, shared with #1355).
