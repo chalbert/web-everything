@@ -1,0 +1,96 @@
+{
+  "id": "annotation",
+  "name": "Annotation Intent",
+  "status": "draft",
+  "requiresCapabilities": [
+    "highlight-api"
+  ],
+  "composesIntents": [
+    "selection",
+    "rich-text",
+    "anchor"
+  ],
+  "summary": "Select content then attach a motivation payload (highlighting, commenting, tagging, suggestion) with an overlay disposition. UX-only: the durable target is delegated to the range-anchor contract — this intent owns no anchor machinery. Orphaned annotations (the anchored text is gone) are a first-class outcome; comment-thread product UI stays app-level.",
+  "dimensions": {
+    "motivation": {
+      "description": "Why the content was annotated — the W3C Web Annotation motivation vocabulary, the payload's discriminant",
+      "values": [
+        "highlighting",
+        "commenting",
+        "tagging",
+        "suggestion"
+      ]
+    },
+    "disposition": {
+      "description": "How the annotation is presented over the host content",
+      "values": [
+        "highlight",
+        "inline-mark",
+        "margin",
+        "popover"
+      ]
+    },
+    "surface": {
+      "description": "Whether the annotation overlays read-only content or becomes an in-model mark in editable content (composes the rich-text intent when editable)",
+      "values": [
+        "overlay",
+        "in-model"
+      ]
+    },
+    "anchorState": {
+      "description": "Lifecycle of the durable target (resolved through the range-anchor contract); orphaned is a first-class outcome, never an error",
+      "values": [
+        "anchored",
+        "orphaned"
+      ]
+    }
+  },
+  "description": "<h3>Motivation Payload</h3><p class=\"text-sm text-gray-600 mb-2\">The user selects content, then attaches a payload whose <strong>motivation</strong> follows the <a href=\"https://www.w3.org/TR/annotation-model/#motivation-and-purpose\">W3C Web Annotation</a> vocabulary.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>highlighting</code>: Mark a passage as salient. No body text required.</li><li><code>commenting</code>: Attach a free-text note to the selection.</li><li><code>tagging</code>: Attach one or more labels/keywords.</li><li><code>suggestion</code>: Propose an edit to the selected text (the Google Docs / suggestion-mode shape).</li></ul><h3>Disposition</h3><p class=\"text-sm text-gray-600 mb-2\">How the annotation renders over the host content.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>highlight</code>: Paint the range via the <a href=\"/capabilities/highlight-api/\">CSS Custom Highlight API</a> — no DOM mutation of the host.</li><li><code>inline-mark</code>: Wrap the range in a styled mark (only when the host is editable — composes the <a href=\"/intents/rich-text/\">Rich Text Intent</a>'s in-model marks).</li><li><code>margin</code>: A gutter note aligned to the anchored line.</li><li><code>popover</code>: An anchored surface (composes the <a href=\"/intents/anchor/\">Anchor Intent</a>) shown on hover/activation.</li></ul><h3>Surface</h3><p class=\"text-sm text-gray-600 mb-2\"><code>overlay</code> annotates <strong>read-only</strong> content non-destructively (Custom Highlight API + the durable anchor); <code>in-model</code> writes a real mark into <strong>editable</strong> content via the rich-text model. The same motivation payload rides either surface.</p><h3>Anchoring &amp; Orphans</h3><p class=\"text-sm text-gray-600 mb-2\">The <em>where</em> — capturing the selection and re-resolving it after the document is re-fetched or lightly edited — is <strong>not</strong> owned here. It is delegated to the <a href=\"/projects/\">durable range-anchor contract</a> (<code>we:blocks/range-anchor/contract.ts</code>, #1471), which stores a W3C selector bundle and re-resolves with a fuzzy fallback. When the anchored text is gone, the annotation enters <code>orphaned</code> — a <strong>first-class outcome</strong> the UX must represent (e.g. an orphan tray), never a silent drop or an error. The selection capture itself composes the <a href=\"/intents/selection/\">Selection Intent</a>.</p><h3>Scope boundary</h3><p class=\"text-sm text-gray-600 mb-2\">This intent declares the <em>what</em> (motivation + disposition + surface + orphan handling). It owns <strong>no</strong> anchor machinery (range-anchor), no positioning math (the anchor/positioning provider), and no comment-thread product UI (reply chains, mentions, resolution workflow) — those stay app-level above the intent.</p>",
+  "designSystemResearch": [
+    {
+      "system": "W3C Web Annotation Data Model",
+      "components": [
+        "motivation vocabulary",
+        "body / target",
+        "TextQuoteSelector / TextPositionSelector"
+      ],
+      "keyInsight": "The motivation vocabulary (highlighting/commenting/tagging/editing) is the upstream standard, adopted wholesale; the target selectors are owned by the range-anchor contract. We standardize the UX of attaching a motivation body, not the wire model.",
+      "reference": "https://www.w3.org/TR/annotation-model/"
+    },
+    {
+      "system": "Hypothesis / RecogitoJS",
+      "components": [
+        "highlight overlay",
+        "orphan handling",
+        "anchoring with fuzzy fallback"
+      ],
+      "keyInsight": "Production annotators treat the orphaned-annotation state as first-class (an 'orphans' bucket), confirming orphan handling belongs in the intent surface, not as an error path.",
+      "reference": "https://web.hypothes.is/"
+    },
+    {
+      "system": "CSS Custom Highlight API",
+      "components": [
+        "Highlight",
+        "::highlight()",
+        "CSS.highlights"
+      ],
+      "keyInsight": "Native, range-based painting with zero host-DOM mutation — the default for the read-only overlay disposition, leaving inline-mark for the editable (rich-text) surface only.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CSS_Custom_Highlight_API"
+    },
+    {
+      "system": "Google Docs / Notion suggestions",
+      "components": [
+        "suggestion mode",
+        "margin comments",
+        "in-model marks"
+      ],
+      "keyInsight": "The suggestion motivation and the margin disposition map directly; their in-document marks validate the overlay-vs-in-model surface split (editable docs write marks; read-only viewers overlay).",
+      "reference": "https://support.google.com/docs/answer/6033474"
+    }
+  ],
+  "researchGaps": [
+    "Multi-range / discontinuous selections — does a single annotation payload attach to one range bundle or a set? The range-anchor contract anchors one range; confirm whether annotation composes N anchors or defers multi-range to the app.",
+    "Suggestion-motivation acceptance flow — is accept/reject of a suggestion an annotation-intent concern (it mutates the host) or strictly the rich-text model's? Define the handoff.",
+    "Orphan re-anchoring UX — when a fuzzy re-resolve offers a candidate, is the confirm/reject affordance part of this intent or app-level?"
+  ]
+}

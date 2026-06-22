@@ -2,8 +2,11 @@
 kind: story
 size: 3
 parent: "1472"
-status: open
+status: resolved
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: "we:src/_data/intents/annotation.json"
 tags: []
 ---
 
