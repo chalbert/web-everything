@@ -1,10 +1,11 @@
 ---
 kind: story
 size: 3
-status: open
-humanGate: { kind: setup, what: "Relocating the dev-panel Vite plugin de-duplicates a file BOTH live dev servers load at config time — `we:vite.config.mts:4` and `fui:vite.config.mts:3` each `import { devPanel } from './tools/dev-panel/vite-plugin'` (byte-identical 10.4KB source). Any relocation repoints those imports (or a config-dependency stub), which restarts Vite on :3000 AND :3001, and the acceptance ('keeps both dev servers working') requires rebooting both to verify. A concurrent batch can't restart/verify the user's running :3000/:3001 (don't-kill-dev-server). Needs a focused session that owns the WE+FUI dev-server lifecycle — same class as #1545/#1561." }
+status: resolved
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: "plateau-app/tools/dev-panel/vite-plugin.ts"
 tags: []
 ---
 
@@ -23,3 +24,25 @@ rebooting both and confirming they boot clean. That cannot run safely against th
 concurrent batch (don't-kill-dev-server). Gated `setup` so it demotes out of Tier-A until a focused session
 owns the WE+FUI dev-server lifecycle. The sub-question (single copy vs shared package) is also still open —
 the shared-package option is what "keeps both working with zero lock-in," but confirm at execution.
+
+## Resolution 2026-06-22 (focused dev-server-ownership session)
+
+Canonical single copy moved to its ratified Plateau home (#1565) at
+`plateau:tools/dev-panel/vite-plugin.ts`; the byte-identical copies were `git rm`'d from
+`we:tools/dev-panel/vite-plugin.ts` and `fui:tools/dev-panel/vite-plugin.ts` (each repo keeps its own
+runtime selection file `we:.browser-selection.json` / `fui:.browser-selection.json` — the plugin
+writes it cwd-relative, so it stays repo-local). The `we:vite.config.mts` and `fui:vite.config.mts`
+configs repoint their `devPanel` import to the sibling plateau source.
+
+**Sub-question resolved → single Plateau-owned copy, not a published package.** The "shared package"
+option is a non-starter for *this* surface: `devPanel` is a **build-time Vite plugin imported by the
+config file itself**, and `resolve.alias` only rewrites the *app* module graph — it never touches the
+config's own imports. A named-package boundary would therefore require a real installed
+`plateau:@plateau/dev-panel` package (its own manifest + a local-path dependency + install in two
+repos) for a single 10.4KB zero-dep file. The direct sibling import is the lightweight,
+equally-escapable (dev-only) form of "Plateau-owned single copy" and rides the same `../<sibling>`
+checkout assumption the `@frontierui/*` / `weRoot` aliases already depend on.
+
+**Acceptance verified:** editing both config files auto-restarted Vite on :3000 and :3001; both return
+`HTTP 200` at root and `/__dev-panel/health` → `{"available":true,...}`, proving the relocated single
+copy is consumed correctly by both servers.

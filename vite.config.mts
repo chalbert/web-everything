@@ -1,7 +1,11 @@
 import { defineConfig, Plugin } from 'vite';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { devPanel } from './tools/dev-panel/vite-plugin';
+// #1579 (per #1565 devtools-placement): the dev-panel / spec-explorer plugin is a Plateau-owned
+// developer tool — the single canonical copy lives in plateau-app. WE consumes it dev-time from the
+// sibling checkout (a build-time plugin can't go through `resolve.alias`, so this is a direct sibling
+// import — same `../<sibling>` assumption the `@frontierui/*` aliases below already rely on).
+import { devPanel } from '../plateau-app/tools/dev-panel/vite-plugin';
 import { moduleService } from './tools/maas/vite-plugin';
 
 // #449 (per #606): plugs is FUI's impl; WE consumes it as a no-leakage client via the
