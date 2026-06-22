@@ -1,8 +1,10 @@
 ---
 kind: epic
 locus: frontierui
-status: open
+status: resolved
 dateOpened: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: none
 relatedReport: reports/2026-06-19-autonomous-exploratory-ui-testing.md
 tags: [fui-devtool, exploratory-testing, autonomous-agent, judge, trainable, vision, epic]
 ---
