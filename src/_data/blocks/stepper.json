@@ -4,8 +4,9 @@
   "status": "active",
   "type": "Component",
   "summary": "Linear, locked-progression navigation — the Wizard / multi-step-form flow. Realizes the navigation intent's third structure value (`linear`, alongside `lateral`/Tabs and `hierarchical`/Router): a fixed sequence of steps where only the current step is shown, advancing replaces rather than stacks history, and leaving mid-flow can prompt to preserve progress. The block that exercises the navigation intent's `session` persistence value (a step that survives Back/Forward but isn't a fresh shareable link). Reference runtime: `StepperBehavior` (locked progression, `aria-current=\"step\"`, the Step N of M announcement, step-change / step-advance-blocked / flow-complete events); first consumer is the auto-insurance quote wizard (#318).",
-  "implementedBy": "@frontierui/blocks/stepper/StepperBehavior.ts",
+  "implementedBy": "@frontierui/blocks/stepper/StepperElement.ts",
   "exports": [
+    "StepperElement",
     "StepperBehavior",
     "registerStepper"
   ],
