@@ -3,7 +3,7 @@ kind: story
 size: 5
 parent: "912"
 status: open
-blockedBy: ["1556"]
+blockedBy: []
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-22"
 locus: frontierui
@@ -120,3 +120,41 @@ ruled+stood-up cross-origin serving but never verified a cross-origin browser im
 handler unit tests). Filed as **#1556** (maas-origin CORS fix) and set `blockedBy: 1556`. Carry-forward
 reason: **blocked-in-fact** (the cross-origin import the consumer needs is browser-verified to fail until the
 serve origin emits CORS). No consumer code written (nothing to land until #1556). Released to `open`.
+
+## Pre-flight (batch-2026-06-22-1575-1030) — #1556 landed; MECHANISM NOW PROVEN end-to-end; only blocker left is the server lifecycle
+
+Claimed with all prerequisites resolved (#1501/#1518/#1556) and **proved the cross-origin live-mount
+mechanism works end-to-end** — the first pre-flight to actually run it rather than stop at a blocker:
+
+- Stood up a **throwaway** maas origin (`fui:vite.maas.config.mts`, fresh port :3009 — the user's running
+  :3002 left untouched, never restarted). It serves `?form=react-live` correctly: `302` pin → `200`,
+  `Access-Control-Allow-Origin: *` on **both** (the #1556 CORS fix), `content-type: text/javascript`, a
+  ~1 MB self-contained module exporting `{ <Block>Element, mount, unmount }` with `createRoot`/ErrorBoundary
+  bundled (the #1518 producer).
+- **Real Playwright arbiter:** a page on the :3001 host origin did a cross-origin `import('http://localhost:3009/_maas/<block>.js?form=react-live')`, then `mod.mount(el, {})` → **rendered React DOM into the element**
+  (no `Failed to fetch` / CORS error), and `mod.unmount()` torn down cleanly. So the consumer premise
+  (cross-origin import + same-document mount, no iframe, #955-A2) is **verified working**, not theoretical.
+
+**The only remaining blocker is environmental, and it's the server lifecycle this item has always needed:**
+- The **running :3002 is stale** — it serves the OLD form set (`declarative/wc-class/html/jsx/functional`)
+  and 400s `Unknown form "react-live"`. Vite `configureServer` middleware (`fui:tools/maas/vite-plugin.mjs`)
+  does **not** hot-reload, so serving the new form on :3002 needs a **process restart**.
+- :3002 is part of the user's `npm run dev` (concurrently DOCS/DEMO/MAAS); the don't-restart-the-user's-server
+  rule forbids restarting it in a concurrent batch. The e2e harness (`fui:playwright.config.ts`) uses
+  `reuseExistingServer`, so it would bind the **stale** :3002 too — it can't verify the new form either.
+- Therefore the item's stated acceptance (a **live mount on the running :3002**, wired into the panels) needs
+  a **focused frontierui session that owns the dev-server lifecycle**: restart :3002 with current code, then
+  build + browser-verify against the real running second origin.
+
+**Design note for that session (not yet decided):** "wired to inspector/event/anatomy panels" is **not
+mechanical** for a cross-origin React render. The inspector reads the **stage** rendered tree
+(`querySelector`/`getComputedStyle`, `fui:workbench/mount.ts:7`), the event log listens on the **stage**, and
+the anatomy panel reflects the **block's intent/trait/token declaration** — none of which reach a React
+component mounted in the Polyglot panel. So the integration must first decide **where the live mount renders**
+(into the stage, replacing the native custom element as the subject, so the existing panels cover it for free
+— vs. a separate Polyglot live-preview that needs new introspection wiring) and how the panels introspect a
+non-custom-element render. Worth a small decision before the build.
+
+Carry-forward reason: **blocked-in-fact** (verified: live-on-:3002 acceptance needs a :3002 restart this
+concurrent batch can't perform; mechanism otherwise proven). `blockedBy` cleared (#1556 resolved); released to
+`open` for `/next 1030` in a frontierui session that owns the server.

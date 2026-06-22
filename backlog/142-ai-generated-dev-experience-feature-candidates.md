@@ -1,8 +1,7 @@
 ---
-kind: task
+kind: idea
 parent: "140"
 status: open
-blockedBy: ["140"]
 dateOpened: "2026-06-07"
 tags: [product-strategy, dev-experience, dev-browser, ai-generated, brainstorm, candidate-features, full-context-debug, ownership-routing, introspection]
 relatedReport: reports/2026-06-07-dev-surface-feature-market-landscape.md
