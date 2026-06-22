@@ -10,9 +10,9 @@ relatedReport: reports/2026-06-21-1442-split-analysis.md
 tags: [packaging, custom-elements, block-model, conversion, frontierui]
 ---
 
-# Block-model conversion: register remaining blocks as custom elements (per-block mechanism)
+# Block-model conversion
 
-Separately-prioritized build epic spun out of #1381. End-state already ruled by #1321: every block becomes a custom element, mechanism chosen per use case, applying the #1381 mechanism-selection guideline (codified we:docs/agent/block-standard.md Packaging governance §7): default S1/native-first; behavior-free presentational control -> transient (A); framework-bound/reactive block -> persistent light-DOM (B); block facing hostile/unknown host CSS opting into #1349 S2 -> shadow (C). Drained incrementally, sequenced by normal burndown ordering.
+Register the remaining blocks as custom elements, mechanism chosen per block. Separately-prioritized build epic spun out of #1381. End-state already ruled by #1321: every block becomes a custom element, mechanism chosen per use case, applying the #1381 mechanism-selection guideline (codified we:docs/agent/block-standard.md Packaging governance §7): default S1/native-first; behavior-free presentational control -> transient (A); framework-bound/reactive block -> persistent light-DOM (B); block facing hostile/unknown host CSS opting into #1349 S2 -> shadow (C). Drained incrementally, sequenced by normal burndown ordering.
 
 ## Slicing (split analysis we:reports/2026-06-21-1442-split-analysis.md)
 
