@@ -1,16 +1,16 @@
 ---
-kind: story
-size: 13
-status: open
-blockedBy: ["1419"]
+kind: epic
+status: resolved
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: none
 tags: []
 ---
 
 # Realize the query (server-state) intent: UX-only intent JSON + swappable cache provider contract + FUI resource-cache block + demo
 
-Realizing work for the #1419 placement ruling: author the query (server-state) intent JSON (UX-only surface — fetchPolicy + staleness display composing loader), the key->{data,staleness,revalidate} swappable cache provider contract (technical knobs: dedupe, freshWindow/evictAfter ms, revalidateOn, dependsOn live here, not the intent), a FUI resource-cache block (or resource-loader extension) implementing it, and a demo (keyed cache with staleness + invalidate-on-mutation). File via /new-standard. Read-path symmetric to the #1395 mutation lifecycle.
+Umbrella for realizing the query (server-state) intent (#1419). Sliced into #1532 (UX-only `query` intent JSON), #1533 (the `resource-cache` provider contract), #1534 (the FUI resource-cache block), and #1535 (keyed-cache demo with staleness + invalidate-on-mutation). Read-path symmetric to the #1395 mutation lifecycle. *(Sliced 2026-06-22; this umbrella's story→epic conversion was completed by the `/split all` sweep — the slices had landed but the parent still carried `size: 13`.)*
 
 ## Pre-flight (batch-2026-06-22-1510-1483) — full greenfield /new-standard build, not a batch slice → re-size 8 → 13, route to /new-standard
 
