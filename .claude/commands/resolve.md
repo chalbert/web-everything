@@ -36,6 +36,18 @@ Do exactly this, in order:
    An epic passes review when its scope was actually delivered by its children, or every remaining strand
    is a **deliberate deferral that cites its tracking `#NNN`**. State the pass/fail verdict in one line.
 
+   **Validate any program claim against the Program Test (the #1442 lesson).** An epic carrying
+   `childlessReason: program` or `ongoing: true` is *exempt from the gate's resolve nudge* — so it will
+   NOT surface in discovery, and when you meet one (explicit `NNN`, or while sweeping) you must check the
+   flag is *earned*, not a hack to silence the cue over an uncarved tail. Apply the four-part **Program
+   Test** (docs/agent/backlog-workflow.md → Programs): a real program has **no Definition of Done** —
+   *if you resolved every current child it would NOT end* (drift/the world keeps moving spawns the next
+   slice), plus a named conformance front + a currency front. **A finite goal — "convert all blocks",
+   "prepare all decisions", any "do X across the whole set" that ends when the set is drained — FAILS
+   the test: it is a burndown epic, not a program**, no matter how long the tail. (Tell: a *resolved*
+   item that was flagged `program` is proof — programs never resolve.) If the flag is unearned, do NOT
+   park and do NOT resolve → reconcile via **"not a program → drop the flag and slice"** below.
+
    On **fail, you MUST reconcile it — a non-resolvable item can never just stay parked at the resolve
    cue** (the gate would re-flag it every run, the limbo this guard exists to kill). First **validate any
    stated block is still live**, then drive exactly one reconciliation. Present the options for the item,
@@ -49,14 +61,30 @@ Do exactly this, in order:
      If there is no real remaining dependency, the block was the only thing holding it open → fall to
      *scaffold the next slice* or *resolve* as the scope dictates. (This is the #1210 case: `blockedBy:
      [1175,765]` both resolved → re-pointed at the FUI-build #1228.)
+   - **Not a program → drop the flag and slice (the #1442 reconciliation).** When the epic FAILED the
+     Program Test above — a finite burndown wearing `childlessReason: program` (or a mis-set `ongoing:
+     true`) to suppress the resolve cue over an uncarved tail — the fix is to **retag it as needing
+     slicing, not to park or resolve it**: (1) **remove** the false `childlessReason: program` / `ongoing`
+     flag; (2) **carve the next batchable wave** as child slices (run `/slice NNN`, or
+     `backlog.mjs scaffold … --parent=NNN`) so it gains open children and reads `tracking` honestly — the
+     resolve cue stays off because real open work now sits under it, not because a flag hides it. Don't
+     pre-scaffold the entire tail; one wave is enough (the rest file on pickup). The epic resolves only
+     when the last wave lands. (#1442: dropped `childlessReason: program`, carved wave-2
+     meter/progress/checkbox/radio → `tracking`.)
    - **Scaffold the next slice.** The remaining scope is carvable now → create the next child item
      (`backlog.mjs scaffold … --parent=NNN`). The epic now has an open child, so it's no longer "all
      slices done."
    - **Declare the stall (only on a LIVE edge).** The remaining scope genuinely can't be carved yet
-     (blocked / undecided / untriaged / program) → ensure the epic carries the matching `childlessReason`
+     (blocked / untriaged, or `program` **only** for a genuine perpetual program that *passed* the
+     Program Test — never as a cover for a finite tail, which is the case above) → ensure the epic carries
+     the matching `childlessReason`
      **and**, if blocked, a `blockedBy` edge to a still-**open** item. The gate's `CHILDLESS_REASONS`
      exemption then makes this a legitimate steady state and the candidate stops re-surfacing — but a
      `childlessReason: blocked` with no live blocker is the stale-block trap above, not a valid stall.
+     **An open *design decision* is never an inline reason: `childlessReason: undecided` is retired and
+     the gate errors on it.** Carve the fork to a `kind: decision` item and use `childlessReason: blocked`
+     + a `blockedBy` edge to it. ("Slices not yet scoped" with no open decision is just the unsliced
+     state — no `childlessReason` at all.)
 
    A blocked epic that already declares a `childlessReason` is only *already reconciled* once you've
    confirmed its blocker is still open — otherwise reconcile per the stale-block path. Never close on
