@@ -12,8 +12,10 @@
 import {
   createDefaultTrackerRegistry,
   UnknownTrackerError,
+  TrackAttribute,
   type CustomTracker,
 } from '/plugs/webanalytics/index.ts';
+import { CustomAttributeRegistry } from '/plugs/webbehaviors/index.ts';
 import { setPlaygroundReady } from '/demos/playground-harness';
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -128,11 +130,113 @@ const CHECKS: Check[] = [
   },
 ];
 
-function runConformance(host: HTMLElement): number {
+/**
+ * The declarative emission seam (#1475/#1477): a `data-track` annotation on an element binds its
+ * interaction to `resolve(customTrackers).track(...)` — no script. These checks exercise the seam end to
+ * end against the live `TrackAttribute` behavior: element annotation → `CustomTrackerRegistry` resolution
+ * → `track()` on the swappable sink, plus the `NoopTracker` floor when no registry is configured. The
+ * resolution path used is the documented global `window.customTrackers` source (set/cleared per check);
+ * interactions are synchronous (`click` / `submit`) so the assertions are deterministic.
+ */
+const DECLARATIVE_CHECKS: Check[] = [
+  {
+    title: 'NoopTracker floor — a data-track element with no registry configured degrades silently (no throw)',
+    run: () => {
+      delete window.customTrackers; // no sink in scope → must fall back to the silent no-op
+      const attrs = new CustomAttributeRegistry();
+      attrs.define('data-track', TrackAttribute);
+      const host = el('button', { 'data-track': 'click:floor-clicked' }, 'floor');
+      document.body.append(host);
+      try {
+        attrs.upgrade(host);
+        host.dispatchEvent(new MouseEvent('click', { bubbles: true })); // unconfigured → no-op, never throws
+        return true;
+      } catch {
+        return false;
+      } finally {
+        attrs.downgrade(host);
+        host.remove();
+      }
+    },
+  },
+  {
+    title: 'a data-track="click:…" annotation resolves the registry and tracks the event + static props',
+    run: () => {
+      const registry = createDefaultTrackerRegistry();
+      const backend = new RecordingTracker('declarative-sink');
+      registry.define(backend, true);
+      window.customTrackers = registry;
+      const attrs = new CustomAttributeRegistry();
+      attrs.define('data-track', TrackAttribute);
+      const host = el('button', { 'data-track': 'click:cta-clicked', 'data-track-props': '{"plan":"pro"}' }, 'cta');
+      document.body.append(host);
+      try {
+        attrs.upgrade(host);
+        host.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        const call = backend.calls.find((c) => c.method === 'track');
+        return call?.args[0] === 'cta-clicked'
+          && (call?.args[1] as { plan?: string })?.plan === 'pro';
+      } finally {
+        attrs.downgrade(host);
+        host.remove();
+        delete window.customTrackers;
+      }
+    },
+  },
+  {
+    title: 'a data-track="submit:…" annotation binds the form submit interaction',
+    run: () => {
+      const registry = createDefaultTrackerRegistry();
+      const backend = new RecordingTracker('declarative-sink');
+      registry.define(backend, true);
+      window.customTrackers = registry;
+      const attrs = new CustomAttributeRegistry();
+      attrs.define('data-track', TrackAttribute);
+      const host = el('form', { 'data-track': 'submit:signup-submitted' });
+      document.body.append(host);
+      try {
+        attrs.upgrade(host);
+        host.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        return backend.calls.some((c) => c.method === 'track' && c.args[0] === 'signup-submitted');
+      } finally {
+        attrs.downgrade(host);
+        host.remove();
+        delete window.customTrackers;
+      }
+    },
+  },
+  {
+    title: 'swapping the resolved sink reroutes subsequent declarative emissions (same annotation)',
+    run: () => {
+      const registry = createDefaultTrackerRegistry();
+      const a = new RecordingTracker('sink-a');
+      const b = new RecordingTracker('sink-b');
+      registry.define(a, true);
+      window.customTrackers = registry;
+      const attrs = new CustomAttributeRegistry();
+      attrs.define('data-track', TrackAttribute);
+      const host = el('button', { 'data-track': 'click:swap-tracked' }, 'swap');
+      document.body.append(host);
+      try {
+        attrs.upgrade(host);
+        host.dispatchEvent(new MouseEvent('click', { bubbles: true })); // → sink-a
+        registry.define(b, true); // swap the resolved default backend underneath the same annotation
+        host.dispatchEvent(new MouseEvent('click', { bubbles: true })); // → sink-b
+        return a.calls.length === 1 && b.calls.length === 1 && b.calls[0].args[0] === 'swap-tracked';
+      } finally {
+        attrs.downgrade(host);
+        host.remove();
+        delete window.customTrackers;
+      }
+    },
+  },
+];
+
+function runConformance(host: HTMLElement, checks: Check[], summaryNoun: string): number {
   const summary = el('div', { class: 'summary' });
   host.append(summary);
   let pass = 0;
-  for (const check of CHECKS) {
+  for (const check of checks) {
     let ok = false;
     try {
       ok = check.run();
@@ -145,8 +249,8 @@ function runConformance(host: HTMLElement): number {
     card.append(badge, el('span', { class: 'an-check-title' }, check.title));
     host.append(card);
   }
-  summary.className = `summary ${pass === CHECKS.length ? 'pass' : 'fail'}`;
-  summary.textContent = `${pass}/${CHECKS.length} webanalytics contract invariants hold`;
+  summary.className = `summary ${pass === checks.length ? 'pass' : 'fail'}`;
+  summary.textContent = `${pass}/${checks.length} ${summaryNoun}`;
   return pass;
 }
 
@@ -157,10 +261,17 @@ function main(): void {
 
   const conformance = el('section', { class: 'an-card' });
   conformance.append(el('h2', {}, 'Runtime conformance — contract + registry swap'));
-  const passCount = runConformance(conformance);
+  const contractPass = runConformance(conformance, CHECKS, 'webanalytics contract invariants hold');
   root.append(conformance);
 
-  setPlaygroundReady(passCount);
+  // #1477: the declarative `data-track` emission seam (#1475), exercised end to end on real annotated
+  // elements — element annotation → registry resolution → track() on the swappable sink, NoopTracker floor.
+  const declarative = el('section', { class: 'an-card' });
+  declarative.append(el('h2', {}, 'Declarative emission — data-track annotations (#1475)'));
+  const declarativePass = runConformance(declarative, DECLARATIVE_CHECKS, 'data-track seam invariants hold');
+  root.append(declarative);
+
+  setPlaygroundReady(contractPass + declarativePass);
 }
 
 main();

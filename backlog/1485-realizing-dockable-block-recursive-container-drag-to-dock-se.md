@@ -25,7 +25,7 @@ single-document roving-tabindex wiring). Its core — drag-to-dock edge/center h
 live-interactive** to verify (no meaningful unit proof of a pointer-driven re-tile). That is materially
 larger than an 8-pt slice and is **not batchable as one** → re-sized to 13 and dropped from the batch pool.
 
-**Carve (for /split, a foundational-first order, [[contract-ts-is-a-separate-slice]]):**
+**Carve (for /split, a foundational-first order — the `we:contracts/dockable.ts` contract is always its own foundational slice):**
 1. WE dockable block contract `we:contracts/dockable.ts` + `@webeverything/contracts/dockable` re-export
    (the foundational slice the FUI impl imports; bounded, gate-verifiable, no live dep).
 2. FUI recursive **container render** (row/column/stack via CSS Grid/Flex + recursive `resizable` splits).
