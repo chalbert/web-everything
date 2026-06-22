@@ -1,19 +1,20 @@
 ---
-kind: story
-size: 21
+kind: epic
 locus: plateau-app
-status: open
+status: resolved
 dateOpened: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: none
 tags: [plateau-app, explorer, devtool-surface]
 ---
 
 # Plateau page: explorer run management + report history
 
-A plateau-app product surface to run the FUI explorer and browse its report history — the UI layer over the now-complete explorer CLI (epic #1522, engine #1167). Big; **for later** — split into slices when picked up.
+Umbrella for the plateau-app explorer run-management + report-history surface over the FUI explorer CLI (epic #1522, engine #1167). Sliced into #A (bundle store + executor endpoint), #B (read-only history viewer), and #C (trigger + recipe editor) — v1 = A+B (browse existing bundles), C layers on. FUI stays the engine (`fui:tools/explorer/`); plateau owns the surface + the executor that drives it. *(Sliced 2026-06-22 by `/split all`.)*
 
 ## Why plateau (placement decided)
 
-It's a product/ops surface consuming a FUI devtool, exactly like the existing `plateau:src/design-review/`, `plateau:src/vision-review/`, and `plateau:src/control-plane/` pages — and the explorer's a11y/conformance output belongs in the same quality loop those serve. The page dogfoods FUI components (#1254). FUI stays the engine (`fui:tools/explorer/`); plateau owns the surface and the executor that drives it. Consistent with #809 (workbench is FUI-owned) because this is an ops console over runs, not the component playground.
+It's a product/ops surface consuming a FUI devtool, exactly like the existing `plateau:src/design-review/`, `plateau:src/vision-review/`, and `plateau:src/control-plane/` pages — and the explorer's a11y/conformance output belongs in the same quality loop those serve. The page dogfoods FUI components (#1254). FUI stays the engine (`fui:tools/explorer/`); plateau owns the surface and the executor that drives it. Consistent with the [we-fui-embed-boundary](docs/agent/platform-decisions.md#we-fui-embed-boundary) rule (#809 — workbench is FUI-owned) because this is an ops console over runs, not the component playground.
 
 ## Three parts
 
