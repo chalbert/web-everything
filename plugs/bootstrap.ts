@@ -55,7 +55,6 @@ import { InterpolationTextNode } from '../blocks/text-nodes/interpolation/Interp
 import { registerEventAttributes } from '../blocks/attributes/on-event/OnEventAttribute';
 import { registerRouter } from '../blocks/router/registerRouter';
 import { registerTransient } from '../blocks/transient/registerTransient';
-import { registerNavigation } from '../blocks/navigation/registerNavigation';
 import { registerForEach } from '../blocks/for-each/registerForEach';
 import { registerTrustedHtml } from '../blocks/trusted-html/registerTrustedHtml';
 import { registerTraits } from './webbehaviors/traitManifest';
@@ -272,9 +271,6 @@ registerRouter(window.attributes);
 // Register transient components (auto-heading)
 registerTransient();
 
-// Register navigation behaviors (nav:list, nav:section)
-registerNavigation(window.attributes);
-
 // Register for-each directive
 registerForEach(window.attributes);
 
@@ -292,7 +288,6 @@ console.log('[Web Everything] Event attributes registered: on:click, on:submit, 
 console.log('[Web Everything] Text node parsers registered: mustache ({{ }}), polymer ([[ ]])');
 console.log('[Web Everything] Router registered: route-view, route-outlet, route:link, route:prefetch');
 console.log('[Web Everything] Transient components registered: auto-heading');
-console.log('[Web Everything] Navigation registered: nav:list, nav:section');
 console.log('[Web Everything] Directives registered: for-each');
 console.log('[Web Everything] Behaviors registered: trusted-html (Trusted Types innerHTML enforcement)');
 console.log('[Web Everything] Data Grid registered: grid:cell-navigation');

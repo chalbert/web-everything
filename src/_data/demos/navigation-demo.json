@@ -1,7 +1,7 @@
 {
   "id": "navigation-demo",
   "name": "Navigation Demo",
-  "description": "Accessible sidebar navigation with collapsible sections, keyboard navigation, and router integration.",
+  "description": "Accessible sidebar navigation with collapsible sections, keyboard navigation, and router integration. Renders from the Frontier UI canonical demo via the #701 fuiDemo iframe — the WE-local navigation runtime was removed per #1504/#1246 (WE holds zero standard implementation).",
   "path": "/demos/navigation-demo.html",
   "status": "active",
   "project": "navigation"

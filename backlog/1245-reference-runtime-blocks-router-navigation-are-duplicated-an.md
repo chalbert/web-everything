@@ -86,11 +86,15 @@ counts) split the work into *deliverable-in-WE-now* vs *gated-on-FUI-build*. Ful
   vector pattern items (a)/(d) below reuse; does *not* delete runtime yet.
 
 **Deferred — could-not-split-here (gated on FUI build, not a decision — re-`/slice` as each gate clears):**
-- **7 bootstrap families** (`router`, `navigation`, `parsers`, `text-nodes`·runtime, `for-each`,
-  `transient`, `attributes`) — imported only by `we:plugs/bootstrap.ts`; the embed boundary
+- **6 bootstrap families** (`router`, `parsers`, `text-nodes`·runtime, `for-each`, `transient`,
+  `attributes`) — imported only by `we:plugs/bootstrap.ts`; the embed boundary
   (`we:docs/agent/platform-decisions.md#we-fui-embed-boundary`) forbids repointing WE at `@frontierui/*`,
   so they can drop only after FUI hosts the ~12 bootstrap-consuming demos and `we:plugs/bootstrap.ts`
-  relocates (#606). Then bulk-delete in one follow-up.
+  relocates (#606). Then bulk-delete in one follow-up. **(`navigation` was carved out of this group and
+  pulled forward to [#1504](/backlog/1504-cold-start-bootstrap-break-navsectionbehavior-imports-delete/)** —
+  its gate cleared early (FUI already hosts `fui:demos/navigation-demo.html`) and it was actively broken
+  (the deleted `ViewEngine` import 500'd cold-start bootstrap), so it ships standalone ahead of the bulk
+  delete.)
 - **`wizard`+`workflow-engine`, `resource-loader`, `stores`, `renderers` (×11 demos)** — deleting breaks the
   consuming demo and no FUI-hosted equivalent exists yet. Action: FUI builds each hosted demo → WE swaps the
   local page to a `#701 fuiDemo` iframe → delete the family. One slice per demo as FUI ships it.
