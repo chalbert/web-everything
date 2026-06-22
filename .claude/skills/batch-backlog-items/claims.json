@@ -12,7 +12,8 @@
         "1485-realizing-dockable-block-recursive-container-drag-to-dock-se",
         "1494-re-home-collectionoperationsbehavior-data-table-backend-sema",
         "1477-conformance-demo-declarative-telemetry-annotations-over-anal",
-        "1366-plateau-configurator-isolation-strategy-s1-s2-decision-card"
+        "1366-plateau-configurator-isolation-strategy-s1-s2-decision-card",
+        "1430-gesture-recognizer-engine-technical-configurator-card-native"
       ],
       "baseline": [
         ".claude/commands/resolve.md",
