@@ -1,7 +1,8 @@
 ---
-kind: idea
+kind: task
 parent: "140"
-status: open
+status: parked
+parkedReason: "AI-generated candidate-feature inventory kept as a living triage POOL under #140 (the body reclassifies it decision→idea); resolving it = product-judgment triage of which candidates graduate to #140 rows, not agent-mechanical work. Parked so it stays a reference pool without surfacing as a batchable task."
 dateOpened: "2026-06-07"
 tags: [product-strategy, dev-experience, dev-browser, ai-generated, brainstorm, candidate-features, full-context-debug, ownership-routing, introspection]
 relatedReport: reports/2026-06-07-dev-surface-feature-market-landscape.md
