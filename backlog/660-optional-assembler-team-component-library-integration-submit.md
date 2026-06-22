@@ -2,8 +2,9 @@
 kind: story
 size: 8
 parent: "646"
-status: open
-blockedBy: ["646"]
+status: parked
+parkedReason: deferred
+parkedDate: "2026-06-22"
 dateOpened: "2026-06-15"
 relatedProject: webdocs
 tags: [devtools, composition, assembler, integration, component-library, optional, future]
@@ -24,3 +25,12 @@ The core assembler (#646) ends at *emit the plain ejectable recipe*; the author 
 - **Constellation home** — the served integration surface follows the #091 managed-offering split (the [monetization](docs/agent/platform-decisions.md#monetization) rule) (standard in WE, served surface in plateau-app); confirm at slice time.
 
 Blocked on #646's foundational slice (the assembler shell + decided emit format) existing first.
+
+## Parked 2026-06-22 (batch pre-flight) — deferred-on-priority, open scope
+
+The #646 assembler shell now **exists** (emit format #652, read-only surface #669, authoring canvas #688,
+eject recipe #689 all resolved), so this is no longer dependency-blocked — but it is explicitly
+**optional/future** ("the assembler is complete without it") and its three "scope to settle when picked up"
+questions (delivery mechanism · conventions adaptation · constellation home) are **unsettled design**, not an
+agent-ready build. Parked `deferred`. **Trigger to un-park:** a concrete need for the convenience-transport
+tier (PR/codemod into a team repo), at which point those scope questions are decided first.
