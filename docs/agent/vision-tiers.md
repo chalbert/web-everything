@@ -131,19 +131,34 @@ zero-shot VLM critique is ~13% valid; a rubric + few-shot grounding is what make
   `CODIFICATION_FACETS`); extensibility lives in the open findings; a deliberate **version bump** is the
   escape hatch for the axis set.
 
-**Axis vocabulary** (8 closed axes; tier-tag → grounding; the list itself is config + versioned, not
-frozen constants):
+**Rubric version: `v2`** (provenance added #1587, 2026-06-22; `v1` = the #1034-ratified 8-axis set). The
+version-bump escape hatch (#1034 Fork 3) covers the axis set; `v2` is **additive** — same 8 axes, now each
+carrying a **provenance** ref to the admitted authoritative source(s) it codifies (the design-knowledge
+intake program #1585; source ids are the rows of [`designKnowledgeWatch.json`](../../src/_data/designKnowledgeWatch.json)).
+This is AI over a *contract*: a codified heuristic carries its authoritative basis, never raw source text.
 
-| # | Axis | Tier | Grounded in |
-|---|---|---|---|
-| 1 | Contrast & legibility | A | colour tokens + a11y gate (#763/#770) |
-| 2 | Spacing & rhythm | A→B | `density` intent + spacing tokens |
-| 3 | Alignment & structure | A→B | `layout` intent |
-| 4 | Typographic scale | A | `typography` intent + type tokens |
-| 5 | Consistency / token use | A | design tokens (#364) |
-| 6 | Grouping & proximity | B→C | `hierarchy` intent (Gestalt) |
-| 7 | Visual hierarchy & emphasis | C (B-assisted) | `typography` / `surface` intents |
-| 8 | Aesthetic polish / craft | C | generic (HIG "clarity"; no single WE standard) |
+**Axis vocabulary** (8 closed axes; tier-tag → grounding; the list itself is config + versioned, not
+frozen constants). **Grounded in** is the page's *declared WE standard* read as input (#1034 Fork 1);
+**Provenance** is the external authoritative *design-knowledge* source the axis distils (admitted-source
+id, #1586 ledger) — the two are orthogonal (WE-standard input vs codified design prior):
+
+| # | Axis | Tier | Grounded in (WE standard) | Provenance (admitted source) |
+|---|---|---|---|---|
+| 1 | Contrast & legibility | A | colour tokens + a11y gate (#763/#770) | `w3c-apg` (WCAG contrast) |
+| 2 | Spacing & rhythm | A→B | `density` intent + spacing tokens | `apple-hig` (layout) |
+| 3 | Alignment & structure | A→B | `layout` intent | `apple-hig` (layout), `nielsen-heuristics` (#8 aesthetic & minimalist) |
+| 4 | Typographic scale | A | `typography` intent + type tokens | `apple-hig` (typography) |
+| 5 | Consistency / token use | A | design tokens (#364) | `nielsen-heuristics` (#4 consistency & standards) |
+| 6 | Grouping & proximity | B→C | `hierarchy` intent (Gestalt) | `apple-hig` (Gestalt grouping), `uicrit-uist24` |
+| 7 | Visual hierarchy & emphasis | C (B-assisted) | `typography` / `surface` intents | `uicrit-uist24`, `apple-hig` (clarity) |
+| 8 | Aesthetic polish / craft | C | generic (HIG "clarity"; no single WE standard) | `apple-hig` (clarity), `uicrit-uist24` |
+
+The **open-findings** contract carries provenance too: the severity scale `{severity 0–4}` is Nielsen's
+(`nielsen-heuristics`, cosmetic → catastrophe), and the closed-axes-plus-localized-findings output shape
+is UICrit's (`uicrit-uist24`). Provenance ids resolve against the #1586 ledger; an id with no ledger row
+is a dangling ref the watch should admit or correct. (The provenance links alone are not "distilled" in
+the #1586 metric sense — flipping a ledger row's `distilledInto` is #1589's job, once #1588 ratifies the
+credibility weights; `v2` carries the *citation*, not the weighted distillation.)
 
 The tier-tags route cheaply: Tier A (deterministic from DOM/CSS), Tier B (algorithmic-perceptual from
 pixels), Tier C (genuine VLM/human judgment). #1035's `/review-design` skill applies this rubric;
