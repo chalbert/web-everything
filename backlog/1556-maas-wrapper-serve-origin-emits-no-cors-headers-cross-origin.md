@@ -70,7 +70,7 @@ custom `maasWrapperServe` middleware route, per the verified diagnosis):
   `Allow-Headers: If-None-Match, Content-Type` + `Max-Age`.
 - **Why `*`, not reflected Origin:** the served bytes are public, credential-free dev modules (a module
   `import()` sends no credentials), so the wildcard is correct and simplest — and `Origin` is a forbidden
-  request header the `Request` guard strips, so it never survives `vite-plugin.mjs`'s `Request` adapter to
+  request header the `Request` guard strips, so it never survives `fui:tools/maas/vite-plugin.mjs`'s adapter to
   be reflected anyway.
 - The Vite middleware (`fui:tools/maas/vite-plugin.mjs`) already copies all response headers via
   `response.headers.forEach(...)` and routes `OPTIONS` to the handler (URL starts with the base path), so

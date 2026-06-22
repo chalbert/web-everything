@@ -159,7 +159,8 @@
     {
       "session": "batch-2026-06-22-1556-1557-1559",
       "ids": [
-        "1556-maas-wrapper-serve-origin-emits-no-cors-headers-cross-origin"
+        "1556-maas-wrapper-serve-origin-emits-no-cors-headers-cross-origin",
+        "1557-wire-the-canonical-build-kind-entity-graduation-predicates-i"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",
