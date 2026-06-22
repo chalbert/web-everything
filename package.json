@@ -30,6 +30,7 @@
     "gen:maas-conformance": "node scripts/gen-maas-conformance.mjs",
     "check:maas-conformance": "node scripts/check-maas-conformance.mjs",
     "check:standards": "node scripts/check-standards.mjs",
+    "check:memory": "node scripts/check-memory.mjs",
     "check:item": "node scripts/check-backlog-item.mjs",
     "check:app-conformance": "node scripts/check-app-conformance.mjs",
     "check:demos": "node scripts/check-demos.mjs",
