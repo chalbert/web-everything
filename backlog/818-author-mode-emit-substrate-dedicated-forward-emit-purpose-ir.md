@@ -1,7 +1,8 @@
 ---
 kind: story
 size: 3
-status: open
+status: parked
+parkedDate: "2026-06-22"
 parent: "746"
 locus: frontierui
 relatedProject: webdocs

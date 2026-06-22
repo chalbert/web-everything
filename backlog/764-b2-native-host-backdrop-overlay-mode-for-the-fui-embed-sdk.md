@@ -2,7 +2,7 @@
 kind: story
 size: 2
 parent: "728"
-status: open
+status: parked
 parkedDate: "2026-06-22"
 locus: frontierui
 dateOpened: "2026-06-16"
