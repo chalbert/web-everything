@@ -23,7 +23,6 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
       include: [
-        'plugs/**/*.ts',
         'blocks/**/*.ts',
       ],
       exclude: [
@@ -33,11 +32,8 @@ export default defineConfig({
         'coverage/**',
         '**/*.test.ts',
         '**/*.spec.ts',
-        'plugs/**/__tests__/**',
         'blocks/**/__tests__/**',
-        'plugs/**/index.ts', // Export files don't need coverage
         'blocks/**/index.ts', // Export files don't need coverage
-        'plugs/core/utils/pathInsertionMethods.ts', // Infrastructure code not yet used by patches
         '.eleventy.js',
         'playwright.config.ts',
         'vitest.config.ts',
@@ -50,7 +46,7 @@ export default defineConfig({
       },
     },
     include: [
-      'plugs/**/__tests__/**/*.test.{ts,tsx}',
+      // #1047: WE's plug tests relocated to FUI (the canonical impl home) when `we:plugs/` was deleted.
       'blocks/**/__tests__/**/*.test.{ts,tsx}',
       'src/**/__tests__/**/*.test.{ts,tsx}', // build-time data files (e.g. burndown accounting)
       'scripts/**/__tests__/**/*.test.mjs', // build/CI tooling (e.g. conformance auto-fix engine, #095)
@@ -86,19 +82,10 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      // The trait-enforcer is a Vite plugin not loaded under vitest, so the virtual trait
-      // manifest has no provider here — alias it to the empty static manifest so bootstrap's
-      // `import 'virtual:trait-manifest'` still resolves. Documented non-Vite fallback (#116/#448).
-      'virtual:trait-manifest': '/plugs/webbehaviors/traitManifest',
-      '@core': '/plugs/core',
-      '@webregistries': '/plugs/webregistries',
-      '@webinjectors': '/plugs/webinjectors',
-      '@webcomponents': '/plugs/webcomponents',
-      '@webcontexts': '/plugs/webcontexts',
-      '@webbehaviors': '/plugs/webbehaviors',
-
-      // #449: the block runtime + its tests import the plug layer via `@frontierui/plugs/*` (FUI owns
-      // the impl, WE consumes it as a no-leakage client) — resolve to the sibling FUI source.
+      // #449/#1047: the block runtime + its tests import the plug layer via `@frontierui/plugs/*` (FUI
+      // owns the impl, WE consumes it as a no-leakage client) — resolve to the sibling FUI source. The
+      // local-plugs sub-aliases (`@core`/`@webregistries`/… + `virtual:trait-manifest`) were dropped with
+      // `we:plugs/` under #1047: every consumer lived inside that tree, which now resides in FUI.
       '@frontierui/plugs': fuiPlugsRoot,
     },
   },
