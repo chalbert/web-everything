@@ -1,10 +1,11 @@
 ---
 kind: decision
-status: open
+status: preparing
 blockedBy: []
 parent: "1585"
 relatedProject: webaudit
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-22"
 tags: []
 ---
 
