@@ -1,9 +1,11 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
 tags: [maas, cors, workbench, polyglot, webdocs]
 ---
 
@@ -55,3 +57,24 @@ tests (`fui:tools/maas/__tests__/wrapperServeHandler.test.mjs`). The CORS gap is
 - [ ] A test asserts the CORS header on the served response.
 
 Relates to #1499 (cross-origin ruling), #1501 (the serve origin), #1518 (the live form), #1030 (blocked).
+
+## Progress (resolved 2026-06-22, batch-2026-06-22-1556-1557-1559)
+
+The serve origin now emits CORS on **every** response. Fixed at the framework-agnostic handler
+(`fui:tools/maas/wrapperServeHandler.mjs`), not by relying on Vite's `server.cors` (which never reaches the
+custom `maasWrapperServe` middleware route, per the verified diagnosis):
+
+- New `corsHeaders(preflight)` helper; `handle()` now wraps the inner `respond()` and tags **every**
+  response (200, the 302 pin redirect, 304, 4xx/5xx) with `Access-Control-Allow-Origin: *`, and answers the
+  browser's `OPTIONS` preflight with a `204` carrying `Access-Control-Allow-Methods: GET, OPTIONS` +
+  `Allow-Headers: If-None-Match, Content-Type` + `Max-Age`.
+- **Why `*`, not reflected Origin:** the served bytes are public, credential-free dev modules (a module
+  `import()` sends no credentials), so the wildcard is correct and simplest — and `Origin` is a forbidden
+  request header the `Request` guard strips, so it never survives `vite-plugin.mjs`'s `Request` adapter to
+  be reflected anyway.
+- The Vite middleware (`fui:tools/maas/vite-plugin.mjs`) already copies all response headers via
+  `response.headers.forEach(...)` and routes `OPTIONS` to the handler (URL starts with the base path), so
+  the CORS headers reach the wire unchanged.
+- Tests: extended `fui:tools/maas/__tests__/wrapperServeHandler.test.mjs` — CORS on the 302 + served 200,
+  and the OPTIONS preflight (13 pass). Acceptance criterion 3 (a test asserts the CORS header) met;
+  criteria 1–2 follow deterministically (ACAO present on the redirect + 200 + preflight).
