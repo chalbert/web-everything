@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "912"
-status: open
+status: resolved
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#single-introspection-slot"
 preparedDate: "2026-06-22"
 relatedReport: reports/2026-06-22-workbench-live-render-target.md
 researchTopic: workbench-live-render-target
@@ -17,6 +20,23 @@ mechanism (cross-origin React/Vue live-mount `?form=react-live`, #1501/#1518/#15
 grounded in a prior-art survey of how component explorers structure render-surface-vs-introspection,
 published as `/research/workbench-live-render-target/` (session report linked via `relatedReport`). It
 carries a **bold** recommended default that has been attacked by a skeptic and survived with an amendment.
+
+## Ruling (ratified 2026-06-22)
+
+**Fork 1 → (a) render the live React/Vue subject into the stage.** The cross-origin live-mount
+(`?form=react-live`) renders into the stage — the one canonical introspection slot the inspector /
+event-log / anatomy panels already read — rather than a separate preview pane (b, rejected). Grounding
+re-verified at ratification: the `live` wrapper mounts the **real custom element** and forwards
+attrs+events (`fui:tools/gen-wrapper/genWrapper.mjs:18`), `mount(el)=createRoot(el)→{update,unmount}`
+(`fui:tools/gen-wrapper/genWrapper.mjs:223-236`), `renderStage` replaces the stage child
+(`fui:workbench/mount.ts:247-262`). Default (a) survived the skeptic and a ratification-time red-team
+(b's only case — isolation — is discharged by amendment 3's `unmount()` ownership; "bias-to-separation"
+does not apply to duplicating one canonical introspection target, the surveyed anti-pattern).
+
+**#1030 now agent-ready** with the three Fork-1(a) amendments in scope: (1) subject-node resolution,
+(2) prop-routed trait/DS control via `instance.update(props)`, (3) `unmount()` lifecycle teardown. The
+two "supported by default" items (render-beside-source is additive/out-of-scope; `exportAsCode` emits
+wrapper source) carry into #1030 as build details, not forks.
 
 ## What you have to decide
 

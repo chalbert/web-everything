@@ -1078,6 +1078,27 @@ survey `reports/2026-06-22-design-knowledge-source-admission-credibility.md`). G
 #1586 (ledger weight column) #1587 (rubric provenance) #1589 (distillation). All three forks survived a
 refute-only skeptic pass.
 
+### One canonical introspection slot — render alternate subject forms into it, never duplicate the surface {#single-introspection-slot}
+
+An explorer / workbench has **one** canonical render target (the "stage") that its introspection panels
+(inspector, event-log, anatomy) read **generically off the rendered DOM**. When an *alternate form* of the
+subject must be shown — a cross-origin framework live-mount, a different framework's wrapper, a future
+device-frame — it **renders into that same slot**, not into a second pane with its own parallel
+introspection wiring. Prior art is unanimous (Storybook / Histoire / Ladle / Bit all read one canvas
+framework-agnostically; a separately-wired second introspection target is the surveyed anti-pattern). The
+enabler is that the live wrapper mounts the **real custom element** and forwards attrs+events, so native
+bubbling + computed-style + the CEM declaration all keep working — the alternate form is *the same subject
+re-mounted*, not a new one. A "render beside source" view is **additive** (a non-introspected display), not
+a rival target, so it never forks the slot. **Tell:** a proposal to "add a preview pane" that re-derives
+events/computed-style/anatomy — that's duplicating the introspection surface; route it through the stage and
+resolve the nested subject node instead. Cost is the **subject-node resolution** + **prop-routed control** +
+**`unmount()` lifecycle** seams, materially less than a second surface.
+
+**Lineage:** #1594 (ratified 2026-06-22; render the `?form=react-live` live-mount into the stage, not a
+separate pane; prep survey `reports/2026-06-22-workbench-live-render-target.md`; skeptic
+SURVIVES-WITH-AMENDMENT — the three seams fold into the #1030 build). Under polyglot-sandbox #912; sibling of
+[compose-intent-dont-duplicate](#compose-intent-dont-duplicate) (reuse-don't-duplicate, render-target face).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
