@@ -2,7 +2,7 @@
 kind: story
 status: open
 locus: webeverything
-blockedBy: ["1504"]
+blockedBy: []
 dateOpened: "2026-06-20"
 size: 5
 dateStarted: "2026-06-22"
@@ -14,6 +14,16 @@ tags: [webexpressions, interpolation, text-node, injector, binding, demo]
 Applied the item's own proven fix: flipped `we:plugs/bootstrap.ts:43` to import the webexpressions registries from `@frontierui/plugs/webexpressions` (was WE-local `./webexpressions`), so the registry's `CustomTextNode` class identity matches the block-layer parser-produced node and `#upgradeTextNode`'s `instanceof` guard fires (completes #449 for the bootstrap). Scope-checked: no other `we:demos/*` imports the WE-local webexpressions class. The fix is committed.
 
 **Could NOT re-confirm the live render this session** — a 2nd-port cold start (the documented verification path) shows the interpolation demo's RESULT slots **empty**, not because of this fix but because `we:blocks/navigation/NavSectionBehavior.ts` 500s on a dangling `../view/ViewEngine` import (migrated to FUI), and bootstrap imports the navigation chain — so the whole bootstrap graph aborts before `customTextNodes.upgrade()` runs (RESULT renders nothing). Filed as **#1504**; this item is now `blockedBy: 1504` (its verified-render + the Playwright regression-test acceptance can only complete once cold-start bootstrap loads). The #449 instanceof analysis + fix above are unchanged and correct by construction.
+
+## Update (batch-2026-06-22-1511-1525) — class-split moot post-#1047; eval bug isolated to the demo-context upgrade (outgrew; demo left untouched)
+
+Cold-started a throwaway `vite --port 3099` (fresh process, user's :3000 untouched) — both blockers are gone (#1503 + #1504 **resolved**), so a clean cold read was finally possible. Findings (durable progress; speculative demo edits were reverted to keep the tree clean, per this item's standing discipline):
+
+1. **The class-identity split (the long-standing prime suspect) is now MOOT.** #1047 deleted the WE-local `we:plugs/` tree; the `/plugs` Vite alias now points at the sibling `fui:plugs/` (#1234/#1250), so the demo bootstrap, parser, registry and nodes **all** resolve to the single FUI copy. Verified live: `customTextNodes.upgrade()` on a fresh **connected** node (even span-wrapped, with a `<template>` sibling) evaluates correctly (`"Hello, World!"`). The FUI determine walk is fine.
+2. **A separate 500 regression from #1047 also exists in this demo.** The demo's inline relative `import` of the old WE-local plugs bootstrap resolves *relative to the .html* → a now-deleted `we:plugs/bootstrap.ts` → Vite 500s the inline module on a cold start (and that relative string also suppresses the bootstrap-injection plugin). The fix points it at the served `fui:plugs/bootstrap.ts` via the `/plugs` alias (a separate absolute module-script tag, matching the other demos) — verified it removes the 500. Left **unapplied** here (reverted with the rest); worth its own tiny demo-fix card or folding into the focused session.
+3. **The original eval bug REMAINS, now sharply isolated.** On the clean substrate the RESULT boxes still render the raw `{{…}}` path. Decisive clue: the **in-demo-module** `customTextNodes.upgrade()` leaves nodes un-upgraded at load (append-then-upgrade AND a `requestAnimationFrame` deferral both still raw), yet an **identical** `upgrade()` on a fresh clone run **post-load** (Playwright/devtools) evaluates fine — and the demo's already-raw nodes are **terminal** (a later re-upgrade won't recover them). So the residual is **not** the determine walk, not class identity, not connection ordering — it is how the demo module's own `upgrade()` invocation resolves at load (registry instance / injector-context). A focused FUI session should instrument the live in-module `upgrade()` call (the registry/parser instance + the `getProviderOf` result at that exact call) on a cold start.
+
+Carry-forward reason: **outgrew** — a focused FUI/demo debugging session, not a batch slice. blockedBy cleared (#1504 resolved). No design fork.
 
 # `{{ }}` interpolation renders the expression's *path* ("name"), not its evaluated value ("World")
 
