@@ -1,8 +1,10 @@
 ---
 kind: epic
 parent: "1255"
-status: open
+status: resolved
 dateOpened: "2026-06-15"
+dateResolved: "2026-06-22"
+graduatedTo: none
 tags: [embedding, iframe, components, docs, mechanism, capability]
 relatedReport: reports/2026-06-15-728-backlog-split-analysis.md
 crossRef: { url: /backlog/604-migrate-the-we-site-to-render-real-frontier-ui-blocks-replac/, label: "#604 — WE block-page consumer of this capability" }
@@ -51,24 +53,32 @@ defer to the DI-mount path) — carved out as the decision card
 [#732](/backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r/). The iframe v1 ships
 for every non-overlay demo regardless of how #732 rules.
 
-## Future — non-iframe / DI component mount
+## Future — non-iframe / DI component mount (DELIVERED)
 
-When a sanctioned way to load a component *into the host page's runtime* exists (Shadow-DOM mount, DI
-component), embedding could move off the iframe and overlays would render natively. For the **WE→FUI** case
-this is gated on **reopening the cross-repo import seam #700 ruled out** — so it is explicitly out of scope
-until that seam is reconsidered; for first-party same-runtime embeds it may be available sooner.
+The DI/in-document mount path that this section framed as gated is now built: the cross-repo isolation
+boundary was relaxed for an in-document DI mode ([#765](/backlog/765-relax-the-we-fui-isolation-boundary-for-an-in-document-di-mo/),
+resolved) and the FUI embed SDK gained a Shadow-DOM in-document render mode
+([#786](/backlog/786-mode-c-fui-embed-sdk-gains-a-shadow-dom-in-document-render-m/), resolved), so
+overlays can render natively rather than clipping to an iframe box.
 
-## Slicing note
+## Slicing note (RESOLVED — scope delivered by children)
 
-Sliced umbrella (size-less; children carry the points). See
+Sliced umbrella (size-less; children carried the points). See
 [we:reports/2026-06-15-728-backlog-split-analysis.md](../reports/2026-06-15-728-backlog-split-analysis.md).
+All carved children resolved; the epic resolved 2026-06-22.
 
-- **Children:** [#732](/backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r/) —
-  overlay/modal escape (`decision`). The one ready piece; the rest below are deferred, not carved.
-- **Not carved yet (premature / out of scope) — would manufacture fake agent-ready work:**
-  - *Generic embed primitive* (beyond `fuiDemo`) — only one consumer in the tree
-    (`we:component.njk:235`); carve when a real **second** embed consumer appears.
-  - *Third-party oEmbed adapter* (YouTube/Facebook-style) — no consumer surface today.
-  - *Post-ruling overlay build slice* — carve after #732 rules.
-  - *DI / Shadow-DOM mount* — gated on **reopening [#700](/backlog/700-component-converter-playground-placement/)**.
-- **Already-shipped v1:** the `fuiDemo` iframe (`we:.eleventy.js:38`, [#701](/backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo/)) — no build slice remains for it.
+- **Children (all resolved):**
+  - [#732](/backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r/) — overlay/modal
+    escape (`decision`).
+  - [#807](/backlog/807-build-the-fui-owned-embed-sdk-skeleton-render-mode-axis-b1-f/) — FUI-owned embed
+    SDK skeleton / render-mode axis (the generic embed primitive beyond `fuiDemo`).
+  - [#764](/backlog/764-b2-native-host-backdrop-overlay-mode-for-the-fui-embed-sdk/) +
+    [#808](/backlog/808-exercise-fui-embed-sdk-b1-overlay-escape-end-to-end-dialog-d/) — overlay-escape
+    build + end-to-end exercise (the post-ruling overlay slice).
+  - [#765](/backlog/765-relax-the-we-fui-isolation-boundary-for-an-in-document-di-mo/) +
+    [#786](/backlog/786-mode-c-fui-embed-sdk-gains-a-shadow-dom-in-document-render-m/) — DI / Shadow-DOM
+    in-document mount.
+- **Out of scope (no consumer — a different capability, not undelivered scope):**
+  - *Third-party oEmbed adapter* (YouTube/Facebook-style) — no consumer surface today; file fresh under a
+    real consumer if one appears.
+- **Shipped v1:** the `fuiDemo` iframe (`we:.eleventy.js:38`, [#701](/backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo/)).
