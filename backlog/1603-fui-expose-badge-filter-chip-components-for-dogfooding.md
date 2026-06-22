@@ -2,9 +2,12 @@
 kind: story
 size: 3
 parent: "777"
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: "blocks/filter-chip (badge pre-existed #1288)"
 tags: []
 ---
 
