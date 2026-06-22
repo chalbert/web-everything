@@ -1,8 +1,7 @@
 ---
 kind: story
 size: 5
-status: parked
-parkedReason: deferred
+status: open
 dateOpened: "2026-06-21"
 locus: frontierui
 relatedProject: webrealtime

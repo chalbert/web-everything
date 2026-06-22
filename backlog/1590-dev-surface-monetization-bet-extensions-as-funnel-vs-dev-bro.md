@@ -1,7 +1,6 @@
 ---
 kind: decision
-status: parked
-parkedReason: deferred
+status: open
 locus: plateau-app
 dateOpened: "2026-06-22"
 relatedReport: reports/2026-06-07-dev-surface-feature-market-landscape.md

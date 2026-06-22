@@ -2,9 +2,7 @@
 kind: story
 size: 8
 parent: "554"
-status: parked
-parkedReason: deferred
-blockedBy: []
+status: open
 dateOpened: "2026-06-14"
 dateParked: "2026-06-14"
 tags: [auto-update, runner, plateau-app, hosted, dashboard, live-serve, parked, out-of-phase]

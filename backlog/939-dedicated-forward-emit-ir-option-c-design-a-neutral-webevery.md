@@ -2,7 +2,7 @@
 kind: decision
 size: 3
 parent: "746"
-status: parked
+status: open
 relatedProject: webdocs
 blockedBy: ["818"]
 dateOpened: "2026-06-18"

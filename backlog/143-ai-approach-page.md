@@ -1,8 +1,8 @@
 ---
 kind: story
 size: 2
-status: parked
-parkedReason: deferred
+status: open
+blockedBy: ["1104"]
 dateOpened: "2026-06-07"
 tags: [content, page, ai, methodology, pre-release, deferred, plateau]
 ---

@@ -2,8 +2,7 @@
 kind: story
 locus: plateau-app
 size: 5
-status: parked
-parkedReason: deferred
+status: open
 dateOpened: "2026-06-11"
 tags: [dev-experience, devtools, validation, adapters, normalization, technical-configurator, dev-surface, no-lock-in]
 parent: "236"

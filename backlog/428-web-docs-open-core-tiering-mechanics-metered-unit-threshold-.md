@@ -3,7 +3,7 @@ kind: decision
 size: 3
 parent: "089"
 blockedBy: ["554"]
-status: parked
+status: open
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-14"
 dateParked: "2026-06-14"

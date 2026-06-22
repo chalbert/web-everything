@@ -1,7 +1,7 @@
 ---
 kind: epic
 size: 8
-status: parked
+status: open
 dateOpened: "2026-06-20"
 childlessReason: parked
 relatedProject: webvalidation

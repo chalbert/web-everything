@@ -1,8 +1,7 @@
 ---
 kind: decision
 size: 3
-status: parked
-parkedReason: deferred
+status: open
 dateOpened: "2026-06-18"
 locus: webeverything
 relatedProject: webdocs

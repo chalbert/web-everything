@@ -2,8 +2,7 @@
 kind: decision
 size: 2
 parent: "099"
-status: parked
-parkedReason: deferred
+status: open
 dateOpened: "2026-06-16"
 tags: [requirement-as-code, code-generation, ai, evergreen, vision]
 crossRef: { url: /backlog/100-requirement-as-code/, label: "Requirement-as-code (#100)" }

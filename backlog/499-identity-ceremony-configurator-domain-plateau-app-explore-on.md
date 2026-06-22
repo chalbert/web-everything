@@ -1,13 +1,14 @@
 ---
-kind: task
-status: parked
-parkedReason: deferred
+kind: decision
+status: open
 blockedBy: []
 dateOpened: "2026-06-13"
 tags: []
 ---
 
 # Identity ceremony Configurator domain (plateau-app) — explore on real authoring need
+
+**Decision (un-parked 2026-06-22 — parking is not a prioritisation escape):** Whether to build the identity-ceremony Configurator domain now, or hold until a consumer needs it.
 
 > **Blocker cleared 2026-06-16:** #483 (its former `blockedBy`) is resolved, so this is no
 > longer DAG-blocked. It stays parked purely on the **demand gate** below — unpark only when a

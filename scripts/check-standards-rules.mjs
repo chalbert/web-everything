@@ -20,7 +20,12 @@
 export const BACKLOG_STATUSES = new Set(['open', 'active', 'preparing', 'parked', 'resolved']);
 // Valid `parkedReason` values (#1392) — the machine-readable WHY a non-epic item is parked, mirror of an
 // epic's childlessReason. Vocab + pill colours live in backlogMeta.js `parkedReasonMeta`.
-export const PARKED_REASONS = new Set(['blocked', 'deferred', 'external-infra', 'superseded']);
+// Tightened 2026-06-22 (parked-item sweep): parking is NOT a prioritisation escape. A park must reduce to a
+// real structural reason — a `blockedBy` edge, a `humanGate` (human-only action), or being a `kind: decision`
+// (decisions live in the decision lane, not parked). The soft `deferred`/`superseded`/`external-infra`
+// reasons are retired; the ONLY standalone `parkedReason` left is `platform-gated` (held on a web-platform
+// capability shipping in browsers — not a backlog item or a human action).
+export const PARKED_REASONS = new Set(['platform-gated']);
 // One `kind` axis (#466/#487) — the merged nature+hierarchy field that replaced the former two
 // correlated axes (`type ∈ idea|issue|decision` + `workItem ∈ story|epic|task`). `story|epic|task` keep
 // the sizing/hierarchy semantics; `decision` keeps Tier-B + fork validation. `size` stays a separate
@@ -169,10 +174,12 @@ export function validateBacklogItem(item, ctx) {
       err(`Backlog item "${item.id}" has invalid parkedReason "${item.parkedReason}" (expected ${[...PARKED_REASONS].join(' / ')})`);
     const hasEdge = Array.isArray(item.blockedBy) && item.blockedBy.length > 0;
     if (!hasEdge && !item.humanGate && !item.parkedReason && !item.childlessReason)
-      err(`Backlog item "${item.id}" is \`status: parked\` but carries no machine-readable reason — add a ` +
-        `\`parkedReason\` (${[...PARKED_REASONS].join(' / ')}), a real \`blockedBy\` edge (file the prereq/decision if missing), ` +
-        `a \`humanGate\`, or — for an epic — a \`childlessReason\`. Parking is a deliberate hold; its WHY must be ` +
-        `first-class, not prose (#1392). See docs/agent/backlog-workflow.md → Parking.`);
+      err(`Backlog item "${item.id}" is \`status: parked\` but carries no machine-readable reason — parking is ` +
+        `NOT a prioritisation escape. Reduce it to a real structural state: a \`blockedBy\` edge (file the ` +
+        `prereq as its own card if missing), a \`humanGate\` (human-only action), \`kind: decision\` + ` +
+        `\`status: open\` (let the decision lane rank it), or \`parkedReason: platform-gated\` (held on a ` +
+        `browser-platform capability). Soft "deferred" holds are retired (#1392, tightened 2026-06-22). ` +
+        `See docs/agent/backlog-workflow.md → Parking.`);
   }
   // Repo-locus: an AUTHORED `locus:` must be a known registry key (a typo'd locus → the batch runs the
   // wrong/nonexistent gate at close-out → hard error). An item whose tags INFERRED a cross-repo locus but

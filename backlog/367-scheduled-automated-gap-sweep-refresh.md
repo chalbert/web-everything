@@ -1,15 +1,15 @@
 ---
-kind: story
-size: 3
+kind: decision
 parent: "315"
-status: parked
-parkedReason: deferred
+status: open
 blockedBy: []
 dateOpened: "2026-06-12"
 tags: []
 ---
 
 # Scheduled / automated gap-sweep refresh
+
+**Decision (un-parked 2026-06-22 — parking is not a prioritisation escape):** Whether to graduate the manual gap-sweep to a scheduled/automated agent sweep now, or keep it on-demand.
 
 Graduate the manual gap-sweep re-run skill (#366) to a scheduled agent sweep that periodically re-runs the pipeline, reports the delta, and surfaces new candidate gaps — once the cadence has proven stable manually. Decided in #349: the automated half is a client of #192's freshness/automation mechanism, so it is gated on #192 (the general refresh engine) and #366 (the manual skill it automates). Until both land, refresh stays manual.
 

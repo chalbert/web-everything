@@ -1,8 +1,7 @@
 ---
 kind: decision
 size: 3
-status: parked
-parkedReason: deferred
+status: open
 relatedProject: webcompliance
 dateOpened: "2026-06-18"
 tags: [compliance, conformance, monetization, plateau, managed-offering]

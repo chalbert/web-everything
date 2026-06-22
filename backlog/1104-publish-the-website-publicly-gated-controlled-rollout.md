@@ -1,6 +1,7 @@
 ---
 kind: epic
 status: open
+humanGate: { kind: deploy, what: "Controlled public launch of the WE website — a human-owned gated rollout (open one notch at a time) plus a credentialed deploy; not agent-executable (never-push)." }
 dateOpened: "2026-06-19"
 tags: [deployment, hosting, gated-access, controlled-rollout, analytics, auth, website, webdocs, solo-founder]
 crossRef: { url: /backlog/181-commercialization-infrastructure/, label: "Commercialization infra — auth/payments/legal (#181)" }

@@ -1,8 +1,7 @@
 ---
 kind: decision
 parent: "099"
-status: parked
-parkedReason: deferred
+status: open
 dateOpened: "2026-06-21"
 relatedTo: ["1406"]
 tags: [decision, parked, selection, marquee, spatial, residual, watch]

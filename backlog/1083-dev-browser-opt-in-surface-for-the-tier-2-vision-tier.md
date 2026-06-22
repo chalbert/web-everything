@@ -2,7 +2,7 @@
 kind: story
 size: 3
 parent: "1073"
-status: parked
+status: open
 blockedBy: ["1391"]
 dateOpened: "2026-06-19"
 tags: []

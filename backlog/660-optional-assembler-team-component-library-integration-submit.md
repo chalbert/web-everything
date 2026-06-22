@@ -2,8 +2,7 @@
 kind: story
 size: 8
 parent: "646"
-status: parked
-parkedReason: deferred
+status: open
 parkedDate: "2026-06-22"
 dateOpened: "2026-06-15"
 relatedProject: webdocs

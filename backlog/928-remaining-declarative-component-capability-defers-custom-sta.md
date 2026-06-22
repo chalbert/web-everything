@@ -1,8 +1,6 @@
 ---
-kind: story
-size: 3
-status: parked
-parkedReason: deferred
+kind: decision
+status: open
 dateOpened: "2026-06-18"
 tags: [webcomponents, component, declarative, deferred]
 relatedProject: webcomponents
@@ -10,6 +8,8 @@ crossRef: { url: /blocks/component/, label: Component block }
 ---
 
 # Remaining declarative <component> capability defers (custom states, manual slots, shared stylesheets)
+
+**Decision (un-parked 2026-06-22 — parking is not a prioritisation escape):** Whether/when to build each remaining declarative-`<component>` capability defer — each needs a concrete use case first.
 
 Capture-for-later home for the three declarative-`<component>` capabilities that epic [#076](/backlog/076-component-declarative-wc-apis/) deliberately deferred rather than built. Parked because each is platform-blocked or low-value today, not because the design is open — none is buildable now, so there is nothing to slice. Split out of the resolved #076 body so a resolved epic doesn't act as the only discovery surface. Revisit when its trigger fires.
 

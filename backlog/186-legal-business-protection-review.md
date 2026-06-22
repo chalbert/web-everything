@@ -2,8 +2,8 @@
 kind: story
 size: 3
 parent: "181"
-status: parked
-parkedReason: deferred
+status: open
+humanGate: { kind: review, what: "Pre-sale legal & business-protection review (entity, licensing/ToS, trademark, liability) — a professional/human action, not agent-doable; required before charging money." }
 dateOpened: "2026-06-08"
 tags: [monetization, legal, trademark, entity, eula, privacy, gdpr, insurance, compliance, solo-founder]
 crossRef: { url: /backlog/098-licensing-strategy/, label: "Licensing strategy (#098)" }

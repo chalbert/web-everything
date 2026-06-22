@@ -20,16 +20,13 @@ module.exports = {
     untriaged: { label: 'needs triage', bg: '#ede9fe', fg: '#5b21b6', tip: 'No child stories yet — a holding-pen of candidates; each must be triaged (promote / fold / drop) before any become stories.' },
     program: { label: 'ongoing program', bg: '#e0f2fe', fg: '#075985', tip: 'No fixed child stories by design — a continuous program measured by progress, not a fixed set of child stories.' },
   },
-  // Why a non-epic item is `status: parked` — a machine-readable hold reason, the story/task/decision mirror
-  // of an epic's `childlessReason` (#1392). Parking is a deliberate hold and the WHY must be first-class:
-  // `check:standards` errors on a parked item with no derivable reason (no `blockedBy` edge AND no
-  // `humanGate` AND no `parkedReason`). A real `blockedBy` edge pills as "blocked by #N" via `reasonPill`
-  // and needs no `parkedReason`; these values cover the reasons an edge can't express.
+  // Why a non-epic item is `status: parked` — a machine-readable hold reason (#1392). TIGHTENED 2026-06-22
+  // (parked-item sweep): parking is NOT a prioritisation escape, so the soft `deferred`/`external-infra`/
+  // `superseded` reasons are retired. A park must reduce to a real structural state — a `blockedBy` edge, a
+  // `humanGate`, `kind: decision` + `status: open` (decision lane), or — the only standalone `parkedReason`
+  // left — `platform-gated`. `check:standards` errors on a parked item with no such reason.
   parkedReasonMeta: {
-    blocked: { label: 'blocked', bg: '#fef2f2', fg: '#991b1b', tip: 'Held on a prerequisite — prefer a real `blockedBy` edge when the blocker is a tracked item; use this only when the blocker is not a single backlog node.' },
-    deferred: { label: 'deferred', bg: '#fef9c3', fg: '#854d0e', tip: 'Deliberately held pending an external signal — usage/funnel data, a launch, a future decision, or a prerequisite landing elsewhere. Revisit when that arrives.' },
-    'external-infra': { label: 'external infra', bg: '#ede9fe', fg: '#5b21b6', tip: 'Held on infrastructure or a capability a person/other-build must provision first (hosted resource, external account, an unbuilt service). Provision it, then it’s workable.' },
-    superseded: { label: 'superseded', bg: '#f1f5f9', fg: '#475569', tip: 'Held pending a reframe — a newer direction may absorb or replace it; revisit once the reframe settles.' },
+    'platform-gated': { label: 'platform-gated', bg: '#e0f2fe', fg: '#075985', tip: 'Held on a web-platform capability shipping in browsers (a native element/CSS feature not yet broadly available) — not a backlog item and not a human action. Unpark when the platform feature lands.' },
   },
   // Why an oversized story (size > 8) is NOT a /split candidate after analysis — author-supplied
   // (`unsplittableReason`), the story-side mirror of an epic's `childlessReason`. Recording it clears the

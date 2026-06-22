@@ -3,7 +3,7 @@ kind: story
 size: 3
 parent: "181"
 blockedBy: ["097"]
-status: parked
+status: open
 dateOpened: "2026-06-11"
 tags: [monetization, payments, merchant-of-record, lemon-squeezy, license-issuance, checkout, solo-founder]
 crossRef: { url: /backlog/183-payments-merchant-of-record/, label: "MoR ruling (#183 → Lemon Squeezy)" }

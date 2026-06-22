@@ -1,8 +1,7 @@
 ---
 kind: task
 parent: "081"
-status: parked
-parkedReason: deferred
+status: open
 blockedBy: []
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-13"

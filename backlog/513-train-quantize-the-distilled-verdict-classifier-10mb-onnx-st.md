@@ -1,15 +1,15 @@
 ---
-kind: story
-size: 5
+kind: decision
 parent: "490"
-status: parked
-parkedReason: deferred
+status: open
 blockedBy: []
 dateOpened: "2026-06-14"
 tags: []
 ---
 
 # Train + quantize the distilled verdict classifier — <=10MB ONNX student (per #488 F1/F2, the [no-leakage-client](docs/agent/platform-decisions.md#no-leakage-client) rule)
+
+**Decision (un-parked 2026-06-22 — parking is not a prioritisation escape):** Whether to proceed with training+quantizing the distilled verdict classifier given the current design-ref corpus volume.
 
 Run slice A's (#511) recipe against the accumulated design-ref corpus to produce a <=10MB-quantized MobileNet/ViT student for the 6-verdict taxonomy via task-specific knowledge distillation (VL2Lite/PAND/VLM-KD) from the big-model labels, gated by slice B's (#512) benchmark (e.g. >=95% verdict-agreement + a quarantine-recall floor). NOT batchable until the corpus has accumulated enough labeled volume — an OPERATIONAL gate beyond #511/#512: the dev gate must run a real vision provider over many captures to fill items/ + quarantine/ (design-refs/items/ holds only ~16 captures today — far below distillation volume). Slice C of epic #490.
 

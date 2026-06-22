@@ -3,7 +3,7 @@ kind: story
 size: 3
 parent: "181"
 blockedBy: ["097"]
-status: parked
+status: open
 dateOpened: "2026-06-08"
 tags: [monetization, marketing, landing-page, pricing, webdocs, distribution, infrastructure]
 relatedProject: webdocs

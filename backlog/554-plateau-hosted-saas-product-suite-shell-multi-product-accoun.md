@@ -1,8 +1,8 @@
 ---
 kind: epic
 parent: "089"
-status: parked
-parkedReason: deferred
+status: open
+humanGate: { kind: setup, what: "Standing up the Plateau hosted-SaaS suite is a founder go/no-go to enter the SaaS phase and provision hosting/accounts/billing — a human business decision, not agent-mechanical work." }
 dateOpened: "2026-06-14"
 dateParked: "2026-06-14"
 tags: [monetization, plateau, saas, hosted, product-suite, live-serve, deferred]

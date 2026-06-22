@@ -1,8 +1,7 @@
 ---
-kind: task
+kind: decision
 parent: "089"
-status: parked
-parkedReason: deferred
+status: open
 dateOpened: "2026-06-07"
 tags: [product-strategy, dev-experience, dev-browser, ai-generated, brainstorm, candidate-features, full-context-debug, ownership-routing, introspection]
 relatedReport: reports/2026-06-07-dev-surface-feature-market-landscape.md
@@ -10,6 +9,8 @@ crossRef: { url: /backlog/140-dev-surface-product-feature-matrix/, label: "Produ
 ---
 
 # AI-generated candidate dev-experience features — full-context debugging & "the best person does the work"
+
+**Decision (un-parked 2026-06-22 — parking is not a prioritisation escape):** Which AI-DX candidate features (this living pool) to promote into real backlog work, and on what trigger.
 
 > **Parked `deferred` (2026-06-22, batch-2026-06-22-1575-1030).** This is a living candidate-feature **pool**,
 > not a unit of agent-mechanical work — "resolving" it = the product-judgment call of which candidates

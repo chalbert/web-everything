@@ -1,9 +1,7 @@
 ---
-kind: story
-size: 3
+kind: decision
 parent: "125"
-status: parked
-parkedReason: deferred
+status: open
 dateOpened: "2026-06-09"
 priority: low
 tags: [component, adapters, compiler, build-tooling, strategy-axis, deferred, swc, tsc]
@@ -13,6 +11,8 @@ crossRef: { url: /adapters/jsx-adapter/, label: JSX Adapter }
 ---
 
 # Deferred `<component>` compiler strategy opt-ins (collected for later, on-demand)
+
+**Decision (un-parked 2026-06-22 — parking is not a prioritisation escape):** Which of the deferred `<component>` compiler strategy opt-ins to build, and on what trigger (none scheduled by default).
 
 Collection of the lower-priority strategy opt-ins set aside by the #127 ruling (the [component-dc](docs/agent/platform-decisions.md#component-dc) rule). #127 settled that the
 compiler's toolchain reach is a set of **configurable strategy axes** with native-first defaults; **#231**

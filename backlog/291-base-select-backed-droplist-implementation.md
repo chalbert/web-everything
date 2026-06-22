@@ -2,7 +2,7 @@
 kind: story
 size: 5
 status: parked
-parkedReason: deferred
+parkedReason: platform-gated
 dateOpened: "2026-06-11"
 tags:
   - base-select
