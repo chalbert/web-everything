@@ -1,0 +1,102 @@
+<h3>The Question</h3>
+<p>
+    The wave-3 block conversions <a href="/backlog/1567-/">#1567</a> (<code>we-tree-select</code>),
+    <a href="/backlog/1568-/">#1568</a> (<code>we-type-ahead</code>) and <a href="/backlog/1569-/">#1569</a>
+    (<code>we-data-grid</code>) were each scoped &ldquo;mirror the shipping
+    <code>StepperElement</code> reference, flat application, no fork.&rdquo; But <code>StepperElement</code>
+    wraps a kernel that <em>scans the host&rsquo;s light-DOM markup</em>, whereas these kernels were assumed
+    to be <em>data-array-driven</em>. So the real question (grounding <a href="/backlog/1570-/">#1570</a>):
+    <em>how does a persistent-B custom-element facade supply the data its kernel needs &mdash; and is that
+    even one shared question across the three?</em>
+</p>
+
+<h3>Recommendation (prepared for #1570)</h3>
+<ol>
+    <li><strong>The trio is not a trio.</strong> Reading the real kernels: only <strong>tree-select</strong>
+        is data-array-driven. <strong>type-ahead</strong> and <strong>data-grid</strong> both
+        <code>extend CustomAttribute</code> and <strong>scan authored light-DOM</strong> (the
+        <code>StepperBehavior</code> shape) &mdash; so the <code>StepperElement</code> mirror holds, they
+        carry <strong>no data-source fork</strong>, and should be unblocked.</li>
+    <li><strong>tree-select default &mdash; (b) a typed <code>.nodes</code> property (B)</strong>, mirroring
+        <code>WizardElement</code> (the <a href="/backlog/1457-/">#1457</a>-named persistent-B reference,
+        itself property-sourced render-from-data); kernel unchanged.</li>
+    <li><strong>(c) JSON-string attribute rejected</strong> &mdash; the primary mechanism in zero surveyed
+        libraries, clunky for deep hierarchies.</li>
+    <li><strong>(a) light-DOM markup parse demoted to a deferred additive</strong> &mdash; admissible only
+        once a <em>non-destructive</em> seed/scan path is designed and a progressive-enhancement consumer
+        exists (a different, out-of-scope kernel).</li>
+</ol>
+
+<h3>Finding 1 &mdash; only one of the three kernels is data-array-driven</h3>
+<p>
+    <code>fui:blocks/tree-select/TreeSelectBehavior.ts</code> is
+    <code>constructor(host, nodes: TreeNode[], opts)</code> and at line 36 does <code>host.innerHTML = ''</code>
+    then builds a normalized <code>&lt;ul role="tree"&gt;</code> from the array &mdash; render-from-data, no
+    markup scan. But <code>fui:blocks/type-ahead/TypeAheadBehavior.ts</code> <code>extends CustomAttribute</code>
+    and reads existing <code>[role="option"]</code>/<code>[role="treeitem"]</code> children via its
+    <code>ITEM_SELECTOR</code>; <code>fui:blocks/data-grid/DataGridBehavior.ts</code> likewise
+    <code>extends CustomAttribute</code> and enhances an authored <code>&lt;table role="grid"&gt;</code> in
+    place. Those two are the <code>StepperBehavior</code> light-DOM-scan shape exactly &mdash; their element
+    facade is the <code>StepperElement</code> mirror verbatim, with nothing to source. The card&rsquo;s
+    &ldquo;genuine fork shared by the trio&rdquo; premise is refuted by the code for two of three blocks.
+</p>
+
+<h3>Finding 2 &mdash; native, standards, and web-component trees source hierarchical data from declarative child markup (A)</h3>
+<p>
+    <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/select">Native <code>&lt;select&gt;</code></a>
+    takes child <code>&lt;option&gt;</code>/<code>&lt;optgroup&gt;</code>; <code>&lt;datalist&gt;</code> takes
+    child <code>&lt;option&gt;</code>; the
+    <a href="https://open-ui.org/components/customizable-select.explainer/">Open UI customizable-<code>&lt;select&gt;</code></a>
+    (shipped in Chromium) keeps that child-markup model; the
+    <a href="https://www.w3.org/WAI/ARIA/apg/patterns/treeview/">WAI-ARIA APG Tree View pattern</a> is, in
+    effect, a markup specification (<code>role=tree/treeitem/group</code> on real DOM nodes). The web-component
+    trees follow native: <a href="https://shoelace.style/components/tree">Shoelace <code>&lt;sl-tree&gt;</code></a>
+    and <a href="https://learn.microsoft.com/en-us/fluent-ui/web-components/components/tree-view">Fluent/FAST
+    <code>&lt;fluent-tree-view&gt;</code></a> source from slotted child markup. There is no native element and
+    no surveyed web-component tree whose primary hierarchical source is a JS array or a JSON-string attribute.
+</p>
+
+<h3>Finding 3 &mdash; framework component libraries use a data property (B); a JSON attribute (C) is used nowhere as primary</h3>
+<p>
+    <a href="https://mui.com/x/react-tree-view/rich-tree-view/items/">MUI X RichTreeView</a> takes an
+    <code>items</code> array; <a href="https://ant.design/components/tree/">Ant Design Tree/TreeSelect</a>
+    recommends <code>treeData</code> over <code>&lt;TreeNode&gt;</code> children;
+    <a href="https://www.ag-grid.com/javascript-data-grid/tree-data/">AG Grid</a> uses
+    <code>rowData</code>&nbsp;+&nbsp;<code>getDataPath</code>;
+    <a href="https://react-spectrum.adobe.com/react-aria/Tree.html">React-Aria</a> dynamic collections use an
+    <code>items</code> prop. A serialized JSON-string attribute is the primary mechanism in <strong>none</strong>
+    of the surveyed native elements, APG patterns, framework libraries, or web-component trees &mdash; it is
+    clunky for deep/large hierarchies (escaped blobs, full re-parse on change, no per-node identity). The
+    convention splits cleanly by component <em>kind</em>: custom elements lean A, framework abstractions lean B.
+</p>
+
+<h3>Finding 4 &mdash; the A-primary case depends on a shadow boundary FUI&rsquo;s persistent-B does not have (the skeptic flip)</h3>
+<p>
+    Shoelace/Fluent keep the author&rsquo;s markup as the source of truth <em>only because they render into
+    shadow DOM</em>: the slotted nodes persist as the data store and the shadow tree is a projection
+    (<a href="https://lit.dev/docs/components/shadow-dom/">slotted children read via
+    <code>slotchange</code>&nbsp;+&nbsp;<code>assignedElements</code></a>). FUI&rsquo;s persistent-B family is
+    <strong>light-DOM, no shadow</strong> (<a href="/backlog/1457-/">#1457</a>&nbsp;/&nbsp;<a href="/backlog/1349-/">#1349</a>).
+    With no shadow, <code>TreeSelectBehavior</code>&rsquo;s <code>host.innerHTML = ''</code>
+    <strong>destroys</strong> the author&rsquo;s <code>&lt;ul&gt;</code> &mdash; so an A-primary parse reads
+    markup the kernel immediately shreds and rebuilds, pure ceremony with a bespoke
+    <code>&lt;li data-id data-selectable&gt;</code> dialect the author must learn for nothing. A skeptic pass
+    prompted only to refute an initial A-primary lean <strong>REFUTED</strong> it on exactly this point, and the
+    in-repo B reference the #1457 ruling itself names &mdash; <code>WizardElement</code>, property-sourced
+    render-from-data &mdash; is the exact structural twin of <code>TreeSelectBehavior</code>. The default flips
+    to <strong>B-primary</strong>: the typed property matches the kernel and the precedent; A is the deviation
+    that would need a non-destructive seed/scan path (a different kernel) to earn its place.
+</p>
+
+<h3>Classification &amp; implication for #1570</h3>
+<p>
+    This is a <strong>FUI packaging impl call</strong> (<a href="/backlog/1321-/">#1321</a>): the
+    navigation/selection <em>contracts</em> are WE&rsquo;s, the element <em>packaging</em> is FUI&rsquo;s. The
+    7-question layer pass yields a runtime element facade, not a new standard; binding principles are
+    native-first vocabulary, most-permissive default, bias-toward-separation, and
+    Config-Extends-Platform-Default (the markup convention, if ever shipped, is the deferred-A card). Net: a
+    single genuine fork (tree-select&rsquo;s primary data-source, default <strong>B</strong>) plus a non-fork
+    grounding correction &mdash; unblock <a href="/backlog/1568-/">#1568</a>/<a href="/backlog/1569-/">#1569</a>
+    and repoint <a href="/backlog/1567-/">#1567</a>&rsquo;s reference from <code>StepperElement</code> to
+    <code>WizardElement</code>.
+</p>

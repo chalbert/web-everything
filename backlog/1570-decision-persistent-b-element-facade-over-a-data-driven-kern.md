@@ -2,52 +2,132 @@
 kind: decision
 status: open
 locus: frontierui
+relatedProject: webcomponents
+relatedReport: reports/2026-06-22-1570-persistent-b-data-source.md
 dateOpened: "2026-06-22"
-tags: [packaging, custom-elements, persistent-b, block-model, "1442", "1457"]
+dateStarted: "2026-06-22"
+preparedDate: "2026-06-22"
+tags: [packaging, custom-elements, persistent-b, block-model, data-source, "1442", "1457"]
 ---
 
-# DECISION: persistent-B element facade over a DATA-driven kernel — how it sources its data
+# DECISION: persistent-B element facade over a data-driven kernel — how it sources its data
 
-The wave-3 persistent-B conversions #1567 (`we-tree-select`), #1568 (`we-type-ahead`), #1569 (`we-data-grid`) are each scoped "mirror the shipping `fui:blocks/stepper/StepperElement.ts` reference, flat application, no fork." But `StepperElement` wraps a kernel that **scans the host's light-DOM markup** (`[data-step]` panels), whereas these three kernels are **data-array-driven** — `TreeSelectBehavior(host, nodes: TreeNode[], opts)`, and likewise type-ahead (items) / data-grid (rows + columns). So the reference does **not** specify how a persistent-B element supplies the data its kernel needs, and that choice is the element's authored public API — a real fork, not a permissive default.
+**Prepared 2026-06-22.** No design existed yet; the single open fork below is grounded in a prior-art
+survey published as [/research/persistent-b-element-data-source/](/research/persistent-b-element-data-source/)
+(session report `we:reports/2026-06-22-1570-persistent-b-data-source.md`, linked via `relatedReport`) and
+**attacked by a skeptic pass that flipped the default**. Each fork carries a recommended default in
+**bold**. **FUI packaging impl call** (`locus: frontierui`): the navigation/selection *contracts* are
+WE's, the element *packaging* is FUI's (#1321).
 
-## Why the StepperElement mirror under-specifies these three
+The card was filed claiming a **fork shared by the wave-3 trio** #1567 (`we-tree-select`) / #1568
+(`we-type-ahead`) / #1569 (`we-data-grid`): "the `StepperElement` mirror doesn't say how a data-driven
+kernel gets its data." **Reading the real kernels refutes that premise for two of the three** — so this
+shrinks to **one** genuine fork on tree-select, plus a non-fork grounding correction that unblocks the
+other two.
 
-`fui:blocks/stepper/StepperElement.ts` `#build()` does `new StepperBehavior(this, { progression })` — the
-kernel reads the steps straight from the light DOM the author already wrote, so the element adds only
-attributes + styling. **There is no data to source.** For the wave-3 trio the kernel's first argument after
-`host` is a **structured data array** the element must produce from somewhere:
+## Recommended path at a glance
 
-- `fui:blocks/tree-select/TreeSelectBehavior.ts`: `constructor(host, nodes: TreeNode[], opts)` —
-  `TreeNode = { id, label, children?, selectable? }` (hierarchical).
-- `fui:blocks/type-ahead/…`: an items/suggestions list.
-- `fui:blocks/data-grid/…`: rows + column definitions.
+| | Recommended default | Main alternative (excluded) | Confidence |
+|---|---|---|---|
+| **Fork 1** — `we-tree-select` primary data-source | **(b) typed `.nodes` property (B)** — mirror `WizardElement`; kernel unchanged | (a) light-DOM markup parse as *primary* (A) | High (~85%) |
 
-No existing element facade parses light-DOM into such a data array (grepped — none), so there is no
-in-repo convention to copy.
+Everything else here is **support-by-default or a grounding correction**, not a choice — see below.
 
-## The fork (options — not yet researched/ratified)
+## Axis framing — only one kernel is data-array-driven
 
-- **A — Light-DOM parse.** The element reads an authored markup convention into the data array
-  (e.g. nested `<ul><li data-id data-selectable>` → `TreeNode[]`; a `<table>` → rows/columns; a
-  `<datalist>`/`<option>` set → items). Most HTML-first / progressive-enhancement-friendly, but each block
-  needs a **decided markup→data mapping** (itself an API), and tree/grid markups are non-trivial.
-- **B — A typed property.** The element exposes `.nodes` / `.items` / `.rows` set programmatically; markup
-  is optional. Simplest to implement, but JS-only (no author-markup form, weaker than the "support-both"
-  framing).
-- **C — A JSON attribute.** `data` as a serialized attribute the element parses. Declarative but clunky for
-  large/hierarchical data and awkward to keep in sync.
-- **D — Hybrid (recommend-shape).** Define ONE shared "persistent-B over a data kernel" pattern (a small
-  base or helper) — light-DOM parse when markup is present (A), else the property (B) — and apply it
-  uniformly to all three, so the three cards become flat applications of a *decided* pattern rather than
-  three independent API inventions.
+The three wave-3 kernels decompose on one axis: **does the kernel render the semantic DOM from a data
+array, or scan author light-DOM markup?**
 
-## Blocks
+- **tree-select — data-array (render-from-data).** `fui:blocks/tree-select/TreeSelectBehavior.ts:33`
+  is `constructor(host, nodes: TreeNode[], opts)`; `:36` does `host.innerHTML = ''` then builds a
+  normalized `<ul role="tree">` from the array. No markup scan — the host's contents are wiped and
+  rebuilt. `TreeNode = { id, label, children?, selectable? }` (hierarchical).
+- **type-ahead — light-DOM scan.** `fui:blocks/type-ahead/TypeAheadBehavior.ts:36` extends
+  `CustomAttribute`; `:26-27` reads existing `[role="option"]`/`[role="treeitem"]` children via
+  `ITEM_SELECTOR`. It **enhances authored markup** — the `StepperBehavior` shape exactly.
+- **data-grid — light-DOM scan.** `fui:blocks/data-grid/DataGridBehavior.ts:9-10` extends
+  `CustomAttribute` and enhances an authored `<table role="grid">` in place. (A separate
+  `fui:blocks/renderers/data-grid/renderDataGrid.ts` data→table renderer exists, but #1569 was scoped
+  over the *behavior*, which scans markup; a data-array-rendered grid, if ever wanted, is a separate
+  transient-A item.)
 
-- #1567 (`we-tree-select`), #1568 (`we-type-ahead`), #1569 (`we-data-grid`) — all `blockedBy` this; each was
-  scoped "no fork / mirror StepperElement", which doesn't hold for a data-driven kernel.
+The persistent-B reference family keeps children in **light DOM, no shadow** (#1457 / #1349 — verified:
+no `attachShadow` across wizard/stepper/tabs/deck). The named B-family reference,
+`fui:blocks/wizard/WizardElement.ts:39`, is **property-sourced render-from-data** (`set graph(g)`, no
+markup form) — the exact structural twin of tree-select's kernel.
 
-Surfaced 2026-06-22 (batch-2026-06-22-1545-1549) grounding #1567: claimed it, read `TreeSelectBehavior`'s
-data-array constructor, and confirmed the named reference (`StepperElement`, light-DOM-scan) doesn't resolve
-the data-source — a genuine fork shared by the trio. No design call was forced to keep them batchable. The
-transient-A single-form-control conversions (#1554/#1555, resolved this batch) were unaffected — those
-kernels are factory-config, not light-DOM-scan, so the question is specific to persistent-B-over-data-kernel.
+## Supported by default (not decisions)
+
+- **#1568 (`we-type-ahead`) and #1569 (`we-data-grid`) carry no data-source fork.** Their kernels are
+  light-DOM-scan `CustomAttribute` behaviors, so the `StepperElement` mirror holds verbatim
+  (`connectedCallback → new <Behavior>(this)` over author markup, plus attributes + styling). The card's
+  "shared trio fork" premise is **factually wrong** for these two. → **Recommend unblocking both** (remove
+  `blockedBy: 1570`) on ratify.
+- **`we-tree-select` will also support the typed `.nodes` property as its floor regardless** — that is
+  the Fork 1 default itself; it is listed here only to note the property API is non-controversial.
+- **#1567's named reference is wrong and should be repointed.** It cites
+  `fui:blocks/stepper/StepperElement.ts` (light-DOM scan), but tree-select's render-from-data kernel makes
+  `fui:blocks/wizard/WizardElement.ts` (property-sourced) the correct mirror. → repoint on ratify; keep
+  `blockedBy: 1570`.
+
+## Fork 1 — `we-tree-select`'s primary data-source form
+
+**Fork-existence:** A-as-*primary* and B-as-*primary* cannot both be the element's declared/CEM-lead
+authored form, and **A-primary is *flawed* for this kernel** (named below) — so this is a real fork (case
+(a): one branch is broken, not merely a coexistence). The composability probe confirms A and B *coexist*
+as primary+additive (parse-if-markup-else-property), but *which is primary* — which form the slice ships,
+the CEM leads with, and docs teach — is the genuine either/or.
+
+**Crux:** `TreeSelectBehavior` renders from a `TreeNode[]` and wipes the host (`:36 innerHTML=''`). The
+element must decide where that array comes from.
+
+- **(a) Light-DOM markup parse (A)** — author writes nested `<ul><li>` (or `<we-tree-item>`); element
+  parses → `TreeNode[]` before the kernel builds. Matches the *custom-element peer* convention (native
+  `<select>`/`<optgroup>`, Open UI customizable-select, WAI-ARIA APG tree, Shoelace `<sl-tree>`,
+  Fluent/FAST `<fluent-tree-view>`) and FUI's HTML-first house style. **Flaw as *primary*:** those peers
+  keep author markup as the source of truth *only because they render into shadow DOM*; FUI persistent-B
+  is **light-DOM, no shadow**, so the kernel's `innerHTML=''` **destroys** the parsed markup — the author
+  writes a `<ul>`, the element parses it, the kernel shreds it and rebuilds a different tree. The parse is
+  **ceremony with negative payoff**, and it commits FUI to a durable markup→`TreeNode` mini-API inside a
+  `size:3` "no-fork" slice. *Rejected as primary.*
+- **(b) Typed `.nodes` property (B)** — `<we-tree-select>` exposes `.nodes` set programmatically; the
+  kernel renders from it unchanged. Mirrors `fui:blocks/wizard/WizardElement.ts:39` — the in-repo B
+  reference the #1457 ruling itself names, property-sourced render-from-data. Lowest friction, zero new
+  public convention, consistent with the kernel and the precedent. **Trade-off:** JS-only (no declarative
+  author-markup form) until/unless (a) is later added.
+- **(c) JSON attribute (C)** — `nodes='[...]'` parsed by the element. *Rejected:* the primary mechanism
+  in **zero** surveyed libraries; clunky for deep/large hierarchies (escaped blobs, full re-parse on
+  change, no per-node identity). Admissible at most as a minor convenience for tiny static trees, never
+  primary.
+
+**Recommended default: (b) — typed `.nodes` property (B)**, mirroring `WizardElement`, kernel unchanged.
+A is **demoted to a deferred additive**: file an A card (a decided markup convention + a *non-destructive*
+seed/scan path — e.g. a kernel that *scans* a `<ul>` like `StepperBehavior` scans `[data-step]`, a
+different out-of-scope kernel) only if a progressive-enhancement consumer for static markup trees appears.
+C rejected.
+
+**Skeptic: REFUTED → flipped to (b).** Prep's first lean was A-primary (custom-element peer convention +
+HTML-first house style). A throwaway skeptic, prompted only to refute, refuted it decisively on the
+*shadow-boundary* point: Shoelace/Fluent's "markup-is-source-of-truth" benefit exists only behind a shadow
+root; FUI persistent-B is light-DOM, so `innerHTML=''` destroys the author markup and the A-primary parse
+is pure ceremony — while the cited B reference (`WizardElement`) is property-sourced render-from-data, the
+exact twin of this kernel. The survey's A cohort is **not a valid peer** for a no-shadow render-from-data
+element. Default flipped to B. **Residual the decider owns:** whether FUI's HTML-first house value is
+weighted highly enough to commission the deferred-A markup form *now* anyway (the only real judgment left).
+
+---
+
+## Context
+
+- **Parent:** epic #1442 (block-model conversion). **Sibling ruling:** #1457 (support-both,
+  element-over-behavior; persistent-B = the styled `we-` element hosting the kernel, light-DOM children,
+  CEM surface). This decision is a *consumer refinement* of #1457 for the render-from-data sub-case the
+  trio surfaced.
+- **Blocks:** #1567 (`we-tree-select`) — `blockedBy: 1570`, the genuine consumer of Fork 1. #1568 /
+  #1569 are `blockedBy: 1570` **on a refuted premise** — unblock on ratify.
+- **Graduation:** ratifying Fork 1 (b) yields #1567 as a property-facade build (mirror `WizardElement`).
+  No Technical Configurator card (the data-source is a public element API, not an inherited platform
+  setting). If the deferred-A markup convention is later commissioned, *that* is the card that documents
+  the markup→`TreeNode` mapping.
+- Surfaced 2026-06-22 (batch-2026-06-22-1545-1549) grounding #1567; prepared 2026-06-22 with a web
+  prior-art survey + a skeptic flip.

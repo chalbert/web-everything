@@ -1,0 +1,21 @@
+{
+  "id": "persistent-b-element-data-source",
+  "title": "How a persistent-B custom-element facade sources data for a render-from-data kernel",
+  "status": "open",
+  "summary": "Grounds decision #1570 (under epic #1442, block-model conversion). The wave-3 conversions #1567 (we-tree-select), #1568 (we-type-ahead), #1569 (we-data-grid) were each scoped 'mirror StepperElement, no fork.' Reading the real FUI kernels corrects the premise: only tree-select's TreeSelectBehavior(host, nodes: TreeNode[]) is data-array-driven (it does host.innerHTML='' then renders the tree from the array); type-ahead's TypeAheadBehavior and data-grid's DataGridBehavior both EXTEND CustomAttribute and SCAN the host's authored light-DOM ([role=option] items, a <table role=grid>) — the exact StepperBehavior shape. So #1568/#1569 carry NO data-source fork and the StepperElement mirror holds; the question is tree-select ONLY. Prior-art survey: native HTML (<select>/<optgroup>, <datalist>), Open UI customizable-select, the WAI-ARIA APG Tree View pattern, and web-component trees (Shoelace <sl-tree>, Fluent/FAST <fluent-tree-view>) all source hierarchical data from declarative CHILD MARKUP (mechanism A); framework libs (MUI X RichTreeView 'items', Ant 'treeData', AG Grid 'rowData', React-Aria collections) use a data PROPERTY (mechanism B); a serialized JSON-string attribute (mechanism C) is the primary mechanism in ZERO surveyed libraries (clunky for deep hierarchies). The decisive nuance: the web-component trees keep author markup as the source of truth ONLY because they render into SHADOW DOM (the slot persists, the shadow tree is a projection). FUI's persistent-B family is LIGHT-DOM, no shadow (#1457/#1349) — so TreeSelectBehavior's host.innerHTML='' DESTROYS the author's markup, making an A-primary parse pure ceremony, and the in-repo B reference the #1457 ruling itself names (WizardElement) is property-sourced render-from-data — the exact structural twin. A skeptic pass REFUTED an initial A-primary lean on exactly that point and flipped the default. Recommendation (prepared for #1570): Fork 1 default (b) typed .nodes property (B), mirroring WizardElement, kernel unchanged; (c) JSON attribute rejected; (a) light-DOM markup parse DEMOTED to a deferred additive admissible only once a non-destructive seed/scan path is designed AND a progressive-enhancement consumer exists; plus the non-fork grounding correction: unblock #1568/#1569 and repoint #1567's reference StepperElement->WizardElement. Classification: FUI packaging impl (the navigation/selection contracts are WE's, the element packaging is FUI's, #1321); 7-question layer pass yields a runtime element facade, not a new standard; binding principles native-first vocabulary, most-permissive default, bias-toward-separation, and Config-Extends-Platform-Default (the markup convention, if ever shipped, is the deferred-A card). Full grounding in reports/2026-06-22-1570-persistent-b-data-source.md.",
+  "dateOpened": "2026-06-22",
+  "lastReviewed": "2026-06-22",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "packaging",
+    "custom-elements",
+    "persistent-b",
+    "block-model",
+    "data-source",
+    "tree-select",
+    "decision-prep"
+  ],
+  "relatedBlocks": ["tree-select", "type-ahead", "data-grid"],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}
