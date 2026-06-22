@@ -22,5 +22,5 @@ Landed (locus frontierui):
 - `fui:workbench/package.json` — new quarantine home for `react`/`react-dom`/`vue` (never root, never shipped bundle, #955/#1030); `workbench` added to root `workspaces`; `npm install` brought vue in.
 - `fui:vite.maas.config.mts` — the dev-only SECOND origin (:3002, `server.cors:true`) serving ONLY the `/_maas/` middleware; `maasWrapperServe` removed from the main `fui:vite.config.mts` (:3001 now framework-free); `dev:maas` script added + folded into the `dev` concurrently triad.
 - `fui:tools/maas/produceWrapperBytes.mjs` — switched esbuild `transform` → `build`/`bundle` (self-contained ESM, react/vue resolved out of `workbench/` via `resolveDir`, no host import-map); `PRODUCER_VERSION` 1→2 for the output-shape change.
-- Tests updated for self-containment (no bare `from 'react'`/`from 'vue'`): `fui:tools/maas/__tests__/produceWrapperBytes.test.mjs` + `wrapperServeHandler.test.mjs` — 14/14 green; `check:standards` 0 errors.
+- Tests updated for self-containment (no bare `from 'react'`/`from 'vue'`): `fui:tools/maas/__tests__/produceWrapperBytes.test.mjs` + `fui:tools/maas/__tests__/wrapperServeHandler.test.mjs` — 14/14 green; `check:standards` 0 errors.
 - Cross-origin live-mount verification is #1030's half (blockedBy this).

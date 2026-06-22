@@ -48,6 +48,26 @@ describe('traitManifest / registerTraits', () => {
     expect(() => registry.upgrade(container)).not.toThrow();
   });
 
+  it('skips an invalid bare (un-hyphenated) trait name instead of throwing — bootstrap stays alive (#1503)', async () => {
+    // A generated manifest can carry a scanner false-positive on prose (e.g. the word "anchor"), which
+    // is not a valid custom-attribute name. It must be skipped with a warning, never abort the loop.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const validLoader = vi.fn(() => Promise.resolve(SortableTrait));
+    // Keyed so the invalid `anchor` is encountered before the valid `my-sortable` (mirrors the sorted
+    // manifest where `anchor` would crash first, #1503).
+    const manifest: TraitManifest = { anchor: vi.fn(), 'my-sortable': validLoader };
+
+    expect(() => registerTraits(registry, manifest)).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('"anchor"'));
+
+    // The valid trait that follows the bad one still registers and loads.
+    container.innerHTML = '<div my-sortable></div>';
+    registry.upgrade(container);
+    await tick();
+    expect(validLoader).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it('registers each manifest entry as a lazily-loaded attribute', async () => {
     const sortableLoader = vi.fn(() => Promise.resolve(SortableTrait));
     const manifest: TraitManifest = { 'my-sortable': sortableLoader };

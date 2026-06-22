@@ -115,6 +115,15 @@ export const traitManifest: TraitManifest = {};
  * filter is fixed at upgrade time, and an eager `define` must precede the upgrade
  * it should apply on (same constraint as `defineLazy`).
  *
+ * A manifest name that is not a valid custom-attribute name (no `-` hyphen and no `:` namespace
+ * separator) is **skipped with a warning**, never registered — because `define`/`defineLazy` *throw* on
+ * such a name, and the manifest is a *generated* artifact: a usage-scanner can false-positive a bare word
+ * in prose (e.g. the documentation line `filter + clearable + … + anchor +`) into a manifest key. Letting
+ * one bad key throw would abort the whole loop and **kill the entire bootstrap** before text-node
+ * upgrade, blanking every interpolation/behavior demo (#1503). Gating keeps bootstrap resilient: the bad
+ * trait simply does not register (it could never have been a valid CustomAttribute anyway), and the
+ * warning names it so a genuinely-misnamed trait gets hyphenated at the source.
+ *
  * @param attributes - The registry to register the traits on
  * @param manifest - The trait manifest (defaults to {@link traitManifest})
  */
@@ -123,6 +132,17 @@ export function registerTraits(
   manifest: TraitManifest = traitManifest,
 ): void {
   for (const [name, entry] of Object.entries(manifest)) {
+    // Gate: a CustomAttribute name MUST contain a hyphen or a ':' namespace separator. A generated
+    // manifest can carry an invalid bare name (scanner false-positive on prose, #1503); skip it with a
+    // warning rather than let `define`/`defineLazy` throw and abort the whole bootstrap.
+    if (!name.includes('-') && !name.includes(':')) {
+      console.warn(
+        `[Web Everything] Skipping invalid trait name "${name}" from the trait manifest — a custom ` +
+          `attribute name must contain a hyphen or a ':' namespace separator. Likely a usage-scanner ` +
+          `false-positive on prose; hyphenate the trait at its source if it is a real trait (#1503).`,
+      );
+      continue;
+    }
     if (typeof entry === 'function') {
       // delivery: lazy (default, shorthand) — code-split, loaded on first appearance.
       attributes.defineLazy(name, entry);
