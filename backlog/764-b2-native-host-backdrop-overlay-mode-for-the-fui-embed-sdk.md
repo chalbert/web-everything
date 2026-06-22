@@ -2,9 +2,12 @@
 kind: story
 size: 2
 parent: "728"
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: embed/contract.ts host-backdrop (B2) mode
 tags: []
 ---
 
