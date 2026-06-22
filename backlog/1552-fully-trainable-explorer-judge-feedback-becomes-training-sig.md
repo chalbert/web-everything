@@ -1,6 +1,5 @@
 ---
 kind: epic
-size: 13
 locus: frontierui
 status: open
 dateOpened: "2026-06-22"
