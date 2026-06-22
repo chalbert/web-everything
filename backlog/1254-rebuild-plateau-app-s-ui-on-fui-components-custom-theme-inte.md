@@ -1,8 +1,10 @@
 ---
 kind: epic
-status: open
+status: resolved
 locus: plateau-app
 dateOpened: "2026-06-20"
+dateResolved: "2026-06-22"
+graduatedTo: none
 relatedReport: reports/2026-06-20-1254-split-analysis.md
 tags: [dogfood, fui, plateau-app, theme, intents, site-rework, epic]
 ---
