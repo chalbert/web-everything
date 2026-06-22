@@ -1,0 +1,23 @@
+{
+  "id": "data-table-conformance-after-backend-delete",
+  "title": "Renderer-conformance mechanism after a backend delete — what a standard asserts when the implementation leaves",
+  "status": "open",
+  "summary": "Grounds decision #1566 (unblocks #1355 data-table delete + #1531 pagination). #1467 ratified that when a runnable renderer moves WE→FUI the standard keeps the verifier + vector corpus + types and 'asserts the stored golden output as data — no live render'; grounding the delete found the mechanism unrealized and the current code hides two tautologies. Concrete state: WE's auditDataTable(root, golden) (we:blocks/renderers/data-table/renderDataTable.ts:425) is a golden-reader; FUI's diverged copy auditDataTable(root, rows, config) (fui:blocks/renderers/data-table/renderDataTable.ts:390) RE-DERIVES expected output by re-running applyPipeline; the two repos have no package edge so 'FUI consumes WE's verifier' is a synced verbatim copy (cases already are). Prior art is decisive. Internal: the ratified MaaS conformance runner (we:blocks/renderers/module-service/conformance/runner.ts, #463/#506) is a target-agnostic runner where a target is (vector)=>response and the reference impl is ONE pluggable target — the shape the data-table verifier should converge to. External, four anchors: W3C web-platform-tests ships an implementation-agnostic suite written against the spec with each engine a pluggable subject; the test-oracle literature (Barr et al., IEEE TSE 2015) says a consistency/derived oracle that re-runs the system's own logic is a WEAK oracle a shared bug passes — so FUI's applyPipeline recompute is invalid AS conformance; Michael Feathers warns a snapshot regenerated from the thing under test is a tautological assertion — so a golden captured from the renderer and auto-re-checked against it (the drift guard) pins nothing, the golden is authoritative only frozen + human-reviewed; mutation testing ('who tests the tests') says an assertion is only meaningful when it kills an input it must reject — so the verifier needs a negative fixture. A hostile skeptic pass (run in prep, verified against the tree) reshaped the original A/B/C/D forks: the goldenToRoot→audit positive loop is tautological by construction (rows in == rows out; grouping admittedly faked, data-table-goldens.ts:143-145); retiring FUI's recompute loses no conformance signal once goldens are frozen+reviewed and audited on REAL rendered roots (golden-reader is then the stronger oracle); the same-renderer drift guard fires only during review that's already happening. Four forks at DoR: (1) WE's post-delete suite asserts verifier-discrimination (negative fixture) + corpus-completeness, dropping the tautological positive loop; (2) the golden-reader is the canonical conformance verifier run in FUI on real roots, FUI's recompute demoted to an optional internal unit test (support both, different questions); (3) drop the auto-regen drift guard — the frozen-golden vs real-render audit is the loud signal; (4) keep the minimal verifier+corpus now, converge on the module-service target-agnostic runner when a second target appears. #1467 is NOT reopened — WPT affirms the impl-agnostic suite. Classification: conformance-suite architecture (not a new protocol/intent); the verifier is the #1467/#817 exception to runtime→FUI (it reads output as DATA); binding principles are bias-toward-separation (decouple verifier from impl), most-permissive default (a golden-reader admits any third-party renderer; the recompute only admits renderers sharing applyPipeline), and reproducibility (frozen human-reviewed goldens, not auto-captured). Full grounding in reports/2026-06-22-data-table-conformance-after-backend-delete.md.",
+  "dateOpened": "2026-06-22",
+  "lastReviewed": "2026-06-22",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "conformance",
+    "renderers",
+    "data-table",
+    "pagination",
+    "verifier",
+    "golden-testing",
+    "test-oracle",
+    "1467",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webeverything"
+}

@@ -1,0 +1,93 @@
+<h3>The Question</h3>
+<p>
+    <a href="/backlog/1467-/">#1467</a> ratified that when a runnable renderer moves WE&nbsp;→&nbsp;FUI, the
+    standard keeps the <strong>verifier&nbsp;+ vector corpus&nbsp;+ types</strong> and its suite
+    "asserts the stored golden output as data &mdash; no live render." Grounding the data-table delete
+    (<a href="/backlog/1355-/">#1355</a>, which also blocks pagination <a href="/backlog/1531-/">#1531</a>)
+    found the mechanism unspecified and the shipped code hiding two tautologies. So the real question is
+    sharper than "where does the verifier live": <em>once the implementation leaves, what can the standard's
+    own test suite honestly assert, and is a verifier that re-derives expected output by re-running the
+    implementation's pipeline a valid conformance oracle?</em>
+</p>
+
+<h3>Recommendation (prepared for #1566)</h3>
+<ol>
+    <li><strong>WE's post-delete suite:</strong> assert <strong>verifier-discrimination</strong> (a negative
+        fixture the verifier must reject) + <strong>corpus-completeness</strong>, and <strong>drop the
+        tautological positive loop</strong> (<code>goldenToRoot</code>&nbsp;→&nbsp;<code>auditDataTable(root,
+        golden)</code> builds a root <em>from</em> the golden then asserts it matches the golden).</li>
+    <li><strong>The conformance run:</strong> the golden-reader <code>auditDataTable(root, golden)</code> is the
+        canonical verifier, realized in <strong>FUI on a REAL rendered root</strong> against a synced copy of
+        WE's frozen goldens. FUI's diverged <code>auditDataTable(root, rows, config)</code> recompute is
+        <strong>demoted to an optional internal unit test</strong> &mdash; not retired, not the conformance gate
+        (the two answer different questions).</li>
+    <li><strong>Drift guard:</strong> <strong>drop</strong> the auto-regenerating
+        <code>toEqual(buildGoldens())</code> guard; the frozen-golden vs real-render audit in FUI is the loud
+        drift signal, and <code>captureGolden</code> stays a manual, reviewed regeneration tool.</li>
+    <li><strong>Shape:</strong> keep the minimal verifier&nbsp;+ corpus now; converge on the module-service
+        <strong>target-agnostic runner</strong> (renderer = a pluggable <code>(case)&nbsp;=&gt;&nbsp;root</code>
+        target) only when a <em>second</em> target appears. <a href="/backlog/1467-/">#1467</a> is
+        <strong>not</strong> reopened.</li>
+</ol>
+
+<h3>Finding 1 &mdash; a conformance suite is implementation-agnostic; the impl is a pluggable subject</h3>
+<p>
+    <strong>W3C web-platform-tests</strong> ships a single suite written against the <em>spec</em>
+    (<code>testharness.js</code> + reftests); each engine &mdash; Chromium, Gecko, WebKit &mdash; is run against
+    the same assertions through WebDriver, and the suite carries no engine of its own. The in-repo precedent is
+    the same shape, already ratified (<a href="/backlog/463-/">#463</a>/<a href="/backlog/506-/">#506</a>): the
+    MaaS conformance runner (<code>we:blocks/renderers/module-service/conformance/runner.ts</code>) drives any
+    target &mdash; <code>(vector)&nbsp;=&gt;&nbsp;response</code> &mdash; against frozen golden vectors, with the
+    JS reference implementation as <em>one</em> pluggable target and generated .NET/Java/Go origins as others.
+    "The fidelity check lives HERE, once, for every language" &mdash; the protobuf/gRPC lesson of 0 vs 1,847
+    failures depending on whether a shared suite gates it. This affirms <a href="/backlog/1467-/">#1467</a>:
+    the verifier + corpus stay in WE; the moved-out renderer becomes one external subject.
+</p>
+
+<h3>Finding 2 &mdash; a re-derived oracle is a weak oracle (the recompute is invalid AS conformance)</h3>
+<p>
+    The <strong>test-oracle</strong> literature (Barr et&nbsp;al., <em>The Oracle Problem in Software Testing</em>,
+    IEEE&nbsp;TSE&nbsp;2015) distinguishes a <em>specified/golden</em> oracle (the independently-correct answer)
+    from a <em>consistency/derived</em> oracle that compares output to the system's own re-run result &mdash; the
+    latter "only checks self-agreement," so a bug shared by both sides passes. FUI's
+    <code>auditDataTable(root, rows, config)</code> calls <code>applyPipeline(rows, config)</code> and asserts the
+    DOM reflects it &mdash; but <code>renderDataTable</code> built that DOM by calling the <em>same</em>
+    <code>applyPipeline</code>. It therefore green-lights a renderer that is wrong in the same way the pipeline is.
+    It is a fine renderer-internal-consistency unit test; it is not a conformance oracle.
+</p>
+
+<h3>Finding 3 &mdash; a golden is authoritative only frozen + human-reviewed, never auto-captured</h3>
+<p>
+    <strong>Michael Feathers</strong> (characterization testing) warns that "it happens with surprising
+    regularity that you inadvertently write a tautological assertion" &mdash; a snapshot regenerated from the
+    thing under test asserts nothing. Two tautologies hide in the current data-table suite: the positive loop
+    reconstructs a root <em>from</em> the golden (<code>goldenToRoot</code>) then audits it <em>against</em> the
+    same golden (rows in == rows out; the grouping is admittedly faked,
+    <code>we:blocks/renderers/data-table/__fixtures__/data-table-goldens.ts:143-145</code>); and the drift guard
+    <code>expect(dataTableGoldens).toEqual(buildGoldens())</code> re-captures from the same renderer the goldens
+    came from. The golden earns its authority from the <strong>human diff-review at capture time</strong> (the
+    WPT reftest model: expected files are updated deliberately), not from an automated round-trip.
+</p>
+
+<h3>Finding 4 &mdash; the verifier must be tested with an input it has to reject</h3>
+<p>
+    <strong>Mutation testing</strong> ("who tests your tests?") exists because a test that executes code without
+    an assertion that can fail will "pass" against deliberately broken code &mdash; an assertion is only proven
+    meaningful when it <em>kills</em> a mutant. After the delete, the one honest thing WE's own suite can assert
+    about the verifier is that it <strong>rejects a corrupted root</strong> (a negative fixture) alongside
+    accepting a conformant one. Without it, a verifier that silently passes everything looks identical to a
+    correct one.
+</p>
+
+<h3>Classification</h3>
+<p>
+    This is a <strong>conformance-suite architecture</strong> concern, not a new protocol or intent and not an
+    author-facing config dimension. The verifier is the <a href="/backlog/1467-/">#1467</a>/<a href="/backlog/817-/">#817</a>
+    exception to "runtime&nbsp;→&nbsp;FUI" precisely because it reads output as <em>data</em>. The binding
+    principles are <strong>bias-toward-separation</strong> (decouple the verifier from the impl; the divergence
+    is an accidental coupling to undo), <strong>most-permissive default</strong> (a golden-reader admits any
+    third-party renderer, whereas the recompute only admits renderers that share <code>applyPipeline</code>), and
+    <strong>reproducibility</strong> (frozen, human-reviewed goldens over auto-captured ones). The seven-question
+    layer pass resolves cleanly: standard layer keeps verifier&nbsp;+ vectors&nbsp;+ types; impl layer (FUI) owns
+    the renderer and runs the conformance audit on its real output.
+</p>
