@@ -3,10 +3,22 @@ kind: story
 size: 5
 parent: "081"
 status: open
+blockedBy: ["1619"]
 locus: frontierui
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-22"
 tags: []
 ---
+
+> **Blocked on a design fork (2026-06-22, batch-2026-06-22-764-1602 pre-flight/work).** Surfaced as
+> mis-flagged Tier-A: reads as "register a FORMS entry" but landing it forces three unprepared design
+> calls — (1) the FUI MaaS catalog **ratified-retired `functional`** (#974/#977 resolved), so the
+> authoring form's catalog identity is undecided; (2) the #700 boundary means FUI MaaS never imports
+> WE's `serve()`, yet WE already emits the functional source — so FUI re-emit vs consume-WE-data-emit
+> (#954 axis) is undecided; (3) the plan is a brain-dump, not a buildable contract. Filed
+> **[#1619](/backlog/1619-decide-the-fui-functional-component-adapter-shape-catalog-id/)**
+> (`blockedBy: 1619`). #313 stays blocked behind this. The `@frontierui/jsx-runtime` runtime already
+> exists; this is the adapter/emit layer around it.
 
 # Land the FUI functional-component adapter
 
