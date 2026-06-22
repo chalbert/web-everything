@@ -1,8 +1,11 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: "memory:project_we_zero_standard_implementation.md (cluster consolidated); we:docs/agent/platform-decisions.md"
 tags: []
 ---
 
