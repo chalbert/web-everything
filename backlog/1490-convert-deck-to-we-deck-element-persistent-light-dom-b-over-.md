@@ -18,7 +18,7 @@ Per #1457 (element-over-behavior, can-do/is-a): give deck its styled is-a form. 
 
 ## Progress
 
-Landed (locus frontierui; deck has no WE block.json — it realizes protocols — so this is FUI-only; locus field was missing, added):
+Landed (locus frontierui; deck has no WE block-contract JSON — it realizes protocols — so this is FUI-only; locus field was missing, added):
 - `fui:blocks/deck/DeckElement.ts` — new persistent light-DOM `<we-deck>` element (B-family, mirrors `fui:blocks/stepper/StepperElement.ts`). Hosts the existing `DeckBehavior` kernel on connect, carries FUI light-DOM styling under the `we-deck` scope class (no shadow; #1349 S1), and **re-adds the CEM attribute surface the kernel omitted** (`boundary` stop/loop/rewind, `slide`) + typed `next`/`prev`/`goTo` — that surface is a feature on the element (the #463/#855 generation target), its upkeep a maintenance cost not a downside. `[data-slide]`s stay light-DOM children. Idempotent overridable-tag `registerDeck(tag='we-deck')` (#841).
 - `fui:blocks/deck/DeckBehavior.ts` — dropped the empty placeholder register fn (now the real one in the element file); kernel stays the headless can-do capability (#1457).
 - `fui:blocks/deck/index.ts` — re-export `DeckElement`/`registerDeck`/`WE_DECK_CSS` from the element file (was re-exporting the empty `registerDeck` from the behavior).

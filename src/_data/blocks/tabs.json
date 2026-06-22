@@ -38,6 +38,8 @@
   "summary": "Accessible tab interface component built on View (ViewBehavior for panel switching), providing tab triggers, panels, and ARIA semantics.",
   "exports": [
     "TabGroupBehavior",
+    "TabsElement",
+    "registerTabs",
     "TabActivationMode",
     "TabOrientation",
     "TabChangeEventDetail"
