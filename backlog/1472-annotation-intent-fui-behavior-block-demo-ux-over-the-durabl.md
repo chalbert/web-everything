@@ -1,16 +1,15 @@
 ---
-kind: story
-size: 13
+kind: epic
 status: open
-blockedBy: ["1471"]
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-22"
+relatedReport: reports/2026-06-22-backlog-split-analysis.md
 tags: []
 ---
 
 # annotation intent + FUI behavior block + demo — UX over the durable-range-anchor contract
 
-Realizing build ratified by #1408 (Fork 2 split, UX half). Author the annotation intent JSON (UX-only): select content then attach a motivation payload (highlighting|commenting|tagging|suggestion) with an overlay disposition; COMPOSES the #1471 durable-range-anchor contract + selection / rich-text (in-model mark when editable) / anchor+popover / highlight-api. Owns no anchor machinery. Plus the FUI behavior block realization and a demo (highlight + comment over read-only HTML). Blocked by #1471 (can't import the anchor we:contract.ts until it lands). File via /new-standard. Orphaned-annotation is a first-class outcome; comment-thread product UI stays app-level.
+Umbrella for realizing the annotation intent (UX over the resolved #1471 durable-range-anchor contract); sliced into the WE intent JSON (#A), the FUI behavior block (#B), and the highlight-and-comment demo (#C) — see [the split analysis](reports/2026-06-22-backlog-split-analysis.md), Run 7. Realizing build ratified by #1408 (Fork 2 split, UX half): select content then attach a motivation payload (highlighting|commenting|tagging|suggestion) with an overlay disposition; composes #1471 + selection / rich-text (in-model mark when editable) / anchor+popover / highlight-api. Owns no anchor machinery. Orphaned-annotation is a first-class outcome; comment-thread product UI stays app-level.
 
 ## Pre-flight (batch-2026-06-22-1510-1483) — full greenfield /new-standard build → re-size 8 → 13, route to /new-standard
 
