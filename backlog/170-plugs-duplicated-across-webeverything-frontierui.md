@@ -1,8 +1,10 @@
 ---
 kind: epic
 parent: "1255"
-status: open
+status: resolved
 dateOpened: "2026-06-07"
+dateResolved: "2026-06-22"
+graduatedTo: none
 tags: [plugs, duplication, drift, single-source, frontierui, maintenance, runtime]
 relatedProject: webplugs
 ---
