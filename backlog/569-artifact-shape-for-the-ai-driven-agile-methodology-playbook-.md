@@ -1,10 +1,14 @@
 ---
 kind: decision
 size: 2
-status: open
+status: resolved
 preparedDate: "2026-06-22"
 parent: "563"
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+codifiedIn: one-off
+graduatedTo: none
 tags: [methodology, agile, ai, ways-of-working, enablement, positioning, decision, deferred, pre-release]
 crossRef: { url: /backlog/143-ai-approach-page/, label: "Public approach page (#143)" }
 ---
@@ -88,8 +92,18 @@ ratify near release with real examples — but the prepared default is now thesi
 - Re-run `/slice 563` against the chosen canonical artifact (B + companion surfaces) — the slices become
   nameable and `file:line`-citable only once the source is fixed.
 
-## Held open — when this is ratified
+## Ratified — 2026-06-22
 
-Held open (decision lane): per the #143 caution, *ratify* near release once the practice has settled, with
-real examples — don't freeze a maturing model. The fork is at DoR now (prepared, source ruled); the call is
-a fast ratify when #563 is ready to decompose.
+**Outcome:** the prepared default is ratified. The **living repo is the source of truth**; the canonical
+*authored* artifact is **(B) the extracted starter-kit** (`.claude/skills/` + backlog CLIs + `docs/agent/`
+cloned like a `create-react-app`); **(A) prose** is its narrative companion (feeds #143); **(C) talk/article**
+and **(D) enablement guide** are further downstream surfaces. (A)-as-source is rejected on the merits.
+
+**Scope of this ratification — canonicity, not content-freeze.** This fixes *which artifact shape is the
+source*; it does **not** freeze the methodology. The #143 "don't freeze a maturing model" caution still
+governs the kit's **contents** — *what* skills/docs ship in (B) is fixed near release with real examples, and
+remains open under #563. Ratifying the source shape now is what unblocks slicing, and content-freeze and
+shape-canonicity are distinct questions.
+
+**Unblocks:** `/slice 563` can now run against the fixed source (B + companion surfaces) — the slices become
+nameable and `file:line`-citable.
