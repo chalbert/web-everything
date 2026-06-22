@@ -11,6 +11,8 @@ tags: [dogfood, fui, plateau-app, theme, intents, site-rework, epic]
 
 Migrate plateau-app's product UI off hand-rolled vanilla TypeScript onto FUI components driven by WE intents, so the only thing distinguishing plateau-app's look is a custom theme. This is the build that lands the [#1253](/backlog/1253-plateau-app-dogfooding-mandate-its-product-ui-is-fui-compone/) dogfooding mandate ([first-party-dogfood](../docs/agent/platform-decisions.md#first-party-dogfood)). A 2026-06-20 audit found plateau-app is ~95% hand-rolled (~5k lines of `document.createElement` / `innerHTML` over a proprietary theme) with FUI present only as the plugs bootstrap + two SSR components in `we:`-adjacent `plateau:src/web-docs/`. The end-state: every surface renders from FUI; the residue that *can't* be built from `theme + intents` is filed as a gap, never hand-rolled around.
 
+> **a11y baseline (2026-06-22).** An explorer audit of all 30 routes ([we:reports/2026-06-22-plateau-app-explorer-a11y-audit.md](../reports/2026-06-22-plateau-app-explorer-a11y-audit.md)) found 147 `color-contrast` failures across 24 routes — a handful of shared hand-rolled token values reused app-wide. This migration is expected to absorb most of them via FUI's accessible defaults; the post-migration re-audit + residual fix is tracked as **#1527** (blocked on the #1506–#1509 slices). Do NOT hand-fix contrast before the migration.
+
 ## Starting reality (the migration target list)
 
 The audit pinned the hand-rolled surfaces to replace, each with the FUI component(s) it needs:
