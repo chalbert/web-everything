@@ -29,6 +29,7 @@
     "./master-detail": "./master-detail.ts",
     "./selection": "./selection.ts",
     "./stepper": "./stepper.ts",
+    "./trainable-judge": "./trainable-judge.ts",
     "./tree-select": "./tree-select.ts",
     "./webdocs": "./webdocs.ts",
     "./reproduction-parity": "./reproduction-parity.ts"
