@@ -307,15 +307,30 @@ function citesResolvedDecision(it) {
 // exists — the orientation should propagate, not the case number. Returns the distinct {ref, anchor}
 // pairs to nudge. A genuine lineage cite ("supersedes #N") is a tolerated false positive — this is a
 // CANDIDATE pool (like G3/G6), a card to re-point-or-keep, never a hard gate.
+// #1571 — ordinal/list-index false positives the G7 cite-the-rule heuristic must NOT flag: a `#N` that is
+// really an intra-card ordinal ("Fix #2", "feature #6"), a `/`-joined enumeration ("#9/#10", "#12/#13/#15"),
+// or a leading-zero legacy/lineage cite ("from #011" — `norm` collides it onto a small decision). Citing the
+// *case* is correct for these; only a standalone reference to the decision itself is a cite-the-rule nudge.
+// Irreducible lineage cites that don't match these shapes are left documented (a tolerated residue).
+const G7_ORDINAL_WORD = /\b(?:acceptance|fix(?:e[sd])?|step|phase|gap|criteri(?:on|a)|feature|idea|fork|option|q|dc)\.?\s*$/i;
+function isOrdinalOrListRef(body, m) {
+  if (/^0/.test(m[1])) return true;                                   // leading-zero legacy/lineage cite (#011)
+  const before = body.slice(Math.max(0, m.index - 24), m.index);
+  const after = body.slice(m.index + m[0].length, m.index + m[0].length + 2);
+  if (G7_ORDINAL_WORD.test(before)) return true;                      // "Fix #2", "feature #6"
+  if (/\/\s*$/.test(before) || /^\s*\//.test(after)) return true;     // part of a #N/#M list run
+  return false;
+}
 function citesCodifiedCase(it) {
   const out = new Map();
-  for (const [, p] of it.body.matchAll(ANY_REF)) {
-    const id = norm(p);
+  for (const m of it.body.matchAll(ANY_REF)) {
+    const id = norm(m[1]);
     if (id === it.id) continue;
     const d = items.get(id);
     const anchor = d && d.type === 'decision' && d.status === 'resolved' ? d.fm.codifiedIn : undefined;
     if (!anchor || anchor === 'one-off') continue;
     if (it.body.includes(anchor)) continue; // already cites the statute alongside the case — fine
+    if (isOrdinalOrListRef(it.body, m)) continue; // #1571 ordinal/list/lineage — not a cite-the-rule nudge
     out.set(id, { ref: id, anchor });
   }
   return [...out.values()];

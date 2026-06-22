@@ -92,7 +92,8 @@
         "1556-maas-wrapper-serve-origin-emits-no-cors-headers-cross-origin",
         "1557-wire-the-canonical-build-kind-entity-graduation-predicates-i",
         "1559-plateau-app-contrast-residual-403-color-contrast-nodes-survi",
-        "1558-g3-subject-dedup-collapse-same-entity-parent-child-graduatio"
+        "1558-g3-subject-dedup-collapse-same-entity-parent-child-graduatio",
+        "1571-tighten-g7-audit-heuristic-to-suppress-ordinal-lineage-false"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",
