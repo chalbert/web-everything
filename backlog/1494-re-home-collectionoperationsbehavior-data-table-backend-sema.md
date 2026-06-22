@@ -1,6 +1,6 @@
 ---
 kind: story
-size: 8
+size: 13
 parent: "1353"
 status: open
 blockedBy: []
@@ -72,3 +72,17 @@ demo (the "reckless" anti-pattern) or an un-green tree. **#1494 and #1355 are mu
 co-land in one focused session** (move backend + swap demo to iframe together); the `#1355 blockedBy #1494`
 edge understates a true co-dependency. Carry-forward reason: **blocked-in-fact** (clean green end-state
 depends on #1355's demo swap). Released to `open`; recommend folding #1355 into the same focused session.
+
+## Pre-flight (batch-2026-06-22-1510-1483) — re-sized 8 → 13 (must-co-land unit, not a solo batchable slice)
+
+Third independent pre-flight reaches the same conclusion: this is **not batchable as one**. The acceptance
+("`check:standards` green in both repos") provably cannot hold for #1494 alone — deleting the WE backend
+strands `we:demos/data-table-demo.ts`, and the ratified #701 boundary forbids repointing it to FUI block
+code, so green is only restored by #1355's #701 FUI-iframe swap. #1494 is therefore the **head of a
+must-co-land unit (#1494 → #1355)** whose combined scope — `auditDataTable` verifier redesign into a
+golden-reader + generate/commit per-case goldens (#899 vector model) + delete the WE backend + re-home the
+coordinator to FUI + (#1355) build the FUI-hosted demo + swap `we:demos/data-table-demo.ts` to a #701
+iframe + delete it + live-iframe verification — is a focused cross-repo session well past an 8-pt slice.
+A mutual `blockedBy` would deadlock (#1355 is already `blockedBy #1494`), so the honest encoding is
+**size 13** (drops it from the batch pool; #1355 stays blocked behind it). Not a gut "looks big" — solo
+close is provably un-green. No new design fork (the #899 model + #1467 placement are ruled). Left `open`.
