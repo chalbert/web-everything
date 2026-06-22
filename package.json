@@ -4,6 +4,7 @@
   "description": "Web Everything - Grouping standards for better web library standardization",
   "customElements": "custom-elements.json",
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "dev": "concurrently --restart-tries -1 --restart-after 1500 --names DOCS,DEMO --prefix-colors blue,magenta \"npx @11ty/eleventy --serve --port=8080 --quiet\" \"vite --port 3000\"",
     "dev:docs": "eleventy --serve --port=8080 --quiet",
     "dev:vite": "vite --port 3000",

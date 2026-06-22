@@ -32,6 +32,7 @@ import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize } from './readiness/reservations.mjs';
 import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, porcelainFiles } from './readiness/claimScope.mjs';
 import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
+import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
@@ -58,6 +59,21 @@ function ok(payload, human) {
   if (JSON_MODE) console.log(JSON.stringify({ ok: true, ...payload }));
   else console.log(human);
   process.exit(0);
+}
+
+// #1574 gap (1) — the CLI write path is the dominant locus-prefix leak: `scaffold`/`resolve`/`settle` write
+// digest + body + `## Progress` prose straight to `fs`, never through the `Edit`/`Write` tools, so the
+// load-bearing PreToolUse `--pre` hook never sees that content (#1364/#1454/#1455 all landed this way). Run
+// the SAME pure detector the gate + `--pre` hook use on the content about to hit disk, and refuse with the
+// same message — shift-left at the source (#883 "enforce at write-time"). Exempt cases (fenced code, md
+// links, `@scope/pkg`, globs) are handled inside `scanRepoLocusPrefixes`, so only a genuine bare ref blocks.
+function writeBacklogMd(abs, rel, content) {
+  const findings = scanRepoLocusPrefixes([{ file: rel, content }]);
+  if (findings.length) {
+    const { count, sample } = findings[0];
+    die(`locus-prefix: ${count} bare code-path ref(s) in ${rel} lack a <repo>: prefix (#883; e.g. "${sample}" → "we:${sample}"). Prefix them now — don't leave it for the gate.`);
+  }
+  writeFileSync(abs, content);
 }
 
 /**
@@ -132,7 +148,7 @@ function transition(v) {
   }
   const res = applyTransition(before, v, { today: today(), graduatedTo: flag('graduated-to'), codifiedTo: flag('codified-to'), as });
   if (res.error) die(`#${file.match(/^\d+/)[0]} — ${res.error}`);
-  writeFileSync(abs, res.content);
+  writeBacklogMd(abs, rel, res.content);
   const id = file.replace(/\.md$/, '');
   const slug = id; // the rename slug is the full id (NNN-slug)
   if (v === 'claim') {
@@ -269,7 +285,7 @@ function scaffold() {
   // hand / non-batch callers) it stays born-open, the long-standing default.
   const session = flag('session');
   const content = renderItem({ kind, size, slug, title, today: today(), blockedBy, parent, digest: flag('digest'), scaffoldedBy: session });
-  writeFileSync(finalAbs, content);
+  writeBacklogMd(finalAbs, `backlog/${finalName}`, content);
   const id = finalName.replace(/\.md$/, '');
   const filled = !!flag('digest');
   const nextStep = session
@@ -300,7 +316,7 @@ function settle() {
   src = src.replace(/^status: active$/m, 'status: open')
            .replace(/^scaffoldedBy: .*\n/m, '')
            .replace(/^dateScaffolded: .*\n/m, '');
-  writeFileSync(abs, src);
+  writeBacklogMd(abs, `backlog/${file}`, src);
   const rel = `backlog/${file}`;
   ok({ verb: 'settle', id: file.replace(/\.md$/, ''), file: rel, status: 'open' },
     `${GRN}✓ settled${RST} ${file.replace(/\.md$/, '')} ${DIM}→ open (published; ownership stamps cleared)${RST}`);

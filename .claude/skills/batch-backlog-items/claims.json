@@ -95,7 +95,8 @@
         "1558-g3-subject-dedup-collapse-same-entity-parent-child-graduatio",
         "1571-tighten-g7-audit-heuristic-to-suppress-ordinal-lineage-false",
         "1572-re-enabled-e2e-lane-post-1047-triage-2-now-failing-specs-to-",
-        "1573-fui-text-node-registry-skip-needless-replacewith-for-static-"
+        "1573-fui-text-node-registry-skip-needless-replacewith-for-static-",
+        "1574-close-the-two-locus-prefix-enforcement-gaps-cli-write-path-p"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",

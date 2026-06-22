@@ -1,8 +1,11 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: none
 locus: webeverything
 tags: [locus-prefix, enforcement, tooling, backlog, pre-commit]
 ---
@@ -38,3 +41,23 @@ clearer feedback at the actual source. They are complementary, not alternatives.
 declared `locus:` when unambiguous (the ~90% case — an item describes files in its own repo), falling back to
 deny only when the token hints another repo or `locus` is absent. Removes the burden entirely for the common
 case; conservative so a cross-repo citation (a `frontierui` item naming a `we:` file) isn't mis-prefixed.
+
+## Progress (resolved 2026-06-22, batch-2026-06-22-1556-1557-1559)
+
+Both gaps closed (the stretch auto-prefix deliberately NOT done — it's a separate, riskier enhancement; deny
+with a clear message is the safe floor).
+
+- **Gap (1) — CLI write path.** Added `writeBacklogMd(abs, rel, content)` in `we:scripts/backlog.mjs` (next
+  to `die`/`ok`): it runs the shared `scanRepoLocusPrefixes` detector on the content about to hit disk and
+  `die`s with the same message the `--pre` hook uses if a bare ref is present. Routed all three CLI md writes
+  through it — `scaffold` (digest + body template), the `applyTransition` write (`claim`/`resolve`/… — the
+  body-content backstop), and `settle`. Verified: a `scaffold --digest=` carrying a bare code-path ref is
+  refused and **no file is created**.
+- **Gap (2) — pre-commit backstop.** Added a tracked `we:.githooks/pre-commit` running `npm run lint:locus`
+  (the existing `--staged` sweep; exit 2 blocks the commit), wired via a `prepare` npm script that sets
+  `git config core.hooksPath .githooks` on install (and set it live this session). Verified: a staged
+  backlog md with a bare ref makes the hook exit 2.
+
+Both reuse the ONE pure detector (`scanRepoLocusPrefixes`) the gate and `--pre` hook already share, so the
+message + exemptions (fenced code, md links, `@scope/pkg`, globs) stay identical across all enforcement
+points. `check:standards` green.

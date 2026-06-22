@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# #1574 gap (2) — locus-prefix pre-commit backstop. The #883 stack guards the Edit/Write tools (the
+# PreToolUse `--pre` hook) and the backlog.mjs CLI write path (#1574 gap 1), but a `cat >>` / heredoc
+# body-append still reaches disk unguarded. This hook runs the SAME staged sweep on every commit, so a
+# bare code-path ref in a staged backlog/*.md or reports/*.md is caught here — regardless of HOW it landed —
+# rather than at check:standards close-out. `lint:locus` (= lint-locus-prefix.mjs --staged) exits 2 on a
+# finding, which blocks the commit. Wired via `core.hooksPath .githooks` (set by the `prepare` npm script).
+npm run --silent lint:locus
