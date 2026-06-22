@@ -659,6 +659,68 @@ Concrete binding: `fui:blocks/deck/deckConformance.ts` (one target). All slice p
 
 ---
 
+## Run 12 — `/slice` 2nd-level on #866's blocked children (#1599 / #1600 / #1601)
+
+Immediately after Run 11, sliced the three `blockedBy #1598` children **by include-family**, grounded on
+the real per-family distribution (`grep` over `src/**/*.njk`, 2026-06-22). All leaf children carry
+`blockedBy #1598` (pattern-precedence — the badge slice proves the inline `<surface>`→FUI mode-C mount
+transform once; the families are otherwise disjoint markup and run in parallel).
+
+### Per-family distribution (files containing the surface)
+
+| family | tables (#1600) | code (#1599) |
+|---|---|---|
+| `_includes/block-descriptions/` | 56 | 34 |
+| `_includes/research-descriptions/` | 98 | 18 |
+| `_includes/project-*` | 33 | 13 |
+| `_includes/plug-descriptions/` | 22 | 3 |
+| `_includes/adapter-descriptions/` | 2 | 0 |
+| other `_includes/` + top-level `src/*.njk` | 8 | 3 |
+
+### #1599 code → epic, 3 family-slices (all ≤3) — **fully reduced**
+
+| Slice | family | size | blockedBy |
+|---|---|---|---|
+| **#1604** | `block-descriptions/` (~34) | 3 | 1598 |
+| **#1605** | `research-descriptions/` (~18) | 2 | 1598 |
+| **#1606** | `project-*` + `plug-descriptions/` + misc + top-level (~19) | 2 | 1598 |
+
+### #1601 cards → epic, 2 page-group slices (all ≤3) — **fully reduced**
+
+| Slice | group | size | blockedBy |
+|---|---|---|---|
+| **#1607** | core catalog pages (`intents`/`blocks`/`design-systems` + peers) | 3 | 1598 |
+| **#1608** | `project-*` include tiles | 3 | 1598 |
+
+### #1600 tables → epic, 5 family-slices — **partially reduced** (3 ready + 2 isolated)
+
+| Slice | family | size | status |
+|---|---|---|---|
+| **#1609** | `project-*` (~33) | 3 | *ready* |
+| **#1610** | `plug-descriptions/` (~22) | 3 | *ready* |
+| **#1611** | `adapter-descriptions/` + top-level (~10) | 2 | *ready* |
+| **#1612** | `block-descriptions/` (~56) | 5 | 3rd-level `/slice` candidate |
+| **#1613** | `research-descriptions/` (~98) | 8 | 3rd-level `/slice` target (by topic-cluster) |
+
+**Why #1612/#1613 are isolated, not count-chunked:** those two families are *heterogeneous* (per-block
+table shapes; bespoke prior-art/comparison matrices per research doc), so each file's data-table mount
+config differs — they're not one homogeneous transform. Shredding 56/98 files into arbitrary ~25-file
+count-cards would manufacture slices with no distinct home or demoable state (the Run-1 #1502 "needless
+fragmentation" finding). The honest floor is the family boundary; the further cut waits until the simpler
+families (#1609/#1610) prove the per-family config, then #1613 slices by topic-cluster.
+
+### Run 12 net (landed 2026-06-22)
+
+- **#1599, #1600, #1601** — `story` → storied **epic** (size dropped; umbrella digests; `relatedReport`).
+- Scaffolded **#1604–#1606** (code, 3 ≤3) + **#1607/#1608** (cards, 2 ≤3) + **#1609–#1613** (tables, 3 ≤3
+  ready + #1612·5 / #1613·8 isolated). `+10` children.
+- **8 new immediately-batchable ≤3 slices** (once #1598 lands), + 2 isolated big-family targets.
+- Note: a concurrent session re-pointed **#1598** `blockedBy → 1603` (a buried `filter-chip` component dep,
+  #1603) and is actively editing it — left untouched (scoped-stop). The whole #866 leaf set therefore now
+  chains behind #1603 → #1598; that's a true structural edge, not a regression of this slice.
+
+---
+
 ## Run 11 — `/slice 866` — migrate WE-docs page-level UI to FUI components
 
 **Candidate:** #866 `Migrate WE-docs page-level UI to FUI components (tiles/tables/badges/code-frame)` —
