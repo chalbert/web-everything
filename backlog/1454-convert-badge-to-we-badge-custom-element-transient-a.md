@@ -23,8 +23,8 @@ Behavior-free presentational control: replace the createBadge factory with regis
 - Built `fui:blocks/badge/BadgeElement.ts` (`extends TransientElement`): `<we-badge>` self-replaces with a
   native `<span class="fui-badge fui-badge--<tone>">`, mapping `tone`/`icon`/`status` config attributes in
   `decorate` (status → `role=status` + tone-prefixed `aria-label`). Reuses `BASE_CLASS`/`BADGE_TONES`
-  (now exported from `Badge.ts`). `createBadge` kept for programmatic/plateau use.
+  (now exported from `fui:Badge.ts`). `createBadge` kept for programmatic/plateau use.
 - `fui:blocks/badge/registerBadge.ts` — `registerBadge(tag='we-badge')`, idempotent; exported from
-  `blocks/badge/index.ts`; wired into `fui:plugs/bootstrap.ts`.
+  `fui:blocks/badge/index.ts`; wired into `fui:plugs/bootstrap.ts`.
 - Tested `fui:blocks/__tests__/unit/badge/BadgeElement.test.ts` — 5 tests (self-replace to span, tone→class,
   unknown-tone fallback, status role+aria-label, icon span). 53/53 in the suite; FUI `check:standards` → 0 errors.

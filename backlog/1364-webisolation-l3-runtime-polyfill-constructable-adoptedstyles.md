@@ -33,7 +33,7 @@ live-browser blocker remained.
 - Tested `fui:tools/scope-isolator/__tests__/runtime.test.ts` — 6 tests: class application, constructable
   adoption keyed to the unique class (no raw `@scope`), idempotency (one sheet, no duplication), distinct
   scopes → distinct sheets, one-call `scopeElement`, and the shadow-root S2 target path. All green
-  (17/17 in the suite). FUI `check:standards` → 0 errors; `runtime.ts` typechecks clean (the 2 tree-wide
+  (17/17 in the suite). FUI `check:standards` → 0 errors; `fui:runtime.ts` typechecks clean (the 2 tree-wide
   tsc errors are pre-existing, in unrelated `webexpressions`/`webstates` plugs — not this changeset).
 
 ## Pre-flight state-fix (batch-2026-06-21) — locus→frontierui (mis-flagged impl)
