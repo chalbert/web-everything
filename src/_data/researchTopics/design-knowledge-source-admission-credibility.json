@@ -1,0 +1,24 @@
+{
+  "id": "design-knowledge-source-admission-credibility",
+  "title": "Design-knowledge source admission + credibility-weight criteria",
+  "status": "open",
+  "summary": "Grounds the #1588 decision (child of the design-knowledge intake program #1585): how a curated corpus of design/usability knowledge (Nielsen heuristics, Apple HIG, W3C/WAI-ARIA APG, academic critique sets like UICrit/UIST'24, UX books, trend blogs) ADMITS a source and computes its credibilityWeight so durable peer-reviewed usability research outranks a trend blog — while staying OPEN (custom/project sources must coexist, per #1585's open-design posture). The prior-art survey spans five bodies: (1) evidence hierarchies — the evidence-based-medicine pyramid (systematic-review > RCT > cohort > expert-opinion, a tier purely by study type) and GRADE (a baseline tier from study type, THEN named downgrade modifiers — risk-of-bias, inconsistency, indirectness, imprecision, publication-bias — and upgrade modifiers — large effect, dose-response; each moves the rating a level); (2) information-literacy rubrics — CRAAP (Currency, Relevance, Authority, Accuracy, Purpose: independent orthogonal axes, implementer-defined aggregation) and SIFT (Stop, Investigate the source, Find better coverage, Trace to original — credibility judged laterally against the field, a primary source outranks a re-reporter); (3) evidence-based UX — Nielsen-Norman's 'UX Evidence' (credibility RISES with diversity/breadth across users-tasks-platforms-geographies-methods and longitudinal span, FALLS with methodological flaws, narrow samples, publication bias; NN/g explicitly REJECTS importing the medical pyramid wholesale, and NO accepted UX-specific evidence hierarchy exists — we'd be defining one by borrowing GRADE's shape + NN/g's factors), and MeasuringU/Sauro's quantification-first rigor; (4) provenance/weighting in RAG knowledge bases — tiered source classes + a composite trust weight (reputation + freshness + author expertise + alignment) feeding a downstream blended score (final = relevance x balance x credibility), so a high-relevance blog can't outrank a durable source (practitioner/preprint sources — illustrative pattern, weak authority); (5) UICrit (UIST'24) — records per-annotator provenance (design-expertise area + years 1-16) as first-class metadata and a multi-factor rubric, but has only one annotator per UI (no inter-rater/consensus signal). SYNTHESIS — four recurring structural patterns: (A) baseline tier from source-type, cheap and deterministic; (B) multi-factor independent scoring (don't collapse authority/currency/purpose to one axis early); (C) GRADE-shaped downgrade/upgrade modifiers on top of the baseline (this is the richest reusable template — it lets a rigorous practitioner study outrank a weak paper and vice-versa); (D) authority is composite (peer-review x adoption/citation-provenance x currency), traced laterally so a re-reporter inherits less than the primary. Direct internal precedent: we:src/_data/benchmarkCorpus.json already governs source admission for the gap-analysis program (#315) with a selectionCriteria array + an inclusionRule 'scores on >=3 criteria AND occupies a category axis' + category axes — the same multi-criteria-gate shape #1588 needs, but for credibility weight rather than coverage breadth (and binary, not weighted). Skeptic amendments folded into #1588: modifier scoring is structured JUDGMENT not deterministic (GRADE inter-rater kappa ~0.5-0.7), so drop any 'reproducible' framing and require each applied modifier to carry a recorded rationale + attribution (only staleness is deterministic, from publish-date); cross-project ABSOLUTE weight comparability is a non-goal (intra-corpus ordering is the only contract) — freeze the meta-schema as the comparable spine and add a nonzero floor so an admitted source can't be covertly re-excluded by weighting it to zero.",
+  "dateOpened": "2026-06-22",
+  "lastReviewed": "2026-06-22",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "design-knowledge",
+    "source-admission",
+    "credibility-weight",
+    "evidence-hierarchy",
+    "grade",
+    "craap",
+    "evidence-based-ux",
+    "provenance",
+    "open-design",
+    "config-extends-default"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webaudit"
+}

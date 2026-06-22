@@ -1,0 +1,44 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  The design-knowledge intake program (<a href="/backlog/1585/">#1585</a>) curates a corpus of design /
+  usability knowledge — Nielsen heuristics, Apple HIG, W3C/WAI-ARIA APG, academic critique sets like
+  UICrit (UIST'24), UX books, trend blogs — and distills it into the <a href="/backlog/1034/">#1034</a>
+  design-critique rubric. <a href="/backlog/1588/">#1588</a> settles the <strong>meta-criteria</strong>:
+  what <strong>admits</strong> a source, and how its <code>credibilityWeight</code> is computed so durable
+  peer-reviewed usability research outranks a trend blog — while the system stays <strong>open</strong>
+  (custom/project sources must coexist). Standardize the <em>criteria</em>, never a frozen source list.
+</p>
+
+<h2>Recommendation (at a glance)</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>Admission ⟂ weight (two-stage).</strong> A permissive <em>provenance</em> floor (identifiable
+    authoritative author/body + traceable provenance + on-topic) admits a source; a <em>separate</em>
+    weight is computed for admitted sources. A low-credibility custom source is admitted-but-discounted,
+    never excluded — the open posture preserved. (One-stage "admit iff weight ≥ threshold" is rejected: it
+    excludes low-weight custom sources.)</li>
+  <li><strong>Weight is GRADE-shaped.</strong> A baseline tier from source-<code>kind</code> (peer-reviewed
+    &amp; W3C/APG highest → vendor guideline/HIG → book → blog), then a small <em>fixed, named, optional</em>
+    set of up/down modifiers from GRADE + Nielsen-Norman's UX-evidence factors (upgrade: breadth/diversity,
+    replication; downgrade: narrow sample, vendor bias, staleness). Each applied modifier records a
+    <strong>rationale + attribution</strong> — auditable, not falsely "deterministic" (only staleness is).</li>
+  <li><strong>Config-extends-platform-default, not a WE mandate.</strong> WE ships the meta-schema (kind
+    enum, modifier vocabulary, computation function) + a default flavor; a project extends weights / adds
+    source-kinds. The meta-schema is the frozen comparable spine; intra-corpus <em>ordering</em> is the only
+    contract; an admitted source carries a <strong>nonzero floor</strong> so weight-to-zero can't covertly
+    re-exclude it.</li>
+</ul>
+
+<h2>Grounding</h2>
+<p>
+  Strongest precedent is internal: <code>we:src/_data/benchmarkCorpus.json</code> already governs source
+  admission for the gap-analysis program (<a href="/backlog/315/">#315</a>) with a multi-criteria
+  <code>selectionCriteria</code> + <code>inclusionRule</code> + category axes — the same gate shape, for
+  coverage breadth rather than credibility. Externally: the evidence-based-medicine pyramid (tier by study
+  type), <strong>GRADE</strong> (baseline tier + named downgrade/upgrade modifiers — the richest reusable
+  template), CRAAP/SIFT (multi-factor independent scoring; trace to the primary source), Nielsen-Norman's
+  "UX Evidence" (credibility tracks diversity/rigor; NN/g rejects importing the medical pyramid wholesale,
+  and no accepted UX-specific hierarchy exists — so this defines one), RAG knowledge-base trust weighting
+  (a per-source weight feeding a blended downstream score), and UICrit's per-annotator provenance metadata.
+</p>
+{% endraw %}
