@@ -3,11 +3,14 @@
   "name": "App Shell",
   "status": "active",
   "type": "Module",
-  "implementedBy": "@frontierui/blocks/app-shell/",
-  "summary": "Chrome layout primitive that frames a page: a (sticky) header with a brand lockup and a header-controls region, an optional nav landmark, the main content region (preceded by a skip link), and an optional footer. Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C).",
+  "implementedBy": "@frontierui/blocks/app-shell/AppShellElement.ts",
+  "summary": "Chrome layout primitive that frames a page: a (sticky) header with a brand lockup and a header-controls region, an optional nav landmark, the main content region (preceded by a skip link), and an optional footer. Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C). Packaged as the persistent light-DOM `<we-app-shell>` custom element (#1617, B-mechanism per block-standard §7) whose reactive `config` property re-renders the shell; with `slotMain` it projects the element's authored light-DOM children into `<main>` (a real `<slot>` only projects in shadow DOM).",
   "exports": [
+    "AppShellElement",
+    "registerAppShell",
     "createAppShell",
     "mountAppShell",
+    "mountAppShellLight",
     "mountInDocument"
   ],
   "webStandards": {
