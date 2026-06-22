@@ -429,6 +429,30 @@ for (const it of items.values()) {
   // D3 is aggregated PER PROJECT after the loop (per #613), not per item.
 }
 
+// G3 subject-dedup (#1558) — the kind gate now counts every non-decision kind incl. epic (#1473), so when
+// an epic and a child both graduate to the SAME entity noun (e.g. #436↔#351 `project:webcompliance`) G3
+// double-counts the one architectural noun. The fix is subject-axis and NOUN-level (a `graduatedTo` can list
+// several `+`-joined nouns): drop a G3 candidate only when EVERY entity noun it declares is already covered
+// by a G3-candidate ANCESTOR (transitive parent/blockedBy closure) — the umbrella. A child that introduces
+// any noun the umbrella lacks (e.g. #629 adds `protocol:editor-engine`/`plug:…` atop `project:webediting`)
+// keeps its flag for those unique nouns. (Item-level whole-string compare would mis-handle a compound
+// umbrella + single-noun child; noun-set coverage is the robust form.)
+{
+  const g3ById = new Map(flags.G3.map((f) => [f.id, f]));
+  const entityNouns = (g) =>
+    String(g).split('+').map((s) => s.trim().toLowerCase()).filter((s) => isEntityGraduation(s));
+  flags.G3 = flags.G3.filter((f) => {
+    const own = entityNouns(f.graduatedTo);
+    if (!own.length) return true;
+    const covered = new Set();
+    for (const anc of transitiveLineage(items.get(f.id))) {
+      const a = g3ById.get(anc);
+      if (a) for (const n of entityNouns(a.graduatedTo)) covered.add(n);
+    }
+    return !own.every((n) => covered.has(n)); // drop only if the umbrella covers every noun
+  });
+}
+
 // D3 stale-project — aggregated PER PROJECT, not per item (per #613). A `relatedProject` that is
 // absent from projects.json is a dangling ref; a project still `status: concept` despite substantial
 // shipped work (≥ STALE_RESOLVED_MIN resolved items) is stale drift whose status should advance. A

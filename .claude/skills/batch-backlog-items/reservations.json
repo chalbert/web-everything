@@ -1,5 +1,36 @@
 {
   "_doc": "Cross-session batch reservations (backlog #083 selection-tier soft hint). A batch stamps the items it PLANS here at plan-approval (`backlog.mjs reserve <NNN...> --session=<batch-slug>`); `check:readiness --select` DEPRIORITIZES (never excludes) items held by ANOTHER session, so a second concurrent batch packs around them. Advisory only — the real lock is the status:open→active flip at `claim`. Entries older than ttlMinutes are ignored (a crashed session cannot depress priority forever) and pruned on the next write. A batch clears its own holds on stop via `backlog.mjs unreserve --session=<slug>`, and `claim` auto-drops an item it hard-claims.",
   "ttlMinutes": 120,
-  "held": []
+  "held": [
+    {
+      "num": "1560",
+      "session": "batch-2026-06-22-1556-1557-1559",
+      "at": "2026-06-22T19:04:52.198Z"
+    },
+    {
+      "num": "1562",
+      "session": "batch-2026-06-22-1556-1557-1559",
+      "at": "2026-06-22T19:04:52.198Z"
+    },
+    {
+      "num": "1571",
+      "session": "batch-2026-06-22-1556-1557-1559",
+      "at": "2026-06-22T19:04:52.198Z"
+    },
+    {
+      "num": "1572",
+      "session": "batch-2026-06-22-1556-1557-1559",
+      "at": "2026-06-22T19:04:52.198Z"
+    },
+    {
+      "num": "1573",
+      "session": "batch-2026-06-22-1556-1557-1559",
+      "at": "2026-06-22T19:04:52.198Z"
+    },
+    {
+      "num": "1574",
+      "session": "batch-2026-06-22-1556-1557-1559",
+      "at": "2026-06-22T19:04:52.198Z"
+    }
+  ]
 }
