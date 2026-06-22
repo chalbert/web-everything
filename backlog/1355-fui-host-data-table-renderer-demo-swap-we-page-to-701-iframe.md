@@ -3,9 +3,9 @@ kind: story
 size: 5
 parent: "1353"
 status: open
-blockedBy: ["1494"]
+blockedBy: ["1566"]
 dateOpened: "2026-06-20"
-dateStarted: "2026-06-21"
+dateStarted: "2026-06-22"
 tags: []
 ---
 
@@ -36,3 +36,16 @@ The delete is confirmed **but bounded by #899's vector-conformance split** — i
 - **Precondition:** `we:blocks/renderers/collection-operations/CollectionOperationsBehavior.ts` value-imports
   `applyPipeline, aggregate` from this renderer — its re-home to FUI is a **separate prereq slice** (filed
   per #1467); this card is `blockedBy` it, since the import must move before the renderer can leave WE.
+
+## Pre-flight (batch-2026-06-22-1545-1549) — demo+move DONE; bounded delete surfaced a fork → `blockedBy: 1566`
+
+Claimed + ground the current state: the demo-build (`fui:demos/data-table-demo.html`) **already exists**, the
+FUI renderer move (`renderDataTable`) **is done**, and the collection-operations precondition (its
+`applyPipeline`/`aggregate` import) is **gone** — so the only residual is the **bounded delete + iframe
+swap**. But grounding the delete surfaced a genuine unresolved fork (filed as **#1566**): WE's verifier
+`auditDataTable(root, golden)` lives **in** `renderDataTable.ts` and needs a rendered root the renderer
+produces; the WE conformance test renders via the backend in all three sections (golden audit, drift guard,
+interactive); and the verifier has **diverged** (FUI ported `auditDataTable(table, rows, config)`). The
+#1467 ruling fixed the boundary, not the mechanism. Completing the delete needs a design choice (stored-root
+fixture / golden-JSON-only / reconcile verifiers / move auditDataTable) — not forced here. `blockedBy: 1566`;
+released. Carry-forward reason: **not-batchable** (fork).
