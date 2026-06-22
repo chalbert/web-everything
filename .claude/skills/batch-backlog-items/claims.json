@@ -22,7 +22,8 @@
         "1496-native-first-gesture-recognizer-multi-pointer-pinch-rotate-t",
         "1502-codification-hygiene-sweep-re-point-g7-backlog-citations-fro",
         "1356-fui-host-pagination-renderer-demo-swap-we-page-to-701-iframe",
-        "1497-native-first-gesture-recognizer-edge-swipe-pull-to-refresh-o"
+        "1497-native-first-gesture-recognizer-edge-swipe-pull-to-refresh-o",
+        "1207-interpolation-text-node-renders-expression-path-not-its-eval"
       ],
       "baseline": [
         ".claude/commands/resolve.md",

@@ -39,8 +39,13 @@ import {
 } from './webvalidation';
 import { CustomGuardRegistry, createDefaultGuardRegistry } from './webguards';
 
-// Import expression parsers and event attributes
-import { CustomExpressionParserRegistry, CustomTextNodeParserRegistry, CustomTextNodeRegistry } from './webexpressions';
+// Import expression parsers and event attributes. The webexpressions registries come from the FUI plug
+// copy (#449/#1207), NOT WE-local `./webexpressions`: the block layer (parsers + InterpolationTextNode)
+// already imports `@frontierui/plugs/webexpressions`, so a WE-local `CustomTextNode` class here would be a
+// DIFFERENT class than the parser-produced node — and `CustomTextNodeRegistry.#upgradeTextNode`'s
+// `instanceof CustomTextNode` guard would reject it, leaving `{{name}}` rendering its raw path. Importing
+// the same FUI copy aligns the class identity so upgrade fires. Completes #449 for the bootstrap.
+import { CustomExpressionParserRegistry, CustomTextNodeParserRegistry, CustomTextNodeRegistry } from '@frontierui/plugs/webexpressions';
 import { CallParser } from '../blocks/parsers/call/CallParser';
 import { ValueParser } from '../blocks/parsers/value/ValueParser';
 import { PipeParser } from '../blocks/parsers/pipe/PipeParser';

@@ -2,12 +2,18 @@
 kind: story
 status: open
 locus: webeverything
-blockedBy: ["1503"]
+blockedBy: ["1504"]
 dateOpened: "2026-06-20"
 size: 5
 dateStarted: "2026-06-22"
 tags: [webexpressions, interpolation, text-node, injector, binding, demo]
 ---
+
+## Progress (batch-2026-06-21-1501-1356) — fix APPLIED, render verification BLOCKED by a newly-found bootstrap break (#1504)
+
+Applied the item's own proven fix: flipped `we:plugs/bootstrap.ts:43` to import the webexpressions registries from `@frontierui/plugs/webexpressions` (was WE-local `./webexpressions`), so the registry's `CustomTextNode` class identity matches the block-layer parser-produced node and `#upgradeTextNode`'s `instanceof` guard fires (completes #449 for the bootstrap). Scope-checked: no other `we:demos/*` imports the WE-local webexpressions class. The fix is committed.
+
+**Could NOT re-confirm the live render this session** — a 2nd-port cold start (the documented verification path) shows the interpolation demo's RESULT slots **empty**, not because of this fix but because `we:blocks/navigation/NavSectionBehavior.ts` 500s on a dangling `../view/ViewEngine` import (migrated to FUI), and bootstrap imports the navigation chain — so the whole bootstrap graph aborts before `customTextNodes.upgrade()` runs (RESULT renders nothing). Filed as **#1504**; this item is now `blockedBy: 1504` (its verified-render + the Playwright regression-test acceptance can only complete once cold-start bootstrap loads). The #449 instanceof analysis + fix above are unchanged and correct by construction.
 
 # `{{ }}` interpolation renders the expression's *path* ("name"), not its evaluated value ("World")
 

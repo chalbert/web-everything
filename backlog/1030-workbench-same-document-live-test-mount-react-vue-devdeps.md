@@ -83,3 +83,7 @@ mount** that needs #1501's running second origin. Set `blockedBy: 1501`; release
 Carry-forward reason: **blocked-in-fact** (prerequisite infra verified absent, now encoded as a real edge,
 not a gut "looks big" call) — the live-mount-on-a-running-second-origin acceptance also wants a focused FUI
 session that owns the dev-server lifecycle.
+
+## Pre-flight (batch-2026-06-21-1501-1356) — #1501 infra now landed; remaining half is a focused live-mount session
+
+The prerequisite #1501 (cross-origin wrapper-serve second origin + esbuild-bundle) **resolved this batch**, so the `blockedBy` is cleared. But this item's own half is unchanged: the deep integration into the 947-line `fui:workbench/mount.ts` (cross-origin-import + same-document live-test mount + React error boundary + `window.onerror`/`unhandledrejection` surfacing + inspector/event/anatomy panel wiring) whose acceptance is a **live in-browser mount on the running :3002 second origin**. That is a focused FUI session that owns the dev-server lifecycle (start :3002 + browser-verify the mount), not a concurrent-batch slice. Carry-forward reason: **blocked-in-fact** (live-mount-on-running-origin verification + deep `fui:workbench/mount.ts` integration). Left `open`, unblocked, for `/next 1030` in a frontierui session.
