@@ -21,6 +21,16 @@ Do exactly this, in order:
      lands as its own commit.
    If discovery finds no candidates, say so and stop.
 
+   **A failing candidate must come with its reconciliation OFFER, never a bare "kept open" verdict.**
+   The whole point of step 1a is that a non-resolvable item can't just stay parked at the resolve cue —
+   so when a candidate fails scope-review, the one-line verdict is paired with the concrete next action
+   the failure dictates (per 1a's reconciliation menu) and an offer to do it now: a finite burndown with
+   carvable tail → *"offer to `/slice NNN` the next wave"*; a stale block → *"offer to re-point
+   `blockedBy`"*; a live stall → *"offer to stamp the `childlessReason` + edge"*. Don't hand the user a
+   verdict that leaves them to re-discover and manually invoke `/slice` — name the fix and offer to run
+   it. (Acting on the offer is its own follow-up turn; discovery itself still only *resolves* the first
+   passing candidate.)
+
 1. **Locate the item.** Find `backlog/NNN-*.md`. If none, stop and say so. Read its frontmatter —
    note `workItem`, `status`, `blockedBy`, `childlessReason`.
 
