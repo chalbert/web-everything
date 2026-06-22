@@ -5,7 +5,7 @@ parent: "1353"
 status: open
 blockedBy: []
 dateOpened: "2026-06-21"
-dateStarted: "2026-06-21"
+dateStarted: "2026-06-22"
 tags: []
 ---
 
@@ -58,3 +58,17 @@ So this is a **conformance-verifier redesign + golden generation + cross-repo mo
 focused session — re-sized 5 → 8, carry-forward reason **outgrew**. No new design fork (the #899 model +
 #1467 placement are ruled — golden format is an impl detail). #1355's delete stays `blockedBy` this.
 Released to `open`.
+
+## Pre-flight (batch-2026-06-21-1501-1356) — entangled with #1355; must co-land (blocked-in-fact for a solo close)
+
+Re-grounded against the boundary. The verifier-redesign + golden + WE-test + coordinator-removal parts are
+clean, but the acceptance line "backend + semantics gone to FUI, **check:standards green in both repos**"
+**cannot be met in isolation**: removing the WE backend strands `we:demos/data-table-demo.ts`, which
+value-imports and *calls* `renderDataTable()`/the fixtures (`we:demos/data-table-demo.ts:13,79,171`). The
+ratified docs-rendering boundary ([[docs-rendering-boundary-we-iframes-fui]], #701) **forbids repointing a
+WE demo to FUI's block code**, so the only correct demo fix is the **#701 FUI-hosted iframe swap — which is
+#1355** (`blockedBy` this, and itself live-iframe work). #1494 alone therefore leaves a knowingly-broken
+demo (the "reckless" anti-pattern) or an un-green tree. **#1494 and #1355 are mutually entangled and must
+co-land in one focused session** (move backend + swap demo to iframe together); the `#1355 blockedBy #1494`
+edge understates a true co-dependency. Carry-forward reason: **blocked-in-fact** (clean green end-state
+depends on #1355's demo swap). Released to `open`; recommend folding #1355 into the same focused session.
