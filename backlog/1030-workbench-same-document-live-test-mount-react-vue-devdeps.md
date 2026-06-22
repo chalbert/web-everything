@@ -3,7 +3,7 @@ kind: story
 size: 5
 parent: "912"
 status: open
-blockedBy: []
+blockedBy: ["1594"]
 humanGate: { kind: setup, what: "Mechanism PROVEN end-to-end (batch-2026-06-22-1575-1030: cross-origin import of ?form=react-live -> same-document mount()/unmount() rendered React DOM, CORS OK; #1501/#1518/#1556 all resolved). Two residuals remain, both needing a focused frontierui session that OWNS the dev-server lifecycle: (1) acceptance is a live mount on the running :3002 second-origin, but :3002 is part of the user's npm run dev and serves a STALE form set; the maas vite-plugin middleware does not hot-reload, so it needs a process RESTART a concurrent batch can't perform (don't-kill-dev-server); (2) an undecided design fork — does the live mount render INTO THE STAGE (replacing the native custom element as the subject, so inspector/event/anatomy panels cover it for free) vs a separate Polyglot live-preview needing new introspection wiring for a non-custom-element React render. Decide (2), then build + browser-verify against a freshly-restarted :3002." }
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-22"
@@ -159,3 +159,13 @@ non-custom-element render. Worth a small decision before the build.
 Carry-forward reason: **blocked-in-fact** (verified: live-on-:3002 acceptance needs a :3002 restart this
 concurrent batch can't perform; mechanism otherwise proven). `blockedBy` cleared (#1556 resolved); released to
 `open` for `/next 1030` in a frontierui session that owns the server.
+
+## 2026-06-22 — render-target fork extracted to decision #1594; `blockedBy: 1594`
+
+The "design note for that session (not yet decided)" above is a **real fork, not a build-time detail**, so it
+is now a `type:decision` work item (**#1594**): does the cross-origin React live-mount render **into the stage
+as the subject** (so inspector/event/anatomy panels cover it for free) **vs a separate Polyglot live-preview**
+needing net-new introspection wiring. The build (cross-origin import → same-document mount → error-surfacing →
+panel wiring) **can't be authored until that render target is ruled**, since it dictates where `mount(el, …)`
+points and how the panels introspect. Set `blockedBy: 1594`. The :3002-restart residual still stands, but it
+is downstream of the decision, not a substitute for it.
