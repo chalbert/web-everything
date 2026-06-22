@@ -3,9 +3,9 @@ kind: story
 size: 5
 parent: "912"
 status: open
-blockedBy: []
+blockedBy: ["1518"]
 dateOpened: "2026-06-19"
-dateStarted: "2026-06-21"
+dateStarted: "2026-06-22"
 locus: frontierui
 relatedProject: webdocs
 tags: [webdocs, block-explorer, workbench, polyglot]
@@ -87,3 +87,13 @@ session that owns the dev-server lifecycle.
 ## Pre-flight (batch-2026-06-21-1501-1356) — #1501 infra now landed; remaining half is a focused live-mount session
 
 The prerequisite #1501 (cross-origin wrapper-serve second origin + esbuild-bundle) **resolved this batch**, so the `blockedBy` is cleared. But this item's own half is unchanged: the deep integration into the 947-line `fui:workbench/mount.ts` (cross-origin-import + same-document live-test mount + React error boundary + `window.onerror`/`unhandledrejection` surfacing + inspector/event/anatomy panel wiring) whose acceptance is a **live in-browser mount on the running :3002 second origin**. That is a focused FUI session that owns the dev-server lifecycle (start :3002 + browser-verify the mount), not a concurrent-batch slice. Carry-forward reason: **blocked-in-fact** (live-mount-on-running-origin verification + deep `fui:workbench/mount.ts` integration). Left `open`, unblocked, for `/next 1030` in a frontierui session.
+
+## Pre-flight (batch-2026-06-22-1510-1483) — a forced producer-side prerequisite surfaced → `blockedBy: 1518`
+
+Claimed + ground the live frontierui tree to actually build it (the prior "needs a focused session" framing is a gut stop the batch rule kills, so I tried). Grounding surfaced a **real, currently-absent prerequisite** that #1501 did not cover:
+
+- `fui:tools/maas/produceWrapperBytes.mjs` emits **only the source-display form** — the generated wrapper component (`export default Comp`, react bundled, **no react-dom, no renderer, no error boundary**). The existing workbench Polyglot panel (`fui:workbench/mount.ts:633`) shows this as **source text only** (it explicitly notes "no live render, #912").
+- The workbench **must stay framework-free** (#955-B), so `fui:workbench/mount.ts` **cannot** `import 'react-dom'` to render the cross-origin component. Importing react-dom from the second origin *separately* would split the React instance from the wrapper's bundled react — a **react/react-dom instance-mismatch bug** (react-dom must share the exact react instance the component renders with).
+- Therefore a live mount **requires a served mount form** (e.g. `?form=react-live`) that bundles **react + react-dom + an ErrorBoundary together** and exports `mount(el, props)` / `unmount()`. That is forced design (per #955, not an open fork) but is **net-new producer/generator/endpoint work** outside this item's stated "steps 4–5 workbench-side" scope.
+
+Filed that prerequisite as **#1518** (`fui:tools/gen-wrapper/genWrapper.mjs` live-mount variant + `fui:tools/maas/produceWrapperBytes.mjs` react-dom bundle + `fui:tools/maas/vite-plugin.mjs` form-serve) and set `blockedBy: 1518`. This item stays the **workbench-side half** (cross-origin-import the `react-live` module → same-document mount → `window.onerror`/`unhandledrejection` surfacing → inspector/event/anatomy wiring + live :3002 browser verification). Carry-forward reason: **blocked-in-fact** (forced prerequisite verified absent, now a real edge). Released to `open`.
