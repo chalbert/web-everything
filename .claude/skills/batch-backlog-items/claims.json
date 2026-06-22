@@ -7,7 +7,9 @@
       "ids": [
         "1501-fui-cross-origin-wrapper-serve-dev-process-second-origin-cor",
         "1495-native-first-gesture-recognizer-continuous-single-pointer-pa",
-        "1503-cold-start-bootstrap-crash-a-trait-behavior-registers-anchor"
+        "1503-cold-start-bootstrap-crash-a-trait-behavior-registers-anchor",
+        "1234-land-the-we-to-frontierui-plugs-repoint-for-real-the-449-rep",
+        "1485-realizing-dockable-block-recursive-container-drag-to-dock-se"
       ],
       "baseline": [
         ".claude/commands/resolve.md",
