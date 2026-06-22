@@ -3,6 +3,7 @@ kind: story
 size: 3
 parent: "1442"
 status: open
+blockedBy: ["1570"]
 dateOpened: "2026-06-22"
 locus: frontierui
 relatedProject: webcomponents
