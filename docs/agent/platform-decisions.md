@@ -1137,6 +1137,10 @@ one place:
 - **Backlog & decision workflow** (fork-existence test, fork-is-not-prioritization, support-all,
   prepared=DoR, reversibility, no decision+epic conflation, resolve-by-parent-edges) →
   [backlog-workflow.md](backlog-workflow.md).
+- **Backlog hold model** — two mechanisms for two jobs (#1620, amends #1392): `priority: low` *demotes*
+  from auto-select but stays visible (settled-but-low-value-now); `maturityGated` (+ a typed, external
+  `maturityTrigger`) *removes* until build-now-stops-being-worse. Parking is never a prioritisation escape →
+  [backlog-workflow.md#hold-model](backlog-workflow.md#hold-model).
 - **Program definition — the strict bar for a perpetual `ongoing` epic** (four-part Program Test:
   standing goal + conformance front + currency front + cadence; watch mode is a lifecycle state;
   L0→L2 maturity ladder; "evergreen" = the property a program maintains) →
