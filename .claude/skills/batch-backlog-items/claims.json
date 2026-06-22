@@ -14,7 +14,8 @@
         "1573-fui-text-node-registry-skip-needless-replacewith-for-static-",
         "1574-close-the-two-locus-prefix-enforcement-gaps-cli-write-path-p",
         "1560-fui-webregistries-root-scope-determination-impl-unit-test",
-        "1562-explorer-bundle-store-executor-endpoint-plateau"
+        "1562-explorer-bundle-store-executor-endpoint-plateau",
+        "1563-explorer-report-history-viewer-read-only-plateau-page"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",
@@ -165,7 +166,8 @@
     {
       "session": "batch-2026-06-22-1575-1030",
       "ids": [
-        "1575-plateau-app-a11y-contrast-residual-15-nodes-after-1559-theme"
+        "1575-plateau-app-a11y-contrast-residual-15-nodes-after-1559-theme",
+        "1030-workbench-same-document-live-test-mount-react-vue-devdeps"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/capacity.json",
