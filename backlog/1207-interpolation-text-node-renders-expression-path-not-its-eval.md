@@ -5,7 +5,6 @@ locus: webeverything
 blockedBy: []
 dateOpened: "2026-06-20"
 size: 13
-unsplittableReason: atomic
 dateStarted: "2026-06-22"
 dateResolved: "2026-06-22"
 graduatedTo: none

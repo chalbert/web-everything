@@ -16,7 +16,7 @@ Capture-for-later home for the three declarative-`<component>` capabilities that
 ## Deferred capabilities
 
 - **`attachInternals` → custom states** (DC-14) — seeding-only `ElementInternals.states` is low-value on its own. **Revisit:** a concrete use that needs a declaratively-seeded custom state hook.
-- **Manual slot assignment** — `slotAssignment:'manual'` has no Declarative Shadow DOM attribute; opting in renders empty slots without a JS `slot.assign()` layer (footgun). **Revisit:** the [#852](/backlog/852-behavior-extends-tier-2-enhancement-hook-on-component-dc-5-r/) behavior hook makes a tier-3 `slot.assign()` spelling safe to expose.
+- **Manual slot assignment** — `slotAssignment:'manual'` has no Declarative Shadow DOM attribute; opting in renders empty slots without a JS `slot.assign()` layer (footgun). **Revisit:** the [#852](/backlog/852-behavior-extends-tier-2-enhancement-hook-on-component-dc-5-r/) ([component-dc](docs/agent/platform-decisions.md#component-dc)) behavior hook makes a tier-3 `slot.assign()` spelling safe to expose.
 - **Shared stylesheets** — `<style>` in template covers per-component; cross-instance `adoptedStyleSheets` sharing has no declarative form. **Revisit:** a platform/DSD spelling for shared constructable stylesheets appears.
 
 Reactive bindings — the fourth #076 defer — is **not** here: it is already tracked by DC-4 [#042](/backlog/042-component-reactive-depth/) (resolved) + [#792](/backlog/792-dc-4-binding-layer-compile-time-expr-contract-observe-reflec/), and stays platform-blocked on Template Instantiation / DOM Parts.

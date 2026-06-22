@@ -9,7 +9,7 @@ dateStarted: "2026-06-13"
 tags: []
 ---
 
-> **Parked (2026-06-13, batch top-up).** #451 — its `blockedBy` — resolved, but #451 is the MaaS
+> **Parked (2026-06-13, batch top-up).** #451 — its `blockedBy` (the [monetization](docs/agent/platform-decisions.md#monetization) rule) — resolved, but #451 is the MaaS
 > hosted-tier *shape & pricing* **decision**, not the served/published `@frontierui/jsx-runtime` URL
 > this needs. As the finding below verified (same day), none of the three exports-safe targets exists
 > (linking is #239-forbidden, the package is unpublished, #461's origin serves WE components not the FU
@@ -51,7 +51,7 @@ containing `node_modules/`, or a bare specifier (it rejects any `/`-, `./`-, `..
   effort.
 - **CDN / served URL** — not published (`esm.sh/@frontierui/jsx-runtime` → 404). A served URL is
   precisely what **#087** (MaaS distribution — the "production runtime delivery" follow-on of #081,
-  itself blocked by #088 versioning) is built to provide. It does not exist yet.
+  itself blocked by #088 versioning — the [constellation-placement](docs/agent/platform-decisions.md#constellation-placement) rule) is built to provide. It does not exist yet.
 - **bare specifier** — an importmap *value* must be a URL the browser can fetch; a bare specifier as the
   target does not resolve in a raw browser. Not viable.
 

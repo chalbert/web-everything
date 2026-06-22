@@ -10,7 +10,7 @@ tags: [plateau, vision, on-device, distillation, webgpu, benchmark, training-pip
 
 **Umbrella for the fixed-cost on-device floor of the vision gate** — a lightweight UI-screenshot
 classifier for the 6-verdict taxonomy, distilled (per the [#488](488-on-device-ui-screenshot-vision-model-as-a-plateau-capability/)
-ruling) from the hosted-model verdicts in the resolved [#489](489-archive-quarantined-frames-persist-frame-verdict-pairs-as-a-/)
+ruling, the [no-leakage-client](docs/agent/platform-decisions.md#no-leakage-client) rule) from the hosted-model verdicts in the resolved [#489](489-archive-quarantined-frames-persist-frame-verdict-pairs-as-a-/)
 corpus and run in-browser, so verdict-gated features can be flat-priced (the linear-cost rule).
 **Sliced** into: **A** corpus-export + codified recipe artifact (ready now) → **B** benchmark harness →
 **C** train+quantize the classifier (also gated on corpus *volume*) → **D** in-browser WebGPU provider;

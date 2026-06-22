@@ -74,7 +74,7 @@ children (or get folded into a phase story) when sliced:
 ## Boundary — what this is NOT
 
 - **Not the commerce stack.** #181 (auth/payments/legal to *charge money*) and its children
-  (#182 license keys, #183 payments) are about selling a product. This epic is about *controlled
+  (#182 license keys, #183 payments) are about selling a product ([monetization](docs/agent/platform-decisions.md#monetization)). This epic is about *controlled
   public exposure of the site itself*. They converge only at phase 5 (login) — cross-ref, don't
   merge. #181 is deprioritized "until the product is in a much better state"; this epic is **not**
   blocked on that — controlled exposure is useful before there's anything to sell.

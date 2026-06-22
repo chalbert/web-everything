@@ -34,13 +34,13 @@ Already on FUI (keep, conform): `Nav` + `ConformancePanel` SSR in `plateau:src/w
 
 - **It's a stated end-goal not yet captured.** No existing item rebuilds plateau-app's own chrome out of FUI — [#777](/backlog/777-dogfood-the-we-docs-website-on-fui-components-rework-the-sit/) is the *WE-docs site* twin, not plateau-app. This epic is that gap.
 - **Forcing-function loop.** Per the [first-party-dogfood](../docs/agent/platform-decisions.md#first-party-dogfood) rule, every rendered a11y/visual regression on a migrated surface *is* a FUI component-conformance failure on the product's own front door — the same loop as the exercise apps (#314) and reproduction-conformance (#1225), turned inward.
-- **Unblocked by the boundary.** plateau-app is the product layer and already consumes FUI via workspace aliases; no WE↔FUI relaxation (the #765 gate that holds #777) applies here. The real gate is FUI *shipping* each component.
+- **Unblocked by the boundary.** plateau-app is the product layer and already consumes FUI via workspace aliases; no WE↔FUI relaxation (the [we-fui-embed-boundary](../docs/agent/platform-decisions.md#we-fui-embed-boundary) #765 gate that holds #777) applies here. The real gate is FUI *shipping* each component.
 
 ## Dependencies & gate
 
 - **[#1253](/backlog/1253-plateau-app-dogfooding-mandate-its-product-ui-is-fui-compone/)** (decision, the charter) — `blockedBy` until ratified, then this epic carries the work.
 - **#658** (promote `@frontierui/blocks` canonical) — resolved; the FUI floor exists.
-- **Theme/intents bundle** — kin to [#747](/backlog/747-design-system-equals-theme-plus-intents-bundle-manifest-catalog/) (design-system = theme + intents bundle); plateau-app needs its theme re-expressed as DTCG tokens over FUI's token base so migrated components carry plateau branding.
+- **Theme/intents bundle** — kin to [#747](/backlog/747-design-system-equals-theme-plus-intents-bundle-manifest-catalog/) (design-system = theme + intents bundle, [intents-ux-only](../docs/agent/platform-decisions.md#intents-ux-only)); plateau-app needs its theme re-expressed as DTCG tokens over FUI's token base so migrated components carry plateau branding.
 - **Per-surface slices** — to be carved from the target-list table above as the matching FUI components ship (mirrors #777's per-page ratchet). Each migrated surface gates on a rendered a11y/visual check (the conformance proof).
 
 ## Slices (ratchet — carve as FUI parts land)

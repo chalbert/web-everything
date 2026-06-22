@@ -19,4 +19,4 @@ De-buried from #479's body (the live-serve placement fork). **Where does the liv
 
 Both branches satisfy #479's DoD *behaviour* (built chunk keyed by capability class, shared across a class, degrades on a wrong guess); they differ on **where the bytes are built/served**.
 
-**Status: `parked`** — the defer-live-serve stance defers *when* this is ratified (decide near a real MaaS-distribution surface, #087/#088), not *whether* the fork is tracked. Resolving it unblocks the live-serve build slices of epic #479 (under A: a WE emit-build-plan slice + a plateau-app serve-consumer slice).
+**Status: `parked`** — the defer-live-serve stance defers *when* this is ratified (decide near a real MaaS-distribution surface, #087/#088 — the [constellation-placement](docs/agent/platform-decisions.md#constellation-placement) rule), not *whether* the fork is tracked. Resolving it unblocks the live-serve build slices of epic #479 (under A: a WE emit-build-plan slice + a plateau-app serve-consumer slice).

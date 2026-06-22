@@ -26,7 +26,7 @@ live render verification before the WE source is deleted.
 
 ## Re-scope from #1467 ruling (ratified 2026-06-21 → b)
 
-The delete is confirmed **but bounded by #899's vector-conformance split** — impl → FUI, not a clean wipe:
+The delete is confirmed **but bounded by #899's vector-conformance split** (the [constellation-placement](docs/agent/platform-decisions.md#constellation-placement) rule) — impl → FUI, not a clean wipe:
 
 - **Leave in WE:** `auditDataTable` (the assertion-semantics **verifier** = #899's WE gate) + the vector
   corpus `we:blocks/renderers/data-table/__fixtures__/data-table-cases.ts` + the contract **types**. The WE
@@ -43,7 +43,7 @@ Claimed + ground the current state: the demo-build (`fui:demos/data-table-demo.h
 FUI renderer move (`renderDataTable`) **is done**, and the collection-operations precondition (its
 `applyPipeline`/`aggregate` import) is **gone** — so the only residual is the **bounded delete + iframe
 swap**. But grounding the delete surfaced a genuine unresolved fork (filed as **#1566**): WE's verifier
-`auditDataTable(root, golden)` lives **in** `renderDataTable.ts` and needs a rendered root the renderer
+`auditDataTable(root, golden)` lives **in** `we:renderDataTable.ts` and needs a rendered root the renderer
 produces; the WE conformance test renders via the backend in all three sections (golden audit, drift guard,
 interactive); and the verifier has **diverged** (FUI ported `auditDataTable(table, rows, config)`). The
 #1467 ruling fixed the boundary, not the mechanism. Completing the delete needs a design choice (stored-root

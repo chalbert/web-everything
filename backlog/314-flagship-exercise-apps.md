@@ -60,7 +60,7 @@ catalog (collection-ops, clipboard/DnD/files, theme-color, webscroll,
 view-transitions, webcommands), the Web Projects (webvalidation, webpermissions,
 webpersistence, webidentity, webcomponents), and the cross-cutting principles
 (native-first, requirement-as-code [#100], business-rule-manager /
-proof-of-compliance [#093], NL-to-technical-configurator [#096], provider-consumer
+proof-of-compliance [#093] (the [monetization](docs/agent/platform-decisions.md#monetization) rule), NL-to-technical-configurator [#096] (the [intents-ux-only](docs/agent/platform-decisions.md#intents-ux-only) rule), provider-consumer
 graph). Isolated block demos don't prove these compose under a real workload. A
 handful of complex apps does — and surfaces gaps the demos hide.
 

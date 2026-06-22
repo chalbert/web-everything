@@ -13,7 +13,7 @@ tags: [webdocs, block-explorer, workbench, polyglot]
 
 # Workbench same-document live-test mount + react/vue devDeps
 
-fui:workbench/live-test/: await import('/_maas/<block>.js?form=react-wrapper'), mount into the workbench document (no iframe — #955-A2), React error boundary + window.onerror/unhandledrejection runtime-error surfacing, wired to inspector/event/anatomy panels; add react/react-dom/vue as devDeps of the **workbench sub-package's own `fui:workbench/package.json`** (granular-sub-package convention, #658/#693) — never root `fui:package.json`, never the shipped @frontierui bundle (framework-free, #955-B).
+fui:workbench/live-test/: await import('/_maas/<block>.js?form=react-wrapper'), mount into the workbench document (no iframe — [constellation-placement](docs/agent/platform-decisions.md#constellation-placement), #955-A2), React error boundary + window.onerror/unhandledrejection runtime-error surfacing, wired to inspector/event/anatomy panels; add react/react-dom/vue as devDeps of the **workbench sub-package's own `fui:workbench/package.json`** (granular-sub-package convention, #658/#693) — never root `fui:package.json`, never the shipped @frontierui bundle (framework-free, #955-B).
 
 ## Dropped from batch-2026-06-19 (cascade-freed by #1029, but live FUI dev server)
 

@@ -21,4 +21,4 @@ The build of the **dev-browser shell itself** — the rightmost column of the [#
 
 ## Sequencing
 
-Per #141, the **extension / DevTools-panel MVP is the first fundable build** (cheap funnel, proves "lights up on a conformant app"); this shell is the later monetizable product. File the extension-MVP separately as the leading build; advance this epic only once that proves the model OR a capability demands chrome-level UI an extension can't reach.
+Per the [monetization](docs/agent/platform-decisions.md#monetization) rule (#141), the **extension / DevTools-panel MVP is the first fundable build** (cheap funnel, proves "lights up on a conformant app"); this shell is the later monetizable product. File the extension-MVP separately as the leading build; advance this epic only once that proves the model OR a capability demands chrome-level UI an extension can't reach.

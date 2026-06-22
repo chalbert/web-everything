@@ -172,8 +172,8 @@ benchmark's ranked queue, mapped to the WE work it implies:
 
 **Draft-surface gaps (implement in WE; existing backlog targets for the `PLATFORM-GAP` tags):**
 - hand-rolled `<table>` → data-table / data-grid block: **#123, #131, #132, #115, #036**.
-- windowing w/o pagination → pagination + collection-operations: **#006, #036, #061**.
-- ad-hoc selection → selection (droplist family): **#023, #021, #024**.
+- windowing w/o pagination → pagination + collection-operations: **#006** (the [intents-ux-only](docs/agent/platform-decisions.md#intents-ux-only) rule)**, #036, #061**.
+- ad-hoc selection → selection (droplist family): **#023, #021, #024** (the [surface-contract-not-computation](docs/agent/platform-decisions.md#surface-contract-not-computation) rule).
 - hardcoded colors → theme/surface token system: **#010**.
 
 The loop ([we:docs/agent/exercise-app-workflow.md](/docs/agent/exercise-app-workflow.md), `/exercise-app`)

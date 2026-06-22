@@ -11,7 +11,7 @@ tags: [maas, polyglot, protocol, deferred-review]
 
 # MaaS wrapper-serve protocol — deferred experience review (collect cases, revisit framework axis)
 
-Deferred review (much later, NOT now): the MaaS wrapper-serve contract was ratified provisionally under #974 (A1 —
+Deferred review (much later, NOT now): the MaaS wrapper-serve contract was ratified provisionally under #974 (the [constellation-placement](docs/agent/platform-decisions.md#constellation-placement) rule; A1 —
 framework rides the catalog-gated `form` param, no new neutral contract surface). That ruling was deliberately
 under-committed: we start now and collect real experience before freezing the shape. This item is the standing home for
 that experience — log concrete cases, friction, and lossiness encountered while building #912/#753/#507 against

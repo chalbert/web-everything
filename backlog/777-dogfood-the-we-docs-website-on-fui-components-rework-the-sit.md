@@ -8,7 +8,7 @@ tags: [dogfood, fui, site-rework, di-mount, boundary, epic]
 
 # Dogfood the WE-docs website on FUI components (rework the site chrome to render only the constellation's own components)
 
-Today the WE-docs site (`:8080`) is hand-written Nunjucks + CSS — header/nav (`we:src/_layouts/base.njk`, the [#645](/backlog/645-conform-the-dogfood-we-header-to-apg-disclosure-navigation/) reveal-nav), footer, layout shell, catalog tiles, tables, badges — none rendered from FUI's real component impl. The end-goal: rework WE-docs so its own chrome renders the constellation's own FUI components — the ultimate dogfooding, where the site **is** the conformance proof. The [#765](/backlog/765-relax-the-we-fui-isolation-boundary-for-an-in-document-di-mo/) boundary relaxation (in-document Shadow-DOM DI mount) that gated this is now resolved. Sliced umbrella: inventory (#778, done), theme/intents bundle (#864), chrome migration (#865), page-UI (#866), per-page ratchet (#867). Re-opened 2026-06-17 after a premature resolve (gate had since cleared: #765/#786/#747).
+Today the WE-docs site (`:8080`) is hand-written Nunjucks + CSS — header/nav (`we:src/_layouts/base.njk`, the [#645](/backlog/645-conform-the-dogfood-we-header-to-apg-disclosure-navigation/) reveal-nav), footer, layout shell, catalog tiles, tables, badges — none rendered from FUI's real component impl. The end-goal: rework WE-docs so its own chrome renders the constellation's own FUI components — the ultimate dogfooding, where the site **is** the conformance proof. The [#765](/backlog/765-relax-the-we-fui-isolation-boundary-for-an-in-document-di-mo/) boundary relaxation (in-document Shadow-DOM DI mount — the [we-fui-embed-boundary](docs/agent/platform-decisions.md#we-fui-embed-boundary) rule) that gated this is now resolved. Sliced umbrella: inventory (#778, done), theme/intents bundle (#864), chrome migration (#865), page-UI (#866), per-page ratchet (#867). Re-opened 2026-06-17 after a premature resolve (gate had since cleared: #765/#786/#747).
 
 ## Why this is its own epic
 
@@ -26,7 +26,7 @@ Pinned to the tree: current chrome is `we:src/_layouts/base.njk` (header/nav at 
 - **[#765](/backlog/765-relax-the-we-fui-isolation-boundary-for-an-in-document-di-mo/)** (decision, *active*) — the boundary relaxation. **Hard gate** for every migration slice.
 - **[#728](/backlog/728-component-embedding-capability-embed-a-live-component-exampl/)** (epic) — the embed *mechanism*; the mode-C DI-mount build (filed at #765 ratification) is the SDK surface this epic consumes for chrome.
 - **[#658](/backlog/658-promote-frontierui-blocks-canonical-migrate-the-9-we-only-fa/)** — promote `@frontierui/blocks` canonical; the components WE-docs would mount must exist and ship from FUI.
-- **[#747](/backlog/747-design-system-equals-theme-plus-intents-bundle-manifest-catalog/)** — design-system = theme + intents bundle; WE-docs needs a theme/intents bundle so the dogfooded components carry WE-docs branding.
+- **[#747](/backlog/747-design-system-equals-theme-plus-intents-bundle-manifest-catalog/)** — design-system = theme + intents bundle (the [intents-ux-only](docs/agent/platform-decisions.md#intents-ux-only) rule); WE-docs needs a theme/intents bundle so the dogfooded components carry WE-docs branding.
 - **[#763](/backlog/763-gate-ui-best-practices-on-website-changes-rendered-site-a11y/)** → [#770](/backlog/770-rendered-site-a11y-gate-axe-lane-route-allowlist-we-docs/) — the rendered-site a11y gate that proves the rework stays conformant.
 
 ## Slicing note

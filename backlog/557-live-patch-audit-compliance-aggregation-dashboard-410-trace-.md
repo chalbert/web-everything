@@ -9,7 +9,7 @@ tags: [dev-browser, live-patch, deployed-app, saas, audit, compliance, soc2, hos
 
 # Live-patch audit & compliance aggregation dashboard — #410 trace records across apps
 
-#410 emits every deployed live-patch as an audit record into the app's trace substrate (who · action · timestamp · affected resource · diff · evidence · revert). This story aggregates those records across apps and teams in the hosted SaaS into a SOC2-style compliance dashboard: every live-patch ever applied, by whom, reverted or promoted to a PR, with break-glass elevations and expiries surfaced — the compliance view that makes the capability enterprise-credible. Blocked on #410 (defines the audit record) and #554 (the SaaS shell).
+#410 (the [monetization](docs/agent/platform-decisions.md#monetization) rule) emits every deployed live-patch as an audit record into the app's trace substrate (who · action · timestamp · affected resource · diff · evidence · revert). This story aggregates those records across apps and teams in the hosted SaaS into a SOC2-style compliance dashboard: every live-patch ever applied, by whom, reverted or promoted to a PR, with break-glass elevations and expiries surfaced — the compliance view that makes the capability enterprise-credible. Blocked on #410 (defines the audit record) and #554 (the SaaS shell).
 
 ## Scope
 

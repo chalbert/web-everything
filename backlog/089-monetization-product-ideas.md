@@ -110,7 +110,7 @@ still holds together as it and its deps change.**
 The serve-time core already returns one authored component as WC / JSX /
 functional / transpiled-to-target, per request, as spec-clean ESM. That *is* a
 paid CDN product (esm.sh / Skypack, but with `form` + `strategy` params). See
-also distribution/caching (#087) and versioning (#088).
+also distribution/caching (#087) and versioning ([constellation-placement](docs/agent/platform-decisions.md#constellation-placement), #088).
 - **Revenue:** usage-based edge delivery, build-free hosting, served-form
   analytics, private component endpoints.
 - **No lock-in:** output is spec-clean ESM you can self-host; transform core is
@@ -168,7 +168,7 @@ introspection substrate, and one billing/hosting surface.
 
 **Further Plateau offerings (own items):**
 - [#092](/backlog/092-provider-consumer-graph-platform-manager/) — provider↔consumer relationship graph & governance.
-- [#093](/backlog/093-business-rule-manager-proof-of-compliance/) — business-rule manager with proof of compliance.
+- [#093](/backlog/093-business-rule-manager-proof-of-compliance/) — business-rule manager with proof of compliance ([monetization](docs/agent/platform-decisions.md#monetization)).
 - *(More surfaced from the Plateau / plateau-app repos — e.g. a translation manager — being catalogued.)*
 
 ## Recommended order — re-ranked by the solo-founder lens
@@ -190,7 +190,7 @@ carry zero model-hosting cost or support — the ideal solo-founder shape:*
   place."
 - **Conformance auto-fix agent ([#095](/backlog/095-conformance-auto-fix-agent/))**
   — reads a failing conformance check and loops fix→re-verify until green.
-- **NL → Technical Configurator ([#096](/backlog/096-nl-to-technical-configurator/))**
+- **NL → Technical Configurator ([#096](/backlog/096-nl-to-technical-configurator/), [intents-ux-only](docs/agent/platform-decisions.md#intents-ux-only))**
   — describe behavior, AI selects+wires the right strategy from the registries
   (AI front-end to plateau-app's configurator).
 - **Migration tooling (idea 3)** — pure self-run codemod + risk report; no uptime,

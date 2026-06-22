@@ -9,7 +9,7 @@ crossRef: { url: /protocols/, label: Conformance protocols }
 
 # The evergreen app — the self-updating, always-current app as the constellation's north star
 
-The **evergreen app** is an application that keeps *itself* current — staying on the latest libraries, platform standards, and practices with little or no manual migration, so it never rots. It is the unifying "Holy Grail" of the archived design essay (`we:reports/2026-06-06-front-end-platform-book.md`, section *"The evergreen app"*) and the implicit target most of the existing monetization/tooling cluster (#086–#096) already points at. This item names it as an explicit **north-star vision** so the scattered mechanisms (versioning, distribution, upgraders, verification, the relationship graph) are understood as *parts of one machine*, not unrelated products.
+The **evergreen app** is an application that keeps *itself* current — staying on the latest libraries, platform standards, and practices with little or no manual migration, so it never rots. It is the unifying "Holy Grail" of the archived design essay (`we:reports/2026-06-06-front-end-platform-book.md`, section *"The evergreen app"*) and the implicit target most of the existing monetization/tooling cluster (#086–#096, [intents-ux-only](docs/agent/platform-decisions.md#intents-ux-only)) already points at. This item names it as an explicit **north-star vision** so the scattered mechanisms (versioning, distribution, upgraders, verification, the relationship graph) are understood as *parts of one machine*, not unrelated products.
 
 ## The picture (from the essay, mapped to today's constellation)
 
@@ -23,8 +23,8 @@ An evergreen app holds together because thin app-specific code sits on **mature,
 | Migration scripts shipped with breaking changes + per-module changelog manifest | #094 + **new — #102** |
 | Incremental/delta updates via service worker | **new — #103** |
 | AI auto-tests a growing share of requirements; learns the rest | #095 + #100 |
-| Apps that don't update keep running on an older app shell, flagged on the dashboard | **new — #104** + #092 |
-| Always-on monitoring, revert-without-deploy, conformance never drifts | #089 idea 1 / #093 |
+| Apps that don't update keep running on an older app shell, flagged on the dashboard | **new — #104** ([constellation-placement](docs/agent/platform-decisions.md#constellation-placement)) + #092 |
+| Always-on monitoring, revert-without-deploy, conformance never drifts | #089 idea 1 / #093 ([monetization](docs/agent/platform-decisions.md#monetization)) |
 
 ## Why it's worth naming as one thing
 

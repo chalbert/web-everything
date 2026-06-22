@@ -11,7 +11,7 @@ tags: [webdocs, adapters, polyglot, generation, component-emit, deferred]
 
 # Dedicated forward-emit IR (Option C) — design a neutral @webeverything emit-purpose contract, case-informed post-subset
 
-Phase-2 design call deferred from [#818](/backlog/818-author-mode-emit-substrate-dedicated-forward-emit-purpose-ir/): whether (and how) to design a **dedicated emit-purpose IR** — Option C from #811 Fork 2, a neutral `@webeverything` contract built *for* forward emit rather than reusing the ingest-focused `ComponentIR`. De-buried here from #818's body so the fork lives in its own card, not inline in a build item (the *Decisions Are Work Items* rule).
+Phase-2 design call deferred from [#818](/backlog/818-author-mode-emit-substrate-dedicated-forward-emit-purpose-ir/): whether (and how) to design a **dedicated emit-purpose IR** — Option C from #811 Fork 2 (the [we-fui-embed-boundary](docs/agent/platform-decisions.md#we-fui-embed-boundary) rule), a neutral `@webeverything` contract built *for* forward emit rather than reusing the ingest-focused `ComponentIR`. De-buried here from #818's body so the fork lives in its own card, not inline in a build item (the *Decisions Are Work Items* rule).
 
 ## Why parked, not open
 
@@ -23,4 +23,4 @@ The whole point of #811's subset-first ruling is to **delay this decision until 
 
 ## The fork (to be made with evidence, not now)
 
-- **Extend `ComponentIR` bidirectionally** (reuse the ingest representation for emit) vs. **a dedicated emit-purpose IR (Option C)** — a separate neutral `@webeverything` contract authored for generation. #811 leaned toward C *eventually*, deferred until informed. The decision also covers C's contract surface and where it sits relative to the #463/#507 forward-generation family.
+- **Extend `ComponentIR` bidirectionally** (reuse the ingest representation for emit) vs. **a dedicated emit-purpose IR (Option C)** — a separate neutral `@webeverything` contract authored for generation. #811 leaned toward C *eventually*, deferred until informed. The decision also covers C's contract surface and where it sits relative to the #463/#507 [forward-generation-adapters](docs/agent/platform-decisions.md#forward-generation-adapters) family.

@@ -9,7 +9,7 @@ tags: [dev-browser, live-patch, deployed-app, saas, policy, governance, hosted]
 
 # Per-app live-patch policy console — dials for #410 (break-glass, TTL, two-party, lifetime)
 
-#410 makes deployed live-patch authorization rigor and patch lifetime per-app policy dials (break-glass elevation, max TTL, two-party-approval on/off, ephemeral-vs-session lifetime). Those dials need a management home. This story builds the per-app policy console in the hosted SaaS where an org sets who may break-glass, the hard TTL ceiling, whether two-party approval is required, and the default patch lifetime per app — the admin surface for the configurable axes #410 ratified. Blocked on #410 (defines the dials) and #554 (the SaaS shell).
+#410 (the [monetization](docs/agent/platform-decisions.md#monetization) rule) makes deployed live-patch authorization rigor and patch lifetime per-app policy dials (break-glass elevation, max TTL, two-party-approval on/off, ephemeral-vs-session lifetime). Those dials need a management home. This story builds the per-app policy console in the hosted SaaS where an org sets who may break-glass, the hard TTL ceiling, whether two-party approval is required, and the default patch lifetime per app — the admin surface for the configurable axes #410 ratified. Blocked on #410 (defines the dials) and #554 (the SaaS shell).
 
 ## Dials this console manages (all defined by #410)
 

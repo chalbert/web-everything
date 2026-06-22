@@ -90,7 +90,7 @@ One story per requirements module (mirrors #317's #378–#388):
 - S1 ([#412](/backlog/412-ins-phase-quote-questionnaire/)) **done** — the quote wizard; WE deliverable was
   **activating the draft Stepper block** (#053 draft→active, `StepperBehavior`, locked progression +
   per-step gate). Conformance **100% (11/11)**. Surfaced gaps filed: configurator constraint-graph
-  ([#096]), step view-transitions ([#015]), a route-view stamping bug ([#423]).
+  ([#096], the [intents-ux-only](docs/agent/platform-decisions.md#intents-ux-only) rule), step view-transitions ([#015], the [project-protocol-bar](docs/agent/platform-decisions.md#project-protocol-bar) rule), a route-view stamping bug ([#423]).
 
 - S2 ([#413](/backlog/413-ins-phase-coverage-tree/)) **done** — the coverage builder; WE deliverable was
   **building the `tree-select` block** ([#296], realizes the `hierarchy` intent: APG tree, cascade

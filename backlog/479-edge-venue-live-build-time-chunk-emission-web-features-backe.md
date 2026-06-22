@@ -12,7 +12,7 @@ Umbrella for the infra-dependent remainder of #219 (which delivered the pure I/O
 Sec-CH-UA* parsing, Accept-CH/Critical-CH/Vary, immutable chunk cache headers, injectable
 `BaselineLookup`). Two pieces need infra absent from the pure-logic `capabilities/` package — and they
 cleave along the agent-ready / needs-a-decision line, so this epic carves into one batchable build slice
-plus one placement decision. Ties into MaaS distribution #087/#088. **Epic DoD** (satisfied when the
+plus one placement decision. Ties into MaaS distribution #087/#088 (the [constellation-placement](docs/agent/platform-decisions.md#constellation-placement) rule). **Epic DoD** (satisfied when the
 children land): a request with real Client-Hints resolves a droplist to a capability-keyed BUILT chunk
 served from the edge cache; two UAs in one class share the chunk; a wrong guess degrades.
 

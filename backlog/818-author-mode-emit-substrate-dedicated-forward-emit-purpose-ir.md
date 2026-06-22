@@ -25,7 +25,7 @@ tags: [webdocs, adapters, polyglot, generation, component-emit]
 > (`we:blocks/renderers/module-service/moduleService.ts`), but the polyglot panel is FUI-owned
 > (`fui:workbench/mount.ts`) and #753's consume-mode uses FUI's own `genWrapper`, never importing WE's
 > `serve()`/`moduleService` (the #700 cross-repo-impl boundary). So "render via serve()" can't be wired as
-> written — it needs a placement call. Filed **[#954](/backlog/954-decide-how-polyglot-author-mode-source-reaches-the-fui-workb/)**
+> written — it needs a placement call ([constellation-placement](docs/agent/platform-decisions.md#constellation-placement)). Filed **[#954](/backlog/954-decide-how-polyglot-author-mode-source-reaches-the-fui-workb/)**
 > (`type: decision`, `blockedBy: 954` added; also set the missing `locus: frontierui` to match its #746
 > siblings). The bold demand-gate (appetite for idiomatic source) is also unresolved and folded into #954.
 >
@@ -39,7 +39,7 @@ tags: [webdocs, adapters, polyglot, generation, component-emit]
 
 # Author-mode emit foundation — wire an output-tabs author mode onto the existing `serve(){form}` forms over the declarative `<component>` subset
 
-Author mode for the polyglot panel (#753): show idiomatic native component **source** for the current block, starting with the forms the transform core **already emits** — the browser member of the ratified #463 forward-generation family (#506-gated). Per #811's ruling, **start subset-first, not with a new IR**. **DEMAND-GATED**: build only after #753's consume-mode (CEM-wrapper) probe ships *and* appetite for idiomatic source is shown.
+Author mode for the polyglot panel (#753): show idiomatic native component **source** for the current block, starting with the forms the transform core **already emits** — the browser member of the ratified #463 [forward-generation-adapters](docs/agent/platform-decisions.md#forward-generation-adapters) family (#506-gated). Per #811's ruling (the [we-fui-embed-boundary](docs/agent/platform-decisions.md#we-fui-embed-boundary) rule), **start subset-first, not with a new IR**. **DEMAND-GATED**: build only after #753's consume-mode (CEM-wrapper) probe ships *and* appetite for idiomatic source is shown.
 
 > **Re-scoped `story·13` → `story·3` foundation on 2026-06-18 (`/split 818`, report [we:reports/2026-06-18-backlog-split-analysis.md](../reports/2026-06-18-backlog-split-analysis.md)).** Could-not-split: the work the item existed for — idiomatic **Vue/Svelte/Angular** source — has no code to ground a slice against (the body's own "wall"), while the React-ish/native forms are already one `serve(definition,{form})` call away. So this item is **re-scoped to the groundable foundation**; the per-framework emitters become batchable slices *after* this lands and reveals their seams. The deferred Option-C emit-IR fork is de-buried to **[#939](/backlog/939-dedicated-forward-emit-ir-option-c-design-a-neutral-webevery/)** (parked `type: decision`).
 

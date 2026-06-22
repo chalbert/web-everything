@@ -21,7 +21,7 @@ component is the tiny license endpoint (#182).
 
 Child stories:
 
-- **#182** — license-key issuance + validation endpoint (the one always-on surface).
+- **#182** — license-key issuance + validation endpoint (the one always-on surface) — under the [monetization](docs/agent/platform-decisions.md#monetization) rule.
 - **#183** — payments via a merchant-of-record → license issuance.
 - **#184** — marketing landing + pricing site (reuse webdocs).
 - **#185** — go-to-market / marketing strategy.

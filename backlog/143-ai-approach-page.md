@@ -18,7 +18,7 @@ The approach is still evolving (agent workflows, backlog-as-tracker, design-firs
 ## What it might cover (sketch — refine at authoring time)
 
 - **AI-native development** — agents as first-class contributors; the human owns direction, review, and merge.
-- **Standard-as-substrate for AI** — why a vendor-neutral, introspectable standard makes apps legible to AI (ties into the dev-browser conformance-gate story, [#141](/backlog/141-dev-browser-vision/)).
+- **Standard-as-substrate for AI** — why a vendor-neutral, introspectable standard makes apps legible to AI (ties into the dev-browser conformance-gate story, [#141](/backlog/141-dev-browser-vision/) — the [monetization](docs/agent/platform-decisions.md#monetization) rule).
 - **Working practices** — backlog-as-source-of-truth, design-first/materialization, demo-driven conformance, plain-language + verify-claims discipline.
 - **Guardrails & control** — where AI acts autonomously vs. where a human ratifies; the review/PR loop.
 - **Honest framing** — what AI does well here and where it doesn't; no hype.

@@ -20,7 +20,7 @@ repo accepts its first external pull request** — the near-term trigger #217 na
 
 - **Frontier UI + Plateau:** copy `we:CLA.md` + `we:.github/workflows/cla.yml` into both
   repos (the gradient needs the CLA on every repo that takes contributions — WE, FU,
-  and Plateau per [#098](/backlog/098-licensing-strategy/)). Adjust each CLA's
+  and Plateau per [#098](/backlog/098-licensing-strategy/) — the [monetization](docs/agent/platform-decisions.md#monetization) rule). Adjust each CLA's
   Project framing only if a repo names itself differently; the relicensing grant is
   identical across all three.
 - **Activate the bot:** replace the `OWNER/REPO` placeholders in each `we:cla.yml`

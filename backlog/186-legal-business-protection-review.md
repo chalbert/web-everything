@@ -23,7 +23,7 @@ Checklist to review and settle:
   clear the name before marketing spend ("Web Everything" / "Plateau" / Frontier
   UI clearance).
 - **OSS + commercial license split** — the policy is its own decision in
-  [#098](/backlog/098-licensing-strategy/); settle before launch and label tiers
+  [#098](/backlog/098-licensing-strategy/) (the [monetization](docs/agent/platform-decisions.md#monetization) rule); settle before launch and label tiers
   honestly.
 - **ToS / EULA + Privacy Policy** — required to sell; privacy policy states the
   telemetry stance ("no source code leaves the machine") and is GDPR-compliant. A

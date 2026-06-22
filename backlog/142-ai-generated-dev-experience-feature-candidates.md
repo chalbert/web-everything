@@ -15,7 +15,7 @@ crossRef: { url: /backlog/140-dev-surface-product-feature-matrix/, label: "Produ
 
 > ⚠️ **AI-generated.** This card was produced by Claude in a brainstorm extending the [feature matrix (#140)](/backlog/140-dev-surface-product-feature-matrix/) along two threads the user raised — *having the full context to debug* and *getting the best person on the team to do the work*. It is a **raw idea inventory to triage**, not vetted, deduped, or prioritised specs. Promote the good ones to #140 rows or their own items; discard the rest.
 
-All candidates ride the same moat as the matrix: a Web Everything app is **self-describing** (introspectable registries / intents / contexts / traces / declared rules + ownership), so tooling can be *semantic, portable, verifiable* instead of heuristic and framework-bound — and can know not just **what** every piece is but **who owns it**. Most are natural-home features of the [dev browser (#141)](/backlog/141-dev-browser-vision/) and are **local-first / zero-server** (consistent with the cost-flat rule in #140).
+All candidates ride the same moat as the matrix: a Web Everything app is **self-describing** (introspectable registries / intents / contexts / traces / declared rules + ownership), so tooling can be *semantic, portable, verifiable* instead of heuristic and framework-bound — and can know not just **what** every piece is but **who owns it**. Most are natural-home features of the [dev browser (#141)](/backlog/141-dev-browser-vision/) and are **local-first / zero-server** (consistent with the cost-flat rule in #140 — the [monetization](docs/agent/platform-decisions.md#monetization) rule).
 
 ## A — Full context to debug
 

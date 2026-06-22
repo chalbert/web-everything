@@ -13,7 +13,7 @@ The explorer's Layer-3 **judge** (`fui:tools/explorer/oracles/advisoryJudge.ts` 
 
 ## Why an epic (not a story)
 
-It spans: a **feedback-capture format** (label a finding/state: false-positive / missed / severity-wrong / looks-broken), a **training-signal store** (the labeled dataset — possibly seeded by #489's frame/verdict pairs), a **learning mechanism** (the real fork — below), an **eval** (does a trained judge beat the frozen one on held-out feedback?), and the **constellation boundary** (training/model may be WE/Plateau-side per #1073/#475; the explorer/FUI consumes outputs — `fui:tools/explorer/oracles/advisoryJudge.ts` `JudgeModel` is already the zero-lock-in seam for the swap).
+It spans: a **feedback-capture format** (label a finding/state: false-positive / missed / severity-wrong / looks-broken), a **training-signal store** (the labeled dataset — possibly seeded by #489's frame/verdict pairs), a **learning mechanism** (the real fork — below), an **eval** (does a trained judge beat the frozen one on held-out feedback?), and the **constellation boundary** (training/model may be WE/Plateau-side per the [no-leakage-client](docs/agent/platform-decisions.md#no-leakage-client) rule, #1073/#475; the explorer/FUI consumes outputs — `fui:tools/explorer/oracles/advisoryJudge.ts` `JudgeModel` is already the zero-lock-in seam for the swap).
 
 ## The architecture fork (a `type:decision` child — DO NOT pre-pick here)
 

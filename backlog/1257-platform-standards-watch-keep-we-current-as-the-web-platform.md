@@ -9,7 +9,7 @@ tags: []
 
 # Platform-standards watch
 
-A front-B currency program (with a front-A conformance arm) that keeps Web Everything aligned to the moving web platform. Front A: every WE standard with a native equivalent defers to it — native-first (#031) as a living check, not a snapshot. Front B: when a new native capability ships (TC39/WHATWG/W3C, with Baseline and a11y/APG as lenses), evaluate impact on WE — adopt and repoint, demote a redundant polyfill to opt-in, or flag an obsoleted/enabled intent. Currently L0: the metric, sweep, and cadence are not yet built. Keystone of the evergreen vision (#099 consumes its output).
+A front-B currency program (with a front-A conformance arm) that keeps Web Everything aligned to the moving web platform. Front A: every WE standard with a native equivalent defers to it — native-first ([native-first-baseline](docs/agent/platform-decisions.md#native-first-baseline), #031) as a living check, not a snapshot. Front B: when a new native capability ships (TC39/WHATWG/W3C, with Baseline and a11y/APG as lenses), evaluate impact on WE — adopt and repoint, demote a redundant polyfill to opt-in, or flag an obsoleted/enabled intent. Currently L0: the metric, sweep, and cadence are not yet built. Keystone of the evergreen vision (#099 consumes its output).
 
 ## The two fronts
 

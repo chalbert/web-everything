@@ -10,7 +10,7 @@ crossRef: { url: /backlog/665-self-driven-project-ratify-the-framing-autonomy-ta
 
 # Self-Driven Project
 
-> **Reopened 2026-06-20 (`ongoing: true`).** Resolving this 2026-06-16 was premature — it is the perpetual *vision umbrella* (the whole-SDLC self-driving north star), not a finite build; the framing decision [#665](/backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas/) stays resolved, but the program itself is continuous and stays `open`.
+> **Reopened 2026-06-20 (`ongoing: true`).** Resolving this 2026-06-16 was premature — it is the perpetual *vision umbrella* (the whole-SDLC self-driving north star), not a finite build; the framing decision [#665](/backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas/) (the [monetization](docs/agent/platform-decisions.md#monetization) rule) stays resolved, but the program itself is continuous and stays `open`.
 
 Umbrella for the **Self-Driven Project**: the self-driving-car model applied to the whole SDLC. A
 human **sets the goal + a tolerance/risk envelope**; the system **drives the steps**
@@ -50,7 +50,7 @@ Already-existing machinery this epic gathers under one roof:
 - **[#141](/backlog/141-dev-browser-vision/)** — dev-browser autonomy ladder + verify-gate loop.
 - **[#095](/backlog/095-conformance-auto-fix-agent/)** — propose-and-verify auto-fix (shipped).
 - **[#099](/backlog/099-evergreen-app-vision/)** / **[#100](/backlog/100-requirement-as-code/)** — the evergreen lifecycle + requirement-as-code.
-- **[#562](/backlog/562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac/)** — IDE-bridge substrate.
+- **[#562](/backlog/562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac/) (the [constellation-placement](docs/agent/platform-decisions.md#constellation-placement) rule)** — IDE-bridge substrate.
 - **[#578](/backlog/578-fix-loop-git-integration-bot-pr-mechanics-flow-forge-auth-ag/)** — AI code not privileged; evidence carries autonomy level.
 - **[#410](/backlog/410-dev-browser-deployed-app-live-patch-gated-capability-safety-)** — higher-autonomy live-patch carve-out.
 - **[#166](/backlog/166-governance-persona-roster-charter-schema/)** — gate-severity enum + persona-scoped views.

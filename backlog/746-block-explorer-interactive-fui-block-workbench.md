@@ -23,7 +23,7 @@ Turn each FUI block "do" page into a live, inspectable, re-themeable, polyglot *
 | # | Item | What it adds | Blocked by |
 |---|---|---|---|
 | 1 | **#748** — block anatomy / composition view | list + browse every piece (traits/plugs/intents/tokens/providers), exploded layer view, toggle-to-degrade | — |
-| 2 | **#747** — *decision*: design system = theme + intents bundle (manifest + `/design-systems/` catalog) | the keystone format the switcher/creator consume | — |
+| 2 | **#747** — *decision*: design system = theme + intents bundle (manifest + `/design-systems/` catalog; the [intents-ux-only](docs/agent/platform-decisions.md#intents-ux-only) rule) | the keystone format the switcher/creator consume | — |
 | 3 | **#749** — live theme / design-system switcher | swap presets live, A/B + token-diff, axis sliders, dark/RTL/container-query | #747, #727 |
 | 4 | **#750** — live trait activation panel | toggle/activate traits live, trait state-machine inspector | #727 |
 | 5 | **#751** — embedded theme/design-system creator (Plateau) | "Your theme" → Plateau embed, localStorage save, import/screenshot→tokens | #747 |
@@ -35,10 +35,10 @@ Turn each FUI block "do" page into a live, inspectable, re-themeable, polyglot *
 ## Boundary (what this epic does NOT own)
 
 - The per-component live render surface + static props/token/a11y panels → **#727**.
-- The token model / DTCG↔CSS / platform default token set → **webtheme (#364)**.
+- The token model / DTCG↔CSS / platform default token set → **webtheme (#364)** (the [project-protocol-bar](docs/agent/platform-decisions.md#project-protocol-bar) rule).
 - The served Web Docs product, hosting, open-core tiering → **#398 / #428**.
-- The MaaS *server-origin* polyglot generation (vs the *component* polyglot panel here) → **#463/#505/#507** (shared generation-adapter core #547).
-- Pushing a configured block onto a live deployed app → **dev-browser #410/#141** (a downstream consumer, not built here).
+- The MaaS *server-origin* polyglot generation (vs the *component* polyglot panel here) → **#463/#505/#507** (shared generation-adapter core #547; #463 is the [forward-generation-adapters](docs/agent/platform-decisions.md#forward-generation-adapters) rule).
+- Pushing a configured block onto a live deployed app → **dev-browser #410/#141** (a downstream consumer, not built here; #410 is the [monetization](docs/agent/platform-decisions.md#monetization) rule).
 
 ## Acceptance (epic done when)
 

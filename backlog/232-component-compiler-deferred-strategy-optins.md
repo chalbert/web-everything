@@ -14,7 +14,7 @@ crossRef: { url: /adapters/jsx-adapter/, label: JSX Adapter }
 
 # Deferred `<component>` compiler strategy opt-ins (collected for later, on-demand)
 
-Collection of the lower-priority strategy opt-ins set aside by the #127 ruling. #127 settled that the
+Collection of the lower-priority strategy opt-ins set aside by the #127 ruling (the [component-dc](docs/agent/platform-decisions.md#component-dc) rule). #127 settled that the
 compiler's toolchain reach is a set of **configurable strategy axes** with native-first defaults; **#231**
 ships the top 2 per axis to prove the principle. These are the *remaining* legitimate-but-deferred strategies
 — captured so they aren't lost, to be picked up only when a concrete project/team demands one.
@@ -34,5 +34,5 @@ ships the top 2 per axis to prove the principle. These are the *remaining* legit
 
 - None of these block #231 — each is an additive opt-in on an axis #231 establishes.
 - The config-surface question (a Technical Configurator domain that selects strategies, data-driven) lives in
-  **#150**, not here.
-- Sibling to #227 (auto-define strategy axis), which has its own deferred-strategy space.
+  **#150** (the [project-protocol-bar](docs/agent/platform-decisions.md#project-protocol-bar) rule), not here.
+- Sibling to #227 (the [config-extends-platform-default](docs/agent/platform-decisions.md#config-extends-platform-default) rule; auto-define strategy axis), which has its own deferred-strategy space.

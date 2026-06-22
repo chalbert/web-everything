@@ -61,7 +61,7 @@ offered) is the trust spine and the moat, identical across all of them.
   Growth: BYO-AI provider ([#188](/backlog/188-upgrader-byo-ai-model-analyzer/)),
   intent inference ([#189](/backlog/189-upgrader-intent-inference/)), more input
   adapters ([#190](/backlog/190-upgrader-additional-input-adapters/)), version
-  codemods ([#191](/backlog/191-upgrader-version-migration-codemods/)).
+  codemods ([#191](/backlog/191-upgrader-version-migration-codemods/), [runtime-di-vs-devtools-provider-seam](docs/agent/platform-decisions.md#runtime-di-vs-devtools-provider-seam)).
 - **Conformance auto-fix agent** ([#095](/backlog/095-conformance-auto-fix-agent/))
   — *being worked.* Fix violations against the checker; tightest verify loop,
   lowest model risk. Effectively the upgrader's narrowest input case — folds onto
@@ -75,7 +75,7 @@ offered) is the trust spine and the moat, identical across all of them.
 
 Everything here stays **tier-1**: self-run tools, BYO-AI, no model cost / uptime
 / SLA. The bigger always-on plays (MaaS live CDN #081, business-rule/compliance
-manager #093, the relationship-graph dashboard #092) are **post-MVP** — they add
+manager #093, the relationship-graph dashboard #092) are **post-MVP** ([monetization](docs/agent/platform-decisions.md#monetization)) — they add
 uptime/contract burden and wait until a self-run tool funds taking that on. The
 one tiny always-on surface (the license endpoint) lives in the infra epic
 ([#181](/backlog/181-commercialization-infrastructure/)), not here.

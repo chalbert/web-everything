@@ -21,7 +21,7 @@ The deferred home for offering multiple Plateau products (custom browser, Web Do
 ## Why this exists separately from the per-product epics
 
 The constellation deliberately has **no single "home" for managed offerings** — per the [#091](/backlog/091-web-docs-as-a-service-plateau/)
-/ #092 rulings each managed offering decomposes across the constellation (standard→WE, primitives→FUI,
+/ #092 rulings (the [monetization](docs/agent/platform-decisions.md#monetization) rule) each managed offering decomposes across the constellation (standard→WE, primitives→FUI,
 served product→plateau-app). That layering answers *"how is one product hosted"*, not *"how are several
 products sold together"*. This epic is the latter: the **suite-level shell** — one account, one sign-in,
 one cross-product billing surface — that the individual product epics would plug into once live-serve is

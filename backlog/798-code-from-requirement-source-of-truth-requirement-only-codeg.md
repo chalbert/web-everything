@@ -12,7 +12,7 @@ relatedProject: webcases
 
 # Code-from-requirement source-of-truth — requirement-only (codegen) vs AI-proposes/dev-validates
 
-Capability 3 of requirement-as-code (#100), de-buried from its body: should code-from-requirement treat the requirement as the ONLY source of truth (code generated at build/run, needs very high confidence) — option (a) — or have the AI PROPOSE a code change a developer validates/edits — option (b)? Parked: far-future vision-tier (the #099 evergreen app), gated on the Plateau-served codegen capability existing. Placement is settled (Plateau-served, no-leakage #475); only the source-of-truth shape is the open call. Un-parks when the codegen capability is real.
+Capability 3 of requirement-as-code (#100), de-buried from its body: should code-from-requirement treat the requirement as the ONLY source of truth (code generated at build/run, needs very high confidence) — option (a) — or have the AI PROPOSE a code change a developer validates/edits — option (b)? Parked: far-future vision-tier (the #099 evergreen app), gated on the Plateau-served codegen capability existing. Placement is settled (Plateau-served, no-leakage #475 — the [no-leakage-client](docs/agent/platform-decisions.md#no-leakage-client) rule); only the source-of-truth shape is the open call. Un-parks when the codegen capability is real.
 
 ## Why this is a parked decision card
 

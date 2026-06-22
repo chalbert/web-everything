@@ -12,4 +12,4 @@ tags: [webdocs, design-system, theme-creator, plateau, vision, screenshot, paid,
 
 # Screenshot to theme (paid vision) for the Plateau creator
 
-PARKED — the paid vision path. Needs a vision TOKEN-extraction capability (a Plateau service per #475, no-leakage client) that does not exist: #086/#382 yield ComponentIR (component structure), not tokens. Unblocks once that capability lands.
+PARKED — the paid vision path. Needs a vision TOKEN-extraction capability (a Plateau service per #475, the [no-leakage-client](docs/agent/platform-decisions.md#no-leakage-client) rule) that does not exist: #086/#382 yield ComponentIR (component structure), not tokens. Unblocks once that capability lands.

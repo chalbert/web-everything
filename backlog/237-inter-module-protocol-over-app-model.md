@@ -14,7 +14,7 @@ crossRef: { url: /backlog/140-dev-surface-product-feature-matrix/, label: "Dev-s
 
 # Inter-module communication contracts as Protocols over the introspectable app model
 
-Spun out of [#150](/backlog/150-dev-authoring-preferences-architecture-intents/). The genuine white-space
+Spun out of [#150](/backlog/150-dev-authoring-preferences-architecture-intents/) (the [project-protocol-bar](docs/agent/platform-decisions.md#project-protocol-bar) rule). The genuine white-space
 the research found: architecture & component-**scoping** rules expressed as declarative intent **over the
 running app model** (composition / context / intent graph), not reverse-engineered from the import graph
 the way dependency-cruiser / Sheriff / Nx do.

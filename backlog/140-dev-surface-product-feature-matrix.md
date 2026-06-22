@@ -22,7 +22,7 @@ A strategy matrix placing each candidate **developer-experience feature** agains
 
 **The core tension (user framing):** the easier to install (extensions), the easier initial **adoption** — but the **harder the sell**. SaaS and the dev browser are inherently closer to "a product," so they're easier to *market and monetize*; the browser especially works as a **free version with caveats → paid upgrade**. Practical read: **extensions are the funnel and the cheap proving ground; the dev browser (and selectively SaaS) is the monetizable product.**
 
-**Cost-flat rule (overrides surface choice):** keep server cost flat on *every* product. A product either **runs locally and is free**, or is **paid and may use a remote server** — never a free product carrying server cost (the one exception: free docs). A **local product may also carry a commercial license** where there's value (the dev browser is the example — local, yet product-shaped enough to license; see [#141](/backlog/141-dev-browser-vision/)). Consequence for this matrix: the server-needing features (5 cloud offload, 7 flags, 8 A/B, 12 translation management) live on the **paid SaaS** side or are deferred ([#089](/backlog/089-monetization-product-ideas/)); the local surfaces (extensions, dev browser) stay free-or-licensed with **zero server cost on us**.
+**Cost-flat rule (overrides surface choice):** keep server cost flat on *every* product. A product either **runs locally and is free**, or is **paid and may use a remote server** — never a free product carrying server cost (the one exception: free docs). A **local product may also carry a commercial license** where there's value (the dev browser is the example — local, yet product-shaped enough to license; see the [monetization](docs/agent/platform-decisions.md#monetization) rule and [#141](/backlog/141-dev-browser-vision/)). Consequence for this matrix: the server-needing features (5 cloud offload, 7 flags, 8 A/B, 12 translation management) live on the **paid SaaS** side or are deferred ([#089](/backlog/089-monetization-product-ideas/)); the local surfaces (extensions, dev browser) stay free-or-licensed with **zero server cost on us**.
 
 ## The matrix
 
@@ -77,7 +77,7 @@ This is the [#089](/backlog/089-monetization-product-ideas/) "AI proposes, the s
 - **[#086](/backlog/086-mockup-to-standard-code-tool/)** owns mockup→code (batch codegen); feature 1 here is the *live in-context reference/analysis* angle.
 - **[#093](/backlog/093-business-rule-manager-proof-of-compliance/)** owns the business-rule manager + proof-of-compliance; feature 11 is its *in-context, per-page, Cucumber-source-of-truth, non-coder* framing.
 - **[#089](/backlog/089-monetization-product-ideas/)** lists flags / A/B / translations as unassessed Plateau-candidate domains — this item assesses their market + surface fit.
-- **[#096](/backlog/096-nl-to-technical-configurator/)**, **[#094](/backlog/094-ai-upgrader-tools/)**, **[#095](/backlog/095-conformance-auto-fix-agent/)** are the AI code-tool family (the #097 MVP) — orthogonal to this surface matrix.
+- **[#096](/backlog/096-nl-to-technical-configurator/)** (the [intents-ux-only](docs/agent/platform-decisions.md#intents-ux-only) rule), **[#094](/backlog/094-ai-upgrader-tools/)**, **[#095](/backlog/095-conformance-auto-fix-agent/)** are the AI code-tool family (the #097 MVP) — orthogonal to this surface matrix.
 - **[#141](/backlog/141-dev-browser-vision/)** is the dev-browser vision (the rightmost column, written up as its own concept).
 
 ## Design notes / next steps

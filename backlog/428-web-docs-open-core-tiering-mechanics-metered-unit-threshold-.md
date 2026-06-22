@@ -33,7 +33,7 @@ crossRef: { url: /backlog/091-web-docs-as-a-service-plateau/, label: "Web Docs r
 Grounded in the [Web Docs open-core tiering prior-art survey](/research/web-docs-open-core-tiering/)
 ([report](../reports/2026-06-12-web-docs-tiering-mechanics.md)) — how comparable docs / dev-tool /
 hosting SaaS meter and tier (Chromatic, Mintlify, ReadMe, GitBook, Netlify, Vercel). [#091](/backlog/091-web-docs-as-a-service-plateau/)
-ratified the open-core *principle* (open-core by usage; cancel-and-self-host always holds); this item
+ratified the open-core *principle* (the [monetization](docs/agent/platform-decisions.md#monetization) rule — open-core by usage; cancel-and-self-host always holds); this item
 settles the *mechanics* it left open. **No design exists yet.** The three named axes reshape into **one
 genuine fork** (the metered unit), **one low-confidence principle** (the free/paid threshold), and **one
 ratify** (the billing surface — already chosen). Recommended unit: **meter the conformance-verified

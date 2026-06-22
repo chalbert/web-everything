@@ -20,7 +20,7 @@ conversion).
 
 Scope: a landing page that leads with the *propose-and-verify* demo (foreign/legacy
 code → provably-conformant output — the hook), a pricing page wired to checkout
-([#183](/backlog/183-payments-merchant-of-record/)), and a download/`npx` CTA.
+([#183](/backlog/183-payments-merchant-of-record/), the [monetization](docs/agent/platform-decisions.md#monetization) rule), and a download/`npx` CTA.
 Product-agnostic: the demo and copy swap per whichever candidate is the emerging
 MVP ([#097](/backlog/097-roadmap-to-mvp/)).
 

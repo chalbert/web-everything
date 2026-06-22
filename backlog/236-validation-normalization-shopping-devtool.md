@@ -12,7 +12,7 @@ crossRef: { url: /backlog/150-dev-authoring-preferences-architecture-intents/, l
 
 # Validation normalization + shopping devtool (adapter-as-normalization-hub)
 
-Spun out of [#150](/backlog/150-dev-authoring-preferences-architecture-intents/). The differentiated,
+Spun out of [#150](/backlog/150-dev-authoring-preferences-architecture-intents/) (the [project-protocol-bar](docs/agent/platform-decisions.md#project-protocol-bar) rule). The differentiated,
 **zero-lock-in** answer for the lint/format/boundary overlap zone: not a new format, but a devtool that
 **adapts to the validation tools you already use**. You can run it once and stop — the project keeps no
 reference to it whatsoever (it only ever touches the incumbents' own config files).

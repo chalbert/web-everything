@@ -15,7 +15,7 @@ docs/marketing page — distinct from any one consumer ([#604](/backlog/604-migr
 is the WE-block-page consumer). Many use cases (YouTube/Facebook-style third-party embeds, and our own
 component-example case) and many mechanisms. v1 = an iframe to a separately-hosted demo (the [#701](/backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo/)
 `fuiDemo` shortcode) — for the WE→FUI case also the **only** mechanism consistent with [#700](/backlog/700-component-converter-playground-placement/)
-(no cross-repo import). Known limit: an iframe clips to its box, so a demo's modal/overlay can't cover the
+(no cross-repo import — the [we-fui-embed-boundary](docs/agent/platform-decisions.md#we-fui-embed-boundary) rule). Known limit: an iframe clips to its box, so a demo's modal/overlay can't cover the
 host page — a slice investigates alternatives and the eventual DI-mount path.
 
 Decided in [#707](/backlog/707-reconcile-604-s-we-renders-real-fui-blocks-framing-with-the-/) (the #604↔iframe

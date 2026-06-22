@@ -12,7 +12,7 @@ tags: [webdocs, block-explorer, adapters, polyglot]
 # Polyglot panel — live-test sandbox: execute the generated wrapper in an embedded sandbox
 
 **Storied epic (split 2026-06-18, `/split 912`).** The live-test sandbox — serve the generated
-React/Vue wrapper, mount it live in the workbench, and surface runtime errors. With #955 (A2 same-document
+React/Vue wrapper, mount it live in the workbench, and surface runtime errors. With #955 ([constellation-placement](docs/agent/platform-decisions.md#constellation-placement); A2 same-document
 mount), #974 (the `servePathIR` wrapper-serve protocol) and #977 (`react-wrapper`/`vue-wrapper` form
 values) all resolved, no design fork remains; the build decomposes into three slices on a linear
 incremental-delivery chain (each leaves a valid demoable state). Home `fui:`. locus:frontierui. See
