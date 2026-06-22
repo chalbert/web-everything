@@ -55,6 +55,10 @@ module.exports = () => {
       status: it.status,
       tier: it.tier || null,           // only open items carry a tier (#249)
       batchable: !!it.batchable,        // Tier-A task or story ≤8 — the batch pool a points-budgeted batch packs
+      // A human-only hold (deploy/credential/feedback/review/setup) that demotes the card out of Tier A — a
+      // residual nothing in the backlog resolves. It belongs to the card, not a node, so the renderer draws it
+      // as a marker on the gated node (not a separate node/edge). `what` feeds the hover tooltip.
+      humanGate: it.humanGate ? { kind: it.humanGateKind || null, what: it.humanGate.what || '' } : null,
       direct: it.directUnblocks,        // #254 leverage fields
       chain: it.transitiveUnblocks,
       leverage: it.leverageScore,

@@ -36,6 +36,7 @@
   };
   var MUTED = { fill: '#f8fafc', stroke: '#cbd5e1', text: '#94a3b8' };      // resolved / parked
   var ACTIVE = { fill: '#dbeafe', stroke: '#2563eb', text: '#1e40af' };     // claimed / in progress
+  var HELD = '#ea580c';   // human-gate ring/badge (a human-only hold: deploy/credential/feedback/review/setup)
   var styleFor = function (n) {
     if (n.status === 'active') return ACTIVE;                               // claimed work stands out
     return (n.status === 'open' && TIER[n.tier]) ? TIER[n.tier] : MUTED;
@@ -234,14 +235,23 @@
       var title = make('title', {});
       title.textContent = '#' + n.num + ' ' + n.title
         + '\nstatus: ' + n.status + (n.tier ? ' · tier ' + n.tier : '') + (n.batchable ? ' · batchable' : '')
-        + '\nunblocks ' + n.direct + ' directly, ' + n.chain + ' in chain';
+        + '\nunblocks ' + n.direct + ' directly, ' + n.chain + ' in chain'
+        + (n.humanGate ? '\n🔒 held — ' + (n.humanGate.kind || 'human') + ' step needed'
+            + (n.humanGate.what ? ': ' + n.humanGate.what : '') : '');
       link.appendChild(title);
       // Batchable (Tier-A task / story ≤8) nodes get a detached outer ring so the batch pool stands out.
       if (n.batchable) link.appendChild(make('circle', { cx: n._x, cy: n._y, r: r + 3.5, fill: 'none', stroke: '#16a34a', 'stroke-width': '1.5' }));
+      // Human-gate hold: a dashed outer ring (drawn under the node) so the held card reads as "waiting on a
+      // human step." The gate belongs to the card (no node/edge of its own), so it's a marker on the gated
+      // node; the kind + instruction live in the hover title above. A gated card is Tier C by construction,
+      // never batchable, so this ring never co-occurs with the green one.
+      if (n.humanGate) link.appendChild(make('circle', { cx: n._x, cy: n._y, r: r + 3.5, fill: 'none', stroke: HELD, 'stroke-width': '1.5', 'stroke-dasharray': '3 2.5' }));
       link.appendChild(make('circle', { cx: n._x, cy: n._y, r: r, fill: st.fill, stroke: st.stroke, 'stroke-width': '2' }));
       var label = make('text', { x: n._x, y: n._y + 4, 'text-anchor': 'middle', 'font-size': '11', 'font-weight': '700', fill: st.text });
       label.textContent = n.num;
       link.appendChild(label);
+      // Corner badge on top of the node so the hold is legible without hover.
+      if (n.humanGate) link.appendChild(make('circle', { cx: n._x + r * 0.72, cy: n._y - r * 0.72, r: 4, fill: HELD, stroke: '#fff', 'stroke-width': '1' }));
       svg.appendChild(link);
     });
   }
