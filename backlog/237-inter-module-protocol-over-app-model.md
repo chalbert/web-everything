@@ -3,7 +3,7 @@ kind: epic
 size: 13
 parent: "150"
 status: open
-blockedBy: ["140", "150"]
+blockedBy: []
 childlessReason: blocked
 dateOpened: "2026-06-09"
 tags: [protocol, architecture, component-scoping, app-model, introspection, inter-module, webcontexts, registries, blocked]
@@ -29,8 +29,11 @@ it just forfeits the injection/configuration that compliant modules receive (gra
 
 Reasoning over the *running app model* (e.g. "this widget may only live inside that container," "this state
 is private to this scope," "this intent is owned here") requires the introspectable runtime model to exist
-first — webcontexts/registries maturity, i.e. **[#140](/backlog/140-dev-surface-product-feature-matrix/)-class
-work** (#150 Q7). Park behind that; the contract *authoring* may be tractable earlier than the
+first — **webcontexts/registries maturity** (the introspectable runtime app-model substrate; #150 Q7).
+That substrate has no single owning item yet (it surfaces across the webcontexts/webtraces/webevents
+family and the [#140](/backlog/140-dev-surface-product-feature-matrix/) matrix's "introspectable app
+model" mechanism), so this epic stays parked via `childlessReason: blocked` rather than on a concrete
+`blockedBy` edge. Park behind that; the contract *authoring* may be tractable earlier than the
 *enforcement-over-live-model*.
 
 ## Open (resolve when unblocked)

@@ -4,14 +4,14 @@ status: open
 dateOpened: "2026-06-21"
 locus: plateau-app
 childlessReason: blocked
-blockedBy: ["140"]
+blockedBy: ["1590"]
 relatedReport: reports/2026-06-21-140-split-analysis.md
 tags: [dev-browser, dev-experience, plateau, product]
 ---
 
 # Dev-browser shell build — Chromium shell embedding plateau-app panels (#141 successor)
 
-The build of the **dev-browser shell itself** — the rightmost column of the [#140](/backlog/140-dev-surface-product-feature-matrix/) surface matrix and the staged successor [#141](/backlog/141-dev-browser-vision/) ratified ("extension/panel first, browser shell later") but never filed. A Chromium shell whose introspection tooling lights up only on WE-conformant apps, embedding plateau-app's panels (`plateau:src/technical-configurator/`, `intent-configurator/`, `profiles/`) per #141 Fork 4-A, reusing the built IDE-bridge substrate (#575/#576/#577/#676). Homed in `plateau:src/dev-browser/`. Filed so the shell is a tracked dependency edge, not an unfiled gap — **not funded to build yet**, gated behind #140's funnel-data triage; the home downstream surfaces (e.g. [#1083](/backlog/1083-dev-browser-opt-in-surface-for-the-tier-2-vision-tier/)) depend on.
+The build of the **dev-browser shell itself** — the rightmost column of the [#140](/backlog/140-dev-surface-product-feature-matrix/) surface matrix and the staged successor [#141](/backlog/141-dev-browser-vision/) ratified ("extension/panel first, browser shell later") but never filed. A Chromium shell whose introspection tooling lights up only on WE-conformant apps, embedding plateau-app's panels (`plateau:src/technical-configurator/`, `intent-configurator/`, `profiles/`) per #141 Fork 4-A, reusing the built IDE-bridge substrate (#575/#576/#577/#676). Homed in `plateau:src/dev-browser/`. Filed so the shell is a tracked dependency edge, not an unfiled gap — **not funded to build yet**, gated behind the funnel-data triage in [#1590](/backlog/1590-dev-surface-monetization-bet-extensions-as-funnel-vs-dev-bro/) (the surface bet carved out of the #140 matrix); the home downstream surfaces (e.g. [#1083](/backlog/1083-dev-browser-opt-in-surface-for-the-tier-2-vision-tier/)) depend on.
 
 ## Scope (to slice when funded)
 

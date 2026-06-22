@@ -1,7 +1,10 @@
 ---
 kind: epic
-status: open
+status: resolved
 dateOpened: "2026-06-07"
+dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: 1590
 tags: [product-strategy, dev-experience, product-surface, dev-browser, vscode-extension, chrome-extension, saas, feature-matrix, monetization, market-landscape]
 relatedReport: reports/2026-06-07-dev-surface-feature-market-landscape.md
 crossRef: { url: /backlog/089-monetization-product-ideas/, label: "Monetization product ideas (#089)" }
@@ -97,3 +100,9 @@ carved out into **[#1590](/backlog/1590-dev-surface-monetization-bet-extensions-
 - **This is a planning artifact, not a build.** The genuinely-new features with no owning item yet — **state & action explorer (6)**, **designer→PR (2)**, **in-context test status (3/4/5)**, **error replay + in-context bug report (9/10)**, **translation-strategy picker (12)** — each warrants its own backlog item when it's picked up; captured here as rows first to avoid 8 thin siblings.
 - **Surface bet:** carved out to [#1590](/backlog/1590-dev-surface-monetization-bet-extensions-as-funnel-vs-dev-bro/) — provisional lean is extensions-as-funnel + dev-browser (+ selective SaaS) as the paid product; ratify there when funnel data exists.
 - **Sequencing:** the three shared mechanisms above should be built before the features that ride them; the trace/replay artifact unblocks the most features (6, 9, 10).
+
+## Progress
+
+- **Status:** active — blocker-DAG honesty pass done; awaiting the resolve-vs-keep-open call on the card itself.
+- **Done (2026-06-22):** This map was being used as a `blockedBy` target by three open items, but it is a durable map that never "resolves as a decision," so it acted as a permanent false blocker. Repointed the two funnel-gated items (#1391 shell, #1500 headed-testing surface) to their real gate **#1590** (the surface-bet decision carved out of this matrix), in both frontmatter and prose. #237 (inter-module protocol) was gated on the introspectable-app-model *substrate* — which it mislabelled "#140-class work" and which has no single owning item — so its stale `blockedBy: ["140","150"]` (140 = a map, 150 = resolved) was emptied; it stays parked via `childlessReason: blocked` with honest prose. Gate green.
+- **Next:** decide the card's own fate — resolve it as a delivered planning artifact (its decision is carved to #1590, its feature rows become items when picked up) vs. keep it open as a standing strategy reference.

@@ -1,6 +1,6 @@
 ---
 kind: task
-parent: "140"
+parent: "089"
 status: parked
 parkedReason: deferred
 dateOpened: "2026-06-07"
@@ -11,11 +11,16 @@ crossRef: { url: /backlog/140-dev-surface-product-feature-matrix/, label: "Produ
 
 # AI-generated candidate dev-experience features — full-context debugging & "the best person does the work"
 
-> **Parked `deferred` (2026-06-22, batch-2026-06-22-1575-1030).** This is a living candidate-feature **pool**
-> for triage under #140, not a unit of agent-mechanical work — "resolving" it = the product-judgment call of
-> which candidates graduate to #140 rows / their own items, which is owned by the #140 matrix. Parked so it
-> stays an available reference inventory without surfacing as a batchable task (it kept getting packed). Was
-> briefly mis-set `kind: idea` (not a valid kind) during this cleanup; reverted to `task` + `status: parked`.
+> **Parked `deferred` (2026-06-22, batch-2026-06-22-1575-1030).** This is a living candidate-feature **pool**,
+> not a unit of agent-mechanical work — "resolving" it = the product-judgment call of which candidates
+> graduate to their own items. Parked so it stays an available reference inventory without surfacing as a
+> batchable task (it kept getting packed). Was briefly mis-set `kind: idea` (not a valid kind) during this
+> cleanup; reverted to `task` + `status: parked`.
+>
+> **Re-homed `parent: 140 → 089` (2026-06-22).** Its original triage home, the [#140 feature matrix](/backlog/140-dev-surface-product-feature-matrix/),
+> was resolved as a delivered planning artifact (its surface-bet decision carved to [#1590](/backlog/1590-dev-surface-monetization-bet-extensions-as-funnel-vs-dev-bro/)),
+> so this pool now rolls under the live [#089](/backlog/089-monetization-product-ideas/) product-ideas epic. The #140 matrix
+> remains the reference map (linked below); promote a candidate to its own item when picked up.
 
 > **Reclassified `decision` → `idea` (2026-06-11).** This is an AI-generated brainstorm **inventory**, not an open fork — there's no single call to ratify here. Its real action is *triaging which of these candidates graduate to #140 rows (or their own items)*, and that triage is owned by the [#140 feature matrix](/backlog/140-dev-surface-product-feature-matrix/) (this card is `parent: 140`). Kept as a `task`-level idea rolling under #140; `status: open` so it stays available as the candidate pool.
 
