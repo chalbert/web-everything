@@ -1,7 +1,8 @@
 ---
 kind: decision
 size: 3
-status: open
+status: parked
+parkedReason: deferred
 dateOpened: "2026-06-18"
 parent: "746"
 relatedProject: webadapters
