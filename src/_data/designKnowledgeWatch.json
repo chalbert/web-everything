@@ -1,12 +1,12 @@
 {
-  "description": "Front-A conformance ledger for the design-knowledge intake program (backlog #1585 / #1586), mirroring the platform-standards watch's #1267 ledger. One row per ADMITTED authoritative design-knowledge source, tracking whether that source has yet been DISTILLED into the codified #1034 design-critique rubric (provenance carried per axis, #1587). The metric the gate surfaces is the count of rows where `distilledInto` is empty — curated sources whose priors are not yet reflected in the rubric. The watch program maintains this ledger: each distillation item flips a row's `distilledInto` to the rubric axis/version it landed in; each source-discovery run adds a row when a new authoritative source is admitted. `credibilityWeight` is PROVISIONAL equal weight pending the #1588 admission/credibility-weight decision — durable peer-reviewed usability research should ultimately outrank a trend blog, but the weighting criteria are an open fork, so every seed row carries the same placeholder weight for now. This is a curated tracking ledger, not a derived view — keep it honest at close-out of each watch item.",
-  "credibilityWeightScale": "provisional: all seed rows weighted 1.0 pending #1588; the decision will replace this with a kind-aware scale (peer-reviewed > standard > guideline > book > blog)",
+  "description": "Front-A conformance ledger for the design-knowledge intake program (backlog #1585 / #1586), mirroring the platform-standards watch's #1267 ledger. One row per ADMITTED authoritative design-knowledge source, tracking whether that source has yet been DISTILLED into the codified #1034 design-critique rubric (provenance carried per axis, #1587). The metric the gate surfaces is the count of rows where `distilledInto` is empty — curated sources whose priors are not yet reflected in the rubric. The watch program maintains this ledger: each distillation item flips a row's `distilledInto` to the rubric axis/version it landed in; each source-discovery run adds a row when a new authoritative source is admitted. `credibilityWeight` is now COMPUTED by the #1588 meta-schema (we:src/_data/credibilityWeighting.js `computeCredibilityWeight`, graduated by #1591): a baseline tier from each row's `kind` + optional named modifiers (none applied to these seed rows yet, so each is the flat tier baseline). A new row computes its weight the same way; add modifiers (with a rationale + attribution) to up/down-weight a source. This is a curated tracking ledger, not a derived view — keep it honest at close-out of each watch item.",
+  "credibilityWeightScale": "computed by we:src/_data/credibilityWeighting.js (#1588/#1591): kind-baseline tiers peer-reviewed 1.0 > standard 0.9 > guideline 0.75 > book 0.6 > blog 0.4, adjusted by optional named modifiers (each clamped to a nonzero floor of 0.05); seed rows carry their flat tier baseline (no modifiers).",
   "entries": [
     {
       "id": "nielsen-heuristics",
       "source": "Nielsen Norman Group — 10 Usability Heuristics for User Interface Design",
       "kind": "guideline",
-      "credibilityWeight": 1.0,
+      "credibilityWeight": 0.75,
       "distilledInto": null,
       "trackingItem": "1589"
     },
@@ -14,7 +14,7 @@
       "id": "apple-hig",
       "source": "Apple Human Interface Guidelines",
       "kind": "guideline",
-      "credibilityWeight": 1.0,
+      "credibilityWeight": 0.75,
       "distilledInto": null,
       "trackingItem": "1589"
     },
@@ -22,7 +22,7 @@
       "id": "w3c-apg",
       "source": "W3C WAI-ARIA Authoring Practices Guide (APG)",
       "kind": "standard",
-      "credibilityWeight": 1.0,
+      "credibilityWeight": 0.9,
       "distilledInto": null,
       "trackingItem": "1589"
     },
