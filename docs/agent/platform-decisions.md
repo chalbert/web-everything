@@ -656,6 +656,27 @@ dead-zone #222) — gates don't each re-derive what "active" means.
 **Lineage:** #221 #222 (behaviour activation / inert dead-zone). Distinct from [guard-gate](#guard-gate)
 (predicate-gated *transitions*; this is behavior *run-state*).
 
+### Persistent-B element over a data-array kernel: source by typed property, not markup parse {#persistent-b-data-source}
+
+A **persistent-B** `we-` element (the styled, light-DOM, **no-shadow** element hosting a kernel — per #1457)
+whose kernel **renders the semantic DOM from a data array** (e.g. `TreeSelectBehavior(host, nodes, opts)`,
+which does `host.innerHTML = ''` then builds) sources that array from a **typed property** (`.nodes` /
+`.items` / `.rows`), mirroring `fui:blocks/wizard/WizardElement.ts` (property-sourced render-from-data) —
+**not** by parsing author light-DOM markup. Markup-parse-as-primary is rejected *for this kernel shape*: peers
+that treat markup as source-of-truth (native `<select>`, Open UI, `<sl-tree>`) do so behind a **shadow root**;
+a no-shadow render-from-data kernel **destroys** any parsed markup on its first `innerHTML=''`, so the parse is
+ceremony with negative payoff. The typed property is the floor. An **optional** declarative form is a binding
+expression on the element's **own** observed attribute (`nodes="[[ data.tree ]]"`), resolved in the element's
+own lifecycle by reusing `we:plugs/webexpressions/CustomExpressionParser` as a library — explicitly **not** a
+globally-registered `CustomAttribute` over arbitrary elements (that is a framework-grade any-element binding
+surface WE avoids); for data-array content, binding a *reference to a data source* is the right declarative
+form, not hand-authored structural markup. **Scope guard:** this is specific to **render-from-data** kernels;
+a **light-DOM-scan** kernel (`CustomAttribute` enhancing authored markup in place — type-ahead, data-grid,
+stepper) has *no* data-source fork and mirrors `StepperElement` verbatim.
+
+**Lineage:** #1570 (ratified — tree-select data-source; #1568/#1569 confirmed fork-free). Consumer refinement
+of #1457 (support-both, element-over-behavior). Builds: #1567.
+
 ### Forward (generation) adapters for polyglot reach {#forward-generation-adapters}
 
 A WE standard projects **outward** into non-JS / enterprise runtimes (.NET, Java, Go) via a

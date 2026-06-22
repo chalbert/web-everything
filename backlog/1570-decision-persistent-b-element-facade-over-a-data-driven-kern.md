@@ -1,11 +1,14 @@
 ---
 kind: decision
-status: open
+status: resolved
 locus: frontierui
 relatedProject: webcomponents
 relatedReport: reports/2026-06-22-1570-persistent-b-data-source.md
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+graduatedTo: "docs/agent/platform-decisions.md#persistent-b-data-source"
+codifiedIn: "docs/agent/platform-decisions.md#persistent-b-data-source"
 preparedDate: "2026-06-22"
 tags: [packaging, custom-elements, persistent-b, block-model, data-source, "1442", "1457"]
 ---
@@ -24,6 +27,24 @@ The card was filed claiming a **fork shared by the wave-3 trio** #1567 (`we-tree
 kernel gets its data." **Reading the real kernels refutes that premise for two of the three** — so this
 shrinks to **one** genuine fork on tree-select, plus a non-fork grounding correction that unblocks the
 other two.
+
+## RULING — ratified 2026-06-22
+
+**Fork 1 resolved → (b) typed `.nodes` property (B).** `we-tree-select` mirrors
+`fui:blocks/wizard/WizardElement.ts:39` (property-sourced render-from-data); the kernel is unchanged.
+A (light-DOM markup parse) is **deferred** — its declarative-authoring value is better served by
+component-owned expression binding (below), so no A-seed card is commissioned now; file one only if a
+real progressive-enhancement consumer for static-markup trees appears.
+
+**Declarative form for B is component-owned, not a global behavior.** The optional `nodes="[[ data.tree ]]"`
+binding is the element's **own** observed attribute, resolved in its own lifecycle by reusing
+`we:plugs/webexpressions/CustomExpressionParser` as a library — explicitly **not** a globally-registered
+`CustomAttribute` over arbitrary elements (ratified refinement, 2026-06-22). It is a forward additive on
+top of the property; #1567 ships the plain `.nodes` property as its floor and does not wait on it.
+
+**Consequent edits (applied on resolve):**
+- #1567 (`we-tree-select`) — reference repointed `StepperElement` → `WizardElement`; `blockedBy: 1570` cleared on resolve (now agent-ready); builds as a property-facade per (b).
+- #1568 (`we-type-ahead`), #1569 (`we-data-grid`) — **unblocked** (`blockedBy: 1570` removed): their kernels are light-DOM-scan `CustomAttribute` behaviors, so the `StepperElement` mirror holds verbatim — the "shared trio fork" premise was factually wrong for them.
 
 ## Recommended path at a glance
 
@@ -93,8 +114,25 @@ element must decide where that array comes from.
 - **(b) Typed `.nodes` property (B)** — `<we-tree-select>` exposes `.nodes` set programmatically; the
   kernel renders from it unchanged. Mirrors `fui:blocks/wizard/WizardElement.ts:39` — the in-repo B
   reference the #1457 ruling itself names, property-sourced render-from-data. Lowest friction, zero new
-  public convention, consistent with the kernel and the precedent. **Trade-off:** JS-only (no declarative
-  author-markup form) until/unless (a) is later added.
+  public convention, consistent with the kernel and the precedent. **The "JS-only" knock is largely
+  dissolved by component-owned expression binding:** `nodes` is the element's **own** attribute — declared
+  in `observedAttributes` and resolved in the element's own lifecycle (`attributeChangedCallback` /
+  `connectedCallback`), where it detects a `[[ ]]` expression, evaluates it, and assigns the resolved
+  `TreeNode[]` to `this.nodes`. So `<we-tree-select nodes="[[ data.tree ]]">` gets a *declarative
+  authoring form without child markup* — nothing for the kernel's `innerHTML=''` to destroy. **This is
+  NOT a globally-registered `CustomAttribute` that matches arbitrary elements** (that would be a much
+  larger, framework-grade any-element binding surface WE deliberately avoids) — it is the standard
+  custom-element pattern: the component owns and wires its own attribute. It **reuses
+  `we:plugs/webexpressions/CustomExpressionParser` as a library** for the evaluation —
+  `we:plugs/webexpressions/CustomExpressionParser.d.ts:56` resolves an expression to **`unknown`** (an
+  object/array reference, not just a string) — so the only new code is the element's own
+  attribute-resolution wiring (and, if ever shared across data-driven `we-` elements, a small
+  `resolveBinding(attrValue, contexts)` helper, never a registered behavior). This is a **forward
+  additive on top of the property, not a feature #1567 waits on**: #1567 ships the plain `.nodes`
+  property as its floor today; the attribute-binding wiring lands the declarative form later without
+  touching the kernel. **Residual trade-off:** declarative binding supplies a *reference to a data
+  source*, not author-authored structural child markup — which is exactly the right declarative form for
+  data-array content (see the A-demotion below).
 - **(c) JSON attribute (C)** — `nodes='[...]'` parsed by the element. *Rejected:* the primary mechanism
   in **zero** surveyed libraries; clunky for deep/large hierarchies (escaped blobs, full re-parse on
   change, no per-node identity). Admissible at most as a minor convenience for tiny static trees, never
@@ -104,7 +142,10 @@ element must decide where that array comes from.
 A is **demoted to a deferred additive**: file an A card (a decided markup convention + a *non-destructive*
 seed/scan path — e.g. a kernel that *scans* a `<ul>` like `StepperBehavior` scans `[data-step]`, a
 different out-of-scope kernel) only if a progressive-enhancement consumer for static markup trees appears.
-C rejected.
+**The declarative-authoring value that A claimed is better served by the webexpressions property-binder
+above** (`nodes="[[ data.tree ]]"`): for data-array content, binding a *reference to a data source* is
+more idiomatic than hand-authoring a `<ul>` that the kernel then shreds — so the binding path strengthens
+the (b) ruling and further weakens A rather than reviving it. C rejected.
 
 **Skeptic: REFUTED → flipped to (b).** Prep's first lean was A-primary (custom-element peer convention +
 HTML-first house style). A throwaway skeptic, prompted only to refute, refuted it decisively on the
