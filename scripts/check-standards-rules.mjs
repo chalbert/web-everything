@@ -277,6 +277,29 @@ export function computeNativeFirstConformance(watch) {
   };
 }
 
+// ── Front-A design-knowledge conformance metric (#1586) ───────────────────────
+// The design-knowledge intake program (#1585) front A: every ADMITTED authoritative source should
+// eventually be distilled into the codified #1034 design-critique rubric (its priors carried per axis as
+// provenance, #1587). This turns that from an aspiration into a living, QUANTITATIVE check — the metric
+// the next watch run reads. Pure over the `designKnowledgeWatch.json` ledger (one row per admitted source,
+// each carrying a `distilledInto` field the watch fills when the source lands in the rubric). A row counts
+// as distilled when `distilledInto` is a non-empty value (a rubric axis/version ref). Mirrors
+// computeNativeFirstConformance (#1267). Returns the totals + the still-undistilled rows; the script
+// surfaces them as a nudge (not an error — distillation is tracked open work, so red-gating would just
+// block the batch doing it).
+export function computeDesignKnowledgeConformance(watch) {
+  const entries = (watch && Array.isArray(watch.entries)) ? watch.entries : [];
+  const isDistilled = (e) => e && e.distilledInto != null &&
+    (Array.isArray(e.distilledInto) ? e.distilledInto.length > 0 : String(e.distilledInto).trim() !== '');
+  const pending = entries.filter((e) => !isDistilled(e));
+  return {
+    total: entries.length,
+    distilled: entries.length - pending.length,
+    pending: pending.length,
+    pendingList: pending.map((e) => `${e.id}${e.trackingItem ? ` (#${e.trackingItem})` : ''}`),
+  };
+}
+
 // ── Raw-HTML-in-backlog-body lint (#290) ──────────────────────────────────────
 // An un-backticked HTML tag in a backlog markdown body is passed through verbatim by 11ty and parsed
 // by the browser as a live element. A void/unclosed interactive one (`<select>`, `<dialog>`,

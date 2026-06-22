@@ -36,7 +36,7 @@ import { loadPresets } from './lib/presets-loader.cjs';
 import { loadDataRegistry } from './lib/registry-loader.cjs';
 import {
   BACKLOG_STATUSES, BACKLOG_KINDS, FIB, FILE, blockSpecFile,
-  dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated, detectClassificationCollapse, computeNativeFirstConformance,
+  dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated, detectClassificationCollapse, computeNativeFirstConformance, computeDesignKnowledgeConformance,
   checkStatus, validateProtocol, validatePreset, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock,
@@ -570,6 +570,17 @@ try {
     warn(`Front-A native-first conformance (platform-standards watch #1257): ${m.registered}/${m.total} tracked native equivalents are registered as their standard's resolver; ${m.pending} still pending — ${m.pendingList.join(', ')}. Each lands when its registration item flips \`registered: true\` in src/_data/nativeFirstWatch.json.`);
 } catch { /* ledger missing/malformed → skip the metric (degrade, don't crash the gate) */ }
 
+// #1586 — FRONT-A design-knowledge conformance metric (design-knowledge intake program #1585). Count the
+// admitted authoritative sources not yet distilled into the codified #1034 design-critique rubric (#1587
+// carries the provenance), so the next watch run is quantitative. A nudge, not an error: distillation is
+// tracked open work (#1589, blockedBy the #1588 admission/credibility-weight decision).
+try {
+  const dkWatch = JSON.parse(readFileSync(join(ROOT, 'src/_data/designKnowledgeWatch.json'), 'utf8'));
+  const dk = computeDesignKnowledgeConformance(dkWatch);
+  if (dk.pending > 0)
+    warn(`Front-A design-knowledge conformance (design-knowledge intake program #1585): ${dk.distilled}/${dk.total} admitted sources are distilled into the #1034 design-critique rubric; ${dk.pending} still pending — ${dk.pendingList.join(', ')}. Each lands when its distillation item fills \`distilledInto\` (the rubric axis/version) in src/_data/designKnowledgeWatch.json.`);
+} catch { /* ledger missing/malformed → skip the metric (degrade, don't crash the gate) */ }
+
 // #1275 — CTA INVARIANT (hard gate). Every OPEN item MUST carry a call-to-action: a pill on the
 // Prioritisation table telling whoever picks it up what to do next, or a passive reason it's parked.
 // The loader derives `hasCta` as the exact union of every renderable pill (tier badge / batch / slice /
@@ -675,6 +686,22 @@ for (const item of backlog) {
   };
   for (const n of blockedEdges.keys())
     if ((colour.get(n) || WHITE) === WHITE) visit(n, [n]);
+}
+
+// Parent-deadlock guard (#142): a child must never list its own EPIC parent in `blockedBy`. An epic
+// resolves only AFTER all its children (the no-open-slice rollup guard below) — so "child blocked until
+// the epic resolves" is an unbreakable cycle the plain blockedBy walk can't see (the edge is implicit in
+// the parent rollup, not in `blockedEdges`): the epic waits on the child, the child waits on the epic.
+// Scoped to a child whose parent is `kind: epic` — a SLICED STORY/decision parent resolves on its own
+// merits, so "wait for the parent's foundational work" is a legitimate edge there and is NOT flagged.
+// Scoped to non-resolved children: a resolved one already escaped the deadlock, so flagging it is noise.
+const kindByNum = new Map(backlog.map((i) => [i.num, i.kind]));
+for (const item of backlog) {
+  if (item.status === 'resolved' || item.parent === undefined || !Array.isArray(item.blockedBy)) continue;
+  const parentNum = String(item.parent);
+  if (kindByNum.get(parentNum) !== 'epic') continue;
+  if (item.blockedBy.some((raw) => String(raw) === parentNum))
+    err(`Backlog item "${item.id}" lists its own epic parent #${parentNum} in \`blockedBy\` — a deadlock: an epic resolves only after all its children, so the child can never start. The \`parent: ${parentNum}\` edge already expresses the rollup; drop #${parentNum} from blockedBy (re-point it at the real open prerequisite if one exists).`);
 }
 
 // Sliced-epic guard: an epic is either UNSLICED (no children → carries its own
