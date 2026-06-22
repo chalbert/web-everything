@@ -2,7 +2,6 @@
 kind: epic
 status: open
 blockedBy: []
-childlessReason: program
 dateOpened: "2026-06-21"
 locus: frontierui
 relatedProject: webcomponents
@@ -16,12 +15,21 @@ Register the remaining blocks as custom elements, mechanism chosen per block. Se
 
 ## Slicing (split analysis we:reports/2026-06-21-1442-split-analysis.md)
 
-The real FUI tree (we:reports/2026-06-21-1442-split-analysis.md) shows blocks in four families, with all three mechanism reference patterns already shipping (A=fui:blocks/transient/TransientElement.ts:28, B=fui:blocks/wizard/WizardElement.ts:25, C=fui:blocks/story-canvas/StoryCanvasElement.ts:49) — so conversions are flat applications with no DAG roots to sequence. First batchable wave carved as slices; the ~50-block mechanical tail stays an incremental burndown (pre-scaffolding it adds review overhead with zero gain — filed per pickup); two genuine per-block forks de-buried into their own decision cards.
+The real FUI tree shows blocks in four families, with all three mechanism reference patterns already shipping (A=fui:blocks/transient/TransientElement.ts:28, B=fui:blocks/wizard/WizardElement.ts:25, C=fui:blocks/story-canvas/StoryCanvasElement.ts:49) — so conversions are flat applications with no DAG roots to sequence. This is a **finite burndown epic, not a program**: it has a Definition of Done (every block converted) and resolves when the catalog is drained. Its remaining scope sits in the batch pool as open `tracking` slices, carved in waves; it is never flagged "to resolve" because open children remain (no `childlessReason: program` hack).
 
-- **#1453** — convert button → `we-button` (transient/A); the #1381-named reference application, still unbuilt.
+**Wave 1** (we:reports/2026-06-21-1442-split-analysis.md) — both per-block forks now resolved:
+
+- **#1453** — convert button → `we-button` (transient/A); the #1381-named reference application.
 - **#1454** — convert badge → `we-badge` (transient/A).
 - **#1455** — convert card → `we-card` (transient/A).
-- **#1456** *(decision)* — grouped form-control packaging mechanism (A vs B); gates checkbox/radio-group + single-input form participation.
-- **#1457** *(decision)* — behavior blocks (stepper/deck/tabs): we- element vs stay CustomAttribute behaviors.
+- **#1456** *(decision, resolved)* — grouped form-control packaging → **B (persistent light-DOM group)**.
+- **#1457** *(decision, resolved)* — behavior blocks (stepper/deck/tabs) → support-both; built via #1489/1490/1491.
 
-Remaining catalog blocks are filed as picked up, classified by the guideline above.
+**Wave 2** (we:reports/2026-06-22-1442-slice-wave-2.md):
+
+- **#1540** — convert meter → `we-meter` (transient/A).
+- **#1541** — convert progress → `we-progress` (transient/A).
+- **#1542** — convert checkbox → `we-checkbox` + `we-checkbox-group` (persistent/B, #1456).
+- **#1543** — convert radio → `we-radio` + `we-radio-group` (persistent/B, #1456).
+
+Remaining catalog blocks (single inputs, stateful/interactive blocks) are carved as later waves on pickup; headless "can-do" behaviors stay CustomAttribute behaviors (out of scope). When the last wave lands, resolve the epic.
