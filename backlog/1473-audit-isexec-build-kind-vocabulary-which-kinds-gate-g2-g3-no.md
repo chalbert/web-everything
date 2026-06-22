@@ -1,11 +1,13 @@
 ---
 kind: decision
-status: open
+status: resolved
 researchTopic: build-kind-exec-vocabulary
 relatedReport: reports/2026-06-22-build-kind-exec-vocabulary.md
 preparedDate: "2026-06-22"
 dateOpened: "2026-06-21"
 dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+codifiedIn: "docs/agent/backlog-workflow.md#canonical-build-kind-predicate"
 tags: [audit, backlog-health, governance, gate, kind-axis, decision]
 ---
 
@@ -154,6 +156,17 @@ minimize-lock-in). No protocol minted. The reusable rule it codifies on resolve 
 canonical build-kind predicate, `kind !== 'decision'`, with a single importable home" — is statute-layer
 material for `we:docs/agent/platform-decisions.md` or the `check:health` section of
 `we:docs/agent/backlog-workflow.md` (set `codifiedIn` on resolve).
+
+## Resolution (2026-06-22)
+
+**Ratified both prepared defaults + envelope (A).**
+
+- **Fork 1 — import `isExecKind`** (a). `we:scripts/audit-backlog-health.mjs` now imports `{ isExecKind, isEntityGraduation }` from `we:scripts/check-standards-rules.mjs`; the dead `it.type === 'idea' || it.type === 'issue'` literal at the exec gate is replaced by `isExecKind(it.type)`. Single source of truth — no second inlined copy to drift.
+- **Fork 2 — include epic** (a). `isExecKind` counts every non-decision kind (story/task/epic), so the 4 unique epic→entity graduations stay visible to G3.
+- **Envelope (A) — both helpers landed together.** G3's subject predicate now calls `isEntityGraduation(it.fm.graduatedTo)` (replacing the raw `graduatedTo !== 'none'`). This completes #1498's G3 subject-scope wiring, which was authored (helper + `we:scripts/__tests__/exec-kind.test.mjs`) but **never wired into the audit** — verified at claim: the audit imported neither helper. So G3 comes back **already scoped** (41 candidates, not the ~350 firehose), not dead. **#1498 does not need reopening** — its unlanded wiring landed here.
+- **Verified:** `we:scripts/__tests__/exec-kind.test.mjs` 8/8 green; audit now reports G2=2, G3=41 (were silently 0/0). `check:standards` red only from 4 pre-existing errors in unrelated items (#1548, #1364, #1454, #1455) — none in this change's files.
+- **Residual filed:** the genuine 2-case subject double-count (#351↔#436, #618↔#629) is **#1558** — dedup entity nouns across the parent/child closure on the G3 *subject* predicate (subject-axis, not this kind gate).
+- **Codified:** the one-canonical-build-kind-predicate rule → `we:docs/agent/backlog-workflow.md#canonical-build-kind-predicate`.
 
 ## Context
 

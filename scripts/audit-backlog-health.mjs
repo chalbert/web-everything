@@ -14,14 +14,15 @@
  *                           temporal ("after"/"once") verbs are excluded — they aren't
  *                           gates. Severity↑ if #N is a decision, highest if that decision
  *                           is still open; both-ends-resolved demotes to INFO.
- *   G2  ruling-after-build  a resolved idea/issue GATED ON (blockedBy) a `type: decision`
+ *   G2  ruling-after-build  a resolved build (non-decision kind) GATED ON (blockedBy) a `decision`
  *                           that resolved AFTER this item — built ahead of its ruling.
  *                           Build order is read from git (the commit flipping
  *                           `status: resolved`), NOT the backfillable `dateResolved`
  *                           frontmatter; items born resolved at their import commit are
  *                           undatable and skipped. `parent` (epic membership) is NOT a
  *                           gating edge, so it does not count here.
- *   G3  ungoverned-arch     a resolved idea/issue that graduated to an entity but has no
+ *   G3  ungoverned-arch     a resolved build (non-decision kind) that graduated to a STANDARD
+ *                           ENTITY (isEntityGraduation, #1498) but has no
  *                           governing decision reachable — neither in its TRANSITIVE
  *                           parent/blockedBy lineage (an epic-hop up) nor cited in its
  *                           prose (a `#N` resolving to a resolved `type: decision`). The
@@ -69,6 +70,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { parseClaims, claimedIdsFor, partitionById } from './readiness/claimScope.mjs';
 import { loadDataRegistry } from './lib/registry-loader.cjs';
+import { isExecKind, isEntityGraduation } from './check-standards-rules.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BL = join(ROOT, 'backlog');
@@ -331,7 +333,7 @@ const flags = { G1: [], G2: [], G3: [], G4: [], G5: [], G6: [], G7: [], O1: [], 
 const TODAY = new Date().toISOString().slice(0, 10); // for the O1 born-active-orphan TTL (#670)
 for (const it of items.values()) {
   const blocked = new Set((it.fm.blockedBy || []).map(norm));
-  const isExec = it.type === 'idea' || it.type === 'issue';
+  const isExec = isExecKind(it.type);
 
   // G1 edge-gap — a real prose prerequisite (filtered verb set) not lifted into blockedBy.
   const g1seen = new Set();
@@ -363,7 +365,7 @@ for (const it of items.values()) {
   }
   // G3 ungoverned-arch — CANDIDATE POOL (judgment confirms): graduated build with no governing
   // decision reachable transitively (parent/blockedBy closure) AND none cited in its prose.
-  if (isExec && it.status === 'resolved' && it.fm.graduatedTo && it.fm.graduatedTo !== 'none'
+  if (isExec && it.status === 'resolved' && isEntityGraduation(it.fm.graduatedTo)
       && ![...transitiveLineage(it)].some(isDecision) && !citesResolvedDecision(it))
     flags.G3.push({ id: it.id, graduatedTo: it.fm.graduatedTo, title: title(it) });
   // G4 false-prepared-fork — a PREPARED, still-open decision whose `## Fork` sections carry
