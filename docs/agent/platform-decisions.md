@@ -303,6 +303,26 @@ re-framed) · #634 · #1408 (durable-anchor contract split) · intents-open-desi
 (licensing/payments) · #451 (MaaS tier) · #775 (assembler open-core) · #410 #141 #166 · #665 #690
 (self-driven framing). *Confidence: principle firm; specific knobs provisional.*
 
+### A separate product brand is earned by structural product-distinctness, not appetite {#brand-on-distinctness}
+
+> A positioning sibling to [§ monetization](#monetization): *never brand on a shifting category*. A
+> sub-component gets its **own marketed product brand only when it has a real standalone consumer
+> surface** — not to *drive* the adoption that would *create* the case (the circular, appetite-based
+> move the monetization rule forbids).
+
+1. **Structural test:** a thing earns a separate brand when ≥1 consumer depends on it **without**
+   depending on the parent product — the `ReactDOM`/`Rollup` case (shipped to millions directly), not
+   the `@lit/reactive-element` case (a sub-package Lit does **not** separately market).
+2. **Default is fold.** A sub-package identity under the constellation/Frontier-UI brand is the
+   *cheapest* path to a later split — folding forecloses nothing; the npm scope + contracts already exist.
+3. **webplugs ruling (#642):** `@frontierui/plugs` **folds** — no separate brand. Per #606 the plugs
+   runtime is a POC with no standalone product surface and one consumer (plateau-app). **Un-park** only
+   on the structural event: webplugs gains ≥1 external consumer that depends on it *without* depending on
+   `@frontierui/blocks` / FUI components. Brand on that event, never on appetite.
+
+**Lineage:** #606 (code home + brand deferral) · #775 (soft/revisitable monetization) · #642 (this
+ruling). *Confidence: high — structural test + un-park trigger firm.*
+
 ### Vision / AI = a Plateau no-leakage service client {#no-leakage-client}
 
 Any **implementation capability** (vision, AI model inference) is **never a WE standard**. It is a

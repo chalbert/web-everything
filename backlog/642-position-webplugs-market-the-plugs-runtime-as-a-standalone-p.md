@@ -1,10 +1,13 @@
 ---
 kind: decision
 size: 2
-status: open
+status: resolved
 preparedDate: "2026-06-22"
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-22"
+dateResolved: "2026-06-22"
+codifiedIn: "docs/agent/platform-decisions.md#brand-on-distinctness"
+graduatedTo: none
 tags: []
 ---
 
@@ -77,8 +80,16 @@ folded in — a structural un-park trigger:** reopen this call only when **webpl
 that depends on it *without* depending on `@frontierui/blocks` / FUI components** (a real standalone-product
 surface) — brand on that structural event, never on appetite.
 
-## Held open — when this is ratified
+## Ratified — 2026-06-22
 
-Held open (decision lane): the brand call is deferred to product/marketing time per #606 (non-blocking). The
-fork is at DoR now (prepared, default + structural trigger stated); **un-park** on the structural event above
-— a fast ratify, not fresh research.
+**Fork 1 → (a) fold.** No separate webplugs brand; `@frontierui/plugs` stays a sub-package identity under
+the constellation/Frontier-UI brand (the `@lit/reactive-element` precedent). Excluded branch (b) "separate
+brand now" is flawed on the merits — #606 found no standalone product surface and one consumer, so branding
+now would be the forbidden appetite-based move.
+
+Codified as statute in
+[platform-decisions § brand-on-distinctness](docs/agent/platform-decisions.md#brand-on-distinctness).
+
+**Un-park trigger (reopen this exact call, fast ratify — not fresh research):** webplugs gains ≥1 external
+consumer that depends on it *without* depending on `@frontierui/blocks` / FUI components — a real standalone
+product surface. Brand on that structural event, never on appetite.
