@@ -1,16 +1,16 @@
 {
-  "_doc": "Calibrated session capacity for POINTS-BUDGETED batches (docs/agent/backlog-workflow.md -> 'Running a batch'). The batch's point budget = round(capacityPoints * targetFraction). 'points' = batchCost (a story's size; a task = 2). `node scripts/backlog.mjs calibrate --points=<P> --context-pct=<C>` folds a session into capacityPoints as a CONTEXT-WEIGHTED MEAN over the last 12 samples: each session's implied capacity (points / context-fraction) is weighted by its contextPct, so a high-context session counts far more than an early low-context stop (whose extrapolation is near-noise and biased low by fixed startup overhead). Unlike the previous fixed-alpha EMA this converges as samples accumulate and actually uses the stored history, while the 12-sample window keeps it adaptive to a regime change (e.g. a new model).",
-  "capacityPoints": 93,
-  "targetFraction": 0.6,
+  "_doc": "Calibrated session capacity for POINTS-BUDGETED batches (docs/agent/backlog-workflow.md -> 'Running a batch'). Estimator = the POOLED AFFINE context-cost model (backlog #1505): a Deming/errors-in-variables fit of context% = overhead + cost*points over EVERY sample's raw (points, contextPct) in the last 12 (capacity-bound and work-bound alike — stop-reason is audit metadata only, no longer a training gate; the old exclusion gate starved the estimate since work-bound is the common case). 'fit' caches {overhead, cost, n, residualStd}; 'capacityPoints' = implied points at 100% context = (100-overhead)/cost (display/back-compat). The batch budget 'budgetPoints' = the largest P that keeps predicted context under 'contextCeiling' minus a data-driven margin marginK*residualStd: P = round((contextCeiling - overhead - marginK*residualStd)/cost) -- replacing the old capacityPoints*targetFraction. 'points' = batchCost (a story's size; a task = 2). `node scripts/backlog.mjs calibrate --points=<P> --context-pct=<C> [--stop-reason=...]` appends a sample and refits. The 12-sample window ages out old regimes (a new model); RLS-with-forgetting is the planned successor (#1516). Don't hand-edit fit/capacityPoints/budgetPoints -- let calibrate move them.",
+  "fit": {
+    "overhead": 20,
+    "cost": 0.6292,
+    "n": 12,
+    "residualStd": 8.37
+  },
+  "capacityPoints": 127,
+  "budgetPoints": 82,
+  "contextCeiling": 80,
+  "marginK": 1,
   "samples": [
-    {
-      "date": "2026-06-20",
-      "points": 32,
-      "contextPct": 40,
-      "impliedCapacity": 80,
-      "stopReason": "empty-pool",
-      "excluded": true
-    },
     {
       "date": "2026-06-20",
       "points": 13,
@@ -97,6 +97,14 @@
       "contextPct": 59,
       "impliedCapacity": 93,
       "stopReason": "context"
+    },
+    {
+      "date": "2026-06-22",
+      "points": 48,
+      "contextPct": 65,
+      "impliedCapacity": 74,
+      "stopReason": "empty-pool",
+      "excluded": true
     }
   ]
 }

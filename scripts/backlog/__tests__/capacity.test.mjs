@@ -1,70 +1,106 @@
-// Tests for the points-budget capacity estimator (backlog #553): the context-weighted window mean and
-// the stop-reason exclusion. Capacity-bound stops (budget/context) train the estimate; work-bound stops
-// (empty-pool/fork/gate/manual) are recorded for audit but excluded, so an early non-budget cutoff can't
-// drag the budget. Pure functions — no CLI/argv/file I/O.
+// Tests for the pooled affine context-cost estimator (backlog #1505). The estimate is a Deming/EIV fit
+// of `context% = overhead + cost·points` over EVERY sample's raw (points, contextPct) — capacity-bound
+// and work-bound alike (stop-reason is audit metadata only; the old exclusion gate is gone, since
+// work-bound is the common case and discarding it starved the estimate). The budget is the largest P
+// under a context ceiling minus a data-driven residual margin. Pure functions — no CLI/argv/file I/O.
 
 import { describe, it, expect } from 'vitest';
-import { trainsEstimate, capacityFromSamples, isKnownStopReason, NON_TRAINING_STOPS, TRAINING_STOPS, KNOWN_STOP_REASONS } from '../capacity.mjs';
-
-describe('trainsEstimate', () => {
-  it('capacity-bound stops train', () => {
-    for (const r of TRAINING_STOPS) expect(trainsEstimate(r)).toBe(true);
-  });
-  it('work-bound stops do not train', () => {
-    for (const r of NON_TRAINING_STOPS) expect(trainsEstimate(r)).toBe(false);
-  });
-  it('outgrew (the rule-4 stop) is work-bound and does not train (#968)', () => {
-    expect(NON_TRAINING_STOPS.has('outgrew')).toBe(true);
-    expect(trainsEstimate('outgrew')).toBe(false);
-  });
-  it('absent reason trains (fail-open, backward compatible)', () => {
-    expect(trainsEstimate(undefined)).toBe(true);
-    expect(trainsEstimate('')).toBe(true);
-  });
-});
+import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from '../capacity.mjs';
 
 describe('isKnownStopReason (the CLI fail-closed guard, #968)', () => {
-  it('every training and non-training stop is known', () => {
-    for (const r of TRAINING_STOPS) expect(isKnownStopReason(r)).toBe(true);
-    for (const r of NON_TRAINING_STOPS) expect(isKnownStopReason(r)).toBe(true);
+  it('every recognised stop reason is known', () => {
+    for (const r of ['budget', 'context', 'empty-pool', 'empty', 'fork', 'gate', 'manual', 'abort', 'outgrew'])
+      expect(isKnownStopReason(r)).toBe(true);
   });
-  it('a typo or un-listed token is not known (so the CLI rejects it instead of silently training)', () => {
+  it('a typo or un-listed token is not known (so the CLI rejects it)', () => {
     expect(isKnownStopReason('some-future-reason')).toBe(false);
     expect(isKnownStopReason('outgrwe')).toBe(false); // transposed typo of outgrew
     expect(isKnownStopReason('')).toBe(false);
   });
-  it('KNOWN_STOP_REASONS is exactly the union of training + non-training', () => {
-    expect(KNOWN_STOP_REASONS).toEqual(new Set([...TRAINING_STOPS, ...NON_TRAINING_STOPS]));
+  it('KNOWN_STOP_REASONS holds both capacity-bound and work-bound reasons', () => {
+    expect(KNOWN_STOP_REASONS.has('context')).toBe(true);
+    expect(KNOWN_STOP_REASONS.has('empty-pool')).toBe(true);
   });
 });
 
-describe('capacityFromSamples', () => {
-  it('is a context-weighted mean — high-context readings dominate', () => {
-    // 100@10% and 200@90% → (100*10 + 200*90) / (10+90) = 19000/100 = 190.
-    expect(capacityFromSamples([
-      { impliedCapacity: 100, contextPct: 10 },
-      { impliedCapacity: 200, contextPct: 90 },
-    ])).toBe(190);
+describe('fitAffineCost', () => {
+  it('recovers a known affine line (overhead + cost·points), noise-free', () => {
+    // y = 20 + 0.5x exactly → Deming returns the generating line.
+    const samples = [10, 30, 50, 70, 90].map((x) => ({ points: x, contextPct: 20 + 0.5 * x }));
+    const fit = fitAffineCost(samples);
+    expect(fit.overhead).toBeCloseTo(20, 6);
+    expect(fit.cost).toBeCloseTo(0.5, 6);
+    expect(fit.n).toBe(5);
+    expect(fit.residualStd).toBeCloseTo(0, 6);
   });
 
-  it('ignores excluded (work-bound) samples entirely', () => {
-    // The excluded 40@50 must not pull the mean down off the single 120@30 training sample.
-    expect(capacityFromSamples([
-      { impliedCapacity: 120, contextPct: 30 },
-      { impliedCapacity: 40, contextPct: 50, excluded: true },
-    ])).toBe(120);
+  it('uses EVERY sample regardless of stop-reason or legacy excluded/impliedCapacity fields', () => {
+    // The same line, but most points are tagged work-bound + excluded (the old gate would drop them).
+    const onLine = (x, extra) => ({ points: x, contextPct: 20 + 0.5 * x, ...extra });
+    const fit = fitAffineCost([
+      onLine(10, { stopReason: 'empty-pool', excluded: true, impliedCapacity: 999 }),
+      onLine(30, { stopReason: 'fork', excluded: true }),
+      onLine(50, { stopReason: 'manual', excluded: true }),
+      onLine(70, { stopReason: 'empty-pool', excluded: true }),
+      onLine(90, { stopReason: 'context' }),
+    ]);
+    expect(fit.overhead).toBeCloseTo(20, 6);
+    expect(fit.cost).toBeCloseTo(0.5, 6);
+    expect(fit.n).toBe(5); // all five counted, not just the one capacity-bound stop
   });
 
-  it('returns null when no training sample carries weight (caller falls back to prev)', () => {
-    expect(capacityFromSamples([{ impliedCapacity: 99, contextPct: 30, excluded: true }])).toBeNull();
-    expect(capacityFromSamples([{ impliedCapacity: 99, contextPct: 0 }])).toBeNull();
-    expect(capacityFromSamples([])).toBeNull();
-    expect(capacityFromSamples(undefined)).toBeNull();
+  it('returns null when underdetermined (fewer than 2 usable tuples, or no points spread)', () => {
+    expect(fitAffineCost([{ points: 40, contextPct: 50 }])).toBeNull();
+    expect(fitAffineCost([])).toBeNull();
+    expect(fitAffineCost(undefined)).toBeNull();
+    // No spread in points → slope unidentifiable.
+    expect(fitAffineCost([{ points: 40, contextPct: 40 }, { points: 40, contextPct: 60 }])).toBeNull();
   });
 
-  it('converges toward the true value as consistent samples accumulate (unlike a fixed-α EMA)', () => {
-    const at = (n) => capacityFromSamples(Array.from({ length: n }, () => ({ impliedCapacity: 100, contextPct: 30 })));
-    expect(at(1)).toBe(100);
-    expect(at(12)).toBe(100); // a true mean of identical readings is exact at any n — no permanent EMA lag
+  it('rejects a non-positive association (cost must be > 0)', () => {
+    // context falls as points rise → not a coherent cost curve; reject so the caller falls back.
+    expect(fitAffineCost([
+      { points: 10, contextPct: 80 }, { points: 50, contextPct: 60 }, { points: 90, contextPct: 40 },
+    ])).toBeNull();
+  });
+
+  it('skips malformed/non-positive tuples', () => {
+    const fit = fitAffineCost([
+      { points: 10, contextPct: 25 }, { points: 50, contextPct: 45 }, { points: 90, contextPct: 65 },
+      { points: 0, contextPct: 30 }, { points: 40, contextPct: 0 }, { points: 'x', contextPct: 50 },
+    ]);
+    expect(fit.n).toBe(3);
+  });
+});
+
+describe('budgetFromFit', () => {
+  const fit = { overhead: 20, cost: 0.5, residualStd: 4, n: 12 };
+
+  it('solves (ceiling − overhead − k·residualStd) / cost', () => {
+    // (80 − 20 − 1·4) / 0.5 = 56 / 0.5 = 112.
+    expect(budgetFromFit(fit, { ceiling: 80, k: 1 })).toBe(112);
+  });
+
+  it('a tighter fit (smaller residualStd) spends more of the ceiling', () => {
+    const tight = budgetFromFit({ ...fit, residualStd: 0 }, { ceiling: 80, k: 1 });
+    const noisy = budgetFromFit({ ...fit, residualStd: 20 }, { ceiling: 80, k: 1 });
+    expect(tight).toBeGreaterThan(noisy);
+  });
+
+  it('returns null on a missing/degenerate fit or no headroom', () => {
+    expect(budgetFromFit(null, { ceiling: 80, k: 1 })).toBeNull();
+    expect(budgetFromFit({ overhead: 20, cost: 0 }, { ceiling: 80, k: 1 })).toBeNull();
+    // overhead alone exceeds the ceiling → no headroom.
+    expect(budgetFromFit({ overhead: 90, cost: 0.5, residualStd: 0 }, { ceiling: 80, k: 1 })).toBeNull();
+  });
+});
+
+describe('impliedCapacity', () => {
+  it('is points at 100% context = (100 − overhead) / cost', () => {
+    expect(impliedCapacity({ overhead: 20, cost: 0.5 })).toBe(160);
+  });
+  it('returns null on a missing/degenerate fit', () => {
+    expect(impliedCapacity(null)).toBeNull();
+    expect(impliedCapacity({ overhead: 20, cost: 0 })).toBeNull();
   });
 });

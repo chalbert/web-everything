@@ -1,56 +1,84 @@
-// Pure capacity-estimate helpers for the points-budgeted batch (backlog #553, building on the
-// context-weighted-mean estimator). Kept in a pure module — no argv, no file I/O — so it's
-// unit-testable without triggering backlog.mjs's CLI dispatch on import.
+// Pure capacity-estimate helpers for the points-budgeted batch. The estimator is the **pooled affine
+// context-cost model** ratified in backlog #1505: `context% = overhead + cost·points`, fit over the
+// stored close-out tuples of EVERY batch — capacity-bound and work-bound alike. (Earlier the estimate was
+// a single ratio through the origin trained only on the rare capacity-bound stop, which starved: ~90% of
+// batches are work-bound by design — the budget is set below capacity — so the exclusion gate discarded
+// almost all the data and the estimate rested on one sample.)
 //
-// The estimator is a context-weighted mean over the retained sample window, but a context weight alone
-// can't fix one bias: a session that stopped for a NON-capacity reason (the work-list ran dry, a design
-// fork surfaced, the gate went red, a manual abort) never measured how much a session *fits* — its
-// `points ÷ context-fraction` is an extrapolation from an arbitrary early cutoff, biased low by fixed
-// startup overhead. Folding those in just drags the budget. So only **capacity-bound** sessions
-// (stopped because the points budget or the context window was the binding constraint) train the estimate.
+// Why affine, and why every batch: the intercept is the fixed per-batch overhead (pack/plan/gate/declines)
+// — real work present in *every* batch, not waste peculiar to a stop reason — so it is one universal
+// intercept that averages out across all batches, and the live residuals showed no systematic work-bound
+// inflation (so no per-stop-reason term is needed). Stop-reason is therefore pure audit metadata; it no
+// longer gates training. The next-batch budget is the largest P that fits under a context ceiling, minus a
+// data-driven margin sized to the fit's own residual spread (a tight fit → small margin; a noisy fit →
+// larger one) — replacing the arbitrary ×0.6 fraction. See backlog #1505 + reports/2026-06-22-calibrator-affine-cost-estimator.md.
 
-// Stop reasons that did NOT exhaust budget/context — these never train the estimate.
-//   empty-pool/empty — no eligible item left;  fork — a design decision surfaced;
-//   gate — a red gate halted the run;           manual/abort — the operator stopped early;
-//   outgrew — an item outgrew its estimate mid-work (the rule-4 stop). All measure an arbitrary
-//   early cutoff, not how much a session fits, so folding them in just drags the budget low (#968).
-export const NON_TRAINING_STOPS = new Set(['empty-pool', 'empty', 'fork', 'gate', 'manual', 'abort', 'outgrew']);
+// Every stop reason the calibrate CLI recognises (audit metadata only since #1505 — it no longer gates
+// training). A `--stop-reason` token outside this set is a typo or an un-listed reason; the CLI rejects it
+// (fail-closed) rather than recording a garbage tag.
+export const KNOWN_STOP_REASONS = new Set([
+  'budget', 'context',                                  // capacity-bound
+  'empty-pool', 'empty', 'fork', 'gate', 'manual', 'abort', 'outgrew', // work-bound
+]);
 
-// Capacity-bound stops that DO train: the budget filled, or the context window was the limit.
-export const TRAINING_STOPS = new Set(['budget', 'context']);
-
-// Every stop reason the calibrate CLI recognises. A `--stop-reason` token outside this set is a typo
-// or an un-listed reason — the CLI rejects it (fail-closed) rather than letting it silently train and
-// corrupt the estimate (#968): a stray `outgrew`-class token once dragged capacityPoints 147→43.
-export const KNOWN_STOP_REASONS = new Set([...TRAINING_STOPS, ...NON_TRAINING_STOPS]);
-
-/** Is this a stop reason the calibrate CLI recognises? (Empty/absent is allowed — see calibrate.) */
+/** Is this a stop reason the calibrate CLI recognises? (Empty/absent is allowed — calibrate omits the tag.) */
 export function isKnownStopReason(stopReason) {
   return KNOWN_STOP_REASONS.has(stopReason);
 }
 
 /**
- * Does a session with this stop reason train the capacity estimate? Capacity-bound (`budget`/`context`)
- * → yes; a known non-capacity stop → no. An absent reason defaults to YES — backward compatible with
- * old samples and callers that don't record a reason (the context weighting still de-risks a low-signal
- * one). An *unknown non-empty* token must never reach here from the CLI (it's rejected upstream by
- * `isKnownStopReason`); if one does, we still fail-open for backward compat, but the CLI is the guard.
+ * Deming (errors-in-variables) fit of `context% = overhead + cost·points` over ALL samples' raw
+ * `(points, contextPct)` tuples (#1505: every batch contributes; the `excluded`/`stopReason`/legacy
+ * `impliedCapacity` fields are ignored — only the raw coordinates are read, so existing history bootstraps
+ * the model with no warm-up). `lambda` = the assumed error-variance ratio var(ε_context)/var(ε_points);
+ * 1 treats both axes as equally noisy (both are coarse — points is an aggregate, context% a human meter
+ * reading), which de-biases the slope attenuation plain OLS suffers.
+ *
+ * Returns `{ overhead, cost, n, residualStd }`, or `null` when the fit is underdetermined (fewer than 2
+ * usable tuples, no spread in points, or a non-positive slope — a degenerate fit the caller must reject
+ * and fall back from).
  */
-export function trainsEstimate(stopReason) {
-  if (typeof stopReason !== 'string' || stopReason === '') return true;
-  if (NON_TRAINING_STOPS.has(stopReason)) return false;
-  return true; // 'budget'/'context' train; an unrecognised token fails-open here but is gated by the CLI
+export function fitAffineCost(samples, { lambda = 1 } = {}) {
+  const pts = (Array.isArray(samples) ? samples : [])
+    .map((s) => [Number(s?.points), Number(s?.contextPct)])
+    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y) && x > 0 && y > 0);
+  const n = pts.length;
+  if (n < 2) return null;
+  const mx = pts.reduce((a, [x]) => a + x, 0) / n;
+  const my = pts.reduce((a, [, y]) => a + y, 0) / n;
+  const sxx = pts.reduce((a, [x]) => a + (x - mx) ** 2, 0) / (n - 1);
+  const syy = pts.reduce((a, [, y]) => a + (y - my) ** 2, 0) / (n - 1);
+  const sxy = pts.reduce((a, [x, y]) => a + (x - mx) * (y - my), 0) / (n - 1);
+  if (sxx <= 0 || sxy <= 0) return null; // no points spread, or a non-positive association → reject
+  const cost = (syy - lambda * sxx + Math.sqrt((syy - lambda * sxx) ** 2 + 4 * lambda * sxy * sxy)) / (2 * sxy);
+  if (!(cost > 0)) return null;
+  const overhead = my - cost * mx;
+  // Vertical residual spread around the fitted line — the basis for the data-driven margin (budgetFromFit).
+  const ssr = pts.reduce((a, [x, y]) => a + (y - (overhead + cost * x)) ** 2, 0);
+  const residualStd = n > 2 ? Math.sqrt(ssr / (n - 2)) : 0;
+  return { overhead, cost, n, residualStd };
 }
 
 /**
- * Context-weighted mean of `impliedCapacity` over the samples that train the estimate (those not
- * `excluded`): Σ(impliedᵢ·ctxᵢ) / Σ(ctxᵢ). Returns null when no training sample carries positive
- * weight, so the caller can fall back to the prior estimate.
+ * Next-batch points budget from an affine fit (#1505 Fork 1 (b)): the largest P that keeps the predicted
+ * context under `ceiling`, after backing the ceiling off by a data-driven margin `k · residualStd` (≈ a
+ * one-sided confidence cushion at k≈1). So `P = (ceiling − overhead − k·residualStd) / cost`. A tight fit
+ * (small residualStd) spends almost the whole ceiling; a noisy fit holds more back. Returns a rounded
+ * points budget, or `null` when the fit is missing/degenerate or leaves no headroom (caller falls back).
  */
-export function capacityFromSamples(samples) {
-  const training = (Array.isArray(samples) ? samples : []).filter((s) => s && !s.excluded);
-  const wsum = training.reduce((sum, x) => sum + (Number(x.contextPct) || 0), 0);
-  if (wsum <= 0) return null;
-  const acc = training.reduce((sum, x) => sum + (Number(x.impliedCapacity) || 0) * (Number(x.contextPct) || 0), 0);
-  return Math.round(acc / wsum);
+export function budgetFromFit(fit, { ceiling = 80, k = 1 } = {}) {
+  if (!fit || !(fit.cost > 0)) return null;
+  const headroom = ceiling - fit.overhead - k * (fit.residualStd ?? 0);
+  if (!(headroom > 0)) return null;
+  return Math.round(headroom / fit.cost);
+}
+
+/**
+ * Implied full-window capacity (points at 100% context) for display / back-compat: `(100 − overhead)/cost`.
+ * Returns null on a missing/degenerate fit.
+ */
+export function impliedCapacity(fit) {
+  if (!fit || !(fit.cost > 0)) return null;
+  const p = (100 - fit.overhead) / fit.cost;
+  return p > 0 ? Math.round(p) : null;
 }

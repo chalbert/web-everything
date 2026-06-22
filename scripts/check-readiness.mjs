@@ -30,15 +30,19 @@ const require = createRequire(import.meta.url);
 const loadBacklog = require(join(ROOT, 'src/_data/backlog.js')); // the SINGLE loader (#248/#249 derivations)
 
 // Calibrated session capacity for points-budgeted batches (.claude/skills/batch-backlog-items/
-// capacity.json, kept current by `backlog.mjs calibrate` at close-out). The batch's point budget is
-// `capacityPoints × targetFraction` — "take as many points as possible up to ~half a session's worth,"
-// not a fixed item count. Missing/unreadable → a conservative built-in default so the CLI still runs.
+// capacity.json, kept current by `backlog.mjs calibrate` at close-out). Since #1505 the budget is the
+// affine model's `budgetPoints` (the largest points-load that fits under a context ceiling minus a
+// data-driven margin), computed at calibrate time and stored. Back-compat: an older file with only
+// `capacityPoints × targetFraction` is read that way; missing/unreadable → a conservative built-in
+// default so the CLI still runs.
 const CAPACITY_PATH = join(ROOT, '.claude/skills/batch-backlog-items/capacity.json');
 function loadCapacity() {
   try {
     const c = JSON.parse(readFileSync(CAPACITY_PATH, 'utf8'));
-    return { capacityPoints: c.capacityPoints ?? 100, targetFraction: c.targetFraction ?? 0.5 };
-  } catch { return { capacityPoints: 100, targetFraction: 0.5 }; }
+    if (Number.isFinite(c.budgetPoints)) return { budget: c.budgetPoints, capacityPoints: c.capacityPoints ?? null };
+    const capacityPoints = c.capacityPoints ?? 100, targetFraction = c.targetFraction ?? 0.5;
+    return { budget: Math.round(capacityPoints * targetFraction), capacityPoints };
+  } catch { return { budget: 50, capacityPoints: 100 }; }
 }
 
 // Cross-session batch reservations (#083 selection-tier soft hint). A batch soft-holds the items it
@@ -74,7 +78,7 @@ const items = typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog;
 const report = computeReadiness(items);
 const selection = computeSelection(items); // the deterministic ranked view (same source as the Prioritisation tab)
 const capacity = loadCapacity();
-const budget = BUDGET_OVERRIDE ?? Math.round(capacity.capacityPoints * capacity.targetFraction);
+const budget = BUDGET_OVERRIDE ?? capacity.budget;
 
 // Apply the soft-reservation penalty AFTER the deterministic ranking: foreign-held items sink to the
 // back so the pack fills with un-held items first (deprioritize, not exclude). `selection.*` stays the
@@ -147,10 +151,10 @@ if (SELECT) {
   if (batchableForView.length) batchableForView.forEach((it) => line(it, it.reservedBy ? `${YEL}⊘${RST}` : `${CYA}◆${RST}`));
   else console.log(`${DIM}  none.${RST}`);
 
-  // The suggested points-budgeted batch — "take as many points as possible up to ~half a session,"
-  // not a fixed item count. Budget = capacityPoints × targetFraction (calibrated at close-out); cost
-  // sums each item's batchCost (size; a task = 2), so a size·8 joins when it fits the remaining points.
-  const budgetSrc = BUDGET_OVERRIDE !== undefined ? `override; remaining at a seam` : `${capacity.capacityPoints} capacity × ${capacity.targetFraction}`;
+  // The suggested points-budgeted batch — "take as many points as possible up to the calibrated budget,"
+  // not a fixed item count. Budget = the affine model's budgetPoints (calibrated at close-out, #1505);
+  // cost sums each item's batchCost (size; a task = 2), so a size·8 joins when it fits the remaining points.
+  const budgetSrc = BUDGET_OVERRIDE !== undefined ? `override; remaining at a seam` : `affine budget; capacity ≈ ${capacity.capacityPoints ?? '?'}`;
   console.log(`\n${CYA}${BLD}Suggested batch — points budget ${budget}${RST} ${DIM}(${budgetSrc}; cost = size, task = 2)${RST}`);
   if (batchPack.picked.length) {
     let run = 0;

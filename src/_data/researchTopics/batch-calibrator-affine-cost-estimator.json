@@ -1,0 +1,20 @@
+{
+  "id": "batch-calibrator-affine-cost-estimator",
+  "title": "Batch Calibrator: Affine Context-Cost Estimator",
+  "status": "open",
+  "summary": "Statistical grounding for backlog #1505: the points-budget calibrator starves because it trains a single-ratio capacity estimate (implied = points / context-fraction, a line through the origin) only on the rare capacity-bound stop and excludes work-bound stops — but work-bound is the designed-for common case (budget = capacity × 0.6), so 11 of 12 live samples are excluded and the estimate rests on one sample. The fix is a pooled affine cost model (context% = overhead + cost·points) fit over ALL batches with a single intercept: the intercept is the universal fixed overhead (pack/plan/gate — real work in every batch), so it legitimately averages out and every batch contributes to both parameters. A fit on the live data shows a real, strongly-significant ~24% fixed overhead (t≈3.8, F≈14.4) the origin-model misattributes to per-point cost. A skeptic pass argued work-bound stops inflate the intercept with non-productive context (fork-thrash, gate-diagnosis) and should carry a separate offset — but the live residuals refute systematic inflation (work-bound mean residual −0.5 vs the single capacity-bound batch at +5.3; the saturating batch sits above, not below the cloud), so the model collapses to one pooled intercept and stop-reason is dropped. The genuine surviving amendments: a data-driven safety margin must replace the arbitrary ×0.6 (leave-one-out swings the budget ~25% on a single dropped sample), and the fit should be errors-in-variables (Deming) since both axes are noisy. Prior art: Tobit/censored regression (the origin model's latent-capacity censoring), recursive least squares with a forgetting factor (the online successor to the fixed 12-sample window), Deming/EIV regression. Per-turn context% trajectory data is deferred — it would enable a per-event waste correction but is not needed for 'every batch contributes' and the data shows no systematic waste to correct.",
+  "dateOpened": "2026-06-22",
+  "tags": [
+    "calibration",
+    "estimation",
+    "affine-model",
+    "censored-regression",
+    "tobit",
+    "recursive-least-squares",
+    "errors-in-variables",
+    "batch",
+    "dev-workflow"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

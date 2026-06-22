@@ -31,7 +31,7 @@ import { applyTransition, readField } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize } from './readiness/reservations.mjs';
 import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, porcelainFiles } from './readiness/claimScope.mjs';
-import { trainsEstimate, capacityFromSamples, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
+import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
@@ -154,8 +154,16 @@ function transition(v) {
   if (v === 'claim') {
     const claimedStatus = as === 'preparing' ? 'preparing' : 'active';
     const verbWord = claimedStatus === 'preparing' ? 'prepping' : 'claimed';
+    // The hard-stop ("claim turn ends here") guards the /decision two-go arc: claim and ratify are two
+    // distinct turns so a present+discuss can't collapse into a commit, and a concurrent session can't be
+    // raced. /prepare has no such arc — prep is autonomous agent work (research + authoring, no ruling),
+    // so a `preparing` claim flows straight into the passes in the same turn. Emit the stop only for the
+    // decision claim (#1397).
+    const tail = claimedStatus === 'preparing'
+      ? `\n\n${DIM}Proceed with the prep passes now — claiming and preparing are one turn (prep makes no ruling, so there is no two-go arc to split).${RST}`
+      : `\n\n${YEL}⏸ This is the claim turn — it ends here.${RST} Do NOT ground, present, or discuss the item's substance now. Stop, let the chat be renamed, and begin the work next turn (the claim and its substance are two distinct turns — collapsing them races concurrent sessions and skips the two-go arc).`;
     ok({ verb: v, id, file: rel, slug, status: claimedStatus },
-      `${GRN}✓ ${verbWord}${RST} ${id} ${DIM}→ ${claimedStatus} (dateStarted ${today()})${RST}\n\n${DIM}Rename this chat via the tab menu to label this session — copy:${RST}\n\`\`\`\n${slug}\n\`\`\`\n\n${YEL}⏸ This is the claim turn — it ends here.${RST} Do NOT ground, present, or discuss the item's substance now. Stop, let the chat be renamed, and begin the work next turn (the claim and its substance are two distinct turns — collapsing them races concurrent sessions and skips the two-go arc).`);
+      `${GRN}✓ ${verbWord}${RST} ${id} ${DIM}→ ${claimedStatus} (dateStarted ${today()})${RST}\n\n${DIM}Rename this chat via the tab menu to label this session — copy:${RST}\n\`\`\`\n${slug}\n\`\`\`${tail}`);
   }
   if (v === 'resolve') {
     const g = flag('graduated-to');
@@ -299,32 +307,31 @@ function settle() {
 }
 
 /**
- * calibrate — fold one session's observed (points resolved ÷ context fraction) into the
- * session-capacity estimate that sizes a points-budgeted batch (capacity.json). This is the close-out
- * feedback loop: the count cap is gone, so the budget must stay honest about what a session actually
- * fits. `--points` = cost-points resolved (sum of each item's batchCost: a story's size, a task = 2);
- * `--context-pct` = the share of the window consumed at close (the editor's context meter, 1–100);
- * `--stop-reason` (optional) = why the batch stopped — only **capacity-bound** stops (`budget`/`context`)
- * train the estimate; a work-bound stop (`empty-pool`/`fork`/`gate`/`manual`) is recorded for audit but
- * `excluded` from the mean (it measured nothing about how much a session fits). See backlog/capacity.mjs.
+ * calibrate — fold one session's `(points resolved, context% at close)` into the **pooled affine
+ * context-cost model** that sizes a points-budgeted batch (capacity.json; ratified in #1505). This is the
+ * close-out feedback loop: the count cap is gone, so the budget must stay honest about what a session
+ * actually fits. `--points` = cost-points resolved (sum of each item's batchCost: a story's size, a
+ * task = 2); `--context-pct` = the share of the window consumed at close (the editor's context meter,
+ * 1–100); `--stop-reason` (optional) = why the batch stopped, recorded as **audit metadata only** — since
+ * #1505 every batch trains the model regardless of stop reason (see capacity.mjs for why).
  *
- * Estimator = a CONTEXT-WEIGHTED MEAN over the training samples in the retained 12-sample window, NOT a
- * fixed-α EMA. A fixed-α blend perpetually tracks the last few sessions and never tightens — more samples
- * don't shrink the error, they just slide the window. A weighted mean over the stored history converges
- * as samples accumulate AND finally *uses* that history. Each sample's implied capacity is trusted in
- * proportion to how much of a window it exercised (a 53%-context reading >> a 13% one); and a work-bound
- * session is dropped entirely (#553), since its early cutoff makes `points ÷ fraction` an extrapolation
- * from noise, biased low by fixed startup overhead. The 12-sample window ages out old sessions, so it
- * stays adaptive to a real regime change (e.g. a new model).
+ * Estimator = a Deming (errors-in-variables) fit of `context% = overhead + cost·points` over EVERY
+ * sample's raw `(points, context%)` in the retained 12-sample window. The fixed overhead is the intercept
+ * (real work in every batch), so it is measured rather than misattributed to per-point cost, and the old
+ * work-bound exclusion gate is gone — work-bound is the common case, so dropping it stops the estimate
+ * starving on the rare capacity-bound stop. The next budget is the largest P under a context ceiling minus
+ * a data-driven margin (`budgetFromFit`); `contextCeiling`/`marginK` in the JSON tune it (defaults 80/1),
+ * replacing the arbitrary ×0.6. The 12-sample window ages out old sessions, staying adaptive to a regime
+ * change (a new model); RLS-with-forgetting is the planned successor (#1516).
  */
 function calibrate() {
   const points = Number(flag('points'));
   const ctxPct = Number(flag('context-pct'));
-  const stopReason = flag('stop-reason'); // optional; capacity-bound stops train, work-bound are excluded
+  const stopReason = flag('stop-reason'); // optional; audit metadata only since #1505 (every batch trains)
   if (!Number.isFinite(points) || points <= 0) die('calibrate needs --points=<cost-points resolved this session>');
   if (!Number.isFinite(ctxPct) || ctxPct <= 0 || ctxPct > 100) die('calibrate needs --context-pct=<1–100, context consumed at close>');
-  // Fail-closed on an unrecognised --stop-reason (#968): a typo or un-listed token would otherwise
-  // default to *training* the estimate (fail-open) and silently corrupt the budget. Reject it instead.
+  // Fail-closed on an unrecognised --stop-reason (#968): reject a typo / un-listed token rather than
+  // recording a garbage audit tag.
   if (stopReason && !isKnownStopReason(stopReason))
     die(`calibrate: unknown --stop-reason="${stopReason}" — use one of: ${[...KNOWN_STOP_REASONS].join(', ')} (or omit it)`);
 
@@ -332,27 +339,38 @@ function calibrate() {
   try { cap = JSON.parse(readFileSync(CAPACITY_PATH, 'utf8')); }
   catch { die(`cannot read ${CAPACITY_PATH} — run a batch in this repo first (the file ships seeded)`); }
 
-  const implied = Math.round(points / (ctxPct / 100)); // what a full session would have fit at this rate
-  const prev = Number.isFinite(cap.capacityPoints) ? cap.capacityPoints : implied;
-  const trains = trainsEstimate(stopReason);
-
-  const sample = { date: today(), points, contextPct: ctxPct, impliedCapacity: implied };
+  const sample = { date: today(), points, contextPct: ctxPct };
   if (stopReason) sample.stopReason = stopReason;
-  if (!trains) sample.excluded = true; // recorded for audit, but does not train the estimate (#553)
   const samples = [...(Array.isArray(cap.samples) ? cap.samples : []), sample].slice(-12);
-  // Context-weighted mean over the TRAINING (non-excluded) samples; fall back to prev when none train.
-  const next = capacityFromSamples(samples) ?? prev;
 
-  cap.capacityPoints = next;
+  const ceiling = Number.isFinite(cap.contextCeiling) ? cap.contextCeiling : 80;
+  const k = Number.isFinite(cap.marginK) ? cap.marginK : 1;
+  const fit = fitAffineCost(samples);
+  const budget = budgetFromFit(fit, { ceiling, k });
+  const capPts = impliedCapacity(fit);
+
+  // Fall back to the prior estimate only when the fit is degenerate (e.g. < 2 samples on a fresh file).
+  const prevBudget = Number.isFinite(cap.budgetPoints) ? cap.budgetPoints
+    : Number.isFinite(cap.capacityPoints) ? Math.round(cap.capacityPoints * (cap.targetFraction ?? 0.5)) : null;
+  const nextBudget = budget ?? prevBudget;
+
   cap.samples = samples;
-  delete cap.ema; // legacy fixed-α weight — no longer used (the estimator is now a weighted window mean)
+  if (fit) {
+    cap.fit = { overhead: Math.round(fit.overhead * 100) / 100, cost: Math.round(fit.cost * 10000) / 10000, n: fit.n, residualStd: Math.round(fit.residualStd * 100) / 100 };
+    if (capPts != null) cap.capacityPoints = capPts;
+  }
+  cap.contextCeiling = ceiling;
+  cap.marginK = k;
+  if (nextBudget != null) cap.budgetPoints = nextBudget;
+  delete cap.ema; // legacy fixed-α weight — long unused
+  delete cap.targetFraction; // superseded by contextCeiling/marginK (#1505); budgetPoints is now stored directly
   writeFileSync(CAPACITY_PATH, JSON.stringify(cap, null, 2) + '\n');
 
-  const trained = samples.filter((s) => !s.excluded).length;
-  const note = trains ? `context-weighted mean of ${trained}` : `not trained (${stopReason} = work-bound stop); mean of ${trained}`;
-  const budget = Math.round(next * (cap.targetFraction ?? 0.5));
-  ok({ verb: 'calibrate', points, contextPct: ctxPct, stopReason: stopReason ?? null, trained: trains, impliedCapacity: implied, capacityPoints: next, budget },
-    `${GRN}✓ calibrated${RST} ${DIM}— ${points} pts at ${ctxPct}% → implied ${implied}; capacity ${prev} → ${BLD}${next}${RST}${DIM} (${note}); next batch budget ≈ ${RST}${BLD}${budget} pts${RST}`);
+  const note = fit
+    ? `affine fit over ${fit.n} (overhead ${cap.fit.overhead}%, cost ${cap.fit.cost}%/pt); capacity ≈ ${capPts}`
+    : `fit degenerate (need ≥2 samples) — held prior budget`;
+  ok({ verb: 'calibrate', points, contextPct: ctxPct, stopReason: stopReason ?? null, fit: cap.fit ?? null, capacityPoints: cap.capacityPoints ?? null, budget: nextBudget },
+    `${GRN}✓ calibrated${RST} ${DIM}— ${points} pts at ${ctxPct}% → ${note}; next batch budget ≈ ${RST}${BLD}${nextBudget ?? '?'} pts${RST}`);
 }
 
 switch (verb) {

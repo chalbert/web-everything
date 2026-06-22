@@ -1,0 +1,154 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    Backlog <a href="/backlog/1505-calibrator-model-batch-context-cost-so-work-bound-stops-the-/">#1505</a>
+    asks how the batch calibrator (<code>scripts/backlog.mjs calibrate</code>) should model session
+    capacity so that <em>every</em> batch informs the next batch's points budget. Today it trains a
+    single-ratio estimate &mdash; <code>implied_capacity = points / (context% / 100)</code> &mdash; and
+    averages it (context-weighted) <strong>only over capacity-bound stops</strong>
+    (<code>budget</code>/<code>context</code>), excluding <strong>work-bound stops</strong>
+    (<code>empty-pool</code>/<code>fork</code>/<code>gate</code>/<code>manual</code>/<code>outgrew</code>).
+    But work-bound is the <em>designed-for common case</em>: the budget is <code>capacity &times; 0.6</code>,
+    so a batch almost always exhausts its pool or hits a seam before saturating the window. The estimator
+    therefore trains on the rare case and starves.
+</p>
+
+<h3>Live evidence &mdash; the starvation is real</h3>
+<p>
+    <code>capacity.json</code> holds 12 samples; <strong>11 are work-bound (<code>excluded</code>) and
+    exactly one (<code>stopReason: context</code>) trains.</strong> So <code>capacityPoints</code> (93)
+    rests on a single sample &mdash; a literal "mean of 1." The 12 <code>(points, context%)</code>
+    close-out tuples:
+</p>
+<pre>(13,37) (57,49) (67,67) (50,47) (37,41) (23,33) (18,23) (34,44) (52,55) (72,51) (55,59) (48,65)</pre>
+
+<h3>Recommendation (to ratify in #1505)</h3>
+<ol>
+    <li><strong>Pooled affine fit &mdash; ratified invariant, every batch contributes.</strong> Replace
+        the single ratio (a line <em>through the origin</em>, i.e. zero fixed overhead) with
+        <code>context% = overhead + cost&middot;points</code>, fit over <em>all</em> batches with a
+        <strong>single</strong> intercept and shared slope. The intercept is the <strong>universal fixed
+        overhead</strong> (pack/plan/gate &mdash; real work in every batch), so it averages out and every
+        batch contributes to both parameters. The origin model is broken on two counts: it misattributes
+        the measured overhead, and its stop-reason on/off gate discards ~90% of the data.</li>
+    <li><strong>No work-bound intercept dummy.</strong> The skeptic argued work-bound stops inflate the
+        intercept with non-productive context and should carry a separate offset; the live residuals
+        refute systematic inflation (Finding 2), and a dummy is unidentifiable with one capacity-bound
+        sample. Stop-reason is dropped.</li>
+    <li><strong>Fork 1 &mdash; keep a data-driven safety margin.</strong> Replace the arbitrary
+        <code>&times;0.6</code> with a margin sized to fit uncertainty (a lower confidence bound on
+        derived capacity, or shrinkage toward the empirical median) &mdash; not the bare point estimate
+        <code>(ceiling &minus; overhead) / cost</code>.</li>
+    <li><strong>Fit errors-in-variables (Deming), not plain OLS</strong>, and check heteroskedasticity as
+        the sample grows &mdash; both axes are noisy (points is a coarse aggregate; context% is a single
+        human eyeball reading), so OLS attenuates the slope and inflates the intercept.</li>
+    <li><strong>Per-turn context% (trajectory data) is deferred, not the structural fix.</strong> It
+        would enable a <em>per-event</em> waste correction (fork/gate tails) but is not needed for "every
+        batch contributes" (the pooled fit already delivers that) and the data shows no systematic waste
+        to correct. File the enabler only if a real per-event confound is later observed; bridge with the
+        one-sided ratchet interim build.</li>
+</ol>
+
+<h3>Finding 1 &mdash; the affine fit shows a real, significant fixed overhead</h3>
+<p>
+    A plain OLS fit of <code>context% = overhead + cost&middot;points</code> over all 12 tuples:
+</p>
+<table>
+    <thead><tr><th>Quantity</th><th>Estimate</th><th>SE</th><th>t</th><th>Note</th></tr></thead>
+    <tbody>
+        <tr><td>overhead (intercept)</td><td><strong>23.5%</strong></td><td>6.2</td><td><strong>3.79</strong></td><td>F(drop intercept) = 14.4 &mdash; overhead is real, not zero</td></tr>
+        <tr><td>cost (slope)</td><td><strong>0.549 %/pt</strong></td><td>0.131</td><td>4.2</td><td>24% relative SE</td></tr>
+        <tr><td>R&sup2;</td><td>0.638</td><td></td><td></td><td>n = 12, 2 params</td></tr>
+    </tbody>
+</table>
+<p>
+    The single-ratio-through-origin model is decisively wrong: a ~24% fixed overhead exists that the old
+    model spread into <code>cost&middot;points</code>, systematically <em>under</em>-estimating implied
+    capacity on small (work-bound) batches &mdash; precisely why excluding them looked necessary. The
+    affine model measures the overhead explicitly, so the exclusion is no longer needed.
+</p>
+
+<h3>Finding 2 &mdash; the skeptic pass, and where it was itself refuted</h3>
+<p>
+    An adversarial skeptic pass raised four objections to the affine default. The first &mdash; that
+    work-bound stops <em>inflate</em> the intercept and need a separate offset &mdash; was tested against
+    the data and refuted; the rest stand:
+</p>
+<ul>
+    <li><strong>"Work-bound context inflates the intercept" &mdash; REFUTED by the residuals.</strong>
+        The fixed overhead the skeptic names (pack/plan/gate) is <em>universal</em> &mdash; real work in
+        every batch &mdash; not a work-bound-only waste; it is exactly the affine intercept and averages
+        out across all batches. The live residuals show no systematic inflation: mean residual is
+        <strong>&minus;0.5 for work-bound vs +5.3 for the single capacity-bound batch</strong> (the
+        saturating batch sits <em>above</em> the work-bound cloud, not below), and the two <code>fork</code>
+        batches split <strong>+6.4 / &minus;10.4</strong>. We also estimate from a work-bound-dominated
+        population to predict a work-bound batch &mdash; like-for-like, no extrapolation bias. So the
+        model collapses to a single pooled intercept and stop-reason is dropped. (The intercept is
+        strongly significant &mdash; t = 3.79, F = 14.4 &mdash; confirming overhead is real, just not
+        stop-specific.)</li>
+    <li><strong>The fit is too thin to retire a margin &mdash; STANDS.</strong> Leave-one-out moves the
+        slope across 0.46&ndash;0.67 and the derived budget@85% across 98&ndash;123 pts &mdash; a ~25%
+        swing from a single dropped sample. A marginless budget removes the buffer that absorbs this and a
+        regime change.</li>
+    <li><strong>Errors-in-variables matters &mdash; STANDS.</strong> A Deming fit moves overhead
+        23.5 &rarr; 20.0 and cost 0.549 &rarr; 0.629 (budget@85% 112 &rarr; 103) &mdash; a materially
+        different model, confirming OLS attenuation. <code>corr(|resid|, points) = 0.20</code> hints at
+        heteroskedasticity but is inconclusive at n = 12.</li>
+    <li><strong>Trajectory data &mdash; deferred, not the structural fix.</strong> The within-batch
+        trajectory could separate productive cost from the occasional fork/gate waste tail <em>inside</em>
+        a batch &mdash; but with the inflation claim refuted, that is a <em>per-event</em> correction for
+        a confound the data does not currently show, not the thing that makes "every batch contribute"
+        (the pooled fit already does). Demoted from prerequisite to a contingency.</li>
+</ul>
+<p>Net: affine is right; the genuine surviving amendments are <strong>keep a data-driven margin</strong>
+    and <strong>fit with EIV</strong> &mdash; the stop-reason carve-out the skeptic wanted is not needed,
+    refuted by the residuals.</p>
+
+<h3>Finding 3 &mdash; prior art: the methods are textbook</h3>
+<table>
+    <thead><tr><th>Method</th><th>Relevance</th></tr></thead>
+    <tbody>
+        <tr>
+            <td>Tobit / censored regression (Tobit 1958)</td>
+            <td>OLS on a censored response is biased and inconsistent; Tobit recovers it via an ML
+                likelihood (Olsen's 1978 <code>&delta; = &beta;/&sigma;</code>,
+                <code>&gamma;&sup2; = &sigma;&#8315;&sup2;</code> reparameterization makes the
+                log-likelihood concave). The item's original "Option 2" reached for Tobit because it
+                modeled <em>latent capacity</em> directly (work-bound = right-censored on capacity). The
+                affine reparameterization dissolves the censoring: a close-out tuple is an exact point on
+                the cost curve regardless of <em>why</em> the batch stopped, and the fixed overhead is a
+                single universal intercept &mdash; so no Tobit and no per-stop-reason offset are needed.</td>
+        </tr>
+        <tr>
+            <td>Recursive least squares with forgetting factor / sliding window (typical &lambda; &isin;
+                [0.98, 0.995])</td>
+            <td>The online form of the affine fit and the principled successor to the fixed 12-sample
+                window: it discounts old regimes (e.g. a model change) continuously rather than by a hard
+                cutoff &mdash; the natural home for the "adapt to a new model" requirement.</td>
+        </tr>
+        <tr>
+            <td>Deming / errors-in-variables regression</td>
+            <td>The correct fit when both axes carry error, which they do here (coarse human context%
+                reading; aggregated points). Plain OLS attenuates the slope.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Classification</h3>
+<p>
+    This is <strong>internal batch tooling</strong>, not a shipped Web Everything standard &mdash; not a
+    protocol, intent, block, or adapter, with no project-facing surface. It lives in the pure module
+    <code>scripts/backlog/capacity.mjs</code> (consumed by <code>scripts/backlog.mjs calibrate</code>),
+    so the standard classification questions resolve to N/A (dev-workflow tooling). The binding
+    constraints are repo conventions: keep the estimator a pure, unit-testable module, and keep the
+    human-supplied <code>--context-pct</code> contract until a harness enabler changes it.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/1505-calibrator-model-batch-context-cost-so-work-bound-stops-the-/">#1505</a>
+        &mdash; the estimator model decision this survey prepares.</li>
+    <li>Origin: backlog #553 (points-budgeted batch + the context-weighted-mean estimator) and #968
+        (the fail-closed stop-reason gate this survey revisits).</li>
+</ul>
+{% endraw %}
