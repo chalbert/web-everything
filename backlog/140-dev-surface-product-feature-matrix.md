@@ -80,15 +80,20 @@ This is the [#089](/backlog/089-monetization-product-ideas/) "AI proposes, the s
 - **[#096](/backlog/096-nl-to-technical-configurator/)** (the [intents-ux-only](docs/agent/platform-decisions.md#intents-ux-only) rule), **[#094](/backlog/094-ai-upgrader-tools/)**, **[#095](/backlog/095-conformance-auto-fix-agent/)** are the AI code-tool family (the #097 MVP) — orthogonal to this surface matrix.
 - **[#141](/backlog/141-dev-browser-vision/)** is the dev-browser vision (the rightmost column, written up as its own concept).
 
+## What this card is (and is not) a decision about
+
+The rows are **not** "what should be standard" calls — they place each *product feature* against a
+*delivery surface* and read the market gap. That's surface placement + prioritization, and
+[prioritization is not a fork](docs/agent/platform-decisions.md). The genuine standard kernels behind the
+features (trace/replay artifact, introspectable app model, declared flags/variants/rule intents) live in
+their own items (#086, #093, the webtraces/webcontexts/webevents family).
+
+The **one** ratifiable decision this matrix surfaces — *which surface carries the paid product* — is
+carved out into **[#1590](/backlog/1590-dev-surface-monetization-bet-extensions-as-funnel-vs-dev-bro/)**
+(parked `deferred` on funnel data). This card stays the durable **map**, not a decision.
+
 ## Design notes / next steps
 
 - **This is a planning artifact, not a build.** The genuinely-new features with no owning item yet — **state & action explorer (6)**, **designer→PR (2)**, **in-context test status (3/4/5)**, **error replay + in-context bug report (9/10)**, **translation-strategy picker (12)** — each warrants its own backlog item when it's picked up; captured here as rows first to avoid 8 thin siblings.
-- **Surface bet:** extensions as funnel/proving-ground, dev browser (+ selective SaaS) as the monetizable product — confirm before investing.
+- **Surface bet:** carved out to [#1590](/backlog/1590-dev-surface-monetization-bet-extensions-as-funnel-vs-dev-bro/) — provisional lean is extensions-as-funnel + dev-browser (+ selective SaaS) as the paid product; ratify there when funnel data exists.
 - **Sequencing:** the three shared mechanisms above should be built before the features that ride them; the trace/replay artifact unblocks the most features (6, 9, 10).
-
-## Direction (provisional, 2026-06-18)
-
-Proceeding on the stated bet — **extensions-as-funnel + dev-browser as the monetizable product** — as
-*provisional* sequencing, explicitly revisitable per the soft-monetization treatment (never priced on a
-shifting category). The 12-feature triage is **not funded yet** — revisit with real funnel data. This card
-stays **open** as the durable planning artifact, not resolved.
