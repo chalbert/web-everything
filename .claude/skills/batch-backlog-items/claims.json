@@ -18,7 +18,8 @@
         "1493-fui-radio-toggle-off-path-clear-affordance-deselectable",
         "1489-convert-stepper-to-we-stepper-element-persistent-light-dom-b",
         "1490-convert-deck-to-we-deck-element-persistent-light-dom-b-over-",
-        "1491-convert-tabs-to-we-tabs-element-persistent-light-dom-b-over-"
+        "1491-convert-tabs-to-we-tabs-element-persistent-light-dom-b-over-",
+        "1496-native-first-gesture-recognizer-multi-pointer-pinch-rotate-t"
       ],
       "baseline": [
         ".claude/commands/resolve.md",
