@@ -1,43 +1,35 @@
 ---
-kind: decision
-status: parked
-parkedReason: maturityGated
-maturityTrigger: "externalConsumers>=1"
+kind: task
+status: open
 dateOpened: "2026-06-21"
+blockedBy: [1627]
 tags: []
 ---
 
 # Mint the dockable layout-tree interchange Protocol (core schema + extension slot)
 
-**Parked `maturityGated` (#1620 sweep, #1623) — `maturityTrigger: externalConsumers>=1`.** Minting the
-Protocol *now* would produce a worse artifact: with only one conforming impl, a "convergent" core schema is
-just that impl's shape (the `#project-protocol-bar` rule). It unparks when a **second** independent
-impl/adapter (dockview / FlexLayout / golden-layout) round-trips the core against `we:blocks/dockable/contract.ts`.
-Realizing build
-of [#1437](/backlog/1437-decision-docking-tiling-dockable-window-management-placement-/) Fork 2a (resolved):
-standardize the dockable layout-tree as a first-class WE Protocol (`we:src/_data/protocols/`) — the
-convergent core schema node `{type: row|column|stack, children|tabs, size}` that dockview / FlexLayout /
-golden-layout all emit, plus an **open extension slot** for the divergent popout-state / per-panel-metadata /
-constraint encodings. Conformance = round-trip the tree. The *whether-protocol* call is already settled
-(#1437 Fork 2a); what remains is purely the **when**, and that is forced by a ratified rule, so there is
-no judgment to bring to DoR.
+Realizing build of [#1437](/backlog/1437-decision-docking-tiling-dockable-window-management-placement-/)
+Fork 2a (resolved): standardize the dockable layout-tree as a first-class WE Protocol
+(`we:src/_data/protocols/`) — the convergent core schema node `{type: row|column|stack, children|tabs, size}`
+that dockview / FlexLayout / golden-layout all emit, plus an **open extension slot** for the divergent
+popout-state / per-panel-metadata / constraint encodings. Conformance = round-trip the tree. The
+*whether-protocol* call is already settled (#1437 Fork 2a); this item is purely the **build** — author the
+Protocol entry once the convergence gate clears.
 
-## Why it's gated, not preparable — the protocol-bar temporal rule
+## The work
+
+Author the `we:src/_data/protocols/` entry for the dockable layout-tree: the core schema node, the extension
+slot, and the round-trip conformance vectors. Source the convergent vocabulary from the survey in
+[`we:reports/2026-06-21-docking-tiling-partition-tree.md`](reports/2026-06-21-docking-tiling-partition-tree.md)
+/ the `docking-tiling-partition-tree` research topic.
+
+## Blocked on the protocol-bar gate, not a maturity park
 
 The [`#project-protocol-bar`](docs/agent/platform-decisions.md#project-protocol-bar) rule mints a Protocol
-entry only **after a second conforming impl validates the core schema**. Minting on one impl is the
-*flawed branch* — a one-impl "convergent" schema is just that impl's shape, so it cannot prove convergence
-or exercise the extension slot's divergence. "Wait for the 2nd impl" is therefore forced, not a weighable
-choice — which is exactly why this is a park, not a `## Fork`.
-
-**Today only one conforming impl exists:** FUI dockable render (#1511–#1514, all resolved) over the WE
-contract (`we:blocks/dockable/contract.ts`). The realizing block epic (#1485) and its slices are resolved,
-but `we:blocks/dockable/` holds no impl and **no second-family adapter** (dockview / FlexLayout /
-golden-layout) has been built against the schema, and no backlog item yet tracks building one (so this is an
-open decision held until the gate clears, not a single `blockedBy` edge).
-
-**Un-park trigger:** a second independent impl/adapter round-trips the `{type: row|column|stack,
-children|tabs, size}` core against `we:blocks/dockable/contract.ts` — then extract the Protocol entry
-(`we:src/_data/protocols/`) and resolve. The cross-library convergence evidence is already surveyed in
-[`we:reports/2026-06-21-docking-tiling-partition-tree.md`](reports/2026-06-21-docking-tiling-partition-tree.md)
-/ the `docking-tiling-partition-tree` research topic, so the mint will be fast once the gate clears.
+entry only **after a second conforming impl validates the core schema** — minting on one impl is the flawed
+branch (a one-impl "convergent" schema is just that impl's shape, and can't exercise the extension slot's
+divergence). Today only one conforming impl exists: FUI dockable render (#1511–#1514, all resolved) over
+`we:blocks/dockable/contract.ts`. The second independent impl is now a **tracked build** —
+[#1627](/backlog/1627-build-a-dockview-adapter-that-round-trips-the-dockable-core-/) (dockview adapter) — so
+this is a real `blockedBy: [1627]` edge, **not** a `maturityGated` park waiting for an external consumer to
+spontaneously appear. When #1627's round-trip passes the gate clears and this item is unblocked to mint.
