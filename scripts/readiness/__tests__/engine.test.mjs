@@ -49,6 +49,7 @@ function makeItems(specs) {
       directUnblocks: s.directUnblocks ?? 0, transitiveUnblocks: s.transitiveUnblocks ?? 0,
       unblocksToReady: s.unblocksToReady ?? 0,
       locus: s.locus, locusAuthored: s.locusAuthored,
+      priority: s.priority,
     };
   });
 }
@@ -137,10 +138,27 @@ describe('selection view (#254 projection) — the skills consume this, never re
       { num: 6, kind: 'story', status: 'resolved', size: 1 },                 // dropped (not open)
     ]);
     const sel = computeSelection(items);
-    expect(sel.counts).toEqual({ open: 5, tierA: 3, agentReady: 3, sliceable: 0, epicActionable: 0, tierB: 1, tierBPrepared: 0, tierC: 1, batchable: 2, inFlight: 0 });
+    expect(sel.counts).toEqual({ open: 5, tierA: 3, agentReady: 3, sliceable: 0, epicActionable: 0, tierB: 1, tierBPrepared: 0, tierC: 1, batchable: 2, inFlight: 0, filler: 0 });
     expect(sel.batchable.map((i) => i.num).sort()).toEqual(['1', '2']);
     expect(sel.tierA.every((i) => i.tier === 'A')).toBe(true);
     expect(sel.tierB.map((i) => i.num)).toEqual(['4']);
+  });
+
+  it('demotes `priority: low` out of the auto-selected ready set into the visible filler group (#1620)', () => {
+    const items = makeItems([
+      { num: 1, kind: 'story', status: 'open', size: 3 },                    // batchable Tier A (ready)
+      { num: 2, kind: 'story', status: 'open', size: 3, priority: 'low' },   // settled but low-priority → filler
+      { num: 3, kind: 'task', status: 'open', priority: 'low' },             // low-priority task → filler
+    ]);
+    const sel = computeSelection(items);
+    // #2/#3 are excluded from the auto-select set (tierA/batchable) but NOT dropped — they surface in filler.
+    expect(sel.tierA.map((i) => i.num)).toEqual(['1']);
+    expect(sel.batchable.map((i) => i.num)).toEqual(['1']);
+    expect(sel.filler.map((i) => i.num).sort()).toEqual(['2', '3']);
+    expect(sel.counts.agentReady).toBe(1);  // only the non-filler story
+    expect(sel.counts.filler).toBe(2);
+    // demote-not-hide: still open + counted, just not auto-ready.
+    expect(sel.counts.open).toBe(3);
   });
 
   it('splits a Tier-A epic into the sliceable bucket — unblocked but not buildable, never agent-ready', () => {

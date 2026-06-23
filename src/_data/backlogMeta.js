@@ -23,10 +23,23 @@ module.exports = {
   // Why a non-epic item is `status: parked` — a machine-readable hold reason (#1392). TIGHTENED 2026-06-22
   // (parked-item sweep): parking is NOT a prioritisation escape, so the soft `deferred`/`external-infra`/
   // `superseded` reasons are retired. A park must reduce to a real structural state — a `blockedBy` edge, a
-  // `humanGate`, `kind: decision` + `status: open` (decision lane), or — the only standalone `parkedReason`
-  // left — `platform-gated`. `check:standards` errors on a parked item with no such reason.
+  // `humanGate`, `kind: decision` + `status: open` (decision lane), or a standalone `parkedReason`.
+  // STANDALONE REASONS (#1620): `platform-gated` (waits on a browser feature) + `maturityGated` (building
+  // now would yield a WORSE artifact — guess the shape, tune against nothing, automate the unproven —
+  // requires a typed, externally-verifiable `maturityTrigger`; the gate errors on one without it, which is
+  // what keeps it from being `deferred` 2.0). `check:standards` errors on a parked item with no such reason.
   parkedReasonMeta: {
     'platform-gated': { label: 'platform-gated', bg: '#e0f2fe', fg: '#075985', tip: 'Held on a web-platform capability shipping in browsers (a native element/CSS feature not yet broadly available) — not a backlog item and not a human action. Unpark when the platform feature lands.' },
+    'maturityGated': { label: 'maturity-gated', bg: '#faf5ff', fg: '#6b21a8', tip: 'Held because building it NOW would produce a worse artifact (you would guess the shape, tune against no real integration, or automate an unproven process). Carries a typed maturityTrigger (externalConsumers>=N | realRuns>=N | a named adoptionSignal) that flips it ready — never a date or bare "later".' },
+  },
+  // `priority: low` (#1620) — a load-bearing demote signal: settled & valid work that is just not worth
+  // doing now. The readiness `--select` ranker EXCLUDES `low` from the auto-selected ready set (so it stops
+  // false-surfacing as Tier-A) but the loader still LISTS it in a visible "deprioritised / filler" group —
+  // demote, never hide (it stays browsable + hand-pickable when nothing better exists). Distinct from a
+  // PARK (which removes the item until an external gate clears): `low` is "not now," a park is "can't yet".
+  // Only `low` is honored (absent = normal); no `high`/`normal` — that invites priority-rot + duplicates tier.
+  priorityMeta: {
+    low: { label: 'low priority', bg: '#f8fafc', fg: '#64748b', tip: 'Settled & valid, just not worth doing now — demoted out of the auto-selected ready set but still pickable as filler when nothing better exists. Not rejected, not parked (#1620).' },
   },
   // Why an oversized story (size > 8) is NOT a /split candidate after analysis — author-supplied
   // (`unsplittableReason`), the story-side mirror of an epic's `childlessReason`. Recording it clears the

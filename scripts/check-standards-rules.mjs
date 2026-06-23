@@ -25,7 +25,14 @@ export const BACKLOG_STATUSES = new Set(['open', 'active', 'preparing', 'parked'
 // (decisions live in the decision lane, not parked). The soft `deferred`/`superseded`/`external-infra`
 // reasons are retired; the ONLY standalone `parkedReason` left is `platform-gated` (held on a web-platform
 // capability shipping in browsers — not a backlog item or a human action).
-export const PARKED_REASONS = new Set(['platform-gated']);
+// #1620 added `maturityGated` — held because building NOW would yield a worse artifact (guess the shape,
+// tune against no integration, automate the unproven). It REQUIRES a typed, externally-verifiable
+// `maturityTrigger` (see MATURITY_TRIGGER_RE) — the gate errors on a maturityGated item without one, which
+// is exactly what keeps it from being a soft `deferred` 2.0 escape.
+export const PARKED_REASONS = new Set(['platform-gated', 'maturityGated']);
+// A `maturityGated` park's `maturityTrigger` must name a COUNTER or an external artifact's EXISTENCE — never
+// a date or bare "later". One of: `externalConsumers>=N` · `realRuns>=N` · `adoptionSignal:<named milestone>`.
+export const MATURITY_TRIGGER_RE = /^(externalConsumers>=\d+|realRuns>=\d+|adoptionSignal:\s*\S.+)$/;
 // One `kind` axis (#466/#487) — the merged nature+hierarchy field that replaced the former two
 // correlated axes (`type ∈ idea|issue|decision` + `workItem ∈ story|epic|task`). `story|epic|task` keep
 // the sizing/hierarchy semantics; `decision` keeps Tier-B + fork validation. `size` stays a separate
@@ -172,6 +179,14 @@ export function validateBacklogItem(item, ctx) {
   if (item.status === 'parked') {
     if (item.parkedReason && !PARKED_REASONS.has(item.parkedReason))
       err(`Backlog item "${item.id}" has invalid parkedReason "${item.parkedReason}" (expected ${[...PARKED_REASONS].join(' / ')})`);
+    // A `maturityGated` park MUST carry a typed, externally-verifiable `maturityTrigger` (#1620) — the
+    // guard that keeps it from being a soft `deferred` 2.0 escape. Missing/untyped/date-only → hard error.
+    if (item.parkedReason === 'maturityGated' &&
+        (typeof item.maturityTrigger !== 'string' || !MATURITY_TRIGGER_RE.test(item.maturityTrigger.trim())))
+      err(`Backlog item "${item.id}" is \`parkedReason: maturityGated\` but lacks a typed \`maturityTrigger\` ` +
+        `— it must name a counter or an external artifact's existence: \`externalConsumers>=N\` · ` +
+        `\`realRuns>=N\` · \`adoptionSignal:<named milestone>\` (never a date or bare "later"). That typed ` +
+        `trigger is what makes maturityGated a real hold, not a soft "deferred" escape (#1620).`);
     const hasEdge = Array.isArray(item.blockedBy) && item.blockedBy.length > 0;
     if (!hasEdge && !item.humanGate && !item.parkedReason && !item.childlessReason)
       err(`Backlog item "${item.id}" is \`status: parked\` but carries no machine-readable reason — parking is ` +

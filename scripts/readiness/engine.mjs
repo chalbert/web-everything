@@ -156,6 +156,7 @@ export function computeSelection(items) {
     directUnblocks: it.directUnblocks ?? 0,
     transitiveUnblocks: it.transitiveUnblocks ?? 0,
     unblocksToReady: it.unblocksToReady ?? 0,
+    priority: it.priority ?? null,
   });
   // Smaller-first key: a `task` is bounded sub-work (0); a sized story uses its points; anything
   // unsized sorts last. Effort tiebreak only — leverage dominates. (The pre-#487 "issue before idea"
@@ -173,7 +174,14 @@ export function computeSelection(items) {
   const rankB = (a, b) => (Number(!!b.preparedDate) - Number(!!a.preparedDate)) || rank(a, b);
 
   const open = items.filter((it) => it.status === 'open');
-  const tierA = open.filter((it) => it.tier === 'A').sort(rank).map(project);
+  // `priority: low` (#1620) — a DEMOTE signal: settled & valid work that's just not worth doing now. It's
+  // EXCLUDED from the auto-selected ready set (tierA / batchable / sliceable) so it stops false-surfacing
+  // as agent-ready, but it is NOT removed — it surfaces in a separate `filler` group, browsable + pickable
+  // when nothing better exists (demote-not-hide; a park, by contrast, removes until a gate clears).
+  const isFiller = (it) => it.priority === 'low';
+  const tierAopen = open.filter((it) => it.tier === 'A');
+  const tierA = tierAopen.filter((it) => !isFiller(it)).sort(rank).map(project);
+  const filler = tierAopen.filter(isFiller).sort(rank).map(project);
   const tierB = open.filter((it) => it.tier === 'B').sort(rankB).map(project);
   const tierC = open.filter((it) => it.tier === 'C');
   const batchable = tierA.filter((it) => it.batchable);
@@ -195,8 +203,8 @@ export function computeSelection(items) {
   const inFlight = items.filter((it) => it.status === 'active' && isBatchShape(it)).sort(rank).map(project);
 
   return {
-    counts: { open: open.length, tierA: tierA.length, agentReady: tierA.length - sliceable.length, sliceable: sliceable.length, epicActionable: sliceable.filter((it) => it.epicState === 'unsliced' || it.epicState === 'done').length, tierB: tierB.length, tierBPrepared: tierB.filter((it) => it.prepared).length, tierC: tierC.length, batchable: batchable.length, inFlight: inFlight.length },
-    tierA, batchable, sliceable, tierB, inFlight,
+    counts: { open: open.length, tierA: tierA.length, agentReady: tierA.length - sliceable.length, sliceable: sliceable.length, epicActionable: sliceable.filter((it) => it.epicState === 'unsliced' || it.epicState === 'done').length, tierB: tierB.length, tierBPrepared: tierB.filter((it) => it.prepared).length, tierC: tierC.length, batchable: batchable.length, inFlight: inFlight.length, filler: filler.length },
+    tierA, batchable, sliceable, tierB, inFlight, filler,
   };
 }
 

@@ -218,6 +218,14 @@ if (SELECT) {
   });
   else console.log(`${DIM}  none.${RST}`);
 
+  // FILLER (#1620) — `priority: low` items: settled & valid Tier-A work demoted OUT of the auto-selected
+  // ready set (so it stops false-surfacing as agent-ready) but kept visible + hand-pickable here for when
+  // nothing better exists. Demote-not-hide: it's "not now," never "rejected" and never a park.
+  if (selection.filler && selection.filler.length) {
+    console.log(`\n${DIM}${BLD}Filler — \`priority: low\` (not in the auto-pack; pick up when nothing better is open)${RST}`);
+    selection.filler.forEach((it) => console.log(`  ${DIM}·${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— ${eff(it)}${RST}`));
+  }
+
   // D3-READINESS (#608) — open builds the loader DEMOTED out of Tier A because their `relatedProject` is
   // a `concept` project with no shipped surface yet (the standard must exist first). Surfaced so the human
   // sees WHY they're held — it's not a `blockedBy` edge, so they'd otherwise look mysteriously absent.
