@@ -1,0 +1,61 @@
+<section class="intro-section mb-12">
+    <h3 id="mission">Mission</h3>
+    <p>
+        <strong>Web Layout</strong> is a deliberately thin <strong>protocol-host</strong> standard: it owns
+        exactly one Protocol &mdash; the <a href="#protocol-dockable-layout-tree">dockable layout-tree
+        interchange</a> &mdash; and nothing else. It ships <em>no</em> implementation and <em>no</em>
+        orchestration; the dock manager, drag-to-dock, and OS-window popout are
+        <a href="/projects/frontierui/">Frontier UI</a> impl (#1511&ndash;#1514). The
+        <a href="/intents/dockable/">dockable</a> intent and its realizing block stay <strong>project-less</strong>
+        (per <a href="/backlog/1437-decision-docking-tiling-dockable-window-management-placement-/">#1437</a>
+        Fork&nbsp;1); this project exists only because a first-class WE Protocol must resolve an
+        <code>ownedByProject</code> (ratified <a href="/backlog/1653-which-project-owns-the-dockable-layout-tree-protocol-1437-ru/">#1653</a> (a)).
+    </p>
+</section>
+
+<section id="protocol-dockable-layout-tree" class="section-card">
+    <h3 id="protocol-heading">Protocol &mdash; <code>DockableLayoutTree</code></h3>
+    <p>
+        Standardizes the <strong>serialized partition tree</strong> that the surveyed dockable-window
+        managers (<code>dockview</code>, FlexLayout, golden-layout) all emit, so a layout authored under one
+        engine round-trips through another. The contract is the only lock; any conforming impl that
+        round-trips the tree (the conformance criterion) interoperates. Source schema:
+        <a href="/blocks/dockable/"><code>blocks/dockable/contract.ts</code></a> (<code>DockLayout</code>);
+        the second conforming impl that cleared the convergence gate is the
+        <a href="/backlog/1627-build-a-dockview-adapter-that-round-trips-the-dockable-core-/">dockview adapter</a>
+        (#1627).
+    </p>
+
+    <div class="standards-grid">
+        <div class="standard-card flex flex-col">
+            <h4 id="protocol-core-schema" class="text-lg font-bold m-0 text-gray-900">Convergent core schema</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                A node is a <code>row</code> or <code>column</code> split (laying out <code>children</code>
+                horizontally / vertically) or a <code>stack</code> leaf (a tab-stack of <code>tabs</code>
+                panels). Nesting is arbitrary; space is fully partitioned (no gaps, no overlaps). Each
+                node carries an optional <code>size</code> (<code>{ value, unit: ratio | pixel }</code>) within
+                its parent split. This is the convergent shape across all three surveyed engines.
+            </p>
+        </div>
+        <div class="standard-card flex flex-col">
+            <h4 id="protocol-extension-slot" class="text-lg font-bold m-0 text-gray-900">Open extension slot</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                The divergent encodings &mdash; popout-state (<code>popout: none | window</code>), per-panel
+                metadata (<code>title</code> / <code>closable</code> / <code>activeTab</code>), and engine-specific
+                constraints &mdash; ride an <strong>open extension slot</strong> layered on the core node,
+                so a richer engine round-trips its own state without forking the convergent core.
+            </p>
+        </div>
+        <div class="standard-card flex flex-col">
+            <h4 id="protocol-conformance" class="text-lg font-bold m-0 text-gray-900">Conformance &mdash; round-trip the tree</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                A conforming impl <strong>round-trips a <code>DockLayout</code></strong>: deserialize the
+                core schema into its own model and re-serialize it without losing the partition topology,
+                split sizes, or stack contents. The minimal round-trip vectors are a single
+                <code>stack</code> root, a nested <code>row</code> of two <code>stack</code>s with
+                <code>ratio</code> sizes, and a <code>column</code> wrapping a popout-tagged <code>stack</code>
+                (the extension-slot survival case).
+            </p>
+        </div>
+    </div>
+</section>

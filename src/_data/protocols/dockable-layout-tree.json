@@ -1,0 +1,8 @@
+{
+  "id": "dockable-layout-tree",
+  "name": "Dockable Layout-Tree Interchange",
+  "summary": "The portable serialized partition tree dockview / FlexLayout / golden-layout all converge on, so a dockable layout authored under one engine round-trips through another. Core schema: a node is a row/column split (laying out children) or a stack leaf (a tab-stack of panels), nesting arbitrary, space fully partitioned, each node carrying an optional size { value, unit: ratio | pixel }. An open extension slot layers the divergent popout-state / per-panel-metadata / engine-constraint encodings on the convergent core. Conformance = round-trip the tree (deserialize + re-serialize without losing topology, sizes, or stack contents). Source schema: blocks/dockable/contract.ts (DockLayout). Minted by #1486 after the #project-protocol-bar convergence gate cleared (second conforming impl: the #1627 dockview adapter); owning-project ratified #1653 (a).",
+  "status": "draft",
+  "ownedByProject": "weblayout",
+  "anchor": "protocol-dockable-layout-tree"
+}

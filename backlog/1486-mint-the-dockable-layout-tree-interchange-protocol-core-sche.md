@@ -1,9 +1,11 @@
 ---
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-06-21"
 blockedBy: []
 dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: "we:src/_data/protocols/dockable-layout-tree.json"
 tags: []
 ---
 
@@ -56,3 +58,28 @@ project, no impl/orchestration), create `we:src/_includes/project-weblayout.njk`
 `<section id="protocol-dockable-layout-tree">`, then author the Protocol entry with
 `ownedByProject: "weblayout"`, `anchor: "protocol-dockable-layout-tree"`. The `dockable` intent + realizing
 block stay project-less (per #1437 Fork 1). `blockedBy` cleared.
+
+## Progress (resolved 2026-06-23, batch-2026-06-23-1689-1500)
+
+Minted, exactly per the #1653 (a) build steps:
+
+- **`we:src/_data/projects/weblayout.json`** — the thin protocol-host project (`status: concept`, no impl/
+  orchestration) + **`we:src/assets/icons/weblayout.svg`** (a partition-tree glyph).
+- **`we:src/_includes/project-weblayout.njk`** — carries `<section id="protocol-dockable-layout-tree">` with
+  three cards: the **convergent core schema** (row/column splits + stack leaves, optional `size {value, unit:
+  ratio|pixel}`), the **open extension slot** (popout-state / per-panel metadata / engine constraints), and
+  the **round-trip conformance** criterion + minimal vectors (single stack root; nested row of two ratio
+  stacks; a column wrapping a popout-tagged stack).
+- **`we:src/_data/protocols/dockable-layout-tree.json`** — the Protocol entry (`ownedByProject: weblayout`,
+  `anchor: protocol-dockable-layout-tree`), sourcing the schema from `we:blocks/dockable/contract.ts`
+  (`DockLayout`).
+- **`we:src/_data/semantics/dockable-layout-tree.json`** — the glossary term (clears the coverage warn).
+
+`validateProtocol` passes (anchor probe resolves the section in the project partial); the 11ty build renders
+both `/projects/weblayout/` (anchor present) and the protocol on `/protocols/` (exit 0). The `dockable`
+intent + realizing block stay project-less (#1437 Fork 1). The dock-manager/popout impl remains FUI
+(#1511–#1514); the schema is the only lock.
+
+**Gate note (not this changeset):** the WE gate's two reds are the same concurrent-session externals as the
+batch's other WE items (`we:reports/2026-06-23-1704-split-analysis.md`, stale `we:AGENTS.md`); neither names
+a weblayout/dockable-layout-tree file. Stepped over per the batch external-red diagnosis.

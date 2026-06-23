@@ -1,0 +1,5 @@
+{
+  "term": "Dockable Layout-Tree Interchange",
+  "definition": "The portable, serialized partition-tree schema that dockable-window managers (dockview, FlexLayout, golden-layout) converge on: a recursive tree whose nodes are row/column splits or stack leaves (tab-stacks of panels), with optional per-node sizes (ratio or pixel) and an open extension slot for divergent popout/metadata/constraint encodings. Conformance is round-tripping the tree without losing topology, sizes, or stack contents.",
+  "usage": "Standardized by the Dockable Layout-Tree Interchange Protocol (Web Layout)."
+}
