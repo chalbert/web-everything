@@ -21,12 +21,18 @@ Each `## Fork N` carries a recommended default in **bold** that has already been
 sub-agent (`Skeptic:` line). Blocks #1598 (migrate WE-docs badge surfaces → FUI badge) and #1208 (dogfood
 backlog badges/chips → FUI badge + filter-chip).
 
-The concern decomposes into two orthogonal axes the research surfaced: **(1) palette governance** — where
-the backlog's bespoke domain colours live relative to FUI's closed tone enum
-(`fui:blocks/badge/Badge.ts:17,41` — `tone ∈ {neutral,info,success,warning,error}`), given that the badge
-already ships a `className` extension hook (`fui:blocks/badge/Badge.ts:34,48`; `<we-badge class>`
-passthrough at `fui:blocks/badge/BadgeElement.ts:30` + `fui:blocks/transient/TransientElement.ts:62-65`)
-and exports `BASE_CLASS`/`BADGE_CSS` for host injection (`fui:blocks/badge/Badge.ts:38,82`); and
+**REFRAMED 2026-06-23 (post-prep, during ratification review): Fork 1 changed.** Reviewing the **`tag`
+intent** exposed that the prep grounded only in the FUI *impl* tree and skipped the *standard layer*: the
+platform had already decomposed this vocabulary via **#1319** (Status Indicator vs Tag vs Notification
+Marker). Fork 1 is no longer "where does the palette live" but "which intent owns each surface"; its old
+(1b) default (a docs-modifier palette on the status badge) is **retired** — see Fork 1 below. This spun
+off **#1669** (build the FUI `we-tag` block) and **#1668** (harden the grounding gate so a vocab→component
+mapping must check the intent registry first). Fork 2 is unchanged.
+
+The concern decomposes into two orthogonal axes: **(1) intent ownership** — which intent owns each backlog
+surface (Status Indicator vs Tag, per #1319), then consume that intent's FUI impl; the badge
+(`fui:blocks/badge/Badge.ts:17,41` — `tone ∈ {neutral,info,success,warning,error}`) implements *Status
+Indicator only*, so categorical surfaces need the Tag impl (#1669), not the badge's `className` escape; and
 **(2) the mount model** — how a *server-rendered* 11ty board (`we:src/_includes/backlog-badges.njk`,
 ~10 macros) consumes the badge across many-small instances, given that mode-C is one-shadow-root +
 one-import per point (`fui:embed/in-document.ts:63-93`) and §7.7 of `we:docs/agent/block-standard.md`
@@ -36,7 +42,7 @@ one-import per point (`fui:embed/in-document.ts:63-93`) and §7.7 of `we:docs/ag
 
 | Fork | Recommended default | Main (rejected) alternative | Confidence |
 |------|--------------------|-----------------------------|------------|
-| **Fork 1** — where the domain palette lives | **(1b)** consume FUI's badge contract + carry the domain palette via the `className` escape + WE-docs CSS; map to a tone only where one genuinely fits | (1a) extend FUI's tone enum with backlog vocabulary | **High** — forced invariant; (1a)/(1c) provably broken |
+| **Fork 1** *(REFRAMED)* — which intent owns each surface | **(1-by-intent)** map each macro to its owning intent (#1319): lifecycle→`badge` now; categorical→`we-tag` (#1669) | (1b) docs-modifier palette on the status badge — *re-conflates Status Indicator + Tag* | **High** — cites resolved statute #1319 + existing `tag` intent |
 | **Fork 2** — mount model for the server-rendered board | **(2b)** register the `<we-badge>` / `<we-filter-chip>` transient element once; emit in njk; upgrade in place; `we-badge{}` CSS baseline for FOUC | (2a) per-badge mode-C shadow mounts | **High** — forced invariant; (2a) broken, (2c) collapses into (2b) |
 | **Fork 2 sub-fork** — FUI-artifact delivery | **runtime cross-origin import** from the FUI origin now → typed import from published `@frontierui/blocks` at #700/#872 | vendoring FUI into the WE build | **Med-high** — interim vs end-state, both coherent |
 
@@ -52,43 +58,59 @@ one-import per point (`fui:embed/in-document.ts:63-93`) and §7.7 of `we:docs/ag
   already interactive (`we:src/backlog.njk:90`), so the chip genuinely needs runtime; the badge does not but
   uses the same element model for a coherent board. Not a fork — a consistency rule.
 
-## Fork 1 — Where does the backlog's domain palette live?
+## Fork 1 — Which intent owns each backlog surface? (REFRAMED 2026-06-23)
 
-*Fork-existence (forced invariant):* branch (1a) — adding the backlog taxonomy (`--kind-story`,
-`--tier-A`, …) to FUI's badge tone enum — is **broken**: it leaks a consumer-specific taxonomy into a
-shared semantic-status component, violating minimize-lock-in and the closed-tone contract. The prior-art
-survey is unanimous (GitHub Primer's own *Label* vs *IssueLabelToken* split; Atlassian Lozenge; Polaris
-"reserve status colours"; SLDS theme hooks; the Ant Design merged-custom-colour cautionary case). So this
-is a ratify, not a weigh.
+**Reframe (supersedes the original "where does the *palette* live" framing).** The original fork asked
+where the backlog's domain palette lives *relative to FUI's badge* — assuming the badge is the only
+component in play. That skipped the **standard layer**. Grounding in the intent registry shows the
+platform already decomposed this exact vocabulary: **#1319**
+(`decompose-overloaded-vocabulary-by-semantic-source`, RESOLVED, codified statute) split one overloaded
+"badge" into three intents by *semantic source*:
 
-**Crux:** FUI's badge tone enum is *operational status* (`neutral|info|success|warning|error`); the
-backlog palette is *domain taxonomy* (story/epic/decision/tier). These are different axes — most backlog
-surfaces don't map onto a status tone at all.
+- **Status Indicator** (`we:src/_data/intents/status-indicator.json`) — lifecycle state; the *visual
+  member of the Web Lifecycle protocol*. FUI's `badge` (`fui:blocks/badge/Badge.ts`) is its impl.
+- **Tag** (`we:src/_data/intents/tag.json`, draft) — decorative/categorical label, with a purpose-built
+  `categorical` tone for topic/keyword labels that map to no severity. **No FUI impl exists** (filed #1669).
+- **Notification Marker** — count-bearing (not on the board).
 
-- **(a) Extend FUI `we-badge` with the backlog vocabulary.** *Rejected* — leaks docs-specific taxonomy
-  into the shared component; defeats the closed-tone semantic system; lock-in. The industry-universal
-  anti-pattern (no surveyed system widens its semantic enum for a consumer taxonomy).
-- **(b) Consume FUI's badge contract for every presentational pill; map to a semantic tone where one
-  *genuinely* fits (e.g. `statusBadge` resolved→success, active→info; size/meta/tags→neutral), and carry
-  the backlog domain palette (kind, tier, unsliced-reason, decision/preparing) via the badge's exported
-  `className` escape + WE-docs-local CSS (`fui-badge fui-badge--kind-story` defined in the docs
-  stylesheet) — never widening FUI's tone enum.** This is config-extends-platform-default; it dogfoods the
-  badge's geometry + `__icon`/`__label` structure + `role=status`/`aria-label` a11y wiring once instead of
-  re-deriving it across ~10 njk macros.
-  - *Skeptic amendment (folded in):* pure-taxonomy surfaces (`kindBadge`, `tierBadge`) where a tone would
-    be a lie (story is not "info") consume the badge **geometry + a docs-owned modifier class with NO FUI
-    tone class** — don't fake-map a taxonomy onto a status tone. Genuinely-status surfaces (`statusBadge`,
-    `epicStatusBadge`, `reasonPill`) get real tones.
-- **(c) A config-driven generic badge accepting arbitrary bg/fg.** *Rejected* — Ant-style merged custom
-  colour accrues contrast / dark-mode debt; defeats the tone system; lock-in.
+So the real question is **which intent owns each surface**, then consume that intent's FUI impl — not
+"how do we bend the badge to hold taxonomy." Putting `kindBadge`/`tierBadge` on the status badge via a
+docs-modifier class (the original (1b)) **re-conflates exactly what #1319 split** — it contradicts
+ratified statute, not just taste.
 
-**Recommended default: (1b).**
+**The mapping** (the ~10 macros in `we:src/_includes/backlog-badges.njk`):
 
-`Skeptic: SURVIVES-WITH-AMENDMENT` — the attack ("consuming only the class vocabulary while overriding all
-colours is a cosmetic dogfood") was beaten: the dogfood is the geometry + a11y wiring + real tones for the
-status surfaces (the minority that override is pure taxonomy). Folded in: taxonomy surfaces = geometry +
-docs modifier (no fake tone); native link-pills share the same docs status tokens so the palette doesn't
-fork into two definitions of "resolved-green".
+| Macro(s) | Intent | FUI impl | Migrate when |
+|---|---|---|---|
+| `statusBadge`, `epicStatusBadge`, `reasonPill` | Status Indicator (lifecycle) | `badge` ✓ exists | **now** (status half of #1598/#1208) |
+| `kindBadge`, `tierBadge`, `tagsRow`, `sizeBadge`, `metaBadge` | **Tag** (categorical) | **`we-tag` — #1669, doesn't exist yet** | blocked on #1669 |
+| `blockerChip`, `childCircle` | native `<a>` link-pills | — | stay native (see *Supported by default*) |
+
+- **(1a) Extend FUI's badge tone enum with backlog taxonomy.** *Rejected* — leaks consumer taxonomy into
+  the shared status component; defeats the closed-tone contract; industry-universal anti-pattern. Now also
+  redundant: the Tag intent exists precisely so taxonomy doesn't ride the status enum.
+- **(1b — original) Carry taxonomy via a docs-modifier class on the status badge.** *Rejected on reframe*
+  — re-conflates Status Indicator and Tag, the two intents #1319 deliberately separated. A docs-owned
+  `categorical` palette stamped on a *status* component is the same conflation in a thinner disguise.
+- **(1-by-intent — NEW default) Map each surface to its owning intent; consume that intent's FUI impl.**
+  Lifecycle surfaces → `badge` (now). Categorical surfaces → `we-tag` (the Tag intent's `categorical`
+  tone, theme-resolved — the domain palette lives in the *intent's* tone vocabulary, not a docs hack),
+  blocked on **#1669**. This is config-extends-platform-default done at the right layer.
+- **(1c) Generic badge accepting arbitrary bg/fg.** *Rejected* — Ant-style merged-colour contrast /
+  dark-mode debt; lock-in.
+
+**Recommended default: (1-by-intent).** Confidence **high** — cites resolved statute (#1319) + the
+existing `tag` intent. The only open sub-question is whether `sizeBadge`/`metaBadge` are Tag-categorical
+or a neutral data pill (mechanical, settled in the build).
+
+**Consequence:** #1621 splits its downstream — the *status* surfaces migrate to `<we-badge>` now; the
+*taxonomy* surfaces are `blockedBy` **#1669** (build the `we-tag` block). The original (1b) docs-modifier
+approach is retired.
+
+`Skeptic note (original, now moot):` the prior "SURVIVES-WITH-AMENDMENT" pass defended (1b) as a
+geometry+a11y dogfood. That defense is obsoleted by the reframe — the right dogfood for taxonomy is the
+*Tag* component, not the status badge wearing a docs class. The skeptic never checked the intent registry,
+exactly the gating gap **#1668** closes.
 
 ## Fork 2 — How does the *server-rendered* board consume the badge across many-small instances?
 
@@ -190,44 +212,49 @@ styles (see wrinkle 2):
 </script>
 ```
 
-### Fork 1 (1b) — status tone vs. taxonomy modifier
+### Fork 1 (REFRAMED) — map each surface to its owning intent
 
-The `statusBadge` above already shows the split: `resolved/active/open` map to real FUI tones
-(`success/info/warning`), but **`preparing` (purple) has no FUI tone** → it takes a docs-owned modifier
-class with *no* tone. Pure-taxonomy `kindBadge` (`we:src/_includes/backlog-badges.njk:25-29`) is
-all-taxonomy:
+> The original example here (taxonomy on the status badge via a `be-kind--*` docs-modifier class) is
+> **retired** — it re-conflated Status Indicator and Tag (#1319). It's preserved below struck-through only
+> to show what *not* to do; the live mapping splits by intent.
+
+**Status surfaces → `<we-badge>` (Status Indicator, exists).** The `statusBadge` example above is correct
+for the lifecycle states: `resolved/active/open` → real tones (`success/info/warning`). Note even here
+**`preparing` has no FUI status tone** — that's a hint it's really *categorical*, so under the reframe it
+moves to `<we-tag tone="categorical">` alongside kind/tier, not a status-badge modifier.
+
+**Taxonomy surfaces → `<we-tag>` (Tag intent, blocked on #1669).** Once the `we-tag` block ships, the
+domain palette lives in the *intent's* `categorical` tone (theme-resolved), not a docs hack:
 
 ```njk
 {% macro kindBadge(kind, scale='sm') %}
-<we-badge class="be-kind be-kind--{{ kind }}">{{ kind }}</we-badge>
+<we-tag tone="categorical" shape="badge" data-kind="{{ kind }}">{{ kind }}</we-tag>
 {% endmacro %}
 ```
 
-```css
-/* WE-docs-local stylesheet — domain taxonomy palette, NEVER widens FUI's enum */
-.fui-badge.be-kind--story    { background:#dbeafe; color:#1e40af; border-color:transparent; }
-.fui-badge.be-kind--epic     { background:#ede9fe; color:#5b21b6; border-color:transparent; }
-.fui-badge.be-kind--decision { background:#e0e7ff; color:#3730a3; border-color:transparent; }
-.fui-badge.be-kind--task     { background:#f1f5f9; color:#475569; border-color:transparent; }
+~~Retired (re-conflates Status Indicator + Tag):~~
+
+```njk
+{# DO NOT — taxonomy stamped onto the *status* badge via a docs-modifier class #}
+{# <we-badge class="be-kind be-kind--{{ kind }}">{{ kind }}</we-badge> #}
 ```
 
-This dogfoods the badge's geometry + `__icon`/`__label` structure + `role=status` wiring once instead of
-re-deriving it across ~10 macros, while the domain colours stay in WE-docs CSS, never in the shared FUI
-component.
+The kind/tier colour vocabulary belongs in the Tag intent's theme tokens (the `we-tag` block, #1669), not
+a WE-docs `be-kind--*` stylesheet — so "story-blue" is defined once, in the standard's own form.
 
-### Two wrinkles the code surfaces (acceptance-criteria for #1598/#1208, not blockers)
+### Two wrinkles the code surfaces (acceptance-criteria for the #1598/#1208 *status* half, not blockers)
 
-1. **Vestigial `fui-badge--neutral`.** `decorate()` *always* stamps a tone class
-   (`fui:blocks/badge/BadgeElement.ts:28-30`) — a no-tone `<we-badge>` lands as
-   `class="fui-badge fui-badge--neutral be-kind be-kind--story"`. The docs CSS wins via the
-   `.fui-badge.be-kind--story` two-class specificity (beats single-class `.fui-badge--neutral`). So **no
-   FUI change is needed** — the build item must use the compound selector, not a bare `.be-kind--story`.
-2. **Light-DOM needs global `BADGE_CSS`.** Unlike mode-C's shadow encapsulation, transient elements are
+1. **`decorate()` always stamps a tone class** (`fui:blocks/badge/BadgeElement.ts:28-30`) — a no-tone
+   element defaults to `--neutral`. Under the reframe this is a **design note for the `we-tag` block
+   (#1669)**: its `categorical` tone must be a *first-class* tone in the element's own enum, not a docs
+   override of a vestigial `--neutral`. (The retired docs-modifier approach would have needed a compound
+   `.fui-badge.be-kind--story` selector to beat `--neutral`; mapping to the Tag intent removes the hack.)
+2. **Light-DOM needs global CSS.** Unlike mode-C's shadow encapsulation, transient elements are
    light-DOM, so tone styles can't be scoped — hence the `BADGE_CSS` injection above
-   (`fui:blocks/badge/Badge.ts:82`). Pulling it from the FUI origin keeps WE's build free of FUI source
-   (true to sub-fork default (i)).
+   (`fui:blocks/badge/Badge.ts:82`); the `we-tag` block needs an equivalent `TAG_CSS` export. Pulling it
+   from the FUI origin keeps WE's build free of FUI source (true to sub-fork default (i)).
 
-Both confirm the defaults rather than challenging them.
+Both are acceptance-criteria for the spin-off builds, not blockers on the decision.
 
 ## Context
 
@@ -235,11 +262,30 @@ Both confirm the defaults rather than challenging them.
   "FUI renders, WE owns data, SSR baseline" model via mode-C for the *one big* chrome mount) and the
   #777/#778 backlog-badge dogfood (#1208). Surfaced in batch-2026-06-22-1615-1208 after #1603 shipped FUI
   `badge`/`filter-chip`.
-- **On resolve, the spin-off builds** (each `blockedBy` this decision until ratified): #1598 (badges →
-  `<we-badge>`, repoint its "mode-C inline SDK" title → transient-CE dogfood) and #1208 (chips →
-  `we-filter-chip`). File the build-time `renderBadge()` SSR enhancement as a new FUI item gated on #700.
-  No `fui:embed/badge-in-document.ts` / `fui:embed/filter-chip-in-document.ts` module is needed (those
-  would only matter under the rejected mode-C branch).
+- **On resolve, the spin-off builds** (each `blockedBy` this decision until ratified), now split by the
+  Fork-1 reframe:
+  - **Status half — buildable now:** #1598 (lifecycle badges → `<we-badge>`, repoint its "mode-C inline
+    SDK" title → transient-CE dogfood) and #1208 (filter chips → `we-filter-chip`).
+  - **Taxonomy half — `blockedBy` #1669:** kind/tier/tags/size pills → `<we-tag>` (Tag intent), which
+    needs the FUI `we-tag` block first (**#1669**). On resolve, add the #1669 edge to the taxonomy
+    portion of #1598/#1208 (split those items if needed).
+  - File the build-time `renderBadge()`/`renderTag()` SSR enhancement as a new FUI item gated on #700.
+  - No `fui:embed/badge-in-document.ts` / `fui:embed/filter-chip-in-document.ts` module is needed (those
+    would only matter under the rejected mode-C branch).
+- **Spun off during ratification review (2026-06-23):** #1669 (build the FUI `we-tag` block) and #1668
+  (harden the fork-readiness grounding gate — check the intent registry + statute before a vocab→component
+  mapping). Both trace to the same gap: the prep grounded in the FUI impl tree and skipped the standard
+  layer, so it missed the #1319 Status-Indicator-vs-Tag decomposition.
 - Pre-flight memory checks honoured: `feedback_prep_verify_mechanism_has_consumer` (read the real FUI tree
   before assuming a flat mount — found the `className` seam + the transient element already shipped) and
   `feedback_misflagged_batchable_fix_real_state`.
+
+## Progress
+
+- **Status:** active — **awaiting ratification.** Both forks presented + code examples added; Fork 1
+  reframed to map-by-intent after reviewing the `tag` intent.
+- **Done:** prep committed; grounded code examples added; Fork 1 rewritten (map-by-intent, supersedes the
+  retired docs-modifier (1b)); spun off #1669 (FUI `we-tag` block) + #1668 (grounding-gate hardening);
+  added the `[[feedback_examples_go_in_the_story]]` + standard-layer-grounding memories.
+- **Next:** on explicit ratify go → `resolve` #1621 (`graduatedTo` none — it's a ruling); confirm the
+  status/taxonomy downstream split on #1598/#1208 and wire the #1669 edge onto their taxonomy half.
