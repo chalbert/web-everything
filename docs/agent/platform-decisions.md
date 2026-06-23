@@ -352,6 +352,16 @@ descope that triggered it) · #1657 (intent-inspector card) · [[project_conform
    dominant solo-dev risk, so the on-device fixed-cost surface leads; SaaS is an optional *later* tier
    (its recurring cost is a liability, not a reason to lead). Extensions are the free funnel. **Build
    is decoupled from release timing**: pursue the product now, switch on paid release later.
+   - **In-shell free/paid line (#1655, soft-accepted):** two **orthogonal** gates, not a
+     per-capability map. **Gate 1 — commercial-use license:** the *whole local browser* (every
+     local fixed-cost feature) is free for **non-commercial / individual / OSS / learning** use,
+     paid for **commercial** use — a use-context license, not a feature split (no Community/Pro
+     local subset: fixed-cost features give no structural hook to split). **Gate 2 — server-cost
+     tier:** any capability that **requires a server to run** (hosted sync/collab/share-links,
+     per-call AI) is **paid for everyone**, non-commercial included, as cost-recovery. Local
+     persist/export/write-back (local repro export, fixtures, safe-edit→PR) stays **free** — only
+     the *server-backed* variant is paid (faithful to #775's "deterministic+local = free; hosted =
+     paid" line; the "persist/write = paid" read-vs-act framing over-reached).
 
 **Lineage:** #098 #185 (licensing / GTM) · #089–#093 #086 (open-core constellation) · #182 #183
 (licensing/payments) · #451 (MaaS tier) · #775 (assembler open-core) · #410 #141 #166 · #665 #690

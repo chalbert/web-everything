@@ -16,7 +16,7 @@ The build of the **dev-browser shell itself** — the rightmost column of the [#
 
 - Chrome-level capabilities an extension can't reach: navigation interception, a "not WE-compatible" screen, conformance-gated feature lighting.
 - Panel embed seam (#141 Fork 4-A) — package vs iframe/web-component boundary to plateau-app's panels (the deferred build detail).
-- Free-tier + caveats → paid licensing surface (#141 commercial-license fork).
+- Free-tier + caveats → paid licensing surface (#141 commercial-license fork). **Line resolved by [#1655](/backlog/1655-dev-browser-in-shell-free-paid-line-which-shell-capabilities/):** `S6` implements a **commercial-use license check (whole local browser) + a server-cost-tier check** (hosted/per-call paid for all), **not** a per-capability free/paid flag table — all local fixed-cost features are free to use.
 
 ## Sequencing
 
