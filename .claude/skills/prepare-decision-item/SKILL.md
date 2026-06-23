@@ -64,6 +64,15 @@ output is the rewritten body, not a message:
    web survey but still needs the concrete-refs check. Research reshapes the forks — expect it to add or
    dissolve a fork (#64 gained Fork 4 from its survey); a pass that only confirms the existing framing
    means the survey was too shallow.
+   - **Standard-layer grounding before any vocab→component mapping** (*backlog-workflow.md → Fork-readiness
+     pass → Standard-layer grounding*). Before a fork's default maps a domain word (badge / pill / label /
+     status / chip / tag, or any UX noun) onto a component, grep `src/_data/intents/` **and**
+     `docs/agent/platform-decisions.md` for an intent/decomposition that already owns that vocabulary, and
+     **cite the owning intent in the item**. Grounding the impl tree alone (does a `badge` component exist?)
+     silently re-conflates vocabulary the standard layer already split — #1621 put taxonomy pills on the
+     status badge, re-merging what #1319 split into Status Indicator / Tag / Notification Marker. A mapping
+     that can't cite an owning intent is ungrounded (do the grep) or a genuine gap (the new intent *is* the
+     fork).
 2. **Per-fork classification pass** — run the fixed 7-question sequence (which layer? · protocol or
    intent dimension? · expose the whole axis? · fixed mechanic or dimension? · DI-injectable? · most-
    permissive default? · seam between intents?) on every element, and record the classification in the
