@@ -286,6 +286,29 @@ platform itself split quote-anchoring into `#:~:text=`).
 **Lineage:** #030 (intent-vs-trait channel split) · #063 (native vocabulary) · #129 (guard intent
 re-framed) · #634 · #1408 (durable-anchor contract split) · intents-open-design.
 
+### Intent-conformance is compliance of a block against the intent contract — not a runtime gate {#intent-conformance-is-block-compliance}
+
+An **intent is an interface; blocks (components/behaviors) implement it** — indirectly, via the
+build-time resolver ([`we:webtraits/intentProfileResolver.ts`](../../webtraits/intentProfileResolver.ts)):
+the intent never names a trait, the resolver maps the active profile → traits (keeps intents UX-only,
+traits technical). An intent with no implementer does nothing, like an unimplemented interface. So
+"**conformance** of an intent" means *does the implementing block satisfy the intent contract* — **not**
+a runtime DOM watcher, and faking a tie is forbidden. It splits two ways:
+
+- **Static / contract conformance** — does the block declare the required `intentDimension`s / bundle the
+  required traits? Checkable in **WE at build time** (resolver / `we:webcases/requirementValidator.ts` shape).
+- **Behavioral conformance** — does the *rendered* component behave per the intent? Needs a running
+  subject: **contract → WE**, **runner/verifier → Plateau** (neutral, so *any* implementer consumes it —
+  FUI is one subject, not the verifier's home), **subject → FUI**.
+
+Never smuggle a conformance run into a *consumer* of traits (e.g. docs chrome) — that is silent
+scope-expansion. The active intent profile is already present in the runtime DOM as `data-intent-*`
+(plus element-level `action-intent` etc.), so *surfacing* an intent for inspection is a read-only,
+near-zero-cost dev-tool, distinct from *checking* conformance.
+
+**Lineage:** #947 (this semantic call) · #1566/#1576/#1597 (verifier→Plateau placement) · #934 (the
+descope that triggered it) · #1657 (intent-inspector card) · [[project_conformance_verifier_vs_subject]].
+
 ### Monetization line *(soft — explicitly revisitable)* {#monetization}
 
 > Tiering/pricing rulings get a **lighter, revisitable** treatment than standards. Fix the

@@ -1,9 +1,11 @@
 ---
 kind: task
-status: active
+status: resolved
 blockedBy: []
+relatedReport: reports/2026-06-23-backlog-split-analysis.md
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
 tags: []
 ---
 
@@ -19,10 +21,12 @@ resolved by a concurrent session (folded into the #1258 framework-churn watch); 
 `platform-gated`; #939 already `blockedBy #818`; #499 → research-gated (topic opened). #1622 vocab landed
 (blocker cleared — stale edge dropped).
 
-**Next (residuals):**
-- **#232** — `priority: low` is **inert** while `kind: decision` (the demote only acts on buildable Tier-A).
-  To make it real: retype #232 to a buildable kind, **or** split the 3-opt-in pool (ts-patch + `.component`
-  → `priority:low` builds; SWC-native → `maturityGated adoptionSignal`).
-- **#718** — split the bundled card: Babel pre-step → build (launch-completeness); SWC-native plugin →
-  `maturityGated adoptionSignal` (real SWC/Turbopack integration to test against). Pending the user's go on splits.
-- Then resolve this task.
+**Residuals cleared (2026-06-23):**
+- **#232** — already sliced upstream into a storied epic: #1628 (`.component`, `priority:low`), #1629
+  (per-bundler SWC, `priority:low`), #1630 (`ts-patch`, `priority:low`). The demote is real (sits on the
+  buildable child stories, not the inert epic). No action needed.
+- **#718** — retyped decision→epic and split: **#1658** Babel pre-step → `priority: low`; **#1659**
+  SWC-native trait transform → `maturityGated` (`maturityTrigger: adoptionSignal: a real SWC/Turbopack
+  trait consumer`). See we:reports/2026-06-23-backlog-split-analysis.md.
+
+Sweep complete — every cluster item re-homed onto the #1620 hold model.
