@@ -29,6 +29,15 @@ Marker). Fork 1 is no longer "where does the palette live" but "which intent own
 off **#1669** (build the FUI `we-tag` block) and **#1668** (harden the grounding gate so a vocab→component
 mapping must check the intent registry first). Fork 2 is unchanged.
 
+**Further (2026-06-23, review cont'd): Fork 1's taxonomy half is now subsumed by #1670.** The review
+generalised past the tag block: an app's categorical vocabularies (kind/tier/size/status) are closed lists
+reused *cross-surface* (badge, tag, the numbered `childCircle`, link-pills, filter chips), so they belong
+to a **single categorical-taxonomy provider** (#1670, open), not a `we-tag` feature. Under that, taxonomy
+surfaces consume the provider by `(set, value)`; `we-tag`/`we-badge`/circles/links are all *consumers*.
+This does **not** change #1621's ratifiable parts — the **status-surface** migration (→ `<we-badge>`),
+Fork 2 (transient mount), and the delivery sub-fork stand on their own. Only the *taxonomy* half now waits
+on #1670 (which waits on nothing — it's the upstream design call).
+
 The concern decomposes into two orthogonal axes: **(1) intent ownership** — which intent owns each backlog
 surface (Status Indicator vs Tag, per #1319), then consume that intent's FUI impl; the badge
 (`fui:blocks/badge/Badge.ts:17,41` — `tone ∈ {neutral,info,success,warning,error}`) implements *Status
