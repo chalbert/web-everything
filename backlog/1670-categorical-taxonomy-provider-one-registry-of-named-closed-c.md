@@ -10,7 +10,7 @@ tags: [tag-intent, design-tokens, provider, taxonomy, cross-surface]
 
 # Categorical taxonomy provider: one registry of named closed category sets, consumed cross-surface by tag/badge/circle/etc.
 
-Surfaced reviewing #1621/#1669: an app's categorical vocabularies (kind/tier/size) are closed lists reused across many surfaces — badge, tag, childCircle, filter chips, borders, links — not a tag feature. Propose ONE taxonomy provider holding N named closed sets, each value → presentation metadata (design-token colour, icon, shape), consumed via (set, value): defined once, shared, simple. Prepared: the provider is a declarative token-resolving layer, not a runtime DI service (Fork 1); status stays lifecycle/Status-Indicator-owned and OUT of the provider, which holds only kind/tier/size (Fork 2). Severity tones stay the shared webtheme palette (#1427/#1458). Reshapes #1669/#1621/#1598/#1208 into consumers.
+Surfaced reviewing #1621/#1669: an app's categorical vocabularies (kind/tier/size) are closed lists reused across many surfaces — badge, tag, childCircle, filter chips, borders, links — not a tag feature. Propose a category meta-schema of N named closed sets, each value → presentation metadata (colour token, icon, shape), consumed via (set, value). UPDATE 2026-06-23: Fork 1 DISSOLVED into ratified #1682 — no new provider/registry; categories are one JS-first token family (`--cat-*`) synced to CSS. Open here: the meta-schema + Fork 2 (status stays lifecycle/Status-Indicator-owned, OUT of the taxonomy). Reshapes #1669/#1621/#1598/#1208 into consumers.
 
 **Prepared 2026-06-23.** Grounded in the real tree + a prior-art survey of how leading design systems model
 app-defined categorical vocabularies, published as the `/research/` topic
@@ -24,11 +24,23 @@ core contribution (provider owns the value→token/icon/shape map) is the docume
 Each `## Fork N` carries a bold default already attacked by a skeptic sub-agent (`Skeptic:` line). Still
 **open** — this is prepared for ratification, not a ruling.
 
+> **Update 2026-06-23 (discussion) — Fork 1 DISSOLVED; this item now `blockedBy` #1682.** Discussing Fork 1's
+> "declarative token-resolving layer vs runtime DI registry" surfaced that the real question is *what holds and
+> resolves a token value at runtime* — and that CSS-custom-properties-as-source-of-truth fails off-DOM / pre-attach
+> JS consumers (constructor compute, worker/canvas, `console %c`; browser-validated). The answer is the injector
+> WE **already ships** (`we:plugs/webinjectors/`), **not** a new provider. That generalises beyond categories to
+> all theme tokens, so it was lifted into its own decision **#1682** (*theme tokens are JS-first, one-way synced
+> to CSS*) with implementation **#1683**. **Fork 1 here no longer has two branches** — category vocabularies are
+> simply one JS-first token family (`--cat-*`) carried by the injector and synced to CSS, *per #1682*. What
+> remains open in THIS item is **Fork 2** (where `status` lives) plus how the taxonomy consumes #1682. **#1682
+> is now ratified** (codified at `we:docs/agent/platform-decisions.md#tokens-js-first`), so this is now a thin
+> consumer ruling.
+
 ## Recommended path at a glance
 
 | Fork | Recommended default | Main (rejected) alternative | Confidence |
 |------|--------------------|-----------------------------|------------|
-| **Fork 1** — provider realization | **(1a, amended)** declarative **token-resolving layer** — colour → CSS custom properties; icon/shape/label → an enumerable **manifest (a primary channel)**; compile to tokens not per-value classes; runtime manifest canonical | (1b) runtime DI registry components query at render | **High** — skeptic SURVIVES-WITH-AMENDMENT |
+| ~~**Fork 1** — provider realization~~ **→ DISSOLVED into #1682** | category vocabularies are **one JS-first token family (`--cat-*`) carried by the injector, synced to CSS** — *no new provider*; per #1682 (JS-first SoT, one-way CSS sync) | ~~(1a) declarative layer · (1b) runtime DI registry~~ — both superseded: CSS can't be the SoT (off-DOM), and the DI already exists (`webinjectors`) | resolved by #1682 |
 | **Fork 2** — `status` home | **(2c)** status is **NOT** a provider set — lifecycle protocol + Status Indicator intent own it end-to-end; provider holds only `kind`/`tier`/`size` | (2a) provider holds status presentation as a segregated set · (2b) flat peer | **High** — skeptic REFUTED (2a)→(2c); `realizesIntent: status-indicator` settles it |
 
 ## What you have to decide
@@ -70,6 +82,55 @@ This satisfies the three requirements that drove it:
 - **Simple** — *one* provider, not one per category type; a new set (`size`) is added to the provider with
   zero component changes.
 
+## Code example (Fork 1a, end-state)
+
+**One source row per `(set, value)`** — project config, behaviour-free closed sets only; colour is a token
+*reference*, icon/shape are the app-owned metadata no token standard models:
+
+```jsonc
+// project taxonomy config — one registry, N closed sets (config-extends-platform-default)
+{
+  "kind": {
+    "story":    { "token": "--cat-kind-story",    "icon": "book",   "shape": "rounded" },
+    "epic":     { "token": "--cat-kind-epic",     "icon": "layers", "shape": "rounded" },
+    "decision": { "token": "--cat-kind-decision", "icon": "gavel" },
+    "task":     { "token": "--cat-kind-task",     "icon": "check" }
+  },
+  "tier": { "A": { "token": "--cat-tier-A" }, "B": { "token": "--cat-tier-B" }, "C": { "token": "--cat-tier-C" } }
+}
+```
+
+That single row emits **both** artifacts (single-source generation, can't drift): colour → DTCG tokens →
+CSS custom properties (light/dark + contrast from the token machinery); icon/shape/label → the manifest.
+
+**Styling is declarative everywhere — no render-time registry:**
+
+```html
+<we-tag set="kind" value="story">                  <!-- → style="background: var(--cat-kind-story-bg)" -->
+<span class="childCircle" data-cat="kind:epic">    <!-- one parameterized rule keys off --cat-* -->
+```
+
+**A custom / runtime-added set is queried declaratively too** (the resolved amendment — *not* a blocker for
+the static path): registering a dynamic set emits inline custom properties, so the **same `var()` read**
+works with no rebuild. Imperative `resolve()` is never the styling path — only enumeration is runtime.
+
+```js
+// app registers a dynamic set (e.g. GitHub issue labels); provider sets the custom properties — no rebuild
+taxonomy.register("label", { bug: { color: "#d73a4a" }, docs: { color: "#0075ca" } });
+// → --cat-label-bug-bg / --cat-label-docs-bg on :root (or a scope element)
+```
+```html
+<we-tag set="label" value="bug">   <!-- identical declarative read: var(--cat-label-bug-bg) -->
+```
+
+**The runtime manifest is for enumeration only** (build filter chips, draw a legend, resolve an icon) — the
+genuinely-runtime cases, never styling:
+
+```js
+manifest.enumerate("kind")        // → ["story","epic","decision","task"]   build the filter row
+manifest.iconFor("kind", "epic")  // → "layers"                              legend / icon-bearing surfaces
+```
+
 ## Supported by default (grounded in the standard layer — not the fork)
 
 - **Colour resolves through design tokens, not the provider directly.** WE already ships the
@@ -101,47 +162,37 @@ This satisfies the three requirements that drove it:
   label/icon; reserve status colours; lean on the token machinery's contrast/dark-mode guarantees (they hold
   only on engineered scales); cap a decorative set's size (~8, colour-blind-ordered).
 
-## Fork 1 — Provider realization: declarative token-resolving layer vs runtime DI service
+## Fork 1 — DISSOLVED into #1682 (no longer a fork)
 
-*Fork-existence (the broken branch):* a **runtime JS registry that every component queries at render**
-(`provider.resolve(set, value)`) to get its colour is broken for the static-styling majority — **no surveyed
-system does it** (the shared layer is always declarative tokens, NAME→value); it forfeits the token
-machinery's light/dark + contrast guarantees, and adds a render-time dependency to a board of hundreds of
-inert pills. So the two branches genuinely differ on an end-state mechanism.
+**This fork no longer has two coherent branches.** It was framed as *declarative token-resolving layer (1a)
+vs runtime DI registry (1b)*. The 2026-06-23 discussion collapsed it:
 
-**Crux:** the same need has two surfaces — *static styling* (paint this pill) wants declarative tokens; *dynamic
-enumeration* (build the filter chips from the live `kind` set, draw a legend, resolve a value's icon) wants a
-queryable list. The fork is which is the *primary* shape.
+- **CSS can't be the source of truth.** Both branches assumed the resolved colour lives in CSS custom
+  properties and JS reads them via `getComputedStyle`. Browser-validated false for the consumers that matter:
+  a **detached** element resolves an inherited/scoped var to `""` (no pre-attach / constructor read), and
+  there is **no element at all** for a worker/OffscreenCanvas, a `console.log("%c", …)`, SSR, or a test. So a
+  whole class of real consumers cannot be served by CSS-as-SoT.
+- **The DI already exists — don't build a new one.** The "runtime registry" branch (1b) is unnecessary
+  *because WE already ships the injector* (`we:plugs/webinjectors/` + `webcontexts`). The right model is
+  **JS-first source of truth (the injector), one-way synced to CSS custom properties** for the paint path —
+  which is **not** "resolve per pill at render": paint stays declarative `var(--cat-*)`, only *compute* reads
+  the injector.
 
-- **(1a) Declarative token-resolving layer.** *(recommended)* The provider is project config that **compiles**
-  each `(set, value)` to design tokens (the `design-tokens` protocol, via DTCG `extends`) + a stable class
-  (`cat-kind-story`); surfaces resolve declaratively through CSS custom properties — zero runtime registry for
-  styling. A **thin enumerable manifest** exposes the closed sets + per-value metadata (icon/shape) for the
-  genuinely-runtime cases only. This is runtime-DI *exactly where a surface consults it* and declarative
-  everywhere else — the runtime-DI-vs-devtools-provider seam test applied per-use, not globally.
-- **(1b) Runtime DI registry service.** Components call `resolve(set, value)` at render for everything.
-  *Rejected* — unprecedented in the survey; forfeits token guarantees; render-time cost on every pill.
+That answer **generalises beyond categories to all theme tokens** (colour, layout, spacing, fonts, radii), so
+it was lifted into its own decision **#1682** (*theme tokens are JS-first, one-way synced to CSS*) with the
+build in **#1683**. The historical 1a/1b reasoning + survey live in the
+[session report](../reports/2026-06-23-categorical-taxonomy-provider.md) and #1682.
 
-**Recommended default: (1a), amended.** Confidence **high** — the prior art is unanimous that cross-surface
-colour is declarative tokens, and the value→token map is the app-owned layer this provider supplies.
+**What this leaves for #1670:** category vocabularies are **one JS-first token family** — `kind`/`tier`/`size`
+sets whose `(set, value)` rows carry `{ token-ref, icon, shape }`, carried by the injector and synced to
+`--cat-*` per #1682. There is no new "taxonomy provider" mechanism; the *contribution* shrinks to **the
+category meta-schema + closed-set discipline** layered on #1682's token runtime. The remaining live question
+in this item is **Fork 2** (below) + the thin "how categories consume #1682" consumer shaping. **#1682 is now
+ratified** (`we:docs/agent/platform-decisions.md#tokens-js-first`), so this is a fast consumer ruling.
 
-`Skeptic: SURVIVES-WITH-AMENDMENT.` The attack ("the manifest isn't thin — icon/shape/label aren't
-CSS-expressible, so *most* of the named surfaces (`childCircle`, `blockerChip`, filter row, legend) hit it on
-every render, so the static/runtime split is mis-drawn") landed, but didn't flip to (1b) — colour genuinely
-benefits from staying in CSS custom properties (cascade, dark-mode, no FOUC, no render cost, contrast
-guarantees), so a render-time `resolve()` is strictly worse for colour. Amendments folded in:
-1. **Two first-class channels, not "thin manifest."** (a) colour → compiled CSS custom properties
-   (declarative, the cascade does the work); (b) icon/shape/label → an **enumerable manifest that is a
-   primary, expected-on-every-non-trivial-render channel**, not an escape hatch. Don't under-build it.
-2. **Compile to tokens, *not* also to per-value classes.** A `cat-kind-story` class per value is dead weight
-   on top of the custom property — a surface applies `style="background: var(--cat-kind-story-bg)"` (or one
-   parameterized class + `data-cat`). The class explosion (set×value) is the real cost; drop it.
-3. **The runtime manifest is canonical; class/token *compilation* is a build-time optimization for the
-   static subset.** So a dynamic / user-added set (GitHub-issue-label case) degrades to "manifest lookup +
-   inline custom property" with no rebuild — keeps the meta-schema honest as a *standard*, not a build-only
-   artifact.
-4. **Single-source generation** — the `(set,value)→(token,icon,shape)` row is the one source; it emits both
-   the token artifact and the manifest, so they can't drift.
+> The `## Code example` and `## The model` sections above predate this dissolution — read them as the category
+> *meta-schema* (closed sets, `(set,value) → {token,icon,shape}`), not as a standalone provider/registry. The
+> *runtime* is #1682's injector, not a new layer.
 
 ## Fork 2 — `status`: lifecycle-owned meaning + provider-rendered presentation
 

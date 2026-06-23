@@ -1191,6 +1191,31 @@ ARIA-APG lens). Realizing builds: #1458 (the `--tone-*` webtheme palette + this 
 `severity`→`tone` rename + synonym normalization sweep). Second application of
 [open-numbered-variants](#open-numbered-variants); composes [native-first-baseline](#native-first-baseline).
 
+### Theme tokens are JS-first; the injector is the source of truth, CSS custom properties are a one-way projection {#tokens-js-first}
+
+The **runtime source of truth** for a resolved theme token (colour, layout, spacing, font, radius — **every**
+CSS-relevant value, not just colour) is **JS, held in the injector** WE already ships (`we:plugs/webinjectors/`
++ `webcontexts`). Any JS reads it **synchronously, off-DOM, with no cascade and no loop**. From that one
+source a CSS custom property (`--token-*`) is **emitted one-way (JS→CSS)** for the declarative **paint** path
+— cascade, light-DOM scope (the `scoped-token-override` semantic), dark-mode, zero render cost. **Direction is fixed:**
+JS→CSS only; CSS custom properties are **never the source** and are **never hand-authored in parallel** (single
+source ⇒ the two projections cannot drift). **Components read the injector to *know* their theme; CSS vars
+exist only to paint** — `getComputedStyle` is **never** in the compute path. **Why CSS cannot be the source
+(browser-validated #1682):** a detached element resolves an inherited/scoped var to `""` (no constructor /
+pre-attach read); a worker/OffscreenCanvas, a `console.log("%c", …)`, SSR, and a test have **no element at
+all**; and the `connectedCallback` read, even when it resolves, is a forced sync style recalc and the earliest
+possible point (deferring to a later loop reintroduces FOUC). **Test:** *does JS need this value before/without
+a painted element?* → read the injector, not CSS. This **refines the `design-tokens` protocol's runtime tier**:
+"each resolved token compiles to a custom property" now reads — the **injector is the runtime source; the
+custom property is the derived projection**. The categorical-taxonomy work (#1670) is one consumer: category
+vocabularies are a JS-first token family (`--cat-*`), **not** a new provider/registry.
+
+**Lineage:** #1682 (ratified 2026-06-23 — JS-first token SoT + one-way CSS sync; emerged from the #1670
+categorical-taxonomy discussion). Realizing build: #1683 (injector resolves the theme; one-way CSS sync;
+migrate the hand-authored `we:src/css/style.css` `:root` vars). Consumer: #1670 (categorical taxonomy).
+Refines the `design-tokens` protocol; composes [tone-meta-contract](#tone-meta-contract) (the `--tone-*`
+palette is one such emitted token family) and [native-first-baseline](#native-first-baseline).
+
 ### Curated-corpus credibility weighting: two-stage admission⟂weight, GRADE-shaped, config-extends-default {#credibility-weighting}
 
 When WE curates a corpus of external sources and must rank them by authority (the design-knowledge
