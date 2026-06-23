@@ -1,0 +1,22 @@
+{
+  "id": "region-select-recognizer-shape-vocabulary",
+  "title": "Region-select recognizer-shape vocabulary — does marquee generalize to an intent?",
+  "status": "open",
+  "summary": "Validation-gate survey grounding decision #1463 (Fork-1 residual of #1406): #1406 shipped marquee as the fui:blocks/marquee-select behavior block (composing the selection intent's result set + a native pan recognizer), NOT a cross-cutting intent, on YAGNI. This survey asks whether a region-select INTENT (with a shape: rect | lasso | polygon | nearest dimension, marquee as its first realization) earns a home — a one-sided go/no-go gated on a SECOND recognizer shape recurring as real demand, not a merit fork. Prior-art delta: incumbents that ship a marquee/rubber-band also ship MORE than the rectangle once they mature into a recognizer FAMILY. tldraw ships only a 'brush' box-select (rect). Excalidraw shipped rect box-select first, then ADDED free-form lasso (Douglas-Peucker-simplified closed path) on user demand (issues #6350/#6494) — the canonical 'second shape recurred' event. Figma ships rect marquee natively + lasso via plugin. Miro/fabric.js/Konva expose a single rect rubber-band. The classic IMAGE-EDITOR family (Photoshop/GIMP) is the mature end-state: rectangular marquee, elliptical marquee, free-form lasso, polygonal lasso, magnetic lasso, magic-wand (color-similarity), nearest/center — a true shape VOCABULARY. WE semantic delta: the web platform has NO native region-select primitive (no Element.intersects(); IntersectionObserver is viewport-relative, not rect-vs-rect) — every shape is hand-rolled over Pointer Events + setPointerCapture + getBoundingClientRect AABB/point-in-polygon math. WE today owns ONE shape (rect AABB) as a behavior block; the open question is whether the geometry/gesture LAYER should be lifted to an intent that names the shape as a dimension. INVARIANT (untouched by any verdict): the selection intent stays PURE — #1406 Fork-1c rejected scope:spatial on selection (geometry has no place in the choice contract; it would implicate non-spatial consumers like a radio group). Promotion would re-home the gesture/geometry layer (fui:blocks/marquee-select/marqueeMath.ts hitTest/bandRect/resolveSelection), never push geometry into the choice contract. Recommended verdict: NOT-YET (YAGNI on the intent). WE ships exactly one recognizer shape (rect) and one realization (the marquee block); the image-editor family proves the END-STATE exists but a single shape is a behavior, not a vocabulary. A premature intent invents a shape dimension with one member — speculative generality the most-permissive-default and not-a-prioritization rules don't license. Concrete un-gate trigger: a SECOND real recognizer shape recurs as demand — free-form lasso (the Excalidraw precedent), polygon, or center-point/nearest — at which point a region-select intent with shape: rect | lasso | … earns its home, marquee as its first block, geometry re-homed off the block. Skeptic: searched the backlog for a second recognizer-shape consumer (lasso / polygon / free-form / magic-wand / nearest / region-select) — the only hits are #1463/#1406 themselves and unrelated hover-intent safe-area polygons (#609/#643); no second shape has real demand yet, so NOT-YET survives on merit. Report: reports/2026-06-23-region-select-recognizer-shape-vocabulary.md.",
+  "dateOpened": "2026-06-23",
+  "tags": [
+    "selection",
+    "marquee",
+    "region-select",
+    "lasso",
+    "recognizer",
+    "shape-vocabulary",
+    "spatial",
+    "behavior-vs-intent",
+    "validation-gate",
+    "yagni"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

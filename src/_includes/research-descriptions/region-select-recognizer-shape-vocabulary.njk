@@ -1,0 +1,105 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    <a href="/backlog/1406-marquee-rubber-band-selection-2-d-drag-select-standard-place/">#1406</a> shipped
+    <strong>marquee / rubber-band selection</strong> as a <em>behavior block</em> (the FUI
+    <code>marquee-select</code> block, composing the <a href="/intents/selection/">selection</a> intent's
+    result set + a native pan recognizer), <strong>not</strong> a cross-cutting intent, on YAGNI grounds —
+    one rectangle, one algorithm, bound to a surface. This survey grounds the Fork-1 residual carried to
+    <a href="/backlog/1463-marquee-recognizer-shape-vocabulary-promote-to-a-region-sele/">#1463</a>:
+    should the recognizer be promoted to a <strong><code>region-select</code> intent</strong> with a
+    <code>shape: rect | lasso | polygon | nearest</code> dimension — marquee as its first realization?
+</p>
+<p>
+    This is a <strong>validation gate</strong>, not a merit fork: there is no rival branch to weigh. It is a
+    one-sided go / no-go on a candidate, gated on whether a <em>second</em> recognizer shape recurs as real
+    demand.
+</p>
+
+<h2>Recommendation — NOT-YET (YAGNI on the intent)</h2>
+<p>
+    WE ships exactly <strong>one</strong> recognizer shape (the rectangle AABB) and <strong>one</strong>
+    realization (the <code>marquee-select</code> behavior block). The mature image-editor family proves the
+    end-state — a real shape <em>vocabulary</em> — exists, but a single shape is a <em>behavior</em>, not a
+    vocabulary. Minting a <code>region-select</code> intent now would invent a <code>shape</code> dimension
+    with exactly one member: speculative generality the most-permissive-default and not-a-prioritization
+    rules do not license.
+</p>
+<p>
+    <strong>Concrete un-gate trigger:</strong> a <em>second</em> real recognizer shape recurs as demand —
+    free-form <strong>lasso</strong> (the canonical precedent; see Excalidraw below), <strong>polygon</strong>,
+    or <strong>center-point / nearest</strong> — at which point a <code>region-select</code> intent with
+    <code>shape: rect | lasso | …</code> earns its own home, with the <code>marquee-select</code> block as its
+    first realization and the geometry layer re-homed off the single block.
+</p>
+
+<h2>Prior-art delta — incumbent recognizer-shape vocabularies</h2>
+<table>
+    <thead>
+        <tr><th>Incumbent</th><th>Recognizer shapes it ships</th><th>WE semantic delta</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>tldraw</strong></td>
+            <td>Rectangle only (the "brush" box-select).</td>
+            <td>Matches WE's single-shape state exactly — one rect behavior, no vocabulary. No pressure to
+                generalize.</td>
+        </tr>
+        <tr>
+            <td><strong>Excalidraw</strong></td>
+            <td>Rectangle box-select first; <strong>added free-form lasso later</strong> (closed path,
+                Douglas-Peucker-simplified) on user demand.</td>
+            <td>The canonical "second shape recurred" event — rect shipped, then lasso was requested
+                (issues #6350 / #6494) and added. This is precisely the trigger #1463 waits for.</td>
+        </tr>
+        <tr>
+            <td><strong>Figma</strong></td>
+            <td>Rectangle marquee native; free-form <strong>lasso via plugin</strong>.</td>
+            <td>Two shapes, but lasso is an opt-in extension — partial vocabulary, demand-driven.</td>
+        </tr>
+        <tr>
+            <td><strong>Miro / fabric.js / Konva</strong></td>
+            <td>Single rectangular rubber-band selection.</td>
+            <td>Canvas libraries expose one rect shape; the app layers any other shape itself.</td>
+        </tr>
+        <tr>
+            <td><strong>Photoshop / GIMP</strong> (image-editor family)</td>
+            <td>Rectangular marquee, elliptical marquee, free-form lasso, <strong>polygonal lasso</strong>,
+                magnetic lasso, <strong>magic-wand</strong> (colour-similarity), nearest / center.</td>
+            <td>The mature end-state: a true shape <em>vocabulary</em>. This is what a
+                <code>region-select</code> intent would eventually model — but only graphics-grade tools
+                reach it.</td>
+        </tr>
+    </tbody>
+</table>
+<p>
+    <strong>The delta in one line:</strong> incumbents converge on the rectangle as the <em>first</em>
+    shape and only grow a shape vocabulary as the tool matures (Excalidraw rect → lasso is the textbook
+    arc). WE is at the first-shape stage; the vocabulary is real but not yet demanded.
+</p>
+
+<h2>Native grounding — no native region-select primitive</h2>
+<p>
+    The web platform ships <strong>no</strong> region-select primitive. There is no
+    <code>Element.intersects()</code>; <code>IntersectionObserver</code> is viewport-relative, not
+    rect-vs-rect, so it does not apply. Every recognizer shape is hand-rolled over <strong>Pointer Events +
+    <code>setPointerCapture</code></strong> and <strong>AABB / point-in-polygon math over
+    <code>getBoundingClientRect</code></strong>. WE today owns exactly one shape — the rectangle AABB — in
+    the FUI block's pure geometry core (<code>bandRect</code> / <code>hitTest</code> /
+    <code>resolveSelection</code> in <code>marqueeMath.ts</code>). The open question is whether that
+    geometry/gesture layer should be lifted to an intent that names the shape as a dimension.
+</p>
+
+<h2>The pure-selection invariant (untouched by any verdict)</h2>
+<p>
+    Regardless of the verdict, the <a href="/intents/selection/">selection</a> intent stays
+    <strong>pure</strong>. #1406's Fork-1c rejected a <code>scope: spatial</code> dimension on
+    <code>selection</code>: geometry has no place in the choice contract, and adding it would force a pure
+    choice intent to own <code>getBoundingClientRect</code> hit-testing, AABB math and the pointer-drag
+    lifecycle, implicating non-spatial consumers (a radio group, a multi-select list) with geometry they
+    cannot satisfy. Promotion to a <code>region-select</code> intent would re-home the
+    <em>gesture / geometry</em> layer — never push geometry into the choice contract. The selection intent's
+    dimensions stay <code>model</code> / <code>immediacy</code> / <code>variant</code> /
+    <code>grouping</code> / <code>deselectable</code>, with no <code>scope</code>, no pointer, no rect.
+</p>
+{% endraw %}
