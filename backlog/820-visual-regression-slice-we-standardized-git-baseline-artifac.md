@@ -2,7 +2,9 @@
 kind: story
 size: 8
 parent: "800"
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "ownedReviewSurfaceWarranted"
 dateOpened: "2026-06-17"
 tags: []
 ---
