@@ -3,7 +3,7 @@ kind: story
 size: 5
 parent: "081"
 status: open
-blockedBy: ["1619"]
+blockedBy: []
 locus: frontierui
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-22"

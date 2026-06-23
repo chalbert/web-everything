@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "081"
-status: open
+status: resolved
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#authoring-form-id-distinct-from-consume-wrapper"
 preparedDate: "2026-06-22"
 relatedReport: reports/2026-06-22-fui-functional-component-adapter-shape.md
 researchTopic: fui-functional-component-adapter-shape
@@ -12,6 +15,24 @@ tags: [maas, polyglot, functional-component, adapter]
 ---
 
 # Decide the FUI functional-component adapter shape: catalog identity vs the #977 functional retirement + #700 emit placement
+
+## Ruling (ratified 2026-06-23)
+
+- **Fork 1 — catalog identity → (a), id stays `functional`** (no rename). The authoring `functional`
+  `ServeForm` keeps its WE id, wholly distinct from FUI's consume-mode `WRAPPER_FORMS`. The
+  `functional-authoring` rename is **rejected**: its only motivation (cross-catalog confusion with FUI's
+  retired `functional` wrapper alias) dissolved on a consumer-graph grep showing **zero real callers** of
+  that alias. Backward-compat is not owed with no consumer, so the dead shim is dropped at source.
+- **Fork 2 — served-JSX transpile owner → (a)**: the FUI MaaS endpoint injects a compiler at the served
+  endpoint via the existing `compilerRegistry` seam (same rule as genWrapper transpile, #974 invariant 5).
+- **Forced invariants ratified:** emit placement rides the #954 **data-emit** channel (WE `serve()` emits
+  to `we:src/_data/authorModeSource.json`; FUI reads data, never imports `serve()`); v1 contract =
+  `<component>` definition → the `defineElement` JSX module `generateFunctionalSource` already emits
+  (render-only).
+- **Unblocks #1602** — scope confirmed as "wire the WE artifact + own the served-module transpile," **not**
+  "build a FUI functional emitter."
+- **Follow-on cleanup filed as #1681** (FUI): drop the dead `RETIRED_FORM_ALIASES.functional` shim + its 2
+  deprecation tests.
 
 No design exists for the FUI functional-component adapter yet — the plan
 (`we:plans/functional-component-adapter.md`) is a brain-dump, and #1602 was mis-flagged as a mechanical
@@ -72,14 +93,29 @@ neutral param; the value-set is the serving runtime's injected catalog).
 - **(c) A separate, explicitly-named authoring catalog.** *Supported by default, not a rival* — describes
   the same end-state as (a) at a higher altitude; the authoring forms already live in a separate id-space.
 
-**Recommended default: (a).** Confidence: **med-high** — prior art is unanimous; the only residual is a
-cosmetic naming call (`functional` vs `functional-authoring` to pre-empt cross-catalog human confusion).
+**Recommended default: (a), id stays `functional` (no rename).** Confidence: **high** — prior art is
+unanimous, and the one residual (`functional` vs `functional-authoring`) **dissolves on the no-consumer
+finding.** The rename was motivated *only* by cross-catalog confusion with FUI's retired `functional`
+wrapper alias. A consumer-graph grep (2026-06-23) finds **zero real callers** of that alias — its only
+references are its own deprecation tests (`fui:tools/maas/__tests__/wrapperServeHandler.test.mjs:82`,
+`fui:tools/gen-wrapper/__tests__/wrapperFormCatalog.test.mjs:50-62`) — and zero consumers of the WE
+authoring served-module. With no consumer there is **no backward-compat obligation** to preserve the
+shim. So the clean move is to **drop the dead alias** (`RETIRED_FORM_ALIASES.functional → react-wrapper`
++ its two tests), removing the confusion *at source* rather than papering over it with a longer id.
+`functional` then unambiguously means the authoring form.
+
+**Follow-on cleanup (separable FUI hygiene, not part of the authoring build):** remove
+`RETIRED_FORM_ALIASES.functional` from `fui:tools/gen-wrapper/wrapperFormCatalog.mjs` and its two
+deprecation tests. This drops the courtesy redirect only — the #977 *retirement* stands (`functional`
+remains a non-member of `WRAPPER_FORMS`). Safe precisely because no consumer relies on it. → file as its
+own small FUI item on ratification.
 
 **Skeptic:** *"Two forms both called `functional` is a footgun — a caller requests the wrong one."*
-SURVIVES — beat the attack: the two ids live in disjoint catalogs reached by **different endpoints** (the
-author-mode data channel vs the genWrapper wrapper-serve endpoint), and the wrapper catalog serves the
-retired alias as a deprecation *note*, not a 400; a caller of the authoring channel never sees
-`WRAPPER_FORMS`. The cosmetic mitigation (`functional-authoring`) does not move the architecture.
+DOES NOT SURVIVE the no-consumer finding — there is no caller to confuse (zero real callers of either
+id), and the footgun's only fuel (the retired wrapper alias) is being removed, not retained. Even absent
+the cleanup the two ids live in disjoint catalogs reached by **different endpoints** (the author-mode data
+channel vs the genWrapper wrapper-serve endpoint), so a caller of the authoring channel never sees
+`WRAPPER_FORMS`; dropping the alias closes the gap entirely.
 
 ## Fork 2 — Who transpiles the served JSX functional form
 

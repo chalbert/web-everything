@@ -830,6 +830,30 @@ axis), [native-first-baseline](#native-first-baseline),
 npm-scope-mirrors-layer rules under [constellation-placement](#constellation-placement). First worked
 instance: #1377 (webisolation L2 — author base `@scope`; pure PostCSS core + per-bundler adapter family).
 
+### Authoring form ids are distinct from consume-mode wrapper ids; served source emits as data, the endpoint owns transpile {#authoring-form-id-distinct-from-consume-wrapper}
+
+An **authoring form** (lowers a `<component>` definition to a target shape — e.g. `functional`, `wc-class`)
+and a **consume-mode wrapper** (wraps an *already-built* artifact for a framework — e.g. `react-wrapper` via
+`genWrapper`) are **distinct artifact kinds in disjoint id-spaces**, reached by different endpoints. One
+stable id per authoring form; **never alias an authoring form id onto a consume wrapper** — that is exactly
+the ambiguity #977 removed. WE owns one neutral catalog-gated `form` param; the value-set is the serving
+runtime's injected catalog ([impl-is-not-a-standard](#)).
+
+The served authoring artifact follows a **data-emit-for-display / endpoint-for-execution split**: WE's
+deterministic `serve()` emits the authoring *source* as data (#954 channel →
+`we:src/_data/authorModeSource.json`) for the panel to *display*; the *mountable* artifact is transpiled at
+the FUI endpoint via the injected `compilerRegistry` (the delivery layer registers the compiler), the same
+rule as `genWrapper` transpile. FUI reads the emitted data and **never imports WE's `serve()`**.
+
+**No-consumer corollary:** a backward-compat shim (e.g. a retired-form alias served as a deprecation
+redirect) with **zero real callers** is dead weight — verify the consumer graph, then **drop it rather than
+design around it** (e.g. rename a colliding id). No consumer ⇒ no backward-compat obligation.
+
+**Lineage:** #1619 (ratified — FUI functional-component adapter shape) · #954/#956 (data-emit channel) ·
+#974/#977 (wrapper-form catalog + `functional` retirement) · #700 (emit placement). Refines
+[runtime-DI-seam](#runtime-di-vs-devtools-provider-seam) (the `compilerRegistry` endpoint seam) and
+[constellation-placement](#constellation-placement) (contract+data → WE, serving endpoint → FUI).
+
 ### Framework-free core; vendor frameworks segregated at the package boundary {#framework-free-core-vendor-segregation}
 
 Frontier UI's **framework-free principle scopes to the core/floor packages only** — *not* identity-wide.
