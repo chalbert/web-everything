@@ -3,7 +3,7 @@ kind: story
 size: 5
 parent: "1353"
 status: open
-blockedBy: ["1566"]
+blockedBy: []
 dateOpened: "2026-06-22"
 tags: []
 ---
@@ -22,3 +22,25 @@ the **golden-drift guard** (`committed goldens == fresh capture from the referen
 **same unresolved mechanism fork** as the data-table sibling #1355 — how WE produces a root / guards golden
 drift without the renderer — filed as **#1566**. Re-pointed `blockedBy: 1356 → 1566`. Carry-forward reason:
 **not-batchable** (fork, shared with #1355).
+
+## Pre-flight (batch-2026-06-22-1581-1582-1576-1355-1531) — #1566 ruled; re-pointed `blockedBy: 1566 → 1576` (Plateau home absent)
+
+Mirrors the data-table sibling #1355 exactly. #1566 is **resolved** (verifier impl + `goldenToRoot` + the
+conformance run move **WE→Plateau**; WE keeps only the interface + golden corpus + schema as data). The
+pagination delete is **atomic** with relocating `auditPagination` + the golden-drift capture to a **Plateau
+conformance home** — and that home is **verified absent** (`plateau:src/` has no conformance dir). The home
+is what the concurrently-`active` **#1576** relocates; landing a competing one here would race it. So this is
+**a real block on #1576** (later #1597), not a design fork: re-pointed `blockedBy: 1566 → 1576`. Cascade-frees when
+#1576 lands the Plateau conformance home.
+
+## Re-point 2026-06-22 — `blockedBy: 1576 → 1597` (#1576 sliced)
+
+#1576 was sliced into an umbrella epic; the **Plateau conformance home** is now established by its slice
+**#1597** (runner/judge impl FUI→Plateau). Re-pointed `blockedBy: 1576 → 1597` — the precise slice that
+lands the home this card waits on. Per we:reports/2026-06-22-backlog-split-analysis.md (Run 10).
+
+## Unblocked 2026-06-23 — `blockedBy: 1597 → []` (#1597 resolved, Plateau home landed)
+
+**#1597 is now `resolved`** — the Plateau conformance home this card waited on has landed (and #1576's
+remaining children are all resolved). So the earlier real-block on #1576/#1597 is **cleared**: emptied
+`blockedBy`. The historical block notes above are superseded. Now genuinely ready (Tier-A), sibling of #1355.

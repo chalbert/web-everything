@@ -2,10 +2,10 @@
 kind: story
 size: 5
 parent: "1353"
-status: open
-blockedBy: ["1566"]
+status: active
+blockedBy: []
 dateOpened: "2026-06-20"
-dateStarted: "2026-06-22"
+dateStarted: "2026-06-23"
 tags: []
 ---
 
@@ -49,3 +49,36 @@ interactive); and the verifier has **diverged** (FUI ported `auditDataTable(tabl
 #1467 ruling fixed the boundary, not the mechanism. Completing the delete needs a design choice (stored-root
 fixture / golden-JSON-only / reconcile verifiers / move auditDataTable) — not forced here. `blockedBy: 1566`;
 released. Carry-forward reason: **not-batchable** (fork).
+
+## Pre-flight (batch-2026-06-22-1581-1582-1576-1355-1531) — #1566 ruled; re-pointed `blockedBy: 1566 → 1576` (Plateau home absent)
+
+#1566 is **resolved** (ruled: WE holds zero executable — keeps only the conformance *interface* + golden
+**corpus** + **schema** as data; the verifier impl `auditDataTable`, `goldenToRoot`/`buildGoldens`, and the
+conformance **run** move **WE→Plateau**; the backend `renderDataTable` is already in FUI). Grounding the
+delete under that ruling: it is **atomic** — `auditDataTable` + `goldenToRoot` + `buildGoldens` /
+`serializeGolden` live inside `we:blocks/renderers/data-table/renderDataTable.ts` +
+`we:blocks/renderers/data-table/__fixtures__/data-table-goldens.ts`, and
+`we:blocks/__tests__/unit/renderers/data-table.test.ts` value-imports **all** of them, so the WE backend
+can't be deleted until that verifier code has a **Plateau conformance home** to land in (Fork 2a) and the WE
+suite is rewritten to data-validation-only (Fork 1a).
+
+**Verified absent:** there is **no** Plateau conformance home yet (`plateau:src/` has no conformance dir, no
+`auditDataTable`/`goldenToRoot`/`runConformance`). That neutral Plateau runner home is exactly what **#1576**
+relocates (the explorer conformance engine → Plateau; Fork 4 says the renderer verifier converges on that
+runner interface). **#1576 is `status: active` in a concurrent session but has not landed the home.** Moving
+the verifier here now would build a **competing** ad-hoc Plateau home that #1576 must then reconcile — a
+wrong-partition collision. So this was **a real block on #1576** (later #1597), not a design fork: re-pointed
+`blockedBy: 1566 → 1576`. Cascade-frees the instant #1576 lands the Plateau conformance home. Sibling #1531
+(pagination) shares this exact dependency.
+
+## Re-point 2026-06-22 — `blockedBy: 1576 → 1597` (#1576 sliced)
+
+#1576 was sliced into an umbrella epic; the **Plateau conformance home** is now established by its slice
+**#1597** (runner/judge impl FUI→Plateau). Re-pointed `blockedBy: 1576 → 1597` — the precise slice that
+lands the home this card waits on. Per we:reports/2026-06-22-backlog-split-analysis.md (Run 10).
+
+## Unblocked 2026-06-23 — `blockedBy: 1597 → []` (#1597 resolved, Plateau home landed)
+
+**#1597 is now `resolved`** — the Plateau conformance home this card waited on has landed (and #1576's
+remaining children are all resolved). So this is **no longer blocked-in-fact**: cleared `blockedBy`. The
+historical "blocked-in-fact on #1576/#1597" notes above are superseded. Now genuinely ready (Tier-A).
