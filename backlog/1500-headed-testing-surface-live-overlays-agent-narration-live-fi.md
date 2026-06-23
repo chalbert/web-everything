@@ -1,10 +1,13 @@
 ---
 kind: story
 size: 8
-status: open
+status: resolved
 locus: plateau-app
 blockedBy: []
 dateOpened: "2026-06-21"
+dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: "plateau:src/dev-browser/headed-surface/"
 tags: [dev-browser, explorer, testing, visualization, plateau, product]
 ---
 
@@ -56,3 +59,31 @@ DevTools-panel MVP is the cheap first surface** (proves the live view on a confo
 standalone browser). The headless engine + CLI (#1219/#1220) already exist — this is the visualization
 layer over them, not new test logic. File the trace-event emitter as the leading slice (it unblocks every
 consumer and is the only possible WE-side seam).
+
+## Progress (resolved 2026-06-23, batch-2026-06-23-1689-1500)
+
+Built the **leading slice** — the trace-event contract + the pure consumers — as
+`plateau:src/dev-browser/headed-surface/`. (The pixel-drawing renderer onto a live headed
+Playwright/CDP page is the residual UI layer over this; this card delivers the data architecture the
+body names as the unblocking slice.)
+
+- **`plateau:src/dev-browser/headed-surface/types.ts`** — the trace-event contract: a discriminated
+  `TraceEvent` union (`state-entered` / `action-fired` (with `why` + `targetLocator`) / `observation` /
+  `finding` / `run-complete`), mirroring the explorer's state-flow vocabulary, plus the consumer-rendered
+  shapes (`NarrationLine`, `FindingFeedEntry`, `OverlayMarker`/`OverlayModel`).
+- **`plateau:src/dev-browser/headed-surface/stream.ts`** — `TraceEventStream`: the one emitter every tool
+  writes to (`emit` stamps monotonic `seq`/`atMs`, fans live to subscribers, keeps history for a
+  mid-run attach). `EmittedEvent` (distributive-omit) is what a tool emits.
+- **`plateau:src/dev-browser/headed-surface/consumers.ts`** — the three **pure consumers** that render the
+  stream as data (never touching the subject, the #832 pattern): `narrate`/`narrateAll` (the "what/why"
+  line per event), `FindingFeed`/`findingFeed` (defects in discovery order, linked to their state/action +
+  a severity roll-up), and `overlayModel` (a fold to the current-state + acted-element + per-state
+  oracle-hit/finding markers the renderer paints, reset on state entry).
+- **`plateau:src/dev-browser/headed-surface/headed-surface.test.ts`** — 6 tests (stream stamping +
+  subscribe/unsubscribe + history, narration per kind, finding feed + roll-up, overlay fold + reset, and
+  the per-state marker surfacing).
+
+**Generality check met:** every event flows through the same generic consumers, so a new tool (a future
+oracle, a different walker) lights up narration + feed + overlay with **zero consumer changes** — the
+contract is the only coupling. Ownership per *The seam*: the explorer (FUI) emits, this product surface
+consumes. Plateau suite green (only the pre-existing external `render-conformance` baseline red).
