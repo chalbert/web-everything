@@ -1,9 +1,9 @@
 ---
 kind: decision
 parent: "866"
-status: open
+status: active
 dateOpened: "2026-06-22"
-dateStarted: "2026-06-22"
+dateStarted: "2026-06-23"
 preparedDate: "2026-06-22"
 relatedReport: reports/2026-06-22-badge-mode-c-migration-model.md
 tags: [dogfood, fui, badge, filter-chip, site-rework]
@@ -144,6 +144,90 @@ breaks the board silently) rather than the stable `<we-badge>` / `createBadge` c
 back to the transient element (2b), with the FOUC concern handled the chrome-dogfood way (a CSS baseline).
 The sub-fork default (cross-origin import) survives — it is the only delivery that keeps WE's build free of
 FUI source.
+
+## Code examples (grounded in the real tree)
+
+Concrete before/after for the two recommended defaults, so the spin-off builds inherit the shape (not
+just the verdict). All refs are real file:line.
+
+### Fork 2 (2b) — transient element end-to-end
+
+**Today** — every macro hand-rolls inline styles. `we:src/_includes/backlog-badges.njk:32-36`
+(`statusBadge`):
+
+```njk
+<span style="padding:{{pad}}; border-radius:9999px; font-size:{{fs}}; font-weight:600;
+  background:{% if status=='resolved' %}#dcfce7{% ... %};
+  color:{% if status=='resolved' %}#166534{% ... %};">{{ status|title }}</span>
+```
+
+**After (2b)** — the macro emits `<we-badge>`; it upgrades in place to a native `<span>`
+(`fui:blocks/badge/BadgeElement.ts:18,27-46`), zero wrapper, light-DOM, no shadow root:
+
+```njk
+{% macro statusBadge(status, scale='sm') %}
+<we-badge tone="{{ 'success' if status=='resolved'
+                   else 'info' if status=='active'
+                   else 'warning' if status=='open'
+                   else 'neutral' }}"
+          {% if status != 'preparing' %}status{% endif %}
+          {% if status=='preparing' %}class="be-status--preparing"{% endif %}>{{ 'Prepping' if status=='preparing' else status|title }}</we-badge>
+{% endmacro %}
+```
+
+**Registered once** (mirrors the #865 chrome wiring at `we:src/_layouts/base.njk:417-426`) — this is the
+delivery sub-fork (i), runtime cross-origin import from the FUI origin. It pulls **both** the element JS
+(`registerBadge`) *and* the tone CSS (`BADGE_CSS`), because light-DOM transients can't carry scoped
+styles (see wrinkle 2):
+
+```njk
+<script type="module">
+  const base = "{{ links.frontierUrl }}";
+  import(`${base}/blocks/badge/registerBadge.ts`).then(m => m.registerBadge()).catch(()=>{});
+  import(`${base}/blocks/badge/Badge.ts`).then(({BADGE_CSS}) => {
+    const s = document.createElement('style'); s.textContent = BADGE_CSS; document.head.append(s);
+  }).catch(()=>{});
+</script>
+```
+
+### Fork 1 (1b) — status tone vs. taxonomy modifier
+
+The `statusBadge` above already shows the split: `resolved/active/open` map to real FUI tones
+(`success/info/warning`), but **`preparing` (purple) has no FUI tone** → it takes a docs-owned modifier
+class with *no* tone. Pure-taxonomy `kindBadge` (`we:src/_includes/backlog-badges.njk:25-29`) is
+all-taxonomy:
+
+```njk
+{% macro kindBadge(kind, scale='sm') %}
+<we-badge class="be-kind be-kind--{{ kind }}">{{ kind }}</we-badge>
+{% endmacro %}
+```
+
+```css
+/* WE-docs-local stylesheet — domain taxonomy palette, NEVER widens FUI's enum */
+.fui-badge.be-kind--story    { background:#dbeafe; color:#1e40af; border-color:transparent; }
+.fui-badge.be-kind--epic     { background:#ede9fe; color:#5b21b6; border-color:transparent; }
+.fui-badge.be-kind--decision { background:#e0e7ff; color:#3730a3; border-color:transparent; }
+.fui-badge.be-kind--task     { background:#f1f5f9; color:#475569; border-color:transparent; }
+```
+
+This dogfoods the badge's geometry + `__icon`/`__label` structure + `role=status` wiring once instead of
+re-deriving it across ~10 macros, while the domain colours stay in WE-docs CSS, never in the shared FUI
+component.
+
+### Two wrinkles the code surfaces (acceptance-criteria for #1598/#1208, not blockers)
+
+1. **Vestigial `fui-badge--neutral`.** `decorate()` *always* stamps a tone class
+   (`fui:blocks/badge/BadgeElement.ts:28-30`) — a no-tone `<we-badge>` lands as
+   `class="fui-badge fui-badge--neutral be-kind be-kind--story"`. The docs CSS wins via the
+   `.fui-badge.be-kind--story` two-class specificity (beats single-class `.fui-badge--neutral`). So **no
+   FUI change is needed** — the build item must use the compound selector, not a bare `.be-kind--story`.
+2. **Light-DOM needs global `BADGE_CSS`.** Unlike mode-C's shadow encapsulation, transient elements are
+   light-DOM, so tone styles can't be scoped — hence the `BADGE_CSS` injection above
+   (`fui:blocks/badge/Badge.ts:82`). Pulling it from the FUI origin keeps WE's build free of FUI source
+   (true to sub-fork default (i)).
+
+Both confirm the defaults rather than challenging them.
 
 ## Context
 
