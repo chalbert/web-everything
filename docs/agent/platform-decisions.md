@@ -229,6 +229,17 @@ The other buckets:
   each implementer. Distinct from [reproduction-conformance](#reproduction-conformance)'s *deterministic-diff*
   engine (#1225), which is FUI (it diffs FUI's own reproductions, not a cross-implementer conformance suite).
 
+**Embed mechanism *inside* a Plateau dev-tool (#1654).** Once a tool is placed in Plateau, how it mounts
+its *own* surfaces is a trust/origin question, not an iframe-by-default one. A Plateau dev-tool's chrome and
+its own same-bundle, same-origin trusted panels (e.g. the **dev-browser shell** mounting plateau-app's
+Technical/Intent Configurator + Profiles via `mount*(el)`) use a **direct in-process import** — an iframe
+there is pure tax *and* would forbid the DevTools-style docked-chrome control that is the point of the tool.
+iframe + origin-validated `postMessage` (the [we-fui-embed-boundary](#we-fui-embed-boundary) bus) is reserved
+for genuinely **cross-origin / untrusted** surfaces. The **app under test** the dev-browser loads is *not*
+such a web iframe: per [#141](../../backlog/141/) the dev-browser is a **Chromium/extension** shell, so the
+loaded app is a real privileged page introspected via the source-awareness substrate (#562) + live-patch
+(#410) — a privileged-introspection boundary, not a `fui-embed` channel.
+
 **The "every developer tool → Plateau" reading is *mostly* right, with one WE residual:** the conformance
 **contract** — the verifier *interface* + the vector/golden corpus + schema (declarative data) — stays in
 the standard layer (#1467/#817, [constellation-placement](#constellation-placement) rule 1). What moves to
@@ -242,6 +253,9 @@ stays WE" carve-out and re-points the engine split above. Composes
 [constellation-placement](#constellation-placement), [we-fui-embed-boundary](#we-fui-embed-boundary)
 (#809), [no-leakage-client](#no-leakage-client) (#475), [reproduction-conformance](#reproduction-conformance)
 (#1225), and `project_conformance_verifier_vs_subject` (#1467, amended). Unblocks #1553.
+**Refined by #1654** (ratified 2026-06-23) — the embed-mechanism rule above: a Plateau dev-tool's own
+same-bundle trusted panels mount by direct import; the dev-browser's loaded app is a privileged-introspection
+boundary (#141/#562/#410), not a web iframe. Unblocks the #1391 `S5` panel-embed slice.
 
 ### Is it a Project / Protocol — or just an intent? {#project-protocol-bar}
 

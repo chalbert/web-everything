@@ -1,8 +1,12 @@
 ---
 kind: decision
-status: open
+status: resolved
 locus: plateau-app
 dateOpened: "2026-06-23"
+dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#devtools-placement"
 preparedDate: "2026-06-22"
 relatedReport: reports/2026-06-22-1391-split-analysis.md
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 Fork 4-A (panel embed seam)" }
@@ -13,47 +17,36 @@ tags: [dev-browser, plateau, panel-embed, decision]
 
 ## Digest
 
-Resolves #141 Fork 4-A — how the Plateau-owned dev-browser shell mounts plateau-app's Technical Configurator / Intent Configurator / Profiles panels — and unblocks slicing the #1391 shell epic (the panel-embed slice currently buries this fork). The forks below are grounded in the [dev-browser panel-embed boundary](/research/dev-browser-panel-embed-boundary/) research topic, each with a **bold** recommended default. The load-bearing finding is that the shell and the panels are the **same repo and same origin**, which dissolves the framing of the original question: a "direct import" here is an intra-repo function call, not a cross-constellation edge, so the import-vs-iframe either/or does not survive as a single ruling — it splits by trust/origin into support-both.
+Resolves #141 Fork 4-A — how the dev-browser **shell chrome** mounts plateau-app's Technical Configurator / Intent Configurator / Profiles **config panels** — and unblocks slicing the #1391 shell epic (the panel-embed slice currently buries this fork). **Ruling: direct package import / `mount*(el)` call** (confidence: High). The seam is narrower than the original title suggests: it is *only* the chrome-to-config-panel boundary. The "loaded app under test" surface — which the prep mistakenly folded in as a second fork — is **not in scope here**: #141 already committed the runtime form (a **Chromium desktop browser, extension-first**), so the loaded app is a real privileged browser page, not a web iframe, and its introspection boundary is **already owned by [#562](/backlog/562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac/) + [#410](/backlog/410-dev-browser-deployed-app-live-patch-gated-capability-safety-/)** (both resolved). That correction is recorded below, not re-decided.
 
 ## Axis-framing
 
-The dev-browser shell is Plateau-owned ([#1565](/backlog/1565-dev-tool-placement-across-the-constellation-devtools-belong-/) — an operated surface you run against your own build lives in Plateau), and the three panels it must surface already ship in the **same plateau-app repo** as plain DOM mount functions with no framework: `mountTechnicalConfigurator(root: HTMLElement)` ([plateau:src/technical-configurator/configurator.ts:639](https://github.com/)), `mountIntentConfigurator(root)` ([plateau:src/intent-configurator/configurator.ts:421](https://github.com/)), and `mountProfiles(el)` ([plateau:src/profiles/profiles-page.ts:165](https://github.com/)). They are one Vite bundle (plateau:package.json declares no react/vue) and are already called same-bundle from the SPA at [plateau:src/main.ts:437/481/527](https://github.com/). The shell directory [plateau:src/dev-browser/](https://github.com/) already exists. Because host and panel are the same origin, a "direct import" is a synchronous in-process call — it never crosses the WE→FUI→plateau DAG (a backward edge is a CODE import *upstream*; an intra-repo import inside the product layer is none). This is the inverse of the two prior plateau-embed transport decisions, which were cross-origin by construction and therefore *forced* iframe+postMessage: #788 (a WE/FUI docs surface embeds a Plateau configurator) and #887 (a Plateau creator iframe feeds a FUI switcher iframe). Where an iframe boundary *does* recur is the third-party app the browser loads — that surface is genuinely cross-origin and reuses the existing FUI embed bus, which origin-validates every message at [fui:embed/embed-host.ts:227](https://github.com/) against a versioned `fui-embed` envelope at [fui:embed/contract.ts:85](https://github.com/).
+Per the resolved [#141 vision](/backlog/141-dev-browser-vision/), the dev-browser is a **Chromium desktop app (extension-first → full browser later)** whose chrome lights up against a standard-conformant app — the DevTools model: the inspected app is a *real top-level page*, the dev tooling is *privileged chrome docked beside it* (resizes the viewport, reaches the live runtime directly, no iframe wall). Two distinct surfaces follow, and only the first is this item's question:
 
-### Recommended path at a glance
+1. **The shell's own config panels** (this seam). The three panels ship in the **same plateau-app repo** as plain DOM mount functions with no framework — `mountTechnicalConfigurator(root: HTMLElement)` (`plateau:src/technical-configurator/configurator.ts:639`), `mountIntentConfigurator(root)` (`plateau:src/intent-configurator/configurator.ts`), `mountProfiles(el)` (`plateau:src/profiles/profiles-page.ts`) — one Vite bundle (`plateau:package.json` declares no react/vue), already called same-bundle from the SPA at `plateau:src/main.ts:437/481/527`. The shell directory `plateau:src/dev-browser/` already exists. These panels are part of the **chrome**, in the same context/bundle as the shell — so the mount is a synchronous in-process call, never crossing the WE→FUI→plateau DAG.
+2. **The loaded app under test** (NOT this seam). A real Chromium-navigated page — yours *or* an arbitrary external URL — introspected via **browser-privileged** mechanisms (extension/CDP), which is *why* #141 chose a browser over a web page. Mapping its rendered DOM back to source and acting on it is the resolved substrate of **#562** (source-awareness + IDE bridge) and **#410** (deployed live-patch). A web iframe + postMessage (the `fui-embed` bus of #788/#887) is at most a *degraded web-only fallback*, not the control path, and not a #1654 decision.
 
-| Fork | Recommended default | Main alternative | Confidence |
-|---|---|---|---|
-| **1 · first-party panel mount** | direct package import / `mount*(el)` call | iframe/web-component boundary *(rejected for same-origin trusted panels)* | **High** — same-repo, same-origin, no isolation need |
-| **2 · loaded third-party app surface** | reuse the existing origin-validated iframe + postMessage bus | mint a new WE Protocol *(rejected)* | **Med-High** — channel already exists, no interop gain from minting |
+## Ruling — direct package import for the config-panel seam
 
-## Fork 1 — how the shell mounts its OWN (first-party) plateau-app panels
+**Direct package import / `mount*(el)` call.** The shell chrome imports and calls the existing mount functions in-process. The panels are trusted first-party plateau-app code in the same bundle and context as the shell (`plateau:src/technical-configurator/configurator.ts:639`, `plateau:src/main.ts:437/481/527`) — none of the drivers the iframe branch exists to serve (untrusted content, independent deploy, CSS/JS encapsulation) are present.
 
-Fork-existence: import-vs-iframe is a *genuine* either/or only if the branches cannot coexist for the same surface — for the shell's own panels they cannot both be the default, so this is a real fork, but the merit is one-sided once same-origin/same-repo is established.
+Decisively, **direct import is what *enables* the DevTools-style experience**: because the panels are same-context chrome, they can dock around and resize the rendered app the way DevTools docks against a page. An iframe boundary would *forbid* that control while buying isolation no one needs — the worst of both. Constellation-DAG clean: an intra-repo import inside the product layer is not a backward edge.
 
-**Crux:** the Technical/Intent Configurators and Profiles are trusted plateau-app code in the same repo and origin as the shell ([plateau:src/technical-configurator/configurator.ts:639](https://github.com/), [plateau:src/main.ts:437/481/527](https://github.com/)) — there is no untrusted-content, independent-deploy, or CSS/JS-encapsulation driver that the iframe branch exists to serve.
+**Rejected — iframe / web-component boundary for the config panels.** Imposes the postMessage/marshalling/duplication tax of the #788/#887 cross-origin embeds where none of their forcing conditions (cross-origin, untrusted, runtime-authored) hold for the shell's own trusted panels.
 
-- **(a — recommended) Direct package import / mount-function call.** The shell calls the existing `mount*(el)` functions in-process. Tightest coupling and the cleanest data flow: synchronous, no postMessage marshalling, shared bundle, single origin, no transport contract to version. Constellation-DAG clean — an intra-repo import inside the product layer is not an edge.
-- **(b) iframe / web-component boundary.** Buys CSS/JS isolation and independent-deploy of each panel — neither of which the shell needs for its own trusted code — at the cost of a postMessage handshake, resource duplication, and cross-frame data marshalling for surfaces that share one bundle and origin. *Rejected* for the first-party panels: it imposes the isolation tax of #788/#887 where none of their forcing conditions (cross-origin, untrusted, runtime-authored) hold.
+*Skeptic:* if a panel were later extracted into its own deployable package or a second origin, direct import would have to become a boundary — but that extraction is itself the trigger that flips the origin/trust property; nothing here forecloses it.
 
-**Default: (a) direct package import / mount-function call.**
+## Correction — the "loaded third-party app" is not an iframe fork (and not this item)
 
-*Skeptic:* if the panels are later extracted into their own deployable package or a second origin, (a) would have to become (b) — but that re-extraction would itself be the trigger that flips the origin/trust property, at which point Fork 2's transport already applies; nothing is foreclosed.
+The prep framed a second fork ("reuse the `fui-embed` iframe bus vs. mint a Protocol") for the loaded app's surface. That framing is **withdrawn**: it pre-supposes the dev-browser is a *web page* embedding an app via iframe, but #141 ruled it a **Chromium/extension browser** with first-level (privileged) control over real pages — exactly the DevTools model. The loaded-app boundary is therefore:
 
-## Fork 2 — the boundary mechanism for the LOADED third-party app's surface
+- **owned elsewhere and already resolved** — #562 (map deployed DOM → source, resolver + IDE-bridge chains) and #410 (deployed live-patch), both `blockedBy: 141`;
+- **a privileged-introspection boundary, not a web iframe** — the `fui-embed` bus (#788/#887) remains only as a degraded fallback for a non-privileged web embed, with no decision owed here.
 
-Fork-existence: this is a distinct surface from Fork 1 (the conformant app the browser navigates to, not the shell's own panels) and is cross-origin/untrusted by construction, so it genuinely needs a transport — the fork is whether to reuse the existing one or mint a new contract.
-
-**Crux:** the dev-browser's premise is loading *other people's* conformant apps; reading their introspectable surfaces is a cross-origin, untrusted boundary, exactly the case the FUI embed bus already handles — it rejects any message whose `event.origin` mismatches the validated frame origin ([fui:embed/embed-host.ts:227](https://github.com/)) over a versioned `fui-embed` envelope union ([fui:embed/contract.ts:85](https://github.com/)).
-
-- **(a — recommended) Reuse the existing origin-validated iframe + postMessage bus.** Adding a message type to the established `fui-embed` envelope is a contract addition, not a new channel; isolation and origin-validation are already in place; consistent with how #788/#887 resolved the same cross-origin shape. Constellation-DAG clean — a runtime cross-origin boundary is not a backward code edge.
-- **(b) Mint a new WE Protocol for the panel-embed transport.** A swappable-vendor protocol earns its keep only when independent parties must interop against a published contract; here the two parties are the shell and the loaded app's FUI-shipped surface, already covered by the documented `fui-embed` envelope. Minting one is lock-in for no interop gain. *Rejected.*
-
-**Default: (a) reuse the existing origin-validated iframe + postMessage bus.**
-
-*Skeptic:* if a future non-FUI implementation must embed into the shell, the `fui-embed` channel name reads impl-specific — but that is a rename/namespacing of an existing contract, not evidence a fresh Protocol is needed today.
+Net: #1654 decides the chrome↔config-panel seam only (direct import). No new Protocol is minted.
 
 ## Context
 
 - **Lineage:** resolves #141 Fork 4-A, whose #141 resolution explicitly deferred the embed seam ("package vs. iframe/web-component is a build detail, deferred"). Filed as a standalone decision per the [#1391 split analysis](reports/2026-06-22-1391-split-analysis.md), which could-not-split #1391 because this fork (and the free/paid line, filed separately) was buried in its panel-embed slice.
 - **Sequencing:** ratifying #1654 unblocks the #1391 `S5` panel-embed slice (`blockedBy: S1 shell scaffold + this decision`). It does not block `S1` (the shell scaffold itself), which can proceed independently.
-- **Constellation:** the shell is Plateau-owned (#1565); first-party import is intra-repo (no DAG edge); the third-party transport is a runtime cross-origin boundary (also no backward code edge). Both defaults keep the WE→FUI→plateau DAG clean.
+- **Constellation:** the shell is Plateau-owned ([#1565](/backlog/1565-dev-tool-placement-across-the-constellation-devtools-belong-/)); the config-panel import is intra-repo (no DAG edge); the loaded-app boundary is a runtime privileged/cross-origin boundary owned by #562/#410 (also no backward code edge). The ruling keeps the WE→FUI→plateau DAG clean.
