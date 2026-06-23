@@ -1,0 +1,26 @@
+{
+  "id": "semantic-layout-role-taxonomy",
+  "title": "Semantic layout-role taxonomy — by what criterion is a layout role distinct, and what is the canonical core set?",
+  "summary": "Prep research for decision #1680 (surfaced alongside #1653). WE ships only a concept-stage `layout` intent (app-shell regions) plus scattered point intents (resizable #1384, arrangeable, overview-grid, slide-layout-template #1191); there is no systematic map of layout roles and no stated criterion for what makes one distinct. Surveyed Every Layout, WAI-ARIA landmark regions + HTML sectioning, Tailwind, MUI, Radix Themes, Chakra UI, Carbon 2x-grid, Material Design 3 canonical layouts, Open UI, and CSS-native layout. DECISIVE FINDING: the sources draw 'distinct role' by DIFFERENT, ORTHOGONAL criteria — Every Layout by CSS mechanism (Stack=margin-flow, Cluster=flex-wrap, Grid=auto-fit), ARIA by document semantics (banner/navigation/main/complementary/...), MUI/M3 by composition intent. The SIDEBAR CASE proves orthogonality: Every Layout has one Sidebar primitive, but ARIA classifies the same box as navigation OR complementary purely by content — so CSS-mechanism and landmark-meaning are independent axes, not refinements. FORK 1 (the load-bearing call — distinctness criterion): (a) identity = COMPOSITION-INTENT (impl-agnostic: 'even vertical flow', 'wrap-group', 'fixed+fluid collapsing split'), with CSS-mechanism as FUI's impl detail and ARIA landmark as an optional author annotation — RECOMMENDED ~75%; (b) hybrid keyed on CSS-mechanism × optional landmark (the Every-Layout cut) — REJECTED: keys identity on the COMPUTATION (violates surface-contract-not-computation / Impl-Is-Not-A-Standard #020), fragments arbitrarily (margin vs gap) and mutates when a browser ships a feature (CSS masonry would merge masonry into grid); (c) pure-ARIA-landmark — REJECTED: most primitives (stack/cluster/grid/center) map to NO landmark, so it cannot tell them apart. The prep default was (b); a skeptic pass REFUTED it and FLIPPED the recommendation to (a). FORK 2 (taxonomy altitude): (b) primitives are roles, page archetypes (app-shell/list-detail/feed) are a SEPARATE composition-intent tier impl'd as FUI blocks + assembler presets — RECOMMENDED ~70%; the existing `layout` intent IS an app-shell and is the charter member of that tier, NOT retracted (skeptic SURVIVES-WITH-AMENDMENT); (a) admit archetypes as first-class roles — REJECTED: conflates altitudes, makes 'one component per role' ill-defined. SETTLED BY DEFAULT (forced by codified rules, not forks): roles are project-less intents, FUI ships one block impl per role, the role set is open-numbered with a ratified core + minting contract (intents-open-design + open-numbered-variants), and per-project styling rides the variant axis + plateau assembler presets (#775) — the user's '1 impl, many styles via plateau' is the consequence, already codified, out of scope. MINTING CONTRACT (role vs variant vs annotation): a new role iff a distinct composition-intent; a variant if it differs only in look (ImageList standard/quilted/woven = one Grid + variants; HStack/VStack = axis variant of Stack); an annotation if it differs only in content meaning (navigation vs complementary sidebar = one Sidebar + landmark). RECOMMENDED CORE ROLE SET: stack, cluster, grid, box/container, center, sidebar/split, frame (core); reel, imposter/overlay, cover, switcher, masonry (candidates). Full grounding in we:reports/2026-06-23-semantic-layout-role-taxonomy.md.",
+  "status": "open",
+  "dateOpened": "2026-06-23",
+  "lastReviewed": "2026-06-23",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webintents",
+    "layout",
+    "taxonomy",
+    "composition-intent",
+    "a11y",
+    "landmark",
+    "every-layout",
+    "open-numbered-variants",
+    "surface-contract-not-computation",
+    "1653",
+    "1680",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

@@ -1,0 +1,80 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Decision <a href="/backlog/1680-semantic-layout-type-taxonomy-identify-every-distinct-layout/">#1680</a>
+  asks for a canonical taxonomy of <strong>semantic layout roles</strong> — and, the load-bearing half,
+  <strong>by what criterion one role is distinct from another</strong>, so the set is a principled minting
+  contract rather than a vote. Today WE ships only a concept-stage <a href="/intents/layout/">layout</a>
+  intent (app-shell regions: <code>shell</code>/<code>pane</code>/<code>dock</code> ×
+  <code>push</code>/<code>overlay</code>/<code>rail</code>) plus scattered point intents
+  (<code>resizable</code> #1384, <code>arrangeable</code>, <code>overview-grid</code>,
+  <code>slide-layout-template</code> #1191). There is no systematic role map and no stated distinctness
+  criterion.
+</p>
+
+<h2>Prior art surveyed</h2>
+<p>
+  Every Layout, WAI-ARIA APG landmark regions + HTML sectioning, Tailwind layout utilities, MUI, Radix
+  Themes, Chakra UI, Carbon 2x-grid, Material Design 3 canonical layouts, Open UI, and CSS-native layout
+  (flex/grid/subgrid/container-queries/scroll-snap).
+</p>
+<p>
+  <strong>Decisive finding — the criteria diverge and are orthogonal.</strong> Every Layout draws "distinct
+  role" by <strong>CSS mechanism</strong> (Stack = margin-flow, Cluster = flex-wrap, Grid = auto-fit). ARIA
+  draws it by <strong>document semantics</strong> (banner / navigation / main / complementary / region /
+  search / form), geometry-blind. MUI / Material Design 3 draw it by <strong>composition intent</strong>
+  (named archetypes, plus page-level canonical layouts). Tailwind / Carbon decline to name roles at all
+  (raw atoms / a single grid).
+</p>
+<p>
+  The <strong>sidebar case</strong> is the proof: Every Layout has <em>one</em> <code>Sidebar</code>
+  primitive (CSS criterion: flex-basis + grow + wrap), but ARIA classifies the visually identical box as
+  <code>navigation</code> <em>or</em> <code>complementary</code> purely by its content. So CSS-mechanism and
+  landmark-meaning are <strong>independent axes, not refinements of each other</strong> — a taxonomy keyed on
+  either one alone either mis-merges semantically-different boxes or cannot separate the many primitives
+  (stack/cluster/grid/center) that share <em>no</em> landmark.
+</p>
+
+<h2>What the survey implies for the decision</h2>
+<ul>
+  <li>
+    <strong>Distinctness criterion → composition-intent.</strong> Because the axes are orthogonal, key a
+    role's <em>identity</em> on the <strong>semantic arrangement the author wants</strong> (impl-agnostic),
+    with the CSS mechanism as the impl library's detail and the ARIA landmark as an optional author
+    annotation. This keeps role identity durable across CSS evolution (when <code>grid masonry</code> ships,
+    "masonry" stays a distinct intent rather than collapsing into "grid") — aligning with
+    <em>surface-contract-not-computation</em> / Impl-Is-Not-A-Standard. (The prep originally recommended a
+    CSS-mechanism hybrid; a skeptic pass refuted it on exactly this point and flipped the recommendation.)
+  </li>
+  <li>
+    <strong>Altitude → primitives are roles; page archetypes are a composition tier.</strong> App-shell /
+    list-detail / feed are arrangements <em>of</em> region roles, so they sit in a separate
+    composition-intent tier (FUI blocks + assembler presets), not the per-role component taxonomy. WE's
+    existing <code>layout</code> intent is an app-shell — it becomes the charter member of that tier, not a
+    retracted intent.
+  </li>
+  <li>
+    <strong>Open-numbered set + role-vs-variant-vs-annotation cut line.</strong> Ratify a core role set and a
+    minting contract (Intents-Open-Design applied to layout): a candidate is a <em>new role</em> iff it is a
+    distinct composition-intent; a <em>variant</em> if it differs only in look (MUI ImageList
+    standard/quilted/woven = one Grid + variants); an <em>annotation</em> if it differs only in content
+    meaning (navigation vs complementary sidebar).
+  </li>
+</ul>
+
+<h2>Recommended core role set</h2>
+<p>
+  Core: <strong>stack, cluster, grid, box/container, center, sidebar/split, frame</strong>. Candidates
+  (contract-tested before minting): <strong>reel, imposter/overlay, cover, switcher, masonry</strong>. Roles
+  are project-less intents; FUI ships one block impl per role; per-project styling rides the variant axis +
+  the plateau assembler — already codified, out of scope for this decision.
+</p>
+
+<h2>Sources</h2>
+<p>
+  every-layout.dev/layouts · w3.org/WAI/ARIA/apg/practices/landmark-regions · MDN ARIA landmark roles ·
+  tailwindcss.com/docs · mui.com/material-ui · radix-ui.com/themes · chakra-ui.com/docs ·
+  carbondesignsystem.com/elements/2x-grid · m3.material.io/foundations/adaptive-design/canonical-layouts ·
+  open-ui.org. Full grounding: <code>reports/2026-06-23-semantic-layout-role-taxonomy.md</code>.
+</p>
+{% endraw %}
