@@ -309,8 +309,18 @@ ownership seam*: adopt the wire format wholesale while still splitting which art
 machinery. #1408 (annotation = UX intent composing a separate durable-range-anchor contract; the
 platform itself split quote-anchoring into `#:~:text=`).
 
+**Converse guard — "technical strategy → Configurator" does *not* license a Configurator domain that
+re-homes axes the config already carries.** When the technical axes already ride a `we:`-layer registry +
+config-flavors (e.g. the credential-creation policy slots on `CustomCredentialProvider` + #483), minting a
+`plateau:` Configurator domain over them is redundant cross-layer duplication, not the rule's intent. The
+UX intent **references** those axes as constraints; it neither owns them nor justifies a second product-layer
+home for them. The free *authorial* UX choices the ceremony leaves open (when to prompt, skippability, tone,
+surface) are what the intent standardizes. #499 (credential-enrollment intent = the `create()`/enrollment
+UX layer; technical creation axes stay on the #483 config, referenced not re-homed; the plateau Configurator
+domain dissolved as redundant — re-judged on pure merit after a zero-consumer demand-gate "hold" was rejected).
+
 **Lineage:** #030 (intent-vs-trait channel split) · #063 (native vocabulary) · #129 (guard intent
-re-framed) · #634 · #1408 (durable-anchor contract split) · intents-open-design.
+re-framed) · #499 (enrollment intent; converse-guard) · #634 · #1408 (durable-anchor contract split) · intents-open-design.
 
 ### Intent-conformance is compliance of a block against the intent contract — not a runtime gate {#intent-conformance-is-block-compliance}
 

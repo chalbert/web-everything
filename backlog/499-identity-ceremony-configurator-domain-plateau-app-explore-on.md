@@ -1,25 +1,41 @@
 ---
 kind: decision
-status: open
+status: resolved
 blockedBy: []
 relatedReport: reports/2026-06-22-identity-ceremony-authoring.md
 dateOpened: "2026-06-13"
+dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: "intent:credential-enrollment"
+codifiedIn: "docs/agent/platform-decisions.md#intents-ux-only"
 preparedDate: "2026-06-23"
 tags: [webidentity, configurator, passkey, fedcm, authoring, research-gated]
 ---
 
 # Identity ceremony Configurator domain (plateau-app) — explore on real authoring need
 
-The prior-art survey this item was gated on is now **done** and recorded in the
-[`identity-ceremony-authoring`](/research/identity-ceremony-authoring/) `/research/` topic
-([report](../reports/2026-06-22-identity-ceremony-authoring.md), survey section dated 2026-06-23). It
-answers all four framing questions: the author-facing enrollment axes are a small *policy*-shaped set; the
-surface is a knob-matrix (not a flow); a `plateau:` Configurator domain would be a **clean instance** of the
-existing data-driven pattern (one seed + one provider entry, zero new mechanism); and — the demand gate —
-**no authoring consumer exists in the constellation today**. Given specifiable-now-but-no-pull, the
-recommended default is **hold the domain on a concrete-consumer trigger** — not build now (an unreachable
-domain duplicating axes the registry already carries), and not permanently dissolve (the survey makes the
-build cheap the moment a consumer appears). Confidence: **High**.
+**RESOLVED (2026-06-23).** The prior-art survey this item was gated on
+([report](../reports/2026-06-22-identity-ceremony-authoring.md), [`research topic`](/research/identity-ceremony-authoring/))
+answered the shape questions, but its original recommendation — *hold the `plateau:` Configurator domain on a
+concrete-consumer trigger* — was **rejected on review**: this is a private project with structurally **zero**
+external consumers, so a consumer-trigger hold means *never*, which is the retired demand-gate, not a merit
+call (judge-on-pure-merit; soft-deferred parks retired). Re-judged on
+**pure merit** ("useful to a dev anywhere?"), the decision splits cleanly along the **UX-intent ↔
+technical-config collaboration** the enrollment moment forces:
+
+1. **The technical-axes Configurator domain is dissolved as redundant.** The policy slots
+   (`userVerification`, `residentKey`, `authenticatorAttachment`, `attestation`, `timeout`) already ride the
+   `CustomCredentialProvider` registry + #483 config-flavors. A `plateau:` domain re-homing them is genuine
+   duplication of a `we:`-layer concept into a product surface — a cross-layer coupling against
+   bias-toward-separation. The collaboration lives in **the intent referencing the config as a constraint**,
+   not a product-layer veneer.
+2. **The free UX layer is authored now as a standard intent** — the merit-go work. Enrollment (`create()`)
+   has genuine authorial choices the ceremony does *not* determine, uncovered until now: when to prompt
+   (`moment`), whether the user may defer (`skippability`), the motivational `tone`, and the `surface`. This
+   shipped as the **[`credential-enrollment`](/intents/credential-enrollment/) intent**
+   ([we:src/_data/intents/credential-enrollment.json](../src/_data/intents/credential-enrollment.json)) — the
+   `create()` counterpart to the existing [`web-identity`](/intents/web-identity/) (`get()` / sign-in) intent,
+   composing Loader + Feedback + web-identity. Confidence: **High**.
 
 The author-facing axes are the policy slots of `PublicKeyCredentialCreationOptions` — `userVerification`,
 `residentKey`/discoverable, `authenticatorAttachment`, `attestation` (enterprise tier only) — plus FedCM's
@@ -38,9 +54,13 @@ tune anything.
 
 ### Recommended path at a glance
 
-| Fork | Recommended default | Main alternative | Confidence |
+| Fork | Ruling (2026-06-23) | Why | Confidence |
 |---|---|---|---|
-| **1 · identity Configurator domain** | **(b) hold** — keep the option alive, un-park on the first plug-free passkey/FedCM authoring consumer | (a) add the domain now | **High** |
+| **1 · identity Configurator domain** | **dissolve the technical-axes domain; author the free UX layer as the `credential-enrollment` intent** | demand-gate "hold" rejected (zero-consumer private project ⇒ never); merit splits tech-axes (already on the registry) from free UX choice (uncovered ⇒ author it) | **High** |
+
+> The original prepared analysis below (Fork 1 options a/b/c, framed around the *consumer-trigger hold*) is
+> kept as the decision trail. Its (b) "hold" recommendation was **superseded** by the ruling above: the hold
+> was a demand-gate, not a merit disposition, so the call was re-made on pure merit.
 
 ## Fork 1 — add the identity-ceremony Configurator domain now, hold on a consumer trigger, or dissolve
 
