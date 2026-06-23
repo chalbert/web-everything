@@ -1,0 +1,23 @@
+{
+  "id": "live-page-we-conformance-detection",
+  "title": "Live-page WE-conformance detection — how the dev-browser extension decides a running app is WE-conformant (and lights up)",
+  "status": "open",
+  "summary": "Prep research for decision #1673 (the conformance-lit funnel MVP under #1656): how does a dev-browser extension decide a running page is WE-conformant, so its tooling lights up? Three mutually-exclusive mechanisms — (a) DECLARED: read a CapabilityManifest the app ships (capability-manifest/provider.ts:139); (b) PROBED: inspect the live runtime for WE signals with no app cooperation (declarativeRegistry.ts: `script[type=registry]`, the SCOPED_REGISTRY_KEY symbol, an active scoped CustomElementRegistry); (c) VERIFIED: run conformance vectors/the engine against the live page (conformance-vectors + wrapper-conformance/runner.ts:62, which MUTATES the DOM). SURVEY of how shipping framework devtools detect their framework on a live page: React injects __REACT_DEVTOOLS_GLOBAL_HOOK__ at init and tags DOM nodes with __reactFiber$ (probe); Vue exposes __VUE__/__VUE_DEVTOOLS_GLOBAL_HOOK__ and el.__vue_app__ (probe); Angular renders ng-version on the root element even under SSR (a DECLARED-ish DOM attribute that is also a probe target) plus the ng global; Svelte compiles to vanilla JS and leaves no runtime global — only svelte- CSS class hints — and is the hardest to detect, the cautionary case for probe-only. Wappalyzer/Lighthouse stack-packs/BuiltWith generalize this: in-page JS with full window+DOM access reading globals, DOM properties, attributes, headers, and CSS patterns against ~3000 signatures; this is widest-reach zero-cooperation detection but is documented as unreliable (false positives, minification/version drift). The DECLARED analog is the opt-in manifest family (PWA web-app-manifest, security.txt, .well-known) — trustable and self-describing but needs app cooperation, can lie, and goes stale. RECURRING TRADE SPACE: declared-manifest (opt-in, trustable, self-describing, but needs cooperation / can lie / goes stale) vs runtime-probe (zero cooperation, widest reach, but brittle to minification/version drift and false positives) vs verification (authoritative, but expensive/slow and mutates the live page). MAPPING to #1673: every shipping framework devtool detects via PROBE first — none gates first-impression on a declared manifest, none runs a verification suite to merely light up — which argues a probe-first MVP for a FREE funnel's widest-reach first impression (per #1590/#1656), with DECLARED as an authoritative opt-in upgrade and VERIFIED demoted to an on-demand inspector action (it mutates the page, so it can never be the passive light-up gate). NOTE the in-repo precedent: #141 Fork 1 already ruled the rich vision 'gate on a capability manifest, degrade gracefully' (per-feature lighting); #1673 is the narrower question of the FIRST-impression detection for the MVP, where no app ships a manifest yet (capability-manifest/check.ts:107 IMPLEMENTATION_MANIFESTS is empty) so a declared-only gate would light up on zero pages. Full grounding in reports/2026-06-23-live-page-we-conformance-detection.md.",
+  "dateOpened": "2026-06-23",
+  "lastReviewed": "2026-06-23",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "dev-browser",
+    "conformance",
+    "chrome-extension",
+    "framework-detection",
+    "capability-manifest",
+    "webregistries",
+    "webexpressions",
+    "conformance-vectors",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": ["webregistries", "webexpressions"],
+  "relatedProject": "webvalidation"
+}

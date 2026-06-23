@@ -1,0 +1,200 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    The <a href="/backlog/1656-conformance-lit-extension-funnel-mvp-chrome-devtools-panel-t/">conformance-lit
+    funnel MVP (#1656)</a> is the first fundable dev-surface build per <a href="/backlog/1590-dev-surface-monetization-bet-extensions-as-funnel-vs-dev-bro/">#1590</a>:
+    a Chrome / DevTools-panel extension whose tooling <strong>lights up only on a WE-conformant app</strong>.
+    The buried fork at its heart (carved out as <a href="/backlog/1673-conformance-lit-mvp-how-does-the-extension-detect-we-conform/">#1673</a>):
+    <strong>how does the extension decide a running page is WE-conformant?</strong> No live-page probe exists
+    today. Three mutually-exclusive mechanisms are on the table:
+</p>
+<ul>
+    <li><strong>(a) DECLARED</strong> — the app ships a <code>CapabilityManifest</code> the extension reads
+        (the <code>we:capability-manifest/</code> schema).</li>
+    <li><strong>(b) PROBED</strong> — the extension inspects the live runtime for WE signals (the scoped
+        custom-element registry, the webexpressions binding layer, context providers), needing no app
+        cooperation.</li>
+    <li><strong>(c) VERIFIED</strong> — run conformance vectors / the engine against the live page.</li>
+</ul>
+<p>
+    This survey grounds the call in how <em>shipping</em> framework devtools detect their framework on a live
+    page, the recurring trade space that pattern reveals, and the WE machinery already in the tree — so the
+    rule reuses precedent vocabulary rather than coining its own.
+</p>
+
+<h2>How shipping framework devtools detect a live page</h2>
+<p>
+    Every widely-used framework devtool faces exactly this problem — "is my framework on this page, and how do
+    I light up?" — and they have converged on a dominant answer: <strong>probe a runtime signal the framework
+    leaves on the page</strong>, never gate on a manifest the app must opt into, never run a verification suite
+    merely to decide whether to activate.
+</p>
+
+<table>
+    <thead>
+        <tr><th>Tool / detector</th><th>Mechanism</th><th>Signal it reads</th><th>Cooperation needed?</th><th>Failure mode</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>React DevTools</td>
+            <td>Probe — global hook + DOM-node tag</td>
+            <td><code>window.__REACT_DEVTOOLS_GLOBAL_HOOK__</code> (React injects it at renderer init); DOM
+                nodes carry <code>__reactFiber$…</code> (React 18+) / <code>__reactInternalInstance$…</code></td>
+            <td>None — React registers the hook for the devtool to find</td>
+            <td>Version drift across fiber-property names; minified internals</td>
+        </tr>
+        <tr>
+            <td>Vue DevTools</td>
+            <td>Probe — global + per-element app handle</td>
+            <td><code>window.__VUE__</code> / <code>window.__VUE_DEVTOOLS_GLOBAL_HOOK__</code>;
+                <code>el.__vue_app__</code> on mounted roots</td>
+            <td>None</td>
+            <td>Vue 2 vs 3 global shape divergence</td>
+        </tr>
+        <tr>
+            <td>Angular devtools</td>
+            <td>Probe — root attribute + global</td>
+            <td><code>ng-version</code> attribute on the root element (rendered even under SSR — the most
+                robust fingerprint); the <code>ng</code> global</td>
+            <td>None — but the attribute is a declared-by-the-framework marker, the probe/declared hybrid</td>
+            <td>Production builds can strip <code>ng</code>; the attribute survives</td>
+        </tr>
+        <tr>
+            <td>Svelte devtools</td>
+            <td>Probe — best-effort, weakest signal</td>
+            <td>Svelte compiles to vanilla JS; <strong>no runtime global</strong> — only <code>svelte-</code>
+                prefixed CSS classes hint at it</td>
+            <td>None</td>
+            <td><strong>Cautionary case:</strong> a compile-away framework leaves almost no probe surface — the
+                hardest major framework to detect programmatically</td>
+        </tr>
+        <tr>
+            <td>Wappalyzer / Lighthouse stack-packs / BuiltWith</td>
+            <td>Probe — generalized signature matching</td>
+            <td>In-page JS with full <code>window</code>+DOM access matching ~3000 signatures: globals
+                (<code>window.__NUXT__</code>), DOM properties/attributes, CSS class patterns, headers, meta
+                tags</td>
+            <td>None (browser-execution mode)</td>
+            <td>Documented as <strong>unreliable</strong>: false positives, version drift, minification</td>
+        </tr>
+        <tr>
+            <td>PWA web-app-manifest / security.txt / .well-known</td>
+            <td><strong>Declared</strong> — opt-in self-description</td>
+            <td>A static JSON/text artifact the app publishes (the DECLARED analog)</td>
+            <td><strong>Required</strong> — the app must ship it</td>
+            <td>Can lie / go stale; needs app cooperation; ~93% fetched over HTTP (tamperable)</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>The recurring trade space</h2>
+<p>
+    Across both the framework-devtool precedent and the manifest family, three postures recur — and they are
+    the same three branches #1673 names:
+</p>
+<ul>
+    <li><strong>Declared-manifest (a)</strong> — opt-in, trustable, self-describing, version-stamped. But it
+        needs app cooperation, <em>can lie</em>, and <em>goes stale</em> against the running code. No shipping
+        framework devtool gates its first-impression on one.</li>
+    <li><strong>Runtime-probe (b)</strong> — zero cooperation, widest reach, the de-facto standard for every
+        framework devtool. But brittle to minification / version drift and prone to false positives (the
+        Wappalyzer-unreliability and Svelte-invisibility lessons).</li>
+    <li><strong>Verification (c)</strong> — authoritative (it actually exercises behaviour, not just presence).
+        But expensive / slow, and — decisively for a passive light-up gate — it <em>mutates the live page</em>
+        (renders elements, dispatches events). No devtool runs a test suite merely to decide whether to
+        activate.</li>
+</ul>
+
+<h2>The WE machinery already in the tree</h2>
+<p>
+    Each branch maps onto concrete WE code, which fixes how much each costs and what each can actually read on
+    a live page <em>today</em>:
+</p>
+<table>
+    <thead>
+        <tr><th>Branch</th><th>WE signal / artifact</th><th>Queryable on a live page today?</th><th>Mutates the page?</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>(a) DECLARED</strong></td>
+            <td><code>we:capability-manifest/provider.ts:139</code> (the <code>CapabilityManifest</code>
+                interface: <code>specVersion</code> / <code>conformanceLevel</code> L0–L2 / <code>features</code>);
+                shipped as a static <code>export const manifest</code> (<code>provider.ts:129</code>,
+                <code>MANIFEST_EXPORT_NAME</code>)</td>
+            <td><strong>No.</strong> It is a build-time export convention; no app ships a runtime-queryable
+                manifest yet (<code>we:capability-manifest/check.ts:107</code>, <code>IMPLEMENTATION_MANIFESTS</code>
+                is empty)</td>
+            <td>No</td>
+        </tr>
+        <tr>
+            <td><strong>(b) PROBED</strong></td>
+            <td>The scoped custom-element registry: <code>we:plugs/webregistries/declarativeRegistry.ts:39</code>
+                (<code>REGISTRY_SCRIPT_TYPE = 'registry'</code> → <code>document.querySelectorAll('script[type="registry"]')</code>),
+                <code>:279</code> (<code>SCOPED_REGISTRY_KEY</code> symbol on hosts), <code>:292</code>
+                (<code>getActiveRegistryResult()</code>). The webexpressions binding layer
+                (<code>we:plugs/webexpressions/index.ts:75</code>, <code>applyPatches()</code>) and its
+                <code>we:plugs/webexpressions/CustomTextNodeRegistry.ts:46</code> — but these are
+                injector-internal, <strong>no public global marker</strong></td>
+            <td><strong>Partly.</strong> The declarative-registry markers are DOM/symbol-queryable; the
+                webexpressions binding has no public probe surface, only injector-chain access</td>
+            <td>No</td>
+        </tr>
+        <tr>
+            <td><strong>(c) VERIFIED</strong></td>
+            <td>The conformance vector corpus (<code>we:conformance-vectors/schema.ts:53</code>,
+                <code>ConformanceVector</code>) + a runner (<code>we:wrapper-conformance/runner.ts:62</code>,
+                <code>runVector()</code>). WE holds the corpus + schema only; the runtime driver lives in
+                FUI/plateau (per #899)</td>
+            <td>Yes (a suite can run)</td>
+            <td><strong>Yes.</strong> The runner creates DOM containers, renders the subject, and dispatches
+                events (<code>we:wrapper-conformance/runner.ts:64</code>) — it cannot be the passive
+                light-up gate</td>
+        </tr>
+    </tbody>
+</table>
+<p>
+    A decisive in-tree fact: a DECLARED-only gate would today light up on <strong>zero</strong> pages, because
+    no implementation ships a runtime manifest (<code>we:capability-manifest/check.ts:107</code>). And VERIFIED
+    mutates the page, so it disqualifies itself as the always-on activation gate. That leaves PROBE as the only
+    branch that can be the <em>default</em> first-impression mechanism for the MVP — exactly the conclusion the
+    framework-devtool precedent reaches independently.
+</p>
+
+<h2>The three-branch mapping and recommendation</h2>
+<p>
+    The framework-devtool precedent, the trade space, and the in-tree facts all point the same way for a
+    <strong>free funnel's widest-reach first impression</strong> (the #1590/#1656 frame): <strong>probe-first,
+    tiered to a declared upgrade and a verify-on-demand action</strong>.
+</p>
+<ul>
+    <li><strong>Default — PROBE to light up.</strong> The extension reads the WE runtime signals that exist
+        with no app cooperation (scoped-registry markers; injector-chain providers; webexpressions presence).
+        Widest reach, the universal framework-devtool pattern, non-mutating, and the only branch that lights up
+        on real pages today.</li>
+    <li><strong>Upgrade — DECLARED as the authoritative opt-in.</strong> When an app <em>does</em> ship a
+        runtime <code>CapabilityManifest</code>, the extension prefers it: it carries the precise
+        <code>conformanceLevel</code> and feature set the probe can only infer, and it is the trustable
+        self-description the rich-vision per-feature lighting (#141 Fork 1) already assumes. It is an
+        <em>enhancement layer over</em> the probe, not a replacement gate.</li>
+    <li><strong>On-demand — VERIFY as an inspector action, never the passive gate.</strong> Running the
+        conformance engine against the live page is authoritative but mutating and slow; it belongs behind an
+        explicit "run conformance" button in the panel, not on the always-on light-up path.</li>
+</ul>
+<p>
+    This is the canonical <strong>tiered detection</strong> shape: probe is the floor (zero-cooperation
+    reach), declared is the ceiling (trustable precision when offered), verify is the on-demand deep check.
+    The sub-fork prep surfaces — "probe-to-light + verify-on-demand tiering" — is therefore not a rival to the
+    main fork but the recommended <em>composition</em> of all three, with probe as the default activation gate.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+    <li><a href="/research/dev-browser-vision/">dev-browser vision</a> — #141 Fork 1 ruled the rich vision's
+        per-feature gate ("gate on a capability manifest, degrade gracefully"); #1673 is the narrower
+        first-impression detection for the MVP, where no manifest is shipped yet.</li>
+    <li><a href="/research/behavioral-conformance-vectors-kit/">behavioral conformance vectors kit</a> — the
+        VERIFIED branch's corpus/runner split (WE owns the contract, FUI/plateau own the runner).</li>
+    <li><a href="/projects/webvalidation/">webvalidation</a> — owner of the capability-manifest + conformance
+        machinery.</li>
+</ul>
+{% endraw %}
