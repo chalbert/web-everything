@@ -1,41 +1,37 @@
 ---
 kind: decision
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-18"
+dateResolved: "2026-06-22"
 parent: "746"
 relatedProject: webadapters
-tags: [maas, polyglot, protocol, deferred-review]
+crossRef: { url: /backlog/1258-framework-churn-watch-keep-we-s-forward-adapters-current-as-/, label: "Watch folded into the Framework-churn watch (#1258)" }
+tags: [maas, polyglot, protocol]
 ---
 
 # MaaS wrapper-serve protocol — deferred experience review (collect cases, revisit framework axis)
 
-Deferred review (much later, NOT now): the MaaS wrapper-serve contract was ratified provisionally under #974 (the [constellation-placement](docs/agent/platform-decisions.md#constellation-placement) rule; A1 —
-framework rides the catalog-gated `form` param, no new neutral contract surface). That ruling was deliberately
-under-committed: we start now and collect real experience before freezing the shape. This item is the standing home for
-that experience — log concrete cases, friction, and lossiness encountered while building #912/#753/#507 against
-`servePathIR`/`maas-versioning`, plus any signal that a first-class neutral `framework` param (A2) is warranted. Revisit
-only once enough cases have accumulated; held open (unratified, decision lane) until then. Promotion to a neutral param would be a deliberate versioned
-`servePathIR` bump.
+**Resolved 2026-06-22 — folded into [#1258 framework-churn watch](/backlog/1258-framework-churn-watch-keep-we-s-forward-adapters-current-as-/).**
 
-## How to use this item (standing instruction)
+This item was mis-shaped: a `kind: decision` written as a *standing experience-collection home* (a Cases log + a
+"how to use this item" instruction) wrapping a hidden decision — the #974 A1-vs-A2 fork — that never took its proper
+form. The strict [Program Test](/backlog/1249-define-program-strictly-the-four-part-bar-for-a-perpetual-on/) makes the
+conflation clear: the perpetual part (frameworks/wrappers keep needing new options) is a **currency front**, already
+owned by #1258 feeding FUI's `form` catalog (#977). What was left here was a single bounded ruling, not a standing
+watch — so a perpetual home was the wrong shape.
 
-**While building anything against the MaaS serve path** (#912 live-test sandbox, #753 consume-mode tabs, #507
-generation-adapter, or any new MaaS origin), **append a dated bullet to the Cases log below** whenever you hit one of:
+Disposition:
 
-- a request/response shape the existing `servePathIR` grammar (`form`/`target`/`strategy`, pin ladder, header set,
-  400/404/500) could **not** express cleanly, or expressed awkwardly;
-- a place the catalog-gated `form` value-set (`react-wrapper`/`vue-wrapper`/…) felt strained — e.g. wanting to vary
-  framework and wrapper-strategy independently (the `form × framework` matrix the A1 ruling pushed into FUI's catalog);
-- a forward-adapter (#507) routing case where an opaque `form` catalog value was insufficient and a **named neutral
-  `framework` param** would have helped (this is the specific A2-revival signal to watch for);
-- lossiness / diagnostics worth remembering, or a header/cache/identity rule that needed bending.
+- **The currency watch → #1258.** Its Front-B scope now explicitly owns the MaaS serve-contract `form` catalog: file a
+  `form`-catalog item when a framework gains traction (same motion as #1271), and **trip an A2-revival decision** when a
+  case shows the catalog can't absorb a variation cleanly.
+- **The decision itself → minted fresh on evidence, not held dormant.** The #974 **A1** ruling
+  ([constellation-placement](docs/agent/platform-decisions.md#constellation-placement)) stands as the current answer
+  (framework rides the catalog-gated `form` param; no new neutral contract surface). A move to a first-class neutral
+  `framework` param (A2, a versioned `servePathIR` bump) is re-opened as a new `kind: decision` *if and when* #1258's
+  watch surfaces a real form-catalog strain — per the discovery-output-is-cards discipline, the card is minted when the
+  evidence exists, not pre-allocated as a placeholder.
+- **Lineage:** provisional ruling #974 · FUI catalog #977 · serve-path preset idea #979 · watch home #1258.
 
-Keep each entry one line: `YYYY-MM-DD — #NNN — what happened / what the contract couldn't do`. **Do not redesign here** —
-just collect. The review fires (unpark → run the #974 fork again with evidence) once the log shows a real pattern, not
-on a schedule. Cross-refs: provisional ruling lives in [#974], the FUI catalog registration in [#977], the
-serve-path **preset** idea (named param bundle) in [#979].
-
-## Cases log
-
-_(empty — append dated bullets as experience accrues)_
+No cases had accrued (the log was empty), so nothing is lost in the fold.
