@@ -2,6 +2,7 @@
 kind: epic
 status: open
 dateOpened: "2026-06-23"
+relatedReport: reports/2026-06-23-1704-split-analysis.md
 tags: []
 ---
 
