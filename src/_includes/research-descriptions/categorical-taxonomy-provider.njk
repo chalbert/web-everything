@@ -1,0 +1,58 @@
+<h3>The Question</h3>
+<p>
+    Decision <a href="/backlog/1670-categorical-taxonomy-provider-one-registry-of-named-closed-c/">#1670</a>
+    emerged from the <a href="/backlog/1621-badge-mode-c-migration-model-how-do-the-bespoke-we-docs-badg/">#1621</a>
+    ratification review. An app has several <strong>categorical vocabularies</strong> &mdash; <code>kind</code>
+    (story/epic/decision), <code>tier</code> (A/B/C), <code>size</code> (sm/lg/xl), <code>status</code>
+    (open/active/resolved). Each is a <em>closed named set</em>. The <em>same</em> vocabulary is consumed across
+    many surfaces &mdash; a status badge, a tag, the numbered <code>childCircle</code>, the
+    <code>blockerChip</code> link-pill, a filter chip, a row border &mdash; each of which today re-hardcodes the
+    palette (<code>we:src/_includes/backlog-badges.njk</code>, ~10 macros). How is a category defined
+    <strong>once</strong> and consumed <strong>identically</strong> everywhere?
+</p>
+
+<h3>Recommendation (prepared for #1670)</h3>
+<p>
+    <strong>Supported by default (survey-confirmed, not forks):</strong> closed named sets, never raw hex; colour
+    resolves through <em>design tokens</em> (the WE <code>design-tokens</code> protocol, DTCG, project-extended);
+    the provider owns the <code>(set,&nbsp;value) &rarr; (token, icon, shape)</code> map &mdash; which the survey
+    found is the <em>documented whitespace</em> (every token standard leaves the data-value&rarr;token-name map to
+    app code; Chakra hand-writes <code>statusMap</code>). <strong>Fork&nbsp;1 &mdash; realize the provider as a
+    declarative token-resolving layer, not a runtime DI service.</strong> No surveyed system ships a runtime JS
+    registry mapping a domain value&rarr;presentation; the shared layer is always declarative tokens (NAME&rarr;value).
+    The provider compiles each <code>(set,&nbsp;value)</code> to design tokens + a stable class; surfaces resolve
+    declaratively, with a thin <em>enumerable manifest</em> only for the genuinely-runtime cases (build filter chips,
+    legends, resolve an icon) &mdash; runtime-DI exactly where a surface consults it.
+    <strong>Fork&nbsp;2 &mdash; status is lifecycle-owned-meaning + provider-rendered-presentation (a segregated,
+    rule-bearing set), not a flat peer of kind/tier.</strong> The Web Lifecycle protocol owns which status values
+    exist and what they mean; the taxonomy provider holds/references only their presentation row, carrying status
+    rules (reserved colours, must pair label/icon). Precedent: Adobe Spectrum (one registry, segregated set) +
+    Primer/Atlassian/M3/Ant (meaning lives with the lifecycle).
+</p>
+
+<h3>Prior art (the survey that reshaped it)</h3>
+<ul>
+    <li><strong>Closed pick-list, token-resolved</strong> is universal (Primer <code>Label</code>, Atlassian
+        <code>Tag</code>, Polaris <code>Badge</code>, Radix <code>accentColor</code>, Spectrum, Chakra
+        <code>colorPalette</code>). Raw hex is a quarantined escape hatch: Primer's separate
+        <code>IssueLabelToken fillColor</code> for user-created labels; Ant <code>Tag color</code> (explicitly
+        un-vetted for WCAG).</li>
+    <li><strong>One shared layer, many surfaces</strong> &mdash; via a root provider
+        (<code>ConfigProvider</code>/<code>ThemeProvider</code>/<code>Theme</code>) + a <em>named</em> prop, never a
+        runtime <code>(set,value)</code> registry. The shared layer is <em>NAME&rarr;token</em>, never
+        <em>data-value&rarr;token</em>.</li>
+    <li><strong>Tokens, declaratively</strong> &mdash; never a JS map at render. DTCG / Style Dictionary / Tokens
+        Studio are all NAME&rarr;value stores; the data-value&rarr;token step is app-owned everywhere (DTCG
+        <code>$extensions</code> is the only spec slot).</li>
+    <li><strong>Status split from decorative</strong> &mdash; meaning owned by a lifecycle/role
+        (Primer <code>StateLabel</code>, Atlassian <code>Lozenge</code>, M3 reserved <code>error</code>, Ant
+        <code>Badge status</code>); or one registry with a segregated rule-bearing set (Adobe
+        <code>StatusLight</code>).</li>
+    <li><strong>Cautions:</strong> reserve status colours; colour alone never carries status (pair label/icon);
+        contrast/dark-mode guarantees only on token-engineered scales; cap decorative sets (~8).</li>
+</ul>
+
+<p>
+    Full grounding &mdash; per-system findings, sources, and the delta &mdash; in
+    <code>reports/2026-06-23-categorical-taxonomy-provider.md</code>.
+</p>

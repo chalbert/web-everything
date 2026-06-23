@@ -1,0 +1,24 @@
+{
+  "id": "categorical-taxonomy-provider",
+  "title": "Categorical taxonomy provider — how is an app's category vocabulary (kind/tier/size/status) defined once and consumed cross-surface by tag/badge/circle/chip?",
+  "status": "open",
+  "summary": "Prep research for decision #1670 (reshapes #1669/#1621/#1598/#1208 into consumers). An app has multiple closed categorical vocabularies (kind, tier, size, status) reused across many surfaces — badge, tag, the numbered childCircle, the blockerChip link-pill, the filter row, borders — each of which today re-hardcodes the palette in we:src/_includes/backlog-badges.njk (~10 macros). The stance: ONE taxonomy provider holding N named closed sets, each value -> presentation metadata (color via design token, icon, shape), consumed by any component via (set, value). Prior-art survey (Primer, Atlassian, Polaris, SLDS, Spectrum, Radix, Material 3, Ant, Chakra + W3C DTCG / Style Dictionary / Tokens Studio) reshaped it. Q1: app category colors are overwhelmingly a CLOSED named pick-list resolved through design tokens, never raw hex; raw-color is a quarantined escape hatch (Primer's separate IssueLabelToken fillColor for user labels; Ant Tag color = un-vetted). Q2: the dominant pattern is a single shared token/role layer every surface reads via a NAMED prop, propagated from one root provider (ConfigProvider/ThemeProvider/Theme) — but NO system ships a runtime registry mapping a domain (set,value) -> presentation; the shared layer is always NAME->token, never data-value->token. Q3: cross-surface consistency is achieved by declarative design tokens (CSS custom properties), never a JS registry queried at render; and crucially the data-value -> token-name map is UNMODELED in DTCG/Style Dictionary/Tokens Studio — left to app code (Chakra hand-writes statusMap; DTCG $extensions is the only spec slot). Q4: most systems split status (lifecycle/meaning owned elsewhere — Primer StateLabel, Atlassian Lozenge, M3 reserved error role, Ant Badge-status) from decorative tags; Adobe Spectrum is the one-registry-with-segregation precedent (StatusLight semantic vs non-semantic sets). Q5 cautions: never raw hex, don't widen a closed semantic enum with product taxonomy, reserve status colors, color-alone never carries status (pair label/icon), contrast/dark-mode guarantees only on token-engineered scales, cap decorative sets (~8). DELTA: the single-provider model is SUPPORTED in spirit but RESHAPED into a declarative token-resolving layer (not a runtime DI service) -> Fork 1; the provider-owns-vocabulary+metadata / tokens-own-color split is STRONGLY SUPPORTED as the documented whitespace (value->token mapping is app-owned everywhere) -> Supported by default; status home is NOT binary (lifecycle owns meaning; provider holds presentation as a segregated rule-bearing set per Spectrum) -> Fork 2. Full grounding in reports/2026-06-23-categorical-taxonomy-provider.md.",
+  "dateOpened": "2026-06-23",
+  "lastReviewed": "2026-06-23",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "design-tokens",
+    "taxonomy",
+    "provider",
+    "tag-intent",
+    "status-indicator",
+    "cross-surface",
+    "design-system-benchmark",
+    "config-extends-default",
+    "minimize-lock-in",
+    "decision-prep"
+  ],
+  "relatedBlocks": ["badge"],
+  "relatedPlugs": [],
+  "relatedProject": "webblocks"
+}
