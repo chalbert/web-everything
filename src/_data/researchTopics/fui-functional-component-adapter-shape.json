@@ -1,0 +1,22 @@
+{
+  "id": "fui-functional-component-adapter-shape",
+  "title": "FUI functional-component adapter shape — catalog identity, #700 emit placement, v1 contract",
+  "status": "open",
+  "summary": "Decision-prep for #1619 (blocks #1602 → #313; parent epic #081). Pre-flight read it as 'register a FORMS entry' but landing it touches a ratified decision (#974/#977) and a codified rule (#954). Real-tree finding: the FUI functional adapter is NOT greenfield — WE's reference serve() ALREADY emits the functional authoring source deterministically. we:blocks/renderers/module-service/moduleService.ts:33 declares ServeForm '…|functional' and :185 dispatches to generateFunctionalSource (we:blocks/renderers/functional/functionalComponent.ts:41), which from a <component> definition emits an export function <Name>() returning JSX + a class <Name>Element extends HTMLElement mount wrapper + a defineElement self-registration, importing the bare specifier '@frontierui/jsx-runtime'. That runtime already ships in FUI (fui:packages/jsx-runtime/src/index.ts re-exports jsx/createElement/Fragment + defineElement; auto-define.ts is the published copy of WE's canonical defineElement). The functional source is committed to we:src/_data/authorModeSource.json (9 functional cases) by the #954 data-emit channel. Classification: TWO of the three 'decide' points COLLAPSE to forced invariants, leaving ONE genuine fork (catalog identity) + one micro-fork (served-JSX transpile owner). Forced invariant 1 — #700 emit placement: branch B (FUI re-emits) is BROKEN (reverses #954-Fork1=A data-emit, reverses #956=A, violates #700/#707 'FUI never imports serve()', diverges from FORMS), so emit placement is a one-line RATIFY of the #954 codified rule (FUI consumes WE's data-emit; #1602 is 'wire a WE artifact', not 'build a FUI emitter'). Forced invariant 2 — v1 input/output: input = a <component> definition (parseDefinition), output = the JSX defineElement module generateFunctionalSource already emits; RATIFY the existing contract (v1 = render-only; callbacks/effects/change-detection are later phases + their own deep-research subject, candidate customChangeDetectorRegistry). Fork 1 (catalog identity) — recommended (a) a NEW first-class authoring form id (keep WE's authoring 'functional' ServeForm distinct from FUI's consume-mode WRAPPER_FORMS catalog); the #974/#977 functional→react-wrapper retirement stays UNTOUCHED because it governs the consume-mode wrapper catalog (fui:tools/gen-wrapper/wrapperFormCatalog.mjs), a different artifact kind in a different id-space. Prior art is unanimous (Stencil functional-vs-custom-element-output, Mitosis authoring-source-vs-target, Svelte/Lit/Vue defineCustomElement): one stable id per authoring form, never aliased onto a consume wrapper — so (b) un-retire (re-open #977) is rejected (no prior-art support, re-introduces the ambiguity #977 removed), (c) separate authoring catalog is the same end-state as (a) [med-high]. Fork 2 (served-JSX transpile owner) — the served functional form is JSX/loader:'jsx' so MUST be transpiled (serveCompiled, we:…/moduleService.ts:211 via the injected compilerRegistry); recommended (a) FUI injects a compiler at the served endpoint via that existing runtime-DI seam (the FUI MaaS endpoint already transpiles in the genWrapper path), rejecting (b) commit-pre-transpiled-data (transpileTarget is a request param, can't be frozen) [med-high]. Net: 2 surviving forks, both med-high, two decide-points collapsed to ratify. Full grounding in we:reports/2026-06-22-fui-functional-component-adapter-shape.md.",
+  "dateOpened": "2026-06-22",
+  "lastReviewed": "2026-06-22",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "maas",
+    "polyglot",
+    "functional-component",
+    "adapter",
+    "jsx-runtime",
+    "catalog-identity",
+    "constellation-placement",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webadapters"
+}

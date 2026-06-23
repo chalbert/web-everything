@@ -1,0 +1,75 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  <a href="/backlog/1602-land-the-fui-functional-component-adapter/">#1602</a> ("land the FUI
+  functional-component adapter", which then unblocks
+  <a href="/backlog/313-module-as-a-service-add-the-frontier-ui-functional-component/">#313</a>) reads as a
+  mechanical "register a <code>FORMS</code> entry," but pre-flight surfaced that landing it touches a
+  <strong>ratified</strong> decision (<a href="/backlog/974-define-the-maas-wrapper-serve-protocol-cem-framework-wrapper/">#974</a>/<a href="/backlog/977-fui-register-react-wrapper-vue-wrapper-form-catalog-values-r/">#977</a>)
+  and a <strong>codified</strong> constellation rule
+  (<a href="/backlog/954-decide-how-polyglot-author-mode-source-reaches-the-fui-workb/">#954</a>).
+  <a href="/backlog/1619-decide-the-fui-functional-component-adapter-shape-catalog-id/">#1619</a> was filed
+  to rule three points: (1) catalog identity vs the <code>functional</code>→<code>react-wrapper</code>
+  retirement, (2) the #700 emit placement (FUI re-emit vs consume WE's data-emit), and (3) the v1
+  input/output contract.
+</p>
+
+<h2>The load-bearing finding — the adapter is not greenfield</h2>
+<p>
+  WE's reference <code>serve()</code> <strong>already emits</strong> the functional authoring source
+  deterministically. <code>blocks/renderers/module-service/moduleService.ts:33</code> declares the
+  <code>ServeForm</code> union (<code>…|functional</code>) and <code>:185</code> dispatches to
+  <code>generateFunctionalSource</code> (<code>blocks/renderers/functional/functionalComponent.ts:41</code>),
+  which from a <code>&lt;component&gt;</code> definition emits an <code>export function &lt;Name&gt;()</code>
+  returning the template as JSX, a <code>class &lt;Name&gt;Element extends HTMLElement</code> mount wrapper,
+  and a <code>defineElement(...)</code> self-registration, importing the bare specifier
+  <code>'@frontierui/jsx-runtime'</code>. That runtime already ships in FUI
+  (<code>packages/jsx-runtime/src/index.ts</code>), and the functional source is committed (9 cases) to
+  <code>src/_data/authorModeSource.json</code> by the #954 data-emit channel. So this prep finds that
+  <strong>two of the three "decide" points collapse to forced invariants</strong>, leaving one genuine fork
+  plus one micro-fork.
+</p>
+
+<h2>Recommendation (to ratify in <a href="/backlog/1619-decide-the-fui-functional-component-adapter-shape-catalog-id/">#1619</a>)</h2>
+<ol>
+  <li>
+    <strong>Fork 1 — catalog identity = (a) a new first-class authoring form id, kept distinct from the
+    consume-mode wrapper catalog</strong> [med-high]. Keep WE's authoring <code>functional</code>
+    <code>ServeForm</code> in the authoring id-space (the <code>FORMS</code> set + author-mode data); the
+    #974/#977 <code>functional</code>→<code>react-wrapper</code> retirement stays untouched because it
+    governs FUI's <em>consume-mode</em> wrapper catalog
+    (<code>tools/gen-wrapper/wrapperFormCatalog.mjs</code>) — a different artifact kind in a different
+    id-space. Prior art (Stencil, Mitosis, Svelte/Lit/Vue) is unanimous: one stable id per authoring form,
+    never aliased onto a consume wrapper. Rejected: (b) un-retire <code>functional</code> (re-opens #977,
+    no prior-art support). Support-both: (c) "separate authoring catalog" is the same end-state as (a).
+  </li>
+  <li>
+    <strong>Fork 2 — served-JSX transpile owner = (a) FUI injects a compiler at the served endpoint via the
+    existing <code>compilerRegistry</code> seam</strong> [med-high]. The served functional form is JSX
+    (<code>loader:'jsx'</code>) so it MUST be transpiled to be import-able (<code>serveCompiled</code>,
+    <code>blocks/renderers/module-service/moduleService.ts:211</code>). The FUI MaaS endpoint already
+    transpiles in the genWrapper path; it owns this transpile too. Rejected: (b) commit a pre-transpiled
+    artifact (<code>transpileTarget</code> is a request param, can't be frozen).
+  </li>
+  <li>
+    <strong>Ratify (forced invariant) — #700 emit placement.</strong> The functional source is a
+    <em>deterministic WE output</em>, so it rides the #954 <strong>data-emit</strong> channel: WE's
+    <code>serve()</code> emits it at build time into <code>src/_data/authorModeSource.json</code>; FUI reads
+    it and never imports <code>serve()</code>. #1602 is "wire a WE artifact + own the served-module
+    transpile," not "build a FUI emitter." (FUI re-emit is broken — reverses #954-Fork1, #956, #700/#707.)
+  </li>
+  <li>
+    <strong>Ratify (forced invariant) — v1 input/output contract.</strong> Input = a
+    <code>&lt;component&gt;</code> definition (<code>parseDefinition</code>); output = the JSX
+    <code>defineElement</code> module <code>generateFunctionalSource</code> already emits. v1 = render-only;
+    callbacks/effects/change-detection are later phases and their own deep-research subject (candidate
+    <code>customChangeDetectorRegistry</code>), out of scope here.
+  </li>
+</ol>
+
+<p>
+  Net: <strong>2 surviving forks</strong> (both med-high), two decide-points collapsed to a one-line ratify.
+  Full grounding in
+  <a href="/reports/2026-06-22-fui-functional-component-adapter-shape/">the session report</a>.
+</p>
+{% endraw %}
