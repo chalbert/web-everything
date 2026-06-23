@@ -3,8 +3,7 @@ kind: epic
 status: open
 dateOpened: "2026-06-21"
 locus: plateau-app
-childlessReason: blocked
-blockedBy: ["1590"]
+blockedBy: []
 relatedReport: reports/2026-06-21-140-split-analysis.md
 tags: [dev-browser, dev-experience, plateau, product]
 ---

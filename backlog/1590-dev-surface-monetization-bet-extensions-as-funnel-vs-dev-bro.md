@@ -1,13 +1,16 @@
 ---
 kind: decision
-status: open
+status: resolved
 locus: plateau-app
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-22"
+dateResolved: "2026-06-23"
+graduatedTo: none
 preparedDate: "2026-06-22"
 relatedReport: reports/2026-06-07-dev-surface-feature-market-landscape.md
 crossRef: { url: /backlog/140-dev-surface-product-feature-matrix/, label: "Dev-surface × feature matrix (#140)" }
-tags: [product-strategy, monetization, product-surface, dev-browser, vscode-extension, chrome-extension, saas, deferred]
+tags: [product-strategy, monetization, product-surface, dev-browser, vscode-extension, chrome-extension, saas]
+codifiedIn: docs/agent/platform-decisions.md#monetization
 ---
 
 # Dev-surface monetization bet — extensions-as-funnel vs dev-browser/SaaS as the paid product
@@ -15,6 +18,33 @@ tags: [product-strategy, monetization, product-surface, dev-browser, vscode-exte
 The single ratifiable call carved out of the #140 planning matrix: **which product surface carries
 the paid product, and which is the free funnel.** #140 stays the durable map (12 features × 4 surfaces
 + market gaps); this card holds the one decision so it isn't buried as prose inside an epic.
+
+## Ratified — 2026-06-22 (amends the prepared default)
+
+**Fork 1 → (a) dev-browser as the flagship / moat — RATIFIED.** Amended on two points:
+
+1. **The paid flagship is the licensed *local* dev-browser (fixed-cost, JetBrains/Sublime model),
+   not the SaaS bundle.** The prepared default sequenced SaaS-first as the "meterable now" early
+   revenue; that inverts the real solo-dev risk. SaaS carries *recurring* server + 24/7 support cost;
+   the local browser carries none. Per the cost-flat rule's local-commercial-license carve-out and the
+   on-device-fixed-cost preference ([platform-decisions §monetization](docs/agent/platform-decisions.md#monetization)
+   rule 3), the fixed-cost local surface is the *safer* paid product for a solo dev. The SaaS bundle is
+   **demoted to an optional, later paid surface** — its recurring cost is a liability, not a reason to
+   lead. Extensions stay the free funnel.
+2. **Build is decoupled from release / monetization timing.** Public release does not gate what we
+   build. Pursue the full product **now**; *when* and *how* to switch on paid release is a separate,
+   later call. The `deferred` posture and the "two real-world triggers gate readiness" framing are
+   dropped (consistent with the soft-deferred-park retirement, #1392/#764).
+
+**Red-team:** the strongest case for the prepared SaaS-first sequencing is "SaaS bills from day one;
+a licensed browser needs the whole browser built first." It fails — the risk being minimized is the
+*recurring obligation* (the dominant solo-dev failure mode the platform monetization rule already
+encodes), not time-to-first-dollar, and build was explicitly decoupled from revenue timing. The
+prepared default contradicted its own statute by leading with the recurring-cost surface for
+"meterable now" convenience. No principle violated: local-commercial-license is an explicit cost-flat
+carve-out, and dropping `deferred` aligns with the park-retirement rule. Amendment holds.
+
+> The analysis below is the prepared groundwork; the section above is the authoritative ruling.
 
 ## Grounding digest
 

@@ -298,10 +298,16 @@ re-framed) · #634 · #1408 (durable-anchor contract split) · intents-open-desi
    inside flat-rate pricing; prefer owned **on-device fixed-cost** capability; BYO-key is a tier,
    not the floor.
 4. **Vision / AI is never a WE standard** → see [§ no-leakage client](#no-leakage-client).
+5. **Dev-surface paid flagship (#1590):** the paid product is the **licensed local dev-browser
+   (fixed-cost, JetBrains/Sublime model)**, not a SaaS — *recurring* server/support cost is the
+   dominant solo-dev risk, so the on-device fixed-cost surface leads; SaaS is an optional *later* tier
+   (its recurring cost is a liability, not a reason to lead). Extensions are the free funnel. **Build
+   is decoupled from release timing**: pursue the product now, switch on paid release later.
 
 **Lineage:** #098 #185 (licensing / GTM) · #089–#093 #086 (open-core constellation) · #182 #183
 (licensing/payments) · #451 (MaaS tier) · #775 (assembler open-core) · #410 #141 #166 · #665 #690
-(self-driven framing). *Confidence: principle firm; specific knobs provisional.*
+(self-driven framing) · #1590 (dev-surface paid flagship = local fixed-cost browser; build
+decoupled from release). *Confidence: principle firm; specific knobs provisional.*
 
 ### A separate product brand is earned by structural product-distinctness, not appetite {#brand-on-distinctness}
 

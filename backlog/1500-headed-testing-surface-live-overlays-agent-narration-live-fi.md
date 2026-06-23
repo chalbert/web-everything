@@ -3,7 +3,7 @@ kind: story
 size: 8
 status: open
 locus: plateau-app
-blockedBy: ["1590"]
+blockedBy: []
 dateOpened: "2026-06-21"
 tags: [dev-browser, explorer, testing, visualization, plateau, product]
 ---
