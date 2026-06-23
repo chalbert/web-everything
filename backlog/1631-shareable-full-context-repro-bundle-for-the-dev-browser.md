@@ -1,9 +1,13 @@
 ---
 kind: decision
 parent: "142"
-status: open
+status: resolved
 locus: plateau-app
 dateOpened: "2026-06-23"
+dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: 1663
+codifiedIn: one-off
 preparedDate: "2026-06-23"
 relatedTo: ["1639", "1646", "1649"]
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
@@ -14,9 +18,9 @@ tags: [dev-browser, repro, handoff, replay, ai-generated, validation, decision]
 
 ## Digest
 
-**AI-generated candidate from the [#142 pool](/backlog/142-ai-generated-dev-experience-feature-candidates/) — this card validates whether it earns a place on the roadmap, not which of two designs wins.** The idea: instead of a teammate filing "it's broken, here are some screenshots," the dev browser exports the *full semantic context* of a moment — declared state + the action trace that led there + the page's declared rules + ownership — as one replayable link the recipient opens to land in the exact same place. The decision is a **go / not-yet / no** validation gate, not a merit fork (there is no rival design contesting the same slot — see *Why this isn't a classic fork*).
+**AI-generated candidate from the [#142 pool](/backlog/142-ai-generated-dev-experience-feature-candidates/) — this card validates whether the capability is worth building on pure merit, not which of two designs wins.** The idea: instead of a teammate filing "it's broken, here are some screenshots," the dev browser exports the *full semantic context* of a moment — declared state + the action trace that led there + the page's declared rules + ownership — as one replayable link the recipient opens to land in the exact same place. The decision is a **go / no** merit gate, not a design fork (there is no rival design contesting the same slot — see *Why this isn't a classic fork*).
 
-**Recommended verdict: not-yet — accept the candidate as real, gate the build on a concrete trigger** (the shared trace/replay capture artifact #142 names exists, AND one flagship exercise-app hits a cross-role handoff that screenshots demonstrably can't carry). **Confidence: Medium.** The moat is real and the prior-art delta is clean; what's unproven is demand urgency ahead of the capture substrate it depends on.
+**RESOLVED 2026-06-23 — verdict: GO.** Judged on pure merit (*could this be useful to a dev anywhere?* — yes): full-context semantic repro is a real, on-moat capability no incumbent can produce without the declared model underneath. Graduated to epic **[#1663](/backlog/1663-shareable-full-context-repro-bundle/)**, sliced across the constellation: contract → WE **[#1664](/backlog/1664-repro-bundle-contract-shape-of-declared-state-action-trace-r/)**, viewer/replay UI → FUI **[#1665](/backlog/1665-repro-bundle-viewer-and-replay-ui-components/)**, export+replay tool → plateau **[#1666](/backlog/1666-repro-bundle-export-and-replay-tool-in-the-dev-browser/)**.
 
 ## What you're deciding
 
@@ -31,7 +35,7 @@ Does Web Everything commit to a **shareable full-context repro bundle** as a dev
 
 ## Why this isn't a classic fork (and is still a decision)
 
-There is no contested either/or here — no rival "build it shape A vs shape B" where one branch is flawed (the *fork-existence* test). It is a **one-sided validation gate** on an AI-generated idea: commit, defer-on-trigger, or drop. Per the user directive, that is still a `decision` card — "anything I want to decide" — it just resolves to a **go/no/not-yet verdict**, not a winning branch. The genuine sub-question with real tension is the **trigger** (build now vs gate on the capture substrate), handled below.
+There is no contested either/or here — no rival "build it shape A vs shape B" where one branch is flawed (the *fork-existence* test). It is a **one-sided merit gate** on an AI-generated idea: build it or don't, judged purely on whether the capability is worth having. Per the user directive that is still a `decision` card — "anything I want to decide" — it just resolves to a **go/no verdict** on merit, not a winning branch. Resolved GO (below).
 
 ## Context & prior art delta
 
@@ -48,15 +52,14 @@ The moat (per #142): a WE app is **self-describing**, so the bundle is *semantic
 
 ## Dependencies & lineage
 
-- **Rides the shared capture substrate.** #142 names the *trace/replay capture artifact* as a shared mechanism most of these features depend on — this bundle is its **handoff/export unit**. It can't ship before some form of that capture exists; that dependency is the natural trigger.
-- **Generalized by [#1639](/backlog/1639-semantic-handoff-packets-between-roles/)** (semantic handoff packets between roles) — the repro bundle is the debugging-specialized case of the general handoff packet. If #1639 is built, this is one of its packet types; decide #1639's shape before over-building this.
+- **Rides the shared capture substrate.** #142 names the *trace/replay capture artifact* as a shared mechanism most of these features depend on — this bundle is its **handoff/export unit**. The plateau export+replay slice (#1666) consumes that capture; it's a `blockedBy` prerequisite on that one slice, not a gate on the contract (#1664) or UI (#1665).
+- **Generalizes [#1639](/backlog/1639-semantic-handoff-packets-between-roles/)** (semantic handoff packets between roles) — per #142's triage, #1639 is a **duplicate that folds into this work**: the repro bundle *is* the concrete debugging handoff packet, so #1639 is one packet type over the same contract, not an upstream blocker.
 - **Adjacent:** [#1646](/backlog/1646-scenario-and-fixture-library-that-doubles-as-e2e-fixtures/) (captured scenarios that double as fixtures) and [#1649](/backlog/1649-branch-and-run-diff-in-the-dev-browser/) (branch/run diff) ride the same capture artifact — coordinate so capture is built once.
 - **Home:** `locus: plateau-app` — a dev-browser feature ([#141](/backlog/141-dev-browser-vision/)), local-first / zero-server per the cost-flat monetization rule (no per-call backend to host the bundle).
 
-## Recommendation
+## Resolution — GO (2026-06-23)
 
-- **Verdict: not-yet (accept-and-gate), Confidence Medium.** The candidate is real (clean prior-art delta, on-moat), so don't drop it — but don't open a build now: it depends on the capture substrate that doesn't yet exist, and demand is unproven.
-- **Un-gate trigger (concrete):** promote to a build story when **(1)** the #142 trace/replay capture artifact has shipped in some form, **AND (2)** a flagship exercise-app run surfaces a real cross-role handoff that screenshots/Jam demonstrably can't carry (evidence, not speculation).
-- **Skeptic:** "Jam.dev already nails repro links — this is reinventing a solved problem." *Refuted on the delta, not on novelty-for-its-own-sake:* Jam shares a heuristic recording; the WE bundle shares **declared state + rules + ownership**, which is exactly what makes it replay into the *semantic* context and self-route — a thing Jam structurally cannot emit without the declared model. The residual the skeptic is right about is **urgency** — hence not-yet, not go.
-
-*If you'd rather decide go now (open a build story immediately) or no (drop the candidate), say so — the verdict is the thing on the table.*
+- **Verdict: GO, judged on pure merit.** The only question that matters: *could a full-context semantic repro bundle be useful to a dev anywhere?* Yes — it's a real, on-moat capability. (Demand/urgency arguments are explicitly out of scope: a private, unpublished project always has zero observed demand, so "no demand yet" is never a valid reason to gate a build.)
+- **Build now, release later.** The constellation split makes the capture-substrate dependency a per-slice `blockedBy` edge, not a gate on the whole feature: the WE contract (#1664) and FUI viewer (#1665) are unblocked and independently valuable; only the plateau export+replay tool (#1666) rides the #142 trace/replay capture substrate, and that's encoded as its real prerequisite. Nothing is parked.
+- **Graduated to epic [#1663](/backlog/1663-shareable-full-context-repro-bundle/)** → slices **[#1664](/backlog/1664-repro-bundle-contract-shape-of-declared-state-action-trace-r/)** (WE contract, agent-ready now), **[#1665](/backlog/1665-repro-bundle-viewer-and-replay-ui-components/)** (FUI UI), **[#1666](/backlog/1666-repro-bundle-export-and-replay-tool-in-the-dev-browser/)** (plateau tool).
+- **Skeptic:** "Jam.dev already nails repro links — this is reinventing a solved problem." *Refuted on the delta:* Jam shares a heuristic pixel/log recording; the WE bundle shares **declared state + rules + ownership**, which is exactly what lets it replay into the *semantic* context and self-route — a thing Jam structurally cannot emit without the declared model. Attack does not land → GO ratified.
