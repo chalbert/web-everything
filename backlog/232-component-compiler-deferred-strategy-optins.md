@@ -1,34 +1,32 @@
 ---
-kind: decision
+kind: epic
 parent: "125"
 status: open
 dateOpened: "2026-06-09"
-priority: low
 tags: [component, adapters, compiler, build-tooling, strategy-axis, deferred, swc, tsc]
 relatedReport: reports/2026-06-06-adapter-real-project-integration.md
 relatedProject: webadapters
 crossRef: { url: /adapters/jsx-adapter/, label: JSX Adapter }
 ---
 
-# Deferred `<component>` compiler strategy opt-ins (collected for later, on-demand)
+# Deferred `<component>` compiler strategy opt-ins (umbrella)
 
-**Decision (un-parked 2026-06-22 — parking is not a prioritisation escape):** Which of the deferred `<component>` compiler strategy opt-ins to build, and on what trigger (none scheduled by default).
+**Epic (re-typed 2026-06-22 — was mis-filed `kind: decision`):** no merit fork here. #127 settled the
+compiler's toolchain reach as **configurable strategy axes** with native-first defaults; **#231** shipped
+the top-2-per-axis baseline. The three opt-ins below each join a **different** axis, are additive, and break
+nothing — *support-all*, not branches of a fork. "Which to build / on what trigger" is pure prioritisation,
+and a fork is never a prioritisation tool. So this is an **epic of low-priority build slices**, each built
+**ahead of** a concrete consumer (full feature surface before adoption, not gated on it), held at
+`priority: low` until there's a slack window.
 
-Collection of the lower-priority strategy opt-ins set aside by the #127 ruling (the [component-dc](docs/agent/platform-decisions.md#component-dc) rule). #127 settled that the
-compiler's toolchain reach is a set of **configurable strategy axes** with native-first defaults; **#231**
-ships the top 2 per axis to prove the principle. These are the *remaining* legitimate-but-deferred strategies
-— captured so they aren't lost, to be picked up only when a concrete project/team demands one.
+## Child slices (each joins an existing axis, no breakage)
 
-## Collected opt-ins (each joins an existing axis, no breakage)
-
-- **`.component` dedicated-file surface** — an SFC-style file holding one `<component>` (Vue `.vue` / Svelte
-  `.svelte` prove it's a real end-state). Costliest to wire (a new extension every editor/bundler learns), so
-  deferred until a team wants the one-element-per-file authoring model. Adds to the source-surface axis.
-- **Per-bundler-native integration** — a richer per-toolchain plugin (incl. a Rust/WASM **SWC** plugin for
-  Next/Turbopack) beyond the universal pre-transform baseline. Only worth it if heavy-SWC adoption demands
-  native-depth integration. Adds to the toolchain-depth axis.
-- **`ts-patch` / `ttypescript` custom-transformer** — gives bundler-refusing **`tsc`-only** projects actual
-  `<component>` lowering (not just types). Adds to the `tsc`-support axis; ship only on demand.
+- **#1628 — `.component` dedicated-file surface** — SFC-style file holding one `<component>` (Vue `.vue` /
+  Svelte `.svelte` prove the end-state). Source-surface axis.
+- **#1629 — per-bundler-native integration** — richer per-toolchain plugin incl. a Rust/WASM **SWC** plugin
+  for Next/Turbopack. Toolchain-depth axis.
+- **#1630 — `ts-patch` / `ttypescript` custom-transformer** — real `<component>` *lowering* for
+  bundler-refusing **`tsc`-only** projects. `tsc`-support axis.
 
 ## Notes
 
