@@ -1,8 +1,9 @@
 ---
 kind: story
 size: 3
-status: open
-blockedBy: ["1624"]
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "adoptionSignal: MaaS-distribution need on epic #479 (#087/#088 distribution surface)"
 locus: plateau-app
 dateOpened: "2026-06-22"
 tags: []
