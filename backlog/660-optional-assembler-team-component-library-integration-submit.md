@@ -2,7 +2,9 @@
 kind: story
 size: 8
 parent: "646"
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "adoptionSignal: a consuming team needs an assembled recipe delivered into their repo (PR/codemod)"
 parkedDate: "2026-06-22"
 dateOpened: "2026-06-15"
 relatedProject: webdocs
@@ -31,5 +33,7 @@ The #646 assembler shell now **exists** (emit format #652, read-only surface #66
 eject recipe #689 all resolved), so this is no longer dependency-blocked — but it is explicitly
 **optional/future** ("the assembler is complete without it") and its three "scope to settle when picked up"
 questions (delivery mechanism · conventions adaptation · constellation home) are **unsettled design**, not an
-agent-ready build. Parked `deferred`. **Trigger to un-park:** a concrete need for the convenience-transport
-tier (PR/codemod into a team repo), at which point those scope questions are decided first.
+agent-ready build. Building it now would only guess those shapes without a real consumer → `parkedReason:
+maturityGated` (the soft `deferred` form is retired, #1392/#1620). **Un-park trigger** (`maturityTrigger:
+adoptionSignal`): a consuming team needs an assembled recipe delivered **into their repo** (PR/codemod), at
+which point those three scope questions are decided first.

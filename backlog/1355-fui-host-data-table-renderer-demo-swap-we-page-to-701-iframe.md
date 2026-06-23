@@ -2,8 +2,8 @@
 kind: story
 size: 5
 parent: "1353"
-status: active
-blockedBy: []
+status: open
+blockedBy: ["1660"]
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-23"
 tags: []
@@ -82,3 +82,16 @@ lands the home this card waits on. Per we:reports/2026-06-22-backlog-split-analy
 **#1597 is now `resolved`** — the Plateau conformance home this card waited on has landed (and #1576's
 remaining children are all resolved). So this is **no longer blocked-in-fact**: cleared `blockedBy`. The
 historical "blocked-in-fact on #1576/#1597" notes above are superseded. Now genuinely ready (Tier-A).
+
+## Pre-flight (batch-2026-06-23-1355-1531) — re-pointed `blockedBy: 1597 → 1660` (#1597 is the wrong mechanism)
+
+Claimed + ground the delete: the re-point `1576 → 1597` rested on a **false premise**. #1597 landed the
+**behavioral-vector** conformance runner (`runConformanceVector`/`judgeConformanceTrace` over a
+`ConformanceBinding`, Layer-2 trace/judge) — a **different mechanism** than the renderer **golden-audit**
+this delete needs (`auditDataTable(root, golden)` audits a statically-rendered DOM against a frozen golden
+projection). A grep confirms **no** `auditDataTable`/`goldenToRoot`/renderer golden-audit anywhere in
+`plateau:src/`, so the Plateau home #1566 Fork 2a requires is **verified absent** — and was **never filed**.
+The delete is **atomic** with standing that home up (the WE backend + verifier can't leave until the run has
+a Plateau home + the WE data-only suite + golden schema exist). Filed that prerequisite as **#1660** (decided
+build, not a fork — #1566 Fork 2a ruled it). Re-pointed `blockedBy: 1660`; **`blocked-in-fact`**, released.
+Cascade-frees when #1660 lands. Sibling shares this exactly.
