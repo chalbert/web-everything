@@ -1084,6 +1084,44 @@ values that fail the membership test stay **intent-local tokens** — `progress`
 `neutral | danger` regardless (#1337, non-negotiable). Realized by #1458 (palette + statute) / #1459 (rename
 sweep). Composes [intents-ux-only](#intents-ux-only) (tone is UX-only; the theme owns the hex).
 
+### A layout role's identity is its composition-intent; CSS-mechanism is impl, landmark is annotation {#layout-role-composition-intent}
+
+A **layout role** is identified by its **composition-intent** — the semantic arrangement the author
+wants ("even vertical flow with consistent spacing" = stack; "fixed+fluid split that collapses when
+narrow" = sidebar) — **impl-agnostic**. The **CSS mechanism** that realizes it (margin-flow vs `gap` vs
+auto-fit grid) is **FUI's impl detail**, never the identity; the **ARIA landmark**
+(`navigation`/`complementary`/…) is an **optional author annotation** bound to the content, never the
+role. Keying identity on CSS-mechanism is **rejected** — it violates
+[surface-contract-not-computation](#surface-contract-not-computation) (Impl-Is-Not-A-Standard) and makes
+the taxonomy brittle to browser releases (when CSS `masonry` ships, "masonry" must **not** merge into
+"grid" — they stay distinct *intents*). Keying on landmark alone is **under-determining** (stack,
+cluster, grid, center all map to *no* landmark).
+
+**Minting contract — role vs variant vs annotation.** The role set is **open-numbered** (a ratified
+core + this contract), [open-numbered-variants](#open-numbered-variants)/Intents-Open-Design applied to
+roles. A candidate earns a **new role** iff it is a *distinct composition-intent* (a different semantic
+arrangement). It is a **variant** if it differs only in presentation (MUI ImageList
+standard/quilted/woven = one grid role + variants; Chakra HStack/VStack = an axis variant of stack). It
+is an **annotation** if it differs only in content meaning (a `navigation` sidebar vs a `complementary`
+sidebar = one sidebar role + a landmark annotation). **Diagnostic:** *different arrangement* → role;
+*different look, same arrangement* → variant; *different content meaning, same arrangement* → annotation.
+
+**Two altitudes.** Primitive region roles (stack, cluster, grid, box, center, sidebar, frame, …) are the
+per-role taxonomy where **FUI ships exactly one block per role**. **Page archetypes** (app-shell,
+list-detail, feed, holy-grail) are *compositions of* region roles and live in a **separate
+composition-intent tier** — impl'd as FUI *blocks* composing region components + plateau assembler
+presets, **never** admitted as atomic roles (that would make "one component per role" re-implement the
+regions it should compose). The line is *atomic composition-intent* (sidebar = one fixed+fluid split) vs
+*page-spanning arrangement of multiple region roles* (app-shell). The shipped `layout` intent
+(we:src/_data/intents/layout.json) is the **charter member** of the composition-intent tier — reclassified,
+**not retracted**.
+
+**Lineage:** #1680 (taxonomy decision — Fork 1 composition-intent identity, flipped from CSS-mechanism by
+the skeptic; Fork 2 separate composition-intent tier with `layout` as charter member). Prep survey
+we:reports/2026-06-23-semantic-layout-role-taxonomy.md (Every Layout, WAI-ARIA, Tailwind, MUI, Radix,
+Chakra, Carbon, MD3, Open UI). Composes [surface-contract-not-computation](#surface-contract-not-computation),
+[open-numbered-variants](#open-numbered-variants), [intents-ux-only](#intents-ux-only), and bias-to-separation. Seeds per-role mint items (intent + FUI block per core role).
+
 ### Reproduction-conformance: reproduce incumbents as theme+intents; the copy is a forcing function {#reproduction-conformance}
 
 Reproducing a third-party design system (Material, Ant, Carbon, Fluent, shadcn…) on the constellation is a

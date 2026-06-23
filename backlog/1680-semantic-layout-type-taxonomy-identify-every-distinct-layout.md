@@ -1,12 +1,14 @@
 ---
 kind: decision
-status: open
+status: resolved
 relatedProject: webintents
 relatedReport: reports/2026-06-23-semantic-layout-role-taxonomy.md
 crossRef: { url: /research/semantic-layout-role-taxonomy/, label: "Prep survey — semantic layout-role taxonomy (a11y + design POV)" }
 preparedDate: "2026-06-23"
 dateOpened: "2026-06-23"
 dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+codifiedIn: "docs/agent/platform-decisions.md#layout-role-composition-intent"
 tags: [layout, taxonomy, intent, a11y, composition-intent, "1653"]
 ---
 
@@ -174,6 +176,30 @@ Surfaced 2026-06-23 alongside #1653 (the dockable layout-tree Protocol → `webl
 intents already shipped: `resizable` (#1384), `arrangeable`, `slide-layout-template` (#1191), `overview-grid`.
 Prior art: we:reports/2026-06-23-semantic-layout-role-taxonomy.md. On ratification, seeds per-role mint items
 (intent + FUI block per core role) and a composition-intent-tier reclassification of `layout`.
+
+## Ruling — ratified 2026-06-23
+
+Both forks ratified **as recommended** (skeptic-tested in prep; red-teamed again at the decision turn —
+both attacks failed on merit):
+
+- **Fork 1 → (a) composition-intent identity** (~80%). A layout role's identity is the semantic
+  arrangement the author wants, impl-agnostic. CSS-mechanism is FUI impl detail; ARIA landmark is an
+  optional author annotation. Rejected (b) CSS-mechanism identity (violates
+  surface-contract-not-computation; brittle to CSS releases — masonry must not merge into grid) and (c)
+  landmark-only (under-determining — stack/cluster/grid/center all map to no landmark).
+- **Fork 2 → (b) separate composition-intent tier** (~75%). Primitive region roles are the per-role
+  taxonomy (FUI = one block per role); page archetypes (app-shell, list-detail) are compositions of
+  region roles in a distinct tier, impl'd as FUI blocks + plateau presets. The shipped `layout` intent is
+  the **charter member** of that tier — reclassified, not retracted.
+- **Minting contract:** role-vs-variant-vs-annotation cut line ratified as the operational test; role set
+  is open-numbered (ratified core + contract).
+
+**Codified as statute:** `we:docs/agent/platform-decisions.md#layout-role-composition-intent` (cite this
+for every future per-role mint decision instead of re-opening the criterion).
+
+**Seeds:** epic #1704 (mint the core role-set intents, 1 per role) and task #1705 (reclassify the live
+`we:src/_data/intents/layout.json` intent into the composition-intent tier). Per-role FUI block impls
+follow under the epic.
 
 ## Definition of Ready — met
 
