@@ -1,7 +1,9 @@
 ---
 kind: decision
 parent: "315"
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "realRuns>=3"
 blockedBy: []
 dateOpened: "2026-06-12"
 tags: []
@@ -9,7 +11,11 @@ tags: []
 
 # Scheduled / automated gap-sweep refresh
 
-**Decision (un-parked 2026-06-22 — parking is not a prioritisation escape):** Whether to graduate the manual gap-sweep to a scheduled/automated agent sweep now, or keep it on-demand.
+**Parked `maturityGated` (#1620 sweep, #1623).** Building the automation *now* would produce a worse
+artifact — you'd automate an **unproven** cadence (#349 ruled "a manual skill first … graduate to scheduled
+only if it proves stable"). So this is held until the soak: **`maturityTrigger: realRuns>=3`** — three clean,
+idempotent `/gap-sweep` re-runs (each a no-op diff over an unchanged landscape, the #349 idempotency
+contract). Until then, the answer ("automate it") is forced-but-premature, not a live decision.
 
 Graduate the manual gap-sweep re-run skill (#366) to a scheduled agent sweep that periodically re-runs the pipeline, reports the delta, and surfaces new candidate gaps — once the cadence has proven stable manually. Decided in #349: the automated half is a client of #192's freshness/automation mechanism, so it is gated on #192 (the general refresh engine) and #366 (the manual skill it automates). Until both land, refresh stays manual.
 

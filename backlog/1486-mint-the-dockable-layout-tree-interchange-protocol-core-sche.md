@@ -1,13 +1,19 @@
 ---
 kind: decision
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "externalConsumers>=1"
 dateOpened: "2026-06-21"
 tags: []
 ---
 
 # Mint the dockable layout-tree interchange Protocol (core schema + extension slot)
 
-**Held open in the decision lane on a ratified temporal gate — not a preparable fork right now.** Realizing build
+**Parked `maturityGated` (#1620 sweep, #1623) — `maturityTrigger: externalConsumers>=1`.** Minting the
+Protocol *now* would produce a worse artifact: with only one conforming impl, a "convergent" core schema is
+just that impl's shape (the `#project-protocol-bar` rule). It unparks when a **second** independent
+impl/adapter (dockview / FlexLayout / golden-layout) round-trips the core against `we:blocks/dockable/contract.ts`.
+Realizing build
 of [#1437](/backlog/1437-decision-docking-tiling-dockable-window-management-placement-/) Fork 2a (resolved):
 standardize the dockable layout-tree as a first-class WE Protocol (`we:src/_data/protocols/`) — the
 convergent core schema node `{type: row|column|stack, children|tabs, size}` that dockview / FlexLayout /
