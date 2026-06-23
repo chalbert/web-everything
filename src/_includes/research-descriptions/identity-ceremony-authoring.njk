@@ -49,11 +49,50 @@
   </li>
 </ul>
 
-<h2>Open questions a fuller pass closes</h2>
+<h2>Survey results (executed 2026-06-23)</h2>
 <ol>
-  <li>Which <code>PublicKeyCredentialCreationOptions</code> / FedCM-config axes are <strong>author-facing</strong> vs impl-only?</li>
-  <li>Is enrollment-ceremony authoring a <strong>policy</strong> surface (toggles / matrix) or a <strong>flow</strong> surface (ordered steps)? This decides the domain's UI shape.</li>
-  <li>Does it fit the existing data-driven Configurator domain with <strong>zero</strong> new mechanism, or does ceremony-authoring need a seam the file-upload / webvalidation domains didn't?</li>
-  <li>Is there an actual authoring <strong>consumer</strong> yet (the #499 demand gate), or does this stay research-only until one appears?</li>
+  <li>
+    <strong>Which axes are author-facing?</strong> A <em>small, policy-shaped</em> set:
+    <code>userVerification</code> (required / preferred / discouraged), <code>residentKey</code> /
+    discoverable, <code>authenticatorAttachment</code> (platform vs cross-platform),
+    <code>attestation</code> (enterprise tier only), FedCM <code>mediation</code> (optional / required /
+    silent), and <code>timeout</code>. Everything else is <strong>branding</strong>
+    (<code>rp.name</code> / icon — the wrong tool for a decision-aid) or <strong>impl-only</strong>
+    (<code>challenge</code>, <code>user.id</code>, <code>pubKeyCredParams</code>,
+    <code>excludeCredentials</code> — the provider's job). FedCM's real config lives in the IdP config
+    file, which the RP author does not write; it contributes essentially one shared axis
+    (<code>mediation</code>).
+  </li>
+  <li>
+    <strong>Policy or flow surface?</strong> <strong>Policy.</strong> Every author-facing axis is a single
+    enumerated choice on an independent knob — no ordering, no branching. This is a knob-matrix, not an
+    ordered-step flow, mapping straight onto the Configurator's <code>Axis</code> model. (The flow-builder
+    tooling that exists — e.g. Descope's visual editor — solves multi-step orchestration + branded screens,
+    a different problem.)
+  </li>
+  <li>
+    <strong>Clean instance or new seam?</strong> <strong>Clean instance, zero new mechanism.</strong> The
+    author-facing axes map directly onto <code>Axis</code> objects (each a policy enum) and the credential
+    families become the strategies declaring where each sits — adding the domain is exactly one seed module
+    + one provider entry, no new seam.
+  </li>
+  <li>
+    <strong>Is there an authoring consumer yet?</strong> <strong>No.</strong> The constellation sweep is
+    unambiguous: WE's only identity surface (the conformance demo) hardcodes its own provider; the plateau
+    Technical Configurator's ~17 domains include none for identity; and the one credential-shaped plateau
+    module is git-forge write-auth, a different problem. The #499 demand gate is unmet.
+  </li>
 </ol>
+
+<h2>Recommendation (to ratify in #499)</h2>
+<p>
+  <strong>Hold on a concrete-consumer trigger</strong> — do <em>not</em> build now (a Configurator domain
+  no author can reach, duplicating axes the <code>CustomCredentialProvider</code> registry + config-flavors
+  already carry), and do <em>not</em> permanently dissolve (the survey proves the domain is now cheaply
+  buildable — one seed + one provider entry — the moment a consumer appears). <strong>Un-park trigger:</strong>
+  the first flagship / exercise-app flow that needs an author to tune passkey / FedCM enrollment policy
+  <strong>without writing a plug</strong>. On that trigger the build is a ~1-day data task seeding the six
+  author-facing axes. Confidence: <strong>high</strong> on both the shape and the absence of a consumer
+  today.
+</p>
 {% endraw %}
