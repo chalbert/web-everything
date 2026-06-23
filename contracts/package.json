@@ -33,6 +33,7 @@
     "./tree-select": "./tree-select.ts",
     "./webdocs": "./webdocs.ts",
     "./reproduction-parity": "./reproduction-parity.ts",
-    "./repro-bundle": "./repro-bundle.ts"
+    "./repro-bundle": "./repro-bundle.ts",
+    "./permissions": "./permissions.ts"
   }
 }
