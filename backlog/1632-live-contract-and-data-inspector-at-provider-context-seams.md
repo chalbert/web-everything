@@ -1,9 +1,13 @@
 ---
 kind: decision
 parent: "142"
-status: open
+status: resolved
 locus: plateau-app
 dateOpened: "2026-06-23"
+dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: 1697
+codifiedIn: one-off
 preparedDate: "2026-06-23"
 relatedTo: ["1642"]
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }

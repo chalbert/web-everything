@@ -1,9 +1,13 @@
 ---
 kind: decision
 parent: "142"
-status: open
+status: resolved
 locus: plateau-app
 dateOpened: "2026-06-23"
+dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: 1693
+codifiedIn: one-off
 preparedDate: "2026-06-23"
 relatedTo: ["1641"]
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
@@ -57,4 +61,11 @@ The moat (per #142): a WE app declares its contracts/intents/rules, so the assis
 - **Un-gate trigger (concrete):** promote to a build story when **(1)** the #142 declared-rule/contract model is queryable against a diff, AND **(2)** #095's conformance core exists to host this as its review-time surface, AND **(3)** a flagship exercise-app PR shows real declared-conformance drift that a generic reviewer (ESLint/CodeRabbit) missed — evidence, not speculation.
 - **Skeptic:** "CodeRabbit / SonarQube already do AI/automated review — this is reinventing it." *Refuted on the delta, not on novelty:* those reason from generic code patterns and configured rules; none check a diff against *this project's declared contracts/intents*, because they have no such declared model to read. Declaration-aware drift detection is the structural gap. The residual the skeptic is right about is that the conformance core is partly built (#095) — hence scope-as-lens and not-yet, not a fresh go.
 
-*If you'd rather decide go now (open a build story immediately) or no (drop the candidate), say so — the verdict is the thing on the table.*
+## Resolution — ratified go (sliced) 2026-06-23
+
+Resolved **go**, carved into two slices (the declared-conformance check has two delivery surfaces, one buildable sooner):
+
+- **Slice A — declared-conformance PR gate** → [#1693](/backlog/1693-declared-conformance-pr-gate-standard-aware-review-ci-surfac/) (`graduatedTo`). A diff-aware CI gate over the example apps; mirrors `plateau:scripts/check-render-conformance.mjs`; scoped as the review-time lens over the #095 conformance core, not a second engine. Blocked by the declared-rule registry [#1689](/backlog/1689-per-app-declared-rule-registry-rule-to-conformance-vector-li/).
+- **Slice B — in-browser review lens** → [#1694](/backlog/1694-in-browser-standard-aware-review-lens-dev-browser/). The live dev-browser surface; same declared-rule reader; blocked by #1689.
+
+Shares its declared-rule reader with #1641 (build once, via #1689).

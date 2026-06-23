@@ -2,6 +2,7 @@
 kind: decision
 parent: "142"
 status: open
+priority: low
 locus: plateau-app
 dateOpened: "2026-06-23"
 preparedDate: "2026-06-23"
@@ -53,5 +54,9 @@ The moat (per #142): a WE app is **self-describing**, so the diff can be *semant
 - **Verdict: not-yet (accept-and-gate), Confidence Medium.** The candidate is real (clean delta, on-moat), so don't drop it — but it depends on the not-yet-existing capture/introspection substrate, and demand is unproven.
 - **Un-gate trigger (concrete):** promote to a build story when **(1)** the #142 capture/introspection artifact has shipped in some form, AND **(2)** a real review on a flagship exercise-app surfaces a *rule or declared-state* regression that pixel/text diffs missed — evidence the three-layer diff earns its keep.
 - **Skeptic:** "Chromatic already diffs branches — this is a visual-regression clone." *Refuted on the delta, not novelty:* Chromatic diffs pixels and tells you nothing about *why*; the WE diff compares **declared state, render, and rules** and attributes the render change to its cause — which a screenshot diff cannot do without the declared model. The residual the skeptic is right about is **timing** — hence not-yet, not go.
+
+## Vision enrichment — live mirrored dual-run (2026-06-23)
+
+Beyond the static "snapshot A vs snapshot B" diff, the target experience is a **live mirrored dual-run**: both branches running simultaneously in the dev browser, every input event **fan-routed to both** instances, with **differential highlighters** lighting up divergence in real time across the three layers (declared state, rendered output, declared rules). This is the most vivid expression of the semantic-diff moat — and it raises the capture requirement from offline snapshot/replay to **live event-mirroring + dual concurrent render**. Parked at `priority: low`; recorded here so the framing isn't lost when the card un-gates.
 
 *If you'd rather decide go now (open a build story immediately) or no (drop the candidate), say so — the verdict is the thing on the table.*
