@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "1442"
-status: open
+status: resolved
 dateOpened: "2026-06-23"
 dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: none
+codifiedIn: "docs/agent/block-standard.md#packaging-governance-1321"
 preparedDate: "2026-06-23"
 locus: frontierui
 relatedProject: webcomponents
@@ -12,6 +15,20 @@ tags: [packaging, custom-elements, block-model, conversion, decision, frontierui
 ---
 
 # pan-zoom-surface packaging mechanism: persistent light-DOM (B) vs shadow (C, #1349-S2)
+
+## Ruling (ratified 2026-06-23)
+
+**`we-pan-zoom-surface` → (B) persistent light-DOM.** Pin per §7 item 7: the block is reactive
+(consumer holds a persistent `PanZoomHandle` and drives `setState`/`zoomBy`/`reset`/`apply`
+post-mount) and content-owning (it styles/transforms the consumer's *own* content children, which a
+shadow boundary would slot away and degrade), and its host is friendly (the consumer's own viewport,
+not an unknown third-party page). In-leak isolation rides the #1349 `webisolation` contract (§7 item
+4), so B keeps the no-conflict guarantee without the `ElementInternals`/`::part` tax. Ratifies the
+shipped factory with zero behavioral change. **(C) shadow is rejected** as the default — it buys
+hostile-host immunity the consumer never needs and is actively worse for the primary use; it stays
+available only as a #1349-S2 *opt-in upgrade* for a future hostile-host deployment. The skeptic case
+for C ("generic embeddable widget → default to the boundary") was run and **survived** (the leak it
+names is in-leak, already covered by `webisolation`). Build story: **#1707**.
 
 Decide the custom-element packaging mechanism for the pan-zoom-surface block under #1442, ratifying the
 already-shipped FUI implementation against the codified packaging rule (block-standard §7, #1321/#1381). The
