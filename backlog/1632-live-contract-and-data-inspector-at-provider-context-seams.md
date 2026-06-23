@@ -14,7 +14,7 @@ tags: [dev-browser, contract-inspector, ai-generated, validation, decision]
 
 ## Digest
 
-This AI-generated candidate from the [#142 pool](/backlog/142-ai-generated-dev-experience-feature-candidates/) earns a go/not-yet/no validation gate, not a merit fork. The idea: at every provider/context seam in a running WE app, show the **actual data flowing through** side-by-side with the **declared contract** for that seam, and validate the live value against it in real time — green when the runtime payload conforms, red (with the offending path) when it drifts. Existing devtools show you the data; none of them hold it up against a *declared* schema the app itself ships. Because a WE app already carries that declared contract introspectably, the validation is almost free to read.
+AI-generated candidate from the [#142 pool](/backlog/142-ai-generated-dev-experience-feature-candidates/) — a go/not-yet/no validation gate, not a merit fork. The idea: at every provider/context seam in a running WE app, show the **actual data flowing through** beside the **declared contract** for that seam and validate it live — green when the payload conforms, red (with the offending path) when it drifts. Existing devtools show the data; none hold it against a *declared* schema the app ships. A WE app carries that contract introspectably, so the check is nearly free to read.
 
 **Recommended verdict: not-yet — accept the candidate, gate the build on the introspection substrate.** Confidence: Medium. The prior-art delta is the cleanest in this cluster (live actual-vs-declared validation is genuinely absent from the market), but the inspector can't read seam contracts until the #142 introspectable-model surface exposes them.
 
