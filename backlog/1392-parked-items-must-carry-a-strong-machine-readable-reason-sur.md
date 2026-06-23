@@ -6,6 +6,7 @@ dateOpened: "2026-06-21"
 dateStarted: "2026-06-21"
 dateResolved: "2026-06-21"
 graduatedTo: "we:src/_data/backlogMeta.js"
+relatedReport: reports/2026-06-21-140-split-analysis.md
 tags: [backlog-workflow, tooling, check-standards, dev-experience]
 ---
 
