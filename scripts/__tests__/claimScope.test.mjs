@@ -3,7 +3,7 @@ import {
   emptyClaimState, parseClaims, serializeClaims, pruneExpiredClaims,
   porcelainFiles, recordClaim, baselineFor, mineFiles,
   findingFiles, classifyFinding, partitionFindings, partitionLocal,
-  claimedIdsFor, partitionById,
+  claimedIdsFor, partitionById, recordTouch, mostRecentSession,
 } from '../readiness/claimScope.mjs';
 
 describe('claimScope — claim-time baseline + finding attribution (#952, #949)', () => {
@@ -167,6 +167,52 @@ describe('claimScope — claim-time baseline + finding attribution (#952, #949)'
       const { blocking, demoted } = partitionLocal([globalOnMine], { fileSet, local: false });
       expect(blocking.map((f) => f.message)).toEqual(['global on my file']);
       expect(demoted).toEqual([]);
+    });
+  });
+
+  describe('2-C union — explicit touches close the baseline-file hole (#1661)', () => {
+    const base = recordClaim(emptyClaimState(), {
+      session: 'b1', id: '1661-x', baselineFiles: ['shared/registry.json', 'other.ts'], nowIso: '2026-06-23T00:00:00Z',
+    });
+
+    it('a baseline file with NO touch stays external (2-A behaviour preserved)', () => {
+      const mine = mineFiles(base, 'b1', new Set(['shared/registry.json']));
+      expect(mine.has('shared/registry.json')).toBe(false); // in baseline, not touched → not mine
+    });
+
+    it('a baseline file that IS a recorded touch is classified mine (the hole 2-C closes)', () => {
+      const touched = recordTouch(base, { session: 'b1', files: ['shared/registry.json'], nowIso: 'T1' });
+      const mine = mineFiles(touched, 'b1', new Set(['shared/registry.json', 'other.ts']));
+      expect(mine.has('shared/registry.json')).toBe(true);  // baseline + touched → mine (blocks)
+      expect(mine.has('other.ts')).toBe(false);              // baseline, not touched → external
+    });
+
+    it('is monotonic — union never reds LESS than the bare baseline-diff', () => {
+      const newlyDirty = new Set(['fresh.ts', 'shared/registry.json']);
+      const bare = mineFiles(base, 'b1', newlyDirty);
+      const withTouch = mineFiles(recordTouch(base, { session: 'b1', files: ['shared/registry.json'] }), 'b1', newlyDirty);
+      for (const f of bare) expect(withTouch.has(f)).toBe(true); // superset
+      expect(withTouch.size).toBeGreaterThanOrEqual(bare.size);
+    });
+
+    it('recordTouch de-dupes and is a no-op for an unknown session', () => {
+      const t = recordTouch(recordTouch(base, { session: 'b1', files: ['x.ts', 'x.ts'] }), { session: 'b1', files: ['x.ts'] });
+      const row = t.sessions.find((s) => s.session === 'b1');
+      expect(row.touched).toEqual(['x.ts']);
+      const unknown = recordTouch(base, { session: 'ghost', files: ['y.ts'] });
+      expect(unknown.sessions.find((s) => s.session === 'ghost')).toBeUndefined();
+    });
+
+    it('touched survives a parse/serialize round-trip', () => {
+      const t = recordTouch(base, { session: 'b1', files: ['shared/registry.json'] });
+      const round = parseClaims(serializeClaims(t));
+      expect(round.sessions.find((s) => s.session === 'b1').touched).toEqual(['shared/registry.json']);
+    });
+
+    it('mostRecentSession returns the newest-claimed session slug', () => {
+      const two = recordClaim(base, { session: 'b2', id: '1661-y', baselineFiles: [], nowIso: '2026-06-23T01:00:00Z' });
+      expect(mostRecentSession(two)).toBe('b2');
+      expect(mostRecentSession(emptyClaimState())).toBeNull();
     });
   });
 });

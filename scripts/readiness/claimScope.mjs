@@ -11,8 +11,21 @@
  * errors still fail (exit 1); everything else prints as a non-failing note. The default no-flag run stays
  * whole-repo-strict (CI / close-out unchanged).
  *
- * Failure mode by design (#949 Fork 2-A): a concurrent session newly-dirtying a file *inside* my window
- * leaks into "mine" — an over-cautious stop, NEVER a foreign red mistaken for clean.
+ * **2-C union (#1661).** 2-A's baseline-diff has a fail-unsafe hole #953 found: a file *already dirty at
+ * claim* (so in the baseline) that THIS session then breaks stays `external` → demoted → stepped over (own
+ * real red mistaken for foreign — the modal trigger being the shared registries every concurrent claim/
+ * release touches). 2-C closes it by also recording each file a session **explicitly touches** (via the
+ * PostToolUse Edit/Write hook and direct appends from the backlog CLIs), then computing
+ * `mineFiles = (currentFiles − baseline) ∪ touched`. This is **monotonic** — the registry can only *add*
+ * files to "mine", so the gate can never red *less* than 2-A, only catch the own-edit-of-a-baseline-file
+ * case it missed. **Honest residual:** a mutation outside *both* Edit/Write and the CLIs (a raw `sed` /
+ * `node -e` on a registry) is still invisible to the toucher and rides the 2-A baseline-diff with its
+ * residual. So the accurate stance is *2-A alone could mistake an own red for foreign on a baseline file;
+ * 2-C closes the hooked/CLI paths but not raw-shell ones* — not the absolute "NEVER a foreign red mistaken
+ * for clean" the original header claimed (#953 corrected).
+ *
+ * The over-cautious direction is unchanged and safe: a concurrent session newly-dirtying a file *inside* my
+ * window still leaks into "mine" (an extra stop, never a foreign red mistaken for clean).
  *
  * This module is PURE — no fs, no process, no `Date` reads. Callers inject the file text, the
  * `git status --porcelain` lines, and the clock. Mirrors `reservations.mjs` (the sibling #083 registry).
@@ -44,6 +57,7 @@ export function parseClaims(text) {
           session: String(s.session),
           ids: Array.isArray(s.ids) ? s.ids.map(String) : [],
           baseline: Array.isArray(s.baseline) ? s.baseline.map(String) : [],
+          touched: Array.isArray(s.touched) ? s.touched.map(String) : [],
           at: String(s.at),
         }))
     : [];
@@ -97,7 +111,7 @@ export function porcelainFiles(porcelain) {
  * session's own earlier edits as baseline. Returns a new state (pure).
  */
 export function recordClaim(state, { session, id, baselineFiles, nowIso }) {
-  const sessions = (state.sessions ?? []).map((s) => ({ ...s, ids: [...s.ids], baseline: [...s.baseline] }));
+  const sessions = (state.sessions ?? []).map((s) => ({ ...s, ids: [...s.ids], baseline: [...s.baseline], touched: [...(s.touched ?? [])] }));
   const existing = sessions.find((s) => s.session === session);
   if (existing) {
     if (id && !existing.ids.includes(id)) existing.ids.push(id);
@@ -107,10 +121,37 @@ export function recordClaim(state, { session, id, baselineFiles, nowIso }) {
       session,
       ids: id ? [id] : [],
       baseline: [...new Set(baselineFiles ?? [])],
+      touched: [],
       at: nowIso,
     });
   }
   return { ttlMinutes: state.ttlMinutes ?? DEFAULT_TTL_MINUTES, sessions };
+}
+
+/**
+ * Record that `session` explicitly touched `files` (the 2-C union source, #1661). Appends de-duped paths to
+ * the session's `touched` row — a **no-op if the session is unknown** (a touch is only meaningful relative
+ * to a claimed session's baseline; recording one against a phantom session with no baseline would mark every
+ * current file "mine"). Returns a new state (pure). `nowIso` is unused today but kept in the signature so a
+ * future per-touch timestamp doesn't break callers.
+ */
+export function recordTouch(state, { session, files, nowIso: _nowIso }) {
+  const list = Array.isArray(files) ? files.filter((f) => typeof f === 'string' && f) : [];
+  const sessions = (state.sessions ?? []).map((s) => ({ ...s, ids: [...s.ids], baseline: [...s.baseline], touched: [...(s.touched ?? [])] }));
+  const existing = sessions.find((s) => s.session === session);
+  if (existing && list.length) existing.touched = [...new Set([...existing.touched, ...list])];
+  return { ttlMinutes: state.ttlMinutes ?? DEFAULT_TTL_MINUTES, sessions };
+}
+
+/** The slug of the most-recently-claimed session (newest `at`), or `null` — the hook/CLI touch-attribution signal. */
+export function mostRecentSession(state) {
+  let best = null;
+  let bestT = -Infinity;
+  for (const s of state.sessions ?? []) {
+    const t = Date.parse(s.at);
+    if (Number.isFinite(t) && t > bestT) { bestT = t; best = s.session; }
+  }
+  return best;
 }
 
 /** Look up a session's recorded baseline file set; `null` when the session is unknown. */
@@ -147,13 +188,17 @@ export function partitionById(findings, mineIds, getId = (f) => f.id) {
 }
 
 /**
- * The set of files attributable to `session`: dirty NOW (`currentFiles`) minus its claim baseline.
- * Returns `null` when the session has no recorded baseline (→ caller falls back to whole-repo strict).
+ * The set of files attributable to `session` (the 2-C union, #1661): `(currentFiles − baseline) ∪ touched`.
+ * The baseline-diff catches files this session newly dirtied; the explicit `touched` set additionally
+ * catches a file that was *already in the baseline* yet this session then edited (the #953 hole). Monotonic
+ * — it can only add to "mine", never subtract, so it never reds *less* than 2-A. Returns `null` when the
+ * session is unknown (→ caller falls back to whole-repo strict).
  */
 export function mineFiles(state, session, currentFiles) {
-  const baseline = baselineFor(state, session);
-  if (!baseline) return null;
-  const mine = new Set();
+  const s = (state.sessions ?? []).find((x) => x.session === session);
+  if (!s) return null;
+  const baseline = new Set(s.baseline);
+  const mine = new Set(s.touched ?? []); // explicit touches are always mine (incl. baseline files this session edited)
   for (const f of currentFiles) if (!baseline.has(f)) mine.add(f);
   return mine;
 }

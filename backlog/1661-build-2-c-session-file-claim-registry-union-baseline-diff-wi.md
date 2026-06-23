@@ -1,8 +1,11 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-23"
+dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: "we:scripts/readiness/claimScope.mjs"
 tags: []
 ---
 
@@ -47,3 +50,31 @@ batch sessions touch every claim/release. See #953's *Ratification* for the full
   while a baseline file with no touch stays `external`.
 - `npm run check:standards` green; the new hook adds bounded latency only (no gate behaviour change for the
   default no-flag run).
+
+## Progress (resolved 2026-06-23, batch-2026-06-23-1689-1500)
+
+Built all four parts of the plan:
+
+- **Registry surface (`we:scripts/readiness/claimScope.mjs`)** — added a per-session `touched` array
+  (parse/serialize/recordClaim preserve it), `recordTouch(state, {session, files})` (de-duped append,
+  **no-op on an unknown session** — a touch is meaningless without a baseline), and `mostRecentSession(state)`
+  (the touch-attribution signal). The header's inaccurate "NEVER a foreign red mistaken for clean" line is
+  corrected to the honest 2-C stance + the raw-shell residual.
+- **Union `mineFiles`** — now `(currentFiles − baseline) ∪ touched`. The only behavioural change, and
+  **monotonic**: it can only add to "mine", so it never reds less than 2-A, and it catches the
+  own-edit-of-a-baseline-file case 2-A missed.
+- **Two recording paths.** (1) A `PostToolUse(Edit|Write)` hook — `we:scripts/readiness/record-touch.mjs`,
+  wired in `we:.claude/settings.json` — reads the tool payload, maps the path repo-relative, and appends it
+  to the most-recent session's `touched`; **fail-silent by construction** (never breaks the edit). (2) Direct
+  CLI appends — `we:scripts/backlog.mjs` records every spliced backlog `.md` via a `recordCliTouch` helper on
+  the single `writeBacklogMd` write-point (covers claim/resolve/scaffold/settle), best-effort.
+- **Session keying** — the **most-recent claim** (`mostRecentSession`) is the chosen signal: cheapest +
+  reliable for a single active batch. Documented residual: two concurrent batches can mis-attribute a touch
+  to the other's session, which only ever *adds* a file to the wrong "mine" (an extra safe stop), never hides
+  a red. Raw `sed`/`node -e` registry mutations stay invisible to the toucher (the honest 2-A residual).
+
+**Acceptance met:** `we:scripts/__tests__/claimScope.test.mjs` grew a 2-C union block (25 tests total, all
+green) — a baseline file that is also a touch → `mine` (blocks); a baseline file with no touch → `external`;
+monotonicity; recordTouch dedup/no-op; round-trip; mostRecentSession. The hook was smoke-tested end-to-end
+(seeded session → payload → `touched` recorded; out-of-repo path + empty registry both clean no-ops).
+`check:standards` green (0 errors).

@@ -30,7 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { applyTransition, readField } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize } from './readiness/reservations.mjs';
-import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, porcelainFiles } from './readiness/claimScope.mjs';
+import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, recordTouch, mostRecentSession, porcelainFiles } from './readiness/claimScope.mjs';
 import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
 import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
 
@@ -74,6 +74,23 @@ function writeBacklogMd(abs, rel, content) {
     die(`locus-prefix: ${count} bare code-path ref(s) in ${rel} lack a <repo>: prefix (#883; e.g. "${sample}" → "we:${sample}"). Prefix them now — don't leave it for the gate.`);
   }
   writeFileSync(abs, content);
+  recordCliTouch(rel);
+}
+
+/**
+ * 2-C touch-recording (#1661): record a file this CLI just spliced against the active session's `touched`
+ * set, so `check:standards --scope` attributes a finding on a file already-dirty-at-claim but edited here as
+ * **mine** (not a foreign red). The session is the `--session` flag when present, else the most-recently
+ * claimed one (`mostRecentSession`). Best-effort — never let attribution bookkeeping fail a mutation.
+ * (`recordTouch` no-ops if the session row doesn't exist yet, e.g. the very first claim before `recordClaim`
+ * runs — there the baseline-diff already catches the newly-dirtied file.)
+ */
+function recordCliTouch(rel) {
+  try {
+    const claims = loadClaims();
+    const session = flag('session') ?? mostRecentSession(claims);
+    if (session) saveClaims(recordTouch(claims, { session, files: [rel], nowIso: new Date().toISOString() }));
+  } catch { /* best-effort — attribution is advisory, never the lock */ }
 }
 
 /**
