@@ -2,11 +2,13 @@
 kind: story
 size: 5
 parent: "081"
-status: open
+status: resolved
 blockedBy: []
 locus: frontierui
 dateOpened: "2026-06-22"
-dateStarted: "2026-06-22"
+dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: "fui:tools/maas/functionalAuthoringForm.mjs"
 tags: []
 ---
 
@@ -40,3 +42,29 @@ prioritisation escape — 2026-06-22 parked-item sweep).
 ## Blocks
 
 - #313 — MaaS: add the Frontier UI functional-component adapter as a FORMS entry.
+
+## Progress (resolved 2026-06-23, batch-2026-06-23-1689-1500)
+
+Built at the scope #1619 ratified — **wire the WE artifact + own the served-module transpile**, NOT a FUI
+functional emitter (WE's `serve()` already emits the functional source; the "build a FUI emitter" reading
+the original Scope assumed was the mis-flag #1619 corrected). Landed as
+`fui:tools/maas/functionalAuthoringForm.mjs`:
+
+- **Wire** — `readAuthorModeSource()` reads the committed WE artifact
+  `we:src/_data/authorModeSource.json` (the #954 data-emit channel) over the sibling `../webeverything`
+  read (the #1618 transport default), and `functionalSourceFor(caseId)` surfaces a case's `functional` JSX
+  form as WE emitted it. Data only — never imports WE's `serve()`/`moduleService` (the #700 boundary).
+- **Transpile** — `transpileFunctionalSource()` lowers the functional JSX to importable ESM via esbuild
+  (the same transpile seam `fui:tools/maas/produceWrapperBytes.mjs` uses), with the project's JSX factory
+  config (`jsx.createElement`/`jsx.Fragment`, per `fui:tsconfig.json`), leaving the `@frontierui/jsx-runtime`
+  import intact — render-only v1 (#1619 forced invariant; bundle/live-mount is a later slice, mirroring the
+  wrapper producer's #1085 transform → #1501 bundle path). `produceFunctionalBytes(caseId)` serves both
+  halves: importable JS bytes + the original source for display.
+- **Test** — `fui:tools/maas/__tests__/functionalAuthoringForm.test.mjs` (5 tests, all green): reads the
+  real committed artifact, surfaces the functional form, and proves the transpile (no raw JSX survives,
+  `jsx.createElement` emitted, runtime import preserved).
+
+Distinct from the consume-mode wrapper catalog (#1619 Fork 1: the authoring `functional` id is wholly
+separate from FUI's retired `functional`→react-wrapper alias, dropped next by #1681). **#313 unblocks** —
+it now wires this adapter into the MaaS demo + polyglot panel (`blockedBy: 1602`). FUI gate green
+(0 errors). The `@frontierui/jsx-runtime` runtime already existed; this is the adapter/emit-wiring layer.
