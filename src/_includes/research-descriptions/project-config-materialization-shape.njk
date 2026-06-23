@@ -1,0 +1,69 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The <a href="/backlog/911-establish-platform-decisions-statute-layer-and-codifiedin-discipline/">platform
+  statute</a> <code>config-extends-platform-default</code> ruled that each multi-strategy concern —
+  auto-define (<a href="/backlog/227-auto-define-strategy-axis/">#227</a>), JSX render-strategy
+  (<a href="/backlog/080-render-strategy-contract-decisions/">#080</a>), code-from-requirement SoT-mode
+  (<a href="/backlog/798-code-from-requirement-source-of-truth-requirement-only-codeg/">#798</a>), theme — is a
+  <strong>configurable dimension</strong>: the core tool/registry stays <strong>default-less</strong>, and the
+  value lives in a <em>project config that <strong>extends</strong> a fully-defined platform-default flavor</em>
+  (precedent mechanism: <code>CustomRegistry.extends</code>). It left one end open, which
+  <a href="/backlog/1662-unified-project-config-surface-vs-per-dimension-flavors-wher/">#1662</a> settles:
+  <em>where do those values physically materialize?</em>
+</p>
+<ul>
+  <li><strong>(a)</strong> one unified materialized project-config surface all dimensions inherit from (an
+  rc-like file/namespace);</li>
+  <li><strong>(b)</strong> per-dimension flavor configs that compose.</li>
+</ul>
+
+<h2>What the prior art shows</h2>
+<p>
+  Config systems split into two materializations. The <strong>monolithic per-section rc file</strong>
+  (TypeScript, Python, legacy ESLint) gives one <code>extends</code> chain and a single discovery point, but
+  packs every concern into one schema, one ownership boundary, and one git object. The ecosystem has been
+  <strong>migrating away from it</strong>: ESLint moved to <em>flat config</em> (an array of composable,
+  independent blocks) specifically because section-merging made resolution opaque and coupled unrelated rules;
+  Vite/Rollup are plugin <em>arrays</em>; EditorConfig, Browserslist, and Prettier are separate per-concern
+  artifacts each with its own resolution. The live trend is decoupled, composable storage with explicit
+  resolution — not a unified rc with sections.
+</p>
+
+<h2>The finding — the fork is false (storage vs discovery)</h2>
+<p>
+  A skeptic pass run during prep <strong>refuted</strong> the card's lean toward (a). The decisive reframe: the
+  a/b framing conflates two separable things.
+</p>
+<ul>
+  <li><strong>Storage</strong> — where a dimension's value and its <code>extends</code> chain live — is the
+  <strong>irreducible kernel</strong> and is identical work in both branches. WE's bias-toward-separation and
+  minimize-lock-in rules, the cited per-concern <code>CustomRegistry.extends</code> precedent, and the
+  flat-config/plugin-array trend all converge: <strong>storage must be per-dimension and decoupled</strong>. A
+  single physical file as the <em>authoritative</em> source of truth re-couples the schema evolution,
+  ownership, and release cadence of semantically unrelated dimensions (theme vs codegen-SoT vs auto-define)
+  into one god-artifact — a merge-conflict and breaking-schema blast-radius hazard, and the project-facing
+  format lock-in WE refuses.</li>
+  <li><strong>Discovery</strong> — seeing the whole project's resolved config at one point — is a
+  <strong>derived view</strong> (a resolver or manifest that <em>reads</em> the per-dimension configs). It is
+  free in either branch and must never be a second source of truth.</li>
+</ul>
+<p>
+  The composability probe, run straight, confirms it: the kernel is the per-dimension config plus its
+  independent <code>extends</code>; (a) only adds a wrapper file, (b) a manifest/resolver — so (a) does not
+  subsume (b). Only the <em>strong</em> reading of (a) — a unified file as the authoritative storage SoT — is
+  broken.
+</p>
+
+<h2>Recommended ruling (prepared, awaiting ratification)</h2>
+<p>
+  <strong>Forced invariant:</strong> per-dimension flavor configs are the <strong>source of truth</strong> —
+  each dimension stores its value and its own extends-to-platform-default chain independently (the
+  <code>CustomRegistry.extends</code> shape, generalized). <strong>Broken branch:</strong> a unified
+  project-config <em>file as authoritative SoT</em>.
+  <strong>Supported by default</strong> (not a rival fork): a unified project-config surface as a derived,
+  non-authoritative discovery view over the per-dimension configs — fine for ergonomics, never a second SoT;
+  whether/when WE ships it is build prioritization. <strong>Confidence: Med-High.</strong> Full grounding in
+  the session report <code>reports/2026-06-23-project-config-materialization-shape.md</code>.
+</p>
+{% endraw %}

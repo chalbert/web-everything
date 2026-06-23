@@ -1,0 +1,24 @@
+{
+  "id": "project-config-materialization-shape",
+  "title": "Where config-extends-platform-default values materialize — unified project-config surface vs per-dimension flavor configs (storage vs discovery)",
+  "status": "open",
+  "summary": "Prep research for decision #1662 (spun out of #798): the config-extends-platform-default statute ruled each multi-strategy concern (auto-define #227, JSX render-strategy #080, code-from-requirement SoT-mode #798, theme) a configurable dimension whose value lives in a 'project config that extends a fully-defined platform-default flavor', core staying default-less (precedent: CustomRegistry.extends). It left open WHERE those values physically live: (a) one unified rc-like project-config surface all dimensions inherit from, vs (b) per-dimension flavor configs that compose. Prior art reshaped the fork: monolithic per-section rc files (TypeScript/Python/legacy-ESLint, one extends chain, single discovery point but one schema+ownership+git-object) vs the live ecosystem migration TO composable flat/array config (ESLint flat config moved away from the rc file; Vite/Rollup are plugin arrays; EditorConfig/Browserslist/Prettier are separate per-concern artifacts) precisely because section-merging coupled unrelated concerns. A prep skeptic pass REFUTED the card's lean toward (a): the a/b framing conflates STORAGE (where a dimension's value + its extends chain live — the irreducible kernel, identical work either way) with DISCOVERY (seeing the whole resolved project config at one point — a derived view, free in either branch). The composability probe run straight shows the kernel is the per-dimension config; (a) only adds a wrapper file, (b) a manifest/resolver — so (a) does not subsume (b). What is broken is only the strong reading of (a): a unified file as the AUTHORITATIVE storage SoT — which re-couples schema evolution, ownership, and release cadence of semantically unrelated dimensions (theme vs codegen-SoT vs auto-define) into one god-artifact, the merge-conflict / breaking-schema-blast-radius hazard and the project-facing-format lock-in WE refuses. Reframed ruling: FORCED INVARIANT — per-dimension flavor configs are the source of truth (each its own extends-to-platform-default chain, generalizing CustomRegistry.extends); the broken branch is a unified file as authoritative SoT. SUPPORTED BY DEFAULT (not a rival fork) — a unified project-config surface as a derived, non-authoritative discovery view/aggregator over the per-dimension configs; whether/when WE ships it is build prioritization, not a design fork. Confidence Med-High. Full grounding in reports/2026-06-23-project-config-materialization-shape.md.",
+  "dateOpened": "2026-06-23",
+  "lastReviewed": "2026-06-23",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "config",
+    "platform-default",
+    "flavors",
+    "project-config",
+    "config-extends-platform-default",
+    "separation-of-concerns",
+    "lock-in",
+    "eslint-flat-config",
+    "tsconfig",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}
