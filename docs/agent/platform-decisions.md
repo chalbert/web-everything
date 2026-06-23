@@ -932,7 +932,20 @@ Defaults live in a **project config that *extends* a fully-defined platform defa
 tool/registry itself stays **default-less** (core `CustomRegistry` `extends`; the JSX render-strategy axis
 is the precedent).
 
-**Lineage:** #227 (auto-define strategy axis) · #080 (render-strategy precedent). Process forms in [conventions.md](conventions.md) / [architecture.md](architecture.md).
+**Where those values materialize (#1662).** Storage is **per-dimension**: each dimension stores its value +
+its own `extends`-to-flavor chain independently (the `CustomRegistry.extends` shape generalized — an
+*open-set* dimension *is* a `CustomRegistry` subclass; a *scalar/mode* dimension realizes the same chain as a
+plain config object). **File-count ≠ schema-coupling**, so the project **author surface defaults to one keyed
+file** (`webeverything.config.{ts,js,json}` — one key per dimension, any key *extractable* to its own file;
+`most-flexible-default`). A **unified config file as the authoritative SoT is rejected** (god-schema coupling
++ project-facing-format lock-in); a unified surface is supported **only as a derived, non-authoritative
+discovery view** (a resolver that *reads* the per-dimension configs). `extends` is an ordered **nearest-wins
+array** (lazy lookup, *not* a destructive merge); the same chain nests platform→project→app→fragment, so
+settings scope to any subtree (runtime DI) and unregistered strategies tree-shake out. The discovery-view and
+config-loader *builds* are separately prioritized, not triggered by this ruling.
+
+**Lineage:** #227 (auto-define strategy axis) · #080 (render-strategy precedent) · #1662 (materialization:
+per-dimension storage + one-keyed-file author surface + discovery-view). Process forms in [conventions.md](conventions.md) / [architecture.md](architecture.md).
 
 ### Compose an existing intent — don't duplicate an owned model {#compose-intent-dont-duplicate}
 
@@ -1238,6 +1251,29 @@ categorical-taxonomy discussion). Realizing build: #1683 (injector resolves the 
 migrate the hand-authored `we:src/css/style.css` `:root` vars). Consumer: #1670 (categorical taxonomy).
 Refines the `design-tokens` protocol; composes [tone-meta-contract](#tone-meta-contract) (the `--tone-*`
 palette is one such emitted token family) and [native-first-baseline](#native-first-baseline).
+
+### Categorical vocabularies are a closed-set token-family meta-schema; behaviour-owned axes (status) are excluded {#categorical-taxonomy}
+
+An app's **categorical vocabularies** (`kind`/`tier`/`size` — closed lists reused across many surfaces:
+badge, tag, numbered circle, link-pill, filter chip, border) are **one JS-first token family** — each
+`(set, value)` row carries `{ token-ref, icon, shape }`, realized as `--cat-<set>-<value>-*` on the
+[tokens-js-first](#tokens-js-first) runtime and synced to CSS. **There is no new "taxonomy provider" or
+runtime registry** — the contribution is the **meta-schema + closed-set discipline** (a value resolves to a
+token, never an author-supplied hex; the set vocabulary is *open* — an app adds `size` without touching
+components), layered on the existing injector. Surfaces consume by `(set, value)`, blind to the rest; this is
+what lets a category be **defined once** and read identically everywhere instead of re-hardcoded per macro.
+**Membership test — what is a categorical set:** a *pure-presentation* axis with **no behavioural owner**.
+**`status` fails it and is excluded:** the Web Lifecycle protocol owns which status values exist + their
+transitions, and `lifecycle.json`'s `realizesIntent: status-indicator` already assigns status *presentation*
+to the **Status Indicator intent** — so status lives end-to-end in lifecycle + Status Indicator, and
+cross-surface reuse comes from **sharing that component**, not smuggling a status colour-row into the
+categorical taxonomy (which would fork lifecycle authority + recreate a two-place join). Same boundary as
+[tone-meta-contract](#tone-meta-contract)'s palette-membership test (`progress`/lifecycle ⇒ intent-local, not
+the shared palette), applied to the categorical layer.
+
+**Lineage:** #1670 (ratified 2026-06-23 — Fork 1 dissolved into [tokens-js-first](#tokens-js-first); Fork 2:
+status excluded, lifecycle/Status-Indicator-owned). Consumers: #1669 (`we-tag`), #1598/#1208 (taxonomy-surface
+migration). Composes [tokens-js-first](#tokens-js-first) and [tone-meta-contract](#tone-meta-contract).
 
 ### Curated-corpus credibility weighting: two-stage admission⟂weight, GRADE-shaped, config-extends-default {#credibility-weighting}
 

@@ -1,8 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-23"
 dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#categorical-taxonomy"
 preparedDate: "2026-06-23"
 relatedReport: reports/2026-06-23-categorical-taxonomy-provider.md
 tags: [tag-intent, design-tokens, provider, taxonomy, cross-surface]
@@ -21,8 +24,11 @@ added the **mechanism** fork (the "one provider" instinct is right, but no syste
 `(set,value)` registry → make it a declarative token-resolving layer) and refined the **status-home** fork
 (not binary — lifecycle owns meaning, the provider holds presentation as a segregated rule-bearing set). The
 core contribution (provider owns the value→token/icon/shape map) is the documented industry whitespace.
-Each `## Fork N` carries a bold default already attacked by a skeptic sub-agent (`Skeptic:` line). Still
-**open** — this is prepared for ratification, not a ruling.
+Each `## Fork N` carries a bold default already attacked by a skeptic sub-agent (`Skeptic:` line).
+
+**RATIFIED 2026-06-23.** Fork 1 dissolved into #1682 (JS-first token SoT); Fork 2 ruled **(2c)** — `status`
+is excluded from the taxonomy, owned end-to-end by lifecycle + the Status Indicator intent. Codified at
+`we:docs/agent/platform-decisions.md#categorical-taxonomy`. Consumers: #1669, #1598, #1208.
 
 > **Update 2026-06-23 (discussion) — Fork 1 DISSOLVED; this item now `blockedBy` #1682.** Discussing Fork 1's
 > "declarative token-resolving layer vs runtime DI registry" surfaced that the real question is *what holds and
