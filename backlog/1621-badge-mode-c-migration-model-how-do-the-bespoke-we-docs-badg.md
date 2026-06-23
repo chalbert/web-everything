@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "866"
-status: active
+status: resolved
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#we-fui-embed-boundary"
 preparedDate: "2026-06-22"
 relatedReport: reports/2026-06-22-badge-mode-c-migration-model.md
 tags: [dogfood, fui, badge, filter-chip, site-rework]
@@ -289,12 +292,33 @@ Both are acceptance-criteria for the spin-off builds, not blockers on the decisi
   before assuming a flat mount — found the `className` seam + the transient element already shipped) and
   `feedback_misflagged_batchable_fix_real_state`.
 
+## Ruling (ratified 2026-06-23)
+
+Ratified the **prepared** parts; the taxonomy half is deferred to #1670 (filed during review).
+
+- **Fork 2 — mount model: (2b).** Register `<we-badge>` / `<we-filter-chip>` as a transient custom element
+  once; emit server-side in the njk macros; each upgrades in place (light-DOM, no shadow root); a
+  `we-badge{}` / `we-tag{}` CSS baseline kills the upgrade flash (the #865 SSR-baseline pattern). Per-badge
+  mode-C shadow mounts (2a) rejected — forced invariant. **Re-frames #1598's "mode-C inline SDK" title →
+  transient-CE dogfood.**
+- **Delivery sub-fork: (i) now → (iii) end-state.** Runtime cross-origin import from the FUI origin (per the
+  #865 chrome precedent + #1499) until `@frontierui/blocks` publishes (#700/#872), then a typed import.
+  Vendoring FUI into the WE build (ii) rejected.
+- **Fork 1 — status half:** lifecycle surfaces (`statusBadge`, `epicStatusBadge`, `reasonPill`) → `<we-badge>`
+  (Status Indicator). The original docs-modifier (1b) is **retired**.
+- **Fork 1 — taxonomy half:** **deferred to #1670** (categorical taxonomy provider). Taxonomy surfaces
+  (`kindBadge`, `tierBadge`, `tagsRow`, `sizeBadge`, `metaBadge`) consume that provider via `(set, value)`;
+  out of scope for this ruling.
+- **Link-pills** (`blockerChip`, `childCircle`) stay native `<a>`.
+- **Downstream on resolve:** #1598 / #1208 status-surface migration is buildable now (repoint #1598 title →
+  transient-CE); their taxonomy-surface migration is `blockedBy` #1669 (→ #1670). The build-time
+  `renderBadge()`/`renderTag()` SSR enhancement is filed separately, gated on #700.
+
 ## Progress
 
-- **Status:** active — **awaiting ratification.** Both forks presented + code examples added; Fork 1
-  reframed to map-by-intent after reviewing the `tag` intent.
-- **Done:** prep committed; grounded code examples added; Fork 1 rewritten (map-by-intent, supersedes the
-  retired docs-modifier (1b)); spun off #1669 (FUI `we-tag` block) + #1668 (grounding-gate hardening);
-  added the `[[feedback_examples_go_in_the_story]]` + standard-layer-grounding memories.
-- **Next:** on explicit ratify go → `resolve` #1621 (`graduatedTo` none — it's a ruling); confirm the
-  status/taxonomy downstream split on #1598/#1208 and wire the #1669 edge onto their taxonomy half.
+- **Status:** resolved (ratified 2026-06-23) — `graduatedTo: none` (it's a ruling, not an entity).
+- **Done:** prep committed; grounded code examples added; Fork 1 reframed map-by-intent then taxonomy half
+  generalised to #1670; spun off #1669 (FUI `we-tag` block), #1668 (grounding-gate hardening), #1670
+  (taxonomy provider decision); status/Fork-2/delivery ratified.
+- **Follow-ups:** #1670 to be prepared then ratified; #1598/#1208 repointed (status buildable, taxonomy
+  blockedBy #1669); `renderBadge()` SSR enhancement filed gated on #700.

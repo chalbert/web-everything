@@ -3,12 +3,14 @@ kind: story
 size: 8
 parent: "777"
 status: open
-blockedBy: ["1621"]
+blockedBy: ["1669"]
 dateOpened: "2026-06-20"
 tags: [dogfood, fui, badge, site-rework]
 ---
 
-# Dogfood the backlog badges/chips onto FUI badge + filter-chip (Mode-C)
+# Dogfood the backlog badges/chips onto FUI badge + filter-chip (transient-CE)
+
+> **Repointed by #1621 (ratified 2026-06-23).** Mount model = transient custom element + runtime cross-origin import + SSR baseline, **not** Mode-C per-instance (we:docs/agent/platform-decisions.md#we-fui-embed-boundary rule 7). Split by intent: **status surfaces → `<we-badge>` / `<we-filter-chip>` buildable now**; **taxonomy surfaces (kind/tier/tags/size/meta) → `blockedBy` #1669** (the FUI `we-tag` block consuming the #1670 taxonomy provider). The status half doesn't need #1669 and could `/split` out. Link-pills (`blockerChip`/`childCircle`) stay native `<a>`. Sized 8 — a `/split` is warranted now that the status/taxonomy seam is explicit.
 
 The concrete #777 slice for the badge surface the #778 inventory mapped: migrate the /backlog/ tile, Prioritisation table, and detail-page badges/chips from hand-rolled njk to the FUI badge + filter-chip components, rendered in-document via Mode-C. Groundwork is done — the badge vocabulary + macros are now a single shared seam (we:src/_includes/backlog-badges.njk + we:src/_data/backlogMeta.js, the #778 "one seam the migration consumes"), Mode-C in-document render shipped (#786), and the status-indicator/badge intent is ratified (#354).
 

@@ -166,8 +166,20 @@ display (its own site + demos, FUI branding).
    build-time `import '@frontierui'` into its build; that import would invert the direction (#700/#239)
    and is the only thing that actually violates the boundary. So "does running a WE runtime in-document
    cross the boundary?" is answered *no* by construction — don't re-open it.
+7. **Mount-model selection (#1621):** within a consumer page (rule 6), pick the mount by the component's
+   nature, not one-size-fits-all. **Heavy / interactive / trusted** embeds → **mode-C** (one shadow root +
+   one dynamic `import()` per mount point, `fui:embed/in-document.ts`) — e.g. the #865 chrome shell.
+   **Many-small, behavior-free, server-rendered** components (a board of hundreds of pills) → the FUI
+   **transient custom element** (`registerBadge()`-style, §7.7 of block-standard.md): register the element
+   **once** via a runtime cross-origin import from the FUI origin, emit `<we-*>` server-side, let each
+   upgrade in place (light-DOM, no shadow root, no per-instance import); inject the block's exported CSS
+   (`BADGE_CSS`-style) globally and ship a `we-*{}` SSR baseline to kill the upgrade flash (the #865
+   baseline pattern). Per-instance mode-C for many-small pills is **rejected** (N shadow roots + N imports
+   per page). Cross-surface categorical styling resolves through design tokens + the taxonomy provider
+   (#1670), never per-component palettes.
 
 **Lineage:** #604 #701 #707 (iframe boundary; "WE renders real FUI blocks" is mis-framed) · #700 ·
+#1621 (rule 7 — mount-model selection: transient CE + cross-origin import for many-small server-rendered, mode-C for heavy/interactive) ·
 #1246 (withdraws the rule-4 reference-vs-impl partition + reverses #697: no block runtime stays in WE) ·
 #1282 (general rule — WE holds zero implementation; demos are a website concern that surfaces FUI) ·
 #705 · #732 (escape SDK) · #765 (mode-C relaxation) · #788 (seed transport) · #791 (reference-vs-impl
