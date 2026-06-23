@@ -4,7 +4,7 @@ locus: plateau-app
 size: 5
 status: parked
 parkedReason: maturityGated
-maturityTrigger: "configuratorBeyondPOC"
+maturityTrigger: "adoptionSignal: Technical Configurator matured past POC"
 dateOpened: "2026-06-11"
 tags: [dev-experience, devtools, validation, adapters, normalization, technical-configurator, dev-surface, no-lock-in]
 parent: "236"

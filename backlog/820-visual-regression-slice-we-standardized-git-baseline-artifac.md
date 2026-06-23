@@ -4,7 +4,7 @@ size: 8
 parent: "800"
 status: parked
 parkedReason: maturityGated
-maturityTrigger: "ownedReviewSurfaceWarranted"
+maturityTrigger: "adoptionSignal: owned review surface warranted (a11y #770 / content #796 gate needs it)"
 dateOpened: "2026-06-17"
 tags: []
 ---

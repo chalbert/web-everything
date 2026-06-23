@@ -3,7 +3,7 @@ kind: story
 size: 5
 status: parked
 parkedReason: maturityGated
-maturityTrigger: "crossCuttingConsumerExists"
+maturityTrigger: "externalConsumers>=1"
 dateOpened: "2026-06-21"
 locus: frontierui
 relatedProject: webrealtime
