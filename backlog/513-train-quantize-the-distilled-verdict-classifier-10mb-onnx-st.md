@@ -1,9 +1,13 @@
 ---
-kind: decision
+kind: story
+size: 5
 parent: "490"
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "adoptionSignal: we:design-refs/training-manifest.json shows >=16 labeled captures in EACH quarantine class (marketing/error/blank/non-app) plus a non-empty labeled holdout (>=96 labeled total as a derived sanity check)"
 blockedBy: []
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-23"
 preparedDate: "2026-06-22"
 relatedReport: reports/2026-06-22-verdict-classifier-training-readiness-gate.md
 tags: []
@@ -16,65 +20,77 @@ The design is fully ratified upstream: all five #488 design forks are codified i
 MobileNet/ViT student via task-specific KD, ONNX Runtime Web + WebGPU runtime, recipe in #511, the
 ≥0.95 verdict-agreement / ≥0.98 quarantine-recall graduation floors in #512). The student-architecture
 (`MobileNet` vs `ViT`) and KD-method (`VL2Lite`/`PAND`/`VLM-KD`) choices are empirical model-selection the
-#512 benchmark auto-decides — not a human-judgment fork. So this item is **not** a design decision; it is
-the operational **training-readiness gate**: a single go/no-go on whether the design-ref corpus is large +
-balanced enough to distil a passing student yet. Grounded in the
-[`/research/verdict-classifier-training-readiness-gate/`](/research/verdict-classifier-training-readiness-gate/)
-topic, the forced ruling today is **WAIT** — the corpus holds zero labeled captures, so the proceed-now
-branch cannot clear the floors and there is nothing to ratify until the un-block trigger fires.
+#512 benchmark auto-decides — not a human-judgment fork. So this is slice C of #490: the **mechanical
+training build**, gated only by corpus maturity.
 
-## Axis-framing — what's settled, and the one operational call
+**Training-readiness ruling (2026-06-23).** This was briefly framed as a held `decision` (proceed-to-train
+vs wait). That framing was wrong: the proceed branch is *broken* below the corpus floor, not chosen — there
+is no human fork. The genuine call (the readiness threshold) is now **ratified** and encoded as the
+`maturityTrigger` below, and the item is remodeled from a held decision into a **`maturityGated` story** (per
+#1620 — building now would yield a worse artifact: a student tuned against zero real labels). This drops it
+out of both the decision lane and the Tier-A ready pool, and the gate-typed trigger auto-surfaces it when the
+corpus fills. The earlier "hold it open as a decision" framing posed a false dichotomy (open-decision vs
+ready-story) and missed the codified third option; `maturityGated` is the honest home.
 
-The build is mechanical: run the codified #511 recipe (`we:design-refs/distillation-recipe.json` v2,
-`we:scripts/design-refs.mjs export`) over the labeled corpus, quantize to ≤10MB, register the ONNX/WebGPU
-provider behind the `we:scripts/design-refs/vision.mjs:149` `registerVisionProvider` seam, and gate on the
-#512 benchmark (`we:scripts/design-refs/benchmark.mjs`, floors ≥0.95 agreement / ≥0.98 quarantine-recall).
-The single axis is **operational corpus volume**: the label IS each frame's `visionVerdict`, written only
-when a real vision provider runs via `we:scripts/design-refs.mjs collect`/`harvest` (opt-in
-`DESIGN_REFS_VISION_PROVIDER`). Today the corpus is unlabeled, so the floors are not even *measurable*:
+## The mechanical build (unparks when the corpus is ready)
+
+Run the codified #511 recipe (`we:design-refs/distillation-recipe.json`, `we:scripts/design-refs.mjs
+export`) over the labeled corpus, quantize to ≤10MB, register the ONNX/WebGPU provider behind the
+`we:scripts/design-refs/vision.mjs` `registerVisionProvider` seam, and gate on the #512 benchmark
+(`we:scripts/design-refs/benchmark.mjs`, floors ≥0.95 agreement / ≥0.98 quarantine-recall). The
+architecture/KD-method are whatever clears the floors under the ≤10MB budget — the benchmark decides, no
+human call.
+
+## Corpus state — why it's parked (grounded 2026-06-23)
+
+The label IS each frame's `visionVerdict`, written only when a real vision provider runs via
+`we:scripts/design-refs.mjs` `collect`/`harvest` (opt-in `DESIGN_REFS_VISION_PROVIDER`). Today the corpus is
+unlabeled, so the floors are not even *measurable*:
 
 - `we:design-refs/items/` — **16** captures; `we:design-refs/quarantine/` — **0** captures.
 - `we:design-refs/training-manifest.json` — `counts.total: 0`, `counts.unlabeled: 16`, `train: 0`,
-  `holdout: 0`, `byVerdict: {}` — **every shot ungated; zero labeled training examples and zero labeled
-  holdout.**
+  `holdout: 0`, `byVerdict: {}` — every shot ungated; zero labeled training examples and zero labeled
+  holdout. (Manifest/recipe are still `version: 1`.)
 
-KD prior art grounds the threshold: task-specific KD into lightweight students (the VL2Lite/VLM-KD/DHO
-methods #490 names) reports its low-data regime as K-shot × C-class, N = K×C, with **16-shot** the empirical
-low-data knee. For the 6-verdict taxonomy that floors a usable set at **N ≈ 16×6 ≈ 96 labeled captures**,
-balanced ~16 per verdict — and the **binding** constraint is the rare quarantine tail under the 0.98 recall
-floor.
+## The ratified readiness threshold
 
-## Recommended path at a glance
+KD prior art grounds it: task-specific KD into lightweight students reports its low-data regime as
+K-shot × C-class (N = K×C), with **16-shot** the empirical low-data knee. For the 6-verdict taxonomy that
+gives **N ≈ 16×6 ≈ 96 labeled captures**, ~16 per verdict.
 
-| Branch | Recommendation | Confidence |
-| --- | --- | --- |
-| Proceed-to-train now vs WAIT-for-corpus | **WAIT** — proceed-now is broken below the corpus floor (0 labeled captures cannot clear the #512 floors); not a fork, a forced invariant | High |
+**Ratified as a trigger to *attempt* training — not a guarantee of passing.** Two honesty caveats settled
+in the 2026-06-23 discussion:
 
-**Ratify (forced invariant):** WAIT — the proceed-now branch is broken below the corpus threshold; distilling
-from 0 labeled captures cannot clear the #512 floors, so there is nothing to ratify yet.
+1. The **96-total is the weaker framing** (it assumes a balance the data won't have — `app` is common,
+   quarantine classes rare). The **load-bearing constraint is per-class: ≥16 in EACH quarantine class**
+   (marketing/error/blank/non-app). 96 total is a derived sanity check, not the gate.
+2. Even ≥16/class is **marginal for the 0.98 quarantine-recall target** — a 0.15 holdout leaves only ~2–3
+   tail positives per class to measure recall on, so one miss swings the measured rate wildly. So the
+   threshold means "enough to *start trying*"; the corpus may need to grow well past 96 before the
+   quarantine tail actually clears 0.98. **The #512 benchmark is the real arbiter.**
 
-**Un-block trigger (grounded, numeric).** The proceed branch goes live once
-`we:scripts/design-refs.mjs collect`/`harvest` has run a real vision provider so the manifest reports:
-(1) **≥~96 labeled captures total** (the N = 16×6 low-data floor), (2) **≥16 labeled examples in EACH of the
-four quarantine classes** (marketing/error/blank/non-app — the binding 0.98-recall constraint, not the
-common `app` class), and (3) a **non-empty labeled holdout split** (`holdoutFraction 0.15`). Then the
-mechanical #511 recipe runs and the #512 benchmark decides the student; retype to a `story` and resolve by
-building.
+**Skeptic (survives):** could a smaller corpus work? For the easy `app` ↔ `non-app` split, plausibly — but
+the real bar is 0.98 recall on the rare tail, and a sub-16-per-quarantine-class corpus can't reliably
+*estimate*, let alone hit, 0.98. Lowering the floor silently takes the worse default the 0.98 gate exists to
+prevent.
 
-**Skeptic:** *Is the threshold right — could a smaller corpus work?* For the easy `app` ↔ `non-app` split,
-plausibly — but the real bar is **0.98 quarantine-recall on the rare tail**, and a sub-16-per-quarantine-class
-corpus cannot reliably clear a 0.98 recall floor (too few tail positives to estimate, let alone hit, 0.98).
-Lowering the threshold silently takes the worse default the 0.98 floor exists to prevent (junk admitted into
-the corpus). **SURVIVES.**
+## Unpark mechanism
+
+The `adoptionSignal` is **observed, not polled** — nothing auto-flips it. But the condition is a one-command
+check against a file: read `we:design-refs/training-manifest.json` (`counts.byVerdict`, `holdout`). What
+moves the needle is separate work — `we:scripts/design-refs.mjs` `collect`/`harvest` runs with a real vision
+provider accumulating labels over time. When the manifest shows ≥16 per quarantine class + a non-empty
+holdout, flip `status: parked → open` and strip `parkedReason`/`maturityTrigger`; it's already a story, so it
+just becomes a normal ready build and the #512 benchmark arbitrates the student. (A future card could teach
+`check:readiness` to auto-surface maturityGated items whose `adoptionSignal` names a manifest counter — out
+of scope here.)
 
 ## Context
 
 - **Lineage / sequencing.** Slice C of epic
-  [#490](/backlog/490-build-the-on-device-verdict-classifier-codified-distillation/). Its DAG predecessors
-  are resolved: #511 (recipe + export) and #512 (benchmark + finalized 0.98 floor) build against the corpus
-  *format* and need no real data; this slice needs accumulated *data*. It stays an **open decision** (the
-  honest held state; soft parks retired per #1392/#1620) rather than a ready story, so the resolved
-  #511/#512 edges don't falsely surface it as Tier-A build work.
+  [#490](/backlog/490-build-the-on-device-verdict-classifier-codified-distillation/). DAG predecessors are
+  resolved: #511 (recipe + export) and #512 (benchmark + finalized 0.98 floor) build against the corpus
+  *format* and need no real data; this slice needs accumulated *data*.
 - **No-leakage boundary.** The on-device provider self-registers behind the same vendor-free seam as the
   hosted provider ([no-leakage-client](docs/agent/platform-decisions.md#no-leakage-client), #475); the
   teacher identity lives in each frame's `visionVerdict.provider`, never in the recipe.
