@@ -1,0 +1,136 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    The <a href="/backlog/1684-scaffold-the-webrouting-standard-route-format-profile-url-as/">webrouting</a>
+    standard's center of gravity is the <strong>URL as a state store</strong> many stateful components read
+    and write — a data-grid's filters / sort / page, a tab selection, a wizard step, a disclosure, pagination.
+    This decision (<a href="/backlog/1686-webrouting-url-as-state-seam-one-shared-serialize-sync-provi/">#1686</a>)
+    settles the <strong>seam</strong> that does it. Today there is <strong>no shared seam</strong>: the only URL
+    sync in the tree is pagination's ad-hoc <code>urlSync: 'none' | 'query-param'</code> option
+    (<code>blocks/renderers/pagination/PaginationBehavior.ts:45</code>), which invented its own
+    <code>?page=n</code> encoding via the History API and does ad-hoc <code>Number(raw)</code> coercion
+    (<code>PaginationBehavior.ts:87</code>) — exactly the per-component drift a standard must replace.
+</p>
+
+<h2>Settled invariants (ratify, not forks)</h2>
+<ol>
+    <li><strong>Never force.</strong> Whether a slice is URL-synced is a <strong>per-slice opt-in</strong> with a
+        permissive <em>non-URL</em> default (most-flexible-default rule). A grid <em>can</em> put filters in the
+        URL; it is never made to.</li>
+    <li><strong>Reuse the <code>url | session | memory</code> vocabulary</strong> from the navigation intent
+        (<code>src/_data/intents/navigation.json</code>) — already declared by <code>tabs</code>
+        (<code>persistence: memory</code>) and exercised by <code>stepper</code> (<code>session</code>). Do not
+        reinvent the persistence enum.</li>
+    <li><strong>URL-as-state is webrouting's facet, not a webstates storage backend.</strong> The
+        <code>storage.json</code> <code>CustomStorageStrategy</code> seam is scoped <em>explicitly</em> to
+        &ldquo;durable structured-record stores ONLY&rdquo; (IndexedDB / localStorage) and carves out non-durable
+        facets to other owners; the <code>persistence</code> axis lives in <strong>navigation</strong> (a routing
+        concern). So the shareable / navigable / history-tied URL is routing's by the tree's own carve-outs.</li>
+</ol>
+
+<h2>Fork 1 — the seam shape</h2>
+<table>
+    <thead>
+        <tr><th>Option</th><th>What it means</th><th>Verdict</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>(c) per-component declaration + a shared codec + optional coordinator</strong>
+                <em>(recommended)</em></td>
+            <td>Components declare their syncable slices <strong>router-agnostically</strong> (works with no router
+                mounted, like pagination today) using a <strong>shared per-slice codec</strong> (Fork 2) on
+                <em>both</em> read and write paths. Each component <strong>coalesces its own slices into one write
+                per microtask</strong>; an <strong>optional coordinator</strong> additionally batches
+                <em>cross-component</em> concurrent writes into one history entry (the nuqs batching model).</td>
+            <td>Best — decoupled + works without a router, yet avoids history-spam: intra-component self-batching
+                always, cross-component batching when a coordinator is present.</td>
+        </tr>
+        <tr>
+            <td>(a) central stateful provider</td>
+            <td>One router-coupled provider every stateful block consumes; it owns all encode/decode + history
+                policy.</td>
+            <td>Rejected — couples every stateful block to a mounted router; breaks a standalone grid on a page
+                with no <code>&lt;we-route-view&gt;</code> (the pagination precedent runs router-free).</td>
+        </tr>
+        <tr>
+            <td>(b) pure per-component (shared codec only, no coordinator)</td>
+            <td>Each component owns read + write with only a shared codec helper; no batching layer.</td>
+            <td>Rejected — re-creates cross-component history-spam (each slice pushes its own entry) and gives up
+                the one-history-entry coordination the multi-slice case needs.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>Fork 2 — the param codec</h2>
+<table>
+    <thead>
+        <tr><th>Option</th><th>What it means</th><th>Verdict</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>(b) typed per-slice codec</strong> <em>(recommended)</em></td>
+            <td>A declared serialize / parse + coercion contract per slice (number / boolean / enum / date / array),
+                with a raw-string escape hatch. A <strong>strategy lock</strong> like
+                <code>CustomStorageStrategy</code> / <code>CustomChangeStrategy</code> — Zod / nuqs plug in behind
+                it, WE does not rebuild them.</td>
+            <td>Best — kills the ad-hoc <code>Number(raw)</code> coercion already in pagination; matches the
+                industry consensus (nuqs parsers, TanStack <code>validateSearch</code>).</td>
+        </tr>
+        <tr>
+            <td>(a) raw URLSearchParams strings only</td>
+            <td>The platform primitive; every component coerces + validates itself.</td>
+            <td>Rejected — loses types, can't cleanly express arrays / nested data, and forces the per-component
+                coercion drift already visible in pagination.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>Contract clauses (skeptic-surfaced — spell out at build)</h2>
+<ul>
+    <li><strong>Namespaced query keys</strong> — a collision arbiter so two components can't both claim
+        <code>?page</code>; direct-write has no central arbiter otherwise.</li>
+    <li><strong>popstate / navigate is the read source of truth</strong> — back / forward restores true state by
+        re-reading the URL, never a stale local cache.</li>
+    <li><strong>Pure codec + History-presence-guarded writes</strong> — codec is a pure string↔value function
+        (SSR / no-DOM safe); writes guard on <code>History</code> presence, as pagination already does.</li>
+</ul>
+
+<h2>Prior art — search params are state</h2>
+<table>
+    <thead>
+        <tr><th>Library</th><th>Typing</th><th>Coordination</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>nuqs</strong></td>
+            <td>Built-in typed parsers + serializers ("useState in the URL").</td>
+            <td><code>useQueryStates</code> batches multiple keys → one flushed history write; replace vs push.</td>
+        </tr>
+        <tr>
+            <td><strong>TanStack Router</strong></td>
+            <td>"Search params ARE state"; <code>validateSearch</code> schema (Zod); JSON beyond URLSearchParams.</td>
+            <td>Fine-grained: a component re-renders only when its specific param changes.</td>
+        </tr>
+        <tr>
+            <td><strong>React Router / Vue Router</strong></td>
+            <td>Raw <code>useSearchParams</code> / <code>route.query</code> — strings only (the baseline).</td>
+            <td>None typed; manual.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>Sources</h2>
+<ul>
+    <li><a href="https://nuqs.dev/">nuqs — type-safe search-params state manager</a> · <a href="https://nuqs.dev/docs/batching">batching (useQueryStates)</a></li>
+    <li><a href="https://tanstack.com/blog/search-params-are-state">TanStack — Search Params Are State</a> · <a href="https://tanstack.com/router/latest/docs/how-to/validate-search-params">validate search params with schemas</a></li>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams">MDN — URLSearchParams (the raw baseline)</a> · <a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API">Navigation API</a></li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+    <li>Decision: <a href="/backlog/1686-webrouting-url-as-state-seam-one-shared-serialize-sync-provi/">#1686 — URL-as-state seam</a> (this prep).</li>
+    <li>Parent epic: <a href="/backlog/1684-scaffold-the-webrouting-standard-route-format-profile-url-as/">#1684 — scaffold the webrouting standard</a>.</li>
+    <li>Sibling: <a href="/backlog/1685-webrouting-route-format-source-of-truth-declarative-dom-temp/">#1685 — route-format source-of-truth</a> (the canonical route table this reads).</li>
+    <li>Ad-hoc precedent: <code>blocks/renderers/pagination/PaginationBehavior.ts:45</code> (<code>urlSync</code>); the persistence vocabulary <a href="/intents/navigation/">navigation intent</a>.</li>
+</ul>
+{% endraw %}

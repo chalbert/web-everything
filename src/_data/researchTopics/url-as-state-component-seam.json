@@ -1,0 +1,26 @@
+{
+  "id": "url-as-state-component-seam",
+  "title": "URL-as-State: How Stateful Components Sync Slices To and From the URL",
+  "status": "open",
+  "summary": "The webrouting standard's center of gravity (#1684) is the URL as a state store many stateful components read and write — a data-grid's filters/sort/page, a tab selection, a wizard step, a disclosure, pagination. This decision (#1686) settles the seam that does it. Real-tree state: NO shared URL-state seam exists; the only URL sync is pagination's ad-hoc urlSync: 'none'|'query-param' option (blocks/renderers/pagination/PaginationBehavior.ts:45) which invented its own ?page=n encoding via the History API and does ad-hoc Number(raw) coercion (PaginationBehavior.ts:87) — exactly the per-component drift a standard must fix. The navigation intent already owns the persistence axis (url|session|memory, src/_data/intents/navigation.json); tabs declare persistence: memory, stepper exercises session. Three settled invariants ground the call: (1) never force — whether a slice is URL-synced is a per-slice opt-in with a permissive non-URL default (most-flexible-default rule); (2) reuse the url|session|memory vocabulary rather than reinvent; (3) URL-as-state is webrouting's facet, NOT a webstates storage backend — storage.json's CustomStorageStrategy seam is scoped EXPLICITLY to durable structured-record stores only (IndexedDB/localStorage) and carves out non-durable facets, and the persistence axis lives in navigation (a routing concern), so the shareable/navigable/history-tied URL is routing's by the tree's own carve-outs. Two forks remain. Fork 1 (seam shape): a central router-coupled provider vs pure per-component vs per-component declaration + a shared per-slice codec used by both paths, with intra-component microtask coalescing and an OPTIONAL coordinator that batches cross-component concurrent writes into one history entry — recommended, matching nuqs's batching model while staying router-agnostic like pagination today. Fork 2 (param codec): raw URLSearchParams strings vs a typed per-slice serialize/parse + coercion contract (a strategy lock like CustomStorageStrategy that lets Zod/nuqs plug in) — recommended typed, since raw strings lose types and force the ad-hoc coercion already in pagination. Prior art: nuqs (type-safe parsers/serializers, useQueryStates batching, history replace/push), TanStack Router (search params ARE state, validateSearch schema validation, JSON beyond URLSearchParams), React Router useSearchParams and Vue Router query (raw strings — the baseline). Contract clauses the skeptic surfaced: namespaced query keys (collision arbiter), popstate/navigate as the read source of truth (back/forward restores true state, not a stale local cache), and a pure codec with History-presence-guarded writes (SSR/no-DOM).",
+  "dateOpened": "2026-06-23",
+  "tags": [
+    "webrouting",
+    "routing",
+    "url-state",
+    "persistence",
+    "search-params",
+    "stateful-components",
+    "deep-linking",
+    "prior-art",
+    "vocabulary"
+  ],
+  "relatedBlocks": [
+    "router",
+    "pagination",
+    "tabs",
+    "stepper"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webstates"
+}
