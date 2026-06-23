@@ -1,0 +1,23 @@
+{
+  "id": "route-table-authoring-source-of-truth",
+  "title": "Route-Table Source-of-Truth: Declarative-DOM Templates vs a Serializable Map",
+  "status": "open",
+  "summary": "The webrouting standard (#1684) needs one canonical form for an app's route table, because more than one consumer must read it: the runtime router, plus non-DOM consumers — a sitemap deriver (#1688), build-time prerender, and config tooling. Today there is no data form at all: routes are authored purely as declarative DOM (<we-route-view> reads child <template route=\"/users/:id\"> elements), parsed by blocks/router/types.ts:194 parseRouteDefinitions() via querySelectorAll('template[route]'), and the in-memory RouteDefinition (types.ts:131) holds a compiled URLPattern + a live HTMLTemplateElement — both non-serializable. Three options: (a) declarative-DOM only, no data form; (b) a serializable data route-map as the authoring source-of-truth; (c) both — declarative-DOM stays the authoring SoT and webrouting derives a serializable route-map projection for non-DOM consumers. Prior art splits the same way and favours derive-don't-duplicate: TanStack Router treats file-based routing as a superset of code-based and generates a route tree via codegen; Next.js app-router authors in the file system and derives serializable manifests + sitemaps; React Router / Angular / Vue Router use code/config route arrays as their SoT but only because they have no native declarative form, and those arrays still hold live component + loader refs (not serializable JSON). The recommendation is (c): keep <template route> as the HTML-first authoring SoT (the WE author-in-the-standard's-own-form rule), and define a serializable route-map projection of RouteDefinition (path, guard, guardLeave, loader, outlet, isErrorBoundary; dropping pattern + template), built by the first consuming slice rather than speculatively. URLPattern stays the committed pattern grammar (native-first; already new URLPattern at types.ts:211), and the projection is an internal WE schema until a second independent router conforms (protocol temporal rule). Skeptic-amended bounds: derivation is DOM→map and may still require a headless DOM (linkedom/happy-dom) to run the existing parser — webrouting adds no DOM-free parser; the map enumerates route templates, not concrete URLs (parametric-URL enumeration + the sitemap value-source are #1688's problem); and it covers statically-authored routes only — runtime/lazy-added routes are excluded by construction.",
+  "dateOpened": "2026-06-23",
+  "tags": [
+    "webrouting",
+    "routing",
+    "route-format",
+    "source-of-truth",
+    "url-pattern",
+    "sitemap",
+    "serialization",
+    "prior-art",
+    "vocabulary"
+  ],
+  "relatedBlocks": [
+    "router"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webblocks"
+}

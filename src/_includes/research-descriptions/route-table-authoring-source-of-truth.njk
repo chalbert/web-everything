@@ -1,0 +1,133 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    The <a href="/backlog/1684-scaffold-the-webrouting-standard-route-format-profile-url-as/">webrouting</a>
+    standard needs <strong>one canonical form</strong> for an app's route table, because more than one consumer
+    must read it: the runtime router, plus <strong>non-DOM consumers</strong> — a
+    <a href="/backlog/1688-webrouting-sitemap-derivation-scope-which-artifact-set-ships/">sitemap deriver (#1688)</a>,
+    build-time prerender, and config tooling. Today there is <strong>no data form at all</strong>: routes are
+    authored purely as declarative DOM — <code>&lt;we-route-view&gt;</code> reads child
+    <code>&lt;template route="/users/:id"&gt;</code> elements, parsed by
+    <code>blocks/router/types.ts:194</code> <code>parseRouteDefinitions()</code> via
+    <code>querySelectorAll('template[route]')</code>, and the in-memory <code>RouteDefinition</code>
+    (<code>types.ts:131</code>) holds a compiled <code>URLPattern</code> + a live <code>HTMLTemplateElement</code>
+    — <strong>both non-serializable</strong>. So a build-time sitemap or config tool cannot read the route table
+    without instantiating a DOM.
+</p>
+
+<h2>Recommendation (to ratify in #1685)</h2>
+<ol>
+    <li><strong>Option (c) — both, one derived.</strong> Keep <code>&lt;template route&gt;</code> as the
+        <strong>HTML-first authoring source-of-truth</strong> (the WE author-in-the-standard's-own-form rule),
+        and have webrouting define a serializable <strong>route-map projection</strong> of
+        <code>RouteDefinition</code> (<code>path</code>, <code>guard</code>, <code>guardLeave</code>,
+        <code>loader</code>, <code>outlet</code>, <code>isErrorBoundary</code>; dropping the non-serializable
+        <code>pattern</code> + <code>template</code>) for the non-DOM consumers. Built by the
+        <strong>first consuming slice</strong> that needs it, not speculatively.</li>
+    <li><strong>Forced invariant (not a fork) — URLPattern stays the pattern grammar.</strong> Native-first; the
+        router already compiles <code>new URLPattern({ pathname })</code> (<code>types.ts:211</code>). webrouting
+        does not invent a route-pattern syntax.</li>
+    <li><strong>Forced invariant (not a fork) — the projection is an internal WE schema, no protocol yet.</strong>
+        Mint a <code>CustomRouteMap</code>-style protocol only once a <em>second</em> independent router conforms
+        (the protocol temporal rule). One impl today = a schema + conformance vectors, not an interchange protocol.</li>
+</ol>
+
+<h2>Skeptic-amended bounds (folded into the ruling)</h2>
+<p>
+    An adversarial pass (2026-06-23) confirmed (c) survives over (a)/(b) but corrected three over-claims, now
+    baked into the default:
+</p>
+<ul>
+    <li><strong>Derivation may still need a DOM.</strong> The only parser is the
+        <code>querySelectorAll</code>-driven <code>parseRouteDefinitions</code>; deriving the map means running it
+        in a <strong>headless DOM</strong> (linkedom / happy-dom) and projecting the result — webrouting adds
+        <em>no</em> DOM-free parser. (c) is still distinct from (a): it forbids (b) and <strong>fixes the
+        projection shape as the cross-consumer contract</strong>, even though the build is deferred.</li>
+    <li><strong>The map enumerates route templates, not concrete URLs.</strong> Parametric routes
+        (<code>/users/:id</code>) cannot be expanded to URLs from the table alone — that needs a value source,
+        which is <a href="/backlog/1688-webrouting-sitemap-derivation-scope-which-artifact-set-ships/">#1688</a>'s
+        problem, not this decision's. The map serves prerender / config / route-introspection; sitemap
+        URL-enumeration is out of scope here.</li>
+    <li><strong>Statically-authored routes only.</strong> Runtime-added or lazy routes never present in the static
+        DOM are excluded from a build-time projection by construction — an accepted bound, noted.</li>
+</ul>
+
+<h2>Options — what is canonical</h2>
+<table>
+    <thead>
+        <tr><th>Option</th><th>What it means</th><th>Cost / behaviour</th><th>Verdict</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>(c) both, one derived</strong> <em>(recommended)</em></td>
+            <td>Declarative-DOM <code>&lt;template route&gt;</code> is the authoring SoT; a serializable route-map
+                is <em>derived</em> from it for non-DOM consumers.</td>
+            <td>HTML-first authoring preserved; single SoT (the map is generated, never hand-authored, so no
+                drift); non-DOM consumers unblocked. Derivation needs a headless DOM.</td>
+            <td>Best — matches TanStack (file→generated tree) and Next (files→manifest); respects the WE
+                authoring-SoT rule.</td>
+        </tr>
+        <tr>
+            <td><strong>(a) declarative-DOM only</strong></td>
+            <td>The status quo: templates, and no data form ever.</td>
+            <td>Simplest; but every non-DOM consumer (sitemap, prerender, config) must independently spin a
+                headless DOM and re-project — no shared contract.</td>
+            <td>Rejected — blocks the #1688 / prerender consumers from a stable shared form; pushes the same
+                projection into each consumer.</td>
+        </tr>
+        <tr>
+            <td><strong>(b) serializable map as the SoT</strong></td>
+            <td>A data/JSON route table is the thing authors edit; templates become content the map points at.</td>
+            <td>Most tooling-friendly; but splits authoring across <em>data + markup</em>, and the route's content
+                still lives in a template — two authoring homes.</td>
+            <td>Rejected — un-HTML-first, against the WE author-in-the-standard's-own-form rule; no consumer
+                demands a data <em>authoring</em> form (only a data <em>derived</em> form).</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>Prior art — author once, derive the serializable form</h2>
+<table>
+    <thead>
+        <tr><th>Router</th><th>Authoring form</th><th>Serializable form</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>TanStack Router</strong></td>
+            <td>File-based (a superset of code-based).</td>
+            <td>Generates a route tree via codegen (<code>routeTree.gen.ts</code>) — derived, not hand-authored.</td>
+        </tr>
+        <tr>
+            <td><strong>Next.js app-router</strong></td>
+            <td>File-system conventions.</td>
+            <td>Derives serializable manifests + a dynamic <code>sitemap.ts</code> from the route tree.</td>
+        </tr>
+        <tr>
+            <td><strong>React Router / Angular / Vue Router</strong></td>
+            <td>Code/config route arrays (the SoT — they have no native declarative form).</td>
+            <td>None that is pure data — the arrays hold live component + loader refs, not serializable JSON.</td>
+        </tr>
+        <tr>
+            <td><strong>webrouting (proposed)</strong></td>
+            <td>Declarative-DOM <code>&lt;template route&gt;</code> (already exists in the tree).</td>
+            <td>Derived route-map projection of <code>RouteDefinition</code>, built when a consumer needs it.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>Sources</h2>
+<ul>
+    <li><a href="https://tanstack.com/router/latest/docs/framework/react/routing/file-based-routing">TanStack Router — File-Based Routing (superset of code-based; generated route tree)</a> · <a href="https://tanstack.com/router/latest/docs/framework/react/routing/code-based-routing">Code-Based Routing</a></li>
+    <li><a href="https://nextjs.org/docs/app/api-reference/file-conventions/metadata/sitemap">Next.js — generate a sitemap from the route tree</a> · <a href="https://nextjs.org/docs/app/api-reference/functions/generate-metadata">generateMetadata</a></li>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/URLPattern">MDN — URLPattern API (the committed pattern grammar)</a></li>
+    <li><a href="https://www.sitemaps.org/protocol.html">sitemaps.org — sitemap protocol (the #1688 consumer)</a></li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+    <li>Decision: <a href="/backlog/1685-webrouting-route-format-source-of-truth-declarative-dom-temp/">#1685 — route-format source-of-truth</a> (this prep).</li>
+    <li>Parent epic: <a href="/backlog/1684-scaffold-the-webrouting-standard-route-format-profile-url-as/">#1684 — scaffold the webrouting standard</a>.</li>
+    <li>Downstream consumer: <a href="/backlog/1688-webrouting-sitemap-derivation-scope-which-artifact-set-ships/">#1688 — sitemap derivation scope</a> (owns parametric-URL enumeration + the value source).</li>
+    <li>Today's parser: <code>blocks/router/types.ts:194</code> <code>parseRouteDefinitions()</code>; the block spec <a href="/blocks/router/">router</a>.</li>
+</ul>
+{% endraw %}
