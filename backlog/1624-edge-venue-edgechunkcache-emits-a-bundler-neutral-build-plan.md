@@ -2,8 +2,11 @@
 kind: story
 size: 3
 parent: "479"
-status: open
+status: resolved
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: "capabilities/edge-io.ts#emitBuildPlan"
 tags: []
 ---
 
@@ -25,3 +28,22 @@ WE-side slice of #479, ratified by #699(a). Add a deterministic emit-build-plan 
 ## Lineage
 
 - Placement + neutrality amendment ratified by [#699](/backlog/699-placement-of-the-live-edge-serve-runtime-plateau-app-product/) (option **a**). Consumer slice: [#1625](/backlog/1625-edge-venue-live-serve-plateau-app-consumes-the-we-emit-build/).
+
+## Progress
+
+Added `emitBuildPlan(served, opts?)` + the `BuildPlan` type to [`we:capabilities/edge-io.ts`](../capabilities/edge-io.ts)
+(the venue's existing I/O + caching shell, the natural home — it already owns the header builders; placing it
+there reuses `negotiationHeaders()`/`chunkCacheHeaders()` verbatim, so the plan never drifts from the live
+directives, and avoids an `edge ↔ edge-io` import cycle). The plan is a pure, deterministic projection of an
+`EdgeChunkCache.serve()` result onto **capability-class + cache-key + URL + declarative web-standard headers**,
+split honestly into `negotiation` (`Vary`/`Accept-CH`/`Critical-CH`) and `chunk` (immutable `Cache-Control`)
+directive bags — **no HTTP server, no esbuild/bundler dependency, no chunk-naming**.
+
+The #699 **bundler-neutrality vector** lives in new [`we:capabilities/check.ts`](../capabilities/check.ts) —
+`assertBuildPlanNeutral(plan)` pins the plan to the allowed `{capabilityClass, cacheKey, url, headers}` shape
++ the declarative directive set and deep-scans every key for esbuild/chunk-naming/bundler creep (returns `[]`
+when conformant). This is the gate-consumed conformance tooling that legitimately stays WE under the
+constellation-placement carve-out — the enforceable guard that delivery coupling cannot creep into the
+standard repo. Conformance test [`we:capabilities/__tests__/edgeBuildPlan.test.ts`](../capabilities/__tests__/edgeBuildPlan.test.ts)
+(7 cases): plan projection + determinism + neutrality-vector pass on a real plan and catch injected
+chunk-naming / esbuild-option creep. Consumer (bundle + serve) is the deferred plateau-app slice #1625.

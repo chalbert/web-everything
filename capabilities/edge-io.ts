@@ -20,7 +20,7 @@
  * production backs {@link BaselineLookup} with `web-features` / Baseline data. Absent a lookup,
  * `baselineYear` is left undefined (honest — the parser never fabricates support).
  */
-import type { ClientHints } from './edge.js';
+import type { ClientHints, EdgeServed } from './edge.js';
 
 /** A case-insensitive header bag — a `Headers` instance or a plain object (as a server framework exposes). */
 export type HeaderBag = Headers | Record<string, string | undefined>;
@@ -140,4 +140,52 @@ export function chunkCacheHeaders(opts: ChunkCacheOptions = {}): Record<string, 
   const maxAge = opts.maxAge ?? 31536000; // 1 year
   const scope = opts.private ? 'private' : 'public';
   return { 'Cache-Control': `${scope}, max-age=${maxAge}, immutable` };
+}
+
+/**
+ * The **bundler-neutral build plan** the edge emits for a downstream serve-consumer to bundle + serve
+ * (#1624, ratified by #699(a) — the WE-side slice of #479; the consumer slice is plateau-app #1625). It is
+ * a *plan*, not bytes: the capability class + cache key the consumer stores the built chunk under, the
+ * component URL, and the **declarative, web-standard** response-header directives — split honestly into the
+ * `negotiation` directives (the entry/HTML response that *chose* the URL — `Vary`/`Accept-CH`/`Critical-CH`)
+ * and the `chunk` directives (the immutable, content-addressed chunk response — `Cache-Control`).
+ *
+ * It carries deliberately **nothing** about esbuild, chunk naming, or any delivery mechanism — so delivery
+ * impl cannot creep into the standard repo. That neutrality is the enforceable guard
+ * ({@link ./check}.{@link assertBuildPlanNeutral}) the #699 amendment requires. The headers reuse this
+ * module's own {@link negotiationHeaders} / {@link chunkCacheHeaders}, so the plan never drifts from the
+ * live response directives.
+ */
+export interface BuildPlan {
+  /** The capability-equivalence class this chunk is built for (NOT a UA). */
+  capabilityClass: string;
+  /** The full cache key `${component}@${version}#${class}` the consumer stores the built chunk under. */
+  cacheKey: string;
+  /** The component URL the chunk is served from (the requested `caps` ride the query). */
+  url: string;
+  /** Declarative, web-standard response-header directives, by the response they apply to. */
+  headers: {
+    /** Directives for the negotiation (entry / HTML) response that chose this chunk URL. */
+    negotiation: Record<string, string>;
+    /** Directives for the chunk response itself (immutable, content-addressed by `caps`). */
+    chunk: Record<string, string>;
+  };
+}
+
+/**
+ * Emit the {@link BuildPlan} for a request already served by an {@link EdgeChunkCache} — a pure,
+ * deterministic projection of its {@link EdgeServed} result onto the capability-class + cache-key +
+ * declarative headers a downstream serve-consumer needs. No HTTP server, no bundler dependency, no
+ * chunk-naming: the plan is bundler-neutral data (#1624 / #699 neutrality amendment).
+ */
+export function emitBuildPlan(served: EdgeServed, opts: ChunkCacheOptions = {}): BuildPlan {
+  return {
+    capabilityClass: served.equivalenceClass,
+    cacheKey: served.cacheKey,
+    url: served.url,
+    headers: {
+      negotiation: negotiationHeaders(),
+      chunk: chunkCacheHeaders(opts),
+    },
+  };
 }
