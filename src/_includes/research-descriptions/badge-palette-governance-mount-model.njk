@@ -1,0 +1,102 @@
+<h3>The Question</h3>
+<p>
+    Decision <a href="/backlog/1621-badge-mode-c-migration-model-how-do-the-bespoke-we-docs-badg/">#1621</a> blocks the
+    WE-docs badge migration (<a href="/backlog/1598-migrate-we-docs-badge-surfaces-to-fui-blocks-badge-mode-c/">#1598</a>)
+    and the backlog chip dogfood (<a href="/backlog/1208-dogfood-the-backlog-badges-chips-onto-fui-badge-filter-chip/">#1208</a>),
+    both under the <em>WE-docs dogfoods FUI</em> epics #866/#777. Two sub-calls. <strong>Fork 1:</strong> the backlog board
+    renders a bespoke per-kind / per-status palette (story=blue, epic=purple, decision=indigo, tier&hellip;);
+    FUI's badge ships a <em>closed</em> tone enum <code>{neutral, info, success, warning, error}</code>. Does the domain
+    palette go <em>into</em> FUI's tones, or stay a consumer extension? <strong>Fork 2:</strong> how does a
+    <em>server-rendered</em> 11ty board consume the badge across <em>many small</em> instances (~6 per tile, hundreds per
+    page) without the per-badge shadow-mount blow-up the item feared?
+</p>
+
+<h3>Recommendation (prepared for #1621)</h3>
+<p>
+    <strong>Fork 1 &mdash; consume the badge contract; keep the domain palette out of FUI's tones (className escape).</strong>
+    Adding <code>--kind-story</code> to FUI's enum leaks a consumer taxonomy into a shared status component &mdash; broken
+    on minimize-lock-in and the closed-tone contract. Map a surface to a tone only where one <em>genuinely</em> fits
+    (status surfaces); carry the domain palette via the badge's existing <code>className</code> escape + WE-docs-local CSS.
+    <strong>Fork 2 &mdash; the transient custom element, not mode-C, not a hand-emitted lowered span.</strong> Mode-C is
+    one shadow root + one dynamic import <em>per mount point</em> (the heavy/interactive iframe-replacement path) &mdash;
+    wrong for many tiny pills. The ratified reference shape for a behavior-free presentational control (badge named
+    explicitly, <code>we:docs/agent/block-standard.md</code> §7.7, #1381) is the <code>&lt;we-badge&gt;</code> transient
+    element: it upgrades in place to a native <code>&lt;span class="fui-badge&hellip;"&gt;</code>, light-DOM, zero shadow
+    roots. Skeptic verdicts: Fork&nbsp;1 <strong>SURVIVES-WITH-AMENDMENT</strong>; Fork&nbsp;2 my lowered-span reframe was
+    <strong>REFUTED</strong> &rarr; flipped back to the transient element.
+</p>
+
+<h3>Fork 1 finding &mdash; the industry-universal pattern: closed semantic enum + a className/CSS escape for domain palettes</h3>
+<p>
+    The item's option list missed FUI's <em>existing</em> extension seam: <code>createBadge({className})</code>
+    (<code>fui:blocks/badge/Badge.ts:34,48</code>) and the <code>&lt;we-badge class&gt;</code> passthrough
+    (<code>fui:blocks/badge/BadgeElement.ts:30</code> appends via <code>classList.add</code>;
+    <code>fui:blocks/transient/TransientElement.ts:62-65</code> copies non-excluded attributes), with
+    <code>BASE_CLASS</code> + <code>BADGE_CSS</code> <em>exported</em> &ldquo;so a composing host can inject it&rdquo;
+    (<code>fui:blocks/badge/Badge.ts:38,82</code>). A web survey of the leading systems is unanimous on the governance
+    pattern:
+</p>
+<ul>
+    <li><strong>GitHub Primer &mdash; the textbook split.</strong> The semantic <em>Label</em> has a closed
+        <code>variant</code> enum and &ldquo;conveys no semantics by itself&rdquo;; the arbitrary-color domain labels are a
+        <em>separate</em> component, <em>IssueLabelToken</em>, whose reason to exist is the <code>fillColor</code> prop.
+        Domain palette and semantic badge are different components, never one widened enum.</li>
+    <li><strong>Atlassian Lozenge</strong> &mdash; closed appearance enum, no custom color; a11y guidance &ldquo;don't use
+        color alone.&rdquo; <strong>Shopify Polaris Badge</strong> &mdash; maintainer: non-status colors may be allowed but
+        &ldquo;yellow, green and red are still reserved when communicating a status.&rdquo; <strong>Salesforce SLDS</strong>
+        &mdash; color via semantic theme hooks, not a free color prop.</li>
+    <li><strong>IBM Carbon Tag</strong> renders <em>categorization</em> via color-FAMILIES, kept distinct from status.
+        <strong>Ant Design Tag/Badge</strong> is the cautionary case: a free <code>color={hex}</code> in the same component
+        accrues contrast / dark-mode bugs. <strong>GitHub issue labels</strong> (arbitrary per-repo color) are the
+        canonical &ldquo;a domain taxonomy is not a fixed tone set&rdquo; case.</li>
+</ul>
+<p>
+    So Fork&nbsp;1 is a <strong>forced invariant</strong>: option (1a) extend-the-enum and (1c) arbitrary-bg/fg are both
+    broken; the ruling is the className escape (config-extends-platform-default). <strong>Skeptic amendment folded in:</strong>
+    pure-taxonomy surfaces (<code>kindBadge</code>, <code>tierBadge</code>) get the badge <em>geometry + a docs-owned
+    modifier class with no FUI tone class</em> (story is not &ldquo;info&rdquo; &mdash; don't fake-map a taxonomy onto a
+    status tone); the native link-pills (<code>blockerChip</code>, <code>childCircle</code>) must consume the
+    <em>same docs status tokens</em> the migrated status badges resolve to, so the migration doesn't fork
+    &ldquo;resolved-green&rdquo; into two definitions.
+</p>
+
+<h3>Fork 2 finding &mdash; mode-C is the wrong tool; the transient element is the reference shape</h3>
+<p>
+    <code>fui:embed/in-document.ts:63-93</code> attaches one shadow root per mount point via a per-point dynamic
+    <code>import()</code>; the badge's <code>mountInDocument</code> (<code>fui:blocks/badge/Badge.ts:112</code>) is a
+    five-tone <em>showcase demo</em>, not a per-instance path &mdash; so per-badge mode-C means N shadow roots + N imports
+    per page. The behavior-free badge's ratified shape (<code>we:docs/agent/block-standard.md</code> §7.7) is the
+    <strong>(A) transient element</strong>: <code>fui:blocks/badge/registerBadge.ts</code> + <code>&lt;we-badge&gt;</code>
+    (<code>fui:blocks/badge/BadgeElement.ts</code>) upgrade in place to a native span, zero wrapper.
+    Progressive-enhancement prior art (HTML web components / light-DOM) confirms a single
+    <code>customElements.define()</code> upgrading many light-DOM instances is the lightweight path versus N shadow roots.
+</p>
+<p>
+    <strong>The skeptic killed a tempting reframe.</strong> Emitting the lowered <code>&lt;span class="fui-badge&hellip;"&gt;</code>
+    directly in the njk macros (zero JS, zero FOUC) is <em>refuted</em>: it is §7.2's lowest-compliance
+    <em>no-element / CSS-only</em> path; it re-implements <code>decorate()</code>'s class + icon/label + <code>role=status</code>
+    logic <em>in WE</em> (violates WE-holds-zero-impl + the #865 &ldquo;FUI renders, WE owns data&rdquo; precedent,
+    <code>we:src/_data/chrome.js:1-10</code>); and it couples the docs build to FUI <em>internal</em> class names rather
+    than the stable <code>&lt;we-badge&gt;</code> / <code>createBadge</code> contract. So the default flips back to the
+    transient element, with FOUC handled by a <code>we-badge { &hellip; }</code> CSS baseline (mirroring
+    <code>we:src/_includes/layouts/base.njk</code>'s reveal-nav SSR baseline).
+</p>
+<p>
+    <strong>Delivery sub-fork:</strong> the board obtains <code>registerBadge</code> + <code>BADGE_CSS</code> via a runtime
+    cross-origin import from the FUI origin now (the <code>fui:embed/in-document.ts</code> precedent + #1499) &rarr; a typed
+    import from the published <code>@frontierui/blocks</code> package at the #700/#872 end-state; vendoring into the WE
+    build is rejected (WE-zero-impl + #170 drift). <strong>End-state enhancement (d):</strong> once
+    <code>@frontierui/blocks</code> ships, a FUI <code>renderBadge(config): string</code> the 11ty build calls is the
+    zero-JS true dogfood &mdash; separately prioritized, gated on #700. <strong>Consistency:</strong> badge and filter-chip
+    are the same §7 transient family &mdash; render both as <code>&lt;we-*&gt;</code>; the filter row is already interactive
+    (<code>we:src/backlog.njk:90</code> <code>&lt;button aria-pressed&gt;</code> + JS) so the chip needs runtime, the badge
+    does not.
+</p>
+
+<h3>Net effect</h3>
+<p>
+    #1598's title &ldquo;mode-C inline SDK&rdquo; re-frames to a <strong>transient-CE dogfood</strong> (mode-C is reserved
+    for the one big chrome mount, not many small pills); #1208's filter row maps cleanly to <code>we-filter-chip</code>;
+    no <code>fui:embed/badge-in-document.ts</code> / <code>fui:embed/filter-chip-in-document.ts</code> module is needed.
+    Full grounding in <code>reports/2026-06-22-badge-mode-c-migration-model.md</code>.
+</p>

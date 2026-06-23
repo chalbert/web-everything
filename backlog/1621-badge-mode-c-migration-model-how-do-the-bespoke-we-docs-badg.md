@@ -3,53 +3,159 @@ kind: decision
 parent: "866"
 status: open
 dateOpened: "2026-06-22"
-tags: []
+dateStarted: "2026-06-22"
+preparedDate: "2026-06-22"
+relatedReport: reports/2026-06-22-badge-mode-c-migration-model.md
+tags: [dogfood, fui, badge, filter-chip, site-rework]
 ---
 
 # Badge mode-C migration model: how do the bespoke WE-docs badge surfaces map to FUI's 5-tone badge, and what mount model fits many-small-components?
 
-Blocks #1598 (migrate WE-docs badge surfaces → FUI badge mode-C) and #1208 (dogfood backlog
-badges/chips → FUI badge + filter-chip). Surfaced in batch-2026-06-22-1615-1208 after #1603 shipped the
-FUI `badge`/`filter-chip` components: claiming #1598 and reading the real FUI tree revealed the
-"flat application" framing hid two entangled design calls, so the badge migration cannot be built
-without a ruling.
+**Prepared 2026-06-22.** Both forks are grounded in the real tree (both repos) + a prior-art survey
+published as the `/research/` topic
+[badge-palette-governance-mount-model](/research/badge-palette-governance-mount-model/) (session report:
+[we:reports/2026-06-22-badge-mode-c-migration-model.md](../reports/2026-06-22-badge-mode-c-migration-model.md)).
+Grounding reshaped both forks — the item's original option lists were materially incomplete — and surfaced
+that **both are forced invariants** (one branch each is provably broken), so ratification should be fast.
+Each `## Fork N` carries a recommended default in **bold** that has already been attacked by a skeptic
+sub-agent (`Skeptic:` line). Blocks #1598 (migrate WE-docs badge surfaces → FUI badge) and #1208 (dogfood
+backlog badges/chips → FUI badge + filter-chip).
 
-## What you have to decide
+The concern decomposes into two orthogonal axes the research surfaced: **(1) palette governance** — where
+the backlog's bespoke domain colours live relative to FUI's closed tone enum
+(`fui:blocks/badge/Badge.ts:17,41` — `tone ∈ {neutral,info,success,warning,error}`), given that the badge
+already ships a `className` extension hook (`fui:blocks/badge/Badge.ts:34,48`; `<we-badge class>`
+passthrough at `fui:blocks/badge/BadgeElement.ts:30` + `fui:blocks/transient/TransientElement.ts:62-65`)
+and exports `BASE_CLASS`/`BADGE_CSS` for host injection (`fui:blocks/badge/Badge.ts:38,82`); and
+**(2) the mount model** — how a *server-rendered* 11ty board (`we:src/_includes/backlog-badges.njk`,
+~10 macros) consumes the badge across many-small instances, given that mode-C is one-shadow-root +
+one-import per point (`fui:embed/in-document.ts:63-93`) and §7.7 of `we:docs/agent/block-standard.md`
+(#1381) names the **transient element** as the reference shape for a behavior-free pill.
 
-**(1) Vocabulary mapping.** `we:src/_includes/backlog-badges.njk` is the single source of truth for ~10
-badge/chip/circle macros: `kindBadge` / `statusBadge` / `sizeBadge` / `tierBadge` / `unslicedBadge` /
-`epicStatusBadge` / `metaBadge` / `tagsRow` / `childCircle` / `blockerChip` / `reasonPill`. Each renders a
-**bespoke per-kind/per-status palette** (story=#dbeafe/#1e40af, epic=#ede9fe/#5b21b6, …) with tooltips,
-and several are **not badges at all** — `blockerChip` and `childCircle` are `<a href>` link pills/circles,
-`reasonPill` is a conditional icon pill. FUI's `we-badge` (`fui:blocks/badge/BadgeElement.ts`, transient
-Mechanism-A) offers only `tone ∈ {neutral,info,success,warning,error}` + `icon` + `status`. **The bespoke
-backlog palette + the link-pills/circles have no FUI-badge equivalent.** Options: (a) extend FUI `we-badge`
-with the backlog vocabulary (FUI change — risks a docs-specific palette leaking into the shared component);
-(b) migrate only the surfaces that map to existing tones, leave the rest hand-rolled (partial dogfood —
-which surfaces?); (c) a config-driven generic badge accepting arbitrary bg/fg (defeats the tone system /
-minimize-lock-in). **Default (b)** — migrate the tone-mappable subset, keep the link-pills/circles native.
+## Recommended path at a glance
 
-**(2) Mount model for many-small-components.** Mode-C (`fui:embed/in-document.ts`, #786/#765) mounts **one
-shadow root per mount point**, each dynamically importing a module that exports `mountInDocument` — and
-**no `fui:embed/badge-in-document.ts` / `fui:embed/filter-chip-in-document.ts` module exists** (only
-`fui:embed/chrome-in-document.ts`). The chrome is ONE big mount; a backlog tile carries ~6 badges and a
-page lists hundreds — ~25+ shadow roots + dynamic imports **per page**. This is exactly the "does the
-inline mode-C render path cover many-small-component mounts?" residual the #1598 pre-flight + the #765/#728
-seam note flagged. Options: (a) per-badge mode-C shadow mounts (simple, but N shadow roots/page — perf +
-a11y cost); (b) register the `we-badge` **transient custom element** once and emit `<we-badge>` in the njk
-(no per-badge SDK/shadow — but not "mode-C inline SDK" as #1598's title says); (c) a single batched
-registry-mount that upgrades all badge mount points in one pass. **Default (b)** — transient custom
-elements are the lightest dogfood for many tiny presentational badges; reserve mode-C shadow mounts for
-heavy/interactive components (the chrome). This likely **re-frames #1598's "mode-C inline SDK" requirement.**
+| Fork | Recommended default | Main (rejected) alternative | Confidence |
+|------|--------------------|-----------------------------|------------|
+| **Fork 1** — where the domain palette lives | **(1b)** consume FUI's badge contract + carry the domain palette via the `className` escape + WE-docs CSS; map to a tone only where one genuinely fits | (1a) extend FUI's tone enum with backlog vocabulary | **High** — forced invariant; (1a)/(1c) provably broken |
+| **Fork 2** — mount model for the server-rendered board | **(2b)** register the `<we-badge>` / `<we-filter-chip>` transient element once; emit in njk; upgrade in place; `we-badge{}` CSS baseline for FOUC | (2a) per-badge mode-C shadow mounts | **High** — forced invariant; (2a) broken, (2c) collapses into (2b) |
+| **Fork 2 sub-fork** — FUI-artifact delivery | **runtime cross-origin import** from the FUI origin now → typed import from published `@frontierui/blocks` at #700/#872 | vendoring FUI into the WE build | **Med-high** — interim vs end-state, both coherent |
 
-## Why this is a fork, not a build
+## Supported by default (not decisions)
 
-Both sub-calls pick an **end-state** (which component surface owns the backlog vocabulary; which mount
-model the docs use for many small components) that reshapes FUI and/or the WE-docs build — not effort.
-Resolving it unblocks #1598 + #1208; a follow-up may also file the missing
-`fui:embed/badge-in-document.ts` / `fui:embed/filter-chip-in-document.ts` FUI modules **iff** option (2a)
-wins.
+- **Link-pills stay native `<a>`.** `blockerChip` / `childCircle` (`we:src/_includes/backlog-badges.njk:82-100`)
+  are interactive links, not non-interactive status pills — forcing a `role=status` badge onto an anchor is
+  broken. They keep their native `<a>` form (a future FUI domain-tag / link-pill component is a separately
+  -prioritized gap, not this migration). **Amendment:** they must consume the *same docs status tokens* the
+  migrated status badges resolve to, so "resolved-green" isn't defined twice.
+- **Badge and filter-chip render the same way** — both are the §7 transient family, emitted as `<we-*>`
+  (badge → native `<span>`; the *interactive* `we-filter-chip` → `<button aria-pressed>`). The filter row is
+  already interactive (`we:src/backlog.njk:90`), so the chip genuinely needs runtime; the badge does not but
+  uses the same element model for a coherent board. Not a fork — a consistency rule.
 
-Lineage: parent #866 (WE-docs FUI-chrome dogfood), sibling of the #867/#868/#869 replay slices, and the
-#777/#778 backlog-badge dogfood (#1208). Pre-flight `[[feedback_prep_verify_mechanism_has_consumer]]` /
-`[[feedback_misflagged_batchable_fix_real_state]]`: read the real FUI tree before assuming a flat mount.
+## Fork 1 — Where does the backlog's domain palette live?
+
+*Fork-existence (forced invariant):* branch (1a) — adding the backlog taxonomy (`--kind-story`,
+`--tier-A`, …) to FUI's badge tone enum — is **broken**: it leaks a consumer-specific taxonomy into a
+shared semantic-status component, violating minimize-lock-in and the closed-tone contract. The prior-art
+survey is unanimous (GitHub Primer's own *Label* vs *IssueLabelToken* split; Atlassian Lozenge; Polaris
+"reserve status colours"; SLDS theme hooks; the Ant Design merged-custom-colour cautionary case). So this
+is a ratify, not a weigh.
+
+**Crux:** FUI's badge tone enum is *operational status* (`neutral|info|success|warning|error`); the
+backlog palette is *domain taxonomy* (story/epic/decision/tier). These are different axes — most backlog
+surfaces don't map onto a status tone at all.
+
+- **(a) Extend FUI `we-badge` with the backlog vocabulary.** *Rejected* — leaks docs-specific taxonomy
+  into the shared component; defeats the closed-tone semantic system; lock-in. The industry-universal
+  anti-pattern (no surveyed system widens its semantic enum for a consumer taxonomy).
+- **(b) Consume FUI's badge contract for every presentational pill; map to a semantic tone where one
+  *genuinely* fits (e.g. `statusBadge` resolved→success, active→info; size/meta/tags→neutral), and carry
+  the backlog domain palette (kind, tier, unsliced-reason, decision/preparing) via the badge's exported
+  `className` escape + WE-docs-local CSS (`fui-badge fui-badge--kind-story` defined in the docs
+  stylesheet) — never widening FUI's tone enum.** This is config-extends-platform-default; it dogfoods the
+  badge's geometry + `__icon`/`__label` structure + `role=status`/`aria-label` a11y wiring once instead of
+  re-deriving it across ~10 njk macros.
+  - *Skeptic amendment (folded in):* pure-taxonomy surfaces (`kindBadge`, `tierBadge`) where a tone would
+    be a lie (story is not "info") consume the badge **geometry + a docs-owned modifier class with NO FUI
+    tone class** — don't fake-map a taxonomy onto a status tone. Genuinely-status surfaces (`statusBadge`,
+    `epicStatusBadge`, `reasonPill`) get real tones.
+- **(c) A config-driven generic badge accepting arbitrary bg/fg.** *Rejected* — Ant-style merged custom
+  colour accrues contrast / dark-mode debt; defeats the tone system; lock-in.
+
+**Recommended default: (1b).**
+
+`Skeptic: SURVIVES-WITH-AMENDMENT` — the attack ("consuming only the class vocabulary while overriding all
+colours is a cosmetic dogfood") was beaten: the dogfood is the geometry + a11y wiring + real tones for the
+status surfaces (the minority that override is pure taxonomy). Folded in: taxonomy surfaces = geometry +
+docs modifier (no fake tone); native link-pills share the same docs status tokens so the palette doesn't
+fork into two definitions of "resolved-green".
+
+## Fork 2 — How does the *server-rendered* board consume the badge across many-small instances?
+
+*Fork-existence (forced invariant):* branch (2a) — a per-badge mode-C shadow mount — is **broken**.
+`fui:embed/in-document.ts:63-93` attaches *one shadow root per mount point* via a *per-point dynamic
+`import()`* (the trusted heavy/interactive iframe-replacement path), and the badge's `mountInDocument`
+(`fui:blocks/badge/Badge.ts:112`) is a five-tone *showcase demo*, not a per-instance path. ~6 badges/tile
+× hundreds of tiles = N shadow roots + N imports/page (perf + a11y-tree cost). So this is a ratify.
+
+**Crux:** the board is a behavior-free, server-rendered surface with hundreds of tiny pills; §7.7 of
+`we:docs/agent/block-standard.md` (#1381) names the **transient element** as the reference shape for
+exactly this (badge cited explicitly).
+
+- **(a) Per-badge mode-C shadow mounts.** *Rejected* — wrong tool (trusted heavy/interactive embed path);
+  N shadow roots + N dynamic imports per page.
+- **(b) Register the `we-badge` / `we-filter-chip` transient custom element once; emit `<we-badge>` /
+  `<we-filter-chip>` server-side in the njk macros; each upgrades in place to its native element
+  (`fui:blocks/badge/registerBadge.ts` + `fui:blocks/badge/BadgeElement.ts`), zero wrapper, light-DOM, no
+  shadow roots. Mitigate the upgrade flash with a `we-badge { … }` CSS baseline so the element is styled
+  *before* upgrade — mirroring `we:src/_includes/layouts/base.njk`'s reveal-nav SSR baseline (#865).**
+  This **re-frames #1598's "mode-C inline SDK" requirement → transient-CE dogfood** (repoint #1598's
+  title/AC on resolve).
+- **(c) A single batched registry-mount.** *Rejected as a distinct branch* — registering the custom
+  element once *is* the single pass; the platform's upgrade walk handles every instance. Collapses into (b).
+
+**Recommended default: (2b).**
+
+### Fork 2 sub-fork — FUI-artifact delivery
+
+How the 11ty board obtains `registerBadge` + `BADGE_CSS` (and the chip's element JS):
+
+- **(i) Runtime cross-origin import from the FUI origin (interim default).** Per the
+  `fui:embed/in-document.ts` precedent ("runtime FUI-hosted module, no `frontierui` alias, imports no FUI
+  source") + the #1499 cross-origin pattern — keeps WE's build free of any FUI source dependency.
+- **(ii) Vendor / bundle FUI's badge into the WE docs build.** *Rejected* — violates WE-holds-zero-impl
+  and recreates the #170 duplication / drift hazard.
+- **(iii) Typed import from the published `@frontierui/blocks` package (end-state).** The #700/#872
+  destination; (i) is the bridge until that package ships.
+
+**End-state enhancement (filed separately, gated on #700):** once `@frontierui/blocks` is published, FUI
+could export a `renderBadge(config): string` the 11ty build calls — zero client JS, zero FOUC, FUI code
+still renders (true dogfood), coupling to a function contract not classes. The genuinely-best *static-board*
+path, but it needs a new FUI export + a build-time FUI dependency, so it's a separately-prioritized
+enhancement, not the interim default.
+
+`Skeptic: REFUTED → flipped.` A reframe attempted in prep — emit the badge's *lowered native form*
+(`<span class="fui-badge…">`) directly in the njk macros (zero JS, zero FOUC) — was refuted on three
+verified grounds: (1) it is §7.2's explicit *no-element / CSS-only* path, the **lowest-compliance** choice;
+(2) reproducing `decorate()`'s class-mapping + `__icon`/`__label` + `role=status` logic in Nunjucks is **WE
+holding badge implementation** (violates WE-zero-impl + the #865 "FUI renders, WE owns data" precedent,
+`we:src/_data/chrome.js:1-10`); (3) it couples the docs build to FUI *internal* class names (a rename
+breaks the board silently) rather than the stable `<we-badge>` / `createBadge` contract. Default flipped
+back to the transient element (2b), with the FOUC concern handled the chrome-dogfood way (a CSS baseline).
+The sub-fork default (cross-origin import) survives — it is the only delivery that keeps WE's build free of
+FUI source.
+
+## Context
+
+- **Lineage.** Parent #866 (WE-docs FUI-chrome dogfood), sibling of #865 (chrome dogfood — established the
+  "FUI renders, WE owns data, SSR baseline" model via mode-C for the *one big* chrome mount) and the
+  #777/#778 backlog-badge dogfood (#1208). Surfaced in batch-2026-06-22-1615-1208 after #1603 shipped FUI
+  `badge`/`filter-chip`.
+- **On resolve, the spin-off builds** (each `blockedBy` this decision until ratified): #1598 (badges →
+  `<we-badge>`, repoint its "mode-C inline SDK" title → transient-CE dogfood) and #1208 (chips →
+  `we-filter-chip`). File the build-time `renderBadge()` SSR enhancement as a new FUI item gated on #700.
+  No `fui:embed/badge-in-document.ts` / `fui:embed/filter-chip-in-document.ts` module is needed (those
+  would only matter under the rejected mode-C branch).
+- Pre-flight memory checks honoured: `feedback_prep_verify_mechanism_has_consumer` (read the real FUI tree
+  before assuming a flat mount — found the `className` seam + the transient element already shipped) and
+  `feedback_misflagged_batchable_fix_real_state`.
