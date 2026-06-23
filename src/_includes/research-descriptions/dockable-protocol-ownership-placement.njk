@@ -1,0 +1,92 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Decision <a href="/backlog/1653-which-project-owns-the-dockable-layout-tree-protocol-1437-ru/">#1653</a>
+  <strong>blocks</strong>
+  <a href="/backlog/1486-mint-the-dockable-layout-tree-interchange-protocol-core-sche/">#1486</a> (mint the
+  dockable layout-tree Protocol). #1486's convergence gate is already satisfied —
+  <a href="/backlog/1627-build-a-dockview-adapter-that-round-trips-the-dockable-core-/">#1627</a> (the dockview
+  adapter) is conforming impl family #2 — so the mint is unblocked on convergence, but it hits an
+  <strong>ownership gap #1437 left open</strong>.
+</p>
+<p>
+  <a href="/backlog/1437-decision-docking-tiling-dockable-window-management-placement/">#1437</a> ratified two
+  rulings that cannot both stand once you go to mint the Protocol. <strong>Fork 1</strong> ruled the dockable
+  family is an <strong>intent + composing block, no project</strong> — the <a href="/intents/dockable/">dockable
+  intent</a>, like every #1384 sibling (<code>resizable</code>, <code>arrangeable</code>, <code>reorder</code>),
+  carries no <code>ownedByProject</code>; intents are structurally project-less in WE. <strong>Fork 2</strong>
+  ruled the serialized layout tree <strong>is a first-class WE Protocol</strong>
+  (<code>node = {type: row|column|stack, children|tabs, size}</code> core + an extension slot). But a WE
+  protocol entry <strong>requires</strong> an owning project: <code>validateProtocol</code>
+  (<code>scripts/check-standards-rules.mjs:772</code>) lists <code>ownedByProject</code> + <code>anchor</code>
+  in its required-fields loop, rejects an <code>ownedByProject</code> that does not resolve in
+  <code>projects.json</code>, and requires the owner's <code>project-&lt;id&gt;.njk</code> partial to carry a
+  <code>&lt;section id="protocol-&lt;id&gt;"&gt;</code> anchor. <strong>All 39 current protocols have an owner;
+  there is no project-less escape hatch.</strong> So the question is: <strong>where does the dockable
+  layout-tree Protocol live, given the family has no project?</strong>
+</p>
+
+<h2>Prior art — how project-less interchange formats are actually homed</h2>
+<p>
+  The consistent pattern across the standards world is the <em>opposite</em> of project-less — a serious
+  interchange format gets a <strong>dedicated host / registry surface</strong> that owns the schema and runs
+  conformance:
+</p>
+<ul>
+  <li>
+    <strong>glTF (Khronos).</strong> A runtime 3D-asset interchange format owned by The Khronos Group,
+    governed by the <strong>Khronos 3D Formats Working Group</strong> and published through the
+    <strong>Khronos glTF Registry</strong> — <em>not</em> owned by any one rendering engine; the engines merely
+    conform.
+  </li>
+  <li>
+    <strong>OpenAPI (Linux Foundation).</strong> Donated by SmartBear in 2015 into the
+    <strong>OpenAPI Initiative</strong> (an LF collaborative project with a Technical Steering Committee) —
+    owned by a purpose-built host org, not by Swagger-the-tool; the gateways/clients conform.
+  </li>
+  <li>
+    <strong>The docking incumbents themselves.</strong> dockview (<code>api.toJSON/fromJSON</code>), FlexLayout
+    (<code>Model.toJson/fromJson</code>), and golden-layout (<code>LayoutConfig</code>) all serialize the same
+    logical <code>row→column→stack-of-tabs</code> tree — but share <strong>no interchange standard and no
+    coordinating body</strong>. Each owns its own JSON; a dockview layout cannot load into FlexLayout. There is
+    <strong>no external owner to point at</strong> — if WE wants a portable dockable layout, WE must home and
+    own the schema.
+  </li>
+</ul>
+<p>
+  WE's <code>validateProtocol</code> invariant (every protocol has an owning project + a catalog anchor) is the
+  same instinct: the owner <em>is</em> the registry surface where the schema, its status, and its conformance
+  live. Relaxing it to "owned by its intent + block" would make the dockable tree the <strong>one protocol with
+  no catalog home</strong> — a hole in the very surface that makes a protocol discoverable and escapable
+  (<em>minimize-lock-in</em>: the protocol IS the escapable lock).
+</p>
+
+<h2>Recommendation (to ratify in #1653)</h2>
+<ol>
+  <li>
+    <strong>Mint a thin <code>weblayout</code> protocol-host project to own the schema (~70%).</strong> The
+    glTF / OpenAPI shape: a registry/host surface that owns <em>only</em> the interchange schema, its
+    <code>&lt;section id="protocol-dockable-layout-tree"&gt;</code> anchor, and its round-trip conformance
+    vectors — nothing behavioural. The dockable <em>family</em> (intent + block) stays project-less exactly as
+    #1437 Fork 1 ruled; only the <em>Protocol</em> gets a home. This needs <strong>no re-open of Fork 1</strong>
+    (a host that owns the schema is a different category from the impl/orchestration project Fork 1 rejected)
+    and <strong>no relaxation of the protocol model</strong> (the 39-protocol invariant stays intact).
+  </li>
+  <li>
+    <strong>Rejected — attach to an existing project (mis-homing).</strong> <code>webpositioning</code> is
+    floating-element anchoring (different concern); <code>webblocks</code>/<code>webintents</code> never named
+    layout interchange and would have their meaning blurred; a Protocol is also a different entity class from
+    an intent, so homing the schema in <code>webintents</code> conflates layers #1437 separated. A correctness
+    cost, not just a stretch.
+  </li>
+  <li>
+    <strong>Rejected for the default, kept as the sub-fork escape-hatch — relax the protocol model (~30%).</strong>
+    Make <code>ownedByProject</code> optional when an <code>ownedByIntent</code> resolves and skip the
+    project-anchor probe. Honours Fork 1's "no project" literally, but makes the dockable tree the one protocol
+    with no catalog home and relaxes a 39-protocol invariant to serve one — a catalog-surface-integrity
+    regression. Recommend only if the deciding agent reads even a schema-only host project as violating Fork 1;
+    then it becomes its own sub-decision over the escape-hatch schema (optional owner iff intent resolves + an
+    intent-anchored rendering path so the protocol still renders in the catalog).
+  </li>
+</ol>
+{% endraw %}

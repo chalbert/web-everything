@@ -1,0 +1,25 @@
+{
+  "id": "dockable-protocol-ownership-placement",
+  "title": "Which project owns the dockable layout-tree Protocol — placement of an interchange schema for a family #1437 ruled project-less",
+  "summary": "Prep research for decision #1653, which BLOCKS #1486 (mint the dockable layout-tree Protocol). #1486's convergence gate is cleared (#1627, the dockview adapter, is conforming impl family #2), so the mint is unblocked — but it hits an ownership gap #1437 left open. THE GAP: #1437 Fork 1 ratified the dockable family as 'intent + composing block, NO project' (the dockable intent we:src/_data/intents/dockable.json, like every #1384 sibling resizable/arrangeable/reorder, carries no ownedByProject — intents are structurally project-less in WE) while Fork 2 ratified the serialized layout tree as a 'first-class WE Protocol'. Those can't both stand at mint time: a WE protocol entry (we:src/_data/protocols/*.json) REQUIRES an owning project — validateProtocol at we:scripts/check-standards-rules.mjs:772 lists ownedByProject + anchor in its required-fields loop, lines 777-779 reject an ownedByProject that doesn't resolve in we:src/_data/projects.json, and lines 783-789 require the owner's partial we:src/_includes/project-<id>.njk to carry a <section id=\"protocol-<id>\"> anchor; all 39 current protocols have an owner, no project-less escape hatch exists. PRIOR ART (project-less / cross-cutting interchange formats): the consistent pattern is the OPPOSITE of project-less — glTF is owned by a dedicated host/registry body (Khronos 3D Formats Working Group + the Khronos glTF Registry), not by any rendering engine; OpenAPI is owned by the OpenAPI Initiative (a Linux-Foundation collaborative project + TSC), not by Swagger-the-tool; vendors merely conform. The docking incumbents themselves (dockview api.toJSON/fromJSON, FlexLayout Model.toJson/fromJson, golden-layout LayoutConfig) all serialize the SAME logical row→column→stack-of-tabs tree but share NO interchange standard and NO coordinating body — each owns its own JSON, so a dockview layout can't load into FlexLayout. That means there is no external owner to point at; if WE wants a portable dockable layout, WE must home + own the schema. THE FORK (ownership of the Protocol — three coherent mutually-exclusive homes): (a) MINT A THIN HOST PROJECT to own the schema (e.g. weblayout) — the glTF/OpenAPI shape: a registry/host surface that owns ONLY the interchange schema + its anchor + conformance vectors, nothing behavioural — RECOMMENDED ~70%. It honours #1437 Fork 1 because Fork 1 rejected an IMPL/ORCHESTRATION project for the intent/block FAMILY, and a schema-only protocol-host owns the Protocol, not the family — the intent + block stay project-less, only the schema gets a registry home; needs NO re-open of Fork 1 and NO relaxation of the protocol model. (b) ATTACH TO AN EXISTING PROJECT — REJECTED (mis-homing, a correctness cost not just effort): webpositioning is floating-element anchoring (different concern), webblocks/webintents never named layout interchange and would blur their meaning; a Protocol is also a different entity class from an intent, so attaching to webintents conflates layers #1437 separated. (c) RELAX THE PROTOCOL MODEL to allow a project-less protocol owned by its intent+block (make ownedByProject optional when ownedByIntent resolves + skip the anchor probe) — REJECTED for the default, kept as the sub-fork escape hatch ~30%: it honours Fork 1's 'no project' literally with zero new surface, but makes the dockable tree the ONE protocol with no catalog home (the project partial's <section id=\"protocol-...\"> anchor IS the rendered protocol's catalog home) and relaxes a 39-protocol invariant to serve one — a catalog-surface-integrity regression on the very surface that makes a protocol discoverable + escapable (minimize-lock-in: the protocol IS the escapable lock). RECOMMENDATION: option (a), mint a thin weblayout protocol-host, ~70% — NO re-open of #1437 Fork 1 (host owns the schema, not the family) and NO relaxation of the protocol model. Sub-fork: if the deciding agent reads even a schema-only host project as violating Fork 1's no-project ruling, fall back to (c) and decide the escape-hatch schema (optional ownedByProject iff ownedByIntent resolves + an intent-anchored rendering path so the protocol still has a catalog home). Full grounding in we:reports/2026-06-22-dockable-protocol-ownership-placement.md.",
+  "status": "open",
+  "dateOpened": "2026-06-22",
+  "lastReviewed": "2026-06-22",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webintents",
+    "dockable",
+    "protocol",
+    "project-placement",
+    "interchange-schema",
+    "ownership",
+    "host-project",
+    "minimize-lock-in",
+    "1437",
+    "1486",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

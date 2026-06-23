@@ -2,7 +2,7 @@
 kind: task
 status: open
 dateOpened: "2026-06-21"
-blockedBy: [1653]
+blockedBy: []
 dateStarted: "2026-06-23"
 tags: []
 ---
@@ -45,7 +45,14 @@ grounding the actual authoring surfaced a fork #1437 left open: a WE `we:src/_da
 `we:scripts/check-standards-rules.mjs:760`; no project-less escape hatch exists). Yet #1437 Fork 1 ratified
 the dockable family as **"intent + composing block, no project"** while Fork 2 made the layout tree a
 **first-class Protocol** — and no existing project is a clean owner. Which project owns the protocol (mint one /
-attach to an existing one / relax the project-required rule) is a real design call, **not** mechanical
-authoring, so this card is `blocked-in-fact` on that decision. Filed as
+attach to an existing one / relax the project-required rule) was a real design call, **not** mechanical
+authoring, so this card *was* blocked on that decision (now resolved — see below). Filed as
 [#1653](/backlog/1653-which-project-owns-the-dockable-layout-tree-protocol-1437-ru/) and re-pointed
 `blockedBy: 1627 → 1653`. Un-blocks to mint once #1653 ratifies an owner.
+
+**UNBLOCKED 2026-06-23 — #1653 ratified (a):** owner is a new thin **`weblayout`** protocol-host project.
+This mint therefore also stands up `weblayout`: add `we:src/_data/projects/weblayout.json` (a schema-host
+project, no impl/orchestration), create `we:src/_includes/project-weblayout.njk` carrying
+`<section id="protocol-dockable-layout-tree">`, then author the Protocol entry with
+`ownedByProject: "weblayout"`, `anchor: "protocol-dockable-layout-tree"`. The `dockable` intent + realizing
+block stay project-less (per #1437 Fork 1). `blockedBy` cleared.

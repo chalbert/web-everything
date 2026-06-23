@@ -621,6 +621,32 @@ government/logistics are form/workflow apps, not collaborative-realtime). Presen
 intent (bias-to-separation; `CoEditCoordinator` "does not merge state"); ratified 2026-06-21). Kin to [constellation-placement](#constellation-placement),
 [compose-dont-handroll](#compose-dont-handroll), [surface-contract-not-computation](#surface-contract-not-computation).
 
+### An interchange Protocol whose family is project-less gets a thin protocol-host project — never owner-less, never mis-homed {#protocol-host-project}
+
+A WE Protocol entry (`src/_data/protocols/*.json`) **structurally requires** an owning project: `validateProtocol`
+(`scripts/check-standards-rules.mjs:772-789`) makes `ownedByProject` + `anchor` required fields, rejects an owner that
+doesn't resolve in `projects.json`, and demands a `<section id="protocol-<id>">` anchor in the owner's
+`src/_includes/project-<id>.njk` — its rendered catalog home. There is **no project-less escape hatch** (all 39
+protocols are owned). So when a ruling makes a *family* project-less (intent + block, no orchestration domain) yet
+also extracts its serialized form as a first-class Protocol, the two collide at mint time. **Resolution: mint a thin
+*protocol-host* project that owns only the schema** — the Protocol entry, its anchor, and its round-trip conformance
+vectors, **nothing behavioural.** The intent + block stay project-less; only the interchange *schema* gets a home.
+
+This is **not** a re-open of the family's no-project ruling: a host owning *only* the schema is a different category
+from the impl/orchestration domain a "no project" ruling rejects — the standards world homes interchange formats in
+dedicated host/registry surfaces (glTF→Khronos 3D Formats WG, OpenAPI→OpenAPI Initiative), **never owner-less**, and
+docking-style incumbents share *no* coordinating body, so WE must home the schema itself. **Do not** attach the
+Protocol to an unrelated existing project (mis-homing — conflates entity classes, blurs that project's meaning), and
+**do not** relax the required-owner invariant to serve one protocol (erodes a rule all others satisfy on exactly the
+surface — the escapable lock — that most needs to stay crisp). The model-relaxation path (`ownedByProject` optional
+iff `ownedByIntent` resolves + an intent-anchored rendering path) is the **dormant escape**, engaged only if the
+host-vs-reopen category split is rejected.
+
+**Lineage:** #1653 (dockable layout-tree Protocol → owned by a new thin `weblayout` protocol-host; #1437 Fork 1's
+project-less family + Fork 2's first-class Protocol both honoured; skeptic SURVIVED — host ≠ reopen; ratified
+2026-06-23; unblocks #1486's mint). Kin to [composition-artifact-ownership](#composition-artifact-ownership),
+[constellation-placement](#constellation-placement), [minimize-lock-in](#constellation-placement).
+
 ### Data-shape evolution is a storage facet, not a reliability concern {#data-shape-vs-mechanism-failure}
 
 When persisted client state **outlives the schema that reads it** (a stored value predates the shape the
