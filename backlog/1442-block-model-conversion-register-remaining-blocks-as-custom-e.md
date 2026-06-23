@@ -38,4 +38,10 @@ The real FUI tree shows blocks in four families, with all three mechanism refere
 - **#1616** — convert sectioned-nav → `we-sectioned-nav` (persistent/B).
 - **#1617** — convert app-shell → `we-app-shell` (persistent/B).
 
-Remaining catalog blocks carry per-block forks and are deferred to decisions on pickup, not flat conversion: **pan-zoom-surface** (B-vs-C shadow #1349-S2); **is-a/can-do** blocks (navigation, master-detail, marquee-select, edit-in-place) needing the #1457 call; **temporal** (A-vs-B unconfirmed). Headless "can-do" behaviors stay CustomAttribute behaviors (out of scope). When the last wave lands, resolve the epic.
+**Wave 4** (we:reports/2026-06-23-1442-slice-wave-4.md) — the remaining catalog blocks each bury a per-block fork, so they carve as **decisions** (conversion tasks file on pickup once each lands):
+
+- **#1674** *(decision)* — pan-zoom-surface mechanism: persistent light-DOM (B) vs shadow (C, #1349-S2).
+- **#1675** *(decision)* — temporal mechanism: transient (A) vs persistent light-DOM (B).
+- **#1676** *(decision)* — is-a/can-do classification for navigation, master-detail, marquee-select, edit-in-place, annotation, bulk-action (#1457 test → `we-*` block or out-of-scope behavior).
+
+**dockable** is excluded — its packaging is downstream of #1653 (dockable layout-tree protocol owner; #1437 ruled the family project-less); carve its mechanism decision under #1442 once #1653 resolves. Headless "can-do" behaviors stay CustomAttribute behaviors (out of scope). When the catalog is drained (every block converted or test-excluded), resolve the epic.
