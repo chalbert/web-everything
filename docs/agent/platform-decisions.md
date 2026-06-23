@@ -433,6 +433,29 @@ swapping a tier is a provider swap, not new plumbing. The design-critique rubric
 **Still deferred (a later call, not a fork):** whether a Tier-2-class critique model is ever built
 on-device vs. stays hosted — the architecture holds either way and the provider seam absorbs the choice.
 
+### WE-compliance validation = a dev-browser lens, not a hosted SaaS {#compliance-validation-home}
+
+WE-compliance validation (run the conformance vectors against a design system, get a report) lives as a
+**dev-browser lens** ([#141](../../backlog/141-dev-browser-vision.md) Chromium/extension shell;
+[#1636](../../backlog/1636-role-scoped-lenses-over-one-dev-browser.md) role-scoped lenses; Plateau-layer
+per [constellation-placement](#constellation-placement) / #1565), **not** a hosted upload SaaS. We **just
+analyse the page in front of us**: the conformance engine runs consumer-side (#891/#954), so the lens runs
+WE vectors against the loaded subject *in the user's own browser* — no upload service, no server-side
+execution, **no per-uploader credentials held by us** (any auth to reach the user's own page is the user's
+own credential in their own password manager). It consumes WE vectors+runner as a
+[no-leakage client](#no-leakage-client) (#475); standard + engine never leave WE (#855).
+
+**Two distinct products — separate them:** (1) the **self-validation lens** above is the non-speculative
+product and where compliance validation lives; (2) a **trusted third-party badge/attestation SaaS** (an
+independent party vouches to the market) is a *different*, demand-gated product. A self-run lens can only
+self-attest, so a trusted badge is not the same thing. **Only product (2) would ever need the
+plateau-app-domain-vs-own-constellation-project granularity call** — revive it (and the structural
+identity/credential test in #966) only if a hosted attestation product is actually demanded.
+
+**Lineage:** #966 (this ruling) · #141/#1636/#1565 (dev-browser home) · #891/#954 (consumer-side engine) ·
+#475 (no-leakage client) · #855 (standard/engine stay in WE). *Confidence: high — fits a settled surface,
+reversible, trigger-armed.*
+
 **Lineage:** #1033 (interactive design-review loop) #1034 (critique rubric) #490 (build epic) · #475
 #488 (on-device fixed-cost floor) · #511/#512/#513 (Tier 1 tooling/training) #1073 (Tier 2 epic) #485
 (hosted teacher bridge) #141 (dev-browser home) #514 (ONNX/WebGPU runtime). Promoted from

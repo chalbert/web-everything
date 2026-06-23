@@ -1,10 +1,14 @@
 ---
 kind: decision
 size: 3
-status: open
+status: resolved
 preparedDate: "2026-06-22"
 relatedProject: webcompliance
 dateOpened: "2026-06-18"
+dateStarted: "2026-06-23"
+dateResolved: "2026-06-23"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#compliance-validation-home"
 tags: [compliance, conformance, monetization, plateau, managed-offering]
 ---
 
@@ -25,6 +29,30 @@ design system, get a conformance report/badge/dashboard).
   hosted product need **not** execute uploaded code server-side.
 - No new `/research/` topic — this is a layer-2 *granularity* placement call over already-ruled ground
   (#091/#899/#475/#855), ratified against the structural-property monetization rule.
+
+## Reframe (2026-06-23) — it's a dev-browser lens, not a hosted SaaS
+
+The original fork (plateau-app domain vs own project) presupposed a **hosted upload SaaS**. That premise
+is rejected. The merit-justified form of WE-compliance validation is a **lens in the dev-browser**
+(#141 Chromium/extension shell; #1636 role-scoped lenses; Plateau-layer per
+[constellation-placement](docs/agent/platform-decisions.md#constellation-placement) / #1565): **we just
+analyse the page in front of us.** The conformance engine already runs consumer-side
+(#891/#954), so the lens runs WE vectors against the loaded subject *in the user's own browser* — no upload
+service, no server-side execution, **no per-uploader credentials held by us.** Any auth needed to reach the
+user's own page is the user's own credential in their own password manager; we never hold it.
+
+This **separates two distinct products**, and only one is open:
+
+- **(1) Self-validation lens** *(the real, non-speculative product → dev-browser)* — "analyse the page in
+  front of you → conformance report." Useful to any dev, client-side, zero lock-in (a no-leakage client of
+  WE vectors+runner, #475; standard+engine stay in WE, #855). **This is where compliance validation lives.**
+- **(2) Trusted third-party badge/attestation SaaS** *(genuinely demand-gated)* — an independent service
+  vouches to the market. A self-run lens can only self-attest, so a trusted badge is a *different* product.
+  No market signal for it. **Only THIS product would ever need the plateau-app-domain-vs-own-project call**
+  — and only when demanded.
+
+**Effect on Fork 1:** superseded, not branch-picked. The a/b granularity fork applies only to product (2)
+and revives if/when a hosted attestation SaaS is demanded.
 
 ## The three layers (only layer 3 is in question)
 
@@ -50,9 +78,10 @@ behind the #475 no-leakage service-client seam so the eventual split stays mecha
 
 ## Recommended path at a glance
 
-| Fork | Recommended default | Main alternative (excluded) | Confidence |
+| Fork | Ruling | Notes | Confidence |
 |---|---|---|---|
-| **Fork 1** — granularity of the Plateau-layer home | **(a) plateau-app domain** *iff* it shares plateau-app tenant identity/auth, holds no per-uploader credentials, and sits behind the #475 service-client seam | (b) its own constellation repo/project — fired the moment a structural trigger (independent deploy cadence or uploader-specific credentials) appears | **med-high** — structural test is clear; the trigger is what's demand-gated |
+| **(reframed)** home of WE-compliance validation | **dev-browser lens** (Plateau, #141/#1636) — analyse the page in front of you, client-side engine (#891/#954), no SaaS, no credentials held by us | supersedes the original a/b | **high** |
+| **Fork 1** — plateau-app domain vs own project | **superseded / deferred** — applies only to a distinct hosted attestation/badge SaaS (product 2), demand-gated; revive a/b only if that product is demanded | the a/b structural test below is preserved for that future call | n/a until product 2 is wanted |
 
 ## Fork 1 — granularity of the Plateau-layer home
 
@@ -93,17 +122,47 @@ consumer-side engine (#891/#954) — server-side execution is a build-detail, no
 migration-tax attack is closed by mandating the #475 seam from day one, keeping the eventual (b) split
 mechanical.
 
+**Red-team at ratification (2026-06-23) — no attack lands:**
+
+- *"A badge product is inherently credential-bearing, so the (b) trigger fires today."* A "WE-conformant"
+  badge means the product signs attestations, i.e. holds a signing key. **Fails:** a badge-signing key is
+  *product-level* state (plateau-app holds it like any tenant secret, as the webvalidation domain already
+  does), **not** *per-uploader* credentials — the trigger is about per-uploader credential/identity state,
+  of which this product still has none. Recorded so the distinction is explicit: **badge-signing alone does
+  not fire the (b) trigger.**
+- *"Compliance tracks WE spec versions → it needs its own deploy cadence, so (b)."* Plausible future, but no
+  such cadence exists today. **Fails (deferred, not denied):** exactly what the trigger-arm catches.
+- *"You're overriding a deliberate, day-old choice to hold."* **Fails:** the hold rested on "no appetite
+  demonstrated yet" = demand, the forbidden basis ([judge-on-pure-merit-never-demand] #1631; monetization
+  rule's "never decide on appetite"). A *placement* call is pure merit and at DoR; the legitimate deferral
+  is the *build*, not the *decision*. See the reframed *Held open* section below.
+
 ## On resolve (when ratified)
 
 - Confirm layers 1–2 stay WE (restating, not deciding).
-- Apply the structural test → pick (a) or (b) for layer 3; if (a), file the plateau-app domain build
-  behind the #475 seam; if (b), file the constellation project-creation item.
-- `codifiedIn`: a hosted validation product is a Plateau managed offering consuming WE vectors as a
-  no-leakage client; standard/engine never leave WE.
+- **Ruling:** WE-compliance validation lives as a **dev-browser lens** (Plateau, #141/#1636) that runs the
+  consumer-side conformance engine (#891/#954) against the page in front of you — no hosted upload service,
+  no per-uploader credentials held by us (user's own auth, their own password manager) — consuming WE
+  vectors+runner as a no-leakage client (#475); standard+engine stay in WE (#855).
+- The original Fork 1 (plateau-app domain vs own project) is **superseded**: it applies only to a distinct
+  *hosted attestation/badge SaaS* (product 2), which is demand-gated; revive the a/b call only if that
+  product is ever demanded.
+- File the dev-browser conformance-lens build as its own item (lens over WE vectors via the #475 seam),
+  demand-gated only on appetite for the *build*, not the placement.
+- `codifiedIn`: WE-compliance validation is a **dev-browser lens** (Plateau) that analyses the page in
+  front of you, consuming WE vectors+runner as a no-leakage client; standard/engine never leave WE; a
+  trusted third-party badge SaaS is a separate, demand-gated product.
 
-## Held open — demand-gated
+## The build is demand-gated — the decision is not
 
-Held open (decision lane): no appetite demonstrated yet for a hosted compliance product distinct from Web Docs
-(#091). The fork is at DoR now (prepared, structural test stated); **un-park** when a user/market signal
-shows a standalone compliance-validation surface is wanted — the home call is then a fast ratify against
-the structural test above.
+The earlier "held open until demand" framing demand-gated the *decision*, which is the forbidden basis
+([judge-on-pure-merit-never-demand] #1631; the monetization rule's "never decide on appetite"). A placement
+call is pure merit and at DoR, so the **home decision is ratified now** (see ruling below). What stays
+deferred is only the **build** — filing/standing-up the plateau-app compliance domain — because building
+ahead of any need is prioritization, not a merit question. This is the clean split per
+[decouple-build-from-release-timing] / [separate-canonicity-from-content-freeze]: **ratify the placement
+now, build later.**
+
+**Build un-park trigger:** a user/market signal that a hosted compliance-validation surface distinct from
+Web Docs (#091) is wanted. At that point the home is *already decided* (a, structural-trigger-armed) — the
+only fresh call is whether a *structural* trigger has since flipped it to (b).
