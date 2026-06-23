@@ -1,0 +1,23 @@
+{
+  "id": "webrouting-route-table-derivations",
+  "title": "Route-Table Derivations: Which Emitters, and How Each Handles Dynamic Routes",
+  "status": "open",
+  "summary": "The webrouting standard (#1684) derives non-DOM artifacts from the one canonical route-map projection #1685 ratified (declarative-DOM <template route> stays the authoring source-of-truth; webrouting derives a serializable route-map of path/guard/loader/outlet/isErrorBoundary, dropping the non-serializable URLPattern + HTMLTemplateElement). #1688 picks which derived artifacts ship. Four candidate emitters, all derivable from that one projection and all coherent: a crawler sitemap.xml (SEO), an in-app navigation-tree / IA map (breadcrumbs, menus, nav blocks), a prerender/static-render manifest (routes to statically render), and a Speculation-Rules prefetch manifest (the router block already references the Speculation Rules API at blocks/router.json). The standing test collapses the item's 'which ships in v1' framing: all four coexist behind a pluggable emitter-set swap seam and none is flawed, so they are support-all (ratify the pluggable set) and v1-vs-later is separately-prioritized burndown ordering, not a merit fork. The genuine merit call is the per-emitter dynamic-route enumeration policy: a parametric template like /users/:id cannot become concrete URLs without an external value source, and prior art does not agree on how to close that gap. Concrete-URL emitters (sitemap URL-list, prerender-by-enumeration, Speculation URL-list rules) require an author-supplied params/entries generator — Next.js generateStaticParams, SvelteKit entries() — or they exclude the parametric route by construction (a sitemap can never contain /users/:id). Pattern-preserving emitters need no value source: the IA nav-tree keeps /users/:id as a structural node; Speculation document-rules (where: href_matches /users/*) match links already in the DOM at runtime; SvelteKit crawl-discovery follows links on prerendered pages. So the deriver needs a parametric-route policy — exclude from concrete-URL emitters by default, optionally enumerate via an author-supplied param-source hook, or lower to a pattern predicate where the artifact supports it (Fork 1). A second smaller seam: whether the IA-tree emitter produces the hierarchy the Navigation Intent structure axis declares (one composed home) or is a standalone derivation (Fork 2). No overlap with the docs-site's own src/sitemap.njk — that is the 11ty documentation SEO sitemap over collections.all (per #774/#770), unrelated to app routing.",
+  "dateOpened": "2026-06-23",
+  "tags": [
+    "webrouting",
+    "routing",
+    "sitemap",
+    "prerender",
+    "speculation-rules",
+    "navigation-tree",
+    "dynamic-routes",
+    "derivation",
+    "prior-art"
+  ],
+  "relatedBlocks": [
+    "router"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webblocks"
+}

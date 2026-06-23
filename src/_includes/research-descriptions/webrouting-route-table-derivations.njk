@@ -1,0 +1,93 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    The <a href="/backlog/1684-scaffold-the-webrouting-standard-route-format-profile-url-as/">webrouting</a>
+    standard derives non-DOM artifacts from the <strong>one canonical route-map projection</strong>
+    <a href="/backlog/1685-webrouting-route-format-source-of-truth-declarative-dom-temp/">#1685</a> ratified:
+    declarative-DOM <code>&lt;template route&gt;</code> stays the authoring source-of-truth, and webrouting derives a
+    serializable route-map of <code>path / guard / loader / outlet / isErrorBoundary</code> (dropping the
+    non-serializable <code>URLPattern</code> + <code>HTMLTemplateElement</code>). This topic asks
+    <a href="/backlog/1688-webrouting-sitemap-derivation-scope-which-artifact-set-ships/">#1688</a>'s question:
+    <strong>which derived artifacts ship</strong>, and the harder question #1685 explicitly punted —
+    <strong>how each artifact handles a parametric route</strong> like <code>/users/:id</code>.
+</p>
+
+<h2>The four candidate emitters</h2>
+<ul>
+    <li><strong>Crawler <code>sitemap.xml</code></strong> — a sitemaps.org/0.9 <code>&lt;urlset&gt;</code> of concrete URLs for SEO.</li>
+    <li><strong>In-app navigation-tree / IA map</strong> — a structured route tree for breadcrumbs, menus, and nav blocks.</li>
+    <li><strong>Prerender / static-render manifest</strong> — the list of routes to statically render at build time.</li>
+    <li><strong>Speculation-Rules prefetch manifest</strong> — declarative <code>&lt;script type="speculationrules"&gt;</code> prefetch/prerender rules. The <code>router</code> block already references the Speculation Rules API (<code>src/_data/blocks/router.json</code>).</li>
+</ul>
+
+<h2>The standing test — these are support-all, not a v1 fork</h2>
+<p>
+    All four emitters are coherent, all derive from the <em>one</em> #1685 projection, and all coexist behind a
+    pluggable emitter-set swap seam — <strong>none is flawed</strong>. So "which ships in v1" is
+    <strong>separately-prioritized burndown ordering, not a merit fork</strong>: the pluggable emitter set is
+    ratified as supported-by-default (config-extends-platform-default / most-flexible-default → an open emitter
+    registry), and the v1 build order is a backlog-ordering knob, not a design branch.
+</p>
+
+<h2>The genuine merit call — per-emitter dynamic-route enumeration</h2>
+<p>
+    A parametric template (<code>/users/:id</code>) <strong>cannot become concrete URLs without an external value
+    source</strong>, and prior art does not agree on how to close that gap:
+</p>
+<table>
+    <thead>
+        <tr><th>Emitter</th><th>Prior art</th><th>Parametric-route handling</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>Crawler <code>sitemap.xml</code></td>
+            <td>Next.js <code>sitemap.(js|ts)</code>; <code>next-sitemap</code>; <code>svelte-sitemap</code>; <code>@quasibit/eleventy-plugin-sitemap</code></td>
+            <td><strong>Must enumerate.</strong> Next requires <code>generateStaticParams</code> / a build-time data fetch; <code>svelte-sitemap</code> scans only already-concrete prerendered routes. No value source ⇒ the parametric route is <strong>excluded by construction</strong> (a sitemap can never contain <code>/users/:id</code>).</td>
+        </tr>
+        <tr>
+            <td>In-app IA nav-tree</td>
+            <td><code>@11ty/eleventy-navigation</code> (hierarchical tree + breadcrumbs); React-Router / Angular route objects</td>
+            <td><strong>Keeps the template form.</strong> A nav tree is structural — <code>/users/:id</code> is a node <em>as a pattern</em>; no concrete IDs needed, no value source.</td>
+        </tr>
+        <tr>
+            <td>Prerender manifest</td>
+            <td>Next prerender-manifest; SvelteKit <code>prerender.entries</code> + <code>entries()</code> generators</td>
+            <td><strong>Enumerate or skip.</strong> SvelteKit prerenders non-dynamic routes by default and discovers dynamic ones via <em>crawl</em> (follow links on prerendered pages) or an explicit author-exported <code>entries()</code> generator. Un-reached parametric routes are skipped without a source.</td>
+        </tr>
+        <tr>
+            <td>Speculation-Rules manifest</td>
+            <td>MDN Speculation Rules API; corewebvitals.io generator; Chrome prerender docs</td>
+            <td><strong>Two native modes; one needs no enumeration.</strong> <em>URL-List</em> rules (<code>"urls": [...]</code>) need concrete URLs (same value-source problem). <em>Document rules</em> (<code>"where": { "href_matches": "/users/*" }</code>) match links already in the DOM at runtime by pattern — a parametric template lowers directly to a predicate with <strong>no value source at all</strong>.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>Recommendation (to ratify in #1688)</h2>
+<ol>
+    <li>
+        <strong>Ratify the pluggable emitter set</strong> (supported-by-default, not a decision): a default-less
+        emitter registry the project config extends, all four emitters coexisting behind a swap seam. v1 build
+        order is separately-prioritized burndown.
+    </li>
+    <li>
+        <strong>Fork 1 — dynamic-route enumeration policy (the genuine merit call).</strong> Default:
+        <strong>(a) exclude parametric routes from concrete-URL emitters by default, with an optional author-supplied
+        param-source hook</strong> (<code>generateStaticParams</code>-shaped) to enumerate when wanted, and lower to a
+        pattern predicate where the artifact natively supports it (Speculation document-rules, IA-tree). Never
+        fabricate or emit a literal <code>:id</code> URL.
+    </li>
+    <li>
+        <strong>Fork 2 — IA-tree composition seam.</strong> Default: <strong>(a) the IA-tree emitter produces the
+        hierarchy the Navigation Intent <code>structure</code> axis declares</strong> — one composed home, not a
+        standalone derivation that re-invents the tree.
+    </li>
+</ol>
+
+<h2>No overlap with the docs-site sitemap</h2>
+<p>
+    <code>src/sitemap.njk</code> is the <strong>11ty documentation site's</strong> own SEO sitemap — it iterates
+    <code>collections.all</code> (every rendered docs page) per #774/#770's rendered-site a11y gate, emitting
+    <code>sitemaps.org/0.9</code>. It has nothing to do with app routing or the route table; it is the docs build's
+    artifact, a different producer / input / consumer. No collision with #1688's app-route sitemap emitter.
+</p>
+{% endraw %}
