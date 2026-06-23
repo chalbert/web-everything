@@ -45,7 +45,14 @@ output is the rewritten body, not a message:
    ratify), or two coherent branches genuinely *cannot* coexist. If you can't name the broken/excluded
    branch, there is no fork — author it as a "Supported by default" entry, never a `## Fork N` with a pick.
    (The #756 miss: A and B were composable from one `traitEnforcerParcel` factory, so the call was
-   *support both, default to the factory*.)
+   *support both, default to the factory*.) **The standing test has *three* outcomes, not two**
+   (*backlog-workflow.md → Third archetype — the validation-gate decision*): a concern is either (1) a real
+   **fork** → `## Fork N`; (2) **support-both** → "Supported by default"; or (3) a one-sided **go/no-go on a
+   candidate** (the #142 AI-generated idea cards) → the **validation-gate shape** (Digest+verdict ·
+   prior-art delta · why-not-a-fork · recommendation = go/no/not-yet + concrete trigger + merit `Skeptic:`),
+   no `## Fork N`. Don't drop a validation gate as "not a fork" — prepare it; just guard the #1620 soft-park
+   (a bare "do we need this, on what trigger" with no delta/verdict is not a prepared gate). Worked example:
+   [#1631](/backlog/1631-shareable-full-context-repro-bundle-for-the-dev-browser/).
 1. **Prior-art research first — never author a fork cold** (*backlog-workflow.md → Fork-readiness pass*,
    first bullet). If the decision designs anything greenfield (a new intent/block/plug/protocol/adapter,
    or any "no design exists yet" call), run *design-first.md → step 1*: survey browser standards
@@ -103,7 +110,11 @@ A prepared decision is **still open** — the call hasn't been made. So `release
    fork is not prepared — do not stamp it. Walk every `## Fork N` and confirm each has its fork-existence
    justification line (#819), named options,
    tradeoffs, a bold default, **and a `Skeptic:` verdict line** (the pass-4 attack was run and its findings
-   folded in — a fork with no `Skeptic:` note is un-attacked, so not at DoR; do not stamp it). **Use the
+   folded in — a fork with no `Skeptic:` note is un-attacked, so not at DoR; do not stamp it). **If the
+   item is a *validation-gate* decision** (third archetype — a go/no-go on a candidate, no `## Fork N`),
+   gate on its shape instead: confirm a Digest+verdict (go/no/not-yet), a prior-art delta, a *concrete*
+   un-gate trigger, and a merit `Skeptic:` line — and that it is **not** a bare "do we need this, on what
+   trigger" (the #1620 soft-park). Then stamp. **Use the
    fixed fork-labeling convention** (*backlog-workflow.md → the
    prepared-decision shape*): numbered `## Fork N` section headings, lowercase `(a)`/`(b)`/`(c)` options
    referenced as "Fork N (a)", a second-level choice as a "Fork N sub-fork" — never `## Fork (a)` or
