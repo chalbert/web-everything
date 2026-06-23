@@ -1374,6 +1374,35 @@ SURVIVES-WITH-AMENDMENT — the three seams fold into the #1030 build). Under po
 
 ---
 
+### Live-page detection probes for tool-observed presence; the printed claim escalates with its evidence tier {#detection-claim-matches-evidence-tier}
+
+A tool that decides whether a stranger's *running* page uses our platform must **passively probe** —
+read tool-observed runtime signals with **zero app cooperation and zero page mutation** — because the
+two alternatives are structurally ineligible for an always-on gate: a *declared* manifest is build-time
+convention with no runtime footprint (no app ships one, and the level is self-asserted-and-trusted, never
+behaviour-verified), and a *verify* pass that runs the conformance corpus **mutates the inspected page**,
+so it can never silently decide whether to light up. This is the universal framework-devtool pattern
+(React's global hook, Vue's `__VUE__`, Angular's `ng-version`). **The load-bearing rule:** the strength of
+the claim the tool prints must **match the evidence tier it actually has** — passive probe ⇒ *presence*
+only ("detected"), a self-declared manifest ⇒ the asserted level **badged unverified**, an on-demand verify
+run ⇒ the **only** tier permitted to print a *verified* result. Tiers escalate the **assertion, not the
+toolset** (the same panels may surface at every tier; what grows is the word the panel is allowed to use).
+Conformance is a *verified* word; presence is what a probe knows — never let a passive signal print a
+verified claim. **Tell:** a "light up as conformant on detection" proposal — that asserts what only verify
+earns; downgrade the headline to "detected" and gate the verified word behind the mutating on-demand action.
+**Caveat (probe reach):** only signals readable across an extension's isolated content-script world count —
+a DOM marker (`script[type="registry"]`) does; a module-private `Symbol()` or closure state does **not**, so
+a public global probe-marker is the load-bearing enabler that widens passive reach beyond the declarative
+minority (the move React/Vue made with `__REACT_DEVTOOLS_GLOBAL_HOOK__`).
+
+**Lineage:** #1673 (ratified 2026-06-23; probe-first tiered detection for the conformance-lit extension
+MVP; prep topic `reports/2026-06-23-live-page-we-conformance-detection.md`; two skeptic passes both
+SURVIVES-WITH-AMENDMENT — the false-positive attack collapsed, the ratification red-team re-sized the probe
+reach and promoted the public-marker follow-up #1722). Buried fork under #1656; faithful MVP composition of
+#141's "gate on a capability manifest, degrade gracefully" end-state.
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
