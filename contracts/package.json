@@ -32,6 +32,7 @@
     "./trainable-judge": "./trainable-judge.ts",
     "./tree-select": "./tree-select.ts",
     "./webdocs": "./webdocs.ts",
-    "./reproduction-parity": "./reproduction-parity.ts"
+    "./reproduction-parity": "./reproduction-parity.ts",
+    "./repro-bundle": "./repro-bundle.ts"
   }
 }
