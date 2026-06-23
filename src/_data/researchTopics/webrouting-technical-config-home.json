@@ -1,0 +1,25 @@
+{
+  "id": "webrouting-technical-config-home",
+  "title": "webrouting Technical-Config Home: a WE Config Schema vs a plateau Configurator Domain",
+  "status": "open",
+  "summary": "The webrouting standard (#1684) has to home the technical routing knobs the Navigation Intent deliberately punts as non-UX — base path, history mode (browser/hash/memory), lazy/code-split, prerender, scroll-restoration policy, 404 fallback. Per the intents-UX-only platform rule (docs/agent/platform-decisions.md#intents-ux-only) these cannot ride the Navigation Intent; per constellation-placement (#constellation-placement) a declarable contract lives in WE and a developer-operated decision tool lives in plateau. The candidate homes are (a) a route-config schema owned by webrouting in WE, (b) a Technical Configurator domain in plateau-app over those knobs, or (c) both. The standing test (bias-toward-separation + config-extends-platform-default + intent-UX-only) collapses (a)-vs-(b): they are not mutually exclusive — the SCHEMA is the contract source-of-truth (WE) and a Configurator domain is downstream tooling over it. So the call is (c) with WE-as-SoT, which holds support-both. The genuine residual fork is WHICH knobs are net-new technical-config vs already covered: the router block ALREADY declares base, scroll, transition, keep-alive, lazy as <we-route-view>/<template> attributes (src/_data/blocks/router.json) — so WE already owns scattered route-config vocabulary, just not as a unified named schema. The net-new knobs a unified schema adds are history mode (browser/hash/memory), prerender, and 404 fallback. Prior art splits each knob by config-vs-code: base path is a declared CONFIG in Next (basePath), SvelteKit (kit.paths.base), TanStack (basepath) but a constructor arg in Vue Router (createWebHistory(base)) and React Router (basename); prerender + trailingSlash + 404-fallback are CONFIG in Next/SvelteKit (next.config, kit.prerender, adapter fallback); history mode is a CODE choice in Vue Router (createWebHistory/createWebHashHistory/createMemoryHistory), TanStack (createBrowserHistory/createHashHistory/createMemoryHistory) and React Router; scroll is a config flag in TanStack (scrollRestoration) but a code function in Vue Router (scrollBehavior); lazy/code-split is per-route file convention in Next/SvelteKit and a code import() everywhere else. The recommendation: WE owns a per-dimension route-config schema (the config-extends-platform-default shape — one key per knob in webeverything.config.*, default-less core, native-first/most-permissive defaults), homing the net-new declarable knobs (history mode, prerender, 404 fallback) and unifying the already-scattered block attributes (base, scroll, lazy) into the named vocabulary; the existing render-strategy/file-upload Configurator domains in plateau (plateau:src/technical-configurator/) are the precedent for an OPTIONAL downstream domain that walks a dev through OUTCOMES and emits config. The #499 converse-guard gates that domain: a plateau Configurator domain is justified ONLY if it adds outcome-framing value over the axes the schema already carries — minting one that merely re-homes the schema's enum values is redundant cross-layer duplication (the #499 dissolution). So: WE schema = ratify now (the contract SoT); plateau Configurator domain = support-both, build-when-it-earns-its-keep, one card per documented technical setting.",
+  "dateOpened": "2026-06-23",
+  "tags": [
+    "webrouting",
+    "routing",
+    "technical-config",
+    "configurator",
+    "constellation-placement",
+    "config-schema",
+    "base-path",
+    "history-mode",
+    "prerender",
+    "prior-art",
+    "vocabulary"
+  ],
+  "relatedBlocks": [
+    "router"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webblocks"
+}

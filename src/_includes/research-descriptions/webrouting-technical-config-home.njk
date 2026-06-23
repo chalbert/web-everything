@@ -1,0 +1,153 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    <a href="/backlog/1687-webrouting-technical-config-home-schema-in-webrouting-vs-a-p/">#1687</a> (under the
+    <a href="/backlog/1684-scaffold-the-webrouting-standard-route-format-profile-url-as/">webrouting</a> scaffold epic)
+    asks where the <strong>technical routing knobs</strong> the
+    <a href="/intents/navigation/">Navigation Intent</a> deliberately excludes as non-UX — base path, history mode
+    (browser / hash / memory), lazy / code-split, prerender, scroll-restoration policy, 404 fallback — are declared as a
+    <strong>contract</strong>, and whether a <strong>plateau Technical Configurator domain</strong> assists choosing
+    values. Three candidate homes: <strong>(a)</strong> a route-config schema owned by webrouting in WE;
+    <strong>(b)</strong> a Technical Configurator domain in plateau-app over those knobs; <strong>(c)</strong> both.
+</p>
+
+<h2>Why these knobs can't live in the Navigation Intent</h2>
+<p>
+    The platform rule <em>intents are UX-only; technical strategy &rarr; Configurator</em>
+    (<code>docs/agent/platform-decisions.md#intents-ux-only</code>) is explicit: an intent carries no implementation
+    refs. The Navigation Intent (<code>src/_data/intents/navigation.json</code>) owns the
+    user-perceivable axes (<code>structure / history / scroll / transition / guard / persistence</code>) — note its
+    <code>history</code> is the UX <em>contribution</em> (push / replace / none, "what Back does"), <em>not</em> the
+    technical <em>history mode</em> (browser / hash / memory, "how the URL is encoded"). The technical mode is a
+    different axis. So these knobs are correctly excluded from the intent and need another home.
+</p>
+
+<h2>The standing test collapses (a)-vs-(b) to support-both</h2>
+<p>
+    Under <em>constellation-placement</em>, <em>bias-toward-separation</em> and <em>config-extends-platform-default</em>,
+    "schema vs Configurator" is not a real either/or. Code that <strong>defines a contract</strong> &rarr; WE; a
+    <strong>developer-operated tool that walks you through choices against your own build</strong> &rarr; plateau
+    (the <em>devtools-placement</em> consumer test). So the <em>schema</em> is the contract source-of-truth in WE and a
+    <em>Configurator domain</em> is downstream tooling over it. That is option (c) with WE-as-SoT — and the two coexist,
+    so they are not a decision. The genuine residual fork is <strong>which knobs</strong> the unified schema actually
+    adds.
+</p>
+
+<h2>WE already owns scattered route-config vocabulary</h2>
+<p>
+    The <a href="/blocks/router/">router</a> block (<code>src/_data/blocks/router.json</code>) <strong>already</strong>
+    declares technical-config knobs as attributes / properties on <code>&lt;we-route-view&gt;</code> and child
+    <code>&lt;template&gt;</code>: <code>base</code> (base path prepended to all patterns), <code>scroll</code>
+    (restoration mode), <code>transition</code> (View Transitions), <code>keep-alive</code> (cache deactivated content),
+    and <code>lazy</code> (lazy-load on first navigation). So WE is not greenfield here — it owns the vocabulary, just
+    <em>scattered as per-element block attributes</em>, not a unified named schema. The <strong>net-new</strong> knobs a
+    config schema adds over what the block already declares are <strong>history mode</strong> (browser / hash / memory),
+    <strong>prerender</strong>, and <strong>404 fallback</strong>.
+</p>
+
+<h2>Prior art &mdash; each knob is config in some routers, code in others</h2>
+<table>
+    <thead>
+        <tr><th>Knob</th><th>Next.js</th><th>SvelteKit</th><th>Vue Router</th><th>TanStack Router</th><th>React Router</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>base path</td>
+            <td><strong>config</strong> <code>basePath</code></td>
+            <td><strong>config</strong> <code>kit.paths.base</code></td>
+            <td>code: <code>createWebHistory(base)</code></td>
+            <td><strong>config</strong> <code>basepath</code></td>
+            <td>code: <code>basename</code></td>
+        </tr>
+        <tr>
+            <td>history mode</td>
+            <td>always browser</td>
+            <td>always browser</td>
+            <td>code: <code>createWeb/Hash/MemoryHistory</code></td>
+            <td>code: <code>createBrowser/Hash/MemoryHistory</code></td>
+            <td>code: history type</td>
+        </tr>
+        <tr>
+            <td>lazy / code-split</td>
+            <td>per-route file (convention)</td>
+            <td>per-route file (convention)</td>
+            <td>code: <code>() =&gt; import()</code></td>
+            <td>code: <code>lazy</code> / file</td>
+            <td>code: <code>lazy</code></td>
+        </tr>
+        <tr>
+            <td>prerender</td>
+            <td><strong>config</strong> static export</td>
+            <td><strong>config</strong> <code>prerender</code> / <code>entries</code></td>
+            <td>&mdash;</td>
+            <td>&mdash;</td>
+            <td>&mdash;</td>
+        </tr>
+        <tr>
+            <td>scroll restoration</td>
+            <td>always</td>
+            <td>built-in</td>
+            <td>code fn: <code>scrollBehavior</code></td>
+            <td><strong>config</strong> <code>scrollRestoration</code></td>
+            <td>component: <code>&lt;ScrollRestoration&gt;</code></td>
+        </tr>
+        <tr>
+            <td>404 fallback</td>
+            <td>file <code>not-found</code></td>
+            <td><strong>config</strong> adapter <code>fallback</code></td>
+            <td>catch-all route</td>
+            <td>catch-all route</td>
+            <td>catch-all route</td>
+        </tr>
+        <tr>
+            <td>trailing slash</td>
+            <td><strong>config</strong> <code>trailingSlash</code></td>
+            <td><strong>config</strong> <code>trailingSlash</code></td>
+            <td>&mdash;</td>
+            <td>&mdash;</td>
+            <td>&mdash;</td>
+        </tr>
+    </tbody>
+</table>
+<p>
+    The split is consistent: <strong>base path, prerender, trailing-slash and 404 fallback are declared CONFIG</strong>
+    in the file-system frameworks (Next / SvelteKit) — they are deploy-shaped facts the bundler / host reads without a
+    running app. <strong>History mode, scroll, and lazy/code-split lean CODE</strong> — constructor arguments
+    (<code>createWebHistory</code>), render functions (<code>scrollBehavior</code>), or per-route imports. This validates
+    that a route-config <em>schema</em> is the right WE home for the deploy-shaped, serializable knobs (history mode,
+    prerender, 404 fallback, base), and that the code-shaped ones (scroll fn, lazy import) are author-in-the-markup
+    concerns the block already covers.
+</p>
+
+<h2>The plateau Configurator precedent &mdash; and its converse-guard</h2>
+<p>
+    plateau-app already runs a data-driven <strong>Technical Configurator</strong>
+    (<code>plateau:src/technical-configurator/</code>) whose domains are exactly the "WE schema + downstream tooling"
+    pattern: <code>plateau:src/technical-configurator/seed-render-strategy.ts</code> (over WE's #079 Render Strategy
+    Protocol) and <code>plateau:src/technical-configurator/seed-file-upload.ts</code> (over the WE file-update
+    transfer-strategy) walk a developer through <strong>outcomes</strong> ("does first paint need no JS?", "where do the
+    bytes land?") and emit the strategy. A new domain is one seed file
+    (<code>seed-&lt;id&gt;.ts</code>) + one line in <code>plateau:src/technical-configurator/provider.ts</code> — no UI
+    change. So a routing Configurator domain is mechanically cheap and precedented.
+</p>
+<p>
+    But the <em>intents-UX-only converse-guard</em> (#499) bounds it: a Configurator domain that merely re-homes axes the
+    config already carries is <strong>redundant cross-layer duplication</strong>, not the rule's intent — the #499
+    credential-enrollment domain was <em>dissolved</em> for exactly this. So a routing Configurator domain is justified
+    only if it adds genuine <strong>outcome-framing</strong> value over the schema's enum values (e.g. "your host has no
+    rewrite support &rarr; hash history" reasoning), not if it just lists <code>browser / hash / memory</code> the schema
+    already names. That makes it a support-both, build-when-it-earns-its-keep concern with one card per documented
+    technical setting, not a thing this decision must ship.
+</p>
+
+<h2>Recommendation</h2>
+<p>
+    <strong>(c) WE owns the route-config schema as the source-of-truth; a plateau Configurator domain is optional
+    downstream tooling.</strong> The schema follows <em>config-extends-platform-default</em>: per-dimension storage
+    (one key per knob in <code>webeverything.config.*</code>), a default-less core, native-first / most-permissive
+    defaults, each knob's value <code>extends</code> a platform flavor. It homes the net-new declarable knobs (history
+    mode, prerender, 404 fallback) and gives the already-scattered block attributes (base, scroll, lazy) a unified
+    named vocabulary. The plateau Configurator domain stays a separately-prioritized build, gated by the #499
+    converse-guard, mirroring the render-strategy / file-upload precedent.
+</p>
+{% endraw %}
