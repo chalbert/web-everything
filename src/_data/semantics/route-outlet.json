@@ -1,0 +1,5 @@
+{
+  "term": "route outlet",
+  "definition": "A named insertion point where a matched route's content renders. The primary (unnamed) outlet renders in place; named outlets (<code>route:outlet</code>) let one navigation populate several regions (the master/detail pattern).",
+  "usage": "Declared via <code>route:outlet='name'</code> on a route template; the empty string is the primary outlet."
+}

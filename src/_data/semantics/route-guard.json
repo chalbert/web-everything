@@ -1,0 +1,5 @@
+{
+  "term": "route guard",
+  "definition": "A named predicate gating a route — <code>canActivate</code> (entry) and <code>canDeactivate</code>/<code>guardLeave</code> (exit, e.g. unsaved-changes) — resolved from the <code>@routeGuard</code> context. The webrouting UX axis of <a href='/projects/webguards/'>Web Guards</a>' predicate seam.",
+  "usage": "Declared via <code>route:guard</code> / <code>route:guard:leave</code>; the name resolves to a guard function at navigation time."
+}

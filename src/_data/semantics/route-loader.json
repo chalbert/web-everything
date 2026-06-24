@@ -1,0 +1,5 @@
+{
+  "term": "route loader",
+  "definition": "A named data-loading function run before a route's content is stamped, so the view renders with its data ready (no in-view loading flash). Resolved from the <code>@routeLoader</code> context.",
+  "usage": "Declared via <code>route:loader='name'</code>; the loader's resolved data is available to the route's content."
+}

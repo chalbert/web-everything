@@ -1,0 +1,5 @@
+{
+  "term": "route error boundary",
+  "definition": "The route whose content renders when a sibling route's activation (guard/loader/render) throws — the routing analog of a try/catch boundary, keeping a failed navigation from blanking the app.",
+  "usage": "Declared via the boolean <code>route:error</code> attribute on a route template."
+}

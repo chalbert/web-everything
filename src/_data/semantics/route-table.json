@@ -1,0 +1,5 @@
+{
+  "term": "route table",
+  "definition": "The ordered set of routes a router matches against the URL — authored as the <code>&lt;template route&gt;</code> children of a <code>&lt;we-route-view&gt;</code> (the declarative-DOM source-of-truth, #1685). First match wins; webrouting derives a serializable route-map projection from it.",
+  "usage": "The canonical authoring form of an app's routes. Each entry carries a URLPattern path + optional guard/loader/outlet/error-boundary."
+}

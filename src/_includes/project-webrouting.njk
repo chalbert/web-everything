@@ -75,6 +75,49 @@
     </div>
 </section>
 
+<section id="route-format-profile-section" class="section-card">
+    <h3 id="route-format-profile">Route-format profile</h3>
+    <p>
+        The portable webrouting artifact is the <strong>route table</strong> — the thin <strong>semantic
+        core</strong> of an app's routing. It declares <em>what each route means</em> (which URL pattern maps
+        to which view, gated by which guard, fed by which loader, rendered into which outlet) and nothing
+        about <em>how a router commits a navigation</em> (history, scroll, transitions — those are the
+        <a href="/intents/navigation/">Navigation Intent</a>'s UX axes). Every field is a <strong>semantic</strong>
+        reference, never an impl detail: <code>guard</code> / <code>loader</code> name a predicate / a
+        data-loader resolved from context, <code>outlet</code> names a region, never a concrete handler. The
+        profile is grounded on the real consumer it must reproduce — the <code>RouteDefinition</code> shape in
+        <code>we:blocks/router/types.ts</code> the shipped router already parses.
+    </p>
+    {% highlight "typescript" %}
+// The webrouting route-format profile — the SEMANTIC core of one route. Authored declaratively as the
+// `<template route>` children of `<we-route-view>` (the #1685 source-of-truth); URLPattern (Baseline 2025)
+// is the path grammar. Presentation-free: how a router commits the navigation (history/scroll/transition)
+// is the Navigation Intent, never here. (The derived serializable projection of this is the route-map,
+// `blocks/router/route-map.ts` #1721; the per-field meaning is the glossary route-* terms.)
+interface RouteFormatEntry {
+  path: string;            // a URLPattern pathname TEMPLATE ("/users/:id"), the route's identity — never a concrete URL
+  guard?: string;          // a `route guard` name: canActivate predicate, resolved from @routeGuard
+  guardLeave?: string;     // a `route guard` name: canDeactivate (e.g. unsaved-changes), resolved from @routeGuard
+  loader?: string;         // a `route loader` name: data-loaded before the view stamps, resolved from @routeLoader
+  outlet?: string;         // the `route outlet` this renders into; omitted = the primary (in-place) outlet
+  isErrorBoundary?: boolean; // marks the `route error boundary` (route:error) — renders when a sibling route throws
+}
+    {% endhighlight %}
+    <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+        <li><strong>Semantic, not presentational:</strong> the profile names <em>meaning</em>
+            (<a href="/semantics/#route-table">route table</a>, <a href="/semantics/#route-outlet">outlet</a>,
+            <a href="/semantics/#route-guard">guard</a>, <a href="/semantics/#route-loader">loader</a>,
+            <a href="/semantics/#route-error-boundary">error boundary</a>) — the router runtime + the Navigation
+            Intent own how those commit.</li>
+        <li><strong>HTML-first, URLPattern-grammared:</strong> authored as <code>&lt;template route&gt;</code>
+            DOM (#1685), with <a href="https://developer.mozilla.org/docs/Web/API/URLPattern">URLPattern</a> the
+            path grammar — webrouting invents no route syntax (native-first).</li>
+        <li><strong>One profile, two reads:</strong> the declarative DOM is the authoring source-of-truth (below);
+            the serializable <a href="#route-format-sot">route-map projection</a> (#1721) is its derived,
+            non-DOM read for sitemap / prerender / config tooling.</li>
+    </ul>
+</section>
+
 <section id="route-format" class="section-card">
     <h3 id="route-format-sot">Route-format source-of-truth</h3>
     <p>
