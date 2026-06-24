@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "746"
-status: open
+status: resolved
 dateOpened: "2026-06-23"
-dateStarted: "2026-06-23"
+dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#source-only-workbench-block"
 preparedDate: "2026-06-23"
 relatedReport: reports/2026-06-23-workbench-declarative-component-hosting.md
 tags: [workbench, declarative-component, polyglot, frontierui, decision]
@@ -37,4 +40,12 @@ Skeptic: REFUTED-then-SURVIVES — attacked (a) with the strongest case for (b) 
 
 ## Context
 
-Lineage: #1618 (the Attachment residual this surfaced from, `blockedBy: 1701`) → #818 (the author-mode emit foundation, resolved) → parent #746 (the Block-Explorer workbench epic). Placement settled by #954 (data-emit, Fork 1 = A): only rendered text + diagnostics cross the #700 seam; FUI never imports `serve()`. This decision unblocks the #1618 Attachment half; the Transport half is flat and independent. At ratification, the build spins out as a #1618 slice (relax the `WorkbenchBlock` contract + register the declarative cases as source-only blocks).
+Lineage: #1618 (the Attachment residual this surfaced from, `blockedBy: 1701`) → #818 (the author-mode emit foundation, resolved) → parent #746 (the Block-Explorer workbench epic).
+
+Orthogonal finding (filed separately, does not gate this decision): ratification surfaced that the MaaS serve **core** still lives in WE (`we:blocks/renderers/module-service/`) as a self-described "v1 walking skeleton" resolver — a candidate relocation to FUI under the ratified #1282 (WE = zero implementation). Filed as **#1730**. #1701 is unaffected: both forks consume only the pre-emitted `we:src/_data/authorModeSource.json` data (#954 build-emit, an allowed author-script use of `serve()`), never the runtime serve core. Placement settled by #954 (data-emit, Fork 1 = A): only rendered text + diagnostics cross the #700 seam; FUI never imports `serve()`. This decision unblocks the #1618 Attachment half; the Transport half is flat and independent. At ratification, the build spins out as a #1618 slice (relax the `WorkbenchBlock` contract + register the declarative cases as source-only blocks).
+
+## Ratified 2026-06-24 — (a) source-only `WorkbenchBlock`
+
+Ruling: **(a)** — relax the registry so a block may carry `authorSource`/`cem` with no runnable `load`/`create`; the shell renders the source/CEM panels and skips the live-instance panels for such a block. The contract change is additive (both fields already optional). Crux verified in-tree: `load`/`create` mandatory (fui:workbench/registry.ts:97,104), `cem?`/`authorSource?` optional (:130,140), and `renderAuthorModePanel(source)` consumes data only — no instance (fui:workbench/authorMode.ts:57, gated fui:workbench/mount.ts:675). (b) excluded on the unneeded-coupling axis (no #746 consumer reads a live instance), stays available for a future live-declarative-render consumer.
+
+**Scope note — this decides the *contract*, not the *acquisition mechanism*.** A separate decision (**#1731**) reframes whether the workbench resolves a block's shape (source/cem/loadable/case-example) from the FUI `/_maas/` serve URL (#1029) instead of hardcoded `WorkbenchBlock` literals. (a) is a prerequisite either way — a MaaS-resolved block with no loadable module needs exactly this relaxed contract. The #1618 build slice should align with #1731 before hardcoding 9 source-only literals, to avoid hardcode-then-rip.

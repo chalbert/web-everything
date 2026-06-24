@@ -3,7 +3,7 @@ kind: story
 size: 5
 parent: "746"
 status: open
-blockedBy: ["818"]
+blockedBy: ["1731"]
 dateOpened: "2026-06-22"
 tags: []
 ---
@@ -20,6 +20,8 @@ construction; **(2) Attachment** — the only workbench block today (`auto-compl
 component with no declarative `<component>` definition, so nothing carries `authorSource` live yet; register
 the `componentCases` declarative blocks (or attach author-source to blocks that have a definition). Only
 rendered text + diagnostics cross the #700 seam (FUI never imports `serve()`).
+
+> **Update 2026-06-24** — the Attachment fork is resolved: **#1701 ratified (a)**, relaxing the `WorkbenchBlock` contract so a block may be source-only (`authorSource`/`cem`, no `load`/`create`) — codified at `we:docs/agent/platform-decisions.md#source-only-workbench-block`. `blockedBy` repointed `1701 → 1731`: the *contract* is settled, but the **acquisition mechanism** (hardcode 9 source-only `WorkbenchBlock` literals vs resolve block shape from the FUI `/_maas/` serve URL) is decided by **#1731** — Attachment should align there first to avoid hardcode-then-rip. Transport (residual 1) stays flat and independent of #1731.
 
 ## Pre-flight (batch-2026-06-22-1615-1208) — Transport is flat, but Attachment hides a fork → not claimed
 
