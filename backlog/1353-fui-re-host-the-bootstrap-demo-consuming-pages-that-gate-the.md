@@ -3,8 +3,6 @@ kind: epic
 status: open
 locus: frontierui
 dateOpened: "2026-06-20"
-blockedBy: [1765, 1766, 1767, 1768]
-childlessReason: blocked
 tags: [frontierui, demos, dogfood, fui-build-gate]
 ---
 
@@ -22,13 +20,13 @@ Investigation of the real runtime import graph (not the body's framing) found th
 
 All three are independent (no shared importer) → batchable together.
 
-## Remainder — gated on FUI build (`blockedBy`; re-`/slice` as each gap clears)
+## Remainder — carved as open child slices (`/slice 1353` + re-scope, 2026-06-24)
 
-`/slice 1353` on 2026-06-24 (`we:reports/2026-06-24-backlog-split-analysis.md`) confirmed **none** of these FUI impls has landed since 2026-06-20 — none is carvable into a deliverable re-host slice yet. No decision is involved (embed-vs-modeC is a settled per-demo menu, `#we-fui-embed-boundary` rule 6) — each is an FUI *impl* gap, now filed as its own open FUI-build item this epic is `blockedBy`:
+`we:reports/2026-06-24-backlog-split-analysis.md` (§§ "#1353", "#1768") carved the four remainder strands as open children. No decision is involved (embed-vs-modeC is a settled per-demo menu, `#we-fui-embed-boundary` rule 6) — three are FUI *impl* gaps that must land before their demo re-host, one is a WE-side delete:
 
-- **#1765** — reorderable-list cross-list twin: FUI is within-list only; needs the `renderCrossListReorder` twin + fixtures ported into `fui:blocks/renderers/reorderable-list/`.
-- **#1766** — loader-background-handoff: FUI `fui:blocks/resource-loader/` lacks `backgroundLoad` + handoff; port `we:blocks/resource-loader/backgroundHandoff.ts` + `we:blocks/resource-loader/handoffContract.ts` + fixtures.
-- **#1767** — component renderer: no `fui:blocks/renderers/component/` dir exists (cited #1286/#1289 resolved but delivered other blocks — false edge); 4 WE consumer demos.
-- **#1768** — bootstrap-bundle sub-epic: 7 families + `stores` share the single importer `we:plugs/bootstrap.ts` (11 demos); not per-family sliceable — re-host all 11 + relocate the plug, then bulk-delete.
+- **#1765** — FUI cross-list reorder twin: FUI `fui:blocks/renderers/reorderable-list/` is within-list only; port the `renderCrossListReorder` twin + fixtures. *Gates the reorderable-list re-host.*
+- **#1766** — FUI loader-background-handoff: `fui:blocks/resource-loader/` lacks `backgroundLoad` + handoff; port `we:blocks/resource-loader/backgroundHandoff.ts` + `we:blocks/resource-loader/handoffContract.ts` + fixtures. *Gates the loader-background-handoff re-host.*
+- **#1767** — FUI component renderer: no `fui:blocks/renderers/component/` dir exists (cited #1286/#1289 resolved but delivered other blocks — false edge); 4 WE consumer demos. *Gates the component-adapter re-host.*
+- **#1768** — bootstrap-runtime delete (**actionable now**, re-scoped): the plug relocation is already done (#606/#1234/#1046); delete the 6 graduated WE families (`parsers`/`text-nodes`/`for-each`/`transient`/`stores`/`attributes`, all at FUI parity) + repoint 3 `declarative-spa*` demos. `we:blocks/router` stays (#1684 standard derivation); `navigation` already gone.
 
-When a prerequisite resolves, re-`/slice 1353` to carve that family's re-host slice and clear its `blockedBy` edge (drop `childlessReason: blocked` once the last edge clears).
+When an FUI build (#1765/#1766/#1767) resolves, file the trivial demo-swap+delete follow-up for that family. The epic resolves when all children are done.

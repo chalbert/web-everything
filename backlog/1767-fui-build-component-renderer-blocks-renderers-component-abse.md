@@ -3,6 +3,7 @@ kind: story
 size: 8
 status: open
 locus: frontierui
+parent: 1353
 dateOpened: "2026-06-24"
 tags: [frontierui, blocks, renderers, fui-build-gate]
 ---

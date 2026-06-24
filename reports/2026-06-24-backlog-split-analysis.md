@@ -184,3 +184,29 @@ No carvable slice today → #1353 is genuinely **stalled on FUI builds**, the #1
 2. Set #1353 `blockedBy: [those four]` + `childlessReason: blocked`, and de-bury the body — replace the four remainder bullets with pointers to the filed `#NNN`.
 
 This stops the gate re-flagging it every run, makes #1353 read honestly as blocked on real open FUI work, and each prerequisite becomes a future `/slice 1353` trigger as it lands.
+
+---
+
+# Backlog split analysis — #1768 bootstrap-bundle sub-epic
+
+**Date:** 2026-06-24
+**Focus:** `/slice 1768` — carve the bootstrap re-host sub-epic filed earlier this session (seeded from #1353's "7 bootstrap families + `stores`, single importer, future sub-epic" framing).
+**Verdict:** **could NOT split — stale premise.** The work-investigation pass shows #1768's framing (inherited from #1353) is wrong on four counts; the seams can't be drawn until #1768 is **re-scoped to the true residual**. No slices proposed.
+
+## Work-investigation pass (real tree, both repos)
+
+- **The plug relocation is already done.** #606 (*where do plugs live*) resolved → **FUI**; #1234 + #1046 (the WE→`@frontierui/plugs` repoint) resolved. WE has **no `plugs/` source dir** — it consumes `@frontierui/plugs`, and `we:vite.config.mts:16` resolves the bootstrap plug URL to FUI's `fui:plugs/`. `fui:plugs/bootstrap.ts` exists and wires all 7 families (`registerRouter`/`registerTransient`/`registerForEach`/`registerEventAttributes` + parsers). #1353's note "(#606 dropped stale — reopen)" is itself stale: #606 is resolved, not open.
+- **FUI already has every family impl** — `fui:blocks/router`, `fui:blocks/navigation`, `fui:blocks/parsers`, `fui:blocks/text-nodes`, `fui:blocks/for-each`, `fui:blocks/transient`, `fui:blocks/attributes`, `fui:blocks/stores` all present. So "build the FUI impl" is not the gap.
+- **`we:blocks/router` is WE-legit standard derivation, not a deletable bootstrap family** — it holds `we:blocks/router/route-emitters.ts`, `we:blocks/router/sitemap-emitter.ts`, `we:blocks/router/route-map.ts`, `we:blocks/router/url-state.ts` + `we:blocks/router/__fixtures__/` conformance vectors: the **#1684 webrouting** epic's WE-side material (same tree the #1684 section of this report covers). It must **stay** in WE.
+- **`navigation` is already deleted** WE-side; the surviving `we:blocks/parsers`, `we:blocks/text-nodes`, `we:blocks/for-each`, `we:blocks/transient`, `we:blocks/stores` each carry a `we:src/_data/blocks/` standard **definition** WE keeps — only the runtime impl graduates to FUI.
+- **3 demos import WE families directly** (`we:demos/declarative-spa.html`, `we:demos/declarative-spa-jsx.tsx`, `we:demos/declarative-spa-router.html`), not only via the FUI-resolved bootstrap — a live direct-import edge that any delete must clear.
+
+## Could not split — condition + unblocking action
+
+| Rubric condition | Why it fails | Unblocking action |
+|---|---|---|
+| (3)/(5) seams investigable, demoable | #1768's scope (relocate plug + bulk-delete 7 families) is stale — relocation done, `navigation` gone, `router` is WE-legit #1684, definitions stay. The true residual (delete only genuinely-graduated runtime, repoint 3 demos) isn't yet specified, so no slice boundary is citable | **Re-scope #1768 first** (foundational): drop the already-done plug relocation; enumerate per surviving family which files are *graduated runtime* (deletable, FUI now owns) vs *WE-legit standard definition/derivation* (stays — `router` wholesale per #1684); repoint the 3 `declarative-spa*` demos off the WE-local imports. Then re-`/slice 1768` against the corrected scope |
+
+## Knock-on to #1353
+
+#1768 is a `blockedBy` of #1353. Because its premise is stale (relocation already delivered, much of the "bundle" either WE-legit or already gone), the bootstrap strand of #1353 is **smaller and partly done** than the 2026-06-20 framing implied — revisit whether #1768 is still the right blocker, or whether the residual collapses to a narrow delete-and-repoint task once re-scoped.
