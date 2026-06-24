@@ -2,12 +2,15 @@
 kind: decision
 size: 3
 parent: "746"
-status: open
+status: resolved
 relatedProject: webdocs
 blockedBy: []
 dateOpened: "2026-06-18"
-dateStarted: "2026-06-23"
+dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: none
 preparedDate: "2026-06-23"
+codifiedIn: "docs/agent/platform-decisions.md#forward-emit-dedicated-ir"
 relatedReport: reports/2026-06-16-forward-component-emit-substrate.md
 tags: [webdocs, adapters, polyglot, generation, component-emit]
 ---
@@ -48,6 +51,24 @@ Options:
 **Ratification is evidence-gated — do NOT ratify on this prep alone.** #811 ruled "decide with cases, not guess." The #818 foundation shipped, but the idiomatic Vue/Svelte/Angular emitters that would *produce* the per-framework cases — where the flat declarative `<component>` subset "demonstrably stops stretching" — are **still deferred**, so the deciding empirical evidence does not exist yet. This prep brings the fork to Definition of Ready (options + tradeoffs + bold default + skeptic, grounded in the #811 prior art); the **ratify-trigger** is: *ratify (b) once the per-framework idiomatic emitters accumulate real cases showing where the declarative `<component>` subset stops stretching* — those cases shape C's contract right, rather than guessing it today. This is an **evidence trigger, not a backlog edge** (hence no `blockedBy`).
 
 *Skeptic:* **SURVIVES — beat the single-rep / round-trip-symmetry argument.** The strongest case for (a) is maintaining one representation with ingest↔emit round-trip symmetry. It fails on merit, not effort: #811's Mitosis evidence shows an ingest-lossy rep loses emit fidelity (the rep was built to *drop* what doesn't fit a tractable subset — exactly the styling/event/reactivity detail emit must preserve), so "one rep" buys symmetry at the cost of the fidelity the fork exists to deliver. (a) also violates *bias-toward-separation* (two concerns — lossy ingest pivot and high-fidelity emit — forced into one schema with conflicting invariants). The cost-of-a-third-IR objection is a prioritization/effort tell, not a merit branch — stripped. Default (b) holds.
+
+## Ruling (2026-06-24 — ratified)
+
+**Fork 1 → (b) Option C, the *direction*, is ratified.** The browser-component emit substrate is a dedicated
+emit-purpose IR (a neutral `@webeverything` contract authored for generation), **not** a bidirectionally-extended
+ingest `ComponentIR`. Settled on **principle, not cases**: the ingest rep is a deliberately lossy subset (its
+`notes` field records what it drops — exactly the styling/event/reactivity detail emit must preserve), so reusing
+it degrades emit fidelity and forces two conflicting invariants into one schema (*bias-toward-separation*). The
+single shipping precedent (Mitosis) declined the same reuse. Red-team of (a)'s single-rep / round-trip-symmetry
+case failed on merit (symmetry buys nothing the lossy rep can deliver); the third-IR cost is an effort tell, not
+a merit branch. (a) Rejected.
+
+**Direction vs shape split.** What's ratified is the *direction* (emit ≠ ingest IR), which the lossy-by-design
+principle decides without empirical cases. Option C's **contract shape** (its fields/grammar) stays **held on the
+evidence trigger** — designed once the idiomatic Vue/Svelte/Angular emitters accumulate real cases. This is the
+*separate-canonicity-from-content-freeze* move: the structural call is ratified now; the content is held. Tracked
+as the parked residual card [#1735](/backlog/1735-design-option-c-s-emit-purpose-ir-contract-shape-held-on-per/). Codified at
+[we:platform-decisions.md#forward-emit-dedicated-ir](docs/agent/platform-decisions.md#forward-emit-dedicated-ir).
 
 ## Context
 
