@@ -2,9 +2,11 @@
 kind: story
 size: 3
 parent: "1734"
-status: active
+status: resolved
 dateOpened: "2026-06-24"
 dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: 1734
 tags: []
 ---
 

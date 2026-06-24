@@ -1,0 +1,40 @@
+<h3 id="overview">Overview</h3>
+<p>
+    <code>CustomUrlCodecStrategy</code> is the typed per-slice URL codec contract for the webrouting
+    <a href="/projects/webrouting/#url-state-seam">URL-as-state seam</a> (ratified
+    <a href="/backlog/1686-webrouting-url-as-state-seam-one-shared-serialize-sync-provi/">#1686</a>). When a
+    stateful component projects a state slice to/from the URL &mdash; a grid's filter / sort / page, a tab, a
+    wizard step, pagination &mdash; each syncable slice declares an <code>encode</code>/<code>decode</code>
+    strategy with native-first coercions (<code>number</code> | <code>boolean</code> | <code>enum</code> |
+    <code>date</code> | <code>array</code>) plus a raw-string escape hatch, instead of ad-hoc
+    <code>URLSearchParams</code> string handling (which forces the per-component coercion drift visible in
+    pagination's <code>Number(raw)</code>). The contract is the only lock: WE ships it, never the parser, so
+    Zod / nuqs / a custom codec plug in behind the same shape and swap without touching the component &mdash;
+    mirroring <a href="/projects/webstates/#protocol-storage"><code>CustomStorageStrategy</code></a>.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/URLSearchParams">URLSearchParams</a></td>
+        <td>Baseline</td>
+        <td>The codec's <code>encode</code>/<code>decode</code> own the typed string&harr;value bridge over the native query string, so the component never hand-coerces a raw param.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/History_API">History API</a> / <a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API">Navigation API</a></td>
+        <td>Baseline 2025</td>
+        <td><code>popstate</code>/<code>navigate</code> is the read source of truth; the same codec decodes the restored param on back/forward, so one encoding round-trips both ways.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+// The typed per-slice URL codec — the only lock. WE ships the contract + native-first built-in codecs;
+// Zod/nuqs/a custom codec plug in behind it. Used on BOTH read (decode) and write (encode) — one encoding.
+interface CustomUrlCodecStrategy<T> {
+  readonly kind: 'number' | 'boolean' | 'enum' | 'date' | 'array' | 'string'; // string = raw escape hatch
+  encode(value: T): string;   // typed value → the URL query-param string
+  decode(raw: string): T;     // the URL query-param string → typed value
+}
+{% endhighlight %}
