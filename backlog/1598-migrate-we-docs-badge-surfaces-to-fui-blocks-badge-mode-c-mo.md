@@ -3,9 +3,9 @@ kind: story
 size: 3
 parent: "866"
 status: open
-blockedBy: ["1669"]
+blockedBy: ["1748"]
 dateOpened: "2026-06-22"
-dateStarted: "2026-06-22"
+dateStarted: "2026-06-24"
 tags: []
 ---
 
@@ -45,3 +45,9 @@ mode-C (`fui:embed/in-document.ts`) mounts **one shadow root per mount point** a
 "many-small-component mounts" residual the original pre-flight flagged. Un-blocks when #1621 picks the
 vocabulary mapping + the mount model (its default leans to the transient `<we-badge>` custom element, which
 would re-frame this card's "mode-C inline SDK" requirement).
+
+## Re-scope finding (batch-2026-06-23-1725-1665) — blocked-in-fact on the docs loader; `blockedBy: 1748`
+
+Both component blockers cleared (#1669 we-tag + #1603 FUI filter-chip both resolved — FUI ships `fui:blocks/badge/` + `fui:blocks/filter-chip/` with their transient elements). But working it surfaced the real crux: the **WE docs site has no mechanism to load + register the FUI transient elements**. Verified — `we:src/_layouts/base.njk` loads only local `we:src/assets/js/*.js`; there is no `@frontierui` import, no `registerBadge`/`registerFilterChip`, no cross-origin FUI bundle, no `customElements.define` for any `we-*` in the docs runtime, and no precedent. So an emitted `<we-badge>` would never upgrade (unstyled unknown element).
+
+#1621 ratified the transient-CE *model* but not the *loader* its "registered once" clause needs on the WE docs site — and that loader carries a production-viability fork (bundle a WE→FUI build edge vs cross-origin import vs defer until a published `@frontierui` component package). Filed as **#1748** and re-pointed `blockedBy: 1748`; set back to `open`. Not pure-agent buildable until the docs-loader mechanism is decided + built; `/batch` declined it as blocked-in-fact and released the claim.
