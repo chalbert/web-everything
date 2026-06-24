@@ -14,6 +14,10 @@ export { default as RoutePrefetchBehavior } from './behaviors/RoutePrefetchBehav
 // Registration
 export { registerRouter } from './registerRouter';
 
+// Serializable route-map projection (the #1685 derived schema — types + validator)
+export type { RouteMapEntry, RouteMap } from './route-map';
+export { validateRouteMap, isRouteMap } from './route-map';
+
 // Types
 export type {
   RouteContext,

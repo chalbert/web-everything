@@ -103,15 +103,20 @@
 
 // DERIVED projection — a serializable route-map for non-DOM consumers (sitemap / prerender / config
 // tooling). GENERATED from the DOM, never hand-authored, so there is no second authoring home and no
-// drift. Drops the non-serializable pattern + template; keeps the rest as a fixed shared contract.
+// drift. A 1:1 drop of the non-serializable pattern + template; keeps exactly the #1685 fields. The
+// table is a flat ordered list (first match wins), mirroring parseRouteDefinitions — outlets are named,
+// not nested. (Schema + validator + vectors authored in slice B, #1721: blocks/router/route-map.ts.)
 interface RouteMapEntry {
   path: string;                 // the URLPattern pathname template, e.g. "/users/:id" (not a concrete URL)
   guard?: string;               // canActivate guard name (resolved from the @routeGuard context)
   guardLeave?: string;          // canDeactivate guard name
   loader?: string;              // data-loader name
-  outlet?: string;              // named outlet identifier ("" = primary)
+  outlet?: string;              // named outlet identifier (omitted = primary, in-place)
   isErrorBoundary?: boolean;    // this entry is the route:error boundary
-  children?: RouteMapEntry[];   // nested routes — the table is a tree
+}
+interface RouteMap {
+  base?: string;                // optional base path the table was parsed under (paths are pre-resolved)
+  routes: RouteMapEntry[];      // ordered, first-match-wins — mirrors the <template route> order
 }
     {% endhighlight %}
     <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
