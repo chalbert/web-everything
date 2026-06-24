@@ -16,6 +16,12 @@
 import { describe, it, expect } from 'vitest';
 import { crossListReorderCases } from '../../../renderers/reorderable-list/__fixtures__/cross-list-reorder-cases';
 import {
+  crossListReorderGoldens,
+  buildGoldens,
+  goldenFor,
+  goldenToRoot,
+} from '../../../renderers/reorderable-list/__fixtures__/cross-list-reorder-goldens';
+import {
   reduceCrossListReorder,
   relocate,
   renderCrossListReorder,
@@ -55,22 +61,38 @@ function walk(initial: ReorderList[], keys: string[]): { state: CrossListState; 
   return { state, lastEvent };
 }
 
-describe('Cross-list reorder reference — verified contract (shared fixtures)', () => {
+describe('Cross-list reorder conformance — auditCrossListReorder reads the stored golden as DATA (#1467/#899; #1776)', () => {
+  // Cross-list (Tier-2) twin of the within-list golden suite: per ratified #1467/#899 the verifier
+  // asserts the STORED golden output, not a live recompute. Each case re-materializes a group root FROM
+  // its committed golden (`goldenToRoot`) and runs `auditCrossListReorder` over it — GREEN WITHOUT a
+  // live `renderCrossListReorder` in the assertion path. The reducer + announcer stay exercised live
+  // below (the impl half FUI owns); when the WE runtime is deleted (#1772) they drop with it while this
+  // data-only golden conformance (+ the golden-schema suite) survives.
   for (const c of crossListReorderCases) {
-    it(`${c.title}: the key sequence lands on the expected state and the group audits clean`, () => {
+    it(`${c.title}: the key sequence lands on the expected state and the golden audits clean`, () => {
+      // Reducer + announcer conformance (the cross-list keyboard model — impl half, exercised live).
       const { state, lastEvent } = walk(c.lists, c.keys);
       expect(state, 'reducer landed elsewhere than the fixture expects').toEqual(c.expected);
-
       const got = lastEvent ? announceCrossList(lastEvent, state, c.items) : '';
       expect(got, 'announcement drifted from the fixture').toBe(c.expectedAnnounce);
 
-      const root = renderCrossListReorder(c.lists, c.items, CONFIG, state);
-      const result = auditCrossListReorder(root, c.items, state, CONFIG);
+      // Audit conformance — STORED-GOLDEN data-reader: rebuild the group from the committed golden and
+      // audit THAT against the case's contract state. No live renderCrossListReorder here.
+      const root = goldenToRoot(goldenFor(c.id));
+      const result = auditCrossListReorder(root, c.items, c.expected, CONFIG);
       const failed = result.checks.filter((x) => !x.pass).map((x) => x.label);
       expect(failed, `failed checks: ${failed.join('; ')}`).toEqual([]);
       expect(result.ok).toBe(true);
     });
   }
+
+  it('every fixture case has a committed golden (the #899 vector corpus is complete)', () => {
+    expect(crossListReorderGoldens.map((g) => g.id).sort()).toEqual(crossListReorderCases.map((c) => c.id).sort());
+  });
+
+  it('committed goldens do not drift — they equal a fresh capture from the reference renderer', () => {
+    expect(crossListReorderGoldens).toEqual(buildGoldens());
+  });
 });
 
 describe('Cross-list group structure & group-wide roving tabindex', () => {

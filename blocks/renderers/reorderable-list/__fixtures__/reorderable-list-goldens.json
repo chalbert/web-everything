@@ -1,0 +1,394 @@
+[
+  {
+    "id": "initial",
+    "rootTag": "UL",
+    "reorderable": true,
+    "role": "listbox",
+    "ariaLabel": null,
+    "items": [
+      {
+        "id": "spec",
+        "role": "option",
+        "tabindex": "0",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "build",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "test",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "demo",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "ship",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      }
+    ]
+  },
+  {
+    "id": "rove",
+    "rootTag": "UL",
+    "reorderable": true,
+    "role": "listbox",
+    "ariaLabel": null,
+    "items": [
+      {
+        "id": "spec",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "build",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "test",
+        "role": "option",
+        "tabindex": "0",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "demo",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "ship",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      }
+    ]
+  },
+  {
+    "id": "grab",
+    "rootTag": "UL",
+    "reorderable": true,
+    "role": "listbox",
+    "ariaLabel": null,
+    "items": [
+      {
+        "id": "spec",
+        "role": "option",
+        "tabindex": "0",
+        "grabbed": true,
+        "target": true,
+        "preserveOnMove": true
+      },
+      {
+        "id": "build",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "test",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "demo",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "ship",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      }
+    ]
+  },
+  {
+    "id": "grab-move",
+    "rootTag": "UL",
+    "reorderable": true,
+    "role": "listbox",
+    "ariaLabel": null,
+    "items": [
+      {
+        "id": "build",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "test",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "spec",
+        "role": "option",
+        "tabindex": "0",
+        "grabbed": true,
+        "target": true,
+        "preserveOnMove": true
+      },
+      {
+        "id": "demo",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "ship",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      }
+    ]
+  },
+  {
+    "id": "grab-end",
+    "rootTag": "UL",
+    "reorderable": true,
+    "role": "listbox",
+    "ariaLabel": null,
+    "items": [
+      {
+        "id": "build",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "test",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "demo",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "ship",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "spec",
+        "role": "option",
+        "tabindex": "0",
+        "grabbed": true,
+        "target": true,
+        "preserveOnMove": true
+      }
+    ]
+  },
+  {
+    "id": "commit",
+    "rootTag": "UL",
+    "reorderable": true,
+    "role": "listbox",
+    "ariaLabel": null,
+    "items": [
+      {
+        "id": "test",
+        "role": "option",
+        "tabindex": "0",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "spec",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "build",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "demo",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "ship",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      }
+    ]
+  },
+  {
+    "id": "cancel",
+    "rootTag": "UL",
+    "reorderable": true,
+    "role": "listbox",
+    "ariaLabel": null,
+    "items": [
+      {
+        "id": "spec",
+        "role": "option",
+        "tabindex": "0",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "build",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "test",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "demo",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "ship",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      }
+    ]
+  },
+  {
+    "id": "edge-clamp",
+    "rootTag": "UL",
+    "reorderable": true,
+    "role": "listbox",
+    "ariaLabel": null,
+    "items": [
+      {
+        "id": "spec",
+        "role": "option",
+        "tabindex": "0",
+        "grabbed": true,
+        "target": true,
+        "preserveOnMove": true
+      },
+      {
+        "id": "build",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "test",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "demo",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      },
+      {
+        "id": "ship",
+        "role": "option",
+        "tabindex": "-1",
+        "grabbed": false,
+        "target": false,
+        "preserveOnMove": true
+      }
+    ]
+  }
+]

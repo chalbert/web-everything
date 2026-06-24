@@ -2,8 +2,11 @@
 kind: story
 size: 5
 parent: "1353"
-status: open
+status: resolved
 dateOpened: "2026-06-24"
+dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: blocks/renderers/golden-schema.ts assertReorderableListGoldens/assertCrossListReorderGoldens + reorderable-list/__fixtures__ frozen golden corpora (reorderable-list + cross-list-reorder), read by the data-only golden-schema suite
 relatedProject: webblocks
 tags: [frontierui, blocks, renderers, conformance, fui-build-gate]
 ---

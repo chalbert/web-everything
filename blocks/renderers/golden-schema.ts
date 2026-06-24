@@ -69,6 +69,52 @@ function assertPaginationGoldenShape(g: unknown, corpus: string, i: number): voi
   }
 }
 
+/** Validate one reorderable-list item projection's shape (id, role, tabindex, the marker booleans). */
+function assertReorderItemShape(it: unknown, corpus: string, i: number, j: number): void {
+  if (!isObject(it)) throw new GoldenSchemaError(corpus, `[${i}] item[${j}] is not an object`);
+  if (typeof it.id !== 'string' || it.id.length === 0) throw new GoldenSchemaError(corpus, `[${i}] item[${j}] needs a non-empty \`id\``);
+  if (!(it.role === null || typeof it.role === 'string')) throw new GoldenSchemaError(corpus, `[${i}] item[${j}] \`role\` must be string or null`);
+  if (!(it.tabindex === null || typeof it.tabindex === 'string')) throw new GoldenSchemaError(corpus, `[${i}] item[${j}] \`tabindex\` must be string or null`);
+  for (const k of ['grabbed', 'preserveOnMove'] as const) {
+    if (typeof it[k] !== 'boolean') throw new GoldenSchemaError(corpus, `[${i}] item[${j}] needs a boolean \`${k}\``);
+  }
+}
+
+/** Validate one within-list reorderable golden's shape (root grounding + the item projections). */
+function assertReorderableListGoldenShape(g: unknown, corpus: string, i: number): void {
+  if (!isObject(g)) throw new GoldenSchemaError(corpus, `[${i}] is not an object`);
+  if (typeof g.id !== 'string' || g.id.length === 0) throw new GoldenSchemaError(corpus, `[${i}] needs a non-empty \`id\``);
+  if (typeof g.rootTag !== 'string') throw new GoldenSchemaError(corpus, `[${i}] needs a string \`rootTag\``);
+  if (typeof g.reorderable !== 'boolean') throw new GoldenSchemaError(corpus, `[${i}] needs a boolean \`reorderable\``);
+  if (!(g.role === null || typeof g.role === 'string')) throw new GoldenSchemaError(corpus, `[${i}] \`role\` must be string or null`);
+  if (!(g.ariaLabel === null || typeof g.ariaLabel === 'string')) throw new GoldenSchemaError(corpus, `[${i}] \`ariaLabel\` must be string or null`);
+  if (!Array.isArray(g.items)) throw new GoldenSchemaError(corpus, `[${i}] \`items\` must be an array`);
+  (g.items as unknown[]).forEach((it, j) => {
+    assertReorderItemShape(it, corpus, i, j);
+    if (typeof (it as Record<string, unknown>).target !== 'boolean')
+      throw new GoldenSchemaError(corpus, `[${i}] item[${j}] needs a boolean \`target\``);
+  });
+}
+
+/** Validate one cross-list reorder golden's shape (group wrapper + per-list grounding + items). */
+function assertCrossListReorderGoldenShape(g: unknown, corpus: string, i: number): void {
+  if (!isObject(g)) throw new GoldenSchemaError(corpus, `[${i}] is not an object`);
+  if (typeof g.id !== 'string' || g.id.length === 0) throw new GoldenSchemaError(corpus, `[${i}] needs a non-empty \`id\``);
+  if (typeof g.rootTag !== 'string') throw new GoldenSchemaError(corpus, `[${i}] needs a string \`rootTag\``);
+  if (!(g.group === null || typeof g.group === 'string')) throw new GoldenSchemaError(corpus, `[${i}] \`group\` must be string or null`);
+  if (!Array.isArray(g.lists)) throw new GoldenSchemaError(corpus, `[${i}] \`lists\` must be an array`);
+  (g.lists as unknown[]).forEach((list, l) => {
+    if (!isObject(list)) throw new GoldenSchemaError(corpus, `[${i}] list[${l}] is not an object`);
+    if (typeof list.id !== 'string' || list.id.length === 0) throw new GoldenSchemaError(corpus, `[${i}] list[${l}] needs a non-empty \`id\``);
+    if (typeof list.reorderable !== 'boolean') throw new GoldenSchemaError(corpus, `[${i}] list[${l}] needs a boolean \`reorderable\``);
+    for (const k of ['ariaLabel', 'role', 'scope', 'reorderGroup', 'containerTabindex'] as const) {
+      if (!(list[k] === null || typeof list[k] === 'string')) throw new GoldenSchemaError(corpus, `[${i}] list[${l}] \`${k}\` must be string or null`);
+    }
+    if (!Array.isArray(list.items)) throw new GoldenSchemaError(corpus, `[${i}] list[${l}] \`items\` must be an array`);
+    (list.items as unknown[]).forEach((it, j) => assertReorderItemShape(it, corpus, i, j));
+  });
+}
+
 /** Assert corpus-level invariants shared by every renderer golden set: non-empty + unique ids. */
 function assertCorpus(goldens: unknown, corpus: string): readonly Record<string, unknown>[] {
   if (!Array.isArray(goldens) || goldens.length === 0)
@@ -92,4 +138,14 @@ export function assertDataTableGoldens(goldens: unknown, corpus = 'data-table'):
 /** Validate a whole pagination golden corpus (schema-validity + completeness). Throws on the first fault. */
 export function assertPaginationGoldens(goldens: unknown, corpus = 'pagination'): void {
   assertCorpus(goldens, corpus).forEach((g, i) => assertPaginationGoldenShape(g, corpus, i));
+}
+
+/** Validate a whole reorderable-list golden corpus (schema-validity + completeness). Throws on the first fault. */
+export function assertReorderableListGoldens(goldens: unknown, corpus = 'reorderable-list'): void {
+  assertCorpus(goldens, corpus).forEach((g, i) => assertReorderableListGoldenShape(g, corpus, i));
+}
+
+/** Validate a whole cross-list reorder golden corpus (schema-validity + completeness). Throws on the first fault. */
+export function assertCrossListReorderGoldens(goldens: unknown, corpus = 'cross-list-reorder'): void {
+  assertCorpus(goldens, corpus).forEach((g, i) => assertCrossListReorderGoldenShape(g, corpus, i));
 }

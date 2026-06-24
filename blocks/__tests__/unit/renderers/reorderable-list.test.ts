@@ -15,6 +15,12 @@
 import { describe, it, expect } from 'vitest';
 import { reorderableListCases } from '../../../renderers/reorderable-list/__fixtures__/reorderable-list-cases';
 import {
+  reorderableListGoldens,
+  buildGoldens,
+  goldenFor,
+  goldenToRoot,
+} from '../../../renderers/reorderable-list/__fixtures__/reorderable-list-goldens';
+import {
   reduceReorder,
   renderReorderableList,
   auditReorderableList,
@@ -47,22 +53,41 @@ function walk(items: ReorderItem[], keys: string[]): { state: ReorderState; last
   return { state, lastEvent };
 }
 
-describe('Reorderable List reference — verified reorder contract (shared fixtures)', () => {
+describe('Reorderable List conformance — auditReorderableList reads the stored golden as DATA (#1467/#899; #1776)', () => {
+  // Per ratified #1467/#899 (the #1356 pagination / #1494 data-table model): the verifier asserts the
+  // STORED golden output, not a live recompute. Each case re-materializes a root FROM its committed
+  // golden (`goldenToRoot`, the inverse of the capture step) and runs `auditReorderableList` over it —
+  // GREEN WITHOUT a live `renderReorderableList` in the assertion path. The reducer + announcer (the
+  // grab-then-move keyboard model) stay exercised directly below: they are the impl half FUI owns, and
+  // when the WE runtime is deleted (#1772) those drop with it while this data-only golden conformance
+  // (+ the golden-schema suite) is what survives.
   for (const c of reorderableListCases) {
-    it(`${c.title}: the key sequence lands on the expected state and the list audits clean`, () => {
+    it(`${c.title}: the key sequence lands on the expected state and the golden audits clean`, () => {
+      // Reducer + announcer conformance (the within-list keyboard model — impl half, exercised live).
       const { state, lastEvent } = walk(c.items, c.keys);
       expect(state, 'reducer landed elsewhere than the fixture expects').toEqual(c.expected);
-
       const got = lastEvent ? announce(lastEvent, c.items) : '';
       expect(got, 'announcement drifted from the fixture').toBe(c.expectedAnnounce);
 
-      const root = renderReorderableList(c.items, {}, state);
-      const result = auditReorderableList(root, c.items, state);
+      // Audit conformance — now a STORED-GOLDEN data-reader: rebuild the root from the committed golden
+      // and audit THAT against the case's contract state. No live renderReorderableList here.
+      const root = goldenToRoot(goldenFor(c.id));
+      const result = auditReorderableList(root, c.items, c.expected);
       const failed = result.checks.filter((x) => !x.pass).map((x) => x.label);
       expect(failed, `failed checks: ${failed.join('; ')}`).toEqual([]);
       expect(result.ok).toBe(true);
     });
   }
+
+  it('every fixture case has a committed golden (the #899 vector corpus is complete)', () => {
+    expect(reorderableListGoldens.map((g) => g.id).sort()).toEqual(reorderableListCases.map((c) => c.id).sort());
+  });
+
+  it('committed goldens do not drift — they equal a fresh capture from the reference renderer', () => {
+    // The capture step (which DOES render) is authoritative ONCE; this guard keeps the frozen JSON in
+    // sync with the renderer, mirroring the pagination/data-table golden drift tests (#1356/#1494).
+    expect(reorderableListGoldens).toEqual(buildGoldens());
+  });
 });
 
 describe('Reorderable List structure & roving tabindex', () => {

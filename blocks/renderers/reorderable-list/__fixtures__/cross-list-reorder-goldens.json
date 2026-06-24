@@ -1,0 +1,815 @@
+[
+  {
+    "id": "initial",
+    "rootTag": "DIV",
+    "group": "board",
+    "lists": [
+      {
+        "id": "todo",
+        "ariaLabel": "Todo",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "spec",
+            "role": "option",
+            "tabindex": "0",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "build",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "doing",
+        "ariaLabel": "Doing",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "test",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "done",
+        "ariaLabel": "Done",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "ship",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "cross-focus",
+    "rootTag": "DIV",
+    "group": "board",
+    "lists": [
+      {
+        "id": "todo",
+        "ariaLabel": "Todo",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "spec",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "build",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "doing",
+        "ariaLabel": "Doing",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "test",
+            "role": "option",
+            "tabindex": "0",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "done",
+        "ariaLabel": "Done",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "ship",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "edge-clamp-left",
+    "rootTag": "DIV",
+    "group": "board",
+    "lists": [
+      {
+        "id": "todo",
+        "ariaLabel": "Todo",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "spec",
+            "role": "option",
+            "tabindex": "0",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "build",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "doing",
+        "ariaLabel": "Doing",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "test",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "done",
+        "ariaLabel": "Done",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "ship",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "cross-move",
+    "rootTag": "DIV",
+    "group": "board",
+    "lists": [
+      {
+        "id": "todo",
+        "ariaLabel": "Todo",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "build",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "doing",
+        "ariaLabel": "Doing",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "spec",
+            "role": "option",
+            "tabindex": "0",
+            "grabbed": true,
+            "preserveOnMove": true
+          },
+          {
+            "id": "test",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "done",
+        "ariaLabel": "Done",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "ship",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "cross-then-within",
+    "rootTag": "DIV",
+    "group": "board",
+    "lists": [
+      {
+        "id": "todo",
+        "ariaLabel": "Todo",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "build",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "doing",
+        "ariaLabel": "Doing",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "test",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "spec",
+            "role": "option",
+            "tabindex": "0",
+            "grabbed": true,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "done",
+        "ariaLabel": "Done",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "ship",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "cross-commit",
+    "rootTag": "DIV",
+    "group": "board",
+    "lists": [
+      {
+        "id": "todo",
+        "ariaLabel": "Todo",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "build",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "doing",
+        "ariaLabel": "Doing",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "spec",
+            "role": "option",
+            "tabindex": "0",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "test",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "done",
+        "ariaLabel": "Done",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "ship",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "cross-cancel",
+    "rootTag": "DIV",
+    "group": "board",
+    "lists": [
+      {
+        "id": "todo",
+        "ariaLabel": "Todo",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "spec",
+            "role": "option",
+            "tabindex": "0",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "build",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "doing",
+        "ariaLabel": "Doing",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "test",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "done",
+        "ariaLabel": "Done",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "ship",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "cross-append",
+    "rootTag": "DIV",
+    "group": "board",
+    "lists": [
+      {
+        "id": "todo",
+        "ariaLabel": "Todo",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "spec",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "doing",
+        "ariaLabel": "Doing",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "test",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "done",
+        "ariaLabel": "Done",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "ship",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "build",
+            "role": "option",
+            "tabindex": "0",
+            "grabbed": true,
+            "preserveOnMove": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "empty-source",
+    "rootTag": "DIV",
+    "group": "board",
+    "lists": [
+      {
+        "id": "todo",
+        "ariaLabel": "Todo",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "spec",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "build",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "doing",
+        "ariaLabel": "Doing",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": []
+      },
+      {
+        "id": "done",
+        "ariaLabel": "Done",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "test",
+            "role": "option",
+            "tabindex": "0",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "ship",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "cross-into-empty",
+    "rootTag": "DIV",
+    "group": "board",
+    "lists": [
+      {
+        "id": "todo",
+        "ariaLabel": "Todo",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "build",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "doing",
+        "ariaLabel": "Doing",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "spec",
+            "role": "option",
+            "tabindex": "0",
+            "grabbed": true,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "done",
+        "ariaLabel": "Done",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "test",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "ship",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "rove-through-empty",
+    "rootTag": "DIV",
+    "group": "board",
+    "lists": [
+      {
+        "id": "todo",
+        "ariaLabel": "Todo",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "spec",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "build",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "doing",
+        "ariaLabel": "Doing",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": []
+      },
+      {
+        "id": "done",
+        "ariaLabel": "Done",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "test",
+            "role": "option",
+            "tabindex": "0",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "ship",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "rest-on-empty",
+    "rootTag": "DIV",
+    "group": "board",
+    "lists": [
+      {
+        "id": "todo",
+        "ariaLabel": "Todo",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "spec",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "build",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      },
+      {
+        "id": "doing",
+        "ariaLabel": "Doing",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": "0",
+        "items": []
+      },
+      {
+        "id": "done",
+        "ariaLabel": "Done",
+        "reorderable": true,
+        "role": "listbox",
+        "scope": "cross-list",
+        "reorderGroup": "board",
+        "containerTabindex": null,
+        "items": [
+          {
+            "id": "test",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          },
+          {
+            "id": "ship",
+            "role": "option",
+            "tabindex": "-1",
+            "grabbed": false,
+            "preserveOnMove": true
+          }
+        ]
+      }
+    ]
+  }
+]
