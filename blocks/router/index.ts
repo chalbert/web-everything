@@ -52,3 +52,7 @@ export {
   buildNavigationTarget,
   buildRouteContext,
 } from './types';
+
+// Sitemap.xml emitter — a concrete RouteMapEmitter over the route-map projection (#1737)
+export { createSitemapEmitter, isParametricPath } from './sitemap-emitter';
+export type { SitemapEmitterOptions, SitemapResult } from './sitemap-emitter';
