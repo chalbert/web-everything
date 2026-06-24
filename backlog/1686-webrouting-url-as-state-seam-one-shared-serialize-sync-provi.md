@@ -1,15 +1,20 @@
 ---
 kind: decision
 parent: "1684"
-status: open
+status: resolved
 dateOpened: "2026-06-23"
 dateStarted: "2026-06-23"
+dateResolved: "2026-06-24"
+graduatedTo: 1684
 preparedDate: "2026-06-23"
+codifiedIn: "docs/agent/platform-decisions.md#url-as-state-per-component-seam"
 locus: webeverything
 tags: [webrouting, routing, url-state, persistence, stateful-components]
 ---
 
 # webrouting URL-as-state seam — one shared serialize/sync provider vs per-component declaration
+
+**RATIFIED 2026-06-23** — Fork 1 → (c), Fork 2 → (b), all three invariants. Codified in `we:docs/agent/platform-decisions.md#url-as-state-per-component-seam`. Build slices carve under [#1684](/backlog/1684-scaffold-the-webrouting-standard-route-format-profile-url-as/) via `/slice 1684`.
 
 Settle the seam by which stateful components project state to and from the URL — a grid's filters/sort/page, a tab, a wizard step, pagination. **Recommended: Fork 1 (c)** per-component declaration over a shared codec, with intra-component microtask coalescing and an *optional* coordinator that batches cross-component writes into one history entry (med-high); **Fork 2 (b)** a typed per-slice codec, not raw strings (med-high). Three invariants ratify (never-force · reuse `url|session|memory` · webrouting-not-storage). Grounded in [/research/url-as-state-component-seam](/research/url-as-state-component-seam/).
 
@@ -60,6 +65,59 @@ The concern decomposes into three settled invariants + two genuine forks, each p
 **Recommended default: (b).** Matches the industry consensus (nuqs typed parsers/serializers, TanStack `validateSearch` schema validation) and kills the ad-hoc coercion already in the tree, while staying a thin contract (the lock), not a re-implementation.
 
 **Skeptic:** SURVIVES — beat the "scope-creep / re-implementing nuqs+Zod" attack: the scope is a per-slice serialize/parse contract (a strategy registry, like the verified storage / change-tracking strategy seams) that *lets* Zod/nuqs plug in. Raw-strings-only is provably insufficient — pagination's `Number(raw)` (`we:blocks/renderers/pagination/PaginationBehavior.ts:87`) is the drift; and no existing layer owns string↔typed URL coercion (webexpressions is a `{{ }}` binding layer; the storage protocol excludes non-durable facets).
+
+---
+
+## Illustrative shapes (non-normative)
+
+Sketches of the two recommended defaults — to make the seam concrete, **not** the ratified API (the exact names/signatures are settled at build under [#1684](/backlog/1684-scaffold-the-webrouting-standard-route-format-profile-url-as/)).
+
+**The drift today** — pagination hand-rolls coercion + a History write, router-free, with no shared codec (`we:blocks/renderers/pagination/PaginationBehavior.ts:87`, `:45`):
+
+```ts
+const raw = el.getAttribute('data-page');
+const page1 = raw != null ? Number(raw) : NaN;   // ad-hoc coercion (Fork 2 kills this)
+// …and a direct History API write under urlSync:'query-param' (Fork 1 formalizes this)
+```
+
+**Fork 2 (b) — the typed per-slice codec (the strategy lock).** Mirrors `CustomStorageStrategy` / `CustomChangeStrategy`: WE ships the registry shape, the parser plugs in behind it.
+
+```ts
+// The only lock: a per-slice serialize/parse contract. number/boolean/enum/date/array
+// are built in; a raw-string codec is the escape hatch; Zod/nuqs satisfy the same shape.
+interface UrlSliceCodec<T> {
+  serialize(value: T): string;        // typed → URL string
+  parse(raw: string | null): T;       // URL string → typed (coercion + default)
+}
+
+const pageCodec    = codecs.integer({ min: 1, default: 1 });        // UrlSliceCodec<number>
+const sortCodec    = codecs.enum(['asc', 'desc'], 'asc');           // UrlSliceCodec<'asc'|'desc'>
+const filtersCodec = zodCodec(FiltersSchema);                       // a Zod adapter, same contract
+```
+
+**Fork 1 (c) — per-component declaration, router-agnostic, intra-component coalesce.** No router reference, so a grid syncs whether or not `<we-route-view>` is mounted. Each slice carries a `persistence` channel (`url | session | memory`) and a namespaced key (the collision arbiter — two components can't both claim `?page`).
+
+```ts
+const grid = syncedState({
+  page:    { persistence: 'url', key: 'grid.page',    codec: pageCodec },
+  sort:    { persistence: 'url', key: 'grid.sort',    codec: sortCodec },
+  filters: { persistence: 'url', key: 'grid.filters', codec: filtersCodec },
+});
+
+grid.page;                                      // reads from the live URL via the codec
+                                                // (popstate/navigate is the read SoT — back/fwd restores true state)
+grid.set({ page: 2, sort: 'desc', filters });   // ONE write this microtask (intra-component coalesce),
+                                                // History-presence-guarded (SSR/no-DOM safe)
+```
+
+**The optional coordinator — cross-component batching.** Without it, a grid + a sibling pane writing in the same tick push *two* history entries; the coordinator collapses concurrent cross-component writes into one (the nuqs batching model). Both paths share the same Fork-2 codec — only the commit (one entry vs N) differs.
+
+```ts
+withUrlBatch(() => {
+  grid.set({ page: 1 });
+  detailPane.set({ tab: 'reviews' });
+});                                             // → a single history entry
+```
 
 ---
 
