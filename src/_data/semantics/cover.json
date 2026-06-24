@@ -1,0 +1,5 @@
+{
+  "term": "Cover Layout Intent",
+  "definition": "A layout region-role: a full-min-height region with a focal child vertically centered between optional header/footer (heroes, splashes, empty states). Identified by its arrangement; the CSS (flex-column + margin-block auto) is an FUI impl seam.",
+  "usage": "Standardized by the Cover Layout Intent."
+}

@@ -1,0 +1,30 @@
+{
+  "id": "cover",
+  "name": "Cover Layout Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "layoutTier": "region-role",
+  "summary": "A primitive layout region-role (#1680 taxonomy): composition-intent = a full-min-height region with a centered focal child between optional header/footer. Identity is the arrangement, not the CSS — FUI ships one block per role and the mechanism (flex-column + margin-block: auto on the focal child) is an impl seam. Project-less; per-project styling rides presentational variants + plateau assembler presets.",
+  "dimensions": {
+    "min-height": {
+      "description": "The region's minimum block-size (e.g. 100vh) — the role's essential knob. The cover is at least this tall, growing with content.",
+      "values": []
+    },
+    "gap": {
+      "description": "Minimum spacing kept around the centered focal child, on a spacing scale.",
+      "values": [
+        "none",
+        "xs",
+        "sm",
+        "md",
+        "lg",
+        "xl"
+      ]
+    },
+    "centered": {
+      "description": "Which child is the focal, vertically-centered one (header and footer pin to the ends). Absent → the sole non-header/footer child.",
+      "values": []
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">A full-min-height region with an optional header and footer pinned to the ends and a focal child vertically centered in the remaining space — landing heroes, full-screen splash, empty states.</p><h3>Composition-intent (the identity)</h3><p class=\"text-sm text-gray-600 mb-2\">A primitive layout <strong>region-role</strong> (<code>layoutTier: region-role</code>), one of the per-role taxonomy ratified in <a href=\"/backlog/1680-semantic-layout-type-taxonomy-identify-every-distinct-layout/\">#1680</a>. Its identity is the <strong>composition-intent</strong> &mdash; a full-min-height region with a centered focal child between optional header/footer &mdash; <strong>impl-agnostic</strong>. FUI ships exactly <em>one</em> block for this role; the CSS mechanism (flex-column + <code>margin-block: auto</code> on the focal child) is an <strong>impl seam</strong>, never the role's identity (<a href=\"/docs/agent/platform-decisions.md\">platform-decisions.md#layout-role-composition-intent</a>).</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>min-height</code>: The region's minimum block-size (e.g. 100vh) — the role's essential knob. The cover is at least this tall, growing with content.</li><li><code>gap</code>: Minimum spacing kept around the centered focal child, on a spacing scale (<code>none · xs · sm · md · lg · xl</code>).</li><li><code>centered</code>: Which child is the focal, vertically-centered one (header and footer pin to the ends). Absent → the sole non-header/footer child.</li></ul><h3>Annotation, not identity</h3><p class=\"text-sm text-gray-600 mb-2\">The earns-role test is met: a vertically-centered full-height region is a distinct arrangement, not a variant of stack or center.</p>"
+}
