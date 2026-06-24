@@ -1,7 +1,11 @@
 /**
- * `webeverything.config` author surface + per-dimension config loader/resolver (#1702, ratifying #1662).
+ * `webeverything.config` **contract** (#1702, ratifying #1662; carved #1780) — the WE-resident half:
+ * the author surface + schema + guards, the per-dimension resolver **interface**, and the native-first
+ * default **declarations**. The resolver **runtime** (`resolveDimension`/`resolveConfig`) and the
+ * flavor **factories** (`autoDefineResolver`/`createScalarFlavorResolver`) are standard impl and live in
+ * **FUI** (the impl of this contract), per #1282. Published to FUI as `@webeverything/config`.
  *
- * Public barrel. See `docs/agent/platform-decisions.md#config-extends-platform-default`.
+ * Public contract barrel. See `docs/agent/platform-decisions.md#config-extends-platform-default`.
  *
  * @module config
  */
@@ -16,21 +20,15 @@ export {
   type DimensionPointer,
   type ExtendsFlavorDescriptor,
   type ThemeFlavorName,
+  type AutoDefineFlavorName,
   type RenderStrategyFlavorName,
   type CodegenSoTFlavorName,
 } from './defineConfig';
 
-export {
-  resolveDimension,
-  resolveConfig,
-  UnresolvableDimensionError,
-  type DimensionResolver,
-} from './resolveDimension';
+export { type DimensionResolver } from './resolverContract';
 
 export {
-  autoDefineResolver,
-  createScalarFlavorResolver,
   PLATFORM_AUTO_DEFINE_FLAVOR,
   PLATFORM_FLAVOR_DEFAULTS,
   type AutoDefineOverrides,
-} from './platformFlavor';
+} from './platformDefaults';

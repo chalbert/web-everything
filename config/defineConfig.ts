@@ -69,15 +69,16 @@ export type DimensionEntry<Flavor extends string = string, Value = unknown> =
   | Value
   | DimensionPointer;
 
-import type { AutoDefineFlavorName } from '../blocks/renderers/auto-define/CustomAutoDefineRegistry';
-
 /**
  * The known dimension flavor-id unions. Open dimensions (not listed) fall back to `string`. These are
- * **type-level only** — the runtime flavor factories live in each dimension's own home (autoDefine in
- * `blocks/renderers/auto-define/…`; renderStrategy in #080, theme, codegenSoT in #798/owners). #1702
- * does NOT build those registries; it only types + wires the author surface and resolver.
+ * **type-level only** — the runtime flavor factories live in each dimension's own home, *in FUI* (the
+ * resolver impl): autoDefine over `CustomAutoDefineRegistry`; renderStrategy in #080, theme, codegenSoT
+ * in #798/owners. The CONTRACT keeps every dimension flavor-id **open (`string`)** so WE holds **zero**
+ * standard impl (#1282) and consumes **no** auto-define registry (the #1780 carve / #1779 prereq); the
+ * concrete flavor union binds in the FUI resolver impl, not here.
  */
 export type ThemeFlavorName = string; // owned by the theme dimension (#404/theme); open at this layer.
+export type AutoDefineFlavorName = string; // owned by #227 registry (impl in FUI #1779); open at this layer.
 export type RenderStrategyFlavorName = string; // owned by #080 (JSX render-strategy axis).
 export type CodegenSoTFlavorName = string; // owned by #798 (codegen source-of-truth mode).
 
