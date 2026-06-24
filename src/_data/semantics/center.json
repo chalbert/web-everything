@@ -1,0 +1,5 @@
+{
+  "term": "Center Layout Intent",
+  "definition": "A layout region-role: horizontally center a single child and constrain it to a maximum measure (the content column), distinct from centering text. Identified by its arrangement; the CSS (margin-inline auto + max-inline-size) is an FUI impl seam.",
+  "usage": "Standardized by the Center Layout Intent."
+}

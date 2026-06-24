@@ -1,0 +1,39 @@
+{
+  "id": "center",
+  "name": "Center Layout Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "layoutTier": "region-role",
+  "summary": "A primitive layout region-role (#1680 taxonomy): composition-intent = center a child and constrain its measure. Identity is the arrangement, not the CSS — FUI ships one block per role and the mechanism (margin-inline: auto + max-inline-size) is an impl seam. Project-less; per-project styling rides presentational variants + plateau assembler presets.",
+  "dimensions": {
+    "measure": {
+      "description": "The maximum inline-size the centered child is constrained to — the readable measure. The role's essential knob.",
+      "values": []
+    },
+    "gutters": {
+      "description": "Minimum side padding so the centered child never touches the viewport edge. Absent → no gutter.",
+      "values": [
+        "none",
+        "xs",
+        "sm",
+        "md",
+        "lg"
+      ]
+    },
+    "intrinsic": {
+      "description": "Whether to center on the child's natural content width (intrinsic) rather than stretching it to the measure. Default false.",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    "center-text": {
+      "description": "Whether to also center the text within the child, not just the box. Default false (box-only centering).",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">Horizontally centers a single child and constrains it to a maximum measure — independent of whether the text inside is centered. The canonical content column.</p><h3>Composition-intent (the identity)</h3><p class=\"text-sm text-gray-600 mb-2\">A primitive layout <strong>region-role</strong> (<code>layoutTier: region-role</code>), one of the per-role taxonomy ratified in <a href=\"/backlog/1680-semantic-layout-type-taxonomy-identify-every-distinct-layout/\">#1680</a>. Its identity is the <strong>composition-intent</strong> &mdash; center a child and constrain its measure &mdash; <strong>impl-agnostic</strong>. FUI ships exactly <em>one</em> block for this role; the CSS mechanism (<code>margin-inline: auto</code> + <code>max-inline-size</code>) is an <strong>impl seam</strong>, never the role's identity (<a href=\"/docs/agent/platform-decisions.md\">platform-decisions.md#layout-role-composition-intent</a>).</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>measure</code>: The maximum inline-size the centered child is constrained to — the readable measure. The role's essential knob.</li><li><code>gutters</code>: Minimum side padding so the centered child never touches the viewport edge. Absent → no gutter (<code>none · xs · sm · md · lg</code>).</li><li><code>intrinsic</code>: Whether to center on the child's natural content width (intrinsic) rather than stretching it to the measure. Default false (<code>true · false</code>).</li><li><code>center-text</code>: Whether to also center the text within the child, not just the box. Default false (box-only centering) (<code>true · false</code>).</li></ul>"
+}
