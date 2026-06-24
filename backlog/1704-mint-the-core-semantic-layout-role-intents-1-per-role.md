@@ -1,7 +1,9 @@
 ---
 kind: epic
-status: open
+status: resolved
 dateOpened: "2026-06-23"
+dateResolved: "2026-06-24"
+graduatedTo: none
 relatedReport: reports/2026-06-23-1704-split-analysis.md
 tags: []
 ---
