@@ -1,10 +1,13 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 locus: frontierui
 parent: 1353
 dateOpened: "2026-06-24"
+dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: frontierui/blocks/renderers/reorderable-list/renderCrossListReorder.ts
 tags: [frontierui, blocks, fui-build-gate]
 ---
 
