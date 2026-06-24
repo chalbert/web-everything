@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "1442"
-status: open
+status: resolved
 dateOpened: "2026-06-23"
-dateStarted: "2026-06-23"
+dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-23"
 locus: frontierui
 relatedProject: webcomponents
