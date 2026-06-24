@@ -1,0 +1,22 @@
+{
+  "id": "upgrader-relocation-demo-serve-seam",
+  "title": "Upgrader relocation — sequencing the impl→FUI move around the code-upgrader demo's MaaS serve() dependency",
+  "status": "open",
+  "summary": "Prep research for decision #1777 (relocate the upgrader renderer family out of WE per the impl→FUI rule #1282; a prerequisite for deleting the shared WE component kernel #1775, blockedBy [1730,1777,1778,1779]). The question is purely a constellation-placement sequencing seam over SHIPPED code — not greenfield standard design — so there is no web-platform survey; the research is a consuming-tree read of both repos plus a skeptic-tested forced-path conclusion. FINDING 1 — the upgrader LIBRARY (we:blocks/renderers/upgrader/upgraderEngine.ts + 5 analyzers + transformInterpreter + versionMigrationPlanner + fixtures), all 8 unit tests, and the we:demos/mockup-to-standard-demo.ts demo import ONLY the component kernel (already in FUI as fui:blocks/renderers/component/declarativeComponent, #1767) — they are serve()-free and forward-port cleanly now. FINDING 2 — the we:demos/code-upgrader-demo.ts demo has TWO INDEPENDENT kernel touches: a value-import of parseDefinition/defineFromDefinition (we:demos/code-upgrader-demo.ts:20, kernel, serve()-FREE, drives the live-element render) and a value-import of serve()/FORMS/ServeForm (we:demos/code-upgrader-demo.ts:19, from we:blocks/renderers/module-service/moduleService.ts) used ONLY in the livePane() 'served in any form' toggle (~lines 90-115). serve() is WE-resident until its own relocation #1730. FINDING 3 (decisive) — the demo's BLOCKING kernel pin is the serve()-free live-element render, NOT serve(); so the resolved-sibling #1778 'fold the impl + demo deletion into #1730' precedent does NOT transfer (a skeptic refuted it): leaving the WE upgrader engine + code-upgrader demo live would keep live value-imports of the kernel #1775 must delete, so #1777 would resolve WITHOUT clearing its #1775 blocker — a false unblock where #1730, not #1777, does the clearing. #1778 was a valid fold only because its lone pin was a test (fully removable now) whose impl's sole remaining consumer was moduleService. Classification: constellation-placement layer; impl→FUI relocation-ordering seam; a FORCED INVARIANT, not an open either/or (every alternative below is broken). Recommended path (Fork 1 default = (b)): relocate everything now — build the FUI upgrader twin importing the FUI kernel, relocate the 8 tests, swap BOTH demos to #701 FUI iframes (the FUI code-upgrader demo keeps the full pipeline + live element via defineFromDefinition, minus the serve() form-toggle), delete the WE upgrader library — removing every kernel pin so #1777 genuinely clears #1775; defer ONLY the serve()-bound form-toggle to a small slice blockedBy #1730. Rejected: (a) fold into #1730 (false unblock, above); (c) block all of #1777 on #1730 (couples serve()-free work to the serve()/#1771-gated MaaS move for no technical need); (d) cross-origin serve() bridge from WE :3000 (a FUI-canonical demo demonstrating WE's serve() is misleading, plus cleanup debt, for one toggle). Full grounding in we:reports/2026-06-24-upgrader-relocation-demo-serve-seam.md.",
+  "dateOpened": "2026-06-24",
+  "lastReviewed": "2026-06-24",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "decision-prep",
+    "zero-implementation",
+    "constellation-placement",
+    "renderers",
+    "upgrader",
+    "relocation-ordering",
+    "maas"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedReport": "reports/2026-06-24-upgrader-relocation-demo-serve-seam.md",
+  "relatedProject": "webcomponents"
+}

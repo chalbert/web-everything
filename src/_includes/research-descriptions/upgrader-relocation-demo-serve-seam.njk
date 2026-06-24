@@ -1,0 +1,68 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Decision <a href="/backlog/1777-relocate-the-upgrader-renderer-family-out-of-we-per-1282-imp/">#1777</a>
+  relocates the upgrader renderer family (<code>we:blocks/renderers/upgrader/</code>) out of Web Everything
+  into Frontier UI, per the <strong>impl→FUI</strong> rule (<a href="/backlog/">#1282</a>). It is a
+  prerequisite for deleting the shared WE component kernel (#1775). One consumer — the
+  <code>code-upgrader</code> demo — imports MaaS <code>serve()</code>, which is <strong>still
+  WE-resident</strong> (its own relocation is #1730, not done). The prep question is purely a
+  <strong>constellation-placement sequencing seam over shipped code</strong>: how to relocate cleanly
+  given that single cross-family dependency. There is no greenfield vocabulary, so no web-platform survey —
+  the research is a consuming-tree read of both repos plus a skeptic-tested conclusion.
+</p>
+
+<h2>Finding 1 — library + tests + the mockup demo are <code>serve()</code>-free</h2>
+<p>
+  The upgrader library (<code>upgraderEngine.ts</code> + 5 analyzers + <code>transformInterpreter</code> +
+  <code>versionMigrationPlanner</code> + fixtures), all 8 unit tests, and the
+  <code>mockup-to-standard</code> demo import <strong>only the component kernel</strong>
+  (<code>we:blocks/renderers/upgrader/upgraderEngine.ts:31</code>,
+  <code>we:demos/mockup-to-standard-demo.ts:24</code>). The kernel is already in FUI as
+  <code>fui:blocks/renderers/component/declarativeComponent.ts</code> (#1767), so this 90% forward-ports
+  cleanly now with no fork.
+</p>
+
+<h2>Finding 2 — the code-upgrader demo has two independent kernel touches</h2>
+<p>
+  <code>we:demos/code-upgrader-demo.ts:20</code> value-imports <code>parseDefinition</code> /
+  <code>defineFromDefinition</code> from the kernel — <strong><code>serve()</code>-free</strong>, and it
+  drives the live-element render. Separately, <code>we:demos/code-upgrader-demo.ts:19</code> value-imports
+  <code>serve</code> / <code>FORMS</code> / <code>ServeForm</code> from
+  <code>we:blocks/renderers/module-service/moduleService.ts</code>, used <strong>only</strong> in the
+  <code>livePane()</code> "served in any form" toggle (~lines 90–115). <code>serve()</code> is WE-resident
+  until #1730 relocates module-service.
+</p>
+
+<h2>Finding 3 (decisive) — the blocking pin is the kernel, not <code>serve()</code></h2>
+<p>
+  The demo's <em>blocking</em> dependency on the kernel #1775 must delete is the
+  <code>serve()</code>-free live-element render, not <code>serve()</code>. So the resolved-sibling #1778
+  "fold the impl + demo deletion into #1730" precedent <strong>does not transfer</strong> (a skeptic
+  refuted it): keeping the WE upgrader engine + code-upgrader demo live would leave live <em>value</em>
+  imports of the kernel, so #1777 would resolve <strong>without clearing its #1775 blocker</strong> — a
+  false unblock where #1730, not #1777, does the clearing. #1778 was a valid fold only because its lone
+  pin was a test (fully removable now) whose impl's sole remaining consumer was <code>moduleService</code>.
+</p>
+
+<h2>Classification &amp; recommended path</h2>
+<p>
+  Constellation-placement layer; an impl→FUI relocation-ordering seam; a <strong>forced invariant</strong>,
+  not an open either/or (every alternative below is broken). <strong>Fork 1 default = (b):</strong>
+  relocate everything now — build the FUI upgrader twin importing the FUI kernel, relocate the 8 tests,
+  swap <em>both</em> demos to #701 FUI iframes (the FUI code-upgrader demo keeps the full pipeline + live
+  element via <code>defineFromDefinition</code>, minus the <code>serve()</code> form-toggle), delete the WE
+  upgrader library — removing every kernel pin so #1777 genuinely clears #1775; defer <strong>only</strong>
+  the <code>serve()</code>-bound form-toggle to a small slice <code>blockedBy #1730</code>.
+</p>
+<ul>
+  <li><strong>(a) fold into #1730</strong> — broken: false unblock (Finding 3).</li>
+  <li><strong>(c) block all of #1777 on #1730</strong> — wrong: couples <code>serve()</code>-free work to
+    the <code>serve()</code>/#1771-gated MaaS move for no technical need.</li>
+  <li><strong>(d) cross-origin <code>serve()</code> bridge from WE :3000</strong> — wrong: a FUI-canonical
+    demo demonstrating WE's <code>serve()</code> is misleading, plus cleanup debt, for one toggle.</li>
+</ul>
+<p>
+  Full grounding: <code>we:reports/2026-06-24-upgrader-relocation-demo-serve-seam.md</code>.
+</p>
+{% endraw %}
