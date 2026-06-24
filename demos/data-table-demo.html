@@ -3,10 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Data Table Playground - Web Everything</title>
+  <title>Data Table Demo - Web Everything</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <link rel="stylesheet" href="/demos/playground.css">
-  <link rel="stylesheet" href="/demos/data-table-demo.css">
+  <style>
+    /*
+     * #1355 — the WE-resident Data Table renderer backend was deleted (#1467/#899 bounded split: impl →
+     * Frontier UI, conformance run → Plateau, WE keeps only the contract types + vector corpus + goldens).
+     * This page is now a #701 fuiDemo iframe shell embedding the FUI-canonical demo, so the page keeps
+     * working without a WE-resident runtime. The demo is a FUI deliverable (fui:demos/data-table-demo.html).
+     */
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #0f1115; color: #e6e9ef; height: 100vh; display: flex; flex-direction: column; }
+    .demo-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid #232733; background: #151821; flex: none; }
+    .demo-header-brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+    .demo-header-brand svg { width: 22px; height: 22px; }
+    .demo-header-back { color: #9aa4b2; text-decoration: none; font-size: 14px; }
+    .demo-header-back:hover { color: #e6e9ef; }
+    .fui-note { padding: 8px 20px; font-size: 13px; color: #9aa4b2; background: #11141b; border-bottom: 1px solid #232733; flex: none; }
+    .fui-note code { color: #c8cedb; }
+    iframe { border: 0; width: 100%; flex: 1 1 auto; background: #fff; }
+  </style>
 </head>
 <body>
   <div class="demo-header">
@@ -20,37 +36,17 @@
     <a href="/" class="demo-header-back">&larr; Back to Home</a>
   </div>
 
-  <main class="play">
-    <header class="play-intro">
-      <h1>Data Table Playground</h1>
-      <p>
-        The runnable home for the <a href="/blocks/data-table/">Data Table block</a> — the
-        blocks-layer realization of the <a href="/intents/collection-operations/">Collection
-        Operations</a> intent's <code>filter</code>, <code>sort</code>, and <code>group</code>
-        stages (the <code>page</code> stage is the companion <a href="/blocks/pagination/">Pagination
-        block</a> — compose, never merge). Each card pairs a row set with a contract, renders the
-        table through the reference renderer, and runs the <strong>same APG / Intl.Collator /
-        SQL-aggregate audit the CI conformance suite asserts</strong>. The last card is
-        <strong>live</strong>: click a header to cycle its sort, toggle the filter, and watch the
-        <code>aria-live</code> region announce what a screen reader would hear.
-      </p>
-      <p class="play-caveat">
-        A green badge means the rendered table satisfies the <em>verified</em> contract: a native
-        <code>&lt;table&gt;</code> with <code>&lt;th scope="col"&gt;</code> headers, the active sort
-        column projecting <code>aria-sort</code> (<a href="https://www.w3.org/WAI/ARIA/apg/patterns/table/">WAI-ARIA
-        APG Sortable Table</a>) with sortable-but-unsorted headers at <code>none</code>, text order
-        following <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator"><code>Intl.Collator</code></a>
-        (numeric / sensitivity), empties placed by SQL <code>NULLS FIRST/LAST</code>, filters
-        combined by <code>filterMatch</code> (all / any), and per-group <code>groupSummary</code>
-        aggregates named after SQL. The renderer here is a deterministic <em>reference</em>;
-        concrete strategies live in Frontier UI.
-      </p>
-    </header>
+  <p class="fui-note">
+    The Data Table renders from the <strong>Frontier&nbsp;UI canonical demo</strong> (the WE-resident
+    renderer backend was removed per <code>#1355</code>/<code>#1467</code> — impl lives in Frontier UI, the
+    conformance run in Plateau; WE keeps only the contract types + vector corpus). Embedded via the
+    <code>#701</code> fuiDemo iframe from <code>fui:demos/data-table-demo.html</code>.
+  </p>
 
-    <div id="examples">Loading examples&hellip;</div>
-  </main>
-
-  <!-- Playground: renders the data table + audits the verified contract. Native DOM only. -->
-  <script type="module" src="/demos/data-table-demo.ts"></script>
+  <iframe
+    src="http://localhost:3001/demos/data-table-demo.html"
+    title="Data Table — Frontier UI canonical demo"
+    loading="lazy"
+    sandbox="allow-scripts allow-same-origin"></iframe>
 </body>
 </html>

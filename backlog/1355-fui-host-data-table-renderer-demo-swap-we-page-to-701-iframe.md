@@ -2,10 +2,12 @@
 kind: story
 size: 5
 parent: "1353"
-status: open
-blockedBy: ["1660"]
+status: resolved
+blockedBy: []
 dateOpened: "2026-06-20"
 dateStarted: "2026-06-23"
+dateResolved: "2026-06-24"
+graduatedTo: 1353
 tags: []
 ---
 
@@ -95,3 +97,14 @@ The delete is **atomic** with standing that home up (the WE backend + verifier c
 a Plateau home + the WE data-only suite + golden schema exist). Filed that prerequisite as **#1660** (decided
 build, not a fork — #1566 Fork 2a ruled it). Re-pointed `blockedBy: 1660`; **`blocked-in-fact`**, released.
 Cascade-frees when #1660 lands. Sibling shares this exactly.
+
+## Progress (batch-2026-06-23-1725-1665) — DONE
+
+Both preconditions verified present (not just cleared edges): Plateau has the real golden-audit home (`plateau:src/conformance-engine/renderer-audit/auditDataTable.ts` + `plateau:src/conformance-engine/renderer-audit/goldenRoot.ts`, landed by #1660), and `fui:blocks/renderers/collection-operations/CollectionOperationsBehavior.ts` no longer value-imports the renderer. The FUI demo renders live (headless check on :3001 — 9 tables, 62 rows, 176 cells, 0 console errors).
+
+Executed the #1467/#899 bounded split:
+- **Swap** — `we:demos/data-table-demo.html` → a #701 fuiDemo iframe shell over the FUI demo `fui:demos/data-table-demo.html` (served on :3001; mirrors #1326/view-tabs).
+- **Delete (runnable backend → FUI / Plateau):** `we:blocks/renderers/data-table/renderDataTable.ts` (renderDataTable + applyPipeline/aggregate/summaryText/sort-state/announce/cellContent/cellDisplayText + auditDataTable), `we:blocks/renderers/data-table/DataTableBehavior.ts`, the goldens generator `we:blocks/renderers/data-table/__fixtures__/data-table-goldens.ts`, the two backend tests (`we:blocks/__tests__/unit/renderers/data-table.test.ts`, `we:blocks/__tests__/unit/renderers/data-table-behavior.test.ts`), and `we:demos/data-table-demo.{ts,css}`.
+- **Keep (the WE contract):** new `we:blocks/renderers/data-table/types.ts` (the contract types — extracted from the deleted renderer; `we:blocks/renderers/data-table/__fixtures__/data-table-cases.ts` re-pointed to it), the vector corpus `we:blocks/renderers/data-table/__fixtures__/data-table-cases.ts`, and the committed goldens `we:blocks/renderers/data-table/__fixtures__/data-table-goldens.json` (schema-checked by `we:blocks/renderers/golden-schema.ts`, 6 tests green).
+
+Cleared the stale `blockedBy: 1660`. WE gate 0 errors. The Plateau auditDataTable is a verbatim port (no WE import), so nothing cross-repo strands.

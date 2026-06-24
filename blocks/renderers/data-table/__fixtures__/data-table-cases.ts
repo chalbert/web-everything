@@ -4,11 +4,12 @@
  * anti-drift split, mirroring the pagination / JSX / component fixtures).
  *
  * Each case pairs a row set + a Collection Operations contract (the filter / sort / group subset)
- * with the verified-contract invariant it proves. The renderer (renderDataTable) and the audit
- * (auditDataTable) are the one shared source both surfaces run. The page stage is the separate
- * Pagination block — out of scope here (compose, never merge).
+ * with the verified-contract invariant it proves. This vector corpus is the WE-resident half of the
+ * #1467/#899 split: the renderer (`renderDataTable`) and the audit (`auditDataTable`) were re-homed to
+ * Frontier UI / Plateau (#1355/#1660) and consume this corpus from there. The page stage is the
+ * separate Pagination block — out of scope here (compose, never merge).
  */
-import type { DataTableConfig, Row } from '../renderDataTable';
+import type { DataTableConfig, Row } from '../types';
 
 export interface DataTableCase {
   id: string;
