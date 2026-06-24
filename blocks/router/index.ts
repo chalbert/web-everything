@@ -22,6 +22,14 @@ export { validateRouteMap, isRouteMap, buildRouteMap } from './route-map';
 export type { RouteMapEmitter } from './route-emitters';
 export { RouteEmitterRegistry, UnknownRouteEmitterError } from './route-emitters';
 
+// URL-as-state declaration + coordinator seam contract (#1728, type-only)
+export type {
+  UrlStatePersistence,
+  UrlCodec,
+  UrlStateSlice,
+  UrlStateCoordinator,
+} from './url-state';
+
 // Types
 export type {
   RouteContext,

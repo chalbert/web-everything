@@ -225,3 +225,51 @@ interface CustomUrlCodecStrategy<T> {
             webrouting, distinct from the durable-record <a href="/projects/webstates/">storage</a> protocol.</li>
     </ul>
 </section>
+
+<section id="url-state-seam-section" class="section-card">
+    <h3 id="url-state-seam">URL-as-state declaration &amp; coordinator seam</h3>
+    <p>
+        A component <strong>declares</strong> which state slices sync &mdash; <strong>router-agnostically</strong>,
+        so it syncs whether or not a router is mounted (the pagination block already writes the URL router-free).
+        The declaration carries a namespaced key (the cross-component collision arbiter), the
+        <a href="#url-state-seam"><code>persistence</code></a> home (<code>url | session | memory</code>, the
+        <a href="/intents/navigation/">Navigation Intent</a>'s axis generalized per slice, never forced), and
+        the typed <a href="#protocol-custom-url-codec-strategy"><code>codec</code></a> (#1727, used on both read
+        and write &mdash; one encoding, never two). Write-coordination is two component-side mechanisms:
+        <strong>intra-component microtask coalescing</strong> (always &mdash; one write per component per tick,
+        History-guarded for SSR/no-DOM) plus an <strong>optional coordinator</strong> that batches
+        <em>cross-component</em> concurrent writes into a single history entry (the nuqs model). Both paths share
+        the same per-slice codec. Authored as the type-only contract <code>we:blocks/router/url-state.ts</code>;
+        the runtime impl rides downstream to FUI.
+    </p>
+    {% highlight "typescript" %}
+// The URL-as-state seam contract (#1728, ratified #1686). A component DECLARES a syncable slice; the
+// declaration is router-agnostic (syncs with or without a mounted router) and never a central provider.
+type UrlStatePersistence = 'url' | 'session' | 'memory'; // navigation `persistence`, per-slice, never forced
+
+interface UrlStateSlice<T> {
+  key: string;                      // namespaced query/storage key — the cross-component collision arbiter
+  persistence: UrlStatePersistence; // url = shareable/navigable/history-tied; session/memory = non-URL homes
+  codec: UrlCodec<T>;               // the #1727 typed codec — shared on read (decode) AND write (encode)
+  defaultValue: T;                  // restored when the URL/store carries none (popstate/navigate = SoT)
+}
+
+// Optional: batches CROSS-component concurrent writes into ONE history entry (the nuqs model). A component
+// always coalesces its OWN writes on the microtask; the coordinator only adds cross-component batching.
+interface UrlStateCoordinator {
+  enqueue<T>(slice: UrlStateSlice<T>, value: T): void;
+}
+    {% endhighlight %}
+    <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+        <li><strong>Per-component, not a central provider:</strong> a central router-coupled provider would
+            couple every stateful block to a mounted router and break the standalone case (pagination's
+            router-free URL write) &mdash; so the declaration lives at the component (#1686).</li>
+        <li><strong>One codec, two commit paths:</strong> intra-component coalescing (one entry) and the optional
+            cross-component coordinator (one batched entry) share the <em>same</em>
+            <a href="#protocol-custom-url-codec-strategy">codec</a> &mdash; one encoding, never two; only the
+            commit granularity differs.</li>
+        <li><strong>Never forced; popstate is truth:</strong> URL-sync is per-slice opt-in with a permissive
+            non-URL default; back/forward (<code>popstate</code>/<code>navigate</code>) is the read source of
+            truth, restoring the true state. Migrates pagination's ad-hoc <code>urlSync</code> onto the seam.</li>
+    </ul>
+</section>
