@@ -2,7 +2,8 @@
   "id": "layout",
   "name": "Layout Intent",
   "status": "concept",
-  "summary": "Protocol defining the application shell structure and region mechanics (Drawers, Rails, Panels).",
+  "layoutTier": "composition",
+  "summary": "The charter member of the page-archetype composition-intent tier (#1680 Fork 2b, codified at platform-decisions.md#layout-role-composition-intent): the app-shell region mechanics (Drawers, Rails, Panels) are a page-spanning arrangement of multiple region roles, NOT a primitive region role. So this intent is classified `layoutTier: composition` to keep it distinct from the per-role primitive taxonomy (stack/cluster/grid/box/center/sidebar/…), each of which carries `layoutTier: region-role`. Reclassified, not retracted.",
   "dimensions": {
     "behavior": {
       "description": "How regions interact with the main content area",
