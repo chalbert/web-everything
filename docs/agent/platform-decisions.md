@@ -129,6 +129,19 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    clearly-editorial getting-started prose, not the neutrality grid (matches BCD / caniuse /
    wpt.fyi / OpenFeature). Ruling #1450.
 
+8. **Relocate at the granularity of dependency-readiness; a relocated module never reaches back.**
+   {#relocation-granularity} When moving impl WE→FUI, relocate every piece whose cross-family deps are
+   *already FUI-satisfiable now*, and defer **only** the pieces whose deps are *not yet FUI-resident* —
+   as an explicit `blockedBy` slice on the dep's own relocation, never as "keep it WE-resident for now".
+   Keeping a piece in WE "until later" leaves a **live WE-resident value-import**, so the relocation
+   resolves *without* clearing the downstream blocker it was supposed to clear (a false unblock). A
+   relocated FUI module satisfies a lagging dep by **(a)** using FUI's own equivalent (e.g. its canonical
+   renderer/util), **(b)** inlining a small pure util, or **(c)** deferring that one feature — **never**
+   by importing back into WE (a FUI→WE backward edge, the same ban as the runtime boundary). Pre-flight
+   the *full* import graph before scoping: the "only dep is X" claim from a partial read is a hypothesis,
+   not a plan. #1777 (upgrader family: `serve()` deferred to #1730 via #1781; `jsxToHtml` rewired to FUI's
+   own via a browser-safe subpath; `compareSpecVersions` inlined — all kernel pins removed, clearing #1775).
+
 *Soft sub-rule — locus tagging:* backlog items carry an explicit `locus:` field (WE / frontierui /
 plateau-app / exercise-app); items gate in their own locus so cross-repo batches stay locus-agnostic.
 
@@ -141,7 +154,9 @@ WE-project; WE holds zero implementation) · #1246 (blocks → FUI, reverses #69
 the reference-implementation tier wholesale** — webpolicy + all delivery runtimes → FUI; WE = contract +
 vectors only; demos are a *website* concern that surfaces FUI) · #1771 (**sharpens the #1566 carve-out
 bound** — a generator that *runs* an impl over WE's own artifacts is impl → FUI, not tooling; resolves the
-MaaS serve-core seam as a forced mapping, reversing #954's "WE runs `serve()`", unblocking #1730).
+MaaS serve-core seam as a forced mapping, reversing #954's "WE runs `serve()`", unblocking #1730) ·
+#1777 (**relocation granularity** — relocate deps-satisfiable-now, defer not-yet-FUI deps as `blockedBy`
+slices, never reach back into WE; see {#relocation-granularity}).
 
 ### WE ↔ Frontier UI rendering & embed boundary {#we-fui-embed-boundary}
 

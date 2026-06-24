@@ -1,12 +1,15 @@
 ---
 kind: decision
-status: open
+status: resolved
 relatedProject: webcomponents
 relatedReport: reports/2026-06-24-upgrader-relocation-demo-serve-seam.md
 preparedDate: "2026-06-24"
 blocks: ["1775"]
 dateOpened: "2026-06-24"
 dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: "fui:blocks/renderers/upgrader/upgraderEngine.ts"
+codifiedIn: "docs/agent/platform-decisions.md#relocation-granularity"
 tags: [placement, zero-implementation, renderers, upgrader, relocation-ordering]
 ---
 
@@ -66,3 +69,48 @@ relocate all kernel-pinning code now, defer only the `livePane()` `serve()` togg
 Decision resolves → opens the build: the forward-port above (FUI twin + tests + both demo swaps + WE
 library delete) executes this story; a new small slice "re-add `code-upgrader` form-toggle in FUI"
 is filed `blockedBy #1730`.
+
+## Build-start grounding correction (2026-06-24 — ratified (b), then full import audit)
+
+The prep grounding read only the **kernel + `serve()`** edges. A full audit of every import in the
+upgrader tree (`grep` over `we:blocks/renderers/upgrader/`) found **two more cross-family deps** the FUI
+twin would have to satisfy — both currently WE-resident, so a naive port creates FUI→WE backward module
+edges (banned, same class as the `serve()` seam). The high-level call (relocate now, don't defer-all)
+stands; the "defer ONLY `serve()`" detail does not. The three seams:
+
+| seam | consumer | WE source | resolution |
+| --- | --- | --- | --- |
+| MaaS `serve()` | `code-upgrader` demo `livePane()` toggle | `we:blocks/renderers/module-service/moduleService.ts` | **defer** to #1730 (as ratified) — no FUI equivalent, runtime service |
+| `compareSpecVersions` | `we:blocks/renderers/upgrader/versionMigrationPlanner.ts:24` | `we:capability-manifest/provider.ts:182` | **inline** — a 9-line pure semver compare with no own deps; copy into the FUI planner, no backward edge, no deferral |
+| `jsxToHtml` | `we:blocks/renderers/upgrader/analyzers/frameworkAnalyzers.ts:20` (React lift) | `we:blocks/renderers/jsx/jsxToHtml.ts` | **sub-fork (below)** — WE's impl ≠ FUI's `@frontierui/component-compiler` one (105 vs 45 LOC; WE adds `jsxToHtmlWithDiagnostics` + `desugar` + `reverseEvents`); `we:blocks/__tests__/unit/renderers/upgrader-frameworks.test.ts` asserts on its output, so a swap risks golden drift; WE's `jsxToHtml` itself pulls `./directives` + `render-strategy` types (the WE jsx subsystem, out of #1777 scope) |
+
+### Fork 2 — the `frameworkAnalyzers` `jsxToHtml` seam (RESOLVED → (C), ratified 2026-06-24)
+
+**Outcome:** ratified **(C)** — frameworkAnalyzers rewired to FUI's own `jsxToHtml` via the new
+browser-safe `@frontierui/component-compiler/jsxToHtml` subpath export (the package root re-exports the
+Node-side `@frontierui/compiler`, which externalizes `node:fs` in the browser). **Zero golden drift** —
+all 9 `upgrader-frameworks` tests passed unchanged against FUI's renderer, so no re-baseline was needed
+and no fallback-to-(A) deferral occurred. The headline demo is intact (verified in-browser: 21/21 cases,
+React/Lit/Vue lifts render live).
+
+**Demo-centrality (the fact that reweights this fork):** the `code-upgrader` demo *registers*
+`frameworkAnalyzers` (`we:demos/code-upgrader-demo.ts:30`) and its framework-lift (React/Lit/Vue → web
+component) is the demo's **headline** capability — not a peripheral toggle like `serve()`. So deferring
+`frameworkAnalyzers` does not "trim" the FUI demo, it **guts** it. (`mockup-to-standard` is unaffected — it
+registers only `mockupAnalyzer`.) Only the **React** path actually calls `jsxToHtml` (3 of 8 framework
+fixtures: `react-static`/`react-dynamic-child`/`react-single-word-name`; Lit/Vue use string transforms).
+
+| option | what it does | verdict |
+| --- | --- | --- |
+| (A) defer `frameworkAnalyzers` to a jsx-relocation slice | relocate engine + interpreter + planner + other 4 analyzers + fixtures + tests now; leave `frameworkAnalyzers` + `upgrader-frameworks.test` WE-resident | structurally clean (it doesn't pin the kernel) **but guts the demo's headline** — the FUI `code-upgrader` would lose React/Lit/Vue lifting, leaving only legacy-WC + model paths |
+| (B) port WE's `jsxToHtml` (+`directives`(225) +`JSXRenderer` + `render-strategy` types) into FUI | drags a ~400+ LOC slice of the separate WE jsx renderer family into #1777 | scope creep — pulls an unrelated, separately-relocatable subsystem; #1777 balloons; that family needs its own #1282 relocation anyway |
+| **(C) rewire `frameworkAnalyzers`'s React path to FUI's `@frontierui/component-compiler` `jsxToHtml`** | the relocated analyzer uses FUI's own canonical JSX→HTML (its architecturally-correct renderer) instead of WE's; re-baseline the 3 `react-*` goldens if output differs | **recommended** — keeps the demo whole, no scope creep, and a FUI analyzer *should* use FUI's renderer (using WE's would itself be a backward edge). Bounded cost: verify/adjust 3 React goldens. Only risk: FUI's 45-LOC impl lacks WE's lossy-diagnostic/desugar nuance, so a fixture may need its expected-HTML updated (a re-baseline, not a regression). |
+| (D) inline a minimal `jsxToHtml` in the FUI upgrader | duplicate a partial impl | drift; two jsxToHtml impls |
+
+**Recommendation: (C)**, confidence medium. The relocated, FUI-resident `frameworkAnalyzers` *should*
+depend on FUI's canonical `jsxToHtml`, not reach back into WE — that makes (C) the architecturally-honest
+choice, keeps the headline demo intact, and avoids hauling the whole WE jsx subsystem (B) or gutting the
+demo (A). Residual: the two impls differ, so I must run `upgrader-frameworks.test` against FUI's renderer
+and re-baseline any of the 3 React goldens that legitimately shift — if a case can't be made to pass
+without lossy-diagnostic behavior FUI lacks, that single case falls back to (A)-style deferral. This is
+the one open call before the build; `serve()` (defer) and `compareSpecVersions` (inline) are settled.
