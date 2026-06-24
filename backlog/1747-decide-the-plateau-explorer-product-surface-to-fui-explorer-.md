@@ -2,7 +2,7 @@
 kind: decision
 status: open
 dateOpened: "2026-06-24"
-relatedProject: plateau-app
+relatedProject: webcomponents
 tags: [explorer, devtools-placement, constellation, plateau, frontierui, cross-repo]
 ---
 
