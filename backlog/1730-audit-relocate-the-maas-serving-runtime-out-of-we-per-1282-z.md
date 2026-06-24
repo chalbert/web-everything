@@ -15,3 +15,13 @@ The MaaS serve core lives in WE at we:blocks/renderers/module-service/ — we:bl
 ## Blocked — embedded fork (2026-06-24, `batch-2026-06-24-1768-1730`)
 
 Claimed and ground the move: it is **not** a clean per-file relocate. The build-time author-mode projector this card keeps WE-resident (`we:blocks/renderers/module-service/authorModeSource.ts:19`) **imports `serve()`** from the `we:blocks/renderers/module-service/moduleService.ts` it relocates — moving that file would force a banned WE→FUI code import. And `serve()` (`we:blocks/renderers/module-service/moduleService.ts:17-19`) sits on the shared `we:blocks/renderers/component` / `we:blocks/renderers/jsx` / `we:blocks/renderers/functional` transform core. The coupled seam decision is filed as **#1771** (`blockedBy`); not pure-agent buildable until it settles. Released back to `open`.
+
+## Note (2026-06-24, from #1778): owns the WE functional-impl delete
+
+#1778 built the FUI functional renderer (`fui:blocks/renderers/functional/functionalComponent.ts`) and
+relocated its test, but **could not delete** `we:blocks/renderers/functional/functionalComponent.ts`:
+`we:blocks/renderers/module-service/moduleService.ts:21` value-imports `generateFunctionalSource` for the
+`'functional'` ServeForm, and moduleService is WE-resident until this card relocates it. So the WE
+functional impl is now an orphan *except for moduleService* — **delete it here** when moduleService moves
+(its FUI twin already exists; point FUI-moduleService's `'functional'` branch at
+`fui:blocks/renderers/functional/functionalComponent`).
