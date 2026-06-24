@@ -53,6 +53,40 @@ export interface RouteMap {
   routes: RouteMapEntry[];
 }
 
+/** The serializable fields the builder projects off a parsed route definition (drops `pattern`/`template`). */
+type SerializableRouteFields = Pick<
+  RouteMapEntry,
+  'path' | 'guard' | 'guardLeave' | 'loader' | 'outlet' | 'isErrorBoundary'
+>;
+
+/**
+ * The DOM→map **builder** (#1736) — the faithful derivation #1721 parked for the first consuming slice.
+ * Projects a parsed `RouteDefinition[]` (from `parseRouteDefinitions`, `./types`) into the serializable
+ * {@link RouteMap}: it **drops** the two non-serializable fields (`pattern: URLPattern`, `template:
+ * HTMLTemplateElement`) and keeps exactly the #1685 serializable fields, in source order.
+ *
+ * It is a **faithful derivation** (docs/agent/platform-decisions.md#faithful-derivation-exclude-not-fabricate):
+ * it excludes what it cannot serialize and never fabricates a missing value. The DOM-walking parse that
+ * *produces* the `RouteDefinition[]` is the browser-runtime impl (FUI); this projection is pure data — it
+ * reads only the already-parsed serializable fields, so it needs no DOM and is the WE-owned contract every
+ * emitter reads.
+ *
+ * @param definitions parsed route definitions (the serializable subset is read; `pattern`/`template` ignored)
+ * @param base        optional base path the definitions were parsed under (recorded; paths are pre-resolved)
+ */
+export function buildRouteMap(definitions: readonly SerializableRouteFields[], base?: string): RouteMap {
+  const routes: RouteMapEntry[] = definitions.map((d) => {
+    const entry: RouteMapEntry = { path: d.path };
+    if (d.guard !== undefined) entry.guard = d.guard;
+    if (d.guardLeave !== undefined) entry.guardLeave = d.guardLeave;
+    if (d.loader !== undefined) entry.loader = d.loader;
+    if (d.outlet !== undefined) entry.outlet = d.outlet;
+    if (d.isErrorBoundary) entry.isErrorBoundary = true;
+    return entry;
+  });
+  return base !== undefined ? { base, routes } : { routes };
+}
+
 /** The fields a {@link RouteMapEntry} may carry — used to reject unknown keys (e.g. a leaked `pattern`). */
 const ENTRY_KEYS = new Set([
   'path',
