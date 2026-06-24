@@ -1,0 +1,33 @@
+{
+  "id": "masonry",
+  "name": "Masonry Layout Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "layoutTier": "region-role",
+  "summary": "A primitive layout region-role (#1680 taxonomy): composition-intent = shortest-column packing of varied-height items. Identity is the arrangement, not the CSS — FUI ships one block per role and the mechanism (CSS grid masonry (grid-template-rows: masonry) or CSS multi-column) is an impl seam. Project-less; per-project styling rides presentational variants + plateau assembler presets.",
+  "dimensions": {
+    "column-width": {
+      "description": "The target column inline-size that drives the column count (more space → more columns) — the responsive knob.",
+      "values": []
+    },
+    "gap": {
+      "description": "Even spacing between items and columns, on a spacing scale.",
+      "values": [
+        "none",
+        "xs",
+        "sm",
+        "md",
+        "lg",
+        "xl"
+      ]
+    },
+    "order": {
+      "description": "Whether items pack preserving DOM order column-wise or fill row-wise. Default column (shortest-column-first).",
+      "values": [
+        "column",
+        "row"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">Packs items of varying heights into columns by always placing the next item in the shortest column, eliminating the ragged gaps of a fixed grid — Pinterest-style galleries, image boards, varied-height card walls.</p><h3>Composition-intent (the identity)</h3><p class=\"text-sm text-gray-600 mb-2\">A primitive layout <strong>region-role</strong> (<code>layoutTier: region-role</code>), one of the per-role taxonomy ratified in <a href=\"/backlog/1680-semantic-layout-type-taxonomy-identify-every-distinct-layout/\">#1680</a>. Its identity is the <strong>composition-intent</strong> &mdash; shortest-column packing of varied-height items &mdash; <strong>impl-agnostic</strong>. FUI ships exactly <em>one</em> block for this role; the CSS mechanism (CSS <code>grid</code> masonry (<code>grid-template-rows: masonry</code>) or CSS multi-column) is an <strong>impl seam</strong>, never the role's identity (<a href=\"/docs/agent/platform-decisions.md\">platform-decisions.md#layout-role-composition-intent</a>).</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>column-width</code>: The target column inline-size that drives the column count (more space → more columns) — the responsive knob.</li><li><code>gap</code>: Even spacing between items and columns, on a spacing scale (<code>none · xs · sm · md · lg · xl</code>).</li><li><code>order</code>: Whether items pack preserving DOM order column-wise or fill row-wise. Default column (shortest-column-first) (<code>column · row</code>).</li></ul><h3>Annotation, not identity</h3><p class=\"text-sm text-gray-600 mb-2\">Stays <strong>DISTINCT from <a href=\"/intents/grid/\">grid</a></strong> — the #1680 load-bearing example: it must <em>not</em> merge into grid when CSS <code>masonry</code> ships, because shortest-column packing is a different composition-intent from uniform cells.</p>"
+}

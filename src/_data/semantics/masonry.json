@@ -1,0 +1,5 @@
+{
+  "term": "Masonry Layout Intent",
+  "definition": "A layout region-role: shortest-column packing of varied-height items (Pinterest-style galleries, image walls). Stays distinct from grid even after CSS masonry ships (#1680). Identified by its arrangement; the CSS is an FUI impl seam.",
+  "usage": "Standardized by the Masonry Layout Intent."
+}
