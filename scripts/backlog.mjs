@@ -29,7 +29,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyTransition, readField } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
-import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize } from './readiness/reservations.mjs';
+import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize, sessionForNum } from './readiness/reservations.mjs';
 import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, recordTouch, mostRecentSession, porcelainFiles } from './readiness/claimScope.mjs';
 import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
 import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
@@ -170,13 +170,22 @@ function transition(v) {
   const slug = id; // the rename slug is the full id (NNN-slug)
   if (v === 'claim') {
     // Clear-on-claim (#083 invariant 2): a hard claim supersedes any soft reservation on this item —
-    // drop it so the now-`active` item never lingers as a stale hold against another session.
-    saveReservations(removeNums(loadReservations(), [file.match(/^\d+/)[0]]));
+    // drop it so the now-`active` item never lingers as a stale hold against another session. Read the
+    // reservation's session BEFORE dropping it, so the baseline below can recover it (#1723).
+    const num = file.match(/^\d+/)[0];
+    const reservationsAtClaim = loadReservations();
+    saveReservations(removeNums(reservationsAtClaim, [num]));
     // Gate-attribution baseline (#952, #949 Fork 2-A): snapshot the files ALREADY dirty (everyone else's
     // in-flight + pre-existing) the first time this session claims, and stamp the owning id. Lets
     // `check:standards --scope=<session>` later block only on files THIS session dirtied. Best-effort —
     // a git/IO hiccup must never fail the claim (attribution is an opt-in convenience, not the lock).
-    const session = flag('session');
+    //
+    // Session inference (#1723): the batch loop runs `claim <NNN>` WITHOUT `--session`, which used to skip
+    // baseline recording entirely — leaving `claims.json` empty so `--scope=<slug>` was silently inert.
+    // Prefer the explicit flag, else the session that `reserve`-d this item (recorded in reservations.json
+    // by the batch's reserve step), else the most-recent claim session. So the baseline records without a
+    // per-claim flag.
+    const session = flag('session') ?? sessionForNum(reservationsAtClaim, num) ?? mostRecentSession(loadClaims());
     if (session) {
       try {
         const baselineFiles = [...porcelainFiles(execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }))];

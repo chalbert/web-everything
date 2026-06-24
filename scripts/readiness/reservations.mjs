@@ -91,6 +91,21 @@ export function foreignHolds(state, nowMs, mySession) {
 }
 
 /**
+ * The session currently holding `num`, or `null`. The `reserve` step stamped each planned item with its
+ * `--session` here, so `claim` can recover that session for the #952 gate baseline even when the claim
+ * itself omits `--session` (the loop runs `claim <NNN>` without it) — making `--scope=<slug>` no longer
+ * silently inert (#1723). Pure read; tolerates a `num` given padded or unpadded.
+ * @param {{held: Array<{num:string, session:string, at:string}>}} state
+ * @param {string|number} num
+ * @returns {string|null}
+ */
+export function sessionForNum(state, num) {
+  const padded = String(num).padStart(3, '0');
+  const hold = (state.held ?? []).find((h) => h.num === padded);
+  return hold ? hold.session : null;
+}
+
+/**
  * Deprioritize (NOT exclude) foreign-reserved items in an already-ranked list: a stable partition so
  * unreserved items keep their order up front and reserved items sink to the back (also in original
  * relative order). Each reserved item is annotated with `reservedBy` (the holding session). Pure —
