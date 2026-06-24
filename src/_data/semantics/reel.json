@@ -1,0 +1,5 @@
+{
+  "term": "Reel Layout Intent",
+  "definition": "A layout region-role: a horizontally scrolling overflow strip with optional scroll-snap (carousels, card shelves), distinct from cluster which wraps. Identified by its arrangement; the CSS (overflow + scroll-snap) is an FUI impl seam.",
+  "usage": "Standardized by the Reel Layout Intent."
+}
