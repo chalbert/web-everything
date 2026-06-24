@@ -1,0 +1,36 @@
+{
+  "id": "region-select",
+  "name": "Region Select Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "summary": "A cross-cutting spatial-selection vocabulary (placement ratified #1463) — the declarative layer naming HOW a pointer-drawn region picks items: the shape it draws (rect | lasso | polygon | nearest), the hit-test mode that decides membership (intersect | contain | center), and the modifier that combines the hit with the existing selection (replace | add | toggle | subtract). Designed in full up front (completeness-early beats YAGNI for a standard's vocabulary, #1463) so the modifier/hit-test contract is proven against the whole shape set rather than retrofitted when a late shape appears. Composes the Selection Intent (it drives a multi-selection) — region-select owns the spatial GESTURE→region→hit-set; selection owns the resulting choice state. UX-only: the geometry engine (AABB / point-in-polygon / centroid) is an impl seam in the FUI realizations (marquee-select = the rect member), NOT part of this intent.",
+  "dimensions": {
+    "shape": {
+      "description": "The geometry the pointer draws to define the region — the declarative \"what shape\". `rect` is the drag-out axis-aligned band (the marquee, #1406); `lasso` is a freehand closed path (point-in-polygon over the traced vertices); `polygon` is a click-to-add vertex path (point-in-polygon over explicit vertices); `nearest` picks the single item whose centroid is closest to the pointer (a degenerate zero-area region). These four are the convergent set across design tools (Figma/Sketch marquee + lasso, Illustrator polygon, snapping 'nearest'), data-viz brushing, and OS file managers — designed in full so every realization declares its `shape` against a settled contract. Open-numbered per the variant contract (intents are open-design); authors may mint further region shapes.",
+      "values": [
+        "rect",
+        "lasso",
+        "polygon",
+        "nearest"
+      ]
+    },
+    "mode": {
+      "description": "The hit-test rule that decides whether an item is in the region — the membership predicate, shared across all shapes. `intersect`: the item is selected if the region overlaps it at all (the permissive default, matching the drag-right marquee in most tools). `contain`: only fully-enclosed items count (the stricter drag-left / 'window' selection, mirroring CAD). `center`: an item counts if its centre point falls inside the region. Optional with a most-permissive default: absent → `intersect`. Grounded in the FUI marquee hit-test core (`MarqueeMode`).",
+      "values": [
+        "intersect",
+        "contain",
+        "center"
+      ]
+    },
+    "modifier": {
+      "description": "How the freshly hit set combines with the existing selection when the region resolves — the set-algebra op, driven by the held keyboard modifier at gesture end. `replace`: the region's hits become the selection (the no-modifier default). `add` (Shift): union the hits in. `toggle` (Cmd/Ctrl): flip each hit's membership. `subtract` (Alt): remove the hits from the selection. Optional with default `replace`. Grounded in the FUI marquee `MarqueeModifier` vocab + `modifierFromEvent` mapping; the keyboard-equivalent obligation rides the composed Selection Intent.",
+      "values": [
+        "replace",
+        "add",
+        "toggle",
+        "subtract"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">A cross-cutting <strong>spatial-selection vocabulary</strong> (placement ratified in <a href=\"/backlog/1463-region-select-intent-mint-full-shape-vocabulary-rect-lasso-p/\">#1463</a>): the declarative layer that names <em>how a pointer-drawn region picks items</em>. The platform ships raw <strong>Pointer Events</strong> but <strong>no region-selection primitive</strong> — every design tool, data-viz brush, and file manager hand-rolls a marquee. This intent owns the <em>declaration</em> (<em>this surface is rect / lasso / polygon / nearest selectable</em>); the geometry <em>engine</em> is a swappable impl in the realizations.</p><h3>Designed in full up front (completeness-early)</h3><p class=\"text-sm text-gray-600 mb-2\">The full <code>shape</code> set — <code>rect · lasso · polygon · nearest</code> — is named at mint, not grown one member at a time. Per the <a href=\"/backlog/1463-region-select-intent-mint-full-shape-vocabulary-rect-lasso-p/\">#1463 GO</a> ruling, <strong>completeness-early beats YAGNI for a standard's vocabulary</strong>: settling the whole shape set lets the shared <code>mode</code> / <code>modifier</code> contract be proven against every member (rect AABB, lasso/polygon point-in-polygon, nearest centroid) rather than retrofitted when a late shape appears. <code>#1406</code> <code>marquee-select</code> becomes the <code>rect</code> realization; the others follow from settled incumbent geometry.</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>shape</code>: the region geometry — <code>rect · lasso · polygon · nearest</code>, the convergent core, open-numbered (authors extend).</li><li><code>mode</code>: the hit-test membership rule — <code>intersect · contain · center</code>; absent → <code>intersect</code> (the most-permissive default).</li><li><code>modifier</code>: the set-algebra op combining hits with the selection — <code>replace · add · toggle · subtract</code>; absent → <code>replace</code>.</li></ul><h3>Composes Selection — the region→choice seam</h3><p class=\"text-sm text-gray-600 mb-2\">Region-select owns <strong>recognition of the spatial region and the hit-set it resolves to</strong>; the resulting <em>choice state</em> lives in the <a href=\"/intents/selection/\">Selection Intent</a> (single vs multi, urgency). A region drives a multi-selection — the two compose, never conflict: region-select is the <em>spatial gesture → hit-set</em>, selection is the <em>persisted chosen set</em>. The keyboard / single-pointer equivalent obligation (a region is never the only path to a multi-selection) rides the composed Selection contract.</p><h3>UX-only &rarr; the geometry is an impl seam</h3><p class=\"text-sm text-gray-600 mb-2\">The <em>how</em> — axis-aligned-band math for <code>rect</code>, point-in-polygon for <code>lasso</code>/<code>polygon</code>, centroid distance for <code>nearest</code>, plus the Douglas-Peucker simplify tolerance and polygon close-trigger — is <strong>impl</strong>, not part of this intent. It lives in the <a href=\"/projects/webcomponents/\">Frontier UI</a> realizations: <code>marquee-select</code> (the <code>rect</code> member) generalizes its geometry core into a shared region-select module that the lasso / polygon / nearest members consume. <code>gesture</code> is the structural precedent — a recognizer-adjacent intent whose engine is a swappable impl seam, not a dimension.</p>"
+}

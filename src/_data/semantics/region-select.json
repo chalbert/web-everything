@@ -1,0 +1,5 @@
+{
+  "term": "Region Select Intent",
+  "definition": "A cross-cutting spatial-selection vocabulary — the declarative layer naming how a pointer-drawn region picks items: the shape it draws (rect | lasso | polygon | nearest), the hit-test mode that decides membership (intersect | contain | center), and the modifier that combines the hit with the existing selection (replace | add | toggle | subtract). Designed in full up front (completeness-early, #1463); composes the Selection Intent and leaves the geometry engine an impl seam in the realizations.",
+  "usage": "Standardized by the Region Select Intent."
+}
