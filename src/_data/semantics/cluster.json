@@ -1,0 +1,5 @@
+{
+  "term": "Cluster Layout Intent",
+  "definition": "A layout region-role: a wrap-group of peer items that flow inline and wrap with even two-axis spacing (tags, action rows, chips). Identified by its arrangement; the CSS (flex-wrap + gap) is an FUI impl seam.",
+  "usage": "Standardized by the Cluster Layout Intent."
+}

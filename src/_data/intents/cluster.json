@@ -1,0 +1,40 @@
+{
+  "id": "cluster",
+  "name": "Cluster Layout Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "layoutTier": "region-role",
+  "summary": "A primitive layout region-role (#1680 taxonomy): composition-intent = a wrap-group of peers with even two-axis spacing. Identity is the arrangement, not the CSS — FUI ships one block per role and the mechanism (flex-wrap + gap) is an impl seam. Project-less; per-project styling rides presentational variants + plateau assembler presets.",
+  "dimensions": {
+    "gap": {
+      "description": "Even spacing inserted in both axes between wrapped peers, on a spacing scale. Open-numbered.",
+      "values": [
+        "none",
+        "xs",
+        "sm",
+        "md",
+        "lg",
+        "xl"
+      ]
+    },
+    "justify": {
+      "description": "Inline alignment of the wrap-group within its line. Most-permissive default: start.",
+      "values": [
+        "start",
+        "center",
+        "end",
+        "space-between"
+      ]
+    },
+    "align": {
+      "description": "Cross-axis alignment of items within a wrapped line. Default start.",
+      "values": [
+        "start",
+        "center",
+        "end",
+        "baseline"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">A wrap-group of peer items that flow inline and wrap to new lines as space runs out, keeping even spacing in both axes — tag lists, action button rows, chip groups, meta rows.</p><h3>Composition-intent (the identity)</h3><p class=\"text-sm text-gray-600 mb-2\">A primitive layout <strong>region-role</strong> (<code>layoutTier: region-role</code>), one of the per-role taxonomy ratified in <a href=\"/backlog/1680-semantic-layout-type-taxonomy-identify-every-distinct-layout/\">#1680</a>. Its identity is the <strong>composition-intent</strong> &mdash; a wrap-group of peers with even two-axis spacing &mdash; <strong>impl-agnostic</strong>. FUI ships exactly <em>one</em> block for this role; the CSS mechanism (flex-wrap + <code>gap</code>) is an <strong>impl seam</strong>, never the role's identity (<a href=\"/docs/agent/platform-decisions.md\">platform-decisions.md#layout-role-composition-intent</a>).</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>gap</code>: Even spacing inserted in both axes between wrapped peers, on a spacing scale. Open-numbered (<code>none · xs · sm · md · lg · xl</code>).</li><li><code>justify</code>: Inline alignment of the wrap-group within its line. Most-permissive default: start (<code>start · center · end · space-between</code>).</li><li><code>align</code>: Cross-axis alignment of items within a wrapped line. Default start (<code>start · center · end · baseline</code>).</li></ul>"
+}
