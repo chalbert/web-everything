@@ -14,6 +14,11 @@ import { moduleService } from './tools/maas/vite-plugin';
 // published package (#877-style). `__dirname` is this config file's directory = the WE repo root.
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fuiPlugsRoot = resolve(__dirname, '../frontierui/plugs');
+// #1768 (per #1282): the 6 bootstrap-runtime block families (parsers, text-nodes, for-each,
+// transient, stores, attributes) graduated to FUI — their WE-local impls are deleted. The demos'
+// only *value* import of a graduated family is `SimpleStore` from `/blocks/stores/simple`; alias it
+// to the FUI sibling so the demos resolve the graduated impl (mirrors the `/plugs` repoint above).
+const fuiBlocksRoot = resolve(__dirname, '../frontierui/blocks');
 
 /**
  * Vite plugin that automatically injects Web Everything patches into demo HTML files.
@@ -175,6 +180,10 @@ export default defineConfig({
       // fetches, so the whole demo surface lands on FUI without per-file rewrites. Release builds use the
       // published `@frontierui/plugs` package.
       '/plugs': fuiPlugsRoot,
+
+      // #1768: the demos' lone value-import of a graduated family resolves to FUI (the family's
+      // new home); the runtime registrations come from the FUI-resolved `/plugs/bootstrap.ts`.
+      '/blocks/stores/simple': resolve(fuiBlocksRoot, 'stores/simple'),
 
       // The Enforcer relocated to FUI (#894), so `virtual:trait-manifest` is no longer provided by a
       // plugin here — alias it to FUI's empty static manifest so bootstrap's `import 'virtual:trait-manifest'`
