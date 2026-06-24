@@ -1,0 +1,5 @@
+{
+  "term": "Switcher Layout Intent",
+  "definition": "A layout region-role: flip between a horizontal row and a vertical stack at a content-width threshold (container-driven, no media query). Distinct from stack/cluster (auto-switches axis). Identified by its arrangement; the CSS is an FUI impl seam.",
+  "usage": "Standardized by the Switcher Layout Intent."
+}

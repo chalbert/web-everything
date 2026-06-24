@@ -1,0 +1,30 @@
+{
+  "id": "switcher",
+  "name": "Switcher Layout Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "layoutTier": "region-role",
+  "summary": "A primitive layout region-role (#1680 taxonomy): composition-intent = flip horizontal↔vertical at a content-width threshold (container-driven, no media query). Identity is the arrangement, not the CSS — FUI ships one block per role and the mechanism (flex-wrap + a min() basis trick (or container queries)) is an impl seam. Project-less; per-project styling rides presentational variants + plateau assembler presets.",
+  "dimensions": {
+    "threshold": {
+      "description": "The container inline-size at which the layout flips from a horizontal row to a vertical stack — the role's essential knob (container-driven, no viewport breakpoint).",
+      "values": []
+    },
+    "gap": {
+      "description": "Even spacing between items in either orientation, on a spacing scale.",
+      "values": [
+        "none",
+        "xs",
+        "sm",
+        "md",
+        "lg",
+        "xl"
+      ]
+    },
+    "limit": {
+      "description": "The maximum number of items allowed in the horizontal row before it is forced to the vertical layout regardless of width. Absent → no item limit.",
+      "values": []
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">Flips between a horizontal row and a vertical stack based on whether the container is wider than a threshold — not a viewport breakpoint, a true container-driven switch. Adaptive toolbars, responsive form rows.</p><h3>Composition-intent (the identity)</h3><p class=\"text-sm text-gray-600 mb-2\">A primitive layout <strong>region-role</strong> (<code>layoutTier: region-role</code>), one of the per-role taxonomy ratified in <a href=\"/backlog/1680-semantic-layout-type-taxonomy-identify-every-distinct-layout/\">#1680</a>. Its identity is the <strong>composition-intent</strong> &mdash; flip horizontal↔vertical at a content-width threshold (container-driven, no media query) &mdash; <strong>impl-agnostic</strong>. FUI ships exactly <em>one</em> block for this role; the CSS mechanism (flex-wrap + a <code>min()</code> basis trick (or container queries)) is an <strong>impl seam</strong>, never the role's identity (<a href=\"/docs/agent/platform-decisions.md\">platform-decisions.md#layout-role-composition-intent</a>).</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>threshold</code>: The container inline-size at which the layout flips from a horizontal row to a vertical stack — the role's essential knob (container-driven, no viewport breakpoint).</li><li><code>gap</code>: Even spacing between items in either orientation, on a spacing scale (<code>none · xs · sm · md · lg · xl</code>).</li><li><code>limit</code>: The maximum number of items allowed in the horizontal row before it is forced to the vertical layout regardless of width. Absent → no item limit.</li></ul><h3>Annotation, not identity</h3><p class=\"text-sm text-gray-600 mb-2\">Distinct from <a href=\"/intents/stack/\">stack</a> / <a href=\"/intents/cluster/\">cluster</a> — it <strong>auto-switches axis</strong> at a threshold rather than fixing one. The earns-role test is met.</p>"
+}
