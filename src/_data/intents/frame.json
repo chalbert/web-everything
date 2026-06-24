@@ -1,0 +1,28 @@
+{
+  "id": "frame",
+  "name": "Frame Layout Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "layoutTier": "region-role",
+  "summary": "A primitive layout region-role (#1680 taxonomy): composition-intent = crop content to a fixed aspect ratio. Identity is the arrangement, not the CSS — FUI ships one block per role and the mechanism (aspect-ratio + object-fit) is an impl seam. Project-less; per-project styling rides presentational variants + plateau assembler presets.",
+  "dimensions": {
+    "ratio": {
+      "description": "The aspect ratio the content is cropped to. Open-numbered; the listed values are the recommended core.",
+      "values": [
+        "16:9",
+        "4:3",
+        "1:1",
+        "3:2",
+        "21:9"
+      ]
+    },
+    "fit": {
+      "description": "How the media fills the frame: cover (fill, crop overflow) or contain (letterbox, no crop). Default cover.",
+      "values": [
+        "cover",
+        "contain"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">Crops its content to a fixed aspect ratio, centering and covering/containing the media within — video embeds, thumbnails, hero images, map tiles.</p><h3>Composition-intent (the identity)</h3><p class=\"text-sm text-gray-600 mb-2\">A primitive layout <strong>region-role</strong> (<code>layoutTier: region-role</code>), one of the per-role taxonomy ratified in <a href=\"/backlog/1680-semantic-layout-type-taxonomy-identify-every-distinct-layout/\">#1680</a>. Its identity is the <strong>composition-intent</strong> &mdash; crop content to a fixed aspect ratio &mdash; <strong>impl-agnostic</strong>. FUI ships exactly <em>one</em> block for this role; the CSS mechanism (<code>aspect-ratio</code> + <code>object-fit</code>) is an <strong>impl seam</strong>, never the role's identity (<a href=\"/docs/agent/platform-decisions.md\">platform-decisions.md#layout-role-composition-intent</a>).</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>ratio</code>: The aspect ratio the content is cropped to. Open-numbered; the listed values are the recommended core (<code>16:9 · 4:3 · 1:1 · 3:2 · 21:9</code>).</li><li><code>fit</code>: How the media fills the frame: cover (fill, crop overflow) or contain (letterbox, no crop). Default cover (<code>cover · contain</code>).</li></ul>"
+}

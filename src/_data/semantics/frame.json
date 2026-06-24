@@ -1,0 +1,5 @@
+{
+  "term": "Frame Layout Intent",
+  "definition": "A layout region-role: crop content to a fixed aspect ratio, centering and covering/containing the media (embeds, thumbnails, heroes). Identified by its arrangement; the CSS (aspect-ratio + object-fit) is an FUI impl seam.",
+  "usage": "Standardized by the Frame Layout Intent."
+}
