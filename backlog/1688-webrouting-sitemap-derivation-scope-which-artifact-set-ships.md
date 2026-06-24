@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "1684"
-status: open
+status: resolved
 dateOpened: "2026-06-23"
-dateStarted: "2026-06-23"
+dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: 1684
+codifiedIn: "docs/agent/platform-decisions.md#faithful-derivation-exclude-not-fabricate"
 preparedDate: "2026-06-23"
 locus: webeverything
 tags: [webrouting, routing, sitemap, prerender, derivation]
@@ -13,6 +16,16 @@ relatedReport: reports/2026-06-23-webrouting-route-table-derivations.md
 # webrouting route-table derivations — emitter set + dynamic-route policy
 
 No design exists yet. The fork-existence test collapses this item's original "which artifact set ships in v1" framing: the four emitters — crawler `sitemap.xml`, IA nav-tree, prerender manifest, Speculation-Rules manifest — all derive from the one route-map projection [#1685](/backlog/1685-webrouting-route-format-source-of-truth-declarative-dom-temp/) ratified and coexist behind a swap seam, so **none is excluded**. They are **supported by default** (a pluggable emitter set); ship-order is burndown, **not a fork**. What survives — grounded in [/research/webrouting-route-table-derivations](/research/webrouting-route-table-derivations/), each with a **bold** default: **Fork 1** the per-emitter dynamic-route enumeration policy (correctness), and **Fork 2** whether the IA-tree emitter composes with the Navigation Intent `structure` axis.
+
+## Ratified (2026-06-24)
+
+Both forks resolve to their bold defaults; support-all stands. The fork-existence reread held on the claim turn and the red-team failed to land on either default.
+
+- **Emitter set — support-all (ratify).** A default-less, pluggable emitter registry; all four emitters (crawler `sitemap.xml`, IA nav-tree, prerender manifest, Speculation-Rules manifest) are facades over the one #1685 route-map projection (`routes[].path`). Build-order is burndown under #1684, not a fork.
+- **Fork 1 — (a)** exclude parametric routes from concrete-URL emitters by default + optional author-supplied param-source hook (`generateStaticParams`-shaped) + consume the pattern directly where the artifact supports it; **plus** a build-time skip notice (ergonomic, not a branch). Never fabricate URLs (branch (c) rejected); never force a source on pattern-preserving emitters (branch (b) rejected).
+- **Fork 2 — (a)** the IA-tree emitter realizes the Navigation Intent `structure` axis (one composed home); **plus** a path-nesting fallback when no intent is declared (the degraded case of (a), not the rejected independent-derivation branch (b)).
+
+**Graduates to #1684** via `/slice 1684`: the emitter registry + four emitters as separately-prioritized build items, plus the Fork-1 param-source hook.
 
 ## Axis framing
 
@@ -51,6 +64,8 @@ These are **ratify**, not forks — the fork-existence test finds no excluded br
 
 **Recommended default: (a) exclude-by-default + optional author param-source + pattern-predicate where supported.** It is the union of what every incumbent does, never fabricates a URL, and stays most-flexible (the param-source is opt-in). Concrete-URL emitters degrade gracefully (emit the static routes, skip the unparameterized dynamic ones); pattern-aware emitters lose nothing.
 
+**Ratification clarification (skip is not silent):** "exclude-by-default" must not read as *silently* dropping URLs an SEO author wanted. The build slice carries a **build-time notice when a concrete-URL emitter skips a parametric route that has no param-source** — surfacing exactly the routes the author could enumerate by supplying a source. This is an ergonomic affordance on default (a), **not** a third branch (it changes no emitted artifact, only the build log), so it does not reopen the fork.
+
 **Skeptic:** SURVIVES — an adversarial pass (2026-06-23) attacked (a) as smuggling scheduling ("exclude now, enumerate later"). It is not scheduling: exclusion vs enumeration vs fabrication produce *different artifacts at the same moment* (a sitemap with vs without the dynamic URLs vs with broken URLs) — a correctness difference independent of when built. The attack on the default itself — "exclude-by-default silently drops URLs an SEO author wants" — is answered by the opt-in param-source hook (the author enumerates when they have the data), and the alternative (error-by-default, (b)) wrongly punishes pattern-preserving emitters. Fabrication (c) stays the named broken branch.
 
 ## Fork 2 — does the IA-tree emitter compose with the Navigation Intent `structure` axis?
@@ -65,6 +80,8 @@ These are **ratify**, not forks — the fork-existence test finds no excluded br
 - **(b) Standalone nav-tree derivation that ignores the intent.** The emitter builds a tree purely from path nesting, unaware of `structure`. *Rejected on merit:* creates two unreconciled homes for the nav hierarchy → drift between the declared UX axis and the emitted tree; violates single-SoT and the compose-don't-duplicate bias.
 
 **Recommended default: (a) compose with the Navigation Intent `structure` axis.** The emitter realizes the intent's declared structure over the route table — no second source of truth.
+
+**Ratification clarification (intentless fallback):** when an app declares **no** navigation intent, the emitter has no `structure` axis to realize and falls back to pure path-nesting. This is **(a)'s degraded case, not branch (b)** — (b) is "ignore a *declared* intent and derive independently," which is the drift this fork rejects; deriving from path-nesting *in the absence of any declaration* is the only coherent default and introduces no second home for a declared hierarchy.
 
 **Skeptic:** SURVIVES — attacked as a false fork ("just support both — emit a tree, let the intent be advisory"). It fails: "advisory" is exactly the two-unreconciled-homes drift the single-SoT rule forbids; a declared `structure: hierarchical` that the emitted tree can silently contradict is the flaw. Composition (a) is the only branch with one source of truth, so the fork is real and (a) is forced.
 
