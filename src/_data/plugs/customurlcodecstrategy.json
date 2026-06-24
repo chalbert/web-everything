@@ -1,0 +1,10 @@
+{
+  "id": "customurlcodecstrategy",
+  "name": "CustomUrlCodecStrategy",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Base contract a per-slice URL codec implements — encode(value) → string and decode(raw) → typed value for one syncable state slice, with the native-first built-in coercions (number | boolean | enum | date | array) and a raw-string escape hatch. Strategies vary the encoding, never the encode/decode surface — the constraint that keeps them swappable, so Zod / nuqs / a custom codec satisfy the same contract and plug in behind it (WE ships the contract, never the parser). The webrouting URL-as-state seam (#1686) tries a declared codec per syncable slice; raw URLSearchParams strings are provably insufficient (per-component coercion drift).",
+  "projects": [
+    "webrouting"
+  ]
+}

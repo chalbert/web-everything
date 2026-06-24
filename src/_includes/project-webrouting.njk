@@ -179,3 +179,49 @@ interface RouteMap {
             slice B ships the schema + vectors only.</li>
     </ul>
 </section>
+
+<section id="protocol-custom-url-codec-strategy-section" class="section-card">
+    <h3 id="protocol-custom-url-codec-strategy">CustomUrlCodecStrategy Protocol</h3>
+    <p>
+        The second webrouting surface (after the route table) is the <strong>URL as a state store</strong>:
+        when a stateful component projects a state slice to/from the URL &mdash; a grid's filter / sort /
+        page, a tab selection, a wizard step, pagination &mdash; the canonical seam is a <strong>per-component,
+        router-agnostic declaration</strong> (it syncs whether or not a router is mounted; the pagination
+        block already writes the URL router-free), <strong>never</strong> a central router-coupled provider
+        (ratified <a href="/backlog/1686-webrouting-url-as-state-seam-one-shared-serialize-sync-provi/">#1686</a>,
+        codified at <a href="/docs/agent/platform-decisions.md">platform-decisions &sect;
+        url-as-state-per-component-seam</a>). The lock is a <strong>typed per-slice codec</strong>: each
+        syncable slice declares a <code>CustomUrlCodecStrategy</code> &mdash; <code>encode</code>/<code>decode</code>
+        with native-first built-in coercions and a raw-string escape hatch &mdash; so the contract is the
+        only thing fixed and Zod / nuqs / a custom codec plug in behind it. WE ships the contract, never the
+        parser (mirroring <a href="/projects/webstates/#protocol-storage"><code>CustomStorageStrategy</code></a>
+        / <code>CustomChangeStrategy</code>).
+    </p>
+    {% highlight "typescript" %}
+// The webrouting URL-as-state codec — a per-slice strategy-lock (#1686). Each syncable state slice
+// declares one; WE ships the CONTRACT + the native-first built-in codecs, never the parser, so Zod/nuqs
+// plug in behind the same shape. Raw URLSearchParams strings are provably insufficient (per-component
+// coercion drift, e.g. pagination's ad-hoc `Number(raw)`).
+type UrlCodecKind = 'number' | 'boolean' | 'enum' | 'date' | 'array' | 'string'; // string = raw escape hatch
+
+interface CustomUrlCodecStrategy<T> {
+  readonly kind: UrlCodecKind;        // which built-in coercion (or `string` for the raw escape hatch)
+  encode(value: T): string;           // typed value → the URL query-param string
+  decode(raw: string): T;             // the URL query-param string → typed value
+}
+    {% endhighlight %}
+    <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+        <li><strong>The contract is the only lock:</strong> strategies vary the encoding, never the
+            <code>encode</code>/<code>decode</code> surface &mdash; so Zod / nuqs / a custom codec all satisfy
+            it and swap without touching the component (the <code>CustomStorageStrategy</code> shape applied
+            to the URL).</li>
+        <li><strong>Per-component &amp; router-agnostic:</strong> a slice syncs whether or not a router is
+            mounted; write-coordination (intra-component microtask coalescing + an optional cross-component
+            coordinator) shares this <em>one</em> codec, so there is a single encoding, never two.</li>
+        <li><strong>Never forced:</strong> URL-sync is per-slice opt-in with a permissive non-URL default
+            (most-flexible-default); the &ldquo;URL or not&rdquo; axis is the
+            <a href="/intents/navigation/">Navigation Intent</a>'s <code>persistence</code>
+            (<code>url | session | memory</code>) generalized per slice. The URL facet is owned here under
+            webrouting, distinct from the durable-record <a href="/projects/webstates/">storage</a> protocol.</li>
+    </ul>
+</section>

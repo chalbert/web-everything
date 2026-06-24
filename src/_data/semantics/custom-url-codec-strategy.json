@@ -1,0 +1,5 @@
+{
+  "term": "CustomUrlCodecStrategy",
+  "definition": "The typed per-slice URL codec protocol for the webrouting URL-as-state seam (#1686): each syncable state slice (a grid filter/sort/page, a tab, a wizard step) declares an encode/decode strategy with native-first coercions (number | boolean | enum | date | array) + a raw-string escape hatch, instead of ad-hoc URLSearchParams strings. The contract is the only lock — WE ships it, Zod/nuqs plug in behind it. Mirrors CustomStorageStrategy.",
+  "usage": "Standardized by the CustomUrlCodecStrategy protocol (Web Routing); per-component and router-agnostic, never forced."
+}

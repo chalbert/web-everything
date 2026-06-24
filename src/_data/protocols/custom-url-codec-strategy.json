@@ -1,0 +1,8 @@
+{
+  "id": "custom-url-codec-strategy",
+  "name": "CustomUrlCodecStrategy",
+  "summary": "The typed per-slice URL codec for the webrouting URL-as-state seam (ratified #1686). When a stateful component projects a state slice to/from the URL (a grid's filter/sort/page, a tab, a wizard step), each syncable slice declares a typed serialize/parse + coercion contract — number | boolean | enum | date | array, with a raw-string escape hatch — instead of ad-hoc URLSearchParams string handling (which forces the per-component coercion drift already visible in pagination's `Number(raw)`). The strategy contract is the only lock: WE ships the contract + native-first built-in codecs, never the parser, so Zod / nuqs / a custom codec plug in behind the same encode/decode shape and swap without touching the component. Mirrors CustomStorageStrategy / CustomChangeStrategy. Router-agnostic and per-component (it syncs whether or not a router is mounted, the standalone-pagination case); write-coordination (intra-component microtask coalescing + an optional cross-component coordinator) shares this one codec, so there is a single encoding, never two. Distinct from the storage protocol (durable structured records only — the URL is the shareable/navigable/history-tied facet, owned here under webrouting).",
+  "status": "concept",
+  "ownedByProject": "webrouting",
+  "anchor": "protocol-custom-url-codec-strategy"
+}
