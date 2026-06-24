@@ -1,0 +1,5 @@
+{
+  "term": "Sidebar Layout Intent",
+  "definition": "A layout region-role: a fixed + fluid column pair that collapses to a stack when the fluid region passes a width threshold (no media query). Composes resizable for a draggable boundary. Identified by its arrangement; the CSS is an FUI impl seam.",
+  "usage": "Standardized by the Sidebar Layout Intent."
+}

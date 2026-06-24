@@ -1,0 +1,37 @@
+{
+  "id": "sidebar",
+  "name": "Sidebar Layout Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "layoutTier": "region-role",
+  "summary": "A primitive layout region-role (#1680 taxonomy): composition-intent = a fixed + fluid pair that collapses to a stack when narrow. Identity is the arrangement, not the CSS — FUI ships one block per role and the mechanism (flex with flex-basis + flex-grow + wrap) is an impl seam. Project-less; per-project styling rides presentational variants + plateau assembler presets.",
+  "dimensions": {
+    "side": {
+      "description": "Which of the two regions is the fixed-width one. Default start.",
+      "values": [
+        "start",
+        "end"
+      ]
+    },
+    "side-width": {
+      "description": "The fixed region's basis (its intrinsic or set inline-size). Absent → the region's intrinsic content width.",
+      "values": []
+    },
+    "content-min": {
+      "description": "The minimum inline-size (a percentage) the fluid region must keep before the pair collapses to a stack — the no-breakpoint reflow threshold.",
+      "values": []
+    },
+    "gap": {
+      "description": "Even spacing between the two regions, on a spacing scale.",
+      "values": [
+        "none",
+        "xs",
+        "sm",
+        "md",
+        "lg",
+        "xl"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">Two adjacent regions — one of fixed/intrinsic width, one fluid — that sit side by side until the fluid region would shrink past a threshold, at which point they collapse to a stack. The fixed+fluid split.</p><h3>Composition-intent (the identity)</h3><p class=\"text-sm text-gray-600 mb-2\">A primitive layout <strong>region-role</strong> (<code>layoutTier: region-role</code>), one of the per-role taxonomy ratified in <a href=\"/backlog/1680-semantic-layout-type-taxonomy-identify-every-distinct-layout/\">#1680</a>. Its identity is the <strong>composition-intent</strong> &mdash; a fixed + fluid pair that collapses to a stack when narrow &mdash; <strong>impl-agnostic</strong>. FUI ships exactly <em>one</em> block for this role; the CSS mechanism (flex with <code>flex-basis</code> + <code>flex-grow</code> + wrap) is an <strong>impl seam</strong>, never the role's identity (<a href=\"/docs/agent/platform-decisions.md\">platform-decisions.md#layout-role-composition-intent</a>).</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>side</code>: Which of the two regions is the fixed-width one. Default start (<code>start · end</code>).</li><li><code>side-width</code>: The fixed region's basis (its intrinsic or set inline-size). Absent → the region's intrinsic content width.</li><li><code>content-min</code>: The minimum inline-size (a percentage) the fluid region must keep before the pair collapses to a stack — the no-breakpoint reflow threshold.</li><li><code>gap</code>: Even spacing between the two regions, on a spacing scale (<code>none · xs · sm · md · lg · xl</code>).</li></ul><h3>Annotation, not identity</h3><p class=\"text-sm text-gray-600 mb-2\">The draggable boundary is the existing <a href=\"/intents/resizable/\">resizable</a> intent (#1384), <em>composed</em> — not part of this role. An optional <code>navigation</code> | <code>complementary</code> landmark is a content annotation.</p>"
+}
