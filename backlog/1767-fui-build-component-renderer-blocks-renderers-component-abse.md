@@ -1,10 +1,13 @@
 ---
 kind: story
 size: 8
-status: open
+status: resolved
 locus: frontierui
 parent: 1353
 dateOpened: "2026-06-24"
+dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: frontierui/blocks/renderers/component/declarativeComponent.ts
 tags: [frontierui, blocks, renderers, fui-build-gate]
 ---
 
