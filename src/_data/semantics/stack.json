@@ -1,0 +1,5 @@
+{
+  "term": "Stack Layout Intent",
+  "definition": "A layout region-role: an even-spaced one-dimensional flow of stacked siblings (consistent spacing between, none at the ends). The block-axis workhorse, identified by its arrangement; the CSS (margin-flow / flex-column + gap) is an FUI impl seam.",
+  "usage": "Standardized by the Stack Layout Intent."
+}

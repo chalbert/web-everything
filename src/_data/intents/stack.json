@@ -1,0 +1,33 @@
+{
+  "id": "stack",
+  "name": "Stack Layout Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "layoutTier": "region-role",
+  "summary": "A primitive layout region-role (#1680 taxonomy): composition-intent = even-spaced flow of siblings along the block axis. Identity is the arrangement, not the CSS — FUI ships one block per role and the mechanism (margin-flow or flex-column + gap) is an impl seam. Project-less; per-project styling rides presentational variants + plateau assembler presets.",
+  "dimensions": {
+    "gap": {
+      "description": "The consistent spacing inserted between stacked siblings, on a spacing scale — the role's one essential knob. Optional with a conventional default; open-numbered per the variant contract.",
+      "values": [
+        "none",
+        "xs",
+        "sm",
+        "md",
+        "lg",
+        "xl"
+      ]
+    },
+    "recursion": {
+      "description": "Whether the consistent spacing applies to every nested descendant level (a recursive stack) or only the direct children (shallow). Default shallow.",
+      "values": [
+        "shallow",
+        "recursive"
+      ]
+    },
+    "split": {
+      "description": "An optional split point — a child index after which the remaining children are pushed to the far end (via auto-margin), so a header/footer pins while the middle flows. Absent → no split.",
+      "values": []
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">The most fundamental layout role: a one-dimensional, even-spaced flow of stacked siblings — consistent spacing <em>between</em> items and none at the ends. The block-axis workhorse of a page: form fields, article blocks, the contents of a card.</p><h3>Composition-intent (the identity)</h3><p class=\"text-sm text-gray-600 mb-2\">A primitive layout <strong>region-role</strong> (<code>layoutTier: region-role</code>), one of the per-role taxonomy ratified in <a href=\"/backlog/1680-semantic-layout-type-taxonomy-identify-every-distinct-layout/\">#1680</a>. Its identity is the <strong>composition-intent</strong> &mdash; even-spaced flow of siblings along the block axis &mdash; <strong>impl-agnostic</strong>. FUI ships exactly <em>one</em> block for this role; the CSS mechanism (margin-flow (<code>&gt; * + *</code>) or flex-column + <code>gap</code>) is an <strong>impl seam</strong>, never the role's identity (<a href=\"/docs/agent/platform-decisions.md\">platform-decisions.md#layout-role-composition-intent</a>).</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>gap</code>: The consistent spacing inserted between stacked siblings, on a spacing scale — the role's one essential knob. Optional with a conventional default; open-numbered per the variant contract (<code>none · xs · sm · md · lg · xl</code>).</li><li><code>recursion</code>: Whether the consistent spacing applies to every nested descendant level (a recursive stack) or only the direct children (shallow). Default shallow (<code>shallow · recursive</code>).</li><li><code>split</code>: An optional split point — a child index after which the remaining children are pushed to the far end (via auto-margin), so a header/footer pins while the middle flows. Absent → no split.</li></ul>"
+}
