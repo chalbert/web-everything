@@ -1,6 +1,6 @@
 ---
 kind: decision
-status: open
+status: active
 relatedProject: webcomponents
 relatedReport: reports/2026-06-24-maas-serve-core-relocation-seam.md
 preparedDate: "2026-06-24"
