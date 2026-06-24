@@ -16,17 +16,15 @@ tags: [maas, functional-adapter, serve-path, polyglot]
 
 ## Digest
 
-A go/no-go gate, not a fork: does the FUI functional adapter's *importable/runnable* output get a served
-home **now**? Recommended verdict: **NOT-YET** (~65%). `fui:tools/maas/functionalAuthoringForm.mjs`'s
-`produceFunctionalBytes(caseId)` has **zero consumers** (only a test); the polyglot panel already shows the
-functional *source* from WE's data-emit. #313's "replace the WE stub" premise is dead (post-#954/#1619/#1681),
-and the importable transpile is latent infrastructure with no live importer. **The workbench shipping in
-both the WE and FUI docs sites is *not* this consumer** — it renders functional *source* (already wired:
-#1618 transport, #1748 WE-site mount), never the runnable bytes. The true consumer is a distinct, unfiled
-**functional live-preview** — the functional sibling of the wrapper live-mount chain (#1518 producer /
-#1030 workbench mount), gated on the same render-target decision **#1594**. Un-gate when that functional
-live-run is wanted as a product; then build (b) the serve endpoint as the functional sibling of #1518 and
-(c) the mount as the functional analog of #1030.
+**RESOLVED GO (2026-06-24).** A go/no-go gate on whether the FUI functional adapter's *importable/runnable*
+output (`fui:tools/maas/functionalAuthoringForm.mjs`'s `produceFunctionalBytes`, today 0 consumers) gets a
+served home now. Grounding cleared a conflation: the workbench shipping in both docs sites consumes functional
+*source* (already wired: #1618/#1748), **not** the runnable bytes — the true consumer is a distinct
+**functional live-preview**. The recommended NOT-YET (build infra ahead of a consumer) was **overridden as a
+product call**: running the React/jsx lowering is judged wanted now. Render-target already ruled (#1594 → into
+the stage); cross-origin serve + CORS reused (#1501/#1556). Realization chain filed under epic #912:
+**#1759** (live producer) → **#1760** (serve route) → **#1761** (workbench mount) → **#1762** (e2e). #313
+superseded. See **## Ruling** for the full chain; the deliberation (NOT-YET case) is preserved below.
 
 ## What you're deciding
 
