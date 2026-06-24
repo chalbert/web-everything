@@ -951,6 +951,23 @@ web-standard import-maps / Native-Federation, never webpack Module Federation (p
 **Lineage:** #963 (Slate/React optional-dep fork). Refines — does not duplicate — [constellation-placement](#constellation-placement)
 (WE/FUI/Plateau division); this is *intra-FUI* framework containment.
 
+### WE-owned generated data crosses to FUI by build-emit + a FUI-served route, never a bundled read of WE's tree; the executable serve contract stays executable-only {#we-data-crosses-via-fui-served-route}
+
+WE owns the generator for a derived artifact (component **source/CEM**, etc.), but FUI carries **no
+`@webeverything` package dependency** and its dev-only sibling aliases vanish at deploy. So WE-generated data
+reaches FUI's runtime by a **build-time CLI/copy emit into FUI's own deployable**, then a **FUI-served HTTP
+route** the consumer fetches — **never** a bundled/aliased read of WE's tree (deploy-broken) and **never** a
+runtime dependency on a live WE-hosted service. One route contract, two byte sources: **dev** runs the WE
+generator in FUI's MaaS dev-server *middleware* in-memory (per-request / on file-watch — never stale);
+**prod** serves the build-emitted committed copy. This honours #954 (FUI never imports the runtime `serve()`
+engine into its bundle — fetching pre-emitted JSON over HTTP is consuming data, not running the transform)
+and #700 (no WE package dep). Corollary: the **executable** serve contract (`servePathIR`, `javascript`/
+`html`/`error` media + `?form=`) stays **executable-only**; inspection artifacts (source/CEM) get a
+**distinct** data route (esm.sh `?raw`-style), never a widening of the executable catalog.
+
+**Lineage:** #1731 (workbench source/CEM crossing). Refines [constellation-placement](#constellation-placement)
+(WE/FUI/Plateau division) and #1499 (cross-origin FUI serve); applies #954/#1701 (author-mode data placement).
+
 ### Runtime-DI seam vs devtools provider seam {#runtime-di-vs-devtools-provider-seam}
 
 A capability is a **runtime-DI standard seam** — a mandated `CustomXRegistry` or protocol — **only if
