@@ -2,10 +2,12 @@
 kind: story
 size: 2
 parent: "081"
-status: open
+status: resolved
 blockedBy: ["1746"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: none
 tags: []
 ---
 
@@ -24,3 +26,13 @@ Un-parked when blocker #1602 resolved, but working it surfaced that the original
 - Per #1619 Fork-1 / #1681, `functional` is **separate** from the wrapper `?form=` catalog, so "add as a FORMS entry" doesn't apply either.
 
 The coherent remaining work is a **design call** — where (if anywhere) the importable/runnable functional form is served (own MaaS endpoint vs live-mount vs author-mode-source-only). Filed as **#1746** and re-pointed `blockedBy: 1746`. Not pure-agent buildable until that settles; `/batch` declined it as not-batchable (fork) and released the claim.
+
+## Superseded 2026-06-24 by the #1746-GO realization chain
+
+#1746 resolved **GO** on the functional served-path question this item was `blockedBy`. This item's
+original premise — "add the FUI adapter as a FORMS entry, **replacing** the WE stub" — is **dead, not
+deferred**: #954 made WE the emitter and FUI the consumer (two ends of one pipe, not substitutes), #1619
+separated the functional id-space, #1681 dropped the alias. Its *true* intent (a served home for the
+functional adapter's importable output) is now realized by the #1746 chain under epic #912: **#1759**
+(live producer) → **#1760** (serve route) → **#1761** (workbench live-mount) → **#1762** (e2e). Resolved as
+superseded; the live build lives in that chain, headed by #1759.

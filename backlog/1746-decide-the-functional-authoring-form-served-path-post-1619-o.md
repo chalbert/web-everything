@@ -1,8 +1,11 @@
 ---
 kind: decision
-status: active
+status: resolved
 dateOpened: "2026-06-24"
 dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-24"
 relatedProject: webcomponents
 relatedReport: reports/2026-06-24-functional-authoring-form-served-path.md
@@ -106,6 +109,45 @@ must settle first). I hold NOT-YET because the functional live-run is the weakes
 shouldn't open a build slice ahead of #1594 resolving for the wrapper path anyway — but **GO is fully
 defensible** if the functional live-preview is judged wanted now, in which case this resolves by filing that
 build story (sibling of #1518 + analog of #1030, `blockedBy: 1594`) and rewiring the chain to it.
+
+## Ruling (ratified 2026-06-24) — GO
+
+**The functional live-preview is wanted: build the full chain to make the author-mode functional form
+live-runnable in the workbench.** The recommended NOT-YET was the steelman against building serve infra
+ahead of a consumer; it is overridden here as a **product call** — running the React/jsx lowering (proving
+the functional rendition is faithful, not just readable) is judged worth the roadmap space now. The
+render-target question is *already settled*: **#1594 resolved** "render the live subject into the **stage**"
+(codified `we:docs/agent/platform-decisions.md#single-introspection-slot`), and the cross-origin serve
+process (#1501) + CORS (#1556) already exist and are **reused**, so the functional chain rides proven infra.
+
+**Realization chain filed (all under epic #912, the live-test sandbox; lineage via `blockedBy`):**
+
+1. **#1759 — Functional live producer** *(story, 5; ready now)*. `produceFunctionalBytes` gains a
+   `functional-live` form that esbuild-**bundles** `@frontierui/jsx-runtime` + its DOM renderer + an
+   ErrorBoundary into a self-contained module exporting `mount/unmount` (today it is transform-only — its
+   own header calls the live variant "a later slice. No bundle"). Functional sibling of #1518; its own
+   author-form id-space, **not** a wrapper-catalog member (#1619). Head of the chain.
+2. **#1760 — Functional MaaS serve route** *(story, 3; `blockedBy: 1759`)*. Serve the live module over the
+   existing cross-origin MaaS origin (#1501, inheriting #1556 CORS), keyed off `caseId` against the
+   author-mode cases — a **sibling** to `fui:tools/maas/wrapperServeHandler.mjs` (#1029), not a `?form=`
+   member.
+3. **#1761 — Workbench functional live-mount** *(story, 5; `blockedBy: 1760, 1030)`*. Reuse #1030's
+   cross-origin-import + same-document mount harness to mount the functional module **into the stage**
+   (#1594), with error surfacing + the inspector/event/anatomy panels. Carries the one known wrinkle: the
+   functional render is **not** a custom element (unlike the wrapper that mounts the real CE), so non-CE
+   introspection may be degraded — surfaced at build, a follow-up only if it needs a call.
+4. **#1762 — Playwright e2e** *(task, 2; `blockedBy: 1761`)*. Functional analog of #1031 — live in-browser
+   arbiter: cross-origin import → `mount()` → render/unmount/error assertions.
+
+**Both-sites "live"** rides the existing workbench-embedding work (#1748 the WE-docs mechanism, active;
+FUI docs already host the workbench) — once #1761 lands, the live-preview appears wherever the workbench is
+embedded, so no separate per-site slice is needed.
+
+**#313 is superseded** — its "replace the WE stub" premise is dead (WE=emitter, FUI=consumer, #954); its
+true intent (a served home for the functional adapter) is realized by this chain. Resolved as superseded,
+pointing at #1759.
+
+Codified: **one-off** (a product GO that spawns a build chain, not a reusable platform rule).
 
 **Skeptic:** SURVIVES-WITH-AMENDMENT. Attacks on a hidden consumer (none found via grep), on the
 validation-gate framing ((b)/(c) are sequential layers, not an either/or), and on "#313 intent abandoned"
