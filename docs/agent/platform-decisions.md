@@ -176,10 +176,16 @@ display (its own site + demos, FUI branding).
    (`BADGE_CSS`-style) globally and ship a `we-*{}` SSR baseline to kill the upgrade flash (the #865
    baseline pattern). Per-instance mode-C for many-small pills is **rejected** (N shadow roots + N imports
    per page). Cross-surface categorical styling resolves through design tokens + the taxonomy provider
-   (#1670), never per-component palettes.
+   (#1670), never per-component palettes. **Applied (#1748):** the *published* WE-docs backlog-pill board
+   loads this way — a FUI-served `fui:embed/badges-in-document.ts` entry registered via a second
+   cross-origin `import(...)` in `we:src/_layouts/base.njk` (alongside the #865 chrome import at :418) +
+   the `we-*{}` SSR baseline. Confirms there is **no #872/#907 publish gate** for this: the docs consume
+   FUI by the already-live `links.frontierUrl` origin (URL bundle), not an npm package. Bundling the FUI
+   package into the docs build was rejected as the lone rule-6 violation. Build: #1758.
 
 **Lineage:** #604 #701 #707 (iframe boundary; "WE renders real FUI blocks" is mis-framed) · #700 ·
 #1621 (rule 7 — mount-model selection: transient CE + cross-origin import for many-small server-rendered, mode-C for heavy/interactive) ·
+#1748 (rule-7 applied to the published WE-docs pill board: cross-origin import from `links.frontierUrl`, no publish gate; build #1758) ·
 #1246 (withdraws the rule-4 reference-vs-impl partition + reverses #697: no block runtime stays in WE) ·
 #1282 (general rule — WE holds zero implementation; demos are a website concern that surfaces FUI) ·
 #705 · #732 (escape SDK) · #765 (mode-C relaxation) · #788 (seed transport) · #791 (reference-vs-impl
