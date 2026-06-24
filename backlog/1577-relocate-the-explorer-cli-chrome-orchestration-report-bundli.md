@@ -1,10 +1,12 @@
 ---
 kind: story
 size: 8
-status: open
+status: resolved
 blockedBy: []
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: "plateau:tools/explorer"
 tags: [explorer, devtools-placement, plateau, frontierui]
 ---
 
@@ -23,6 +25,30 @@ engine. The explorer's `reportBundle` output must conform to the WE result/outpu
 Unblocked: #1747 resolved.
 
 ---
+
+## Done (2026-06-24)
+
+Wholesale relocation executed per #1747 — the entire explorer tree (engine + CLI + oracles + harnesses +
+report-bundling, 51 files) now lives at `plateau:tools/explorer/`; FUI keeps **no** copy.
+
+- **plateau-app (added):** copied the tree; inlined the lone out-of-tree coupling (`WCAG_TAGS`) into a local
+  `plateau:tools/explorer/wcagTags.ts` (drops the `fui:tests/a11y/sitemap-routes` import at 2 sites); repointed
+  `plateau:src/explorer-runs/executor.ts` `defaultRunner` + `plateau:vite.config.mts` to drive the LOCAL CLI
+  (`cwd` = plateau root); dropped the now-dead `@frontierui/tools*` aliases (tsconfig + vite + vitest);
+  repointed `plateau:src/conformance-engine/conformanceVectors.ts`'s `Finding` import to the local sibling;
+  added `@axe-core/playwright` + `vite-node` deps + `explore`/`explore:gate` scripts; prepended `:4000` to the
+  CLI probe list. Tests wired: vitest `include` + playwright `testMatch` broadened; `fixtures.smoke` repointed
+  `:3001`→`:4000`. **Verified:** 95 explorer unit tests + 9 fixtures smoke pass; CLI runs end-to-end (bundle
+  written); plateau full suite 552/552 green.
+- **FUI (removed):** `git rm` the whole tree; removed `explore`/`explore:gate` scripts; fixed the stale
+  `fui:blocks/deck/deckConformance.ts` doc-link. FUI `check:standards` green (0 errors); no dangling refs.
+- **Skills:** moved `stress-test` + `improve-explorer` FUI → `plateau:.claude/skills/`, repointed
+  `fui:tools/explorer`→`plateau:tools/explorer`, dev port `:3001`→`:4000`, `locus: frontierui`→`plateau`.
+- **Dropped coverage tracked:** the 3 FUI-host-specific browser smokes (workbench/gate/docs-sweep) were
+  non-portable (hardcoded FUI surfaces); filed **#1773** (blocked by this) to re-establish fixture-based
+  live-path smoke for `runGate` + `stressTestComponent`.
+- **Out of scope (own cards):** `reportBundle` → WE result/output-format schema conformance is #1769; the
+  end-state placement audit is #1770.
 
 ## Original framing (superseded by the re-scope above)
 
