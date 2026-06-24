@@ -86,7 +86,14 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    capability, so it is interface/conformance, not implementation. **(#1566 bounds this: the carve-out
    covers tooling that checks WE's *own declarative artifacts* — manifests, golden-corpus
    completeness/schema-validity. A verifier that judges a running *implementation's* output is executable
-   + neutral → Plateau, not WE; see [devtools-placement](#devtools-placement).)** **Interim state (honest):** a set of
+   + neutral → Plateau, not WE; see [devtools-placement](#devtools-placement). **#1771 sharpens the
+   bound:** a *generator that runs an implementation* over WE's own artifacts — e.g. a renderer that
+   lowers `<component>` to emit committed source data — is itself implementation → FUI, even though its
+   input is WE's own corpus. The carve-out is for declarative *checks* (schema-validity, completeness),
+   never for *executing the impl* to produce data; that the impl runs at build time, in-repo, and is
+   drift-tested does not make it tooling. The generated data stays WE only if WE no longer runs the
+   generator — FUI runs its own transform and either commits the data or WE consumes it across the seam
+   as data.)** **Interim state (honest):** a set of
    WE-resident logic reference runtimes predate this rule and currently **violate** it —
    `we:webpolicy/enforcement.ts`/`proof.ts` (consumed by `we:demos/webpolicy-conformance-demo.ts` via a
    build-time local import) and the ~10 subsystems #1078 covered. They are **tracked relocation debt**,
@@ -132,7 +139,9 @@ plateau-app / exercise-app); items gate in their own locus so cross-repo batches
 WE-resident reference-implementation tier — **superseded by #1282**: conflated WE-website with
 WE-project; WE holds zero implementation) · #1246 (blocks → FUI, reverses #697) · #1282 (**withdraws
 the reference-implementation tier wholesale** — webpolicy + all delivery runtimes → FUI; WE = contract +
-vectors only; demos are a *website* concern that surfaces FUI).
+vectors only; demos are a *website* concern that surfaces FUI) · #1771 (**sharpens the #1566 carve-out
+bound** — a generator that *runs* an impl over WE's own artifacts is impl → FUI, not tooling; resolves the
+MaaS serve-core seam as a forced mapping, reversing #954's "WE runs `serve()`", unblocking #1730).
 
 ### WE ↔ Frontier UI rendering & embed boundary {#we-fui-embed-boundary}
 
