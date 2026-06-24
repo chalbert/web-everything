@@ -1053,7 +1053,10 @@ is a declarative vocabulary entry (if expressible as data) **plus** an imperativ
 contract — never an imperative seam folded into the standard.
 
 **Lineage:** #1163 (webdocs Doc Spec — declarative `docs.*` vocabulary in WE, custom `SortStrategy` fn as a
-per-impl escape hatch; FUI = reference impl). Composes [surface-contract-not-computation](#surface-contract-not-computation)
+per-impl escape hatch; FUI = reference impl); #1687 (webrouting technical-config — the serializable route-config
+schema admits *every* setting with merit + real-app use, placed by serializability: serializable deploy-shaped
+settings → the config schema, author-in-code forms (a `scrollBehavior` fn, a per-route `import()`) → the block/markup
+escape hatch; the set is open and grows as apps surface settings — never an exclusion). Composes [surface-contract-not-computation](#surface-contract-not-computation)
 (pin surface / swap impl), [intents-ux-only](#intents-ux-only) + Intents-Open-Design (standardize the
 meta-schema, not the list), and the minimize-lock-in / escapable-lock principle; the config-surface analogue
 of [forward-generation-adapters](#forward-generation-adapters) (contract is the authority, code crosses no seam).
