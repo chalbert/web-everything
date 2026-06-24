@@ -834,6 +834,27 @@ standard artifact; the generated origins are ecosystem impl, and any served prod
 **Lineage:** #463 (ratified — polyglot MaaS origin generation) · builds #505/#506/#507. Relates to
 [surface-contract-not-computation](#surface-contract-not-computation) (neutral contract is the SoT).
 
+#### Browser-component emit substrate is a dedicated emit-purpose IR, not the ingest rep {#forward-emit-dedicated-ir}
+
+For the **browser-component** member of the forward-generation family — emitting idiomatic per-framework
+source (Vue/Svelte/Angular) — the canonical substrate is a **dedicated emit-purpose IR (Option C)**, a neutral
+`@webeverything` contract authored for generation, **not** a bidirectionally-extended ingest `ComponentIR`.
+**Direction ratified** (#939): the ingest rep is a deliberately *lossy* subset (its `notes` field records what
+it **drops** — exactly the styling/event/slot/reactivity detail emit must preserve), so reusing it as the
+high-fidelity emit substrate degrades the fidelity the fork exists to deliver and forces two conflicting
+invariants into one schema (violating *bias-toward-separation*). The lone shipping precedent (Mitosis) built an
+emit-shaped `MitosisComponent` rather than reuse its ingest rep. The per-framework serializers are forward-adapter
+artifacts (each #506-gated); the live render stays FUI-hosted.
+
+**Shape held, not the direction.** Option C's *contract shape* (its fields/grammar) is held on an **evidence
+trigger** — designed once the idiomatic Vue/Svelte/Angular emitters accumulate real cases showing where the flat
+declarative `<component>` subset stops stretching, rather than guessed today (#811's "decide with cases, not
+guess"). Tracked as the parked residual.
+
+**Lineage:** #939 (direction ratified) — de-buried from #818, grounded in #811 Fork 2
+([report](../../reports/2026-06-16-forward-component-emit-substrate.md)). Applies
+[bias-toward-separation] and synthesizes [forward-generation-adapters](#forward-generation-adapters).
+
 ### Standard consumability: author to the standard, ship removable agnostic adapters {#standard-consumability}
 
 **How a WE standard reaches consumers with zero lock-in.** A standard is a *guarantee*; making it work today
@@ -1428,6 +1449,32 @@ MVP; prep topic `reports/2026-06-23-live-page-we-conformance-detection.md`; two 
 SURVIVES-WITH-AMENDMENT — the false-positive attack collapsed, the ratification red-team re-sized the probe
 reach and promoted the public-marker follow-up #1722). Buried fork under #1656; faithful MVP composition of
 #141's "gate on a capability manifest, degrade gracefully" end-state.
+
+### A standard's vocabulary dimension is designed in full up front when its member-set is settled in prior art — completeness-early, not consumer-at-a-time {#vocabulary-completeness-early}
+
+Once an intent's existence is warranted on merit, design its **dimension's full member vocabulary** up
+front rather than admitting members one real-consumer-at-a-time. For a **standard** (the intent/vocabulary
+layer), the platform's value *is* the coherence of the whole space, so a named-but-incomplete dimension is
+an outlier waiting to break the contract: the modifier/intersect/composition rules get proven against the
+*whole* member-set instead of being retrofitted when a late shape appears and forces a breaking change.
+**The rule:** when a dimension's full member-set is already **settled and specifiable from prior art**,
+name and design every member now (`shape: rect | lasso | polygon | nearest`), even if only one is realized
+today. This does **not** license inventing speculative members with no prior art — completeness is bounded
+by what incumbents prove, not by imagination.
+
+**Tension — and the precise line — vs [thin-container-graduation-trigger](#thin-container-graduation-trigger)
+and [judge-on-merit](#judge-on-merit):** the graduation trigger governs minting a new *implementation
+artifact* (a block/home) whose **reuse is unproven** — that waits for a 2nd consumer. This rule governs a
+*standard's vocabulary completeness* whose **members are already proven in incumbents** — that ships
+complete. Artifact reuse is demand-gated; vocabulary design is merit-gated. The marquee case is the
+worked example: NOT-YET (wait for a 2nd recognizer shape) was **demand-gating a merit question**, which
+judge-on-merit forbids — the shapes are all specifiable from settled geometry, so the dimension ships whole.
+
+**Lineage:** #1463 (ratified 2026-06-24 GO, reversing the prepared demand-gated NOT-YET; merit reframe —
+region-select is a coherent intent and `shape` a real dimension whose members all ship in incumbents and
+are specifiable now). Fork-1 residual of #1406 (`marquee-select` placement); parent #099 (the intent
+layer); graduated to build epic #1734. Prep topic
+`reports/2026-06-23-region-select-recognizer-shape-vocabulary.md`.
 
 ---
 

@@ -1,25 +1,32 @@
 ---
 kind: decision
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-21"
-dateStarted: "2026-06-23"
+dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: 1734
+codifiedIn: "docs/agent/platform-decisions.md#vocabulary-completeness-early"
 preparedDate: "2026-06-23"
 relatedTo: ["1406"]
 relatedReport: reports/2026-06-23-region-select-recognizer-shape-vocabulary.md
-tags: [decision, parked, selection, marquee, spatial, residual, watch, validation-gate]
+tags: [decision, selection, marquee, spatial, residual, validation-gate, ratified]
 ---
 
 # Marquee recognizer-shape vocabulary — promote to a region-select intent?
 
 ## Digest
 
-Recommended verdict: **NOT-YET** — hold the `region-select` intent (YAGNI), confidence ~85%. WE ships
-exactly one recognizer shape (the rectangle AABB) and one realization (the `marquee-select` behavior
-block). A single shape is a behavior, not a vocabulary; minting an intent now invents a `shape` dimension
-with one member. Un-gate to **GO** the moment a *second* real recognizer shape recurs as demand
-(free-form lasso, polygon, or center-point/nearest). A backlog sweep found no such second consumer today,
-so NOT-YET holds.
+**RATIFIED 2026-06-24 — GO** (reverses the prepared demand-gated NOT-YET). Mint the `region-select` intent
+now with a **full** `shape: rect | lasso | polygon | nearest` dimension, designed up front. The prepared
+NOT-YET ("hold until a *second* recognizer shape recurs as demand") was **demand-gating a merit question** —
+which the judge-on-merit rule forbids. On pure merit `region-select` is a coherent intent (a real recurring
+semantic with no native web primitive) and `shape` is a real dimension: rect, lasso, and polygon all ship in
+incumbents and **all four are specifiable now** from settled geometry (AABB; closed-path point-in-polygon;
+vertex point-in-polygon; centroid). For a *standard*, designing the full vocabulary early is what matures
+the platform and prevents a late shape forcing a breaking retrofit of the modifier/intersect contract —
+completeness-early beats YAGNI (codified: we:docs/agent/platform-decisions.md#vocabulary-completeness-early).
+Graduated to build epic **#1734**.
 
 ## What you're deciding
 
@@ -32,6 +39,10 @@ recognizer shape as a configurable dimension. It is a go / no-go on building tha
 that flips the gate.
 
 ## Why this isn't a classic fork (and is still a decision)
+
+> **Superseded by the GO ruling.** This section framed the call as a one-sided *validation gate* waiting
+> on external demand. The merit reframe (see Recommendation) reversed that: the question is a *merit*
+> question, not a demand one, and the answer is GO now. Kept for the audit trail.
 
 There is **no excluded rival branch** to weigh — this is a one-sided *validation gate* (the third decision
 archetype), not a merit fork. #1406 already ruled the *placement* (behavior block, with `scope: spatial`
@@ -77,25 +88,40 @@ push geometry into the choice contract.
   [#1406](/backlog/1406-marquee-rubber-band-selection-2-d-drag-select-standard-place/) (collected as a
   parked card, not lost as prose).
 - **Parent:** [#099](/backlog/099-the-intent-layer-the-semantic-vocabulary/) (the intent layer).
-- No backlog edge blocks this — it is gated on an **external** trigger (a second recognizer shape in
-  demand), not on another item.
+- **Resolved GO** → graduated to build epic **#1734**. (The prepared framing gated this on an external
+  trigger — a second recognizer shape in demand — but the GO ruling discards that gate as demand-gating a
+  merit question; nothing blocks the build.)
 
-## Recommendation
+## Recommendation — RATIFIED GO (2026-06-24)
 
-**NOT-YET** — hold the `region-select` intent (YAGNI), confidence ~85%. WE ships one recognizer shape and
-one realization; an intent now would invent a `shape` dimension with exactly one member — speculative
-generality the *not-a-prioritization* and *most-permissive-default* rules don't license. The image-editor
-family proves the end-state vocabulary is real, but only graphics-grade tools reach it; rect-only tools
-(tldraw, Miro, the canvas libs) sit exactly where WE sits.
+**GO** — mint `region-select` with the full `shape: rect | lasso | polygon | nearest` dimension, designed up
+front. The prepared verdict was NOT-YET at ~85% on a YAGNI/"one member today" argument; the merit reframe
+reversed it. Judge-on-merit asks two things, neither of which is demand: is the intent useful to a dev
+anywhere (yes — a recurring spatial-selection semantic with no native web primitive), and does the `shape`
+dimension pass the both-branches-are-real-end-states test (yes — rect, lasso, polygon all ship in
+incumbents; all four are specifiable now from settled geometry). "Only one member is realized today" is
+demand-gating, which judge-on-merit bars.
 
-**Concrete un-gate trigger:** a *second* real recognizer shape recurs as demand — free-form **lasso** (the
-Excalidraw precedent), **polygon**, or **center-point / nearest** — at which point a `region-select`
-intent with `shape: rect | lasso | …` earns its home, with `marquee-select` as its first block and the
-geometry layer re-homed off the single block. Until then this stays an open, unratified gate.
+**Why design the full vocabulary now (the ratifying principle):** for a *standard*, the platform's value is
+the coherence of the whole space, so having all the design in place early matures the platform and prevents
+a late shape (the "outlier") from forcing a breaking retrofit of the modifier (replace/add/toggle/subtract)
+and intersect (intersect/contain/center) contract. A named-but-incomplete dimension is an outlier waiting
+to break the contract. Codified: we:docs/agent/platform-decisions.md#vocabulary-completeness-early.
 
-Skeptic: attacked NOT-YET by hunting for a second recognizer-shape consumer already in the tree — grepped
-the backlog for lasso / polygon / free-form / magic-wand / nearest / region-select / center-point. The
-only selection-recognizer hits are this card and #1406; the polygon / free-form hits elsewhere are
-unrelated (hover-intent safe-area corridors #609/#643, governance/text contexts). **SURVIVES — no second
-recognizer shape has real demand yet, so NOT-YET holds.** Had a real lasso/polygon consumer existed, the
-verdict flips to GO.
+**The one legitimate (non-demand) brake — wrong-abstraction risk** — is neutralized by completeness-early
+itself: you cannot be surprised by a shape you already designed against, and the geometry of all four is
+settled in incumbents, so they are specified against prior art rather than invented.
+
+**Build:** epic **#1734** — mint the intent + full `shape` dimension, re-home the gesture/geometry layer
+(`marqueeMath`) off the single block into the intent's realization contract, with #1406 `marquee-select` as
+the `rect` realization and lasso (closed-path point-in-polygon, Douglas-Peucker simplified), polygon (vertex
+point-in-polygon) and nearest (centroid) as the further members.
+
+**The pure-`selection` invariant is untouched:** promotion re-homes the *gesture/geometry* layer into
+`region-select`, never pushes geometry into the `selection` choice contract (#1406 Fork-1c stands).
+
+Skeptic (prepared pass, now superseded): hunted for a second recognizer-shape consumer in the tree and
+found none, concluding NOT-YET SURVIVES. That pass was answering a *demand* question; the ratification
+turns on *merit*, where the absence of a second consumer is irrelevant — the shapes are specifiable from
+prior art regardless. Independent re-verification (2026-06-24) confirmed the grep finding (only this card
+and #1406 are real recognizer hits) but the verdict reverses on the merit reframe, not the demand count.
