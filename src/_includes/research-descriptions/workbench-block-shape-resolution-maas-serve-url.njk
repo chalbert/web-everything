@@ -1,0 +1,90 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  Decision <a href="/backlog/1731-workbench-resolves-block-shape-from-the-fui-maas-serve-url-n/">#1731</a>
+  (parent <a href="/backlog/746-block-explorer-interactive-fui-block-workbench/">#746</a>) reframes the FUI
+  <em>workbench</em> as <strong>thin UI over rendering</strong>: the FUI <code>/_maas/</code> serve endpoint
+  (<a href="/backlog/1029-fui-maas-wrapper-serve-endpoint-vite-middleware-conforming-t/">#1029</a>,
+  conforming to <code>servePathIR</code>) would provide <em>whatever shape the UI needs</em> for a component
+  — source forms, CEM, a loadable element module, or a case example — <strong>resolved by URL</strong>,
+  instead of each block hardcoding <code>load</code>/<code>create</code>/<code>cem</code>/<code>authorSource</code>
+  closures inline in the workbench registry. The user-stated end-state is "URL-resolved blocks."
+</p>
+
+<h2>The finding that shrinks it</h2>
+<p>
+  "<em>Whatever shape</em> resolved by URL" is <strong>too broad</strong>. The <code>/_maas/</code> serve
+  path is an <strong>executable-artifact origin</strong>: today it serves only loadable ES modules
+  (React/Vue wrapper + live forms), cross-origin (CORS, the #1499 design), with an identity model
+  (content-hash pin · immutable cache · SRI integrity · <code>javascript/html/error</code> media types only)
+  that is meaningful only for evaluated bytes. Meanwhile ratified placement (#954/#1701) already settled that
+  component <strong>source forms cross the #700 seam as pre-emitted build-time data</strong>
+  (<code>authorModeSource.json</code>; FUI never imports the runtime <code>serve()</code>). So the four
+  shape-classes classify cleanly — and only one is open.
+</p>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>Source forms / CEM → build-time data</strong> (settled, not a fork) — no source/CEM media type
+    on the serve path; the panels read committed data, no live instance.</li>
+  <li><strong>Case example → workbench demo fixture</strong> (settled) — an authored seed/config, neither a
+    served artifact nor a WE emit.</li>
+  <li><strong>Loadable element module → the one shape the serve path is for</strong> (open) — polyglot
+    live forms are <em>forced</em> to the URL (#1499); the native form is the real choice.</li>
+</ul>
+
+<h2>Recommendation (at a glance)</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>Fork 1 — resolution scope: loadable modules only.</strong> The URL resolves executable
+    element/wrapper modules; source/CEM stay build-time data, case examples stay workbench fixtures.
+    <em>Rejected: extend the serve path to also return source-text + CEM-as-data</em> — it contradicts
+    #954/#1701 and <strong>widens the protocol</strong> onto non-executable data no runtime consumer reads.
+    <em>(Confidence High — near a forced invariant.)</em></li>
+  <li><strong>Fork 2 — loadable-instance acquisition: split.</strong> Native primary stage via direct
+    <code>import()</code> of the authoritative FUI element; polyglot React/Vue live forms via the
+    cross-origin serve URL (forced by #1499); source-only blocks (#1701a) carry no loadable shape; plus an
+    opt-in "as-served" secondary view for native (skeptic amendment). <em>Alternative: URL-resolve every
+    live form incl. native via a thin descriptor (mints a workbench-only <code>wc-class-live</code> catalog
+    form)</em> — closer to the stated "URL-resolved blocks" end-state. <em>(Confidence Med — divergent; this
+    is where judgment is genuinely needed.)</em></li>
+  <li><strong>Native-first.</strong> Load the platform-native artifact directly; the served projection is the
+    opt-in, never the floor — the URL round-trip earns its keep only where there is a cross-origin/projection
+    reason (the polyglot forms).</li>
+</ul>
+
+<h2>Prior art</h2>
+<p>
+  Every mature system splits <strong>executable-module resolution</strong> (a transform/serve URL, or a
+  direct bundler import) from <strong>source/metadata resolution</strong> (build-time docgen data).
+  <strong>esm.sh</strong>'s transform-by-param URL (<code>?target</code>/<code>?bundle</code>) serves
+  executable modules; raw source is a distinct <code>?raw</code> mode. <strong>Storybook / Histoire /
+  Ladle</strong> extract source + props as build-time docgen data and import the component module via the
+  bundler. <strong>CEM-driven docs</strong> (Shoelace / Web Awesome) ship the manifest as a build-time data
+  file. None overloads one transform-by-param URL to also return source-text or a manifest-as-data — which is
+  exactly Fork 1's rejection of branch (b) and the support for Fork 2's direct-import default.
+</p>
+
+<h2>Dependencies</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>blockedBy #1701 + #1029</strong> (both resolved) — the relaxed <code>WorkbenchBlock</code>
+    contract (source-only blocks) and the FUI <code>/_maas/</code> serve handler. Lineage edges.</li>
+  <li><strong>#1730 is NOT a blocker</strong> — relocating WE's serve core to FUI (#1282 cleanup) doesn't
+    change the HTTP contract the workbench consumes; context only.</li>
+  <li><strong>#1618 is downstream</strong> — its build slice should align with #1731 before hardcoding 9
+    source-only literals (the #1701 scope note); it should gain <code>blockedBy: 1731</code> at ratification.</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li>Prepares: <a href="/backlog/1731-workbench-resolves-block-shape-from-the-fui-maas-serve-url-n/">#1731</a>,
+    under the Block-Explorer workbench epic
+    <a href="/backlog/746-block-explorer-interactive-fui-block-workbench/">#746</a>.</li>
+  <li>Builds on: <a href="/backlog/1701-how-does-the-fui-workbench-host-a-declarative-component-case/">#1701</a>
+    (source-only <code>WorkbenchBlock</code>) and
+    <a href="/backlog/1029-fui-maas-wrapper-serve-endpoint-vite-middleware-conforming-t/">#1029</a>
+    (FUI <code>/_maas/</code> serve endpoint).</li>
+  <li>Informs: <a href="/backlog/1618-wire-the-we-author-mode-source-artifact-into-the-live-fui-wo/">#1618</a>
+    (wire the author-mode artifact); context
+    <a href="/backlog/1730-audit-relocate-the-maas-serving-runtime-out-of-we-per-1282-z/">#1730</a>.</li>
+  <li>Seam: <code>servePathIR.ts</code> <code>MEDIA_TYPES</code> / catalog-gated <code>form</code> param;
+    the FUI workbench registry / serve handler.</li>
+</ul>
+{% endraw %}

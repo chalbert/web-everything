@@ -1,0 +1,23 @@
+{
+  "id": "workbench-block-shape-resolution-maas-serve-url",
+  "title": "Workbench block-shape resolution — /_maas/ serve URL vs hardcoded WorkbenchBlock literals",
+  "status": "open",
+  "summary": "Prep research for decision #1731 (parent #746). #1731 reframes the FUI workbench as thin UI over rendering, with the FUI /_maas/ serve endpoint (#1029, conforming to we:blocks/renderers/module-service/servePathIR.ts) providing whatever shape the UI needs for a component — source forms, CEM, a loadable element module, or a case example — resolved by URL, instead of each block hardcoding load/create/cem/authorSource closures inline in fui:workbench/registry.ts. KEY FINDING: 'whatever shape resolved by URL' is too broad. Grounding (verified in-tree): the FUI /_maas/ handler (fui:tools/maas/wrapperServeHandler.mjs, #1029 resolved) serves ONLY loadable ES modules (catalog forms react/vue-wrapper + react/vue-live), cross-origin (CORS, #1499); servePathIR MEDIA_TYPES = javascript/html/error only, identity = content-hash pin + immutable cache + SRI — an executable-artifact origin. Ratified placement #954/#1701 already settled that component SOURCE forms cross the #700 seam as PRE-EMITTED BUILD-TIME DATA (we:src/_data/authorModeSource.json; FUI never imports serve()). Prior art converges: esm.sh's transform-by-param URL serves executable modules (raw source is a distinct ?raw mode); Storybook/Histoire/Ladle extract source/props as build-time docgen DATA and import the component module via the bundler; CEM ships as a build-time manifest. So the four workbench shape-classes classify: source forms + CEM = build-time data (settled, not a fork), case example = workbench demo fixture (settled), loadable element module = the one shape the serve path is for (open). The decision shrinks to TWO forks. FORK 1 (resolution scope): (a) loadable modules only [recommended, confidence High — near-forced invariant] vs (b) extend the serve path to also return source-text + CEM-as-data [rejected: contradicts #954/#1701 + widens the protocol onto non-executable data with no runtime consumer]. FORK 2 (loadable-instance acquisition): (b) split [recommended, confidence Med/divergent] — native primary stage via direct inline import() of the authoritative FUI element, polyglot React/Vue live forms via the cross-origin serve URL (forced by #1499), source-only blocks (#1701a) carry no loadable shape, plus an opt-in 'as-served' secondary view for native (skeptic amendment) — vs (a) URL-resolve every live form incl. native via a thin descriptor (mints a workbench-only wc-class-live catalog form), closer to the stated 'URL-resolved blocks' end-state. Both fork defaults attacked by the prep skeptic: Fork 1 SURVIVES, Fork 2 SURVIVES-WITH-AMENDMENT. Dependencies: blockedBy #1701 + #1029 (both resolved, lineage); #1730 (relocate WE serve core to FUI) is NOT a blocker — internal WE→FUI cleanup that doesn't change the consumed HTTP contract; #1618 is downstream and should gain blockedBy #1731 at ratification. Full survey + skeptic verdicts in we:reports/2026-06-24-workbench-block-shape-resolution-maas-serve-url.md.",
+  "dateOpened": "2026-06-24",
+  "lastReviewed": "2026-06-24",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "workbench",
+    "block-explorer",
+    "maas",
+    "frontierui",
+    "servePathIR",
+    "polyglot",
+    "decision-prep",
+    "native-first",
+    "bias-separation"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}
