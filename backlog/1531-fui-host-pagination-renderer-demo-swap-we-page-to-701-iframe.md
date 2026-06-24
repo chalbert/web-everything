@@ -2,9 +2,12 @@
 kind: story
 size: 5
 parent: "1353"
-status: open
-blockedBy: ["1660"]
+status: resolved
+blockedBy: []
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: 1353
 tags: []
 ---
 
@@ -57,3 +60,14 @@ The delete is **atomic** with standing that home up (the WE backend + verifier c
 a Plateau home + the WE data-only suite + golden schema exist). Filed that prerequisite as **#1660** (decided
 build, not a fork — #1566 Fork 2a ruled it). Re-pointed `blockedBy: 1660`; **`blocked-in-fact`**, released.
 Cascade-frees when #1660 lands. Sibling shares this exactly.
+
+## Progress (batch-2026-06-23-1725-1665) — DONE
+
+Mirrors the data-table sibling #1355 exactly. Preconditions verified present: Plateau has the golden-audit home (`plateau:src/conformance-engine/renderer-audit/auditPagination.ts`, a verbatim port — no WE import), and the FUI pagination demo renders live on :3001 (5 navs, 9 buttons, real content, 0 console errors).
+
+Executed the #1467/#899 bounded split:
+- **Swap** — `we:demos/pagination-demo.html` → a #701 fuiDemo iframe over the FUI demo `fui:demos/pagination-demo.html` (served on :3001).
+- **Delete (runnable backend → FUI / Plateau):** `we:blocks/renderers/pagination/renderPagination.ts` (renderPagination + rangeText/announcePagination + auditPagination), `we:blocks/renderers/pagination/PaginationBehavior.ts`, the goldens generator `we:blocks/renderers/pagination/__fixtures__/pagination-goldens.ts`, the two backend tests (`we:blocks/__tests__/unit/renderers/pagination.test.ts`, `we:blocks/__tests__/unit/renderers/pagination-behavior.test.ts`), and `we:demos/pagination-demo.{ts,css}`.
+- **Keep (the WE contract):** new `we:blocks/renderers/pagination/types.ts` (the contract types — `PageState`/`PaginationOptions` + mode aliases, extracted from the deleted renderer; `we:blocks/renderers/pagination/__fixtures__/pagination-cases.ts` re-pointed to it), the vector corpus `we:blocks/renderers/pagination/__fixtures__/pagination-cases.ts`, and the committed goldens `we:blocks/renderers/pagination/__fixtures__/pagination-goldens.json` (schema-checked by `we:blocks/renderers/golden-schema.ts`, 6 tests green).
+
+Cleared the stale `blockedBy: 1660`. WE gate 0 errors.

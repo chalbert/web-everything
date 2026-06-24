@@ -4,10 +4,11 @@
  * (the anti-drift split, mirroring the JSX/component fixtures).
  *
  * Each case pairs a page-state + contract options with the verified-contract invariant it proves.
- * The renderer (renderPagination) and the audit (auditPagination) are the one shared source both
- * surfaces run. See reports/2026-06-03-pagination-standard-research.md.
+ * This vector corpus is the WE-resident half of the #1467/#899 split: the renderer (`renderPagination`)
+ * and the audit (`auditPagination`) were re-homed to Frontier UI / Plateau (#1531/#1660) and consume this
+ * corpus from there. See reports/2026-06-03-pagination-standard-research.md.
  */
-import type { PageState, PaginationOptions } from '../renderPagination';
+import type { PageState, PaginationOptions } from '../types';
 
 export interface PaginationCase {
   id: string;
