@@ -6,14 +6,15 @@
  * Each case pairs a per-list order model with a key sequence (the **grab-then-move** model, extended
  * with Left/Right to cross between sibling lists) and the state that sequence should leave the group
  * in — proving one rule (cross-list focus, cross-list move, in-list move after a cross, commit,
- * cancel-reverts-across-lists, group-edge clamp, append into a sibling). The reducer
- * (reduceCrossListReorder), the renderer, the announcer (announceCrossList), and the audit
- * (auditCrossListReorder) are the one shared source both surfaces run. `expectedAnnounce` is the
- * live-region string of the LAST event the sequence raised ('' when none) — double-entry against the
- * announcer, evaluated against the FINAL state.
+ * cancel-reverts-across-lists, group-edge clamp, append into a sibling). The reference renderer +
+ * reducer + announcer + audit are FUI-canonical (#1772: impl →
+ * `@frontierui/blocks/renderers/reorderable-list`); WE keeps this vector corpus as the contract,
+ * validated data-only via the committed goldens (`./cross-list-reorder-goldens.json`,
+ * `../golden-schema.ts`). `expectedAnnounce` is the live-region string of the LAST event the sequence
+ * raised ('' when none) — double-entry against the announcer, evaluated against the FINAL state.
  */
-import type { ReorderItem } from '../renderCrossListReorder';
-import type { CrossListState, ReorderList } from '../renderCrossListReorder';
+import type { ReorderItem } from '../types';
+import type { CrossListState, ReorderList } from '../types';
 
 export interface CrossListReorderCase {
   id: string;

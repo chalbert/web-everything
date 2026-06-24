@@ -5,12 +5,13 @@
  *
  * Each case pairs an item set with a key sequence (the **grab-then-move** keyboard model) and the state
  * that sequence should leave the list in — proving one rule (roving focus, grab, move, drop/commit,
- * cancel/revert, edge clamp). The reducer (reduceReorder), the renderer (renderReorderableList), the
- * announcer (announce), and the audit (auditReorderableList) are the one shared source both surfaces
- * run. `expectedAnnounce` is the live-region string of the LAST event the sequence raised ('' when no
- * event fired) — double-entry against the announcer.
+ * cancel/revert, edge clamp). The reference renderer + reducer + announcer + audit are FUI-canonical
+ * (#1772: impl → `@frontierui/blocks/renderers/reorderable-list`); WE keeps this vector corpus as the
+ * contract, validated data-only via the committed goldens (`./reorderable-list-goldens.json`,
+ * `../golden-schema.ts`). `expectedAnnounce` is the live-region string of the LAST event the sequence
+ * raised ('' when no event fired) — double-entry against the announcer.
  */
-import type { ReorderItem, ReorderState } from '../renderReorderableList';
+import type { ReorderItem, ReorderState } from '../types';
 
 export interface ReorderableListCase {
   id: string;
