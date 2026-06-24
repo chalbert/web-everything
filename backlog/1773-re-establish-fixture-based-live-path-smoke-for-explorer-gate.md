@@ -2,10 +2,13 @@
 kind: story
 size: 3
 parent: "1522"
-status: open
+status: resolved
 dateOpened: "2026-06-24"
 locus: plateau-app
 blockedBy: [1577]
+dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: "plateau:tools/explorer/__tests__"
 tags: [explorer, exploratory-testing, plateau, test-coverage]
 ---
 
