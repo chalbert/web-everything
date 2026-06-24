@@ -1,0 +1,5 @@
+{
+  "term": "Grid Layout Intent",
+  "definition": "A layout region-role: uniform responsive cells that fit-to-container (auto-fit minmax), reflowing without media queries. Stays distinct from masonry. Identified by its arrangement; the CSS is an FUI impl seam.",
+  "usage": "Standardized by the Grid Layout Intent."
+}
