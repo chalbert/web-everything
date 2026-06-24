@@ -1,6 +1,6 @@
 ---
 kind: decision
-status: open
+status: active
 dateOpened: "2026-06-24"
 dateStarted: "2026-06-24"
 preparedDate: "2026-06-24"
@@ -14,12 +14,16 @@ tags: [maas, functional-adapter, serve-path, polyglot]
 ## Digest
 
 A go/no-go gate, not a fork: does the FUI functional adapter's *importable/runnable* output get a served
-home **now**? Recommended verdict: **NOT-YET** (~70%). `fui:tools/maas/functionalAuthoringForm.mjs`'s
+home **now**? Recommended verdict: **NOT-YET** (~65%). `fui:tools/maas/functionalAuthoringForm.mjs`'s
 `produceFunctionalBytes(caseId)` has **zero consumers** (only a test); the polyglot panel already shows the
 functional *source* from WE's data-emit. #313's "replace the WE stub" premise is dead (post-#954/#1619/#1681),
-and the importable transpile is latent infrastructure with no live importer. Un-gate when a concrete
-consumer — a polyglot live-*preview* that wants to **run** the form — appears; then build the own serve
-endpoint (mirroring the wrapper handler) immediately, and live-mount once #1030 lands.
+and the importable transpile is latent infrastructure with no live importer. **The workbench shipping in
+both the WE and FUI docs sites is *not* this consumer** — it renders functional *source* (already wired:
+#1618 transport, #1748 WE-site mount), never the runnable bytes. The true consumer is a distinct, unfiled
+**functional live-preview** — the functional sibling of the wrapper live-mount chain (#1518 producer /
+#1030 workbench mount), gated on the same render-target decision **#1594**. Un-gate when that functional
+live-run is wanted as a product; then build (b) the serve endpoint as the functional sibling of #1518 and
+(c) the mount as the functional analog of #1030.
 
 ## What you're deciding
 
@@ -62,14 +66,46 @@ wrapper `?form=` member — so a served functional path is a sibling to, not a m
 #1681 (alias drop), #1602 (the landed adapter). Report:
 `we:reports/2026-06-24-functional-authoring-form-served-path.md`.
 
+## Discussion 2026-06-24 — "isn't the workbench-in-both-sites the consumer?"
+
+Challenge raised: this looks like a broken blocker chain — we'll certainly want the polyglot workbench in
+both the WE and FUI docs sites; aren't those the consumers we're waiting for? Grounding the live FUI tree
+resolved a **conflation** between two distinct "functional" artifacts:
+
+- **Functional *source*** — the React-function rendition the declarative `<component>` lowers to, shown as a
+  read-only tab. `fui:workbench/authorMode.ts` renders this from WE's `we:src/_data/authorModeSource.json`
+  emit, "pure of any live block state." Embedding the workbench in both sites consumes **this** — and it is
+  *already wired* (#1618 transport residual; #1748, active, the WE-site element-load mechanism). It does
+  **not** import or run `produceFunctionalBytes`.
+- **Functional *runnable bytes*** — `produceFunctionalBytes`, the importable ESM that can actually **run**.
+  This is #1746's orphan. Its only consumer would be a surface that *imports + mounts* the functional form.
+
+So **workbench-in-both-sites is not #1746's consumer** — it's the consumer of the *source emit*, which is
+solved elsewhere. The genuine consumer is a **functional live-preview**, and grounding shows it is the exact
+sibling of the wrapper live-mount chain, which is nearly complete: #1029 serve → #1501 cross-origin → #1518
+react-dom+ErrorBoundary producer → #1556 CORS → #1030 workbench mount (mechanism **proven end-to-end**,
+blocked only on the **#1594** render-target decision: live-mount into the stage-as-subject vs a separate
+preview). #1746's (b) endpoint is the functional analog of #1518's producer; (c) the functional analog of
+#1030; both would gate on the same **#1594**.
+
+**The real open question is therefore a product call, not "wait for a hypothetical consumer":** do we want
+to *live-run* the author-mode **functional** form — distinct from (a) showing its source (done), the native
+block already rendering live (mode C, `fui:workbench/mount.ts`), and (b) live-running the *wrapper* (#1030)?
+Running the functional lowering additionally proves the React-native rendition is faithful — plausible but
+the **weakest** of the live-mount cases (the native render + wrapper live-mount already cover "see it run").
+
 ## Recommendation
 
-**Verdict: NOT-YET (~70%).** Resolve #313 as superseded — delivered by #1602 + the existing author-mode
-panel. Keep `produceFunctionalBytes` as latent infrastructure. **Un-gate trigger (concrete):** a live
-importer materialises — a polyglot live-*preview* surface that imports + runs a case's functional ESM
-(not merely displays its source). When that consumer is specced, build (b) the own serve endpoint as a
-sibling to `fui:tools/maas/wrapperServeHandler.mjs` (its own content-identity + cache + error contract)
-immediately — the wrapper precedent served bytes from day one — and add (c) live-mount once #1030 lands.
+**Verdict: NOT-YET (~65%).** Resolve #313 as superseded — delivered by #1602 + the existing author-mode
+panel. Keep `produceFunctionalBytes` as latent infrastructure. **Un-gate trigger (sharpened):** *not* the
+workbench shipping in both sites (that's source-only), but a decision that the **functional live-preview**
+is wanted as a product. When it is, build (b) the serve endpoint as the functional **sibling of #1518**
+(its own content-identity + cache + error contract; not a wrapper-catalog member, #1619) and (c) the mount
+as the functional **analog of #1030** — both `blockedBy: 1594` (the render-target decision the wrapper path
+must settle first). I hold NOT-YET because the functional live-run is the weakest live-mount case and
+shouldn't open a build slice ahead of #1594 resolving for the wrapper path anyway — but **GO is fully
+defensible** if the functional live-preview is judged wanted now, in which case this resolves by filing that
+build story (sibling of #1518 + analog of #1030, `blockedBy: 1594`) and rewiring the chain to it.
 
 **Skeptic:** SURVIVES-WITH-AMENDMENT. Attacks on a hidden consumer (none found via grep), on the
 validation-gate framing ((b)/(c) are sequential layers, not an either/or), and on "#313 intent abandoned"
