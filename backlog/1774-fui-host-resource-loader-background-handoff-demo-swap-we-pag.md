@@ -2,8 +2,11 @@
 kind: story
 size: 5
 parent: "1353"
-status: open
+status: resolved
 dateOpened: "2026-06-24"
+dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: frontierui/demos/loader-background-handoff-demo.html
 relatedProject: webblocks
 tags: [frontierui, demos, blocks, fui-build-gate]
 ---

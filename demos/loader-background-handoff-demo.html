@@ -5,8 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Loader → Background Task Handoff Playground - Web Everything</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-  <link rel="stylesheet" href="/demos/playground.css">
-  <link rel="stylesheet" href="/demos/loader-background-handoff-demo.css">
+  <style>
+    /*
+     * #1774 — the WE-resident producer-side handoff runtime was deleted (#1766 ported
+     * `backgroundLoad` + `ResourceLoaderHandle` + `reportProgress` + the reference receiver + fixtures
+     * into `fui:blocks/resource-loader/`, so FUI is now canonical for the whole resource-loader family;
+     * WE keeps only the contract + conformance vectors). This page is now a #701 fuiDemo iframe shell
+     * embedding the FUI-canonical demo, so the page keeps working without a WE-resident runtime. The
+     * demo is a FUI deliverable (fui:demos/loader-background-handoff-demo.html). Mirrors #1355 / #1531.
+     */
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #0f1115; color: #e6e9ef; height: 100vh; display: flex; flex-direction: column; }
+    .demo-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid #232733; background: #151821; flex: none; }
+    .demo-header-brand { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+    .demo-header-brand svg { width: 22px; height: 22px; }
+    .demo-header-back { color: #9aa4b2; text-decoration: none; font-size: 14px; }
+    .demo-header-back:hover { color: #e6e9ef; }
+    .fui-note { padding: 8px 20px; font-size: 13px; color: #9aa4b2; background: #11141b; border-bottom: 1px solid #232733; flex: none; }
+    .fui-note code { color: #c8cedb; }
+    iframe { border: 0; width: 100%; flex: 1 1 auto; background: #fff; }
+  </style>
 </head>
 <body>
   <div class="demo-header">
@@ -20,35 +38,18 @@
     <a href="/" class="demo-header-back">&larr; Back to Home</a>
   </div>
 
-  <main class="play">
-    <header class="play-intro">
-      <h1>Loader → Background Task Handoff Playground</h1>
-      <p>
-        The <strong>producer</strong> half of the Background Task handoff &mdash; a WE standard: a real
-        <a href="/blocks/resource-loader/">Resource Loader</a> running <code>backgroundLoad()</code>
-        escalates a slow load by dispatching a bubbling <code>background-task-register</code> event that
-        a <strong>receiver</strong> adopts off-view. The receiving end here is a minimal
-        <strong>reference receiver</strong> (not Frontier&nbsp;UI's <code>&lt;background-tasks&gt;</code>
-        surface, which is impl and demoed FUI-side) &mdash; so each card proves an
-        <strong>invariant of the escalation + handoff <em>contract</em></strong>, the cross-boundary seam,
-        rather than the surface's own behavior.
-      </p>
-      <p class="play-caveat">
-        <strong>Escalation:async trigger.</strong> A load escalates exactly when it crosses the Loader's
-        debounce threshold into <code>loading</code> &mdash; the moment the Loader already decided the
-        work was slow enough to surface a pending UI. Fast loads that resolve first never enter
-        <code>loading</code>, so they never register. The threshold is shortened here for a snappy
-        demo. Scenarios and the controllable-promise lever come from the same shared fixture module the
-        unit suite imports, so the badges and CI can't drift. This wires
-        <a href="/backlog/152-loader-background-task-handoff-wiring/">#152</a> (decoupled per
-        <a href="/backlog/812-how-we-apps-straddle-demos-consume-the-9-moved-block-impl-fa/">#812</a>).
-      </p>
-    </header>
+  <p class="fui-note">
+    The Loader → Background Task handoff playground renders from the
+    <strong>Frontier&nbsp;UI canonical demo</strong> (the WE-resident producer runtime —
+    <code>backgroundLoad</code> + the reference receiver + fixtures — was removed per <code>#1774</code>;
+    impl lives in Frontier UI per <code>#1766</code>, WE keeps only the contract + conformance vectors).
+    Embedded via the <code>#701</code> fuiDemo iframe from <code>fui:demos/loader-background-handoff-demo.html</code>.
+  </p>
 
-    <div id="examples">Loading scenarios&hellip;</div>
-  </main>
-
-  <!-- Playground: drives a real ResourceLoader → the WE reference receiver. Native APIs only. -->
-  <script type="module" src="/demos/loader-background-handoff-demo.ts"></script>
+  <iframe
+    src="http://localhost:3001/demos/loader-background-handoff-demo.html"
+    title="Loader → Background Task Handoff — Frontier UI canonical demo"
+    loading="lazy"
+    sandbox="allow-scripts allow-same-origin"></iframe>
 </body>
 </html>

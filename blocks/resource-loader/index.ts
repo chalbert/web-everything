@@ -7,21 +7,10 @@
 export { default as ResourceLoader } from './ResourceLoader';
 export type { LoadResult } from './ResourceLoader';
 
-// Loader → off-view-receiver handoff (producer side)
-export {
-  backgroundLoad,
-  ResourceLoaderHandle,
-  BACKGROUND_TASK_REGISTER_EVENT,
-  BACKGROUND_TASK_DISMISS_EVENT,
-} from './backgroundHandoff';
-export type { BackgroundLoadOptions } from './backgroundHandoff';
-// The producer-owned wire contract (the standard handoff seam)
-export type {
-  LoaderSnapshot,
-  LoaderStateHandle,
-  BackgroundTaskRegisterDetail,
-  BackgroundTaskDismissDetail,
-} from './handoffContract';
+// The Loader → off-view-receiver handoff (producer side + wire contract) is FUI-canonical
+// (#1766/#1774): `backgroundLoad`, `ResourceLoaderHandle`, the handoff contract types, and the
+// reference receiver / fixtures live in `fui:blocks/resource-loader/`. WE keeps only the loader
+// core + its conformance contract, so this index no longer re-exports the handoff surface.
 
 // Traits
 export { withSoftBlocking } from './traits/withSoftBlocking';
