@@ -28,11 +28,14 @@
   color: {% if kind == 'story' %}#1e40af{% elif kind == 'epic' %}#5b21b6{% elif kind == 'decision' %}#3730a3{% else %}#475569{% endif %};">{{ kind }}</span>
 {% endmacro %}
 
-{# Includes the `preparing` → "Prepping" branch on BOTH surfaces (was missing on the detail page). #}
-{% macro statusBadge(status, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.75em' %}
-<span style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 600; white-space: nowrap;
-  background: {% if status == 'open' %}#fef3c7{% elif status == 'active' %}#dbeafe{% elif status == 'preparing' %}#ede9fe{% elif status == 'resolved' %}#dcfce7{% else %}#f1f5f9{% endif %};
-  color: {% if status == 'open' %}#92400e{% elif status == 'active' %}#1e40af{% elif status == 'preparing' %}#6d28d9{% elif status == 'resolved' %}#166534{% else %}#475569{% endif %};">{% if status == 'preparing' %}Prepping{% else %}{{ status | title }}{% endif %}</span>
+{# Status Indicator surface (#1621 status half) — lifecycle state → FUI `<we-badge>` (transient CE, loaded
+   by the #1758 cross-origin loader in we:src/_layouts/base.njk). Tone maps onto the badge's CLOSED 5-tone
+   enum (per #1319 — categorical taxonomy never rides the status enum): open→warning, active/preparing→info,
+   resolved→success, else→neutral. The bespoke purple `preparing` shade is intentionally folded into `info`
+   (the "Prepping" label carries the distinction). `scale` is kept for call-site compatibility but no longer
+   sizes the pill — the FUI badge owns its own geometry; the we:src/css/style.css `we-badge[tone]` baseline
+   styles it before upgrade (no FOUC). Includes the `preparing` → "Prepping" branch on BOTH surfaces. #}
+{% macro statusBadge(status, scale='sm') %}{% set tone = 'warning' if status == 'open' else ('info' if (status == 'active' or status == 'preparing') else ('success' if status == 'resolved' else 'neutral')) %}<we-badge tone="{{ tone }}">{% if status == 'preparing' %}Prepping{% else %}{{ status | title }}{% endif %}</we-badge>
 {% endmacro %}
 
 {% macro sizeBadge(size, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
@@ -58,15 +61,15 @@
 
 {# The epic-status badge cluster — picks exactly one of: ongoing program / unsliced·why / all slices done /
    ⚠ open slice. ONE place so the tile and the detail page read identically. #}
-{% macro epicStatusBadge(item, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
+{% macro epicStatusBadge(item, scale='sm') %}
 {% if item.kind == 'epic' %}
 {%- if item.ongoing and item.status != 'resolved' -%}
-<span title="Ongoing program — a continuous effort, not a fixed deliverable. It legitimately has every child resolved between slices and is NEVER a resolve cue; the next slice is added as the program advances." style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #e0f2fe; color: #075985;">ongoing program</span>
+<we-badge tone="info" title="Ongoing program — a continuous effort, not a fixed deliverable. It legitimately has every child resolved between slices and is NEVER a resolve cue; the next slice is added as the program advances.">ongoing program</we-badge>
 {%- elif not (item.children | length) -%}{{ unslicedBadge(item.childlessReason, scale) }}
 {%- elif item.openChildCount == 0 and (item.status == 'open' or item.status == 'active') -%}
-<span title="Every child slice is resolved but the epic is still open — its scope looks delivered. Resolve it, or add the remaining child work." style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #dcfce7; color: #166534;">all slices done</span>
+<we-badge tone="success" title="Every child slice is resolved but the epic is still open — its scope looks delivered. Resolve it, or add the remaining child work.">all slices done</we-badge>
 {%- elif item.openChildCount and item.status == 'resolved' -%}
-<span title="The epic is resolved but {{ item.openChildCount }} child slice(s) are still open — a contradiction. Reopen the epic, re-parent, or resolve the children." style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #fef2f2; color: #991b1b;">&#9888; {{ item.openChildCount }} open slice{% if item.openChildCount != 1 %}s{% endif %}</span>
+<we-badge tone="error" icon="&#9888;" title="The epic is resolved but {{ item.openChildCount }} child slice(s) are still open — a contradiction. Reopen the epic, re-parent, or resolve the children.">{{ item.openChildCount }} open slice{% if item.openChildCount != 1 %}s{% endif %}</we-badge>
 {%- endif -%}
 {% endif %}
 {% endmacro %}
@@ -107,11 +110,16 @@
    on purpose: a project-pending / human-gated epic (e.g. #170) carries no `notBatchableReason` yet must
    still show its hold. Emits nothing for an agent-ready (A) or ready-to-ratify (B) item — none of these
    fields fire there. Vocabulary/colours come from backlogMeta (single source of truth). #}
+{# Status Indicator surface (#1621 status half) — the "why not ready" hold renders as FUI `<we-badge>`
+   (tone = severity on the closed 5-tone enum; the leading ⊗/⏸/▽ glyph rides the badge `icon=` slot; the
+   bespoke per-reason palette collapses onto the tone). The `project-pending` branch is a LINK to the
+   project page, so it stays a native `<a>` (the #1621 link-pill rule — a `role=status` badge can't be an
+   anchor); it keeps the inline `base`/`pad`/`fs` styling, the sole remaining consumer of them here. #}
 {% macro reasonPill(item, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.05rem 0.4rem' %}{% set fs = '0.78em' if scale == 'md' else '0.62em' %}{% set base = 'border-radius:9999px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; white-space:nowrap; padding:' + pad + '; font-size:' + fs + ';' %}
-{%- if item.stopTheWorld %}{% set nb = backlogMeta.notBatchableMeta['stop-the-world'] %} <span title="{{ nb.tip }}" style="{{ base }} background:{{ nb.bg }}; color:{{ nb.fg }};">⊗ {{ nb.label }}</span>
-{%- elif item.humanGate %}{% set hg = backlogMeta.humanGateMeta[item.humanGateKind] %} <span title="{{ hg.tip if hg else 'Held on a human-only action — an agent can’t clear it. See the item for what to do.' }}{% if item.humanGate.what %} — {{ item.humanGate.what }}{% endif %}" style="{{ base }} background:{{ hg.bg if hg else '#fef2f2' }}; color:{{ hg.fg if hg else '#991b1b' }};">⊗ {{ hg.label if hg else 'human-gated' }}</span>
-{%- elif item.openBlockers.length %} <span title="Blocked — waiting on an unresolved prerequisite (blockedBy). Not workable until it resolves." style="{{ base }} background:#fef2f2; color:#991b1b;">⊗ blocked by {% for n in item.openBlockers %}#{{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+{%- if item.stopTheWorld %}{% set nb = backlogMeta.notBatchableMeta['stop-the-world'] %} <we-badge tone="error" icon="⊗" title="{{ nb.tip }}">{{ nb.label }}</we-badge>
+{%- elif item.humanGate %}{% set hg = backlogMeta.humanGateMeta[item.humanGateKind] %} <we-badge tone="error" icon="⊗" title="{{ hg.tip if hg else 'Held on a human-only action — an agent can’t clear it. See the item for what to do.' }}{% if item.humanGate.what %} — {{ item.humanGate.what }}{% endif %}">{{ hg.label if hg else 'human-gated' }}</we-badge>
+{%- elif item.openBlockers.length %} <we-badge tone="error" icon="⊗" title="Blocked — waiting on an unresolved prerequisite (blockedBy). Not workable until it resolves.">blocked by {% for n in item.openBlockers %}#{{ n }}{% if not loop.last %}, {% endif %}{% endfor %}</we-badge>
 {%- elif item.projectPending and item.kind != 'epic' %}{% set nb = backlogMeta.notBatchableMeta['project-pending'] %} <a href="/projects/{{ item.relatedProject }}/" title="{{ nb.tip }} — held on project `{{ item.relatedProject }}` ({{ item.relatedProjectStatus }}); open it to ship/graduate, or re-home this item." style="{{ base }} background:{{ nb.bg }}; color:{{ nb.fg }}; text-decoration:none;">⊗ {{ nb.label }} · {{ item.relatedProject }}</a>
-{%- elif item.status == 'parked' and item.parkedReason %}{% set pr = backlogMeta.parkedReasonMeta[item.parkedReason] %} <span title="{{ pr.tip if pr else 'Parked — a deliberate hold; see the item for the reason.' }}" style="{{ base }} background:{{ pr.bg if pr else '#f1f5f9' }}; color:{{ pr.fg if pr else '#475569' }};">⏸ {{ pr.label if pr else item.parkedReason }}</span>
-{%- elif item.priority == 'low' %}{% set pm = backlogMeta.priorityMeta.low %} <span title="{{ pm.tip }}" style="{{ base }} background:{{ pm.bg }}; color:{{ pm.fg }};">▽ {{ pm.label }}</span>
+{%- elif item.status == 'parked' and item.parkedReason %}{% set pr = backlogMeta.parkedReasonMeta[item.parkedReason] %} <we-badge tone="warning" icon="⏸" title="{{ pr.tip if pr else 'Parked — a deliberate hold; see the item for the reason.' }}">{{ pr.label if pr else item.parkedReason }}</we-badge>
+{%- elif item.priority == 'low' %}{% set pm = backlogMeta.priorityMeta.low %} <we-badge tone="neutral" icon="▽" title="{{ pm.tip }}">{{ pm.label }}</we-badge>
 {%- endif %}{% endmacro %}

@@ -2,10 +2,12 @@
 kind: story
 size: 3
 parent: "866"
-status: open
-blockedBy: ["1758"]
+status: resolved
+blockedBy: []
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: none
 tags: []
 ---
 
@@ -51,3 +53,34 @@ would re-frame this card's "mode-C inline SDK" requirement).
 Both component blockers cleared (#1669 we-tag + #1603 FUI filter-chip both resolved — FUI ships `fui:blocks/badge/` + `fui:blocks/filter-chip/` with their transient elements). But working it surfaced the real crux: the **WE docs site has no mechanism to load + register the FUI transient elements**. Verified — `we:src/_layouts/base.njk` loads only local `we:src/assets/js/*.js`; there is no `@frontierui` import, no `registerBadge`/`registerFilterChip`, no cross-origin FUI bundle, no `customElements.define` for any `we-*` in the docs runtime, and no precedent. So an emitted `<we-badge>` would never upgrade (unstyled unknown element).
 
 #1621 ratified the transient-CE *model* but not the *loader* its "registered once" clause needs on the WE docs site — and that loader carries a production-viability fork (bundle a WE→FUI build edge vs cross-origin import vs defer until a published `@frontierui` component package). Filed as **#1748** and re-pointed `blockedBy: 1748`; set back to `open`. Not pure-agent buildable until the docs-loader mechanism is decided + built; `/batch` declined it as blocked-in-fact and released the claim.
+
+## Done (2026-06-24) — status surfaces migrated to `<we-badge>`; verified on the live board
+
+The #1758 loader resolved (`<we-badge>`/`<we-filter-chip>` registered on the docs site via the cross-origin
+import in we:src/_layouts/base.njk), so the **status half** of the #1621 mapping is now buildable and
+shipped. The three Status-Indicator macros in we:src/_includes/backlog-badges.njk now emit `<we-badge>`
+(tone on the closed 5-tone enum; bespoke inline-style spans deleted):
+
+- **`statusBadge`** → `<we-badge tone>` — open→warning, active/preparing→info, resolved→success, else→neutral
+  (purple `preparing` folded into `info`; the "Prepping" label keeps the distinction).
+- **`epicStatusBadge`** → its three direct spans (ongoing program→info, all-slices-done→success,
+  ⚠ N-open-slices→error+`icon`) become `<we-badge>`; the childless branch keeps delegating to
+  `unslicedBadge` (taxonomy, out of scope).
+- **`reasonPill`** → the five non-link holds (stop-the-world/human-gate/blocked→error, parked→warning,
+  priority-low→neutral) become `<we-badge>` with the ⊗/⏸/▽ glyph in the badge `icon=` slot; tooltips ride
+  the `title` attribute (TransientElement copies non-config attrs onto the upgraded span). The
+  `project-pending` branch is a LINK and stays a native `<a>` (the #1621 link-pill rule).
+
+**Verified:** `npm run verify` (11ty build clean; check:standards 0 errors — the 2 vitest reds are a
+pre-existing `we:scripts/backlog.mjs` git-guard source-match, unrelated) + a real-browser check on the
+running :8080 board with FUI :3001 live — **0 un-upgraded `<we-badge>` left, all 1910 upgraded to
+`<span class="fui-badge fui-badge--TONE">`, 144 icon glyphs rendered, no console errors.** The SSR baseline
+(`we-badge[tone]` in we:src/css/style.css) styles the pre-upgrade pills (no FOUC).
+
+**Out of scope / remainder (tracked under sibling #1208, the broader badges/chips dogfood):**
+the **taxonomy** macros (`kindBadge`/`tierBadge`/`tagsRow`/`sizeBadge`/`metaBadge`/`unslicedBadge`) →
+`<we-tag>` need a we-tag docs loader (the #1758 analog for the Tag block; not yet built) + the #1670
+taxonomy provider; and the **interactive filter chips** in we:src/backlog.njk → `<we-filter-chip>` need the
+client-side filter JS (we:src/assets/js) rewired off `data-*-chip`/`aria-pressed` onto the FUI element —
+both bigger than this size-3 and squarely #1208's territory. Link-pills (`blockerChip`/`childCircle`) stay
+native by the #1621 ruling. Resolving #1598 for the delivered Status-Indicator surfaces.
