@@ -104,3 +104,65 @@ Both reuse decided substrate; neither touches the detection fork.
 2. `scaffold` **S1** and **S2** under `--parent=1656` (`--blocked-by=<S1>` on S2), locus `plateau-app`.
 3. File the **conformance-detection decision** card (`--kind=decision`, `--parent=1656`).
 4. Gate on `npm run check:standards`. No backlog mutation performed yet.
+
+---
+
+# Split analysis — #1684 scaffold the webrouting standard
+
+**Target:** [#1684](/backlog/1684-scaffold-the-webrouting-standard-route-format-profile-url-as/) — `kind: epic`, `status: open`, unsliced (its children #1685–#1688 are the shape **decisions**, not build deliverables). Focused `/slice 1684`.
+**Verdict:** ⚠️ **Partial split** — 5 fork-free build tasks stand up the scaffold spine + the two **resolved**-fork deliverables; the sitemap + technical-config deliverables stay could-not-split-here behind their **open** decisions.
+
+## Gate state — two of four forks resolved
+
+The epic carves deliverables *"once the forks ratify"* (body line 36). Current fork state:
+
+| Fork | Decides | Status | Gates deliverable |
+| --- | --- | --- | --- |
+| #1685 | route-format source-of-truth | **resolved** | route-format profile + vectors |
+| #1686 | URL-as-state seam shape + codec | **resolved** | URL-as-state contract + vectors |
+| #1687 | technical-config home (webrouting vs plateau) | **open** | technical-config schema |
+| #1688 | sitemap derivation scope | **open** | sitemap deriver |
+
+Normal epic (concrete build deliverables, not a roadmap of fundable sub-standards) → slices are **tasks**, mirroring the webgraph epic [#1351](/backlog/1351-scaffold-the-webgraph-standard-project-graphspec-profile-lay/) it explicitly mirrors (slices A→B,C,D,E, all `kind: task`).
+
+## Investigation (real-tree seams)
+
+- **Project node + spec page** — webgraph slice A landed `we:src/_data/projects/webgraph.json` + `we:src/_includes/project-webgraph.njk` + `we:assets/icons/webgraph.svg` (all present). `webrouting` equivalents do **not** exist (`ls we:src/_data/projects/webrouting.json` → absent). The `router` block (`we:src/_data/blocks/router.json:2`, `implementsIntent: navigation` at `:144`) sets **no** `relatedProject` — slice A adds `relatedProject: webrouting`.
+- **Semantic profile + terms** — webgraph slice B authored the profile as a `{% highlight typescript %}` block in the spec page + terms as `we:src/_data/semantics/<slug>.json` (per-slug files; there is no single `we:src/_data/semantics.json`). Route-format profile mirrors this.
+- **URL-as-state codec lock** — #1686 ratified a typed per-slice codec as a **strategy-lock** mirroring `CustomStorageStrategy` / `CustomChangeStrategy` (`we:src/_data/protocols/storage.json`, `we:src/_data/protocols/change-tracking.json` — both present). A concrete protocol-json + plug artifact, distinct from the declaration/coordinator runtime contract.
+- **Declaration/coordinator seam** — #1686's per-component `syncedState`-style declaration + intra-component microtask coalesce + optional cross-component coordinator; consumes the codec; codified at `we:docs/agent/platform-decisions.md#url-as-state-per-component-seam`. Authored as interface spec in the spec page (like webgraph's profile interfaces).
+- **Conformance vectors** — webgraph slice D landed presentation-free vectors at `we:src/cases/webgraph/`. Route-format + URL-as-state vectors mirror this at `we:src/cases/webrouting/`.
+
+## Could split — 5 task slices
+
+All `kind: task` under `parent: 1684` (tasks carry no Fibonacci `size`, per webgraph). None buries a fork — each rides an already-resolved decision.
+
+| Slice | Title | Rides | blockedBy | Files (citable) |
+| --- | --- | --- | --- | --- |
+| **A** | project node + skeleton spec page | epic ruling | — (root) | `we:src/_data/projects/webrouting.json`, `we:src/_includes/project-webrouting.njk`, `we:assets/icons/webrouting.svg`; `we:src/_data/blocks/router.json` += `relatedProject` |
+| **B** | route-format semantic profile + terms | #1685 | A | profile in spec page; `we:src/_data/semantics/` terms |
+| **C** | URL-as-state codec strategy-lock protocol | #1686 | A | `we:src/_data/protocols/custom-url-codec-strategy.json` + plug entry (mirrors `we:src/_data/protocols/storage.json`) |
+| **D** | URL-as-state declaration + coordinator seam contract | #1686 | C | declaration/coordinator interfaces in spec page; consumes C's codec; pagination `urlSync` migration note |
+| **E** | route-format + URL-as-state conformance vectors | #1685, #1686 | B, D | `we:src/cases/webrouting/` (presentation-free) |
+
+**Slice DAG:**
+```
+A ──► B ──────────► E
+ └──► C ──► D ──────┘
+```
+A is the root (every slice needs the project node/spec page). B and C are independent off A; D consumes C's codec; E needs the profile (B) + the seam contract (D). Each leaves a demoable state (A renders the tile at `/projects/webrouting/`; B/D add spec sections; C registers a protocol; E adds running conformance cases). Batchable along the DAG once upstream lands.
+
+## Could not split — design-gated behind open forks
+
+| Deliverable | Failed condition | Unblocking action |
+| --- | --- | --- |
+| **Sitemap deriver** | no buried fork — scope is the open call in #1688 | **Resolve [#1688](/backlog/1688-webrouting-sitemap-derivation-scope-which-artifact-set-ships/)**, then `/slice 1684` again for the deriver slice |
+| **Technical-config schema** | no buried fork — *home* itself is the open call in #1687 (may not land in webrouting at all) | **Resolve [#1687](/backlog/1687-webrouting-technical-config-home-schema-in-webrouting-vs-a-p/)**, then slice wherever it homes |
+
+Both are already first-class `type:decision` cards (#1687, #1688) and the epic body points to them — no fork is buried, no new card needed.
+
+## Proposed mutation (gated on one "go")
+
+1. Leave #1684 as the storied epic (already `kind: epic`; confirm no residual `size`).
+2. `scaffold` **A–E** under `--parent=1684` with the DAG edges (B,C `--blocked-by=A`; D `--blocked-by=<C>`; E `--blocked-by=<B>,<D>`), all `--type=task --workitem=task`, locus `webeverything`.
+3. Gate on `npm run check:standards`; confirm backlog count rose by 5.
