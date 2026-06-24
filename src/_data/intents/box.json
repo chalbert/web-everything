@@ -1,0 +1,33 @@
+{
+  "id": "box",
+  "name": "Box Layout Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "layoutTier": "region-role",
+  "summary": "A primitive layout region-role (#1680 taxonomy): composition-intent = a padded container with an optional max-measure. Identity is the arrangement, not the CSS — FUI ships one block per role and the mechanism (padding + optional max-inline-size + auto margin) is an impl seam. Project-less; per-project styling rides presentational variants + plateau assembler presets.",
+  "dimensions": {
+    "padding": {
+      "description": "The inset applied on all sides, on a spacing scale — the role's essential knob.",
+      "values": [
+        "none",
+        "xs",
+        "sm",
+        "md",
+        "lg",
+        "xl"
+      ]
+    },
+    "measure": {
+      "description": "An optional maximum inline-size constraint on the content. Absent → unconstrained (the most-permissive default).",
+      "values": []
+    },
+    "invert": {
+      "description": "Whether the box flips to an inverted tone/contrast context (a dark-on-light → light-on-dark surface). Default false.",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">A padded container that establishes a fresh spacing context and optionally constrains its content to a comfortable measure — a card surface, a callout, a section wrapper.</p><h3>Composition-intent (the identity)</h3><p class=\"text-sm text-gray-600 mb-2\">A primitive layout <strong>region-role</strong> (<code>layoutTier: region-role</code>), one of the per-role taxonomy ratified in <a href=\"/backlog/1680-semantic-layout-type-taxonomy-identify-every-distinct-layout/\">#1680</a>. Its identity is the <strong>composition-intent</strong> &mdash; a padded container with an optional max-measure &mdash; <strong>impl-agnostic</strong>. FUI ships exactly <em>one</em> block for this role; the CSS mechanism (<code>padding</code> + optional <code>max-inline-size</code> + auto margin) is an <strong>impl seam</strong>, never the role's identity (<a href=\"/docs/agent/platform-decisions.md\">platform-decisions.md#layout-role-composition-intent</a>).</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>padding</code>: The inset applied on all sides, on a spacing scale — the role's essential knob (<code>none · xs · sm · md · lg · xl</code>).</li><li><code>measure</code>: An optional maximum inline-size constraint on the content. Absent → unconstrained (the most-permissive default).</li><li><code>invert</code>: Whether the box flips to an inverted tone/contrast context (a dark-on-light → light-on-dark surface). Default false (<code>true · false</code>).</li></ul><h3>Annotation, not identity</h3><p class=\"text-sm text-gray-600 mb-2\">An optional <code>region</code> landmark applies only when the box is a <em>named, navigable</em> section — a content annotation, never the role itself.</p>"
+}

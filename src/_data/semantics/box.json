@@ -1,0 +1,5 @@
+{
+  "term": "Box Layout Intent",
+  "definition": "A layout region-role: a padded container establishing a fresh spacing context, optionally constraining its content to a measure (card, callout, section). Identified by its arrangement; the CSS (padding + max-inline-size) is an FUI impl seam.",
+  "usage": "Standardized by the Box Layout Intent."
+}
