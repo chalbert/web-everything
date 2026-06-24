@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Reuse colors from other icons to ensure consistency (cf. webgraph) -->
+    <linearGradient id="routeNodeIndigo" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#4f46e5" /> <!-- From Blocks/Contexts -->
+      <stop offset="100%" stop-color="#818cf8" />
+    </linearGradient>
+    <linearGradient id="routeNodeSky" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#0284c7" /> <!-- From Registries/Behaviors -->
+      <stop offset="100%" stop-color="#38bdf8" />
+    </linearGradient>
+
+    <filter id="routeFloatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <!-- Metaphor: a route table is a tree — one URL root branching into nested outlets. The
+       declarative <template route> children are the authoring SoT; the branches are the derived map. -->
+  <g filter="url(#routeFloatShadow)">
+      <!-- Route edges (parent path → child outlet) drawn behind the nodes -->
+      <g fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round">
+          <path d="M40 40 L40 96" />
+          <path d="M40 64 L72 64" />
+          <path d="M40 96 L72 96" />
+      </g>
+
+      <!-- Route nodes — the root (/) and its nested child routes (outlets) -->
+      <rect x="30" y="30" width="20" height="20" rx="6" fill="url(#routeNodeIndigo)" stroke="white" stroke-width="2.5" />
+      <rect x="64" y="54" width="20" height="20" rx="6" fill="url(#routeNodeSky)" stroke="white" stroke-width="2.5" />
+      <rect x="64" y="86" width="20" height="20" rx="6" fill="url(#routeNodeSky)" stroke="white" stroke-width="2.5" />
+  </g>
+</svg>

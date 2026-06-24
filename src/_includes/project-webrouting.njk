@@ -1,0 +1,133 @@
+<section class="intro-section mb-12">
+    <h3 id="mission">Mission</h3>
+    <p>
+        <strong>Web Routing</strong> brings the routing domain into the platform on the same terms as every
+        other Web Everything standard: a route table is declared by its <em>semantic intent</em> &mdash; the
+        URL patterns, their guards, loaders and nested outlets &mdash; kept strictly separate from how a router
+        runtime commits navigations. Routing was, until now, <strong>partly built but ownerless</strong>: the
+        <a href="/intents/navigation/">Navigation Intent</a> owns the user-perceivable UX axes
+        (<code>structure / history / scroll / transition / guard / persistence</code>), the <code>router</code>
+        block (<code>we:src/_data/blocks/router.json</code>, <code>implementedBy: @frontierui/blocks/router</code>)
+        is the imperative runtime, and <a href="/projects/webguards/">Web Guards</a> treats a route guard as one
+        instance of its predicate seam &mdash; but <em>nothing</em> owned route <em>format</em> as a declarable
+        contract, the URL as a shared state store, technical routing config, or sitemap derivation. This project
+        is that owner. Per the constellation rule the contract lives here in <code>@webeverything</code>, the
+        runtime stays in Frontier UI, and the UX stays in the Navigation Intent.
+    </p>
+</section>
+
+<section id="scope" class="section-card">
+    <h3 id="scope-heading">Scope</h3>
+    <p>
+        The load-bearing surface is not route format alone but <strong>the URL as a state store many stateful
+        components read and write</strong> &mdash; a data-grid's filters / sort / page, a tab selection, a
+        wizard step, a disclosure's open-state. The hard constraint (ratified 2026-06-23): <strong>nothing is
+        forced</strong>. Whether any given state slice lives in the URL is a <em>per-slice dimension</em> with a
+        permissive default, reusing the Navigation Intent's existing <code>persistence</code> vocabulary
+        (<code>url | session | memory</code>) generalized from whole-view navigation down to each slice. The
+        standard ships the mechanism and the vocabulary; it mandates no convention
+        (<a href="/docs/agent/platform-decisions.md">conventions fold into compliance</a>). The shape is settled
+        &mdash; ratified in
+        <a href="/backlog/1685-webrouting-route-format-source-of-truth-declarative-dom-temp/">#1685</a> (codified
+        at <a href="/docs/agent/platform-decisions.md">platform-decisions &sect; single-authoring-sot-derived-projection</a>)
+        and scaffolded under epic
+        <a href="/backlog/1684-scaffold-the-webrouting-standard-route-format-profile-url-as/">#1684</a>.
+    </p>
+    <div class="standards-grid">
+        <div class="standard-card flex flex-col">
+            <h4 id="scope-format" class="text-lg font-bold m-0 text-gray-900">Route-format profile</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                Declarative DOM is the authoring source-of-truth &mdash; <code>&lt;template route&gt;</code>
+                children of <code>&lt;we-route-view&gt;</code>, with <strong>URLPattern</strong> as the pattern
+                grammar &mdash; and webrouting <em>derives</em> a serializable route-map projection for non-DOM
+                consumers. <span class="text-gray-400">(Schema + vectors in slice B,
+                <a href="/backlog/1721-webrouting-serializable-route-map-projection-schema-conforma/">#1721</a>.)</span>
+            </p>
+        </div>
+        <div class="standard-card flex flex-col">
+            <h4 id="scope-url-state" class="text-lg font-bold m-0 text-gray-900">URL-as-state seam</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                The serialize / restore seam many stateful components share, with a per-slice
+                <code>persistence</code> declaration grounded on the Navigation Intent's
+                <code>url | session | memory</code> axis &mdash; <strong>never forced</strong>, permissive
+                default. <span class="text-gray-400">(Shape decided in
+                <a href="/backlog/1686-webrouting-url-as-state-seam-one-shared-serialize-sync-provi/">#1686</a>.)</span>
+            </p>
+        </div>
+        <div class="standard-card flex flex-col">
+            <h4 id="scope-sitemap" class="text-lg font-bold m-0 text-gray-900">Sitemap derivation</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                A v1 emitter set derived from the route table &mdash; the first real consumer of the serializable
+                route-map projection, reading routes without instantiating the running app.
+                <span class="text-gray-400">(Scope in
+                <a href="/backlog/1688-webrouting-sitemap-derivation-scope-which-artifact-set-ships/">#1688</a>;
+                technical-config home in
+                <a href="/backlog/1687-webrouting-technical-config-home-schema-in-webrouting-vs-a-p/">#1687</a>.)</span>
+            </p>
+        </div>
+    </div>
+    <div class="bg-blue-50 border-l-4 border-blue-400 p-3 mt-6 text-xs text-blue-800">
+        <strong>Status:</strong> concept &mdash; this is the project skeleton (slice A of epic
+        <a href="/backlog/1684-scaffold-the-webrouting-standard-route-format-profile-url-as/">#1684</a>). The
+        route-format profile, the URL-as-state contract, the sitemap deriver, and the technical-config home land
+        in the following slices. Per the constellation rule the contract lives here in
+        <code>@webeverything</code> and the router runtime ships in Frontier UI.
+    </div>
+</section>
+
+<section id="route-format" class="section-card">
+    <h3 id="route-format-sot">Route-format source-of-truth</h3>
+    <p>
+        Routes are authored as <strong>declarative DOM</strong>, not a hand-written data table: today
+        <code>parseRouteDefinitions()</code> runs <code>querySelectorAll('template[route]')</code> over
+        <code>&lt;we-route-view&gt;</code>'s children, reading <code>route</code> / <code>route:guard</code> /
+        <code>route:loader</code> / <code>route:outlet</code> / <code>route:error</code> attributes. That
+        <code>&lt;template route&gt;</code> tree is the <strong>canonical authoring source-of-truth</strong>
+        (HTML-first, single SoT, no drift), and <a href="https://developer.mozilla.org/docs/Web/API/URLPattern">URLPattern</a>
+        (Baseline 2025) is the pattern grammar &mdash; webrouting invents no syntax. The catch: a
+        <code>RouteDefinition</code> carries a compiled <code>URLPattern</code> + a live
+        <code>HTMLTemplateElement</code>, <strong>both non-serializable</strong>, so no consumer (sitemap,
+        prerender, config tooling) can read the route table without a DOM. webrouting therefore <em>derives</em>
+        a serializable <strong>route-map projection</strong> &mdash; built by the first consuming slice, never
+        speculatively &mdash; that drops the non-serializable fields and exposes the rest as a fixed shared
+        contract.
+    </p>
+    {% highlight "typescript" %}
+// AUTHORING source-of-truth — declarative DOM. The route table is the <template route> children of
+// <we-route-view>; URLPattern is the grammar. This is what an author edits — HTML-first, single SoT.
+//
+//   <we-route-view>
+//     <template route="/users/:id" route:loader="user" route:guard="auth">…</template>
+//     <template route="/users/:id/settings" route:outlet="detail">…</template>
+//   </we-route-view>
+
+// DERIVED projection — a serializable route-map for non-DOM consumers (sitemap / prerender / config
+// tooling). GENERATED from the DOM, never hand-authored, so there is no second authoring home and no
+// drift. Drops the non-serializable pattern + template; keeps the rest as a fixed shared contract.
+interface RouteMapEntry {
+  path: string;                 // the URLPattern pathname template, e.g. "/users/:id" (not a concrete URL)
+  guard?: string;               // canActivate guard name (resolved from the @routeGuard context)
+  guardLeave?: string;          // canDeactivate guard name
+  loader?: string;              // data-loader name
+  outlet?: string;              // named outlet identifier ("" = primary)
+  isErrorBoundary?: boolean;    // this entry is the route:error boundary
+  children?: RouteMapEntry[];   // nested routes — the table is a tree
+}
+    {% endhighlight %}
+    <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+        <li><strong>One canonical authoring form:</strong> the <code>&lt;template route&gt;</code> DOM is the SoT;
+            the serializable map is <em>derived</em>, never a second authored home &mdash; so there is no drift
+            and HTML-first authoring is preserved
+            (<a href="/backlog/1685-webrouting-route-format-source-of-truth-declarative-dom-temp/">#1685</a>).</li>
+        <li><strong>URLPattern is the grammar:</strong> native-first &mdash; webrouting reuses the platform's
+            URLPattern (Baseline 2025) rather than inventing a route syntax.</li>
+        <li><strong>Internal schema, not yet a protocol:</strong> one conforming router exists today
+            (<code>fui:blocks/router</code>), so the derived map is an internal WE schema + conformance vectors;
+            a <code>CustomRouteMap</code> protocol is minted only on a <em>second</em> independent impl (the
+            protocol temporal rule).</li>
+        <li><strong>Build-only-when-a-consumer-exists:</strong> the projection <em>builder</em> is not slice B
+            &mdash; it folds into the first consuming slice (sitemap,
+            <a href="/backlog/1688-webrouting-sitemap-derivation-scope-which-artifact-set-ships/">#1688</a>);
+            slice B ships the schema + vectors only.</li>
+    </ul>
+</section>

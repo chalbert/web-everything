@@ -142,6 +142,7 @@
   ],
   "implementedBy": "@frontierui/blocks/router/index.ts",
   "implementsIntent": "navigation",
+  "relatedProject": "webrouting",
   "intentDimensions": {
     "structure": "hierarchical",
     "history": "push",
