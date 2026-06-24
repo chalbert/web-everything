@@ -1,0 +1,35 @@
+{
+  "id": "imposter",
+  "name": "Imposter Layout Intent",
+  "requiresCapabilities": [],
+  "status": "concept",
+  "layoutTier": "region-role",
+  "summary": "A primitive layout region-role (#1680 taxonomy): composition-intent = center a child over a positioning context (overlay). Identity is the arrangement, not the CSS — FUI ships one block per role and the mechanism (absolute positioning / a single-cell grid stack) is an impl seam. Project-less; per-project styling rides presentational variants + plateau assembler presets.",
+  "dimensions": {
+    "fixed": {
+      "description": "Whether the child is positioned relative to the viewport (fixed) or the nearest positioned ancestor. Default false (ancestor).",
+      "values": [
+        "true",
+        "false"
+      ]
+    },
+    "margin": {
+      "description": "Minimum breathing room kept between the overlaid child and the container edges. Absent → no minimum.",
+      "values": [
+        "none",
+        "xs",
+        "sm",
+        "md",
+        "lg"
+      ]
+    },
+    "contain": {
+      "description": "Whether the child is clipped to the container's bounds. Default false.",
+      "values": [
+        "true",
+        "false"
+      ]
+    }
+  },
+  "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">Centers a child over a positioning context, breaking out of the document flow to overlay it — a modal-positioned panel, a centered loading state, an overlay badge.</p><h3>Composition-intent (the identity)</h3><p class=\"text-sm text-gray-600 mb-2\">A primitive layout <strong>region-role</strong> (<code>layoutTier: region-role</code>), one of the per-role taxonomy ratified in <a href=\"/backlog/1680-semantic-layout-type-taxonomy-identify-every-distinct-layout/\">#1680</a>. Its identity is the <strong>composition-intent</strong> &mdash; center a child over a positioning context (overlay) &mdash; <strong>impl-agnostic</strong>. FUI ships exactly <em>one</em> block for this role; the CSS mechanism (absolute positioning / a single-cell grid stack) is an <strong>impl seam</strong>, never the role's identity (<a href=\"/docs/agent/platform-decisions.md\">platform-decisions.md#layout-role-composition-intent</a>).</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>fixed</code>: Whether the child is positioned relative to the viewport (fixed) or the nearest positioned ancestor. Default false (ancestor) (<code>true · false</code>).</li><li><code>margin</code>: Minimum breathing room kept between the overlaid child and the container edges. Absent → no minimum (<code>none · xs · sm · md · lg</code>).</li><li><code>contain</code>: Whether the child is clipped to the container's bounds. Default false (<code>true · false</code>).</li></ul><h3>Annotation, not identity</h3><p class=\"text-sm text-gray-600 mb-2\">Distinct from the <a href=\"/intents/dialog/\">modal</a> / <a href=\"/intents/anchor/\">anchor</a> <em>behavior</em> intents — imposter is the <strong>arrangement</strong>; dialog/popover semantics are an optional annotation (#1680 Fork-1a: behavior <em>can-do</em> vs layout <em>is-a</em>).</p>"
+}

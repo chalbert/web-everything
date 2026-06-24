@@ -1,0 +1,5 @@
+{
+  "term": "Imposter Layout Intent",
+  "definition": "A layout region-role: center a child over a positioning context, overlaying it out of flow (modal-positioned panels, overlays). Distinct from modal/anchor behavior intents — it is the arrangement. Identified by its arrangement; the CSS is an FUI impl seam.",
+  "usage": "Standardized by the Imposter Layout Intent."
+}
