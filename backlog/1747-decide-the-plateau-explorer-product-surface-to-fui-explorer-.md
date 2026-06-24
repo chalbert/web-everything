@@ -1,120 +1,96 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-24"
 dateStarted: "2026-06-24"
+dateResolved: "2026-06-24"
+graduatedTo: none
 preparedDate: "2026-06-24"
 relatedProject: webcomponents
 relatedReport: reports/2026-06-24-cross-repo-tool-engine-product-boundary.md
-tags: [explorer, devtools-placement, constellation, plateau, frontierui, cross-repo]
+codifiedIn: docs/agent/platform-decisions.md#devtools-placement
+tags: [explorer, devtools-placement, constellation, plateau, frontierui, monetization, output-contract]
 ---
 
-# Decide the Plateau explorer-product-surface ↔ FUI-explorer-engine boundary (the @frontierui public API the moved CLI imports) + the Layer-1 genericInvariants home
+# Decide the explorer's home: a Plateau product (closed); WE holds only the result/output-format contract
 
 ## Digest
 
-#1577 (relocate the explorer CLI chrome FUI→Plateau per ratified #1565 Fork 3) needs a cross-repo boundary
-that doesn't exist: the 4 product files import 8 FUI engine internals, and `plateau:package.json` has no
-`@frontierui` dep. Two coupled forks. **Fork 1** (how Plateau consumes the FUI engine): default **(c) thin
-CLI chrome over the narrowest engine API, → (a) a curated public package later** — the move is ratified so
-(b) "keep it in FUI" is out, and the engine still churns (#1522) so a full public API now (a) is premature.
-**Fork 2** (genericInvariants home): **stays in FUI** — its only consumers are FUI engine internals, so a
-Plateau home is a banned backward edge. Confidence med. Two open forks.
+The autonomous explorer is a **Plateau-owned product, closed-source** — engine, CLI, oracles, harnesses,
+report-bundling, all of it. It is **not** "FUI's engine"; the prepared split (engine→FUI, chrome→Plateau) is
+withdrawn and **both its forks dissolve**. The **only** Web Everything artifact is a **result/output-format
+contract** (a finding/report interchange schema) so any other tool can consume explorer output. Free vs paid
+follows the assembler model (cost/hosting line; local oracles free, the per-call VLM judge paid).
+Open-sourcing later stays Plateau's option, not a fork to settle now. Confidence med-high.
 
-## Framing
+## Decision (2026-06-24)
 
-The decision turns on the WE↔Plateau↔FUI **source-dependency DAG**, not on where the product is operated.
-`we:docs/agent/platform-decisions.md` devtools-placement **rule 3** ratifies "autonomous-explorer CLI
-chrome → Plateau" (#1565 Fork 3; the live work item is `we:backlog/1577-*.md`), so the CLI *moves* — the
-only question is the consumption seam. The 4 product-surface files
-(`fui:tools/explorer/cli.ts`, `fui:tools/explorer/cliRouting.ts`, `fui:tools/explorer/routeDiscovery.ts`,
-`fui:tools/explorer/reportBundle.ts`, ~640 LOC) import 8 engine internals via `fui:tools/explorer/cli.ts:21-31`
-(`workbenchHarness`, `docsSiteHarness`, `gateRunner`, `routeSweep`, `routeDiscovery`, `reportBundle`,
-`authRecipe`, + `stateFlowGraph`/`observation`/`gate` types). `plateau:package.json` has no `@frontierui`
-dep; `fui:package.json` is `"private": true` with no `exports`/`main`/`bin`. Prior art
-(`/research/cross-repo-tool-engine-product-boundary/` — Playwright/WebdriverIO/axe/Chromatic) favours a
-separate CLI package beside the engine while it churns, graduating to a curated public-API package once
-stable; the constellation has *already* mandated the two-repo split, so the faithful reading is "thin
-chrome now, public package later." The explorer engine is **distinct** from the conformance engine
-(contract `we:conformance-vectors/binding.ts` #1596, runner/judge `plateau:src/conformance-engine/conformanceVectors.ts`
-#1597) — #1576's "unblock" of #1577 was a false edge over a *different* engine.
+The explorer is a **closed Plateau product**. The whole tool relocates to plateau-app; FUI keeps no copy. WE
+mints **one** thing — the explorer **result/output-format contract** — and nothing else.
 
-## Recommended path at a glance
+## Why a product, not the standard or the reference impl
 
-| Fork | Recommended default | Main alternative | Confidence |
-|---|---|---|---|
-| Fork 1 — cross-repo consumption boundary | **(c) thin CLI chrome in Plateau over the narrowest FUI-engine API, structured toward (a)** | (a) full curated `@frontierui` explorer-engine public API now | Med |
-| Fork 2 — Layer-1 genericInvariants home | **stays in FUI with the engine** (app-agnostic, but consumed only by FUI engine internals) | a shared platform-UX lib upstream of FUI | Med-high |
+- **Open-core draws one line:** the **standard (WE)** and the **reference implementation (FUI)** are the open
+  giveaway that drives adoption; **products** are closed/paid. The explorer is neither the standard nor a
+  reference impl of it — it is a **developer-operated surface you run against your own build**, which is
+  exactly `we:docs/agent/platform-decisions.md` rule-1's positive test for → Plateau, and the same class as
+  the assembler / configurator / dev-browser (already Plateau products).
+- **FUI does not need it** (verified 2026-06-24). Every engine file imports only `@playwright/test` + its own
+  `fui:tools/explorer/*` siblings — **zero imports of FUI component source**; nothing in FUI outside
+  `fui:tools/explorer/` imports it. It is a **point-it-at-a-URL analyzer**: FUI is merely one *subject* (and
+  the incidental current host, via the `explore` / `explore:gate` dogfood scripts in `fui:package.json`), not
+  a consumer. There is no FUI→engine dependency to preserve.
+- **Generic-ness cuts toward closed, not open.** Because it tests *any* app, not only WE apps, it has a market
+  beyond the ecosystem — product value, not adoption bait. "Generic" never implied "open."
 
-## Fork 1 — how the Plateau explorer product surface consumes the FUI explorer engine
+## What WE keeps: the result/output-format contract
 
-**Fork-existence:** a genuine either/or — the CLI moves to Plateau (ratified rule 3), so Plateau must
-consume the FUI engine across a repo boundary by exactly one mechanism; (b) "keep the CLI in FUI" is the
-*excluded* branch because it contradicts the ratified placement.
+The lone standard-layer artifact is a **finding/report interchange schema** — severity, location, oracle id,
+evidence, run/coverage summary — plus an open extension slot. Rationale: per `we:docs/agent/platform-decisions.md`
+(#1467) WE keeps the *contract*, not the engine; and the temporal rule is already satisfied by **convergent
+external prior art** for tool-result interchange (SARIF, axe-core JSON, Lighthouse JSON), so mint the core
+schema now + an extension slot rather than waiting on a second impl. This lets third-party tools and CI consume
+explorer output without depending on the closed product. (Distinct from the already-resolved **conformance**
+binding interface in WE, #1596 — a different engine; that distinction is this card's original finding.)
 
-Crux refs: `we:docs/agent/platform-decisions.md` rule 3 (CLI chrome → Plateau) + `we:backlog/1577-*.md`
-(the relocation work item); `fui:tools/explorer/cli.ts:21-31` (the 8 engine imports); `plateau:package.json`
-(no `@frontierui` dep); `fui:package.json` (private, no `exports`). Prior art:
-`/research/cross-repo-tool-engine-product-boundary/`.
+## The two prepared forks dissolve
 
-- **(c) Thin CLI chrome in Plateau over the narrowest engine API — _recommended_.** Move only the
-  genuinely product-specific orchestration (`cli`, `cliRouting`, `routeDiscovery`, `reportBundle`) to
-  Plateau, behind the smallest FUI-engine surface (`workbenchHarness` / `docsSiteHarness` / `gateRunner` /
-  `routeSweep` + `stateFlowGraph`/`observation`/`gate` *types*). Honours the ratified move without freezing
-  a large public API while the engine churns (epic #1522/#1167). Explicitly structured toward (a): the
-  narrow surface graduates to a versioned `@frontierui` entry when it stabilises. Cost: some chrome may
-  briefly straddle repos during the transition.
-- **(a) `@frontierui` package dependency + a curated explorer-engine public API.** *Deferred end-state, not
-  now.* Cleanest long-term (add `@frontierui` to `plateau:package.json`, export `explore` + the
-  oracle/observation/harness/gate-runner surface from a stable entry), but committing a large public API +
-  versioning contract while the engine is still churning is premature (API Extractor-grade governance cost
-  for a moving surface). Adopt once the surface stabilises.
-- **(b) Keep the whole explorer (CLI included) in FUI; expose only a hosted wrapper in Plateau.**
-  *Rejected* — it re-reads #1565 Fork 3 as "the hosted product is Plateau" *without moving the CLI source*,
-  which contradicts the ratified rule-3 placement ("autonomous-explorer CLI chrome → Plateau") and never
-  builds the boundary this decision exists to settle. (A genuine reversal of rule 3 would be allowed, but
-  must be argued as one and clear the merit gate — the churn argument licenses (c), not staying put.)
+- **Fork 1 — cross-repo consumption boundary:** *moot.* It existed only because the prep assumed the engine
+  stays in FUI while the chrome moves, creating a Plateau→FUI seam. The whole explorer lives in Plateau and
+  imports nothing from FUI (it drives subjects over a browser), so there is **no** `@frontierui` public API to
+  stand up.
+- **Fork 2 — Layer-1 `fui:tools/explorer/oracles/genericInvariants.ts` home:** *moot.* It travels to Plateau
+  with the engine it is internal to; no FUI-vs-shared-lib question remains.
 
-**Skeptic:** SURVIVES-WITH-AMENDMENT → flipped the original (b) default to **(c)**. The skeptic over-reached
-claiming "engine→FUI is a factual error" — that codified ruling governs the *conformance* engine (#1566),
-not the *explorer* engine, whose FUI home is consistent with the carve-out. But its load-bearing point held:
-rule 3 + #1577 ratify CLI-chrome→Plateau, so the original (b) default was a silent reversal. (c) honours the
-move while deferring the API-freeze that churn makes premature.
+## Consequences (on ratify)
 
-## Fork 2 — the Layer-1 genericInvariants home (the explicit #1565 residual)
+- **Re-scope `we:backlog/1577`** — from "relocate CLI chrome / orchestration / report-bundling" to "relocate
+  the **whole** explorer (engine included) FUI → Plateau." The engine moves too; FUI dogfoods by running the
+  Plateau tool against its dev server.
+- **Supersede `we:backlog/1763`** (extract engine to a neutral *open* package) — withdrawn: the whole tool
+  goes to *closed* Plateau, not an open package. Resolve as superseded.
+- **New WE slice** — scaffold a foundational contract card: "Explorer result/output-format interchange schema
+  (+ extension slot)", the one WE artifact this decision mints.
+- **Amend `we:docs/agent/platform-decisions.md`** devtools-placement: the autonomous explorer's **engine**
+  (not just its chrome) → Plateau, and WE additionally holds the explorer **output-format contract**. This
+  re-points the residual #1565 Fork 3 left open.
 
-**Fork-existence:** a genuine placement either/or left open by #1565 — app-agnostic Layer-1 invariants
-could legitimately live with the engine that runs them (FUI) or in a shared platform-UX lib both repos
-consume; the branches are mutually exclusive homes.
+## Red-team
 
-Crux refs: `fui:tools/explorer/oracles/genericInvariants.ts` (app-agnostic no-crash / no-a11y), consumed
-only by `fui:tools/explorer/gate.ts:21`, `fui:tools/explorer/exploreAndAudit.ts:15`,
-`fui:tools/explorer/routeSweep.ts:18` — all FUI engine internals; the #1565 residual framing
-(`we:docs/agent/platform-decisions.md` devtools-placement).
-
-- **Stays in FUI with the engine — _recommended_.** Its only consumers are the FUI-resident explorer
-  engine internals; Plateau's CLI reaches these invariants **transitively** through the engine API (Fork 1),
-  never directly. Relocating it to Plateau would force a FUI-engine → Plateau **backward CODE import**,
-  which the constellation DAG bans (backward edges are module imports). So it stays upstream, with the
-  engine it serves.
-- **(a) Plateau product-engine.** *Rejected* — creates the banned backward edge above (FUI engine code
-  would import an app-agnostic oracle from downstream Plateau). The #1565 residual framed this as an
-  option, but the residual pre-dated reading the consumer graph.
-- **(b) A shared platform-UX lib upstream of FUI.** *Rejected for now* — bias-toward-separation favours a
-  shared home in principle, but the lib would have to sit upstream of both FUI and Plateau (it can't be WE
-  per #1282 — `genericInvariants` is executable), and creating a new package for one file with no *direct*
-  second consumer is premature. Revisit when Plateau's product layer needs to run these invariants without
-  going through the FUI engine — then extract upstream.
-
-**Skeptic:** SURVIVES (skeptic REFUTED). The skeptic argued genericInvariants → Plateau on
-bias-toward-separation. Tested against the consumer graph (its three importers are all FUI engine
-internals): a Plateau home is a banned backward edge. The separation pull is real but is satisfied at the
-*engine-API* seam (Fork 1), not by relocating an engine-internal oracle. Default stays FUI.
+The flip from the prepared "engine→FUI split" clears the merit gate: the explorer is a run-against-your-own-build
+**product** (rule-1 positive test → Plateau), not the standard's implementer-agnostic verifier — that is the
+*conformance* engine, already interface→WE (#1596), and this card's founding finding is that the two are
+different engines. "Engine stays in FUI" rested on FUI *needing* it, which is refuted (point-at-URL, zero FUI
+imports). "WE holds only the contract" respects #1467 + the temporal rule (convergent prior art: SARIF / axe /
+Lighthouse). No principle is violated by homing closed-product code in Plateau. Residual that is genuinely the
+founder's, not this card's: whether a future free tier is *open-source* or merely *free-to-use* — deferred,
+Plateau can open-source later if needed.
 
 ## Lineage
 
-#1577 is `blockedBy` this. Surfaced during batch-2026-06-23-1725-1665 working #1577. Grounds: #1565 Fork 3
-(devtools-placement, `we:docs/agent/platform-decisions.md`), #1566 (the conformance-engine split — a
-*different* engine), #1576/#1596/#1597 (conformance-engine home), the verified-absent `@frontierui`
-dependency in `plateau:package.json`. Research: `/research/cross-repo-tool-engine-product-boundary/`.
-Report: `we:reports/2026-06-24-cross-repo-tool-engine-product-boundary.md`.
+#1577 is `blockedBy` this. Surfaced during batch-2026-06-23-1725-1665 working #1577. Grounds: #1565 Fork 3 +
+`we:docs/agent/platform-decisions.md` rule 1/3 (#1467 contract-in-WE; #475 vision→Plateau), the
+assembler-is-Plateau-with-both-tiers precedent (#775), the verified point-at-URL / zero-FUI-import nature of the
+engine, and open-core monetization (#089–#093). Report:
+`we:reports/2026-06-24-cross-repo-tool-engine-product-boundary.md`. Supersedes the prep's split recommendation
+and #1763.

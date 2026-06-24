@@ -246,6 +246,18 @@ The other buckets:
   split: engine **interface** → WE, engine **impl** + product CLI chrome → Plateau (#1576/#1577), bindings →
   each implementer. Distinct from [reproduction-conformance](#reproduction-conformance)'s *deterministic-diff*
   engine (#1225), which is FUI (it diffs FUI's own reproductions, not a cross-implementer conformance suite).
+- **The autonomous explorer is a closed Plateau PRODUCT — engine included (amended 2026-06-24, #1747).** The
+  explorer (the autonomous browser-driving *tester*: `playwrightDriver`, heuristic oracles incl.
+  `genericInvariants`, harnesses, `stateFlowGraph`, `gate`, CLI, report-bundling) is **not** the standard's
+  verifier and **not** the reference impl — it is an operator-facing surface you run against your own build
+  (rule 3), and being generic (it tests *any* app) makes it product value, not adoption bait. So the **whole
+  tool → Plateau, closed-source** (#1577; free/paid on the assembler model #775; open-sourcing later is
+  Plateau's option). This corrects the earlier "engine stays FUI / only chrome moves" reading: FUI does **not
+  consume** the explorer (it imports zero explorer code — it is only a browser *subject* the tool points at),
+  so nothing forces the engine to stay FUI. **WE keeps exactly one artifact: the explorer result/output-format
+  interchange schema** (#1769 — SARIF-compatible core + extension slot, per #1467; temporal rule met by
+  convergent prior art — SARIF / axe / Lighthouse) so other tools and CI can consume explorer output without
+  depending on the closed product. A *different* engine from the conformance engine above — the #1747 finding.
 
 **Embed mechanism *inside* a Plateau dev-tool (#1654).** Once a tool is placed in Plateau, how it mounts
 its *own* surfaces is a trust/origin question, not an iframe-by-default one. A Plateau dev-tool's chrome and
