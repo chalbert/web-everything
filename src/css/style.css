@@ -1712,3 +1712,44 @@ table td, table th {
   border: 0;
   background: #fff;
 }
+
+/* #1758 (ratified #1748): SSR baseline for the FUI transient pills the docs server-render in bulk.
+   `<we-badge>` / `<we-filter-chip>` upgrade in place to light-DOM `<span class="fui-badge…">` /
+   `<button class="fui-filter-chip…">` once the cross-origin FUI registration ESM loads (base.njk),
+   at which point the FUI-injected stylesheet (keyed to `.fui-badge` / `.fui-filter-chip`) takes over.
+   This tag-keyed baseline styles them BEFORE that upgrade so the pills don't flash unstyled, and it
+   stands fully on its own if the FUI host is unavailable (the load .catch()es to this). Tracks the
+   FUI BADGE_CSS / FILTER_CHIP_CSS palettes (fui:blocks/badge/Badge.ts, fui:blocks/filter-chip/FilterChip.ts);
+   keep in sync if those tone/selected colours change. */
+we-badge,
+we-filter-chip {
+  font: inherit;
+  font-size: 0.8em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.25em 0.55em;
+  border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+we-badge { font-weight: 600; background: #eef1f4; color: #3a4252; border-color: #dfe3e8; }
+we-badge[tone="info"]    { background: #e7f0ff; color: #1d4ed8; border-color: #c7dbff; }
+we-badge[tone="success"] { background: #e7f8ef; color: #047a45; border-color: #c2ecd4; }
+we-badge[tone="warning"] { background: #fdf4e3; color: #9a6700; border-color: #f4e2b8; }
+we-badge[tone="error"]   { background: #fdecec; color: #b42318; border-color: #f6cecb; }
+we-filter-chip {
+  font-size: 0.85em;
+  gap: 0.4em;
+  padding: 0.35em 0.7em;
+  cursor: pointer;
+  background: #f3f4f6;
+  color: #374151;
+  border-color: #e0e3e8;
+}
+we-filter-chip[selected] {
+  background: color-mix(in srgb, var(--accent, #1d4ed8) 14%, #fff);
+  color: var(--accent, #1d4ed8);
+  border-color: color-mix(in srgb, var(--accent, #1d4ed8) 45%, #fff);
+}

@@ -424,5 +424,17 @@
         })
         .catch(() => { /* FUI host unavailable — keep the SSR chrome baseline */ });
     </script>
+
+    {#- #1758 (ratified #1748): register the FUI transient pills (`<we-badge>` / `<we-filter-chip>`) the
+        docs server-render in bulk (#1598). The rule-7 transient-CE counterpart to the #865 chrome shell
+        above — a second runtime cross-origin import (mode C, rule 6), NEVER a build-time `import '@frontierui'`.
+        The served entry registers both elements + injects their block CSS once; each pill then upgrades in
+        place to a light-DOM `<span class="fui-badge…">`. A load failure is silent and the `we-badge{}` /
+        `we-filter-chip{}` SSR baseline in style.css remains the rendered pill (progressive enhancement). -#}
+    <script type="module">
+      import("{{ links.frontierUrl }}/embed/badges-in-document.ts")
+        .then((m) => m.registerBadgesInDocument())
+        .catch(() => { /* FUI host unavailable — keep the SSR pill baseline */ });
+    </script>
 </body>
 </html>
