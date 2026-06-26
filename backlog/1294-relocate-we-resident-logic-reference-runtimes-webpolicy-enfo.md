@@ -1,9 +1,7 @@
 ---
 kind: epic
-size: 8
 status: open
 dateOpened: "2026-06-20"
-childlessReason: parked
 relatedProject: webvalidation
 relatedReport: reports/2026-06-24-split-analysis-1294.md
 tags: [constellation-placement, reference-runtime, webpolicy, relocation, frontierui, conformance]
