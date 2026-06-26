@@ -2,10 +2,11 @@
 kind: story
 size: 5
 parent: "142"
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: externalConsumers>=1
 locus: plateau-app
 dateOpened: "2026-06-23"
-dateStarted: "2026-06-26"
 tags: []
 ---
 
