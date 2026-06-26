@@ -3,7 +3,6 @@ kind: epic
 size: 8
 status: open
 dateOpened: "2026-06-20"
-blockedBy: ["1783"]
 childlessReason: parked
 relatedProject: webvalidation
 relatedReport: reports/2026-06-24-split-analysis-1294.md
@@ -34,10 +33,14 @@ A skeptic pass confirmed the move cannot start without stranding conformance pro
 (a mode-C runtime bundle path **or** the #899 runner is built). Then slice per subsystem (webpolicy
 first — it has the live demo + 23 tests).
 
-**Now `blockedBy: 1783`** (filed 2026-06-26): both un-park legs reduce to the one missing foundation —
-the #899-ratified FUI conformance reference backend + headless-logic surface path was never built. #1783
-is that build; on its landing, re-run `/slice 1294` (gate (a) → "move into an existing home", gate (b) →
-"repoint to an existing runner"). See `we:reports/2026-06-26-backlog-split-analysis.md`.
+**Un-parked 2026-06-26 — foundation #1783 resolved.** The conformance-surface foundation landed:
+`we:conformance-vectors/binding.ts` now ships the clock-free `SynchronousConformanceBinding` (#1789), the
+plateau runner drives it (`plateau:src/conformance-engine/conformanceVectors.ts`, #1790), and the surface
+mechanism is settled — a **plateau-hosted conformance iframe** (#1788 ratified (b): the runner stays a
+shared plateau tool). So per-subsystem the relocation is now sliceable: (a) relocate the runtime → FUI;
+(b) write its **binding** (the one-screen `dispatch`/`observe` adapter) + its **vector corpus**; (c) wire
+the visible docs page to the plateau iframe; (d) delete the WE runtime, keeping contract + vectors. Webpolicy
+first (it has the live demo + 23 tests). **Re-run `/slice 1294`.** See `we:reports/2026-06-26-backlog-split-analysis.md`.
 
 ## Slices (to carve on un-park)
 

@@ -1,7 +1,9 @@
 ---
 kind: epic
-status: open
+status: resolved
 dateOpened: "2026-06-26"
+dateResolved: "2026-06-26"
+graduatedTo: none
 relatedReport: reports/2026-06-26-backlog-split-analysis.md
 tags: [conformance, constellation-placement, conformance-vectors, headless-logic]
 ---
