@@ -25,6 +25,7 @@
     "./validity-merge": "./validity-merge.ts",
     "./validator-resolution": "./validator-resolution.ts",
     "./audit": "./audit.ts",
+    "./explorer": "./explorer.ts",
     "./lifecycle": "./lifecycle.ts",
     "./master-detail": "./master-detail.ts",
     "./selection": "./selection.ts",
