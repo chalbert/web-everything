@@ -3,6 +3,7 @@ kind: story
 size: 8
 status: open
 dateOpened: "2026-06-26"
+relatedReport: reports/2026-06-26-backlog-split-analysis.md
 tags: []
 ---
 
