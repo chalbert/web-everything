@@ -1,0 +1,46 @@
+<!--
+  WEB CASE 1: Route-format fidelity (declarative route table → route entries)
+  The first webrouting conformance axis (route-format profile, slice B #1726). A conformant router must
+  realize what the route table MEANS: every child `<template route>` becomes exactly one route entry, in
+  source order (first-match-wins), with its semantic fields preserved — none dropped, duplicated, or
+  re-ordered. The declarative `<template route>` DOM is the canonical authoring source-of-truth (#1685);
+  URLPattern (Baseline 2025) is the path grammar. Presentation-free: no runtime is executed here, so the
+  case stands as a static conformance declaration against the not-yet-built FUI router runtime.
+
+  This is the constellation site's own route table (a dogfood): Frontier UI implements Web Everything;
+  Plateau consumes Frontier UI.
+-->
+<we-route-view base="/">
+  <template route="/">
+    <!-- home -->
+  </template>
+  <template route="/standards/:standard" route:loader="standard" route:guard="published">
+    <!-- a standard's page; loaded by name, gated until published -->
+  </template>
+  <template route="/standards/:standard/conformance" route:loader="conformance" route:outlet="detail">
+    <!-- the conformance sub-view, rendered into the named `detail` outlet -->
+  </template>
+  <template route="/backlog/:id" route:loader="item" route:guard:leave="confirmUnsaved">
+    <!-- a backlog item; canDeactivate guard confirms before leaving an unsaved edit -->
+  </template>
+  <template route="/*" route:error>
+    <!-- the catch-all error boundary (404) -->
+  </template>
+</we-route-view>
+
+<!--
+  EXPECTED (route-format fidelity axis): exactly five route entries, one per `<template route>`, in the
+  authored source order (first match wins, so `/` precedes `/standards/:standard` precedes the catch-all
+  `/*`). Each entry carries only the slice-B semantic fields, mapped 1:1 from its attributes:
+
+    [0] { path: "/" }
+    [1] { path: "/standards/:standard", loader: "standard", guard: "published" }
+    [2] { path: "/standards/:standard/conformance", loader: "conformance", outlet: "detail" }
+    [3] { path: "/backlog/:id", loader: "item", guardLeave: "confirmUnsaved" }
+    [4] { path: "/*", isErrorBoundary: true }
+
+  Each `path` is a URLPattern pathname TEMPLATE (e.g. `/standards/:standard`), never a concrete URL. The
+  semantic roles (route-table, route-outlet, route-guard, route-loader, route-error-boundary, #1726) are
+  asserted here; how the runtime COMMITS a navigation (the FUI navigation engine) is NOT — that is the
+  runtime, not the format. Position/markup of the rendered view is NOT asserted (presentation-free).
+-->

@@ -1,0 +1,44 @@
+<!--
+  WEB CASE 2: Route-format derived projection (DOM route table → serializable route-map)
+  The second webrouting conformance axis (route-format profile, slice B #1726, over the #1721 derived
+  projection). A conformant non-DOM consumer (sitemap / prerender / config tooling) reads the route table
+  through its SERIALIZABLE projection (#1721 route-map), never the live DOM. The projection is a faithful
+  derivation: it keeps exactly the serializable fields and DROPS the two non-serializable ones (the parsed
+  `URLPattern` and the `HTMLTemplateElement`), never fabricating a missing value. Presentation-free; no
+  runtime is executed.
+
+  Same constellation route table as case 1 — here asserted in its derived, non-DOM read form.
+-->
+<we-route-view base="/app">
+  <template route="/orders" route:loader="orders">
+    <!-- /app/orders — base-prefixed at parse time -->
+  </template>
+  <template route="/orders/:orderId" route:loader="order" route:guard="auth">
+    <!-- /app/orders/:orderId -->
+  </template>
+  <template route="/*" route:error>
+    <!-- error boundary -->
+  </template>
+</we-route-view>
+
+<!--
+  EXPECTED (route-format derived-projection axis): the route-map projection is
+
+    {
+      "base": "/app",
+      "routes": [
+        { "path": "/app/orders", "loader": "orders" },
+        { "path": "/app/orders/:orderId", "loader": "order", "guard": "auth" },
+        { "path": "/app/*", "isErrorBoundary": true }
+      ]
+    }
+
+  Invariants a conformant projection must satisfy:
+   - paths are POST-normalization — the `base` (/app) is already prefixed onto every entry path.
+   - no entry carries a non-serializable field (a leaked `pattern` or `template`) or any unknown key.
+   - the whole map is JSON-serializable (round-trips through JSON.stringify/parse unchanged).
+   - source order is preserved (first match wins), mirroring the authored `<template route>` order.
+
+  This is the read-side contract validated by `validateRouteMap` (we:blocks/router/route-map.ts); the case
+  pins the same shape declaratively for any conforming generator.
+-->

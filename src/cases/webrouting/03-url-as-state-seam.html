@@ -1,0 +1,42 @@
+<!--
+  WEB CASE 3: URL-as-state seam (declared state slice → URL persistence + codec round-trip)
+  The third webrouting conformance axis (URL-as-state seam, slice D #1728/#1686). A conformant router-agnostic
+  component DECLARES the state it syncs to the URL — a namespaced key, a persistence mode, a shared codec, and
+  a default — and the seam honors it: the codec round-trips (the SAME codec reads and writes), persistence is
+  per-component and NEVER forced, popstate is the source of truth, and concurrent cross-component writes batch
+  into one history entry (the optional coordinator). Presentation-free; no runtime is executed — this is the
+  contract any conforming `UrlStateSlice` impl must reproduce, declared statically.
+
+  The slices below mirror the pagination `urlSync` migration target named in slice D.
+-->
+<script type="application/vnd.webrouting.url-state+json">
+{
+  "slices": [
+    { "key": "page",  "persistence": "url",     "codec": "int",    "default": 1 },
+    { "key": "sort",  "persistence": "url",     "codec": "string", "default": "name" },
+    { "key": "filter","persistence": "session", "codec": "json",   "default": {} },
+    { "key": "draft", "persistence": "memory",  "codec": "json",   "default": null }
+  ]
+}
+</script>
+
+<!--
+  EXPECTED (url-as-state seam axis): for each declared slice, given the URL `?page=3&sort=date`:
+
+    page   → read 3   (int codec decodes "3" → 3; write 3 re-encodes to "3" — read=write round-trip)
+    sort   → read "date"
+    filter → absent from the URL → falls back to its default {} (persistence: session, not the address bar)
+    draft  → never serialized to the URL at all (persistence: memory — in-tab only, never forced to the URL)
+
+  Invariants a conformant seam must satisfy:
+   - persistence is honored per-slice and never forced: a `url` slice appears in the address bar, a `session`
+     slice survives reload but is not in the URL, a `memory` slice is in-tab only.
+   - the codec is shared read+write — encode(decode(x)) and decode(encode(x)) are stable (no drift).
+   - popstate is truth: a back/forward navigation re-reads the URL and re-hydrates every `url` slice.
+   - concurrent writes from >1 component collapse into ONE history entry (the optional coordinator, nuqs model)
+     — not one entry per slice.
+
+  This is the read+write contract of `UrlStateSlice<T>` / `UrlCodec<T>` / `UrlStateCoordinator`
+  (we:blocks/router/url-state.ts, slice D); the runtime impl rides downstream to FUI. The case asserts the
+  seam semantics, not any rendered presentation.
+-->
