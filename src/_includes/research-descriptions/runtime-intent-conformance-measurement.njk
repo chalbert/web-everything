@@ -1,0 +1,82 @@
+<h2>Purpose</h2>
+<p>
+  Prep survey for decision
+  <a href="/backlog/1791-declared-intent-exposure-reality-measurement-contract-for-th/">#1791</a>, which
+  gates the explorer's intent-conformance oracle
+  (<a href="/backlog/1698-intent-conformance-oracle-for-the-explorer-declared-intent-/">#1698</a>, under
+  the explorer-CLI-autonomy program
+  <a href="/backlog/1522-explorer-cli-autonomy/">#1522</a>). #1698 wants the explorer to read a running
+  page's <em>declared</em> density / motion / a11y-level and flag where the rendered page diverges from
+  its own declaration. The pre-flight found that
+  <a href="/backlog/1689-per-app-declared-rule-registry-rule-to-conformance-vector-li/">#1689</a> shipped
+  a <strong>DeclaredRule</strong> registry (rule→conformance-vector linkage), <strong>not</strong> an
+  intent exposure — leaving two contracts apparently undecided: <strong>Exposure</strong> (how a page
+  declares the intents) and <strong>Reality measurement</strong> (how the oracle measures each dimension).
+</p>
+
+<h2>The headline finding</h2>
+<p>
+  <strong>The exposure contract already exists and is already consumed.</strong> A running page declares
+  its profile via root <code>data-intent-*</code> attributes:
+  <code>INTENT_PROFILE_ATTRS = { density: 'data-intent-density', mode: 'data-intent-mode', motion:
+  'data-intent-motion' }</code> (<code>plateau:src/dev-browser/intent-inspector/inspect.ts:11-24</code>),
+  read by <code>readIntentProfile()</code> (<code>inspect.ts:26-33</code>) and emitted by the FUI
+  workbench from a design-system preset (<code>fui:workbench/mount.ts:330-333</code>). The vocabulary is
+  owned by WE intents — <code>density.json</code> (comfortable 44px+ / compact 32px / wafer 24px touch
+  targets) and <code>motion.json</code> (natural / immediate / reduced). So the item's three exposure
+  candidates collapse: the root data-attrs <em>are</em> the live contract; the #1689 DeclaredRule is the
+  wrong layer (it links declared <em>rules</em> to test <em>vectors</em>, not a density/motion profile —
+  <code>declared-rules/types.ts:35-56</code>); and a per-page manifest is a redundant parallel path. The
+  Exposure question demotes from a fork to <strong>support-by-default: reuse <code>data-intent-*</code></strong>.
+</p>
+
+<h2>Reality-measurement prior art</h2>
+<ul>
+  <li>
+    <strong>Density.</strong> WCAG 2.5.8 Target Size (Minimum) = 24×24 CSS px (AA); 2.5.5 (Enhanced) =
+    44×44 (AAA) — the <code>density.json</code> bands map onto exactly this scale. Density reality =
+    <em>geometric</em> hit-box measurement (<code>getBoundingClientRect</code>) of interactive elements
+    vs the declared band's floor. Geometric measurement catches a page that declares <code>compact</code>
+    but a CSS override renders 18px targets — a token re-read cannot.
+  </li>
+  <li>
+    <strong>Motion.</strong> Re-render under emulated <code>prefers-reduced-motion: reduce</code> and flag
+    still-active non-semantic animation (<code>Element.getAnimations()</code>). The native View
+    Transitions API does not auto-respect reduced-motion
+    (<code>we:conformance-vectors/slide-transition-reduced-motion.vectors.ts</code>); the FUI upgrader
+    already infers a motion intent from a <code>prefers-reduced-motion</code> guard.
+  </li>
+  <li>
+    <strong>A11y.</strong> Already collected — <code>Observation.a11yViolations</code> from the #770 axe
+    lane (<code>plateau:tools/explorer/oracles/observation.ts:39-46</code>). Axe measures
+    <em>absolute</em> WCAG conformance; no new declaration is required.
+  </li>
+</ul>
+
+<h2>The three residual forks #1791 must rule</h2>
+<ol>
+  <li><strong>a11y-level</strong> — delegate wholly to the absolute axe lane (default) vs mint a declared
+    a11y-level intent + attribute. No a11y-level intent exists today.</li>
+  <li><strong>Reality-field home</strong> — extend the existing <code>Observation</code> (default) vs a
+    parallel intent-observation. #1698 explicitly rides the existing single collector.</li>
+  <li><strong>Density metric</strong> — touch-target hit-size (default) vs whitespace/spacing density.</li>
+</ol>
+
+<h2>Constellation placement</h2>
+<p>
+  Per the conformance verifier-vs-subject split (#1467): WE owns the <strong>contract</strong> (the intent
+  vocabulary + bands — <code>density.json</code> / <code>motion.json</code>); the plateau explorer owns
+  the <strong>measurer</strong> (the oracle + collector probes,
+  <code>plateau:tools/explorer/oracles</code>). No new WE↔FUI edge — the explorer reads rendered DOM plus
+  WE-owned band values; it imports no FUI code.
+</p>
+
+<h2>Latent inconsistency flagged</h2>
+<p>
+  The standard <code>motion.json</code> vocabulary is <code>natural | immediate | reduced</code>; the
+  runtime <code>manifest.ts</code> / <code>IntentProfile</code> examples use
+  <code>full | reduced | none</code>. Both share <code>reduced</code>, so the reduced-motion oracle is
+  unblocked, but the divergence is real and noted on #1791 as a residual — not a measurement fork.
+</p>
+
+<p>Full grounding: <code>we:reports/2026-06-26-runtime-intent-conformance-measurement.md</code>.</p>
