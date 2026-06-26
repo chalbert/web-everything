@@ -56,3 +56,7 @@ export {
 // Sitemap.xml emitter — a concrete RouteMapEmitter over the route-map projection (#1737)
 export { createSitemapEmitter, isParametricPath } from './sitemap-emitter';
 export type { SitemapEmitterOptions, SitemapResult } from './sitemap-emitter';
+
+// IA nav-tree emitter — realizes the navigation-intent structure axis from the route-map (#1738)
+export { createNavTreeEmitter } from './nav-tree-emitter';
+export type { NavStructure, NavTreeNode, NavTreeResult, NavTreeEmitterOptions } from './nav-tree-emitter';
