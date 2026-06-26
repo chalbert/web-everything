@@ -75,3 +75,7 @@ export type {
   SpeculationRulesResult,
   SpeculationRulesEmitterOptions,
 } from './speculation-rules-emitter';
+
+// Dynamic-route param-source hook — opt-in enumeration of parametric routes for concrete-URL emitters (#1741)
+export { expandRouteMap, substituteParams } from './param-source';
+export type { RouteParams, ParamSource, ParamSourceMap, ParamExpansion } from './param-source';
