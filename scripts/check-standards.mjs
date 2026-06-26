@@ -882,6 +882,54 @@ const backlogReportRefs = new Set(
   }
 }
 
+// ── 6g. Catalog-index completeness — every artifact type is reachable from a top-level index + nav ──
+// The recurring "expose everything" drift (#1803): a type ships detail pages (/<type>/{id}/) but never
+// gets a top-level index (/<type>/) or a nav entry, so it's only reachable by deep-linking. Derive the
+// detail-page type set from the templates themselves (a permalink "<type>/{{ …id }}/" right after the
+// quote — nested permalinks like "capabilities/adapters/{{ … }}/" don't match, by design) so a NEW
+// registry can't silently skip its index. A type is satisfied by (a) an index resolving to /<type>/
+// (a src/<type>.njk, or any template with permalink "<type>/") and (b) a weNavLink("/<type>/", …) in
+// base.njk — unless it's on an explicit exemption allowlist WITH a reason.
+{
+  const SRC = join(ROOT, 'src');
+  const njk = readdirSync(SRC).filter((f) => f.endsWith('.njk'));
+  const fileContent = new Map(njk.map((f) => [f, readFileSync(join(SRC, f), 'utf8')]));
+  const navContent = fileContent.get('_layouts/base.njk') // base.njk lives under _layouts; read it directly
+    ?? readFileSync(join(SRC, '_layouts', 'base.njk'), 'utf8');
+
+  // A type is exempt from the INDEX and/or NAV requirement only with a stated reason.
+  const INDEX_EXEMPT = {
+    projects: 'the homepage (/) is the projects catalog — it lists every project grouped by category',
+  };
+  const NAV_EXEMPT = {
+    projects: 'reached from the homepage hero/grid, not the Standards menu (its catalog is /)',
+  };
+
+  // Derive detail-page types: permalink "<type>/{{ …id }}/" anchored right after the opening quote.
+  const detailTypes = new Set();
+  for (const content of fileContent.values()) {
+    const m = content.match(/permalink:\s*["']([a-z0-9-]+)\/\{\{/);
+    if (m) detailTypes.add(m[1]);
+  }
+
+  for (const type of [...detailTypes].sort()) {
+    const hasIndexFile = existsSync(join(SRC, `${type}.njk`));
+    const hasIndexPermalink = [...fileContent.values()].some((c) =>
+      new RegExp(`permalink:\\s*["']${type}/["']`).test(c));
+    const hasIndex = hasIndexFile || hasIndexPermalink;
+    const hasNav = navContent.includes(`weNavLink("/${type}/"`) || navContent.includes(`weNavLink('/${type}/'`);
+
+    if (!hasIndex && !(type in INDEX_EXEMPT))
+      err(`Catalog type "${type}" has detail pages (/${type}/{id}/) but no top-level index resolving to /${type}/ ` +
+          `— add a src/${type}.njk index (mirror src/adapters.njk), or add it to INDEX_EXEMPT in check-standards.mjs with a reason (#1803).`,
+          { kind: 'catalog-index', file: `src/${type}.njk` });
+    if (!hasNav && !(type in NAV_EXEMPT))
+      err(`Catalog type "${type}" has detail pages but no nav entry — add weNavLink("/${type}/", "…") to src/_layouts/base.njk, ` +
+          `or add it to NAV_EXEMPT in check-standards.mjs with a reason (#1803).`,
+          { kind: 'catalog-nav', file: 'src/_layouts/base.njk' });
+  }
+}
+
 // ── 7. AGENTS.md inventory must be in sync (generated, not hand-edited) ────────
 try {
   const agentsPath = join(ROOT, 'AGENTS.md');

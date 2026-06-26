@@ -1,0 +1,57 @@
+---
+layout: base.njk
+title: Web Everything — Plugs
+---
+
+<section class="intro">
+  <h1>Plugs</h1>
+  <p>
+    Plugs are <strong>speculative platform primitives</strong> — runtime building blocks (registries,
+    base classes, injectors) that imagine how a missing capability would fit if it were normalized into
+    the web platform. Each plug below links to its full specification.
+  </p>
+</section>
+
+<section style="margin: 1.5rem 0 2rem;">
+  <div style="flex: 1; min-width: 220px; max-width: 420px;">
+    <h3 style="margin: 0 0 0.5rem; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted);">Search</h3>
+    <input type="search" id="plug-search" placeholder="Filter by name, summary, or type…"
+           style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.9em; background: var(--color-surface, #fff);">
+  </div>
+</section>
+
+<div class="project-grid" id="plug-grid">
+  {% for plug in plugs %}
+  <a href="/plugs/{{ plug.id }}/"
+     class="project-card plug-tile"
+     data-haystack="{{ plug.id }} {{ plug.name | lower }} {{ plug.summary | lower }} {{ plug.type | lower }}"
+     style="text-decoration: none; color: inherit; display: block;">
+    <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+      <h3 class="project-title" style="margin: 0;">{{ plug.name }}</h3>
+      <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if plug.status == 'active' %}#dcfce7{% elif plug.status == 'draft' %}#dbeafe{% elif plug.status == 'concept' %}#fef3c7{% elif plug.status == 'experimental' %}#fde68a{% else %}#f1f5f9{% endif %}; color: {% if plug.status == 'active' %}#166534{% elif plug.status == 'draft' %}#1e40af{% elif plug.status == 'concept' %}#92400e{% elif plug.status == 'experimental' %}#854d0e{% else %}#475569{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ plug.status | title }}</span>
+    </div>
+    <p style="margin: 0; color: var(--color-text-muted); font-size: 0.9em;">{{ plug.summary | safe }}</p>
+  </a>
+  {% endfor %}
+</div>
+
+<p id="plug-empty" style="display: none; text-align: center; color: var(--color-text-muted); margin: 2rem 0;">No plugs match.</p>
+
+<script>
+(function () {
+  var grid = document.getElementById('plug-grid');
+  var empty = document.getElementById('plug-empty');
+  var search = document.getElementById('plug-search');
+  var tiles = Array.prototype.slice.call(grid.querySelectorAll('.plug-tile'));
+  search.addEventListener('input', function () {
+    var q = (search.value || '').trim().toLowerCase();
+    var visible = 0;
+    tiles.forEach(function (tile) {
+      var ok = !q || tile.dataset.haystack.indexOf(q) !== -1;
+      tile.style.display = ok ? '' : 'none';
+      if (ok) visible++;
+    });
+    empty.style.display = visible === 0 ? '' : 'none';
+  });
+})();
+</script>

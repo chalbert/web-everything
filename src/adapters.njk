@@ -1,0 +1,38 @@
+---
+layout: base.njk
+title: Web Everything — Adapters
+---
+
+<section class="intro">
+  <h1>Adapters</h1>
+  <p>
+    Adapters are <strong>format- and library-bridges</strong>. Rendering adapters let teams author in
+    HTML, JSX, or template strings and compile to the same Web Everything primitives; syntax and library
+    adapters bridge alternative authoring forms and incumbent libraries into the standard. Each adapter
+    below links to its full specification.
+  </p>
+  <p style="color: var(--color-text-muted); font-size: 0.9em;">
+    Adapters are owned by the <a href="/projects/webadapters/">Web Adapters</a> project — see it for the
+    narrative grouping and rationale.
+  </p>
+</section>
+
+{% for category in adapters %}
+<section style="margin: 2rem 0;">
+  <h2 id="{{ category.id }}" style="font-size: 1.1em;">{{ category.title }}</h2>
+  {% if category.description %}<p style="color: var(--color-text-muted); font-size: 0.9em; margin-top: 0.25rem;">{{ category.description | safe }}</p>{% endif %}
+  <div class="project-grid">
+    {% for adapter in category.items %}
+    <a href="/adapters/{{ adapter.id }}/"
+       class="project-card"
+       style="text-decoration: none; color: inherit; display: block;">
+      <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+        <h3 class="project-title" style="margin: 0;">{{ adapter.name }}</h3>
+        <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if adapter.status == 'implemented' %}#dcfce7{% elif adapter.status == 'draft' %}#dbeafe{% else %}#f1f5f9{% endif %}; color: {% if adapter.status == 'implemented' %}#166534{% elif adapter.status == 'draft' %}#1e40af{% else %}#475569{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ adapter.status | title }}</span>
+      </div>
+      <p style="margin: 0; color: var(--color-text-muted); font-size: 0.9em;">{{ adapter.summary | safe }}</p>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}

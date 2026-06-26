@@ -1,0 +1,26 @@
+---
+layout: base.njk
+title: Web Everything — States
+---
+
+<section class="intro">
+  <h1>States</h1>
+  <p>
+    States are <strong>standards for the state and validation layer</strong> — schemas, signals, and
+    stores expressed declaratively over web primitives. Each state below links to its full specification.
+  </p>
+</section>
+
+<div class="project-grid">
+  {% for state in states %}
+  <a href="/states/{{ state.id }}/"
+     class="project-card"
+     style="text-decoration: none; color: inherit; display: block;">
+    <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+      <h3 class="project-title" style="margin: 0;">{{ state.name }}</h3>
+      <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if state.status == 'active' %}#dcfce7{% elif state.status == 'draft' %}#dbeafe{% elif state.status == 'concept' %}#fef3c7{% else %}#f1f5f9{% endif %}; color: {% if state.status == 'active' %}#166534{% elif state.status == 'draft' %}#1e40af{% elif state.status == 'concept' %}#92400e{% else %}#475569{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ state.status | title }}</span>
+    </div>
+    <p style="margin: 0; color: var(--color-text-muted); font-size: 0.9em;">{{ state.summary | safe }}</p>
+  </a>
+  {% endfor %}
+</div>
