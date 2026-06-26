@@ -3,10 +3,24 @@ kind: story
 size: 5
 parent: "746"
 status: open
-blockedBy: []
+blockedBy: ["1752"]
 dateOpened: "2026-06-22"
+dateStarted: "2026-06-26"
 tags: []
 ---
+
+> **Pre-flight (batch-2026-06-26-1732-1696) — transport premise is dead; re-pointed `blockedBy: ["1752"]`.**
+> Two later rulings invalidated this item's "the WE half ships a committed artifact; just wire transport"
+> framing: **(1)** #1730 **deleted** the WE MaaS serving runtime per the #1282 zero-impl rule — both
+> `we:scripts/gen-author-mode-source.mjs` and the committed `we:src/_data/authorModeSource.json` are **gone**,
+> so the residual-1 "sibling read of WE's committed artifact" no longer has an artifact to read. **(2)** #1731
+> ruled (Fork 1a) the source/CEM bytes now cross via **FUI's own `/_maas/` HTTP data route** (dev:
+> live-generated in the FUI MaaS middleware in-memory; prod: a build-emitted FUI-deployable copy), **not** a
+> read of WE's tree. That makes the generator a FUI concern and routes both residuals through the FUI MaaS
+> loader + thin-descriptor registry that #1731 spun out as **#1752** (open, size 8). Per this item's own
+> "align there first to avoid hardcode-then-rip" note, the consumption wiring must follow #1752's loader/route
+> — so this is `blockedBy: ["1752"]` (was `[]`). Released unbuilt; re-scope the body to the FUI-served model
+> when #1752 lands.
 
 # Wire the WE author-mode-source artifact into the live FUI workbench (transport + declarative-component blocks)
 
