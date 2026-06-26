@@ -7,11 +7,14 @@ dateOpened: "2026-06-22"
 tags: []
 ---
 
-# Migrate WE-docs table surfaces to FUI blocks/renderers/data-table (mode-C mount)
+# Migrate WE-docs table surfaces to FUI blocks/renderers/data-table (transient-CE mount)
 
 Umbrella for migrating the ~225 `<table>` surfaces (largest; no shared macro) to FUI
-blocks/renderers/data-table via the mode-C inline mount proven by #1598. **2nd-level slice (2026-06-22,
-`/slice`, see relatedReport)** — split by include-family, each child `blockedBy #1598`. Three families land
+blocks/renderers/data-table via the **transient-CE mount** (`<we-data-table>`, #1621 rule-7 model — the
+data-table counterpart to the #1598/#1758 badge dogfood; the original "mode-C inline mount proven by #1598"
+framing was **stale**, #1598 was the badge migration that #1621 pivoted off mode-C). **2nd-level slice
+(2026-06-22, `/slice`, see relatedReport)** — split by include-family, each child `blockedBy #1787` (the
+FUI `fui:embed/data-table-in-document.ts` embed entry, re-pointed from the retired #1598, batch-2026-06-26). Three families land
 ≤3; the two largest are heterogeneous bulk isolated (not count-chunked — avoids arbitrary fragmentation)
 and stay 3rd-level `/slice` targets:
 
