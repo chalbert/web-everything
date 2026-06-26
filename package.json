@@ -27,9 +27,6 @@
     "check:axis-vacancy": "node scripts/check-axis-vacancy.mjs",
     "pin:references": "node scripts/pin-reference-snapshots.mjs",
     "gen:maas-openapi": "node scripts/gen-maas-openapi.mjs",
-    "gen:maas-conformance": "node scripts/gen-maas-conformance.mjs",
-    "gen:author-mode-source": "node scripts/gen-author-mode-source.mjs",
-    "check:maas-conformance": "node scripts/check-maas-conformance.mjs",
     "check:standards": "node scripts/check-standards.mjs",
     "check:memory": "node scripts/check-memory.mjs",
     "check:item": "node scripts/check-backlog-item.mjs",
@@ -48,8 +45,7 @@
     "autofix": "node scripts/conformance-autofix.mjs",
     "design-refs": "node scripts/design-refs.mjs",
     "design-refs:frontier": "node scripts/design-refs/frontier.mjs",
-    "gen:maas-origin": "node scripts/gen-maas-origin.mjs",
-    "gen:wrapper": "node scripts/gen-wrapper/cli.mjs",
+"gen:wrapper": "node scripts/gen-wrapper/cli.mjs",
     "gen:cem": "node scripts/gen-cem.mjs"
   },
   "devDependencies": {

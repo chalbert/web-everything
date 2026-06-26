@@ -1,10 +1,12 @@
 ---
 kind: story
 size: 8
-status: open
+status: resolved
 blockedBy: []
 dateOpened: "2026-06-24"
-dateStarted: "2026-06-24"
+dateStarted: "2026-06-26"
+dateResolved: "2026-06-26"
+graduatedTo: none
 tags: []
 ---
 
@@ -25,3 +27,7 @@ relocated its test, but **could not delete** `we:blocks/renderers/functional/fun
 functional impl is now an orphan *except for moduleService* — **delete it here** when moduleService moves
 (its FUI twin already exists; point FUI-moduleService's `'functional'` branch at
 `fui:blocks/renderers/functional/functionalComponent`).
+
+## Done (2026-06-26)
+
+Per #1771's forced mapping, deleted all WE impl from `we:blocks/renderers/module-service/`. Kept: `we:blocks/renderers/module-service/servePathIR.ts`, `we:blocks/renderers/module-service/servePathOpenAPI.ts`, `we:blocks/renderers/module-service/conformance/golden.json` (frozen vectors), `we:blocks/renderers/module-service/traitServePath.ts` (WE-contract imports only; filed #1782 for its FUI relocation). Deleted: moduleService, authorModeSource, fetchHandler, productionDelivery, prewarm, reactivity, incrementalUpdate, definitionRegistry, entire `we:blocks/renderers/module-service/generation/` subtree and `we:blocks/renderers/module-service/conformance/` except vectors data, demos, scripts (`we:scripts/gen-author-mode-source.mjs`, `we:scripts/gen-maas-conformance.mjs`, `we:scripts/check-maas-conformance.mjs`, `we:scripts/gen-maas-origin.mjs`), `we:tools/maas/vite-plugin.ts`, `we:src/_data/authorModeSource.json`. Also deleted `we:blocks/renderers/functional/functionalComponent.ts` orphan per #1778 note. `check:standards` clean (0 errors); `vitest run` 1938/1940 pass (2 pre-existing failures unrelated to this item).

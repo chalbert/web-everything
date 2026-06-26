@@ -1,7 +1,7 @@
 ---
 kind: task
 status: open
-blockedBy: ["1730"]
+blockedBy: []
 dateOpened: "2026-06-24"
 tags: []
 ---

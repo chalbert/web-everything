@@ -542,12 +542,6 @@ describe('codegen-placement invariants (#964 — hardening #956)', () => {
     expect(errors).toEqual([]);
   });
 
-  it('real data stays clean: the live ServeForm union is the ratified set', () => {
-    const src = readFileSync(join(ROOT, 'blocks/renderers/module-service/moduleService.ts'), 'utf8');
-    const union = src.match(/export type ServeForm\s*=\s*([^;]+);/);
-    const ids = [...union[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
-    expect(validateReferenceRuntimeForms(ids).errors).toEqual([]);
-  });
 });
 
 describe('findRawHtmlInMarkdown — raw HTML in backlog body (#290)', () => {
