@@ -38,26 +38,43 @@ export interface ConformanceClock {
 }
 
 /**
- * The #899 binding interface: the per-component adapter the driver dispatches a vector's steps to and reads
- * observable surfaces from. A binding interprets the action verbs (`setInput`, `beginAsync`, …) for ONE
- * standard's components and schedules any async settles on its {@link clock}; the driver stays verb-agnostic
- * (it only sequences steps and advances time). Each implementer ships a binding per conformant standard; a
- * test supplies a fake one.
+ * The #899 binding interface, **clock-free base**: the per-component adapter the driver dispatches a vector's
+ * steps to and reads observable surfaces from. A binding interprets the action verbs (`setInput`, `setFacts`,
+ * …) for ONE standard and reads its observable outcomes; the driver stays verb-agnostic (it only sequences
+ * steps). Each implementer ships a binding per conformant standard; a test supplies a fake one.
+ *
+ * A **synchronous** standard — a facts→verdict engine (e.g. a DMN policy engine, #1784) whose vectors are
+ * order-only (every step's `atMs` omitted ⇒ synchronous, per {@link file://./schema.ts}) — implements this
+ * base directly: it has no temporal vectors, so it needs **no** {@link ConformanceClock}. Only a standard
+ * with *temporal* vectors (`beginAsync … settlesInMs`) implements the clock-bearing {@link ConformanceBinding}
+ * below. (Skeptic-corrected in #1784: the clock is welded to temporal observation and is dead weight for
+ * synchronous logic, so the contract factors rather than carrying an unused clock everywhere.)
  */
-export interface ConformanceBinding {
-  /** The shared clock the binding schedules async settles on (the same instance the driver advances). */
-  readonly clock: ConformanceClock;
-  /** Perform one action verb against the candidate component (args are verb-specific). */
+export interface SynchronousConformanceBinding {
+  /** Perform one action verb against the candidate (args are verb-specific). */
   dispatch(step: ConformanceVector['steps'][number]): void | Promise<void>;
   /**
-   * Read one observable platform surface (`aria`, `renderedMessage`, `validity`, `state`, `events`, …) —
-   * never an impl internal. `aria` returns the attribute map; `state` is the contract-vocabulary state used
-   * by `expect.finalState`.
+   * Read one observable surface (`verdict`, `aria`, `renderedMessage`, `validity`, `state`, `events`, …) —
+   * never an impl internal. `state` is the contract-vocabulary state used by `expect.finalState`.
    */
   observe(surface: string): unknown;
 }
 
-/** Builds a fresh binding (clean component + clock) for each vector, so vectors don't bleed into each other. */
-export interface ConformanceBindingFactory {
-  create(vector: ConformanceVector): ConformanceBinding | Promise<ConformanceBinding>;
+/**
+ * The **temporal** binding: a {@link SynchronousConformanceBinding} plus the virtual {@link clock} a temporal
+ * vector needs — the binding schedules its async settles on the same clock instance the driver advances. A
+ * standard with no temporal vectors uses the clock-free base above instead.
+ */
+export interface ConformanceBinding extends SynchronousConformanceBinding {
+  /** The shared clock the binding schedules async settles on (the same instance the driver advances). */
+  readonly clock: ConformanceClock;
+}
+
+/**
+ * Builds a fresh binding (clean candidate + clock) for each vector, so vectors don't bleed into each other.
+ * Generic over the binding variant: defaults to the temporal {@link ConformanceBinding} (backward-compatible);
+ * a synchronous standard parameterises it as `ConformanceBindingFactory<SynchronousConformanceBinding>`.
+ */
+export interface ConformanceBindingFactory<B extends SynchronousConformanceBinding = ConformanceBinding> {
+  create(vector: ConformanceVector): B | Promise<B>;
 }
