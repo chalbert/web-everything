@@ -1,12 +1,11 @@
 ---
-kind: story
-size: 8
+kind: epic
 status: open
 dateOpened: "2026-06-26"
 relatedReport: reports/2026-06-26-backlog-split-analysis.md
-tags: []
+tags: [conformance, constellation-placement, conformance-vectors, headless-logic]
 ---
 
-# Build the #899 FUI conformance reference backend + headless-logic surface path (the #1294 un-park foundation)
+# The generic conformance-surface foundation that un-parks #1294
 
-The #899 behavioral-conformance decision (resolved 2026-06-18) ratified that runnable backends live in FUI and the WE site runs vectors against them — but never opened a build story, so the FUI reference backend and the headless-logic surface path the WE-website demo would repoint to do not exist. This is the foundation that un-parks #1294 (relocating the WE-resident logic reference runtimes): build the FUI conformance reference backend (mount/dispatch + clock impl per #899) and a mode-C / vector-runner path by which a WE-website conformance demo surfaces FUI headless logic with no build-time @frontierui import.
+Per #1784 (ratified: the #899 declarative-vector KIT for facts→verdict runtimes), this is the **generic** machinery the WE docs site needs to exercise a relocated headless-logic runtime's conformance with no build-time `@frontierui` import — independent of any one subsystem (webpolicy's own binding + corpus belong to #1294's relocation). Sliced 2026-06-26 (`we:reports/2026-06-26-split-analysis-1783.md`) into the WE synchronous-binding variant (ready) and the FUI-origin runner bundle (gated on a runner-home decision). #1294 stays blocked on this epic.
