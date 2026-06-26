@@ -64,3 +64,14 @@ export type { NavStructure, NavTreeNode, NavTreeResult, NavTreeEmitterOptions } 
 // Prerender manifest emitter — the static-route pre-render list over the route-map projection (#1739)
 export { createPrerenderEmitter } from './prerender-emitter';
 export type { PrerenderManifest } from './prerender-emitter';
+
+// Speculation Rules emitter — native prefetch/prerender rules over the route-map projection (#1740)
+export { createSpeculationRulesEmitter } from './speculation-rules-emitter';
+export type {
+  SpeculationAction,
+  SpeculationEagerness,
+  SpeculationRule,
+  SpeculationRules,
+  SpeculationRulesResult,
+  SpeculationRulesEmitterOptions,
+} from './speculation-rules-emitter';
