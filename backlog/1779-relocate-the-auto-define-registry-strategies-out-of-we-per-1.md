@@ -1,9 +1,11 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-24"
 dateStarted: "2026-06-24"
+dateResolved: "2026-06-26"
+graduatedTo: none
 relatedTo: ["1775", "1767", "1702", "1662", "1282"]
 locus: frontierui
 tags: [frontierui, blocks, renderers, relocation]
