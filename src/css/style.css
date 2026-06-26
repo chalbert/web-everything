@@ -1771,3 +1771,19 @@ we-code-view pre {
   font: 13px/1.55 ui-monospace, SFMono-Regular, monospace;
 }
 we-code-view code { font: inherit; }
+
+/* #1786 (family #1601): SSR baseline for the FUI transient `<we-card>` the docs server-render. Like the
+   pills above (and unlike `we-code-view`), `CardElement` is a TransientElement that self-replaces into a
+   light-DOM `<article class="fui-card">` once the cross-origin FUI registration ESM loads (base.njk), at
+   which point the FUI-injected `.fui-card` stylesheet takes over. This tag-keyed baseline styles the
+   pre-upgrade `<we-card>` so it doesn't flash, and stands alone if the FUI host is unavailable (the load
+   .catch()es to this). Mirrors the FUI CARD_CSS look (fui:blocks/card/Card.ts); keep in sync if it changes. */
+we-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border, #e2e5ea);
+  border-radius: var(--radius-md, 10px);
+  background: var(--color-surface-card, #fff);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(17, 18, 29, 0.06));
+  overflow: hidden;
+}

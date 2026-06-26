@@ -446,5 +446,15 @@
         .then((m) => m.registerCodeViewInDocument())
         .catch(() => { /* FUI host unavailable — keep the SSR code baseline */ });
     </script>
+    {#- #1786 card (family #1601): the card counterpart to the badges/code-view entries above. A runtime
+        cross-origin import (mode C, rule 6), NEVER a build-time `import '@frontierui'`. Registers the transient
+        `<we-card>` + injects the card CSS once; each SSR `<we-card>` self-replaces in place to a light-DOM
+        `<article class="fui-card">`. A load failure is silent and the `we-card{}` SSR baseline in style.css
+        remains the rendered card (progressive enhancement). -#}
+    <script type="module">
+      import("{{ links.frontierUrl }}/embed/card-in-document.ts")
+        .then((m) => m.registerCardInDocument())
+        .catch(() => { /* FUI host unavailable — keep the SSR card baseline */ });
+    </script>
 </body>
 </html>
