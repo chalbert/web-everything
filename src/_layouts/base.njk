@@ -436,5 +436,15 @@
         .then((m) => m.registerBadgesInDocument())
         .catch(() => { /* FUI host unavailable — keep the SSR pill baseline */ });
     </script>
+    {#- #1785 code-view (family #1599): the code-view counterpart to the badges entry above. A second runtime
+        cross-origin import (mode C, rule 6), NEVER a build-time `import '@frontierui'`. Registers the transient
+        `<we-code-view>` + injects its host-document CSS once; each SSR `<we-code-view><pre><code>…</code></pre>`
+        upgrades in place, hydrating from its light-DOM source. A load failure is silent and the `we-code-view{}`
+        SSR baseline in style.css remains the rendered code surface (progressive enhancement). -#}
+    <script type="module">
+      import("{{ links.frontierUrl }}/embed/code-view-in-document.ts")
+        .then((m) => m.registerCodeViewInDocument())
+        .catch(() => { /* FUI host unavailable — keep the SSR code baseline */ });
+    </script>
 </body>
 </html>

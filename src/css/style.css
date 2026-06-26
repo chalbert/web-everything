@@ -1753,3 +1753,21 @@ we-filter-chip[selected] {
   color: var(--accent, #1d4ed8);
   border-color: color-mix(in srgb, var(--accent, #1d4ed8) 45%, #fff);
 }
+
+/* #1785 (family #1599): SSR baseline for the FUI transient `<we-code-view>` the docs server-render.
+   Unlike the light-DOM self-replacing pills above, `CodeViewElement` upgrades to a SHADOW root (no slot),
+   so the docs server-render the source in light DOM — `<we-code-view><pre><code>…</code></pre>` — and the
+   element hydrates `code` from that text on upgrade (progressive enhancement). This tag-keyed baseline
+   styles the pre-upgrade light-DOM surface so it doesn't flash, and stands alone if the FUI host never
+   loads (the base.njk import .catch()es to this). Mirrors the FUI `codeViewHostCss` look
+   (fui:blocks/code-view/CodeViewElement.ts); keep in sync if that changes. */
+we-code-view { display: block; }
+we-code-view pre {
+  margin: 0;
+  padding: 0.8rem 1rem;
+  overflow: auto;
+  border-radius: 8px;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  font: 13px/1.55 ui-monospace, SFMono-Regular, monospace;
+}
+we-code-view code { font: inherit; }
