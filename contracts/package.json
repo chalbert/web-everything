@@ -36,6 +36,7 @@
     "./reproduction-parity": "./reproduction-parity.ts",
     "./repro-bundle": "./repro-bundle.ts",
     "./permissions": "./permissions.ts",
-    "./webcontexts": "./webcontexts.ts"
+    "./webcontexts": "./webcontexts.ts",
+    "./webpolicy": "./webpolicy.ts"
   }
 }
