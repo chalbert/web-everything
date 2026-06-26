@@ -3,8 +3,10 @@ kind: epic
 size: 8
 status: open
 dateOpened: "2026-06-20"
+blockedBy: ["1783"]
 childlessReason: parked
 relatedProject: webvalidation
+relatedReport: reports/2026-06-24-split-analysis-1294.md
 tags: [constellation-placement, reference-runtime, webpolicy, relocation, frontierui, conformance]
 ---
 
@@ -31,6 +33,11 @@ A skeptic pass confirmed the move cannot start without stranding conformance pro
 **Un-park when:** (a) FUI hosts each runtime, AND (b) the website can surface FUI for headless logic
 (a mode-C runtime bundle path **or** the #899 runner is built). Then slice per subsystem (webpolicy
 first — it has the live demo + 23 tests).
+
+**Now `blockedBy: 1783`** (filed 2026-06-26): both un-park legs reduce to the one missing foundation —
+the #899-ratified FUI conformance reference backend + headless-logic surface path was never built. #1783
+is that build; on its landing, re-run `/slice 1294` (gate (a) → "move into an existing home", gate (b) →
+"repoint to an existing runner"). See `we:reports/2026-06-26-backlog-split-analysis.md`.
 
 ## Slices (to carve on un-park)
 
