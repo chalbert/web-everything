@@ -1,10 +1,14 @@
 ---
 kind: decision
-status: open
+status: resolved
 relatedProject: webvalidation
 blocks: ["1783"]
 relatedReport: reports/2026-06-26-conformance-surface-headless-logic.md
 dateOpened: "2026-06-26"
+dateStarted: "2026-06-26"
+dateResolved: "2026-06-26"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-26"
 tags: [conformance, constellation-placement, mode-c, conformance-vectors, headless-logic, webpolicy]
 ---
@@ -12,6 +16,10 @@ tags: [conformance, constellation-placement, mode-c, conformance-vectors, headle
 # Conformance model for the relocated headless-logic runtimes — bespoke self-checking FUI bundle vs the #899 declarative-vector KIT
 
 The #1294 relocation un-park gate (b) needs the WE docs site to exercise FUI headless logic (webpolicy is a DMN engine — facts→decision, no DOM) with no build-time `@frontierui` import, while keeping an executable conformance proof. Investigation dissolved the original "mode-C **or** #899-runner" framing: those are **orthogonal layers** (mode-C = transport, #899 = harness format) that compose — you mode-C-load a runner. The genuine fork sits underneath: the **conformance model** for the relocated logic runtimes — keep a bespoke self-checking FUI bundle, or adopt the #899 declarative-vector KIT (which needs its binding generalized from DOM/component to headless logic).
+
+## Decision (ratified 2026-06-26)
+
+**(b) — the #899 declarative-vector KIT**, scoped to the **facts→verdict** runtimes (webpolicy first). A relocated logic runtime proves conformance as a declarative vector suite (facts→golden verdict): WE owns the vector corpus + a **clock-optional synchronous** `ConformanceBinding` variant; FUI ships the per-subsystem binding impl (a ~one-screen adapter — `dispatch(setFacts)` / `observe('verdict')`); plateau's runner logic (#1597) executes, re-exported as a **FUI-origin** bundle the docs site mode-C-loads. The two skeptic corrections stand: the loaded bundle is FUI-origin (a plateau bundle fails mode-C's #765 gate), and (a) carries no #1467 demerit (its real flaw is format proliferation). The conformance model for the non-engine #1078 runtimes (`intl`/`webtheme`/`webexpressions`) is a separate later call. Build delegated to #1783 (now unblocked).
 
 ## Settled before the fork (not decisions — grounding)
 
