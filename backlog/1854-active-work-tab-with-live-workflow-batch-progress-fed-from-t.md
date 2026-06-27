@@ -1,9 +1,11 @@
 ---
 kind: story
 size: 8
-status: active
+status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: "we:src/backlog.njk#panel-active + we:scripts/dev/active-progress-watch.mjs + we:src/assets/js/backlog-active.js"
 tags: [backlog-ui, dx]
 locus: webeverything
 ---
