@@ -1,8 +1,10 @@
 ---
 kind: epic
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-24"
+dateResolved: "2026-06-27"
+graduatedTo: "intent:region-select"
 relatedReport: reports/2026-06-24-1734-split-analysis.md
 tags: []
 ---
