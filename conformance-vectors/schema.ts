@@ -31,9 +31,47 @@ export interface ConformanceStep {
 }
 
 /**
+ * The closed comparison-matcher vocabulary for a non-verdict `expect` key (#1816, ratified —
+ * `docs/agent/platform-decisions.md#non-verdict-conformance-matcher`). A relocated runtime whose
+ * conformance output is *not* a verdict (#1294 non-engine: webtheme token-projection, intl formatting,
+ * analytics aggregation, reliability provider-strategy) does not get a new model — it classifies onto one
+ * of WE's two suite shapes and tags each `expect` key with *how* it is compared. The set is **closed and
+ * exhaustive** over what these runtimes emit; widening it is a fork to re-open, not a default.
+ *
+ * - `exact` — strict `===` (today's default; scalars, e.g. webcompliance `violationCount`).
+ * - `deep-equal` — structural equality (object returns: webtheme's resolved token map, reliability `RecoveryResult`).
+ * - `resolved-options/parts-structure` — assert `resolvedOptions()` + `formatToParts` part types/order,
+ *   whitespace/separator classes as equivalence classes (intl `Number`/`DateTime`/`RelativeTime` — never
+ *   raw strings, which drift with host ICU/CLDR).
+ * - `predicate` — a boolean over the observed surface: contains / subset / count / absence / sign-order
+ *   (analytics' `void`-returning recorded-call log; `Intl.Collator`, which has no `formatToParts`).
+ *
+ * WE owns the **vocabulary**; the per-key **dispatch** is the Plateau judge
+ * (`plateau:src/conformance-engine/conformanceVectors.ts`). Absent ⇒ `exact` (the strict-`===` default).
+ */
+export type ConformanceMatcher =
+  | 'exact'
+  | 'deep-equal'
+  | 'resolved-options/parts-structure'
+  | 'predicate';
+
+/** The closed matcher vocabulary, runtime-checkable by the validator (the schema's source of truth). */
+export const CONFORMANCE_MATCHERS: ReadonlyArray<ConformanceMatcher> = [
+  'exact',
+  'deep-equal',
+  'resolved-options/parts-structure',
+  'predicate',
+];
+
+/**
  * The observable outcome a conformant component must produce — read only through the platform surface.
  * `finalState`/`aria`/`validity` assert end-state; `neverObserved` is the temporal guard (a rendering
  * that must *never* appear at any point, e.g. a stale async message) the driver checks across the run.
+ *
+ * `matchers` carries the per-`expect`-key comparison tag (#1816): a map from an `expect` key to the
+ * `ConformanceMatcher` the Plateau judge applies to that key. A key with no entry defaults to `exact`
+ * (today's strict `===`), so existing verdict/scalar suites need no change. The reserved `matchers` key
+ * itself is metadata, never a comparable observation.
  */
 export interface ConformanceExpectation {
   /** The terminal observable state (contract vocabulary, not an impl field). */
@@ -42,6 +80,12 @@ export interface ConformanceExpectation {
   readonly neverObserved?: ReadonlyArray<Record<string, unknown>>;
   /** Expected ARIA attribute values on the final component. */
   readonly aria?: Record<string, string>;
+  /**
+   * Per-key comparison matcher (#1816). Maps an `expect` key to how the Plateau judge compares it;
+   * keys absent here are judged `exact`. Only the closed `ConformanceMatcher` members are valid —
+   * `assertConformanceSuite` rejects any other value.
+   */
+  readonly matchers?: Readonly<Record<string, ConformanceMatcher>>;
   /** Other observable assertions (validity, renderedMessage, …). */
   readonly [assertion: string]: unknown;
 }
@@ -119,6 +163,18 @@ export function assertConformanceSuite(suite: ConformanceVectorSuite): Conforman
     }
     if (!vector.expect || typeof vector.expect !== 'object')
       throw new ConformanceSchemaError(label, `vector "${vector.id}" missing \`expect\``);
+    const matchers = vector.expect.matchers;
+    if (matchers !== undefined) {
+      if (typeof matchers !== 'object' || matchers === null || Array.isArray(matchers))
+        throw new ConformanceSchemaError(label, `vector "${vector.id}" has a non-object \`matchers\``);
+      for (const [key, matcher] of Object.entries(matchers)) {
+        if (!CONFORMANCE_MATCHERS.includes(matcher as ConformanceMatcher))
+          throw new ConformanceSchemaError(
+            label,
+            `vector "${vector.id}" \`matchers.${key}\` is "${String(matcher)}" — not one of {${CONFORMANCE_MATCHERS.join(' · ')}}`,
+          );
+      }
+    }
     if (!Array.isArray(vector.observeVia) || vector.observeVia.length === 0)
       throw new ConformanceSchemaError(label, `vector "${vector.id}" must declare at least one \`observeVia\` surface`);
   }

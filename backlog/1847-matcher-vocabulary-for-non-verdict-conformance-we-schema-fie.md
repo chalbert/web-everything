@@ -2,9 +2,12 @@
 kind: story
 parent: "1294"
 size: 5
-status: open
+status: resolved
 relatedProject: webvalidation
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: conformance-vectors/schema.ts
 tags: [conformance, relocation]
 ---
 
