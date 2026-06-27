@@ -2,9 +2,12 @@
 kind: decision
 size: 3
 parent: "1855"
-status: open
+status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: docs/agent/memory-management.md rule 3 (conflict→delete wording); net decision = status quo, no new policy
+codifiedIn: one-off
 preparedDate: "2026-06-27"
 relatedReport: reports/2026-06-27-program-model-usage-watch.md
 tags: [memory, write-time, dedup, metadata, model-usage-watch]

@@ -43,7 +43,8 @@ So the goal is a **bounded index**, not a bounded corpus.
 3. **One canonical memory per idea.** When a new fact extends an existing one, **update that file** —
    don't add a parallel memory. Consolidate clusters (several files orbiting one idea) into a single file
    with sub-points; a single source can't contradict itself (split sources drift — e.g. an index line that
-   went stale while the nuance lived in another file). **Prune superseded / disproven memories on sight.**
+   went stale while the nuance lived in another file). When a new fact **conflicts** with an existing
+   memory, delete the stale one (don't let both stand). **Prune superseded / disproven memories on sight.**
 
 4. **Merge-before-add at budget.** When the index is at budget, adding a memory **requires** merging or
    pruning one first. The write-time hook enforces this mechanically (a save that pushes the index over
