@@ -1,8 +1,11 @@
 ---
 kind: task
 parent: "1855"
-status: open
+status: resolved
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: "we:MEMORY.md index trims (deep compaction → #1868)"
 tags: []
 ---
 
