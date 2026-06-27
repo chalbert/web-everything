@@ -121,25 +121,25 @@ title: Backlog
         <div class="filter-groups">
             <div class="status-filter" role="group" aria-label="Filter by status">
                 {% for s in statusOrder %}
-                <button type="button" class="status-filter-chip" data-status-chip="{{ s }}" aria-pressed="true">{{ s | title }}</button>
+                <we-filter-chip data-status-chip="{{ s }}" selected>{{ s | title }}</we-filter-chip>
                 {% endfor %}
             </div>
             <div class="status-filter" role="group" aria-label="Filter by kind">
                 {% for k in kindChips %}
-                <button type="button" class="status-filter-chip" data-kind-chip="{{ k }}" aria-pressed="true" title="{% if k == 'epic' %}umbrella — rolls up child stories/tasks{% elif k == 'task' %}bounded sub-work under a parent{% elif k == 'decision' %}a design fork to ratify (Tier B){% else %}an independently valuable, sized deliverable{% endif %}">{{ k | title }}</button>
+                <we-filter-chip data-kind-chip="{{ k }}" selected title="{% if k == 'epic' %}umbrella — rolls up child stories/tasks{% elif k == 'task' %}bounded sub-work under a parent{% elif k == 'decision' %}a design fork to ratify (Tier B){% else %}an independently valuable, sized deliverable{% endif %}">{{ k | title }}</we-filter-chip>
                 {% endfor %}
             </div>
             {% if sizeChips | length %}
             <div class="status-filter" role="group" aria-label="Filter by size">
                 {% for s in sizeChips %}
-                <button type="button" class="status-filter-chip" data-size-chip="{{ s }}" aria-pressed="true">{{ s }} pt{% if s != 1 %}s{% endif %}</button>
+                <we-filter-chip data-size-chip="{{ s }}" selected>{{ s }} pt{% if s != 1 %}s{% endif %}</we-filter-chip>
                 {% endfor %}
             </div>
             {% endif %}
             {% if tierChips | length %}
             <div class="status-filter" role="group" aria-label="Filter by agent-readiness">
                 {% for t in tierChips %}
-                <button type="button" class="status-filter-chip" data-tier-chip="{{ t }}" aria-pressed="true" title="{{ backlogMeta.tierMeaning[t] }}">{{ backlogMeta.tierLabel[t] }}</button>
+                <we-filter-chip data-tier-chip="{{ t }}" selected title="{{ backlogMeta.tierMeaning[t] }}">{{ backlogMeta.tierLabel[t] }}</we-filter-chip>
                 {% endfor %}
             </div>
             {% endif %}
@@ -461,22 +461,22 @@ title: Backlog
     <div class="ptable-filter" style="display:flex; gap:0.6rem 1rem; flex-wrap:wrap; align-items:center; margin-bottom:0.75rem;">
         <input type="search" data-ptable-search placeholder="Filter by # or title…" aria-label="Filter the table by id or title" style="appearance:none; border:1px solid var(--color-border); border-radius:0.4rem; padding:0.3rem 0.6rem; font:inherit; font-size:0.85em; min-width:200px;">
         <div class="status-filter" role="group" aria-label="Filter by readiness">
-            <button type="button" class="status-filter-chip" data-pready="batchable" aria-pressed="true" title="The batch pool — Tier-A task or story ≤8; a points-budgeted batch packs from here">Batchable</button>
-            <button type="button" class="status-filter-chip" data-pready="agentready" aria-pressed="true" title="Buildable agent-ready beyond the batch pool — a story ≥13 (too big to chain). Excludes epics.">Agent-ready</button>
-            <button type="button" class="status-filter-chip" data-pready="sliceable" aria-pressed="true" title="Epics — unblocked, not directly buildable. Tagged slice (unsliced), resolve (children all done), or tracking (open children, no action).">Epics</button>
-            <button type="button" class="status-filter-chip" data-pready="program" aria-pressed="true" title="Ongoing programs — perpetual umbrellas (e.g. the flagship exercise apps) marked ongoing:true. Never a resolve to-do; continuously advanced, a new slice each round.">Programs</button>
-            <button type="button" class="status-filter-chip" data-pready="decision" aria-pressed="true" title="Tier B — a decision to ratify">Decision</button>
-            <button type="button" class="status-filter-chip" data-pready="notready" aria-pressed="true" title="Tier C — has an open prerequisite">Not ready</button>
+            <we-filter-chip data-pready="batchable" selected title="The batch pool — Tier-A task or story ≤8; a points-budgeted batch packs from here">Batchable</we-filter-chip>
+            <we-filter-chip data-pready="agentready" selected title="Buildable agent-ready beyond the batch pool — a story ≥13 (too big to chain). Excludes epics.">Agent-ready</we-filter-chip>
+            <we-filter-chip data-pready="sliceable" selected title="Epics — unblocked, not directly buildable. Tagged slice (unsliced), resolve (children all done), or tracking (open children, no action).">Epics</we-filter-chip>
+            <we-filter-chip data-pready="program" selected title="Ongoing programs — perpetual umbrellas (e.g. the flagship exercise apps) marked ongoing:true. Never a resolve to-do; continuously advanced, a new slice each round.">Programs</we-filter-chip>
+            <we-filter-chip data-pready="decision" selected title="Tier B — a decision to ratify">Decision</we-filter-chip>
+            <we-filter-chip data-pready="notready" selected title="Tier C — has an open prerequisite">Not ready</we-filter-chip>
         </div>
         {% if countSplit %}<div class="status-filter" role="group" aria-label="Filter to split candidates">
-            <button type="button" class="status-filter-chip" data-psplit aria-pressed="false" title="When on, show only /split candidates — open stories of size &gt; 8 (the 13 band). Orthogonal to readiness: combines with the readiness/type chips (AND), so it isolates split candidates within whatever else is selected. Off by default.">Splittable only</button>
+            <we-filter-chip data-psplit title="When on, show only /split candidates — open stories of size &gt; 8 (the 13 band). Orthogonal to readiness: combines with the readiness/type chips (AND), so it isolates split candidates within whatever else is selected. Off by default.">Splittable only</we-filter-chip>
         </div>{% endif %}
         <div class="status-filter" role="group" aria-label="Filter by kind">
             {# Build a chip per kind PRESENT IN THE TABLE — `tableRows`, not just open items — so a pinned
                in-flight decision/batch (status:active) still gets its kind chip. Otherwise its row carries a
                kind with no matching chip, and the JS kind-filter (all chips pressed = that set only) hides it. #}
             {% for k in ["story", "epic", "task", "decision"] %}{% if tableRows | where("kind", k) | length %}
-            <button type="button" class="status-filter-chip" data-pkind="{{ k }}" aria-pressed="true">{{ k | title }}</button>
+            <we-filter-chip data-pkind="{{ k }}" selected>{{ k | title }}</we-filter-chip>
             {% endif %}{% endfor %}
         </div>
         <span style="font-size:0.82em; color:var(--color-text-muted);"><strong data-ptable-count>{{ leverageCount + countActiveDecisions + countPreparing + countActiveBatch }}</strong> shown</span>

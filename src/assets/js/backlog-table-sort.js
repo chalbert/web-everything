@@ -53,24 +53,26 @@
   var table = document.querySelector('table.sortable');
   if (!table) return;
   var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
-  var readyChips = Array.prototype.slice.call(document.querySelectorAll('[data-pready]'));
-  var kindChips = Array.prototype.slice.call(document.querySelectorAll('[data-pkind]'));
+  // Live accessors — always re-query so post-upgrade <button> elements are included.
+  function readyChips() { return Array.prototype.slice.call(document.querySelectorAll('[data-pready]')); }
+  function kindChips()  { return Array.prototype.slice.call(document.querySelectorAll('[data-pkind]')); }
   // `splittable` is an ORTHOGONAL facet, not a readiness value — a split candidate (story · size > 8) is
   // ALSO agent-ready or not-ready, so it can't live in the mutually-exclusive readiness group. It's a
   // single ON/OFF toggle (default OFF) that AND-composes with the other filters: when on, narrow to rows
   // carrying `data-splittable`. `splitSummary` is the big "N to split" pill — a one-click shortcut to it.
-  var splitChip = document.querySelector('[data-psplit]');
+  function splitChip() { return document.querySelector('[data-psplit]'); }
   var splitSummary = document.querySelector('[data-psplitfilter]');
   var search = document.querySelector('[data-ptable-search]');
   var countEl = document.querySelector('[data-ptable-count]');
-  if (!readyChips.length && !kindChips.length && !search) return;
+  if (!readyChips().length && !kindChips().length && !search) return;
 
   // ── Visual state + persistence ──────────────────────────────────────────────
-  // A chip's pressed state lives in `aria-pressed`, but the chip palette (style.css) only highlights
-  // `.status-filter-chip.is-active` — the same class home-display.js drives on the Tracked-work chips. So
-  // mirror aria-pressed → .is-active on every render, or a click changes nothing visible. The resulting
-  // filter (which chips are on + the search box) is remembered in localStorage and re-applied on reload,
-  // matching every other backlog filter (graph toggle, tab, home chips).
+  // A chip's pressed state lives in `aria-pressed`; the FUI chip styles highlight
+  // `fui-filter-chip--selected` — the class we-filter-chip sets on upgrade, and that home-display.js
+  // also mirrors on the Tracked-work chips. Mirror aria-pressed → fui-filter-chip--selected on every
+  // render so a click changes the visible state. The resulting filter (which chips are on + the search
+  // box) is remembered in localStorage and re-applied on reload, matching every other backlog filter
+  // (graph toggle, tab, home chips).
   var READY_KEY = 'we-backlog-priority-ready';
   var KIND_KEY = 'we-backlog-priority-kind';
   var SPLIT_KEY = 'we-backlog-priority-split';
@@ -79,18 +81,19 @@
     return chips.filter(function (c) { return c.getAttribute('aria-pressed') !== 'false'; })
                 .map(function (c) { return c.getAttribute(attr); });
   }
-  function splitOn() { return splitChip && splitChip.getAttribute('aria-pressed') === 'true'; }
+  function splitOn() { var sc = splitChip(); return sc && sc.getAttribute('aria-pressed') === 'true'; }
   function syncVisual() {
-    readyChips.concat(kindChips).forEach(function (c) {
-      c.classList.toggle('is-active', c.getAttribute('aria-pressed') !== 'false');
+    readyChips().concat(kindChips()).forEach(function (c) {
+      c.classList.toggle('fui-filter-chip--selected', c.getAttribute('aria-pressed') !== 'false');
     });
-    // The split toggle defaults OFF, so (unlike the groups above) is-active tracks pressed === 'true'.
-    if (splitChip) splitChip.classList.toggle('is-active', splitOn());
+    // The split toggle defaults OFF, so (unlike the groups above) fui-filter-chip--selected tracks pressed === 'true'.
+    var sc = splitChip();
+    if (sc) sc.classList.toggle('fui-filter-chip--selected', splitOn());
   }
   function save() {
     try {
-      localStorage.setItem(READY_KEY, JSON.stringify(pressedVals(readyChips, 'data-pready')));
-      localStorage.setItem(KIND_KEY, JSON.stringify(pressedVals(kindChips, 'data-pkind')));
+      localStorage.setItem(READY_KEY, JSON.stringify(pressedVals(readyChips(), 'data-pready')));
+      localStorage.setItem(KIND_KEY, JSON.stringify(pressedVals(kindChips(), 'data-pkind')));
       localStorage.setItem(SPLIT_KEY, splitOn() ? '1' : '0');
       localStorage.setItem(SEARCH_KEY, (search && search.value) || '');
     } catch (e) { /* ignore */ }
@@ -100,11 +103,11 @@
   function restore() {
     try {
       var r = JSON.parse(localStorage.getItem(READY_KEY));
-      if (Array.isArray(r)) readyChips.forEach(function (c) { c.setAttribute('aria-pressed', r.indexOf(c.getAttribute('data-pready')) >= 0 ? 'true' : 'false'); });
+      if (Array.isArray(r)) readyChips().forEach(function (c) { c.setAttribute('aria-pressed', r.indexOf(c.getAttribute('data-pready')) >= 0 ? 'true' : 'false'); });
       var t = JSON.parse(localStorage.getItem(KIND_KEY));
-      if (Array.isArray(t)) kindChips.forEach(function (c) { c.setAttribute('aria-pressed', t.indexOf(c.getAttribute('data-pkind')) >= 0 ? 'true' : 'false'); });
-      var s = localStorage.getItem(SPLIT_KEY);
-      if (splitChip && s != null) splitChip.setAttribute('aria-pressed', s === '1' ? 'true' : 'false');
+      if (Array.isArray(t)) kindChips().forEach(function (c) { c.setAttribute('aria-pressed', t.indexOf(c.getAttribute('data-pkind')) >= 0 ? 'true' : 'false'); });
+      var sc = splitChip(), s = localStorage.getItem(SPLIT_KEY);
+      if (sc && s != null) sc.setAttribute('aria-pressed', s === '1' ? 'true' : 'false');
       var q = localStorage.getItem(SEARCH_KEY);
       if (search && typeof q === 'string') search.value = q;
     } catch (e) { /* ignore */ }
@@ -120,8 +123,8 @@
   }
 
   function apply() {
-    var reads = active(readyChips, 'data-pready');
-    var kinds = active(kindChips, 'data-pkind');
+    var reads = active(readyChips(), 'data-pready');
+    var kinds = active(kindChips(), 'data-pkind');
     var q = ((search && search.value) || '').trim().toLowerCase();
     var shown = 0;
     rows.forEach(function (r) {
@@ -152,22 +155,24 @@
     if (splitSummary) { splitSummary.setAttribute('aria-pressed', 'false'); splitSummary.style.boxShadow = ''; }
   }
   function resetAllChips() {
-    readyChips.forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });
-    kindChips.forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });
-    if (splitChip) splitChip.setAttribute('aria-pressed', 'false');   // split defaults OFF (no constraint)
+    readyChips().forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });
+    kindChips().forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });
+    var sc = splitChip();
+    if (sc) sc.setAttribute('aria-pressed', 'false');   // split defaults OFF (no constraint)
     if (search) search.value = '';
   }
 
-  function bindToggle(chip) {
-    chip.addEventListener('click', function () {
-      chip.setAttribute('aria-pressed', chip.getAttribute('aria-pressed') === 'false' ? 'true' : 'false');
-      clearSummary();
-      apply();
-    });
-  }
-  readyChips.forEach(bindToggle);
-  kindChips.forEach(bindToggle);
-  if (splitChip) bindToggle(splitChip);   // same flip-and-apply as the group chips; its is-active is OFF-default
+  // Delegate click to document so the handler survives the we-filter-chip transient upgrade:
+  // FilterChipElement replaces itself with a native <button>, which would drop direct per-chip
+  // listeners. A delegated handler on document catches clicks on both the original element and
+  // the upgraded <button> (they share the same data-* attribute).
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest('[data-pready],[data-pkind],[data-psplit]');
+    if (!t) return;
+    t.setAttribute('aria-pressed', t.getAttribute('aria-pressed') === 'false' ? 'true' : 'false');
+    clearSummary();
+    apply();
+  });
   if (search) search.addEventListener('input', function () { clearSummary(); apply(); });
 
   // The "N to split" summary pill — a one-click shortcut: reset the groups to "all", then turn the split
@@ -178,7 +183,8 @@
       clearSummary();
       resetAllChips();
       if (!wasActive) {
-        if (splitChip) splitChip.setAttribute('aria-pressed', 'true');
+        var sc = splitChip();
+        if (sc) sc.setAttribute('aria-pressed', 'true');
         splitSummary.setAttribute('aria-pressed', 'true');
         splitSummary.style.boxShadow = '0 0 0 2px #334155';
       }
@@ -194,10 +200,11 @@
         resetAllChips();
       } else {
         var cats = (chip.getAttribute('data-pfilter') || '').split(',');
-        kindChips.forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });   // readiness-only shortcut
-        if (splitChip) splitChip.setAttribute('aria-pressed', 'false');   // a readiness shortcut is a fresh view — drop the split facet
+        kindChips().forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });   // readiness-only shortcut
+        var sc = splitChip();
+        if (sc) sc.setAttribute('aria-pressed', 'false');   // a readiness shortcut is a fresh view — drop the split facet
         if (search) search.value = '';
-        readyChips.forEach(function (c) {
+        readyChips().forEach(function (c) {
           c.setAttribute('aria-pressed', cats.indexOf(c.getAttribute('data-pready')) >= 0 ? 'true' : 'false');
         });
         chip.setAttribute('aria-pressed', 'true');
@@ -209,4 +216,17 @@
 
   restore();
   apply();
+
+  // Re-sync after we-filter-chip elements upgrade to <button> (FilterChipElement transient self-replace).
+  // The upgrade fires asynchronously (after the FUI cross-origin module loads), resetting aria-pressed to
+  // the static HTML default (decorate() derives it from the `selected` attr, ignoring any JS-set value).
+  // The observer detects the new <button> nodes and re-runs restore()+apply() so localStorage state wins.
+  (new MutationObserver(function (mutations) {
+    var hasChipChange = mutations.some(function (m) {
+      return Array.prototype.some.call(m.addedNodes, function (n) {
+        return n.nodeType === 1 && (n.hasAttribute('data-pready') || n.hasAttribute('data-pkind') || n.hasAttribute('data-psplit'));
+      });
+    });
+    if (hasChipChange) { restore(); apply(); }
+  })).observe(document.body, { childList: true, subtree: true });
 })();

@@ -99,40 +99,50 @@
             const set = activeFn();
             chips.forEach(function (chip) {
                 const on = set ? set.has(chip.dataset[attr]) : false;
-                chip.classList.toggle('is-active', on);
+                chip.classList.toggle('fui-filter-chip--selected', on);
                 chip.setAttribute('aria-pressed', on ? 'true' : 'false');
             });
         }
 
         function wireChips(chips, attr, storageKey, allValues, defaultExclude, activeFn) {
-            chips.forEach(function (chip) {
-                if (chip.__homeWired) return;
-                chip.__homeWired = true;
-                chip.addEventListener('click', function (e) {
-                    const set = readSet(storageKey, allValues, defaultExclude);
-                    const v = chip.dataset[attr];
-                    if (e.metaKey || e.ctrlKey) {
-                        // ⌘/Ctrl-click toggles every OTHER chip in this category, leaving the clicked
-                        // one untouched — so ⌘-clicking a lone-active chip "solos" it (turns the rest
-                        // off), and ⌘-clicking again flips them all back on.
-                        allValues.forEach(function (val) {
-                            if (val === v) return;
-                            if (set.has(val)) { set.delete(val); } else { set.add(val); }
-                        });
-                    } else if (set.size === allValues.length) {
-                        // Plain click while every chip is active (the default — no filter in
-                        // effect) means "show only this" (solo), matching the natural expectation
-                        // that clicking a chip filters TO it. Once a real subset is in effect,
-                        // clicks toggle individual chips in/out.
-                        set.clear();
-                        set.add(v);
-                    } else {
-                        if (set.has(v)) { set.delete(v); } else { set.add(v); }
-                    }
-                    try { localStorage.setItem(storageKey, JSON.stringify(Array.from(set))); } catch (e2) { /* ignore */ }
-                    syncChips(chips, attr, activeFn);
-                    applyFilter();
-                });
+            // Delegate click to the section so the handler survives the we-filter-chip transient
+            // upgrade: FilterChipElement replaces itself with a native <button>, which would drop
+            // direct per-chip listeners. A delegated listener on the stable section container
+            // catches clicks on both the original we-filter-chip and the upgraded <button>.
+            var dataAttr = 'data-' + attr.replace(/([A-Z])/g, function (c) { return '-' + c.toLowerCase(); });
+            var delegateKey = '__homeDelegate_' + attr;
+            if (section[delegateKey]) return;   // already wired (hot-reload guard)
+            section[delegateKey] = true;
+            section.addEventListener('click', function (e) {
+                var chip = e.target.closest('[' + dataAttr + ']');
+                if (!chip) return;
+                var chipVal = chip.dataset[attr];
+                if (chipVal === undefined) return;
+                var set = readSet(storageKey, allValues, defaultExclude);
+                if (e.metaKey || e.ctrlKey) {
+                    // ⌘/Ctrl-click toggles every OTHER chip in this category, leaving the clicked
+                    // one untouched — so ⌘-clicking a lone-active chip "solos" it (turns the rest
+                    // off), and ⌘-clicking again flips them all back on.
+                    allValues.forEach(function (val) {
+                        if (val === chipVal) return;
+                        if (set.has(val)) { set.delete(val); } else { set.add(val); }
+                    });
+                } else if (set.size === allValues.length) {
+                    // Plain click while every chip is active (the default — no filter in
+                    // effect) means "show only this" (solo), matching the natural expectation
+                    // that clicking a chip filters TO it. Once a real subset is in effect,
+                    // clicks toggle individual chips in/out.
+                    set.clear();
+                    set.add(chipVal);
+                } else {
+                    if (set.has(chipVal)) { set.delete(chipVal); } else { set.add(chipVal); }
+                }
+                try { localStorage.setItem(storageKey, JSON.stringify(Array.from(set))); } catch (e2) { /* ignore */ }
+                // Re-query chips live so the sync hits the upgraded <button> elements (not the
+                // stale pre-upgrade we-filter-chip references captured at init time).
+                var liveChips = Array.from(section.querySelectorAll('[' + dataAttr + ']'));
+                syncChips(liveChips, attr, activeFn);
+                applyFilter();
             });
         }
 
@@ -206,11 +216,32 @@
         }
 
         // Re-apply the saved state on every run (first load and hot-reload).
-        syncChips(statusChips, 'statusChip', activeStatuses);
-        syncChips(kindChips, 'kindChip', activeKinds);
-        syncChips(sizeChips, 'sizeChip', activeSizes);
-        syncChips(tierChips, 'tierChip', activeTiers);
-        applyFilter();
+        function reSync() {
+            // Re-query live so we hit the upgraded <button> elements (post we-filter-chip upgrade).
+            var liveStatus = Array.from(section.querySelectorAll('[data-status-chip]'));
+            var liveKind   = Array.from(section.querySelectorAll('[data-kind-chip]'));
+            var liveSize   = Array.from(section.querySelectorAll('[data-size-chip]'));
+            var liveTier   = Array.from(section.querySelectorAll('[data-tier-chip]'));
+            syncChips(liveStatus, 'statusChip', activeStatuses);
+            syncChips(liveKind,   'kindChip',   activeKinds);
+            syncChips(liveSize,   'sizeChip',   activeSizes);
+            syncChips(liveTier,   'tierChip',   activeTiers);
+            applyFilter();
+        }
+        reSync();
+        // Observe the section for DOM mutations: when we-filter-chip elements upgrade to <button>
+        // (via FilterChipElement's transient self-replace), re-sync so the upgraded buttons carry
+        // the correct aria-pressed + fui-filter-chip--selected state from localStorage.
+        var chipObs = new MutationObserver(function (mutations) {
+            var hasChipChange = mutations.some(function (m) {
+                return Array.prototype.some.call(m.addedNodes, function (n) {
+                    return n.nodeType === 1 && (n.hasAttribute('data-status-chip') || n.hasAttribute('data-kind-chip') || n.hasAttribute('data-size-chip') || n.hasAttribute('data-tier-chip'));
+                });
+            });
+            if (hasChipChange) reSync();
+        });
+        chipObs.observe(section, { childList: true, subtree: true });
+
         let savedView = 'grid';
         try { savedView = localStorage.getItem(viewKey) || 'grid'; } catch (e) { /* ignore */ }
         setView(savedView);
