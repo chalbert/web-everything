@@ -1,0 +1,127 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/1884-presentation-trait-style-vocabulary-intents-parallel-style-a/">#1884</a>:
+  mint the <strong>style sibling of intents</strong> — a declarative <em>open</em> vocabulary for the
+  presentation/surface axis (<code>rounded</code>, <code>shadowed</code>, <code>bordered</code>,
+  <code>hover</code>…), where each entry resolves to one CSS property or a multi-prop recipe and
+  <strong>declares its interactions</strong> with the others. It surfaced from the <code>we-card</code> docs
+  dogfood —
+  <a href="/backlog/1871-which-project-include-card-surfaces-migrate-to-we-card-and-h/">#1871</a> and
+  <a href="/backlog/1608-migrate-project-include-catalog-tiles-cards-to-fui-blocks-ca/">#1608</a> — where
+  reducing bespoke <code>.section-card</code> CSS to &ldquo;native element + consumed standard&rdquo; exposed
+  that WE has a first-class open <a href="/intents/">UX vocabulary (intents)</a> but <strong>no standard for
+  the style axis</strong>.
+</p>
+
+<h2>The gap, today</h2>
+<p>
+  WE ships <a href="/intents/">intents</a> as an open UX vocabulary with a standardized meta-schema, held
+  <em>UX-only</em> by statute. On the style side it ships only <strong>theme tokens</strong> — single values
+  (<code>--radius-md</code>, <code>--shadow-lg</code>) projected one-way from the JS-first injector. There is
+  nothing <em>between</em> a token and a finished component: no standard that says &ldquo;this surface is
+  rounded + shadowed + has a shine-on-hover,&rdquo; composed from named, declared, interacting style pieces.
+  So the Plateau assembler papers the gap with <strong>hand-authored CSS blobs</strong> — the
+  <code>hovercard</code> preset ships a literal
+  <code>.hovercard-card { border-radius; box-shadow; transition }</code> — which is component-implementation
+  leaking into products. #1884 proposes the missing axis as three tiers mirroring the constellation:
+  <strong>tokens</strong> (primitive + DTCG composite types) &rarr; <strong>presentation traits</strong> (the
+  new open-vocab + meta-schema standard; WE owns the type-only contract, FUI owns the recipe&rarr;CSS engine)
+  &rarr; <strong>flavors / recipes</strong> (the assembler composes these instead of emitting raw CSS).
+</p>
+
+<h2>What the prior-art survey harvested</h2>
+<ol>
+  <li>
+    <strong>The atomic prop&rarr;token layer.</strong>
+    <a href="https://tailwindcss.com/docs/border-radius">Tailwind</a> is the canonical
+    <em>one-utility = one-declaration tied to a named scale</em> model (<code>rounded-sm/md/lg/full</code>),
+    with orthogonal composing modifier-prefixes (<code>hover:</code>, <code>md:</code>, <code>dark:</code>).
+    <a href="https://v2.chakra-ui.com/docs/styled-system/style-props">Chakra style-props</a> give the explicit
+    <em>prop&rarr;CSS-property map</em> (<code>rounded</code>&rarr;<code>border-radius</code>) resolving through
+    the theme token scale, with <code>_hover</code>/<code>_focus</code> pseudo-state props — exactly WE's
+    tier-1&rarr;tier-2 seam.
+  </li>
+  <li>
+    <strong>The primitive-values layer.</strong>
+    <a href="https://open-props.style/">Open Props</a> is <em>just CSS custom properties</em>
+    (<code>--radius-2</code>, <code>--shadow-3</code>) — confirming tier 1 is values-only and that traits must
+    <em>reference</em> token names, never inline values.
+  </li>
+  <li>
+    <strong>The recipe / variant engine — the interaction model.</strong>
+    <a href="https://panda-css.com/docs/concepts/recipes">Panda CSS</a>,
+    <a href="https://vanilla-extract.style/documentation/packages/recipes/">vanilla-extract</a>, and
+    <a href="https://stitches.dev/docs/variants">Stitches</a> all converge on the <em>same four-key shape</em>
+    — <code>base</code>, <code>variants</code>, <code>compoundVariants</code>, <code>defaultVariants</code>.
+    The <strong>compound variant</strong> (extra CSS applied only when multiple variant dimensions intersect —
+    &ldquo;only the matching combo merges&rdquo;) <em>is</em> the &ldquo;declared interaction between
+    traits&rdquo; the decision needs: a flavor <em>is</em> a recipe, a trait <em>is</em> one named variant
+    dimension, an interaction <em>is</em> one <code>compoundVariant</code> entry.
+  </li>
+  <li>
+    <strong>The composite-token layer.</strong> The
+    <a href="https://www.designtokens.org/tr/drafts/format/">DTCG composite token types</a> (shadow, border,
+    typography, transition, gradient) each group multiple sub-properties into one named token — which grounds
+    the &ldquo;1 CSS prop <em>or</em> a recipe&rdquo; duality at the token layer.
+  </li>
+  <li>
+    <strong>The semantic-vs-presentational boundary.</strong> The platform has <em>no</em> presentational-
+    appearance vocabulary:
+    <a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-disabled">aria-disabled</a>
+    exposes semantic state only and explicitly leaves styling a separate developer concern;
+    <a href="https://www.w3.org/WAI/ARIA/apg/practices/hiding-semantics/">role=presentation</a> <em>removes</em>
+    semantics; and
+    <a href="https://developer.mozilla.org/en-US/docs/Web/CSS/appearance">CSS <code>appearance</code></a> only
+    controls native-widget rendering and &ldquo;does not affect non-widgets.&rdquo; The platform itself
+    separates <em>semantic state</em> from <em>appearance</em> — the strongest defense that this style axis
+    stays separate from intents/UX.
+  </li>
+</ol>
+
+<h2>How the survey reshaped the forks</h2>
+<p>
+  Two reshapes fall out. The DTCG finding <strong>dissolves a sub-fork</strong>: &ldquo;does a trait resolve
+  to one CSS prop or a multi-prop recipe?&rdquo; is not an authoring choice — it follows from whether the
+  trait targets a primitive property or a DTCG <em>composite</em> token, so recipe-ness is <em>derived</em>
+  and the meta-schema carries a single <code>target</code>. The
+  <a href="/research/">action-emphasis-axis prep</a> <strong>adds a scope sub-boundary</strong>: UX-meaning
+  treatment selectors (a button's <code>fill | outline | ghost</code> emphasis) stay as <em>intent
+  dimensions</em> on their owning intent, not finishes — so the scope boundary is three-way
+  (intents/UX-treatment &perp; finishes/surface-physics &perp; layout/spacing), not the two-way the item
+  posed.
+</p>
+
+<h2>The three forks, at a glance</h2>
+<ul>
+  <li>
+    <strong>Name &rarr; <code>finishes</code>.</strong> The material-finish metaphor fits surface-physics
+    scope and pairs with tier-3 <em>flavors</em>; it avoids collision with the droplist
+    <code>traits</code>/<code>webtraits</code> project, the <code>surface</code> intent, and faceted-search —
+    over <code>facets</code> / <code>aspects</code> / <code>surfaces</code> / <code>treatments</code>.
+  </li>
+  <li>
+    <strong>Scope &rarr; surface appearance only</strong> (shape, border, elevation, gloss,
+    interaction-feedback). Spacing routes <em>out</em> to the layout/region system; UX-meaning treatments stay
+    on their intent.
+  </li>
+  <li>
+    <strong>Meta-schema &rarr; the recipe four-key shape.</strong> A finish declares a <code>target</code>
+    (CSS prop or DTCG composite), a <code>tokenFamily</code> + value <code>scale</code>, optional
+    <code>states</code>, and an <code>interactions[]</code> array (the compound-variant model). The FUI
+    resolver composes a set by declared cascade order, last-wins conflict precedence, compound-variant
+    interactions, pseudo-state nesting, and responsive value-as-breakpoint-object — reusing the
+    industry-converged shape rather than coining a novel one.
+  </li>
+</ul>
+
+<h2>Classification</h2>
+<p>
+  Home is <code>relatedProject: webtheme</code> — the project that already owns the DTCG&rarr;native-CSS token
+  layer. The binding principles are native-first vocabulary (borrow the recipe/compound-variant shape and the
+  DTCG composite types; don't invent jargon), the meta-schema-not-the-list discipline inherited from intents
+  (standardize the trait shape and a recommended core; products extend the list), and bias-toward-separation
+  (finishes get their own axis rather than leaking into intents). This does <strong>not</strong> block the
+  card — the card-surface is just one recipe and can ship on plain tokens now and retrofit to finishes later.
+  Full grounding in <code>reports/2026-06-27-presentation-trait-style-vocabulary.md</code>.
+</p>

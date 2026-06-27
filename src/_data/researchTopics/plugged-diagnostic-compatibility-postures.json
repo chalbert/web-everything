@@ -1,0 +1,22 @@
+{
+  "id": "plugged-diagnostic-compatibility-postures",
+  "title": "Plugged diagnostic & compatibility postures — a zero-semantics-change Proxy posture family between unplugged and plugged",
+  "status": "open",
+  "summary": "Grounds decision #1872 (under epic #1836, make every plug public API functional unplugged): a config-selectable POSTURE FAMILY between unplugged and plugged, built on a pass-through Proxy over the native methods plugged mode patches (createElement, insertion verbs) that NEVER changes method semantics, only observes (Reflect-forwarding wrapper). Two new postures: diagnostic (warn when unowned code hits a path unplugged silently no-ops — call-site + which plugged-only capability + the manual fix) and compatibility (on detecting an un-upgraded root unowned code touched, enqueue a batched/deduped upgrade(root) recovering the WeakMap-PORTABLE capability set without prototype patching). The hard boundary is the residue bar (we:docs/agent/platform-decisions.md:888-894): true Fork-1 residue (transparent createElement tagging needs the value at creation; a detached-never-inserted node makes no root call to observe) stays plugged-only — compatibility narrows the practical gap to exactly that residue and no further. unplugged = fui:plugs/unplugged.ts register/upgrade product surface; plugged = fui:plugs/bootstrap.ts prototype patching; portable attachment = fui:plugs/core/ElementAttachment.ts (#1842 WeakMap). Prior-art survey settles the mechanism choices: (1) customElements.upgrade(root) IS the compatibility model — retroactively upgrades subtrees built by arbitrary code, idempotent (re-upgrade is a no-op), and the platform BATCHES candidate discovery while keeping the per-element upgrade synchronous (whatwg/html#3535's upgrade-candidate registry) — copy that split. (2) whatwg/dom#1287: per-root MutationObserver is insufficient for retroactively enhancing DOM built by code that never hands you the root (tight coupling or 'extremely wasteful' brute-force scan); one global instrument wins. (3) MDN/javascript.info: a Reflect-forwarding Proxy on a SMALL named method set is the transparent-observer pattern; trap cost is 5-20% over raw (Eisenberg), so wrap only the residue surface; identity (proxy!==target) is the watch-out. (4) web-components polyfills' patching-vs-noPatch (ShadyDOM #237, Lit polyfill-support) is the SAME plugged/unplugged seam — communities ship BOTH modes as a selectable posture the library adapts to. (5) queueMicrotask dirty-set flush (Vue/React-18 batching) coalesces repeated touches into one idempotent upgrade; flush a snapshot to avoid recursive starvation. Standing-test verdicts on the four authoring questions: Q1 Proxy granularity = REAL FORK -> global native-method Proxy (per-root can't see unowned construction, the motivating case); Q2 upgrade scheduling = real fork on sync-vs-async -> microtask-batched dirty-set (copy the platform's batched-discovery/synchronous-upgrade split; idempotent upgrade gives free dedup; residual = optional flush() escape hatch); Q3 per-plug vs global posture = NOT a fork, a config dimension -> global default + optional per-plug override (the three-layer carve: WE type-only enum, FUI resolver, project config value); Q4 parity-table coupling = NOT a fork, a presentation choice the residue bar already settles -> posture-neutral table (states the unplugged truth) + a separate 'recoverable under compatibility' column distinguishing portable-not-yet-triggered from true residue. Survey added no new fork and confirmed only Q1 is genuinely non-composable. Full grounding in reports/2026-06-27-plugged-diagnostic-compatibility-postures.md.",
+  "dateOpened": "2026-06-27",
+  "lastReviewed": "2026-06-27",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "plugs",
+    "unplugged",
+    "diagnostic",
+    "compatibility",
+    "residue",
+    "proxy",
+    "config",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webplugs"
+}

@@ -1,0 +1,106 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/1872-plugged-diagnostic-mode-zero-behaviour-change-residue-probe-/">#1872</a>
+  (under epic <a href="/backlog/1836-...-make-every-plug-public-api-functional-unplugged/">#1836</a>): a
+  config-selectable <strong>posture family</strong> between <code>unplugged</code> and <code>plugged</code>,
+  built on a <em>pass-through</em> Proxy over the native methods plugged mode patches
+  (<code>createElement</code>, insertion verbs) that <strong>never changes method semantics — only
+  observes</strong>. Two new postures sit in the middle: <strong>diagnostic</strong> warns when unowned code
+  hits a path <code>unplugged</code> silently no-ops (the call-site, which plugged-only capability, the manual
+  fix); <strong>compatibility</strong> enqueues an automatic <code>upgrade(root)</code> for un-upgraded roots
+  unowned code touches, recovering the <em>portable</em> capability set <strong>without</strong> prototype
+  patching. The invariant across all postures is that <code>plugged</code> is the only one that changes what a
+  native method <em>does</em>.
+</p>
+
+<h2>The spectrum and the hard boundary</h2>
+<p>
+  <code>unplugged</code> is the clean, manual <code>register</code>/<code>upgrade(root)</code> product surface,
+  but it silently misses unowned construction; <code>plugged</code> recovers everything by patching the page
+  realm's prototypes. Between them: <strong>diagnostic</strong> turns the silent miss into a dev-time signal, and
+  <strong>compatibility</strong> shrinks the practical gap for everything merely <em>not-yet-triggered</em>. The
+  boundary is the <strong>residue bar</strong>: a capability is genuine, unrecoverable residue iff its
+  observable contract — <em>including transparency</em> — requires intercepting a native method on a node the
+  plug holds no handle to and cannot be reproduced by <code>WeakMap</code>-keyed out-of-band state. Compatibility
+  recovers exactly the portable set and no further: a detached node never inserted makes no root call to observe,
+  and transparent <code>createElement</code> tagging needs the value <em>at creation</em>, so true residue stays
+  <code>plugged-only</code>.
+</p>
+
+<h2>What the prior-art survey found</h2>
+<ol>
+  <li>
+    <strong>The Custom Elements upgrade lifecycle is the compatibility model.</strong>
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/CustomElementRegistry/upgrade"><code>customElements.upgrade(root)</code></a>
+    retroactively upgrades a subtree built by arbitrary code, even before connection, and is <em>idempotent</em>
+    (re-upgrade is a no-op). The
+    <a href="https://html.spec.whatwg.org/multipage/custom-elements.html">WHATWG spec</a> keeps an
+    <em>upgrade-candidate registry</em> and <strong>batches discovery</strong> while keeping the per-element
+    upgrade <strong>synchronous</strong> (<a href="https://github.com/whatwg/html/pull/3535/files">whatwg/html#3535</a>)
+    — the exact split to copy.
+  </li>
+  <li>
+    <strong>One global instrument beats N per-root observers.</strong>
+    <a href="https://github.com/whatwg/dom/issues/1287">whatwg/dom#1287</a> argues per-root
+    <code>MutationObserver</code> can't catch DOM built by code that never hands you the root, forcing either
+    tight coupling or an <em>"extremely wasteful"</em> brute-force scan — grounding the global-Proxy granularity
+    choice.
+  </li>
+  <li>
+    <strong>A Reflect-forwarding Proxy on a small method set is the transparent observer.</strong>
+    <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy">MDN</a> and
+    <a href="https://javascript.info/proxy">javascript.info</a> show a trap that calls <code>Reflect</code>
+    forwards default behaviour unchanged; trap cost is
+    <a href="https://eisenbergeffect.medium.com/the-prickly-case-of-javascript-proxies-b6c3833b738">5–20% over raw</a>,
+    so wrap only the residue surface, and mind that <code>proxy !== target</code>.
+  </li>
+  <li>
+    <strong>The plugged/unplugged seam is the polyfill patching-vs-<code>noPatch</code> tension.</strong>
+    The <a href="https://polymer-library.polymer-project.org/3.0/docs/polyfills">web-components polyfills</a>
+    (<a href="https://github.com/webcomponents/polyfills/issues/237">ShadyDOM #237</a>) ship <em>both</em> a
+    patching mode and a non-patching mode as a selectable posture the library adapts to — supporting the
+    "config dimension, not exclusive fork" reading.
+  </li>
+  <li>
+    <strong>A microtask dirty-set flush coalesces upgrades.</strong> The
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/HTML_DOM_API/Microtask_guide">microtask pattern</a>
+    (used by Vue and React 18 batching) collapses repeated touches of a root into one idempotent
+    <code>upgrade</code>; flush a <em>snapshot</em> to avoid recursive starvation.
+  </li>
+</ol>
+
+<h2>The four authoring questions — verdicts</h2>
+<ul>
+  <li>
+    <strong>Q1 — Proxy granularity (real fork):</strong> <strong>global native-method Proxy</strong>. Per-root
+    can't see unowned construction — the motivating case — so it isn't a coherent second branch.
+  </li>
+  <li>
+    <strong>Q2 — Upgrade scheduling (real fork on sync-vs-async):</strong> <strong>microtask-batched
+    dirty-set</strong>, copying the platform's batched-discovery / synchronous-upgrade split; idempotent
+    <code>upgrade</code> gives free dedup. Residual: an optional <code>flush()</code> escape hatch for the rare
+    same-tick consumer.
+  </li>
+  <li>
+    <strong>Q3 — Per-plug vs global posture (config dimension, not a fork):</strong> <strong>global default +
+    optional per-plug override</strong> — the three-layer carve (WE type-only enum, FUI resolver, project-config
+    value).
+  </li>
+  <li>
+    <strong>Q4 — Parity-table coupling
+    (<a href="/backlog/1844-...-static-parity-table/">#1844</a>, presentation choice, not a fork):</strong>
+    <strong>posture-neutral table</strong> stating the <code>unplugged</code> truth, with a separate
+    "recoverable under compatibility" column distinguishing portable-not-yet-triggered from true residue.
+  </li>
+</ul>
+
+<h2>Lineage &amp; consumers</h2>
+<p>
+  Parent <a href="/backlog/1836-...-make-every-plug-public-api-functional-unplugged/">#1836</a>; built on the
+  residue bar (decision #1839). Relates the static
+  <a href="/backlog/1844-...-static-parity-table/">#1844</a> parity table (the static counterpart to diagnostic's
+  live signal) and the autonomous explorer
+  <a href="/backlog/1167-...-autonomous-explorer/">#1167</a>, which can consume diagnostic output as an
+  issue-signal source. Full grounding in
+  <code>reports/2026-06-27-plugged-diagnostic-compatibility-postures.md</code>.
+</p>

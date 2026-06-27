@@ -1,69 +1,73 @@
 ---
-kind: decision
+kind: story
 size: 5
 parent: "746"
 status: open
 blockedBy: []
 dateOpened: "2026-06-22"
-tags: []
+dateStarted: "2026-06-27"
+locus: frontierui
+relatedReport: reports/2026-06-27-fui-workbench-author-mode-source-home.md
+tags: [block-explorer, workbench, author-mode, maas, fui]
 ---
 
-> **Retyped story → decision (batch-2026-06-27 pre-flight).** Two small but real design sub-calls gate the
-> build and an agent must not pick them silently: **(a)** form-set — build the missing `html`/`jsx` author-mode
-> emitters + lossy signal (carved as #1883), or scope the panel to the 3 forms FUI faithfully emits; **(b)**
-> generation-home — build-emit JSON the registry carries vs a live `/_maas/` author-source endpoint. Ratify
-> these (then the wiring is a clean follow-up build), or `/prepare` to bring them to DoR.
+# Wire the author-mode-source into the live FUI workbench (declarative-component blocks)
 
-> **Pre-flight (batch-2026-06-26-1732-1696) — transport premise is dead; re-pointed `blockedBy: ["1752"]`.**
-> Two later rulings invalidated this item's "the WE half ships a committed artifact; just wire transport"
-> framing: **(1)** #1730 **deleted** the WE MaaS serving runtime per the #1282 zero-impl rule — both
-> `we:scripts/gen-author-mode-source.mjs` and the committed `we:src/_data/authorModeSource.json` are **gone**,
-> so the residual-1 "sibling read of WE's committed artifact" no longer has an artifact to read. **(2)** #1731
-> ruled (Fork 1a) the source/CEM bytes now cross via **FUI's own `/_maas/` HTTP data route** (dev:
-> live-generated in the FUI MaaS middleware in-memory; prod: a build-emitted FUI-deployable copy), **not** a
-> read of WE's tree. That makes the generator a FUI concern and routes both residuals through the FUI MaaS
-> loader + thin-descriptor registry that #1731 spun out as **#1752** (open, size 8). Per this item's own
-> "align there first to avoid hardcode-then-rip" note, the consumption wiring must follow #1752's loader/route
-> — so this is `blockedBy: ["1752"]` (was `[]`). Released unbuilt; re-scope the body to the FUI-served model
-> when #1752 lands.
->
-> **Update (batch-20260626-1811-1817-1819 close):** #1752 has **landed** (resolved, graduatedTo 746), so the
-> blocker is cleared (`blockedBy: []`). This is now ready to **rescope + build** — not blocked, just stale-bodied:
-> re-scope both residuals onto #1752's FUI `/_maas/` loader + thin-descriptor registry (the WE artifact is gone
-> per #1730), then wire the workbench panel to read block descriptors from the served URL. A focused FUI session.
->
-> **Claimed + released unbuilt (batch-2026-06-26-1813-1208-1618) — it's not clean wiring; two small design sub-calls block the build.** Traced the FUI tree: the 9 `<component>` case definitions relocated into FUI as `fui:blocks/renderers/component/__fixtures__/component-cases.ts` (the SoT), and FUI can lower a def to **3 of the 5** author-mode forms — `declarative` (the def text), `wc-class` (`fui:blocks/renderers/component/declarativeComponent.ts`), `functional` (`fui:blocks/renderers/functional/functionalComponent.ts` `generateFunctionalSource`) — but there is **no `html`/`jsx` source-text emitter and no `lossy`/`diagnostics` computation** in the tree. So generating `AuthorModeSource` for source-only blocks needs **(a)** a form-set decision (build the missing `html`/`jsx` emitters + lossy signal, or scope the panel to the 3 forms FUI faithfully emits) and **(b)** a generation-home decision (build-emit JSON the registry carries vs a live `/_maas/` author-source endpoint — note the `/_maas/` route in `fui:vite.maas.config.mts` today serves only consume-mode *wrapper* bytes, not author-mode *source*). Both are small but real calls — `/prepare` or a focused FUI session pins them, then builds. Released `active → open`; FUI-locus.
+> **Retyped decision → story (prepare-all 2026-06-27).** This was briefly retyped to a `decision` because two
+> design sub-calls (form-set, generation-home) gated the build. **Both are now resolved** — carved to
+> [#1865](/backlog/1865-author-mode-source-form-set-generation-home-for-the-fui-work/) and **ratified**
+> (`graduatedTo: 1618`, `codifiedIn` `we:docs/agent/platform-decisions.md#workbench-inert-data-static-slot`):
+> Fork 1 = ship the 3 faithfully-emitted forms (carve `html`/`jsx`); Fork 2 = static `authorSource` registry
+> slot like `cem`, dev freshness via the existing `/_maas/data/` HMR re-fetch. The attachment contract was
+> settled by #1701 (source-only `WorkbenchBlock`) and the transport premise by #1730/#1752 (the WE artifact is
+> gone; generation is a FUI concern). **No open fork remains — this is a clean FUI wiring build.**
 
-# Wire the WE author-mode-source artifact into the live FUI workbench (transport + declarative-component blocks)
+## What to build
 
-Follow-up to #818 (the author-mode emit foundation, placement #954). The WE half ships: a `serve()`
-build-emit (`we:scripts/gen-author-mode-source.mjs`) + committed, drift-tested `we:src/_data/authorModeSource.json`;
-FUI ships the consuming output-tabs panel (`fui:workbench/authorMode.ts`, rendered by `fui:workbench/mount.ts`
-when a `WorkbenchBlock` declares `authorSource`). Two residuals remain, both real wiring (no fork): **(1)
-Transport** — feed the WE-committed artifact to the FUI registry without a hand-synced copy (a sibling
-`../webeverything` build read or a published artifact) so the panel stays in sync with WE's `serve()` by
-construction; **(2) Attachment** — the only workbench block today (`auto-complete`) is an imperative CEM
-component with no declarative `<component>` definition, so nothing carries `authorSource` live yet; register
-the `componentCases` declarative blocks (or attach author-source to blocks that have a definition). Only
-rendered text + diagnostics cross the #700 seam (FUI never imports `serve()`).
+Following #1865's ratified shape, register FUI's declarative `<component>` cases as **source-only**
+`WorkbenchBlock`s carrying a static `authorSource`, and let the existing author-mode panel render them.
 
-> **Update 2026-06-24** — the Attachment fork is resolved: **#1701 ratified (a)**, relaxing the `WorkbenchBlock` contract so a block may be source-only (`authorSource`/`cem`, no `load`/`create`) — codified at `we:docs/agent/platform-decisions.md#source-only-workbench-block`. `blockedBy` repointed `1701 → 1731`: the *contract* is settled, but the **acquisition mechanism** (hardcode 9 source-only `WorkbenchBlock` literals vs resolve block shape from the FUI `/_maas/` serve URL) is decided by **#1731** — Attachment should align there first to avoid hardcode-then-rip. Transport (residual 1) stays flat and independent of #1731.
+1. **Generate author-source data from FUI's fixtures.** Lower each case in
+   `fui:blocks/renderers/component/__fixtures__/component-cases.ts` to the 3 faithfully-emitted forms —
+   `declarative` (the def text), `wc-class` (`fui:blocks/renderers/component/declarativeComponent.ts`
+   `generateClassSource`), `functional` (`fui:blocks/renderers/functional/functionalComponent.ts`
+   `generateFunctionalSource`) — into the `{code, language, lossy, diagnostics}` shape the panel consumes
+   (`fui:workbench/authorMode.ts:21-24`).
+2. **Carry it as a static registry slot.** Populate the inert `authorSource?: AuthorModeSource` slot already
+   declared beside `cem?` on the descriptor registry (`fui:workbench/registry.ts:143-147`) — read directly for
+   first render, no fetch (the #1865 Fork-2 ruling: author-source is inert display data in the `cem` class, not
+   a live module).
+3. **Wire dev freshness via the existing `cem` loop.** Editing a fixture re-emits the data manifest; the
+   workbench demo re-fetches `/_maas/data/<tag>.json` and calls `handle.refresh()` — the same file-watch → HMR
+   → data-route path `cem` already rides (`fui:vite.config.mts` `cemHotReload`, `fui:demos/workbench.ts`). No
+   new transport; `/_maas/`'s transpile/serve role stays reserved for live modules.
+4. **Render unchanged.** The panel is form-count-agnostic — one tab per `source.forms` entry
+   (`fui:workbench/authorMode.ts:98-110`) under "flag, don't fake" (`fui:workbench/authorMode.ts:12`), so a
+   3-form source renders 3 tabs with no empty/faked tabs.
 
-## Pre-flight (batch-2026-06-22-1615-1208) — Transport is flat, but Attachment hides a fork → not claimed
+Only rendered text + diagnostics cross the #700 seam (FUI never imports `serve()`).
 
-Traced the real tree before claiming. **(1) Transport** is flat as described — a sibling `../webeverything`
-build-read of `we:src/_data/authorModeSource.json` into `fui:workbench/registry.ts`, clear default (the
-published-artifact alternative is the #700/#907 end-state, separately tracked). **(2) Attachment is NOT
-"flat wiring (no fork)"** as the body assumed: `we:src/_data/authorModeSource.json` carries 9 declarative
-`<component>` **cases** (`user-card`, …) but they exist as **no `WorkbenchBlock`** — the workbench registers
-only the imperative `auto-complete` (`fui:workbench/registry.ts`), which has never instantiated a declarative
-`<component>`. To make a case carry `authorSource` *live*, the workbench needs **either** (a) the
-declarative-component runtime (`fui:plugs/webregistries/declarativeRegistry.ts` /
-`fui:compiler/src/component-transform/declarative.ts`) wired into `fui:workbench/registry.ts` so a `<component>` definition
-becomes a live `create()`-able block, **or** (b) a new *source-only* `WorkbenchBlock` shape (the panel is
-source-only — no live render — so a block could carry `authorSource` without a `create()`, but the current
-`WorkbenchBlock` contract requires `load`/`create`). That's a genuine design call on how the workbench hosts
-a declarative-component case — file it as a `kind: decision` (or pick the source-only-block default) before
-landing. **Not claimed** in this batch — the batch had already hit a hard stop (the #1621 badge fork), and
-this is the second buried fork, so no flat independent item remained. Transport-half stays ready; Attachment
-needs the workbench-hosting decision first.
+## Note for the #1883 / html-jsx follow-up (prep-skeptic finding, 2026-06-27)
+
+A prep skeptic attacking #1865's "scope to 3" found the `html`/`jsx` forms are **nearly free**, so **#1883 may
+be over-scoped** — it should likely be narrowed to *only* the lossy/diagnostics engine, not "build html/jsx
+emitters":
+
+- **`html` needs no emitter** — `def.templateHTML` is the raw `innerHTML` of the `<component>` definition
+  (`fui:blocks/renderers/component/declarativeComponent.ts:123`); the `html` form *is* that string verbatim
+  (`code: def.templateHTML, language: 'html', lossy: false`).
+- **`jsx` already has a faithful substrate** — `htmlToJsx` (`fui:packages/component-compiler/src/htmlToJsx.ts`)
+  is the production HTML→JSX converter the **already-shipping** `functional` form is built on
+  (`fui:blocks/renderers/functional/functionalComponent.ts:47`). A `jsx` form is `code:
+  htmlToJsx(def.templateHTML), language: 'jsx'` — one line reusing a shipped, tested function.
+
+This does **not** override #1865 (ratified) — it's a flag for the #1883 builder (or a cheap #1865 revisit):
+5-form parity is ~2 lines beyond 3-form, with the only genuinely-missing piece being the `lossy/diagnostics`
+computation for the hard cases (e.g. `htmlToJsx` silently dropping non-directive HTML comments). Decide there
+whether to ship 5 forms now or keep them carved.
+
+## Lineage
+
+Follow-up to #818 (author-mode emit foundation, placement #954) under workbench epic #746. Design sub-calls
+resolved by #1865 (form-set + generation-home), #1701 (source-only `WorkbenchBlock`), #1730/#1752 (transport —
+WE artifact deleted, FUI `/_maas/` loader + thin-descriptor registry). FUI-locus.
