@@ -563,6 +563,10 @@ Two shapes:
 
 **Throughput order across the modes:** **`--parallel`** (reached via **`/workflow`**; independent, concurrent) > **serial pack** (the **`/batch`** default; independent, sequential) > **cascade** (dependent, sequential). Cascade can't have the parallel speedup — the items are chained by construction — so it trades that for the thing that actually matters here: running the whole chain unattended in one session instead of as a string of one-item handoffs.
 
+#### Two execute modes, explicitly operator-selected — not auto-routed {#two-modes-explicit-selection}
+
+`/batch` (serial) and `/workflow` (parallel) are **two execute modes of one skill**, kept as **separate explicit entries** — the operator chooses which to run per batch, with `--serial`/`--parallel` as per-invocation overrides. The serial inline path stays calibrated, context-bounded and Sonnet-delegable; the parallel orchestrator path runs worktree subagents on a token/agent budget and degenerates to serial when no disjoint lane exists. **Do not unify on a single auto-routing entry that always runs the probe** (#1862, rejecting that option): it would push *every* batch — including degenerate-serial ones — through the orchestrator and pay probe + integration-worktree overhead for no benefit, and would forfeit the inline-serial path. Explicit selection also keeps the calibration boundary per-command-clear (`/batch` calibrates, `/workflow` does not) rather than prose-gated. The parallel orchestrator and its safety contract shipped under #1143/#1147.
+
 ### The stop rule — solid by construction
 
 Built so the batch is driven by **one number — the points budget** — with three hard exits that can only stop it *earlier*; nothing soft, nothing judgement-based, can stop it. Evaluate at each seam. **Stop the batch if ANY is true (and ONLY these):**

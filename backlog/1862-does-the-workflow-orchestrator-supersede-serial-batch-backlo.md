@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "1855"
-status: open
+status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: none
+codifiedIn: "docs/agent/backlog-workflow.md#two-modes-explicit-selection"
 preparedDate: "2026-06-27"
 relatedReport: reports/2026-06-27-workflow-vs-serial-batch-orchestration.md
 tags: [agent-orchestration, batch, workflow, structured-output, native-first]
@@ -22,7 +25,7 @@ The single mechanism already exists and is coherent. `/batch` + `/batch-next` ru
 | Concern | Shape | Recommended | Why |
 |---|---|---|---|
 | **Title — "does Workflow supersede serial?"** | confirmation | **No — one skill, two modes** | `/workflow` *is* `batch-backlog-items --parallel`; serial default + parallel opt-in already shipped (#1143/#1147). |
-| **Fork 1 — routing / entry model** | genuine fork | **(b) auto-routing single entry** (always probe; code-gate calibration-skip; keep `--serial`/`--parallel` as overrides) | The probe *already* makes the serial-vs-parallel call internally; explicit selection offloads to operator + prose discipline what code can enforce. |
+| **Fork 1 — routing / entry model** | genuine fork | **(a) keep explicit selection** *(operator's call, 2026-06-27 — flips prepared (b))* | Keep both entries; operator picks `/batch` (serial) vs `/workflow` (parallel), `--serial`/`--parallel` as overrides. No code change; orchestrator already degenerates to serial. Avoids paying probe + worktree overhead on every batch, and the calibration boundary is per-command-clear rather than prose-gated. |
 | **Structured-output (`agent({schema})`)** | supported by default | **already adopted; ranker stays deterministic (invariant)** | Schema is in use across the lanes today; the readiness ranker is deliberately LLM-free and must stay byte-identical to the rendered tab. |
 
 ## Fork 1 — routing / entry model: explicit selection vs. auto-route
@@ -32,7 +35,9 @@ The single mechanism already exists and is coherent. `/batch` + `/batch-next` ru
 - **(a) Keep explicit mode selection.** The operator picks `/batch` (serial) vs `/workflow` (parallel), `--parallel`/`--serial` overriding either. Preserves the *two execution paths*: inline-serial (calibrated, context-bounded, Sonnet-delegable) and orchestrator-parallel (worktree subagents, token-bounded, no calibration). Its weakness (per the skeptic): the operator can't reliably predict disjointness — that's *why* the probe exists and treats declared files as a lower bound — so the explicit choice mostly controls whether the probe runs at all, and the calibration-clean guarantee rides on prose discipline, not code.
 - **(b) Auto-routing single entry** *(default).* One entry **always runs the probe** and lets the existing deterministic partition decide serial-vs-parallel per item (it already does this — [we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js:186](.claude/skills/batch-backlog-items/parallel-execute.workflow.js#L186) probes at `effort:'low'`; degenerates to serial when nothing is disjoint). Make the calibration-skip a **code-gated consequence of "did any lane run concurrently"** rather than a function of which command was typed (the `calibrate()` fit is mode-blind today — [we:scripts/backlog.mjs:369](scripts/backlog.mjs#L369) — so the clean-estimate guarantee is currently prose-only). Retain `--serial`/`--parallel` purely as manual overrides for the probe's known blind spots (a shared `.njk` include it misses) or a budget-constrained run. Field tools (CrewAI `Process.sequential`/`hierarchical`, LangGraph state-graph) make process-type explicit because the *author encodes a known graph* — here it's a per-run scheduler decision, so the analogy argues for auto-routing, not against it.
 
-*Surviving tension for the decider (the skeptic underweighted this):* unifying on one auto-routing entry means **every** batch flows through the `Workflow` orchestrator — so even a degenerate-serial run pays probe + integration-worktree overhead and loses the inline-serial path's calibrated, context-bounded, Sonnet-delegable execution. The real call is *"keep two execution paths with explicit selection"* vs *"unify on the orchestrator and always probe."* The default leans (b) because the probe is cheap and can never make a clean batch slower than serial, but the path-unification cost is the genuine residual to weigh at ratify.
+*Surviving tension for the decider (the skeptic underweighted this):* unifying on one auto-routing entry means **every** batch flows through the `Workflow` orchestrator — so even a degenerate-serial run pays probe + integration-worktree overhead and loses the inline-serial path's calibrated, context-bounded, Sonnet-delegable execution. The real call is *"keep two execution paths with explicit selection"* vs *"unify on the orchestrator and always probe."* The prepared default leaned (b) because the probe is cheap and can never make a clean batch slower than serial — but this tension is exactly what the operator weighed.
+
+**Resolution (operator, 2026-06-27): (a) keep explicit selection.** Both entries stay; the operator chooses `/batch` vs `/workflow` per run, with `--serial`/`--parallel` as overrides. Rationale: (a) preserves both execution paths and avoids paying probe + integration-worktree overhead on degenerate-serial runs; the inline-serial path keeps its calibrated, context-bounded, Sonnet-delegable execution. Red-team of (a) failed to land: the "operator can't predict disjointness" knock is moot because explicit selection keeps the probe as an opt-in escape hatch (`/workflow` still probes + degenerates to serial), and the prose-gated-calibration risk was specific to the *unified* world — under explicit selection each command has one defined calibration behavior, so the boundary is per-command-clear, not prose-enforced. (a) aligns with most-flexible-default and bias-toward-separation; no catalog principle is violated. The prepared (b) lineage is retained below as the considered-and-rejected alternative.
 
 Code surface (the default's shape):
 
