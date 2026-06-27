@@ -2,6 +2,7 @@
 kind: decision
 parent: "1601"
 status: open
+blockedBy: ["1886"]
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
 preparedDate: "2026-06-27"
@@ -23,11 +24,11 @@ A batch pre-flight (`batch-2026-06-27-1842-1720`) found #1608's premise stale: t
 status-pill / dimension-chip vocabulary, so the #1820 Fork-1a badge+tag mapping (#1607 applied to the
 catalog tiles) does **not** apply here. What they carry are two **content-card** surfaces:
 
-- **`.section-card` (225)** — `<section id="…" class="section-card">` content-section wrappers with `h3`/`h4`
+- **`.section-card` (279)** — `<section id="…" class="section-card">` content-section wrappers with `h3`/`h4`
   children, deep-linked via `.section-card:target` + `scroll-margin-top`
   (`we:src/css/style.css:817-845,1427-1430`). The anchor `id` is on the **wrapper**
   (`we:src/_includes/project-webcomponents.njk:3,20,64`).
-- **`.standard-card` (29, across 14 files — but split by tag)** — **22** are `<div class="standard-card"><h4>…`
+- **`.standard-card` (29, across 15 files — but split by tag)** — **22** are `<div class="standard-card"><h4>…`
   content cards; **7** are `<a href class="standard-card">` **link tiles** with `data-*` filter hooks
   (`we:src/_includes/project-webblocks.njk:35`, `we:src/_includes/project-webstates.njk:12`,
   `we:src/_includes/project-webplugs.njk:102`, `we:src/_includes/project-webintents.njk:50`,
@@ -51,13 +52,31 @@ corrects the original framing. The first axis is **scope**: which of the two sur
 Per MDN ([`<article>`](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/article) — "a self-contained
 composition … independently distributable … a product card"), a `.standard-card` is a discrete
 self-contained card (`<article>` is a semantic *upgrade*), whereas a `.section-card` is a page's *thematic
-content section* (`<section>` is correct; re-declaring 225 of them as `<article>` downgrades the document
+content section* (`<section>` is correct; re-declaring 279 of them as `<article>` downgrades the document
 outline). The second axis is **anchor/heading preservation**, and here the original premise was wrong: since
 `we-card` transfers attributes (`fui:blocks/transient/TransientElement.ts:62-64`), a wrapper `id` rides
 through onto the `<article>` *automatically* — `.section-card:target` keeps matching if the class is kept, so
 **wrapper-id survival is not a fork**. The genuine residual is the **child-heading id**: a standard-card's
 `<h4 id="scope-vocab">` is an anchor target, and `we-card`'s `title=` would emit an id-less heading — so the
 fork is whether to use the card's `title=` header slot or keep the explicit `<hN id>` in the body.
+
+## Blocked on the governing decision #1886 (the deep concept)
+
+This item is the **docs application**. The architecture it rests on — *a card is a root-agnostic
+structure+style applied to a native element; `we-card` = the `<article>` binding; not element-polymorphic;
+FUI base + flavor values; "different semantic ⇒ different element / look ≠ identity"* — was hoisted into
+its own governing decision **#1886** (source of truth). Once #1886 ratifies, this item's two forks resolve
+**mechanically**:
+
+- **Fork 1 (scope)** → article-cards (the 22 `<div class="standard-card">`) bind to `we-card`; the 279
+  `<section class="section-card">` stay native `<section>` + card *style* (no bespoke CSS); the 7
+  `<a class="standard-card">` link tiles stay `<a>` + card style. (This is default (a), now justified by
+  #1886's principle, not by an impl limit.)
+- **Fork 2 (heading/anchor)** → unchanged and independent of #1886: keep the explicit `<hN id>` in the
+  card body (default (b)), preserving the ~17 live anchor ids; `title=` only for `no-toc`, id-less headings.
+
+The follow-up residual (unify the card-surface style across `<article>`/`<section>` rather than today's
+overlapping `we:.section-card` + `fui:.fui-card`) is folded into #1886's base/flavor layering.
 
 ## Recommended path at a glance
 
@@ -86,19 +105,19 @@ on the docs page (the transient renders into light DOM — the `CARD_CSS` must b
 ## Fork 1 — scope: which content-card surface converts
 
 *Fork exists because branch (b) is flawed:* `<section id>` content wrappers are sectioning landmarks
-(document outline + `:target` deep-links), not self-contained compositions — erasing 225 of them to
+(document outline + `:target` deep-links), not self-contained compositions — erasing 279 of them to
 `<article class="fui-card">` is a semantic downgrade (MDN `<article>` = self-contained/syndicatable). So
 (a) and (b) genuinely cannot both be right.
 
 - **(a) the 22 `<div class="standard-card">` content cards** *(default, amended post-skeptic)* — convert
-  only the `<div>` content cards to `<we-card>`. **Exclude** (i) the 225 `.section-card` `<section>` wrappers
+  only the `<div>` content cards to `<we-card>`. **Exclude** (i) the 279 `.section-card` `<section>` wrappers
   (sectioning landmarks, not articles) and (ii) the **7 `<a href class="standard-card">` link tiles** — a
   link tile cannot become a `<we-card>` because `we-card` resolves to a non-linkable `<article>`
   (`fui:blocks/card/Card.ts:49`); those are catalog-tile-shaped (link + `data-*` filter hooks) and ride the
   #1820/#1607 outer-anchor pattern, not this content-card migration. The `<div>` standard-card is a discrete
   self-contained card → `<article>` is the correct element (MDN lists "product card"). Bounded size (22),
   no outline regression.
-- **(b) + section-cards** — also convert the 225 `.section-card`. Rejected: downgrades 225 thematic
+- **(b) + section-cards** — also convert the 279 `.section-card`. Rejected: downgrades 279 thematic
   page-sections to `<article>`, a far larger page-restructuring change for no semantic gain.
 - **(c) neither** — dominated: a genuine card surface exists and #1608 would resolve as won't-do, defeating
   the #1601 dogfooding intent.
