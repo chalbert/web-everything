@@ -3,7 +3,7 @@ kind: story
 size: 8
 parent: "1600"
 status: open
-blockedBy: ["1787"]
+blockedBy: ["1867"]
 dateOpened: "2026-06-22"
 tags: []
 ---

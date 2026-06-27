@@ -3,9 +3,17 @@ kind: story
 size: 3
 parent: "1836"
 status: open
+blockedBy: ["1839"]
 dateOpened: "2026-06-27"
 tags: []
 ---
+
+> **Pre-flight (batch-2026-06-27) — re-pointed `blockedBy: ["1839"]`; build-vs-residue disposition is forked.**
+> The two members can't be cleanly built now: the webregistries root `customElements` swap is **separately
+> disabled and human-gated** (#1545 `humanGate: setup`, #1483), so its unplugged-drive branch is blocked on
+> re-enabling that swap; and the alternative — "record them plugged-only residue" — needs the **plugged-only
+> residue bar #1839 decides** (still open, Tier B ready-to-ratify). Either branch waits on #1839's ruling, so
+> this is `blockedBy: ["1839"]` (was unset). Not a clean batch pickup until the residue bar lands.
 
 # webbehaviors + webregistries unplugged members — drive defineLazy/trait-manifest and root-registry swap via the unplugged register/upgrade API, or record plugged-only
 

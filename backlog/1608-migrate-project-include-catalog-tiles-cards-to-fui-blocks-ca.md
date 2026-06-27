@@ -12,14 +12,10 @@ tags: []
 
 Migrate the catalog tile/card surfaces in the `we:src/_includes/project-*.njk` includes to FUI blocks/card via the **transient-CE mount** (`<we-card>`, #1621 rule-7 model — the card counterpart to the #1598/#1758 badge dogfood, **not** the retired mode-C inline mount). Blocked by #1786 (the FUI `fui:embed/card-in-document.ts` embed entry + SSR baseline). Gate npm run verify + a :8080 render check.
 
-## Pre-flight (batch-2026-06-26-1745-1775) — design fork, not a clean cascade
+## Pre-flight (batch-2026-06-27) — fork resolved; now a clean mechanical migration
 
-Surfaced while cascading the #1786 card embed: migrating the catalog tiles to `<we-card>` is **not** a
-mechanical wrap (unlike the #1604/#1605/#1606 `<pre>`→`we-code-view` cascade). The catalog tiles (e.g.
-`we:src/intents.njk:45`) are clickable `<a class="…-tile" data-status data-haystack>` whose `data-*` the
-in-page filter JS depends on, carrying a bespoke per-status palette badge + dimension chips — none of which
-map to `we-card`'s self-replacing `<article>` / `title`+body model without a design call (full adoption =
-filter-JS rework + dropping the bespoke vocabulary; shallow wrap = a frame that keeps the bespoke vocab).
-This is the **same vocabulary-mapping fork [#1208](/backlog/1208-dogfood-the-backlog-badges-chips-onto-fui-badge-filter-chip-/) is blocked on** (badge/chip flavour). Decide the catalog-tile→`we-card` mapping
-first; then this becomes a clean migration. Left `open` (the #1786 blocker is resolved, but the real
-blocker is the undecided mapping).
+The catalog-tile→`we-card` vocabulary-mapping fork is **decided**: #1820 resolved (Fork 1a) — the
+anchor-relocation rule + the vocabulary map are settled there, the in-page filter JS stays attribute-driven
+off the preserved `data-*` hooks (no "read off a card model" rework), and the mount is the already-ratified
+#1621 rule-7 transient-CE model. So this is now the uniform badge+tag migration #1820 widened it to, not a
+design call. (Supersedes the prior "undecided mapping" note — that blocker cleared when #1820 resolved.)
