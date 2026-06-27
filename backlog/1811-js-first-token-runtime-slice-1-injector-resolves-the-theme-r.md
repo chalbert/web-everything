@@ -2,9 +2,12 @@
 kind: story
 size: 5
 parent: "1683"
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: 1683
 tags: [design-tokens, theme, webinjectors, webtheme, native-first]
 ---
 
@@ -18,3 +21,13 @@ The foundational slice of #1683 (model ratified in #1682, `we:docs/agent/platfor
 - **Console** — `console.log("%c…", "color: …")` uses a theme colour with no element to query.
 
 Slices 2 (#1812, one-way CSS emit) and 3 (#1813, migrate WE `:root`) build on this and are `blockedBy` it.
+
+## Progress (batch-20260626-1811-1817-1819)
+
+Built the greenfield `fui:plugs/webtheme/` substrate:
+- `fui:plugs/webtheme/tokens.ts` — `TokenFamily` (color·spacing·radius·shadow·font), `ResolvedTheme` (plain-string records, so a snapshot is `structuredClone`/`postMessage`-safe), `TOKEN_FAMILIES`.
+- `fui:plugs/webtheme/ThemeSource.ts` — the injector-held SoT: `token()`/`has()`/`family()`/`snapshot()`/`with()`, synchronous, off-DOM, no cascade, no `getComputedStyle`; parent-chain delegation = the runtime `scoped-token-override` building block for slices 2/3.
+- `fui:plugs/webtheme/defaultTheme.ts` — platform-default resolved theme (the JS baseline slice 3 migrates `:root` into).
+- `fui:plugs/webtheme/resolveTheme.ts` — module-scope `getRootTheme()`/`setRootTheme()` (readable with **no node**) + `resolveTheme(node?)` that consults the node's injector chain (`THEME_PROVIDER` provider) first, root fallback.
+- Registered the plug in `fui:src/_data/plugs.json` (type `Theme`).
+- 11 vitest cases cover all three acceptance criteria (constructor pre-attach + `getComputedStyle` never called; worker snapshot survives `structuredClone`; `console.log("%c")` from a token) plus scoped-override resolution.
