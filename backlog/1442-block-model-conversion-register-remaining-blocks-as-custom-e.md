@@ -1,8 +1,10 @@
 ---
 kind: epic
-status: open
+status: resolved
 blockedBy: []
 dateOpened: "2026-06-21"
+dateResolved: "2026-06-27"
+graduatedTo: none
 locus: frontierui
 relatedProject: webcomponents
 relatedReport: reports/2026-06-21-1442-split-analysis.md
@@ -44,4 +46,8 @@ The real FUI tree shows blocks in four families, with all three mechanism refere
 - **#1675** *(decision)* — temporal mechanism: transient (A) vs persistent light-DOM (B).
 - **#1676** *(decision)* — is-a/can-do classification for navigation, master-detail, marquee-select, edit-in-place, annotation, bulk-action (#1457 test → `we-*` block or out-of-scope behavior).
 
-**dockable** is excluded — its packaging is downstream of #1653 (dockable layout-tree protocol owner; #1437 ruled the family project-less); carve its mechanism decision under #1442 once #1653 resolves. Headless "can-do" behaviors stay CustomAttribute behaviors (out of scope). When the catalog is drained (every block converted or test-excluded), resolve the epic.
+**Wave 5** (we:reports/2026-06-24-1442-slice-wave-5.md) — the last block. #1653 (dockable protocol owner) and #1486 (protocol mint) have resolved and the block is fully built (#1485), so dockable's deferred packaging-mechanism decision is now carved:
+
+- **#1750** *(decision)* — dockable packaging mechanism: persistent light-DOM (B) vs shadow (C, #1349-S2). Same B-vs-C shape as #1674; conversion `task` files on pickup once it lands.
+
+Headless "can-do" behaviors stay CustomAttribute behaviors (out of scope). When the catalog is drained (every block converted or test-excluded) — i.e. once #1750 and its conversion task land — resolve the epic.
