@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "777"
-status: open
+status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-27"
 relatedReport: reports/2026-06-27-backlog-filter-chip-rich-count-dogfood.md
 tags: [dogfood, filter-chip, backlog, webdocs, fui]
@@ -34,6 +37,16 @@ Two structurally different controls share the Prioritisation row. The **plain** 
 - **(3) Accept the lossy flatten** — convert now, collapsing the sub-counts to a scalar and dropping the per-pill colour. **Flawed branch:** violates #1825's "exactly as before" and discards actionable signal (prepared-vs-preparing-vs-in-flight is what a solo dev reads to pick the next decision). Rejected.
 
 *Skeptic: SURVIVES-WITH-AMENDMENT → default (1) holds. Verified `decorate()` clobbers `el.innerHTML` (`fui:blocks/filter-chip/FilterChipElement.ts:40`), so the carve is the only faithful move; confirmed option (3) is genuinely the flawed branch (the sub-counts are actionable, not cosmetic) and a probed 4th option — composing multiple chips per pill — breaks the one-`data-pfilter`-toggle semantics. Amendment folded into the default: the option-2 capability must be filed and hard-linked as a child of #777 before #1825 closes, else the carve is indistinguishable from permanent omission.*
+
+## Ruling — RATIFIED 2026-06-27
+
+**Option (1) + skeptic amendment.** #1825 is scoped to the **plain** filter chips (faithful clean swap, ships now); the six Prioritisation **summary pills** are carved out, kept hand-rolled and untouched until the FUI capability they need exists. The carve is **purely sequencing, fully recoverable** — the missing pieces (a rich/structured sub-count API + a per-chip semantic colour-variant) are *additive* component features, not fundamental limits of the custom-element model; once they land, the pills convert with no fidelity loss (output identical, only the authoring form changes). Option (3) — flatten now — was rejected as the one *permanent* loss (it discards actionable prepared-vs-preparing-vs-in-flight signal). The amendment is **discharged**, not deferred:
+
+- **[#1873](/backlog/1873-grow-we-filter-chip-a-rich-structured-count-colour-variant-a/)** (child of #777) — grow `we-filter-chip` the rich structured-count + colour-variant API. The capability gate.
+- **[#1874](/backlog/1874-convert-the-backlog-prioritisation-summary-pills-to-we-filte/)** (child of #777, `blockedBy: [1873]`) — the carved summary-pill conversion. The true #777 dogfood end-state for the Prioritisation row.
+- **[#1825](/backlog/1825-migrate-the-backlog-filter-pills-to-fui-we-filter-chip-inter/)** scoped to plain chips (Build/Acceptance amended), `blockedBy` cleared → now agent-ready.
+
+So the dogfood gap is tracked as concrete #777 children with a hard `blockedBy` chain, never a silent omission.
 
 ## Lineage
 
