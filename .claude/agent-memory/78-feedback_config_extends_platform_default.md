@@ -46,3 +46,5 @@ strategy — it's inherited/extended from the platform config like everything el
 render strategy + reaction set, both collapsed to open config-driven platform settings). Pairs with the
 "one Technical Configurator card per documented technical setting at graduation" rule
 ([[feedback_intent_ux_only_technical_to_configurator]]).
+
+**Codified:** the canonical rule is `docs/agent/platform-decisions.md#config-extends-platform-default` (the statute is source-of-truth; any `#NNN` above is provenance, not the reference).

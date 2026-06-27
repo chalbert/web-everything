@@ -1017,7 +1017,7 @@ guess"). Tracked as the parked residual.
 
 **Lineage:** #939 (direction ratified) — de-buried from #818, grounded in #811 Fork 2
 ([report](../../reports/2026-06-16-forward-component-emit-substrate.md)). Applies
-[bias-toward-separation] and synthesizes [forward-generation-adapters](#forward-generation-adapters).
+[bias-toward-separation](#bias-toward-separation) and synthesizes [forward-generation-adapters](#forward-generation-adapters).
 
 ### Standard consumability: author to the standard, ship removable agnostic adapters {#standard-consumability}
 
@@ -1200,7 +1200,7 @@ provider would do — demote build-time providers *out* of the runtime-registry 
 
 ### A declarative author-facing seam over an already-built provider is a non-rendering behavior/directive — not a new intent or protocol {#declarative-seam-over-existing-provider}
 
-When a standard **already ships the transport** — a contract + a runtime-DI provider ([runtime-DI seam](#runtime-di-vs-devtools-provider-seam)) + a controlled vocabulary — and the only unbuilt piece is the **author-facing declarative seam** (a `data-*`-style annotation that says "do X on interaction I" *without* sprinkled imperative calls), that seam is a **non-rendering behavior/directive that consumes the existing provider**. It is **not** a new [Intent](#intents-ux-only) (intents are UX-only and *render a surface*; an emission/binding seam renders nothing, so an intent would be the catalog's lone non-rendering member) and **not** a new Protocol (the contract + vocabulary already exist — the seam adds *vocabulary entries*, never a new transport, like [compose-don't-duplicate](#compose-intent-dont-duplicate)). Whether to ship the seam at all is a genuine support-vs-not call (imperative-only is coherent, not broken), decided on **end-state merit** (every scaled prior-art ships the `data-*` binding) with the build filed as **separately-prioritized** ([fork-is-not-a-prioritization-tool](#)); two emission concerns sharing the emit-to-a-sink shape stay **two homes that compose** (one emits *through* the other), never an umbrella ([bias-toward-separation](#)). Native-first floor: unconfigured provider → silent no-op default.
+When a standard **already ships the transport** — a contract + a runtime-DI provider ([runtime-DI seam](#runtime-di-vs-devtools-provider-seam)) + a controlled vocabulary — and the only unbuilt piece is the **author-facing declarative seam** (a `data-*`-style annotation that says "do X on interaction I" *without* sprinkled imperative calls), that seam is a **non-rendering behavior/directive that consumes the existing provider**. It is **not** a new [Intent](#intents-ux-only) (intents are UX-only and *render a surface*; an emission/binding seam renders nothing, so an intent would be the catalog's lone non-rendering member) and **not** a new Protocol (the contract + vocabulary already exist — the seam adds *vocabulary entries*, never a new transport, like [compose-don't-duplicate](#compose-intent-dont-duplicate)). Whether to ship the seam at all is a genuine support-vs-not call (imperative-only is coherent, not broken), decided on **end-state merit** (every scaled prior-art ships the `data-*` binding) with the build filed as **separately-prioritized** ([fork-is-not-a-prioritization-tool](#)); two emission concerns sharing the emit-to-a-sink shape stay **two homes that compose** (one emits *through* the other), never an umbrella ([bias-toward-separation](#bias-toward-separation)). Native-first floor: unconfigured provider → silent no-op default.
 
 **Lineage:** #1415 (telemetry declarative emission seam → behavior/directive over the built `CustomTracker` sink + Analytics Event Vocabulary; #1414 experiment-exposure composes through it). Sibling of [runtime-DI-vs-devtools-provider-seam](#runtime-di-vs-devtools-provider-seam) and [intents-ux-only](#intents-ux-only).
 
@@ -1847,6 +1847,56 @@ consume/provide contract shape. Prep topic `reports/2026-06-26-consumable-await-
 `/research/reactive-consume-handle-shape/`. Coheres with
 [framework-free-core-vendor-segregation](#framework-free-core-vendor-segregation) (native primitives over
 vendor reactive libs).
+
+### Bias toward separation — on any combine-vs-split fork, default to two composable homes {#bias-toward-separation}
+
+On any "one combined thing vs. two composed things" fork, **default to separation**: split a reusable axis into
+its own intent/protocol/plug that others *compose*, rather than absorbing it into a larger one. The **burden of
+proof is on combining**, not separating — couple only when the split has a concrete, named cost. The test for a
+distinct paradigm is **recurrence without its neighbour**: a concept that shows up without the thing it was
+bundled with (disclosure without a tree; positioning without a droplist) is its own home; folding it in forces
+unrelated consumers to drag in a host they don't need. The hazard the rule guards is **schema/ownership
+coupling**, not file count — two concerns in two files but one shared schema are still coupled, and one concern
+split across many files is not (see [file-count-not-schema-coupling](#categorical-taxonomy) framing). Worked
+example: #064 → `disclosure` (open/closed) is its own intent that `hierarchy` *composes*, not absorbed into it.
+
+**Lineage:** #064 (disclosure⟂hierarchy) and the standing per-fork classification pass in
+[backlog-workflow.md](backlog-workflow.md); the composition-over-monolith logic the WE constellation is built
+on. Coheres with [most-flexible-default](#native-first-baseline) and the harvest-cross-cutting-paradigms pass.
+
+### Reusable-against-all-implementers → the neutral home; fix the surface, not the home {#reusable-neutral-home}
+
+A tool/runtime **reusable against every implementer** belongs in the **shared, neutral home (plateau)**; code
+**specific to one implementer** belongs in that implementer (FUI for FUI's own). When a placement decision is
+pressured by *one* consuming surface's constraint (a trust-gate, an origin requirement, a backward-edge),
+**fix the surface, not the home** — never relocate shared infrastructure to satisfy a single consumer. A
+multi-surface tool (run via `npx` inside the impl under test, from the dev browser, from the SaaS exerciser,
+and as the docs demo) is shared infra **by construction**; "neutrality is about who-hosts, not where-source-
+lives" is a rationalization this rule rejects. The per-implementer piece is the **thin adapter** (the binding's
+`dispatch`/`observe`), never the generic engine — distinct from "runnable backends → FUI" (#899), which means
+the *impl-specific* backend, not the generic runner/judge.
+
+**Lineage:** #1788 (ratified — the prepared default to re-home the conformance *runner* into FUI was
+overturned; the runner is multi-surface shared infra). Refines [constellation-placement](#constellation-placement)
+and relates to the backward-edge module-import boundary.
+
+### Cross-origin import keeps the dev server clean — serve heavy/vendor deps from a second origin {#cross-origin-dev-server-hygiene}
+
+When a live-test/workbench feature needs a heavy or vendor dependency (`react`/`react-dom`/`vue`), serve the
+generated wrapper module from a **separate origin** and **cross-origin-import** it
+(`await import('http://localhost:<port>/<block>.js?form=react-wrapper')`) rather than importing the dep into
+the running dev-server tree. ES dynamic import is origin-agnostic and the imported module still mounts
+**same-document** (the cross-origin *iframe* is what's forbidden, not a cross-origin fetch), so the dep lives
+only on the serving origin — **never in the main dev tree or the shipped bundle** — and the running dev server
+never resolves/pre-bundles it (no re-optimize, no reload, no don't-restart-the-server violation). Before
+flagging "needs the dev server restarted" because a feature pulls a heavy dep, ask whether it can be served
+from a *second* origin and cross-origin-imported (CORS in dev is trivial); two framework copies (one per
+origin) is fine when the consumer is framework-free and the mount is isolated. The excluded fork — same-origin
+via the running Vite middleware — both reloads the server and leaks vendor deps toward the main tree.
+
+**Lineage:** #1499 (ruling — the workbench live-test #1030/#912 serves the wrapper cross-origin; this is why
+#1030's `setup` human-gate was wrong and was removed). Coheres with the FUI vendor-deps-quarantined-to-a-
+sub-package rule and [framework-free-core-vendor-segregation](#framework-free-core-vendor-segregation).
 
 ---
 

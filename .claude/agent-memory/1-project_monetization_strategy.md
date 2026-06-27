@@ -72,3 +72,5 @@ scopes it over dependency graphs, design systems, intents, CI, compliance,
 micro-frontends, feature flags, A/B testing, translations, versioning, deployment
 — each a candidate offering. Old `plateau` repo has no monetization material.
 See [[reference_repo_constellation]].
+
+**Codified:** the canonical rule is `docs/agent/platform-decisions.md#monetization` (the statute is source-of-truth; any `#NNN` above is provenance, not the reference).

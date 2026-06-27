@@ -12,3 +12,5 @@ On any "one combined thing vs. two composed things" fork, **always bias toward s
 **Why:** a concept that recurs without its neighbour (disclosure without a tree; positioning without a droplist) is a distinct paradigm; folding it in forces unrelated consumers to drag in a host they don't need. Decoupling keeps each home thin and reusable — the composition-over-monolith logic the WE constellation is built on.
 
 **How to apply:** the burden of proof is on *combining*, not separating — couple only when the split has a concrete, named cost. E.g. #064 → `disclosure` (open/closed) is its own intent that `hierarchy` composes, not absorbed into it. Part of the per-fork classification pass in docs/agent/backlog-workflow.md. Pairs with [[feedback_harvest_cross_cutting_paradigms]], [[feedback_most_flexible_default]], [[feedback_dimension_vs_fixed_mechanic]].
+
+**Codified:** the canonical rule is `docs/agent/platform-decisions.md#bias-toward-separation` (the statute is source-of-truth; any `#NNN` above is provenance, not the reference).

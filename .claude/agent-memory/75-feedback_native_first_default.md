@@ -13,3 +13,5 @@ originSessionId: 632552c1-a19a-44e5-89e5-307b251ba792
 - In the **feature-inventory table**, tier Tier-1 features should lean on platform standards. Tier 2+ features can be "basic built-in / better via adapter."
 - In **Step 4 (Plan)**, set the default provider to use platform standards; adapters are for Tier 3 or older-browser fallback.
 - When designing plugs and adapters, the minimal built-in provider should use platform features; adapters are thin bridges to libraries, not ground-up reimplementations.
+
+**Codified:** the canonical rule is `docs/agent/platform-decisions.md#native-first-baseline` (the statute is source-of-truth; any `#NNN` above is provenance, not the reference).

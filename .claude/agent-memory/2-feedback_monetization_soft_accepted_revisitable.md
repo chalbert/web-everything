@@ -17,3 +17,5 @@ Monetization/open-core tiering decisions get a **lighter, explicitly-revisitable
 - Stamp decision items with a "monetization ≠ standard (soft-accepted, revisitable)" read-me note so future turns inherit the lighter treatment.
 
 Related: [[project_monetization_strategy]] (open-core: open=free, paid=license), [[project_linear_cost_revenue_on_device]] (cost must scale ~linearly with revenue — the structural rule's backbone), [[feedback_fork_not_a_prioritization_tool]] (cost/effort is prioritization, never a fork branch).
+
+**Codified:** the canonical rule is `docs/agent/platform-decisions.md#monetization` (the statute is source-of-truth; any `#NNN` above is provenance, not the reference).

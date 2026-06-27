@@ -12,3 +12,5 @@ WE is not in the business of *mandating* conventions, but it does need a **commo
 **Why:** mandating project-facing conventions contradicts WE's stance (native-first, minimize lock-in, "the protocol is the only lock"). Reframing as default-plus-override-plus-compliance preserves a shared vocabulary without locking anyone in.
 
 **How to apply:** when triaging a "convention" candidate, don't drop it and don't author a mandate — home it in webcompliance as a customizable rule that extends a platform default. See [[feedback_config_extends_platform_default]] and [[feedback_minimize_lock_in_protocol_only_lock]]. Codified in the #111 triage.
+
+**Codified:** the canonical rule is `docs/agent/platform-decisions.md#compliance-validation-home` (the statute is source-of-truth; any `#NNN` above is provenance, not the reference).

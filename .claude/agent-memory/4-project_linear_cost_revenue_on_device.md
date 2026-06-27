@@ -27,3 +27,5 @@ They compose: **on-device model as the bundled/default tier; API/BYO-key as an o
 Capability survey (#488, /research/on-device-ui-vision): the gate verdict is *coarse screen classification* — a ≲10MB distilled classifier runs in-browser on any device (Enrico 75% top-1 / 20 classes; ours = 6), feasible NOW; a small VLM (SmolVLM/Moondream/Florence-2, ≲2B device ceiling) is a separate heavier tier. #488 prepared (5 forks, ✓ ready to ratify).
 
 Related: [[project_monetization_strategy]] (open-core; self-run > single-service > enterprise; defer live-serve — an on-device model is the cleanest "self-run, no hosting cost" shape), [[project_managed_offering_constellation_layering]], [[feedback_native_first_default]].
+
+**Codified:** the canonical rule is `docs/agent/platform-decisions.md#monetization` (the statute is source-of-truth; any `#NNN` above is provenance, not the reference).

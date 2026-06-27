@@ -28,3 +28,5 @@ ratified project-less, the owner is an unresolved fork — surface it as a `kind
 mint a project or attach to an arbitrary host. Convergence (the second impl) clearing is necessary but not
 sufficient. Relates to [[feedback_prep_verify_mechanism_has_consumer]], [[project_protocol_first_class]]
 ([[feedback_protocol_first_class]]), [[feedback_catalog_auto_render]].
+
+**Codified:** the canonical rule is `docs/agent/platform-decisions.md#protocol-host-project` (the statute is source-of-truth; any `#NNN` above is provenance, not the reference).

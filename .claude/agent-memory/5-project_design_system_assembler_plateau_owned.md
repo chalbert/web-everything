@@ -15,3 +15,5 @@ metadata:
 - Forced invariants: two-tier split, manual-authoring-free, vision-paid (#475 no-leakage), persist/share-paid.
 
 Successor builds (separately prioritized): #751 (full paid creator), #749 (live switcher), #754 (permalink). Consistent with [[project_managed_offering_constellation_layering]] (#091 open-core-by-usage) and [[reference_repo_constellation]] (product → plateau-app).
+
+**Codified:** the canonical rule is `docs/agent/platform-decisions.md#monetization` (the statute is source-of-truth; any `#NNN` above is provenance, not the reference).

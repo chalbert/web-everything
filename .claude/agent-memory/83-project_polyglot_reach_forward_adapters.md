@@ -41,3 +41,5 @@ as `createMaaSFetchHandler` (blocks/renderers/module-service/fetchHandler.ts), n
 Build program carved: **#505** (neutral contract + IR) → **#506** (conformance suite) → **#507**
 (deterministic generation-adapter + first .NET/Java target). Polyglot generation may now be baked into
 plans as decided.
+
+**Codified:** the canonical rule is `docs/agent/platform-decisions.md#forward-generation-adapters` (the statute is source-of-truth; any `#NNN` above is provenance, not the reference).
