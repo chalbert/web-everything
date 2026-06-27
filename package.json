@@ -5,9 +5,10 @@
   "customElements": "custom-elements.json",
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
-    "dev": "concurrently --restart-tries -1 --restart-after 1500 --names DOCS,DEMO --prefix-colors blue,magenta \"npx @11ty/eleventy --serve --port=8080 --quiet\" \"vite --port 3000\"",
+    "dev": "concurrently --restart-tries -1 --restart-after 1500 --names DOCS,DEMO,ACTIVE --prefix-colors blue,magenta,green \"npx @11ty/eleventy --serve --port=8080 --quiet\" \"vite --port 3000\" \"node scripts/dev/active-progress-watch.mjs\"",
     "dev:docs": "eleventy --serve --port=8080 --quiet",
     "dev:vite": "vite --port 3000",
+    "dev:active-progress": "node scripts/dev/active-progress-watch.mjs",
     "build": "npm run build:docs && npm run build:demo",
     "build:docs": "eleventy",
     "build:check": "eleventy --output=/tmp/we-build-check --quiet",

@@ -43,6 +43,15 @@ title: Backlog
 .bk-collapse > summary:hover { color: var(--color-text); }
 .bk-collapse[data-persist="intro"] { margin-bottom: 0; }
 .bk-collapse[data-persist="intro"] > summary { margin-top: 0.25rem; }
+/* Active-work LIVE board (#1854) — pulsing "live" dot + per-agent state chips. */
+@keyframes active-pulse { 0% { box-shadow: 0 0 0 0 rgba(22,163,74,0.55); } 70% { box-shadow: 0 0 0 7px rgba(22,163,74,0); } 100% { box-shadow: 0 0 0 0 rgba(22,163,74,0); } }
+.aw-agent { display:inline-flex; align-items:center; gap:0.35rem; padding:0.15rem 0.5rem; border-radius:9999px; font-size:0.78em; font-weight:600; border:1px solid; white-space:nowrap; }
+.aw-agent.done { background:#dcfce7; color:#166534; border-color:#86efac; }
+.aw-agent.running { background:#dbeafe; color:#1e40af; border-color:#93c5fd; }
+.aw-agent.pending { background:#f1f5f9; color:#475569; border-color:#cbd5e1; }
+.aw-agent.failed { background:#fef2f2; color:#991b1b; border-color:#fca5a5; }
+.aw-agent .dot { width:7px; height:7px; border-radius:50%; background:currentColor; }
+.aw-agent.running .dot { animation:active-pulse 1.4s infinite; }
 </style>
 
 {% import "backlog-badges.njk" as bk with context %}
@@ -61,7 +70,9 @@ title: Backlog
 
 <div class="backlog-tabs" role="tablist" aria-label="Backlog views">
     <button type="button" class="backlog-tab is-active" role="tab" aria-selected="true" aria-controls="panel-tracked" id="tab-tracked" data-bd-tab="tracked">Tracked work</button>
+    <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-active" id="tab-active" data-bd-tab="active">Active work{% if backlog.activeWork.count %} <span class="count-badge">{{ backlog.activeWork.count }}</span>{% endif %}<span id="active-tab-live" hidden style="margin-left:0.4rem; display:inline-flex; align-items:center; gap:0.3rem; color:#16a34a; font-weight:700; font-size:0.8em;"><span style="width:8px; height:8px; border-radius:50%; background:#16a34a; animation:active-pulse 1.4s infinite;"></span><span id="active-tab-live-n"></span> live</span></button>
     <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-priority" id="tab-priority" data-bd-tab="priority">Prioritisation</button>
+    <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-humansetup" id="tab-humansetup" data-bd-tab="humansetup">Human setup</button>
     <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-graph" id="tab-graph" data-bd-tab="graph">Graph</button>
     <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-burndown" id="tab-burndown" data-bd-tab="burndown">Burndown</button>
 </div>
@@ -219,6 +230,70 @@ title: Backlog
 {% endif %}
 
 </div>{# /#panel-tracked #}
+
+<div id="panel-active" role="tabpanel" aria-labelledby="tab-active" hidden>
+{# ACTIVE WORK (#1854) — what's being worked RIGHT NOW, in one place, with batch/workflow membership.
+   Two layers, by design:
+     • STATIC (this Nunjucks) — the build-time snapshot from backlog.activeWork: every status:active item,
+       grouped by its owning batch (reservations.json session) else standalone. Refreshes on rebuild.
+     • LIVE (#active-live, filled by /assets/js/backlog-active.js) — running workflows + per-agent phase/
+       state, POLLED from /active-progress.json. That file is written by the dev-only watcher
+       (scripts/dev/active-progress-watch.mjs) which digests the harness's own run-journal; it 404s on a
+       static publish, so the live section simply stays hidden there. The workflow script can't write it —
+       a Workflow runs sandboxed with no fs — so the website reads what the harness already persists. #}
+{# Compact row for one active item — links to its detail page, badges via the shared bk macros. #}
+{% macro activeRow(it) %}
+<div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; padding:0.45rem 0.65rem; border:1px solid var(--color-border); border-radius:0.45rem; background:var(--color-surface, #fff);">
+    <a href="/backlog/{{ it.id }}/" style="color:var(--color-primary); text-decoration:none; font-weight:600;"><span style="color:var(--color-text-muted, #94a3b8); font-variant-numeric:tabular-nums;">#{{ it.num }}</span> {{ it.title }}</a>
+    <span style="display:inline-flex; align-items:center; gap:0.3rem; flex-wrap:wrap;">{{ bk.kindBadge(it.kind) }}{{ bk.statusBadge(it.status) }}{% if it.size %}{{ bk.sizeBadge(it.size) }}{% endif %}{{ bk.tierBadge(it.tier) }}</span>
+</div>
+{% endmacro %}
+{% set aw = backlog.activeWork %}
+<section class="mb-12">
+    <h2 class="section-title">Active work <span class="count-badge" data-count-target>{{ aw.count }}</span></h2>
+    <p class="section-desc">Everything claimed (<code>status: active</code>) right now, grouped by the <strong>batch</strong> or <strong>workflow</strong> that owns it — so concurrent runs coordinate instead of colliding. The <strong>Live</strong> board below is real-time when the dev watcher is running (<code>npm run dev:active-progress</code>): it polls running workflows and shows each subagent's phase, state, and current activity. The grouped cards are the build-time snapshot (refresh on rebuild).</p>
+
+    {# LIVE board — populated client-side from /active-progress.json; hidden until the poller finds a run. #}
+    <div id="active-live" hidden style="margin-bottom:1.75rem;">
+        <h3 class="section-title" style="font-size:1.05em; display:flex; align-items:center; gap:0.5rem;">
+            <span style="width:9px; height:9px; border-radius:50%; background:#16a34a; box-shadow:0 0 0 0 rgba(22,163,74,0.6); animation:active-pulse 1.6s infinite;"></span>
+            Live now <span id="active-live-count" class="count-badge"></span>
+            <span id="active-live-stamp" style="font-size:0.7em; font-weight:500; color:var(--color-text-muted);"></span>
+        </h3>
+        <div id="active-live-runs" style="display:flex; flex-direction:column; gap:1rem; margin-top:0.75rem;"></div>
+    </div>
+
+    {# STATIC snapshot — batches first (membership), then standalone active items. #}
+    {% if aw.batches | length %}
+    <h3 class="section-title" style="font-size:1.05em;">In batches <span class="count-badge">{{ aw.batches | length }}</span></h3>
+    <div style="display:flex; flex-direction:column; gap:0.85rem; margin:0.75rem 0 1.75rem;">
+        {% for b in aw.batches %}
+        <div style="border:1px solid var(--color-border); border-radius:0.6rem; padding:0.85rem 1rem; background:var(--color-surface-alt, #f8fafc);">
+            <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.6rem;">
+                <span style="font-weight:700; color:#3730a3;">⊘ {{ b.session }}</span>
+                <span style="font-size:0.8em; color:var(--color-text-muted); font-variant-numeric:tabular-nums;">{{ b.date }} · {{ b.items | length }} active{% if b.points %} · {{ b.points }} pts{% endif %}</span>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:0.4rem;">
+                {% for it in b.items %}{{ activeRow(it) }}{% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if aw.standalone | length %}
+    <h3 class="section-title" style="font-size:1.05em;">Standalone <span class="count-badge">{{ aw.standalone | length }}</span></h3>
+    <p class="section-desc" style="margin-bottom:0.75rem;">Claimed outside a batch — a single <code>/next</code>, <code>/decision</code>, or ad-hoc session.</p>
+    <div style="display:flex; flex-direction:column; gap:0.4rem;">
+        {% for it in aw.standalone %}{{ activeRow(it) }}{% endfor %}
+    </div>
+    {% endif %}
+
+    {% if not aw.count %}
+    <p style="color:var(--color-text-muted);">Nothing is claimed right now. When a <code>/next</code>, <code>/batch</code>, <code>/decision</code>, or <code>/workflow</code> run claims items they appear here — and the Live board lights up if the dev watcher is running.</p>
+    {% endif %}
+</section>
+</div>{# /#panel-active #}
 
 <div id="panel-priority" role="tabpanel" aria-labelledby="tab-priority" hidden>
 {# Open items ranked by how much work resolving them would free — derived deterministically in the
@@ -391,6 +466,68 @@ title: Backlog
 </section>
 </div>{# /#panel-priority #}
 
+<div id="panel-humansetup" role="tabpanel" aria-labelledby="tab-humansetup" hidden>
+{# Human setup — the residuals that ONLY a person can clear (a `humanGate` in the loader: a non-`blockedBy`
+   hold, kinds deploy/credential/setup/review/feedback). Nothing in the backlog resolves these — an agent
+   can't run a credentialed deploy, register an npm account, or give a sign-off — so they sit OUTSIDE the
+   leverage ranking on the Prioritisation tab (which is agent-workable, blockedBy-driven). This tab gathers
+   them in one place and answers "if I sit down and do this, how much work does it free?": doing the action
+   makes the gated item itself agent-workable (+1), and that item in turn gates `transitiveUnblocks` more
+   open items downstream — so `frees = 1 + transitiveUnblocks`. Sorted most-freeing first. All derived from
+   the same deterministic fields the Prioritisation tab uses (humanGate + the inverted blockedBy edges). #}
+{% set setupItems = backlog | where("humanSetupPending", true) | sort(attribute="leverageScore", reverse=true) %}
+{% set setupCount = setupItems | length %}
+{% set setupFreesTotal = 0 %}{% for it in setupItems %}{% set setupFreesTotal = setupFreesTotal + it.transitiveUnblocks + 1 %}{% endfor %}
+<section class="mb-12">
+    <h2 class="section-title">Human setup <span class="count-badge">{{ setupCount }}</span></h2>
+    <p class="section-desc">The things <strong>only you</strong> can do — held on a <strong>human-only action</strong> an agent can't perform (a credentialed deploy, an external account or npm publish, a one-time live verification, a sign-off). These aren't a <code>blockedBy</code> edge anything in the backlog will clear, so they don't appear in the Prioritisation leverage table. <strong>Frees</strong> = how much work doing the action unlocks: the gated item itself becomes agent-workable, plus every open item it then gates downstream. Sorted most-freeing first. Do these, then remove the <code>humanGate</code> from the item.</p>
+    {% if setupCount %}
+    {# Per-kind tally chips — what KINDS of action are waiting, by the same humanGateMeta vocabulary the pills use. #}
+    {% set kindOrderHG = ["deploy", "credential", "setup", "review", "feedback"] %}
+    <div style="display:flex; gap:0.6rem; flex-wrap:wrap; align-items:center; margin:0 0 1.25rem; font-size:0.85em;">
+        <span style="display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:#0f172a; color:#fff; font-weight:700; white-space:nowrap;">{{ setupCount }} action{{ "s" if setupCount != 1 }} <span style="font-weight:600; opacity:0.8;">(frees ~{{ setupFreesTotal }} items)</span></span>
+        {% for k in kindOrderHG %}{% set n = setupItems | where("humanGateKind", k) | length %}{% if n %}{% set m = backlogMeta.humanGateMeta[k] %}
+        <span title="{{ m.tip }}" style="display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:{{ m.bg }}; color:{{ m.fg }}; font-weight:700; white-space:nowrap;">{{ n }} {{ m.label }}</span>
+        {% endif %}{% endfor %}
+    </div>
+    <div style="overflow-x: auto;">
+    <table class="bd-ratetable" style="min-width: 760px;">
+        <thead><tr>
+            <th style="text-align:left;">Item</th>
+            <th style="text-align:left;">Action you do</th>
+            <th title="How much doing this action unlocks: the gated item itself becomes agent-workable, plus every open item it then gates downstream (1 + chain).">Frees</th>
+            <th title="Open items this gate is the last thing standing between and agent-ready">Direct</th>
+            <th style="text-align:left;">Would free</th>
+        </tr></thead>
+        <tbody>
+        {% for item in setupItems %}
+            {% set hg = backlogMeta.humanGateMeta[item.humanGateKind] %}
+            <tr>
+                <td style="text-align:left;">
+                    <a href="/backlog/{{ item.id }}/" style="color: var(--color-primary); text-decoration: none; font-weight: 600;"><span style="color: var(--color-text-muted, #94a3b8); font-variant-numeric: tabular-nums;">#{{ item.num }}</span> {{ item.title }}</a>
+                    {% if item.status == 'active' %} <span title="Claimed (status:active) — already being worked." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#dbeafe; color:#1e40af; white-space:nowrap;">in progress</span>{% endif %}
+                </td>
+                <td style="text-align:left; font-size:0.92em;">
+                    <span title="{{ hg.tip if hg else 'A human-only action.' }}" style="display:inline-block; padding:0.05rem 0.45rem; border-radius:9999px; font-size:0.72em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:{{ hg.bg if hg else '#fef2f2' }}; color:{{ hg.fg if hg else '#991b1b' }}; white-space:nowrap; margin-right:0.4rem;">{{ hg.label if hg else 'human action' }}</span>
+                    {% if item.humanGate.short %}{{ item.humanGate.short }}{% elif item.humanGate.what %}{{ item.humanGate.what }}{% endif %}
+                </td>
+                <td style="font-weight:700; color:#166534;">{{ item.transitiveUnblocks + 1 }}</td>
+                <td>{{ item.directUnblocks }}</td>
+                <td style="text-align:left; font-size:0.92em;">
+                    {% for dep in item.dependents | where("status", "open") %}<a href="/backlog/{{ dep.id }}/" title="{{ dep.title }}" style="color: var(--color-text-muted); text-decoration: none; font-variant-numeric: tabular-nums;">#{{ dep.num }}</a>{% if not loop.last %}, {% endif %}{% else %}<span style="color: var(--color-text-muted);">just this item</span>{% endfor %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="section-desc" style="margin-top:1rem; font-size:0.82em;"><strong>Frees</strong> counts the gated item plus the open items it gates once it's workable — a setup task with a high number is the highest-leverage thing you can personally unblock. <strong>Direct</strong> is how many items name this one as a <code>blockedBy</code> prerequisite. After you do the action, edit the item and remove its <code>humanGate</code> so it drops off this list and re-enters the agent-ready pool.</p>
+    {% else %}
+    <p>No human-only setup pending — every open item is agent-workable or blocked only by other backlog items.</p>
+    {% endif %}
+</section>
+</div>{# /#panel-humansetup #}
+
 <div id="panel-graph" role="tabpanel" aria-labelledby="tab-graph" hidden>
 {# Dependency relationship graph — the `blockedBy` network as a diagram (#255). Nodes/edges/layers are
    computed deterministically in src/_data/backlogGraph.js (reusing the #254 leverage fields); the SVG is
@@ -510,3 +647,4 @@ title: Backlog
 <script src="/assets/js/backlog-burndown.js"></script>
 <script src="/assets/js/backlog-graph.js"></script>
 <script src="/assets/js/backlog-table-sort.js"></script>
+<script src="/assets/js/backlog-active.js"></script>

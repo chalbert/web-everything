@@ -9,7 +9,9 @@
   var tabs = Array.prototype.slice.call(document.querySelectorAll('[data-bd-tab]'));
   var panels = {
     tracked: document.getElementById('panel-tracked'),
+    active: document.getElementById('panel-active'),
     priority: document.getElementById('panel-priority'),
+    humansetup: document.getElementById('panel-humansetup'),
     graph: document.getElementById('panel-graph'),
     burndown: document.getElementById('panel-burndown'),
   };

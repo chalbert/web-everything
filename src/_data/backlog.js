@@ -146,8 +146,10 @@ function deriveTier(item) {
 }
 
 // Valid `humanGate.kind` values (the pill + held-section vocabulary live in backlogMeta.js). A gate is
-// `{ kind, what }`: `kind` classifies the human action; `what` is the one-line instruction (a runbook
-// pointer / the feedback asked for). Unknown kinds still gate (fail-safe demotion) but render generic.
+// `{ kind, what, short? }`: `kind` classifies the human action; `what` is the full prose instruction (a
+// runbook pointer / the feedback asked for, shown in the badge tooltip); optional `short` is a concise
+// one-line summary rendered as the detail-page banner under the badges. Unknown kinds still gate (fail-safe
+// demotion) but render generic.
 const HUMAN_GATE_KINDS = new Set(['deploy', 'credential', 'feedback', 'review', 'setup']);
 
 // Strip inline markdown so a line makes a clean one-line summary.
@@ -339,6 +341,11 @@ module.exports = function backlog() {
     item.humanGated = !!item.humanGate;
     item.humanGateKind = item.humanGate && typeof item.humanGate === 'object' ? item.humanGate.kind : undefined;
     item.humanGateKnownKind = HUMAN_GATE_KINDS.has(item.humanGateKind);
+    // Pending human setup — a human-gated item still awaiting the action (not yet resolved). Drives the
+    // "Human setup" tab (backlog.njk), which gathers the residuals only a person can clear. A derived
+    // boolean rather than a template-side `rejectattr` because Eleventy's Nunjucks `rejectattr` only honors
+    // the attribute-presence form, not the 3-arg `equalto` test — and `where` does strict `===` on one value.
+    item.humanSetupPending = item.humanGated && item.status !== 'resolved';
 
     item.tier = deriveTier(item);
 
@@ -645,6 +652,34 @@ module.exports = function backlog() {
       }).sort((a, b) => String(b.at).localeCompare(String(a.at))); // most-recently-started first
     }
   } catch { /* advisory only — never break the build over reservation state */ }
+
+  // Active work (#1854) — every CLAIMED (status:active) item, grouped by its owning batch (the
+  // reservations.json `session` that soft-holds it, attached as `reservedBy` above) else standalone.
+  // Drives the Active-work tab (backlog.njk). This is the BUILD-TIME snapshot — it refreshes on rebuild,
+  // and covers active cards + batch membership. The genuinely-LIVE layer (running workflows, per-agent
+  // phase/state) is NOT here: it can't be — a workflow's progress lives in the harness run-journal, not
+  // in the repo — so the tab polls /active-progress.json (written by the dev-only watcher,
+  // scripts/dev/active-progress-watch.mjs) and overlays it client-side. Mirrors activeBatches: dev-only,
+  // frozen on a static build, read defensively.
+  const activeLite = ({ id, num, slug, title, status, kind, size, tier, reservedBy }) =>
+    ({ id, num, slug, title, status, kind, size, tier, reservedBy });
+  const activeBatchBySession = new Map(
+    (items.activeBatches || []).map((b) => [b.session, { session: b.session, date: b.date, points: b.points, items: [] }]),
+  );
+  const activeStandalone = [];
+  let activeCount = 0;
+  for (const it of items) {
+    if (it.status !== 'active') continue;
+    activeCount++;
+    const grp = it.reservedBy ? activeBatchBySession.get(it.reservedBy) : null;
+    if (grp) grp.items.push(activeLite(it));
+    else activeStandalone.push(activeLite(it));
+  }
+  items.activeWork = {
+    batches: [...activeBatchBySession.values()].filter((b) => b.items.length),
+    standalone: activeStandalone.sort((a, b) => Number(a.num) - Number(b.num)),
+    count: activeCount,
+  };
 
   return items;
 };
