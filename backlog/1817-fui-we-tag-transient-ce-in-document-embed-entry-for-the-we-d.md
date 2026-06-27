@@ -1,9 +1,12 @@
 ---
 kind: story
 size: 2
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: none
 tags: [dogfood, fui, tag, embed-boundary, transient-ce]
 ---
 
@@ -15,3 +18,10 @@ The prerequisite the #1208 **taxonomy** half needs (kind/size/tier/tags/meta →
 - `fui:embed/tag-in-document.ts` exports `registerTagsInDocument`, registers `<we-tag>`, injects `TAG_CSS` once (idempotent).
 - Mirrors the `badges-in-document` contract (transient-CE, mode-C rule 6/7); a test covers the idempotent register + style-inject.
 - Unblocks #1208's taxonomy-surface swap.
+
+## Progress (batch-20260626-1811-1817-1819)
+
+- Added `fui:embed/tag-in-document.ts` exporting `registerTagsInDocument(doc = document)` — calls `registerTag()` and injects `TAG_CSS` once via the `fui-transient-tag-styles` `<style id>` guard, a direct mirror of `fui:embed/badges-in-document.ts`.
+- Exported it from the `fui:embed/index.ts` barrel.
+- `fui:embed/__tests__/tag-in-document.test.ts` — 3 cases: registers `<we-tag>`, injects `.fui-tag` CSS once into the host head, idempotent on repeat call. All green.
+- The docs-side load in `we:src/_layouts/base.njk` + the `we-tag{}` SSR baseline are part of #1208's taxonomy-surface swap (now unblocked), not this prerequisite.
