@@ -1,11 +1,14 @@
 ---
 kind: decision
 parent: "1836"
-status: open
+status: resolved
 relatedProject: webplugs
 relatedReport: reports/2026-06-27-unplugged-plug-parity.md
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#plug-distribution-unit"
 preparedDate: "2026-06-27"
 tags: [plugs, packaging, npm, dedup]
 ---
@@ -43,6 +46,12 @@ The decision turns on one axis — *what is the distribution unit*, one package 
 **Scope note (against #1836's "every plug"):** only **8 of the 20** plug directories are exported today; ~12 (`webtheme`, `webanalytics`, `webguards`, `webvalidation`, …) have **no export at all**. For those the consumer's choice isn't "monolith vs per-plug" — it's "no published access yet". The monolith ruling holds for them too, but the reframed #1846 (below) must *enumerate the unexported domains* and give each a clean subpath export, or the parity epic's "every plug functional" goal isn't actually met.
 
 **Skeptic: SURVIVES-WITH-AMENDMENT** — the refute attempt (verified against the tree) argued the future external-publish consumer (#872/#907) is the per-plug case, and probed three claims. Two load-bearing claims were *overstated* and are corrected above: (1) "tree-shaking already delivers minimal install" — true for *import* granularity, but the package is source-distributed `.ts` with no tarball/`sideEffects` so minimal *install* for a published consumer is unproven (folded into the reframed #1846 residual); (2) option (c) `-labs` is **not** a free door — cross-domain deep-reach imports make no plug extractable today, so it is blocked-until-decoupled. The *direction* survives **more strongly**, for a partly different reason than first written: per-plug packaging is not merely skew-risky, it is currently *impossible* (the import cycles), and the industry has consolidated away from it regardless.
+
+## Ruling (ratified 2026-06-27)
+
+**UPHOLD #1045 — keep the monolith `@frontierui/plugs` with subpath exports (option b). Per-plug packages (option a) are rejected; the `-labs` stability-tier split (option c) is held as a future, blocked-until-decoupled exception.** Confidence high; three independent grounds converge — currently *impossible* (verified cross-domain deep-reach import cycles: `fui:plugs/webregistries/ScopedRegistryAttribute.ts:17`, `fui:plugs/webexpressions/CustomTextNode.ts:7`), reintroduces the closed version-skew hazard (#1045/#1006), and runs against the unanimous post-2024 industry consolidation (Radix/Chakra/React Aria).
+
+**Red-team result — attack failed.** Strongest case for (a) is the future external `npm install` consumer (#872/#907), but that is minimal-*install* (add a build + `sideEffects: false` to the one package), not a reason to split into N. No principle is violated by the monolith: separation is schema/ownership not file-count (#1662 — the domains are runtime-coupled via shared registries/contexts, so per-package is file-count separation *against* the coupling); packaging is FUI-owned impl (#606, not a standard conflation); `exports`-map subpaths are a web standard (zero lock-in). Skeptic pass already SURVIVES-WITH-AMENDMENT.
 
 ## Consequence for W6 / #1846
 

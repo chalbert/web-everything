@@ -484,6 +484,32 @@ decoupled from release). *Confidence: principle firm; specific knobs provisional
 **Lineage:** #606 (code home + brand deferral) · #775 (soft/revisitable monetization) · #642 (this
 ruling). *Confidence: high — structural test + un-park trigger firm.*
 
+### Plug distribution unit = one `@frontierui/plugs`, subpath exports — never per-plug packages {#plug-distribution-unit}
+
+The plug **distribution unit is one `@frontierui/plugs` package** with per-domain subpath exports
+(`@frontierui/plugs/<domain>`), **never one npm package per plug**. Consumers get minimal-*import*
+granularity via subpaths + tree-shaking; they do **not** get independently-versioned per-plug packages.
+
+1. **Why not per-plug:** three independent grounds. (a) *Currently impossible* — the domains have dense
+   cross-domain imports reaching private files (`fui:plugs/webregistries/ScopedRegistryAttribute.ts:17` →
+   `../webbehaviors/CustomAttribute`; `fui:plugs/webexpressions/CustomTextNode.ts:7` →
+   `../webinjectors/InjectorRoot`), so no domain ships standalone without first severing those edges. (b)
+   *Reintroduces a closed hazard* — N independently-versioned packages sharing runtime registries/contexts
+   let a consumer pin `webbehaviors@2` against `webregistries@1` and break the seam at runtime: the exact
+   cross-monorepo skew #1045/#1006 closed. (c) *Against the industry* — Radix/Chakra/React Aria all
+   consolidated *away* from per-package granularity post-2024, citing this very pain.
+2. **Minimal-install ≠ minimal-import.** Subpath exports already deliver minimal *import*. A future
+   external `npm install` consumer (#872/#907) wanting smaller *install* gets it by adding a build step +
+   `sideEffects: false` to the **one** package — not by splitting into N.
+3. **The only sanctioned split is a `-labs` stability tier** (Lit's `@lit-labs/*` model): split a plug out
+   *only* when its API is genuinely experimental — axis = **stability, never per-feature** — and only after
+   a decoupling pass severs the cross-domain edges. Not a free escape hatch.
+
+**Lineage:** #1837 (this ruling) *upholds* #1045 (single-package) + #1006 (exports-lock) + #606 (plugs
+FUI-owned); reframes #1846 (W6) into a subpath-export conformance check. Grounded in
+`/research/unplugged-plug-parity/` Survey 1. *Confidence: high — impossible-today + closed-hazard +
+industry consolidation converge; red-team failed.*
+
 ### Vision / AI = a Plateau no-leakage service client {#no-leakage-client}
 
 Any **implementation capability** (vision, AI model inference) is **never a WE standard**. It is a
