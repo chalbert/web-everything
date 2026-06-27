@@ -1,9 +1,12 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 blockedBy: ["1854"]
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: "we:src/backlog.njk#active-batches + we:src/assets/js/backlog-active.js"
 tags: []
 ---
 

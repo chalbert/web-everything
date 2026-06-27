@@ -311,14 +311,25 @@ title: Backlog
             <div id="active-live-runs" style="display:flex; flex-direction:column; gap:0.85rem;"></div>
         </div>
 
+        {# BATCHING — live, persistent (client-filled from the feed's kind:batch runs + batch-linked digests).
+           A /batch stays visible here for as long as its reservation is live, even between items (when it
+           has just resolved one and not yet flipped the next to active) — unlike the build-time lane below,
+           which only shows items that happen to be `active` this instant. Hidden until the poller finds a batch. #}
+        <div id="active-batches" class="aw-lane" hidden>
+            <div class="aw-lane-head" style="color:#3730a3;"><span class="aw-lane-dot" style="background:#3730a3;"></span>Batching · live <span id="active-batches-count" class="count-badge"></span></div>
+            <div id="active-batches-runs" style="display:flex; flex-direction:column; gap:0.85rem;"></div>
+        </div>
+
         {{ lane('Preparing', '#6d28d9', aw.lanes.preparing, '<code>/prepare</code> — researching a decision\'s forks to Definition of Ready.') }}
         {{ lane('Deciding', '#92400e', aw.lanes.deciding, '<code>/decision</code> — a ratification call in progress.') }}
         {{ lane('Slicing', '#155e75', aw.lanes.slicing, '<code>/slice</code> — an epic being cut into child stories.') }}
         {{ lane('Programs', '#075985', aw.lanes.programs, 'Perpetual umbrellas (e.g. flagship exercise apps) — always active, advanced incrementally.') }}
 
-        {# BATCHING — items soft-held by a running /batch, grouped by batch session (membership). #}
+        {# BATCHING (build-time fallback) — items soft-held by a running /batch that are ALSO active this
+           instant. Usually empty (the held pack is status:open); the live #active-batches above is the real
+           view. The client hides this when it renders the live section, to avoid a double batch listing. #}
         {% if aw.batches | length %}
-        <div class="aw-lane">
+        <div class="aw-lane" id="aw-static-batching">
             <div class="aw-lane-head" style="color:#3730a3;"><span class="aw-lane-dot" style="background:#3730a3;"></span>Batching <span class="count-badge">{{ v.batching }}</span></div>
             {% for b in aw.batches %}
             <div class="aw-batch">

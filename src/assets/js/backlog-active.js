@@ -128,6 +128,7 @@
   var openRuns = {};      // run.id → expanded? (per-workflow card, persists across polls)
   var lastDigests = null; // last payload, so a toggle can re-render without waiting for the next poll
   var lastRuns = null;    // last workflow runs, for the same reason
+  var lastData = null;    // full last payload, so a toggle can repaint rows + batch card together
 
   // hh:mm:ss from an ISO/epoch (for step timestamps).
   function clock(t) {
@@ -196,7 +197,8 @@
     if (st) {
       var num = st.getAttribute('data-stream-toggle');
       openStreams[num] = !openStreams[num];
-      applyDigests(lastDigests);
+      applyDigests(lastDigests);   // lane rows
+      renderBatches(lastData);     // and the same num inside a batch card
       return;
     }
     var rt = e.target.closest('[data-run-toggle]');
@@ -209,8 +211,67 @@
     }
   });
 
+  // ── Live Batching section ───────────────────────────────────────────────────────────────────────
+  // A /batch persists here for as long as its reservation is live, even between items — unlike the
+  // build-time lanes, which only draw items that are `active` this instant (so a batch vanished whenever
+  // it had just resolved one item and not yet flipped the next to active). Driven entirely by the feed:
+  // the kind:'batch' run carries the held/planned nums; the digests carry which nums it's actively working
+  // (and their live progress). #1876.
+  var batchesWrap = document.getElementById('active-batches');
+  var batchesRunsEl = document.getElementById('active-batches-runs');
+  var batchesCountEl = document.getElementById('active-batches-count');
+  var staticBatching = document.getElementById('aw-static-batching');
+  function numCmp(a, b) { return Number(a) - Number(b); }
+
+  // One "working" item inside a batch card — its live progress (todo / last action / step stream).
+  function batchWorkingItem(num, d) {
+    var h = '<div style="border:1px solid var(--color-border); border-radius:0.45rem; padding:0.45rem 0.6rem; background:var(--color-surface, #fff); margin-bottom:0.3rem;">';
+    h += '<div>' + numLink(num) + ' <span style="font-size:0.7em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:#1e40af;">working</span></div>';
+    if (d.currentTodo) h += '<div class="now" style="font-size:0.8em;">▸ ' + esc(d.currentTodo) + '</div>';
+    var meta = [];
+    if (d.lastTool) meta.push('last: ' + esc(d.lastTool));
+    if (d.updatedAt) meta.push(esc(ago(d.updatedAt)));
+    if (d.sessionId) meta.push('session ' + esc(d.sessionId));
+    if (meta.length) h += '<div class="meta" style="font-size:0.76em; color:var(--color-text-muted);">' + meta.join(' · ') + '</div>';
+    var steps = Array.isArray(d.steps) ? d.steps : [];
+    if (steps.length) {
+      var open = !!openStreams[num];
+      h += '<button type="button" class="aw-stream-toggle" data-stream-toggle="' + esc(num) + '">' + (open ? '▾' : '▸') + ' ' + steps.length + ' steps</button>';
+      if (open) h += '<div class="aw-stream">' + streamHtml(steps) + '</div>';
+    }
+    h += '</div>';
+    return h;
+  }
+
+  function renderBatches(data) {
+    var runs = (data && Array.isArray(data.runs) ? data.runs : []).filter(function (r) { return r && r.kind === 'batch'; });
+    if (!batchesWrap) return;
+    if (!runs.length) { batchesWrap.hidden = true; return; }
+    if (staticBatching) staticBatching.style.display = 'none'; // the live section supersedes the build-time one
+    batchesWrap.hidden = false;
+    if (batchesCountEl) batchesCountEl.textContent = runs.length;
+    var digests = (data && data.digests) || {};
+    batchesRunsEl.innerHTML = runs.map(function (run) {
+      var working = Object.keys(digests).filter(function (n) { return digests[n].batch === run.id; }).sort(numCmp);
+      var inWorking = {}; working.forEach(function (n) { inWorking[n] = 1; });
+      var planned = (Array.isArray(run.nums) ? run.nums : []).filter(function (n) { return !inWorking[n]; }).sort(numCmp);
+      var h = '<div class="aw-batch">';
+      h += '<div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.5rem;">';
+      h += '<span style="font-weight:700; color:#3730a3;">⊘ ' + esc(run.id) + '</span>';
+      h += '<span style="font-size:0.72em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:' + (run.status === 'running' ? '#1e40af' : '#475569') + ';">' + esc(run.status || 'running') + '</span>';
+      h += '<span style="font-size:0.78em; color:var(--color-text-muted);">' + working.length + ' working · ' + planned.length + ' planned</span>';
+      if (run.updatedAt) h += '<span style="margin-left:auto; font-size:0.72em; color:var(--color-text-muted);">' + esc(ago(run.updatedAt)) + '</span>';
+      h += '</div>';
+      if (working.length) h += working.map(function (n) { return batchWorkingItem(n, digests[n]); }).join('');
+      if (planned.length) h += '<div style="font-size:0.8em; color:var(--color-text-muted);">planned: ' + planned.map(numLink).join(' ') + '</div>';
+      return h + '</div>';
+    }).join('');
+  }
+
   function render(data) {
+    lastData = data;
     applyDigests(data && data.digests);
+    renderBatches(data);
     var runs = (data && Array.isArray(data.runs) ? data.runs : [])
       .filter(function (r) { return r && r.kind === 'workflow'; })
       .sort(function (a, b) {  // running first, then most-recently-updated
@@ -235,8 +296,8 @@
   function poll() {
     fetch(FEED, { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { if (d) render(d); else { wrap.hidden = true; setTabLive(0); applyDigests(null); } })
-      .catch(function () { /* watcher not running / static publish — stay silent */ wrap.hidden = true; setTabLive(0); applyDigests(null); });
+      .then(function (d) { if (d) render(d); else { wrap.hidden = true; setTabLive(0); applyDigests(null); renderBatches(null); } })
+      .catch(function () { /* watcher not running / static publish — stay silent */ wrap.hidden = true; setTabLive(0); applyDigests(null); renderBatches(null); });
   }
 
   function start() { if (timer) return; poll(); timer = setInterval(poll, INTERVAL); }
