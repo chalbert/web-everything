@@ -64,6 +64,21 @@ if (items.length === 0) {
   return { ledger: [], concurrentItems: 0, serialItems: 0, conflictsReplayed: 0, derivedRegenerated: false };
 }
 
+// ── Subagent return-hygiene contract (#1861, model-usage watch #1855) ──────────
+// Prepended to every spawned-agent prompt. Keeps returns as CONCLUSIONS the parent keeps, not transcripts,
+// and kills the confidently-invented-specifics failure (the #1855 front-B sweep fabricated Claude Code
+// version numbers). The canonical prose lives in docs/agent/backlog-workflow.md → "Subagent return hygiene";
+// this constant mirrors it because a workflow script has no filesystem read at runtime.
+const RETURN_HYGIENE = [
+  `RETURN HYGIENE — return the conclusion the parent will keep, not a transcript:`,
+  `• NEVER fabricate specifics. No invented version numbers, file:line refs, API names, flags, or counts —`,
+  `  if you did not READ it in this run, do not state it as fact. An honest "unknown / not verified" beats a`,
+  `  plausible guess (a wrong file:line or version is worse than a gap — it silently misleads the parent).`,
+  `• Flag uncertainty explicitly: mark any inference vs. a verified fact.`,
+  `• Prefer a tight ranked list over prose; omit raw file dumps and step-by-step narration.`,
+  `• If returning a structured object, every field must be grounded — leave it empty rather than guess.`,
+].join('\n');
+
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
 // A per-item effect probe: the REAL touch-set predicted from the body, not just the frontmatter (a lower
@@ -166,6 +181,8 @@ let probedCount = 0;
 const probes = await parallel(items.map((it) => () =>
   agent(
     [
+      RETURN_HYGIENE,
+      ``,
       `You are scoping backlog item #${it.num} ("${it.slug}") for a PARALLEL batch. Read we:backlog/${it.file}`,
       `and any files it references. Predict EVERY repo-relative file this item will create or edit if worked now:`,
       `its impl/code files, its own we:backlog/${it.num}.md, and any per-entry registry file it would add`,
@@ -228,6 +245,8 @@ phase('Items');
 
 function itemWorktreePrompt(it) {
   return [
+    RETURN_HYGIENE,
+    ``,
     `You are PARALLEL batch item #${it.num} ("${it.slug}") running ALONE in your OWN isolated git worktree.`,
     `Work EXACTLY this one item, full single-item arc (batch-backlog-items SKILL.md / docs/agent/backlog-workflow.md):`,
     `claim (node scripts/backlog.mjs claim ${it.num}) → work, editing ONLY this item's own files: impl/code,`,
@@ -301,6 +320,8 @@ if (serialItems.length > 0) {
     sIdx++;
     const r = await agent(
       [
+        RETURN_HYGIENE,
+        ``,
         `You are the SERIAL segment of a parallel batch (slug ${batchSlug}), working item #${it.num}`,
         `("${it.slug}"). Do ALL work INSIDE the integration worktree: \`cd ${integrationWorktree}\` first (it is`,
         `on branch "${integrationBranch}"); never touch the user's main checkout. This item is here because it`,
@@ -350,6 +371,8 @@ for (let i = 0; i < concurrentResults.length; i++) {
     log(`#${it.num} could not land clean (${reason}) — replaying it serially.`);
     const replay = await agent(
       [
+        RETURN_HYGIENE,
+        ``,
         `Inside the integration worktree (\`cd ${integrationWorktree}\`, on branch "${integrationBranch}"; never`,
         `touch the user's main checkout), replay parallel batch item #${it.num} ("${it.slug}") SERIALLY (its`,
         `worktree merge was aborted/failed). Work it as an ordinary serial item: claim if not already active,`,
