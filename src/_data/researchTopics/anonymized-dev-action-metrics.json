@@ -1,0 +1,21 @@
+{
+  "id": "anonymized-dev-action-metrics",
+  "title": "Anonymized dev-action metrics to drive prioritization (channel, anonymization, opt-default, build gate)",
+  "status": "open",
+  "summary": "Grounds decision #1797: the platform should collect anonymized developer actions (install/build/test counts) so prioritization is data-driven, distinct from the in-app declarative emission seam #1415/#1475. The decisive verified finding: #1415's analytics protocol (we:analytics/contract.ts:1-20) is a transport-agnostic CONTRACT — track() is void fire-and-forget, the backend is a swappable CustomTracker resolved through DI ('the application never knows about Mixpanel/GA4/Segment') — so its contract SHAPE + vocabulary-extension mechanism (analytics-vocabulary.json) are reusable for dev metrics even though its DOM emitter and product-analytics vendor sink are not (#1476 experiment-exposure already rode it as a sibling vocabulary). No dev-action collection exists in the repo today. Constellation placement: contract+vocabulary → WE (contracts only), reference emitter → FUI, aggregation endpoint → plateau (the server-cost piece, platform-decisions.md:404-418, the deferrable one). Prior-art survey (Homebrew/VSCode/.NET/Next/Astro/npm/cargo): opt-out is the convenience norm among collectors, strongest-privacy posture is no machine id (Homebrew), several core tools collect nothing client-side; persistent hashed-MAC machine id is the most-criticized choice. A refute-only skeptic REFUTED three of the original defaults and amended the gate. Resulting shape at DoR: Fork 1 — #1415 relationship: reuse #1415's transport-agnostic contract shape + vocabulary-extension pattern as a sibling dev-metrics vocabulary with a dedicated platform sink (default) vs a fully separate channel; the product-analytics vendor SINK is a forced invariant (dedicated, settled). Fork 2 — anonymization: a salted rotating-daily install-id (per-day distinct count, no persistent identity, default) vs no-id-at-all (refuted — destroys the distinct-developer dedupe that is the card's purpose) vs persistent hashed-MAC (refuted — most-criticized fingerprint). Fork 3 — opt-default: opt-IN with a prominent first-run prompt + one-flag escape (default) vs opt-OUT (refuted — contradicts the platform's privacy/minimize-lock-in pitch). Build scope & maturity gate: build the contract + vocabulary + FUI reference emitter now at priority:low (demand-blind, specifiable), gate only the hosted plateau endpoint with a typed maturityTrigger externalConsumers>=1 (server-cost rule); drop any vague 'prioritization need' trigger. Settled: metric set = command (closed vocab) + exit code + CLI/platform version + OS+arch + CI flag + timestamp, excluding all PII. Full grounding in reports/2026-06-26-anonymized-dev-action-metrics.md.",
+  "dateOpened": "2026-06-26",
+  "lastReviewed": "2026-06-26",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "telemetry",
+    "metrics",
+    "prioritization",
+    "privacy",
+    "anonymization",
+    "webanalytics",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webanalytics"
+}

@@ -1,0 +1,66 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/1797-anonymized-dev-action-metrics-to-drive-prioritization/">#1797</a>:
+  the platform should collect <strong>anonymized developer actions</strong> — counts of installs, builds,
+  tests — so prioritization is informed by real usage, not guesswork. This is the product/operations use of
+  telemetry, distinct from the in-app declarative emission seam <a href="/backlog/1415-/">#1415</a> /
+  <a href="/backlog/1475-/">#1475</a> designed (how an app emits its own runtime events). Privacy is a
+  first-class constraint: aggregate, anonymized, no per-developer identifiable data.
+</p>
+
+<h2>The decisive finding — #1415 is a transport-agnostic contract</h2>
+<p>
+  <code>we:analytics/contract.ts:1-20</code> shows the analytics protocol is the pure-contract half:
+  <code>track()</code> is <strong>void fire-and-forget</strong> and the backend is a <strong>swappable
+  <code>CustomTracker</code> resolved through DI</strong> — "the application never knows about Mixpanel /
+  GA4 / Segment." So #1415's <em>contract shape</em> and its vocabulary-extension mechanism
+  (<code>analytics-vocabulary.json</code>) are reusable for dev metrics, even though its DOM emitter and its
+  product-analytics vendor sink are not. The "ride on #1415 is broken" elimination therefore holds only at
+  the sink layer; at the contract/vocabulary layer the reuse is live — which is why the channel question is
+  a real fork, not settled by elimination.
+</p>
+
+<h2>Constellation placement &amp; the server-cost gate</h2>
+<p>
+  "What to build next" is a product/ops concern that decomposes down the constellation: contract +
+  vocabulary → WE (contracts only, no shipping impl), reference emitter → FUI, aggregation endpoint →
+  plateau (the only piece that holds data). The hosted endpoint is a server-cost liability
+  (<code>we:docs/agent/platform-decisions.md:404-418</code>) — the deferrable, maturity-gated piece — while
+  the contract is fully specifiable now.
+</p>
+
+<h2>Prior art</h2>
+<p>
+  Across Homebrew, VS Code, .NET CLI, Next.js and Astro, opt-out is the convenience default among tools that
+  collect; the strongest-privacy posture is <strong>no machine id</strong> (Homebrew, public aggregate API),
+  and several core tools (npm, Vite core, cargo core) collect nothing client-side. The persistent
+  hashed-MAC machine id (VS Code / .NET) is the most-criticized choice.
+</p>
+
+<h2>What the skeptic pass changed</h2>
+<ul>
+  <li><strong>Channel — REFUTED→reframed.</strong> Dedicated sink is a forced invariant (settled); the live
+    fork is whether the dev-metrics vocabulary reuses #1415's contract shape (a sibling vocabulary) or mints
+    a fully separate channel.</li>
+  <li><strong>Anonymization — REFUTED.</strong> "No machine id" destroys the distinct-developer dedupe the
+    card needs; folded to a <strong>salted, rotating-daily install-id</strong> (per-day distinct, no
+    persistent identity).</li>
+  <li><strong>Opt-default — REFUTED.</strong> Opt-out contradicts the platform's privacy / minimize-lock-in
+    pitch; folded to <strong>opt-IN</strong> with a prominent first-run prompt + one-flag escape.</li>
+  <li><strong>Gate — amended.</strong> Build the contract + vocabulary + FUI emitter now at
+    <code>priority: low</code>; gate only the hosted plateau endpoint with a typed
+    <code>maturityTrigger: externalConsumers&gt;=1</code> (drop the vague "prioritization need" trigger).</li>
+</ul>
+
+<h2>The shape at a glance</h2>
+<ul>
+  <li><strong>Fork 1 — #1415 relationship.</strong> Reuse #1415's transport-agnostic contract + a sibling
+    dev-metrics vocabulary (default) vs a fully separate channel; product-analytics sink stays dedicated
+    (forced invariant).</li>
+  <li><strong>Fork 2 — anonymization.</strong> Salted rotating-daily install-id (default) vs no-id (refuted)
+    vs persistent hashed-MAC (refuted).</li>
+  <li><strong>Fork 3 — opt-default.</strong> Opt-IN (default) vs opt-OUT (refuted).</li>
+  <li><strong>Build scope.</strong> Contract + vocabulary + FUI emitter now at <code>priority: low</code>;
+    hosted endpoint <code>maturityGated</code> on <code>externalConsumers&gt;=1</code>. Metric set settled by
+    prior-art consensus (PII excluded).</li>
+</ul>
