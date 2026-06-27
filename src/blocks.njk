@@ -64,25 +64,31 @@ title: Web Everything — Blocks
 
 <div class="project-grid" id="block-grid">
   {% for block in blocks %}
+    {# #1607 (#1820 Fork 1a): <we-card> frame + status → <we-badge>, type/intent chips → <we-tag>; the
+       click-through + filter data-* stay on the OUTER <a> (.block-card is the filter JS hook). The anchor's
+       own frame is stripped by `.project-card:has(> we-card)` in style.css so the card is the sole frame. #}
+    {% set statusTone = 'success' if block.status == 'active' else ('info' if block.status == 'draft' else ('warning' if block.status == 'concept' else 'neutral')) %}
     <a href="/blocks/{{ block.id }}/"
        class="project-card block-card"
        data-type="{{ block.type }}"
        data-status="{{ block.status }}"
        data-search="{{ (block.name + ' ' + block.summary + ' ' + (block.implementsIntent or '') + ' ' + (block.composesIntents | join(' ') if block.composesIntents else '')) | lower }}"
        style="text-decoration: none; color: inherit; display: block;">
-      <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
-        <h3 class="project-title" style="margin: 0;">{{ block.name }}</h3>
-        <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if block.status == 'concept' %}#fef3c7{% elif block.status == 'draft' %}#dbeafe{% elif block.status == 'active' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if block.status == 'concept' %}#92400e{% elif block.status == 'draft' %}#1e40af{% elif block.status == 'active' %}#166534{% else %}#475569{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ block.status | title }}</span>
-      </div>
-      <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ block.summary | truncate(180) }}</p>
-      <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;">
-        {% if block.type %}
-        <span style="display: inline-block; padding: 0.15rem 0.55rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.75em;">{{ block.type }}</span>
-        {% endif %}
-        {% if block.implementsIntent %}
-        <span style="display: inline-block; padding: 0.15rem 0.55rem; border-radius: 9999px; background: rgba(99,102,241,0.08); color: #4338ca; font-size: 0.75em;">Intent: {{ block.implementsIntent }}</span>
-        {% endif %}
-      </div>
+      <we-card>
+        <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+          <h3 class="project-title" style="margin: 0;">{{ block.name }}</h3>
+          <we-badge tone="{{ statusTone }}">{{ block.status | title }}</we-badge>
+        </div>
+        <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ block.summary | truncate(180) }}</p>
+        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;">
+          {% if block.type %}
+          <we-tag shape="pill">{{ block.type }}</we-tag>
+          {% endif %}
+          {% if block.implementsIntent %}
+          <we-tag shape="pill" style="background: rgba(99,102,241,0.08); color: #4338ca; --cat-bg: rgba(99,102,241,0.08); --cat-color: #4338ca;">Intent: {{ block.implementsIntent }}</we-tag>
+          {% endif %}
+        </div>
+      </we-card>
     </a>
   {% endfor %}
 </div>

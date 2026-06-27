@@ -715,6 +715,24 @@ h1, h2, h3, h4, h5, h6 {
     border-color: var(--color-primary);
 }
 
+/* #1607 (#1820 Fork 1a): a catalog tile whose body is a <we-card> (it server-renders, then upgrades to
+   <article class="fui-card">) delegates the visual frame to the card. Keep .project-card for grid layout
+   and the hover lift, but strip its own border/background/shadow/padding so the card is the SOLE frame —
+   no nested double box. Covers both the pre-upgrade <we-card> and the post-upgrade .fui-card. */
+.project-card:has(> we-card),
+.project-card:has(> .fui-card) {
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    overflow: visible;
+}
+.project-card:has(> we-card):hover,
+.project-card:has(> .fui-card):hover {
+    box-shadow: none;
+    border-color: transparent;
+}
+
 .content-box {
     background: var(--color-surface);
     border: 1px solid var(--color-border);
