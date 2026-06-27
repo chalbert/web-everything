@@ -2,16 +2,36 @@
 kind: story
 size: 5
 parent: "746"
-status: open
+status: resolved
 blockedBy: []
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: frontierui/workbench/authorModeData.ts
 locus: frontierui
 relatedReport: reports/2026-06-27-fui-workbench-author-mode-source-home.md
 tags: [block-explorer, workbench, author-mode, maas, fui]
 ---
 
 # Wire the author-mode-source into the live FUI workbench (declarative-component blocks)
+
+## Progress (batch-2026-06-27) — built
+
+Wired per #1865's ratified shape. New `fui:workbench/authorModeData.ts` lowers each shared
+`fui:blocks/renderers/component/__fixtures__/component-cases.ts` fixture to the **3 faithfully-emitted
+forms** (#1865 Fork 1): `declarative` (the definition verbatim), `wc-class`
+(`generateClassSource`), `functional` (`generateFunctionalSource`) — into the
+`{form,label,language,code,lossy,diagnostics}` shape `fui:workbench/authorMode.ts` consumes. Each case
+becomes a **`source-only`** `WorkbenchBlock` carrying a static `authorSource` (the #1865 Fork-2 inert slot,
+like `cem`); the 10 blocks are spread into `WORKBENCH_BLOCKS` (`fui:workbench/registry.ts`). The existing
+`renderAuthorModePanel` (form-count-agnostic, `fui:workbench/mount.ts:723`) renders them unchanged, and the
+`source-only` shape degrades the live-instance panels (the `#workbench-inert-data-static-slot` statute). A
+case that fails to parse degrades to a single lossy `declarative` form rather than breaking the registry
+import. Only rendered text crosses the #700 seam — FUI never imports `serve()`. Also refreshed the stale
+`authorSource`-slot doc comment (the WE `serve()` / `we:src/_data/authorModeSource.json` premise is
+superseded by #1730/#1752 — generation is a FUI concern). Tests: new `fui:workbench/__tests__/authorModeData.test.ts` (3) + the full
+workbench suite (37) green; FUI `check:standards` red is pre-existing and unrelated (34→34, none names this
+changeset).
 
 > **Retyped decision → story (prepare-all 2026-06-27).** This was briefly retyped to a `decision` because two
 > design sub-calls (form-set, generation-home) gated the build. **Both are now resolved** — carved to
