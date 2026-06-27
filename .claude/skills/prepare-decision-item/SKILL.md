@@ -88,7 +88,14 @@ output is the rewritten body, not a message:
    preview-table row — support-both concerns from pass 0 go in the "Supported by default" list, not the
    table. A row whose "main alternative" isn't actually *excluded* is a pass-0 miss — demote it. Author
    the default to survive a red-team (*backlog-workflow.md → Red-team the default*): ground the default's
-   rationale against the real tree now.
+   rationale against the real tree now. **Add a concrete code example whenever the fork turns on a
+   code-level shape** — an API surface, wire-form, attribute, schema, or call-site. A fork that is "which
+   shape" stays abstract until you show the shape: write a short snippet for the default (and, where the
+   contrast carries the argument, for the main alternative), keyed to the *real* API you grounded against
+   (use the actual provider/registration calls, not pseudo-code) and labelled by fork + option. Skip it
+   only for forks with no code surface (pure naming/ownership/scope/timing calls) — there a snippet adds
+   nothing. The example is part of the fork's prepared shape, not chat-only (#1621 — examples go in the
+   item).
 4. **Run the skeptic pass *now*, in prep — don't defer the attack to the decision turn** (*backlog-workflow.md
    → Red-team the default*: prep is the primary skeptic seat). Prep that only *asserts* a default and tags
    "flag for the skeptic" leaves the attack to land at ratify time — the exact failure #1437 hit (prep
@@ -119,7 +126,9 @@ A prepared decision is **still open** — the call hasn't been made. So `release
    fork is not prepared — do not stamp it. Walk every `## Fork N` and confirm each has its fork-existence
    justification line (#819), named options,
    tradeoffs, a bold default, **and a `Skeptic:` verdict line** (the pass-4 attack was run and its findings
-   folded in — a fork with no `Skeptic:` note is un-attacked, so not at DoR; do not stamp it). **If the
+   folded in — a fork with no `Skeptic:` note is un-attacked, so not at DoR; do not stamp it) — **plus a
+   concrete code example for any fork that turns on a code-level shape** (API/wire-form/attr/schema/call-site;
+   a code-shape fork with no snippet is not at DoR — pure naming/ownership/scope/timing forks are exempt). **If the
    item is a *validation-gate* decision** (third archetype — a go/no-go on a candidate, no `## Fork N`),
    gate on its shape instead: confirm a Digest+verdict (go/no/not-yet), a prior-art delta, a *concrete*
    un-gate trigger, and a merit `Skeptic:` line — and that it is **not** a bare "do we need this, on what
