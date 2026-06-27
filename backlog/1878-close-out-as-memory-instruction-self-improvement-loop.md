@@ -2,9 +2,11 @@
 kind: story
 size: 5
 parent: "1855"
-status: open
+status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: scripts/memory-reflect.mjs (npm run reflect) + .claude/commands/close-session.md reflection step
 tags: [memory, close-out, self-improvement, consolidation, model-usage-watch, cadence]
 ---
 
@@ -38,7 +40,15 @@ The card assumed a repo-local `we:.claude/skills/closing-session`, but the **clo
 - **(a) Edit the global skill** — one place, applies the reflection loop to *every* project's close. But it's outside this repo (not version-controlled here, not committable in a WE batch) and changes close behaviour everywhere, so it needs explicit human sign-off.
 - **(b) Repo-local close mechanism** — a WE-scoped close step (extend `we:.claude/commands/close-session.md`, or a repo skill/script the close invokes) that runs the memory/instruction reflection only for this repo. Committable here; no cross-project blast radius; but doesn't generalise to other projects.
 
-Recommendation: **(b) for the WE-specific memory-consolidation reflection** (it reads this repo's `check:memory --json` + memory dir), with the *generic* "propose learnings" idea promoted to the global skill only on a deliberate, separately-approved pass. Released to `open` pending this call.
+Recommendation: **(b) for the WE-specific memory-consolidation reflection** (it reads this repo's `check:memory --json` + memory dir), with the *generic* "propose learnings" idea promoted to the global skill only on a deliberate, separately-approved pass.
+
+**Resolved 2026-06-27 → (b) repo-local** (human-ratified). No global skill change.
+
+## Delivered (2026-06-27)
+
+- **`we:scripts/memory-reflect.mjs`** (`npm run reflect`) — a propose-only close-out consolidation pass: prints index headroom + corpus skew, lists **orphans**, surfaces **near-duplicate** topic-file candidates (description-token Jaccard ≥ 0.5, a rule-3 consolidation signal), flags index pressure, and prompts the session-learnings capture. **Writes nothing** — advisory, always exits 0.
+- **`we:.claude/commands/close-session.md`** — added the repo-local reflection step after the existing safety audit: run `npm run reflect`, act on its checklist, propose-don't-apply, skip silently on a zero-finding close. Repo-local only — the global `closing-session` skill is untouched (option a rejected).
+- Reuses the #1880 metrics surface; this is the L1→L2 **cadence trigger** the watch lacked (close-out, no cron).
 
 ## Lineage
 

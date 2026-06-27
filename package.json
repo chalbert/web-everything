@@ -30,6 +30,7 @@
     "gen:maas-openapi": "node scripts/gen-maas-openapi.mjs",
     "check:standards": "node scripts/check-standards.mjs",
     "check:memory": "node scripts/check-memory.mjs",
+    "reflect": "node scripts/memory-reflect.mjs",
     "check:item": "node scripts/check-backlog-item.mjs",
     "check:app-conformance": "node scripts/check-app-conformance.mjs",
     "check:demos": "node scripts/check-demos.mjs",
