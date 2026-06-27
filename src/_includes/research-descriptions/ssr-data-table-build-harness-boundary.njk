@@ -1,0 +1,82 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/1867-build-time-data-table-ingestion-harness-eleventy-resolves-ro/">#1867</a>,
+  the WE-side build residual of <a href="/backlog/">#1818</a>'s ratified
+  <code>#block-data-ingestion</code> rule (under epic <a href="/backlog/">#1600</a>). A
+  <code>&lt;we-data-table rows="[[ ref ]]"&gt;</code> binding whose context is build-known must resolve at build
+  time into a plain server-rendered <code>&lt;table&gt;</code>. But the two halves of the harness that does this —
+  the DOM-free expression <em>evaluator</em> and the DOM-dependent table <em>renderer</em> — both live in
+  <strong>Frontier UI</strong>, and Web Everything's Eleventy build <strong>cannot code-import them</strong>
+  (a WE→FUI code import is a banned backward edge in the standard→WE→FUI dependency DAG). This is the prerequisite
+  for the entire #1600 table→data-table family (#1609–#1613, ~219 static table surfaces).
+</p>
+
+<h2>What the tree actually says</h2>
+<p>
+  WE has <strong>no <code>plugs/</code> source dir</strong> (per #1282 zero-impl, WE holds no impl); #1818's
+  <code>we:plugs/...</code> citation predates the FUI relocation. The evaluator is
+  <code>evaluate(resolved: ResolvedValues): unknown</code>, <strong>DOM-free</strong>
+  (<code>fui:plugs/webexpressions/CustomExpressionParser.ts:42-62</code>); the renderer is
+  <code>renderDataTable(rows, config): HTMLTableElement</code>, <strong>DOM-dependent</strong> — it builds the tree
+  with <code>document.createElement</code> (<code>fui:blocks/renderers/data-table/renderDataTable.ts:333-335</code>),
+  and FUI already runs it under a <code>happy-dom</code> shim in tests. The cell contract is
+  <strong>JSON-native</strong>: <code>Cell = string | number | null | undefined</code>; function-valued options
+  (<code>Column.format</code>, <code>FilterPredicate.test</code>, the <code>Intl.Collator</code>-backed
+  <code>SortKey</code>) live only on the imperative <code>.config</code> path and never serialize.
+</p>
+
+<h2>Fork 1 — the evaluate/render boundary mechanism</h2>
+<p>
+  Because WE cannot import the FUI evaluator/renderer, invoking <code>evaluate()</code> at build needs a
+  <strong>runtime/process boundary</strong>, not a module import. Three options: <strong>(a)</strong> a FUI
+  build-CLI WE shells out to (deterministic context JSON in via stdin, SSR <code>&lt;table&gt;</code> HTML out via
+  stdout, one batched process, harness re-homed to FUI); <strong>(b)</strong> FUI serves rendered tables over a
+  cross-origin route WE fetches; <strong>(c)</strong> a published FUI runtime package WE depends on — rejected, it
+  inverts the DAG. The prior-art survey is decisive: the canonical "call logic you may not import" solution is a
+  <strong>CLI subprocess with a typed stdin/stdout contract</strong> —
+  <a href="https://github.com/sass/sass/blob/main/spec/embedded-protocol.md">dart-sass's Embedded Sass Protocol</a>,
+  esbuild's subprocess service, the compiler-as-CLI pattern — which severs the static import edge while staying
+  <strong>hermetic and deterministic</strong>. A build-time fetch from a running server is the documented
+  anti-pattern: <a href="https://bazel.build/basics/hermeticity">Bazel's hermeticity guidance</a> flags
+  network-during-build as breaking reproducibility. The project's own
+  <code>#workbench-inert-data-static-slot</code> anchor already ruled that for inert display data the static/build
+  path is the primary transport and the served route is only the dev-freshness seam — directly favoring (a).
+</p>
+
+<h2>Fork 2 — the serialized-context format</h2>
+<p>
+  The inert <code>&lt;script type="application/json"&gt;</code> payload for the deterministic + interactive cell
+  (a build-resolved baseline the client re-renders on sort/filter). <strong>(a)</strong> ship the evaluated result
+  (resolved rows + the declarative <code>config</code> subset) as plain JSON, co-located as a nested-child script
+  inside the element (structural association), carrying <strong>raw field values</strong> not formatted display
+  text; <strong>(b)</strong> ship the raw input context and re-run <code>evaluate()</code> on the client. Islands
+  frameworks (<a href="https://docs.astro.build/en/concepts/islands/">Astro</a>,
+  <a href="https://www.11ty.dev/docs/plugins/is-land/">Eleventy is-land</a>,
+  <a href="https://lit.dev/docs/ssr/client-usage/">Lit SSR</a>) co-locate the hydration payload <em>with the
+  element instance</em>, not in a page-global blob. A type-preserving codec
+  (<a href="https://github.com/nuxt-contrib/devalue">devalue</a>,
+  <a href="https://github.com/flightcontrolhq/superjson">superjson</a>) is needed <strong>only for non-JSON-native
+  values</strong> — WE's <code>Cell</code> is JSON-native, so plain JSON suffices, with a guard: widening
+  <code>Cell</code> beyond JSON-native triggers a codec decision.
+</p>
+
+<h2>Classification &amp; statute reconciliation</h2>
+<p>
+  Fork 1 is a <strong>build-integration boundary</strong> — a devtools provider seam per
+  <code>#runtime-di-vs-devtools-provider-seam</code> (build-time invocation, not a runtime registry), not a new
+  protocol; Fork 2 is a <strong>derived-projection wire-form</strong> per
+  <code>#single-authoring-sot-derived-projection</code> (the binding stays the single authoring source of truth).
+  #1867 is the <strong>inverse-direction sibling</strong> of <code>#we-data-crosses-via-fui-served-route</code>
+  (FUI-compute → WE-build, vs that anchor's WE-data → FUI-runtime) — it composes, it does not duplicate — and it
+  fills the three open residuals named by <code>#block-data-ingestion</code>. The skeptic surfaced one carry-forward
+  risk: build-vs-client render skew if the build-CLI and client use two different pinned renderers; the mitigation
+  is one pinned FUI version and one <code>renderDataTable</code> for both SSR text and hydration.
+</p>
+
+<h2>Net</h2>
+<p>
+  Recommended defaults: Fork 1 → <strong>(a) FUI build-CLI, batched one keyed process, harness re-homed to FUI</strong>;
+  Fork 2 → <strong>(a) evaluated-result payload, nested-child inert JSON, raw field values, plain JSON over the
+  JSON-native <code>Cell</code></strong>. Both survive the skeptic with amendments folded in (no flip). Full grounding
+  in <code>reports/2026-06-27-ssr-data-table-build-harness-boundary.md</code>.
+</p>

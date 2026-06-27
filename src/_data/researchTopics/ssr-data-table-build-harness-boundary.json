@@ -1,0 +1,22 @@
+{
+  "id": "ssr-data-table-build-harness-boundary",
+  "title": "SSR data-table build harness — the WE→FUI evaluate/render boundary + the serialized-context format",
+  "status": "open",
+  "summary": "Grounds decision #1867 (WE-side build residual of #1818's `#block-data-ingestion`, under epic #1600): how WE's offline Eleventy build pre-renders a `<we-data-table rows=\"[[ ref ]]\">` binding into a plain SSR `<table>` when the evaluator (`evaluate(ResolvedValues)`, DOM-free) and the renderer (`renderDataTable(rows, config): HTMLTableElement`, DOM-dependent) BOTH live in FUI and WE cannot code-import them (a WE→FUI code import is a banned backward DAG edge; a process/origin boundary is not an edge). Two forks. Fork 1 (boundary mechanism): (a) a FUI build-CLI WE shells out to — deterministic JSON context in via stdin, SSR `<table>` HTML out via stdout, batched one-shot, harness re-homed to FUI; (b) FUI serves rendered tables over a cross-origin route WE fetches; (c) published runtime package — rejected, inverts the DAG. Prior art is decisive: the canonical 'call logic you may not import' solution is a CLI subprocess with a typed stdin/stdout contract (dart-sass Embedded Sass Protocol, esbuild's subprocess service, the compiler-as-CLI pattern), which severs the static import edge while staying hermetic + deterministic; a build-time fetch from a running server is the documented anti-pattern (Bazel hermeticity: network during build breaks reproducibility). The project's own `#workbench-inert-data-static-slot` already ruled inert display data rides the static/build path as PRIMARY transport, the served route only as the dev-freshness seam — directly favoring (a). Fork 2 (serialized-context format): the inert `<script type=\"application/json\">` payload for the deterministic+interactive cell. (a) ship the evaluated result (resolved rows + the declarative config subset field/label/sortable/type) as plain JSON, co-located as a nested-child script inside the element (structural association), carrying raw field values not formatted text; (b) ship the raw input context, client re-runs evaluate(). Prior art: islands frameworks co-locate the hydration payload with the element instance (Astro props attr, Eleventy is-land template, Lit SSR DSD) not a page-global blob; a type-preserving codec (devalue/superjson/turbo-stream) is needed ONLY for non-JSON-native values — and WE's `Cell` type is `string|number|null|undefined`, JSON-native, so plain JSON suffices (guard: widening Cell forces a codec). Classification: a build-integration boundary (devtools provider seam per #runtime-di-vs-devtools-provider-seam, not a runtime registry) + a derived-projection wire-form (#single-authoring-sot-derived-projection), not a new protocol. Statute reconciliation: #1867 is the INVERSE-direction sibling of #we-data-crosses-via-fui-served-route (FUI-compute→WE-build vs WE-data→FUI-runtime) — composes, does not duplicate; fills the three open residuals named by #block-data-ingestion. Full grounding in reports/2026-06-27-ssr-data-table-build-harness-boundary.md.",
+  "dateOpened": "2026-06-27",
+  "lastReviewed": "2026-06-27",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "data-table",
+    "ssr",
+    "build-integration",
+    "embed-boundary",
+    "webexpressions",
+    "hermetic-build",
+    "hydration-island",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "frontierui"
+}
