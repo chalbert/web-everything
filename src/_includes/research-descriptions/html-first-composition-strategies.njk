@@ -1,0 +1,133 @@
+<h3>The Question</h3>
+<p>
+    A recurring real problem: designers bring many visual variations of one core component. Some are
+    structural and warrant a new block; many are <em>mostly visual yet not purely CSS-achievable</em> —
+    inject an icon, add a status badge, wrap a child in a popover, swap a sub-element. When WE already
+    ships a navigation block that meets every a11y requirement (<code>nav-list</code>, the W3C APG
+    Disclosure Navigation pattern), rebuilding it per variation is waste. React offers a rich reuse menu
+    (replace a sub-component, HOC / decoration, prop-merge, abstract-piece split, context config).
+    <strong>What is the HTML-first, standards-based set of strategies WE should offer for the same
+    reuse</strong> — and which are first-class vs. left to userland, in a way that preserves the base
+    block's a11y guarantees? This survey grounds backlog
+    <a href="/backlog/1795-html-first-composition-strategies-for-re-skinning-an-a11y-co/">#1795</a> per
+    design-first step&nbsp;1, mapping each React pattern onto a web-platform primitive before the call.
+</p>
+
+<h3>Recommendation (prepared in #1795, post-skeptic)</h3>
+<ol>
+    <li><strong>Three strategies are cleanly first-class &amp; composable</strong> (slots, behavior/decoration,
+        abstract-piece-split convention) — none excludes another. <strong>Sub-component replacement</strong>
+        is sanctioned but <em>blocked</em>: #854's contract is ratified, but the webregistries runtime is
+        mid-port to FUI (#901's graduated file is absent from HEAD; open re-home items incl. #1483/#1545) —
+        adopt the ruling, mark the build blocked-on the re-home. <strong>Context-driven configuration is
+        not a free-standing visual-variation strategy</strong> — it is the "configure-one-block" branch the
+        fork below defaults against, and survives only for non-visual config (locale, data, flags).</li>
+    <li><strong>The one genuine fork is where the a11y contract is owned</strong> for mostly-visual variation:
+        compose over the a11y-complete base (the base stays one block and owns its a11y contract) vs.
+        configure one block to render many visual variants from injected config. The branches compose only at
+        the margin — config may <em>select which presentation-only slots appear</em>, never own the contract.
+        <strong>Default: compose-over-base</strong>, argued on native-first + a11y-ownership merit; #023
+        ("distinct tags, NOT one configurable element") is cited as analogy, not controlling precedent.</li>
+    <li><strong>A forced invariant (ratify), but contract-level — not a per-strategy vector:</strong> the
+        a11y contract is single-sourced on the base block, and any sanctioned composition strategy must be
+        <em>non-destructive</em> to it (it may add to the ARIA/focus surface, never override or remove it).
+        Verifying a given composed variant is a FUI/Plateau conformance-run concern, not a WE-shipped proof
+        matrix (composed variants are not expressible in the vector schema, and the verifier/impl live
+        downstream per the constellation rule).</li>
+</ol>
+
+<h3>Finding 1 — the motivating block is real, and so is the a11y gap</h3>
+<p>
+    The <code>nav-list</code> block is concrete, not hypothetical: "Accessible navigation menus using the
+    W3C APG Disclosure Navigation pattern… keyboard navigation, collapsible sections, and router
+    integration with aria-current tracking" (<code>we:src/_data/blocks/nav-list.json</code>), composed of
+    <code>NavListBehavior</code> (roving tabindex) + <code>NavSectionBehavior</code>
+    (<code>aria-expanded</code> disclosure), with a git-tracked conformance demo
+    (<code>we:demos/reveal-nav-conformance.html</code>). A11y conformance vectors exist as a corpus
+    (<code>we:conformance-vectors/presentation-a11y.vectors.ts</code> asserts aria-live announcement, focus
+    management, inert reading-order — judging only the observable platform surface, never impl internals).
+    But <strong>no suite proves a <em>composed</em> variant preserves the base's guarantees</strong> — that
+    is the enforcement seam the decision must add.
+</p>
+
+<h3>Finding 2 — strategy → web-platform primitive (four already in the tree)</h3>
+<ul>
+    <li><strong>Slots</strong> (inject icon/badge/popover) → shadow <code>&lt;slot&gt;</code>, named and
+        default, already the standard authoring form in WE's <code>&lt;component&gt;</code> renderer
+        (<code>we:blocks/renderers/component/__fixtures__/component-cases.ts</code>); the JSX directive layer
+        maps named child slots to lifecycle states
+        (<code>we:blocks/renderers/jsx/directives.ts:74-80</code>). Native, lowest-risk.</li>
+    <li><strong>Sub-component replacement</strong> (the CustomLink analog) → <strong>scoped custom element
+        registries</strong>, governed by #854 (ratified, codified <code>#component-dc</code>): registries as
+        first-class declared elements associated by DOM IDREF, a <code>CustomAttribute</code> binding doing
+        the scoped <code>define</code>. Build is unstarted (#900 → #901); no <code>CustomLink</code> exists
+        yet — specced-but-greenfield.</li>
+    <li><strong>Behavior / decoration</strong> (the HOC analog) → <code>CustomAttribute</code> behaviors —
+        the most mature strategy, with real child-decorating examples that mutate a host's a11y state
+        (<code>we:blocks/router/behaviors/RouteLinkBehavior.ts</code> sets <code>aria-current="page"</code>
+        on its host <code>&lt;a&gt;</code>).</li>
+    <li><strong>Context-driven configuration</strong> → <strong>webinjectors</strong> IDREF (declarative
+        provider resolution, <code>we:_site/plugs/webinjectors/declarativeInjector.ts</code>) and
+        <strong>webexpressions</strong> <code>{% raw %}{{ }}{% endraw %}</code> for object-valued binding
+        (<code>we:conformance-vectors/text-node.vectors.ts</code>), layered over the resolved three-layer
+        project-config carve (#1780: contract→WE, resolver→FUI, values→product).</li>
+    <li><strong>Abstract-piece split</strong> → a <em>convention</em>, not a single mechanism: #023's
+        distinct-tags-assemble-trait-sets plus #715's tree-shakable webtraits. Userland authoring discipline
+        WE need not ship a primitive for.</li>
+</ul>
+
+<h3>Finding 3 — the web platform shipped the hard parts</h3>
+<p>
+    Two primitives the HTML-first menu leans on are no longer polyfill-only. <strong>Scoped custom element
+    registries</strong> — multiple definitions for one tag name, attached to a shadow root via
+    <code>attachShadow({ customElementRegistry })</code> — are now default in Chromium&nbsp;146 and shipped
+    in Safari (revamped spec at whatwg/html#10854). <strong>Imperative slot assignment</strong>
+    (<code>HTMLSlotElement.assign()</code> with <code>slotAssignment: "manual"</code>) lets a block slot
+    sub-components by DOM position or id without duplicate <code>slot</code> attributes — the native engine
+    for dynamic sub-component slotting. So strategies&nbsp;1 and&nbsp;2 rest on native, interoperable
+    primitives, validating the HTML-first stance over a framework-runtime composition layer.
+</p>
+
+<h3>Finding 4 — the strategies split three ways, not "all support-all"</h3>
+<p>
+    The fork-existence test does <em>not</em> classify all five as composable peers. Slots, behavior/decoration,
+    and abstract-piece-split are cleanly first-class and compose (slot an icon <em>and</em> decorate a child
+    <em>and</em> swap a sub-part on one block). Sub-component replacement is sanctioned but
+    <strong>blocked</strong> on the webregistries FUI re-home. Context-driven configuration is the outlier:
+    for the decision's <em>visual</em> use-case it is the "configure-one-block" branch the fork defaults
+    against — so counting it as a fifth support-all strategy is incoherent with that default. It is sanctioned
+    only for <em>non-visual</em> config and otherwise folds into the fork below.
+</p>
+
+<h3>Finding 5 — the one genuine fork: where the a11y contract is owned</h3>
+<p>
+    The mostly-visual variation case forces a real either/or on a11y-contract ownership.
+    <strong>(a) Compose-over-base</strong>: the a11y-complete base stays a single block and owns its a11y
+    contract; variation arrives by slotting, decorating, scoped-replacing a sub-part, or theme tokens — and
+    variation that can't be expressed that way is <em>structural</em>, so it becomes a distinct block.
+    <strong>(b) Configure-one-block</strong>: one block exposes a rich injected-config surface and renders
+    many visual variants internally, dissolving the single contract into a config matrix. The branches
+    compose only at the margin — config may <em>select which presentation-only slots appear</em> over a
+    compose-over-base base, never own the contract. <strong>Default (a)</strong>, argued on native-first +
+    a11y-ownership merit (one block owning one contract is easier to keep conformant than a config matrix)
+    for the block-reskin case directly; #023 ("distinct tags, NOT one configurable element") is droplist-scoped
+    and cited here as analogy, not controlling precedent. Context-config stays for behavioral / data wiring,
+    not visual restructuring.
+</p>
+
+<h3>Finding 6 — overlap is bounded; the decision is non-duplicative</h3>
+<p>
+    Adjacent composition work does not own this menu: #646 is the devtools <em>assembler</em> that emits
+    ejectable recipes (it would <em>consume</em> these strategies); #715 (webtraits) is the
+    cross-bundler <em>delivery</em> of trait composition; #748 shipped the block <em>anatomy view</em>
+    (inspection, resolved); #023 ruled droplist trait composition (resolved, and the precedent for Finding&nbsp;5).
+    The one hard dependency: sub-component replacement is settled by #854 / built by #901 — #1795 adopts that
+    ruling rather than re-deciding it.
+</p>
+
+<h3>Sources</h3>
+<ul>
+    <li>WICG / WHATWG — <a href="https://wicg.github.io/webcomponents/proposals/Scoped-Custom-Element-Registries.html">Scoped Custom Element Registries</a>; revamped spec <a href="https://github.com/whatwg/html/issues/10854">whatwg/html#10854</a>; <a href="https://developer.chrome.com/blog/scoped-registries">Chrome for Developers — scoped registries</a>.</li>
+    <li>MDN — <a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_templates_and_slots">Using templates and slots</a>; WICG <a href="https://github.com/WICG/webcomponents/blob/gh-pages/proposals/Imperative-Shadow-DOM-Distribution-API.md">Imperative Shadow DOM Distribution API</a> (<code>HTMLSlotElement.assign()</code>).</li>
+    <li>W3C WAI-ARIA APG — Disclosure Navigation pattern (the <code>nav-list</code> base block).</li>
+</ul>

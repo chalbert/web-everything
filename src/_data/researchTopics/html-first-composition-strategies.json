@@ -1,0 +1,21 @@
+{
+  "id": "html-first-composition-strategies",
+  "title": "HTML-First Composition Strategies for Re-skinning an A11y-Complete Block",
+  "status": "open",
+  "summary": "Prior-art grounding for backlog #1795: the standards-based reuse menu WE should offer when designers bring many visual variations of one a11y-complete block (e.g. the nav-list block, W3C APG Disclosure Navigation), most of them mostly-visual-yet-not-pure-CSS — inject an icon, add a status badge, wrap a child in a popover, swap a sub-element. React's reuse menu (replace a sub-component, HOC/decoration, prop-merge, abstract-piece split, context config) maps onto five HTML-first, web-platform primitives, four of which already exist in the WE tree and most of which now ship natively: shadow <slot> (incl. imperative HTMLSlotElement.assign() / slotAssignment:'manual' for dynamic sub-component slotting); scoped custom element registries (now default in Chromium 146 + Safari) for sub-component replacement, the #854 CustomLink analog; CustomAttribute behaviors for child decoration (the HOC analog, e.g. RouteLinkBehavior); webinjectors IDREF + webexpressions {{ }} for context-driven configuration; and the abstract-piece-split convention (#023 'distinct tags', #715 tree-shakable traits). The survey finds these are composable, not mutually exclusive (support-all, per the fork-existence test) — so the live decision is the default seam-precedence for mostly-visual variation (compose-over-the-a11y-base vs. configure-one-block-to-render-variants, the #023 'distinct tags, not one configurable element' tension) and the forced invariant that every sanctioned strategy ship a conformance vector proving the re-skinned variant still passes the base block's a11y vectors (an a11y-composition suite that does not yet exist — the real build gap).",
+  "dateOpened": "2026-06-26",
+  "tags": [
+    "composition",
+    "blocks",
+    "slots",
+    "scoped-registries",
+    "custom-attributes",
+    "behaviors",
+    "webinjectors",
+    "a11y",
+    "html-first",
+    "reuse"
+  ],
+  "relatedBlocks": ["nav-list"],
+  "relatedPlugs": ["webbehaviors", "webinjectors", "webexpressions", "webregistries"]
+}

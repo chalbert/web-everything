@@ -2,26 +2,78 @@
 kind: decision
 status: open
 dateOpened: "2026-06-26"
+preparedDate: "2026-06-26"
+relatedReport: reports/2026-06-26-composition-strategies-prep-1795.md
+relatedResearch: html-first-composition-strategies
 tags: [composition, blocks, slots, configuration, html-first]
 ---
 
 # HTML-first composition strategies for re-skinning an a11y-complete block
 
-A recurring real problem: designers bring many visual variations of one core component. Some are structural and warrant a new block; many are *mostly visual yet not purely CSS-achievable* — inject an icon, add a status badge, wrap a child in a popover, swap a sub-element. When we already have a navigation block that meets every a11y requirement, rebuilding it per variation is waste. React has a rich menu here (replace a sub-component, HOC/decoration, prop-merge, abstract-piece split, context config). **What is the HTML-first, standards-based set of strategies WE should offer for the same reuse?**
+Designers bring many visual variations of one core component. Some are structural and warrant a new block; many are *mostly visual yet not purely CSS-achievable* — inject an icon, add a status badge, wrap a child in a popover, swap a sub-element. When WE already ships an a11y-complete navigation block (`nav-list`, W3C APG Disclosure Navigation), rebuilding it per variation is waste. React has a rich reuse menu (sub-component replacement, HOC/decoration, abstract-piece split, context config). **What is the HTML-first, standards-based set of strategies WE should offer for the same reuse** — and which are first-class, preserving the base block's a11y guarantees?
 
-This decision should enumerate the candidate strategies and decide which WE supports as first-class (vs. leaves to userland), in a way that preserves the base block's a11y guarantees.
+Prior art surveyed in [/research/html-first-composition-strategies/](/research/html-first-composition-strategies/).
 
-## The fork (candidate strategies to evaluate)
+## Grounding digest
 
-- **Slots** — named/default `<slot>`s for injecting icons/badges/popovers without forking the block.
-- **Sub-component replacement** — declare a replacement element for an internal part (the `CustomLink` analog) via scoped registration / IDREF (#854) or a slot.
-- **Behavior/decoration** — attach a CustomAttribute behavior to decorate an existing child (the HOC analog).
-- **Context-driven configuration** — the same block behaves differently per app via an injected context/config (webinjectors / project-config layering).
-- **Abstract-piece split** — factor reusable internals so a new block can recompose them.
+- **The motivating block is real.** `nav-list` ships the W3C APG Disclosure Navigation pattern — `NavListBehavior` (roving tabindex) + `NavSectionBehavior` (`aria-expanded` disclosure), with a git-tracked conformance demo (`we:demos/reveal-nav-conformance.html`).
+- **Four of the five strategies map to web-platform primitives already in the tree** (the fifth is a convention):
+  - **Slots** → shadow `<slot>` named+default, already the `<component>` authoring form (`we:blocks/renderers/component/__fixtures__/component-cases.ts`; lifecycle-slot directives at `we:blocks/renderers/jsx/directives.ts:74-80`). Native dynamic slotting via `HTMLSlotElement.assign()` / `slotAssignment:'manual'`.
+  - **Sub-component replacement** (CustomLink analog) → scoped custom element registry + IDREF, governed by #854 (ratified, codified `#component-dc`). **Now a native primitive** (scoped registries default in Chromium 146 + Safari, whatwg/html#10854).
+  - **Behavior/decoration** (HOC analog) → `CustomAttribute` — the most mature strategy, with real child-decorating examples that mutate host a11y state (`we:blocks/router/behaviors/RouteLinkBehavior.ts` sets `aria-current` on its host `<a>`).
+  - **Context-driven config** → webinjectors IDREF (`we:_site/plugs/webinjectors/declarativeInjector.ts`) + webexpressions `{{ }}` (`we:conformance-vectors/text-node.vectors.ts`), over the resolved #1780 three-layer config carve.
+  - **Abstract-piece split** → a userland *convention* (#023 distinct-tags, #715 tree-shakable webtraits), no WE primitive needed.
+- **The a11y enforcement corpus is a gap.** A11y vectors exist (`we:conformance-vectors/presentation-a11y.vectors.ts`) but are **deck/slide-specific** — there is **no** nav/disclosure a11y vector suite, and the vector schema (`we:conformance-vectors/schema.ts:24-82`) judges a *standard's* contract, not a "base + slot P + decoration Q" composed tuple. Per the constellation rule the verifier/impl live in FUI/Plateau ([conformance-verifier-vs-subject], [we-zero-standard-implementation]).
+- **Strategy 2's runtime is mid-migration.** #854's contract is ratified and #900 (naming) resolved, but #901's `graduatedTo` registry file is absent from HEAD and webregistries is being ported into FUI (open re-home items incl. `we:backlog/1483-…`, `we:backlog/1545-…`). Adopt the ruling; the build is **blocked-on the re-home**.
 
-Decide which of these are the sanctioned WE patterns, how they compose, and where the a11y contract is enforced. Relates to existing composition work (#023, #646, #715, #748) — confirm overlap before slicing the build.
+## The axis
+
+The decision's surface ("which strategies, and where is a11y enforced") resolves into three distinct shapes once the fork-existence test runs. Most of the menu is **support-all** — slots, behavior-decoration, and the abstract-piece-split convention are composable first-class patterns that don't exclude each other; a designer slots an icon *and* decorates a child *and* (once unblocked) scoped-replaces a sub-part on the same block. Sub-component replacement is **support-but-blocked** (contract ratified #854, runtime re-homing to FUI). The *one* genuine either/or is narrower than the item first framed: **where the base block's a11y contract is owned** — composed over a single base block, or dissolved into a configure-one-block matrix. Context-driven configuration, listed as a peer strategy, is actually the *configure-one-block* branch of that fork for the **visual** case (it stays sanctioned for non-visual config) — so it folds into the fork rather than counting as a fifth support-all strategy.
+
+## Recommended path at a glance
+
+| # | Concern | Resolution | Default |
+|---|---|---|---|
+| **Fork 1** | Who owns the a11y contract for mostly-visual variation | (a) compose-over-base · (b) configure-one-block | **(a)** |
+| Ratify | A11y preservation guarantee | forced invariant — contract-level non-destructiveness, single-sourced on the base | — |
+| Support-all | Slots · behavior-decoration · abstract-piece-split | first-class composable patterns (+ scoped-replace, blocked on re-home) | — |
+
+## Supported by default (not forks)
+
+These are composable mechanisms — none excludes another, so each is sanctioned, not chosen between (per the support-all rule, the #756 lesson):
+
+- **Slots** — first-class. Shadow `<slot>` for injecting icons/badges/popovers; imperative `HTMLSlotElement.assign()` for dynamic sub-component slotting. Seam: the `<component>` shadow-authoring form.
+- **Behavior/decoration** — first-class, most mature. `CustomAttribute` attached to a child to decorate it (the HOC analog). Seam: `we:blocks/router/behaviors/RouteLinkBehavior.ts`-style behaviors. Constrained by the Ratify invariant below (add-only to the a11y surface).
+- **Sub-component replacement** — sanctioned, **blocked on the webregistries FUI re-home**. Adopts #854's ratified scoped-registry+IDREF ruling (`#component-dc`); do not re-decide it here. Build gated on #901's runtime landing in FUI.
+- **Abstract-piece split** — a userland *convention*, not a WE primitive: factor reusable internals so a new block recomposes them (#023 distinct-tags + #715 tree-shakable traits). WE ships nothing for it.
+- **Context-driven configuration** — sanctioned for **non-visual** config only (locale, data source, feature flags), via webinjectors/webexpressions. For *visual* variation it is the excluded branch of Fork 1 (see below), not a free-standing strategy.
+
+## Ratify — a11y preservation is a forced invariant (not a fork)
+
+*Why not a fork:* the alternative (a composition strategy may override or remove the base's a11y surface) is **broken** — it defeats the decision's whole premise ("preserves the base block's a11y guarantees"). So this is a forced invariant to ratify, not an either/or.
+
+**Invariant:** the a11y contract is **single-sourced on the base block**, and every sanctioned composition strategy must be **non-destructive** to it — a slot/decoration/replacement may *add* to the base's ARIA/focus/keyboard surface, never *override or remove* it. WE owns the **contract statement**; whether a given composed variant honors it is a **FUI/Plateau conformance-run concern**, not a WE-shipped per-strategy proof matrix (composed variants aren't expressible in `we:conformance-vectors/schema.ts:24-82`, and the verifier/impl live downstream). The build slice this opens is the contract statement **plus the missing nav-block a11y vector corpus** the base block itself needs.
+
+`Skeptic: REFUTED-as-written → corrected` — the original "ship a conformance vector per strategy per composed block" was refuted: no nav a11y vectors exist (`we:conformance-vectors/presentation-a11y.vectors.ts` is deck-only), a composed tuple isn't expressible in the schema, and shipping a verifier-against-subject violates [we-zero-standard-implementation]. Folded to the contract-level non-destructiveness invariant WE *can* own.
+
+## Fork 1 — who owns the a11y contract for mostly-visual variation
+
+*Fork-existence:* a genuine either/or on **a11y-contract ownership** — the two branches put the contract in different places and cannot both be the default. The excluded branch (b) dissolves the single a11y contract into a per-config matrix, making conformance a combinatorial property instead of one block's responsibility; #023 already excluded the analogous droplist shape ("distinct tags, NOT one configurable element"). The branches compose only at a *boundary* (config may select presentation-only slots), not as a merge.
+
+- **(a) compose-over-base (default)** — the a11y-complete base stays one block and owns its a11y contract; visual variation arrives by slotting, decorating, scoped-replacing a sub-part, or theme tokens. Variation that can't be expressed that way is *structural* → a distinct block. Config may *select which presentation-only slots appear* but never owns the contract.
+- **(b) configure-one-block** — one block exposes a rich injected-config surface and renders many visual variants internally from config. Fewer tags, but the a11y contract becomes a config matrix (every combination must be re-proven), and the block accretes variant code — the shape #023 ruled against.
+
+**Default: (a).** Argued on native-first + a11y-ownership merit *for the block-reskin case directly*: a single block owning one a11y contract is easier to keep conformant than a config matrix, and it composes cleanly with the Ratify invariant (add-only). #023 is cited as **analogy, not controlling precedent** (its ruling is droplist-trait-granularity-scoped). Consequence: context-driven config is for behavioral/data wiring, not visual restructuring.
+
+`Skeptic: SURVIVES-WITH-AMENDMENT` — the fork is real, but two amendments folded: (1) reframed from a raw compose-vs-configure either/or to the **a11y-contract-ownership axis**, with the legitimate *config-selects-presentation-slots* overlap carved out explicitly (it's a boundary, not mutual exclusion); (2) **#023 demoted from controlling precedent to analogy** (droplist-scoped), so the default is argued on the reskin case's own native-first merit.
 
 ## What you decide
-Which strategies are first-class WE composition patterns (and which are out), plus the seam each uses. Resolves into the build slices for the chosen set.
 
-_Converted from `we:plans/ui-configuration.md` (#1792 hidden-docs cleanup)._
+Ratify Fork 1 (default **(a)**) and the a11y non-destructiveness invariant, or override. The "first-class vs userland" classification and the support-all list are prepared above (not a fork). Resolving opens the build slices: a contract statement for composition non-destructiveness, the missing `nav-list` a11y vector corpus, and the four first-class strategy seams (sub-component replacement gated on the webregistries FUI re-home).
+
+## Acceptance
+
+- The sanctioned composition strategies and their seams are codified (rule or doc), with the support-all set + the Fork 1 default recorded.
+- A11y non-destructiveness is stated as a contract-level invariant single-sourced on the base block; the verification home (FUI/Plateau) is named, not a WE per-strategy vector.
+- Build slices filed: composition non-destructiveness contract, `nav-list` a11y vector corpus, strategy seams (scoped-replace marked blocked-on the webregistries re-home).
+- `check:standards` green.
