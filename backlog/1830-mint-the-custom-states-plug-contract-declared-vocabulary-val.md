@@ -1,9 +1,13 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-27"
-tags: []
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: "plug:customstates (we:src/_data/plugs/customstates.json) — webcomponents declarative custom-state plug contract per #1807; FUI runtime impl → #1831"
+relatedProject: webcomponents
+tags: [custom-state-set, states, plug-contract, plug-unplugged]
 ---
 
 # Mint the custom-states plug contract (declared vocabulary + validation + polyfill) under webcomponents

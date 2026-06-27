@@ -1,0 +1,10 @@
+{
+  "id": "customstates",
+  "name": "CustomStates",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Plug contract for the declarative custom-state surface — how a component declares and validates its `internals.states` (CustomStateSet / :state()) vocabulary, the layer absent from every platform spec (the primitive is Baseline-2024; declaring/validating a vocabulary is not). Single-substrate per #1826: plugged/unplugged is the delivery+enforcement axis over ONE contract. (a) Declaration: a per-instance, construction-time `internals` declaration call (NOT static — static can't be conditional), the lowering target of the `states=\"…\"` attribute, mirroring the default-aria-* surface. Unplugged = open set, `states=\"…\"` non-validating doc-list; plugged = `states=\"…\"` as an enforced vocabulary. (b) Validation: in plugged mode a toggle of an un-declared state is rejected/warned (a producer/consumer contract — a TS union / JSON enum over usage, not a tautology over the open declaration). Unplugged = imperative setter/getter floor, no enforcement. (c) Polyfill: the nowhere-native declaration+validation layer is polyfilled in plugged mode — WE's candidate to take upstream. WE holds only this contract; the runtime impl is FUI (#1831).",
+  "projects": [
+    "webcomponents"
+  ]
+}

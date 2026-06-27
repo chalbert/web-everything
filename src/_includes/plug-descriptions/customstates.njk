@@ -1,0 +1,88 @@
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
+<p>
+    <strong>CustomStates</strong> is the WE plug <em>contract</em> for the declarative custom-state surface: how a
+    component declares and validates the vocabulary of internal states it exposes through
+    <code>ElementInternals.states</code> (the <code>CustomStateSet</code> behind native
+    <a href="https://developer.mozilla.org/en-US/docs/Web/CSS/:state"><code>:state()</code></a> styling). The
+    primitive is Baseline-2024; what every platform spec is missing is the layer that <em>declares</em> a component's
+    state vocabulary and <em>validates</em> toggles against it. WE supplies that layer as one single-substrate contract
+    delivered in two postures (per the plug-as-proposed-standard doctrine, #1826). WE holds only this contract; the
+    runtime implementation is Frontier UI (#1831).
+</p>
+
+<h3 id="contract">Contract surfaces</h3>
+<ul class="list-disc ml-5 mb-4 text-sm text-gray-600">
+    <li><strong>Declaration:</strong> a per-instance, construction-time <code>internals</code> declaration call (not a
+        <code>static</code> field — a static list cannot be conditional), the lowering target of the
+        <code>states="…"</code> attribute, mirroring the <code>default-aria-*</code> surface.</li>
+    <li><strong>Validation:</strong> in plugged mode, toggling an un-declared state is rejected/warned — a
+        producer/consumer contract over <em>usage</em> (like a TypeScript union or JSON-schema enum), not a tautology
+        over the open declaration set.</li>
+    <li><strong>Polyfill:</strong> the nowhere-native declaration + validation layer is polyfilled in plugged mode —
+        WE's candidate to take upstream.</li>
+</ul>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/CustomStateSet">CustomStateSet</a> /
+            <a href="https://developer.mozilla.org/en-US/docs/Web/CSS/:state"><code>:state()</code></a></td>
+        <td>Baseline 2024</td>
+        <td>The unplugged form is a thin setter/getter over the native open set; the plugged form adds the
+            declaration + validation layer the platform does not yet specify.</td>
+    </tr>
+</table>
+
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("states-example", code=true) }}
+{% highlight "html" %}
+<!-- states="…" is an ENFORCED vocabulary; toggling an
+     un-declared state throws/warns, and the declaration
+     + validation layer is polyfilled. -->
+<component name="rating-stars" states="hovered selected disabled">
+  ...
+</component>
+{% endhighlight %}
+
+{{ unpluggedContent("states-example", code=true) }}
+{% highlight "html" %}
+<!-- Safe today: native CustomStateSet + thin sugar.
+     states="…" is a non-validating documentation list;
+     the open set is never enforced. -->
+<component name="rating-stars" states="hovered selected disabled">
+  ...
+</component>
+{% endhighlight %}
+
+{{ comparisonContent("states-example", code=true) }}
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;">
+    <div>
+        <div style="font-size: 0.7rem; font-weight: 600; color: #059669; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f0fdf4; border-bottom: 1px solid #e5e7eb;">Plugged &mdash; enforced vocabulary</div>
+{% highlight "javascript" %}
+// states="hovered selected" declared.
+internals.states.add('hovered');  // ok
+internals.states.add('expandd');  // throws/warns:
+                                  // un-declared
+{% endhighlight %}
+    </div>
+    <div style="border-left: 1px solid #e5e7eb;">
+        <div style="font-size: 0.7rem; font-weight: 600; color: #475569; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f8fafc; border-bottom: 1px solid #e5e7eb;">Unplugged &mdash; open set, no enforcement</div>
+{% highlight "javascript" %}
+// states="…" is documentation only.
+internals.states.add('hovered');  // ok
+internals.states.add('expandd');  // ok (open set)
+{% endhighlight %}
+    </div>
+</div>
+
+{{ endContent() }}
+
+<p class="text-sm text-gray-600 mt-4">
+    Resolved under <a href="/backlog/">#1807</a> (declarative custom-state surface) per the
+    <a href="/projects/webplugs/">plug-as-proposed-standard doctrine</a> (#1826). See
+    <a href="/projects/webcomponents/">Web Components</a>.
+</p>
