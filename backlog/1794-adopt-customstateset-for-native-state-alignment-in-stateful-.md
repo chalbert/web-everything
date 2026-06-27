@@ -3,7 +3,7 @@ kind: story
 size: 3
 status: open
 locus: frontierui
-blockedBy: ["1831"]
+blockedBy: ["1891"]
 dateOpened: "2026-06-26"
 dateStarted: "2026-06-27"
 tags: [custom-state-set, states, native-first, a11y]
