@@ -1,13 +1,18 @@
 ---
-kind: story
+kind: decision
 size: 5
 parent: "746"
 status: open
 blockedBy: []
 dateOpened: "2026-06-22"
-dateStarted: "2026-06-27"
 tags: []
 ---
+
+> **Retyped story → decision (batch-2026-06-27 pre-flight).** Two small but real design sub-calls gate the
+> build and an agent must not pick them silently: **(a)** form-set — build the missing `html`/`jsx` author-mode
+> emitters + lossy signal (carved as #1883), or scope the panel to the 3 forms FUI faithfully emits; **(b)**
+> generation-home — build-emit JSON the registry carries vs a live `/_maas/` author-source endpoint. Ratify
+> these (then the wiring is a clean follow-up build), or `/prepare` to bring them to DoR.
 
 > **Pre-flight (batch-2026-06-26-1732-1696) — transport premise is dead; re-pointed `blockedBy: ["1752"]`.**
 > Two later rulings invalidated this item's "the WE half ships a committed artifact; just wire transport"

@@ -1,5 +1,5 @@
 ---
-kind: story
+kind: decision
 size: 8
 status: open
 parent: "1836"
@@ -8,6 +8,12 @@ locus: frontierui
 dateOpened: "2026-06-27"
 tags: [plugs, unplugged, residue, diagnostic, compatibility, dev-experience, config]
 ---
+
+> **Retyped story → decision (batch-2026-06-27 pre-flight).** The body's "Open authoring questions" section
+> carries four genuine architectural forks an agent must not settle silently — Proxy granularity (global vs
+> per-root), compatibility upgrade scheduling (sync vs microtask + dedup/ordering), per-plug vs global posture
+> in the config schema, and parity-table coupling (#1844). Ratify these (then the Proxy impl is a clean build),
+> or `/prepare` to bring them to DoR.
 
 # Plugged diagnostic & compatibility modes: a zero-semantics-change Proxy posture family between unplugged and plugged
 
