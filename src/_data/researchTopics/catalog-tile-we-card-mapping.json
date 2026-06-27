@@ -1,0 +1,21 @@
+{
+  "id": "catalog-tile-we-card-mapping",
+  "title": "Catalog-tile → we-card vocabulary mapping (full by-intent adoption vs shallow wrap)",
+  "status": "open",
+  "summary": "Grounds decision #1820 (unblocks #1607 + #1608): how the catalog tiles (we:src/intents.njk, we:src/blocks.njk, we:src/design-systems.njk + the 14 we:src/_includes/project-*.njk includes) map onto FUI's <we-card> (a TransientElement that erases to <article class=\"fui-card\">, passing every non-title/heading-level attribute — including data-* — through). The load-bearing constraint, verified in the tree: each tile IS a single <a> carrying class + data-status + data-haystack/search + href, and the per-page filter IIFE queries that exact element (we:src/intents.njk:80-86, blocks.njk:105-110, design-systems.njk:91-93) — it never reaches inside the badge/chip DOM. <we-card> resolves to <article>, NOT <a>: it has no href/link affordance and replaceWith()-es away the original node (fui:blocks/card/CardElement.ts:17-51). So a tile→card swap cannot preserve the whole-tile click-through without moving .project-card/data-* onto a new outer anchor — the anchor-vs-frame relationship is a real design call, not mechanical wiring. The decisive precedent is #1621 (resolved, codified platform-decisions.md#we-fui-embed-boundary), which resolved the ANALOGOUS badge/chip fork by map-by-intent — lifecycle states → <we-badge> (Status Indicator), categorical labels → <we-tag> (Tag) — rejecting 'bend the shared component to carry the bespoke palette' because it re-conflated what #1319 split (Status Indicator / Tag / Notification Marker). Verified against the tree: BOTH <we-badge> AND <we-tag> are already shipped and wired (fui:blocks/tag/TagElement.ts, fui:embed/tag-in-document.ts, base.njk:465-470 + 15 we-tag CSS rules), so there is no tag-chain blocker — the by-intent map is buildable in full today. A refute-only skeptic REFUTED the first-draft 'frame + native anchor + status-now/chips-later' default on three grounds (internally inconsistent: can't both keep a native <a> and leave filter JS untouched; false-premise deferral: we-tag is shipped; three structurally-distinct surfaces, not one). The two surviving forks at DoR: Fork 1 — mapping strategy: full by-intent adoption (we-card frame + <a> relocation + status→we-badge + chips→we-tag, all now) vs shallow cosmetic wrap (we-card frame only, vocab + JS untouched) — default full by-intent, the only #1319/#1621-statute-consistent path. Fork 2 — non-card surfaces: do design-systems.njk's <div> tiles + the project-*.njk .status-meter macro ride this ruling, or get their own by-intent rulings — default carve them out (they aren't cards). Full grounding in reports/2026-06-26-catalog-tile-we-card-mapping.md.",
+  "dateOpened": "2026-06-26",
+  "lastReviewed": "2026-06-26",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "blocks",
+    "card",
+    "we-card",
+    "catalog",
+    "vocabulary-mapping",
+    "design-system",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

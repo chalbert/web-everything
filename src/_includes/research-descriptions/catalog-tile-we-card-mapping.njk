@@ -1,0 +1,64 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/1820-catalog-tile-to-we-card-vocabulary-mapping-full-adoption-vs-/">#1820</a>:
+  the catalog tiles on <a href="/intents/">/intents/</a>, <a href="/blocks/">/blocks/</a>,
+  <a href="/design-systems/">/design-systems/</a> (and the 14 <code>project-*.njk</code> includes) carry a
+  bespoke per-status palette badge and dimension/type chips, all hung off <code>data-*</code> attributes that
+  a per-page filter script reads. None of that maps onto FUI's <code>&lt;we-card&gt;</code> — a transient
+  custom element that erases to <code>&lt;article class="fui-card"&gt;</code> — without a design call.
+  <a href="/backlog/1607-/">#1607</a> and <a href="/backlog/1608-/">#1608</a> are both
+  <code>blockedBy: ["1820"]</code> so this single ruling converts them from design work into mechanical
+  migrations.
+</p>
+
+<h2>The load-bearing constraint — the tile <em>is</em> the anchor</h2>
+<p>
+  Verified against the tree: each core tile is a single <code>&lt;a&gt;</code> carrying
+  <code>class</code> + <code>data-status</code> + <code>data-haystack</code>/<code>data-search</code> +
+  <code>href</code> all on one element, and the filter IIFE queries that exact element
+  (<code>we:src/intents.njk:80-86</code>, <code>blocks.njk:105-110</code>,
+  <code>design-systems.njk:91-93</code>) — it never reaches inside the badge/chip DOM.
+  <code>&lt;we-card&gt;</code> resolves to <code>&lt;article&gt;</code>, <strong>not</strong>
+  <code>&lt;a&gt;</code>: it has no <code>href</code>/link affordance and <code>replaceWith()</code>-es away
+  the original node (<code>fui:blocks/card/CardElement.ts:17-51</code>). So a tile→card swap cannot preserve
+  the whole-tile click-through without moving <code>.project-card</code>/<code>data-*</code> onto a new
+  <em>outer</em> anchor. The anchor-vs-frame relationship is a genuine design call, not mechanical wiring.
+</p>
+
+<h2>The decisive precedent — #1621 map-by-intent</h2>
+<p>
+  <a href="/backlog/1621-/">#1621</a> (resolved, codified at
+  <code>platform-decisions.md#we-fui-embed-boundary</code>) resolved the <strong>analogous</strong> badge/chip
+  fork by <strong>map-by-intent</strong>: lifecycle states → <code>&lt;we-badge&gt;</code> (Status Indicator),
+  categorical labels → <code>&lt;we-tag&gt;</code> (Tag). It <em>rejected</em> "bend the shared component to
+  carry the bespoke docs palette" because that re-conflated what <a href="/backlog/1319-/">#1319</a> split
+  (Status Indicator / Tag / Notification Marker). Mount is the rule-7 transient-CE model: register once via
+  cross-origin import, emit <code>&lt;we-*&gt;</code> server-side, upgrade in place, ship a
+  <code>we-*{}</code> SSR baseline to kill the flash.
+</p>
+
+<h2>What the skeptic pass changed</h2>
+<p>
+  A refute-only sub-agent <strong>REFUTED</strong> the first-draft "we-card frame + native anchor +
+  status→badge now, chips stay plain spans, defer to we-tag" default on three verified grounds: (1) it is
+  internally inconsistent — because the tile <em>is</em> the anchor and <code>&lt;we-card&gt;</code> deletes
+  the original node, you cannot both keep a native <code>&lt;a&gt;</code> and leave the filter JS untouched;
+  (2) the deferral rests on a <strong>false premise</strong> — <code>&lt;we-tag&gt;</code> is already shipped
+  and wired (<code>fui:blocks/tag/TagElement.ts</code>, <code>fui:embed/tag-in-document.ts</code>,
+  <code>base.njk:465-470</code> + 15 <code>we-tag</code> CSS rules), so badge-now/chips-later is a
+  self-inflicted #1621-style half-migration; (3) the anchor tiles, the <code>design-systems.njk</code>
+  <code>&lt;div&gt;</code>, and the <code>.status-meter</code> macro are structurally distinct surfaces, not one.
+</p>
+
+<h2>The two forks, at a glance</h2>
+<ul>
+  <li><strong>Fork 1 — mapping strategy.</strong> Full by-intent adoption (<code>&lt;we-card&gt;</code> frame +
+    <code>&lt;a&gt;</code> relocation + status→<code>&lt;we-badge&gt;</code> + chips→<code>&lt;we-tag&gt;</code>,
+    all now) vs a shallow cosmetic wrap (frame only, vocabulary + filter JS untouched). Recommended default:
+    <strong>full by-intent</strong> — the only path consistent with the #1319/#1621 statute, and buildable in
+    full today since both impls are shipped.</li>
+  <li><strong>Fork 2 — non-card surfaces.</strong> Do <code>design-systems.njk</code>'s non-anchor
+    <code>&lt;div&gt;</code> tiles and the <code>project-*.njk</code> <code>.status-meter</code> macro ride this
+    ruling, or get their own by-intent rulings? Recommended default: <strong>carve them out</strong> — they
+    aren't cards, and folding them in would make the ruling a rename.</li>
+</ul>
