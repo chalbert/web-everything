@@ -1,8 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-26"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: 1849
+codifiedIn: one-off
 preparedDate: "2026-06-26"
 relatedReport: reports/2026-06-26-anonymized-dev-action-metrics.md
 tags: [telemetry, metrics, prioritization, privacy]
@@ -40,6 +43,9 @@ vocabulary → WE, reference emitter → FUI, aggregation endpoint → plateau (
 
 ## Fork 1 — relationship to #1415's analytics contract
 
+> **RATIFIED 2026-06-27 → (a)** reuse #1415's transport-agnostic contract shape + a sibling dev-metrics
+> vocabulary, with a dedicated platform sink. (Forks 2 & 3 still open.)
+
 **Fork-existence:** a real either/or at the contract/vocabulary layer; the product-analytics *vendor sink*
 is **not** part of the fork (it's a forced invariant — a platform-owned dev-metrics stream cannot route to a
 consumer's Segment/GA4 sink, so "ride #1415's sink" is the broken branch, settled below). What remains
@@ -66,6 +72,11 @@ real fork (a). The dedicated *sink* is folded out as a forced invariant.
 
 ## Fork 2 — anonymization model
 
+> **RATIFIED 2026-06-27 → (a)** salted rotating-daily install-id; **not configurable** — making the
+> identity model a knob would fragment the aggregate (mixed rotating-daily / no-id installs break
+> consistent distinct-developer dedupe), and the only meaningful looser setting (no-id) is already
+> covered by Fork 3's on/off consent flag. Fixed mechanic, not a dimension.
+
 **Fork-existence:** a real either/or — you ship one identity model — and **both** alternatives are *flawed*:
 (b) no machine id destroys the distinct-developer dedupe that is the card's whole purpose (1 power user vs
 100 users is indistinguishable at small N — pure noise for a young platform); (c) a persistent hashed-MAC is
@@ -85,6 +96,12 @@ card's purpose); flipped to the salted rotating-daily id, which the original fal
 hashed-MAC) had skipped.
 
 ## Fork 3 — opt-in vs opt-out default
+
+> **RATIFIED 2026-06-27 → (a)** opt-IN default + first-run prompt + one-flag escape, **plus an
+> enterprise-policy precedence layer**: absent org policy the individual dev is opt-in; an enterprise
+> policy (env var / config file at a precedence the per-dev flag cannot override) can force-off
+> (the common compliance case) or force-on (org consenting on machines it owns). Precedence order:
+> enterprise policy > per-dev consent > opt-in default. Carried into the build story as a requirement.
 
 **Fork-existence:** a real either/or; (b) opt-out is the *flawed* branch **for this platform specifically**
 — a platform whose differentiation is privacy / minimize-lock-in (the platform's minimize-lock-in / native-first stance) collecting by default on its own developers is a credibility self-own,
