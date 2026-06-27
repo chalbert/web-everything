@@ -1,8 +1,9 @@
 ---
 kind: decision
 parent: "1683"
-status: open
+status: preparing
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
 tags: []
 ---
 
@@ -18,4 +19,4 @@ Blocks **#1813** (re-pointed `blockedBy: ["1824"]`). FUI slices 1 (#1811) + 2 (#
 
 **2. Where the WE-site's token VALUES live.** The emit's source is FUI's default theme; the site's brand values currently live in `we:src/css/style.css`. Per the three-layer carve (contract→WE, impl→FUI, values→product) the site's values should be a **project theme extending the FUI default** — but no "WE-site project theme" mechanism is wired yet. Decide whether slice 3 establishes that home or consumes the FUI default verbatim for now.
 
-No default set — **unprepared** (Tier B: discuss, don't auto-build). `/prepare` to bring bold defaults to DoR. Verified in batch-2026-06-26-1813-1208-1618 (ban + FOUC confirmed against the tree); diagnosis originally surfaced by batch-20260626-1811-1817-1819. Relates to [[project_theme_tokens_js_first]] (#1682) and the author-mode transport fork (#1731/#1752).
+No default set — **unprepared** (Tier B: discuss, don't auto-build). `/prepare` to bring bold defaults to DoR. Verified in batch-2026-06-26-1813-1208-1618 (ban + FOUC confirmed against the tree); diagnosis originally surfaced by batch-20260626-1811-1817-1819. Relates to the JS-first theme-tokens ruling (#1682) and the author-mode transport fork (#1731/#1752).

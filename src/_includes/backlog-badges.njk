@@ -14,18 +14,21 @@
   same everywhere by construction. Each macro is SELF-CONTAINED (inlines its own scale) so it survives
   `import`. check:standards forbids re-defining these macros locally (anti-drift).
 
-  Dogfood seam (#777): when FUI ships `badge`/`filter-chip` (#778 map, #658 gap) and the Mode-C in-document
-  render lands (#765/#728), these macro bodies swap to render via the FUI components — one seam, not five
-  duplicated definitions across two files.
+  Dogfood seam (#777): these macro bodies render via the FUI components, one seam, not duplicated defs.
+    • Status surfaces  → `<we-badge>`  (#1598): statusBadge, epicStatusBadge, reasonPill.
+    • Taxonomy surfaces → `<we-tag>`   (#1208, prereq #1817): kindBadge, sizeBadge, tierBadge, tagsRow,
+      metaBadge, unslicedBadge — categorical (set,value) mode (#1670), palette in we:src/css/style.css.
+    • Filter pills (interactive) → `<we-filter-chip>`: the backlog.njk filter row — its own slice (the
+      interactive half is an aria-pressed/data-* JS rewrite across the page filter scripts, split off #1208).
+  All loaded transient-CE via the cross-origin embed entries in we:src/_layouts/base.njk (mode C, rule 6/7).
+  Link-pills (`blockerChip`/`childCircle`) stay native `<a>`.
 #}
 
 {# The item KIND badge — the one merged nature+hierarchy axis (#466/#487): story | epic | task | decision.
    `epic`/`task` self-name here (they replaced the old unsized-stand-in `workItemBadge`); a `story` shows
    its kind alongside the size badge; a `decision` keeps the indigo it had as a `type`. #}
-{% macro kindBadge(kind, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
-<span title="{% if kind == 'epic' %}epic — umbrella; rolls up its child stories/tasks{% elif kind == 'task' %}task — bounded sub-work; points roll up to its parent{% elif kind == 'decision' %}decision — a design fork to ratify (Tier B){% else %}story — an independently valuable, sized deliverable{% endif %}" style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
-  background: {% if kind == 'story' %}#dbeafe{% elif kind == 'epic' %}#ede9fe{% elif kind == 'decision' %}#e0e7ff{% else %}#f1f5f9{% endif %};
-  color: {% if kind == 'story' %}#1e40af{% elif kind == 'epic' %}#5b21b6{% elif kind == 'decision' %}#3730a3{% else %}#475569{% endif %};">{{ kind }}</span>
+{% macro kindBadge(kind, scale='sm') %}{# #1208: KIND taxonomy → FUI `<we-tag>` categorical (set,value) mode (#1670); per-value palette in we:src/css/style.css. `scale` kept for call-site compat but no longer sizes the pill (the FUI tag owns its geometry). #}
+<we-tag set="kind" value="{{ kind }}" title="{% if kind == 'epic' %}epic — umbrella; rolls up its child stories/tasks{% elif kind == 'task' %}task — bounded sub-work; points roll up to its parent{% elif kind == 'decision' %}decision — a design fork to ratify (Tier B){% else %}story — an independently valuable, sized deliverable{% endif %}">{{ kind }}</we-tag>
 {% endmacro %}
 
 {# Status Indicator surface (#1621 status half) — lifecycle state → FUI `<we-badge>` (transient CE, loaded
@@ -38,25 +41,23 @@
 {% macro statusBadge(status, scale='sm') %}{% set tone = 'warning' if status == 'open' else ('info' if (status == 'active' or status == 'preparing') else ('success' if status == 'resolved' else 'neutral')) %}<we-badge tone="{{ tone }}">{% if status == 'preparing' %}Prepping{% else %}{{ status | title }}{% endif %}</we-badge>
 {% endmacro %}
 
-{% macro sizeBadge(size, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
-<span title="Estimate: {{ size }} agile point{% if size != 1 %}s{% endif %}" style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569);">{{ size }} pt{% if size != 1 %}s{% endif %}</span>
+{% macro sizeBadge(size, scale='sm') %}{# #1208: size taxonomy → FUI `<we-tag>` (`set="size"` keys the neutral + tabular-nums rule in style.css). #}
+<we-tag set="size" value="{{ size }}" title="Estimate: {{ size }} agile point{% if size != 1 %}s{% endif %}">{{ size }} pt{% if size != 1 %}s{% endif %}</we-tag>
 {% endmacro %}
 
 {# Agent-readiness chip. Heuristic HINT (loader-derived from structured fields), not authoritative. #}
-{% macro tierBadge(tier, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
-{% if tier %}<span title="Agent-readiness hint — {{ backlogMeta.tierMeaning[tier] }}. Heuristic from structured fields only (type + resolved prerequisites); not authoritative — the selection pass still refines it." style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
-  background: {% if tier == 'A' %}#dcfce7{% elif tier == 'B' %}#fef3c7{% else %}#f1f5f9{% endif %};
-  color: {% if tier == 'A' %}#166534{% elif tier == 'B' %}#92400e{% else %}#475569{% endif %};">{{ backlogMeta.tierLabel[tier] }}</span>{% endif %}
+{% macro tierBadge(tier, scale='sm') %}{# #1208: agent-readiness tier → FUI `<we-tag>` categorical (set,value); palette in we:src/css/style.css. #}
+{% if tier %}<we-tag set="tier" value="{{ tier }}" title="Agent-readiness hint — {{ backlogMeta.tierMeaning[tier] }}. Heuristic from structured fields only (type + resolved prerequisites); not authoritative — the selection pass still refines it.">{{ backlogMeta.tierLabel[tier] }}</we-tag>{% endif %}
 {% endmacro %}
 
 {# The "unsliced" badge for a childless epic — "unsliced · <why>" (colour/tooltip from backlogMeta) or a bare "unsliced". #}
-{% macro unslicedBadge(reason, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}{% set m = backlogMeta.childlessReasonMeta[reason] %}
-{% if m %}<span title="{{ m.tip }}" style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: {{ m.bg }}; color: {{ m.fg }};">unsliced &middot; {{ m.label }}</span>{% else %}<span title="Unsliced epic — no child stories cut yet, and no reason recorded (add a childlessReason)." style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #f1f5f9; color: #475569;">unsliced</span>{% endif %}
+{% macro unslicedBadge(reason, scale='sm') %}{# #1208: epic "unsliced·reason" → FUI `<we-tag>`; the per-reason palette (backlogMeta.childlessReasonMeta) is injected as inline `--cat-*`/background custom props so it survives the transient upgrade without duplicating the vocabulary into CSS. #}{% set m = backlogMeta.childlessReasonMeta[reason] %}
+{% if m %}<we-tag set="unsliced" value="{{ reason }}" title="{{ m.tip }}" style="background:{{ m.bg }}; color:{{ m.fg }}; --cat-bg:{{ m.bg }}; --cat-color:{{ m.fg }};">unsliced &middot; {{ m.label }}</we-tag>{% else %}<we-tag set="unsliced" value="none" title="Unsliced epic — no child stories cut yet, and no reason recorded (add a childlessReason).">unsliced</we-tag>{% endif %}
 {% endmacro %}
 
 {# A labelled meta pill (e.g. "PARENT #314", "STARTED 2026-06-11") — detail-page header chips. #}
-{% macro metaBadge(label, value, scale='md') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.78em' if scale == 'md' else '0.7em' %}
-<span style="padding: {{ pad }}; border-radius: 9999px; font-size: {{ fs }}; font-weight: 600; white-space: nowrap; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569);"><span style="text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.7;">{{ label }}</span>&nbsp;{{ value }}</span>
+{% macro metaBadge(label, value, scale='md') %}{# #1208: labelled meta pill → FUI `<we-tag>` (neutral); the inner uppercase label span survives the transient upgrade (TransientElement MOVES childNodes onto the native span, doesn't flatten to text). #}
+<we-tag shape="pill"><span style="text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.7;">{{ label }}</span>&nbsp;{{ value }}</we-tag>
 {% endmacro %}
 
 {# The epic-status badge cluster — picks exactly one of: ongoing program / unsliced·why / all slices done /
@@ -75,8 +76,8 @@
 {% endmacro %}
 
 {# The item's topic tags row (the `tags:` frontmatter) — identical pill styling on every surface. #}
-{% macro tagsRow(tags, scale='sm') %}{% set pad = '0.15rem 0.6rem' if scale == 'md' else '0.1rem 0.5rem' %}{% set fs = '0.8em' if scale == 'md' else '0.75em' %}
-{% if tags %}<div style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0 0 0.75rem;">{% for tag in tags %}<span style="display: inline-block; padding: {{ pad }}; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: {{ fs }};">{{ tag }}</span>{% endfor %}</div>{% endif %}
+{% macro tagsRow(tags, scale='sm') %}{# #1208: topic tags (the `tags:` frontmatter) → FUI `<we-tag>` (neutral). #}
+{% if tags %}<div style="display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0 0 0.75rem;">{% for tag in tags %}<we-tag shape="pill">{{ tag }}</we-tag>{% endfor %}</div>{% endif %}
 {% endmacro %}
 
 {# A child of an epic, drawn as a numbered circle coloured by the agent-readiness palette (resolved=grey ·

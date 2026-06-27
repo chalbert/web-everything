@@ -460,5 +460,16 @@
         .then((m) => m.registerCardInDocument())
         .catch(() => { /* FUI host unavailable — keep the SSR card baseline */ });
     </script>
+    {#- #1817 (consumed by #1208): the taxonomy-pill counterpart to the badges/code-view/card entries above.
+        A runtime cross-origin import (mode C, rule 6), NEVER a build-time `import '@frontierui'`. Registers
+        the transient `<we-tag>` (#1669) + injects its block CSS once; each SSR `<we-tag set value>` upgrades
+        in place to a light-DOM `<span class="fui-tag…">`, painting from the categorical (set,value) palette
+        the docs supply in style.css (#1670/#1682). A load failure is silent and the `we-tag{}` SSR baseline
+        in style.css remains the rendered pill (progressive enhancement). -#}
+    <script type="module">
+      import("{{ links.frontierUrl }}/embed/tag-in-document.ts")
+        .then((m) => m.registerTagsInDocument())
+        .catch(() => { /* FUI host unavailable — keep the SSR tag baseline */ });
+    </script>
 </body>
 </html>

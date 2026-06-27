@@ -1787,3 +1787,60 @@ we-card {
   box-shadow: var(--shadow-sm, 0 1px 2px rgba(17, 18, 29, 0.06));
   overflow: hidden;
 }
+
+/* #1208 (prereq #1817): SSR baseline + categorical vocabulary for the FUI transient `<we-tag>` the docs
+   server-render for the backlog TAXONOMY pills (kind / size / tier / topic-tags / meta). Like the badge/
+   card pills above, `TagElement` self-replaces into a light-DOM `<span class="fui-tag…">` once the cross-
+   origin FUI registration ESM loads (base.njk → tag-in-document), at which point the FUI-injected `.fui-tag`
+   stylesheet takes over. Two jobs here: (1) a tag-keyed baseline so the pre-upgrade `<we-tag>` doesn't flash
+   and stands alone if the FUI host is unavailable (the load .catch()es to this); (2) the docs site's
+   categorical vocabulary (#1670/#1682) — the per-(set,value) palette the upgraded `.fui-tag--categorical`
+   reads via `--cat-*`. Each (set,value) is keyed to BOTH the pre-upgrade `we-tag[set][value]` (literal
+   background/color) and the post-upgrade `.fui-tag[data-cat-*]` (the `--cat-*` custom props) so the colour
+   is identical across the swap, no flash. Mirrors the FUI TAG_CSS look (fui:blocks/tag/Tag.ts). */
+we-tag {
+  font: inherit;
+  font-size: 0.8em;
+  font-weight: 600;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.1rem 0.5rem;
+  border-radius: 9999px;          /* pill — matches the prior badge geometry */
+  white-space: nowrap;
+  border: 1px solid transparent;
+  background: var(--color-surface-alt, #f1f5f9);
+  color: var(--color-text-muted, #475569);
+}
+/* size pills read numerically (neutral, any value); topic-tag + meta pills inherit the neutral base above. */
+we-tag[set="size"],
+.fui-tag[data-cat-set="size"] { background:var(--color-surface-alt,#f1f5f9); color:var(--color-text-muted,#475569); --cat-bg:#f1f5f9; --cat-color:#475569; --cat-shape:9999px; font-variant-numeric: tabular-nums; }
+/* kind + tier are uppercase categorical pills (the surfaces that carried text-transform pre-migration). */
+we-tag[set="kind"],
+we-tag[set="tier"],
+.fui-tag[data-cat-set="kind"],
+.fui-tag[data-cat-set="tier"] { text-transform: uppercase; letter-spacing: 0.03em; font-weight: 700; }
+
+/* kind vocabulary — story (blue) · epic (violet) · decision (indigo) · task (slate). */
+we-tag[set="kind"][value="story"],
+.fui-tag[data-cat-set="kind"][data-cat-value="story"]       { background:#dbeafe; color:#1e40af; --cat-bg:#dbeafe; --cat-color:#1e40af; --cat-shape:9999px; }
+we-tag[set="kind"][value="epic"],
+.fui-tag[data-cat-set="kind"][data-cat-value="epic"]        { background:#ede9fe; color:#5b21b6; --cat-bg:#ede9fe; --cat-color:#5b21b6; --cat-shape:9999px; }
+we-tag[set="kind"][value="decision"],
+.fui-tag[data-cat-set="kind"][data-cat-value="decision"]    { background:#e0e7ff; color:#3730a3; --cat-bg:#e0e7ff; --cat-color:#3730a3; --cat-shape:9999px; }
+we-tag[set="kind"][value="task"],
+.fui-tag[data-cat-set="kind"][data-cat-value="task"]        { background:#f1f5f9; color:#475569; --cat-bg:#f1f5f9; --cat-color:#475569; --cat-shape:9999px; }
+
+/* tier vocabulary — A (green) · B (amber) · C (slate); matches the agent-readiness palette. */
+we-tag[set="tier"][value="A"],
+.fui-tag[data-cat-set="tier"][data-cat-value="A"]           { background:#dcfce7; color:#166534; --cat-bg:#dcfce7; --cat-color:#166534; --cat-shape:9999px; }
+we-tag[set="tier"][value="B"],
+.fui-tag[data-cat-set="tier"][data-cat-value="B"]           { background:#fef3c7; color:#92400e; --cat-bg:#fef3c7; --cat-color:#92400e; --cat-shape:9999px; }
+we-tag[set="tier"][value="C"],
+.fui-tag[data-cat-set="tier"][data-cat-value="C"]           { background:#f1f5f9; color:#475569; --cat-bg:#f1f5f9; --cat-color:#475569; --cat-shape:9999px; }
+
+/* unsliced·reason carries a per-reason palette from backlogMeta (childlessReasonMeta), injected as inline
+   `--cat-*` + background/color custom props on the element, so this set needs only the pill `--cat-shape`. */
+.fui-tag[data-cat-set="unsliced"] { --cat-shape:9999px; text-transform:uppercase; letter-spacing:0.03em; font-weight:700; }
+we-tag[set="unsliced"] { text-transform:uppercase; letter-spacing:0.03em; font-weight:700; }

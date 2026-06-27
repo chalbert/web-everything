@@ -2,13 +2,31 @@
 kind: story
 size: 5
 parent: "777"
-status: open
-blockedBy: ["1817"]
+status: resolved
+blockedBy: []
 dateOpened: "2026-06-20"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: none
 tags: [dogfood, fui, badge, site-rework]
 ---
 
 # Dogfood the backlog badges/chips onto FUI badge + filter-chip (transient-CE)
+
+> **Resolved (batch-2026-06-26-1813-1208-1618) — taxonomy half delivered; interactive filter pills split to #1825.**
+> With #1817 landed (the FUI `we-tag` in-document embed entry), migrated the **taxonomy** surfaces to FUI
+> `<we-tag>`: `kindBadge`/`sizeBadge`/`tierBadge`/`tagsRow`/`metaBadge`/`unslicedBadge` in
+> `we:src/_includes/backlog-badges.njk` now emit `<we-tag>` (categorical `(set,value)` mode, #1670), the
+> per-value palette lives in `we:src/css/style.css` (keyed to both the pre-upgrade `we-tag[set][value]` and
+> the post-upgrade `.fui-tag[data-cat-*]` so there's no shape/colour shift), and `we:src/_layouts/base.njk`
+> cross-origin-imports `fui:embed/tag-in-document.ts` + calls `registerTagsInDocument()`. Browser-verified on
+> the running :8080: all `<we-tag>` upgrade to `span.fui-tag`, no console error, palettes exact, pills render
+> consistently. **Status surfaces** were already `<we-badge>` (#1598). The remaining **interactive filter
+> pills** (`<we-filter-chip>`) are a cross-file `aria-pressed`/`.is-active` JS rewrite + live-interaction
+> verification — a materially different, separable surface from the decorative taxonomy swap — so they were
+> **split to #1825** (the body's earlier "keep the whole surface in one card" note assumed both halves were
+> similar-effort span swaps; the traced tree showed the filter half is a 4-script interaction rewrite).
+> Resolved as the badge/tag dogfood; the chip half rides #1825.
 
 > **Pre-flight (batch-2026-06-26-1793-1697) — body below is stale; real state reconciled here.** Traced the live tree:
 > - **Status surfaces — DONE.** #1598 (resolved) migrated the status badges to `<we-badge>` (`statusBadge`/`epicStatusBadge` in `we:src/_includes/backlog-badges.njk`), and `we:src/_layouts/base.njk` already cross-origin-imports `fui:embed/badges-in-document.ts` + calls `registerBadgesInDocument()`. The "no `fui:embed/badge-in-document.ts` exists" / "Parked — blocked-in-fact" notes below are obsolete (#1758 shipped it).
