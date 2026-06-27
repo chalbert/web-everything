@@ -30,8 +30,14 @@ Both were design calls, not wiring — **now resolved by decision #1824 (ratifie
 
 ## Unblocked by #1824 (ratified 2026-06-27) — concrete scope + re-size
 
-Decision #1824 resolved both calls. This story now carries three pieces (re-sized `3 → 8`; consider
-`/slice 1813` into the three below if batching):
+Decision #1824 resolved both calls. This story now carries three pieces (re-sized `3 → 8`):
+
+> **Analyzed 2026-06-27 (`/slice 1813`): atomic — keep whole, do not slice.** The three pieces are a
+> rigid linear chain (P2→P1→P3): `ThemeSource.with()`/`emitTokenCss()` both live in FUI and WE can't
+> build-import them, so P1+P2 resolve FUI-side and only the `:root{}` string crosses — nothing visible
+> ships until P3 (no incremental delivery), and P1 still carries #1824's "ruled at build" transport
+> residual. Already at the `size:8` batchable ceiling; work it as one pass. See
+> [the split analysis](../reports/2026-06-27-backlog-split-analysis.md).
 1. **Engine-agnostic transport (Fork 1a).** A thin `we:src/_data/` build global returns the FUI
    `emitTokenCss()` `:root{}` string fresh each build (bytes cross via the #1731 served-route/CLI
    boundary — **no** build-import, **no** committed generated artifact); the layout inlines it
