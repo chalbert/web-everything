@@ -105,13 +105,15 @@
     // Per-agent state chips (each num-bearing chip is the membership signal — no separate "owns" line).
     h += '<div style="display:flex; flex-wrap:wrap; gap:0.35rem;">' + agents.map(agentChip).join('') + '</div>';
 
-    // Current activity — the running agents' last transcript line (slice-3 jsonl tail).
-    var live = running.filter(function (a) { return a.lastLine; });
+    // Current activity — each running agent's live step stream (last few steps), tailed from its transcript.
+    var live = running.filter(function (a) { return (a.steps && a.steps.length) || a.lastLine; });
     if (live.length) {
-      h += '<div style="margin-top:0.6rem; display:flex; flex-direction:column; gap:0.25rem;">';
+      h += '<div style="margin-top:0.6rem; display:flex; flex-direction:column; gap:0.4rem;">';
       live.forEach(function (a) {
-        h += '<div style="font-size:0.78em; color:var(--color-text-muted);"><span style="color:#1e40af; font-weight:600;">' +
-          esc(a.label || a.agentId) + '</span>: ' + esc(a.lastLine) + '</div>';
+        h += '<div><div style="font-size:0.78em; color:#1e40af; font-weight:600; margin-bottom:0.1rem;">' + esc(a.label || a.agentId) + '</div>';
+        if (a.steps && a.steps.length) h += '<div class="aw-stream">' + streamHtml(a.steps.slice(-3)) + '</div>';
+        else h += '<div style="font-size:0.78em; color:var(--color-text-muted);">' + esc(a.lastLine) + '</div>';
+        h += '</div>';
       });
       h += '</div>';
     }
@@ -121,14 +123,34 @@
 
   var vitalWf = document.getElementById('aw-vital-workflows');
   var vitalWfN = document.getElementById('aw-vital-workflows-n');
+  var openStreams = {};   // num → expanded?  (persists across polls)
+  var lastDigests = null; // last payload, so a toggle can re-render without waiting for the next poll
 
-  // Overlay each active item's live session digest onto its lane row (matched by num). The digest is the
-  // "chat progress" for non-workflow work: current todo / last action / last line, from the watcher.
+  // hh:mm:ss from an ISO/epoch (for step timestamps).
+  function clock(t) {
+    var ms = typeof t === 'number' ? t : Date.parse(t);
+    if (!ms) return '';
+    var d = new Date(ms);
+    return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
+  }
+
+  // Render a step list (newest first) — the live "agent progress / step / message" stream.
+  function streamHtml(steps) {
+    return steps.slice().reverse().map(function (s) {
+      return '<div class="aw-step ' + (s.kind === 'tool' ? 'tool' : 'text') + '">' +
+        '<span class="at">' + esc(clock(s.at)) + '</span><span class="tx">' + esc(s.text) + '</span></div>';
+    }).join('');
+  }
+
+  // Overlay each active item's live session digest onto its lane row (matched by num): current todo,
+  // last action, and an expandable step stream — the live "chat progress" for non-workflow work.
   function applyDigests(digests) {
+    lastDigests = digests;
     var rows = document.querySelectorAll('[data-digest-for]');
     for (var i = 0; i < rows.length; i++) {
       var el = rows[i];
-      var d = digests && digests[el.getAttribute('data-digest-for')];
+      var num = el.getAttribute('data-digest-for');
+      var d = digests && digests[num];
       if (!d) { el.hidden = true; el.innerHTML = ''; continue; }
       var h = '';
       if (d.currentTodo) h += '<span class="now">▸ ' + esc(d.currentTodo) + '</span>';
@@ -138,10 +160,26 @@
       if (d.sessionId) meta.push('session ' + esc(d.sessionId));
       if (meta.length) h += '<span class="meta">' + meta.join(' · ') + '</span>';
       if (d.lastLine && !d.currentTodo) h += '<span>' + esc(d.lastLine) + '</span>';
+      var steps = Array.isArray(d.steps) ? d.steps : [];
+      if (steps.length) {
+        var open = !!openStreams[num];
+        h += '<button type="button" class="aw-stream-toggle" data-stream-toggle="' + esc(num) + '">' +
+          (open ? '▾' : '▸') + ' ' + steps.length + ' steps</button>';
+        if (open) h += '<div class="aw-stream">' + streamHtml(steps) + '</div>';
+      }
       el.innerHTML = h;
       el.hidden = !h;
     }
   }
+
+  // Delegated toggle for the per-row step streams (rows are re-rendered each poll, so delegate once).
+  document.addEventListener('click', function (e) {
+    var t = e.target.closest && e.target.closest('[data-stream-toggle]');
+    if (!t) return;
+    var num = t.getAttribute('data-stream-toggle');
+    openStreams[num] = !openStreams[num];
+    applyDigests(lastDigests);
+  });
 
   function render(data) {
     applyDigests(data && data.digests);

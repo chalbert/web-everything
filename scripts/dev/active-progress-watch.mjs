@@ -43,34 +43,53 @@ const PROJECT_SLUG = ROOT.replace(/[^a-zA-Z0-9]/g, '-');
 const PROJECTS_DIR = join(homedir(), '.claude', 'projects', PROJECT_SLUG);
 
 const TERMINAL = new Set(['completed', 'failed', 'aborted', 'cancelled']);
+const STEP_LIMIT = 10;       // live step-stream depth per session
+const AGENT_STEP_LIMIT = 6;  // per running subagent
+
+// Short hint for a tool call — the arg that says WHAT it's doing (command / file / query / description).
+function toolHint(input) {
+  if (!input || typeof input !== 'object') return '';
+  const raw = input.command || input.file_path || input.path || input.pattern || input.query || input.description || input.url || '';
+  return String(raw).replace(/\s+/g, ' ').trim().slice(0, 64);
+}
+
+// Turn one assistant event into 0–2 stream steps (a text line and/or a tool call), newest-relevant last.
+function eventSteps(ev) {
+  const out = [];
+  const at = ev.timestamp;
+  for (const b of (Array.isArray(ev.message && ev.message.content) ? ev.message.content : [])) {
+    if (b.type === 'text' && b.text && b.text.trim()) {
+      out.push({ at, kind: 'text', text: b.text.trim().replace(/\s+/g, ' ').slice(0, 120) });
+    } else if (b.type === 'tool_use') {
+      const hint = toolHint(b.input);
+      out.push({ at, kind: 'tool', text: '→ ' + b.name + (hint ? ' ' + hint : '') });
+    }
+  }
+  return out;
+}
 // A backlog num inside an agent label — workflow lanes are labelled `verify:#353`, `probe:1149`,
 // `slice-1622`, etc. Match a 2–4 digit run on word boundaries (so `b1`/`D3`/`G1` don't false-match);
 // the `#` is optional. This is the membership signal that ties a running lane back to its card.
 const NUM_RE = /\b(\d{2,4})\b/;
 
-// Last meaningful activity line from a subagent transcript — the tail event's text or tool call. Reads
-// only the tail of the file (transcripts grow large) and fails soft to undefined.
-function lastActivity(jsonlPath) {
+// Recent step-stream + last line from a subagent transcript. Reads only the tail of the file
+// (transcripts grow large) and fails soft. Returns { lastLine, steps } (steps oldest→newest).
+function tailSteps(jsonlPath, limit) {
   try {
-    if (!existsSync(jsonlPath)) return undefined;
+    if (!existsSync(jsonlPath)) return { steps: [] };
     let text = readFileSync(jsonlPath, 'utf8');
-    if (text.length > 65536) text = text.slice(-65536); // tail only; a partial first line is skipped below
+    if (text.length > 131072) text = text.slice(-131072); // tail only; a partial first line is skipped below
     const lines = text.split('\n').filter(Boolean);
-    for (let i = lines.length - 1; i >= 0; i--) {
+    const steps = [];
+    for (const line of lines) {
       let ev;
-      try { ev = JSON.parse(lines[i]); } catch { continue; } // skip a truncated tail line
+      try { ev = JSON.parse(line); } catch { continue; } // skip a truncated tail line
       if (ev.type !== 'assistant' || !ev.message) continue;
-      const blocks = Array.isArray(ev.message.content) ? ev.message.content : [];
-      for (let j = blocks.length - 1; j >= 0; j--) {
-        const b = blocks[j];
-        if (b.type === 'tool_use') return `→ ${b.name}`;
-        if (b.type === 'text' && b.text && b.text.trim()) {
-          return b.text.trim().replace(/\s+/g, ' ').slice(0, 140);
-        }
-      }
+      for (const s of eventSteps(ev)) { steps.push(s); if (steps.length > limit) steps.shift(); }
     }
-  } catch { /* fail soft */ }
-  return undefined;
+    const lastLine = steps.length ? steps[steps.length - 1].text : undefined;
+    return { lastLine, steps };
+  } catch { return { steps: [] }; }
 }
 
 // Digest one workflow journal file into a run object (null to drop it).
@@ -92,10 +111,11 @@ function digestJournal(journalPath) {
       const num = (String(e.label || '').match(NUM_RE) || [])[1];
       const state = e.state || 'running';
       const a = { index: e.index, label: e.label, phaseTitle: e.phaseTitle, agentId: e.agentId, state, num };
-      // Tail the transcript for current activity only on still-running agents (cheaper; done agents are static).
+      // Tail the transcript for a live step-stream only on still-running agents (cheaper; done are static).
       if (state !== 'done' && e.agentId) {
-        const line = lastActivity(join(subagentsDir, `agent-${e.agentId}.jsonl`));
-        if (line) a.lastLine = line;
+        const t = tailSteps(join(subagentsDir, `agent-${e.agentId}.jsonl`), AGENT_STEP_LIMIT);
+        if (t.lastLine) a.lastLine = t.lastLine;
+        if (t.steps && t.steps.length) a.steps = t.steps;
       }
       return a;
     });
@@ -171,6 +191,7 @@ function digestSession(jsonlPath) {
   let text;
   try { text = readFileSync(jsonlPath, 'utf8'); } catch { return null; }
   const owned = new Set();
+  const steps = [];
   let currentTodo, lastTool, lastLine;
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
@@ -195,8 +216,9 @@ function digestSession(jsonlPath) {
         lastLine = b.text.trim().replace(/\s+/g, ' ').slice(0, 160);
       }
     }
+    for (const s of eventSteps(ev)) { steps.push(s); if (steps.length > STEP_LIMIT) steps.shift(); }
   }
-  return { ownedNums: [...owned], currentTodo, lastTool, lastLine };
+  return { ownedNums: [...owned], currentTodo, lastTool, lastLine, steps };
 }
 
 // num → live digest, from every recent top-level session transcript (cached on mtime). A num owned by
@@ -219,7 +241,7 @@ function sessionDigests() {
     for (const num of d.ownedNums) {
       const prev = out[num];
       if (prev && prev.updatedAt >= updatedAt) continue; // keep the most recently active session
-      out[num] = { sessionId: sessionId.slice(0, 8), currentTodo: d.currentTodo, lastTool: d.lastTool, lastLine: d.lastLine, updatedAt };
+      out[num] = { sessionId: sessionId.slice(0, 8), currentTodo: d.currentTodo, lastTool: d.lastTool, lastLine: d.lastLine, steps: d.steps || [], updatedAt };
     }
   }
   return out;

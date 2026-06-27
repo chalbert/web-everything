@@ -669,7 +669,7 @@ module.exports = function backlog() {
   // overlays it onto these lane rows. Dev-only, frozen on a static build, read defensively.
   const activeLite = ({ id, num, slug, title, status, kind, size, tier, reservedBy, relatedProject }) =>
     ({ id, num, slug, title, status, kind, size, tier, reservedBy, relatedProject });
-  const lanes = { preparing: [], deciding: [], slicing: [], building: [] };
+  const lanes = { preparing: [], deciding: [], slicing: [], programs: [], building: [] };
   const batchBySession = new Map(
     (items.activeBatches || []).map((b) => [b.session, { session: b.session, date: b.date, points: b.points, items: [] }]),
   );
@@ -680,7 +680,10 @@ module.exports = function backlog() {
     const grp = it.reservedBy ? batchBySession.get(it.reservedBy) : null;
     if (grp) grp.items.push(lite);                       // batch membership wins
     else if (it.kind === 'decision') lanes.deciding.push(lite);
-    else if (it.kind === 'epic') lanes.slicing.push(lite);
+    // An active epic is being SLICED — UNLESS it's an `ongoing` program (a perpetual umbrella like the
+    // flagship exercise apps), which is legitimately always-active and is NOT a slice operation. Calling
+    // those "slicing" overclaims, so they get their own Programs lane.
+    else if (it.kind === 'epic') (it.ongoing ? lanes.programs : lanes.slicing).push(lite);
     else lanes.building.push(lite);                       // story / task / anything else active
   }
   const byNumAsc = (a, b) => Number(a.num) - Number(b.num);
@@ -696,11 +699,13 @@ module.exports = function backlog() {
       preparing: lanes.preparing.length,
       deciding: lanes.deciding.length,
       slicing: lanes.slicing.length,
+      programs: lanes.programs.length,
       batching: batchItemCount,
       batches: batches.length,
       building: lanes.building.length,
     },
-    count: lanes.preparing.length + lanes.deciding.length + lanes.slicing.length + lanes.building.length + batchItemCount,
+    count: lanes.preparing.length + lanes.deciding.length + lanes.slicing.length
+      + lanes.programs.length + lanes.building.length + batchItemCount,
   };
 
   return items;
