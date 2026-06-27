@@ -1,0 +1,21 @@
+{
+  "id": "fui-workbench-author-mode-source-home",
+  "title": "Author-mode source for the FUI workbench — form-set + generation-home",
+  "status": "open",
+  "summary": "Grounds decision #1865 (child of #1618 / workbench epic #746): the two build-blocking sub-calls before the FUI block-explorer's author-mode panel can be wired. (a) FORM-SET — AuthorModeForm names 5 forms (declarative|wc-class|html|jsx|functional, fui:workbench/authorMode.ts:23) but FUI faithfully emits only 3 (declarative=def text, wc-class=generateClassSource, functional=generateFunctionalSource); html/jsx text emitters and the lossy/diagnostics computation don't exist. The panel is form-count-agnostic (iterates source.forms, authorMode.ts:98-110), so shipping 3 now and adding html/jsx later is sequencing, not a fork — default is scope-to-3 + carve. (b) GENERATION-HOME — the thin-descriptor registry (fui:workbench/registry.ts:276) already has an inert authorSource? data slot (registry.ts:143-147, same class as cem?); /_maas/ today serves only consume-mode wrapper bytes + CEM data + a 404ing functional route, none author-mode source. Default is build-emit the author-source as descriptor data (B), NOT a live /_maas/ endpoint (A): author-mode source is static display text needing none of /_maas/'s transpile/bundle/cross-origin machinery (the #1499/#955 reason the origin exists), and a data slot matches #1731's settled 'authorSource crosses as pre-emitted data, panel reads data only, no live instance' note while not re-introducing the load/create closures #1731 Fork 2 banished from registry.ts. Skeptic: Fork 1 SURVIVES (sequencing, panel form-count-agnostic); Fork 2 SURVIVES-WITH-AMENDMENT (authorSource is inert data not a closure; HMR concern is narrow — label the slot the v1 interim and a dev-server live-read the documented upgrade seam). The WE emitter + committed artifact were deleted by #1730, so generation is wholly a FUI concern off fui:blocks/renderers/component/__fixtures__/component-cases.ts. Full grounding in reports/2026-06-27-fui-workbench-author-mode-source-home.md.",
+  "dateOpened": "2026-06-27",
+  "lastReviewed": "2026-06-27",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "block-explorer",
+    "workbench",
+    "author-mode",
+    "maas",
+    "fui",
+    "thin-descriptor",
+    "source-emit",
+    "webdocs"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

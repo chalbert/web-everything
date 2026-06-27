@@ -1,0 +1,46 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/1865-author-mode-source-form-set-generation-home-for-the-fui-work/">#1865</a> — the two
+  build-blocking sub-calls before the FUI block-explorer's <em>author-mode panel</em>
+  (<code>fui:workbench/authorMode.ts</code>) can be wired by
+  <a href="/backlog/1618-wire-the-we-author-mode-source-artifact-into-the-live-fui-wo/">#1618</a> (workbench
+  epic <a href="/backlog/746-block-explorer-interactive-fui-block-workbench/">#746</a>).
+</p>
+
+<h2>(a) Form-set — 3 of 5 emit faithfully</h2>
+<p>
+  <code>AuthorModeForm</code> names five forms (<code>declarative | wc-class | html | jsx | functional</code>,
+  <code>authorMode.ts:23</code>) and carries a <code>lossy</code>/<code>diagnostics</code> pair the panel
+  renders as a <code>⚠ Lossy</code> flag — the &ldquo;flag, don&rsquo;t fake&rdquo; doctrine
+  (<code>authorMode.ts:12-15</code>). FUI emits only three faithfully today: <code>declarative</code> (the def
+  text), <code>wc-class</code> (<code>generateClassSource</code>), <code>functional</code>
+  (<code>generateFunctionalSource</code>). No <code>html</code>/<code>jsx</code> text emitter and no
+  lossy/diagnostics computation exist. The panel is <strong>form-count-agnostic</strong> — it renders one tab
+  per <code>source.forms</code> entry (<code>authorMode.ts:98-110</code>) — so shipping 3 now and adding the
+  rest later is <em>sequencing, not a fork</em>.
+</p>
+
+<h2>(b) Generation-home — descriptor data vs live endpoint</h2>
+<p>
+  The thin-descriptor registry (<code>fui:workbench/registry.ts:276</code>) already has an inert
+  <code>authorSource?</code> data slot (<code>registry.ts:143-147</code>, same class as <code>cem?</code>).
+  <code>/_maas/</code> serves only consume-mode wrapper bytes + CEM data + a 404ing functional route — never
+  author-mode source. Since author-mode source is <strong>static display text</strong> needing none of
+  <code>/_maas/</code>&rsquo;s transpile/bundle/cross-origin machinery (the #1499/#955 reason the origin
+  exists), the default is to <strong>build-emit it as descriptor data</strong>, not stand up a live endpoint —
+  consistent with #1731&rsquo;s settled &ldquo;authorSource crosses as pre-emitted data, panel reads data only,
+  no live instance,&rdquo; and not re-introducing the <code>load</code>/<code>create</code> closures #1731
+  Fork 2 banished from <code>registry.ts</code>.
+</p>
+
+<h2>Skeptic</h2>
+<p>
+  Fork 1 <strong>SURVIVES</strong> (panel form-count-agnostic; sequencing). Fork 2
+  <strong>SURVIVES-WITH-AMENDMENT</strong> — <code>authorSource</code> is inert data not a behavioural closure,
+  so no #1731 conflict; the HMR concern is narrow (source-only block, no live instance), so the amendment is to
+  label the build-emitted slot the v1 interim and a dev-server live-read the documented upgrade seam. Full
+  grounding in <code>reports/2026-06-27-fui-workbench-author-mode-source-home.md</code>.
+</p>
+{% endraw %}

@@ -1,0 +1,43 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/1868-reconcile-the-always-loaded-memory-index-with-the-harness-co/">#1868</a> under the
+  model-usage watch
+  <a href="/backlog/1855-model-usage-watch-keep-claude-s-use-of-the-agent-system-effi/">#1855</a> — the
+  always-loaded memory index sits at ~21.97 KB / 140 lines, at the gate&rsquo;s 22 KB ceiling
+  (<code>we:scripts/check-memory.mjs:27</code>), and <a href="/backlog/1864-memory-index-prune-dedup-pass-index-is-at-the-22kb-ceiling/">#1864</a>
+  showed the entries load-bearing.
+</p>
+
+<h2>The 17.1 KB target is unverified</h2>
+<p>
+  The card&rsquo;s &ldquo;~17.1 KB compact target&rdquo; appears <strong>nowhere in the repo</strong> — only in
+  the card body, sourced from a compaction hook firing during #1864. The sole <em>documented</em> harness limit
+  is ~24.4 KB silent truncation (<code>check-memory.mjs:7</code>), which the 22 KB gate already clears. So
+  <strong>Fork 1</strong> keeps tracking the documented limit and dismisses the phantom (skeptic:
+  <strong>SURVIVES</strong>).
+</p>
+
+<h2>The crux: does the harness recall unindexed files?</h2>
+<p>
+  <code>docs/agent/memory-management.md:57</code> says topic files &ldquo;need not have an index line at all
+  once the index is at budget,&rdquo; but the gate <strong>errors</strong> on unindexed files calling them
+  &ldquo;unreachable by recall context&rdquo; (<code>check-memory.mjs:90-91</code>) — a direct policy↔gate
+  contradiction. The whole mechanism decision (<strong>Fork 2</strong>) pivots on one fact only the running
+  harness can settle: <em>is an unindexed fact file recalled by its <code>description</code>?</em> If
+  <strong>yes</strong> → evict lowest-recall entries to recall-only files + relax the gate (real load
+  reduction). If <strong>no</strong> → eviction is deletion-with-extra-steps; instead delete the aspirational
+  <code>:57</code> line, accept a bounded index, and reduce load via rule 1 (right-home invariants to
+  <code>platform-decisions.md</code>). Sharding is rejected both ways (the harness auto-loads
+  <code>MEMORY.md</code> only).
+</p>
+
+<h2>Skeptic</h2>
+<p>
+  Fork 2 was <strong>REFUTED</strong> as first drafted (the &ldquo;build a lazy tier&rdquo; default presumed a
+  recall mechanism the repo can&rsquo;t show), so it is reframed: the empirical recall check is the unlock and
+  the policy-clarification branch is the safe default. Full grounding in
+  <code>reports/2026-06-27-always-loaded-memory-index-tiering.md</code>.
+</p>
+{% endraw %}

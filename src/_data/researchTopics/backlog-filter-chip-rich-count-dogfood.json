@@ -1,0 +1,20 @@
+{
+  "id": "backlog-filter-chip-rich-count-dogfood",
+  "title": "Backlog summary-pill → we-filter-chip — the rich structured-count tradeoff",
+  "status": "open",
+  "summary": "Grounds decision #1866 (child of dogfood epic #777; blocks #1825): the /backlog/ Prioritisation row has two chip families. The PLAIN filter chips (status/kind/size/tier/readiness/split, we:src/backlog.njk:451-452) are a clean faithful swap to FUI we-filter-chip. The six SUMMARY pills (data-pfilter, we:src/backlog.njk:394-401) each carry a distinct semantic background colour + a RICH structured count of nested colour-coded sub-spans (the decision pill has green '✓ prepared' / blue 'in flight' / purple 'preparing', backlog.njk:399) — actionable at-a-glance signals, not decoration. we-filter-chip cannot represent them: decorate() flattens textContent and OVERWRITES el.innerHTML (fui:blocks/filter-chip/FilterChipElement.ts:40), erasing authored child sub-spans, exposes only a single scalar count attribute, and has no slots / Shadow DOM / colour-variant API. Three card options: (1) scope #1825 to the plain chips now + carve the summary-pill conversion; (2) extend we-filter-chip to carry rich/structured counts (the true #777 dogfood end-state, a FUI component-design lift); (3) accept the lossy flatten. A probed 4th (compose multiple chips per pill) is rejected — each pill is one semantic data-pfilter toggle unit. Default is option (1): it delivers #1825's 'exactly as before' faithfully for the clean-swap family and defers the lossy family — but ONLY honestly if the option-2 capability is filed as a concrete child of #777 and named as the carved follow-up's blocker before #1825 closes (else 'scope later' = permanent omission). Skeptic: SURVIVES-WITH-AMENDMENT — innerHTML-clobber confirmed, option 3 is the flawed branch (sub-counts are actionable), option 4 breaks the toggle semantics; the required amendment is the hard-linked tracked follow-up. Full grounding in reports/2026-06-27-backlog-filter-chip-rich-count-dogfood.md.",
+  "dateOpened": "2026-06-27",
+  "lastReviewed": "2026-06-27",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "dogfood",
+    "filter-chip",
+    "we-filter-chip",
+    "backlog",
+    "webdocs",
+    "fui",
+    "component-api"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

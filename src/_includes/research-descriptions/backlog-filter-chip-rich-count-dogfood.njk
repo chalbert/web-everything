@@ -1,0 +1,41 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/1866-backlog-prioritisation-summary-pill-conversion-to-we-filter-/">#1866</a> — converting
+  the <code>/backlog/</code> Prioritisation pills to FUI <code>we-filter-chip</code> under dogfood epic
+  <a href="/backlog/777-dogfood-the-we-docs-website-on-fui-components-rework-the-sit/">#777</a> (blocks
+  <a href="/backlog/1825-migrate-the-backlog-filter-pills-to-fui-we-filter-chip-inter/">#1825</a>).
+</p>
+
+<h2>Two chip families</h2>
+<p>
+  The <strong>plain</strong> filter chips (status/kind/size/tier/readiness/split,
+  <code>backlog.njk:451-452</code>) are a clean, faithful swap. The six <strong>summary</strong> pills
+  (<code>data-pfilter</code>, <code>backlog.njk:394-401</code>) each carry a distinct semantic background colour
+  and a <em>rich structured count</em> of nested colour-coded sub-spans — the <code>decision</code> pill alone
+  shows green <code>✓ prepared</code>, blue <code>in flight</code>, purple <code>preparing</code>
+  (<code>backlog.njk:399</code>). These are actionable at-a-glance batch signals, not decoration.
+</p>
+
+<h2>The gap</h2>
+<p>
+  <code>we-filter-chip</code> (<code>fui:blocks/filter-chip/FilterChipElement.ts</code>) flattens
+  <code>textContent</code> and <strong>overwrites <code>el.innerHTML</code></strong> in <code>decorate()</code>
+  (<code>FilterChipElement.ts:40</code>), erasing any authored sub-spans; it exposes only a single scalar
+  <code>count</code> and has no slot / Shadow-DOM / colour-variant API. It provably cannot represent the
+  summary pills today.
+</p>
+
+<h2>Recommendation + skeptic</h2>
+<p>
+  Default <strong>option (1)</strong>: scope #1825 to the plain chips (faithful &ldquo;exactly as before&rdquo;
+  now) and carve the summary-pill conversion. Option (3) lossy-flatten is the flawed branch (drops actionable
+  signal); a probed option (4) — multiple chips per pill — breaks the one-toggle semantics. <strong>Skeptic:
+  SURVIVES-WITH-AMENDMENT</strong> — the carve is only honest if option (2) (extend <code>we-filter-chip</code>
+  with a rich/structured-count API, the true #777 dogfood end-state) is <em>filed as a concrete child of #777
+  and named as the carved follow-up&rsquo;s blocker</em> before #1825 closes, else &ldquo;scope later&rdquo; =
+  permanent omission. Full grounding in
+  <code>reports/2026-06-27-backlog-filter-chip-rich-count-dogfood.md</code>.
+</p>
+{% endraw %}

@@ -1,0 +1,20 @@
+{
+  "id": "always-loaded-memory-index-tiering",
+  "title": "Always-loaded memory index vs the harness compact target — tiering the recall surface",
+  "status": "open",
+  "summary": "Grounds decision #1868 (child of the model-usage watch #1855): the always-loaded memory index MEMORY.md sits at 22,494 bytes (~21.97 KB) / 140 lines across 140 topic fact files — AT the gate's 22 KB ceiling (we:scripts/check-memory.mjs:27), with the #1864 prune having shown the entries load-bearing (can't mechanically trim a multi-KB gap). The card's '~17.1 KB harness compact target' appears NOWHERE in the repo — only in the card body, sourced from a compaction hook firing during #1864; the only DOCUMENTED harness limit is ~24.4 KB silent truncation (check-memory.mjs:7), which the 22 KB gate already clears with headroom. Fork 1 (gate target): keep tracking the documented 24.4 KB limit; dismiss the unverified 17.1 KB — SURVIVES the skeptic (chasing a phantom hardens the gate to anecdote). Fork 2 (mechanism) pivots on ONE empirical fact only the running harness can settle: does it recall an unindexed fact file by its description frontmatter? docs/agent/memory-management.md:57 says topic files 'need not have an index line at all once the index is at budget', but check-memory.mjs:90-91 ERRORS on unindexed files calling them 'unreachable by recall context' — a direct policy↔gate contradiction. If recall reaches unindexed files → evict lowest-recall entries to recall-only files + relax the gate (real load reduction, the #1855 cost). If not → eviction is deletion-with-extra-steps; instead delete the aspirational :57 line, accept a bounded index, and reduce load only via rule 1 (right-home project invariants to platform-decisions.md). Sharding is rejected both ways (harness auto-loads MEMORY.md only). Skeptic: Fork 2 REFUTED as first drafted (presumed a recall mechanism the repo can't show) — reframed so the empirical recall check is the unlock and the policy-clarification branch is the safe default. Full grounding in reports/2026-06-27-always-loaded-memory-index-tiering.md.",
+  "dateOpened": "2026-06-27",
+  "lastReviewed": "2026-06-27",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "memory",
+    "context",
+    "always-loaded",
+    "model-usage-watch",
+    "harness",
+    "recall",
+    "gate"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}
