@@ -45,3 +45,16 @@ first (it has the live demo + 23 tests). **Re-run `/slice 1294`.** See `we:repor
 Per-subsystem: (a) stand up the FUI home; (b) repoint the WE-website conformance demo to surface FUI
 (bundle/runner) or convert to a vector run FUI-side; (c) delete the WE runtime, retaining contract +
 vectors. Webpolicy is the first slice; the remaining #1078 subsystems follow.
+
+## Carve status (per `we:reports/2026-06-27-split-analysis-1294-webcompliance.md`)
+
+- **webpolicy — DONE.** The proving cascade: W1–W4 (#1799 engine→FUI · #1800 binding+vectors · #1801
+  plateau-iframe docs page · #1802 delete WE runtime). Reached the #1282 end-state.
+- **webcompliance — CARVED.** Next ready facts→verdict engine, 5-story cascade C1–C5: #1808 (extract
+  contract) → #1814 (relocate runtime) → #1809 (binding+vectors) → #1810 (docs page) → #1815 (delete
+  runtime).
+- **process, webtraits** (engines, non-facts→verdict) and **webcases** (mixed tooling, #1566) — could
+  not split: need a per-subsystem conformance-shape / placement read first.
+- **reliability, intl, analytics, webtheme** (non-engine planes) — gated on the conformance-model
+  decision **#1816** (filed `priority: low`: the #899 verdict-vector model doesn't fit formatting /
+  aggregation / token-projection / provider-strategy).
