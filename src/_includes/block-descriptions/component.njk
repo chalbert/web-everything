@@ -141,7 +141,7 @@ customElements.define('user-card', UserCard);
         <tr><td>Form participation (<code>form-associated</code> → <code>attachInternals</code>)</td><td>built-in (DC-12)</td><td>2</td></tr>
         <tr><td>Default ARIA semantics (<code>default-role</code> → <code>internals.role</code>)</td><td>built-in (DC-13)</td><td>2</td></tr>
         <tr><td>Default ARIA surface beyond role (<code>default-aria-*</code> → <code>internals.aria*</code>)</td><td>built-in (#853)</td><td>2</td></tr>
-        <tr><td>Custom states (<code>:state()</code> seeding/toggling)</td><td>defer (DC-14)</td><td>3</td></tr>
+        <tr><td>Custom states (<code>:state()</code> via <code>internals.states</code>) — declarative <code>states=</code> vocabulary + per-instance toggle</td><td>built-in surface (DC-14, <a href="/backlog/1807-declarative-custom-state-surface-how-a-component-declares-to/">#1807</a>); plugged validation/polyfill via the custom-states plug (<a href="/backlog/1830-mint-the-custom-states-plug-contract-declared-vocabulary-val/">#1830</a>/<a href="/backlog/1831-implement-the-custom-states-plug-in-fui-plugged-validation-p/">#1831</a>), plug-as-proposed-standard (#1826)</td><td>3</td></tr>
         <tr><td>Form value &amp; validation wiring</td><td>compose (<a href="/projects/webvalidation/">Web Validation</a>)</td><td>3</td></tr>
         <tr><td>State-preserving moves (<code>preserve-on-move</code> → <code>connectedMoveCallback</code>)</td><td>built-in (DC-15)</td><td>2</td></tr>
         <tr><td>Slots / content projection</td><td>compose (native <code>&lt;slot&gt;</code>)</td><td>1</td></tr>
