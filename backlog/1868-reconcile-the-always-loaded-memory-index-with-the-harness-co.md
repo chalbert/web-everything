@@ -45,6 +45,26 @@ The always-loaded memory index `we:MEMORY.md` sits at ~21.97 KB / 140 lines, at 
 
 *Skeptic: REFUTED as first drafted → reframed around the empirical pivot. The "build a real lazy tier by evicting to an unindexed pool" default presumed a recall mechanism the repo can't show exists; if it doesn't, eviction destroys access rather than deferring load (the only thing telling the model a fact exists is the line being removed). So the recall check is promoted to the gating step, and the **policy-clarification branch is the safe default** until recall is confirmed. Sharding stays rejected on both branches.*
 
+## Update 2026-06-27 (run 2 — literature sweep + human steer, under #1855)
+
+Two inputs from the second model-usage-watch run sharpen Fork 2 without yet resolving it (the recall check is still the gate).
+
+- **External evidence on the pivot.** A 2025–2026 agent-memory literature sweep (front B of [#1855](/backlog/1855-model-usage-watch-keep-claude-s-use-of-the-agent-system-effi/)) found the *documented* Claude memory tool does **no** embedding/description auto-search — the agent reaches a file only by viewing the directory and choosing to read it ("just-in-time retrieval with lightweight identifiers", *Anthropic, "Effective context engineering"*; Claude memory-tool docs). That leans the pivot toward **recall does NOT reach unindexed files for free** → the policy-clarification safe-default. **But** this repo's harness visibly injects description-matched "recalled memories" into `<system-reminder>` blocks, which points the other way for *our* harness specifically. The two signals conflict, so the empirical check (drop one index line, confirm whether the fact still surfaces in a later relevant session) remains the gating step — it is now **promoted to this card's named next action**.
+- **Human steer — push the index toward pure pointers.** Direction set: prefer shrinking the always-loaded index to a small **core-invariants set** plus on-demand topic files ("a rule for X exists if needed, not the rule itself"), because the full ~22 KB index is a per-session context cost. This is the aggressive branch of Fork 2 — *valid only if the recall check passes*.
+- **Rigor-preservation constraint on the eviction branch.** If we evict, instruction-rigor must not regress. Guards that must hold for the eviction branch to be acceptable: (1) the core-invariants set (~≤12) stays always-loaded; (2) eviction is gated on a *passing* recall check — never drop an index line before proving the fact is still reachable; (3) `we:scripts/check-memory.mjs` + the write-time hook keep enforcing budget/pointer integrity; (4) durable rigor-bearing rules live in `we:docs/agent/platform-decisions.md` + `we:AGENTS.md` (rule 1), never in the volatile memory index — so the shrink only ever evicts low-recall, non-load-bearing facts.
+
+## Recall check — armed 2026-06-27 (the gating experiment)
+
+Rather than un-index a load-bearing memory (which would risk a real fact during the observation window), the experiment reuses the **existing orphan** as a zero-cost specimen:
+
+- **Specimen:** `we:reference_front_end_platform_book.md` — already has no index line in `we:MEMORY.md` (the persistent gate-red from run 1 of #1855). Leave it un-indexed; do **not** clear it until the observation lands.
+- **Observation:** in a future session whose context genuinely touches *front-end platform engineering / the referenced book*, check whether this file appears in the harness's **recalled-memory `<system-reminder>`** block despite having no index line.
+- **Read-out:**
+  - **Surfaces → recall reaches unindexed files by `description`** → the evict-to-recall-only branch of Fork 2 is viable; relax `we:scripts/check-memory.mjs:90-91` to permit a designated unindexed pool, and the index can shrink to a core-invariants set (the human's pointer-index steer).
+  - **Absent across a few such sessions → recall is index-driven** → policy-clarification branch: delete the aspirational `we:docs/agent/memory-management.md` "need not have an index line" line, accept a bounded index, and shed load only via rule 1 (right-home into `we:docs/agent/platform-decisions.md`). Then clear the orphan (index or evict).
+
+Until the read-out, the gate stays red on this one file **by design** — it is the live probe, not an unaddressed defect.
+
 ## Lineage
 
 Surfaced 2026-06-27 when the harness compaction hook fired repeatedly during the [#1864](/backlog/1864-memory-index-prune-dedup-pass-index-is-at-the-22kb-ceiling/) prune (`graduatedTo` "deep compaction → #1868"), under the model-usage watch [#1855](/backlog/1855-model-usage-watch-keep-claude-s-use-of-the-agent-system-effi/). Prepared 2026-06-27: gate + memory-dir survey establishing the real sizes, the unverified 17.1 KB figure, and the policy↔gate contradiction, published as research topic `always-loaded-memory-index-tiering` and report [we:reports/2026-06-27-always-loaded-memory-index-tiering.md](reports/2026-06-27-always-loaded-memory-index-tiering.md). The existing policy is codified at [we:docs/agent/memory-management.md](docs/agent/memory-management.md).

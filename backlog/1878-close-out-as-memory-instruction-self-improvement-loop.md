@@ -1,0 +1,35 @@
+---
+kind: story
+size: 5
+parent: "1855"
+status: open
+dateOpened: "2026-06-27"
+tags: [memory, close-out, self-improvement, consolidation, model-usage-watch, cadence]
+---
+
+# Close-out as memory/instruction self-improvement loop
+
+Extend the `closing-session` skill with a consolidation/reflection pass so every session-end becomes the standing cadence beat for the [#1855](/backlog/1855-model-usage-watch-keep-claude-s-use-of-the-agent-system-effi/) model-usage watch — turning close-out into a self-improvement loop instead of a pure safety audit.
+
+## Why
+
+The 2025–2026 agent-memory literature treats **consolidation/reflection as a distinct scheduled step** ("sleep-time" agents, offline consolidation — *Letta*; *Park et al., "Generative Agents"*; *Anthropic, "Effective context engineering"*), not something done opportunistically. The [#1855](/backlog/1855-model-usage-watch-keep-claude-s-use-of-the-agent-system-effi/) watch named this gap and still lacks an L1→L2 cadence trigger. Session close is the natural hook — it already audits durable capture and runs the health gate — so wiring the reflection pass here graduates the watch's cadence **without a cron** (the #367 scheduling pattern becomes unnecessary for this front).
+
+## Scope
+
+At close-out, after the existing capture audit + health gate, run a bounded reflection pass that **proposes, never auto-applies** (per the discovery-proposes/human-disposes rule and "hand back early in interactive loops"):
+
+- **Learnings → memory:** surface this session's durable insights as candidate `feedback_*`/`project_*` memories (or a right-home into `we:docs/agent/platform-decisions.md` per memory rule 1).
+- **Dedup/prune:** flag topic files that duplicate or are superseded by a later one, and stale/contradictory memories, for one-tap pruning (the front-A metrics of [#1855](/backlog/1855-model-usage-watch-keep-claude-s-use-of-the-agent-system-effi/)).
+- **Instruction/skill drift:** note instructions that fired wrong or skills that went unused this session.
+- **Output is a checklist**, presented to the human; nothing is written without an explicit go.
+
+## Boundaries
+
+- Reflection is **additive to** `we:.claude/skills/closing-session`, behind the existing audit — it must not block or slow a normal close when there's nothing to consolidate (zero-finding close stays one step).
+- Propose-only: no memory write, prune, or instruction edit lands without confirmation. Auto-apply is explicitly out of scope (rigor + the human-disposes rule).
+- Enforcement stays with `we:scripts/check-memory.mjs` + the write-time hook; this skill *surfaces* candidates, it does not replace the gate.
+
+## Lineage
+
+Surfaced 2026-06-27 in the second [#1855](/backlog/1855-model-usage-watch-keep-claude-s-use-of-the-agent-system-effi/) watch run (front B literature sweep, gap #3 — scheduled consolidation) and proposed by the human as "use the close skill as a self-improvement loop". Report: [we:reports/2026-06-27-program-model-usage-watch.md](../reports/2026-06-27-program-model-usage-watch.md).
