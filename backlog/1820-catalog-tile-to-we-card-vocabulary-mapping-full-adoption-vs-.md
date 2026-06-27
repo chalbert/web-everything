@@ -1,8 +1,10 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+codifiedIn: "docs/agent/platform-decisions.md#catalog-tile-by-intent-mapping"
 preparedDate: "2026-06-26"
 relatedReport: reports/2026-06-26-catalog-tile-we-card-mapping.md
 tags: [blocks, card, vocabulary-mapping]
@@ -30,6 +32,15 @@ and click-through survives the swap* — and the #1621 precedent (resolved, codi
 `we:docs/agent/platform-decisions.md#we-fui-embed-boundary`) already answered the analogous badge/chip
 fork with **map-by-intent**, rejecting "bend the shared component to carry the bespoke palette" because it
 re-conflated what #1319 split.
+
+## Ruling (ratified 2026-06-27)
+
+**Fork 1 → (a) full by-intent adoption. Fork 2 → (a) carve out.** Both defaults survived the red-team:
+(b) shallow wrap is strictly dominated — the `<we-card>`→non-linkable-`<article>` erase forces the same
+anchor relocation a frame-only swap would, so (b) pays the identical cost while dogfooding none of the
+shipped `<we-tag>`/`<we-badge>` vocabulary and re-introducing the #1621-retired conflation. Codified at
+`we:docs/agent/platform-decisions.md#catalog-tile-by-intent-mapping`. #1607/#1608 are now agent-ready and
+stay mechanical (the vocab map + anchor-relocation rule are decided here).
 
 ## Recommended path at a glance
 

@@ -217,6 +217,35 @@ display (its own site + demos, FUI branding).
 #705 · #732 (escape SDK) · #765 (mode-C relaxation) · #788 (seed transport) · #791 (reference-vs-impl
 partition) · #809 (workbench locus) · #932 (website≠standard; consumer may run WE runtimes in-document).
 
+### Catalog tiles adopt `<we-card>`/`<we-badge>`/`<we-tag>` by-intent; relocate the anchor outward {#catalog-tile-by-intent-mapping}
+
+**A docs catalog tile maps to FUI block vocabulary by-intent — never a bespoke palette wrapped in a
+cosmetic card shell.** This is the card-frame instance of [we-fui-embed-boundary](#we-fui-embed-boundary)
+rule 7 + the #1621 badge/chip ruling: a tile's status pill → `<we-badge>` (the #1319 Status-Indicator
+intent), its dimension/type chips → `<we-tag>` (the Tag intent), and the tile frame → `<we-card>` — all
+server-emitted `<we-*>`, upgrading in place. A frame-only "shallow wrap" that leaves the bespoke
+badge/chip vocabulary inside is **rejected**: it re-introduces the docs-palette-on-a-shared-component
+conflation #1621 retired, and buys nothing — see the anchor mechanic below.
+
+**The anchor-relocation mechanic.** `<we-card>` resolves to a non-linkable `<article>` and
+`replaceChildren`-es the original node (`fui:blocks/card/CardElement.ts`, `excludedAttributes =
+['title','heading-level']`). So when the tile **is** a single click-through `<a>` (the `we:src/intents.njk`
+/ `we:src/blocks.njk` pattern: `class` + `data-status` + `data-haystack`/`data-search` + `href` on one
+element, queried directly by the per-page filter IIFE), preserving click-through requires **relocating**
+the `<a>` + filter `data-*` + tile class to an *outer* anchor wrapping the `<we-card>`; the filter JS then
+queries that outer anchor. This relocation is unavoidable **even for a frame-only swap**, which is why the
+shallow wrap is strictly dominated (same relocation cost, zero intent dogfood, statute violation). The
+filter mechanism stays attribute-driven off `data-*` — it never reads a card model.
+
+**Non-anchor surfaces carve out.** Structurally-distinct catalog surfaces get their own by-intent rulings,
+not this one: `we:src/design-systems.njk`'s non-anchor `<div>` tiles (no click-through, no relocation) and
+the `.status-meter` *bar* macro (`we:src/_includes/project-status.njk`, a status-bar not a pill). Folding
+them into one "tile→card" rule re-merges surfaces #1319 split.
+
+**Lineage:** #1820 (this ruling) · #1621 (`<we-badge>`/`<we-tag>` map-by-intent precedent) · #1319 (the
+status/tag vocabulary split into owning intents) · #1786 (`<we-card>` embed wiring) · unblocks #1607 (the
+three core catalog pages) + #1608 (the 14 `project-*.njk` includes).
+
 ### Dev-tool placement: the consumer test {#devtools-placement}
 
 **Where does a dev/test tool live across the constellation?** A user ruling — *dev-tools belong in
