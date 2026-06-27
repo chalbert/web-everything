@@ -1,8 +1,11 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-26"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: src/block-pages.njk
 tags: [docs, website, blocks, dx]
 ---
 
@@ -21,5 +24,11 @@ Most of the user tier can auto-generate from data we already have — the block 
 - A representative block renders both tiers; the user tier needs no manual authoring beyond what's in the registry/demos.
 - API table is derived, not hand-typed.
 - `check:standards` green.
+
+## Progress
+Restructured `we:src/block-pages.njk` (the per-block doc template, paginated over the block registry) into two tiers, no per-block hand-authoring:
+- **Tier 1 — "Using this block"** (generated, user-facing): **Overview** (`block.summary`), **Live example** (`block.fuiDemo`), **Quick start** (first Web Case's copy-paste HTML), **API reference** (the derived attributes/properties/events/slots/CSS-props/parts tables — same `we:src/_data/blocks/` source `gen:cem` projects), and **Common patterns** (the remaining Web Cases).
+- **Tier 2 — "Implementer reference"** (kept, secondary, visually separated): the existing `we:src/_includes/block-descriptions/` prose + WE Standards overlay, Implements/Composes Intents, Traits, Accessibility & Web Standards, Component tokens, Anatomy — reordered under a labelled divider, every panel's graceful-absence guard preserved.
+- Verified on representatives: `autocomplete` (demo+attrs → Overview/API/demo + Implementer reference) and `for-each`/`resource-loader` (5 cases each → Quick start + Common patterns). Full `eleventy` build clean; `check:standards` green.
 
 _Converted from `we:plans/doc-generation-notes.md` (#1792 hidden-docs cleanup)._

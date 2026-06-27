@@ -30,385 +30,427 @@ eleventyComputed:
     </div>
 </div>
 
+{# ── Two-tier block docs (#1796) ──────────────────────────────────────────────────────────────────
+   Tier 1 (user) is a generated user-facing layer — overview, live demo, copy-paste quick-start, the
+   derived public-API table, and common patterns — built entirely from data we already hold (the block
+   registry summary + API + the existing demos/cases), so it needs no per-block hand-authoring. Tier 2
+   (implementer) keeps the existing description page + the deep conformance/composition panels, clearly
+   separated and secondary. Every panel keeps its graceful-absence guard (no data → no panel), so the
+   tiers degrade panel-by-panel exactly as before. #}
+{% set blockCases = cases[block.id] %}
+
 <div class="container block-detail-page">
     <div class="block-body content">
-        <div class="section-card">
-            {% include "block-descriptions/" + block.id + ".njk" %}
-        </div>
 
-        {% if block.fuiDemo %}
-        <div class="section-card mt-8">
-            <h2>Live example</h2>
-            {% fuiDemo block.fuiDemo.file, block.fuiDemo.title, block.fuiDemo.height %}
-        </div>
-        {% endif %}
+        {# ===== TIER 1 — USER ===== #}
+        <section class="block-tier block-tier-user" style="border-top: 4px solid var(--color-primary, #6366f1); padding-top: 0.5rem;">
+            <p class="block-tier-label" style="margin: 0; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--color-primary, #6366f1);">Using this block</p>
 
-        {# WE Standards overlay (#832, the WE-locus half of the #755 split / #809) — rendered AROUND the
-           FUI-hosted embed above, from WE's OWN standard data, never inside the iframe (the demo runs in
-           FrontierUI; these conformance panels are WE-docs chrome and don't travel to third-party
-           embedders). Three proofs: (1) the intent→ARIA bridge — the genuinely-new pairing of the UX
-           intent the author declares against the platform ARIA WE resolves it to; (2) why-this-token
-           provenance (#747/#364) and (3) the #092 provider↔consumer graph, shown compactly here and
-           detailed in the Component-tokens / Anatomy sections below (summarized, not duplicated). Gated on
-           an embed being present so it literally wraps the workbench; degrades panel-by-panel on absent
-           substrate (the fuiDemo/webStandards graceful-absence precedent). #}
-        {% if block.fuiDemo and (block.implementsIntent or block.composesIntents or block.componentTokens or block.dependsOn) %}
-        {% set wsKeys = (block.webStandards | webStandardsRows) if block.webStandards else [] %}
-        {% set providerCount = block.dependsOn | length %}
-        {% set consumerBlocks = [] %}
-        {% for other in blocks %}{% if block.id in (other.dependsOn or []) %}{% set consumerBlocks = (consumerBlocks.push(other), consumerBlocks) %}{% endif %}{% endfor %}
-        <div class="section-card mt-8">
-            <h2>WE Standards overlay</h2>
-            <p class="mb-6 text-slate-600">WE-owned conformance proofs for the component embedded above, rendered from WE's <strong>own standard data</strong> — the demo runs in FrontierUI; these panels are Web&nbsp;Docs chrome and never travel into the iframe or to a third-party embedder (the <a href="/backlog/755/">#755</a>/<a href="/backlog/809/">#809</a> boundary split).</p>
+            <div class="section-card mt-4">
+                <h2>Overview</h2>
+                <p class="text-slate-600">{{ block.summary | safe }}</p>
+            </div>
 
-            {% if block.implementsIntent or block.composesIntents %}
-            <h3>Intent&nbsp;→&nbsp;platform ARIA</h3>
-            <p class="mb-2 text-slate-600">The author declares a <strong>UX intent</strong> — no ARIA in the authored markup. WE resolves that intent to the web-platform accessibility mechanisms on the right: the standards bridge that proves the intent is realized, not asserted.</p>
-            <table>
-                <thead><tr><th>Declared intent (UX)</th><th>Resolved platform ARIA / web standard</th></tr></thead>
-                <tbody>
-                    <tr>
-                        <td>
-                            {% if block.implementsIntent %}<a href="/intents/{{ block.implementsIntent }}/"><code>{{ block.implementsIntent }}</code></a>{% endif %}
-                            {% for c in block.composesIntents %}{% if c != block.implementsIntent %}<br><a href="/intents/{{ c }}/"><code>{{ c }}</code></a> <span class="text-slate-500 text-sm">(composed)</span>{% endif %}{% endfor %}
-                        </td>
-                        <td>
-                            {% if wsKeys | length %}
-                            {% for row in wsKeys %}<code title="{{ row.concern }}">{{ row.label }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
-                            <div class="text-sm text-slate-500 mt-1">Full realization in <strong>Accessibility &amp; Web Standards</strong> below.</div>
-                            {% else %}<span class="text-slate-500">Realized via the intent's standard ARIA pattern — see the linked intent.</span>{% endif %}
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+            {% if block.fuiDemo %}
+            <div class="section-card mt-8">
+                <h2>Live example</h2>
+                {% fuiDemo block.fuiDemo.file, block.fuiDemo.title, block.fuiDemo.height %}
+            </div>
             {% endif %}
 
-            {% if block.componentTokens %}
-            {% set tokenGroups832 = block.componentTokens if (block.componentTokens | string) != block.componentTokens else [block.componentTokens] %}
-            <h3 class="mt-6">Why this token</h3>
-            <p class="mb-2 text-slate-600">The component's styling resolves <strong>through the design-token scale</strong>, so it can never drift from the primitives:
-                {% for group in tokenGroups832 %}{% for row in componentTokens[group] %}{% if loop.first %}<code>{{ row.name }}</code>{% if row.reference %} → <code>{{ row.reference }}</code>{% endif %} → <code>{{ row.resolved }}</code>{% endif %}{% endfor %}{% endfor %}.
-                Full provenance in <strong>Component tokens</strong> below.</p>
-            {% endif %}
-
-            {% if providerCount or (consumerBlocks | length) %}
-            <h3 class="mt-6">Provider&nbsp;↔&nbsp;consumer graph</h3>
-            <p class="mb-2 text-slate-600">The composition edges this block sits on (<a href="/backlog/092/">#092</a>): it composes <strong>{{ providerCount }}</strong> provider{{ 's' if providerCount != 1 }}{% if consumerBlocks | length %} and is used by <strong>{{ consumerBlocks | length }}</strong> consumer{{ 's' if (consumerBlocks | length) != 1 }}{% endif %} — disable any provider and the block degrades to what remains (the minimize-lock-in surface). Full bidirectional graph in <strong>Anatomy</strong> below.</p>
-            {% endif %}
-        </div>
-        {% endif %}
-
-        {% if block.technicalConfig %}
-        <div class="section-card mt-8">
-            <h2>Configure technical aspects</h2>
-            <p class="mb-4">These are <strong>technical</strong> delivery settings (render strategy, transport, trait lazy-loading, chunk splitting) — never UX dimensions on the block, and never a Web Everything mandate. Explore the tradeoffs for this block in the embedded <a href="/intents/">Plateau</a> configurator; the cost preview (chunk graph + bytes/requests/hydration) updates as you change a setting. Use <em>Open full configurator&nbsp;↗</em> for the project-wide decision.</p>
-            {% technicalConfigurator block.technicalConfig, block.technicalConfig.height %}
-        </div>
-        {% endif %}
-
-        {% if block.implementsIntent %}
-        <div class="section-card mt-8">
-            <h2>Implements Intent</h2>
-            {% for intent in intents %}
-                {% if intent.id == block.implementsIntent %}
-            <p class="mb-4">This block is a technical implementation of the <a href="/intents/{{ intent.id }}/">{{ intent.name }}</a> — {{ intent.summary | lower }}</p>
-                {% if block.intentDimensions and intent.dimensions %}
-            <p class="mb-2 text-slate-600">The values this block realizes for the intent's <a href="/intents/{{ intent.id }}/">configurable dimensions</a> (axes it does not declare defer to a composed block):</p>
-            <table>
-                <thead>
-                    <tr><th>Dimension</th><th>Realized value</th><th>Axis</th></tr>
-                </thead>
-                <tbody>
-                    {% for dimKey, dimValue in block.intentDimensions %}
-                    <tr>
-                        <td><code>{{ dimKey }}</code></td>
-                        <td><code>{{ dimValue }}</code></td>
-                        <td class="text-slate-600">{% if intent.dimensions[dimKey] %}{{ intent.dimensions[dimKey].description }}{% endif %}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-                {% endif %}
-                {% endif %}
-            {% endfor %}
-        </div>
-        {% endif %}
-
-        {% if block.composesIntents %}
-        <div class="section-card mt-8">
-            <h2>Composes Intents</h2>
-            <p class="mb-4 text-slate-600">This block is a <strong>composition manifest</strong> — it defers each behavior to the intent that owns it, rather than re-specifying them. It composes:</p>
-            <ul class="list-disc pl-5">
-            {% for composedId in block.composesIntents %}
-                {% for intent in intents %}
-                    {% if intent.id == composedId %}
-                <li><a href="/intents/{{ intent.id }}/">{{ intent.name }}</a> — {{ intent.summary | lower }}</li>
-                    {% endif %}
-                {% endfor %}
-            {% endfor %}
-            </ul>
-        </div>
-        {% endif %}
-
-        {% if block.traits %}
-        <div class="section-card mt-8">
-            <h2>Traits</h2>
-            <p class="mb-6 text-slate-600">Composable behaviors loaded on-demand based on the active intent profile. Only the traits matching the application's chosen configuration are bundled.</p>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Trait</th>
-                        <th>Intent Dimension</th>
-                        <th>Description</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for trait in block.traits %}
-                    <tr>
-                        <td><code>{{ trait.name }}</code></td>
-                        <td>{% if trait.intentDimension %}<code>{{ trait.intentDimension }}</code>{% else %}&mdash;{% endif %}</td>
-                        <td>{{ trait.description }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
-
-        {# Accessibility & Web Standards — the per-component realization SoT (#803/#826): one row per
-           concern in block.webStandards → how this block satisfies it + a Reference link to the governing
-           spec. Graceful absence mirrors fuiDemo/composesIntents (no field → no panel). The flexible
-           {concern:{usage,reference}} bag (the realization SoT, #803) is rendered through the
-           `webStandardsRows` filter (#828): the raw camelCase concern key is humanized (ariaCurrentStep →
-           "aria-current step"), and rows are grouped into a fixed category order (ARIA & accessibility →
-           CSS → Platform APIs & DOM) and sorted by label within each group. Display-only — the on-disk
-           field shape is untouched; the raw key is preserved as a hover title for traceability. #}
-        {% if block.webStandards %}
-        {% set wsRows = block.webStandards | webStandardsRows %}
-        <div class="section-card mt-8">
-            <h2>Accessibility &amp; Web Standards</h2>
-            <p class="mb-6 text-slate-600">The web-platform standards this block realizes — each concern names how the block satisfies it, with a link to the governing specification. Concerns are grouped by area and ordered for scanning.</p>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Concern</th>
-                        <th>Usage</th>
-                        <th>Reference</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in wsRows %}
-                    {% if loop.first or row.category != wsRows[loop.index0 - 1].category %}
-                    <tr class="bg-slate-50"><th colspan="3" class="text-left font-semibold text-slate-700">{{ row.category }}</th></tr>
-                    {% endif %}
-                    <tr>
-                        <td><code title="{{ row.concern }}">{{ row.label }}</code></td>
-                        <td>{{ row.usage }}</td>
-                        <td>{% if row.reference %}<a href="{{ row.reference }}" target="_blank" rel="noopener">Reference&nbsp;↗</a>{% else %}&mdash;{% endif %}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
-
-        {# Public API — the props-table surface (#838, ratified by #801 Fork-1=B → the *public-API* line).
-           The block's authored public contract — attributes / properties / events / slots / CSS
-           custom-properties / parts — is the same data `scripts/gen-cem.mjs` projects onto the emitted
-           Custom Elements Manifest (one seam, many consumers: api-viewer, the Technical Configurator args
-           panel, autodocs). The live `<props-table>` element is FUI-owned (impl) and never rendered here
-           per the docs-rendering boundary; WE renders the identical CEM-shaped contract server-side from
-           its OWN `blocks.json` source. Only the deliberately-public surface is authored — private/internal
-           members are excluded by default (the #706 opt-in impl-scan adds them later). Each table is
-           omitted when the block authors no member of that kind (most blocks carry events but no slots
-           yet — the projection shows whatever the contract declares). #}
-        {% if block.attributes or block.properties or block.events or block.slots or block.cssProperties or block.cssParts %}
-        <div class="section-card mt-8">
-            <h2>Public API</h2>
-            <p class="mb-6 text-slate-600">The block's <strong>public contract</strong> — the surface a consumer programs against. This is the same data the <a href="/protocols/">Custom Elements Manifest</a> projects (<code>npm run gen:cem</code>), rendered here from the block's own <code>blocks.json</code> declaration.</p>
-
-            {% if block.attributes %}
-            <h3>Attributes</h3>
-            <table>
-                <thead><tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
-                <tbody>
-                    {% for a in block.attributes %}
-                    <tr>
-                        <td><code>{{ a.name }}</code></td>
-                        <td>{% if a.type %}<code>{{ a.type }}</code>{% else %}&mdash;{% endif %}</td>
-                        <td>{% if a.default is defined %}<code>{{ a.default }}</code>{% else %}&mdash;{% endif %}</td>
-                        <td>{{ a.description }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-
-            {% if block.properties %}
-            <h3>Properties</h3>
-            <table>
-                <thead><tr><th>Property</th><th>Type</th><th>Reflects</th><th>Description</th></tr></thead>
-                <tbody>
-                    {% for p in block.properties %}
-                    <tr>
-                        <td><code>{{ p.name }}</code></td>
-                        <td>{% if p.type %}<code>{{ p.type }}</code>{% else %}&mdash;{% endif %}</td>
-                        <td>{% if p.reflects %}<code>{{ p.attribute or p.name }}</code>{% else %}&mdash;{% endif %}</td>
-                        <td>{{ p.description }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-
-            {# events carry two on-disk shapes (an array of {name,…} or an object keyed by event name);
-               an array has `.length`, an object does not — branch so both render the same row set, the
-               same normalization gen-cem applies. #}
-            {% if block.events %}
-            <h3>Events</h3>
-            <table>
-                <thead><tr><th>Event</th><th>Type</th><th>Description</th></tr></thead>
-                <tbody>
-                    {% if block.events.length %}
-                    {% for e in block.events %}
-                    <tr><td><code>{{ e.name }}</code></td><td><code>{{ e.class or 'CustomEvent' }}</code></td><td>{{ e.description }}</td></tr>
-                    {% endfor %}
-                    {% else %}
-                    {% for name, e in block.events %}
-                    <tr><td><code>{{ name }}</code></td><td><code>{{ e.class or 'CustomEvent' }}</code></td><td>{{ e.description }}</td></tr>
-                    {% endfor %}
-                    {% endif %}
-                </tbody>
-            </table>
-            {% endif %}
-
-            {% if block.slots %}
-            <h3>Slots</h3>
-            <table>
-                <thead><tr><th>Slot</th><th>Description</th></tr></thead>
-                <tbody>
-                    {% for s in block.slots %}
-                    <tr><td><code>{{ s.name or '(default)' }}</code></td><td>{{ s.description }}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-
-            {% if block.cssProperties %}
-            <h3>CSS custom properties</h3>
-            <table>
-                <thead><tr><th>Property</th><th>Default</th><th>Description</th></tr></thead>
-                <tbody>
-                    {% for c in block.cssProperties %}
-                    <tr>
-                        <td><code>{{ c.name }}</code></td>
-                        <td>{% if c.default is defined %}<code>{{ c.default }}</code>{% else %}&mdash;{% endif %}</td>
-                        <td>{{ c.description }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-
-            {% if block.cssParts %}
-            <h3>CSS parts</h3>
-            <table>
-                <thead><tr><th>Part</th><th>Description</th></tr></thead>
-                <tbody>
-                    {% for part in block.cssParts %}
-                    <tr><td><code>{{ part.name }}</code></td><td>{{ part.description }}</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% endif %}
-        </div>
-        {% endif %}
-
-        {# Component tokens — the per-component design-token table (#829, ratified by #802). The block names
-           the webtheme component-token group(s) it draws from via `componentTokens` (string|string[], #802
-           Fork 2); `componentTokens` (the `src/_data/componentTokens.js` global) carries each group resolved
-           through the SAME webtheme pipeline the CEM `cssProperties` emit uses (#802 Fork 1 — one source).
-           Three columns (#802 Fork 3): the CSS custom property the block overrides · the alias it references ·
-           the literal it resolves to. Graceful absence — no field → no panel (the `fuiDemo` precedent). #}
-        {% if block.componentTokens %}
-        {% set tokenGroups = block.componentTokens if (block.componentTokens | string) != block.componentTokens else [block.componentTokens] %}
-        <div class="section-card mt-8">
-            <h2>Component tokens</h2>
-            <p class="mb-6 text-slate-600">The design tokens this component exposes — each overridable CSS custom property, the primitive it <strong>aliases</strong>, and the literal it currently <strong>resolves</strong> to. Every token aliases a primitive so it can never drift from the scale. Same source as the <a href="/protocols/">Custom Elements Manifest</a> <code>cssProperties</code> emit.</p>
-            <table>
-                <thead><tr><th>Override</th><th>Alias</th><th>Resolved</th></tr></thead>
-                <tbody>
-                    {% for group in tokenGroups %}
-                    {% for row in componentTokens[group] %}
-                    <tr>
-                        <td><code>{{ row.name }}</code></td>
-                        <td>{% if row.reference %}<code>{{ row.reference }}</code>{% else %}&mdash;{% endif %}</td>
-                        <td><code>{{ row.resolved }}</code></td>
-                    </tr>
-                    {% endfor %}
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
-
-        {# Anatomy — the composition graph straight from the registries (#748): the dependency edges this
-           block sits on, each piece linking to its own page so they're independently browsable. "Used by" is
-           the reverse edge (every block whose dependsOn names this one) — the bidirectional graph. The
-           interactive exploded / toggle-a-piece-off-to-watch-it-degrade view needs in-document live render
-           and layers on once that lands (#786 mode C); this is the static, buildable-now half. #}
-        {% set usedByBlocks = [] %}
-        {% for other in blocks %}{% if block.id in (other.dependsOn or []) %}{% set usedByBlocks = (usedByBlocks.push(other), usedByBlocks) %}{% endif %}{% endfor %}
-        {% if (block.dependsOn | length) or (usedByBlocks | length) %}
-        <div class="section-card mt-8">
-            <h2>Anatomy</h2>
-            <p class="mb-6 text-slate-600">Every piece this block composes, each linking to its own page. Together with the <strong>Implements / Composes Intents</strong> and <strong>Traits</strong> sections above, this is the block's full composition graph — the minimize-lock-in / graceful-degradation surface. A live <em>toggle-a-piece-off</em> exploded view layers on once in-document render lands (<a href="/backlog/786-mode-c-fui-embed-sdk-gains-a-shadow-dom-in-document-render-m/">#786</a>).</p>
-            {% if block.dependsOn | length %}
-            <h3>Built on</h3>
-            <p class="mb-2 text-slate-600">The blocks and capabilities this one composes — disable any and the block degrades to what remains.</p>
-            <ul class="list-disc pl-5 mb-4">
-                {% for dep in block.dependsOn %}
-                {% if (blocks | selectattr("id", "equalto", dep) | list | length) %}
-                <li><a href="/blocks/{{ dep }}/">{{ dep }}</a></li>
-                {% else %}
-                <li><code>{{ dep }}</code> <span class="text-slate-600">(capability)</span></li>
-                {% endif %}
-                {% endfor %}
-            </ul>
-            {% endif %}
-            {% if usedByBlocks | length %}
-            <h3>Used by</h3>
-            <p class="mb-2 text-slate-600">Blocks that compose this one — the reverse dependency edge.</p>
-            <ul class="list-disc pl-5">
-                {% for u in usedByBlocks %}
-                <li><a href="/blocks/{{ u.id }}/">{{ u.name }}</a></li>
-                {% endfor %}
-            </ul>
-            {% endif %}
-        </div>
-        {% endif %}
-
-        {% set blockCases = cases[block.id] %}
-        {% if blockCases %}
-        <div class="section-card mt-8">
-            <h2 class="text-2xl font-bold mb-4">Web Cases</h2>
-            <p class="mb-6 text-slate-600">Standardized scenarios for testing and documentation. These definitions are sourced directly from the conformance suite.</p>
-
-            <div class="grid gap-8">
-                {% for webCase in blockCases %}
-                <div class="case-item border-l-4 border-slate-200 pl-4">
-                    <h3 class="text-lg font-bold text-slate-900 mb-1">
-                        <span class="text-slate-400 font-mono mr-2">#{{ loop.index }}</span>
-                        {{ webCase.title }}
-                    </h3>
-                    <p class="text-slate-600 mb-3 text-sm leading-relaxed">{{ webCase.description }}</p>
-                    <div class="case-code">
-                        {% highlight "html" %}{{ webCase.code | safe }}{% endhighlight %}
-                    </div>
+            {# Quick start — the first Web Case is the copy-paste HTML a user starts from; remaining cases
+               become "Common patterns" below. Derived from the conformance suite, never hand-authored. #}
+            {% if blockCases and blockCases.length %}
+            <div class="section-card mt-8">
+                <h2>Quick start</h2>
+                <p class="mb-3 text-slate-600">{{ blockCases[0].title }} — copy, paste, and adapt.</p>
+                <div class="case-code">
+                    {% highlight "html" %}{{ blockCases[0].code | safe }}{% endhighlight %}
                 </div>
+            </div>
+            {% endif %}
+
+            {# Public API — the props-table surface (#838, ratified by #801 Fork-1=B → the *public-API* line).
+               The block's authored public contract — attributes / properties / events / slots / CSS
+               custom-properties / parts — is the same data `scripts/gen-cem.mjs` projects onto the emitted
+               Custom Elements Manifest (one seam, many consumers: api-viewer, the Technical Configurator args
+               panel, autodocs). The live `<props-table>` element is FUI-owned (impl) and never rendered here
+               per the docs-rendering boundary; WE renders the identical CEM-shaped contract server-side from
+               its OWN `blocks.json` source. Only the deliberately-public surface is authored — private/internal
+               members are excluded by default (the #706 opt-in impl-scan adds them later). Each table is
+               omitted when the block authors no member of that kind (most blocks carry events but no slots
+               yet — the projection shows whatever the contract declares). #}
+            {% if block.attributes or block.properties or block.events or block.slots or block.cssProperties or block.cssParts %}
+            <div class="section-card mt-8">
+                <h2>API reference</h2>
+                <p class="mb-6 text-slate-600">The block's <strong>public contract</strong> — the surface a consumer programs against. This is the same data the <a href="/protocols/">Custom Elements Manifest</a> projects (<code>npm run gen:cem</code>), rendered here from the block's own <code>blocks.json</code> declaration.</p>
+
+                {% if block.attributes %}
+                <h3>Attributes</h3>
+                <table>
+                    <thead><tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+                    <tbody>
+                        {% for a in block.attributes %}
+                        <tr>
+                            <td><code>{{ a.name }}</code></td>
+                            <td>{% if a.type %}<code>{{ a.type }}</code>{% else %}&mdash;{% endif %}</td>
+                            <td>{% if a.default is defined %}<code>{{ a.default }}</code>{% else %}&mdash;{% endif %}</td>
+                            <td>{{ a.description }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+
+                {% if block.properties %}
+                <h3>Properties</h3>
+                <table>
+                    <thead><tr><th>Property</th><th>Type</th><th>Reflects</th><th>Description</th></tr></thead>
+                    <tbody>
+                        {% for p in block.properties %}
+                        <tr>
+                            <td><code>{{ p.name }}</code></td>
+                            <td>{% if p.type %}<code>{{ p.type }}</code>{% else %}&mdash;{% endif %}</td>
+                            <td>{% if p.reflects %}<code>{{ p.attribute or p.name }}</code>{% else %}&mdash;{% endif %}</td>
+                            <td>{{ p.description }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+
+                {# events carry two on-disk shapes (an array of {name,…} or an object keyed by event name);
+                   an array has `.length`, an object does not — branch so both render the same row set, the
+                   same normalization gen-cem applies. #}
+                {% if block.events %}
+                <h3>Events</h3>
+                <table>
+                    <thead><tr><th>Event</th><th>Type</th><th>Description</th></tr></thead>
+                    <tbody>
+                        {% if block.events.length %}
+                        {% for e in block.events %}
+                        <tr><td><code>{{ e.name }}</code></td><td><code>{{ e.class or 'CustomEvent' }}</code></td><td>{{ e.description }}</td></tr>
+                        {% endfor %}
+                        {% else %}
+                        {% for name, e in block.events %}
+                        <tr><td><code>{{ name }}</code></td><td><code>{{ e.class or 'CustomEvent' }}</code></td><td>{{ e.description }}</td></tr>
+                        {% endfor %}
+                        {% endif %}
+                    </tbody>
+                </table>
+                {% endif %}
+
+                {% if block.slots %}
+                <h3>Slots</h3>
+                <table>
+                    <thead><tr><th>Slot</th><th>Description</th></tr></thead>
+                    <tbody>
+                        {% for s in block.slots %}
+                        <tr><td><code>{{ s.name or '(default)' }}</code></td><td>{{ s.description }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+
+                {% if block.cssProperties %}
+                <h3>CSS custom properties</h3>
+                <table>
+                    <thead><tr><th>Property</th><th>Default</th><th>Description</th></tr></thead>
+                    <tbody>
+                        {% for c in block.cssProperties %}
+                        <tr>
+                            <td><code>{{ c.name }}</code></td>
+                            <td>{% if c.default is defined %}<code>{{ c.default }}</code>{% else %}&mdash;{% endif %}</td>
+                            <td>{{ c.description }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+
+                {% if block.cssParts %}
+                <h3>CSS parts</h3>
+                <table>
+                    <thead><tr><th>Part</th><th>Description</th></tr></thead>
+                    <tbody>
+                        {% for part in block.cssParts %}
+                        <tr><td><code>{{ part.name }}</code></td><td>{{ part.description }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {# Common patterns — the remaining Web Cases (the first is the Quick start above). Sourced from
+               the conformance suite, so they double as runnable scenarios. Graceful absence: a block with
+               ≤1 case shows no patterns panel. #}
+            {% if blockCases and blockCases.length > 1 %}
+            <div class="section-card mt-8">
+                <h2>Common patterns</h2>
+                <p class="mb-6 text-slate-600">Worked scenarios beyond the quick start — sourced from the conformance suite, so they double as runnable tests.</p>
+
+                <div class="grid gap-8">
+                    {% for webCase in blockCases %}
+                    {% if not loop.first %}
+                    <div class="case-item border-l-4 border-slate-200 pl-4">
+                        <h3 class="text-lg font-bold text-slate-900 mb-1">
+                            <span class="text-slate-400 font-mono mr-2">#{{ loop.index0 }}</span>
+                            {{ webCase.title }}
+                        </h3>
+                        <p class="text-slate-600 mb-3 text-sm leading-relaxed">{{ webCase.description }}</p>
+                        <div class="case-code">
+                            {% highlight "html" %}{{ webCase.code | safe }}{% endhighlight %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </section>
+
+        {# ===== TIER 2 — IMPLEMENTER ===== #}
+        <section class="block-tier block-tier-implementer mt-16" style="border-top: 4px solid var(--color-border, #e2e8f0); padding-top: 0.5rem;">
+            <p class="block-tier-label" style="margin: 0; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--color-text-muted, #64748b);">Implementer reference</p>
+            <p class="mt-1 mb-0 text-slate-600">Standards alignment, framework research, design decisions, and composition internals — for contributors building or extending this block.</p>
+
+            <div class="section-card mt-8">
+                {% include "block-descriptions/" + block.id + ".njk" %}
+            </div>
+
+            {# WE Standards overlay (#832, the WE-locus half of the #755 split / #809) — rendered AROUND the
+               FUI-hosted embed above, from WE's OWN standard data, never inside the iframe (the demo runs in
+               FrontierUI; these conformance panels are WE-docs chrome and don't travel to third-party
+               embedders). Three proofs: (1) the intent→ARIA bridge — the genuinely-new pairing of the UX
+               intent the author declares against the platform ARIA WE resolves it to; (2) why-this-token
+               provenance (#747/#364) and (3) the #092 provider↔consumer graph, shown compactly here and
+               detailed in the Component-tokens / Anatomy sections below (summarized, not duplicated). Gated on
+               an embed being present so it literally wraps the workbench; degrades panel-by-panel on absent
+               substrate (the fuiDemo/webStandards graceful-absence precedent). #}
+            {% if block.fuiDemo and (block.implementsIntent or block.composesIntents or block.componentTokens or block.dependsOn) %}
+            {% set wsKeys = (block.webStandards | webStandardsRows) if block.webStandards else [] %}
+            {% set providerCount = block.dependsOn | length %}
+            {% set consumerBlocks = [] %}
+            {% for other in blocks %}{% if block.id in (other.dependsOn or []) %}{% set consumerBlocks = (consumerBlocks.push(other), consumerBlocks) %}{% endif %}{% endfor %}
+            <div class="section-card mt-8">
+                <h2>WE Standards overlay</h2>
+                <p class="mb-6 text-slate-600">WE-owned conformance proofs for the component embedded above, rendered from WE's <strong>own standard data</strong> — the demo runs in FrontierUI; these panels are Web&nbsp;Docs chrome and never travel into the iframe or to a third-party embedder (the <a href="/backlog/755/">#755</a>/<a href="/backlog/809/">#809</a> boundary split).</p>
+
+                {% if block.implementsIntent or block.composesIntents %}
+                <h3>Intent&nbsp;→&nbsp;platform ARIA</h3>
+                <p class="mb-2 text-slate-600">The author declares a <strong>UX intent</strong> — no ARIA in the authored markup. WE resolves that intent to the web-platform accessibility mechanisms on the right: the standards bridge that proves the intent is realized, not asserted.</p>
+                <table>
+                    <thead><tr><th>Declared intent (UX)</th><th>Resolved platform ARIA / web standard</th></tr></thead>
+                    <tbody>
+                        <tr>
+                            <td>
+                                {% if block.implementsIntent %}<a href="/intents/{{ block.implementsIntent }}/"><code>{{ block.implementsIntent }}</code></a>{% endif %}
+                                {% for c in block.composesIntents %}{% if c != block.implementsIntent %}<br><a href="/intents/{{ c }}/"><code>{{ c }}</code></a> <span class="text-slate-500 text-sm">(composed)</span>{% endif %}{% endfor %}
+                            </td>
+                            <td>
+                                {% if wsKeys | length %}
+                                {% for row in wsKeys %}<code title="{{ row.concern }}">{{ row.label }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+                                <div class="text-sm text-slate-500 mt-1">Full realization in <strong>Accessibility &amp; Web Standards</strong> below.</div>
+                                {% else %}<span class="text-slate-500">Realized via the intent's standard ARIA pattern — see the linked intent.</span>{% endif %}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                {% endif %}
+
+                {% if block.componentTokens %}
+                {% set tokenGroups832 = block.componentTokens if (block.componentTokens | string) != block.componentTokens else [block.componentTokens] %}
+                <h3 class="mt-6">Why this token</h3>
+                <p class="mb-2 text-slate-600">The component's styling resolves <strong>through the design-token scale</strong>, so it can never drift from the primitives:
+                    {% for group in tokenGroups832 %}{% for row in componentTokens[group] %}{% if loop.first %}<code>{{ row.name }}</code>{% if row.reference %} → <code>{{ row.reference }}</code>{% endif %} → <code>{{ row.resolved }}</code>{% endif %}{% endfor %}{% endfor %}.
+                    Full provenance in <strong>Component tokens</strong> below.</p>
+                {% endif %}
+
+                {% if providerCount or (consumerBlocks | length) %}
+                <h3 class="mt-6">Provider&nbsp;↔&nbsp;consumer graph</h3>
+                <p class="mb-2 text-slate-600">The composition edges this block sits on (<a href="/backlog/092/">#092</a>): it composes <strong>{{ providerCount }}</strong> provider{{ 's' if providerCount != 1 }}{% if consumerBlocks | length %} and is used by <strong>{{ consumerBlocks | length }}</strong> consumer{{ 's' if (consumerBlocks | length) != 1 }}{% endif %} — disable any provider and the block degrades to what remains (the minimize-lock-in surface). Full bidirectional graph in <strong>Anatomy</strong> below.</p>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if block.technicalConfig %}
+            <div class="section-card mt-8">
+                <h2>Configure technical aspects</h2>
+                <p class="mb-4">These are <strong>technical</strong> delivery settings (render strategy, transport, trait lazy-loading, chunk splitting) — never UX dimensions on the block, and never a Web Everything mandate. Explore the tradeoffs for this block in the embedded <a href="/intents/">Plateau</a> configurator; the cost preview (chunk graph + bytes/requests/hydration) updates as you change a setting. Use <em>Open full configurator&nbsp;↗</em> for the project-wide decision.</p>
+                {% technicalConfigurator block.technicalConfig, block.technicalConfig.height %}
+            </div>
+            {% endif %}
+
+            {% if block.implementsIntent %}
+            <div class="section-card mt-8">
+                <h2>Implements Intent</h2>
+                {% for intent in intents %}
+                    {% if intent.id == block.implementsIntent %}
+                <p class="mb-4">This block is a technical implementation of the <a href="/intents/{{ intent.id }}/">{{ intent.name }}</a> — {{ intent.summary | lower }}</p>
+                    {% if block.intentDimensions and intent.dimensions %}
+                <p class="mb-2 text-slate-600">The values this block realizes for the intent's <a href="/intents/{{ intent.id }}/">configurable dimensions</a> (axes it does not declare defer to a composed block):</p>
+                <table>
+                    <thead>
+                        <tr><th>Dimension</th><th>Realized value</th><th>Axis</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for dimKey, dimValue in block.intentDimensions %}
+                        <tr>
+                            <td><code>{{ dimKey }}</code></td>
+                            <td><code>{{ dimValue }}</code></td>
+                            <td class="text-slate-600">{% if intent.dimensions[dimKey] %}{{ intent.dimensions[dimKey].description }}{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                    {% endif %}
+                    {% endif %}
                 {% endfor %}
             </div>
-        </div>
-        {% endif %}
+            {% endif %}
+
+            {% if block.composesIntents %}
+            <div class="section-card mt-8">
+                <h2>Composes Intents</h2>
+                <p class="mb-4 text-slate-600">This block is a <strong>composition manifest</strong> — it defers each behavior to the intent that owns it, rather than re-specifying them. It composes:</p>
+                <ul class="list-disc pl-5">
+                {% for composedId in block.composesIntents %}
+                    {% for intent in intents %}
+                        {% if intent.id == composedId %}
+                    <li><a href="/intents/{{ intent.id }}/">{{ intent.name }}</a> — {{ intent.summary | lower }}</li>
+                        {% endif %}
+                    {% endfor %}
+                {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            {% if block.traits %}
+            <div class="section-card mt-8">
+                <h2>Traits</h2>
+                <p class="mb-6 text-slate-600">Composable behaviors loaded on-demand based on the active intent profile. Only the traits matching the application's chosen configuration are bundled.</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Trait</th>
+                            <th>Intent Dimension</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for trait in block.traits %}
+                        <tr>
+                            <td><code>{{ trait.name }}</code></td>
+                            <td>{% if trait.intentDimension %}<code>{{ trait.intentDimension }}</code>{% else %}&mdash;{% endif %}</td>
+                            <td>{{ trait.description }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            {# Accessibility & Web Standards — the per-component realization SoT (#803/#826): one row per
+               concern in block.webStandards → how this block satisfies it + a Reference link to the governing
+               spec. Graceful absence mirrors fuiDemo/composesIntents (no field → no panel). The flexible
+               {concern:{usage,reference}} bag (the realization SoT, #803) is rendered through the
+               `webStandardsRows` filter (#828): the raw camelCase concern key is humanized (ariaCurrentStep →
+               "aria-current step"), and rows are grouped into a fixed category order (ARIA & accessibility →
+               CSS → Platform APIs & DOM) and sorted by label within each group. Display-only — the on-disk
+               field shape is untouched; the raw key is preserved as a hover title for traceability. #}
+            {% if block.webStandards %}
+            {% set wsRows = block.webStandards | webStandardsRows %}
+            <div class="section-card mt-8">
+                <h2>Accessibility &amp; Web Standards</h2>
+                <p class="mb-6 text-slate-600">The web-platform standards this block realizes — each concern names how the block satisfies it, with a link to the governing specification. Concerns are grouped by area and ordered for scanning.</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Concern</th>
+                            <th>Usage</th>
+                            <th>Reference</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in wsRows %}
+                        {% if loop.first or row.category != wsRows[loop.index0 - 1].category %}
+                        <tr class="bg-slate-50"><th colspan="3" class="text-left font-semibold text-slate-700">{{ row.category }}</th></tr>
+                        {% endif %}
+                        <tr>
+                            <td><code title="{{ row.concern }}">{{ row.label }}</code></td>
+                            <td>{{ row.usage }}</td>
+                            <td>{% if row.reference %}<a href="{{ row.reference }}" target="_blank" rel="noopener">Reference&nbsp;↗</a>{% else %}&mdash;{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            {# Component tokens — the per-component design-token table (#829, ratified by #802). The block names
+               the webtheme component-token group(s) it draws from via `componentTokens` (string|string[], #802
+               Fork 2); `componentTokens` (the `src/_data/componentTokens.js` global) carries each group resolved
+               through the SAME webtheme pipeline the CEM `cssProperties` emit uses (#802 Fork 1 — one source).
+               Three columns (#802 Fork 3): the CSS custom property the block overrides · the alias it references ·
+               the literal it resolves to. Graceful absence — no field → no panel (the `fuiDemo` precedent). #}
+            {% if block.componentTokens %}
+            {% set tokenGroups = block.componentTokens if (block.componentTokens | string) != block.componentTokens else [block.componentTokens] %}
+            <div class="section-card mt-8">
+                <h2>Component tokens</h2>
+                <p class="mb-6 text-slate-600">The design tokens this component exposes — each overridable CSS custom property, the primitive it <strong>aliases</strong>, and the literal it currently <strong>resolves</strong> to. Every token aliases a primitive so it can never drift from the scale. Same source as the <a href="/protocols/">Custom Elements Manifest</a> <code>cssProperties</code> emit.</p>
+                <table>
+                    <thead><tr><th>Override</th><th>Alias</th><th>Resolved</th></tr></thead>
+                    <tbody>
+                        {% for group in tokenGroups %}
+                        {% for row in componentTokens[group] %}
+                        <tr>
+                            <td><code>{{ row.name }}</code></td>
+                            <td>{% if row.reference %}<code>{{ row.reference }}</code>{% else %}&mdash;{% endif %}</td>
+                            <td><code>{{ row.resolved }}</code></td>
+                        </tr>
+                        {% endfor %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            {# Anatomy — the composition graph straight from the registries (#748): the dependency edges this
+               block sits on, each piece linking to its own page so they're independently browsable. "Used by" is
+               the reverse edge (every block whose dependsOn names this one) — the bidirectional graph. The
+               interactive exploded / toggle-a-piece-off-to-watch-it-degrade view needs in-document live render
+               and layers on once that lands (#786 mode C); this is the static, buildable-now half. #}
+            {% set usedByBlocks = [] %}
+            {% for other in blocks %}{% if block.id in (other.dependsOn or []) %}{% set usedByBlocks = (usedByBlocks.push(other), usedByBlocks) %}{% endif %}{% endfor %}
+            {% if (block.dependsOn | length) or (usedByBlocks | length) %}
+            <div class="section-card mt-8">
+                <h2>Anatomy</h2>
+                <p class="mb-6 text-slate-600">Every piece this block composes, each linking to its own page. Together with the <strong>Implements / Composes Intents</strong> and <strong>Traits</strong> sections above, this is the block's full composition graph — the minimize-lock-in / graceful-degradation surface. A live <em>toggle-a-piece-off</em> exploded view layers on once in-document render lands (<a href="/backlog/786-mode-c-fui-embed-sdk-gains-a-shadow-dom-in-document-render-m/">#786</a>).</p>
+                {% if block.dependsOn | length %}
+                <h3>Built on</h3>
+                <p class="mb-2 text-slate-600">The blocks and capabilities this one composes — disable any and the block degrades to what remains.</p>
+                <ul class="list-disc pl-5 mb-4">
+                    {% for dep in block.dependsOn %}
+                    {% if (blocks | selectattr("id", "equalto", dep) | list | length) %}
+                    <li><a href="/blocks/{{ dep }}/">{{ dep }}</a></li>
+                    {% else %}
+                    <li><code>{{ dep }}</code> <span class="text-slate-600">(capability)</span></li>
+                    {% endif %}
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% if usedByBlocks | length %}
+                <h3>Used by</h3>
+                <p class="mb-2 text-slate-600">Blocks that compose this one — the reverse dependency edge.</p>
+                <ul class="list-disc pl-5">
+                    {% for u in usedByBlocks %}
+                    <li><a href="/blocks/{{ u.id }}/">{{ u.name }}</a></li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+            {% endif %}
+        </section>
     </div>
 </div>
