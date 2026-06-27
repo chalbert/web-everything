@@ -5,6 +5,7 @@ status: open
 priority: low
 locus: frontierui
 relatedProject: webexpressions
+relatedReport: reports/2026-06-27-split-analysis-1827.md
 dateOpened: "2026-06-27"
 tags: [webexpressions, injector-context, ssr, hydration, fui-runtime, awaiting-consumer]
 ---
