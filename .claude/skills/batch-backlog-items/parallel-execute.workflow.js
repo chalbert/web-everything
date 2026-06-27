@@ -48,7 +48,10 @@ export const meta = {
 //
 // args (passed by the main loop after the conversational pack/plan/"go"):
 //   { batchSlug, budgetPoints, items: [ { num, slug, file, locus, cost, declaredFiles: [..], blockedBy: [..] } … ] }
-// Returns: { integrationBranch, ledger, concurrentItems, serialItems, conflictsReplayed, multiLaneFiles, … }
+// Returns: { integrationBranch, ledger, concurrentItems, serialItems, conflictsReplayed, stranded, multiLaneFiles, … }
+//   stranded (#1869 defect 2): items an agent reported `resolved` whose resolve commit was NOT verified
+//   reachable from the integration branch (a post-assembly git reconcile) — reclassified, never counted as
+//   resolved, so the worktree can never be pruned over silently-lost work.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // `args` may arrive as a parsed object OR as a JSON string (the Workflow runtime serializes it in some
@@ -114,6 +117,7 @@ const ITEM_RESULT_SCHEMA = {
     cost: { type: 'number' },
     drop: { type: 'string', description: 'drop-reason if not resolved (taken/blocked-in-fact/not-batchable/outgrew)' },
     branch: { type: 'string', description: 'the git branch/worktree ref holding this item\'s commit, for the integrator to merge (worktree items only; omit for serial-lane items already on the integration branch).' },
+    resolveCommit: { type: 'string', description: 'the full SHA of the commit that resolved this item (git rev-parse HEAD right after the resolve commit). The integrator asserts this commit is reachable from the integration branch before trusting status:"resolved" — a worktree-local resolve that never merged is reclassified "stranded", never silently reported resolved (#1869 defect 2).' },
     changedFiles: {
       type: 'array', items: { type: 'string' },
       description: 'EVERY repo-relative file this item actually changed (git diff --name-only vs base). Used to surface files touched by more than one item — the residual silent-merge risk a human should eyeball.',
@@ -264,9 +268,10 @@ function itemWorktreePrompt(it) {
     `• Commit this item's own files inside this worktree (git add <explicit paths>; never -A; never push).`,
     `  Resolve only after its local gate is green.`,
     ``,
-    `Report: num, status, cost, the branch ref holding your commit, changedFiles (git diff --name-only vs`,
-    `the base — used to flag files touched by >1 item), derivedArtifacts you deferred, any monolithEdits, and`,
-    `gate green/red. Return ONLY the structured object.`,
+    `Report: num, status, cost, the branch ref holding your commit, resolveCommit (the full SHA of your resolve`,
+    `commit — \`git rev-parse HEAD\` after committing; the integrator verifies it landed), changedFiles`,
+    `(git diff --name-only vs the base — used to flag files touched by >1 item), derivedArtifacts you deferred,`,
+    `any monolithEdits, and gate green/red. Return ONLY the structured object.`,
   ].join('\n');
 }
 
@@ -328,12 +333,13 @@ if (serialItems.length > 0) {
         `could not be PROVEN independent (uncertain touch-set, touches a monolithic registry, or shares files /`,
         `a blockedBy edge with another item). Work the FULL single-item arc: claim → work → FULL whole-repo gate`,
         `(npm run check:standards, run from inside the worktree) → commit this item's files on this branch`,
-        `(never push). Resolve only after green. Return the structured ITEM result (include changedFiles).`,
+        `(never push). Resolve only after green. Return the structured ITEM result (include changedFiles and`,
+        `resolveCommit = git rev-parse HEAD after your resolve commit).`,
       ].join(' '),
       { label: `serial:#${it.num}`, phase: 'Integrate', schema: ITEM_RESULT_SCHEMA },
     ).catch(() => null);
     log(`  serial ${sIdx}/${serialItems.length}: #${it.num} — ${r ? r.status + ' (gate ' + r.gate + ')' : 'no result'}`);
-    if (r) ledger.push({ num: r.num || String(it.num), status: r.status, cost: r.cost, drop: r.drop, lane: 'serial', changedFiles: r.changedFiles, derivedArtifacts: r.derivedArtifacts });
+    if (r) ledger.push({ num: r.num || String(it.num), status: r.status, cost: r.cost, drop: r.drop, lane: 'serial', changedFiles: r.changedFiles, derivedArtifacts: r.derivedArtifacts, resolveCommit: r.resolveCommit });
   }
 }
 
@@ -377,15 +383,16 @@ for (let i = 0; i < concurrentResults.length; i++) {
         `touch the user's main checkout), replay parallel batch item #${it.num} ("${it.slug}") SERIALLY (its`,
         `worktree merge was aborted/failed). Work it as an ordinary serial item: claim if not already active,`,
         `redo the edits on THIS tree, FULL whole-repo gate (npm run check:standards), commit (never push).`,
-        `Return the structured ITEM result (include changedFiles).`,
+        `Return the structured ITEM result (include changedFiles and resolveCommit = git rev-parse HEAD after`,
+        `your resolve commit).`,
       ].join(' '),
       { label: `replay:#${it.num}`, phase: 'Integrate', schema: ITEM_RESULT_SCHEMA },
     ).catch(() => null);
     const src = replay || cr;
-    if (src) ledger.push({ num: src.num || String(it.num), status: src.status, cost: src.cost, drop: src.drop, lane: `#${it.num}-replayed`, changedFiles: src.changedFiles, derivedArtifacts: src.derivedArtifacts });
+    if (src) ledger.push({ num: src.num || String(it.num), status: src.status, cost: src.cost, drop: src.drop, lane: `#${it.num}-replayed`, changedFiles: src.changedFiles, derivedArtifacts: src.derivedArtifacts, resolveCommit: src.resolveCommit });
     log(`  replay #${it.num}: ${replay ? replay.status + ' (gate ' + replay.gate + ')' : 'no result'}`);
   } else {
-    ledger.push({ num: cr.num || String(it.num), status: cr.status, cost: cr.cost, drop: cr.drop, lane: `#${it.num}`, changedFiles: cr.changedFiles, derivedArtifacts: cr.derivedArtifacts });
+    ledger.push({ num: cr.num || String(it.num), status: cr.status, cost: cr.cost, drop: cr.drop, lane: `#${it.num}`, changedFiles: cr.changedFiles, derivedArtifacts: cr.derivedArtifacts, resolveCommit: cr.resolveCommit });
   }
 }
 
@@ -425,9 +432,63 @@ if (multiLaneFiles.length > 0) {
   log(`⚠ ${multiLaneFiles.length} file(s) were changed by more than one item — eyeball for a silent clean-but-wrong merge: ${multiLaneFiles.join(', ')}`);
 }
 
+// 3e. RECONCILE (#1869 defect 2) — independently verify, via git on the integration branch, that every
+// ledger-`resolved` item's resolve actually LANDED. The ledger status is each agent's self-report; a
+// worktree-local resolve that failed to merge (or an agent that over-reported) would otherwise be returned
+// `resolved` and silently lost when the worktree is pruned. This re-checks reality and reclassifies any
+// un-landed resolve as `stranded` — never a false `resolved`. (Defect 1 — landing on the live branch — is
+// structurally prevented above: assembly happens only in the integration worktree; the same check confirms
+// the integration branch exists and is NOT the live branch, the one the main agent will merge.)
+const resolvedToVerify = ledger
+  .filter((l) => l && l.status === 'resolved')
+  .map((l) => ({ num: String(l.num), resolveCommit: l.resolveCommit || '' }));
+let stranded = [];
+if (resolvedToVerify.length > 0) {
+  const recon = await agent(
+    [
+      `Inside the integration worktree (\`cd ${integrationWorktree}\`, on branch "${integrationBranch}"; never`,
+      `touch the user's main checkout), RECONCILE the parallel batch ledger against git reality (#1869 defect 2).`,
+      `First assert the integration branch is real and safe: \`git rev-parse --verify ${integrationBranch}\``,
+      `succeeds AND \`git rev-parse --abbrev-ref HEAD\` equals "${integrationBranch}" (NOT main/the live branch).`,
+      `Set branchOk accordingly. Then, for EACH item below, verify its resolve actually landed on this branch —`,
+      `it is STRANDED (resolve did not land) if BOTH signals say so:`,
+      `  (a) commit reachability: if resolveCommit is non-empty, \`git merge-base --is-ancestor <resolveCommit> HEAD\``,
+      `      exits NON-zero (commit not reachable from the integration branch);`,
+      `  (b) backlog ground truth: \`backlog/<num>-*.md\` on this branch does NOT contain a line \`status: resolved\`.`,
+      `If resolveCommit is empty, rely on (b) alone. If (a) and (b) disagree, treat (b) — the backlog file's`,
+      `committed status — as authoritative. Items to verify (JSON): ${JSON.stringify(resolvedToVerify)}.`,
+      `Return { branchOk: boolean, stranded: [{ num, reason }] } listing ONLY the items whose resolve did not land.`,
+    ].join(' '),
+    {
+      label: 'integrate:reconcile', phase: 'Integrate',
+      schema: {
+        type: 'object', required: ['branchOk', 'stranded'], additionalProperties: true,
+        properties: {
+          branchOk: { type: 'boolean' },
+          stranded: { type: 'array', items: { type: 'object', required: ['num'], additionalProperties: true, properties: { num: { type: 'string' }, reason: { type: 'string' } } } },
+        },
+      },
+    },
+  ).catch(() => null);
+  if (!recon) {
+    log('⚠ reconcile step produced no result — cannot confirm resolves landed; treating all as UNVERIFIED. The main agent MUST reconcile the ledger vs the branch before landing.');
+  } else {
+    if (recon.branchOk === false) log(`⚠ reconcile: the assembled branch is NOT a safe throwaway integration branch (branchOk=false) — do NOT land it; investigate before merging.`);
+    stranded = Array.isArray(recon.stranded) ? recon.stranded : [];
+    for (const s of stranded) {
+      const entry = ledger.find((l) => l && String(l.num) === String(s.num) && l.status === 'resolved');
+      if (entry) {
+        entry.status = 'stranded';
+        log(`⚠ #${s.num} reported resolved but its resolve did NOT land on ${integrationBranch} (${s.reason || 'not reachable / backlog status not resolved'}) — reclassified STRANDED, not counted resolved.`);
+      }
+    }
+    if (stranded.length === 0) log(`Reconcile: all ${resolvedToVerify.length} resolved item(s) verified present on ${integrationBranch}.`);
+  }
+}
+
 const resolved = ledger.filter((l) => l.status === 'resolved');
 const spent = resolved.reduce((s, l) => s + (Number(l.cost) || 0), 0);
-log(`Parallel batch assembled on ${integrationBranch} (in worktree ${integrationWorktree}): ${resolved.length}/${ledger.length} resolved, ${conflictsReplayed} item(s) replayed serially, ${multiLaneFiles.length} multi-item file(s), ${spent}/${budgetPoints} points. The user's checkout was never touched. The MAIN AGENT now lands ${integrationBranch} onto the live branch, then removes the worktree (git worktree remove ${integrationWorktree}).`);
+log(`Parallel batch assembled on ${integrationBranch} (in worktree ${integrationWorktree}): ${resolved.length}/${ledger.length} resolved, ${stranded.length} stranded, ${conflictsReplayed} item(s) replayed serially, ${multiLaneFiles.length} multi-item file(s), ${spent}/${budgetPoints} points. The user's checkout was never touched. The MAIN AGENT now lands ${integrationBranch} onto the live branch, then removes the worktree (git worktree remove ${integrationWorktree}).`);
 
 return {
   // The workflow never touched the user's checkout/branch — it assembled everything in its own worktree.
@@ -438,6 +499,7 @@ return {
   concurrentItems: concurrent.length,
   serialItems: serialItems.length,
   conflictsReplayed,
+  stranded,             // #1869 defect 2: items reported resolved whose resolve did NOT land on the branch — reclassified, never counted resolved
   multiLaneFiles,       // files touched by >1 item — the close-skill audit surfaces these for a human glance
   derivedRegenerated,
   pointsSpent: spent,
