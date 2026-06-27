@@ -87,9 +87,25 @@ function tailSteps(jsonlPath, limit) {
       if (ev.type !== 'assistant' || !ev.message) continue;
       for (const s of eventSteps(ev)) { steps.push(s); if (steps.length > limit) steps.shift(); }
     }
-    const lastLine = steps.length ? steps[steps.length - 1].text : undefined;
+    // Prefer the last TEXT step as the agent's "message" (its prose result) over a trailing tool call
+    // like StructuredOutput, which reads as "→ StructuredOutput" and says nothing.
+    let lastLine;
+    for (let i = steps.length - 1; i >= 0; i--) { if (steps[i].kind === 'text') { lastLine = steps[i].text; break; } }
+    if (!lastLine && steps.length) lastLine = steps[steps.length - 1].text;
     return { lastLine, steps };
   } catch { return { steps: [] }; }
+}
+
+// Cache an agent transcript tail by file mtime — a done agent's file never changes, so it's parsed once.
+const AGENT_TAIL_CACHE = new Map(); // path → { mtimeMs, tail }
+function cachedAgentTail(p) {
+  let mtimeMs;
+  try { mtimeMs = statSync(p).mtimeMs; } catch { return { steps: [] }; } // no transcript (pruned / not written)
+  const c = AGENT_TAIL_CACHE.get(p);
+  if (c && c.mtimeMs === mtimeMs) return c.tail;
+  const tail = tailSteps(p, AGENT_STEP_LIMIT);
+  AGENT_TAIL_CACHE.set(p, { mtimeMs, tail });
+  return tail;
 }
 
 // Digest one workflow journal file into a run object (null to drop it).
@@ -102,7 +118,9 @@ function digestJournal(journalPath) {
   if (TERMINAL.has(status) && (Date.now() - mtimeMs) > RECENT_MS) return null;
 
   const sessionDir = dirname(dirname(journalPath)); // <session>/workflows/wf_x.json → <session>
-  const subagentsDir = join(sessionDir, 'subagents');
+  // A workflow agent's transcript lives at <session>/subagents/workflows/<runId>/agent-<agentId>.jsonl
+  // (NOT <session>/subagents/, which holds plain Agent-tool subagents).
+  const agentDir = join(sessionDir, 'subagents', 'workflows', String(j.runId || ''));
   const progress = Array.isArray(j.workflowProgress) ? j.workflowProgress : [];
 
   const agents = progress
@@ -111,9 +129,11 @@ function digestJournal(journalPath) {
       const num = (String(e.label || '').match(NUM_RE) || [])[1];
       const state = e.state || 'running';
       const a = { index: e.index, label: e.label, phaseTitle: e.phaseTitle, agentId: e.agentId, state, num };
-      // Tail the transcript for a live step-stream only on still-running agents (cheaper; done are static).
-      if (state !== 'done' && e.agentId) {
-        const t = tailSteps(join(subagentsDir, `agent-${e.agentId}.jsonl`), AGENT_STEP_LIMIT);
+      // Tail EVERY agent's transcript for its message stream — a done agent's final message is its
+      // result, which is exactly what you want to read. Cached by file mtime (a done agent's transcript
+      // is immutable, so it parses once), so re-tailing a big finished run each tick stays cheap.
+      if (e.agentId) {
+        const t = cachedAgentTail(join(agentDir, `agent-${e.agentId}.jsonl`));
         if (t.lastLine) a.lastLine = t.lastLine;
         if (t.steps && t.steps.length) a.steps = t.steps;
       }

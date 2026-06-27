@@ -75,46 +75,47 @@
 
   var TERMINAL = { completed: 1, failed: 1, aborted: 1, cancelled: 1 };
 
+  var stateColor = { done: '#166534', running: '#1e40af', failed: '#991b1b', pending: '#475569' };
+
+  // One agent's message block: label (state-coloured) + its message — a running agent shows its live
+  // step stream, a finished agent shows its final message (its result), a pending one just its name.
+  function agentMsg(a) {
+    var cls = stateClass(a.state);
+    var head = '<span style="font-size:0.78em; font-weight:600; color:' + (stateColor[cls] || '#475569') + ';">' +
+      esc(a.label || a.agentId || 'agent') + (a.num ? ' ' + numLink(a.num) : '') + '</span>';
+    var body = '';
+    if (cls === 'running' && a.steps && a.steps.length) body = '<div class="aw-stream">' + streamHtml(a.steps.slice(-4)) + '</div>';
+    else if (a.lastLine) body = '<div style="font-size:0.78em; color:var(--color-text-muted);">' + esc(a.lastLine) + '</div>';
+    return '<div style="margin-bottom:0.3rem;">' + head + body + '</div>';
+  }
+
   function runCard(run) {
     var agents = Array.isArray(run.agents) ? run.agents : [];
     var done = agents.filter(function (a) { return stateClass(a.state) === 'done'; }).length;
-    var running = agents.filter(function (a) { return stateClass(a.state) === 'running'; });
     var statusColor = run.status === 'completed' ? '#166534'
       : run.status === 'failed' || run.status === 'aborted' ? '#991b1b' : '#1e40af';
+    // Default expanded for a running run (you want to follow it); collapsed for a finished one. A click
+    // overrides and sticks across polls.
+    var open = (run.id in openRuns) ? openRuns[run.id] : !TERMINAL[run.status];
 
-    // A finished run lingers briefly — collapse it to one line (no chip explosion); only RUNNING runs
-    // get the full per-agent board, which is what you actually want to follow.
-    if (TERMINAL[run.status]) {
-      return '<div style="border:1px solid var(--color-border); border-radius:0.5rem; padding:0.5rem 0.8rem; background:var(--color-surface-alt, #f8fafc); display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">' +
-        '<span style="font-weight:600;">▸ ' + esc(run.name || run.id) + '</span>' +
-        '<span style="font-size:0.72em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:' + statusColor + ';">' + esc(run.status) + '</span>' +
-        '<span style="font-size:0.78em; color:var(--color-text-muted);">' + done + '/' + agents.length + ' agents</span>' +
-        (run.updatedAt ? '<span style="margin-left:auto; font-size:0.72em; color:var(--color-text-muted);">' + esc(ago(run.updatedAt)) + '</span>' : '') +
-        '</div>';
-    }
-
-    var h = '<div style="border:1px solid var(--color-border); border-radius:0.6rem; padding:0.85rem 1rem; background:var(--color-surface-alt, #f8fafc);">';
-    h += '<div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.5rem;">';
-    h += '<span style="font-weight:700;">▸ ' + esc(run.name || run.id) + '</span>';
+    var h = '<div style="border:1px solid var(--color-border); border-radius:0.6rem; padding:0.7rem 0.9rem; background:var(--color-surface-alt, #f8fafc);">';
+    h += '<div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;' + (open ? ' margin-bottom:0.5rem;' : '') + '">';
+    h += '<button type="button" data-run-toggle="' + esc(run.id) + '" style="appearance:none; background:none; border:none; cursor:pointer; font:inherit; font-weight:700; padding:0; color:inherit;">' + (open ? '▾' : '▸') + ' ' + esc(run.name || run.id) + '</button>';
     h += '<span style="font-size:0.72em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:' + statusColor + ';">' + esc(run.status || 'running') + '</span>';
     if (run.phase) h += '<span style="font-size:0.8em; color:var(--color-text-muted);">phase: <strong>' + esc(run.phase) + '</strong></span>';
     h += '<span style="font-size:0.78em; color:var(--color-text-muted); font-variant-numeric:tabular-nums;">' + done + '/' + agents.length + ' agents</span>';
     if (run.updatedAt) h += '<span style="margin-left:auto; font-size:0.72em; color:var(--color-text-muted);">' + esc(ago(run.updatedAt)) + '</span>';
     h += '</div>';
 
-    // Per-agent state chips (each num-bearing chip is the membership signal — no separate "owns" line).
-    h += '<div style="display:flex; flex-wrap:wrap; gap:0.35rem;">' + agents.map(agentChip).join('') + '</div>';
-
-    // Current activity — each running agent's live step stream (last few steps), tailed from its transcript.
-    var live = running.filter(function (a) { return (a.steps && a.steps.length) || a.lastLine; });
-    if (live.length) {
-      h += '<div style="margin-top:0.6rem; display:flex; flex-direction:column; gap:0.4rem;">';
-      live.forEach(function (a) {
-        h += '<div><div style="font-size:0.78em; color:#1e40af; font-weight:600; margin-bottom:0.1rem;">' + esc(a.label || a.agentId) + '</div>';
-        if (a.steps && a.steps.length) h += '<div class="aw-stream">' + streamHtml(a.steps.slice(-3)) + '</div>';
-        else h += '<div style="font-size:0.78em; color:var(--color-text-muted);">' + esc(a.lastLine) + '</div>';
-        h += '</div>';
-      });
+    if (open) {
+      // State chips (compact overview of every agent).
+      h += '<div style="display:flex; flex-wrap:wrap; gap:0.35rem;">' + agents.map(agentChip).join('') + '</div>';
+      // Each agent's message — the part you asked to see. Show agents that produced one; if none have a
+      // transcript (pruned for an old run), say so rather than render emptiness.
+      var withMsg = agents.filter(function (a) { return a.lastLine || (a.steps && a.steps.length); });
+      h += '<div style="margin-top:0.6rem; display:flex; flex-direction:column;">';
+      if (withMsg.length) h += withMsg.map(agentMsg).join('');
+      else h += '<div style="font-size:0.74em; color:var(--color-text-muted); opacity:0.8;">No agent messages captured — subagent transcripts may be pruned for this run.</div>';
       h += '</div>';
     }
     h += '</div>';
@@ -123,8 +124,10 @@
 
   var vitalWf = document.getElementById('aw-vital-workflows');
   var vitalWfN = document.getElementById('aw-vital-workflows-n');
-  var openStreams = {};   // num → expanded?  (persists across polls)
+  var openStreams = {};   // num → expanded?  (per-row session stream, persists across polls)
+  var openRuns = {};      // run.id → expanded? (per-workflow card, persists across polls)
   var lastDigests = null; // last payload, so a toggle can re-render without waiting for the next poll
+  var lastRuns = null;    // last workflow runs, for the same reason
 
   // hh:mm:ss from an ISO/epoch (for step timestamps).
   function clock(t) {
@@ -172,13 +175,24 @@
     }
   }
 
-  // Delegated toggle for the per-row step streams (rows are re-rendered each poll, so delegate once).
+  // Delegated toggles (rows + run cards are re-rendered each poll, so delegate once).
   document.addEventListener('click', function (e) {
-    var t = e.target.closest && e.target.closest('[data-stream-toggle]');
-    if (!t) return;
-    var num = t.getAttribute('data-stream-toggle');
-    openStreams[num] = !openStreams[num];
-    applyDigests(lastDigests);
+    if (!e.target.closest) return;
+    var st = e.target.closest('[data-stream-toggle]');
+    if (st) {
+      var num = st.getAttribute('data-stream-toggle');
+      openStreams[num] = !openStreams[num];
+      applyDigests(lastDigests);
+      return;
+    }
+    var rt = e.target.closest('[data-run-toggle]');
+    if (rt) {
+      var id = rt.getAttribute('data-run-toggle');
+      var run = (lastRuns || []).find(function (r) { return r.id === id; });
+      var eff = (id in openRuns) ? openRuns[id] : (run ? !TERMINAL[run.status] : false);
+      openRuns[id] = !eff;
+      if (lastRuns) runsEl.innerHTML = lastRuns.map(runCard).join('');
+    }
   });
 
   function render(data) {
@@ -195,6 +209,7 @@
     }).length;
     setTabLive(liveN);
     if (vitalWf) { vitalWf.hidden = !liveN; if (vitalWfN) vitalWfN.textContent = liveN; }
+    lastRuns = runs;
     if (!runs.length) { wrap.hidden = true; return; }
     wrap.hidden = false;
     if (countEl) countEl.textContent = runs.length;
