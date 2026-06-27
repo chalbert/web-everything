@@ -471,5 +471,19 @@
         .then((m) => m.registerTagsInDocument())
         .catch(() => { /* FUI host unavailable — keep the SSR tag baseline */ });
     </script>
+    {#- #1787 data-table (family #1600; ingestion ruled by #1818): the data-table counterpart to the badges/
+        code-view/card/tag entries above. A runtime cross-origin import (mode C, rule 6), NEVER a build-time
+        `import '@frontierui'`. Registers the transient `<we-data-table>` + injects its host-document CSS once.
+        Per #1818 (platform-decisions.md#block-data-ingestion) the ~219 docs tables are deterministic +
+        non-interactive: the build resolves their `rows="[[ ref ]]"` binding and server-renders a plain
+        `<table>`, so most surfaces ship nothing and never upgrade. This entry is the upgrade path for the
+        INTERACTIVE case (a server-rendered `<we-data-table>` re-binds `.rows`/`.config` from a serialized
+        resolved-context island and rebuilds a `.data-table`). A load failure is silent and the `we-data-table{}`
+        SSR baseline in style.css remains the rendered table (progressive enhancement). -#}
+    <script type="module">
+      import("{{ links.frontierUrl }}/embed/data-table-in-document.ts")
+        .then((m) => m.registerDataTableInDocument())
+        .catch(() => { /* FUI host unavailable — keep the SSR table baseline */ });
+    </script>
 </body>
 </html>

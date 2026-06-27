@@ -2,10 +2,12 @@
 kind: story
 size: 3
 parent: "1600"
-status: open
+status: resolved
 blockedBy: ["1818"]
 dateOpened: "2026-06-26"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: 1600
 locus: frontierui
 relatedProject: webdocs
 tags: [webdocs, data-table, transient-ce, embed-boundary]

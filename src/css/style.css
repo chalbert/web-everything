@@ -1844,3 +1844,32 @@ we-tag[set="tier"][value="C"],
    `--cat-*` + background/color custom props on the element, so this set needs only the pill `--cat-shape`. */
 .fui-tag[data-cat-set="unsliced"] { --cat-shape:9999px; text-transform:uppercase; letter-spacing:0.03em; font-weight:700; }
 we-tag[set="unsliced"] { text-transform:uppercase; letter-spacing:0.03em; font-weight:700; }
+
+/* #1787 (family #1600; ingestion ruled by #1818): SSR baseline for the FUI transient `<we-data-table>` the
+   docs server-render for the #1600 table→data-table family (#1609–#1613, ~219 surfaces). Per #1818
+   (platform-decisions.md#block-data-ingestion) those tables are deterministic + non-interactive: the build
+   resolves their `rows="[[ ref ]]"` binding (DOM-free CustomExpressionParser) and server-renders a plain
+   `<table>` inside `<we-data-table>` — most ship no client payload and never upgrade. This tag-keyed baseline
+   styles that server-rendered `<table>`; for the INTERACTIVE case the element upgrades and the kernel rebuilds
+   a fresh `<table class="data-table">` via `host.replaceChildren` (fui:blocks/renderers/data-table/
+   DataTableBehavior.ts) — so this keys BOTH `table` and `.data-table` for an identical look across the swap,
+   no flash. Stands alone if the FUI host is unavailable (the base.njk import .catch()es to this). Mirrors the
+   FUI `dataTableHostCss` look (fui:blocks/renderers/data-table/DataTableBehavior.ts); keep in sync if it
+   changes. */
+we-data-table { display: block; overflow-x: auto; }
+we-data-table table,
+we-data-table .data-table { border-collapse: collapse; font-size: 0.82rem; width: 100%; }
+we-data-table caption { text-align: left; font-weight: 600; padding: 0.25rem 0; color: #1f2937; }
+we-data-table th,
+we-data-table td { border: 1px solid #e5e7eb; padding: 0.3rem 0.55rem; text-align: left; }
+we-data-table thead th { background: #f8fafc; font-weight: 600; white-space: nowrap; }
+we-data-table thead th button {
+  font: inherit; font-weight: 600; background: none; border: 0; padding: 0; cursor: pointer;
+  color: #1f2937; display: inline-flex; align-items: center; gap: 0.3rem;
+}
+we-data-table thead th[aria-sort]:not([aria-sort="none"]) button { color: var(--accent, #6366f1); }
+we-data-table thead th[aria-sort="ascending"]  button::after { content: "▲"; font-size: 0.6rem; }
+we-data-table thead th[aria-sort="descending"] button::after { content: "▼"; font-size: 0.6rem; }
+we-data-table thead th[aria-sort="none"]       button::after { content: "↕"; font-size: 0.6rem; opacity: 0.4; }
+we-data-table .group-row th { background: #eef2ff; color: #3730a3; font-weight: 600; }
+we-data-table .data-table-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
