@@ -1,34 +1,22 @@
 ---
 kind: story
-size: 13
+size: 3
 parent: "1836"
 status: open
+blockedBy: ["1890"]
 dateOpened: "2026-06-27"
 tags: []
 ---
 
-> **Outgrew size-3 → needs `/split` (batch-2026-06-27 pre-flight).** The original "auto-render from a WE
-> `we:src/_data` registry" premise is **invalidated by #1839**, which ratified that the parity verdict is a
-> *measured fact about the FUI runtime* and so must be stored **FUI-side** (a per-plug parity manifest under
-> `fui:plugs/`) and surfaced to the doc-site via the **cross-origin data path** — **WE exposes at most a
-> type-only schema, never the values** (#1282 zero-impl: a measured impl verdict in a WE file is a FUI→WE
-> leak; `we:docs/agent/platform-decisions.md#plugged-only-residue-bar`). That makes this a 5-part cross-locus
-> pipeline, none of which exists yet (no FUI parity manifest, no WE schema, no doc-site page). Carve into
-> standalone slices, homed by `relatedProject`:
-> 1. **FUI** — seed the per-plug parity manifests under `fui:plugs/` with the 15 re-audited verdicts
->    (`we:reports/2026-06-27-unplugged-functional-re-audit.md`), in the #1839 3-state vocab
->    (works / works-with-caveat + mandatory note / plugged-only + residue justification naming the missing
->    platform hook).
-> 2. **FUI** — serve the parity data over the existing cross-origin MaaS data route
->    (`fui:tools/maas/vite-plugin.mjs`).
-> 3. **FUI** — a drift gate ensuring the parity manifest tracks the runtime (must target the FUI tree / a
->    manifest, **not** a WE plugs dir — Gap A: WE has no plugs tree, so the existing dual-mode walk in
->    `we:scripts/check-standards.mjs` is a silent no-op in WE).
-> 4. **WE** — a **type-only** schema for the parity entry shape (the only WE-resident artifact #1839 permits).
-> 5. **WE** — a plugs-parity doc-site page (under the `we:src/plugs.njk` catalog) that fetches the FUI-served
->    data at runtime and renders the 3-state table (the catalog-auto-render pattern, but over cross-origin
->    runtime data, not build-time `we:src/_data`).
-
 # Publish a doc-site plugged vs unplugged parity table
 
-Publish a page comparing every public plug API across plugged and unplugged: works, works-with-caveat, or plugged-only, per capability. Auto-render it from a live registry (the catalog-auto-render pattern) seeded from the re-audited matrix, and cover it with a drift gate so it cannot go stale (mirror the #1309 plugs drift gate). Marks the plugged-only residue per the agreed bar.
+The WE doc-site page (the tail slice of the #1839-reshaped pipeline — split 2026-06-27, see [we:reports/2026-06-27-backlog-split-analysis.md](/reports/2026-06-27-backlog-split-analysis.md)). Build a plugs-parity page (under the `we:src/plugs.njk` catalog) that **fetches the FUI-served parity data at runtime** (the cross-origin data path #1839 mandates) and renders the 3-state table — works / works-with-caveat (+ mandatory note) / plugged-only (+ residue justification) — per public plug API. This is the catalog-auto-render pattern, but over cross-origin runtime data, not build-time `we:src/_data`. WE holds only the type-only schema ([#1888]); the verdict values are a measured FUI-runtime fact (#1839/#1282 zero-impl).
+
+Blocked by [#1890] (the FUI MaaS data route that serves the parity manifest).
+
+## Sibling slices (carved from the original size-13 pipeline, all under #1836)
+
+- [#1887] **FUI** — seed the per-plug parity manifest with the re-audited 3-state verdicts (foundational).
+- [#1888] **WE** — type-only parity-entry schema (the only WE-resident artifact #1839 permits).
+- [#1890] **FUI** — serve the parity data over the cross-origin MaaS data route (blocks this page).
+- [#1889] **FUI** — drift gate so the manifest tracks the runtime (Gap A: must target the FUI tree, not a WE plugs dir; mirror #1309).
