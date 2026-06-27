@@ -1204,6 +1204,45 @@ values that fail the membership test stay **intent-local tokens** — `progress`
 `neutral | danger` regardless (#1337, non-negotiable). Realized by #1458 (palette + statute) / #1459 (rename
 sweep). Composes [intents-ux-only](#intents-ux-only) (tone is UX-only; the theme owns the hex).
 
+### Composition preserves the base block's a11y contract; changing it means a new component {#composition-preserves-a11y-contract}
+
+The a11y contract of a block (its roles, focus order, keyboard model, aria surface) is
+**single-sourced on the base block**. Every sanctioned HTML-first re-skin strategy must be
+**add-only** to that contract — it may *extend* the surface, never *override or remove* it.
+
+**The developer test (cite this to inform any block/component-shape API):** *does the variation need
+to **change** the base's a11y contract — different roles, focus order, or keyboard model?* **Yes → a
+new component** (structural; a distinct block under the same intent). **No, it only adds → the same
+block, re-skinned** via composition. This is the third tier below [open-numbered-variants](#open-numbered-variants)'s
+diagnostic: *CSS/tokens-reachable on the same markup* → a **variant**; *not CSS-reachable but add-only
+to a11y* → the **same block re-skinned by composition**; *requires changing the a11y contract* → a
+**new block**. (Example: slotting an icon/badge or decorating a child with `aria-current` keeps one
+`<nav-item>`; `as="menubar"` — which forces `role=menuitem` and a different arrow-key model — is a new
+component, not a config flag.)
+
+**The four sanctioned add-only strategies** (none excludes another — support-all, per
+[compose-dont-handroll](#compose-dont-handroll)): **slots** (shadow `<slot>` + imperative
+`HTMLSlotElement.assign()`, the `<component>` authoring form); **behavior/decoration** (a
+`CustomAttribute` on a child — the HOC analog, the most mature; e.g. `route:link` adds `aria-current`);
+**sub-component replacement** (scoped custom-element registry + IDREF per [`#component-dc`](#component-dc) —
+sanctioned but its runtime is **blocked on the webregistries FUI re-home**); and **abstract-piece split**
+(a userland *convention* — distinct tags + tree-shakable traits — WE ships no primitive for it).
+**Context-driven config** (webinjectors/webexpressions) is sanctioned for **non-visual** wiring only
+(locale, data, flags); for *visual* variation it is the rejected "configure-one-block" shape — a
+combinatorial a11y matrix, the [open-numbered-variants](#open-numbered-variants) ceiling restated for a11y.
+
+**Where a11y is verified:** WE owns the **contract statement** (add-only non-destructiveness); whether a
+given composed variant honors it is a **FUI/Plateau conformance-run concern**, not a WE-shipped
+per-strategy proof matrix — composed tuples aren't expressible in the vector schema, and verifier/impl
+live downstream per [conformance-verifier-vs-subject] / WE-zero-standard-implementation.
+
+**Lineage:** #1795 (HTML-first composition strategies — Fork 1 = compose-over-base; a11y
+non-destructiveness ratified as a forced invariant; the support-all set classified). Extends
+[open-numbered-variants](#open-numbered-variants) (adds the a11y-contract tier below the CSS-reachable
+diagnostic) and composes [compose-dont-handroll](#compose-dont-handroll). Build follow-ups filed as the
+composition non-destructiveness contract, the `nav-list` a11y vector corpus, the strategy seams
+(scoped-replace blocked on the webregistries re-home), and a current-block-interface compliance review.
+
 ### A layout role's identity is its composition-intent; CSS-mechanism is impl, landmark is annotation {#layout-role-composition-intent}
 
 A **layout role** is identified by its **composition-intent** — the semantic arrangement the author
