@@ -1,0 +1,23 @@
+{
+  "id": "workflow-vs-serial-batch-orchestration",
+  "title": "Workflow orchestrator vs serial batch — one skill, two execute modes (not competing tools)",
+  "status": "open",
+  "summary": "Grounds decision #1862 (front-B currency call under the model-usage watch #1855): does the Workflow orchestrator supersede the serial batch-backlog-items skill? The survey corrects the card's premise — there is NO separate /workflow skill: /workflow invokes the SAME batch-backlog-items skill in its --parallel execute mode (.claude/commands/workflow.md → parallel-execute.workflow.js), /batch is the same skill serial; the conversational arc (pack → plan → one go → reserve → close-out) is identical and only the execute phase differs. The relationship the card asks us to decide is already shipped and coherent (one skill, serial default, parallel opt-in, auto-degenerating to serial when no provably-disjoint lane exists), delivered under #1143/#1147. So the literal 'supersede?' question is a support-both confirmation, not a fork: (a) keep-both and (c) serial-default-opt-in describe the shipped reality; (b) fold-into-always-parallel is the broken branch (coupled clusters can't safely parallelize — the orchestrator already routes them serial, so forcing parallel adds probe/worktree overhead with zero benefit). One genuine fork survives plus one dissolved concern. The ROUTING model is the live fork — keep explicit mode selection vs an auto-routing single entry that probes disjointness and picks per item; the prep skeptic flipped the recommended default to auto-route (the orchestrator's probe already makes the serial/parallel call at item granularity, and calibrate() is mode-blind so the clean-estimate guarantee is prose-enforced not code-enforced — an auto-router can code-gate the calibration-skip on 'did any lane run concurrent'), with --serial/--parallel retained as overrides; the residual the decider weighs is that unifying on the orchestrator makes every batch pay probe + worktree overhead and lose the inline-serial calibrated path. The STRUCTURED-OUTPUT concern (the card's downstream agent({schema}) note) dissolves to supported-by-default: schema is already adopted across the lanes (PROBE_SCHEMA, item-result, integrate, replay), the compounding probe→partition step is already validated, fork pre-flight is reserved main-loop judgment (not a lane handoff), and the readiness ranker stays LLM-free as a determinism/CLI-tab-parity invariant (check-readiness.mjs). Full grounding in reports/2026-06-27-workflow-vs-serial-batch-orchestration.md.",
+  "dateOpened": "2026-06-27",
+  "lastReviewed": "2026-06-27",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "agent-orchestration",
+    "batch",
+    "workflow",
+    "parallel",
+    "serial",
+    "structured-output",
+    "agent-schema",
+    "self-driven-project",
+    "model-usage-watch",
+    "native-first"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

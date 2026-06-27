@@ -1,0 +1,105 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/1862-does-the-workflow-orchestrator-supersede-serial-batch-backlo/">#1862</a> —
+  <em>does the Workflow orchestrator supersede the serial <code>batch-backlog-items</code> skill?</em> — a
+  front-B currency call under the
+  <a href="/backlog/1855-model-usage-watch-keep-claude-s-use-of-the-agent-system-effi/">model-usage watch
+  (#1855)</a>. The short answer the survey establishes: <strong>no — they are not competing tools, they are
+  two execute modes of one skill</strong>. The deliberation that remains is narrower than the card's framing.
+</p>
+
+<h2>The card's premise is false</h2>
+<p>
+  The card asks the question on the premise that &ldquo;a <code>/workflow</code> skill already exists for
+  running backlog items in parallel disjoint lanes, yet <code>batch-backlog-items</code> still runs
+  serially.&rdquo; The shipped code says otherwise. There is <strong>no separate <code>/workflow</code>
+  skill</strong>:
+</p>
+<ul>
+  <li>
+    <code>/workflow</code> (<code>.claude/commands/workflow.md</code>) invokes the <strong>same</strong>
+    <code>batch-backlog-items</code> skill in its <code>--parallel</code> execute mode, handing the execute
+    phase to the <code>Workflow</code> tool (<code>parallel-execute.workflow.js</code>).
+  </li>
+  <li>
+    <code>/batch</code> and <code>/batch-next</code> are the same skill in its <strong>serial</strong>
+    execute mode — the default.
+  </li>
+  <li>
+    The conversational arc is <strong>identical</strong> across modes (pack &rarr; ordered plan &rarr; one
+    &ldquo;go&rdquo; &rarr; reserve &rarr; close-out); only the execute phase differs. <code>--parallel</code>
+    / <code>--serial</code> flip either command per-invocation.
+  </li>
+</ul>
+<p>
+  So the relationship the card asks us to decide is <strong>already shipped and coherent</strong> (delivered
+  under epic <a href="/backlog/1143-safe-parallel-batching-via-workflow-orchestration/">#1143</a> /
+  <a href="/backlog/1147-workflow-driven-batch-parallel-effects-manifest-serial-integ/">#1147</a>): one skill,
+  serial default, parallel opt-in, <strong>auto-degenerating to serial</strong> when no provably-disjoint
+  lane exists.
+</p>
+
+<h2>Standing test — the &ldquo;supersede?&rdquo; question is a confirmation, not a fork</h2>
+<p>
+  Against the fork-existence test, the card's three options collapse:
+</p>
+<ul>
+  <li><strong>(a) keep both</strong> and <strong>(c) serial default + opt-in</strong> both
+    <em>describe the shipped reality</em> &mdash; a support-both confirmation, not a fork.</li>
+  <li><strong>(b) fold batching into Workflow (always parallel)</strong> is the
+    <strong>excluded / broken branch</strong>: tightly-coupled items can't be safely parallelized (overlapping
+    touch-sets &rarr; worktree merge conflicts), and the orchestrator <em>already</em> routes those to the
+    serial lane. Forcing always-parallel adds probe + worktree overhead and bimodal calibration noise with
+    <strong>zero</strong> throughput benefit when items are coupled. A named-broken branch &rArr; ratify
+    against it.</li>
+</ul>
+
+<h2>What remains worth ratifying — two residuals</h2>
+<ol>
+  <li>
+    <strong>Routing / entry model</strong> (a genuine fork): keep <strong>explicit</strong> mode selection
+    (serial <code>/batch</code> default, parallel <code>/workflow</code> opt-in) vs. an
+    <strong>auto-routing</strong> single entry that probes disjointness and picks per item. Both branches are
+    coherent and mutually exclusive as the default. Recommended default (post-skeptic) =
+    <strong>(b) auto-route</strong>: the orchestrator's probe <em>already</em> makes the serial-vs-parallel
+    call at item granularity, and <code>calibrate()</code> is mode-blind, so the clean-estimate guarantee is
+    prose-enforced not code-enforced &mdash; an auto-router can code-gate the calibration-skip on
+    &ldquo;did any lane run concurrent,&rdquo; with <code>--serial</code>/<code>--parallel</code> retained as
+    overrides. Residual the decider weighs: unifying on the orchestrator makes every batch pay probe +
+    worktree overhead and lose the inline-serial calibrated path.
+  </li>
+  <li>
+    <strong>Structured-output (<code>agent({schema})</code>) adoption</strong> (the card's downstream note)
+    &mdash; <em>dissolves to supported-by-default, not a fork</em>. Schema is <strong>already adopted</strong>
+    across the orchestrator's lanes (<code>PROBE_SCHEMA</code>, item-result, integrate, replay); the
+    compounding probe&rarr;partition step the 0.95<sup>N</sup> argument describes is already validated, and
+    fork pre-flight is reserved <strong>main-loop human judgment</strong>, not a lane handoff. The readiness
+    ranker (<code>scripts/check-readiness.mjs</code>) stays LLM-free as a <strong>determinism /
+    CLI-tab-parity invariant</strong>. The only follow-on is hardening <code>PROBE_SCHEMA</code> validation.
+  </li>
+</ol>
+
+<h2>External prior art</h2>
+<ul>
+  <li>
+    <strong>Serial-vs-parallel is an explicit author choice in the field.</strong> CrewAI exposes
+    <code>Process.sequential</code> / <code>hierarchical</code> as a declared crew property; LangGraph models
+    execution as an explicit directed state-graph with conditional edges. Neither <em>infers</em> the
+    execution shape &mdash; the operator declares it. Supports the explicit-default for residual 1.
+  </li>
+  <li>
+    <strong>Structured output beats free-text parsing, and the gain compounds along a chain.</strong>
+    Provider-native schema enforcement (tool-calling under the hood) yields near-deterministic parse success;
+    free-text JSON parsing fails a few percent per step, and a 10-step chain at 95%/step completes only
+    &asymp;60% of the time. The case for <code>agent({schema})</code> is strongest where output feeds
+    downstream (the parallel lanes) and weakest where the path is <em>already</em> deterministic (the ranker).
+  </li>
+</ul>
+
+<p>
+  Full grounding, concrete <code>file:line</code> refs, and sources in
+  <code>reports/2026-06-27-workflow-vs-serial-batch-orchestration.md</code>.
+</p>
+{% endraw %}
