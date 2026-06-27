@@ -1806,3 +1806,4 @@ one place:
   L0→L2 maturity ladder; "evergreen" = the property a program maintains) →
   [backlog-workflow.md#program-definition](backlog-workflow.md#program-definition).
 - **Prove claims by observation** → AGENTS.md hard rule 7 / [testing.md](testing.md).
+- <a id="memory-optimization-strategy"></a>**Memory-optimization strategy — right-home-first, eviction deferred** (#1868, under watch #1855): shrink the always-loaded memory surface via rule-1 right-homing of durable rules into this doc + the AGENTS.md router (proven, on-demand); **evict-to-recall-only stays deferred** until an empirical recall check proves the harness surfaces an *unindexed* topic file by its `description` (evidence currently leans against it). Gate tracks the documented ~24.4 KB limit (22 KB ceiling); the ~17.1 KB figure is dismissed as unverified. Full strategy → [memory-management.md#strategy--direction-the-target-architecture](memory-management.md).

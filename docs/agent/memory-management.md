@@ -96,7 +96,7 @@ The field has converged on **just-in-time retrieval**: keep the always-loaded su
 
 | Lever | Status | Card |
 |---|---|---|
-| Shrink the always-loaded index toward a **core-invariants set + recall** | **OPEN** — gated on the empirical recall check (does the harness surface an *unindexed* topic file by its `description`?). External evidence conflicts: the *documented* Claude memory tool does no auto-search, but this repo's harness injects description-matched recalled memories. Resolve before any eviction. | [#1868](../../backlog/1868-reconcile-the-always-loaded-memory-index-with-the-harness-co.md) |
+| Shrink the always-loaded surface — **right-home-first, eviction deferred** | **RATIFIED 2026-06-27** — shrink *now* via the proven lever (rule 1: right-home durable rules into `platform-decisions.md` + `AGENTS.md`, on-demand). The **evict-to-recall-only** branch is deferred until the armed recall check reads positive (does the harness surface an *unindexed* topic file by its `description`?) — evidence leans against free recall, so rigor is not bet on it. Gate tracks the documented ~24.4 KB limit (22 KB ceiling); the ~17.1 KB figure is dismissed as unverified. | [#1868](../../backlog/1868-reconcile-the-always-loaded-memory-index-with-the-harness-co.md) |
 | **Write-time UPDATE/DELETE/NOOP** + a minimal `last-affirmed` stamp (over merge-only-at-budget) | **OPEN** — direction set, needs prep/ratify | [#1879](../../backlog/1879-sharpen-memory-write-time-discipline-update-delete-noop-plus.md) |
 | **Close-out as a consolidation/reflection pass** (the scheduled-consolidation cadence, propose-not-auto) | **OPEN** — story filed | [#1878](../../backlog/1878-close-out-as-memory-instruction-self-improvement-loop.md) |
 

@@ -66,4 +66,8 @@ Push the index toward a **pure pointer + core-invariants set**; **preserve instr
 - **Folded into open #1868** — the recall-mechanism evidence, the pointer-index steer, and the rigor-preservation constraint; promoted *run the recall check* to its named next action.
 - **3 children filed** — **#1878** close-out as a consolidation/reflection loop (the missing cadence) · **#1879** decision: sharpen memory write-time discipline · **#1880** instrument & templatize the watch (script the steps + output templates).
 
-**Next run:** run the **#1868 recall check** — it gates the whole index-shrink; re-sweep Claude Code releases (idempotent); progress #1878/#1880 to graduate the watch cadence L1→L2.
+### #1868 ratified (same session)
+
+After the steers, **#1868 was ratified**: Fork 1 keeps the documented ~24.4 KB gate target (dismiss the unverified 17.1 KB); Fork 2 is **right-home-first** — shrink the always-loaded surface *now* via rule-1 right-homing (proven, no recall dependency), with **evict-to-recall-only deferred** until the armed recall check reads positive. Decisive evidence: this memory-saturated session surfaced **zero** unindexed topic files via recall (every one had to be `Read` manually), reinforcing the literature's "no free auto-search" finding — so rigor is not bet on recall. Codified in `we:docs/agent/memory-management.md` → "Strategy & direction"; opened build story **#1881** (right-home durable rules into `we:docs/agent/platform-decisions.md` + the `we:AGENTS.md` router).
+
+**Next run:** watch for the #1868 recall read-out (armed; specimen `we:reference_front_end_platform_book.md`); build #1881; re-sweep Claude Code releases (idempotent); progress #1878/#1880 to graduate the watch cadence L1→L2.

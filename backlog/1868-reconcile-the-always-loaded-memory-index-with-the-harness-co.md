@@ -1,9 +1,11 @@
 ---
 kind: decision
 parent: "1855"
-status: open
+status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+codifiedIn: "docs/agent/platform-decisions.md#memory-optimization-strategy"
 preparedDate: "2026-06-27"
 relatedReport: reports/2026-06-27-always-loaded-memory-index-tiering.md
 tags: [memory, context, model-usage-watch, harness, recall]
@@ -12,6 +14,13 @@ tags: [memory, context, model-usage-watch, harness, recall]
 # Reconcile the always-loaded memory index with the harness compact target
 
 The always-loaded memory index `we:MEMORY.md` sits at ~21.97 KB / 140 lines, at the gate's 22 KB ceiling, with [#1864](/backlog/1864-memory-index-prune-dedup-pass-index-is-at-the-22kb-ceiling/) having shown the entries load-bearing — mechanical trimming can't close the gap. Two calls under the #1855 watch. **Fork 1 (gate target):** keep tracking the *documented* ~24.4 KB harness limit; the card's "~17.1 KB compact target" appears nowhere in the repo. **Fork 2 (mechanism):** the structural fix pivots on one empirically-checkable fact — *does the harness recall an unindexed fact file by its `description`?* — which selects between evict-to-recall-only and a policy clarification.
+
+## Resolution — ratified 2026-06-27
+
+- **Fork 1 → keep the documented ~24.4 KB harness limit (22 KB ceiling).** The ~17.1 KB figure is unverified (appears in no script/doc/config); a compaction hook firing under pressure is not a stable threshold. `we:scripts/check-memory.mjs` stays as-is.
+- **Fork 2 → right-home-first; eviction gated on a positive recall read-out.** The always-loaded surface shrinks **now** via the *proven* lever — **rule 1, right-home durable/load-bearing rules out of personal memory into `we:docs/agent/platform-decisions.md` + the `we:AGENTS.md` router** (on-demand, no recall dependency). The **evict-to-recall-only** branch is **deferred** until the armed recall check reads positive; betting rigor on unproven description-recall is rejected. Evidence weighed: this resolution's own session (saturated with "memory") surfaced **zero** unindexed topic files via recall, and the documented Claude memory tool does no embedding auto-search — both lean against free recall, but the cross-session check remains the formal settler for ever enabling eviction.
+
+Codified into `we:docs/agent/memory-management.md` → "Strategy & direction". Opens build story: the right-home pass (child of [#1855](/backlog/1855-model-usage-watch-keep-claude-s-use-of-the-agent-system-effi/)). The recall check stays **armed** (see below) as the trigger to revisit eviction.
 
 ## The axis — what is genuinely open, grounded in the gate + memory dir
 
