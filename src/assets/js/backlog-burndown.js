@@ -16,7 +16,9 @@
     burndown: document.getElementById('panel-burndown'),
   };
   var TAB_KEY = 'we-backlog-tab';
-  function activate(name, focus) {
+  // The active tab is reflected in the URL hash (e.g. /backlog/#priority) so a view
+  // is shareable/bookmarkable; localStorage stays as the cross-visit fallback.
+  function activate(name, focus, fromHash) {
     tabs.forEach(function (t) {
       var on = t.dataset.bdTab === name;
       t.classList.toggle('is-active', on);
@@ -26,6 +28,15 @@
     });
     Object.keys(panels).forEach(function (k) { if (panels[k]) panels[k].hidden = k !== name; });
     try { localStorage.setItem(TAB_KEY, name); } catch (e) { /* ignore */ }
+    // Mirror to the hash unless we were driven *by* a hash change (avoids a loop).
+    // replaceState keeps the tabbing out of the back-button history and never scrolls.
+    if (!fromHash && ('#' + name) !== location.hash) {
+      try { history.replaceState(null, '', '#' + name); } catch (e) { location.hash = name; }
+    }
+  }
+  function tabFromHash() {
+    var h = (location.hash || '').replace(/^#/, '');
+    return panels[h] ? h : null;
   }
   tabs.forEach(function (t) { t.addEventListener('click', function () { activate(t.dataset.bdTab); }); });
   // Keyboard: Left/Right move (and activate) between tabs; Home/End jump to ends.
@@ -40,10 +51,16 @@
     else if (e.key === 'End') next = tabs.length - 1;
     if (next !== null) { e.preventDefault(); activate(tabs[next].dataset.bdTab, true); }
   });
-  // Restore the last-opened tab on reload (default: tracked / hidden burndown).
+  // Pick the initial tab: URL hash wins (shareable link), then last-opened
+  // (localStorage), then the default (tracked / hidden burndown).
   var savedTab = null;
   try { savedTab = localStorage.getItem(TAB_KEY); } catch (e) { /* ignore */ }
-  activate(savedTab && panels[savedTab] ? savedTab : 'tracked'); // also sets initial roving tabindex
+  activate(tabFromHash() || (savedTab && panels[savedTab] ? savedTab : 'tracked'), false, true);
+  // React to back/forward and manual hash edits.
+  window.addEventListener('hashchange', function () {
+    var name = tabFromHash();
+    if (name) activate(name, false, true);
+  });
 
   // ── Chart ──────────────────────────────────────────────────────────────
   var dataEl = document.getElementById('burndown-data');
