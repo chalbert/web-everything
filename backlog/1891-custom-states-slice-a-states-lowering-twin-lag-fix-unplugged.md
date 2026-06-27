@@ -2,8 +2,11 @@
 kind: story
 size: 3
 parent: "1831"
-status: open
+status: resolved
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: frontierui/blocks/renderers/component/declarativeComponent.ts
 tags: []
 ---
 
