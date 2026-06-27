@@ -653,32 +653,54 @@ module.exports = function backlog() {
     }
   } catch { /* advisory only — never break the build over reservation state */ }
 
-  // Active work (#1854) — every CLAIMED (status:active) item, grouped by its owning batch (the
-  // reservations.json `session` that soft-holds it, attached as `reservedBy` above) else standalone.
-  // Drives the Active-work tab (backlog.njk). This is the BUILD-TIME snapshot — it refreshes on rebuild,
-  // and covers active cards + batch membership. The genuinely-LIVE layer (running workflows, per-agent
-  // phase/state) is NOT here: it can't be — a workflow's progress lives in the harness run-journal, not
-  // in the repo — so the tab polls /active-progress.json (written by the dev-only watcher,
-  // scripts/dev/active-progress-watch.mjs) and overlays it client-side. Mirrors activeBatches: dev-only,
-  // frozen on a static build, read defensively.
-  const activeLite = ({ id, num, slug, title, status, kind, size, tier, reservedBy }) =>
-    ({ id, num, slug, title, status, kind, size, tier, reservedBy });
-  const activeBatchBySession = new Map(
+  // Active work (#1854 v2) — a COMMAND CENTER for everything in flight at once, grouped into
+  // OPERATION-TYPE LANES so someone juggling many concurrent runs can coordinate them. Lanes are derived
+  // here from structured fields only (status + kind + reservation membership) — the deterministic, build-
+  // time skeleton, refreshed on rebuild as items are claimed/resolved:
+  //   • Preparing — a decision claimed by /prepare (status:preparing): forks being researched to DoR.
+  //   • Deciding  — an active decision (status:active, kind:decision): a ratification call in progress.
+  //   • Slicing   — an active epic (status:active, kind:epic): being /sliced into child stories.
+  //   • Batching  — items soft-held by a running /batch (reservedBy), grouped by batch session.
+  //   • Building  — any other active story/task (status:active): a single /next or ad-hoc build.
+  //   • Workflows — multi-agent /workflow runs; LIVE-only (journal-backed), rendered client-side.
+  // The genuinely-LIVE layer — running workflows AND a per-session "what's happening right now" digest for
+  // each active item — can't live here (it's in the harness transcripts, not the repo), so the tab polls
+  // /active-progress.json (written by the dev-only watcher scripts/dev/active-progress-watch.mjs) and
+  // overlays it onto these lane rows. Dev-only, frozen on a static build, read defensively.
+  const activeLite = ({ id, num, slug, title, status, kind, size, tier, reservedBy, relatedProject }) =>
+    ({ id, num, slug, title, status, kind, size, tier, reservedBy, relatedProject });
+  const lanes = { preparing: [], deciding: [], slicing: [], building: [] };
+  const batchBySession = new Map(
     (items.activeBatches || []).map((b) => [b.session, { session: b.session, date: b.date, points: b.points, items: [] }]),
   );
-  const activeStandalone = [];
-  let activeCount = 0;
   for (const it of items) {
+    const lite = activeLite(it);
+    if (it.status === 'preparing') { lanes.preparing.push(lite); continue; }
     if (it.status !== 'active') continue;
-    activeCount++;
-    const grp = it.reservedBy ? activeBatchBySession.get(it.reservedBy) : null;
-    if (grp) grp.items.push(activeLite(it));
-    else activeStandalone.push(activeLite(it));
+    const grp = it.reservedBy ? batchBySession.get(it.reservedBy) : null;
+    if (grp) grp.items.push(lite);                       // batch membership wins
+    else if (it.kind === 'decision') lanes.deciding.push(lite);
+    else if (it.kind === 'epic') lanes.slicing.push(lite);
+    else lanes.building.push(lite);                       // story / task / anything else active
   }
+  const byNumAsc = (a, b) => Number(a.num) - Number(b.num);
+  for (const k of Object.keys(lanes)) lanes[k].sort(byNumAsc);
+  const batches = [...batchBySession.values()].filter((b) => b.items.length);
+  const batchItemCount = batches.reduce((t, b) => t + b.items.length, 0);
   items.activeWork = {
-    batches: [...activeBatchBySession.values()].filter((b) => b.items.length),
-    standalone: activeStandalone.sort((a, b) => Number(a.num) - Number(b.num)),
-    count: activeCount,
+    lanes,
+    batches,
+    // Vitals — the at-a-glance roll-up the command center leads with (live workflow/agent totals are
+    // added client-side from the poll). `count` also drives the tab badge.
+    vitals: {
+      preparing: lanes.preparing.length,
+      deciding: lanes.deciding.length,
+      slicing: lanes.slicing.length,
+      batching: batchItemCount,
+      batches: batches.length,
+      building: lanes.building.length,
+    },
+    count: lanes.preparing.length + lanes.deciding.length + lanes.slicing.length + lanes.building.length + batchItemCount,
   };
 
   return items;

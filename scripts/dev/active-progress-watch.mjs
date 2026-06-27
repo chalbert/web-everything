@@ -154,14 +154,87 @@ function batchRuns() {
   } catch { return []; }
 }
 
+// ── Per-session live digest (#1854 v2) ────────────────────────────────────────────────────────────
+// The "live chat progress" for NON-workflow work (prepare / decide / slice / build / batch). Each of
+// those runs in an ordinary session with no run-journal, so the only progress signal is the session's own
+// transcript. We map an active item → the session working it by replaying that session's backlog CLI
+// calls (claim adds ownership, resolve/release removes it; net set = what it currently owns), then tail
+// the same transcript for a digest: the current in-progress todo, last tool, and last assistant line.
+const SESSION_CACHE = new Map(); // sessionId → { mtimeMs, digest }
+// A REAL backlog CLI invocation, anchored to a command boundary (line start, `;`, `&&`, `|`), optional
+// `node `, then a quote/space-free path ending in backlog.mjs. Anchoring matters: it must NOT match a
+// command that merely MENTIONS the string — e.g. `grep 'backlog.mjs claim 1854'` (backlog.mjs sits inside
+// a quote, not at a command boundary) would otherwise be miscounted as a claim and leak a resolved item.
+const BACKLOG_VERB_RE = /(?:^|[\n;&|])\s*(?:node\s+)?[^\s'"]*backlog\.mjs\s+(claim|resolve|release)\s+(\d+)/g;
+
+function digestSession(jsonlPath) {
+  let text;
+  try { text = readFileSync(jsonlPath, 'utf8'); } catch { return null; }
+  const owned = new Set();
+  let currentTodo, lastTool, lastLine;
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    let ev;
+    try { ev = JSON.parse(line); } catch { continue; }
+    if (ev.type !== 'assistant' || !ev.message) continue;
+    for (const b of (Array.isArray(ev.message.content) ? ev.message.content : [])) {
+      if (b.type === 'tool_use') {
+        lastTool = b.name;
+        if (b.name === 'Bash' && b.input && typeof b.input.command === 'string') {
+          let m;
+          BACKLOG_VERB_RE.lastIndex = 0;
+          while ((m = BACKLOG_VERB_RE.exec(b.input.command))) {
+            if (m[1] === 'claim') owned.add(m[2]); else owned.delete(m[2]);
+          }
+        }
+        if (b.name === 'TodoWrite' && b.input && Array.isArray(b.input.todos)) {
+          const ip = b.input.todos.find((t) => t.status === 'in_progress');
+          currentTodo = ip ? ip.content : (b.input.todos.length ? b.input.todos[b.input.todos.length - 1].content : currentTodo);
+        }
+      } else if (b.type === 'text' && b.text && b.text.trim()) {
+        lastLine = b.text.trim().replace(/\s+/g, ' ').slice(0, 160);
+      }
+    }
+  }
+  return { ownedNums: [...owned], currentTodo, lastTool, lastLine };
+}
+
+// num → live digest, from every recent top-level session transcript (cached on mtime). A num owned by
+// more than one session takes the most recently active one.
+function sessionDigests() {
+  const out = {};
+  if (!existsSync(PROJECTS_DIR)) return out;
+  for (const f of readdirSync(PROJECTS_DIR)) {
+    if (!/^[0-9a-f-]{36}\.jsonl$/.test(f)) continue; // top-level session transcripts only
+    const p = join(PROJECTS_DIR, f);
+    let mtimeMs;
+    try { mtimeMs = statSync(p).mtimeMs; } catch { continue; }
+    if ((Date.now() - mtimeMs) > 6 * 3600_000) continue; // skip stale sessions (>6h)
+    const cached = SESSION_CACHE.get(f);
+    const d = (cached && cached.mtimeMs === mtimeMs) ? cached.digest : digestSession(p);
+    SESSION_CACHE.set(f, { mtimeMs, digest: d });
+    if (!d || !d.ownedNums.length) continue;
+    const sessionId = f.replace('.jsonl', '');
+    const updatedAt = new Date(mtimeMs).toISOString();
+    for (const num of d.ownedNums) {
+      const prev = out[num];
+      if (prev && prev.updatedAt >= updatedAt) continue; // keep the most recently active session
+      out[num] = { sessionId: sessionId.slice(0, 8), currentTodo: d.currentTodo, lastTool: d.lastTool, lastLine: d.lastLine, updatedAt };
+    }
+  }
+  return out;
+}
+
 function generate() {
   const runs = [...workflowRuns(), ...batchRuns()];
+  const digests = sessionDigests();
   const payload = {
     generatedAt: new Date().toISOString(),
     generatedBy: 'active-progress-watch',
     projectSlug: PROJECT_SLUG,
     updatedAt: runs.length ? runs[0].updatedAt : new Date().toISOString(),
     runs,
+    digests,
   };
   mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(OUT, JSON.stringify(payload, null, 2));
@@ -171,7 +244,7 @@ function generate() {
 if (ONCE) {
   const p = generate();
   const wf = p.runs.filter((r) => r.kind === 'workflow').length;
-  console.log(`active-progress: wrote ${OUT} — ${p.runs.length} run(s) (${wf} workflow), slug ${PROJECT_SLUG}`);
+  console.log(`active-progress: wrote ${OUT} — ${p.runs.length} run(s) (${wf} workflow), ${Object.keys(p.digests).length} live session digest(s), slug ${PROJECT_SLUG}`);
 } else {
   console.log(`active-progress: watching ${PROJECTS_DIR}\n  → ${OUT} every ${INTERVAL_MS / 1000}s (Ctrl-C to stop)`);
   const tick = () => { try { const p = generate(); process.stdout.write(`\r  ${new Date().toLocaleTimeString()} · ${p.runs.length} run(s)   `); } catch (e) { console.error('tick error:', e.message); } };

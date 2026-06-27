@@ -52,6 +52,21 @@ title: Backlog
 .aw-agent.failed { background:#fef2f2; color:#991b1b; border-color:#fca5a5; }
 .aw-agent .dot { width:7px; height:7px; border-radius:50%; background:currentColor; }
 .aw-agent.running .dot { animation:active-pulse 1.4s infinite; }
+/* Command-center lanes (#1854 v2) — operation-type lanes, vitals bar, per-item live digest. */
+.aw-surface { background:var(--color-surface, #fff); border:1px solid var(--color-border); border-radius:0.75rem; padding:1.25rem 1.5rem; }
+.aw-vitals { display:flex; flex-wrap:wrap; gap:0.5rem; margin:0 0 1.5rem; }
+.aw-vital { display:inline-flex; align-items:center; gap:0.4rem; padding:0.3rem 0.7rem; border-radius:9999px; font-size:0.85em; font-weight:700; border:1px solid; white-space:nowrap; }
+.aw-vital .n { font-variant-numeric:tabular-nums; }
+.aw-lane { margin:0 0 1.5rem; }
+.aw-lane-head { display:flex; align-items:center; gap:0.5rem; font-size:0.78em; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; margin:0 0 0.6rem; }
+.aw-lane-dot { width:10px; height:10px; border-radius:50%; flex:none; }
+.aw-rows { display:flex; flex-direction:column; gap:0.4rem; }
+.aw-row { border:1px solid var(--color-border); border-radius:0.5rem; padding:0.5rem 0.7rem; background:var(--color-surface-alt, #f8fafc); }
+.aw-row-head { display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; }
+.aw-digest { margin-top:0.4rem; font-size:0.78em; color:var(--color-text-muted); display:flex; flex-direction:column; gap:0.15rem; }
+.aw-digest .now { color:#1e40af; font-weight:600; }
+.aw-digest .meta { font-variant-numeric:tabular-nums; opacity:0.85; }
+.aw-batch { border:1px solid #c7d2fe; border-radius:0.6rem; padding:0.7rem 0.85rem; background:#eef2ff; margin-bottom:0.6rem; }
 </style>
 
 {% import "backlog-badges.njk" as bk with context %}
@@ -232,66 +247,87 @@ title: Backlog
 </div>{# /#panel-tracked #}
 
 <div id="panel-active" role="tabpanel" aria-labelledby="tab-active" hidden>
-{# ACTIVE WORK (#1854) — what's being worked RIGHT NOW, in one place, with batch/workflow membership.
-   Two layers, by design:
-     • STATIC (this Nunjucks) — the build-time snapshot from backlog.activeWork: every status:active item,
-       grouped by its owning batch (reservations.json session) else standalone. Refreshes on rebuild.
-     • LIVE (#active-live, filled by /assets/js/backlog-active.js) — running workflows + per-agent phase/
-       state, POLLED from /active-progress.json. That file is written by the dev-only watcher
-       (scripts/dev/active-progress-watch.mjs) which digests the harness's own run-journal; it 404s on a
-       static publish, so the live section simply stays hidden there. The workflow script can't write it —
-       a Workflow runs sandboxed with no fs — so the website reads what the harness already persists. #}
-{# Compact row for one active item — links to its detail page, badges via the shared bk macros. #}
+{# ACTIVE WORK (#1854 v2) — a command center for everything in flight AT ONCE, grouped into OPERATION-TYPE
+   lanes (Preparing · Deciding · Slicing · Batching · Building · Workflows) so someone juggling many
+   concurrent runs can coordinate them. Two layers:
+     • STRUCTURE (this Nunjucks) — backlog.activeWork.lanes, derived from status + kind + reservation.
+       Refreshes on rebuild (claims trigger a rebuild). Each row carries data-active-num for the overlay.
+     • LIVE (filled by /assets/js/backlog-active.js, polled from /active-progress.json) — running workflows
+       (per-agent phase/state) AND a per-SESSION digest for each active item (current todo / last action /
+       last line), so prepare/decide/slice/build all show live "chat progress", not just workflows. The
+       watcher (scripts/dev/active-progress-watch.mjs) reads the harness transcripts; it 404s on a static
+       publish, so the page falls back to the structural snapshot there. #}
+{# One compact active-item row. `data-active-num` is the join key the client uses to overlay the live
+   session digest; the digest container is unhidden + filled by the poller. Badges deduped — the lane
+   already implies the status, so we show kind + size + tier only. #}
 {% macro activeRow(it) %}
-<div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; padding:0.45rem 0.65rem; border:1px solid var(--color-border); border-radius:0.45rem; background:var(--color-surface, #fff);">
-    <a href="/backlog/{{ it.id }}/" style="color:var(--color-primary); text-decoration:none; font-weight:600;"><span style="color:var(--color-text-muted, #94a3b8); font-variant-numeric:tabular-nums;">#{{ it.num }}</span> {{ it.title }}</a>
-    <span style="display:inline-flex; align-items:center; gap:0.3rem; flex-wrap:wrap;">{{ bk.kindBadge(it.kind) }}{{ bk.statusBadge(it.status) }}{% if it.size %}{{ bk.sizeBadge(it.size) }}{% endif %}{{ bk.tierBadge(it.tier) }}</span>
+<div class="aw-row" data-active-num="{{ it.num }}">
+    <div class="aw-row-head">
+        <a href="/backlog/{{ it.id }}/" style="color:var(--color-primary); text-decoration:none; font-weight:600;"><span style="color:var(--color-text-muted, #94a3b8); font-variant-numeric:tabular-nums;">#{{ it.num }}</span> {{ it.title }}</a>
+        <span style="display:inline-flex; align-items:center; gap:0.3rem; flex-wrap:wrap;">{{ bk.kindBadge(it.kind) }}{% if it.size %}{{ bk.sizeBadge(it.size) }}{% endif %}{{ bk.tierBadge(it.tier) }}</span>
+    </div>
+    <div class="aw-digest" data-digest-for="{{ it.num }}" hidden></div>
 </div>
 {% endmacro %}
+{# A labelled lane of rows (no-op when empty). #}
+{% macro lane(title, color, items, desc) %}
+{% if items | length %}
+<div class="aw-lane">
+    <div class="aw-lane-head" style="color:{{ color }};"><span class="aw-lane-dot" style="background:{{ color }};"></span>{{ title }} <span class="count-badge">{{ items | length }}</span></div>
+    {% if desc %}<p class="section-desc" style="margin:-0.3rem 0 0.6rem; font-size:0.8em;">{{ desc | safe }}</p>{% endif %}
+    <div class="aw-rows">{% for it in items %}{{ activeRow(it) }}{% endfor %}</div>
+</div>
+{% endif %}
+{% endmacro %}
 {% set aw = backlog.activeWork %}
+{% set v = aw.vitals %}
 <section class="mb-12">
     <h2 class="section-title">Active work <span class="count-badge" data-count-target>{{ aw.count }}</span></h2>
-    <p class="section-desc">Everything claimed (<code>status: active</code>) right now, grouped by the <strong>batch</strong> or <strong>workflow</strong> that owns it — so concurrent runs coordinate instead of colliding. The <strong>Live</strong> board below is real-time when the dev watcher is running (<code>npm run dev:active-progress</code>): it polls running workflows and shows each subagent's phase, state, and current activity. The grouped cards are the build-time snapshot (refresh on rebuild).</p>
+    <p class="section-desc">A live command center for everything in flight at once — claimed work grouped by the <strong>operation</strong> driving it. Each row shows its live "chat progress" (current todo / last action) when the dev watcher is running (<code>npm start</code> includes it); multi-agent <strong>workflows</strong> show every subagent's phase &amp; state. Lane membership refreshes on rebuild; the live overlay polls every few seconds.</p>
 
-    {# LIVE board — populated client-side from /active-progress.json; hidden until the poller finds a run. #}
-    <div id="active-live" hidden style="margin-bottom:1.75rem;">
-        <h3 class="section-title" style="font-size:1.05em; display:flex; align-items:center; gap:0.5rem;">
-            <span style="width:9px; height:9px; border-radius:50%; background:#16a34a; box-shadow:0 0 0 0 rgba(22,163,74,0.6); animation:active-pulse 1.6s infinite;"></span>
-            Live now <span id="active-live-count" class="count-badge"></span>
-            <span id="active-live-stamp" style="font-size:0.7em; font-weight:500; color:var(--color-text-muted);"></span>
-        </h3>
-        <div id="active-live-runs" style="display:flex; flex-direction:column; gap:1rem; margin-top:0.75rem;"></div>
-    </div>
-
-    {# STATIC snapshot — batches first (membership), then standalone active items. #}
-    {% if aw.batches | length %}
-    <h3 class="section-title" style="font-size:1.05em;">In batches <span class="count-badge">{{ aw.batches | length }}</span></h3>
-    <div style="display:flex; flex-direction:column; gap:0.85rem; margin:0.75rem 0 1.75rem;">
-        {% for b in aw.batches %}
-        <div style="border:1px solid var(--color-border); border-radius:0.6rem; padding:0.85rem 1rem; background:var(--color-surface-alt, #f8fafc);">
-            <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.6rem;">
-                <span style="font-weight:700; color:#3730a3;">⊘ {{ b.session }}</span>
-                <span style="font-size:0.8em; color:var(--color-text-muted); font-variant-numeric:tabular-nums;">{{ b.date }} · {{ b.items | length }} active{% if b.points %} · {{ b.points }} pts{% endif %}</span>
-            </div>
-            <div style="display:flex; flex-direction:column; gap:0.4rem;">
-                {% for it in b.items %}{{ activeRow(it) }}{% endfor %}
-            </div>
+    <div class="aw-surface">
+        {# VITALS — at-a-glance roll-up. Workflow/agent live totals are appended by the client. #}
+        <div class="aw-vitals">
+            <span class="aw-vital" style="background:#ede9fe; color:#6d28d9; border-color:#ddd6fe;"><span class="n">{{ v.preparing }}</span> preparing</span>
+            <span class="aw-vital" style="background:#fef3c7; color:#92400e; border-color:#fde68a;"><span class="n">{{ v.deciding }}</span> deciding</span>
+            <span class="aw-vital" style="background:#ecfeff; color:#155e75; border-color:#a5f3fc;"><span class="n">{{ v.slicing }}</span> slicing</span>
+            <span class="aw-vital" style="background:#eef2ff; color:#3730a3; border-color:#c7d2fe;"><span class="n">{{ v.batching }}</span> batching{% if v.batches %} <span style="opacity:0.7;">({{ v.batches }})</span>{% endif %}</span>
+            <span class="aw-vital" style="background:#dcfce7; color:#166534; border-color:#bbf7d0;"><span class="n">{{ v.building }}</span> building</span>
+            <span id="aw-vital-workflows" class="aw-vital" hidden style="background:#dbeafe; color:#1e40af; border-color:#bfdbfe;"><span class="aw-lane-dot" style="background:#1e40af; animation:active-pulse 1.4s infinite;"></span><span class="n" id="aw-vital-workflows-n"></span> workflows live</span>
         </div>
-        {% endfor %}
-    </div>
-    {% endif %}
 
-    {% if aw.standalone | length %}
-    <h3 class="section-title" style="font-size:1.05em;">Standalone <span class="count-badge">{{ aw.standalone | length }}</span></h3>
-    <p class="section-desc" style="margin-bottom:0.75rem;">Claimed outside a batch — a single <code>/next</code>, <code>/decision</code>, or ad-hoc session.</p>
-    <div style="display:flex; flex-direction:column; gap:0.4rem;">
-        {% for it in aw.standalone %}{{ activeRow(it) }}{% endfor %}
-    </div>
-    {% endif %}
+        {# WORKFLOWS — live multi-agent runs (client-filled; hidden until the poller finds one). #}
+        <div id="active-live" class="aw-lane" hidden>
+            <div class="aw-lane-head" style="color:#16a34a;"><span class="aw-lane-dot" style="background:#16a34a; animation:active-pulse 1.6s infinite;"></span>Workflows · live <span id="active-live-count" class="count-badge"></span><span id="active-live-stamp" style="font-weight:500; text-transform:none; letter-spacing:0; color:var(--color-text-muted); margin-left:0.25rem;"></span></div>
+            <div id="active-live-runs" style="display:flex; flex-direction:column; gap:0.85rem;"></div>
+        </div>
 
-    {% if not aw.count %}
-    <p style="color:var(--color-text-muted);">Nothing is claimed right now. When a <code>/next</code>, <code>/batch</code>, <code>/decision</code>, or <code>/workflow</code> run claims items they appear here — and the Live board lights up if the dev watcher is running.</p>
-    {% endif %}
+        {{ lane('Preparing', '#6d28d9', aw.lanes.preparing, '<code>/prepare</code> — researching a decision\'s forks to Definition of Ready.') }}
+        {{ lane('Deciding', '#92400e', aw.lanes.deciding, '<code>/decision</code> — a ratification call in progress.') }}
+        {{ lane('Slicing', '#155e75', aw.lanes.slicing, '<code>/slice</code> — an epic being cut into child stories.') }}
+
+        {# BATCHING — items soft-held by a running /batch, grouped by batch session (membership). #}
+        {% if aw.batches | length %}
+        <div class="aw-lane">
+            <div class="aw-lane-head" style="color:#3730a3;"><span class="aw-lane-dot" style="background:#3730a3;"></span>Batching <span class="count-badge">{{ v.batching }}</span></div>
+            {% for b in aw.batches %}
+            <div class="aw-batch">
+                <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.5rem;">
+                    <span style="font-weight:700; color:#3730a3;">⊘ {{ b.session }}</span>
+                    <span style="font-size:0.78em; color:var(--color-text-muted); font-variant-numeric:tabular-nums;">{{ b.date }} · {{ b.items | length }} active{% if b.points %} · {{ b.points }} pts{% endif %}</span>
+                </div>
+                <div class="aw-rows">{% for it in b.items %}{{ activeRow(it) }}{% endfor %}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {{ lane('Building', '#166534', aw.lanes.building, 'A single <code>/next</code> or ad-hoc session building a story/task.') }}
+
+        {% if not aw.count %}
+        <p style="color:var(--color-text-muted); margin:0;">Nothing is claimed right now. When a <code>/prepare</code>, <code>/decision</code>, <code>/slice</code>, <code>/batch</code>, <code>/next</code>, or <code>/workflow</code> run claims work it appears here — with its live progress if the watcher is running.</p>
+        {% endif %}
+    </div>
 </section>
 </div>{# /#panel-active #}
 
