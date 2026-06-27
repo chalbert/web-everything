@@ -1,9 +1,12 @@
 ---
 kind: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-06-26"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
 tags: [website, plugs, messaging, mission]
+graduatedTo: none
 ---
 
 # Make the plug / aspiring-standard stance explicit on the website
@@ -19,5 +22,10 @@ This is a messaging/copy story, not a mechanism. Surface the stance where a read
 ## Acceptance
 - A reader landing on the plugs/mission pages can articulate the "imagine it normalized" intent without prior context.
 - `check:standards` green.
+
+## Progress
+- Added a **"What a plug is — and isn't"** stance section to the Plugs page (`we:src/plugs.njk`) — "what if this were a standard?" as the design lens, zero adoption dependency, explicitly not crowning ourselves the future standard.
+- Added the same stance (one paragraph) to the **mission** page (`we:src/about.njk`), inline in the Vision section where the reader forms the plug mental model.
+- `check:standards` green; `eleventy` build clean.
 
 _Converted from `we:plans/future-standard.md` (#1792 hidden-docs cleanup)._
