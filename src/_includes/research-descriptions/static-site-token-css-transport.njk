@@ -1,0 +1,59 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/1824-static-site-token-css-transport-how-we-s-eleventy-build-cons/">#1824</a>
+  (parent <a href="/backlog/1683-/">#1683</a>, blocks <a href="/backlog/1813-/">#1813</a>): FUI slices 1 and 2
+  shipped the token injector and a one-way CSS emit. #1813 migrates the WE site's hand-authored
+  <code>:root</code> token vars onto that emitted set — but it is not clean wiring, because two consumption
+  calls are open: how the emitted CSS reaches WE's build output without a build-import or a flash of
+  unstyled content, and where the WE site's token <em>values</em> actually live.
+</p>
+
+<h2>The constraints</h2>
+<p>
+  WE's Eleventy build <strong>cannot</strong> <code>import '@frontierui'</code> (the #700 ban,
+  <code>we:src/_layouts/base.njk:434</code>); a runtime <code>import()</code> + <code>applyTokenVars</code>
+  injects the <code>:root</code> vars <em>after</em> first paint (FOUC, violating #1813's "renders
+  identically"). <code>emitTokenCss(theme)</code> returns a static <code>:root{}</code> string
+  (<code>fui:plugs/webtheme/emitCss.ts:57-63</code>) with no production consumer yet. Eleventy
+  passthrough-copies <code>we:src/css</code> (<code>we:.eleventy.js:265</code>) and runs arbitrary build JS
+  via <code>we:src/_data/</code> globals — so a build step can inline the emitted string server-side, before
+  paint.
+</p>
+
+<h2>The verified findings that reshaped the defaults</h2>
+<ol>
+  <li><strong><code>var(--token*)</code> appears 0 times in <code>we:src/</code>; <code>var(--color*)</code>
+    appears 627 times.</strong> So emitting a <code>--token-*</code> block while the site keeps reading
+    <code>--color-*</code> leaves the emit <em>unread</em> — the migration #1813 asks for does not happen.</li>
+  <li><strong>FUI's default theme is dark and lacks names WE needs</strong>
+    (<code>fui:plugs/webtheme/defaultTheme.ts:16-53</code> has 9 color names; WE reads
+    <code>--color-bg</code>, <code>--color-text-main</code>, <code>--color-surface-alt</code>,
+    <code>--color-accent</code>, …). Consuming the FUI default verbatim would invert the site, and a
+    name-only alias is impossible without supplying the missing names.</li>
+  <li><strong><code>@webeverything/contracts</code> is unpublished + human-gated (#907)</strong> and
+    type-only — there is no published token-CSS artifact to read, so the "published-artifact" branch is
+    premature.</li>
+</ol>
+
+<h2>What the skeptic pass changed</h2>
+<ul>
+  <li><strong>Fork 1 — SURVIVES-WITH-AMENDMENT.</strong> The intent (build-time, pre-paint, no
+    build-import) is right, but a committed/copied <code>.css</code> reintroduces a drift surface. Folded:
+    prefer <strong>server-side inline</strong> of the emitted string via a <code>we:src/_data/</code> global;
+    if a file is wanted it must be build-emitted-not-committed.</li>
+  <li><strong>Fork 2 — REFUTED.</strong> Emitting <code>--token-*</code> while keeping the old
+    <code>--color-*</code> override does not migrate anything. Folded: stand up the WE-site project theme
+    <em>now</em> (the load-bearing slice), emit the resolved theme, and alias the legacy names to the emitted
+    tokens so the 627 call sites derive from the injector.</li>
+</ul>
+
+<h2>The two forks, at a glance</h2>
+<ul>
+  <li><strong>Fork 1 — transport.</strong> FUI build-emits, bytes cross into WE's build via the #1731
+    served-route/CLI boundary, inlined server-side into <code>base.njk</code> head (default) vs a
+    published-artifact read (refuted/premature, #907). Committed-file is the drift anti-pattern to avoid.</li>
+  <li><strong>Fork 2 — values home.</strong> Stand up the WE-site project theme now (light-brand override +
+    the missing names, extending the FUI default via <code>ThemeSource.with()</code>), emit it, and alias
+    legacy <code>--color-*</code> → emitted <code>--token-*</code> (default) vs the refuted keep-old-override
+    and the ruled-out consume-verbatim. #1813 is undersized at <code>size:3</code> — flag for re-size.</li>
+</ul>

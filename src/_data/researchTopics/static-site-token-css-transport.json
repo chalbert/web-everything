@@ -1,0 +1,21 @@
+{
+  "id": "static-site-token-css-transport",
+  "title": "Static-site token-CSS transport — how WE's Eleventy build consumes the FUI-emitted token CSS without a build-import or FOUC",
+  "status": "open",
+  "summary": "Grounds decision #1824 (parent #1683, blocks #1813): FUI slices 1 (#1811) + 2 (#1812) shipped the token injector + a one-way CSS emit — emitTokenCss(theme) returns a :root{} string (fui:plugs/webtheme/emitCss.ts:57-63), applyTokenVars mutates a live element (the FOUC path, :71-74), and defaultTheme is a DARK theme (fui:plugs/webtheme/defaultTheme.ts:16-53). #1813 migrates we:src/css/style.css's hand-authored :root token vars onto that emitted set, but two consumption calls are open. WE's Eleventy build CANNOT import '@frontierui' (the #700 ban, we:src/_layouts/base.njk:434); a runtime import() injects vars after first paint (FOUC, violating #1813's no-visual-diff acceptance). Eleventy passthrough-copies we:src/css (we:.eleventy.js:265) and runs arbitrary build JS via we:src/_data/ globals (33), so a build step can inline the emitted string server-side. Verified findings that reshaped the defaults: var(--token*) appears 0 times in we:src/ while var(--color*) appears 627 times; FUI's dark default lacks names WE needs (--color-bg/text-main/surface-alt/accent); @webeverything/contracts is unpublished + human-gated (#907) and type-only, so there is no published token-CSS artifact to read. A refute-only skeptic SURVIVES-WITH-AMENDMENT on Fork 1 (prefer server-side inline over a committed/copied .css to avoid a drift surface) and REFUTED Fork 2's original default (emitting --token-* while keeping --color-* leaves the emit unread — the migration #1813 demands does not happen; deferring the project-theme home is a #1620 soft-park). Two forks at DoR: Fork 1 — transport: FUI build-emits and the bytes cross into WE's build via the #1731 served-route/CLI boundary, inlined server-side into base.njk head (default) vs a published-artifact read (refuted/premature, #907); committed-file is the drift anti-pattern to avoid. Fork 2 — values home + how the migration happens: stand up the WE-site project theme NOW (a WE-authored light-brand override + the names FUI's dark default lacks, extending the FUI default via ThemeSource.with(), fui:plugs/webtheme/ThemeSource.ts:73), emit that resolved theme, and alias the legacy --color-* names to the emitted --token-* in one generated block so the 627 call sites keep working and derive from the injector (default) — vs the refuted keep-old-override-and-defer, and the ruled-out consume-FUI-default-verbatim (dark/light clash). Net effect: #1813 is blocked on the project-theme mechanism existing and is almost certainly undersized at size:3 — flag for re-size/split. Full grounding in reports/2026-06-26-static-site-token-css-transport.md.",
+  "dateOpened": "2026-06-26",
+  "lastReviewed": "2026-06-26",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webtheme",
+    "tokens",
+    "css",
+    "eleventy",
+    "fouc",
+    "three-layer-carve",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webtheme"
+}
