@@ -1,0 +1,21 @@
+{
+  "id": "webrouting-runtime-route-ingestion",
+  "title": "webrouting runtime/dynamic route-ingestion mechanism (provider shape, lazy-component attr, merge order)",
+  "status": "open",
+  "summary": "Grounds decision #1823 (parent #1684, unblocks #1720): route-view ingests routes only from static <template route> children today (parseRouteDefinitions over the light DOM, we:blocks/router/types.ts:194-232), matched declaration-order first-match-wins (types.ts:243-266), with loader/guard resolved late by NAME through the injector context seam (InjectorRoot.getProviderOf(host,'customContexts:routeLoader'), fui:blocks/router/elements/RouteViewElement.ts:484-493). #1720 wants a runtime path (dynamic route objects via context + lazy component-from-URL) and is blocked on settling three mechanism calls. The decisive verified finding: the #1685 serializable RouteMap (we:blocks/router/route-map.ts:28-159) is an OUTPUT projection — buildRouteMap explicitly DROPS the non-serializable pattern + template fields, and a closed ENTRY_KEYS validator rejects any unknown key — so it CANNOT be the runtime engine input (the engine stamps template.content.cloneNode and matches on pattern.exec, RouteViewElement.ts:498). A refute-only skeptic REFUTED the original Fork-1 default (reuse the #1685 schema as the runtime input) on exactly this, and amended Forks 2+3. Prior-art survey (React Router lazy, Vue addRoute/component:()=>import(), Angular loadComponent, TanStack, Navigation API+URLPattern) shows the lazy import is near-universally INLINE on the route (() => import()), named lazy/component/loadComponent, with critical loader eager + non-critical component deferred; modern matchers rank by specificity while WE uses declaration order. Three forks at DoR: Fork 1 — provider shape: reuse the injector-context DI MECHANISM with a new customContexts:routes key carrying a distinct RUNTIME route-object shape (carrying a component/template ref) vs a brand-new provider contract — default reuse-the-mechanism; the #1685-schema-as-input branch is refuted/broken. Fork 2 — lazy component: attr route:component (renamed from route:module to disambiguate from the data route:loader); inline () => import() thunk for the JS/runtime path + a bare specifier string for the serializable/DOM path; drop the customContexts:routeModule name-registry (ceremony); data-loader stays independent/eager. Fork 3 — merge order: static-wins via static-first concatenation keeping the first-match-wins engine, default tiebreak, PLUS a shadowing diagnostic when a dynamic pattern is shadowed by a static one, and #1720 must ground the disjoint-sets premise / an override use case before ratify. Full grounding in reports/2026-06-26-webrouting-runtime-route-ingestion.md.",
+  "dateOpened": "2026-06-26",
+  "lastReviewed": "2026-06-26",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webrouting",
+    "router",
+    "route-view",
+    "dynamic-routes",
+    "lazy-loading",
+    "dependency-injection",
+    "decision-prep"
+  ],
+  "relatedBlocks": ["router"],
+  "relatedPlugs": ["injectorroot"],
+  "relatedProject": "webrouting"
+}

@@ -1,0 +1,71 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/1823-webrouting-runtime-dynamic-route-ingestion-mechanism-provide/">#1823</a>
+  (parent <a href="/backlog/1684-/">#1684</a>, unblocks <a href="/backlog/1720-/">#1720</a>):
+  <code>route-view</code> ingests routes only from static <code>&lt;template route&gt;</code> children today.
+  #1720 wants a runtime path — dynamic route objects supplied via context, plus lazy component-from-URL — so
+  #1823 settles the three mechanism calls that path needs before it builds: the context-provider shape for
+  dynamic route objects, the lazy component attr, and the static/dynamic merge order.
+</p>
+
+<h2>Current mechanism</h2>
+<p>
+  <code>parseRouteDefinitions</code> walks <code>querySelectorAll('template[route]')</code> over the light DOM
+  (<code>we:blocks/router/types.ts:194-232</code>), building <code>RouteDefinition</code>s that carry a live
+  <code>URLPattern</code> + <code>HTMLTemplateElement</code> plus string fields; matching is
+  <strong>declaration-order, first-match-wins</strong> (<code>types.ts:243-266</code>) — not specificity
+  ranking. Loaders/guards are resolved late, by <em>name</em>, through the injector context seam:
+  <code>InjectorRoot.getProviderOf(host, 'customContexts:routeLoader')</code> returns a name→function map
+  (<code>fui:blocks/router/elements/RouteViewElement.ts:484-493</code>); the seam supplies the
+  <em>functions</em> a route name resolves to and has no slot for route <em>definitions</em>.
+</p>
+
+<h2>The decisive finding — #1685 is an output projection, not a runtime input</h2>
+<p>
+  The <a href="/backlog/1685-/">#1685</a> serializable <code>RouteMap</code>
+  (<code>we:blocks/router/route-map.ts:28-159</code>) is a <strong>faithful derivation</strong>:
+  <code>buildRouteMap</code> explicitly <strong>drops</strong> the non-serializable <code>pattern</code> +
+  <code>template</code> fields, and a <strong>closed</strong> <code>ENTRY_KEYS</code> validator rejects any
+  unknown key. So it cannot be the runtime engine input — the engine stamps
+  <code>template.content.cloneNode</code> and matches on <code>pattern.exec</code>
+  (<code>RouteViewElement.ts:498</code>), both fields the projection drops, and a <code>module</code> field
+  would be rejected outright. #1685 is the serialization/transport contract; the runtime path needs a
+  distinct live route-object shape.
+</p>
+
+<h2>Prior art</h2>
+<p>
+  Across React Router (<code>route.lazy</code>), Vue Router (<code>addRoute</code> +
+  <code>component: () => import()</code>), Angular (<code>loadComponent</code>), TanStack
+  (<code>Route.lazy()</code>) and the platform Navigation API + URLPattern, the lazy import is
+  near-universally <strong>inline on the route</strong> (<code>() => import()</code>), named
+  <code>lazy</code>/<code>component</code>/<code>loadComponent</code>, with the critical loader eager and the
+  non-critical component deferred. Modern matchers rank by <em>specificity</em>, whereas WE matches by
+  <em>declaration order</em> — relevant to the merge-order fork.
+</p>
+
+<h2>What the skeptic pass changed</h2>
+<ul>
+  <li><strong>Fork 1 — REFUTED.</strong> "Reuse the #1685 schema as the runtime input" is broken (drops
+    <code>template</code>, closed keys reject <code>module</code>, and <code>getProviderOf</code>
+    first-found-wins silently shadows the whole route table). Folded: reuse the injector <em>mechanism</em>
+    with a new <code>customContexts:routes</code> key carrying a distinct runtime route-object shape.</li>
+  <li><strong>Fork 2 — SURVIVES-WITH-AMENDMENT.</strong> Drop the <code>customContexts:routeModule</code>
+    name-registry (ceremony); accept an inline <code>() => import()</code> thunk for the JS path + a bare
+    specifier string for the serializable path; rename the attr to <code>route:component</code>.</li>
+  <li><strong>Fork 3 — SURVIVES-WITH-AMENDMENT.</strong> Keep static-first concatenation as the default
+    tiebreak, but add a shadowing diagnostic and require #1720 to ground the disjoint-sets premise / an
+    override use case before ratify.</li>
+</ul>
+
+<h2>The three forks, at a glance</h2>
+<ul>
+  <li><strong>Fork 1 — provider shape.</strong> Reuse the injector-context DI mechanism (new
+    <code>customContexts:routes</code> key, runtime route-object shape carrying a component/template ref) vs a
+    brand-new provider contract. Default: <strong>reuse the mechanism</strong>; the #1685-schema-as-input
+    branch is refuted.</li>
+  <li><strong>Fork 2 — lazy component.</strong> Attr <code>route:component</code>, inline thunk (JS) + bare
+    specifier (DOM), no name-registry, data-loader independent. Default as stated.</li>
+  <li><strong>Fork 3 — merge order.</strong> Static-wins via static-first concatenation + a shadowing
+    diagnostic. Default as stated; #1720 must ground disjointness first.</li>
+</ul>
