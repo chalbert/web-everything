@@ -1727,6 +1727,22 @@ we-filter-chip[selected] {
   border-color: color-mix(in srgb, var(--accent, #1d4ed8) 45%, #fff);
 }
 
+/* #1874: the six Prioritisation summary pills carry a WE-domain semantic background (batchable/agentready/…).
+   That vocabulary stays WE-side (FUI's we-filter-chip is generic), supplied here by the surviving `data-pfilter`
+   hook on BOTH the pre-upgrade `<we-filter-chip>` (SSR baseline, no FOUC) and the upgraded `.fui-filter-chip`
+   <button>. Font-weight + a tinted border land the pressed state legibly over the hard fill. The nested
+   colour-coded sub-count spans are authored inline in the template and survive the transient upgrade. */
+we-filter-chip[data-pfilter],
+.fui-filter-chip[data-pfilter] { font-weight: 700; }
+we-filter-chip[data-pfilter="batchable"], .fui-filter-chip[data-pfilter="batchable"] { background: #166534; color: #fff;     border-color: #166534; }
+we-filter-chip[data-pfilter="agentready"], .fui-filter-chip[data-pfilter="agentready"] { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+we-filter-chip[data-pfilter="sliceable"], .fui-filter-chip[data-pfilter="sliceable"] { background: #ecfeff; color: #155e75;  border-color: #cff5fb; }
+we-filter-chip[data-pfilter="program"],   .fui-filter-chip[data-pfilter="program"]   { background: #e0f2fe; color: #075985;  border-color: #c3e6fb; }
+we-filter-chip[data-pfilter="decision"],  .fui-filter-chip[data-pfilter="decision"]  { background: #fef3c7; color: #92400e;  border-color: #fce7a8; }
+we-filter-chip[data-pfilter="notready"],  .fui-filter-chip[data-pfilter="notready"]  { background: #f1f5f9; color: #475569;  border-color: #e2e8f0; }
+/* The pressed-state ring for a summary pill is set as an inline box-shadow by backlog-table-sort.js
+   (`chip.style.boxShadow`, tag-agnostic) — cleared by clearSummary() — so no class-keyed rule is needed here. */
+
 /* #1785 (family #1599): SSR baseline for the FUI transient `<we-code-view>` the docs server-render.
    Unlike the light-DOM self-replacing pills above, `CodeViewElement` upgrades to a SHADOW root (no slot),
    so the docs server-render the source in light DOM — `<we-code-view><pre><code>…</code></pre>` — and the
