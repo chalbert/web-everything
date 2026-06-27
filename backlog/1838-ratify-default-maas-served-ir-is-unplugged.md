@@ -1,11 +1,14 @@
 ---
 kind: decision
 parent: "1836"
-status: open
+status: resolved
 relatedProject: webplugs
 relatedReport: reports/2026-06-27-unplugged-plug-parity.md
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#maas-serves-self-contained-modules-only"
 preparedDate: "2026-06-27"
 tags: [plugs, unplugged, maas, served-form-invariant]
 ---
@@ -65,6 +68,16 @@ function assertServableForm(entry) {
 ```
 
 **Skeptic: REFUTED-AND-REGROUNDED → SURVIVES.** The prep skeptic (verified against `fui:tools/maas/vite-plugin.mjs`, `fui:tools/maas/functionalServeHandler.mjs:7-11`, `fui:workbench/loader.ts:63-67`) **refuted the original framing**: `unplugged`/`plugged` are not members of the served `form` catalog (it is `react/vue/*-live`), the functional axis is `?variant` on the `/_maas/fn/` route (#1681), and a served module self-registers on import (so "serve the side-effect-free unplugged API" is uncallable across the serve boundary). The fix was not to weaken a default but to **re-ground the decision onto the real seam**: the live, defensible call is the served-form invariant above, which preserves the epic's "default delivery is unplugged" intent while matching how the origin actually works. The re-grounded invariant then survives its own attack — a served plugged form is impossible across `import()`, so the excluded branch is genuinely broken. (Stale reference-handler citations from the first draft were dropped — no such file exists under the `we:blocks/renderers/module-service/` path.)
+
+## Ruling (ratified 2026-06-27)
+
+**Ratified Fork 1a — codify "served = self-contained modules only" as a serve-path invariant.** Every `form`/`variant` the MaaS origin serves must be a module the host imports without host-global patching (self-registers scoped). A plugged/global-patching served form is **incoherent across cross-origin `import()`** (it patches the served module's own realm, not the host's; the host consumes via `createElement`, never reading patched globals — `fui:workbench/loader.ts:63-67`), so it is forbidden, not merely dispreferred. Plugged stays a **consumer-side** entry (`@frontierui/plugs/bootstrap`, imported by the app itself). Plugged-only residue is **marked-and-omitted** (`X-MaaS-Lossy`, `we:servePathIR.ts:57`) and recorded `plugged-only` in the #1839 parity table — never served.
+
+All five grounding citations re-verified against the live tree at ratification: `we:servePathIR.ts` (X-MaaS-Lossy header, catalog-gated `form` with open value-set), `fui:workbench/loader.ts:63-67` (served → `import()` then `createElement`), `fui:plugs/bootstrap.ts` (patches importer's `window.WebEverything`), `fui:tools/maas/functionalServeHandler.mjs` (`?variant=functional|live` on the separate `/_maas/fn/` route, not a `?form=` member), `fui:tools/maas/vite-plugin.mjs` (react/vue wrapper + live forms).
+
+**Red-team — impl-is-not-a-standard (attack failed):** the invariant is a guarantee about the *protocol's wire behavior* that any cross-origin consumer relies on, so it is correctly homed on the neutral serve-path contract (`we:servePathIR.ts`); the FUI serve handlers merely *satisfy* it and host the validator/guard (same contract/subject split as #1467). The principle confirms the WE home rather than challenging it.
+
+**Build:** [#1843](/backlog/1843-make-the-default-maas-served-ir-unplugged/) (open) codifies the invariant onto the serve-path contract + FUI serve handlers. **#1841 reconciliation:** #1841 ("MaaS mode adapter: serve a component plugged or unplugged") was resolved 2026-06-27 to `graduatedTo: none` — the incoherent plugged-serve axis was never shipped, so the reconciliation is moot; its body's "plugged or unplugged" framing is superseded by this ruling (the servable axis is delivery-shape only).
 
 ## Dependencies & lineage
 

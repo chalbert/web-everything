@@ -1064,6 +1064,42 @@ design around it** (e.g. rename a colliding id). No consumer ⇒ no backward-com
 [runtime-DI-seam](#runtime-di-vs-devtools-provider-seam) (the `compilerRegistry` endpoint seam) and
 [constellation-placement](#constellation-placement) (contract+data → WE, serving endpoint → FUI).
 
+### The MaaS origin serves only self-contained modules; plug-mode is a consumer-side axis, never the served form {#maas-serves-self-contained-modules-only}
+
+Plug-mode (global-patching `bootstrap` vs functional) and the MaaS serve catalog are **orthogonal axes**.
+The served catalog is **delivery-shape** only — `?form=react-wrapper|vue-wrapper|react-live|vue-live`
+(`fui:tools/maas/vite-plugin.mjs`) and `?variant=functional|live` on the separate `/_maas/fn/` route
+(`fui:tools/maas/functionalServeHandler.mjs`, #1681); `plugged`/`unplugged` is **not a member of either
+catalog**. The serve-path invariant: **every `form`/`variant` the origin serves must be a self-contained
+module** — imported without patching host globals, self-registering scoped. The host consumes by cross-origin
+`import(servedUrl)` then `document.createElement(tag)` (`fui:workbench/loader.ts:63-67`); the served bytes
+register their own element as an import side effect.
+
+A **plugged / host-global-patching served form is forbidden because it is incoherent**, not merely
+dispreferred (forced-invariant — one branch is mechanically impossible): a module fetched by cross-origin
+`import()` runs in its **own realm**, so its `window`/prototype patches (`fui:plugs/bootstrap.ts` patches the
+importer's `window.WebEverything`) never reach the *host*, and the host's `createElement` path never reads
+patched globals. Plugged therefore stays a **consumer-side** dev entry — the app imports
+`@frontierui/plugs/bootstrap` itself, never over the wire. A genuinely plugged-only capability is
+**marked-and-omitted**, never served plugged: the served module sets `X-MaaS-Lossy`
+(`we:blocks/renderers/module-service/servePathIR.ts:57`) and the parity table records it `plugged-only`
+([#1839](#)). The invariant is a guarantee about the **protocol's wire behavior** (every cross-origin
+consumer relies on it) so it homes on the neutral serve-path contract (`we:servePathIR.ts`), validated by
+the FUI serve handlers/catalog ([impl-is-not-a-standard](#); same contract/subject split as #1467). It
+**constrains what any catalog entry may be**, not a default `form` value (the `form` value-set stays an
+injected catalog the contract deliberately leaves open — [authoring-form-id-distinct-from-consume-wrapper](#authoring-form-id-distinct-from-consume-wrapper)).
+
+**Lineage:** #1838 (ratified 2026-06-27 — Fork 1a; forced-invariant, the plugged-served branch is broken
+across `import()`; skeptic REFUTED-AND-REGROUNDED→SURVIVES [re-grounded the original `?form=plugged` framing
+onto the real seam]; red-team impl-is-not-a-standard FAILED [the invariant is contract-level]; prep
+`we:reports/2026-06-27-unplugged-plug-parity.md`). Parent epic #1836 (W5); build slice #1843. Reconciles
+#1841 (resolved `graduatedTo: none` — the incoherent plugged-serve axis was never shipped). Sub-fork — the
+plugged-only residue bar — delegated to #1839. Sibling of
+[authoring-form-id-distinct-from-consume-wrapper](#authoring-form-id-distinct-from-consume-wrapper) and
+[we-data-crosses-via-fui-served-route](#we-data-crosses-via-fui-served-route) in the MaaS serve cluster;
+instances of [constellation-placement](#constellation-placement) (contract → WE, serving → FUI) and
+[impl-is-not-a-standard](#).
+
 ### A workbench/explorer block may be source-only — relax the host contract, never manufacture an unused live instance {#source-only-workbench-block}
 
 When a host surface (the FUI workbench / block-explorer) wants to present a case whose real content is **emitted source + diagnostics** — a declarative `<component>` author-source case, no imperative element — host it as **exactly what it is**: let the block carry `authorSource`/`cem` with **no runnable `load`/`create`**, and have the shell render the source/CEM panels while **skipping the live-instance panels** (theme/trait/inspect). Do **not** wire a `<component>`→live-element lowering just to manufacture an instance the source panel never reads — the author-source renderer consumes `{name, definition, forms[]}` **data only** (`fui:workbench/authorMode.ts` `renderAuthorModePanel`, gated on `block.authorSource` in `fui:workbench/mount.ts`), so a synthesized instance is coupling no consumer reads (bias-toward-separation; faithful-shape). The relaxation is **additive** — the live-instance path stays mandatory for blocks that have one; a live-declarative-render runtime remains a **separate** capability, filed when a consumer that mounts the declarative case live actually exists. This rule fixes the host **contract** (a block *may* be source-only); the **acquisition mechanism** (hardcoded `WorkbenchBlock` literal vs resolved from the FUI `/_maas/` serve URL) is a distinct axis decided separately.
