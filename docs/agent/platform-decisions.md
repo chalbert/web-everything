@@ -1375,6 +1375,67 @@ values that fail the membership test stay **intent-local tokens** — `progress`
 `neutral | danger` regardless (#1337, non-negotiable). Realized by #1458 (palette + statute) / #1459 (rename
 sweep). Composes [intents-ux-only](#intents-ux-only) (tone is UX-only; the theme owns the hex).
 
+### A component's identity is its semantic element; its look is an orthogonal composable style {#identity-semantic-look-composable}
+
+**A component's *identity* is its semantic element; its *look* is an orthogonal, composable style layer
+applied *to* that element. Visual similarity is never semantic identity.** Two consequences:
+
+1. **Different semantic value ⇒ different element.** A card (`<article>`, a self-contained composition)
+   and a section (`<section>`, a thematic region) have different semantic value → different elements.
+   They may share a *look*; that shared look is a **style**, never a shared element. (The role/variant
+   minting contract restated: *different arrangement → distinct entity; same arrangement, different look
+   → variant* — see [tagname-naming](#tagname-naming)'s "name by semantics, not by uniformity".)
+2. **Native elements are the semantic standards; WE recognizes, it does not re-mint.** Settling thought
+   experiment: *if HTML had no `<article>`/`<section>`, would WE mint standards for them? Yes.* So they
+   are semantic standards the platform already provides — [native-first](#native-first-baseline) means WE
+   builds the orthogonal style layer on top, never wraps a custom element around a sufficient native one.
+
+**The card, as the worked example (#1886).**
+
+- **A card is a root-agnostic structure+style standard**, carrying **no semantic identity of its own** —
+  structure (a titled surface: header/body/footer slots, `fui:blocks/card/Card.ts`) + a tokenized style
+  surface, *applied to* a native-semantic root that supplies the semantics.
+- **`we-card` = the card bound to an `<article>` root** — the declarative convenience: `CardElement
+  extends TransientElement`, `resolveTag(): 'article'` (`fui:blocks/card/CardElement.ts:17-21`), so
+  `<we-card>` is **transient** — it erases to `<article class="fui-card">`. Composition, not subclassing.
+- **A `<section>` that wants the look keeps `<section>` and wears the card *style*** via the named style
+  hook `.fui-card` (`fui:blocks/card/Card.ts:34` `BASE_CLASS`): `<section class="fui-card">`, never
+  hand-rolled bespoke CSS.
+
+**Root polymorphism — intrinsic-yes / extrinsic-author-fiat-no (#1886 Fork 1).** Reject the *extrinsic
+author-fiat* `<we-card as="section|article">` — one custom-element name whose DOM root is chosen by an
+author *override* that can contradict content. It imports React's `as=`, which exists because JSX has no
+element-erasure mechanism; WE already has one (`TransientElement`), so `as=` solves a constraint WE lacks
+— the author just writes the native element + the style hook. **But not** polymorphism *per se*:
+**intrinsic, evidence-based** resolution where the element reads its **own** content to pick its tag is
+**blessed** and already shipped — `ButtonTransientElement.resolveTag()` returns
+`this.hasAttribute('href') ? 'a' : 'button'` (`fui:blocks/button/ButtonTransientElement.ts:17-18`). The
+line is **who chooses the root**: intrinsic evidence (DOM identity follows the element's own content) =
+blessed; extrinsic author-fiat override = rejected.
+
+**Where the look lives — FUI tokenized base + product/flavor values (#1886 Fork 2).** The standard
+three-layer carve: **WE** owns only the *contract* (root-agnostic structure + surface-styleable, no
+values); **FUI** ships the *base* card — structure + behavior + a **tokenized neutral surface** that
+already exists and is already token-driven (`CARD_CSS` = `var(--color-border, …)`, `var(--radius-md, …)`,
+`var(--color-surface-card, …)`, `fui:blocks/card/Card.ts:90-103`), reskinnable by *setting tokens*, never
+forked; **flavor (product layer)** supplies token *values*, composed/authored by the **Plateau
+assembler** (per [managed-offering constellation layering]: standard→WE, primitives→FUI, product→plateau;
+the default ships **zero** flavors). **Hardcoding the look in FUI core is rejected** — it bakes one
+register in, forcing a CSS fork to reskin, defeating the `var(--token, fallback)` indirection already
+shipped. The card surface is one *recipe* of the broader presentation-trait vocabulary (#1884); it ships
+on **plain tokens now** and retrofits to traits later, so #1884 does not block it.
+
+**Lineage:** #1886 (this ruling — both forks ratified 2026-06-27; parent #1287; `relatedReport`
+`reports/2026-06-27-project-include-we-card-migration.md`). Grounds the #1871 catalog-card migration and
+the #1608 frame-swap build. Refines [native-first-baseline](#native-first-baseline) and
+[tagname-naming](#tagname-naming); the Fork-2 carve applies the constellation three-layer split. Sibling
+of [composition-preserves-a11y-contract](#composition-preserves-a11y-contract) (#1832), which governs
+when a *composed variation* of a base block becomes a new component by its **a11y-contract** test —
+adjacent turf, consistent outcome (a section wears the card look as a `<section class="fui-card">`
+re-skin, not by overriding a custom element's root). *Confidence: high — both forks are grounded in
+already-shipped code (`resolveTag`, `CARD_CSS`, `BASE_CLASS`); the prepare-time skeptics survived with
+the intrinsic/extrinsic amendment folded.*
+
 ### Composition preserves the base block's a11y contract; changing it means a new component {#composition-preserves-a11y-contract}
 
 The a11y contract of a block (its roles, focus order, keyboard model, aria surface) is

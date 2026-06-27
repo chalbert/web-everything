@@ -102,9 +102,20 @@ output is the rewritten body, not a message:
    asserted a Fork-2 default, the decision turn wobbled it, and only the ratify-time skeptic recovered it).
    Close it at the source: after authoring each fork's default, **spin up a throwaway skeptic sub-agent
    (prompted *only* to refute — `general-purpose`, default "this default is wrong") and have it attack the
-   recommended branch of every fork, hardest on the high-leverage / high-`gates` ones.** Then **resolve its
+   recommended branch of every fork, hardest on the high-leverage / high-`gates` ones.** The skeptic's
+   prompt **must carry two attack axes, not one**: (1) *merit* — is the default wrong on correctness /
+   composability / a11y / lock-in? and (2) **statute-overlap** (*backlog-workflow.md → Red-team the default
+   → Statute-overlap check*, #1886) — *if this decision will set `codifiedIn`, does the rule it would write
+   collide with or duplicate an anchor already in [platform-decisions.md](../../../docs/agent/platform-decisions.md)
+   governing the same turf by a different test?* Draft the codified claim, grep `platform-decisions.md` for
+   same-subject anchors, and have the skeptic try to find the collision — the axis whose miss is
+   un-recoverable downstream (a statute conflict found at *resolve* lands after the human has ratified, when
+   the call is immutable and the only honest move is a new reconciliation item; prep is the last cheap fix).
+   Then **resolve its
    findings into the item before stamping**: REFUTED → flip the default + rewrite the rationale; SURVIVES →
-   record the surviving rationale (the attack it beat); SURVIVES-WITH-AMENDMENT → fold the amendment in.
+   record the surviving rationale (the attack it beat); SURVIVES-WITH-AMENDMENT → fold the amendment in;
+   **statute overlap found → reconcile it in the item now** (cite the sibling anchor, state how the two rules
+   compose) so ratification never inherits an unreconciled conflict.
    The durable output is a one-line **`Skeptic: <verdict + what changed>`** note under each `## Fork N`, so
    the decision turn sees an already-attacked default, not a raw assertion. Never leave a bare "flag for the
    skeptic" marker — running it *is* prep's job. (The decision-turn red-team in *backlog-workflow.md* stays,
