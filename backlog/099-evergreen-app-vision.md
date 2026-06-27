@@ -34,3 +34,4 @@ Each part already has (or is getting) its own item, but the *value* is the loop:
 
 - Is "evergreen" a **maturity rating** an app earns (a dashboard score: how much updates without intervention), a **protocol/conformance tier**, or just a vision label? Recommendation: start as a vision + a dashboard score (#092/#104), graduate to a tier only if it proves measurable.
 - The hardest unsolved piece is **requirement-as-code → automatic verification** (#100/#095); everything else (versioning, delivery, upgraders) is comparatively tractable. Sequence the vision around closing that gap.
+- **Un-itemized essay ideas** (from `we:reports/2026-06-06-front-end-platform-book.md`, not yet carved into items): form controls, notifications, container-query responsive, logging/tracking, nomenclature/import standards. Mine into backlog items as the vision is worked. *(Breadcrumb right-homed here from a personal-memory reference, 2026-06-27, #1881.)*

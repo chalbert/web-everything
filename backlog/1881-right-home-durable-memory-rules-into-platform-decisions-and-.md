@@ -2,9 +2,11 @@
 kind: story
 size: 5
 parent: "1855"
-status: open
+status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: "audit: no bulk pass (memories carry nuance); 1 worked right-home (specimen → #099 + repo, orphan deleted); ongoing trickle via #1878 reflect cadence"
 tags: [memory, right-home, platform-decisions, context, model-usage-watch]
 ---
 
@@ -42,6 +44,10 @@ Action: **no deletions taken.** Recommend re-scoping #1881 from "bulk right-home
 2. **Prune** genuinely stale/superseded memories (rule 3) — surfaced each close-out by `npm run reflect` (#1878).
 
 Expected reclaim is **modest** (a few hundred bytes to ~1–2 KB), not a structural shrink — the test proved the big lever doesn't exist. Lower-priority, incremental; no bulk pass.
+
+## Resolved 2026-06-27
+
+Investigation complete; conclusion is **no bulk right-home pass exists** (the audit refuted it — memories carry nuance beyond canon). One concrete right-home was done as the worked example: the `reference_front_end_platform_book` memory (the #1868 recall specimen) — its content was confirmed fully present in `we:reports/2026-06-06-front-end-platform-book.md` + #099, the unique un-itemized-ideas breadcrumb was preserved into #099, then the orphan memory was deleted (clearing the `check:memory` gate-red). **Ongoing incremental right-home/prune now flows through the close-out reflection cadence ([#1878](/backlog/1878-close-out-as-memory-instruction-self-improvement-loop/), `npm run reflect`)** — there is no standalone bulk task left, so this card closes rather than lingering as perpetual low-priority work.
 
 ## Boundaries
 
