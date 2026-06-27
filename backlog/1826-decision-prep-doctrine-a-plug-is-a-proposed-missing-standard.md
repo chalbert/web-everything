@@ -1,11 +1,14 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: "docs/agent/platform-decisions.md#native-first-baseline"
 preparedDate: "2026-06-27"
 relatedReport: reports/2026-06-27-plug-as-proposed-standard-doctrine.md
 relatedProject: webplugs
+codifiedIn: docs/agent/platform-decisions.md#native-first-baseline
 tags: [plugs, polyfill, ponyfill, prollyfill, extensible-web, native-first, doctrine, decision-prep]
 ---
 
@@ -61,6 +64,15 @@ grounding, traced to the real tree:
 | 1 · The doctrine | Adopt the dual plugged/unplugged posture as a **standing rule**? | **Yes — forced invariant** (a single forced choice sacrifices either safety-today or the upstream proposal) | high |
 | 2 · Partition | How does this divide from `#native-first-baseline`? | **Per-layer present-vs-absent** against the shipping platform (decompose, then classify each layer) | high |
 | 3 · Codification | Where does the rule live? | **Corollary under `#native-first-baseline`** + a prep-lens paragraph in `we:docs/agent/backlog-workflow.md` | med-high |
+
+## Ratified ruling (2026-06-27)
+
+**Ratified as prepared** (discussed + red-teamed across the #1807 conversation; the "renames #606 / contradicts the floor statute" attack failed on altitude + the single-substrate guardrail). All three forks resolve to their bold defaults:
+- **Fork 1 — dual posture as a standing rule** (forced invariant): every elemental-but-missing capability is framed unplugged(safe-now) + plugged(proposed-standard) over one single-substrate contract.
+- **Fork 2 — per-layer present-vs-absent partition** against the shipping platform (decompose, then classify each layer); spec-maturity rejected as the boundary.
+- **Fork 3 — fold a corollary under `#native-first-baseline`** (not a sibling anchor) + a standing-lens paragraph in `we:docs/agent/backlog-workflow.md`.
+
+**codifiedIn:** the *plug-as-proposed-standard* corollary under `we:docs/agent/platform-decisions.md#native-first-baseline` + the standing-lens paragraph in `we:docs/agent/backlog-workflow.md`. First application: #1807 (`blockedBy` this — now unblocked).
 
 ## Fork 1 — Adopt the dual plugged/unplugged posture as a standing rule
 

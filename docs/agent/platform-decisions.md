@@ -637,7 +637,7 @@ toolchain reach (#127).
 > `{{ }}` / `[[ ]]` expression-binding layer (`webexpressions`) already exists — reuse its grammar,
 > not a new runtime.
 
-**Lineage:** #039 #040 #042 #043 #044 #045 #046 #047 #074 #082 #084 #127 #792 #854.
+**Lineage:** #039 #040 #042 #043 #044 #045 #046 #047 #074 #082 #084 #127 #792 #854 · #853 (default-aria-*) · #1807 (DC-14 custom states — `states=` declarative surface + per-instance toggle, delivered plugged/unplugged via the custom-states plug per #1826).
 
 ### Compose an existing trait — don't hand-roll a covered pattern {#compose-dont-handroll}
 
@@ -812,6 +812,10 @@ abstract base) must not **mandate** a method the platform omits — relax the re
 `CustomElementRegistry` surface); #1350 (the corollary at the shared `Plug` contract — `isPlug`/`HTMLRegistry`
 drop the `downgrade` *requirement*, `downgrade?` optional; build #1413). Mirrors `AGENTS.md` rule 6 + the
 native-first authoring default.
+
+**Plug = a proposed missing standard; unplugged = safe-now (corollary).** The floor rule above governs capabilities the platform *has* (assume present; below-floor is out of scope). Its mirror is the capability **elemental to web applications but absent from every spec**. WE can neither wait for standards bodies nor force adoption, so it ships **two postures over one contract**: **unplugged** — safe-today usage of only what the platform ships, non-invasive and enforcement-free (the supported product surface, #606); **plugged** — the *proposed standard materialized as runnable code* (the prollyfill / upstream candidate, carrying enforcement + polyfill). This is the Extensible Web Manifesto move (expose primitives, prototype in JS, standardize what wins); the ecosystem already names the split — **ponyfill** (non-global, side-effect-free) = unplugged, **polyfill / prollyfill** (global; a not-yet-standardized API) = plugged. **Guardrail (what reconciles this with the single-substrate floor):** the *contract* stays single-substrate — plugged/unplugged is a **delivery+enforcement** axis over one contract (enforcement-on vs enforcement-off, the `--strict` analogy), **not** two native-vs-shimmed contracts; and the plugged impl is still implementation (→ Frontier UI), never a `@webeverything` standard artifact (#606). So "plugged = the proposed standard" names the impl's *upstream-candidate role* — it does not make the polyfill a standard, and the floor rule is preserved. **Partition grain:** decompose a capability into layers and classify **each layer** present-vs-absent against a shippable browser — a present layer → native (this floor); a layer absent from every spec → the plug. (#1807 is the worked example: `:state()`/`CustomStateSet` primitive present → native; the custom-state *declaration/validation* layer absent from every spec → plugged.) The `/prepare` lens that applies this at decision time lives in [backlog-workflow.md](backlog-workflow.md).
+
+**Lineage:** #606 (unplugged-is-product / plugged-is-POC; plug impl → FUI) generalized into this corollary; #1826 (the doctrine decision); #1807 (first application). Prior art: the ponyfill / polyfill / prollyfill triad + the Extensible Web Manifesto.
 
 ### Shape a new contract's surface by platform idiom, not capability {#contract-surface-platform-idiom}
 
