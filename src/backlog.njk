@@ -11,7 +11,7 @@ title: Backlog
 
 <style>
 .backlog-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--color-border); margin: 0 0 1.5rem; }
-.backlog-tab { appearance: none; background: none; border: none; border-bottom: 2px solid transparent; padding: 0.6rem 1rem; font: inherit; font-weight: 600; color: var(--color-text-muted, #475569); cursor: pointer; margin-bottom: -1px; }
+.backlog-tab { appearance: none; background: none; border: none; border-bottom: 2px solid transparent; padding: 0.6rem 1rem; font: inherit; font-weight: 600; color: var(--color-text-muted, #475569); text-decoration: none; cursor: pointer; margin-bottom: -1px; }
 .backlog-tab:hover { color: var(--color-text); }
 .backlog-tab.is-active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
 .bd-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; }
@@ -90,12 +90,14 @@ title: Backlog
 </section>
 
 <div class="backlog-tabs" role="tablist" aria-label="Backlog views">
-    <button type="button" class="backlog-tab is-active" role="tab" aria-selected="true" aria-controls="panel-tracked" id="tab-tracked" data-bd-tab="tracked">Tracked work</button>
-    <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-active" id="tab-active" data-bd-tab="active">Active work{% if backlog.activeWork.count %} <span class="count-badge">{{ backlog.activeWork.count }}</span>{% endif %}<span id="active-tab-live" hidden style="margin-left:0.4rem; display:inline-flex; align-items:center; gap:0.3rem; color:#16a34a; font-weight:700; font-size:0.8em;"><span style="width:8px; height:8px; border-radius:50%; background:#16a34a; animation:active-pulse 1.4s infinite;"></span><span id="active-tab-live-n"></span> live</span></button>
-    <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-priority" id="tab-priority" data-bd-tab="priority">Prioritisation</button>
-    <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-humansetup" id="tab-humansetup" data-bd-tab="humansetup">Human setup</button>
-    <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-graph" id="tab-graph" data-bd-tab="graph">Graph</button>
-    <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-burndown" id="tab-burndown" data-bd-tab="burndown">Burndown</button>
+    {# Tabs are real anchors to the view's hash URL so ⌘/Ctrl/middle-click opens it in a new browser
+       tab (a <button> has no URL to open). JS intercepts plain left-click for in-page switching. #}
+    <a href="#tracked" class="backlog-tab is-active" role="tab" aria-selected="true" aria-controls="panel-tracked" id="tab-tracked" data-bd-tab="tracked">Tracked work</a>
+    <a href="#active" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-active" id="tab-active" data-bd-tab="active">Active work{% if backlog.activeWork.count %} <span class="count-badge">{{ backlog.activeWork.count }}</span>{% endif %}<span id="active-tab-live" hidden style="margin-left:0.4rem; display:inline-flex; align-items:center; gap:0.3rem; color:#16a34a; font-weight:700; font-size:0.8em;"><span style="width:8px; height:8px; border-radius:50%; background:#16a34a; animation:active-pulse 1.4s infinite;"></span><span id="active-tab-live-n"></span> live</span></a>
+    <a href="#priority" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-priority" id="tab-priority" data-bd-tab="priority">Prioritisation</a>
+    <a href="#humansetup" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-humansetup" id="tab-humansetup" data-bd-tab="humansetup">Human setup</a>
+    <a href="#graph" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-graph" id="tab-graph" data-bd-tab="graph">Graph</a>
+    <a href="#burndown" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-burndown" id="tab-burndown" data-bd-tab="burndown">Burndown</a>
 </div>
 
 <div id="panel-tracked" role="tabpanel" aria-labelledby="tab-tracked">
@@ -297,7 +299,7 @@ title: Backlog
             <span class="aw-vital" style="background:#ede9fe; color:#6d28d9; border-color:#ddd6fe;"><span class="n">{{ v.preparing }}</span> preparing</span>
             <span class="aw-vital" style="background:#fef3c7; color:#92400e; border-color:#fde68a;"><span class="n">{{ v.deciding }}</span> deciding</span>
             <span class="aw-vital" style="background:#ecfeff; color:#155e75; border-color:#a5f3fc;"><span class="n">{{ v.slicing }}</span> slicing</span>
-            <span class="aw-vital" style="background:#eef2ff; color:#3730a3; border-color:#c7d2fe;"><span class="n">{{ v.batching }}</span> batching{% if v.batches %} <span style="opacity:0.7;">({{ v.batches }})</span>{% endif %}</span>
+            <span class="aw-vital" style="background:#eef2ff; color:#3730a3; border-color:#c7d2fe;"><span class="n" id="aw-vital-batching-n">{{ v.batching }}</span> batching{% if v.batches %} <span style="opacity:0.7;">({{ v.batches }})</span>{% endif %}</span>
             <span class="aw-vital" style="background:#dcfce7; color:#166534; border-color:#bbf7d0;"><span class="n">{{ v.building }}</span> building</span>
             {% if v.programs %}<span class="aw-vital" style="background:#e0f2fe; color:#075985; border-color:#bae6fd;"><span class="n">{{ v.programs }}</span> programs</span>{% endif %}
             <span id="aw-vital-workflows" class="aw-vital" hidden style="background:#dbeafe; color:#1e40af; border-color:#bfdbfe;"><span class="aw-lane-dot" style="background:#1e40af; animation:active-pulse 1.4s infinite;"></span><span class="n" id="aw-vital-workflows-n"></span> workflows live</span>

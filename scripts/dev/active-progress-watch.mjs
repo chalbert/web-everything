@@ -212,7 +212,7 @@ function digestSession(jsonlPath) {
   try { text = readFileSync(jsonlPath, 'utf8'); } catch { return null; }
   const owned = new Set();
   const steps = [];
-  let currentTodo, lastTool, lastLine;
+  let currentTodo, lastTool, lastLine, sessionBatch;
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     let ev;
@@ -227,6 +227,11 @@ function digestSession(jsonlPath) {
           while ((m = BACKLOG_VERB_RE.exec(b.input.command))) {
             if (m[1] === 'claim') owned.add(m[2]); else owned.delete(m[2]);
           }
+          // A /batch session stamps its slug via `backlog.mjs reserve … --session=batch-…`. Capture it so
+          // the items this session works can be grouped under their batch — the claim itself doesn't tag
+          // the item (reservedBy only covers the still-open PLANNED holds), so this is the live link.
+          const bm = b.input.command.match(/backlog\.mjs\s+reserve\b[^\n;|&]*--session=(batch-[\w-]+)/);
+          if (bm) sessionBatch = bm[1];
         }
         if (b.name === 'TodoWrite' && b.input && Array.isArray(b.input.todos)) {
           const ip = b.input.todos.find((t) => t.status === 'in_progress');
@@ -238,7 +243,7 @@ function digestSession(jsonlPath) {
     }
     for (const s of eventSteps(ev)) { steps.push(s); if (steps.length > STEP_LIMIT) steps.shift(); }
   }
-  return { ownedNums: [...owned], currentTodo, lastTool, lastLine, steps };
+  return { ownedNums: [...owned], currentTodo, lastTool, lastLine, steps, sessionBatch };
 }
 
 // num → live digest, from every recent top-level session transcript (cached on mtime). A num owned by
@@ -261,7 +266,7 @@ function sessionDigests() {
     for (const num of d.ownedNums) {
       const prev = out[num];
       if (prev && prev.updatedAt >= updatedAt) continue; // keep the most recently active session
-      out[num] = { sessionId: sessionId.slice(0, 8), currentTodo: d.currentTodo, lastTool: d.lastTool, lastLine: d.lastLine, steps: d.steps || [], updatedAt };
+      out[num] = { sessionId: sessionId.slice(0, 8), currentTodo: d.currentTodo, lastTool: d.lastTool, lastLine: d.lastLine, steps: d.steps || [], batch: d.sessionBatch, updatedAt };
     }
   }
   return out;

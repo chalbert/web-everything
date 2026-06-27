@@ -147,8 +147,13 @@
 
   // Overlay each active item's live session digest onto its lane row (matched by num): current todo,
   // last action, and an expandable step stream — the live "chat progress" for non-workflow work.
+  var vitalBatchN = document.getElementById('aw-vital-batching-n');
+
   function applyDigests(digests) {
     lastDigests = digests;
+    // Count active items currently linked to a batch (the live session→batch link), so the batching vital
+    // reflects what's actually being worked in a batch now — not just the build-time open reservations.
+    var liveBatched = 0;
     var rows = document.querySelectorAll('[data-digest-for]');
     for (var i = 0; i < rows.length; i++) {
       var el = rows[i];
@@ -156,6 +161,9 @@
       var d = digests && digests[num];
       if (!d) { el.hidden = true; el.innerHTML = ''; continue; }
       var h = '';
+      // Batch membership (live link) — the session working this item belongs to a /batch run. Shown as a
+      // badge so "which work is part of which batch" holds even though the claim didn't tag the item.
+      if (d.batch) { liveBatched++; h += '<span style="display:inline-block; align-self:flex-start; padding:0.05rem 0.45rem; margin-bottom:0.2rem; border-radius:9999px; font-size:0.72em; font-weight:700; background:#eef2ff; color:#3730a3; border:1px solid #c7d2fe;">⊘ ' + esc(d.batch) + '</span>'; }
       if (d.currentTodo) h += '<span class="now">▸ ' + esc(d.currentTodo) + '</span>';
       var meta = [];
       if (d.lastTool) meta.push('last: ' + esc(d.lastTool));
@@ -172,6 +180,12 @@
       }
       el.innerHTML = h;
       el.hidden = !h;
+    }
+    // Reflect live batch membership in the batching vital (max of build-time reservations + live link).
+    if (vitalBatchN) {
+      var base = parseInt(vitalBatchN.getAttribute('data-base') || vitalBatchN.textContent, 10) || 0;
+      if (!vitalBatchN.getAttribute('data-base')) vitalBatchN.setAttribute('data-base', base);
+      vitalBatchN.textContent = Math.max(base, liveBatched);
     }
   }
 
