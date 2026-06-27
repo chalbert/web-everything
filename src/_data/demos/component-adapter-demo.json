@@ -5,7 +5,8 @@
   "kind": "playground",
   "description": "<h2>Concept</h2><p>This playground exercises the <a href=\"/blocks/component/\"><code>&lt;component&gt;</code></a> standard and its intended implementation, the <a href=\"/adapters/declarative-component/\">Declarative Component adapter</a>. For each definition it shows three panes: the authored <strong>declarative source</strong>, the <strong>generated class</strong> the deterministic build-time transform would emit, and a <strong>live element</strong> registered from that definition — then checks that the rendered shadow/light tree equals the authored template (pass/fail badge).</p><h3>Test your own</h3><p>The editable sandbox parses a <code>&lt;component&gt;</code> definition plus its usage, emits the class, registers the element under a unique tag (so repeated runs with edits work), and renders it live.</p><h3>Scope</h3><p>Runs the <em>runtime twin</em> of the build-time AST transform so it can be exercised in a browser — tier 1: static template, slots, and shadow modes (open/closed/none). Reactive bindings and scoped registration are tier-2 and compose with other standards later.</p>",
   "status": "draft",
-  "liveUrl": "http://localhost:3000/demos/component-adapter-demo.html",
+  "fuiDemoFile": "component-adapter-demo.html",
+  "fuiDemoHeight": 720,
   "projects": [
     "webcomponents",
     "webadapters"

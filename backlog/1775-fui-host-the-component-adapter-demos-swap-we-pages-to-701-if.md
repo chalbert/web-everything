@@ -3,9 +3,11 @@ kind: story
 size: 5
 parent: "1353"
 blockedBy: []
-status: open
+status: resolved
 dateOpened: "2026-06-24"
-dateStarted: "2026-06-24"
+dateStarted: "2026-06-26"
+dateResolved: "2026-06-27"
+graduatedTo: 1353
 relatedProject: webblocks
 tags: [frontierui, demos, renderers, fui-build-gate]
 ---
@@ -62,3 +64,28 @@ self-bootstrapping `fui:demos/component-adapter-demo` (the only pure-component d
 moment its FUI host exists), relocate `declarativeComponent.test` (→ FUI / conformance → Plateau), and
 delete the WE runtime renderer; the 3 mixed demos swap with their family relocations.
 Released `active → open`.
+
+## Progress (batch-2026-06-26-1745-1775)
+
+Blockers (#1730/#1777/#1778/#1779) all resolved → the kernel-delete tail executed for the pure-`component`
+demo (the 3 mixed demos swap with their own family relocations, out of scope here). #1767 made FUI's
+`fui:blocks/renderers/component/declarativeComponent.ts` canonical, and the runtime tests were already
+relocated to FUI — so the WE copies were stale duplicates.
+- `fui:demos/component-adapter-demo.{ts,html,css}` — the self-bootstrapping FUI host (verbatim port; the
+  import paths `/demos/playground-harness`, `/blocks/renderers/component/declarativeComponent`,
+  `/blocks/renderers/component/__fixtures__/component-cases` resolve identically in FUI, which already ships
+  all three).
+- `we:src/_data/demos/component-adapter-demo.json` — swapped to a #701 `fuiDemoFile` iframe (FUI-hosted,
+  sandboxed; WE never imports the app's component code — the #700/#701 boundary). Dropped the WE `liveUrl`.
+- **Deleted from WE** (impl→FUI, #1282/#1467): `we:blocks/renderers/component/declarativeComponent.ts` (+ its
+  build-artifact maps), the stale `we:blocks/__tests__/unit/renderers/declarativeComponent.test.ts` + `we:blocks/__tests__/unit/renderers/autoDefine.test.ts` duplicates (FUI holds
+  the canonical relocated `fui:blocks/__tests__/unit/renderers/declarativeComponent.test.ts` + `fui:blocks/__tests__/unit/renderers/autoDefineRegistry.test.ts`), and the WE-hosted
+  `component-adapter-demo.{ts,html,css}` (replaced by the iframe).
+- **Kept** `we:blocks/renderers/component/__fixtures__/component-cases.ts` — the `<component>` conformance
+  vectors WE owns (#1467); inlined its `ShadowMode` type so the vectors stand alone (no import from the
+  deleted runtime).
+
+Gate: WE `check:standards` 0 errors (scoped); WE renderer vitest 241 pass (the deleted duplicates gone, no
+orphan import); 11ty build clean (the demo page now iframes the FUI host); FUI `check:standards` baseline-
+steady (34); FUI demo tsc clean. The non-`component` renderer families (moduleService/upgrader/functional)
+remain their own relocation tails.

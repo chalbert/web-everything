@@ -5,8 +5,14 @@
  * Deliberately SEPARATE from the JSX mapping fixtures: the invariant differs. JSX proves two-way
  * equivalence/round-trip (HTML ⇄ JSX); `<component>` proves ONE-WAY lowering fidelity (definition →
  * class → rendered tree). See reports/2026-06-03-declarative-component-element.md.
+ *
+ * These cases ARE the `<component>` conformance vectors WE keeps (#1775 / #1467 — WE keeps the contract +
+ * vectors, the runtime renderer is FUI's). The `ShadowMode` vocabulary is inlined here (not imported from
+ * the now-deleted WE runtime `declarativeComponent.ts`) so the vectors stand alone as build-agnostic data.
  */
-import type { ShadowMode } from '../declarativeComponent';
+
+/** The `attachShadow` mode a `<component>` declares — `open`/`closed` shadow root, or `none` (light DOM). */
+export type ShadowMode = 'open' | 'closed' | 'none';
 
 export interface ComponentCase {
   id: string;
