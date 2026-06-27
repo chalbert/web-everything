@@ -1,11 +1,14 @@
 ---
 kind: decision
 parent: "1836"
-status: open
+status: resolved
 relatedProject: webplugs
 relatedReport: reports/2026-06-27-unplugged-plug-parity.md
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: "docs/agent/platform-decisions.md#plugged-only-residue-bar"
+codifiedIn: "docs/agent/platform-decisions.md#plugged-only-residue-bar"
 preparedDate: "2026-06-27"
 tags: [plugs, unplugged, parity, residue, conformance]
 ---
@@ -70,7 +73,45 @@ function isPluggedOnly(api) {
 //   -> isPluggedOnly = false  (works unplugged; mark `works` or `works-with-caveat`)
 ```
 
-**Skeptic: SURVIVES-WITH-AMENDMENT** — the attack (verified against `fui:plugs/webcontexts/Node.contexts.patch.ts:52-70`) found the original binary test misclassified the transparent-`createElement` case: its *capability* ports via WeakMap, so `!reproducibleViaWeakMap` was `false` and the bar stamped it `works` — yet its headline value (drop-in interception) is genuine residue, the same mechanism the item calls residue for webinjectors. Amendment folded in: **clause (ii) tests *contract*-portability, not *capability*-portability** (option (a) rewritten) — a capability with a portable kernel but an un-portable transparent-interception contract is residue. This also closes the "everything ports via `upgrade()`+WeakMap, residue is near-empty" attack: the discriminator is whether the *observable contract* (including transparency) survives the port, not whether the bare verb can be re-expressed. Discharged by evidence (the declaration cites which unowned global + why no handle reaches it; #1840 re-audit attempts the port). The original "cite-the-global note" amendment was *insufficient* on its own and is subsumed by the contract-vs-capability fix.
+### Worked example — the `createElement` residue, both sides
+
+This is the canonical residue case, pushed to the API surface. The plugged `createElement` patch is **not standalone** — it is one node in a web of cooperating prototype patches that propagate an *ambient injection context*:
+
+- **Insertion patches set the ambient injector:** `InjectorRoot.creationInjector = this.getClosestInjector()` runs inside patched insertion methods (`fui:plugs/webcomponents/Element.insertion.patch.ts:144`, `fui:plugs/core/utils/pathInsertionMethods.ts:188`).
+- **The `createElement` patch reads it:** every `document.createElement(...)` tags its result into `creationInjectors` (`fui:plugs/webinjectors/Node.injectors.patch.ts:88-94`, a `WeakMap<Node, HTMLInjector>`).
+- **`getClosestInjector()` consults it as the last-resort fallback** for nodes with no tree position (`fui:plugs/webinjectors/Node.injectors.patch.ts:175`).
+
+**Plugged** — zero call-site changes, works on code the plug does not own:
+
+```js
+// Anywhere — including inside a third-party lib, a framework render fn, a templating engine:
+const el = document.createElement('div');   // native call; plug holds NO handle, gets NO callback
+
+// el is still detached — never inserted into any tree:
+el.getClosestInjector();                     // ✅ returns the injector ambient at creation time
+                                             //    (via the creationInjectors WeakMap fallback)
+```
+
+**Unplugged** — the functional API is root-walking (`fui:plugs/unplugged.ts`: `register`/`upgrade(root)`; `fui:plugs/webinjectors/InjectorRoot.ts:474` observes `document.body` with `childList`):
+
+```js
+register(injectors);
+upgrade(root);                  // walks an ATTACHED root's existing tree, tags what it finds
+
+// To get creation context you must call the plug's own factory (the PROPOSED port — not built yet, #1840):
+const el = injectorScopedCreate(injector, 'div');   // ✅ capability reproduced: WeakMap-keyed, no prototype touched
+```
+
+**What is genuinely impossible unplugged** (the residue). The *capability* ports cleanly (`injectorScopedCreate` + WeakMap). Two slices of the *contract* do not, and are irreducibly residue:
+
+1. **Transparent capture on call-sites the plug doesn't own.** A bare `document.createElement('div')` written inside a third-party library or framework internals — code you cannot edit to call `injectorScopedCreate` — cannot participate. The only way to intercept it is to patch native `Document.prototype.createElement`. **There is no standard "element constructed" hook** — this is the genuinely-missing platform primitive.
+2. **Detached-node creation context.** The context must be associated *synchronously at construction*, on a node that may never be inserted. Both candidate substitutes fail: `MutationObserver` observes **insertions** (`childList`), **asynchronously** — it never sees a detached, never-inserted node and can't answer a synchronous `getClosestInjector()`; `upgrade(root)` only walks **attached** trees, so a detached node is invisible to it by construction.
+
+So the residue is not "createElement" the verb — it is **transparent ambient-context propagation across unowned construction**, and the missing standard is a *construction/insertion lifecycle hook*. The webcontexts `Node.prototype.createElement` case (`fui:plugs/webcontexts/Node.contexts.patch.ts:52-70`) is the **same mechanism** (it adds `createElement` to `Node.prototype`, which is not even a standard method) → same verdict.
+
+**Refinement folded into the bar (from this dig):** the residue declaration must **name which native hook is missing** (here: a construction/insertion lifecycle observer), not just "patches `createElement`". That is what keeps the verdict auditable and *falsifiable as the platform evolves* — if the platform ever ships a creation observer, the capability moves **out** of residue and the mechanical test (a) notices, where an allowlist (c) would not.
+
+**Skeptic: SURVIVES-WITH-AMENDMENT** — the attack (verified against `fui:plugs/webcontexts/Node.contexts.patch.ts:52-70`) found the original binary test misclassified the transparent-`createElement` case: its *capability* ports via WeakMap, so `!reproducibleViaWeakMap` was `false` and the bar stamped it `works` — yet its headline value (drop-in interception) is genuine residue, the same mechanism the item calls residue for webinjectors. Amendment folded in: **clause (ii) tests *contract*-portability, not *capability*-portability** (option (a) rewritten) — a capability with a portable kernel but an un-portable transparent-interception contract is residue. This also closes the "everything ports via `upgrade()`+WeakMap, residue is near-empty" attack: the discriminator is whether the *observable contract* (including transparency) survives the port, not whether the bare verb can be re-expressed. Discharged by evidence (the declaration cites which unowned global + why no handle reaches it, **and names the missing platform hook** the residue stands in for — see the `createElement` worked example above; #1840 re-audit attempts the port). The original "cite-the-global note" amendment was *insufficient* on its own and is subsumed by the contract-vs-capability fix.
 
 ## Fork 2 — the parity table's state vocabulary
 
@@ -103,6 +144,10 @@ Code shape — the 3-state mark as a per-API-member `parity` block in an **FUI-o
 ```
 
 **Skeptic: SURVIVES-WITH-AMENDMENT (vocabulary survives; locus flipped).** Two attacks. (1) "`works-with-caveat` is a slippery slope" — *refuted*: the middle is bounded by Fork 1's contract line (a difference is a *caveat* only if the capability genuinely `works` unplugged; a contract-breaking difference is `plugged-only`; an invisible difference is `works`), and the mandatory note is the forcing function — a caveat you can't state in one line isn't one. (2) "storing parity on WE `src/_data/plugs/` violates contract-vs-impl" — *sustained* and folded in: the verdict is a measured FUI-runtime fact (the audit defines it as test coverage; the caveat note describes FUI internals), so the original WE-storage default was a #1282 zero-impl leak. Default flipped to **FUI-owned `fui:plugs/webbehaviors/parity.json`**, WE keeps at most a type-only schema (option (c) now the rejected branch). The 3-state vocabulary + mandatory-note discipline are unchanged.
+
+## Ruling (ratified 2026-06-27)
+
+Both forks ratified as recommended. **Fork 1:** the strict mechanical bar over *contract*-portability (plugged-only ⟺ unowned-global interception **and** the observable contract — including transparency — does not survive a WeakMap port); declarations must name the missing platform hook. **Fork 2:** 3-state `works` / `works-with-caveat` (mandatory note) / `plugged-only`, stored **FUI-side**, WE type-only. Codified into the statute layer at `we:docs/agent/platform-decisions.md#plugged-only-residue-bar`. Surfaced a follow-on build idea — a **diagnostic/probe mode** (zero-behaviour-change instrumentation over the residue surface that logs when unowned code hits a plugged-only path under unplugged) — filed as its own card under #1836.
 
 ## Dependencies & lineage
 

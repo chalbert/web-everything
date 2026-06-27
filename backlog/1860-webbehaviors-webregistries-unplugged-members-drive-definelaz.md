@@ -3,17 +3,17 @@ kind: story
 size: 3
 parent: "1836"
 status: open
-blockedBy: ["1839"]
+blockedBy: ["1545"]
 dateOpened: "2026-06-27"
 tags: []
 ---
 
-> **Pre-flight (batch-2026-06-27) — re-pointed `blockedBy: ["1839"]`; build-vs-residue disposition is forked.**
-> The two members can't be cleanly built now: the webregistries root `customElements` swap is **separately
-> disabled and human-gated** (#1545 `humanGate: setup`, #1483), so its unplugged-drive branch is blocked on
-> re-enabling that swap; and the alternative — "record them plugged-only residue" — needs the **plugged-only
-> residue bar #1839 decides** (still open, Tier B ready-to-ratify). Either branch waits on #1839's ruling, so
-> this is `blockedBy: ["1839"]` (was unset). Not a clean batch pickup until the residue bar lands.
+> **Pre-flight (batch-2026-06-27, updated 2026-06-27 — #1839 ruling landed) — build-vs-residue disposition is forked.**
+> The residue bar #1839 decides has **resolved** (`we:docs/agent/platform-decisions.md#plugged-only-residue-bar`),
+> so the "record them plugged-only residue" branch is now actionable: apply the strict contract-portability bar
+> and mark accordingly. The **unplugged-drive** branch still waits on the webregistries root `customElements`
+> swap, which is **separately disabled and human-gated** (#1545 `humanGate: setup`, #1483) — so `blockedBy` is
+> re-pointed to **#1545** (the real remaining open dependency for the build path). Pick the branch per #1839's bar.
 
 # webbehaviors + webregistries unplugged members — drive defineLazy/trait-manifest and root-registry swap via the unplugged register/upgrade API, or record plugged-only
 
