@@ -1,0 +1,113 @@
+{% raw %}
+<h2>Question</h2>
+<p>
+  Prep survey for decision
+  <a href="/backlog/1816-conformance-model-for-non-facts-verdict-relocated-runtimes/">#1816</a> (parent
+  <a href="/backlog/1294-relocate-we-resident-logic-reference-runtimes/">#1294</a>), the non-engine
+  complement of the resolved facts→verdict KIT
+  <a href="/backlog/1784-conformance-kit-for-the-facts-verdict-relocated-engines/">#1784</a>. The #1294
+  relocation cascade proves conformance with the #899/#1789 <em>interaction-script</em> vector model — a
+  binding is driven (<code>dispatch(step)</code>) and a typed surface read (<code>observe(surface)</code>),
+  judged against <code>expect</code>. Four relocated <strong>non-engine</strong> runtimes produce output
+  that is <strong>not a verdict</strong>: webtheme token-projection (DTCG → resolved map, #404), intl
+  formatting (native <code>Intl.*</code> instances → locale strings), analytics aggregation, and
+  reliability provider-strategy (a typed <code>RecoveryResult</code>). How do they prove conformance
+  through the plateau-hosted runner?
+</p>
+
+<h2>The headline finding — the model is not verdict-locked, and a second shape already exists</h2>
+<p>
+  Two load-bearing facts in the real tree dissolve most of the apparent fork:
+</p>
+<ul>
+  <li>
+    <strong>The interaction-script <code>expect</code> is already open-ended.</strong>
+    <code>ConformanceExpectation</code> is <code>{ finalState?, neverObserved?, aria?, [assertion]:
+    unknown }</code> (<code>we:conformance-vectors/schema.ts:38-47</code>), and the judge compares every
+    non-special key against the final snapshot via strict <code>===</code>
+    (<code>plateau:src/conformance-engine/conformanceVectors.ts:142-147</code>). webcompliance already
+    observes a <strong>number</strong> (<code>violationCount</code>) and booleans through this path
+    (<code>we:conformance-vectors/webcompliance.vectors.ts</code>). "Observe a verdict" was always
+    shorthand for "observe a typed surface."
+  </li>
+  <li>
+    <strong>A golden-output suite shape already ships</strong> — the Doc-Spec suite (#1163,
+    <code>we:conformance-vectors/webdocs.vectors.ts</code>): <code>{ manifest, cases, expect: DocsSite
+    }</code>, a pure-transform vector judged by <strong>deep-equality</strong>, exported as a deliberately
+    separate shape (<code>we:conformance-vectors/index.ts:20-22</code>). So sketch-candidate (B) is not an
+    invention — it is reusing a proven precedent. webtheme token-projection is the same kind of artifact.
+  </li>
+</ul>
+
+<h2>Recommendation — classify onto the two shapes; the only fork is the comparison matcher</h2>
+<table>
+  <thead>
+    <tr><th>Runtime</th><th>Output</th><th>Suite shape</th><th>Comparison matcher</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>webtheme token-projection (#404)</td><td>resolved token map</td><td>(B) Doc-Spec golden, generalized to <code>(input)→output</code></td><td>deep-equal on the <strong>map</strong> (not CSS text)</td></tr>
+    <tr><td>reliability provider-strategy</td><td><code>RecoveryResult</code></td><td>(A) interaction-script vector</td><td>deep-equal (structured return)</td></tr>
+    <tr><td>analytics aggregation</td><td>recorded calls</td><td>(A) interaction-script vector</td><td>deep-equal</td></tr>
+    <tr><td>intl formatting</td><td>locale-sensitive string</td><td>(A) interaction-script vector</td><td><strong>normalized/property</strong> — <code>resolvedOptions()</code> + <code>formatToParts</code> structure, <em>never</em> string equality</td></tr>
+  </tbody>
+</table>
+<p>
+  The three sketched candidates collapse: (A) and (B) are <em>both</em> already real and complementary, so
+  the answer is <strong>support-both, classified by output nature</strong>. The one genuine fork is the
+  <strong>comparison semantics</strong> — strict <code>===</code> suffices for scalars but not for
+  structured or locale-sensitive output. Resolve it with a small <strong>closed matcher set</strong> —
+  <code>{ exact · deep-equal · resolved-options/parts-structure }</code> — carried as an
+  <code>expect</code>/golden tag in the WE schema and interpreted by the Plateau judge. <strong>Reject (C)
+  per-shape binding bases</strong> (formatter-judge / aggregator-judge / token-projector-judge): a matcher
+  is a comparison tag, not a fresh driver, so (C) is judge proliferation for no merit gain.
+</p>
+
+<h2>Why intl forces the third matcher (the skeptic's refutation)</h2>
+<p>
+  A refute-only skeptic <strong>refuted exact-equality for intl</strong>: formatted output depends on the
+  host engine's ICU/CLDR version (e.g. the U+202F narrow-no-break-space that replaced the ASCII space
+  before AM/PM around ICU 72), so a golden or deep-equal <code>expect</code> produces false negatives that
+  track the <em>engine</em>, not the implementation under test — the exact failure Test262's Intl suite is
+  engineered to avoid. Because the corpus (WE) and the executing engine (Plateau runner / FUI binding) sit
+  on different layers by design, equality of any flavor is the wrong oracle for intl. The fix —
+  asserting <code>resolvedOptions()</code> and <code>formatToParts</code> part structure — is folded in as
+  the third matcher. It <strong>sharpens</strong> the fork (the real call is comparison semantics, not
+  model shape) without resurrecting (C): a matcher is a schema tag, not a binding base. Verdict:
+  <strong>SURVIVES-WITH-AMENDMENT</strong>.
+</p>
+
+<h2>Comparison of conformance-testing prior art</h2>
+<table>
+  <thead>
+    <tr><th>Prior art</th><th>Shape</th><th>Maps to</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>WPT script-tests / WHATWG behavioral tests</td><td>drive + observe a surface</td><td>(A) interaction-script vector</td></tr>
+    <tr><td>WPT ref-tests / Jest snapshots / approval testing</td><td><code>input → golden output</code>, exact/deep compare</td><td>(B) Doc-Spec golden suite</td></tr>
+    <tr><td>Test262 Intl tests</td><td><strong>property</strong> asserts on <code>resolvedOptions</code> / <code>formatToParts</code>; never exact localized glyphs</td><td>the normalized/property matcher</td></tr>
+    <tr><td>ICU/CLDR golden data</td><td>versioned golden corpus, tolerance-compared</td><td>why intl needs normalization, not equality</td></tr>
+  </tbody>
+</table>
+
+<h2>Constellation placement (#1467 / #1566)</h2>
+<p>
+  Per the conformance contract/impl/binding split: the <strong>contract + vector/golden corpus +
+  schema</strong> (incl. the matcher vocabulary) stay <strong>WE</strong>; the <strong>runner / judge
+  implementation + the matchers + the run</strong> are <strong>Plateau</strong>; the per-target
+  <strong>binding</strong> is the subject, shipped by <strong>FUI</strong>. No new WE→FUI code edge — the
+  topology is identical to the webpolicy / webcompliance cascade, and #1282 (WE holds zero executable)
+  holds. Each non-engine subsystem still relocates via its own <code>/slice 1294</code> cascade; this
+  decision only settles the <em>conformance shape</em> each cascade's binding+corpus slice targets, which
+  unblocks them.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/backlog/1294-relocate-we-resident-logic-reference-runtimes/">#1294</a> — parent relocation epic</li>
+  <li><a href="/backlog/1784-conformance-kit-for-the-facts-verdict-relocated-engines/">#1784</a> — the facts→verdict KIT this complements (resolved)</li>
+  <li>#899 / #1789 / #1790 — the interaction-script vector model + synchronous binding + runner</li>
+  <li>#1163 — the Doc-Spec golden-output suite precedent · #404 — webtheme token projection · #1282 — zero-executable rule</li>
+</ul>
+
+<p>Full grounding: <code>we:reports/2026-06-27-non-verdict-conformance-model.md</code>.</p>
+{% endraw %}

@@ -1,0 +1,21 @@
+{
+  "id": "non-verdict-conformance-model",
+  "title": "Conformance model for non-facts→verdict relocated runtimes — reuse the two existing suite shapes + a comparison-matcher set",
+  "status": "open",
+  "summary": "Prep survey for decision #1816 (parent #1294), the non-engine complement of the resolved facts→verdict KIT #1784. The #1294 relocation cascade proves conformance via the #899/#1789 interaction-script vector model (drive a binding, observe a typed surface), but four relocated non-engine runtimes produce non-verdict output: webtheme token-projection (DTCG→resolved map, #404), intl formatting (native Intl.* instances → locale strings), analytics aggregation, reliability provider-strategy (RecoveryResult). Load-bearing finding: WE ALREADY ships two suite shapes and the model is not verdict-locked. (1) The interaction-script ConformanceVectorSuite's `expect` is open-ended (we:conformance-vectors/schema.ts:38-47) and the judge compares every key (plateau:src/conformance-engine/conformanceVectors.ts:142-147, strict ===) — webcompliance already observes a NUMBER (violationCount) and booleans. (2) The Doc-Spec golden-output suite (#1163, we:conformance-vectors/webdocs.vectors.ts) is a SEPARATE shipped shape for pure transforms `(input)→structured output`, judged by deep-equality, exported on its own (index.ts:20-22). So the three sketched candidates collapse: A (extend the vector model) and B (golden-output, = the Doc-Spec shape) are BOTH already real and complementary; the only genuine fork is the COMPARISON SEMANTICS. Recommendation: classify each runtime onto a shape — pure transforms (webtheme) → Doc-Spec golden suite (B) generalized to a generic (input)→output suite + deep-equality on the resolved MAP not CSS text; provider-seam behavior (reliability, analytics) → interaction-script vector (A) with deep-equal for structured returns; reject C (per-shape binding judges) as needless proliferation. Skeptic REFUTED exact-equality for intl: formatted strings are ICU/CLDR-version-dependent (the U+202F narrow-no-break-space shift ~ICU 72), so any equality falsely fails conformant impls (Test262 Intl avoids exact-output asserts) — intl needs a normalized/property matcher over resolvedOptions() + formatToParts structure. Folded in as a third matcher variant: the closed set is {exact, deep-equal, resolved-options/parts-structure}, an `expect` tag in the WE schema, NOT a per-shape binding (C stays rejected). Constellation (#1467/#1566): contract+corpus+schema→WE, runner/judge impl + matchers→Plateau, per-target binding→FUI; no new WE→FUI edge; #1282 holds. Full grounding in reports/2026-06-27-non-verdict-conformance-model.md.",
+  "dateOpened": "2026-06-27",
+  "lastReviewed": "2026-06-27",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "conformance",
+    "constellation-placement",
+    "relocation",
+    "golden-output",
+    "intl",
+    "webtheme",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webvalidation"
+}
