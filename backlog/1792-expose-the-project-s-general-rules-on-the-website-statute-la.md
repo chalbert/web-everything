@@ -18,6 +18,9 @@ Decide **how** the rules get a read path. Two coherent end-states:
 
 **Default: B** — it matches the existing "catalogs auto-render from JSON" convention (the same pattern /protocols/ and /intents/ already use) and makes the `codifiedIn` citation discipline ([we:docs/agent/platform-decisions.md](docs/agent/platform-decisions.md) = the cite-able statute layer) actually enforceable rather than aspirational. **A is a fine cheap interim** if a read path is wanted before the registry work lands.
 
+## Scope note — root governance docs
+The same gap covers the root-level governance markdown that's also outside the build: [we:DEV_GUIDE.md](DEV_GUIDE.md), [we:SELF-DRIVEN-PROJECT-DRAFT.md](SELF-DRIVEN-PROJECT-DRAFT.md), and [we:CLA.md](CLA.md). A `/governance/` page already exists (returns 200), so decide per file whether each renders under the chosen rules route or under `/governance/` — don't leave them repo-only.
+
 ## What you decide
 
 Pick A, B, or A-then-B (ship the markdown-lift now, migrate to the registry later). Then this resolves into the build story for the chosen shape.
