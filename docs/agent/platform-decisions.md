@@ -1539,6 +1539,31 @@ layer); graduated to build epic #1734. Prep topic
 
 ---
 
+### A reactive handle is never a thenable — expose `.value` + `await .next()` + async iteration, never `get then()` {#reactive-handle-not-thenable}
+
+A reactive handle (the return of a future reactive `consume()`, or any value-plus-future-updates primitive)
+must **not** be a thenable. Reading the current value is a synchronous pull — `handle.value` (re-reads live,
+matching TC39 Signals `.get()` and RxJS `BehaviorSubject.value`); waiting for the next update is the
+*explicit* `await handle.next()`; streaming future updates is `for await…of` via `Symbol.asyncIterator`. A
+`get then()` is forbidden because `await handle` after an internal update **hangs forever** — `await` follows
+the thenable and waits for the *next* settle that never comes (you also cannot return a thenable from an
+`async` function: the Promise Resolution Procedure unwraps it and the outer promise *follows* its pending
+state). The hang is thus eliminated **by construction**, not documented-around — the footgun-elimination +
+native-first stance. The one spelling sacrificed (`await handle` meaning "wait for next") is *itself* the
+ambiguity (now-vs-next collide on one object), so dropping it is the point, not a loss. Rejected alternatives:
+keeping `consume()` sync and warning in prose (leaves the footgun); a `{ consumable, value }` wrapper (clunky
+destructure + `value` is a consume-time snapshot, a quiet staleness footgun, where `.value` re-reads live).
+
+**Lineage:** #1798 (ratified 2026-06-26 GO; default (a) survived the skeptic pass with amendment — the
+value-first `.value` read is retained, only the thenable spelling is removed). Build filed as #1829
+(`blockedBy: [1798]`), impl in `fui:plugs/webinjectors` + `fui:plugs/webcontexts`; WE keeps only the
+consume/provide contract shape. Prep topic `reports/2026-06-26-consumable-await-footgun.md` +
+`/research/reactive-consume-handle-shape/`. Coheres with
+[framework-free-core-vendor-segregation](#framework-free-core-vendor-segregation) (native primitives over
+vendor reactive libs).
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from

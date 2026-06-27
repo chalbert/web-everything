@@ -1,9 +1,12 @@
 ---
 kind: decision
-status: open
+status: resolved
 size: 3
 dateOpened: "2026-06-26"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#reactive-handle-not-thenable"
 preparedDate: "2026-06-27"
 tags: [webinjectors, webcontexts, consumable, dx, native-first]
 relatedReport: reports/2026-06-26-consumable-await-footgun.md
@@ -14,6 +17,10 @@ relatedReport: reports/2026-06-26-consumable-await-footgun.md
 ## Digest
 
 **No design exists yet** — this picks the shape of a *future* reactive `consume()` handle before it is built (pre-flight under `batch-2026-06-26-1793-1697` confirmed the subject API is **not** shipped). The handle must expose the current provided value *and* let a consumer wait for / iterate future `provide()` calls. The prior survey ([we:reports/2026-06-26-consumable-await-footgun.md](reports/2026-06-26-consumable-await-footgun.md)) found the footgun in the obvious shape, and a fresh prior-art pass (TC39 Signals · async iterators · the thenable footgun class · RxJS BehaviorSubject) is published as the `/research/` topic **[reactive-consume-handle-shape](/research/reactive-consume-handle-shape/)**. **One fork** below carries a **bold default**.
+
+## Ruling (ratified 2026-06-26)
+
+**Fork 1 → (a) eliminate the thenable.** The reactive `consume()` handle is **not** a thenable: current value reads synchronously via `consumable.value` (re-reads live, matching Signals `.get()` / RxJS `BehaviorSubject.value`), waiting for the next provide is the explicit `await consumable.next()`, and streaming is `for await…of` via `Symbol.asyncIterator`. The `await consumable`-hangs-forever footgun is impossible by construction (no `get then()`). The skeptic pass (below) survived with amendment; the value-first read is retained. Build filed as **#1829** (`blockedBy: [1798]`), impl in `fui:plugs/webinjectors` + `fui:plugs/webcontexts`; WE keeps only the consume/provide contract shape. No new entity/protocol/intent.
 
 ## Axis-framing
 
