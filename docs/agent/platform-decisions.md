@@ -1179,6 +1179,14 @@ and #700 (no WE package dep). Corollary: the **executable** serve contract (`ser
 **Lineage:** #1731 (workbench source/CEM crossing). Refines [constellation-placement](#constellation-placement)
 (WE/FUI/Plateau division) and #1499 (cross-origin FUI serve); applies #954/#1701 (author-mode data placement).
 
+### Inert workbench display data rides as a static descriptor slot read directly (like `cem`); the FUI-served `/_maas/data/` route is the dev-freshness HMR seam, not the primary transport {#workbench-inert-data-static-slot}
+
+Once a derived **inert display artifact** is generated wholly inside FUI (e.g. author-mode **source** text after #1730/#1282 deleted WE's generator), the workbench consumes it as a **static slot on the thin descriptor** (`authorSource?`/`cem?` in `fui:workbench/registry.ts`) **read directly** for first render (`block.cem`, `block.authorSource`) — synchronous, no fetch. The **primary transport is the static slot**, not a runtime route. Dev freshness rides the **existing `/_maas/data/<tag>.json` HMR re-fetch**: a dev-only watcher (`fui:vite.config.mts` `cemHotReload` pattern) fires an HMR event on fixture change and the workbench demo (`fui:demos/workbench.ts`) re-fetches the data route and calls `refresh()` — never stale, no registry rebuild. `/_maas/`'s **executable** serve role stays reserved for **transpilable live modules** (polyglot React/Vue forms loaded by cross-origin `import()`, `fui:workbench/loader.ts`); static display text never routes through it as its baseline transport. This is not a *live instance*: serving rendered text is "consuming data, not running the transform" (#954), so the slot is inert data, not a behavioural closure, and does not reintroduce the imperative `load`/`create` the workbench banished.
+
+**Caveat — ratified ~80% (#1865).** Revisit if the MaaS layer matures such that `/_maas/data/` becomes the routine transport for *all* descriptor data; the static-slot-as-primary call may then flip to serving author-source directly. Reversal is cheap — the consumer reads `block.authorSource` either way; only where the baseline value comes from changes.
+
+**Lineage:** #1865 (author-mode source generation-home, ratified-with-caveat). Refines [#we-data-crosses-via-fui-served-route](#we-data-crosses-via-fui-served-route) (static-slot baseline vs route-as-dev-seam for inert data); applies #1730/#1282 (WE generator deleted → generation is a FUI concern), #1731 (`cem`/source crossing) and #954/#1701 (author-mode data placement).
+
 ### Runtime-DI seam vs devtools provider seam {#runtime-di-vs-devtools-provider-seam}
 
 A capability is a **runtime-DI standard seam** — a mandated `CustomXRegistry` or protocol — **only if
