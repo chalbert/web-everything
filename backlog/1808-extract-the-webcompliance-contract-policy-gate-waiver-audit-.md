@@ -7,6 +7,7 @@ dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
 dateResolved: "2026-06-27"
 graduatedTo: "we:webcompliance/contract.ts"
+relatedReport: reports/2026-06-27-split-analysis-1294-webcompliance.md
 tags: []
 ---
 
