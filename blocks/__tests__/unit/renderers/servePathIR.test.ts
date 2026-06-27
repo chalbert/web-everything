@@ -20,8 +20,18 @@ describe('serve-path IR — shape', () => {
     expect(Object.isFrozen(SERVE_PATH)).toBe(true);
     expect(SERVE_PATH.method).toBe('GET');
     expect(SERVE_PATH.basePath).toBe(DEFAULT_BASE_PATH);
-    expect(SERVE_PATH.params.map((p) => p.name)).toEqual(['form', 'target', 'strategy']);
+    expect(SERVE_PATH.params.map((p) => p.name)).toEqual(['form', 'mode', 'target', 'strategy']);
     expect(SERVE_PATH.responses.map((r) => r.status).sort()).toEqual([200, 302, 304, 400, 404, 500]);
+  });
+
+  it('exposes mode as an optional, catalog-gated, byte-determining axis (plugged/unplugged)', () => {
+    const mode = SERVE_PATH.params.find((p) => p.name === 'mode');
+    expect(mode).toBeDefined();
+    // Optional: this slice makes both modes serveable, independent of the default-mode call (#1843).
+    expect(mode?.required).toBe(false);
+    // Catalog-gated: the plugged/unplugged value set is an injected implementation catalog, not the
+    // neutral contract — an unknown mode value mints a 400, like an unknown form.
+    expect(mode?.catalogGated).toBe(true);
   });
 });
 

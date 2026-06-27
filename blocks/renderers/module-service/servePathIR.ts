@@ -117,7 +117,7 @@ export interface ServePathIR {
   readonly method: 'GET';
   readonly hashAlgorithm: string;
   readonly hashPinPattern: string;
-  /** Query params (`form`/`target`/`strategy`) — names + roles, never a JS value set (neutrality). */
+  /** Query params (`form`/`mode`/`target`/`strategy`) — names + roles, never a JS value set (neutrality). */
   readonly params: readonly ServePathParam[];
   readonly cachePolicy: typeof CACHE_POLICY;
   readonly headers: typeof MAAS_HEADERS;
@@ -142,6 +142,13 @@ export const SERVE_PATH: ServePathIR = Object.freeze({
       catalogGated: true,
       description:
         'The served form (e.g. wc-class). Defaults to the origin\'s default form. The value set is an implementation catalog, not part of the neutral contract.',
+    },
+    {
+      name: 'mode',
+      required: false,
+      catalogGated: true,
+      description:
+        'The plug-binding mode the component is served in (e.g. plugged vs unplugged). Defaults to the origin\'s default mode. Byte-determining: the served bytes differ by mode. The value set is an implementation catalog, not part of the neutral contract.',
     },
     {
       name: 'target',
@@ -177,7 +184,7 @@ export const SERVE_PATH: ServePathIR = Object.freeze({
     },
     {
       status: HTTP_STATUS.badRequest,
-      when: 'An unknown form query value.',
+      when: 'An unknown value for a catalog-gated query param (form or mode).',
       headers: [],
       mediaType: MEDIA_TYPES.error,
     },

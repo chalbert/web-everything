@@ -30,6 +30,15 @@
             }
           },
           {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "description": "The plug-binding mode the component is served in (e.g. plugged vs unplugged). Defaults to the origin's default mode. Byte-determining: the served bytes differ by mode. The value set is an implementation catalog, not part of the neutral contract.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "target",
             "in": "query",
             "required": false,
@@ -138,7 +147,7 @@
             }
           },
           "400": {
-            "description": "An unknown form query value.",
+            "description": "An unknown value for a catalog-gated query param (form or mode).",
             "content": {
               "application/json": {
                 "schema": {
