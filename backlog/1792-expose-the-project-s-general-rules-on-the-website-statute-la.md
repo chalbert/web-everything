@@ -1,8 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-26"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-26"
 relatedReport: reports/2026-06-26-rules-readpath-prep-1792.md
 tags: [website, governance, docs, exposure]
@@ -57,6 +60,10 @@ The decision is **where the rules' authoring source-of-truth lives, and how much
 ## What you decide
 
 Ratify Fork 1 (default **(c)**) and Fork 2 (default **(b)**), or override. Resolving opens the build story: a docs collection template rendering the four cited docs, a `/rules/` index + nav entry (`we:src/_layouts/base.njk:95-97`) + Vite allowlist entry (`we:vite.config.mts:127`), and the cross-doc `codifiedIn:` anchor-resolution gate.
+
+## Resolution (ratified 2026-06-27)
+
+Both defaults ratified after grounding-verification and red-team: **Fork 1 → (c)** rendered index over markdown SoT + cross-doc anchor gate (no records migration, no filter UI); **Fork 2 → (b)** statute → `/rules/`, governance narratives → `/governance/`, per-file. Grounding confirmed against the tree: ~209 platform-decisions cites / 57 distinct anchors + 7/4/2 across the three sibling docs (all 404 today); Eleventy `input: "src"` with no `docs/` passthrough; `we:src/_data/rules/` absent; `we:src/governance.njk` is a narrative page. Build graduates to **#1828** (`blockedBy: 1792`); no new statute rule (an application of [authoring-sot-is-the-standard-form] / [bias-separation-decoupling]), so `codifiedIn: one-off`.
 
 ## Acceptance
 
