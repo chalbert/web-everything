@@ -13,14 +13,20 @@ title: Web Everything — Resources
 
 <div class="project-grid">
   {% for resource in resources %}
+  {# #1870 (#1820 Fork 1a): <we-card> frame + status → <we-badge>; the anchor's own frame is stripped by
+     `.project-card:has(> we-card)` in style.css so the card is the sole frame.
+     Status vocab: active→success, draft→info, concept→warning, else→neutral. #}
+  {% set statusTone = 'success' if resource.status == 'active' else ('info' if resource.status == 'draft' else ('warning' if resource.status == 'concept' else 'neutral')) %}
   <a href="/resources/{{ resource.id }}/"
      class="project-card"
      style="text-decoration: none; color: inherit; display: block;">
-    <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
-      <h3 class="project-title" style="margin: 0;">{{ resource.name }}</h3>
-      <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if resource.status == 'active' %}#dcfce7{% elif resource.status == 'draft' %}#dbeafe{% elif resource.status == 'concept' %}#fef3c7{% else %}#f1f5f9{% endif %}; color: {% if resource.status == 'active' %}#166534{% elif resource.status == 'draft' %}#1e40af{% elif resource.status == 'concept' %}#92400e{% else %}#475569{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ resource.status | title }}</span>
-    </div>
-    <p style="margin: 0; color: var(--color-text-muted); font-size: 0.9em;">{{ resource.summary | safe }}</p>
+    <we-card>
+      <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+        <h3 class="project-title" style="margin: 0;">{{ resource.name }}</h3>
+        <we-badge tone="{{ statusTone }}">{{ resource.status | title }}</we-badge>
+      </div>
+      <p style="margin: 0; color: var(--color-text-muted); font-size: 0.9em;">{{ resource.summary | safe }}</p>
+    </we-card>
   </a>
   {% endfor %}
 </div>

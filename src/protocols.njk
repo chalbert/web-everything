@@ -49,27 +49,34 @@ title: Web Everything — Protocols
 
 <div class="project-grid" id="protocol-grid">
   {% for proto in protocols %}
+    {# #1870 (#1820 Fork 1a): <we-card> frame + status → <we-badge>, project/intent chips → <we-tag>; the
+       click-through + filter data-* stay on the OUTER <a> (.project-card is the filter JS hook). The anchor's
+       own frame is stripped by `.project-card:has(> we-card)` in style.css so the card is the sole frame.
+       Status vocab: active→success, draft→info, concept→warning, experimental→warning, else→neutral. #}
     {% set proj = None %}
     {% for p in projects %}{% if p.id == proto.ownedByProject %}{% set proj = p %}{% endif %}{% endfor %}
+    {% set statusTone = 'success' if proto.status == 'active' else ('info' if proto.status == 'draft' else ('warning' if (proto.status == 'concept' or proto.status == 'experimental') else 'neutral')) %}
     <a href="/projects/{{ proto.ownedByProject }}/#{{ proto.anchor }}"
        class="project-card"
        data-project="{{ proto.ownedByProject }}"
        data-status="{{ proto.status }}"
        style="text-decoration: none; color: inherit; display: block;">
-      <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
-        <h3 class="project-title" style="margin: 0;">{{ proto.name }}</h3>
-        <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if proto.status == 'concept' %}#fef3c7{% elif proto.status == 'draft' %}#dbeafe{% elif proto.status == 'experimental' %}#fde68a{% elif proto.status == 'active' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if proto.status == 'concept' %}#92400e{% elif proto.status == 'draft' %}#1e40af{% elif proto.status == 'experimental' %}#854d0e{% elif proto.status == 'active' %}#166534{% else %}#475569{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ proto.status | title }}</span>
-      </div>
-      <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ proto.summary }}</p>
-      <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;">
-        <span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.55rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.75em;">
-          {% if proj and proj.isSvg %}<img src="{{ proj.icon }}" alt="" width="14" height="14" style="display: inline-block;">{% endif %}
-          {{ proj.name if proj else proto.ownedByProject }}
-        </span>
-        {% if proto.realizesIntent %}
-        <span style="display: inline-block; padding: 0.15rem 0.55rem; border-radius: 9999px; background: rgba(99,102,241,0.08); color: #4338ca; font-size: 0.75em;">Intent: {{ proto.realizesIntent }}</span>
-        {% endif %}
-      </div>
+      <we-card>
+        <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+          <h3 class="project-title" style="margin: 0;">{{ proto.name }}</h3>
+          <we-badge tone="{{ statusTone }}">{{ proto.status | title }}</we-badge>
+        </div>
+        <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ proto.summary }}</p>
+        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;">
+          <we-tag shape="pill">
+            {% if proj and proj.isSvg %}<img src="{{ proj.icon }}" alt="" width="14" height="14" style="display: inline-block; vertical-align: middle;">{% endif %}
+            {{ proj.name if proj else proto.ownedByProject }}
+          </we-tag>
+          {% if proto.realizesIntent %}
+          <we-tag shape="pill" style="--cat-bg: rgba(99,102,241,0.08); --cat-color: #4338ca;">Intent: {{ proto.realizesIntent }}</we-tag>
+          {% endif %}
+        </div>
+      </we-card>
     </a>
   {% endfor %}
 </div>

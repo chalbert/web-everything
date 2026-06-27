@@ -38,15 +38,27 @@ title: Web Everything — Plugs
 
 <div class="project-grid" id="plug-grid">
   {% for plug in plugs %}
+  {# #1870 (#1820 Fork 1a): <we-card> frame + status → <we-badge>, type chip → <we-tag>; click-through +
+     data-haystack stay on the OUTER <a> (.plug-tile is the filter JS hook). The anchor's own frame is
+     stripped by `.project-card:has(> we-card)` in style.css so the card is the sole frame.
+     Status vocab: active→success, concept→warning, experimental→warning, else→neutral. #}
+  {% set statusTone = 'success' if plug.status == 'active' else ('warning' if (plug.status == 'concept' or plug.status == 'experimental') else 'neutral') %}
   <a href="/plugs/{{ plug.id }}/"
      class="project-card plug-tile"
      data-haystack="{{ plug.id }} {{ plug.name | lower }} {{ plug.summary | lower }} {{ plug.type | lower }}"
      style="text-decoration: none; color: inherit; display: block;">
-    <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
-      <h3 class="project-title" style="margin: 0;">{{ plug.name }}</h3>
-      <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if plug.status == 'active' %}#dcfce7{% elif plug.status == 'draft' %}#dbeafe{% elif plug.status == 'concept' %}#fef3c7{% elif plug.status == 'experimental' %}#fde68a{% else %}#f1f5f9{% endif %}; color: {% if plug.status == 'active' %}#166534{% elif plug.status == 'draft' %}#1e40af{% elif plug.status == 'concept' %}#92400e{% elif plug.status == 'experimental' %}#854d0e{% else %}#475569{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ plug.status | title }}</span>
-    </div>
-    <p style="margin: 0; color: var(--color-text-muted); font-size: 0.9em;">{{ plug.summary | safe }}</p>
+    <we-card>
+      <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+        <h3 class="project-title" style="margin: 0;">{{ plug.name }}</h3>
+        <we-badge tone="{{ statusTone }}">{{ plug.status | title }}</we-badge>
+      </div>
+      <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ plug.summary | safe }}</p>
+      {% if plug.type %}
+      <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+        <we-tag shape="pill">{{ plug.type }}</we-tag>
+      </div>
+      {% endif %}
+    </we-card>
   </a>
   {% endfor %}
 </div>
