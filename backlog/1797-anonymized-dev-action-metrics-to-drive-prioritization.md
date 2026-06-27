@@ -1,6 +1,5 @@
 ---
-kind: story
-size: 3
+kind: decision
 status: open
 dateOpened: "2026-06-26"
 tags: [telemetry, metrics, prioritization, privacy]
@@ -13,10 +12,13 @@ The platform should collect **anonymized developer actions** — counts of insta
 
 Privacy is a first-class constraint: aggregate, anonymized, opt-in/opt-out per the project's stance — no per-developer identifiable data.
 
-## Build
+## What you decide
+
+The gating fork (retyped story→decision in batch-2026-06-26 pre-flight — the body's crux is a design call, not a clean build): **does dev-action metrics ride on #1415's now-resolved declarative emission seam, or stand up a dedicated dev-tooling channel?** Plus the supporting calls the build needs settled first: the minimal dev-action metric set (installs, builds, tests, …) and the anonymization model. Resolving this opens the build story.
+
+## Build (once decided)
 - Define the minimal dev-action metric set (installs, builds, tests, …) and the anonymization model.
-- Decide the collection path: reuse #1415's emission seam vs. a dedicated dev-tooling channel.
-- Wire collection + a way to read the aggregate for prioritization.
+- Wire collection along the chosen path + a way to read the aggregate for prioritization.
 
 ## Acceptance
 - Metrics are collected anonymized and aggregate-only; opt-out honored.
