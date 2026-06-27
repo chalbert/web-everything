@@ -16,6 +16,7 @@ export { presentationA11ySuite } from './presentation-a11y.vectors.js';
 export { textNodeSuite } from './text-node.vectors.js';
 export { treegridArbitrationSuite } from './treegrid-arbitration.vectors.js';
 export { webpolicySuite } from './webpolicy.vectors.js';
+export { webcomplianceSuite } from './webcompliance.vectors.js';
 // The Doc Spec suite (#1163) is a pure (manifest, cases) → DocsSite golden-vector suite, a different shape
 // from the interaction-script ConformanceVectorSuite — exported on its own, not in `conformanceSuites`.
 export { webdocsDocSpecSuite, assertDocSpecSuite, DocSpecSchemaError } from './webdocs.vectors.js';
@@ -28,6 +29,7 @@ import { presentationA11ySuite } from './presentation-a11y.vectors.js';
 import { textNodeSuite } from './text-node.vectors.js';
 import { treegridArbitrationSuite } from './treegrid-arbitration.vectors.js';
 import { webpolicySuite } from './webpolicy.vectors.js';
+import { webcomplianceSuite } from './webcompliance.vectors.js';
 
 /** The registry of shipped per-standard suites — what the #899 driver enumerates. */
 export const conformanceSuites: ReadonlyArray<ConformanceVectorSuite> = [
@@ -38,4 +40,5 @@ export const conformanceSuites: ReadonlyArray<ConformanceVectorSuite> = [
   textNodeSuite,
   treegridArbitrationSuite,
   webpolicySuite,
+  webcomplianceSuite,
 ];
