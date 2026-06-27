@@ -3,7 +3,7 @@ kind: story
 size: 5
 parent: "746"
 status: open
-blockedBy: ["1752"]
+blockedBy: []
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-26"
 tags: []
@@ -21,6 +21,11 @@ tags: []
 > "align there first to avoid hardcode-then-rip" note, the consumption wiring must follow #1752's loader/route
 > — so this is `blockedBy: ["1752"]` (was `[]`). Released unbuilt; re-scope the body to the FUI-served model
 > when #1752 lands.
+>
+> **Update (batch-20260626-1811-1817-1819 close):** #1752 has **landed** (resolved, graduatedTo 746), so the
+> blocker is cleared (`blockedBy: []`). This is now ready to **rescope + build** — not blocked, just stale-bodied:
+> re-scope both residuals onto #1752's FUI `/_maas/` loader + thin-descriptor registry (the WE artifact is gone
+> per #1730), then wire the workbench panel to read block descriptors from the served URL. A focused FUI session.
 
 # Wire the WE author-mode-source artifact into the live FUI workbench (transport + declarative-component blocks)
 
