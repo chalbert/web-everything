@@ -869,6 +869,46 @@ stepper) has *no* data-source fork and mirrors `StepperElement` verbatim.
 **Lineage:** #1570 (ratified — tree-select data-source; #1568/#1569 confirmed fork-free). Consumer refinement
 of #1457 (support-both, element-over-behavior). Builds: #1567.
 
+### Block data-ingestion: one `[[ ref ]]` form, resolved by determinism × interactivity {#block-data-ingestion}
+
+A render-from-data `we-` block (per [persistent-b-data-source](#persistent-b-data-source)) sources its complete
+data (rows/options/config) from **one declarative form** — an attribute web-expression `rows="[[ ref ]]"`
+binding to a **context**, with the typed JS property `.rows`/`.config` as the imperative floor it sets. There is
+**no second ingestion shape**; what varies by situation is *where the binding resolves* and *whether the resolved
+data is shipped to the client*, set by two orthogonal axes:
+
+1. **Determinism** — is the context **build-known**? The `webexpressions` evaluator is **DOM-free**
+   (`CustomExpressionParser.evaluate(ResolvedValues)` takes a pre-resolved `contexts` map; the DOM coupling is
+   only the *runtime* text-node binding layer), so a **deterministic** binding **resolves at build time**: the
+   server supplies the context, evaluates, renders a plain `<table>`, and drops the binding. A **non-deterministic**
+   (client-only) context can only resolve in the client.
+2. **Interactivity** — does the client **re-render** (sort/filter)? If not, nothing is shipped. If so, the resolved
+   typed data is shipped to the client.
+
+|  | **non-interactive** | **interactive** |
+|---|---|---|
+| **deterministic** | server resolves → plain `<table>`, ship nothing | `<table>` baseline **+ serialized resolved context** (inert `<script type="application/json">`) for client re-render |
+| **non-deterministic** | client resolves + renders once | ship binding **+ runtime context hydration (#1827)** — the app case |
+
+The familiar paths are **derived consequences, not separate forms**: a "simple SSR table → plain `<table>`" is the
+deterministic + non-interactive cell; a "JSON island" is the deterministic + interactive cell (the island *is* the
+serialized resolved context — same source of truth, no hand-authored twin); runtime injector hydration is only the
+non-deterministic cells. **Correctness invariant:** the server-resolved / serialized payload always carries the
+**raw typed values**, so any client sort runs on raw `field` values — **nothing reparses rendered `<td>` text**
+(a key recovered from rendered text is silently wrong on cells like `Baseline 2026` or `✅`).
+
+**Precedence.** The typed JS property is **authoritative**; `[[ ref ]]` is the declarative path that sets it, and an
+explicit imperative property set **wins over** a binding (a late-resolving async binding must observe this and no-op).
+Raw author markup is **never** a data source for a render-from-data kernel (its kernel attaches a freshly-built tree
+via `replaceChildren`, discarding any parsed markup) — markup-as-source stays exclusively the **light-DOM-scan**
+kernel's contract; the two kernel shapes never mix in one element.
+
+**Lineage:** #1818 (this decision — ratified) extends [persistent-b-data-source](#persistent-b-data-source) (#1570)
+with the resolution-locus + client-payload axes. Surfaced by #1787 / the #1600 table→data-table family (all
+deterministic, ship without #1827). Follow-on: #1827 (SSR injector-context hydration, app-facing). Open impl
+residuals (mechanism may flex, goal fixed): the determinism predicate, the build-time evaluation harness, the
+serialized-context format.
+
 ### Forward (generation) adapters for polyglot reach {#forward-generation-adapters}
 
 A WE standard projects **outward** into non-JS / enterprise runtimes (.NET, Java, Go) via a

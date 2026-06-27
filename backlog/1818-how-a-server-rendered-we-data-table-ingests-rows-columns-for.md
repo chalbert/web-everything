@@ -1,10 +1,13 @@
 ---
 kind: decision
-status: active
+status: resolved
 size: 2
 locus: webeverything
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: "docs/agent/platform-decisions.md#block-data-ingestion"
+codifiedIn: "docs/agent/platform-decisions.md#block-data-ingestion"
 preparedDate: "2026-06-27"
 relatedReport: reports/2026-06-27-ssr-data-table-docs-ingestion.md
 tags: [data-table, transient-ce, embed-boundary, ssr, webdocs, ingestion-interface, webexpressions, injector-context]
