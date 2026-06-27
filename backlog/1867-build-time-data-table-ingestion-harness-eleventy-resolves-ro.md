@@ -17,8 +17,8 @@ tags: [data-table, ssr, build-integration, embed-boundary, webexpressions]
 > holds no impl; that citation predates the relocation.
 >
 > **The fork it forces:** WE's Eleventy build **cannot import** the FUI evaluator/renderer — a WE→FUI code
-> import is a backward DAG edge ([[feedback_constellation_backward_edge_is_module_import]]; the constellation
-> runs standard→WE→FUI). So "the Eleventy build invokes `evaluate()`" needs a **runtime boundary**, not a
+> import is a backward DAG edge (the DAG bans only an upstream *code import*; a runtime boundary —
+> cross-origin / CLI — is not an edge; the constellation runs standard→WE→FUI). So "the Eleventy build invokes `evaluate()`" needs a **runtime boundary**, not a
 > module import — and which boundary, plus the **serialized-context format** (a contract the whole #1609–#1613
 > family inherits), is the call #1818 deferred to the build. It is **not** a silent pick:
 >
