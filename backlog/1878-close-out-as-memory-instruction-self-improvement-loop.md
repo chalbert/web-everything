@@ -4,6 +4,7 @@ size: 5
 parent: "1855"
 status: open
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
 tags: [memory, close-out, self-improvement, consolidation, model-usage-watch, cadence]
 ---
 
@@ -29,6 +30,15 @@ At close-out, after the existing capture audit + health gate, run a bounded refl
 - Reflection is **additive to** `we:.claude/skills/closing-session`, behind the existing audit — it must not block or slow a normal close when there's nothing to consolidate (zero-finding close stays one step).
 - Propose-only: no memory write, prune, or instruction edit lands without confirmation. Auto-apply is explicitly out of scope (rigor + the human-disposes rule).
 - Enforcement stays with `we:scripts/check-memory.mjs` + the write-time hook; this skill *surfaces* candidates, it does not replace the gate.
+
+## Blocked on a placement fork (surfaced 2026-06-27, mid-batch)
+
+The card assumed a repo-local `we:.claude/skills/closing-session`, but the **closing-session skill is global** (it lives under the user's home `~/.claude/skills/`, not the repo); the repo only holds the command alias `we:.claude/commands/close-session.md`. So where the reflection pass lives is a real fork an agent shouldn't pick unattended (it changes blast radius + committability):
+
+- **(a) Edit the global skill** — one place, applies the reflection loop to *every* project's close. But it's outside this repo (not version-controlled here, not committable in a WE batch) and changes close behaviour everywhere, so it needs explicit human sign-off.
+- **(b) Repo-local close mechanism** — a WE-scoped close step (extend `we:.claude/commands/close-session.md`, or a repo skill/script the close invokes) that runs the memory/instruction reflection only for this repo. Committable here; no cross-project blast radius; but doesn't generalise to other projects.
+
+Recommendation: **(b) for the WE-specific memory-consolidation reflection** (it reads this repo's `check:memory --json` + memory dir), with the *generic* "propose learnings" idea promoted to the global skill only on a deliberate, separately-approved pass. Released to `open` pending this call.
 
 ## Lineage
 
