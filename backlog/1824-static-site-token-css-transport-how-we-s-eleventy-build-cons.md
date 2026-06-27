@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "1683"
-status: open
+status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-26"
 relatedReport: reports/2026-06-26-static-site-token-css-transport.md
 tags: [webtheme, tokens]
@@ -21,6 +24,36 @@ resolved theme, with the legacy `--color-*` names aliased to the emitted `--toke
 sites keep working *and* derive from the injector. Grounded in
 [the prep report](../reports/2026-06-26-static-site-token-css-transport.md) and
 [the research topic](/research/static-site-token-css-transport/).
+
+## Decision — RATIFIED 2026-06-27
+
+Both forks ratified as recommended: **Fork 1 → (a)** FUI build-emit, cross via the #1731
+served-route/CLI boundary, inline-fresh server-side into the head (no committed artifact);
+**Fork 2 → (a)** stand up the WE-site project theme now via `ThemeSource.with()` over the FUI
+default + alias the legacy `--color-*` names to the emitted `--token-*` (alias bridge over a
+627/629-site rewrite). Load-bearing facts re-verified at ratification: `var(--token*)` = **0** in
+`we:src/` (the only two hits are the prep artifacts quoting the count), `var(--color*)` = **629**;
+the #700 build-import ban (`we:src/_layouts/base.njk:434`) and the `we:src/css` passthrough
+(`we:.eleventy.js:265`) both hold.
+
+**Scope of the ruling — website-local, no general-standard change.** This decision *applies* three
+already-ratified statutes — [`we-data-crosses-via-fui-served-route`](../docs/agent/platform-decisions.md#we-data-crosses-via-fui-served-route)
+(#1731), the three-layer carve / `config-extends-platform-default` (values→product), and JS-first
+tokens (#1682) — to the WE docs site. It mints **no** new general rule and does **not** touch FUI's
+`emitTokenCss` shape. It is the *first reference instance* of "a static-site build consuming FUI's
+one-way token-CSS emit": a **precedent pattern**, not statute. Left un-codified deliberately —
+promote to a one-line refinement under the boundary rule only if a second static consumer
+(plateau-app site, FUI's own site) actually appears.
+
+**Added build constraint — author the transport engine-agnostic (Eleventy-portability).** WE may
+move off Eleventy onto FUI's render/serve path (dogfooding) later; that is a separate net-new
+decision to be filed under #777, not folded here. To keep this ruling migration-robust, implement
+Fork 1's transport as a **thin engine-agnostic build function** (e.g. a `we:src/_data/` global that
+returns the emitted `:root{}` CSS string), so the only Eleventy-coupled surface is the single
+server-side inline *sink* in `we:src/_layouts/base.njk` — a future engine swap re-points one sink,
+not a bespoke mechanism. The inline-fresh-each-build choice (vs the boundary rule's committed-copy
+variant) is the right one *because this consumer paints from a static build* and is the most
+portable.
 
 The axis is *how a one-way emit (`fui:plugs/webtheme/emitCss.ts:57-63` returns a `:root{}` string;
 `applyTokenVars` at `:71-74` is the runtime FOUC path) crosses a deliberate build-import boundary and
