@@ -2,9 +2,12 @@
 kind: story
 size: 5
 parent: "1836"
-status: open
+status: resolved
 blockedBy: ["1842"]
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: frontierui/plugs/webcontexts/Node.contexts.patch.ts
 tags: []
 ---
 
