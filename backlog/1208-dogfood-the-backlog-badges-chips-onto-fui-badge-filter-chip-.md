@@ -1,14 +1,19 @@
 ---
 kind: story
-size: 8
+size: 5
 parent: "777"
 status: open
-blockedBy: ["1669"]
+blockedBy: ["1817"]
 dateOpened: "2026-06-20"
 tags: [dogfood, fui, badge, site-rework]
 ---
 
 # Dogfood the backlog badges/chips onto FUI badge + filter-chip (transient-CE)
+
+> **Pre-flight (batch-2026-06-26-1793-1697) — body below is stale; real state reconciled here.** Traced the live tree:
+> - **Status surfaces — DONE.** #1598 (resolved) migrated the status badges to `<we-badge>` (`statusBadge`/`epicStatusBadge` in `we:src/_includes/backlog-badges.njk`), and `we:src/_layouts/base.njk` already cross-origin-imports `fui:embed/badges-in-document.ts` + calls `registerBadgesInDocument()`. The "no `fui:embed/badge-in-document.ts` exists" / "Parked — blocked-in-fact" notes below are obsolete (#1758 shipped it).
+> - **Taxonomy surfaces (kind/size/tier/tags/meta) → `<we-tag>` — blocked-in-fact.** The stale `blockedBy: ["1669"]` was cleared (1669 delivered the `we-tag` *block*), but the real prerequisite is a FUI `we-tag` **in-document embed entry** (the analog of `badges-in-document`), which does **not** exist — so WE docs can't render `<we-tag>` transient-CE yet. Filed as **#1817**; re-pointed `blockedBy: ["1817"]`. The hand-rolled `kindBadge`/`sizeBadge`/`tierBadge`/`tagsRow`/`metaBadge`/`unslicedBadge` spans swap to `<we-tag>` once #1817 lands.
+> - **Filter pills** (`we:src/backlog.njk` `data-*-chip` buttons) → `<we-filter-chip>` is the remaining status-half remnant; `filter-chip` is registered, but the pills are interactive controls wired to page filter JS (`aria-pressed` toggle), so the swap needs live verification against the running /backlog/ filter UI — keep within this card once #1817 unblocks the taxonomy swap so the whole surface migrates together. De-sized 8 → 5 (status badges already delivered by #1598).
 
 > **Repointed by #1621 (ratified 2026-06-23).** Mount model = transient custom element + runtime cross-origin import + SSR baseline, **not** Mode-C per-instance (we:docs/agent/platform-decisions.md#we-fui-embed-boundary rule 7). Split by intent: **status surfaces → `<we-badge>` / `<we-filter-chip>` buildable now**; **taxonomy surfaces (kind/tier/tags/size/meta) → `blockedBy` #1669** (the FUI `we-tag` block consuming the #1670 taxonomy provider). The status half doesn't need #1669 and could `/split` out. Link-pills (`blockerChip`/`childCircle`) stay native `<a>`. Sized 8 — a `/split` is warranted now that the status/taxonomy seam is explicit.
 
