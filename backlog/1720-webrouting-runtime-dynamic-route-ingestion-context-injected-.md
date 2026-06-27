@@ -3,12 +3,32 @@ kind: story
 size: 8
 parent: "1684"
 status: open
-blockedBy: ["1823"]
+locus: frontierui
+blockedBy: ["1897"]
 dateOpened: "2026-06-23"
+dateStarted: "2026-06-27"
 tags: []
 ---
 
 # webrouting runtime/dynamic route ingestion — context-injected route objects + lazy component-from-URL
+
+> **Stop (batch-2026-06-27, stop-rule-4 — a sub-fork surfaced mid-build).** Building against #1823's
+> ratified mechanism, the **lazy `route:component`** half hit an **undesigned sub-call #1823 did not
+> settle**: how an imported component *module* (a `() => import()` thunk / bare specifier) maps to a stamped
+> custom-element *tag* — `fui:blocks/router/elements/RouteViewElement.ts:498` stamps by cloning a
+> `<template>`, so it needs a concrete tag, but a thunk yields a module. Filed as decision **#1897**
+> (`blockedBy` repointed `["1823"] → ["1897"]`); making the module→tag call silently to force the build would
+> violate "never quietly make a design call to force batchability". Released unbuilt to avoid a half-build
+> under a forced design call.
+>
+> **Split note for the builder:** the **runtime-route-object ingestion half is build-ready** and fully
+> specified by #1823 — the `customContexts:routes` injector provider (new `ProviderTypeMap` key) + a settable
+> `routes` property (the getter exists at `fui:blocks/router/elements/RouteViewElement.ts:48`) + the
+> three-surface merge under a `mergePrecedence` config-extends-default (default `static-first`, first-match-
+> wins + a `console.warn` shadowing diagnostic; nested route-view **merges**, never shadows) + name-DI-default
+> / inline-override resolution for guard/loader. Only the **lazy component-from-URL** sub-facet is blocked on
+> #1897. Slice this story A (ingestion, build now) / B (lazy component, blocked) if a build-now sliver is
+> wanted — the data `route:loader` already stays independent and eager, so A stands alone.
 
 route-view ingests routes only from static child <template route> today (parseRouteDefinitions over the light DOM). This story adds a runtime ingestion path for dynamic routes: route objects supplied programmatically through context (the same @routeLoader/@routeGuard seam route-view already consults), plus lazy component-from-URL loading (e.g. a route:module attr deferring a code-split module until match). Static and dynamic routes stay disjoint sets, so single-SoT per route holds. Reuses the serializable route-map schema (ratified in #1685, built in #1721) as the INPUT contract — not just #1721's derived output. Blocked on #1721 delivering that schema. Likely spawns its own mechanism decision (context-provider shape, lazy-attr design, static/dynamic merge order) when prepared.
 
