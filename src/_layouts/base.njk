@@ -6,6 +6,14 @@
     <title>{{ title | default("Web Everything") }}</title>
     <meta name="build-id" content="{{ buildId.id }}"><!-- #850 dev-server staleness signal -->
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+    {#- #1813 (ruled #1824): JS-first token CSS. The injector-derived `--token-*` resolved theme (FUI
+        webtheme default + the WE-site project theme) + the legacy `--<family>-*` alias bridge, emitted
+        one-way (JS→CSS) by `scripts/lib/token-css.mjs` and crossed into this build via the #1731
+        served-route/CLI boundary — NEVER a build-time `import '@frontierui'`, no committed generated
+        file. Inlined server-side BEFORE style.css so its `var(--color-*)` call sites resolve pre-paint
+        (no FOUC; the tokens are no longer hand-authored in style.css). The `safe` filter keeps the
+        emitted CSS literal. -#}
+    <style id="we-token-css">{{ tokenCss | safe }}</style>
     <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="/css/prism-theme.css">
 </head>

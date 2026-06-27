@@ -2,10 +2,13 @@
 kind: story
 size: 8
 parent: "1683"
-status: open
+status: resolved
 locus: webeverything
 blockedBy: []
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: scripts/lib/token-css.mjs
 tags: [design-tokens, theme, webinjectors, website]
 ---
 
