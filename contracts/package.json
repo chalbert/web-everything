@@ -38,6 +38,7 @@
     "./permissions": "./permissions.ts",
     "./webcontexts": "./webcontexts.ts",
     "./webpolicy": "./webpolicy.ts",
-    "./webcompliance": "./webcompliance.ts"
+    "./webcompliance": "./webcompliance.ts",
+    "./plug-parity": "./plug-parity.ts"
   }
 }
