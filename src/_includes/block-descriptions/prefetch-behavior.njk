@@ -232,7 +232,7 @@ docInjector.set('customContexts:prefetchConfig', {
 </table>
 
 <h3>Interface</h3>
-<pre><code class="language-typescript">/** Prefetch eagerness levels */
+<we-code-view><pre><code class="language-typescript">/** Prefetch eagerness levels */
 type PrefetchEagerness =
     | 'viewport'     // IntersectionObserver
     | 'hover'        // pointerenter + focusin
@@ -263,7 +263,7 @@ interface PrefetchConfig {
     rootMargin?: string;       // IntersectionObserver margin
     hoverDelay?: number;       // Debounce ms (default: 200)
     maxConcurrent?: number;    // Limit parallel prefetches
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>Exports</h3>
 <table>

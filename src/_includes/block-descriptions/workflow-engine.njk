@@ -31,7 +31,7 @@
 </table>
 
 <h3>Example</h3>
-<pre><code class="language-typescript">import { customWorkflowEngine } from 'blocks/workflow-engine';
+<we-code-view><pre><code class="language-typescript">import { customWorkflowEngine } from 'blocks/workflow-engine';
 
 const checkout = {
   id: 'checkout', initial: 'address', context: { paid: false },
@@ -45,14 +45,14 @@ const checkout = {
 const wf = customWorkflowEngine.resolve().start(checkout);   // native-first default
 wf.onTransition(({ from, to }) =&gt; render(to));
 wf.send('NEXT');           // → pay
-wf.send('SUBMIT');         // → confirm (final); wf.done === true</code></pre>
+wf.send('SUBMIT');         // → confirm (final); wf.done === true</code></pre></we-code-view>
 
 <h3>Swapping the engine</h3>
-<pre><code class="language-typescript">import * as xstate from 'xstate';
+<we-code-view><pre><code class="language-typescript">import * as xstate from 'xstate';
 import { XStateWorkflowAdapter, customWorkflowEngine } from 'blocks/workflow-engine';
 
 customWorkflowEngine.define(new XStateWorkflowAdapter(xstate));   // reference adapter
-customWorkflowEngine.setDefault('xstate');                        // same contract, library behind it</code></pre>
+customWorkflowEngine.setDefault('xstate');                        // same contract, library behind it</code></pre></we-code-view>
 
 <p class="text-sm text-gray-600 mt-4">
     Distinct from <a href="/protocols/lifecycle/">Lifecycle</a>: same SCXML transition-map <em>form</em>, different subject

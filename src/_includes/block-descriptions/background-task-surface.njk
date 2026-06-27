@@ -178,7 +178,7 @@ el.dispatchEvent(new CustomEvent('background-task-register', {
     (<code>durability</code> / <code>withReloadDurability</code>) is a documented <strong>future</strong>
     tier (#134), not part of this config &mdash; see the dimensions table above.
 </p>
-<pre><code class="language-typescript">type BackgroundTaskState = 'registered' | 'active' | 'success' | 'error' | 'dismissed';
+<we-code-view><pre><code class="language-typescript">type BackgroundTaskState = 'registered' | 'active' | 'success' | 'error' | 'dismissed';
 type ProgressMode = 'determinate' | 'indeterminate';
 
 // A single observation of the backgrounded Loader's state (subscribed off-view).
@@ -195,7 +195,7 @@ interface BackgroundTasksConfig {
     navigationGuard: boolean;            // default false — arm beforeunload + route-leave guard
     completionToast: boolean;            // default false — emit a Feedback toast on completion
     retry: boolean;                      // default false — expose a per-task retry affordance
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>Exports</h3>
 <table>

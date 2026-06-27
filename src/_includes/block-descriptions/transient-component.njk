@@ -98,7 +98,7 @@
   <li><strong>Microtask runs</strong> — the transient element is removed, the native element takes its place. Zero visual flash.</li>
 </ol>
 
-<pre><code>// Simplified TransientElement base class
+<we-code-view><pre><code>// Simplified TransientElement base class
 class TransientElement extends HTMLElement {
   connectedCallback() {
     const tag = this.resolveTag();         // subclass decides
@@ -122,7 +122,7 @@ class TransientElement extends HTMLElement {
   resolveTag(): string {
     throw new Error('resolveTag() must be implemented');
   }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>Use Case 1: Accessible Auto-Heading</h3>
 
@@ -154,7 +154,7 @@ class TransientElement extends HTMLElement {
 
 <h4>Injector-Based Level (Recommended)</h4>
 
-<pre><code>// Section component increments heading level in its injector scope
+<we-code-view><pre><code>// Section component increments heading level in its injector scope
 class SectionElement extends HTMLElement {
   connectedCallback() {
     const parentLevel = InjectorRoot.getProviderOf(this, 'headingLevel') ?? 0;
@@ -187,11 +187,11 @@ class AutoHeading extends TransientElement {
     }
     return count;
   }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h4>Usage</h4>
 
-<pre><code>&lt;!-- Author writes: --&gt;
+<we-code-view><pre><code>&lt;!-- Author writes: --&gt;
 &lt;section&gt;
   &lt;auto-heading&gt;Page Title&lt;/auto-heading&gt;        &lt;!-- becomes &lt;h1&gt; --&gt;
   &lt;section&gt;
@@ -200,7 +200,7 @@ class AutoHeading extends TransientElement {
       &lt;auto-heading&gt;Sub-section&lt;/auto-heading&gt;    &lt;!-- becomes &lt;h3&gt; --&gt;
     &lt;/section&gt;
   &lt;/section&gt;
-&lt;/section&gt;</code></pre>
+&lt;/section&gt;</code></pre></we-code-view>
 
 <h3>Use Case 2: Smart Link</h3>
 
@@ -209,11 +209,11 @@ class AutoHeading extends TransientElement {
   This avoids the ARIA anti-pattern of <code>&lt;div role="link"&gt;</code> and ensures correct semantics for both navigation and actions.
 </p>
 
-<pre><code>&lt;!-- Navigation → becomes &lt;a href="/about"&gt; --&gt;
+<we-code-view><pre><code>&lt;!-- Navigation → becomes &lt;a href="/about"&gt; --&gt;
 &lt;smart-link href="/about"&gt;About&lt;/smart-link&gt;
 
 &lt;!-- Action → becomes &lt;button type="button"&gt; --&gt;
-&lt;smart-link&gt;Delete Item&lt;/smart-link&gt;</code></pre>
+&lt;smart-link&gt;Delete Item&lt;/smart-link&gt;</code></pre></we-code-view>
 
 <h3>Use Case 3: Ergonomic Directive Syntax</h3>
 
@@ -222,7 +222,7 @@ class AutoHeading extends TransientElement {
   The element replaces itself with start/end comment markers, then the structural directive manages the comment-bounded region.
 </p>
 
-<pre><code>&lt;!-- Author writes: --&gt;
+<we-code-view><pre><code>&lt;!-- Author writes: --&gt;
 &lt;for-each store="items" as="item"&gt;
   &lt;li&gt;{{ item.name }}&lt;/li&gt;
 &lt;/for-each&gt;
@@ -231,7 +231,7 @@ class AutoHeading extends TransientElement {
 &lt;!-- for-each:start store="items" as="item" --&gt;
 &lt;li&gt;Alpha&lt;/li&gt;
 &lt;li&gt;Beta&lt;/li&gt;
-&lt;!-- for-each:end --&gt;</code></pre>
+&lt;!-- for-each:end --&gt;</code></pre></we-code-view>
 
 <p>
   This combines <strong>author ergonomics</strong> (custom element syntax) with the <strong>proven comment-based implementation</strong> that preserves CSS Grid/Flex parent-child relationships.
@@ -307,7 +307,7 @@ class AutoHeading extends TransientElement {
 
 <h3>API Draft</h3>
 
-<pre><code>/** Base class for transient custom elements */
+<we-code-view><pre><code>/** Base class for transient custom elements */
 abstract class TransientElement extends HTMLElement {
   /** Determine the replacement element tag name */
   abstract resolveTag(): string;
@@ -330,7 +330,7 @@ function withSelfReplacement&lt;T extends CustomElementConstructor&gt;(
 ): T;
 
 /** Utility: calculate heading level from DOM nesting */
-function calculateHeadingLevel(element: Element): number;</code></pre>
+function calculateHeadingLevel(element: Element): number;</code></pre></we-code-view>
 
 <h3>Exports</h3>
 

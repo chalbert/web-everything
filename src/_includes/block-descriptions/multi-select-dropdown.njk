@@ -56,7 +56,7 @@
 
 <h3>Altitude 1a — Inside <code>&lt;drop-list&gt;</code>: the class</h3>
 <p>The same generic bridge as the dropdown, with a <strong>plural</strong> form-control surface. It is still a <strong>form-associated custom element</strong>, but its submitted value is multi-valued: rather than a single string, it hands <code>setFormValue</code> a <code>FormData</code> that repeats the control's <code>name</code> once per selected value — exactly how the native <code>&lt;select multiple&gt;</code> submits. It exposes its resolved attributes on <strong>its own injector</strong> as locals nothing outside the element can see.</p>
-<pre><code class="language-typescript">const { injectors, InjectorRoot } = window;
+<we-code-view><pre><code class="language-typescript">const { injectors, InjectorRoot } = window;
 
 class DropList extends HTMLElement {
   static formAssociated = true;                                  // → real form control
@@ -124,10 +124,10 @@ class DropList extends HTMLElement {
   }
 }
 
-customElements.define('drop-list', DropList);</code></pre>
+customElements.define('drop-list', DropList);</code></pre></we-code-view>
 
 <p>The locals the class set — <code>@options</code>, <code>@selected</code> (now an array), <code>@summary</code>, <code>@placeholder</code>, <code>@surfaceId</code> — are the <em>only</em> contexts the template references. The trigger shows the <code>@summary</code> (a count) rather than a single option's label, and each <code>&lt;li&gt;</code>'s <code>aria-selected</code> reads membership in <code>@selected</code>:</p>
-<pre><code class="language-html">&lt;button anchor="{{ '{{' }}@surfaceId}}"
+<we-code-view><pre><code class="language-html">&lt;button anchor="{{ '{{' }}@surfaceId}}"
         aria-haspopup="listbox"
         commandfor="{{ '{{' }}@surfaceId}}" command="toggle-popover"&gt;
   {{ '{{' }}@summary}}
@@ -146,7 +146,7 @@ customElements.define('drop-list', DropList);</code></pre>
       {{ '{{' }}@option.label}}
     &lt;/li&gt;
   &lt;/template&gt;
-&lt;/ul&gt;</code></pre>
+&lt;/ul&gt;</code></pre></we-code-view>
 
 <h4>Reading the pair as trait language</h4>
 <ul>
@@ -160,28 +160,28 @@ customElements.define('drop-list', DropList);</code></pre>
 
 <h3>Altitude 2 — Component (the consumer call site)</h3>
 <p>The element and its attributes <em>are</em> the trait selection. <code>multiple</code> is baked into this preset; the consumer passes data in and the component handles the rest.</p>
-<pre><code class="language-html">&lt;drop-list name="tags"
+<we-code-view><pre><code class="language-html">&lt;drop-list name="tags"
            multiple
            options="@interests"
            on:change="setTags($event)"&gt;&lt;/drop-list&gt;
 &lt;!-- `multiple` is baked into the preset; `options` accepts a context reference
      (resolved from an ancestor injector) or an inline expression, and is
-     re-exposed inside the component as the private @options context. --&gt;</code></pre>
+     re-exposed inside the component as the private @options context. --&gt;</code></pre></we-code-view>
 
 <h3>Altitude 3 — TypeScript, explicit composition</h3>
 <p>A list of <code>with*</code> factories — identical to the dropdown except for the single <code>withSelection</code> argument:</p>
-<pre><code class="language-typescript">const tags = composeDroplist(trigger, [
+<we-code-view><pre><code class="language-typescript">const tags = composeDroplist(trigger, [
   withAnchoredSurface({ placement: 'bottom-start', collision: ['flip', 'resize'] }),
   withFocusDelegation({ strategy: 'virtual' }),                 // omit strategy → inherits ambient intent
   withSelection({ model: 'multiple', selectionFollowsFocus: false }),   // the one line that differs
   withTypeAhead(),
 ]);
-// → returns a handle; tags.cleanup() reverts every trait, in reverse.</code></pre>
+// → returns a handle; tags.cleanup() reverts every trait, in reverse.</code></pre></we-code-view>
 <p><code>withSelection({ model: 'multiple', selectionFollowsFocus: false })</code> is the entire "I am a multi-select" statement. Diff it against the dropdown's <code>withSelection({ model: 'single' })</code> and that one argument is the whole delta.</p>
 
 <h3>Example — a project's interests picker</h3>
 <p>A project consumes the generic <code>&lt;drop-list multiple&gt;</code> by passing data and a handler at the boundary; the component is otherwise untouched. The handler receives the full array of selected options on every toggle.</p>
-<pre><code class="language-html">&lt;form on:submit="saveProfile($event)"&gt;
+<we-code-view><pre><code class="language-html">&lt;form on:submit="saveProfile($event)"&gt;
   &lt;label for="interests"&gt;Interests&lt;/label&gt;
   &lt;drop-list id="interests"
              name="interests"
@@ -193,8 +193,8 @@ customElements.define('drop-list', DropList);</code></pre>
   &lt;!-- … other fields … --&gt;
 
   &lt;button type="submit"&gt;Save&lt;/button&gt;
-&lt;/form&gt;</code></pre>
-<pre><code class="language-javascript">import { SimpleStore } from '/blocks/stores/simple';
+&lt;/form&gt;</code></pre></we-code-view>
+<we-code-view><pre><code class="language-javascript">import { SimpleStore } from '/blocks/stores/simple';
 const { injectors } = window;
 
 // Project data — could equally come from a fetch or a generated list.
@@ -220,7 +220,7 @@ root.set('customContexts:handlers', {
   },
 });
 
-window.attributes.upgrade(document.body);</code></pre>
+window.attributes.upgrade(document.body);</code></pre></we-code-view>
 
 <h4>What the project owns vs. what the multi-select owns</h4>
 <ul>

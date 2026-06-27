@@ -26,14 +26,14 @@
 </table>
 
 <h3>Save, autosave, restore</h3>
-<pre><code class="language-typescript">const drafts = new DraftPersistence&lt;LoanForm&gt;({ version: 2 });
+<we-code-view><pre><code class="language-typescript">const drafts = new DraftPersistence&lt;LoanForm&gt;({ version: 2 });
 await drafts.requestPersistent();           // best-effort non-evictable storage
 
 input.addEventListener('input', () =&gt; drafts.autosave('loan:42', readForm()));  // debounced
 
 const draft = await drafts.restore('loan:42');   // resume to the exact field state
 if (draft) applyForm(draft.state);
-await drafts.discard('loan:42');            // on successful commit</code></pre>
+await drafts.discard('loan:42');            // on successful commit</code></pre></we-code-view>
 <p class="text-sm text-gray-600">
     A restored draft whose schema <code>version</code> no longer matches is dropped, so a shape change can't resurrect a
     broken form.

@@ -37,7 +37,7 @@
 </ul>
 
 <h3>Usage Example</h3>
-<pre><code class="language-javascript">import { createHandlerExpressionParser } from '@webeverything/blocks/parsers';
+<we-code-view><pre><code class="language-javascript">import { createHandlerExpressionParser } from '@webeverything/blocks/parsers';
 
 // Create and register the parser
 const parser = createHandlerExpressionParser();
@@ -45,4 +45,4 @@ registry.define('handler', parser);
 
 // Parse an expression
 const result = parser.tryParse('save($event, @item.id)');
-</code></pre>
+</code></pre></we-code-view>

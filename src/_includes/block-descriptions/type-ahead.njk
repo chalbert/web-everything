@@ -25,24 +25,24 @@
 
 <h3>Usage</h3>
 <p>Add the <code>type-ahead</code> attribute to any container whose children are the navigable items. Items are resolved by ARIA role (<code>option</code>, <code>menuitem</code>, <code>treeitem</code>) or by an explicit <code>[data-type-ahead-item]</code> marker.</p>
-<pre><code class="language-html">&lt;ul role="listbox" type-ahead&gt;
+<we-code-view><pre><code class="language-html">&lt;ul role="listbox" type-ahead&gt;
   &lt;li role="option" tabindex="-1"&gt;Argentina&lt;/li&gt;
   &lt;li role="option" tabindex="-1"&gt;Australia&lt;/li&gt;
   &lt;li role="option" tabindex="-1"&gt;Austria&lt;/li&gt;
   &lt;li role="option" tabindex="-1"&gt;Brazil&lt;/li&gt;
 &lt;/ul&gt;
 &lt;!-- Type "aus" quickly &rarr; focus moves to "Australia".
-     Pause &gt;500ms, then type "a" &rarr; buffer reset, focus moves to "Argentina". --&gt;</code></pre>
+     Pause &gt;500ms, then type "a" &rarr; buffer reset, focus moves to "Argentina". --&gt;</code></pre></we-code-view>
 
 <h3>Configuration</h3>
-<pre><code class="language-html">&lt;!-- Matching strategy: prefix | cycle | prefix-then-cycle (default) --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Matching strategy: prefix | cycle | prefix-then-cycle (default) --&gt;
 &lt;ul role="listbox" type-ahead type-ahead-match="prefix-then-cycle"&gt;...&lt;/ul&gt;
 
 &lt;!-- Reset timeout in ms (default 500) --&gt;
 &lt;ul role="listbox" type-ahead type-ahead-reset="500"&gt;...&lt;/ul&gt;
 
 &lt;!-- Wrap focus past the ends (present = wrap, omit = clamp) --&gt;
-&lt;ul role="listbox" type-ahead type-ahead-wrap&gt;...&lt;/ul&gt;</code></pre>
+&lt;ul role="listbox" type-ahead type-ahead-wrap&gt;...&lt;/ul&gt;</code></pre></we-code-view>
 
 <h3>Behavior</h3>
 <table>
@@ -69,12 +69,12 @@
 </table>
 
 <h3>Styling Hooks</h3>
-<pre><code class="language-css">/* The item type-ahead most recently moved focus to */
+<we-code-view><pre><code class="language-css">/* The item type-ahead most recently moved focus to */
 [data-type-ahead-item]:focus-visible { ... }
 
 /* Container while a buffer is active (optional, set during matching) */
 [type-ahead][data-type-ahead-active] { ... }
-</code></pre>
+</code></pre></we-code-view>
 
 <h3>Exports</h3>
 <table>

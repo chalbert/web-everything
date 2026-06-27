@@ -79,15 +79,15 @@
 </ol>
 
 <h3>Provisioning Chain</h3>
-<pre><code class="language-text">App declares LoaderIntent profile
+<we-code-view><pre><code class="language-text">App declares LoaderIntent profile
   → Injector provides customContexts:loaderIntent
     → Consumer resolves intent from ancestor injector
       → Consumer selects matching Resource Loader trait(s)
         → Trait applies DOM/CSS/ARIA changes during async operation
-          → On resolve: trait cleans up, consumer renders result</code></pre>
+          → On resolve: trait cleans up, consumer renders result</code></pre></we-code-view>
 
 <h4>Full Setup Example (with Router)</h4>
-<pre><code class="language-javascript">// 1. App declares its loader intent profile
+<we-code-view><pre><code class="language-javascript">// 1. App declares its loader intent profile
 const docInjector = injectors.getInjectorOf(document);
 
 docInjector.set('customContexts:loaderIntent', {
@@ -105,13 +105,13 @@ docInjector.set('customContexts:routeLoader', {
     if (!res.ok) throw new Error('User not found');
     return res.json();
   }
-});</code></pre>
-<pre><code class="language-html">&lt;!-- 3. Router consumes both: routeLoader for data, loaderIntent for UX --&gt;
+});</code></pre></we-code-view>
+<we-code-view><pre><code class="language-html">&lt;!-- 3. Router consumes both: routeLoader for data, loaderIntent for UX --&gt;
 &lt;route-view&gt;
   &lt;template route="/users/:id" route:loader="loadUser"&gt;
     &lt;h1&gt;{{ '@route.data.name' }}&lt;/h1&gt;
   &lt;/template&gt;
-&lt;/route-view&gt;</code></pre>
+&lt;/route-view&gt;</code></pre></we-code-view>
 <p style="font-size: 0.9rem; color: var(--color-text-muted);">
     When <code>loadUser</code> runs, the router resolves <code>customContexts:loaderIntent</code> from the injector chain.
     The <code>soft</code> strategy activates <code>withSoftBlocking</code>: the previous route content stays visible but
@@ -217,11 +217,11 @@ docInjector.set('customContexts:routeLoader', {
     <strong>CustomResourceRegistry</strong> rather than inline. This ensures consistent loading
     visuals across the application.
 </p>
-<pre><code class="language-typescript">// Register reusable loading templates
+<we-code-view><pre><code class="language-typescript">// Register reusable loading templates
 customResources.define('user-profile', {
     loader: 'skeleton-profile',   // skeleton template name
     error: 'error-card'           // error template name
-});</code></pre>
+});</code></pre></we-code-view>
 
 <h3>Virtual Implementation</h3>
 <p>
@@ -433,7 +433,7 @@ customResources.define('user-profile', {
 </table>
 
 <h3>Interface</h3>
-<pre><code class="language-typescript">/**
+<we-code-view><pre><code class="language-typescript">/**
  * Loader Intent profile — declares how loading states affect the UI.
  * Provided via customContexts:loaderIntent on the injector chain.
  *
@@ -450,7 +450,7 @@ interface LoaderIntent {
 }
 
 /** State machine for loading lifecycle */
-type LoaderState = 'idle' | 'pending' | 'loading' | 'success' | 'empty' | 'error' | 'stale';</code></pre>
+type LoaderState = 'idle' | 'pending' | 'loading' | 'success' | 'empty' | 'error' | 'stale';</code></pre></we-code-view>
 
 <h3>Exports</h3>
 <table>

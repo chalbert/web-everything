@@ -29,15 +29,15 @@
 <p>Keyboard-reorder is <strong>mandatory</strong>, not an enhancement. A conforming list provides a keyboard path equivalent to the pointer path: a <a href="/intents/focus-delegation/">roving tabindex</a> over items, grab/move/drop keys, and a polite <a href="/intents/live-region-status/">live-region</a> announcement of each move and the final commit (e.g. "Moved item 3 to position 1 of 8"). A pointer-only reorderable list is <strong>non-conforming</strong>, not "partially done".</p>
 
 <h3>Usage</h3>
-<pre><code class="language-html">&lt;ul role="listbox" reorderable&gt;
+<we-code-view><pre><code class="language-html">&lt;ul role="listbox" reorderable&gt;
   &lt;li role="option" tabindex="-1" preserve-on-move&gt;First&lt;/li&gt;
   &lt;li role="option" tabindex="-1" preserve-on-move&gt;Second&lt;/li&gt;
   &lt;li role="option" tabindex="-1" preserve-on-move&gt;Third&lt;/li&gt;
 &lt;/ul&gt;
-&lt;!-- Drag an item, or focus one and press Space to grab, Arrow keys to move, Space to drop, Esc to cancel. --&gt;</code></pre>
+&lt;!-- Drag an item, or focus one and press Space to grab, Arrow keys to move, Space to drop, Esc to cancel. --&gt;</code></pre></we-code-view>
 
 <h3>Configuration</h3>
-<pre><code class="language-html">&lt;!-- Grab: whole item (default) vs a scoped handle --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Grab: whole item (default) vs a scoped handle --&gt;
 &lt;ul reorderable grab="handle"&gt;
   &lt;li&gt;&lt;span data-reorder-handle&gt;⠿&lt;/span&gt; Draggable by the handle only&lt;/li&gt;
 &lt;/ul&gt;
@@ -46,7 +46,7 @@
 &lt;ul reorderable commit="persisted"&gt;...&lt;/ul&gt;
 
 &lt;!-- Scope: within-list (default) | cross-list (sibling lists sharing a group key) --&gt;
-&lt;ul reorderable scope="cross-list" reorder-group="columns"&gt;...&lt;/ul&gt;</code></pre>
+&lt;ul reorderable scope="cross-list" reorder-group="columns"&gt;...&lt;/ul&gt;</code></pre></we-code-view>
 
 <h3>Behavior</h3>
 <table>
@@ -82,7 +82,7 @@
 </table>
 
 <h3>Styling Hooks</h3>
-<pre><code class="language-css">/* The item currently grabbed */
+<we-code-view><pre><code class="language-css">/* The item currently grabbed */
 [reorderable] [data-reorder-grabbed] { ... }
 
 /* The candidate drop position (gap / placeholder) the item would land in.
@@ -92,7 +92,7 @@
 
 /* The scoped handle (when grab="handle") */
 [data-reorder-handle] { cursor: grab; }
-</code></pre>
+</code></pre></we-code-view>
 
 <h3>Composition</h3>
 <p>Composes <a href="/intents/interaction/">Interaction</a> (pointer/touch modality), <a href="/intents/focus-delegation/">Focus Delegation</a> (roving tabindex for the keyboard path), and <a href="/intents/live-region-status/">Live Region Status</a> (announcement). Item relocation uses the <a href="/blocks/component/">Component</a> block's <code>preserve-on-move</code> so an atomic move keeps each card's state. The generic drag-source / drop-target / data-transfer family (files, cross-window) is out of scope here — see <a href="/backlog/007-gap-11-clipboard-dnd-files-intents/">backlog #007</a>.</p>

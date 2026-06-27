@@ -26,7 +26,7 @@
 <h3>Syntax Options</h3>
 
 <h4>Option A: Invoker Commands + name attribute (Recommended)</h4>
-<pre><code class="language-html">&lt;div tab-group&gt;
+<we-code-view><pre><code class="language-html">&lt;div tab-group&gt;
   &lt;nav tab-list&gt;
     &lt;!-- Uses Invoker Commands API for triggers --&gt;
     &lt;button commandfor="counter-panel" command="--tab-show"&gt;Counter&lt;/button&gt;
@@ -40,11 +40,11 @@
     &lt;section id="todos-panel" tab-panel name="demo-tabs" hidden&gt;Todos...&lt;/section&gt;
     &lt;section id="form-panel" tab-panel name="demo-tabs" hidden&gt;Form...&lt;/section&gt;
   &lt;/div&gt;
-&lt;/div&gt;</code></pre>
+&lt;/div&gt;</code></pre></we-code-view>
 <p><strong>Pros:</strong> Aligns with web standards, progressive enhancement, works today with polyfill</p>
 
 <h4>Option B: Shorthand (attribute-based linking)</h4>
-<pre><code class="language-html">&lt;div tab-group="demo"&gt;
+<we-code-view><pre><code class="language-html">&lt;div tab-group="demo"&gt;
   &lt;nav tab-list&gt;
     &lt;button tab-trigger="counter"&gt;Counter&lt;/button&gt;
     &lt;button tab-trigger="todos"&gt;Todo List&lt;/button&gt;
@@ -54,17 +54,17 @@
     &lt;section tab-panel="counter"&gt;Counter content...&lt;/section&gt;
     &lt;section tab-panel="todos"&gt;Todo content...&lt;/section&gt;
   &lt;/div&gt;
-&lt;/div&gt;</code></pre>
+&lt;/div&gt;</code></pre></we-code-view>
 <p><strong>Pros:</strong> More concise, auto-generates IDs and commandfor/command</p>
 
 <h4>Option C: Custom Element</h4>
-<pre><code class="language-html">&lt;we-tabs&gt;
+<we-code-view><pre><code class="language-html">&lt;we-tabs&gt;
   &lt;we-tab-trigger slot="triggers" panel="counter"&gt;Counter&lt;/we-tab-trigger&gt;
   &lt;we-tab-trigger slot="triggers" panel="todos"&gt;Todo List&lt;/we-tab-trigger&gt;
 
   &lt;we-tab-panel slot="panels" name="counter"&gt;Counter content...&lt;/we-tab-panel&gt;
   &lt;we-tab-panel slot="panels" name="todos"&gt;Todo content...&lt;/we-tab-panel&gt;
-&lt;/we-tabs&gt;</code></pre>
+&lt;/we-tabs&gt;</code></pre></we-code-view>
 <p><strong>Pros:</strong> More encapsulated, clearer component boundary</p>
 
 <h3>ARIA Implementation</h3>
@@ -88,7 +88,7 @@
 </table>
 
 <h3>Configuration</h3>
-<pre><code class="language-html">&lt;!-- Activation mode: automatic (default) or manual --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Activation mode: automatic (default) or manual --&gt;
 &lt;div tab-group activation="manual"&gt;...&lt;/div&gt;
 
 &lt;!-- Orientation: horizontal (default) or vertical --&gt;
@@ -102,18 +102,18 @@
 
 &lt;!-- Persist to storage --&gt;
 &lt;div tab-group sync="session"&gt;...&lt;/div&gt;
-&lt;div tab-group sync="local"&gt;...&lt;/div&gt;</code></pre>
+&lt;div tab-group sync="local"&gt;...&lt;/div&gt;</code></pre></we-code-view>
 
 <h3>View Integration</h3>
 <p>Since Tabs uses ViewBehavior (panels always in DOM), state preservation is automatic. ViewEngine features that apply:</p>
-<pre><code class="language-html">&lt;!-- Transitions between panels --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Transitions between panels --&gt;
 &lt;div tab-group view:transition&gt;...&lt;/div&gt;
 
 &lt;!-- Hidden mode: let Ctrl+F find content in inactive tabs --&gt;
 &lt;section tab-panel="faq" hidden-mode="until-found"&gt;...&lt;/section&gt;
 
 &lt;!-- Lazy load panel content (defer rendering until first activation) --&gt;
-&lt;section tab-panel="heavy" view:lazy&gt;...&lt;/section&gt;</code></pre>
+&lt;section tab-panel="heavy" view:lazy&gt;...&lt;/section&gt;</code></pre></we-code-view>
 <p>Note: <code>view:keep-alive</code> is not needed for Tabs &mdash; panels are never destroyed, so state is always preserved. <code>keep-alive</code> is for directives (ViewIf, ViewSwitch) that stamp/destroy DOM.</p>
 
 <h3>Planned Traits</h3>
@@ -134,7 +134,7 @@
 </table>
 
 <h3>Styling Hooks</h3>
-<pre><code class="language-css">/* Active trigger */
+<we-code-view><pre><code class="language-css">/* Active trigger */
 [tab-trigger][aria-selected="true"] { ... }
 
 /* Active panel */
@@ -142,4 +142,4 @@
 
 /* Focus visible for keyboard users */
 [tab-trigger]:focus-visible { ... }
-</code></pre>
+</code></pre></we-code-view>

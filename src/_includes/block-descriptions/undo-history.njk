@@ -1,0 +1,49 @@
+<h2>Undo History</h2>
+<p>The <strong>navigable-time</strong> facet of <a href="/projects/webstates/">Web States</a> (the #011
+sibling of <a href="/blocks/draft-persistence/">draft-persistence</a>, which is the storage facet): a
+past / present / future cursor over Change Patches. It is a history layer that <strong>composes</strong>
+the Change Tracking Protocol — it does not extend <code>CustomChangeStrategy</code> or mint a new inverse
+contract (#1394 ratified).</p>
+
+<h3>What it provides</h3>
+<ul>
+  <li><strong>A past/present/future cursor</strong> over Change Patches — undo applies
+    <code>CustomChangeStrategy.applyInverse</code> of the past patch; redo is a forward re-apply of the
+    future patch. The command-pattern <code>invert()</code> case folds in as a custom strategy supplying
+    <code>applyInverse</code> — nothing lost, no new inverse contract.</li>
+  <li><strong><code>transact(fn)</code></strong> — groups/coalesces a run of changes into one undo step,
+    so one user gesture is one undo even when the underlying strategy batches detection differently.</li>
+  <li><strong>Bounded stacks</strong> — a configurable <code>maxDepth</code> caps retained patches;
+    pushing past the bound evicts the oldest past entry, and any new change clears the future (redo)
+    stack.</li>
+  <li><strong>Per-scope selection</strong> — each scope reads its active strategy from
+    <code>CustomChangeStrategyRegistry</code> through the injector chain, so different subtrees track
+    (and undo) under different strategies. No new scoping mechanism.</li>
+  <li><strong>A native InputEvent bridge</strong> — for contenteditable / form-control surfaces the
+    block drives the same cursor from the browser's <code>historyUndo</code> / <code>historyRedo</code>
+    <code>InputEvent</code> rather than re-binding Ctrl/Cmd-Z (native-first).</li>
+  <li><strong>Events</strong> — <code>history-changed</code> (cursor or stacks moved → re-read
+    <code>canUndo</code>/<code>canRedo</code> + depth) and <code>history-reverted</code> (an inverse /
+    forward patch applied, with direction), composing the Change Tracking Protocol's change-reverted
+    event.</li>
+</ul>
+
+<h3>What it deliberately does not own</h3>
+<ul>
+  <li><strong>The inverse contract</strong> — reused from Web States' shipped Change Patch +
+    <code>CustomChangeStrategy.applyInverse</code>, never redefined.</li>
+  <li><strong>The undo/redo UI control</strong> — a separate downstream block composing
+    <a href="/intents/command/">command</a> (invoke) + <a href="/intents/status-indicator/">status
+    indicator</a> (canUndo/canRedo) + feedback/notification; it consumes this block's API and
+    <code>history-changed</code> event.</li>
+  <li><strong>Optimistic-rollback churn</strong> — optimistic mutation (#1395) shares the reversible-op
+    primitive but runs a <strong>separate</strong> runtime: a failed-write rollback must never land on
+    the user's undo stack, which is fed only by committed user-intent changes.</li>
+</ul>
+
+<h3>Composition</h3>
+<p>The block exposes the history API + <code>history-changed</code> event a visible undo/redo control
+consumes, while delegating the reversible-operation contract wholesale to the
+<a href="/projects/webstates/">Web States</a> Change Tracking Protocol. It is the realizing shape of
+#1394, sibling to <a href="/blocks/draft-persistence/">draft-persistence</a> and distinct from the
+optimistic-mutation runtime (#1395).</p>

@@ -202,7 +202,7 @@ docInjector.set('customContexts:resourceAction', {
 </table>
 
 <h3>Interface</h3>
-<pre><code class="language-typescript">/**
+<we-code-view><pre><code class="language-typescript">/**
  * Resource Action configuration — provided via
  * customContexts:resourceAction on the injector chain.
  *
@@ -220,7 +220,7 @@ interface OptimisticPrediction&lt;T&gt; {
     predict: (params: Record&lt;string, unknown&gt;) => T;
     apply: (prediction: T) => void;
     revert: (previous: T) => void;
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>Exports</h3>
 <table>

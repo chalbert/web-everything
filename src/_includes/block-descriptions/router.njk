@@ -137,7 +137,7 @@
 <h4>Providing Guards and Loaders</h4>
 <p>Guard and loader functions are provided via context, following the same <code>customContexts</code> pattern used throughout the framework. The <code>route:guard</code> and <code>route:loader</code> attribute values on <code>&lt;template&gt;</code> elements are looked up by name from their respective contexts.</p>
 
-<pre><code class="language-javascript">// Provide guards and loaders via injector
+<we-code-view><pre><code class="language-javascript">// Provide guards and loaders via injector
 const docInjector = injectors.getInjectorOf(document);
 
 docInjector.set('customContexts:routeGuard', {
@@ -157,12 +157,12 @@ docInjector.set('customContexts:routeLoader', {
     if (!res.ok) throw new Error('User not found');
     return res.json();
   }
-});</code></pre>
+});</code></pre></we-code-view>
 
 <h4>How @route Is Populated</h4>
 <p>When a route matches, <code>&lt;route-view&gt;</code> sets <code>customContexts:route</code> on its own injector before stamping template content in-place. This makes <code>@route</code> available to all descendant expressions. For named outlets, the context is set on the outlet's injector instead.</p>
 
-<pre><code class="language-javascript">// Internally, &lt;route-view&gt; does something like:
+<we-code-view><pre><code class="language-javascript">// Internally, &lt;route-view&gt; does something like:
 const viewInjector = injectors.getInjectorOf(this);
 viewInjector.set('customContexts:route', {
   params: { userId: '123', postId: '456' },
@@ -172,7 +172,7 @@ viewInjector.set('customContexts:route', {
   query: new URLSearchParams('tab=comments'),
   hash: 'top',
   state: null
-});</code></pre>
+});</code></pre></we-code-view>
 
 <h3>Navigation API Integration</h3>
 <p>Router wraps the Navigation API rather than duplicating it. The browser's <code>navigate</code> event is the single integration point. Router adds route matching, guard orchestration, loader execution, and DOM stamping on top of what the platform provides natively.</p>
@@ -191,7 +191,7 @@ viewInjector.set('customContexts:route', {
   <li><strong>Stamp</strong> &mdash; Clone template, set <code>customContexts:route</code> on <code>&lt;route-view&gt;</code>'s injector, append content in-place. For named outlets (<code>route:outlet="name"</code>), stamp into the <code>&lt;route-outlet&gt;</code> instead. Use ViewEngine for transitions and keep-alive.</li>
 </ol>
 
-<pre><code class="language-typescript">// Simplified internal flow (inside RouteViewElement.connectedCallback)
+<we-code-view><pre><code class="language-typescript">// Simplified internal flow (inside RouteViewElement.connectedCallback)
 navigation.addEventListener('navigate', (event) => {
   if (!event.canIntercept) return;
 
@@ -230,7 +230,7 @@ navigation.addEventListener('navigate', (event) => {
       this.#stampRoute(matched, data, error);
     }
   });
-});</code></pre>
+});</code></pre></we-code-view>
 
 <p style="font-size: 0.9rem; color: var(--color-text-muted);">
   <strong>Timing note:</strong> For <code>push</code>/<code>replace</code> navigations, the URL updates immediately when <code>event.intercept()</code> is called, before the async handler resolves. If <code>canActivate</code> fails after intercept, Router must navigate away programmatically. For <code>traverse</code> (back/forward), the URL updates when the handler's promise settles.
@@ -240,7 +240,7 @@ navigation.addEventListener('navigate', (event) => {
 
 <h4>Context Types</h4>
 
-<pre><code class="language-typescript">/**
+<we-code-view><pre><code class="language-typescript">/**
  * Route context provided to matched route content.
  * Available as @route in expressions.
  * Injector key: customContexts:route
@@ -279,11 +279,11 @@ interface RouteNavigationTarget {
   hash: string;
   /** Navigation type from Navigation API */
   navigationType: 'push' | 'replace' | 'traverse' | 'reload';
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h4>Guard Types</h4>
 
-<pre><code class="language-typescript">/**
+<we-code-view><pre><code class="language-typescript">/**
  * Guard function result.
  * - true: allow navigation
  * - false: cancel navigation
@@ -310,11 +310,11 @@ type RouteGuardResult = boolean | string;
 type RouteGuardFn = (
   to: RouteNavigationTarget,
   from: RouteNavigationTarget | null
-) => RouteGuardResult | Promise&lt;RouteGuardResult&gt;;</code></pre>
+) => RouteGuardResult | Promise&lt;RouteGuardResult&gt;;</code></pre></we-code-view>
 
 <h4>Loader Types</h4>
 
-<pre><code class="language-typescript">/**
+<we-code-view><pre><code class="language-typescript">/**
  * Parameters passed to a loader function.
  */
 interface RouteLoaderParams {
@@ -344,11 +344,11 @@ interface RouteLoaderParams {
  * };
  * ```
  */
-type RouteLoaderFn = (params: RouteLoaderParams) => Promise&lt;unknown&gt;;</code></pre>
+type RouteLoaderFn = (params: RouteLoaderParams) => Promise&lt;unknown&gt;;</code></pre></we-code-view>
 
 <h4>Route Definition</h4>
 
-<pre><code class="language-typescript">/**
+<we-code-view><pre><code class="language-typescript">/**
  * Parsed route definition. Built by &lt;route-view&gt; from its child
  * &lt;template&gt; elements and their plain HTML attributes.
  */
@@ -379,11 +379,11 @@ interface MatchedRoute {
   definition: RouteDefinition;
   params: Record&lt;string, string&gt;;
   url: URL;
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h4>Components</h4>
 
-<pre><code class="language-typescript">/**
+<we-code-view><pre><code class="language-typescript">/**
  * Main router orchestrator. Custom element that owns child &lt;template&gt;
  * route definitions, listens to Navigation API events, runs guards
  * and loaders, and stamps matched content in-place as its own children.
@@ -495,11 +495,11 @@ class RouteOutletElement extends HTMLElement {
   connectedCallback(): void;
   /** @internal */
   disconnectedCallback(): void;
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h4>Behaviors (CustomAttribute)</h4>
 
-<pre><code class="language-typescript">/**
+<we-code-view><pre><code class="language-typescript">/**
  * Navigation link behavior. Intercepts clicks to use Navigation API
  * instead of full page navigation. Manages .active class on the host
  * &lt;a&gt; element when its route matches the current URL.
@@ -537,11 +537,11 @@ class RouteLinkBehavior extends CustomAttribute {
 class RoutePrefetchBehavior extends CustomAttribute {
   connectedCallback(): void;
   disconnectedCallback(): void;
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h4>Navigation API Types (re-exported from lib.dom)</h4>
 
-<pre><code class="language-typescript">/**
+<we-code-view><pre><code class="language-typescript">/**
  * Result of programmatic navigation via RouteViewElement.navigate().
  * Wraps the Navigation API's NavigationResult.
  */
@@ -550,12 +550,12 @@ interface NavigationResult {
   committed: Promise&lt;NavigationHistoryEntry&gt;;
   /** Resolves when the navigation handler has completed (loaders done, content stamped) */
   finished: Promise&lt;NavigationHistoryEntry&gt;;
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>Core Patterns</h3>
 
 <h4>Pattern 1: Basic Routes (in-place rendering)</h4>
-<pre><code class="language-html">&lt;!-- Content is stamped in-place inside &lt;route-view&gt; --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Content is stamped in-place inside &lt;route-view&gt; --&gt;
 &lt;route-view&gt;
   &lt;template route="/home"&gt;
     &lt;home-page&gt;&lt;/home-page&gt;
@@ -567,10 +567,10 @@ interface NavigationResult {
     &lt;not-found-page&gt;&lt;/not-found-page&gt;
   &lt;/template&gt;
   &lt;!-- Matched content appears here as children --&gt;
-&lt;/route-view&gt;</code></pre>
+&lt;/route-view&gt;</code></pre></we-code-view>
 
 <h4>Pattern 2: Navigation Links</h4>
-<pre><code class="language-html">&lt;nav&gt;
+<we-code-view><pre><code class="language-html">&lt;nav&gt;
   &lt;a route:link="/home"&gt;Home&lt;/a&gt;
   &lt;a route:link="/users/123"&gt;Profile&lt;/a&gt;
   &lt;a route:link="/settings" route:prefetch="hover"&gt;Settings&lt;/a&gt;
@@ -578,10 +578,10 @@ interface NavigationResult {
 
 &lt;style&gt;
   [route\:link].active { font-weight: bold; }
-&lt;/style&gt;</code></pre>
+&lt;/style&gt;</code></pre></we-code-view>
 
 <h4>Pattern 3: Route Parameters</h4>
-<pre><code class="language-html">&lt;!-- URLPattern syntax for params --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- URLPattern syntax for params --&gt;
 &lt;template route="/users/:userId/posts/:postId"&gt;
   &lt;!-- @route context set on &lt;route-view&gt;'s injector --&gt;
   &lt;p&gt;User: {{ @route.params.userId }}&lt;/p&gt;
@@ -591,10 +591,10 @@ interface NavigationResult {
 &lt;!-- Wildcard patterns --&gt;
 &lt;template route="/files/*"&gt;
   &lt;file-browser path="{{ @route.pathname.groups[0] }}"&gt;&lt;/file-browser&gt;
-&lt;/template&gt;</code></pre>
+&lt;/template&gt;</code></pre></we-code-view>
 
 <h4>Pattern 4: Guards (Navigation Control)</h4>
-<pre><code class="language-html">&lt;route-view&gt;
+<we-code-view><pre><code class="language-html">&lt;route-view&gt;
   &lt;!-- canActivate: "requireAuth" resolved from @routeGuard context --&gt;
   &lt;template route="/admin" route:guard="requireAuth"&gt;
     &lt;admin-panel&gt;&lt;/admin-panel&gt;
@@ -604,10 +604,10 @@ interface NavigationResult {
   &lt;template route="/editor" route:guard:leave="confirmUnsaved"&gt;
     &lt;document-editor&gt;&lt;/document-editor&gt;
   &lt;/template&gt;
-&lt;/route-view&gt;</code></pre>
+&lt;/route-view&gt;</code></pre></we-code-view>
 
 <h4>Pattern 5: Loaders (Data Fetching)</h4>
-<pre><code class="language-html">&lt;route-view&gt;
+<we-code-view><pre><code class="language-html">&lt;route-view&gt;
   &lt;!-- "loadUser" resolved from @routeLoader context --&gt;
   &lt;template route="/users/:id" route:loader="loadUser"&gt;
     &lt;user-profile user="{{ @route.data }}"&gt;&lt;/user-profile&gt;
@@ -617,10 +617,10 @@ interface NavigationResult {
   &lt;template route="/users/:id" route:loader="loadUser" route:error&gt;
     &lt;error-page message="{{ @route.error.message }}"&gt;&lt;/error-page&gt;
   &lt;/template&gt;
-&lt;/route-view&gt;</code></pre>
+&lt;/route-view&gt;</code></pre></we-code-view>
 
 <h4>Pattern 6: Named Outlets (auxiliary views)</h4>
-<pre><code class="language-html">&lt;!-- Primary content renders in-place inside &lt;route-view&gt; --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Primary content renders in-place inside &lt;route-view&gt; --&gt;
 &lt;route-view&gt;
   &lt;template route="/dashboard"&gt;
     &lt;dashboard-page&gt;&lt;/dashboard-page&gt;
@@ -634,10 +634,10 @@ interface NavigationResult {
 &lt;!-- Named outlet: renders outside the &lt;route-view&gt; --&gt;
 &lt;aside&gt;
   &lt;route-outlet name="sidebar"&gt;&lt;/route-outlet&gt;
-&lt;/aside&gt;</code></pre>
+&lt;/aside&gt;</code></pre></we-code-view>
 
 <h3>Configuration</h3>
-<pre><code class="language-html">&lt;!-- Scroll restoration --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Scroll restoration --&gt;
 &lt;route-view scroll="auto"&gt;...&lt;/route-view&gt;
 &lt;route-view scroll="manual"&gt;...&lt;/route-view&gt;
 
@@ -648,16 +648,16 @@ interface NavigationResult {
 &lt;route-view transition&gt;...&lt;/route-view&gt;
 
 &lt;!-- Keep-alive: cache deactivated routes --&gt;
-&lt;route-view keep-alive&gt;...&lt;/route-view&gt;</code></pre>
+&lt;route-view keep-alive&gt;...&lt;/route-view&gt;</code></pre></we-code-view>
 
 <h3>Prefetching</h3>
-<pre><code class="language-html">&lt;!-- Prefetch modes (on links) --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Prefetch modes (on links) --&gt;
 &lt;a route:link="/about" route:prefetch="none"&gt;No prefetch&lt;/a&gt;
 &lt;a route:link="/about" route:prefetch="hover"&gt;Prefetch on hover&lt;/a&gt;
 &lt;a route:link="/about" route:prefetch="visible"&gt;Prefetch when visible&lt;/a&gt;
 &lt;a route:link="/about" route:prefetch="eager"&gt;Prefetch immediately&lt;/a&gt;
 
-&lt;!-- Generates Speculation Rules when API available --&gt;</code></pre>
+&lt;!-- Generates Speculation Rules when API available --&gt;</code></pre></we-code-view>
 
 <h3>ViewEngine Integration</h3>
 <p><code>&lt;route-view&gt;</code> delegates show/hide mechanics to <a href="/blocks/view/">ViewEngine</a>. It handles its own structural stamping but uses the engine for:</p>
@@ -666,7 +666,7 @@ interface NavigationResult {
   <li><strong>Transitions</strong>: Route changes wrapped in <code>document.startViewTransition()</code></li>
   <li><strong>Events</strong>: <code>beforetoggle</code>/<code>toggle</code> fired on <code>&lt;route-view&gt;</code> (or named outlet) during route changes</li>
 </ul>
-<pre><code class="language-html">&lt;!-- State preservation across routes --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- State preservation across routes --&gt;
 &lt;route-view keep-alive&gt;...&lt;/route-view&gt;
 
 &lt;!-- Animated route transitions --&gt;
@@ -675,7 +675,7 @@ interface NavigationResult {
 &lt;!-- Lazy load route content --&gt;
 &lt;route-view&gt;
   &lt;template route="/heavy" lazy&gt;...&lt;/template&gt;
-&lt;/route-view&gt;</code></pre>
+&lt;/route-view&gt;</code></pre></we-code-view>
 
 <h3>Transition direction vs Motion feel</h3>
 <p>A route change can read <strong>two intents</strong> at once: the <a href="/intents/navigation/">Navigation intent</a>'s <code>transition</code> dimension (<code>directional</code> · <code>fade</code> · <code>none</code>) owns the view-transition's <em>direction</em> — derived from history-traversal direction, which Motion structurally cannot know — while the <a href="/intents/motion/">Motion intent</a>'s <code>physics</code> dimension (<code>natural</code> · <code>immediate</code> · <code>reduced</code>) owns its <em>feel</em> (easing, duration, <code>prefers-reduced-motion</code>). They are orthogonal, not ranked: <code>transition</code> decides <em>whether / which direction</em>, <code>physics</code> decides <em>duration / easing and whether decorative motion plays at all</em>. The Router resolves the two genuine overlaps with three rules:</p>
@@ -688,7 +688,7 @@ interface NavigationResult {
 
 <h3>Styling</h3>
 <p>Both <code>&lt;route-view&gt;</code> and <code>&lt;route-outlet&gt;</code> are real DOM elements &mdash; natural CSS targets:</p>
-<pre><code class="language-css">/* Primary view layout */
+<we-code-view><pre><code class="language-css">/* Primary view layout */
 route-view {
   display: block;
   min-height: 100dvh;
@@ -711,7 +711,7 @@ route-outlet[name="sidebar"] {
 [route\:link].active {
   font-weight: bold;
   color: var(--color-accent);
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>Loader Intent Integration</h3>
 <p>
@@ -734,7 +734,7 @@ route-outlet[name="sidebar"] {
 </p>
 
 <h4>App-Level Declaration</h4>
-<pre><code class="language-javascript">// Declare how route loading should look across the entire app
+<we-code-view><pre><code class="language-javascript">// Declare how route loading should look across the entire app
 const docInjector = injectors.getInjectorOf(document);
 
 docInjector.set('customContexts:loaderIntent', {
@@ -743,12 +743,12 @@ docInjector.set('customContexts:loaderIntent', {
   progress: 'indeterminate',  // no measurable progress for route loads
   context: 'transition',      // routes have prior content (except initial load)
   timing: 'debounced'         // don't flash indicator for fast loads (400ms)
-});</code></pre>
+});</code></pre></we-code-view>
 
 <h4>Per-Route Overrides</h4>
 <p>Individual routes can override specific intent dimensions via <code>route:loader-*</code> attributes. These are plain HTML attributes on <code>&lt;template&gt;</code> elements, following the same pattern as <code>route:guard</code> and <code>route:loader</code>.</p>
 
-<pre><code class="language-html">&lt;route-view&gt;
+<we-code-view><pre><code class="language-html">&lt;route-view&gt;
   &lt;!-- Fast route: uses app-level intent (soft, debounced) --&gt;
   &lt;template route="/dashboard" route:loader="loadDashboard"&gt;
     ...
@@ -767,7 +767,7 @@ docInjector.set('customContexts:loaderIntent', {
             route:loader-timing="immediate"&gt;
     ...
   &lt;/template&gt;
-&lt;/route-view&gt;</code></pre>
+&lt;/route-view&gt;</code></pre></we-code-view>
 
 <h4>Strategy-to-Behavior Mapping</h4>
 <table>
@@ -822,7 +822,7 @@ docInjector.set('customContexts:loaderIntent', {
 
 <h4>Navigation Pipeline (Updated)</h4>
 <p>The loading phase of the navigation pipeline (step 5) now integrates with the Loader Intent:</p>
-<pre><code class="language-typescript">// Inside event.intercept() handler, after canActivate passes:
+<we-code-view><pre><code class="language-typescript">// Inside event.intercept() handler, after canActivate passes:
 
 // 1. Resolve loader intent from injector chain
 const intent = InjectorRoot.getProviderOf(this, 'customContexts:loaderIntent');
@@ -850,11 +850,11 @@ cleanup();
 // 6. Stamp route content
 if (!event.signal.aborted) {
   this.#stampRoute(matched, data, error);
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h4>Styling per Strategy</h4>
 <p>CSS targets vary by strategy. The intent-driven approach means CSS is predictable:</p>
-<pre><code class="language-css">/* Soft strategy — default, CSS-only approach */
+<we-code-view><pre><code class="language-css">/* Soft strategy — default, CSS-only approach */
 route-view[aria-busy="true"] {
   opacity: 0.6;
   pointer-events: none;
@@ -875,7 +875,7 @@ route-view .loader-skeleton {
   animation: shimmer 1.5s infinite;
 }
 
-/* Optimistic strategy — no loading styles needed */</code></pre>
+/* Optimistic strategy — no loading styles needed */</code></pre></we-code-view>
 
 <h3>Resource Pipeline Integration</h3>
 <p>
@@ -1090,7 +1090,7 @@ docInjector.set('customContexts:resourceAction', {
 </table>
 
 <h3>Programmatic Navigation</h3>
-<pre><code class="language-javascript">// Get the &lt;route-view&gt; element (renders in-place)
+<we-code-view><pre><code class="language-javascript">// Get the &lt;route-view&gt; element (renders in-place)
 const router = document.querySelector('route-view');
 
 // Navigate programmatically (wraps navigation.navigate())
@@ -1105,7 +1105,7 @@ router.back();
 router.forward();
 
 // Access current route
-const { params, path, query, hash } = router.currentRoute;</code></pre>
+const { params, path, query, hash } = router.currentRoute;</code></pre></we-code-view>
 
 <h3>URL Pattern Examples</h3>
 <table>
@@ -1136,7 +1136,7 @@ const { params, path, query, hash } = router.currentRoute;</code></pre>
 </table>
 
 <h3>Registration</h3>
-<pre><code class="language-typescript">/**
+<we-code-view><pre><code class="language-typescript">/**
  * Registers all router components and behaviors with default names.
  * Tag names and attribute names can be customized by registering manually.
  *
@@ -1158,7 +1158,7 @@ const { params, path, query, hash } = router.currentRoute;</code></pre>
  * attributes.define('app:link', RouteLinkBehavior);
  * ```
  */
-function registerRouter(attributes: CustomAttributeRegistry): void;</code></pre>
+function registerRouter(attributes: CustomAttributeRegistry): void;</code></pre></we-code-view>
 
 <h3>Template Attributes Reference</h3>
 <p>These are plain HTML attributes on <code>&lt;template&gt;</code> elements inside <code>&lt;route-view&gt;</code>. They are read directly by the config component &mdash; no registry entries or classes needed.</p>

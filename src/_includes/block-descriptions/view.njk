@@ -168,7 +168,7 @@
 <h4>Toggle Events (Popover API pattern)</h4>
 <p>ViewEngine fires <code>beforetoggle</code>/<code>toggle</code> events matching the Popover API shape. Since these names are shared with Popover and <code>&lt;details&gt;</code>, ViewEngine registers <strong>typed event classes</strong> via <a href="/projects/webevents/">Web Events</a> provider keys for discrimination:</p>
 
-<pre><code class="language-javascript">// Standard listener — works, but receives ALL toggle events (views, popovers, details)
+<we-code-view><pre><code class="language-javascript">// Standard listener — works, but receives ALL toggle events (views, popovers, details)
 element.addEventListener('toggle', (e) => {
   console.log('Now:', e.newState);
 });
@@ -181,7 +181,7 @@ listenForScoped(element, 'toggle', 'customEvents:view-toggle', (e) => {
 // Plugged mode — same discrimination, standard API
 element.addEventListener('toggle', (e) => {
   console.log('View toggled:', e.newState);
-}, { provider: 'customEvents:view-toggle' });</code></pre>
+}, { provider: 'customEvents:view-toggle' });</code></pre></we-code-view>
 
 <table>
   <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Cancelable</th></tr>
@@ -191,17 +191,17 @@ element.addEventListener('toggle', (e) => {
 <p>Detail shape: <code>{ oldState: 'hidden'|'visible', newState: 'hidden'|'visible' }</code></p>
 
 <h4>Exclusive Groups</h4>
-<pre><code class="language-html">&lt;!-- Elements with same name: only one visible at a time --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Elements with same name: only one visible at a time --&gt;
 &lt;!-- Mirrors &lt;details name="..."&gt; pattern from HTML standard --&gt;
 &lt;section view name="panels"&gt;Panel A&lt;/section&gt;
-&lt;section view name="panels" hidden&gt;Panel B&lt;/section&gt;</code></pre>
+&lt;section view name="panels" hidden&gt;Panel B&lt;/section&gt;</code></pre></we-code-view>
 
 <h4>Transitions (opt-in)</h4>
-<pre><code class="language-html">&lt;!-- Engine wraps toggle in document.startViewTransition() --&gt;
-&lt;section view view:transition&gt;...&lt;/section&gt;</code></pre>
+<we-code-view><pre><code class="language-html">&lt;!-- Engine wraps toggle in document.startViewTransition() --&gt;
+&lt;section view view:transition&gt;...&lt;/section&gt;</code></pre></we-code-view>
 
 <h4>API Draft</h4>
-<pre><code class="language-typescript">/** Hidden mode determines HOW an element is hidden */
+<we-code-view><pre><code class="language-typescript">/** Hidden mode determines HOW an element is hidden */
 type ViewHiddenMode = 'display' | 'content-visibility' | 'until-found' | 'inert';
 
 /** Matches Popover API state values */
@@ -282,10 +282,10 @@ class ___(/* TBD */) {
    * show/hide is wrapped in document.startViewTransition().
    * Nested transitions are queued, not nested (browser limitation).
    */
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h4>How blocks use the API</h4>
-<pre><code class="language-typescript">// ViewBehavior — creates instance, delegates command handling
+<we-code-view><pre><code class="language-typescript">// ViewBehavior — creates instance, delegates command handling
 class ViewBehavior extends CustomAttribute {
   #view = new ___(/* TBD */)();
 
@@ -321,7 +321,7 @@ class Router {
     if (keepAlive) this.#view.hide(outlet);
     else           outlet.innerHTML = '';
   }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <!-- ═══════════════════════════════════════════════ -->
 <hr>
@@ -331,27 +331,27 @@ class Router {
 <p>Marks an element as a view target that can be shown/hidden via Invoker Commands. The element is always in the DOM &mdash; ViewBehavior only toggles its visibility using the engine's hidden modes.</p>
 
 <h4>Usage</h4>
-<pre><code class="language-html">&lt;!-- Triggers using Invoker Commands API --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Triggers using Invoker Commands API --&gt;
 &lt;button commandfor="panel-1" command="--view-show"&gt;Show&lt;/button&gt;
 &lt;button commandfor="panel-1" command="--view-hide"&gt;Hide&lt;/button&gt;
 &lt;button commandfor="panel-1" command="--view-toggle"&gt;Toggle&lt;/button&gt;
 
 &lt;!-- Target: always in DOM, visibility managed --&gt;
-&lt;section id="panel-1" view&gt;Panel content&lt;/section&gt;</code></pre>
+&lt;section id="panel-1" view&gt;Panel content&lt;/section&gt;</code></pre></we-code-view>
 
 <h4>With exclusive groups</h4>
-<pre><code class="language-html">&lt;button commandfor="home" command="--view-show"&gt;Home&lt;/button&gt;
+<we-code-view><pre><code class="language-html">&lt;button commandfor="home" command="--view-show"&gt;Home&lt;/button&gt;
 &lt;button commandfor="about" command="--view-show"&gt;About&lt;/button&gt;
 
 &lt;section id="home" view name="pages"&gt;Home content&lt;/section&gt;
-&lt;section id="about" view name="pages" hidden&gt;About content&lt;/section&gt;</code></pre>
+&lt;section id="about" view name="pages" hidden&gt;About content&lt;/section&gt;</code></pre></we-code-view>
 
 <h4>With hidden mode</h4>
-<pre><code class="language-html">&lt;!-- Searchable when hidden (Ctrl+F reveals it) --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Searchable when hidden (Ctrl+F reveals it) --&gt;
 &lt;section view hidden-mode="until-found"&gt;FAQ answer&lt;/section&gt;
 
 &lt;!-- Visible but non-interactive --&gt;
-&lt;section view hidden-mode="inert"&gt;Preview content&lt;/section&gt;</code></pre>
+&lt;section view hidden-mode="inert"&gt;Preview content&lt;/section&gt;</code></pre></we-code-view>
 
 <h4>Who uses this</h4>
 <ul>
@@ -368,14 +368,14 @@ class Router {
 <p>Binds an expression to an element's visibility. The element stays in the DOM; its visibility reacts to state changes. Unlike ViewBehavior (imperative, command-driven), ViewShowBehavior is declarative and expression-driven.</p>
 
 <h4>Usage</h4>
-<pre><code class="language-html">&lt;!-- Show when expression is truthy, hide when falsy --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Show when expression is truthy, hide when falsy --&gt;
 &lt;div view:show="isDropdownOpen"&gt;Dropdown menu&lt;/div&gt;
 
 &lt;!-- Works with dot-notation paths --&gt;
 &lt;div view:show="user.isAdmin"&gt;Admin tools&lt;/div&gt;
 
 &lt;!-- Negation --&gt;
-&lt;div view:show="!isLoading"&gt;Content ready&lt;/div&gt;</code></pre>
+&lt;div view:show="!isLoading"&gt;Content ready&lt;/div&gt;</code></pre></we-code-view>
 
 <h4>Difference from ViewBehavior</h4>
 <table>
@@ -400,7 +400,7 @@ class Router {
 <p>Structural conditional rendering. When the expression is falsy, the content does not exist in the DOM at all &mdash; no element, no placeholder, no accessibility trace. Content is stamped from a <code>&lt;template&gt;</code> when the condition becomes truthy and destroyed when it becomes falsy.</p>
 
 <h4>Usage</h4>
-<pre><code class="language-html">&lt;!-- Content created/destroyed based on condition --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Content created/destroyed based on condition --&gt;
 &lt;template view:if="isLoggedIn"&gt;
   &lt;user-dashboard&gt;&lt;/user-dashboard&gt;
 &lt;/template&gt;
@@ -411,7 +411,7 @@ class Router {
 &lt;/template&gt;
 &lt;template view:else&gt;
   &lt;empty-state&gt;&lt;/empty-state&gt;
-&lt;/template&gt;</code></pre>
+&lt;/template&gt;</code></pre></we-code-view>
 
 <h4>Why not ViewShowBehavior?</h4>
 <p>Use ViewIfDirective when:</p>
@@ -448,7 +448,7 @@ class Router {
 <p>Multi-branch structural rendering. Evaluates an expression and stamps the matching case. Only the active branch exists in the DOM (unless using <code>keep-alive</code>).</p>
 
 <h4>Usage</h4>
-<pre><code class="language-html">&lt;div view:switch="currentStep"&gt;
+<we-code-view><pre><code class="language-html">&lt;div view:switch="currentStep"&gt;
   &lt;template view:case="info"&gt;
     &lt;info-form&gt;&lt;/info-form&gt;
   &lt;/template&gt;
@@ -461,17 +461,17 @@ class Router {
   &lt;template view:default&gt;
     &lt;p&gt;Unknown step&lt;/p&gt;
   &lt;/template&gt;
-&lt;/div&gt;</code></pre>
+&lt;/div&gt;</code></pre></we-code-view>
 
 <h4>With keep-alive</h4>
-<pre><code class="language-html">&lt;!-- Cache previously rendered branches (form state preserved) --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Cache previously rendered branches (form state preserved) --&gt;
 &lt;div view:switch="currentStep" view:keep-alive&gt;
   &lt;template view:case="info"&gt;...&lt;/template&gt;
   &lt;template view:case="payment"&gt;...&lt;/template&gt;
 &lt;/div&gt;
 
 &lt;!-- With LRU cache limit --&gt;
-&lt;div view:switch="route" view:keep-alive="5"&gt;...&lt;/div&gt;</code></pre>
+&lt;div view:switch="route" view:keep-alive="5"&gt;...&lt;/div&gt;</code></pre></we-code-view>
 <p>When using <code>keep-alive</code>, cached branches are hidden using the engine's hidden modes instead of being destroyed. This is the bridge between directive and behavior patterns &mdash; the directive handles structural stamping, but delegates hide/show of cached content to the engine.</p>
 
 <h4>Why not ViewBehavior with exclusive groups?</h4>

@@ -14,13 +14,13 @@
 </ul>
 
 <h3>Usage Example</h3>
-<pre><code class="language-html">&lt;!-- Attribute-based enforcement --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Attribute-based enforcement --&gt;
 &lt;div trusted-html="sanitize-user-content"&gt;&lt;/div&gt;
 
 &lt;!-- With fallback content --&gt;
 &lt;article trusted-html="blog-post-policy"&gt;
     &lt;p&gt;Loading...&lt;/p&gt;
-&lt;/article&gt;</code></pre>
+&lt;/article&gt;</code></pre></we-code-view>
 
 <h3>Key Concepts</h3>
 <ul>
@@ -39,16 +39,16 @@
 </ul>
 
 <h3>Strict Mode Example</h3>
-<pre><code class="language-html">&lt;!-- Throws if innerHTML receives a raw string --&gt;
-&lt;div trusted-html="user-content" trusted-html-strict&gt;&lt;/div&gt;</code></pre>
+<we-code-view><pre><code class="language-html">&lt;!-- Throws if innerHTML receives a raw string --&gt;
+&lt;div trusted-html="user-content" trusted-html-strict&gt;&lt;/div&gt;</code></pre></we-code-view>
 
-<pre><code class="language-typescript">// This throws in strict mode
+<we-code-view><pre><code class="language-typescript">// This throws in strict mode
 element.innerHTML = userInput; // Error: raw string not allowed
 
 // This works
 element.innerHTML = trustedTypes
     .getPolicy('user-content')
-    .createHTML(userInput);</code></pre>
+    .createHTML(userInput);</code></pre></we-code-view>
 
 <h3>Integration with innerHTML Patch</h3>
 <p>

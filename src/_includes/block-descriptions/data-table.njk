@@ -82,7 +82,7 @@
 <p>The <code>sortDirection → aria-sort</code> projection is exposed as a named <code>sort:header</code> behavior seam — plausibly reusable on a non-table sortable header bar — but realized inside this block; extracting a standalone behavior is deferred until a second, non-table consumer exists. Virtualization stays with <a href="/intents/windowed-collection/">Windowed Collection</a> and paging with <a href="/blocks/pagination/">Pagination</a>; this block renders the full filtered/sorted/grouped set and composes those neighbours on the same collection.</p>
 
 <h3>HTML Usage</h3>
-<pre><code class="language-html">&lt;!-- Sortable table: the active column projects aria-sort; a button toggles it --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Sortable table: the active column projects aria-sort; a button toggles it --&gt;
 &lt;table sort:header&gt;
   &lt;thead&gt;
     &lt;tr&gt;
@@ -95,11 +95,11 @@
     &lt;tr class="group-row"&gt;&lt;th scope="rowgroup" colspan="3"&gt;Engineering — count: 2&lt;/th&gt;&lt;/tr&gt;
     &lt;tr&gt;&lt;td&gt;Aaron&lt;/td&gt;&lt;td&gt;Engineering&lt;/td&gt;&lt;td&gt;Oslo&lt;/td&gt;&lt;/tr&gt;
   &lt;/tbody&gt;
-&lt;/table&gt;</code></pre>
+&lt;/table&gt;</code></pre></we-code-view>
 
 <h3>Interface (contracts only)</h3>
 <p>Web Everything defines the contract; concrete strategy implementations (an alternate comparator, server-delegated ordering, a virtualization provider) live in <strong>Frontier UI</strong> and register against these seams without changing the contract.</p>
-<pre><code class="language-typescript">type SortDirection = 'ascending' | 'descending';            // aria-sort
+<we-code-view><pre><code class="language-typescript">type SortDirection = 'ascending' | 'descending';            // aria-sort
 type Sensitivity   = 'base' | 'accent' | 'case' | 'variant'; // Intl.Collator
 type EmptyPlacement = 'first' | 'last';                      // SQL NULLS FIRST/LAST
 type FilterMatch   = 'all' | 'any';
@@ -127,7 +127,7 @@ interface DataTableContract {
   sort?:   { by: SortKey[]; keys: 'single' | 'multiple' };
   group?:  { field: string; summary: GroupSummary; summaryField?: string };
   // Observable events: 'sortchange' | 'filterchange' | 'groupchange'.
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>Status &amp; scope</h3>
 <p><code>status: draft</code> — the contract, the APG/Intl.Collator/SQL-aggregate design, and a fixture-driven

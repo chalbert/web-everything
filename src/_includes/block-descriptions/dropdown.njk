@@ -55,7 +55,7 @@
 
 <h3>Altitude 1a — Inside <code>&lt;drop-list&gt;</code>: the class</h3>
 <p>A dropdown does not bake in <em>which</em> options or <em>whose</em> selection — it is generic. The component class bridges the public surface (attributes, <code>value</code>, the form, events) and the private substrate (the locals its template reads). Two things are non-negotiable: it is a <strong>form-associated custom element</strong> (so <code>&lt;form&gt;</code> / <code>FormData</code> / reset / validity all just work — no hidden input), and it exposes its resolved attributes on <strong>its own injector</strong> as locals nothing outside the element can see.</p>
-<pre><code class="language-typescript">const { injectors, InjectorRoot } = window;
+<we-code-view><pre><code class="language-typescript">const { injectors, InjectorRoot } = window;
 
 class DropList extends HTMLElement {
   static formAssociated = true;                                  // → real form control
@@ -112,10 +112,10 @@ class DropList extends HTMLElement {
   }
 }
 
-customElements.define('drop-list', DropList);</code></pre>
+customElements.define('drop-list', DropList);</code></pre></we-code-view>
 
 <p>The locals the class just set — <code>@options</code>, <code>@selected</code>, <code>@placeholder</code>, <code>@surfaceId</code> — are the <em>only</em> contexts the template references. There is no hidden input: form participation moved to the element itself via <code>ElementInternals.setFormValue</code>.</p>
-<pre><code class="language-html">&lt;button anchor="{{ '{{' }}@surfaceId}}"
+<we-code-view><pre><code class="language-html">&lt;button anchor="{{ '{{' }}@surfaceId}}"
         aria-haspopup="listbox"
         commandfor="{{ '{{' }}@surfaceId}}" command="toggle-popover"&gt;
   {{ '{{' }}@selected.label ?? @placeholder}}
@@ -134,7 +134,7 @@ customElements.define('drop-list', DropList);</code></pre>
       {{ '{{' }}@option.label}}
     &lt;/li&gt;
   &lt;/template&gt;
-&lt;/ul&gt;</code></pre>
+&lt;/ul&gt;</code></pre></we-code-view>
 
 <h4>Reading the pair as trait language</h4>
 <ul>
@@ -148,27 +148,27 @@ customElements.define('drop-list', DropList);</code></pre>
 
 <h3>Altitude 2 — Component (the consumer call site)</h3>
 <p>The element and its attributes <em>are</em> the trait selection. The consumer passes the data in; the component handles the rest.</p>
-<pre><code class="language-html">&lt;drop-list name="country"
+<we-code-view><pre><code class="language-html">&lt;drop-list name="country"
            options="@countries"
            on:change="setCountry($event)"&gt;&lt;/drop-list&gt;
 &lt;!-- `single` is baked into the preset; `options` accepts a context reference
      (resolved from an ancestor injector) or an inline expression, and is
-     re-exposed inside the component as the private @options context. --&gt;</code></pre>
+     re-exposed inside the component as the private @options context. --&gt;</code></pre></we-code-view>
 
 <h3>Altitude 3 — TypeScript, explicit composition</h3>
 <p>A list of <code>with*</code> factories — structurally identical to <code>loader.load(promise, [traitA, traitB])</code>. This is what <code>&lt;drop-list&gt;</code> would invoke under the hood if its inner assembly were re-expressed in TypeScript:</p>
-<pre><code class="language-typescript">const country = composeDroplist(trigger, [
+<we-code-view><pre><code class="language-typescript">const country = composeDroplist(trigger, [
   withAnchoredSurface({ placement: 'bottom-start', collision: ['flip', 'resize'] }),
   withFocusDelegation({ strategy: 'virtual' }),   // omit strategy → inherits ambient intent
   withSelection({ model: 'single' }),             // structural: stated here, never inherited
   withTypeAhead(),
 ]);
-// → returns a handle; country.cleanup() reverts every trait, in reverse.</code></pre>
+// → returns a handle; country.cleanup() reverts every trait, in reverse.</code></pre></we-code-view>
 <p><code>withSelection({ model: 'single' })</code> is the entire "I am a single dropdown" statement. It reads as construction, because it is.</p>
 
 <h3>Example — a project's country dropdown</h3>
 <p>A project consumes the generic <code>&lt;drop-list&gt;</code> by passing data and a handler at the boundary; the component is otherwise untouched. The same <code>&lt;drop-list&gt;</code> is reused for currency, language, time zone, role, or account by changing <code>options=</code> and the handler — never by editing the component.</p>
-<pre><code class="language-html">&lt;form on:submit="saveAddress($event)"&gt;
+<we-code-view><pre><code class="language-html">&lt;form on:submit="saveAddress($event)"&gt;
   &lt;label for="country"&gt;Country&lt;/label&gt;
   &lt;drop-list id="country"
              name="country"
@@ -179,8 +179,8 @@ customElements.define('drop-list', DropList);</code></pre>
   &lt;!-- … other fields … --&gt;
 
   &lt;button type="submit"&gt;Save&lt;/button&gt;
-&lt;/form&gt;</code></pre>
-<pre><code class="language-javascript">import { SimpleStore } from '/blocks/stores/simple';
+&lt;/form&gt;</code></pre></we-code-view>
+<we-code-view><pre><code class="language-javascript">import { SimpleStore } from '/blocks/stores/simple';
 const { injectors } = window;
 
 // Project data — could equally come from a fetch or a generated list.
@@ -206,7 +206,7 @@ root.set('customContexts:handlers', {
   },
 });
 
-window.attributes.upgrade(document.body);</code></pre>
+window.attributes.upgrade(document.body);</code></pre></we-code-view>
 
 <h4>What the project owns vs. what the dropdown owns</h4>
 <ul>

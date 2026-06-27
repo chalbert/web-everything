@@ -32,12 +32,12 @@
 <p>Per-dimension resolution: <code>explicit (local) ⊕ ambient intent (behavioral only) ⊕ trait default</code>. Structural dimensions stop at <code>explicit ⊕ default</code> — the ambient channel has no say. One app-level line can still make "every droplist here uses virtual focus and truncates" true, but it can never make a dropdown single or multiple. That stays where the widget is built.</p>
 
 <h4>Ambient intent in practice</h4>
-<pre><code class="language-typescript">// App root — a designer/product policy, NOT structure:
+<we-code-view><pre><code class="language-typescript">// App root — a designer/product policy, NOT structure:
 injector.set('customContexts:droplistIntent', {
   focusStrategy: 'virtual',     // prefer virtual focus everywhere
   collision: ['flip', 'shift'],
   truncate: true,
-});</code></pre>
+});</code></pre></we-code-view>
 <p>A trait with no explicit option for a <em>behavioral</em> dimension reads this. A trait with no explicit option for a <em>structural</em> dimension falls through to its default — never to the ambient channel.</p>
 
 <h3>How a trait reaches the page</h3>

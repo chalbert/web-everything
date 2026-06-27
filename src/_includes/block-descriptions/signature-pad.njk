@@ -48,7 +48,7 @@
   <tr><td><code>sign</code></td><td><code>{ record: SignatureRecord }</code></td><td>The signature committed — affirmation accepted and a name typed (or a mark drawn). The record is frozen and never re-mutated.</td></tr>
   <tr><td><code>clear</code></td><td><code>{ method: SignatureMethod }</code></td><td>The in-progress typed name / drawn mark was reset before commit.</td></tr>
 </table>
-<pre><code class="language-typescript">type SignatureMethod = 'typed' | 'drawn';
+<we-code-view><pre><code class="language-typescript">type SignatureMethod = 'typed' | 'drawn';
 
 interface SignatureRecord {
   signer: string;        // the affirmed identity (typed legal name or the supplied signer)
@@ -57,7 +57,7 @@ interface SignatureRecord {
   value: string;         // the typed name, or a data-URL for a drawn mark
   affirmed: boolean;     // the intent-to-sign the signer accepted
 }
-</code></pre>
+</code></pre></we-code-view>
 <p class="text-sm text-gray-600">
   <strong>Status note:</strong> a freshly-minted contract (first shipped to drive the loan-origination
   exercise app's S9 disclosures). The shape is implemented + consumed + tested, but the contract is open to

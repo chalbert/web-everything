@@ -87,7 +87,7 @@
 <p>The Data Grid does <em>not</em> re-implement focus management — it realizes Focus Delegation's <code>roving</code> strategy over two axes, and the <strong>movement engine</strong> (<code>nextCellPosition</code>) is the verifiable seam. It is a parallel block to the <a href="/blocks/data-table/">Data Table</a>, not a sortable table upgraded in place: the two compose onto the same collection when both reordering and cell traversal are wanted. <a href="#editable-cells">Editable cells</a> are the same APG grid pattern with an editing mode, so they ship as a <em>composable behavior</em> on this block (<code>grid:cell-edit</code>) rather than a parallel block; two-dimensional selection and virtualized rows remain concrete strategies that register against these seams without changing the contract.</p>
 
 <h3>HTML Usage</h3>
-<pre><code class="language-html">&lt;!-- Data grid: one cell is the roving tabindex=0; arrows move focus cell to cell.
+<we-code-view><pre><code class="language-html">&lt;!-- Data grid: one cell is the roving tabindex=0; arrows move focus cell to cell.
      Add grid:cell-edit for the editable sub-pattern (Enter/F2 to edit, Esc/Enter to cancel/commit). --&gt;
 &lt;table role="grid" grid:cell-navigation grid:cell-edit aria-rowcount="3" aria-colcount="2"&gt;
   &lt;thead&gt;
@@ -102,11 +102,11 @@
       &lt;td role="gridcell" tabindex="-1" aria-colindex="2"&gt;Engineering&lt;/td&gt;
     &lt;/tr&gt;
   &lt;/tbody&gt;
-&lt;/table&gt;</code></pre>
+&lt;/table&gt;</code></pre></we-code-view>
 
 <h3>Interface (contracts only)</h3>
 <p>Web Everything defines the contract; concrete strategy implementations (virtualized rows, editable cells, server paging, two-dimensional selection) live in <strong>Frontier UI</strong> and register against these seams without changing the contract.</p>
-<pre><code class="language-typescript">interface GridColumn { field: string; label: string; }
+<we-code-view><pre><code class="language-typescript">interface GridColumn { field: string; label: string; }
 
 interface CellPosition { row: number; col: number; }  // row 0 = the header row
 
@@ -123,7 +123,7 @@ function nextCellPosition(
   key: { key: string; ctrlKey?: boolean; metaKey?: boolean },
   dims: { rows: number; cols: number },   // rows INCLUDES the header row
   pageSize?: number,
-): CellPosition;</code></pre>
+): CellPosition;</code></pre></we-code-view>
 
 <h3>Status &amp; scope</h3>
 <p><code>status: draft</code> — the contract, the APG Data Grid / roving-tabindex design, the

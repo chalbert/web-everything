@@ -14,17 +14,17 @@
 </p>
 
 <h3>Usage Example</h3>
-<pre><code class="language-html">&lt;!-- trusted:html policy="sanitize-user-content" --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- trusted:html policy="sanitize-user-content" --&gt;
   &lt;template&gt;
     &lt;div data-bind="userGeneratedHtml"&gt;&lt;/div&gt;
   &lt;/template&gt;
-&lt;!-- /trusted:html --&gt;</code></pre>
+&lt;!-- /trusted:html --&gt;</code></pre></we-code-view>
 
 <h3>Policy Scoping via Injectors</h3>
 <p>
     Policies can be scoped hierarchically through the <code>HTMLInjector</code> system. A <code>CustomTrustedTypesRegistry</code> holds named policies, allowing different application zones to enforce different sanitization rules.
 </p>
-<pre><code class="language-typescript">// Register a policy in the injector
+<we-code-view><pre><code class="language-typescript">// Register a policy in the injector
 trustedTypesRegistry.define('sanitize-user-content', {
     createHTML: (input) => DOMPurify.sanitize(input)
 });
@@ -35,7 +35,7 @@ trustedTypesRegistry.define('admin-only', {
         if (!isAdmin()) throw new Error('Unauthorized');
         return input;
     }
-});</code></pre>
+});</code></pre></we-code-view>
 
 <h3>Fallback Behavior</h3>
 <p>

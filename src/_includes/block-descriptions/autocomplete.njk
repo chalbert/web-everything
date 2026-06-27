@@ -80,7 +80,7 @@
 
 <h3>Altitude 1a — Inside <code>&lt;auto-complete&gt;</code>: the class</h3>
 <p>An autocomplete does not bake in <em>which</em> options or <em>whose</em> selection — it is generic. The component class bridges the public surface (the <code>name</code>/<code>src</code> attributes, <code>value</code>, the form, events) and the private two-element substrate. Two things are non-negotiable: it is a <strong>form-associated custom element</strong> (so <code>&lt;form&gt;</code> / <code>FormData</code> / reset / validity all just work — no hidden input), and the only autocomplete-specific glue is the commit handler: <em>on commit, write the label into the input, dismiss the surface, keep focus on the input.</em></p>
-<pre><code class="language-typescript">const { injectors } = window;
+<we-code-view><pre><code class="language-typescript">const { injectors } = window;
 
 class AutoComplete extends HTMLElement {
   static formAssociated = true;                                  // → real form control
@@ -131,10 +131,10 @@ class AutoComplete extends HTMLElement {
   };
 }
 
-customElements.define('auto-complete', AutoComplete);</code></pre>
+customElements.define('auto-complete', AutoComplete);</code></pre></we-code-view>
 
 <p>The locals the class set — <code>@surfaceId</code>, <code>@inputId</code>, <code>@src</code>, <code>@placeholder</code> — are the <em>only</em> contexts the template references. There is no hidden input; form participation lives on the element itself via <code>ElementInternals.setFormValue</code>. The template wires the two-element substrate, naming the input as the listbox's focus controller:</p>
-<pre><code class="language-html">&lt;input id="{{ '{{' }}@inputId}}" role="combobox"
+<we-code-view><pre><code class="language-html">&lt;input id="{{ '{{' }}@inputId}}" role="combobox"
        aria-controls="{{ '{{' }}@surfaceId}}"
        aria-autocomplete="list"
        aria-expanded="false"
@@ -150,7 +150,7 @@ customElements.define('auto-complete', AutoComplete);</code></pre>
     live-status
     popover&gt;
   &lt;!-- `filter` injects &lt;li role="option"&gt; from `src` matches; nothing authored here --&gt;
-&lt;/ul&gt;</code></pre>
+&lt;/ul&gt;</code></pre></we-code-view>
 
 <h4>Reading the pair as trait language</h4>
 <ul>
@@ -165,17 +165,17 @@ customElements.define('auto-complete', AutoComplete);</code></pre>
 
 <h3>Altitude 2 — Component (the consumer call site)</h3>
 <p>The element and its attributes <em>are</em> the trait selection. <code>editable</code>/<code>filter</code> are baked into this preset; the consumer points <code>src</code> at a query endpoint and reads the value.</p>
-<pre><code class="language-html">&lt;auto-complete name="city"
+<we-code-view><pre><code class="language-html">&lt;auto-complete name="city"
                src="/api/cities?q="
                placeholder="Search a city…"
                on:change="setCity($event)"&gt;&lt;/auto-complete&gt;
 &lt;!-- `filter="async"` is baked into the preset; `src` is the query endpoint the
      filter trait appends the typed text to. A `client`-mode autocomplete would
-     instead receive an inline option set and filter it in place. --&gt;</code></pre>
+     instead receive an inline option set and filter it in place. --&gt;</code></pre></we-code-view>
 
 <h3>Altitude 3 — TypeScript, explicit composition</h3>
 <p>A list of <code>with*</code> factories — structurally identical to the dropdown's, with the editable delta made explicit: <code>controller</code> on focus, <code>withFilter</code> in place of <code>withTypeAhead</code>, plus <code>clearable</code> and <code>live-status</code>:</p>
-<pre><code class="language-typescript">const city = composeDroplist(input, [
+<we-code-view><pre><code class="language-typescript">const city = composeDroplist(input, [
   withAnchoredSurface({ placement: 'bottom-start', collision: ['flip', 'resize'] }),
   withFocusDelegation({ strategy: 'virtual', controller: input }),  // host is the input
   withSelection({ model: 'single', selectionFollowsFocus: false }), // arrow previews, Enter commits
@@ -183,12 +183,12 @@ customElements.define('auto-complete', AutoComplete);</code></pre>
   withClearable(),                                                  // the X affordance
   withLiveStatus(),                                                 // announce counts + active option
 ]);
-// → returns a handle; city.cleanup() reverts every trait, in reverse.</code></pre>
+// → returns a handle; city.cleanup() reverts every trait, in reverse.</code></pre></we-code-view>
 <p>Diff it against the dropdown's composition and the delta is exact: <code>controller</code> is added to focus, <code>withTypeAhead()</code> becomes <code>withFilter(...)</code>, and <code>withClearable()</code> + <code>withLiveStatus()</code> come along. <code>selection</code> and <code>anchor</code> are unchanged.</p>
 
 <h3>Example — a project's city autocomplete</h3>
 <p>A project consumes the generic <code>&lt;auto-complete&gt;</code> by pointing <code>src</code> at an endpoint and handling the commit; the component is otherwise untouched. The same element is reused for users, products, or tags by changing <code>src=</code> and the handler — never by editing the component.</p>
-<pre><code class="language-html">&lt;form on:submit="saveTrip($event)"&gt;
+<we-code-view><pre><code class="language-html">&lt;form on:submit="saveTrip($event)"&gt;
   &lt;label for="city"&gt;Destination&lt;/label&gt;
   &lt;auto-complete id="city"
                  name="city"
@@ -199,8 +199,8 @@ customElements.define('auto-complete', AutoComplete);</code></pre>
   &lt;!-- … other fields … --&gt;
 
   &lt;button type="submit"&gt;Save&lt;/button&gt;
-&lt;/form&gt;</code></pre>
-<pre><code class="language-javascript">const { injectors } = window;
+&lt;/form&gt;</code></pre></we-code-view>
+<we-code-view><pre><code class="language-javascript">const { injectors } = window;
 
 // Provide the action handlers at the document root — any &lt;auto-complete&gt; in
 // the tree resolves them. The city list itself is fetched by `filter` from `src`.
@@ -213,7 +213,7 @@ root.set('customContexts:handlers', {
   },
 });
 
-window.attributes.upgrade(document.body);</code></pre>
+window.attributes.upgrade(document.body);</code></pre></we-code-view>
 
 <h4>What the project owns vs. what the autocomplete owns</h4>
 <ul>

@@ -45,23 +45,23 @@
 <h3>Core Patterns</h3>
 
 <h4>Pattern 1: Invoker Commands Triggers (Standard)</h4>
-<pre><code class="language-html">&lt;!-- Using Invoker Commands API (Baseline Jan 2026) --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Using Invoker Commands API (Baseline Jan 2026) --&gt;
 &lt;button commandfor="panel-1" command="--view-show"&gt;Show Panel&lt;/button&gt;
 &lt;button commandfor="panel-1" command="--view-hide"&gt;Hide Panel&lt;/button&gt;
 &lt;button commandfor="panel-1" command="--view-toggle"&gt;Toggle Panel&lt;/button&gt;
 
-&lt;section id="panel-1" view&gt;Panel content&lt;/section&gt;</code></pre>
+&lt;section id="panel-1" view&gt;Panel content&lt;/section&gt;</code></pre></we-code-view>
 
 <h4>Pattern 2: Exclusive Groups (name attribute)</h4>
-<pre><code class="language-html">&lt;!-- Same name = mutually exclusive (mirrors &lt;details name="..."&gt;) --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Same name = mutually exclusive (mirrors &lt;details name="..."&gt;) --&gt;
 &lt;button commandfor="home" command="--view-show"&gt;Home&lt;/button&gt;
 &lt;button commandfor="about" command="--view-show"&gt;About&lt;/button&gt;
 
 &lt;section id="home" view name="pages"&gt;Home content&lt;/section&gt;
-&lt;section id="about" view name="pages" hidden&gt;About content&lt;/section&gt;</code></pre>
+&lt;section id="about" view name="pages" hidden&gt;About content&lt;/section&gt;</code></pre></we-code-view>
 
 <h4>Pattern 3: Binary Conditional (show vs if)</h4>
-<pre><code class="language-html">&lt;!-- view:show - toggles visibility, keeps DOM/state --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- view:show - toggles visibility, keeps DOM/state --&gt;
 &lt;div view:show="isOpen"&gt;Dropdown content&lt;/div&gt;
 
 &lt;!-- view:if - adds/removes from DOM --&gt;
@@ -75,14 +75,14 @@
 &lt;/template&gt;
 &lt;template view:else&gt;
   &lt;empty-state&gt;&lt;/empty-state&gt;
-&lt;/template&gt;</code></pre>
+&lt;/template&gt;</code></pre></we-code-view>
 
 <h4>Pattern 4: Switch/Case</h4>
-<pre><code class="language-html">&lt;div view:switch="currentTab"&gt;
+<we-code-view><pre><code class="language-html">&lt;div view:switch="currentTab"&gt;
   &lt;section view:case="home"&gt;Home content&lt;/section&gt;
   &lt;section view:case="settings"&gt;Settings content&lt;/section&gt;
   &lt;section view:default&gt;Unknown tab&lt;/section&gt;
-&lt;/div&gt;</code></pre>
+&lt;/div&gt;</code></pre></we-code-view>
 
 <h3>Hidden Modes</h3>
 <p>Multiple ways to hide content, matching platform capabilities:</p>
@@ -115,12 +115,12 @@
   </tr>
 </table>
 
-<pre><code class="language-html">&lt;!-- Specify hidden mode --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Specify hidden mode --&gt;
 &lt;section view hidden-mode="until-found"&gt;Searchable content&lt;/section&gt;
-&lt;section view hidden-mode="content-visibility"&gt;Performance optimized&lt;/section&gt;</code></pre>
+&lt;section view hidden-mode="content-visibility"&gt;Performance optimized&lt;/section&gt;</code></pre></we-code-view>
 
 <h3>Events (Popover API Pattern)</h3>
-<pre><code class="language-javascript">// Same event shape as Popover API
+<we-code-view><pre><code class="language-javascript">// Same event shape as Popover API
 element.addEventListener('beforetoggle', (e) => {
   console.log(e.oldState, e.newState); // 'hidden', 'visible'
   e.preventDefault(); // Cancel the toggle
@@ -128,33 +128,33 @@ element.addEventListener('beforetoggle', (e) => {
 
 element.addEventListener('toggle', (e) => {
   console.log('Now:', e.newState);
-});</code></pre>
+});</code></pre></we-code-view>
 
 <h3>Features</h3>
 
 <h4>State Preservation (keep-alive)</h4>
-<pre><code class="language-html">&lt;!-- Preserve component state when hidden --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Preserve component state when hidden --&gt;
 &lt;div view:switch="activeTab" view:keep-alive&gt;
   &lt;form-panel view:case="form"&gt;...&lt;/form-panel&gt;
   &lt;preview-panel view:case="preview"&gt;...&lt;/preview-panel&gt;
 &lt;/div&gt;
 
 &lt;!-- With cache limit (LRU eviction) --&gt;
-&lt;div view:switch="route" view:keep-alive="5"&gt;...&lt;/div&gt;</code></pre>
+&lt;div view:switch="route" view:keep-alive="5"&gt;...&lt;/div&gt;</code></pre></we-code-view>
 
 <h4>Transitions (View Transitions API)</h4>
-<pre><code class="language-html">&lt;!-- Opt-in to native View Transitions --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Opt-in to native View Transitions --&gt;
 &lt;div view:switch="page" view:transition&gt;
   &lt;home-page view:case="home"&gt;&lt;/home-page&gt;
   &lt;about-page view:case="about"&gt;&lt;/about-page&gt;
-&lt;/div&gt;</code></pre>
+&lt;/div&gt;</code></pre></we-code-view>
 
 <h4>Lazy Loading</h4>
-<pre><code class="language-html">&lt;!-- Don't render until visible (default) --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Don't render until visible (default) --&gt;
 &lt;section view:case="heavy" view:lazy&gt;...&lt;/section&gt;
 
 &lt;!-- Render eagerly even when hidden --&gt;
-&lt;section view:case="preload" view:lazy="eager"&gt;...&lt;/section&gt;</code></pre>
+&lt;section view:case="preload" view:lazy="eager"&gt;...&lt;/section&gt;</code></pre></we-code-view>
 
 <h3>Framework Comparison</h3>
 <table>

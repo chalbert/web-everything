@@ -10,7 +10,7 @@
 </ul>
 
 <h3>Basic Usage</h3>
-<pre><code class="language-javascript">import { SimpleStore } from '/blocks/stores/simple';
+<we-code-view><pre><code class="language-javascript">import { SimpleStore } from '/blocks/stores/simple';
 
 // Create a store with initial state
 const counter = new SimpleStore({ count: 0 });
@@ -25,10 +25,10 @@ counter.setItem('count', counter.getItem('count') + 1);
 
 // Unsubscribe when done
 unsubscribe();
-</code></pre>
+</code></pre></we-code-view>
 
 <h3>Nested State with Dot-Notation</h3>
-<pre><code class="language-javascript">const form = new SimpleStore({
+<we-code-view><pre><code class="language-javascript">const form = new SimpleStore({
   user: { name: '', email: '' }
 });
 
@@ -40,10 +40,10 @@ form.setItem('user.name', 'John');
 form.setItem('user.email', 'john@example.com');
 
 // State is now: { user: { name: 'John', email: 'john@example.com' } }
-</code></pre>
+</code></pre></we-code-view>
 
 <h3>Derived State with onBeforeNotify</h3>
-<pre><code class="language-javascript">const todoStore = new SimpleStore(
+<we-code-view><pre><code class="language-javascript">const todoStore = new SimpleStore(
   { todos: [], totalTodos: 0, activeTodos: 0, completedTodos: 0 },
   // This hook runs BEFORE subscribers are notified
   (state) => {
@@ -62,7 +62,7 @@ todoStore.setItem('todos', [
 todoStore.getItem('totalTodos');     // 2
 todoStore.getItem('activeTodos');    // 1
 todoStore.getItem('completedTodos'); // 1
-</code></pre>
+</code></pre></we-code-view>
 
 <h3>API Reference</h3>
 <table>

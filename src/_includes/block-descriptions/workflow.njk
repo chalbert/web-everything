@@ -455,7 +455,7 @@ workflowEl.addEventListener('workflow-step-before-change', async (e) => {
 </table>
 
 <h3>Interface</h3>
-<pre><code class="language-typescript">/** Step definition parsed from DOM */
+<we-code-view><pre><code class="language-typescript">/** Step definition parsed from DOM */
 interface WorkflowStepDefinition {
     id: string;                    // workflow-step attribute value
     fieldset: HTMLFieldSetElement; // The step's fieldset element
@@ -485,7 +485,7 @@ interface WorkflowStepChangeDetail {
 interface WorkflowCompleteDetail {
     data: Record&lt;string, FormDataEntryValue&gt;; // All form data
     steps: WorkflowStepDefinition[];           // Final step states
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>Styling Hooks</h3>
 <table>

@@ -12,12 +12,12 @@
     A story is a <code>WebCase</code>, the pivot the webcases generator already emits
     (<code>@frontierui/webdocs/generator.ts</code>):
 </p>
-<pre><code class="language-typescript">interface WebCase {
+<we-code-view><pre><code class="language-typescript">interface WebCase {
   readonly id: string;          // stable id (the source filename, e.g. 01-basic.html)
   readonly title: string;
   readonly description: string;
   readonly code: string;        // the case source (HTML/TS), verbatim and trimmed
-}</code></pre>
+}</code></pre></we-code-view>
 <p class="text-sm text-gray-600">
     Interaction-tests fold in as webcases carrying an interaction script; docs-only presentation needs (ordering,
     prose) are <strong>optional</strong> WebCase fields — never a second file to keep in sync.
@@ -39,12 +39,12 @@
 </table>
 
 <h3>Usage</h3>
-<pre><code class="language-html">&lt;!-- resolve a case by id against the page's webcases --&gt;
-&lt;story-canvas case-id="01-basic"&gt;&lt;/story-canvas&gt;</code></pre>
-<pre><code class="language-typescript">// or set the WebCase directly
+<we-code-view><pre><code class="language-html">&lt;!-- resolve a case by id against the page's webcases --&gt;
+&lt;story-canvas case-id="01-basic"&gt;&lt;/story-canvas&gt;</code></pre></we-code-view>
+<we-code-view><pre><code class="language-typescript">// or set the WebCase directly
 const canvas = document.querySelector('story-canvas');
 canvas.case = { id: '01-basic', title: 'Basic', description: '…', code: '&lt;drop-list …&gt;' };
-</code></pre>
+</code></pre></we-code-view>
 
 <h3>Contract</h3>
 <ul>

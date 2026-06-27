@@ -66,7 +66,7 @@
 <p>NavListBehavior observes the DOM for <code>aria-current</code> changes (via MutationObserver or router events) and updates the roving tabindex accordingly &mdash; the currently active page link receives <code>tabindex="0"</code>.</p>
 
 <h3>HTML Usage</h3>
-<pre><code class="language-html">&lt;nav nav:list aria-label="Main navigation"&gt;
+<we-code-view><pre><code class="language-html">&lt;nav nav:list aria-label="Main navigation"&gt;
   &lt;!-- Top-level links --&gt;
   &lt;a href="/" route:link&gt;Home&lt;/a&gt;
   &lt;a href="/about" route:link&gt;About&lt;/a&gt;
@@ -93,7 +93,7 @@
       &lt;li&gt;&lt;a href="/guides/state" route:link&gt;State Management&lt;/a&gt;&lt;/li&gt;
     &lt;/ul&gt;
   &lt;/div&gt;
-&lt;/nav&gt;</code></pre>
+&lt;/nav&gt;</code></pre></we-code-view>
 
 <h3>ARIA Implementation</h3>
 <p>Follows the <a href="https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/">W3C APG Disclosure Navigation</a> pattern:</p>
@@ -120,7 +120,7 @@
 </table>
 
 <h3>Configuration</h3>
-<pre><code class="language-html">&lt;!-- Orientation: vertical (default) or horizontal --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Orientation: vertical (default) or horizontal --&gt;
 &lt;nav nav:list orientation="vertical"&gt;...&lt;/nav&gt;
 &lt;nav nav:list orientation="horizontal"&gt;...&lt;/nav&gt;
 
@@ -128,7 +128,7 @@
 &lt;div nav:section auto-expand&gt;...&lt;/div&gt;
 
 &lt;!-- Collapse other sections when one is expanded (accordion mode) --&gt;
-&lt;nav nav:list exclusive-sections&gt;...&lt;/nav&gt;</code></pre>
+&lt;nav nav:list exclusive-sections&gt;...&lt;/nav&gt;</code></pre></we-code-view>
 
 <h3>Router Integration</h3>
 <p>When used with the <a href="/blocks/router/">Router</a>, navigation links use <code>route:link</code> to get automatic active state management:</p>
@@ -140,7 +140,7 @@
 </ul>
 
 <h3>Styling Hooks</h3>
-<pre><code class="language-css">/* Active link (current page) */
+<we-code-view><pre><code class="language-css">/* Active link (current page) */
 [nav\:list] a[aria-current="page"] {
   font-weight: bold;
   border-left: 3px solid var(--color-primary);
@@ -167,7 +167,7 @@
   [nav\:section] ul {
     transition: none;
   }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>Exports</h3>
 <ul>

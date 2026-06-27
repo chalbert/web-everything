@@ -4,7 +4,7 @@
 <p>This behavior is part of the <a href="/blocks/nav-list/">Navigation</a> module. For the full navigation system including keyboard navigation and router integration, see the <a href="/blocks/nav-list/">Navigation</a> page.</p>
 
 <h3>HTML Usage</h3>
-<pre><code class="language-html">&lt;div nav:section&gt;
+<we-code-view><pre><code class="language-html">&lt;div nav:section&gt;
   &lt;button aria-expanded="true" aria-controls="section-links"&gt;
     Section Title
   &lt;/button&gt;
@@ -24,7 +24,7 @@
     &lt;li&gt;&lt;a href="/page-4" route:link&gt;Page 4&lt;/a&gt;&lt;/li&gt;
     &lt;li&gt;&lt;a href="/page-5" route:link&gt;Page 5&lt;/a&gt;&lt;/li&gt;
   &lt;/ul&gt;
-&lt;/div&gt;</code></pre>
+&lt;/div&gt;</code></pre></we-code-view>
 
 <h3>ARIA Attributes Managed</h3>
 <table>
@@ -52,6 +52,6 @@
 <p>Note: <code>Enter</code> and <code>Space</code> are handled natively by the browser on <code>&lt;button&gt;</code> elements. NavSectionBehavior listens for the <code>click</code> event (which fires on both mouse click and keyboard activation) to toggle state.</p>
 
 <h3>Configuration</h3>
-<pre><code class="language-html">&lt;!-- Auto-expand when a child link has aria-current="page" --&gt;
-&lt;div nav:section auto-expand&gt;...&lt;/div&gt;</code></pre>
+<we-code-view><pre><code class="language-html">&lt;!-- Auto-expand when a child link has aria-current="page" --&gt;
+&lt;div nav:section auto-expand&gt;...&lt;/div&gt;</code></pre></we-code-view>
 <p>When <code>auto-expand</code> is set, NavSectionBehavior checks on <code>connectedCallback</code> and on route changes whether any descendant link has <code>aria-current="page"</code>. If so, the section is automatically expanded.</p>
