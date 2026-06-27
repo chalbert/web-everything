@@ -159,7 +159,10 @@ an item*). The backlog file is the durable, resumable record — the item body *
    Begin the actual work on the *next* turn.
 5. **Keep it in sync as you go.** Maintain the `## Progress` block (Status / Branch / Done / Next / Notes)
    *as work happens*, not at the end — if the session is lost, that block is all the next one has. Flip back
-   to `open` if you abandon it unfinished. At claim, also **re-evaluate this item's `blockedBy` edges**
+   to `open` if you abandon it unfinished. Also keep **one** `in_progress` TodoWrite entry phrased as a
+   present-tense status — it's surfaced live as this card's *currently-doing* on the /backlog Active-work
+   tab (*backlog-workflow.md → Working an item → Keep it in sync*); let it double as your progress channel
+   instead of narrating in prose. At claim, also **re-evaluate this item's `blockedBy` edges**
    against its body (*backlog-workflow.md → Keep the blocker DAG honest*): lift any prose prerequisite
    ("after #NNN", "blocked on…", "needs X from #NNN") into the field, drop any spurious edge — do this
    *with* the claim edit, not a separate turn.

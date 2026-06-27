@@ -419,6 +419,8 @@ The backlog file is the **durable, resumable record** of in-flight work — trea
    - **Notes:** <key file paths, decisions, gotchas>
    ```
    (An in-session TodoWrite list is fine for live tracking, but it is **not** durable — only the item body survives the session.)
+
+   **Keep one in-progress todo, phrased as a status — it's exposed live.** The item's `in_progress` TodoWrite entry is surfaced on the **/backlog Active-work tab** as that card's *currently-doing* line (read live from your session transcript; the board prefers it over an inferred last-action). So keep **exactly one** todo `in_progress` at a time and phrase it as a present-tense status a glancer can read (`Wiring the lane overlay`, `Gating + verifying the build`) — not a vague `step 3`. Let that todo **be** your progress channel: it doubles as the live status *and* keeps you from narrating the same thing in prose (the *track, don't narrate* habit). This is the live, at-a-glance view; the **durable** record still lives in `## Progress`.
 3. **If abandoned unfinished,** run **`node scripts/backlog.mjs release <NNN>`** (`active` → `open`); leave the `## Progress` section as-is (it says where it stopped), so it returns to the pool instead of looking claimed-but-dead.
 4. **Reclaiming a stranded claim.** An item left `active` by a crashed/forgotten session would otherwise be invisible forever (selection drops `active`). So when asked to work and the pool looks empty — or when explicitly told to continue one — treat an `active` item as **resumable**: read its `## Progress`, check out its branch, and continue from **Next**. Don't re-pick it as fresh; resume it.
 

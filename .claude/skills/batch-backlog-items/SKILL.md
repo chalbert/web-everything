@@ -58,7 +58,9 @@ the per-item chat-rename — a batch labels the session **once**.
    - **Empty pool → no batch.** Fall back to *backlog-workflow.md → "When nothing is agent-ready"*: surface
      the **single** highest-leverage blocker, discuss, stop. Don't open a batch on Tier B/C work.
 3. **Loop, per item — the full arc, one command per transition:** `claim <NNN>` (wins the race + flips +
-   stamps; at claim **re-evaluate its `blockedBy` edges + digest**) → work (keep `## Progress` synced) →
+   stamps; at claim **re-evaluate its `blockedBy` edges + digest**) → work (keep `## Progress` synced, and
+   keep **one** `in_progress` todo phrased as a present-tense status — it's the card's live *currently-doing*
+   on the /backlog Active-work tab, see *Working an item* → *Keep it in sync*) →
    **gate in the item's own locus** (look up `LOCI[item.locus]` in `check-standards-rules.mjs`: run
    `gateCommand` in `repoPath`, probe `devServerProbe` for any render check, do any `closeoutDiscipline`;
    a WE item is just `npm run check:standards`). **Pass `--scope=<batch-slug>` to the WE gates** —
