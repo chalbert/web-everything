@@ -1,15 +1,15 @@
 /**
  * Web Policy — the **pure-contract half** (#1028, slice #1077): the #406 DMN-aligned rule meta-schema.
  *
- * Types and interfaces only: this module is fully **compile-erased** (no runtime emit) so it can become
- * the `@webeverything/contracts/policy` entry (#872/#874) that FUI depends on (the FUI→WE arrow),
+ * Types and interfaces only: this module is fully **compile-erased** (no runtime emit) and is the
+ * `@webeverything/contracts/webpolicy` entry (#872/#874) that FUI depends on (the FUI→WE arrow),
  * superseding byte-replication — exactly like `guard/contract.ts`. The runtime half — the PDP
- * ({@link PolicyDecisionPoint}), PEP, the built-in `comparatorEvaluator`, and the hit-policy combination
- * logic — is impl and lives next door in `./enforcement.ts` (production impl → FUI; the WE-resident
- * copy is the standard's **reference implementation** — executable spec consumed by WE's conformance
- * demo + tests, per #1078); the split is at the *file* seam,
- * not the public surface (`enforcement.ts` re-exports these types so importers reach types + runtime from
- * one site, mirroring `guard/provider.ts`).
+ * (`PolicyDecisionPoint`), PEP, the built-in `comparatorEvaluator`, and the hit-policy combination logic —
+ * is impl and **lives in FUI** (`fui:webpolicy/enforcement.ts` + `fui:webpolicy/proof.ts`, relocated #1799
+ * per #1282 — WE holds zero executable). FUI's engine imports these types via the scoped specifier and
+ * re-exports them so importers reach types + runtime from one site (mirroring `validity-merge/provider.ts`);
+ * WE keeps only this contract + the behavioral vectors (`conformance-vectors/webpolicy.vectors.ts`), which
+ * prove any engine conformant through the plateau-hosted runner (#1800/#1801).
  *
  * Web Policy fixes the **rule meta-schema** — how a rule is expressed, versioned, and scoped — by
  * adopting the OMG **DMN** vocabulary (decision tables + FEEL-style entry expressions). It standardizes

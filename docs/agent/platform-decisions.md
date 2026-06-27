@@ -78,7 +78,7 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    demo is a **website** artifact: the WE-docs site is a downstream *consumer* that **surfaces FUI**
    (mode-C runtime bundle / `fuiDemo` iframe — [we-fui-embed-boundary](#we-fui-embed-boundary) rule 6),
    so it exercises **FUI's** runtime, never a WE-project copy. Delivery runtime
-   (`we:webpolicy/enforcement.ts`, block engines, parser/proof logic, …) is **FUI-canonical**; the WE
+   (`fui:webpolicy/enforcement.ts`, block engines, parser/proof logic, …) is **FUI-canonical**; the WE
    project keeps the **contract + conformance vectors (data)** only. The `@webeverything` *package*
    stays types-only (rule 3); the source arrow is WE→FUI, never inverts. **The one runtime-ish thing
    that stays WE is conformance *tooling* a WE-side `check.ts` gate consumes** (e.g.
@@ -94,14 +94,16 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    drift-tested does not make it tooling. The generated data stays WE only if WE no longer runs the
    generator — FUI runs its own transform and either commits the data or WE consumes it across the seam
    as data.)** **Interim state (honest):** a set of
-   WE-resident logic reference runtimes predate this rule and currently **violate** it —
-   `we:webpolicy/enforcement.ts`/`proof.ts` (consumed by `we:demos/webpolicy-conformance-demo.ts` via a
-   build-time local import) and the ~10 subsystems #1078 covered. They are **tracked relocation debt**,
-   **not** a sanctioned standing tier: their move to FUI is gated on (a) a FUI home existing and (b) a
-   working way for the WE-website conformance demo to surface FUI runtime for *headless* logic (the
-   `fuiDemo` iframe serves only rendered components today; the #899 vector-runner is designed, not
-   built). Until both clear they stay put **as debt under this rule** — and crucially **no _new_
-   WE-resident delivery runtime may be added.** Relocation tracked by #1294; the rule is #1282.
+   WE-resident logic reference runtimes predate this rule and **violated** it — the ~10 subsystems #1078
+   covered. **webpolicy is the first fully relocated** (#1294 cascade W1–W4: engine → `fui:webpolicy/`
+   #1799, binding + WE vector corpus #1800, plateau-hosted conformance docs surface #1801, WE runtime
+   deleted #1802) — both gates that held the move are now cleared: a FUI home exists, and the WE-website
+   conformance demo surfaces FUI *headless* logic through the **plateau-hosted conformance iframe** (the
+   #899 vector-runner, built #1790/#1801, drives the WE vectors against the FUI binding cross-origin). The
+   **remaining ~8 subsystems** stay put **as tracked relocation debt** under this rule (the non-engine ones
+   gated on the deferred conformance-model decision #1784), **not** a sanctioned standing tier — and
+   crucially **no _new_ WE-resident delivery runtime may be added.** Relocation tracked by #1294; the rule
+   is #1282.
 2. **The file seam is the cut:** `contract.ts` (pure types, compile-erased) → WE; `provider.ts` +
    `registry.ts` (runtime) → FUI. Split mixed modules *mid-file* at this seam.
 3. **Distribution end-state:** FUI consumes WE contracts via a WE-published type-only package
