@@ -16,42 +16,12 @@
  * testable. The result is *data* — a runner maps `blocked` to an exit code; a report / audit trail logs the
  * `waived[]` and `expiredWaivers[]` as evidence.
  */
-import type { GateResult, GateViolation, PolicyRule } from './gate';
+import type { GateResult, GateViolation, Waiver, WaivedViolation, WaiveredGateResult } from './contract';
 
-/** A tracked, expiring, audited override of one policy rule's violation. */
-export interface Waiver {
-  /** The {@link PolicyRule.id} this waives. */
-  readonly ruleId: string;
-  /** Who granted the waiver — the accountable party. */
-  readonly who: string;
-  /** Why it was granted — the justification on record. */
-  readonly why: string;
-  /** Expiry — an ISO date (`YYYY-MM-DD` or full timestamp). On/after `now` the waiver is inert. */
-  readonly until: string;
-  /** Optional scope note, carried for the audit record (mirrors {@link PolicyRule.scope}). */
-  readonly scope?: string;
-}
-
-/** A violation suppressed by an active waiver — kept for the audit trail, not counted as failing. */
-export interface WaivedViolation extends GateViolation {
-  readonly waiver: Waiver;
-}
-
-/** The gate verdict after waivers are applied. */
-export interface WaiveredGateResult {
-  /** True iff no *unwaived* `block`-severity rule was violated (CI may proceed). */
-  readonly passed: boolean;
-  /** True iff an *unwaived* `block`-severity rule was violated (CI must fail). */
-  readonly blocked: boolean;
-  /** Violations that remain after waivers (an active waiver removed the rest). */
-  readonly violations: readonly GateViolation[];
-  /** Violations suppressed by an active waiver — the audit trail (who/why/until). */
-  readonly waived: readonly WaivedViolation[];
-  /** Waivers that were present but expired (`until <= now`) — surfaced for renewal/removal, never silent. */
-  readonly expiredWaivers: readonly Waiver[];
-  /** The resolved rules that were evaluated (unchanged from the input result). */
-  readonly evaluated: readonly PolicyRule[];
-}
+// The waiver types ({@link Waiver}/{@link WaivedViolation}/{@link WaiveredGateResult}) are the pure-contract
+// half — they live in `./contract.ts` (the `@webeverything/contracts/webcompliance` entry, #1294 C1).
+// Re-exported here so importers reach the types + the runtime from one site (mirrors `webpolicy/proof.ts`).
+export type * from './contract';
 
 /** Is the waiver still active at `now`? Active ⇒ `now` is strictly before `until` (expires *on* the date). */
 export function isActive(waiver: Waiver, now: string): boolean {

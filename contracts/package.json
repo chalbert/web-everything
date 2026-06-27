@@ -37,6 +37,7 @@
     "./repro-bundle": "./repro-bundle.ts",
     "./permissions": "./permissions.ts",
     "./webcontexts": "./webcontexts.ts",
-    "./webpolicy": "./webpolicy.ts"
+    "./webpolicy": "./webpolicy.ts",
+    "./webcompliance": "./webcompliance.ts"
   }
 }

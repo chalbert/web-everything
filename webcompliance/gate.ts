@@ -16,39 +16,23 @@
  *
  * Pure + dependency-free: no process exit, no I/O — the caller maps {@link GateResult.blocked} to an exit
  * code and feeds it to a reporter. Deterministic and testable.
+ *
+ * The #436 policy/rule model + the gate verdict types ({@link Severity}/{@link PolicyRule}/
+ * {@link CompliancePolicy}/{@link Measure}/{@link GateViolation}/{@link GateResult}/{@link RunGateOptions})
+ * are the pure-contract half — they live in `./contract.ts` (the `@webeverything/contracts/webcompliance`
+ * entry, #1294 C1). Re-exported here so importers reach the types + the runtime from one site (mirrors
+ * `webpolicy/enforcement.ts`); the split is at the file seam, not the public surface.
  */
+import type {
+  CompliancePolicy,
+  GateResult,
+  GateViolation,
+  Measure,
+  PolicyRule,
+  RunGateOptions,
+} from './contract';
 
-/** Gate severity — `block` fails CI; `error`/`warn` report; `off` disables the rule. */
-export type Severity = 'block' | 'error' | 'warn' | 'off';
-
-/** One promoted conformance criterion — a measure enforced at a severity, optionally above a threshold. */
-export interface PolicyRule {
-  readonly id: string;
-  /** The conformance signal this rule promotes, e.g. `'app-conformance:aria-sort'`. */
-  readonly measure: string;
-  readonly severity: Severity;
-  /** Where it applies — a scope tag (project | path glob | app id); informational for the gate. */
-  readonly scope?: string;
-  /** The bar to clear: a number (`measured >= threshold`) or a level string like `'L2'`. Omitted ⇒ presence. */
-  readonly threshold?: number | string;
-  /** The policy version this criterion was promoted in. */
-  readonly since?: string;
-}
-
-/** A versioned policy that `extends` a baseline — the #436 shape. */
-export interface CompliancePolicy {
-  readonly id: string;
-  readonly version: string;
-  /** The baseline policy this builds on (resolved by {@link resolvePolicy}). */
-  readonly extends?: CompliancePolicy;
-  readonly rules: readonly PolicyRule[];
-}
-
-/** A measured conformance signal the gate evaluates rules against. */
-export interface Measure {
-  readonly measure: string;
-  readonly value: number | string;
-}
+export type * from './contract';
 
 /**
  * Resolve a policy against its `extends` chain into a flat rule list: baseline first, then each override
@@ -83,30 +67,6 @@ export function clears(measured: number | string | undefined, threshold: number 
     return !Number.isNaN(mRank) && mRank >= tRank;
   }
   return String(measured) === threshold;
-}
-
-/** A rule the measured signals failed to satisfy. */
-export interface GateViolation {
-  readonly rule: PolicyRule;
-  /** The value measured for the rule's `measure` (undefined ⇒ the signal was absent). */
-  readonly measured: number | string | undefined;
-  readonly reason: 'below-threshold' | 'missing-measure';
-}
-
-export interface GateResult {
-  /** True iff no `block`-severity rule was violated (CI may proceed). */
-  readonly passed: boolean;
-  /** True iff a `block`-severity rule was violated (CI must fail). */
-  readonly blocked: boolean;
-  /** Every violated rule (any severity except `off`), in resolved-policy order. */
-  readonly violations: readonly GateViolation[];
-  /** The resolved rules that were evaluated (after `extends`, excluding `off`). */
-  readonly evaluated: readonly PolicyRule[];
-}
-
-export interface RunGateOptions {
-  /** Override the pass test for a measure (e.g. a domain-specific comparator). Defaults to {@link clears}. */
-  readonly clears?: (measured: number | string | undefined, threshold: number | string | undefined) => boolean;
 }
 
 /**

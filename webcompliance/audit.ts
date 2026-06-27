@@ -14,31 +14,27 @@
  * Pure + dependency-free like {@link ./gate} and {@link ./waiver}: `at` is passed in (no clock read), so
  * the record and its report are deterministic and testable.
  */
-import type { GateResult, GateViolation, PolicyRule, Severity as GateSeverity, CompliancePolicy } from './gate';
-import type { WaiveredGateResult, WaivedViolation, Waiver } from './waiver';
+import type {
+  AnyGateResult,
+  AuditRecord,
+  AuditToReportOptions,
+  CompliancePolicy,
+  GateViolation,
+  PolicyRule,
+  Severity as GateSeverity,
+  Waiver,
+  WaiveredGateResult,
+  WaivedViolation,
+} from './contract';
 import type { Report, ReportSection, Finding, Score, Severity as ReportSeverity } from '../blocks/renderers/report/renderReport';
 
-/** A gate verdict in either form — the raw {@link GateResult} or the post-waiver {@link WaiveredGateResult}. */
-export type AnyGateResult = GateResult | WaiveredGateResult;
+// The audit types ({@link AnyGateResult}/{@link AuditRecord}/{@link AuditToReportOptions}) + every gate/waiver
+// type are the pure-contract half — they live in `./contract.ts` (the `@webeverything/contracts/webcompliance`
+// entry, #1294 C1). The Report model this maps onto is the renderer's contract (its own home).
 
 /** Narrow to a post-waiver result (carries the `waived` / `expiredWaivers` audit lists). */
 function isWaivered(r: AnyGateResult): r is WaiveredGateResult {
   return 'waived' in r;
-}
-
-/**
- * One enforcement event: the policy that was enforced (id + version), when, and its verdict. This is the
- * unit the audit trail records and {@link auditToReport} renders — the defensible "what/when/version/result".
- */
-export interface AuditRecord {
-  /** The policy enforced — its id. */
-  readonly policyId: string;
-  /** The policy version enforced (the "which standard version" of the record). */
-  readonly policyVersion: string;
-  /** When enforcement ran — an ISO timestamp, passed in (no clock read). */
-  readonly at: string;
-  /** The gate verdict (raw or post-waiver). */
-  readonly result: AnyGateResult;
 }
 
 /**
@@ -105,15 +101,6 @@ function passFinding(rule: PolicyRule, source: string): Finding {
     ruleId: rule.id,
     source,
   };
-}
-
-export interface AuditToReportOptions {
-  /**
-   * Emit a `pass` finding for every evaluated rule that was *not* violated (the full defensible record).
-   * Default `true` — an audit trail records what passed, not only what failed. Set `false` for a
-   * failures-only view.
-   */
-  readonly includePasses?: boolean;
 }
 
 /**
