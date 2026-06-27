@@ -9,14 +9,14 @@
     "intents"
   ],
   "summary": {
-    "uniqueUrls": 1231,
-    "totalOccurrences": 1551,
+    "uniqueUrls": 1246,
+    "totalOccurrences": 1569,
     "byHome": {
       "corpus": 51,
-      "references": 28,
-      "blocks": 182,
+      "references": 34,
+      "blocks": 185,
       "capability": 1266,
-      "intents": 24
+      "intents": 33
     }
   },
   "references": [
@@ -3042,6 +3042,16 @@
       "occurrences": 1
     },
     {
+      "url": "https://d3js.org/d3-force",
+      "home": "references",
+      "sourceId": "UI & Interaction",
+      "label": "D3-force",
+      "homes": [
+        "references"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://design-system.service.gov.uk/",
       "home": "corpus",
       "sourceId": "gov-uk",
@@ -3969,8 +3979,18 @@
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Credential_Management_API",
       "home": "intents",
-      "sourceId": "web-identity",
-      "label": "Web Identity Intent",
+      "sourceId": "credential-enrollment",
+      "label": "Credential Enrollment Intent",
+      "homes": [
+        "intents"
+      ],
+      "occurrences": 2
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/CredentialsContainer/create",
+      "home": "intents",
+      "sourceId": "credential-enrollment",
+      "label": "Credential Enrollment Intent",
       "homes": [
         "intents"
       ],
@@ -4138,6 +4158,16 @@
       "occurrences": 1
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/InputEvent/inputType",
+      "home": "blocks",
+      "sourceId": "undo-history",
+      "label": "Undo History · inputEventHistory",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Intersection_Observer_API",
       "home": "intents",
       "sourceId": "viewport-presence",
@@ -4291,6 +4321,16 @@
       "occurrences": 1
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/structuredClone",
+      "home": "blocks",
+      "sourceId": "undo-history",
+      "label": "Undo History · structuredClone",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API",
       "home": "blocks",
       "sourceId": "trusted-html",
@@ -4319,6 +4359,16 @@
         "blocks"
       ],
       "occurrences": 3
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/VisualViewport",
+      "home": "intents",
+      "sourceId": "viewport-transform",
+      "label": "Viewport Transform Intent",
+      "homes": [
+        "intents"
+      ],
+      "occurrences": 1
     },
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_custom_elements",
@@ -4398,6 +4448,16 @@
       "label": "Navigation · prefersReducedMotion",
       "homes": [
         "blocks"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/animation-range",
+      "home": "intents",
+      "sourceId": "scroll-progress",
+      "label": "Scroll Progress Intent",
+      "homes": [
+        "intents"
       ],
       "occurrences": 1
     },
@@ -4552,6 +4612,16 @@
       "occurrences": 1
     },
     {
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/meter",
+      "home": "intents",
+      "sourceId": "meter",
+      "label": "Meter Intent",
+      "homes": [
+        "intents"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/nav",
       "home": "blocks",
       "sourceId": "nav-list",
@@ -4567,9 +4637,10 @@
       "sourceId": "resource-loader",
       "label": "Resource Loader · progressElement",
       "homes": [
-        "blocks"
+        "blocks",
+        "intents"
       ],
-      "occurrences": 1
+      "occurrences": 2
     },
     {
       "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/select",
@@ -5005,6 +5076,16 @@
       "occurrences": 1
     },
     {
+      "url": "https://github.com/dagrejs/dagre",
+      "home": "references",
+      "sourceId": "UI & Interaction",
+      "label": "dagre",
+      "homes": [
+        "references"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://github.com/ing-bank/lion",
       "home": "corpus",
       "sourceId": "lion",
@@ -5393,6 +5474,26 @@
         "capability"
       ],
       "occurrences": 2
+    },
+    {
+      "url": "https://html.spec.whatwg.org/multipage/sections.html",
+      "home": "intents",
+      "sourceId": "sectioning",
+      "label": "Sectioning Intent",
+      "homes": [
+        "intents"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://js.cytoscape.org/",
+      "home": "references",
+      "sourceId": "UI & Interaction",
+      "label": "Cytoscape.js",
+      "homes": [
+        "references"
+      ],
+      "occurrences": 1
     },
     {
       "url": "https://krausest.github.io/js-framework-benchmark",
@@ -6802,6 +6903,16 @@
       "label": "Rich text editor (Tiptap)",
       "homes": [
         "capability"
+      ],
+      "occurrences": 1
+    },
+    {
+      "url": "https://mermaid.js.org/",
+      "home": "references",
+      "sourceId": "UI & Interaction",
+      "label": "Mermaid",
+      "homes": [
+        "references"
       ],
       "occurrences": 1
     },
@@ -9668,6 +9779,16 @@
       "occurrences": 2
     },
     {
+      "url": "https://reaflow.dev/",
+      "home": "references",
+      "sourceId": "UI & Interaction",
+      "label": "reaflow",
+      "homes": [
+        "references"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://shoelace.style/",
       "home": "corpus",
       "sourceId": "shoelace",
@@ -11620,6 +11741,16 @@
       "occurrences": 1
     },
     {
+      "url": "https://www.eclipse.org/elk",
+      "home": "references",
+      "sourceId": "UI & Interaction",
+      "label": "ELK (Eclipse Layout Kernel)",
+      "homes": [
+        "references"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://www.fast.design/",
       "home": "corpus",
       "sourceId": "fast",
@@ -11951,6 +12082,16 @@
       "occurrences": 1
     },
     {
+      "url": "https://www.w3.org/TR/annotation-model#motivation-and-purpose",
+      "home": "intents",
+      "sourceId": "annotation",
+      "label": "Annotation Intent",
+      "homes": [
+        "intents"
+      ],
+      "occurrences": 1
+    },
+    {
       "url": "https://www.w3.org/TR/permissions",
       "home": "intents",
       "sourceId": "permission",
@@ -12117,7 +12258,7 @@
         "capability",
         "intents"
       ],
-      "occurrences": 2
+      "occurrences": 3
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/grid",
@@ -12284,6 +12425,16 @@
         "capability"
       ],
       "occurrences": 2
+    },
+    {
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/treegrid",
+      "home": "blocks",
+      "sourceId": "data-grid",
+      "label": "Data Grid · apgTreeGrid",
+      "homes": [
+        "blocks"
+      ],
+      "occurrences": 1
     },
     {
       "url": "https://www.w3.org/WAI/ARIA/apg/patterns/treeview",
