@@ -342,6 +342,19 @@ stays WE" carve-out and re-points the engine split above. Composes
 same-bundle trusted panels mount by direct import; the dev-browser's loaded app is a privileged-introspection
 boundary (#141/#562/#410), not a web iframe. Unblocks the #1391 `S5` panel-embed slice.
 
+### Non-verdict conformance compares by a closed matcher vocabulary {#non-verdict-conformance-matcher}
+
+**A relocated runtime whose conformance output is *not* a verdict does not get a new conformance model — it classifies onto one of the two suite shapes WE already ships and picks a comparison matcher.** The two shapes: the interaction-script `ConformanceVectorSuite` (`we:conformance-vectors/schema.ts`) for provider/behavioral surfaces, and the Doc-Spec golden suite (#1163, `we:conformance-vectors/webdocs.vectors.ts`) for pure `(input)→output` transforms. The comparison is a **closed four-member matcher set**, carried as a per-`expect`-key tag in the WE schema and interpreted by the Plateau judge:
+
+1. **`exact`** — strict `===` (today's default; scalars, e.g. webcompliance `violationCount`).
+2. **`deep-equal`** — structural equality (object returns: webtheme's resolved token map, reliability `RecoveryResult`).
+3. **`resolved-options/parts-structure`** — assert `resolvedOptions()` + `formatToParts` part types/order, whitespace/separator classes as equivalence classes (intl `Number`/`DateTime`/`RelativeTime` — never raw strings, which drift with host ICU/CLDR).
+4. **`predicate`** — a boolean over the observed surface: contains / subset / count / absence / sign-order (analytics' `void`-returning recorded-call log; `Intl.Collator`, which has no `formatToParts` — assert `compare()` sign + sort order).
+
+The set is closed and exhaustive over what these runtimes emit; widening it is a fork to re-open, not a default. **Placement** (composes [constellation-placement](#constellation-placement), [we-fui-embed-boundary](#we-fui-embed-boundary)): the contract + vector/golden corpus + the `matcher` vocabulary stay **WE**; the per-key matcher **dispatch** in the judge is **Plateau** (`plateau:src/conformance-engine/conformanceVectors.ts`, today hardcoded strict `!==` — the seam does not yet exist); the per-target binding is the **FUI** subject. No new WE→FUI code edge; #1282 (WE holds zero executable) holds. **What this is NOT:** not strict-equality-only (false-negatives for intl and all object returns), not per-shape binding judges (driver proliferation — a matcher is a comparison *tag*, not a new driver).
+
+**Lineage:** #1816 (ratified 2026-06-27; research `/research/non-verdict-conformance-model/`, report `we:reports/2026-06-27-non-verdict-conformance-model.md`; parent #1294). Two-pass red-team widened the set from three to four (`predicate` added for analytics + collator) and pinned webtheme's subject to the `resolveTokens` map, not `compileToCss` text. Complements #1784 (facts→verdict KIT) · grounds #899/#1789 (vector model + binding) · #1163 (golden precedent) · #404 (webtheme) · #1282 (zero-executable). Build mechanism: #1847.
+
 ### Is it a Project / Protocol — or just an intent? {#project-protocol-bar}
 
 **Not every gap is a Project or a Protocol.**
