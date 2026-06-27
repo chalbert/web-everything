@@ -18,16 +18,24 @@
     <header class="play-intro">
       <h1>Web Policy Conformance Demo</h1>
       <p>
-        The runnable proof of the webpolicy DMN contract+engine and proof-of-compliance
-        (<a href="/backlog/1028-webpolicy-impl-epic/">#1028</a>, slice C). A DMN-style decision table is
-        evaluated through the real <code>PolicyDecisionPoint</code> under each hit policy
-        (<code>FIRST</code> / <code>UNIQUE</code> / <code>PRIORITY</code> / default), then every decision
-        is appended to a hash-linked <code>ProofChain</code> that verifies — and a tampered chain is caught.
+        The runnable proof that the webpolicy DMN engine is <strong>conformant</strong>. The runtime —
+        the <code>PolicyDecisionPoint</code> and the proof-of-compliance <code>ProofChain</code> — is
+        <strong>relocated to Frontier UI</strong> (<a href="/backlog/1799-relocate-the-webpolicy-engine-enforcement-proof-to-fui/">#1799</a>,
+        WE holds zero executable, #1282). Its conformance runs through the
+        <strong>plateau-hosted conformance runner</strong>
+        (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a> /
+        <a href="/backlog/1790-plateau-origin-conformance-runner-docs-surface-end-to-end-smo/">#1790</a>),
+        which drives the WE-owned webpolicy vector suite
+        (<a href="/backlog/1800-webpolicy-conformance-binding-we-vector-corpus/">#1800</a>: facts→verdict
+        per hit policy + proof-chain checks) against the FUI binding and reports pass/fail.
       </p>
       <p class="play-caveat">
-        The app knows only the <code>PolicyRuleSet</code> meta-schema (#406); the rule-evaluator is the
-        swappable seam (#093). The demo hash is a deterministic non-crypto stub — a real venue injects
-        SHA-256; the chaining/tamper logic under test is identical.
+        The pass/fail panel below is rendered <strong>at plateau-origin inside an iframe</strong> — the
+        cross-origin runtime boundary (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a>
+        ratified (b)) that reaches the shared, neutral runner with no implementer→runner edge. WE owns only
+        the build-agnostic vectors and the <code>PolicyRuleSet</code> meta-schema (#406); the engine impl is
+        FUI's, the runner is plateau's. A green result proves conformance independent of how the engine is
+        built (#899).
       </p>
     </header>
     <div id="play-root">Loading demo&hellip;</div>

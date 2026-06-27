@@ -4,3 +4,7 @@
 .conformance-list li { padding: 0.5rem 0.75rem; border-radius: 8px; font: 0.92rem/1.4 ui-monospace, monospace; }
 .conformance-list li.pass { background: rgba(34, 197, 94, 0.1); color: #166534; }
 .conformance-list li.fail { background: rgba(239, 68, 68, 0.12); color: #991b1b; }
+.conformance-summary.pass { color: #166534; }
+.conformance-summary.fail { color: #991b1b; }
+/* #1801: webpolicy renders its pass/fail via the plateau-hosted conformance iframe (cross-origin). */
+.conformance-iframe { width: 100%; min-height: 220px; border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 8px; background: #fff; }
