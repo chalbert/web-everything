@@ -3,7 +3,7 @@ kind: story
 size: 8
 parent: "1684"
 status: open
-blockedBy: ["1877"]
+blockedBy: ["1823"]
 dateOpened: "2026-06-23"
 tags: []
 ---
@@ -22,3 +22,18 @@ child `<template route>` today (`parseRouteDefinitions`, line 83) — it consult
 `routeLoader` but has **no route-object ingestion**. So the three sub-calls (context-provider shape, lazy
 `route:module` attr, static/dynamic merge order) are genuinely undesigned. Filed as decision **#1877**;
 `blockedBy` repointed `[] → ["1877"]`. **/prepare #1877**, then this builds. Not batchable until then.
+
+## Correction (2026-06-27 /prepare) — #1877 was a duplicate; the mechanism decision is already ratified as #1823
+
+The pre-flight above filed #1877 without seeing that the **same** mechanism decision (same parent #1684,
+same three sub-calls) had already been prepared *and ratified* as **#1823** earlier the same day —
+codified at `we:docs/agent/platform-decisions.md#webrouting-runtime-route-ingestion` (Fork 1 → reuse the
+injector seam + `customContexts:routes` runtime shape + merge-not-shadow; Fork 2 → `route:component`
+inline-thunk / bare-specifier, no mandatory registry; Fork 3 → `mergePrecedence` config-extends-default,
+static-first first-match-wins + shadowing diagnostic). #1877 has been resolved as a duplicate
+(`graduatedTo: 1823`) and `blockedBy` repointed `["1877"] → ["1823"]` to match #1823's codified lineage
+(*"Unblocks build story #1720 (`blockedBy: ["1823"]`)"*). #1823 is **resolved**, so this story is now
+unblocked — build it against the ratified mechanism. Note the body's "reuses the #1685 serializable
+route-map as the INPUT contract" is **superseded** by #1823: the skeptic pass proved the #1685 projection
+*cannot* be the runtime engine input (it drops `pattern`/`template`); the runtime path uses a distinct
+route-object shape over the reused injector mechanism.

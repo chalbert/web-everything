@@ -1,8 +1,12 @@
 ---
 kind: decision
 parent: "1684"
-status: open
+status: resolved
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: 1823
+codifiedIn: "docs/agent/platform-decisions.md#webrouting-runtime-route-ingestion"
 tags: []
 ---
 
