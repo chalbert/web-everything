@@ -88,10 +88,38 @@ content.split('\n').forEach((ln, i) => {
   if (!existsSync(join(MEM_DIR, m[1]))) v.push(`line ${i + 1} points to a missing file: ${m[1]}`);
 });
 const topicFiles = readdirSync(MEM_DIR).filter((f) => f.endsWith('.md') && f !== 'MEMORY.md');
-for (const f of topicFiles) if (!indexedFiles.has(f)) v.push(`topic file has no index line: ${f} (add one ≤ ${MAX_LINE} chars, or it's unreachable by recall context)`);
+const orphans = topicFiles.filter((f) => !indexedFiles.has(f));
+for (const f of orphans) v.push(`topic file has no index line: ${f} (add one ≤ ${MAX_LINE} chars, or it's unreachable by recall context)`);
 
 const lineCount = content.split('\n').filter((l) => l.trim()).length;
+
+// Front-A watch metrics (#1880, model-usage watch #1855): corpus skew by type — a redundancy-likelihood
+// signal (a type bucket far larger than the others is where dedup/right-home pressure lives).
+const TYPES = ['feedback', 'project', 'user', 'reference'];
+const skew = Object.fromEntries(TYPES.map((t) => [t, topicFiles.filter((f) => f.startsWith(`${t}_`) || f === `${t}.md`).length]));
+const metrics = {
+  indexBytes: bytes,
+  indexKB: +(bytes / 1024).toFixed(1),
+  budgetKB: MAX_BYTES / 1024,
+  headroomBytes: MAX_BYTES - bytes,
+  lineCount,
+  topicFiles: topicFiles.length,
+  orphanCount: orphans.length,
+  orphans,
+  corpusSkew: skew,
+  violations: v.length,
+  ok: v.length === 0,
+};
+
+// `--json` (#1880): emit the front-A metrics as one object for the watch to consume, instead of a
+// sequence of greps. Still exits non-zero on a violation so it stays a usable gate.
+if (process.argv.includes('--json')) {
+  console.log(JSON.stringify(metrics, null, 2));
+  process.exit(v.length ? 2 : 0);
+}
+
 console.log(`check:memory — index ${(bytes / 1024).toFixed(1)} KB / ${lineCount} lines / ${topicFiles.length} topic files (budget ${MAX_BYTES / 1024} KB, ≤ ${MAX_LINE} chars/line)`);
+console.log(`  corpus: ${TYPES.map((t) => `${skew[t]} ${t}`).join(' · ')}${orphans.length ? ` · ${orphans.length} orphan(s)` : ''}`);
 
 if (v.length) {
   console.error(`\n✗ ${v.length} memory-budget violation(s) (#1517; docs/agent/memory-management.md):\n  - ${v.join('\n  - ')}`);

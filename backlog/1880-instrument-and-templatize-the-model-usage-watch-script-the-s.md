@@ -2,8 +2,11 @@
 kind: story
 size: 5
 parent: "1855"
-status: open
+status: resolved
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: scripts/check-memory.mjs (--json front-A metrics + corpus skew) + .claude/skills/review-program/templates.md
 tags: [tooling, model-usage-watch, automation, templates, l1-to-l2]
 ---
 
@@ -34,6 +37,12 @@ Add fill-in-the-blank templates under `we:.claude/skills/review-program/` (or al
 - Discovery still **proposes, human disposes** — the script measures and pre-fills; it never files cards or stamps logs autonomously.
 - Front-B (external sweep) stays human/subagent-driven — only the *internal* measurement and the *formatting* are scripted.
 - Pairs with [#1878](/backlog/1878-close-out-as-memory-instruction-self-improvement-loop/) (close-out reflection) and the cadence trigger — together they are the L1→L2 graduation lever, not assumed.
+
+## Delivered (2026-06-27)
+
+- **Instrumented** `we:scripts/check-memory.mjs` — added `--json` emitting one front-A metrics object (index bytes/KB, headroom, line + topic-file counts, orphan list, **corpus skew** by type, violation count) and a one-line corpus summary in the default sweep. One command now feeds the watch instead of a grep sequence.
+- **Templatized** the outputs — `we:.claude/skills/review-program/templates.md`: fill-in-the-blank scaffolds for the review-log entry, the living-report run section, and decision/story candidate cards; pointer wired into the skill's step 4.
+- **Deferred (residual, not silently dropped):** the transcript-based **skill-invocation tally** (unused-skill metric) — needs session-transcript parsing (a separate substrate from the memory dir); capturable as a later enhancement to the same `--json` emitter when the transcript path is settled.
 
 ## Lineage
 
