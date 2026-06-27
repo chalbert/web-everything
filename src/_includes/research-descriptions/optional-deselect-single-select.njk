@@ -1,0 +1,77 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/1470-selection-intent-optional-deselect-axis-for-single-select-al/">#1470</a> —
+  should the <a href="/intents/selection/">selection intent</a> gain an
+  <strong>optional deselect / &ldquo;allow no selection&rdquo;</strong> axis for
+  <code>model:single</code>: the ability to return a chosen single-select group (radio, segmented,
+  single-select menu) to the <em>empty</em> state? Native HTML radio cannot be user-unchecked — once a
+  value is picked the user can switch options but never clear back to none. This is a
+  <strong>greenfield axis</strong>: <code>selection.json</code> exposes only
+  <code>model</code>/<code>immediacy</code>/<code>variant</code>/<code>grouping</code> (plus a
+  <code>constraints?{min,max}</code> type in its interface block) and <em>no</em> nullability
+  dimension, so this survey precedes the forks.
+</p>
+
+<h2>The platform codifies the inverse axis, not this one</h2>
+<p>
+  Native radio <strong>cannot</strong> be returned to an all-unchecked state by the user (MDN
+  <code>radiogroup</code>: once checked, &ldquo;it is not possible to return to having no radio buttons
+  checked&rdquo;). The WAI-ARIA APG radio pattern only asserts mutual exclusivity. The one axis ARIA
+  <em>does</em> codify is <code>aria-required</code> — the <em>opposite</em> of optional. The platform's
+  &ldquo;single choice that can be empty&rdquo; idiom lives in the <strong>listbox/<code>&lt;select&gt;</code></strong>
+  family (a placeholder/empty <code>&lt;option&gt;</code>), not the radio family — and Open UI's
+  customizable-select inherits that lineage with no standardized <code>clearable</code> semantic yet.
+</p>
+
+<h2>The pattern is established, but family-split</h2>
+<ul>
+  <li>
+    <strong>Toggle / segmented / chip — default-ON.</strong> Radix
+    <code>ToggleGroup type="single"</code> deselects on re-activate <em>by default</em>, with a boolean
+    that disables it to &ldquo;always keep a value selected after first selection.&rdquo; Mantine
+    <code>Select</code> ships <code>allowDeselect</code> (default <code>true</code>).
+  </li>
+  <li>
+    <strong>Dropdown / listbox — opt-in clear button.</strong> Ant Design <code>allowClear</code>
+    renders an explicit &ldquo;x&rdquo; affordance.
+  </li>
+  <li>
+    <strong>Native radio — absent.</strong> React Aria and Chakra reach the none-state only
+    <em>programmatically</em> (<code>value: null</code> / <code>onChange('')</code>), never via a
+    built-in user gesture.
+  </li>
+</ul>
+
+<h2>Naming — a named boolean, never a count-constraint</h2>
+<p>
+  Every implementation names this a <strong>boolean axis</strong>: <code>allowDeselect</code> (clearing
+  via the control's own items — WE's case), <code>allowClear</code> (the dropdown x-button), or the
+  inverse <code>required</code>/<code>isRequired</code>. <strong>No</strong> surveyed library models it
+  as a count-constraint (<code>min:0</code>) on a single-select control — that framing only appears for
+  multi-select selection counts. This argues for a named dimension on the intent over folding it into
+  <code>constraints.min</code>.
+</p>
+
+<h2>Trigger is renderer packaging, not intent vocabulary</h2>
+<p>
+  For the radio/segmented shape the dominant trigger is <strong>re-activate the already-selected
+  item</strong>; the dropdown idiom is an &ldquo;x&rdquo; button. Escape is <em>not</em> a value-clear
+  convention. Which gesture clears is impl/keyboard detail (a fixed mechanic per #1440) — confirming the
+  intent should express <em>that</em> a single-select can be cleared, not <em>how</em>.
+</p>
+
+<h2>Recommendation seed</h2>
+<p>
+  Model the axis as a <strong>named boolean dimension</strong>, <strong>default-permissive</strong>
+  (deselect allowed) per the <a href="/intents/">most-flexible-default</a> principle, with
+  &ldquo;require a value&rdquo; as the author's opt-in — the permissive complement of
+  <code>required</code>, matching Radix <code>ToggleGroup</code>'s default-deselectable + disable model.
+</p>
+
+<h2>Source</h2>
+<p>
+  Full prior-art survey (MDN/WAI-ARIA, React Aria, Radix, Mantine, Ant, Chakra, Open UI) in
+  <code>reports/2026-06-21-optional-deselect-single-select.md</code>.
+</p>
+{% endraw %}

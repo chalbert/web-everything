@@ -1,0 +1,81 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Prep research for decision
+  <a href="/backlog/513-train-quantize-the-distilled-verdict-classifier-10mb-onnx-st/">#513</a> — a
+  <strong>go/no-go training-readiness gate</strong>, not a design fork. All five
+  <a href="/backlog/488-on-device-ui-screenshot-vision-model-as-a-plateau-capability/">#488</a> design
+  forks are already ratified in
+  <a href="/backlog/490-build-the-on-device-verdict-classifier-codified-distillation/">#490</a>'s codified
+  spec (≤10MB MobileNet/ViT student, ONNX Runtime Web + WebGPU runtime, task-specific KD recipe in
+  <a href="/backlog/511-design-ref-corpus-export-codified-distillation-recipe-artifa/">#511</a>, the
+  ≥0.95 verdict-agreement / ≥0.98 quarantine-recall graduation floors in
+  <a href="/backlog/512-on-device-verdict-benchmark-harness-verdict-agreement-quaran/">#512</a>). The
+  student architecture and KD method are <em>empirical model-selection the #512 benchmark auto-decides</em>
+  — not a human-judgment fork. The single forced question:
+</p>
+<blockquote>
+  Is the design-ref corpus large + balanced enough to distil a ≤10MB student that clears the #512 floors
+  on the 6-verdict taxonomy yet?
+</blockquote>
+<p>
+  Grounded count: <code>design-refs/items/</code> holds <strong>16</strong> captures,
+  <code>design-refs/quarantine/</code> holds <strong>0</strong> — but
+  <code>design-refs/training-manifest.json</code> reports <code>total:0</code> /
+  <code>unlabeled:16</code>: <strong>every shot is ungated</strong> (no vision provider has run over the
+  corpus), so there are <strong>zero labeled training examples and zero labeled holdout</strong>. The #512
+  floors are not even <em>measurable</em> today.
+</p>
+<p>
+  Prior art grounds the threshold. The task-specific KD methods named in #490's recipe
+  (<a href="https://openaccess.thecvf.com/content/CVPR2025/papers/Jang_VL2Lite_Task-Specific_Knowledge_Distillation_from_Large_Vision-Language_Models_to_Lightweight_CVPR_2025_paper.pdf">VL2Lite</a>,
+  <a href="https://arxiv.org/html/2408.16930v1">VLM-KD</a>, and the dual-head
+  <a href="https://arxiv.org/html/2505.07675">DHO</a> line) report their low-data regime as
+  <strong>K-shot × C-class, N = K×C</strong>, with <strong>16-shot</strong> the empirical low-data
+  sweet-spot (DHO across 11 datasets; the broader few-shot literature puts the cost-effective knee in the
+  10–16-shot range, and notes adding <em>classes</em> helps more than adding samples per class). For a
+  <strong>6-class</strong> taxonomy that floors a usable distillation set at
+  <strong>N ≈ 16 × 6 ≈ 96 labeled captures</strong>, balanced ~16 per verdict.
+</p>
+
+<h2>Recommendation (to ratify in #513)</h2>
+<p>
+  <strong>WAIT</strong> — the proceed-now branch is broken below the corpus floor. Distilling from
+  <strong>0</strong> labeled captures cannot clear the #512 floors, so there is nothing to ratify yet. This
+  is a single <strong>forced invariant</strong>, not a fork: there is no legitimate competing end-state
+  ("proceed now on 0 labeled shots" is not a coherent branch, it just fails the benchmark).
+</p>
+<p>
+  <strong>Un-block trigger (grounded, numeric).</strong> Once
+  <code>design-refs.mjs collect</code>/<code>harvest</code> has run a real vision provider so the manifest
+  reports:
+</p>
+<ul>
+  <li><strong>≥~96 labeled captures total</strong> (the N = 16×6 low-data floor), <em>and</em></li>
+  <li><strong>≥16 labeled examples in EACH of the four quarantine classes</strong> (marketing / error /
+    blank / non-app) — this is the <em>binding</em> constraint, because the ≥0.98 quarantine-recall floor
+    rides on the rare tail, not the common <code>app</code> class, <em>and</em></li>
+  <li>a <strong>non-empty labeled holdout split</strong> (<code>holdoutFraction 0.15</code>) — required
+    just to <em>score</em> the gate.</li>
+</ul>
+<p>
+  …the proceed branch goes live: the mechanical #511 recipe runs and the #512 benchmark decides the
+  student. At that point #513 retypes to a <code>story</code> and is resolved by building.
+</p>
+<p>
+  <strong>Skeptic.</strong> Could a smaller corpus proceed? For the easy <code>app</code> ↔
+  <code>non-app</code> split, plausibly — but the real bar is the <strong>0.98 quarantine-recall on the
+  rare tail</strong>, and a sub-16-per-quarantine-class corpus cannot reliably clear a 0.98 recall floor
+  (you cannot estimate, let alone hit, 0.98 recall from a handful of positives). The threshold
+  <strong>SURVIVES</strong>.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Decision: <a href="/backlog/513-train-quantize-the-distilled-verdict-classifier-10mb-onnx-st/">#513</a> (this prep)</li>
+  <li>Epic: <a href="/backlog/490-build-the-on-device-verdict-classifier-codified-distillation/">#490</a> — codified distillation pipeline (all #488 forks ratified)</li>
+  <li>Recipe slice: <a href="/backlog/511-design-ref-corpus-export-codified-distillation-recipe-artifa/">#511</a> — export + distillation recipe artifact</li>
+  <li>Benchmark slice: <a href="/backlog/512-on-device-verdict-benchmark-harness-verdict-agreement-quaran/">#512</a> — verdict-agreement + ≥0.98 quarantine-recall floors</li>
+  <li>Ruling: <a href="/backlog/488-on-device-ui-screenshot-vision-model-as-a-plateau-capability/">#488</a> — the five ratified design forks</li>
+</ul>
+{% endraw %}

@@ -1,0 +1,142 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Decision <a href="/backlog/1437-decision-docking-tiling-dockable-window-management-placement/">#1437</a>
+  is the <strong>Fork-4 carve-out</strong> of
+  <a href="/backlog/1384-spatial-manipulation-arrangeable-surfaces-resizable-splitter/">#1384</a> — it is
+  <code>blockedBy</code> #1384 for the shared a11y + Pointer-Events substrate baseline. #1384 ratified three
+  placements for user-driven spatial manipulation (a standalone <a href="/intents/resizable/">resizable</a>
+  splitter intent, an <a href="/intents/arrangeable/">arrangeable</a> 2-D grid intent, and an
+  <code>alignment-guides</code> intent) and <strong>deferred</strong> the <strong>recursive
+  partition-tree</strong> model — the golden-layout / dockview / FlexLayout / rc-dock family — as a
+  genuinely distinct third model. Both shipped intents already point here
+  (<code>resizable.json:6</code> and <code>arrangeable.json:32</code> both say "deferred #1437"). The
+  partition-tree is <strong>nested rows/columns of resizable splits whose leaves are tab-stacks</strong>,
+  with drag-to-dock, popout-to-OS-window, and a serialized layout tree. The question:
+  <strong>where does this model go — its own intent, or a configuration of <code>arrangeable</code>? — is
+  its serialized tree a Protocol? — and is popout-to-window in scope?</strong>
+</p>
+
+<h2>Finding 1 — the partition-tree is a composition of #1384's pieces, not a fourth primitive</h2>
+<p>
+  Decompose what golden-layout / dockview / FlexLayout actually are and the model is a
+  <strong>recursive tree of two node kinds WE already standardizes</strong>:
+</p>
+<table>
+  <thead><tr><th>Node kind</th><th>What it is</th><th>WE already ships</th><th>Library names</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Split node</strong> (row / column)</td><td>partitions its space among children with a draggable splitter between siblings</td><td>the <a href="/intents/resizable/">resizable</a> linear-split divider, applied recursively</td><td><code>row</code>/<code>column</code> (golden-layout), Splitview/Gridview (dockview)</td></tr>
+    <tr><td><strong>Stack leaf</strong> (tab-stack)</td><td>a leaf holding N panels shown one-at-a-time behind a tab bar</td><td>the <strong>Tabs</strong> pattern as the <a href="/blocks/tabs/">tabs</a> block (native exclusive-group <code>name</code> + ARIA Tabs)</td><td><code>stack</code> (golden-layout), "group" (dockview)</td></tr>
+  </tbody>
+</table>
+<p>
+  So the partition-tree adds <strong>no new gesture and no new leaf widget</strong>. It adds (a) a
+  <strong>recursive container contract</strong> (a node is a row/column/stack, nesting arbitrarily, space
+  fully partitioned — no gaps or overlaps, ever), (b) <strong>drag-to-dock</strong> (drop a panel onto an
+  edge/center drop-zone to re-tile the tree), (c) <strong>tree serialization</strong>, and (d) optional
+  <strong>popout-to-window</strong>. The convergent vocabulary is the same across all four libraries:
+  <code>row</code>/<code>column</code> → <code>stack</code>/<code>group</code> →
+  <code>tab</code>/<code>component</code>. dockview's <code>api.toJSON()</code>/<code>api.fromJSON()</code>
+  and FlexLayout's <code>Model.fromJson()</code>/<code>model.toJson()</code> both serialize exactly this
+  <code>row→column→stack-of-tabs</code> tree.
+</p>
+
+<h2>Finding 2 — popout-to-OS-window is a separate, optional capability</h2>
+<p>
+  golden-layout and dockview both offer <strong>popout windows</strong> — detach a tab-stack into a real
+  second browser window (<code>window.open()</code> + cloning <code>adoptedStyleSheets</code> / moving the
+  DOM subtree). This is <strong>orthogonal</strong> to the partition-tree: the tree model is complete
+  without it (FlexLayout and rc-dock tile strongly with weak/optional popout), and popout is a generic
+  <em>capability</em> (move a live subtree to another <code>Window</code>) with nothing to do with
+  recursive partitioning. Bias-toward-separation flags it as a <strong>separate dimension/concern</strong>,
+  recommended <strong>out of the dock core</strong> and deferred to the realizing build.
+</p>
+
+<h2>Finding 3 — there is no native APG pattern for docking; it composes two that exist</h2>
+<p>
+  The most load-bearing finding for placement. The W3C WAI-ARIA APG pattern set (32 patterns) has
+  <strong>no "docking" / "tiling" / "window-manager" / "panel-layout" pattern</strong> — but it
+  <em>does</em> have the two patterns the model decomposes into: <strong>Window Splitter</strong>
+  (the splitters: <code>role="separator"</code> + <code>aria-valuenow/min/max</code> + arrows/Home/End)
+  and <strong>Tabs</strong> (the stacks). So docking's a11y contract is <strong>not new</strong> — it is
+  the composition of the APG Window Splitter contract <a href="/intents/resizable/">resizable</a> already
+  carries (a fixed invariant) and the APG Tabs contract the <a href="/blocks/tabs/">tabs</a> block already
+  carries. The one genuinely docking-specific keyboard surface (no APG precedent) is
+  <strong>drag-to-dock relocation</strong> — and that reuses the same grab/move/drop + live-region announce
+  mechanic the #1384 substrate already mandates for <a href="/intents/arrangeable/">arrangeable</a>. Across
+  the incumbents, keyboard/ARIA for the docking manipulation is <strong>absent</strong> (golden-layout,
+  dockview, FlexLayout, rc-dock all ship zero) — the same unmet need #1384 reported, and exactly where a
+  standards-led design has leverage.
+</p>
+
+<h2>Finding 4 — native-substrate Baseline check: nothing new is needed below the model</h2>
+<table>
+  <thead><tr><th>Primitive</th><th>Role for docking</th><th>Baseline status</th></tr></thead>
+  <tbody>
+    <tr><td>Pointer Events + <code>setPointerCapture</code></td><td>drag substrate for splitters + drag-to-dock</td><td><strong>Baseline</strong> — already #1384's substrate</td></tr>
+    <tr><td>CSS Grid / Flexbox</td><td>renders the row/column partition at each tree level</td><td><strong>Baseline</strong></td></tr>
+    <tr><td><code>Element.moveBefore()</code></td><td>state-preserving panel relocation on re-tile (keeps focus/anim/iframe)</td><td><strong>Limited</strong> → progressive, <code>insertBefore</code> fallback</td></tr>
+    <tr><td><code>window.open()</code> + <code>adoptedStyleSheets</code></td><td>popout-to-window</td><td><strong>Baseline</strong> — the only popout substrate; no special primitive</td></tr>
+    <tr><td>APG Window Splitter</td><td>a11y contract for the splitters</td><td>spec contract (via <code>resizable</code>)</td></tr>
+    <tr><td>APG Tabs</td><td>a11y contract for the stacks</td><td>spec contract (via the <code>tabs</code> block)</td></tr>
+    <tr><td>Native dock / tab-stack / split-view element</td><td>—</td><td><strong>Does not exist; no Open UI / CSSWG / WHATWG proposal in flight</strong></td></tr>
+  </tbody>
+</table>
+<p>
+  <strong>Bottom line:</strong> the partition-tree needs <strong>no new substrate primitive</strong> below
+  #1384's baseline. The gap is purely the <strong>compositional model</strong> (a recursive container
+  contract + drag-to-dock + serialization) layered over the splitter, tabs, and grid-drag mechanics WE
+  already standardizes — which is exactly why the carve is correct <em>and</em> why it is
+  <code>blockedBy</code> #1384.
+</p>
+
+<h2>Classification (per-fork pass)</h2>
+<ul>
+  <li><strong>Layer</strong> — Intent (declarative UX "what") + a composing Block, mirroring #1384's
+    intent+block forced-ratify. Not a Project. The serialized tree <em>might</em> be a Protocol (Fork 2).</li>
+  <li><strong>Composition seam</strong> — <code>dockable</code> composes the shipped <code>resizable</code>
+    splitter, the <code>tabs</code> block, and the #1384 Pointer-Events + reorder grab/move/drop substrate;
+    it adds no new gesture.</li>
+  <li><strong>Fixed mechanics (baked, inherited from #1384)</strong> — APG Window Splitter on the splitters,
+    APG Tabs on the stacks, live-region announce on drag-to-dock, Pointer Events substrate (never HTML DnD),
+    <code>Element.moveBefore()</code> progressive relocation. Pointer-only is the broken branch.</li>
+  <li><strong>Resolution / default</strong> — most-permissive: docking is opt-in per surface; absent → a
+    static (non-dockable) layout.</li>
+  <li><strong>Native-first</strong> — gesture, partition rendering, and popout are native; the standard adds
+    the recursive container model + drag-to-dock semantics + the composed a11y contract the platform lacks.</li>
+  <li><strong>Minimize lock-in</strong> — the serialized layout tree is the single escapable lock surface
+    (Fork 2); everything else is composition, removable adapters, or native substrate.</li>
+</ul>
+
+<h2>The prepared forks</h2>
+<ul>
+  <li>
+    <strong>Fork 1 — Placement of the recursive-tree model.</strong> Its own <code>dockable</code> intent
+    composing <code>resizable</code> + <code>tabs</code> + the arrangeable substrate
+    <em>(recommended)</em> vs a configuration/dimension of <code>arrangeable</code>. The mechanics compose,
+    but the contract shape (a recursive no-gaps/overlaps tree) is structurally distinct from
+    <code>arrangeable</code>'s flat <code>Array&lt;{x,y,w,h}&gt;</code> — so a separate intent that
+    <em>composes</em>, not a dimension that <em>overloads</em>.
+  </li>
+  <li>
+    <strong>Fork 2 — Serialized layout tree: a Protocol, or intent-internal shape?</strong> A first-class
+    WE <strong>Protocol</strong> (an escapable interchange schema) <em>(recommended)</em> vs the intent's
+    internal persisted state (no protocol). The <code>toJSON/fromJSON</code> tree is the one candidate
+    lock-in surface in the family.
+  </li>
+  <li>
+    <strong>Fork 3 — Popout-to-OS-window scope.</strong> An optional <code>dockable</code> dimension
+    deferred to the realizing build <em>(recommended)</em> vs in the core now vs its own separate decision.
+    Finding 2 shows it is orthogonal and optional.
+  </li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/intents/">Web Intents catalog</a> — where a <code>dockable</code> intent would render.</li>
+  <li><a href="/research/spatial-manipulation-arrangeable-surfaces/">Spatial manipulation research</a> (#1384) — the parent survey that carved this out.</li>
+  <li><a href="/intents/resizable/">Resizable intent</a> + <a href="/intents/arrangeable/">Arrangeable intent</a> — the two #1384 placements docking composes / contrasts with.</li>
+  <li><a href="/blocks/tabs/">Tabs block</a> — the stack-leaf the partition-tree composes.</li>
+  <li>Backlog <a href="/backlog/1437-decision-docking-tiling-dockable-window-management-placement/">#1437</a> — the decision this research prepares.</li>
+</ul>
+{% endraw %}

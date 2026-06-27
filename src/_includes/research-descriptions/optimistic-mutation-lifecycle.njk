@@ -1,0 +1,84 @@
+<h3>The Question</h3>
+<p>
+    The <a href="/backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi/">verb-axis</a>
+    and <a href="/backlog/1403-discovery-lens-data-lifecycle-paradigms-load-cache-mutate-sy/">data-lifecycle</a>
+    discovery lenses both flagged the same candidate standard: <strong>optimistic mutation</strong> — apply a
+    change to the UI immediately, reconcile it against the source of truth, and roll back on failure. The
+    placement decision is <a href="/backlog/1395-optimistic-mutation-apply-reconcile-rollback-standard-placem/">#1395</a>.
+    This topic surveys the prior art and grounds that decision.
+</p>
+<p>
+    The card was filed on the premise that WE owns loading, reliability, and background work but has
+    <em>no</em> apply→reconcile→rollback model. Tracing the tree, <strong>that premise is wrong</strong>: WE
+    already ships the lifecycle as the <a href="/blocks/resource-action/">Resource Action</a> block. So the
+    real question is <strong>where the contract lives</strong>, not whether to build it. Full findings and the
+    concrete <code>file:line</code> grounding are in the companion report
+    (<code>reports/2026-06-21-optimistic-mutation-placement.md</code>).
+</p>
+
+<h3>The model the field converged on</h3>
+<p>
+    Every server-state library implements the same three-phase mutation lifecycle, kept deliberately distinct
+    from the query/read lifecycle (the <code>useQuery</code> vs <code>useMutation</code> split is itself
+    near-universal):
+</p>
+<table>
+    <thead><tr><th>Library</th><th>Apply (optimistic)</th><th>Reconcile (settle)</th><th>Rollback (on error)</th></tr></thead>
+    <tbody>
+        <tr><td><strong>TanStack Query</strong> <code>useMutation</code></td><td><code>onMutate</code> — cancel in-flight, snapshot, set predicted</td><td><code>onSettled</code> → <code>invalidateQueries</code></td><td><code>onError</code> restore snapshot</td></tr>
+        <tr><td><strong>Apollo Client</strong></td><td><code>optimisticResponse</code></td><td>cache <code>update</code> / refetch</td><td>automatic cache rewrite</td></tr>
+        <tr><td><strong>SWR</strong> <code>useSWRMutation</code></td><td><code>optimisticData</code></td><td><code>populateCache</code> + <code>revalidate</code></td><td><code>rollbackOnError</code></td></tr>
+        <tr><td><strong>RTK Query</strong></td><td><code>updateQueryData</code> (<code>patchResult</code>)</td><td>invalidatesTags</td><td><code>patchResult.undo()</code></td></tr>
+        <tr><td><strong>Relay</strong></td><td><code>optimisticUpdater</code></td><td>store commit</td><td>discard optimistic update</td></tr>
+    </tbody>
+</table>
+<p>
+    The convergent shape: snapshot current state → apply a <em>predicted</em> result immediately → fire the
+    mutation → on success reconcile/invalidate against the source of truth → on failure restore the snapshot.
+    Every implementation also handles <strong>double-submit prevention</strong>, a trigger <strong>busy
+    state</strong>, and <strong>cache invalidation</strong> of dependent queries.
+</p>
+
+<h3>WE already ships it — as a block, but unnamed at the intent layer</h3>
+<p>
+    The <a href="/blocks/resource-action/">Resource Action</a> block (a <code>draft</code> directive that
+    <code>dependsOn</code> Resource Loader) <strong>is</strong> WE's <code>useMutation</code>: a
+    <code>withOptimisticMutation</code> trait (<em>"applies predicted result immediately, reverts on error"</em>),
+    a dedicated <code>resource-action-revert</code> event carrying the <code>previousState</code> snapshot, and
+    a <code>frameworkComparison</code> mapping TanStack/Apollo/SWR/Remix directly. So this is a
+    <strong>contract-placement</strong> call, not a greenfield build.
+</p>
+<p>
+    Two grounding gaps the placement closes. <strong>First</strong>, the lifecycle has no owning intent.
+    Resource Action declares <code>implementsIntent: action</code>, but the
+    <a href="/intents/action/">Action Intent</a> is purely <em>visual-weight</em> (level / variant /
+    disposition / busy / grouping) — the <a href="/intents/command/">Command Intent</a> even states the
+    boundary: <em>"orthogonal to the Action Intent (visual weight)."</em> The
+    <code>withOptimisticMutation</code> trait currently wires to <code>loader.strategy.optimistic</code>, a
+    <em>read/blocking</em> dimension — it is borrowing a read-side axis because no write-side axis exists.
+    <strong>Second</strong>, the rollback primitive already exists: the <strong>Change Record</strong> semantic
+    carries <code>oldValue</code> precisely <em>"because RFC 6902 ops are not self-inverting"</em> — exactly
+    what an optimistic revert restores and what an undo applies. So the reversibility machinery optimistic
+    mutation needs is the same one <a href="/backlog/1394-undo-redo-reversible-mutation-history-standard-placement/">undo/redo (#1394)</a>
+    needs, with a designated home in the forthcoming Change Tracking protocol (topic
+    <a href="/research/change-tracking-observability/">change-tracking-observability</a>).
+</p>
+
+<h3>Where it lands (recommendations for #1395)</h3>
+<ul>
+    <li><strong>Mint a first-class <code>mutation</code> intent</strong> — the write-lifecycle axis (strategy:
+        optimistic / pessimistic · rollback · reconcile · double-submit · busy), symmetric to the
+        <a href="/intents/loader/">Loader Intent</a> for reads. Resource Action retargets to it and stops
+        squatting on <code>loader.strategy.optimistic</code>. Not the Action Intent (visual weight) and not the
+        Reliability Intent (failure-only — it can't own the optimistic happy path).</li>
+    <li><strong>Express rollback over Change Record</strong> so optimistic-revert and undo/redo share one
+        inverse-data contract; keep Resource Action's 1-deep <code>previousState</code> snapshot as a permitted
+        fast-path.</li>
+    <li><strong>Default to pessimistic</strong> (await the server, then apply) — the always-safe behavior;
+        optimism is the author's opt-in (it requires supplying a predicted result).</li>
+</ul>
+<p>
+    This is <strong>not a mandate</strong>: WE supports any coherent mutation strategy. The decision only names
+    the axis and aligns the rollback contract — the running block, the strategy dimension, and the
+    reliability/loader/action/change-tracking seams are all compositions, not forks.
+</p>

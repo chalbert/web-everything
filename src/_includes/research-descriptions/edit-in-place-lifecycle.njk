@@ -1,0 +1,126 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    A recurring interaction turns a <em>displayed value</em> into an <em>editor in place</em> and back:
+    the click-to-edit profile field, the editable table cell, the rename-in-tree. The lifecycle is always
+    the same — <strong>display</strong> (value rendered read-only) → <strong>activate</strong> (a gesture
+    swaps the display for an editor) → <strong>edit</strong> → <strong>commit</strong> (blur / Enter writes
+    the value back) <em>or</em> <strong>cancel</strong> (Esc discards and restores the baseline). Web
+    Everything owns the editor (<a href="/intents/input/">input</a>), the commit gate
+    (<a href="/intents/validation/">validation</a>), flowed-content editing
+    (<a href="/intents/rich-text/">rich-text</a>) and a <a href="/specs/data-grid/">data-grid</a> block —
+    but <strong>none owns the display→edit→commit/cancel lifecycle</strong> as a reusable concern. This
+    survey grounds decision
+    <a href="/backlog/1397-in-place-inline-edit-edit-in-place-editable-cell-standard-pl/">#1397</a>
+    (surfaced by the verb-axis lens
+    <a href="/backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi/">#1390</a>):
+    should the lifecycle be its <strong>own intent</strong>, a <strong>behavior recipe</strong> composing
+    existing intents, or <strong>just a data-grid feature</strong>? Per design-first step&nbsp;1, prior
+    art is gathered first so the dimensions reuse platform vocabulary.
+</p>
+
+<h3>Recommendation (to ratify in #1397)</h3>
+<ol>
+    <li><strong>Mint a dedicated <code>edit-in-place</code> intent</strong> (Fork&nbsp;1, ~80%). The
+        lifecycle recurs in three or more loci <em>without</em> a grid — a standalone field, an editable
+        cell, a tree-node rename — and a concept that recurs without its neighbour earns its own home,
+        which is the standing separate-and-decouple bias. The excluded branch, <em>data-grid feature
+        only</em>, is broken: it forces a standalone field or a tree rename to depend on a grid block.</li>
+    <li><strong>Own only the thin residual; compose the rest</strong> (Fork&nbsp;2, ~85%). The intent owns
+        the <em>activation gesture</em>, the <em>display-renderer&nbsp;⇄&nbsp;editor-renderer swap</em>,
+        and the <em>commit/cancel-revert</em> semantics — adopting the platform's
+        <kbd>Enter</kbd>&nbsp;/&nbsp;<kbd>F2</kbd>&nbsp;/&nbsp;<kbd>Esc</kbd> vocabulary — and
+        <em>composes</em> <a href="/intents/input/">input</a> (the editor),
+        <a href="/intents/validation/">validation</a> (the commit gate),
+        <a href="/intents/focus-delegation/">focus-delegation</a> (cell focus) and optionally
+        <a href="/intents/rich-text/">rich-text</a> (a flowed editor). The excluded branch — re-owning text
+        entry or validation — is duplication and drift of shipped standards (native-first). This mirrors
+        the <a href="/intents/accessible-name/">accessible-name</a> precedent
+        (<a href="/backlog/596-candidate-cross-cutting-accessible-name-intent/">#596</a>): own the thin
+        recurring policy, defer everything the platform or a neighbour already standardizes.</li>
+    <li><strong>Supported by default</strong> (not a fork): the WE <em>intent</em> (the contract) and a
+        Frontier&nbsp;UI <em>behavior block</em> (the realization) coexist at different layers — the "own
+        intent vs behavior" framing is not an either/or, since
+        <a href="/intents/data-transfer/">data-transfer</a>, <a href="/intents/reorder/">reorder</a> and
+        <a href="/intents/selection/">selection</a> each already ship an intent <em>and</em> a realizing
+        block. <a href="/specs/data-grid/">data-grid</a> composes the intent for editable cells;
+        <a href="/intents/rich-text/">rich-text</a> keeps its <code>mode</code> axis for flowed content.</li>
+</ol>
+
+<h3>Finding 1 — a named cross-component primitive that recurs <em>without</em> a grid</h3>
+<p>
+    Three major systems ship the lifecycle as a <strong>standalone</strong> component, independent of any
+    table:
+</p>
+<ul>
+    <li><a href="https://atlassian.design/components/inline-edit/">Atlassian
+        <code>@atlaskit/inline-edit</code></a> — <code>readView</code> / <code>editView</code> render
+        props, an <code>onConfirm</code> commit, starts in <code>readView</code> (click to edit),
+        <code>keepEditViewOpenOnBlur</code>; commits on blur/Enter, cancels on Esc.</li>
+    <li><a href="https://primereact.org/inplace/">PrimeReact <code>Inplace</code></a> —
+        <code>InplaceDisplay</code> (read) and <code>InplaceContent</code> (edit) children; click the
+        display to switch to edit; <code>closable</code> returns to read.</li>
+    <li><a href="https://ant.design/components/typography/">Ant Design <code>Typography</code>
+        <code>editable</code></a> — <code>triggerType</code> (icon/text),
+        <code>onChange</code>/<code>onStart</code>/<code>onCancel</code>/<code>onEnd</code>,
+        <code>enterIcon</code>.</li>
+</ul>
+<p>
+    The same display⇄edit⇄commit lifecycle appears as a first-class standalone primitive, and recurs again
+    in <strong>rename-in-tree</strong> (Ant Tree custom-title editing; the APG treegrid) with no grid in
+    sight. That is the load-bearing finding: the lifecycle is <strong>not</strong> a property of a grid.
+</p>
+
+<h3>Finding 2 — the keyboard + a11y model is already platform-standard</h3>
+<p>
+    The <a href="https://www.w3.org/WAI/ARIA/apg/patterns/grid/">WAI-ARIA APG Grid pattern</a> specifies
+    the in-place editing keyboard model verbatim — the same model the standalone primitives use:
+</p>
+<ul>
+    <li><kbd>Enter</kbd> / <kbd>F2</kbd> puts focus into the editor; <kbd>F2</kbd> again restores
+        navigation.</li>
+    <li><kbd>Escape</kbd> restores navigation <strong>and, if content was being edited, undoes the
+        edit</strong> — cancel reverts to the <strong>baseline</strong>.</li>
+    <li><code>aria-readonly</code> marks cells (or the whole grid) where editing is disabled.</li>
+</ul>
+<p>
+    So the activation gesture and the commit/cancel-revert semantics are W3C-specified vocabulary; the
+    intent <em>adopts</em> them rather than re-minting them. <a href="https://mui.com/x/react-data-grid/editing/persistence/">MUI&nbsp;X DataGrid</a>
+    (cell/row edit modes, <code>processRowUpdate</code>, Esc rolls back the cell) and AG&nbsp;Grid
+    (<code>editable</code> columns + cell editors) show the grid <em>consuming</em> this same lifecycle per
+    cell.
+</p>
+
+<h3>Finding 3 — what is genuinely new vs. already-owned</h3>
+<p>
+    Decomposing the lifecycle against the existing intents leaves only a small unowned residual:
+</p>
+<ul>
+    <li>The editor control → <a href="/intents/input/">input</a> (or
+        <a href="/intents/rich-text/">rich-text</a> for flowed content) — <em>compose</em>.</li>
+    <li>Gating the commit on validity, <code>aria-invalid</code>, commit policy →
+        <a href="/intents/validation/">validation</a> (<code>commitment</code> full/deferred,
+        <code>execution</code> change/blur/submit) — <em>compose</em>.</li>
+    <li>Cell focus / roving tabindex (the grid case) →
+        <a href="/intents/focus-delegation/">focus-delegation</a> — <em>compose</em>.</li>
+    <li><strong>Activation gesture</strong>, <strong>display⇄editor renderer swap for one atomic
+        value</strong>, <strong>cancel-reverts-to-baseline</strong> → <strong>unowned</strong> — this is
+        what the new intent would own.</li>
+</ul>
+<p>
+    <a href="/specs/data-grid/">data-grid</a> defines <em>no</em> edit lifecycle of its own — its
+    <code>contractsOnly</code> decision names the movement engine and the active-cell projection as its
+    seams and lists editing as an external implementation that "registers against them without changing
+    the contract." So data-grid is the first <em>consumer</em> of the intent, not its home.
+</p>
+
+<h3>The seam vs. rich-text</h3>
+<p>
+    <a href="/intents/rich-text/">rich-text</a> already has a <code>mode: editable | read-only</code>
+    dimension, but it governs a <strong>flowed, formatted content surface</strong> (paragraphs, block
+    elements, a document model). Edit-in-place governs an <strong>atomic scalar value</strong> (a field, a
+    number, a cell, a label) that swaps to <em>one</em> editor control. They <em>compose</em> rather than
+    overlap — an edit-in-place field may pick a rich-text surface as its editor — and the seam is content
+    shape: a flowed document is rich-text's, an atomic value is edit-in-place's.
+</p>
+{% endraw %}

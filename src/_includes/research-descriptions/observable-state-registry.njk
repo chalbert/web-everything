@@ -1,0 +1,145 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The webcases requirement validator grounds every typed slot of a requirement <em>hard</em> against a
+  live registry — a reference to a nonexistent intent, dimension, value, semantic term, protocol, or
+  conformance tier fails <strong>at author time</strong>, which is the typed-binding ground truth generic
+  BDD lacks (<code>webcases/requirementValidator.ts</code>). One slot is the exception:
+  <code>then.observe</code> — <em>the observable state or event the protocol exposes that the conformance
+  case asserts</em> — falls through to an <code>info</code> finding rather than a hard error, because
+  <code>protocols.json</code> models no observable states
+  (<code>webcases/requirementValidator.ts:115-125</code>). This topic surveys the platform to answer two
+  coupled questions: <strong>what is an observable, and where does its vocabulary live</strong>, so that
+  <code>then.observe</code> grounds hard like its siblings.
+</p>
+
+<h2>Finding — the platform already ships a precise, three-source vocabulary for "an observable state"</h2>
+<p>
+  The survey returns a consistent answer across WAI-ARIA, the WHATWG/W3C custom-element specs, and the DOM
+  events model: a component's externally-observable condition is expressed three ways, and the platform
+  itself draws the <strong>state vs. event</strong> distinction that the slot's own doc-comment ("a
+  protocol-observable state/event") conflates.
+</p>
+<ul>
+  <li>
+    <strong>WAI-ARIA states</strong> — <code>aria-expanded</code>, <code>aria-invalid</code>,
+    <code>aria-busy</code>, <code>aria-checked</code>/<code>aria-selected</code>/<code>aria-pressed</code>,
+    <code>aria-current</code>. ARIA explicitly separates <em>states</em> (dynamic, change over the
+    element's lifetime) from <em>properties</em> (static). These are the accessibility-tree observable
+    states a conformance test reads, and the shape testing libraries assert against
+    (<code>getByRole(…, { expanded: true })</code>, <code>toHaveAttribute('aria-busy')</code>).
+  </li>
+  <li>
+    <strong>Custom states</strong> via <code>ElementInternals.states</code> /
+    <code>CustomStateSet</code> &rarr; the CSS <code>:state(<var>ident</var>)</code> pseudo-class. This is
+    the native mechanism — Baseline across modern browsers since May 2024 — by which a custom element
+    exposes its <em>own</em> internal states (<code>loading</code>, <code>committed</code>,
+    <code>invalid</code>) to outside observers, both in CSS and to test code via
+    <code>el.matches(':state(committed)')</code>. It is the standards-aligned home for a protocol-specific
+    observable that has no ARIA equivalent.
+  </li>
+  <li>
+    <strong>DOM events</strong> — <code>toggle</code>/<code>beforetoggle</code>, <code>change</code>,
+    <code>input</code>, <code>invalid</code>. The discrete-occurrence observables: you <em>await</em> them
+    rather than <em>read</em> them. A conformance assertion over an event is a fundamentally different
+    machine operation than one over a state.
+  </li>
+</ul>
+<p>
+  The consequence is sharp for the one consumer. The case&rarr;test bridge emits a machine-checkable
+  directive — <code>&lt;!-- assert: protocol="…" observe="…" tier="…" --&gt;</code>
+  (<code>webcases/compileRequirement.ts:65</code>) — and a runner cannot execute it without knowing
+  whether to <strong>read a state</strong> or <strong>await an event</strong>. So a flat string vocabulary
+  is under-powered: the registry entry must carry a <code>kind</code>.
+</p>
+
+<h2>Finding — the registry's home is already settled by the validator's own <code>given</code> precedent</h2>
+<p>
+  The <code>given</code> side of a requirement does <strong>not</strong> resolve against a flat global
+  <code>values.json</code>; it resolves <em>nested</em> — intent &rarr; that intent's dimension &rarr;
+  that dimension's value (<code>webcases/requirementValidator.ts:91-101</code>). Values have no identity
+  independent of their dimension, which has none independent of its intent, so the vocabulary lives
+  <em>on</em> the intent record (<code>src/_data/intents/&lt;id&gt;.json</code>). The <code>then</code>
+  side is symmetric: an observable has no meaning independent of the protocol that exposes it
+  (<code>committed</code> means nothing without <code>change-tracking</code>;
+  <code>invalid-state-announced</code> means nothing without <code>validation</code>). By the same
+  precedent the observable vocabulary co-locates on the protocol record, and <code>then.observe</code>
+  resolves <em>within</em> the already-resolved <code>then.protocol</code>.
+</p>
+<p>
+  This is reinforced by the protocols that already describe their observables in prose: the
+  <code>validation</code> protocol summary literally reads <em>"Observable states/events per level
+  (control/group/form/nested)"</em> (<code>src/_data/protocols/validation.json</code>). The protocol is
+  already the de-facto owner; formalization types what it already claims, and the new vocabulary rides the
+  <code>protocols</code> registry the validator already injects — no new injection seam.
+</p>
+
+<h2>Web-standards alignment table</h2>
+<table>
+  <thead>
+    <tr><th>Platform source</th><th>Kind</th><th>How a test observes it</th><th>Registry mapping</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>WAI-ARIA state (<code>aria-expanded</code>, <code>aria-busy</code>)</td>
+      <td><code>state</code></td>
+      <td>Read the accessibility-tree attribute / role state</td>
+      <td><code>{ id, kind: 'state', platform: 'aria-expanded' }</code></td>
+    </tr>
+    <tr>
+      <td>Custom state (<code>CustomStateSet</code> &rarr; <code>:state(committed)</code>)</td>
+      <td><code>state</code></td>
+      <td><code>el.matches(':state(committed)')</code></td>
+      <td><code>{ id, kind: 'state', platform: ':state(committed)' }</code></td>
+    </tr>
+    <tr>
+      <td>DOM event (<code>toggle</code>, <code>change</code>, <code>invalid</code>)</td>
+      <td><code>event</code></td>
+      <td>Await the dispatched event</td>
+      <td><code>{ id, kind: 'event', platform: 'toggle' }</code></td>
+    </tr>
+    <tr>
+      <td>Protocol-internal observable with no platform equivalent</td>
+      <td><code>state</code> or <code>event</code></td>
+      <td>Per the protocol's conformance harness</td>
+      <td><code>{ id, kind }</code> (<code>platform</code> omitted)</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Implication for the decision</h2>
+<p>
+  Three prepared forks fall out, each with a default the survey grounds:
+</p>
+<ul>
+  <li>
+    <strong>Fork 1 — Home.</strong> Co-locate the observable vocabulary on the protocol record (default),
+    not a standalone <code>observables.json</code>. The standalone branch is the flawed one: a second
+    source of truth that must be kept in sync with the protocol it points back to, plus a flat global
+    namespace where <code>expanded</code> collides across protocols.
+  </li>
+  <li>
+    <strong>Fork 2 — Grammar.</strong> A typed entry
+    <code>{ id, kind: 'state' | 'event', platform? }</code> (default), not a flat string list. The flat
+    list cannot tell the case&rarr;test bridge whether to read a state or await an event — it starves the
+    one consumer of the signal it needs. <code>platform</code> is the optional ARIA token / custom-state
+    ident / DOM event type, aligning to platform vocabulary where one exists (native-first).
+  </li>
+  <li>
+    <strong>Fork 3 — Rollout.</strong> Progressive grounding (default): <code>then.observe</code> grounds
+    hard when the resolved protocol <em>declares</em> an observables list and the token isn't in it, and
+    stays an <code>info</code> finding when the protocol declares none. The flag-day alternative — every
+    one of the 33 protocols must declare observables before any requirement validates — breaks every
+    currently-valid requirement (including the shipped test fixture at
+    <code>webcases/__tests__/requirementValidator.test.ts:30</code>) for no migration benefit.
+  </li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/projects/webcases/">webcases</a> — the project whose validator defers this slot.</li>
+  <li>Backlog <a href="/backlog/1160-webcases-observable-state-registry-semantics-for-then-observ/">#1160</a> — the decision this research prepares.</li>
+  <li>Backlog <a href="/backlog/1038-webdocs-spec-surface-completeness-doc-manifest-cases-specs-w/">#1038</a> — the spec-surface completeness epic; resolving this turns the Cases-Spec slice's last coverage gap into a small task.</li>
+  <li>Backlog <a href="/backlog/1162-cases-spec-completion-case-to-test-bridge-conformance-valida/">#1162</a> — the case&rarr;test bridge conformance slice, the registry's downstream consumer.</li>
+</ul>
+{% endraw %}

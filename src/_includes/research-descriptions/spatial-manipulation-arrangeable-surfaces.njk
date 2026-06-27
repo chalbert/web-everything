@@ -1,0 +1,185 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Web Everything has <strong>no standard for user-driven spatial manipulation</strong> — grabbing an edge
+  to resize a pane, snapping elements to a grid / alignment points, or dragging widgets around a 2-D
+  dashboard. The adjacent pieces exist but none covers the gap: the
+  <a href="/intents/">Reorder Intent</a> (<code>src/_data/intents/reorder.json:5</code>) does
+  <em>1-D order of a collection</em>; the <a href="/intents/">Layout Intent</a> names a
+  <code>pane</code> as <em>"a resizable subdivision of the shell"</em>
+  (<code>src/_data/intents/layout.json:24</code>) but ships <strong>no divider mechanic</strong>; the
+  <a href="/blocks/">Carousel</a> block uses CSS <code>scroll-snap</code> for <em>paging</em> only. This
+  research grounds decision
+  <a href="/backlog/1384-spatial-manipulation-arrangeable-surfaces-resizable-splitter/">#1384</a>: is
+  this <strong>one standard or several, where does each live, and how much composes the existing
+  <code>reorder</code> substrate?</strong> Like
+  <a href="/backlog/022-drag-and-drop-paradigms/">#022</a> (one decision → <code>reorder</code> intent +
+  <code>reorderable-list</code> block + traits), the expectation is a <strong>fan-out</strong>, not a
+  pre-minted set.
+</p>
+
+<h2>Finding 1 — there is no single "spatial manipulation"; there are three irreducible layout models</h2>
+<p>
+  Surveyed across the incumbents, every library is some subset of <strong>three structurally distinct
+  models</strong>, each with its own state shape and mechanics. They are <strong>not interchangeable</strong>
+  and do not unify into one contract:
+</p>
+<table>
+  <thead><tr><th>Model</th><th>What it is</th><th>State shape</th><th>Mechanics</th><th>Lead libraries</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Linear split</strong></td>
+      <td>1-D draggable divider between two panes, recursable</td>
+      <td>a divider position (% / px), or a small split-tree</td>
+      <td>resize only; resizing one pane reflows its sibling; no collision</td>
+      <td>Split.js, react-resizable-panels, allotment, react-split-pane</td>
+    </tr>
+    <tr>
+      <td><strong>Flat 2-D grid</strong></td>
+      <td>independent widgets on one shared N-column plane</td>
+      <td><strong>flat list</strong> <code>Array&lt;{i,x,y,w,h}&gt;</code> (clean JSON)</td>
+      <td>drag <strong>+</strong> resize <strong>+</strong> collision / compaction
+        (<code>vertical</code> / <code>horizontal</code> / <code>none</code> / overlap)</td>
+      <td>react-grid-layout, gridstack, Muuri (no resize, unmaintained)</td>
+    </tr>
+    <tr>
+      <td><strong>Recursive partition tree</strong></td>
+      <td>nested rows / cols / tab-stacks, space fully partitioned</td>
+      <td>a <strong>recursive tree</strong> (<code>row → column → stack-of-tabs</code>)</td>
+      <td>re-tile + shared splitters; popout to OS window; never overlaps / gaps</td>
+      <td>golden-layout, dockview, FlexLayout, rc-dock</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  A split-tree cannot leave a gap or hold free-floating tiles; a flat grid cannot express a tab-stack
+  nested two splits deep that resizes its sibling. <strong>Inside each model, drag + resize + collision +
+  serialization cluster tightly</strong> — they are facets of one layout engine, not independent features.
+</p>
+
+<h2>Finding 2 — "snap" is two different things, and only one of them stands alone</h2>
+<p>
+  The single most load-bearing finding for the decomposition. Snap is <strong>not one concern</strong>:
+</p>
+<ul>
+  <li>
+    <strong>Grid-snap is emergent, not a feature.</strong> In gridstack and react-grid-layout there is
+    <em>no snap knob at all</em> — positions are expressed in cell / column units, so landing on a boundary
+    is just a consequence of the coordinate system. It is a <strong>property of the grid</strong>, with zero
+    awareness of peer-element edges and no guide lines.
+  </li>
+  <li>
+    <strong>Magnetic alignment (Figma smart guides) is a standalone capability.</strong> Peer-element
+    reference frame, rendered guide lines, a snap threshold — attaches to <em>any</em> free drag and
+    <strong>needs no grid</strong> (moveable's <code>Snappable</code>, interactjs's <code>snap</code>
+    modifier). "Having grid cells gives you no Figma guides; having Figma guides needs no grid."
+  </li>
+</ul>
+<p>
+  So snap does not fold into one intent: grid-snap belongs to the 2-D-grid model as a dimension; magnetic
+  alignment is its own standalone concern. CSS <code>scroll-snap</code> (the Carousel substrate) is a
+  <strong>third, unrelated</strong> thing — it snaps <em>scrolling / paging</em>, not free placement, and
+  is a distractor here.
+</p>
+
+<h2>Finding 3 — keyboard / ARIA is the web's most conspicuous unmet need</h2>
+<p>
+  Across <strong>all four</strong> capability areas, keyboard + ARIA support is "afterthought-to-absent."
+  The lone exceptions are react-resizable-panels (a verified <code>role="separator"</code> +
+  arrow/Home/End) and react-split-pane v3 (claims parity). react-grid-layout (issue #936: handles not
+  focusable), gridstack, Muuri, golden-layout, dockview, FlexLayout, and rc-dock all ship <strong>zero</strong>
+  keyboard / ARIA for the manipulation. The web platform's missing primitive is felt most as a
+  <strong>missing accessibility contract</strong> — exactly where a standards-led design has the highest
+  leverage, and exactly the parity the <a href="/intents/">Reorder Intent</a> already mandates.
+</p>
+
+<h2>Finding 4 — the gesture layer is native &amp; Baseline; the interaction semantics are not</h2>
+<table>
+  <thead><tr><th>Primitive</th><th>Role for spatial manipulation</th><th>Baseline status</th></tr></thead>
+  <tbody>
+    <tr><td>Pointer Events + <code>setPointerCapture</code></td><td>the drag substrate for <em>all three</em> models</td><td><strong>Baseline widely available</strong> — the correct foundation (never HTML DnD)</td></tr>
+    <tr><td><code>ResizeObserver</code></td><td>size read-back (observes, does not resize)</td><td><strong>Baseline widely available</strong></td></tr>
+    <tr><td>CSS Grid (+ subgrid)</td><td>the snap <em>target</em> / coordinate model a dashboard quantizes to</td><td><strong>Baseline widely available</strong></td></tr>
+    <tr><td>CSS <code>resize</code></td><td>single-box corner self-resize</td><td><strong>Limited / not Baseline</strong> — overflow-gated, corner-only, no sibling reflow, no events → <em>not</em> a splitter</td></tr>
+    <tr><td>CSS <code>scroll-snap</code></td><td>snaps <em>scrolling / paging</em>, not free placement</td><td>Baseline, but the <strong>wrong tool</strong> (distractor)</td></tr>
+    <tr><td><code>Element.moveBefore()</code></td><td>state-preserving widget move (keeps focus / anim / iframe)</td><td><strong>Limited</strong> (no Safari late-2025) → progressive, <code>insertBefore</code> fallback</td></tr>
+    <tr><td>CSS Anchor Positioning</td><td>tether / align a floating handle or menu</td><td>Limited → just reaching newly-available; behind <code>@supports</code></td></tr>
+    <tr><td>HTML Drag and Drop API</td><td>—</td><td>Baseline but an <strong>a11y / control dead-end</strong> (no keyboard, weak touch, breaks selection) — <strong>disqualified</strong></td></tr>
+    <tr><td>ARIA APG Window Splitter</td><td><code>role="separator"</code> + <code>aria-valuenow/min/max</code> + arrows/Home/End</td><td>spec contract — the a11y contract a <em>resize</em> intent mandates</td></tr>
+    <tr><td>ARIA APG Grid pattern</td><td><code>role="grid"</code> / <code>gridcell</code> 2-D arrow-key traversal</td><td>spec contract — the a11y contract a <em>2-D arrange</em> intent mandates</td></tr>
+    <tr><td>Native splitter / dashboard element</td><td>—</td><td><strong>Does not exist; no Open UI / CSSWG proposal in flight</strong> (confirmed gap)</td></tr>
+  </tbody>
+</table>
+<p>
+  The <em>gesture / observation / layout</em> layers are native and mostly Baseline. The
+  <em>interaction semantics</em> — splitter resize, snap-to-cell dragging, dashboard arrangement, and their
+  accessible keyboard equivalents — have <strong>no native primitive and no proposal in flight</strong>.
+  That interaction layer is exactly where WE standardizes an intent / behavior, mandating conformance to
+  the ARIA APG Window-Splitter and Grid patterns on the Baseline Pointer Events substrate.
+</p>
+
+<h2>Classification (per-fork pass)</h2>
+<ul>
+  <li><strong>Layer</strong> — Intent(s) (declarative UX "what") + composing Block(s). Not a Protocol (no
+    engine-swap / vendor interop, no interchange schema); not a Project (no cross-cutting orchestration
+    domain) — the <a href="/backlog/409-decision-master-detail-intent-vs-project/">#409</a> /
+    <a href="/backlog/467-responsive-container-query-layout-placement-new-project-vs-i/">#467</a>
+    "not every gap is a project" precedent + the <code>project-protocol-bar</code> rule.</li>
+  <li><strong>Snap</strong> — <em>two</em> concerns: grid-snap is a dimension of the 2-D-grid model;
+    magnetic alignment is a standalone intent (bias-toward-separation — it recurs without a grid).</li>
+  <li><strong>Resolution / default</strong> — most-permissive: manipulation is opt-in per surface; absent →
+    static.</li>
+  <li><strong>Fixed mechanics</strong> — keyboard parity + ARIA conformance + live-region announce +
+    Pointer-Events substrate hold under <em>any</em> value of the dimensions, so they are baked, not
+    exposed.</li>
+  <li><strong>Native-first</strong> — gesture (Pointer Events), layout (CSS Grid), observation
+    (ResizeObserver) are native; the standard adds the interaction semantics + the a11y contract the
+    platform lacks.</li>
+</ul>
+
+<h2>The prepared forks</h2>
+<p>
+  After the standing test the five sketched concerns collapse to <strong>two forced ratifies</strong>
+  (placement = intent + block, no project / protocol; keyboard-a11y + Pointer-Events substrate as a fixed
+  mechanic) <strong>+ four genuine forks</strong>:
+</p>
+<ul>
+  <li>
+    <strong>Fork 1 — Resize home.</strong> A standalone <code>resizable</code> intent <em>(recommended)</em>
+    vs extend <code>layout</code> so its <code>pane</code> gains the divider. Resize recurs <em>without</em>
+    the app-shell (a split code editor, a preview pane), so by bias-toward-separation it earns its own home;
+    <code>layout.pane</code> then composes it.
+  </li>
+  <li>
+    <strong>Fork 2 — 2-D arrangement &amp; the <code>reorder</code> relationship.</strong> A new
+    <code>arrangeable</code> intent that <em>composes</em> reorder's pointer/keyboard/announce substrate
+    <em>(recommended)</em> vs extending <code>reorder</code> with a 2-D placement dimension. Reorder's
+    contract is <em>"user-mutable order of a collection"</em> (1-D sequence); a dashboard is 2-D
+    <em>placement</em> (x,y,w,h) + resize — overloading reorder past its contract is the worse branch.
+  </li>
+  <li>
+    <strong>Fork 3 — Snap decomposition.</strong> Split it <em>(recommended)</em>: grid-snap is a dimension
+    of <code>arrangeable</code>; magnetic alignment is a standalone <code>alignment-guides</code> intent. A
+    single <code>snap</code> intent conflates two architecturally separate things (Finding 2).
+  </li>
+  <li>
+    <strong>Fork 4 — Docking / tiling scope.</strong> Carve it to its own future decision
+    <em>(recommended)</em> vs folding the recursive-tree model in now as a <code>dockable</code> intent.
+    Finding 1 shows docking is a genuinely distinct third model (golden-layout / dockview class); folding it
+    bloats this decision, but it is the same <em>family</em>.
+  </li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/intents/">Web Intents catalog</a> — where Reorder / Layout / Breakpoint and the new
+    spatial intents render.</li>
+  <li><a href="/backlog/022-drag-and-drop-paradigms/">#022</a> — the drag-and-drop decision whose fan-out
+    shape (intent + block + traits) this mirrors.</li>
+  <li><a href="/backlog/409-decision-master-detail-intent-vs-project/">#409</a> /
+    <a href="/backlog/467-responsive-container-query-layout-placement-new-project-vs-i/">#467</a> — the
+    "intent, not project" placement precedents.</li>
+  <li>Backlog <a href="/backlog/1384-spatial-manipulation-arrangeable-surfaces-resizable-splitter/">#1384</a>
+    — the decision this research prepares.</li>
+</ul>
+{% endraw %}

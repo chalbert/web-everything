@@ -301,11 +301,11 @@
 </ul>
 
 <p>Example:</p>
-<pre><code>&lt;!-- This provider is layout-transparent --&gt;
+<we-code-view><pre><code>&lt;!-- This provider is layout-transparent --&gt;
 &lt;context-provider style="display:contents" heading-level="3"&gt;
   &lt;auto-heading&gt;Title&lt;/auto-heading&gt;  &lt;!-- resolves to h3 --&gt;
   &lt;p&gt;Content&lt;/p&gt;
-&lt;/context-provider&gt;</code></pre>
+&lt;/context-provider&gt;</code></pre></we-code-view>
 
 <p><strong>Accessibility note:</strong> As of 2023&ndash;2024, <code>display: contents</code> accessibility bugs have been largely fixed in major browsers. The element remains in the accessibility tree. However, it should not be used on inherently semantic elements like <code>&lt;button&gt;</code>, <code>&lt;table&gt;</code>, or <code>&lt;details&gt;</code>.</p>
 
@@ -314,7 +314,7 @@
 
 <p>The existing JSXRenderer supports string tags and class constructors. Extending it to support <strong>function components</strong> would enable Stencil/Haunted-style DOM-less composition:</p>
 
-<pre><code>// Function component &mdash; no custom element, no wrapper
+<we-code-view><pre><code>// Function component &mdash; no custom element, no wrapper
 const List = ({ items }) =&gt; (
   &lt;&gt;
     {items.map(item =&gt; &lt;li&gt;{item}&lt;/li&gt;)}
@@ -322,7 +322,7 @@ const List = ({ items }) =&gt; (
 );
 
 // Usage &mdash; List adds zero DOM nodes
-const el = &lt;ul&gt;&lt;List items={['a', 'b', 'c']} /&gt;&lt;/ul&gt;;</code></pre>
+const el = &lt;ul&gt;&lt;List items={['a', 'b', 'c']} /&gt;&lt;/ul&gt;;</code></pre></we-code-view>
 
 <p>When <code>type</code> is a function (not a class constructor), <code>createElement</code> calls it with props and inlines the returned DOM. Zero extra elements. Zero custom element registration.</p>
 

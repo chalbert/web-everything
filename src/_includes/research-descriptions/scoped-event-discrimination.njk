@@ -180,7 +180,7 @@
 
 <p>The connection point is the <code>resource-load-end</code> event detail. It carries a <code>duration</code> value and the <code>operation</code> key. A tracer span wrapping the same operation has the same key and timing. This enables correlation:</p>
 
-<pre><code>// Listener receives the event
+<we-code-view><pre><code>// Listener receives the event
 listenForScoped(app, 'resource-load-end', 'customEvents:resource-load-end', (event) => {
   // event.detail.operation = ['users', 123]
   // event.detail.duration = 247 (ms)
@@ -191,7 +191,7 @@ listenForScoped(app, 'resource-load-end', 'customEvents:resource-load-end', (eve
   // span.attributes = { 'http.status': 200, 'cache.hit': false }
   // span.parentId = 'nav:route-change:abc'  (← what triggered it)
 });
-</code></pre>
+</code></pre></we-code-view>
 
 <p>Events tell the UI "data arrived." Traces tell the developer "here's the full journey of that request."</p>
 

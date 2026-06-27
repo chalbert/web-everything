@@ -1,0 +1,55 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    <a href="/backlog/1590-dev-surface-monetization-bet-extensions-as-funnel-vs-dev-bro/">#1590</a>
+    ratified the <em>licensed local dev-browser</em> as the flagship paid product (the fixed-cost
+    JetBrains/Sublime model — no server, no recurring obligation — with build explicitly decoupled
+    from release/monetization timing). It set the <strong>high-level posture</strong>, not the
+    <strong>per-capability gating line inside the shell</strong>:
+    <a href="/backlog/1655-dev-browser-in-shell-free-paid-line-which-shell-capabilities/">#1655</a> must
+    draw which of the dev-browser's introspection/conformance capabilities light up <strong>free</strong>
+    (the funnel) and which require the <strong>local license</strong>. The capability menu is concrete —
+    the 22 inspector items
+    <a href="/backlog/1631-shareable-full-context-repro-bundle-for-the-dev-browser/">#1631</a>–<a href="/backlog/1652-jump-to-source-from-any-live-element/">#1652</a>
+    plus the named features in
+    <a href="/backlog/141-dev-browser-vision/">#141</a>. The risk is pricing on a <em>shifting category</em>
+    (&ldquo;debugging vs collaboration&rdquo; drifts); the project's monetization statute says gate on a
+    <strong>structural property</strong> instead. This survey gathers how comparable dev/observability
+    tools draw that line so the call reuses the market's vocabulary rather than coining one cold.
+</p>
+
+<h2>Recommendation (to ratify in #1655)</h2>
+<ol>
+    <li><strong>Gating principle = the read-vs-act structural line.</strong> FREE funnel = any
+        <em>passive, read-only introspection of a single app/session</em> (an inspector that only
+        <em>reads</em> the conformant app's self-description and renders it). LICENSED = anything that
+        <strong>writes</strong> back to source or runtime, <strong>automates</strong> (the AI fix-loop,
+        task queues), <strong>persists</strong> a shared artifact, or <strong>scales</strong> across many
+        apps / sessions / teams. This is the market's universal line (React/Vue/Redux &amp; Chrome
+        DevTools keep read-only introspection free forever as the hook; Sentry / Datadog / LogRocket /
+        Replay gate on volume·retention·automation·seats, never on &ldquo;which signal you may read&rdquo;)
+        <em>and</em> the composition of the cost-flat rule
+        (<a href="/backlog/089-monetization-product-ideas/">#089</a>) with the capability-cost precedent
+        already ratified for the design-system creator
+        (<a href="/backlog/775-design-system-creator-assembler-open-core-layering-simple-fu/">#775</a>)
+        and web-docs (<a href="/backlog/428-web-docs-open-core-tiering/">#428</a>). The property is
+        structural (an inspector either mutates/persists/aggregates or it doesn't), not a category that
+        drifts. <em>High confidence — a composition of existing rulings, not a new judgment.</em></li>
+    <li><strong>The capability map falls out almost entirely forced.</strong> ~13 read-only inspectors land
+        FREE (contract/data inspector, render-cause/perf, semantic explain, ownership routing, role
+        lenses, intent/a11y conformance, variant simulator, permission/identity simulator, semantic
+        search, jump-to-source, in-context test status, state/action explorer, business-rules-in-context);
+        ~9 act/persist/scale capabilities land LICENSED (shareable repro bundle, annotation threads,
+        handoff packets, capability-matched task queue, safe-edit-sandbox&rarr;PR, branch/run diff,
+        scenario·fixture + seed loaders, failure injector, manager-mode cross-app rollups). The map is a
+        <em>classification under the principle</em>, not a list of decisions. <em>High confidence.</em></li>
+    <li><strong>The one contested knob — bug-capture export.</strong> #141's analyst funnel leans on
+        &ldquo;click report, the dev gets a fully-debuggable ticket.&rdquo; By the structural rule the
+        <em>captured, persisted, shared</em> bundle is LICENSED — yet it is the single strongest
+        top-of-funnel conversion hook (it converts a casual user into a reporter who pulls the team in).
+        Recommend <strong>capture-and-view FREE, export/share/persist LICENSED</strong>: reading the
+        repro inline is read-only introspection (free funnel); emitting the shareable artifact crosses the
+        persist/share line (licensed). <em>Medium confidence — the genuine boundary the principle
+        contests.</em></li>
+</ol>
+{% endraw %}

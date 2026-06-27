@@ -76,21 +76,21 @@
 
 <h3>2. Node Context Convenience Methods</h3>
 <p><strong>What plateau has:</strong> Seven methods patched onto <code>Node.prototype</code>:</p>
-<pre><code>node.getContext('user')          // walk chain for customContexts:user
+<we-code-view><pre><code>node.getContext('user')          // walk chain for customContexts:user
 node.getOwnContext('user')       // check only this element
 node.createContext('user')       // construct from customContextType registry
 node.ensureContext('user')       // get own or create + attach
 node.hasContext('user')          // boolean
 node.hasOwnContext('user')       // boolean
-node.queryContext('user', 'name') // consume with path expression</code></pre>
+node.queryContext('user', 'name') // consume with path expression</code></pre></we-code-view>
 <p><strong>What Web Everything has:</strong> Only injector traversal methods (<code>getClosestInjector</code>, <code>injectors</code>, <code>getOwnInjector</code>, <code>hasOwnInjector</code>).</p>
 <p><strong>Impact:</strong> Without these, developers must manually walk the injector chain and understand the <code>customContexts:</code> prefix convention. These methods are the primary consumer-facing API.</p>
 <p><strong>Depends on:</strong> Consumable class (#1), webcontexts migration (#5).</p>
 
 <h3>3. Scoped createElement</h3>
 <p><strong>What plateau has:</strong> <code>Node.prototype.createElement</code> walks the injector chain, checking <code>customElements</code> registries at each level for tag names containing <code>-</code>. Falls back to <code>document.createElement</code>.</p>
-<pre><code>// plateau: resolves Button from nearest customElements registry
-const button = someElement.createElement('my-button');</code></pre>
+<we-code-view><pre><code>// plateau: resolves Button from nearest customElements registry
+const button = someElement.createElement('my-button');</code></pre></we-code-view>
 <p><strong>What Web Everything has:</strong> <code>Document.prototype.createElement</code> is patched only to track <code>InjectorRoot.creationInjector</code> during construction. No scoped custom element resolution.</p>
 <p><strong>Impact:</strong> Custom elements registered in a scoped injector (not the global <code>customElements</code>) cannot be created via <code>createElement</code>. Only matters when using injector-scoped element registries rather than the global <code>customElements.define()</code>.</p>
 

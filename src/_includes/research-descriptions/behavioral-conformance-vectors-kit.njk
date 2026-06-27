@@ -33,7 +33,7 @@
   platform surface (DOM / ARIA / events), never impl internals. The temporal case is the one that
   <em>needs</em> a controllable clock:
 </p>
-<pre><code>{
+<we-code-view><pre><code>{
   "id": "validator-resolution/versioning/stale-async-dropped",
   "contract": "@webeverything/validator-resolution",
   "steps": [
@@ -44,7 +44,7 @@
   ],
   "expect": { "finalState": "valid", "neverObserved": [ { "renderedMessage": "taken" } ], "aria": { "aria-invalid": "false" } },
   "observeVia": ["aria", "renderedMessage", "validity"]
-}</code></pre>
+}</code></pre></we-code-view>
 <p>
   v1 settles <em>after</em> v2 but is a stale generation → a conforming component must drop it.
   "Never observed 'taken'" can only be checked by running time — which is exactly why

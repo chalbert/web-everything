@@ -1,0 +1,88 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    <a href="/backlog/1381-button-packaging-pick-runtime-shape-mechanism-transient-vs-p/">#1381</a> picks the
+    <strong>FUI button's concrete runtime-shape mechanism</strong>, deferred from
+    <a href="/backlog/1321-variant-component-surface-and-per-variant-loading-one-polymo/">#1321</a> (which
+    ratified the <em>general</em> block-packaging ruling — every block is a uniform custom-element
+    <em>usage</em> surface, isolation rides
+    <a href="/backlog/1349-light-dom-scoped-component-css-isolation-native-compile-prop/">#1349</a>). #1321
+    named three families: <strong>(A)</strong> <code>TransientElement</code> self-replace &rarr; native
+    <code>&lt;button&gt;</code> (wrapper-less); <strong>(B)</strong> a persistent light-DOM custom element
+    owning a real <code>&lt;button&gt;</code>; <strong>(C)</strong> shadow. This is a <strong>consumer
+    refinement</strong> of already-surveyed ground, so the full benchmark/isolation surveys live in
+    <a href="/research/fui-variant-surface-packaging/">fui-variant-surface-packaging</a> and
+    <a href="/research/scoped-component-css-isolation/">scoped-component-css-isolation</a>; this topic adds
+    the one new angle they didn't survey — the <strong>self-erasing transient</strong> pattern vs a
+    <strong>persistent</strong> element for a behavior-free native control.
+</p>
+
+<h2>The standing test shrinks three concerns to one fork</h2>
+<ul>
+    <li><strong><code>we-button</code> tag &mdash; settled, not a fork.</strong>
+        <a href="/backlog/841-decide-the-we-contract-custom-element-tag-naming-convention-/">#841</a> ratified
+        the derivation <code>&lt;prefix&gt;-&lt;id&gt;</code> (default <code>we-</code>); the button derives
+        <code>we-button</code>, FUI conforms via <code>registerButton(tag = 'we-button')</code>. No prettier
+        semantic alternative exists (unlike <code>pagination&rarr;page-nav</code>); <code>fui-</code> is
+        excluded. Confirmation.</li>
+    <li><strong>Block-model conversion program &mdash; prioritization, not a fork.</strong> #1321 already
+        ruled the end-state (every block becomes a custom element, mechanism per use case) and labelled the
+        conversion &ldquo;sizable, separately prioritized.&rdquo; Per
+        <em>fork-is-not-a-prioritization-tool</em>, carve a separately-prioritized epic carrying a per-block
+        mechanism-selection guideline (default S1; transient for behavior-free controls, persistent for
+        reactive, shadow for hostile-CSS).</li>
+    <li><strong>S1 (light DOM) vs S2 (shadow) &mdash; already support-both, default S1, by #1349.</strong> So
+        <strong>(C) shadow is the #1349 S2 opt-in</strong>, not a fresh #1381 fork. What #1349 did
+        <em>not</em> decide is, within the default S1 strategy, the button's shape: <strong>A (transient) vs
+        B (persistent light-DOM)</strong>. That is the one genuine residual.</li>
+</ul>
+
+<h2>The new angle &mdash; transient vs persistent, grounded</h2>
+<p>
+    <code>fui:blocks/transient/TransientElement.ts</code> is the real one-shot self-replace: its
+    <code>connectedCallback</code> creates the native tag, transfers attributes/children, then
+    <code>queueMicrotask(() =&gt; this.replaceWith(el))</code> &mdash; after which the custom element is
+    <strong>gone</strong>. The button needs no persistent element (#1321's behavior inventory: <code>variant</code>
+    is CSS, busy/toggle/async/icon are <code>CustomAttribute</code>s on the native button,
+    <code>command</code>/<code>commandfor</code>+<code>popovertarget</code> made triggering native). So
+    transient's post-render-reactivity loss only bites a <strong>framework-bound / property-set</strong>
+    consumer (the polyglot-adapter case &mdash; <strong>B</strong>'s home); CSS variant-reactivity over the
+    surviving <code>[variant]</code> works fine. Transient carries <strong>S1</strong> (the #1349 L2 transform
+    keys a unique class on the emitted native button) but <strong>not S2</strong> (no host for a shadow), so
+    selecting S2 forces a persistent element. Clean mapping: <strong>A = S1/native-first floor &middot; C = S2
+    opt-in &middot; B = persistent-light middle for reactive consumers.</strong> Today's
+    <code>fui:blocks/button/Button.ts</code> is neither &mdash; a factory hanging <code>fui-button</code>
+    global classes on a native button with zero element (the #1321-rejected no-element shape, pending #841).
+</p>
+<p>
+    <strong>External consensus (June 2026)</strong> votes transient for a behavior-free button:
+    &ldquo;web components are not recommended for small UI like buttons &mdash; that&rsquo;s design-system CSS;
+    WC&rsquo;s strength is sharing <em>behavior</em>&rdquo;
+    (<a href="https://eduardo-ottaviani.medium.com/web-components-a-practical-perspective-using-custom-elements-7523a6462387">Ottaviani</a>);
+    the native <code>&lt;button&gt;</code> is the clear winner for an interactive control
+    (<a href="https://web.dev/articles/building/a-button-component">web.dev</a>); <strong>shadcn</strong> ships
+    the byte-identical native-<code>&lt;button&gt;</code>+computed-class shape. The
+    <a href="https://frontendmasters.com/blog/light-dom-only/">light-DOM-only WC movement</a>
+    (<a href="https://chromamine.com/2024/10/you-can-use-web-components-without-the-shadow-dom/">Chromamine</a>,
+    <a href="https://cloudfour.com/thinks/testing-html-light-dom-web-components-easier-than-expected/">Cloud Four</a>)
+    validates <strong>B</strong> as a coherent end-state; Scott Jehl&rsquo;s
+    <a href="https://scottjehl.com/posts/html-web-components-shadow-dom/">light-to-shadow swapping</a> mirrors
+    the A-floor / C-opt-in layering.
+</p>
+
+<h2>Recommendation (to ratify in #1381)</h2>
+<ol>
+    <li><strong>Fork 1 &rarr; A (transient self-erase &rarr; native <code>&lt;button&gt;</code>), ~75%.</strong>
+        The native-first S1 floor: wrapper-less, a real native button (a11y/forms free, never pays
+        <code>ElementInternals</code>), DOM-clean, byte-equal to shadcn, S1-isolatable via #1349 L2 &mdash; and
+        the button has no reactivity need a persistent element would serve. <strong>B</strong> stays
+        allowed-not-floor for framework-reactive consumers and is the shape that upgrades to C/S2. Residual
+        ~25%: if the framework-binding consumer is the <em>primary</em> button consumer, B becomes the better
+        default.</li>
+    <li><strong><code>we-button</code> confirmed</strong> (derive-from-#841; FUI conforms).</li>
+    <li><strong>Conversion program carved</strong> as a separately-prioritized epic with the per-block
+        mechanism-selection guideline.</li>
+</ol>
+
+<p>Full grounding: <code>reports/2026-06-21-1381-button-packaging-mechanism.md</code>.</p>
+{% endraw %}

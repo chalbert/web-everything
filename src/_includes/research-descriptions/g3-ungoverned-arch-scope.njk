@@ -1,0 +1,75 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+  Repairing the dead <code>isExec</code> predicate (<a href="/backlog/1473-audit-isexec-build-kind-vocabulary-which-kinds-gate-g2-g3-no/">#1473</a>)
+  brought the backlog-health gate <strong>G3 (ungoverned-arch)</strong> from inert (0) to
+  <strong>350 candidates</strong> — every resolved build that graduated to an entity
+  (<code>graduatedTo</code> set) with no governing <code>type:decision</code> reachable transitively nor
+  cited in prose. That is the gate working as designed (a judgment CANDIDATE class), but 350 is too
+  voluminous to action as a pre-flight signal. This survey grounds
+  <a href="/backlog/1498-g3-ungoverned-arch-now-fires-at-350-candidates-does-the-gate/">backlog&nbsp;#1498</a>:
+  should G3 scope by recency, add a stronger lineage filter, or stay full-pool as audit-only?
+</p>
+
+<h3>The three named options, grounded against the real tree (1483 items)</h3>
+<ul>
+  <li>
+    <strong>Recency scope — a false premise.</strong> The whole backlog's resolved history is compressed
+    into June 2026 (1466/1483 items opened 2026-06). Of the 350, only <strong>253 are git-datable</strong>
+    (a real <code>status:resolved</code> flip), all in 2026-06; the other <strong>98 are import-born /
+    born-resolved with no usable date</strong>. And recent resolves <em>dominate</em> the volume —
+    <strong>172 of 253</strong> resolved in the last three days — so "resolved after the governance
+    discipline began (2026-06-18)" still leaves ~181&nbsp;datable&nbsp;+&nbsp;98&nbsp;undatable&nbsp;≈&nbsp;279.
+    There is no clean temporal boundary to cut on.
+  </li>
+  <li>
+    <strong>Stronger lineage filter — shaves nothing read literally.</strong> Only 11 of 350 mention
+    <code>platform-decisions.md</code>, only 2 cite any decision, 0 carry a <code>codifiedIn</code>. The
+    walk isn't missing edges — these builds genuinely have no decision in any form.
+  </li>
+  <li>
+    <strong>Stronger <em>subject</em> filter — the real fix.</strong> Of the 350, <strong>306 graduate to
+    a file path</strong> (routine impl landing in a file) and only <strong>45 to a named
+    <code>&lt;kind&gt;:</code> entity</strong>, of which <strong>41 are standard-entity kinds</strong>
+    (block&nbsp;27 · intent&nbsp;4 · project&nbsp;6 · adapter&nbsp;3 · protocol&nbsp;1). The 41
+    entity-graduations are the real violation class — new named standard entities shipped with no governing
+    decision. Counting file-path impl as "architecture" is the subject category error behind the 42%
+    over-fire.
+  </li>
+</ul>
+
+<h3>Prior art surveyed</h3>
+<ul>
+  <li>
+    <strong>SonarQube "new-code period" / leak period; ESLint, Android-Lint &amp; betterer baselines;
+    reviewdog <code>filter-mode</code>.</strong> All gate only on code changed <em>after</em> a clean
+    forward boundary. They explain <em>why</em> recency fails here: our backlog has no such boundary
+    (compressed history + import-born undatables), so the temporal discriminator collapses.
+  </li>
+  <li>
+    <strong>G6 codification-gap (within-repo precedent).</strong> Explicitly "the catch-up pool for the
+    <em>legacy</em> decisions resolved before this gate existed — it should only ever shrink." A gate
+    activated late lights up the whole pre-discipline history; the sanctioned treatment is a shrinking
+    legacy inventory, not an action list. G3's 350 is the same phenomenon.
+  </li>
+  <li>
+    <strong><code>--scope=&lt;batch-slug&gt;</code> changeset attribution (#957/#949).</strong> Already
+    demotes pre-existing <code>check:health</code> findings to a non-failing note and surfaces only the
+    session's claimed items — so within a batch the actionability is already half-solved; the
+    <em>unscoped</em> count is what still reads 350. Scopes by <em>owner</em>; #1498 scopes by
+    <em>subject</em> — complementary axes.
+  </li>
+</ul>
+
+<h3>Synthesis handed to #1498</h3>
+<p>
+  Recommend the subject-scope reframe: gate G3 on <strong>entity-graduation</strong>
+  (<code>graduatedTo</code> names a standard entity — block/intent/protocol/project/plug/capability/adapter,
+  not a repo path or <code>demo:</code>) → 350 drops to <strong>~41</strong>, actionable. Recency is the
+  data-disproven (fork-existence flawed) branch; full-pool audit-only is the coherent alternative but
+  abandons the forward signal, whereas subject-scope preserves it <em>and</em> restores actionability,
+  with the full 350 still retained in the report as a G6-style shrinking legacy inventory. Repo-internal
+  backlog devtools — not a WE standard; the reusable rule it codifies ("a governance gate's subject is
+  governable architecture, not routine impl") is statute-layer material.
+</p>
+{% endraw %}

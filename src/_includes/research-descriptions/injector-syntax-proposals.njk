@@ -39,7 +39,7 @@
 
 <h3>1.1 Consumable Class</h3>
 <p>A multi-resolving, Promise-compatible, AsyncIterator-compatible object. The core async primitive for reactive consumption.</p>
-<pre><code>// Construction
+<we-code-view><pre><code>// Construction
 const consumable = new Consumable('path.expression');
 
 // Provide a value (can be called multiple times)
@@ -55,24 +55,24 @@ const { value } = await consumable;
 for await (const result of consumable) {
   console.log(result.value);
 }
-</code></pre>
+</code></pre></we-code-view>
 <p><strong>Status in Web Everything:</strong> Stub only (7-line placeholder in Injector.ts). Blocks all reactive consumption patterns.</p>
 
 <h3>1.2 injector.consume() Query Syntax</h3>
 <p>The consume method accepts a query string with optional path expression after a <code>/</code> separator.</p>
-<pre><code>// Basic — get a whole provider
+<we-code-view><pre><code>// Basic — get a whole provider
 injector.consume('customContexts:nav', querier);
 
 // With path expression — query into a provider
 injector.consume('customContexts:data/foo.bar[0]', querier);
 
 // Format: "providerName" or "providerName/path.to.value"
-</code></pre>
+</code></pre></we-code-view>
 <p>If the resolved provider implements <code>query(expression)</code> (the <code>Queryable</code> interface), the path expression is delegated to it. Otherwise the whole provider is returned.</p>
 
 <h3>1.3 Consume Overload Variants (Explored, Not Finalized)</h3>
 <p>Several signatures were explored in plateau's Injector.ts comments for batch consumption:</p>
-<pre><code>// Array form — consumable resolves when any update
+<we-code-view><pre><code>// Array form — consumable resolves when any update
 const consumable = injector.consume([
   'customContexts:redux',
   'customContexts:nav',
@@ -87,7 +87,7 @@ const consumable = injector.consume({
   data: 'customContexts:data',
 });
 const { redux, nav, data } = await consumable;
-</code></pre>
+</code></pre></we-code-view>
 <p><strong>Status:</strong> Comments only. Neither form was implemented. Worth evaluating whether batch consumption is needed or whether individual consumes suffice.</p>
 
 <h3>1.4 Node Context Convenience Methods</h3>
@@ -138,7 +138,7 @@ const { redux, nav, data } = await consumable;
 <p><strong>Status in Web Everything:</strong> None of these are patched. Only injector traversal methods exist (<code>getClosestInjector</code>, <code>injectors</code>, <code>getOwnInjector</code>, <code>hasOwnInjector</code>).</p>
 
 <h3>1.5 Also Explored on Node (Commented Out in Plateau)</h3>
-<pre><code>// Batch multi-context query
+<we-code-view><pre><code>// Batch multi-context query
 node.queryContextList([
   { type: 'redux', query: 'foo' },
   { type: 'nav', query: 'bar' },
@@ -149,64 +149,64 @@ node.queryContextAll('data', 'foo.bar');
 
 // Shorthand consume by provider + constructor
 node.consume('customElements', ButtonConstructor);
-</code></pre>
+</code></pre></we-code-view>
 <p>These were commented out and never finalized. Likely over-engineering for initial needs.</p>
 
 <h2>Layer 2: HTML Declarative Syntax</h2>
 
 <h3>2.1 Script Type: Injector</h3>
 <p>The most developed HTML declarative form. An injector is defined as a <code>&lt;script type="injector"&gt;</code> block with a unique <code>id</code>, then associated with elements via the <code>injector</code> attribute.</p>
-<pre><code>&lt;!-- Define an injector with a unique id --&gt;
+<we-code-view><pre><code>&lt;!-- Define an injector with a unique id --&gt;
 &lt;script type="injector" id="theme-injector"&gt;
     provide { theme } from './theme-dark.js';
 &lt;/script&gt;
 
 &lt;!-- Associate a node with the injector by id --&gt;
 &lt;my-widget injector="theme-injector"&gt;&lt;/my-widget&gt;
-</code></pre>
+</code></pre></we-code-view>
 
 <h4>The <code>injector</code> Meta Reference</h4>
 <p>Inside a <code>&lt;script type="injector"&gt;</code>, the bare <code>injector</code> keyword (not <code>import.injector</code>) refers to the current injector context in the <code>from</code> clause:</p>
-<pre><code>&lt;script type="injector" id="custom-elements-injector"&gt;
+<we-code-view><pre><code>&lt;script type="injector" id="custom-elements-injector"&gt;
     provide * of 'customElements' from injector;
 &lt;/script&gt;
-</code></pre>
+</code></pre></we-code-view>
 
 <h4>The <code>isolate</code> Attribute</h4>
 <p>By default, an injector context extends its parent injector. To prevent inheritance and create a fully isolated injector, add the boolean <code>isolate</code> attribute:</p>
-<pre><code>&lt;script type="injector" id="isolated-injector" isolate&gt;
+<we-code-view><pre><code>&lt;script type="injector" id="isolated-injector" isolate&gt;
     provide { theme } from './theme-contrast.js';
 &lt;/script&gt;
-</code></pre>
+</code></pre></we-code-view>
 <p>When <code>isolate</code> is present, the injector does <strong>not</strong> inherit from any parent context. This is analogous to <code>hidden</code>, <code>inert</code>, and other boolean HTML attributes.</p>
 <p><strong>Status:</strong> Explored in plateau project documentation. Could be implemented via <code>customScriptTypes</code> registry as an extensibility point.</p>
 
 <h3>2.2 Script Type: Expression</h3>
-<pre><code>&lt;script type="expression"&gt;
+<we-code-view><pre><code>&lt;script type="expression"&gt;
   consume number from 'state';
   const result = number + 1;
   provide default result;
-&lt;/script&gt;</code></pre>
+&lt;/script&gt;</code></pre></we-code-view>
 <p>Proposed to be converted at runtime into a <code>ConsumableModule</code> with observed values. The <code>consume</code>/<code>provide</code> keywords inside would be parsed and transformed.</p>
 
 <h3>2.3 Script Type: Context</h3>
-<pre><code>&lt;script type="context" name="bindings"&gt;
+<we-code-view><pre><code>&lt;script type="context" name="bindings"&gt;
   consume { toTitleDate, date } from 'component';
   provide const title = toTitleDate(data);
   provide const datetime = date;
-&lt;/script&gt;</code></pre>
+&lt;/script&gt;</code></pre></we-code-view>
 <p>Creates a named context accessible via the injector chain. Consumed by elements using <code>@bindings.title</code> syntax.</p>
 
 <h3>2.4 Script Type: Bindings</h3>
-<pre><code>&lt;script type="bindings"&gt;
+<we-code-view><pre><code>&lt;script type="bindings"&gt;
   consume { toTitleDate, date } from 'component';
   export const title = toTitleDate(data);
   export const datetime = date;
 &lt;/script&gt;
-&lt;time&gt;&lt;/time&gt;  &lt;!-- bindings apply to next sibling --&gt;</code></pre>
+&lt;time&gt;&lt;/time&gt;  &lt;!-- bindings apply to next sibling --&gt;</code></pre></we-code-view>
 
 <h3>2.5 Binding Consumption Syntax</h3>
-<pre><code>&lt;!-- All bindings from a context --&gt;
+<we-code-view><pre><code>&lt;!-- All bindings from a context --&gt;
 &lt;time v-bind="@bindings"&gt;&lt;/time&gt;
 
 &lt;!-- Specific bindings --&gt;
@@ -214,12 +214,12 @@ node.consume('customElements', ButtonConstructor);
 
 &lt;!-- By ID selector --&gt;
 &lt;time v-bind="#my-bindings"&gt;&lt;/time&gt;
-</code></pre>
+</code></pre></we-code-view>
 <p><strong>Status:</strong> Conceptual only. The <code>@</code> prefix for context references and <code>#</code> for selector-based references were explored but not standardized.</p>
 
 <h2>Layer 3: Decorators</h2>
 <p>Plateau implemented these using legacy TypeScript decorators:</p>
-<pre><code>// Attach a context to the element when the attribute connects
+<we-code-view><pre><code>// Attach a context to the element when the attribute connects
 @provide('myContextType')
 class MyAttribute extends CustomAttribute {}
 
@@ -232,7 +232,7 @@ class MyElement extends CustomElement {
   @context()
   state = { count: 0 };
 }
-</code></pre>
+</code></pre></we-code-view>
 <p><strong>Consideration:</strong> TC39 decorators are now stage 3. If Web Everything adopts decorators, they should use the standard syntax. However, decorators add a framework-specific feel that may conflict with the "native browser APIs" philosophy.</p>
 
 <h2>Key Concept: Registries vs Domains</h2>
@@ -297,7 +297,7 @@ class MyElement extends CustomElement {
 <p>These are the most ambitious proposals — new JavaScript syntax constructs that would require esbuild plugins or TypeScript transformers to compile.</p>
 
 <h3>4.1 Injector Block Declaration</h3>
-<pre><code>// Exportable injector (like a class or variable)
+<we-code-view><pre><code>// Exportable injector (like a class or variable)
 export injector definitions {
   const Resource = 100;
   provide { Resource };
@@ -318,7 +318,7 @@ injector PageName {
 injector TestPage extends PageName {
   provide { 'react', 'react-dom' } from MockInjector;
 }
-</code></pre>
+</code></pre></we-code-view>
 
 <h3>4.2 Provide Statement</h3>
 <table>
@@ -356,30 +356,30 @@ injector TestPage extends PageName {
 
 <h4>Fallback Providers</h4>
 <p>Injectors can provide fallback implementations that are only used if the dependency hasn't been provided by an ancestor. The syntax evolved during plateau development:</p>
-<pre><code>// Original syntax (used a dedicated keyword)
+<we-code-view><pre><code>// Original syntax (used a dedicated keyword)
 provide fallback { Logger } from './console-logger';
 
 // Revised syntax (comma-separated source list, parent takes priority)
 provide { Logger } from import.injector, './console-logger';
-</code></pre>
+</code></pre></we-code-view>
 <p>The revised form eliminates the <code>fallback</code> keyword. The comma-separated <code>from</code> clause acts as a resolution chain — <code>import.injector</code> is tried first, and <code>'./console-logger'</code> is the fallback.</p>
 
 <h3>4.3 Consume Statement</h3>
 <p>The consume statement uses two prepositions: <code>of</code> for abstract domains and <code>from</code> for concrete registries.</p>
 
 <h4>Consuming from Domains (<code>of</code>)</h4>
-<pre><code>// Destructured from an abstract domain
+<we-code-view><pre><code>// Destructured from an abstract domain
 consume { Resource } of '@definitions';
 
 // Multiple from a domain
 consume { addMonths, startOfMonth, getDaysInMonth } of '@date/core';
 consume { format }                                  of '@date/fmt';
 consume { ChevronLeft, ChevronRight }               of '@ui/icons';
-</code></pre>
+</code></pre></we-code-view>
 <p>The <code>of</code> preposition suggests membership in an abstract set — the consumer declares what capability it needs without knowing the implementation.</p>
 
 <h4>Consuming from Registries (<code>from</code>)</h4>
-<pre><code>// Destructured from a specific context
+<we-code-view><pre><code>// Destructured from a specific context
 consume { nav } from 'customContexts:a';
 
 // Shorthand for single value
@@ -393,7 +393,7 @@ consume { 'foo.bar[0]' as item } from 'customContexts:data';
 
 // Multiple contexts at once
 consume { redux, nav, data } from 'customContexts';
-</code></pre>
+</code></pre></we-code-view>
 
 <h3>4.4 Map Statement — Removed</h3>
 <p>The original proposal included a <code>map</code> statement for module remapping (e.g., <code>map 'react' from './lib/react'</code>). After analysis, this was <strong>removed</strong> because:</p>
@@ -431,11 +431,11 @@ consume { redux, nav, data } from 'customContexts';
 <p>A proposed special reference (like <code>import.meta</code>) that refers to the current module's injector context. Used as a source in <code>provide</code> statements and in the fallback resolution chain.</p>
 
 <h3>4.6 provide class Syntax</h3>
-<pre><code>// Shorthand: auto-registers by camelCase name into the relevant registry
+<we-code-view><pre><code>// Shorthand: auto-registers by camelCase name into the relevant registry
 provide class Button1 extends CustomElement {
   // ...
 }
-</code></pre>
+</code></pre></we-code-view>
 <p>Explored briefly. Would infer the registry from the base class.</p>
 
 <h2>Layer 5: TypeScript Type Proposals (Tangential)</h2>
@@ -469,7 +469,7 @@ provide class Button1 extends CustomElement {
 <p>The most compelling demonstration of domain-based injection from the plateau project. A "hollow" widget delegates all complexity to injected domains, containing zero implementation logic itself.</p>
 
 <h3>The Consumer (Widget)</h3>
-<pre><code>// components/calendar.ts
+<we-code-view><pre><code>// components/calendar.ts
 // Declare dependencies on abstract domains
 consume { addMonths, startOfMonth, getDaysInMonth } of '@date/core';
 consume { format }                                  of '@date/fmt';
@@ -492,10 +492,10 @@ export class HollowCalendar extends HTMLElement {
     `;
   }
 }
-</code></pre>
+</code></pre></we-code-view>
 
 <h3>The Wiring (Application Root)</h3>
-<pre><code>// app.ts
+<we-code-view><pre><code>// app.ts
 import { DateFnsAdapter } from "./adapters/date-fns";
 import { FloatingUIDOM } from "./adapters/floating-ui";
 import { FontAwesomeIcons } from "./theme/fa-icons";
@@ -507,7 +507,7 @@ export injector AppEnvironment {
   provide * to '@ui/floating'   from FloatingUIDOM;
   provide * to '@ui/icons'      from FontAwesomeIcons;
 }
-</code></pre>
+</code></pre></we-code-view>
 <p>The widget never imports a concrete library. The application root decides which implementations to inject. Swapping <code>date-fns</code> for <code>dayjs</code> or <code>Temporal</code> is a one-line change at the composition root.</p>
 
 <h2>Evaluation: What Should Carry Forward</h2>

@@ -100,9 +100,9 @@
 </table>
 
 <p>Example:</p>
-<pre><code>&lt;button on:click="save()" tooltip:show="Save changes" shortcut:key="ctrl+s"&gt;
+<we-code-view><pre><code>&lt;button on:click="save()" tooltip:show="Save changes" shortcut:key="ctrl+s"&gt;
   Save
-&lt;/button&gt;</code></pre>
+&lt;/button&gt;</code></pre></we-code-view>
 
 <p>Three independent behaviors, zero coupling between them. Each manages its own lifecycle and cleanup. This is WE's version of hooks &mdash; except it works on <strong>any element</strong>, not just components you authored.</p>
 
@@ -138,7 +138,7 @@
 </table>
 
 <p>Example &mdash; rich navigation with icons and badges:</p>
-<pre><code>&lt;nav aria-label="Main" nav:list&gt;
+<we-code-view><pre><code>&lt;nav aria-label="Main" nav:list&gt;
   &lt;ul&gt;
     &lt;li&gt;
       &lt;a route:link="/"&gt;
@@ -154,7 +154,7 @@
       &lt;/a&gt;
     &lt;/li&gt;
   &lt;/ul&gt;
-&lt;/nav&gt;</code></pre>
+&lt;/nav&gt;</code></pre></we-code-view>
 
 <p><code>NavListBehavior</code> discovers <code>a[href]</code> elements and manages roving tabindex on them. It does not care what's <em>inside</em> the <code>&lt;a&gt;</code> &mdash; icons, badges, status dots, or plain text all work. <strong>This is WE's strongest differentiator.</strong> React headless libraries use hooks + props getters; WE uses behavior attributes &mdash; same separation, but declarative and HTML-first.</p>
 
@@ -190,11 +190,11 @@
 </table>
 
 <p>Example:</p>
-<pre><code>&lt;nav nav:list orientation="horizontal" density="compact"&gt;</code></pre>
+<we-code-view><pre><code>&lt;nav nav:list orientation="horizontal" density="compact"&gt;</code></pre></we-code-view>
 
 <p>CSS targets these directly:</p>
-<pre><code>nav[orientation="horizontal"] { flex-direction: row; }
-nav[density="compact"] a { padding: 0.25rem 0.75rem; font-size: 0.85rem; }</code></pre>
+<we-code-view><pre><code>nav[orientation="horizontal"] { flex-direction: row; }
+nav[density="compact"] a { padding: 0.25rem 0.75rem; font-size: 0.85rem; }</code></pre></we-code-view>
 
 
 <h3>Strategy D: CSS Custom Properties as Design Tokens</h3>
@@ -224,7 +224,7 @@ nav[density="compact"] a { padding: 0.25rem 0.75rem; font-size: 0.85rem; }</code
 </table>
 
 <p>Three-tier token architecture:</p>
-<pre><code>/* Tier 1: Global primitives */
+<we-code-view><pre><code>/* Tier 1: Global primitives */
 :root { --color-indigo-600: #4f46e5; }
 
 /* Tier 2: Semantic mappings */
@@ -242,7 +242,7 @@ nav[nav\:list] {
 nav[density="compact"] {
   --nav-icon-size: 1rem;
   --nav-item-padding: 0.25rem 0.75rem;
-}</code></pre>
+}</code></pre></we-code-view>
 
 
 <h3>Strategy E: Injector-Based Context Configuration</h3>
@@ -276,7 +276,7 @@ nav[density="compact"] {
 </table>
 
 <p>Example &mdash; different nav configuration per application:</p>
-<pre><code>&lt;!-- App A provides minimal nav config --&gt;
+<we-code-view><pre><code>&lt;!-- App A provides minimal nav config --&gt;
 &lt;div data-inject="navConfig: { icons: false, badges: false }"&gt;
   &lt;nav nav:list&gt;...&lt;/nav&gt;
 &lt;/div&gt;
@@ -284,7 +284,7 @@ nav[density="compact"] {
 &lt;!-- App B provides rich nav config --&gt;
 &lt;div data-inject="navConfig: { icons: true, badges: true }"&gt;
   &lt;nav nav:list&gt;...&lt;/nav&gt;
-&lt;/div&gt;</code></pre>
+&lt;/div&gt;</code></pre></we-code-view>
 
 <p>The same <code>nav:list</code> behavior resolves configuration from its injector chain. Different ancestor providers produce different behavior &mdash; no component API changes needed.</p>
 
@@ -316,7 +316,7 @@ nav[density="compact"] {
 </table>
 
 <p>Example &mdash; a nav-item Custom Element with named slots:</p>
-<pre><code>&lt;!-- Shadow DOM template --&gt;
+<we-code-view><pre><code>&lt;!-- Shadow DOM template --&gt;
 &lt;a part="link"&gt;
   &lt;slot name="icon"&gt;&lt;/slot&gt;
   &lt;slot&gt;&lt;!-- default: label text --&gt;&lt;/slot&gt;
@@ -328,7 +328,7 @@ nav[density="compact"] {
   &lt;svg slot="icon"&gt;...&lt;/svg&gt;
   Inbox
   &lt;span slot="badge"&gt;12&lt;/span&gt;
-&lt;/nav-item&gt;</code></pre>
+&lt;/nav-item&gt;</code></pre></we-code-view>
 
 <p><strong>Tension with WE:</strong> WE currently uses light DOM behaviors (CustomAttribute), not Shadow DOM components. The light DOM approach keeps things simple, styleable, and progressive-enhancement-friendly. Slots require Shadow DOM.</p>
 
@@ -362,10 +362,10 @@ nav[density="compact"] {
 </table>
 
 <p>Example:</p>
-<pre><code>/* Consumer styles a nav-item's internal parts */
+<we-code-view><pre><code>/* Consumer styles a nav-item's internal parts */
 nav-item::part(link) { text-decoration: none; }
 nav-item::part(icon) { color: var(--nav-icon-color); }
-nav-item::part(badge) { background: var(--nav-badge-bg); border-radius: 9999px; }</code></pre>
+nav-item::part(badge) { background: var(--nav-badge-bg); border-radius: 9999px; }</code></pre></we-code-view>
 
 
 <h3>Strategy H: Custom States via <code>CustomStateSet</code></h3>
@@ -395,13 +395,13 @@ nav-item::part(badge) { background: var(--nav-badge-bg); border-radius: 9999px; 
 </table>
 
 <p>Example:</p>
-<pre><code>// Inside a Custom Element
+<we-code-view><pre><code>// Inside a Custom Element
 this.#internals.states.add('has-badge');
 this.#internals.states.add('expanded');
 
 /* CSS targeting custom states */
 nav-item:state(has-badge)::part(badge) { display: inline-flex; }
-nav-section:state(expanded) { --chevron-rotation: 180deg; }</code></pre>
+nav-section:state(expanded) { --chevron-rotation: 180deg; }</code></pre></we-code-view>
 
 
 <h3>Strategy I: Emerging Platform APIs</h3>

@@ -1,0 +1,95 @@
+{% raw %}
+<h2>The idea</h2>
+<p>
+  An agent that drives a live web UI <strong>on its own</strong> — clicks, types, navigates — discovers the
+  reachable states, and flags bugs, regressions, and odd behaviors <strong>without a pre-written
+  script</strong>. This is classic <em>autonomous exploratory</em> testing (monkey / model-based), now
+  LLM-steerable. Three first consumers, in priority order, ride <strong>one engine</strong>:
+</p>
+<ol>
+  <li>
+    <strong>Stress-test FUI components</strong> (explore mode) — drive each component in the catalog in
+    isolation and hunt for crashes and bad states. The first and primary use.
+  </li>
+  <li>
+    <strong>Verify the WE docs website works-as-supposed</strong> (explore mode) — sweep the assembled site
+    (nav works, catalogs render, demos run, no broken / dead-end states). Because the dogfood goal
+    (<code>#777</code>) renders the WE site's chrome <em>from FUI components</em>, this is the same engine
+    pointed at components-in-assembly — and it doubles as the rendered-works proof that epic already wants.
+  </li>
+  <li>
+    <strong>Pre-close gate on UI work items</strong> (gate mode) — an agent finishing a UI story invokes
+    the tool on the affected page / component; it must pass before <code>status:resolved</code>, alongside
+    <code>check:standards</code> and the <code>#770</code> rendered-a11y gate.
+  </li>
+</ol>
+
+<h2>Placement — an FUI-owned devtool, not a WE standard (~85%)</h2>
+<p>
+  This is an <strong>implementation capability, not a contract</strong> — so by the constellation's standing
+  rules it is <strong>not</strong> a <code>@webeverything</code> standard. It lands in FUI, the same family
+  as the block-explorer workbench (<code>#809</code>, a FUI-owned product) and the generator-is-a-tool
+  ruling (<code>#855</code>, FUI owns zero-lock-in devtools). FUI owns its components, so the thing that
+  stress-tests them lives with them. The one WE-facing seam is the <strong>oracle</strong>: for semantic
+  correctness the tester can check a component against WE's behavioral-conformance vectors
+  (<code>#899</code>) — that <em>contract</em> crosses the seam; the engine never does. A generic web-UI
+  tester sold as a Plateau product is a downstream call, out of scope here.
+</p>
+
+<h2>Two settled design defaults (recorded, not contested forks)</h2>
+<p>
+  The brainstorm surfaced two design questions; both have a clear default that the prior-art survey
+  confirms, so they are baked into the build rather than carved as <code>type:decision</code> forks.
+</p>
+<ul>
+  <li>
+    <strong>Oracle layering — generic invariants first.</strong> How does an autonomous tester know
+    something is <em>wrong</em> with no script? Layer cheapest-first:
+    <strong>(1)</strong> generic invariants always-on (no console errors, no unhandled promise rejections,
+    no HTTP 5xx, no axe-core a11y violations, no broken / overflowing layout, no dead-end / stuck-focus, no
+    crash — works on a bare component <em>and</em> a whole page, reusing the <code>#770</code> axe lane);
+    <strong>(2)</strong> conformance / expectations (the <code>#899</code> vectors for components, a small
+    site-expectation set for the website); <strong>(3)</strong> an LLM-as-judge layer that stays
+    <strong>advisory only</strong> (the WebVoyager pattern — probabilistic, produces candidate findings,
+    never a hard gate verdict).
+  </li>
+  <li>
+    <strong>Two invocation profiles — explore vs. gate.</strong> Exploratory testing is non-deterministic,
+    but a close gate must be bounded and reliable. The same engine runs in two profiles:
+    <strong>explore</strong> (seeded-broad, large budget, on-demand / nightly, findings become backlog
+    items, never blocks) and <strong>gate</strong> (fixed seed, hard step / time budget, fails only on hard
+    Layer-1 invariants, deterministic, blocking — records the seed + step trace on failure for replay).
+  </li>
+</ul>
+
+<h2>Prior art — the survey validates the architecture and both defaults</h2>
+<ul>
+  <li>
+    <strong>Crawljax</strong> — the canonical web reference: fire events on candidate clickables, detect
+    DOM-state changes, infer a <strong>state-flow graph</strong> (state = DOM signature, edge = event).
+    This is the explorer core and the source of the app-agnostic invariant-oracle approach. Desktop
+    ancestor: Memon's GUI Ripping / event-flow graphs.
+  </li>
+  <li>
+    <strong>Android Monkey</strong> — the seeded, crash-only baseline to beat (seeded randomness means a
+    failing run replays; "no crash" alone misses silently-wrong states).
+  </li>
+  <li>
+    <strong>WebVoyager / Agent-E</strong> and commercial tools (Mabl, Octomind, QA Wolf, Momentic) — ground
+    the LLM-judge layer, and confirm every commercial tool still leans on
+    <strong>human-approved assertions</strong> for precise correctness, so the judge stays advisory.
+  </li>
+  <li>
+    <strong>fast-check + Meticulous</strong> — ground the explore-vs-gate split exactly: seeded-broad to
+    find bugs (non-gating) vs. fixed-seed / record-replay to gate (deterministic).
+  </li>
+  <li>
+    <strong>Playwright + axe-core</strong> (<code>@axe-core/playwright</code>) — the de-facto
+    browser-automation substrate and a11y engine. Build on these.
+  </li>
+</ul>
+<p>
+  Full grounding, citations, and the build/slicing shape are in
+  <code>reports/2026-06-19-autonomous-exploratory-ui-testing.md</code>.
+</p>
+{% endraw %}

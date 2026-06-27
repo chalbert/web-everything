@@ -88,7 +88,7 @@
     into one shape so downstream consumers are strategy-agnostic. <strong>Deliberately under-specified for
     now; to be revised as the contract meets real adapters.</strong>
 </p>
-<pre><code>interface ChangeRecord {
+<we-code-view><pre><code>interface ChangeRecord {
   path: JsonPointer;     // RFC 6901 — the RFC 6902 spine
   op: 'add' | 'remove' | 'replace' | 'move' | 'copy';
   oldValue?: unknown;    // REQUIRED for self-contained reversibility (RFC ops don't carry it)
@@ -96,7 +96,7 @@
   source: ChangeSource;  // attribution
   timestamp: number;
   version?: string | number;  // optimistic-concurrency / causal token
-}</code></pre>
+}</code></pre></we-code-view>
 <p>
     The record is a <em>lossy lingua franca for observation</em>, not a replacement for any strategy's
     native form: Merge-Patch is too coarse to be the spine (no arrays), and CRDT ops need an adapter rather

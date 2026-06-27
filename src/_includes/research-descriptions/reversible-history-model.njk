@@ -1,0 +1,84 @@
+<h3>The Question</h3>
+<p>
+    A reversible <strong>mutation history</strong> — an undo/redo stack of applied changes, where each
+    change knows its inverse, with grouping/coalescing and scope — is a universal interaction verb that no
+    Web Everything standard currently models. WE owns <em>invocation</em> (the
+    <a href="/intents/command/">Command Intent</a>, on Baseline Invoker Commands) and <em>durable save</em>
+    (the <a href="/blocks/draft-persistence/">Draft Persistence</a> block), but neither is a navigable
+    history. This research asks <strong>where that standard lives and what its reversible-operation
+    contract is</strong>, surfaced by the verb-axis gap lens
+    (<a href="/backlog/1390-interaction-paradigm-inventory-verb-axis-gap-lens-find-missi/">#1390</a>).
+    Full findings and citations are in the companion report
+    (<code>reports/2026-06-21-reversible-mutation-history-undo-redo.md</code>).
+</p>
+
+<h3>Finding 1 — the platform ships an undo <em>signal</em>, not an undo <em>stack</em></h3>
+<p>
+    For editable surfaces the platform is native-first: <code>beforeinput</code> / <code>input</code> with
+    <code>inputType</code> of <code>historyUndo</code> / <code>historyRedo</code>
+    (<a href="https://www.w3.org/TR/input-events-2/">Input Events Level 2</a>) is the standards-compliant
+    signal fired when the user triggers undo/redo inside a <code>contenteditable</code> / <code>input</code>
+    / <code>textarea</code> — cancelable on <code>beforeinput</code>, so an app can intercept it and drive
+    its own stack. But that signal is <strong>scoped to editable elements</strong>. For general app state
+    there is <strong>no native undo stack</strong>: the HTML5 <code>UndoManager</code> / DOM Transaction
+    proposal was removed (~2011–2013; Firefox removed its implementation in
+    <a href="https://bugzilla.mozilla.org/show_bug.cgi?id=1310385">bug 1310385</a>), and the later
+    <a href="https://rniwa.github.io/undo-api/">Undo API</a> /
+    <a href="https://github.com/whsieh/UndoManager">UndoManager</a> proposals have no traction. The general
+    history model must be authored; the editable-surface signal should be consumed where present.
+</p>
+
+<h3>Finding 2 — every incumbent undo manager is one shape</h3>
+<p>
+    ProseMirror, CodeMirror, Lexical, Quill, Yjs <code>Y.UndoManager</code>, redux-undo, and
+    Immer/Mutative all converge on the same model: a <strong>past / present / future cursor</strong> where
+    each entry is an <strong>invertible operation</strong> (inverse step, inverse Delta, inverse JSON
+    patch, or CRDT inverse op), plus a <strong>time-window / transaction coalescer</strong> deciding what
+    counts as one undo (<code>newGroupDelay</code>, <code>captureTimeout</code>, <code>delay</code>,
+    <code>groupBy</code>), plus a <strong>scope</strong> (which target / whose changes — Yjs
+    <code>trackedOrigins</code> undoes only your own edits in a collaborative doc). None is a UX
+    <em>intent</em>; each is a <em>mechanism</em> — a manager behind a contract.
+</p>
+
+<h3>Finding 3 — the reversible-operation contract already ships in Web States</h3>
+<p>
+    The decisive finding. The <a href="/projects/webstates/">Web States</a>
+    <a href="/research/change-tracking-observability/">Change Tracking Protocol</a> already authored every
+    primitive undo needs:
+</p>
+<ul>
+    <li><strong>Change Record</strong> — <code>path</code> (RFC 6901), <code>op</code> (RFC 6902),
+        <code>oldValue</code>/<code>newValue</code>, <code>source</code>, <code>timestamp</code>; the
+        <code>oldValue</code> is carried <em>"because RFC 6902 ops are not self-inverting"</em> — i.e.
+        invertibility is designed in.</li>
+    <li><strong>Change Patch</strong> — an <em>"optionally invertible set of Change Records … inverse
+        patches … revert it, <strong>enabling undo/replay</strong>."</em></li>
+    <li><strong><code>CustomChangeStrategy.applyInverse</code></strong> — the inverse-application
+        primitive, already in the contract and feature-detected.</li>
+    <li><strong><code>CustomChangeStrategyRegistry</code></strong> — resolves the active strategy
+        <em>per scope</em> through the injector chain, so undo's scope axis is already solved.</li>
+    <li><strong>Change Source</strong> already enumerates an <code>undo</code> / <code>replay</code>
+        origin; <a href="/blocks/audit-trail/">Audit</a> already consumes the
+        <code>{ before, after }</code> shape, and a <code>change-reverted</code> event already applies an
+        inverse Change Patch.</li>
+</ul>
+<p>
+    So undo/redo is <strong>not a new contract</strong> — it is a <strong>navigable history cursor</strong>
+    layered on the existing Change Patch + <code>applyInverse</code> primitive, adding only the
+    past/present/future stack, transaction grouping/coalescing (the one thing the protocol does not model —
+    it streams individual records), and the editable-surface <code>historyUndo</code> bridge. The home is
+    Web States, as a reference <em>history behavior/block composing the protocol</em> — never a new intent
+    (undo is a mechanism, not a UX axis), never a <code>command</code> extension (command = invoke, not
+    state), never coupled to the concrete <a href="/blocks/simple-store/">SimpleStore</a> (compose the
+    abstract <code>CustomChangeStrategy</code>).
+</p>
+
+<h3>Finding 4 — shared with optimistic mutation, at the primitive not the stack</h3>
+<p>
+    Optimistic mutation
+    (<a href="/backlog/1395-optimistic-mutation-apply-reconcile-rollback-standard-placem/">#1395</a>) rolls
+    back on failure by applying the inverse of one uncommitted change — the same <code>applyInverse</code>
+    primitive. But its lifetime differs: a transient in-flight revert that <strong>must not</strong> land
+    on the user's undo stack. The coordinated position: <strong>share the reversible-operation primitive,
+    keep separate runtimes</strong>.
+</p>

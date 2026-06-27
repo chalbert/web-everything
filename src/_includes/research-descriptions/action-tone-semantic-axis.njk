@@ -1,0 +1,135 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  <a href="/intents/">Action Intent</a> (<code>src/_data/intents/action.json:10-18</code>) declares
+  <code>level</code> — <code>primary | secondary | tertiary | destructive</code> — as
+  <em>"the semantic weight determining visual prominence."</em> Three of those values
+  (<code>primary | secondary | tertiary</code>) form an <strong>ordinal</strong> scale: how loud the
+  action is. But <code>destructive</code> (line 16) is not a loudness — it is a <strong>nominal</strong>
+  semantic: <em>what kind of consequence</em> the action carries (danger, harm, irreversibility). Seating
+  it as one of the mutually-exclusive members of the <code>level</code> enum makes prominence and danger
+  <strong>mutually exclusive</strong>, so <em>"a prominent red Delete"</em> (<code>primary</code> +
+  danger) and <em>"a quiet red Delete link"</em> (<code>tertiary</code> + danger) are both
+  <strong>inexpressible</strong> today. This is the sibling of the orthogonality break
+  <a href="/backlog/1318-action-intent-emphasis-style-axis-fill-outline-ghost-link-or/">#1318</a> found
+  for <code>variant</code> and
+  <a href="/backlog/1324-revisit-whether-action-level-models-outcome-role-continue-ca/">#1324</a> found
+  for <code>disposition</code> — one axis over. The question:
+  <strong>does <code>destructive</code> belong on <code>level</code>, or is it one member of a separate
+  semantic-tone axis?</strong>
+</p>
+
+<h2>Finding 1 — no design system models danger as a prominence tier; it is a separate axis with siblings</h2>
+<p>
+  Surveyed across the benchmark libraries, danger is <strong>never</strong> a rung on the prominence
+  ladder — it is its own nominal axis, and that axis almost always carries
+  <strong>success / warning / info</strong> alongside danger:
+</p>
+<table>
+  <thead><tr><th>System</th><th>Prominence / emphasis axis</th><th>Separate semantic-tone axis</th></tr></thead>
+  <tbody>
+    <tr><td>Bootstrap</td><td>size / outline modifier</td><td>contextual: <code>primary · secondary · success · danger · warning · info · light · dark</code></td></tr>
+    <tr><td>Material 3</td><td>filled / tonal / outlined / text / elevated</td><td>color roles incl. <code>error</code></td></tr>
+    <tr><td>Blueprint</td><td><code>minimal</code> / <code>outlined</code> / size</td><td><code>intent = none | primary | success | warning | danger</code></td></tr>
+    <tr><td>Chakra</td><td><code>variant</code> (solid/outline/ghost/link)</td><td><code>colorScheme</code> / <code>status</code> (incl. error/success/warning/info)</td></tr>
+    <tr><td>Ant Design</td><td><code>type</code> / <code>ghost</code></td><td><code>status</code> + <code>danger</code> flag</td></tr>
+    <tr><td>Fluent 2</td><td><code>appearance</code></td><td>severity / intent (incl. danger)</td></tr>
+    <tr><td>Radix Themes</td><td><code>variant</code> / <code>size</code></td><td><code>color</code> (semantic tokens incl. red/danger)</td></tr>
+  </tbody>
+</table>
+<p>
+  The convergent shape is a <strong>nominal semantic-tone axis orthogonal to emphasis and to
+  prominence</strong>. Danger is one member of it; <code>success / warning / info</code> are its
+  siblings. Folding the single member <code>destructive</code> into <code>level</code> is the lone
+  outlier — and it reproduces, for tone, the same conflation
+  <a href="/research/action-emphasis-axis/">the emphasis research</a> found systems suffer when they fold
+  emphasis into one prop.
+</p>
+
+<h2>Finding 2 — SwiftUI is the apparent counter-example, and it confirms the axis is its own</h2>
+<p>
+  SwiftUI looks like a counter-example — <code>ButtonRole = { cancel, destructive }</code> appears to fold
+  danger into a "role." But two observations dissolve it. (i) That role drives
+  <strong>confirmation-dialog styling and ordering</strong>, not visual <em>prominence</em> — exactly the
+  <a href="/research/action-disposition-outcome-role/">disposition finding</a>, one axis over. (ii) Inside
+  <code>ButtonRole</code>, <code>destructive</code> is itself <strong>orthogonal to <code>cancel</code></strong>
+  (the disposition member): a destructive action is usually the <strong>affirmative</strong> one (in a
+  delete-confirm dialog, "Delete" is the affirmative/destructive button and "Cancel" is the dismissive,
+  often <em>more</em> prominent, safe default). So danger is neither prominence (<code>level</code>) nor
+  disposition (<code>affirmative/dismissive</code>) — it is a <strong>third orthogonal axis</strong>.
+</p>
+
+<h2>Finding 3 — the platform has no native vocabulary for tone; borrow the convergent DS convention</h2>
+<p>
+  Like button emphasis (<a href="/research/action-emphasis-axis/">#1318</a>), semantic tone has
+  <strong>no web-platform vocabulary</strong>: <code>&lt;button&gt;</code> has no <code>tone</code> /
+  <code>severity</code> attribute, ARIA has no danger state (<code>aria-invalid</code> is form-field
+  <em>validation</em>, not an action's consequence-tone), and CSS exposes only presentational hooks. So WE
+  cannot borrow a spec term here; it standardizes the <strong>meta-axis + a recommended core</strong> and
+  borrows the convergent design-system vocabulary, exactly as #1318 did for <code>variant</code>. The
+  behavior a danger action <em>might</em> trigger (a confirmation step) stays
+  <strong>native</strong> (<code>type</code>/<code>value</code>/invoker <code>command</code>) per
+  <a href="/intents/">intents-are-UX-only</a>; the tone axis names only the UX "this action is dangerous,"
+  not the confirmation mechanism.
+</p>
+
+<h2>Finding 4 — WE precedent is unanimous: orthogonal UX axis → new dimension on the owning intent</h2>
+<p>
+  This is the <strong>third application</strong> of a move WE has already made twice on this exact intent:
+  <a href="/backlog/1318-action-intent-emphasis-style-axis-fill-outline-ghost-link-or/">#1318</a> added
+  <code>variant</code> (presentation) and
+  <a href="/backlog/1324-revisit-whether-action-level-models-outcome-role-continue-ca/">#1324</a> added
+  <code>disposition</code> (affirmative/dismissive) as new orthogonal dimensions rather than overloading
+  <code>level</code>. Action Intent is already multi-axis (<code>level · variant · disposition · busy ·
+  groupOrdering · groupSizing</code>, <code>action.json:9-58</code>), so adding a <code>tone</code>
+  dimension and removing the one nominal value (<code>destructive</code>) that never belonged on the
+  ordinal <code>level</code> scale is the established shape. After this, <code>level</code> is a clean
+  ordinal prominence scale (<code>primary | secondary | tertiary</code>) and tone is its own nominal axis —
+  three orthogonal knobs (prominence / emphasis / tone) a designer drives independently.
+</p>
+
+<h2>Classification (per-fork pass)</h2>
+<ul>
+  <li><strong>Layer</strong> — Intent (declarative UX "what"). Not a Protocol (no engine-swap/interop).</li>
+  <li><strong>Shape</strong> — a dimension, not a trait (traits are structural composition #030; tone
+    selects a treatment, it composes nothing).</li>
+  <li><strong>Axis exposure</strong> — expose the whole axis: all tone values are legitimate simultaneous
+    end-states (a dialog footer can hold a neutral "Cancel" and a danger "Delete" at once).</li>
+  <li><strong>Resolution</strong> — explicit per-action ⊕ ambient project default ⊕ default; most-permissive
+    default = <strong>unspecified → neutral</strong>.</li>
+  <li><strong>Vocabulary</strong> — open-numbered per the #1318 contract: standardize the dimension + a
+    recommended core, authors may extend.</li>
+  <li><strong>Seam</strong> — intent → native/theme color wiring (danger → conventional red treatment +
+    optional confirmation affordance, which stays native).</li>
+</ul>
+
+<h2>The prepared forks</h2>
+<ul>
+  <li>
+    <strong>Fork 1 — Relocate <code>destructive</code> off <code>level</code>?</strong> Yes
+    <em>(recommended, forced ratify)</em>. Keeping it on <code>level</code> is the <strong>broken</strong>
+    branch: a single-select ordinal enum cannot express prominent-dangerous vs subtle-dangerous, and no
+    benchmark models danger as a prominence tier.
+  </li>
+  <li>
+    <strong>Fork 2 — A full semantic-tone axis or a narrow <code>danger</code>-only flag?</strong> A full
+    open-numbered <code>tone</code> axis (<code>neutral | danger</code> core + <code>success | warning |
+    info</code> recommended extended) <em>(recommended)</em> vs a <code>danger</code>-only flag (under-fits
+    a universally-present axis and forces a second relocation when success/warning surface).
+  </li>
+  <li>
+    <strong>Fork 3 — Name the axis.</strong> <code>tone</code> <em>(recommended)</em> vs
+    <code>status</code> / <code>severity</code> / <code>intent</code> — <code>intent</code> collides with
+    WE's Intent concept; <code>status</code> connotes runtime state; <code>severity</code> connotes
+    alert/validation levels.
+  </li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/intents/">Web Intents catalog</a> — where Action Intent and its dimensions render.</li>
+  <li><a href="/research/action-disposition-outcome-role/">Disposition research</a> (#1324) — the sibling axis that carved this question out.</li>
+  <li><a href="/research/action-emphasis-axis/">Emphasis research</a> (#1318) — the first orthogonal-axis precedent.</li>
+  <li>Backlog <a href="/backlog/1337-revisit-whether-destructive-belongs-on-level-prominence-or-i/">#1337</a> — the decision this research prepares.</li>
+</ul>
+{% endraw %}

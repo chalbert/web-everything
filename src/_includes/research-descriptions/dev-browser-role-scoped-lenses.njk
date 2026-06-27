@@ -1,0 +1,72 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    The <a href="/backlog/141-dev-browser-vision/">dev-browser vision (#141)</a> describes one browser that
+    reshapes itself per role — a designer sees the visual-edit surface, a rule-owner the rules surface, a
+    translator the i18n surface, a dev state/tests — and frames it as
+    <strong>"a feature toggle map over the introspection surfaces"</strong> (#141, Profiles). Backlog
+    <a href="/backlog/1636-role-scoped-lenses-over-one-dev-browser/">#1636</a> is the lone genuine
+    <em>merit</em> fork carved from the #142 AI-DX candidate pool (its 21 siblings are
+    prioritization — "build X, on what trigger" — not forks). It forces a contested layer/shape either/or
+    that is decidable now without a trigger:
+</p>
+<p>
+    Is <strong>"role / lens" a first-class dimension</strong> baked into the dev-browser's surface model — a
+    load-bearing primitive every feature (inspectors, panels, simulators) <em>registers against</em> and is
+    filtered/scoped by — <strong>or</strong> are role surfaces just <strong>independent feature panels</strong>
+    (designer view / rule-owner view / translator view / dev view) with no unifying lens abstraction? These
+    cannot both be the default for the same surface model: either the lens is the primitive the whole surface
+    is built around, or it is not and #1636 dissolves into "ship per-role panels." This is architecturally
+    <strong>upstream</strong> of the panel-shaped sibling cards
+    (<a href="/backlog/1632-live-contract-and-data-inspector-at-provider-context-seams/">#1632</a>,
+    <a href="/backlog/1634-semantic-explain-this-element-inspector/">#1634</a>,
+    <a href="/backlog/1638-in-context-annotation-and-discussion-threads-on-semantic-no/">#1638</a>,
+    <a href="/backlog/1642-intent-and-a11y-conformance-inspector/">#1642</a>,
+    <a href="/backlog/1643-variant-simulator-for-locale-flag-role-viewport-motion/">#1643</a>), so it is the
+    high-leverage card to settle first.
+</p>
+<p>
+    The decisive prior art is in the tree, not the market. <a href="/backlog/564-personas-as-a-first-class-agile-concept/">#564</a>
+    (resolved) already named the <strong>persona-preset primitive</strong> — "a persona is a named preset over
+    composable concepts: <em>preferences + the surfaces that light up</em>" — and identified the dev-browser's
+    "feature toggle map" lens as its <strong>third, not-yet-built projection</strong> (alongside the shipped
+    governance charter <a href="/backlog/166-governance-persona-roster-charter-schema/">#166</a> and the
+    agile-role concept <a href="/backlog/563-ai-driven-agile-methodology-as-a-shareable-approach/">#563</a>).
+    The forced invariant from both #166 and #564: a lens is a <strong>decision-rights / preference lens
+    (RACI), never authorization (RBAC)</strong> — it scopes <em>what you see</em>, not <em>what you may do</em>.
+    Market tools agree on the shape: Figma Dev Mode is a genuine mode-as-first-class-dimension; Chrome DevTools
+    has no role primitive (independent panels); Storybook viewmodes are a registry of independent surfaces.
+</p>
+
+<h2>Recommendation (to ratify in #1636)</h2>
+<ol>
+    <li>
+        <strong>Lens-as-first-class-primitive</strong> — make "lens" a thin, load-bearing dimension of the
+        dev-browser surface model. Every feature (the #1631–#1652 inspectors, the #141 named surfaces)
+        <em>declares which lenses it appears in and how it is scoped</em>; the active lens filters and
+        re-orders the feature menu. This is not greenfield: it is the #564 persona-preset projected onto the
+        running app — <strong>a lens === a persona charter's <code>reviewAreas</code> filtered onto the
+        introspection surfaces</strong>, the runtime twin of the governance charter's
+        <code>platformArea</code> join (plateau:schema.ts).
+    </li>
+    <li>
+        <strong>Independent per-role panels are the degenerate config, not a rival shape.</strong> The
+        composability probe collapses the fork: a per-role panel is exactly "one lens that scopes the whole
+        feature menu to one role with no cross-lens declarations." The primitive subsumes the panels; the
+        panels cannot subsume the primitive (you would re-implement role logic per feature with no cross-role
+        coherence). So the fork shrinks to "build the primitive; panels are its degenerate preset."
+    </li>
+    <li>
+        <strong>Reuse, do not re-home.</strong> The lens roster is the persona roster (#166/#564), owned by
+        plateau-app and read by the dev-browser as data (the #166 Fork-3 shared-data-home ruling already drew
+        this seam). The lens primitive is plateau-app surface-model machinery, not a WE standard entity and
+        not an Intent — it has no conformance/interop story.
+    </li>
+    <li>
+        <strong>Keep it RACI, not RBAC, and keep it free.</strong> A lens re-skins one browser session
+        read-only; #1655's free/paid map already classifies #1636 as <strong>Free</strong> ("read-only re-skin
+        of one browser; no persist"). The primitive must not become a permission gate — access stays owned by
+        the access-control gate (#178).
+    </li>
+</ol>
+{% endraw %}

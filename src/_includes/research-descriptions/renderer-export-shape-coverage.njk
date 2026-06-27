@@ -21,7 +21,7 @@
   surface; <em>extras are explicitly fine</em> — "the impl can export MORE"
   (<code>check-standards-rules.mjs:1441</code>):
 </p>
-<pre><code>const missing = (b.declaredExports || []).filter((name) =&gt; !actual.has(name)); // only "declared ∉ actual"</code></pre>
+<we-code-view><pre><code>const missing = (b.declaredExports || []).filter((name) =&gt; !actual.has(name)); // only "declared ∉ actual"</code></pre></we-code-view>
 <p>
   The original framing lists dir-walk's risk as <em>"looser than a curated barrel — picks up internal
   helpers as exports."</em> Under an asymmetric rule that ignores extras, those extra internal symbols

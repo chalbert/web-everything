@@ -1,0 +1,71 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  A UI-testing / exploration <strong>engine</strong> (graph crawler, oracles, browser-driver harnesses)
+  lives in one repo; a <strong>product surface</strong> that orchestrates it (CLI, route discovery, report
+  bundling) is moving to another repo. How should the product repo consume the engine repo? This grounds
+  <a href="/backlog/1747-decide-the-plateau-explorer-product-surface-to-fui-explorer-/">#1747</a> — the
+  Plateau explorer product surface consuming the FUI explorer engine. Three candidates:
+</p>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>(a) Curated public-API package</strong> — a versioned <code>exports</code> entry the
+    consumer depends on.</li>
+  <li><strong>(b) Keep co-located</strong> — the whole tool incl. CLI stays with the engine; expose only
+    a thin operated/hosted wrapper in the product repo.</li>
+  <li><strong>(c) Duplicate thin chrome</strong> — copy the genuinely product-specific orchestration into
+    the product repo over the smallest engine API.</li>
+</ul>
+
+<h2>What the prior art does</h2>
+<p>
+  Real practice overwhelmingly favors a <strong>separate CLI/product package <em>beside</em> the engine
+  package, co-located in ONE repo while the surface churns</strong>, with a thin operated wrapper in the
+  product repo. Essentially nobody duplicates the engine; almost nobody hard-merges CLI into the engine
+  bundle.
+</p>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>Playwright</strong> — three layers from one repo: <code>playwright-core</code> (engine),
+    <code>playwright</code> (engine + browsers + CLI), <code>@playwright/test</code> (the test-runner
+    product) consuming the engine via a stable <a href="https://playwright.dev/docs/library">Library API</a>.</li>
+  <li><strong>WebdriverIO</strong> — moved multi-repo &rarr; monorepo in v5 because the pieces churned
+    together; <code>@wdio/cli</code> is its own package beside the engine. (<a href="https://webdriver.io/docs/contribute/">contribute</a>)</li>
+  <li><strong>axe</strong> — <code>axe-core</code> engine; thin <a href="https://www.npmjs.com/package/@axe-core/cli"><code>@axe-core/cli</code></a>
+    over it; commercial <strong>axe DevTools</strong> wraps the same unforked engine — the canonical
+    "hosted product over an unforked OSS engine."</li>
+  <li><strong>Testing Library</strong> — engine declared a <strong>peerDependency</strong> of the
+    framework adapters, a deliberate published-API boundary preventing version skew.</li>
+  <li><strong>Chromatic / Percy / Sauce Labs</strong> — operate an OSS engine as a SaaS without absorbing
+    its source.</li>
+</ul>
+<p class="text-sm text-gray-600">
+  The curated-public-API pattern (package.json <a href="https://nodejs.org/api/packages.html"><code>exports</code></a>
+  maps, <code>./internal</code> entries, <a href="https://api-extractor.com/">Microsoft API Extractor</a>'s
+  <code>@alpha</code>/<code>@beta</code>/<code>@public</code> gating) carries a real semver-commitment +
+  governance cost — the existence of that tooling <em>is</em> the evidence that a stable tool API is a
+  burden, so teams graduate to it only once the surface stops churning. Monorepo guidance (Conway's law):
+  co-locate what changes/versions/deploys together; split on team/ownership boundaries, not technical ones.
+</p>
+
+<h2>The WE-specific wrinkle</h2>
+<p>
+  The constellation has <strong>already ratified the two-repo split</strong> — the autonomous-explorer CLI
+  chrome &rarr; Plateau (<code>docs/agent/platform-decisions.md</code> devtools-placement rule 3; #1565
+  Fork 3; #1577). So the generic "keep co-located while churning" advice (option b) cannot be taken
+  literally — the move is mandated, and (b) "keep the whole explorer in FUI" would <em>reverse</em> a
+  ratified decision. Given the explorer engine is still churning (epic #1522/#1167), the faithful interim
+  is the (c)&rarr;(a) hybrid: move the thin CLI chrome to Plateau over the <strong>narrowest</strong>
+  engine API and graduate that surface to a versioned public-API package (a) as it stabilizes. The
+  project's own dev-panel-duplication footgun confirms full duplication drifts, so (c) is bounded to "thin
+  chrome only," never a copy of the engine.
+</p>
+
+<h2>Recommendation (at a glance)</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>End-state: (a) curated public-API package</strong> — the principled constellation answer
+    (product &rarr; Plateau, engine &rarr; FUI, consumed as a versioned package).</li>
+  <li><strong>Interim while churning: (c) thin CLI chrome in Plateau over the narrowest engine API</strong>,
+    structured toward (a). Honors the ratified move without freezing a large API surface mid-churn.</li>
+  <li><strong>(b) keep-in-FUI is out</strong> — it contradicts the ratified CLI-chrome &rarr; Plateau
+    placement and never builds the boundary the decision exists to settle.</li>
+</ul>
+{% endraw %}

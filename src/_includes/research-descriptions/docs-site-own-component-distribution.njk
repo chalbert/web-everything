@@ -1,0 +1,73 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  When a documentation or marketing site needs to render its <em>own</em> design-system web components
+  (custom elements) — and those components live in a separate package or repo — how does it load and
+  <strong>register</strong> them in production so server-rendered <code>&lt;we-*&gt;</code> tags
+  <em>upgrade</em> in place? This grounds
+  <a href="/backlog/1748-we-docs-site-mechanism-to-load-register-fui-transient-elemen/">#1748</a>: the Web
+  Everything Eleventy docs site loading Frontier UI's <code>&lt;we-badge&gt;</code> /
+  <code>&lt;we-filter-chip&gt;</code> transient elements. Three candidate strategies:
+</p>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>(a) Bundle</strong> a pinned component package into the site's own assets at build time.</li>
+  <li><strong>(b) Cross-origin ESM</strong> — import the registration module from a served component
+    origin / CDN at runtime.</li>
+  <li><strong>(c) Defer</strong> — keep inline markup until a published component package exists.</li>
+</ul>
+
+<h2>What the prior art does (the generic norm)</h2>
+<p>
+  Across real design-system docs sites the production norm is <strong>(a) bundle a pinned, tree-shaken
+  npm package</strong> into the site's own assets, using <code>:not(:defined){ visibility:hidden }</code>
+  or SSR to hide the pre-upgrade flash (FOUCE). <strong>Cross-origin / CDN ESM (b)</strong> is
+  consistently the <em>prototyping</em> tier, viable in production only with version-pinning + SRI and an
+  accepted second-origin runtime cost. <strong>Defer (c)</strong> has no real-world end-state precedent —
+  it is only ever a transitional stand-in before the package exists.
+</p>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>Material Web</strong> — <code>esm.run</code> + import map is documented <em>for
+    prototyping</em>; production = npm install + bundler. (<a href="https://material-web.dev/about/quick-start/">quick-start</a>)</li>
+  <li><strong>Adobe Spectrum Web Components</strong> — ships an all-in bundle but states "we DO NOT
+    suggest leveraging this technique in a production application"; production = per-component npm imports.
+    (<a href="https://opensource.adobe.com/spectrum-web-components/tools/bundle/">bundle docs</a>)</li>
+  <li><strong>Microsoft FAST / Fluent</strong> — CDN script for convenience, but advises pinning and
+    self-hosting the version you tested with. (<a href="https://learn.microsoft.com/en-us/fluent-ui/web-components/getting-started/quick-start">quick-start</a>)</li>
+  <li><strong>Shoelace / Web Awesome</strong> — famous CDN autoloader (lazy <code>customElements.define</code>),
+    explicitly flagged as causing FOUCE; production = install the package + cherry-pick imports.
+    (<a href="https://www.abeautifulsite.net/posts/flash-of-undefined-custom-elements">FOUCE post</a>)</li>
+  <li><strong>GitHub (Catalyst), Salesforce LWC, gov design systems</strong> — bundle into the app's own
+    build pipeline; CDN is "best for rapid prototyping… not recommended for production."</li>
+</ul>
+<p class="text-sm text-gray-600">
+  Standards watch: the <a href="https://wicg.github.io/webcomponents/proposals/Scoped-Custom-Element-Registries.html">Scoped
+  Custom Element Registries</a> proposal (WICG/WHATWG, revamped 2025) targets exactly the
+  CDN-vended-widgets-fighting-over-the-global-namespace case, but is not yet a production-stable substrate.
+</p>
+
+<h2>The WE-specific inversion (why the generic norm does NOT apply)</h2>
+<p>
+  For Web Everything the generic "bundle wins" answer is <strong>overridden by the constellation
+  boundary</strong>. The <code>we-fui-embed-boundary</code> rule (<code>docs/agent/platform-decisions.md</code>)
+  states that a build-time <code>import '@frontierui'</code> into WE's build is <strong>the only thing
+  that actually violates the WE&rarr;FUI boundary</strong> (#700/#239) — so option <strong>(a) bundle is
+  boundary-illegal</strong> here. Meanwhile rule 7 (#1621) already ratifies the cross-origin-import
+  transient-CE model <em>by name</em> for "many-small, behavior-free, server-rendered components (a board
+  of hundreds of pills)": register once via a runtime cross-origin import from the FUI origin, emit
+  <code>&lt;we-*&gt;</code> server-side, inject the block's exported CSS globally, ship a
+  <code>we-*{}</code> SSR baseline. And a served FUI origin is <strong>already in production use</strong> —
+  <code>base.njk</code> cross-origin-imports <code>https://frontierui.dev/embed/in-document.ts</code> for
+  the #865 chrome shell, with graceful degradation.
+</p>
+
+<h2>Recommendation (at a glance)</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>For a generic docs site: (a) bundle a pinned, tree-shaken package</strong> with a
+    <code>:not(:defined)</code> / SSR baseline. Cross-origin is prototyping-tier; defer is only a
+    stand-in.</li>
+  <li><strong>For WE specifically: (b) cross-origin import</strong> the FUI registration ESM from the
+    existing <code>links.frontierUrl</code> origin, with the rule-7 SSR baseline — because (a) bundle is
+    the one boundary violation, and (b) is the already-ratified, zero-new-infra, no-#907-gate path. The
+    only build is a small FUI-served registration entry mirroring <code>embed/in-document.ts</code>.</li>
+</ul>
+{% endraw %}

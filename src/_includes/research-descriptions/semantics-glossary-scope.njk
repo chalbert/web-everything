@@ -1,0 +1,95 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The Web Everything <a href="/semantics/">semantics glossary</a> holds cross-cutting vocabulary, but
+  most named standards have no glossary term (Status Indicator, Notification Marker, Selection, the new
+  Tag intent, …). The <a href="/backlog/1327-semantics-glossary-comprehensiveness-audit-missing-terms-gat/">#1327</a>
+  story wants to (1) backfill the missing terms and (2) add a <code>check:standards</code> coverage gate
+  so the glossary can't drift. But <em>backfill what?</em> Taken literally, "every named
+  intent/block/protocol/plug/capability" is <strong>~188 entries</strong> and conflates two different
+  things — so <a href="/backlog/1343-what-is-the-semantics-glossary-the-vocabulary-of-concept-onl/">#1343</a>
+  asks the load-bearing question: <strong>what is the glossary the ubiquitous-language vocabulary
+  <em>of</em>?</strong>
+</p>
+
+<h2>The fork</h2>
+<ul>
+  <li>
+    <strong>A — concept categories</strong> (intents + protocols + capabilities). Genuine cross-cutting
+    <em>semantic</em> terms; drift-prone; the actual #1319/#1325 overloaded-vocabulary gap. Backfill
+    <strong>≈ 75</strong>; the gate fires on those source registries.
+  </li>
+  <li>
+    <strong>B — every named standard</strong> (also blocks + plugs). Backfill <strong>≈ 188</strong>; the
+    gate fires on all five categories — including the 53 <code>Custom*</code> registry class names and 60
+    concrete block impls (Button, Date Picker, …).
+  </li>
+</ul>
+
+<h2>Finding — concept categories (default, ~75%)</h2>
+<p>Three grounds converge:</p>
+<ol>
+  <li>
+    <strong>The artifact already declares its purpose.</strong> <code>src/semantics.njk</code> heads the
+    page <em>"Ubiquitous language and precise definitions to remove ambiguity from the Web Everything
+    protocols."</em> — concepts/contracts, not implementations.
+  </li>
+  <li>
+    <strong>Prior art is unanimous.</strong> Domain-Driven Design's <em>ubiquitous language</em> output
+    is a glossary of <em>domain concepts</em> — the language <em>influences</em> code naming, but the
+    glossary itself is the concept set, not a dump of every class. Design-system glossaries (Shopify
+    Polaris, IBM Carbon) are likewise <em>terminology pages</em> for cross-functional alignment, distinct
+    from the exhaustive component/API reference. The catalogue — here <a href="/plugs/">/plugs/</a> and
+    <a href="/blocks/">/blocks/</a> — is a separate surface.
+  </li>
+  <li>
+    <strong>B is the body's own predicted failure.</strong> Minting a
+    <code>CustomAttributeParserRegistry</code> glossary <em>term</em> is noise; a gate that fires on all
+    188 is all-warn-noise unless scoped to the concept layer.
+  </li>
+</ol>
+
+<h2>Two sub-calls dissolve on investigation</h2>
+<ul>
+  <li>
+    <strong>Derive-vs-hand-author</strong> (the body's stated sub-call) is not a real fork. A term's
+    definition is hand-authored editorial prose — e.g.
+    <code>src/_data/semantics/ambient-intent.json</code> ("A designer- or product-owned
+    <em>behavioral</em> preference … never structural") — which no <code>name</code>-field transform
+    produces. The gate therefore enforces <strong>presence</strong> (does an in-scope standard have a
+    term?), never the content. The "derive" applies to the coverage requirement, not the definition.
+  </li>
+  <li>
+    <strong>The gate's fire-set mechanism</strong> is determined, not open. A term JSON is
+    <code>{ term, definition, usage }</code> with <strong>no provenance field</strong>, so the gate cannot
+    scope per-term — it scopes by <strong>source registry</strong> (iterate the <code>intents/</code> +
+    <code>protocols/</code> + <code>capabilities/</code> dirs). A per-item <code>isConcept</code> flag is
+    only needed under a curated-conceptual-block policy, which the default avoids.
+  </li>
+</ul>
+
+<h2>Consequences carried into the decision</h2>
+<ul>
+  <li>
+    <strong>Blocks/plugs are not <em>required</em> but remain <em>allowed</em>.</strong> A genuinely
+    conceptual abstract block <em>family</em> — the <a href="/blocks/">droplist</a> family (abstract) vs
+    the concrete dropdown member — may carry a hand-authored term; the gate simply doesn't force one.
+    Most-permissive on the author side.
+  </li>
+  <li>
+    <strong>Capabilities are already 0-gap</strong> (21/21 covered), so folding them into the required
+    concept set costs nothing and keeps them maintained.
+  </li>
+  <li>
+    <strong>Residual on the default (~25%):</strong> the handful of genuinely-conceptual block families a
+    category-level exclusion leaves un-required — mitigated by the "allowed, not required" allowance, and
+    revisitable by adding an <code>isConcept</code> flag later if the gap proves real.
+  </li>
+</ul>
+
+<p>
+  Full grounding in <code>reports/2026-06-20-semantics-glossary-scope.md</code>. On resolve this unblocks
+  #1327, which then slices into (1a) backfill the in-scope categories + (1b)/(2) the scoped coverage gate
+  at <code>scripts/check-standards.mjs:248</code>.
+</p>
+{% endraw %}

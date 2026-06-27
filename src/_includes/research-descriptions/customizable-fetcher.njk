@@ -43,7 +43,7 @@
 
 <h3>Interface</h3>
 
-<pre><code>interface CustomResourceClient {
+<we-code-view><pre><code>interface CustomResourceClient {
     execute(operation: ResourceOperation): Consumable&lt;ResourceResult&gt;;
 }
 
@@ -53,7 +53,7 @@ interface ResourceOperation {
     context: Record&lt;string, unknown&gt;;  // Request-specific context
 }
 
-type Consumable&lt;T&gt; = Promise&lt;T&gt; | AsyncIterable&lt;T&gt; | Observable&lt;T&gt;;</code></pre>
+type Consumable&lt;T&gt; = Promise&lt;T&gt; | AsyncIterable&lt;T&gt; | Observable&lt;T&gt;;</code></pre></we-code-view>
 
 <p>The <code>Consumable</code> return type supports three consumption patterns:</p>
 
@@ -82,7 +82,7 @@ type Consumable&lt;T&gt; = Promise&lt;T&gt; | AsyncIterable&lt;T&gt; | Observabl
 
 <h3>Injection via Injector</h3>
 
-<pre><code>// App provides a custom client via injector
+<we-code-view><pre><code>// App provides a custom client via injector
 const docInjector = injectorRoot.getInjectorOf(document);
 
 // Default: native fetch client
@@ -95,7 +95,7 @@ docInjector.set('customContexts:resourceClient', new AxiosClient(axiosInstance))
 docInjector.set('customContexts:resourceClient', new GraphQLClient(endpoint));
 
 // Or: Mock client for testing
-docInjector.set('customContexts:resourceClient', new MockClient(fixtures));</code></pre>
+docInjector.set('customContexts:resourceClient', new MockClient(fixtures));</code></pre></we-code-view>
 
 <h3>Framework Comparison: Transport Abstraction</h3>
 
@@ -139,15 +139,15 @@ docInjector.set('customContexts:resourceClient', new MockClient(fixtures));</cod
 
 <h3>Interface</h3>
 
-<pre><code>type MiddlewareNext = (req: ResourceOperation) => Consumable&lt;ResourceResult&gt;;
+<we-code-view><pre><code>type MiddlewareNext = (req: ResourceOperation) => Consumable&lt;ResourceResult&gt;;
 
 interface CustomMiddleware {
     process(req: ResourceOperation, next: MiddlewareNext): Consumable&lt;ResourceResult&gt;;
-}</code></pre>
+}</code></pre></we-code-view>
 
 <p>Middleware wraps the <code>next</code> handler, enabling both request preprocessing and response postprocessing:</p>
 
-<pre><code>// Auth middleware
+<we-code-view><pre><code>// Auth middleware
 class AuthMiddleware implements CustomMiddleware {
     process(req, next) {
         req.context.headers = {
@@ -170,7 +170,7 @@ class RetryMiddleware implements CustomMiddleware {
             }
         }
     }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>Framework Comparison: Middleware</h3>
 
@@ -207,12 +207,12 @@ class RetryMiddleware implements CustomMiddleware {
 
 <h3>Interface</h3>
 
-<pre><code>interface CustomCachePolicy {
+<we-code-view><pre><code>interface CustomCachePolicy {
     mode: 'cache-first' | 'network-only' | 'stale-while-revalidate';
     maxAge: number;                          // ms
     staleWhileRevalidate: number;            // ms
     key: (op: ResourceOperation) => string;  // Cache key derivation
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>Separation of Policy and Storage</h3>
 
@@ -255,7 +255,7 @@ class RetryMiddleware implements CustomMiddleware {
 
 <p>All three layers &mdash; client, middleware, and cache &mdash; are provided via the injector system:</p>
 
-<pre><code>// Application bootstrap
+<we-code-view><pre><code>// Application bootstrap
 const docInjector = injectorRoot.getInjectorOf(document);
 
 // Transport
@@ -279,7 +279,7 @@ docInjector.set('customContexts:resourceCachePolicy', {
 // Per-scope override: admin panel uses GraphQL
 const adminPanel = document.querySelector('#admin');
 const adminInjector = injectorRoot.getInjectorOf(adminPanel);
-adminInjector.set('customContexts:resourceClient', new GraphQLClient('/admin/graphql'));</code></pre>
+adminInjector.set('customContexts:resourceClient', new GraphQLClient('/admin/graphql'));</code></pre></we-code-view>
 
 <p>Resource Loader resolves these from the injector chain at request time. If no custom client is provided, it falls back to native <code>fetch()</code>.</p>
 
@@ -288,7 +288,7 @@ adminInjector.set('customContexts:resourceClient', new GraphQLClient('/admin/gra
 
 <h3>Axios Adapter</h3>
 
-<pre><code>class AxiosClient implements CustomResourceClient {
+<we-code-view><pre><code>class AxiosClient implements CustomResourceClient {
     #instance: AxiosInstance;
 
     constructor(instance: AxiosInstance) {
@@ -304,11 +304,11 @@ adminInjector.set('customContexts:resourceClient', new GraphQLClient('/admin/gra
         });
         return { data, metadata: { status, headers } };
     }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>GraphQL Adapter</h3>
 
-<pre><code>class GraphQLClient implements CustomResourceClient {
+<we-code-view><pre><code>class GraphQLClient implements CustomResourceClient {
     #endpoint: string;
 
     constructor(endpoint: string) {
@@ -329,11 +329,11 @@ adminInjector.set('customContexts:resourceClient', new GraphQLClient('/admin/gra
         if (errors?.length) throw new GraphQLError(errors);
         return { data };
     }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>Mock Adapter (Testing)</h3>
 
-<pre><code>class MockClient implements CustomResourceClient {
+<we-code-view><pre><code>class MockClient implements CustomResourceClient {
     #fixtures: Map&lt;string, unknown&gt;;
 
     constructor(fixtures: Record&lt;string, unknown&gt;) {
@@ -347,7 +347,7 @@ adminInjector.set('customContexts:resourceClient', new GraphQLClient('/admin/gra
         }
         return { data: this.#fixtures.get(key) };
     }
-}</code></pre>
+}</code></pre></we-code-view>
 
 
 <h2>Key Principles</h2>

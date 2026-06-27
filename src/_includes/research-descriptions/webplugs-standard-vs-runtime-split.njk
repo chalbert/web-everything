@@ -1,0 +1,73 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  <a href="/backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth/">#606</a> ruled that
+  the plugs <strong>runtime</strong> lives in Frontier UI (<code>@frontierui/plugs</code>), not as a Web
+  Everything standard artifact. That raised a follow-on: does the WE <code>webplugs</code> <em>project
+  entity</em> still have a reason to exist, or is it a ghost of the pre-#606 model that should be retired?
+  The trigger was a <code>&#8855; project pending</code> readiness pill on the plugs-dedup epic
+  <a href="/backlog/170-plugs-duplicated-across-webeverything-frontierui/">#170</a>, which implied
+  <code>webplugs</code> is an un-built concept with no shipped surface.
+</p>
+
+<h2>Finding — WE owns the plugs interface/contract standard; #606 split only the runtime</h2>
+<p>
+  The <code>webplugs</code> project is <strong>not</strong> an empty concept. WE authors and ships a live
+  standards surface for it, distinct from the FUI runtime:
+</p>
+<ul>
+  <li>
+    <strong>The plug-layer spec.</strong> <code>src/_includes/project-webplugs.njk</code> defines Web
+    Plugs as <em>"the foundational layer of the Web Everything platform"</em> — the polyfills/patches
+    contract. It specifies the <strong>plug types</strong> (<code>Global</code> = new objects on
+    <code>window</code>; <code>Patch</code> = modifies a native API) and, in its
+    <code>#plugged-unplugged</code> section, the <strong>Plugged vs Unplugged dual-mode contract</strong>:
+    <em>plugged</em> monkey-patches native APIs so the DOM self-upgrades automatically; <em>unplugged</em>
+    is explicit safe-library usage. That dual-mode mechanism is a <strong>standard definition</strong>,
+    authored in WE.
+  </li>
+  <li>
+    <strong>51 active plug interface defs.</strong> <code>src/_data/plugs/</code> holds 51 entries
+    (<code>CustomAttribute</code>, <code>CustomContext</code>, <code>CustomExpressionParser</code>, the
+    registries, …), each <code>"status": "active"</code>. They are the interface/contract surfaces of the
+    plug layer, homed under the <em>domain</em> projects they serve
+    (<code>customattribute.json</code> &rarr; <code>"projects": ["webbehaviors"]</code>), with
+    <code>webplugs</code> as the foundational meta-project that defines what a plug <em>is</em>.
+  </li>
+</ul>
+<p>
+  This is the canonical <strong>WE-standard / FUI-impl seam</strong>: WE owns the contract (the plug
+  interfaces + the plugged/unplugged mechanism + conformance), FUI owns the runtime
+  (<code>@frontierui/plugs</code>). #606 moved the <em>impl</em> half only — it did not move or dissolve
+  the WE-side standard. A WE <code>webplugs</code> project is therefore correct, not a ghost.
+</p>
+
+<h2>Why the readiness pill misfired — status-drift invisible to the loader proxy</h2>
+<p>
+  The hold is a <strong>false positive from status-drift</strong>
+  (<a href="/backlog/617-d3-readiness-concept-status-drift/">#617</a>). The project still reads
+  <code>"status": "concept"</code> (<code>src/_data/projects/webplugs.json</code>) despite the shipped
+  surface above. The loader's drift-escape is meant to <em>not</em> demote a concept project that has real
+  shipped work — but its shipped-surface proxy counts only <strong>resolved backlog items carrying
+  <code>relatedProject: webplugs</code> in frontmatter</strong> (<code>src/_data/backlog.js:77</code>,
+  consumed at <code>:84-87</code>). Zero items match: <code>webplugs</code>' surface shipped as a
+  <em>spec page + data defs</em>, not as a tagged resolved backlog item. The drift is real but invisible
+  to the proxy, so #170 is demoted out of Tier&nbsp;A.
+</p>
+<p>
+  This is a small but general loader-precision gap: <strong>any project whose surface ships as spec/data
+  rather than a <code>relatedProject</code>-tagged resolved item is mis-demoted.</strong> Worth a
+  follow-up so it isn't whack-a-mole across webplugs-like projects.
+</p>
+
+<h2>Disposition</h2>
+<p>
+  The fork is a <strong>forced invariant</strong>, not a live either/or. <strong>Retire</strong> is ruled
+  out — it would delete a real, shipped WE standard (the plugged/unplugged contract + 51 active plug defs
+  + the spec page); that branch only looked viable while #606 was misread as moving the whole concern to
+  FUI. <strong>Keep</strong> is correct — reconcile the drift by bumping
+  <code>src/_data/projects/webplugs.json</code> <code>status: concept &rarr; poc</code> (the enum
+  ceiling), which reflects the shipped standards surface and clears #170's false hold. Confidence ~90%;
+  residual is the exact status value and whether the loader-proxy gap warrants its own fix now.
+</p>
+{% endraw %}

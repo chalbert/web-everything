@@ -190,7 +190,7 @@
 
 <p>This is the most significant development for i18n. It provides a standard message formatting syntax to replace ICU MessageFormat 1.0:</p>
 
-<pre><code>// Variable interpolation
+<we-code-view><pre><code>// Variable interpolation
 {Hello {$name}!}
 
 // Plural selection
@@ -202,7 +202,7 @@
 {Your appointment is {$date :datetime dateStyle=long}}
 
 // Custom functions (extensible registry)
-{$amount :currency currency=USD}</code></pre>
+{$amount :currency currency=USD}</code></pre></we-code-view>
 
 <p>Key improvements: consistent data model, better error handling (partial output on errors), extensible function registry, simpler nesting.</p>
 
@@ -210,8 +210,8 @@
 
 <p><strong>Status:</strong> Stage 1 (as of early 2025). Would bring MF2 to browsers natively:</p>
 
-<pre><code>const mf = new Intl.MessageFormat('{Hello {$name}!}', 'en');
-mf.format({ name: 'World' }); // "Hello World!"</code></pre>
+<we-code-view><pre><code>const mf = new Intl.MessageFormat('{Hello {$name}!}', 'en');
+mf.format({ name: 'World' }); // "Hello World!"</code></pre></we-code-view>
 
 <p><strong>Timeline concern:</strong> Stage 1 proposals can take 3&ndash;7 years to ship in all browsers. A polyfill/library will be necessary for the foreseeable future.</p>
 
@@ -270,7 +270,7 @@ mf.format({ name: 'World' }); // "Hello World!"</code></pre>
 </ul>
 
 <p>The message function signature is the common interface either way:</p>
-<pre><code>type MessageFn = (params?: Record&lt;string, unknown&gt;) =&gt; string;</code></pre>
+<we-code-view><pre><code>type MessageFn = (params?: Record&lt;string, unknown&gt;) =&gt; string;</code></pre></we-code-view>
 
 
 <h2>Web Component i18n Challenges</h2>
@@ -336,8 +336,8 @@ mf.format({ name: 'World' }); // "Hello World!"</code></pre>
 
 <p>The <code>@t</code> context already referenced in <code>blocks.json</code> (handler expression parser's context access patterns) is the right surface API:</p>
 
-<pre><code>&lt;span&gt;@t.greeting&lt;/span&gt;
-&lt;span&gt;@t.itemCount({ count: $store.items.length })&lt;/span&gt;</code></pre>
+<we-code-view><pre><code>&lt;span&gt;@t.greeting&lt;/span&gt;
+&lt;span&gt;@t.itemCount({ count: $store.items.length })&lt;/span&gt;</code></pre></we-code-view>
 
 
 <h2>Key Design Decisions</h2>

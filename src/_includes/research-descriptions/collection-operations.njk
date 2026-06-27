@@ -121,7 +121,7 @@
     carries a sub-object because it is the deep one; comparison is expressed as a <em>preference</em>
     (locale-aware? case-sensitive? numeric?), never as a function.
 </p>
-<pre><code class="language-typescript">type SortDir = 'asc' | 'desc';
+<we-code-view><pre><code class="language-typescript">type SortDir = 'asc' | 'desc';
 type EmptyPlacement = 'first' | 'last';
 type Operation = 'filter' | 'sort' | 'group' | 'page';
 
@@ -146,7 +146,7 @@ interface CollectionOperationsIntent {
   group?: { summarize?: ('total' | 'count' | 'average' | 'min' | 'max')[] };
   page?: { size?: number; mode?: 'paged' | 'append';   // append + advance:auto = infinite scroll
            advance?: 'manual' | 'auto' };              // default manual
-}</code></pre>
+}</code></pre></we-code-view>
 <p>
     <code>aria-sort</code> is the <em>rendered projection</em> of <code>sort.by[0]</code> onto the active
     header (<code>asc→ascending</code>, <code>desc→descending</code>, no key →<code>none</code>) — the intent

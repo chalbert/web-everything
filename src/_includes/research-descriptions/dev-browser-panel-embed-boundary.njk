@@ -1,0 +1,61 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    <a href="/backlog/1654/">#1654</a> resolves <a href="/backlog/141/">#141</a> Fork 4-A: how the Plateau-owned Chromium
+    <strong>dev-browser shell</strong> mounts plateau-app&rsquo;s existing management panels &mdash; the
+    <strong>Technical Configurator</strong>, <strong>Intent Configurator</strong> and <strong>Profiles</strong> &mdash;
+    via a <em>direct package import</em> (a same-repo function call, tight coupling, shared bundle, synchronous data flow)
+    or an <em>iframe / web-component boundary</em> (an isolation seam with independent origin/deploy and a
+    <code>postMessage</code> transport cost). It unblocks slicing the <a href="/backlog/1391/">#1391</a> shell epic,
+    whose panel-embed slice currently buries this fork.
+</p>
+
+<h2>The load-bearing finding &mdash; the shell and the panels are the same repo and origin</h2>
+<p>
+    The shell is Plateau-owned (<a href="/backlog/1565/">#1565</a>: an operated surface you run against your own build
+    lives in Plateau), and the panels it must surface <em>already ship in the same plateau-app repo</em> as plain DOM
+    mount functions &mdash; <code>mountTechnicalConfigurator(root)</code>, <code>mountIntentConfigurator(root)</code>,
+    <code>mountProfiles(el)</code> &mdash; with no React/Vue and one Vite bundle. So a &ldquo;direct import&rdquo; here is a
+    <strong>same-repo, same-origin function call</strong>, not a cross-constellation edge: it never touches the
+    WE&nbsp;&rarr;&nbsp;FUI&nbsp;&rarr;&nbsp;Plateau DAG (a backward edge is a CODE import <em>upstream</em>; an intra-repo
+    import within the product layer is none). This is the <em>opposite</em> of the two prior plateau-embed transport
+    decisions &mdash; <a href="/backlog/788/">#788</a> (a WE/FUI docs surface embeds a Plateau configurator) and
+    <a href="/backlog/887/">#887</a> (a Plateau creator iframe feeds a FUI switcher iframe) &mdash; which were
+    cross-origin <em>by construction</em> and therefore <em>forced</em> iframe + <code>postMessage</code> because the
+    host and panel were different origins and same-origin DOM was unreadable. Neither forcing condition holds here, so the
+    iframe boundary is no longer mandatory for the shell&rsquo;s own panels.
+</p>
+<p>
+    Devtools-shell prior art splits the same way. VS Code webviews and Chrome DevTools extension panels are
+    iframe-sandboxed on a separate origin, talking only over <code>postMessage</code> &mdash; chosen precisely because the
+    content is <strong>untrusted third-party</strong>. Micro-frontend practice mirrors it: Module Federation / direct
+    import for a <em>trusted shared-runtime shell</em> (deep integration, shared bundle, synchronous data flow, zero
+    transport marshalling); iframe/web-component only when you need <em>hard isolation</em> (untrusted code, independent
+    origin/deploy, CSS/JS encapsulation). The dev-browser&rsquo;s own panels are trusted first-party code with no
+    independent-deploy or isolation need; the apps the browser <em>loads</em> are untrusted and cross-origin.
+</p>
+
+<h2>Recommendation (to ratify in #1654)</h2>
+<ol>
+    <li>
+        <strong>First-party panels &rarr; direct package import / mount-function call.</strong> The Technical/Intent
+        Configurators and Profiles are trusted same-repo plateau-app code; the shell calls their existing
+        <code>mount*(el)</code> functions in-process. No iframe, no transport, synchronous data flow, the cleanest
+        coupling. The iframe branch has no merit here &mdash; the things that earned it in #788/#887 (cross-origin,
+        untrusted, runtime-authored) are all absent. <em>(Confidence: High.)</em>
+    </li>
+    <li>
+        <strong>The loaded third-party app surface &rarr; reuse the existing origin-validated iframe + <code>postMessage</code>
+        bus.</strong> When the shell renders a <em>conformant app&rsquo;s own</em> embedded surfaces (its whole premise is
+        loading other people&rsquo;s apps), that IS cross-origin/untrusted &mdash; reuse the established FUI embed-host
+        pattern that rejects any message whose <code>event.origin</code> mismatches the validated frame origin and the
+        versioned <code>fui-embed</code> envelope contract, rather than mint a new WE Protocol. <em>(Confidence:
+        Med-High.)</em>
+    </li>
+    <li>
+        <strong>Net: support both, split by trust/origin &mdash; not a single import-vs-iframe ruling.</strong> Import for
+        the shell&rsquo;s first-party trusted panels; iframe + origin-validated <code>postMessage</code> for the loaded
+        third-party app. The original either/or collapses to a configuration boundary keyed on origin/trust.
+    </li>
+</ol>
+{% endraw %}

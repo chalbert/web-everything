@@ -48,9 +48,9 @@
   #744's premise.</strong> A project can author a tiny local resolver that imports a WE factory and passes
   the Map as a JS argument captured in a closure:
 </p>
-<pre><code>// parcel-resolver-trait-enforcer.js  (project-local, relative-path in .parcelrc)
+<we-code-view><pre><code>// parcel-resolver-trait-enforcer.js  (project-local, relative-path in .parcelrc)
 import { traitEnforcerParcel } from '@frontierui/trait-enforcer/parcel';
-export default traitEnforcerParcel({ traitMap: { sortable: '…', 'export-csv': '…' } });</code></pre>
+export default traitEnforcerParcel({ traitMap: { sortable: '…', 'export-csv': '…' } });</code></pre></we-code-view>
 <p>
   where <code>traitEnforcerParcel(options)</code> returns a <code>Resolver</code> that returns
   <code>{ filePath: virtualId, code: buildTraitManifestSource(options) }</code> for the virtual id. This

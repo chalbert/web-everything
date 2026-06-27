@@ -267,7 +267,7 @@
 
 <p>A plug could patch <code>EventTarget.prototype.addEventListener</code> and <code>EventTarget.prototype.dispatchEvent</code> to accept Symbols, mapping them to unique strings under the hood:</p>
 
-<pre><code class="language-typescript">// Symbol → unique string mapping
+<we-code-view><pre><code class="language-typescript">// Symbol → unique string mapping
 const symbolToString = new Map&lt;symbol, string&gt;();
 
 function resolveType(type: string | symbol): string {
@@ -296,9 +296,9 @@ EventTarget.prototype.dispatchEvent = function(event) {
 // Helper to create events with Symbol types
 function createEvent&lt;T&gt;(type: symbol, detail: T, init?: EventInit) {
   return new CustomEvent(resolveType(type), { ...init, detail });
-}</code></pre>
+}</code></pre></we-code-view>
 
-<pre><code class="language-typescript">// Usage — collision-free by construction
+<we-code-view><pre><code class="language-typescript">// Usage — collision-free by construction
 export const TAB_CHANGE = Symbol('tab-change');
 export const ROUTE_CHANGE = Symbol('route-change');
 
@@ -307,7 +307,7 @@ element.dispatchEvent(createEvent(TAB_CHANGE, { from: 'a', to: 'b' }));
 
 // Consumer — import the symbol to listen
 import { TAB_CHANGE } from 'blocks/tabs';
-element.addEventListener(TAB_CHANGE, (e) =&gt; { /* type-safe */ });</code></pre>
+element.addEventListener(TAB_CHANGE, (e) =&gt; { /* type-safe */ });</code></pre></we-code-view>
 
 <h4>Polyfill trade-offs</h4>
 
@@ -450,7 +450,7 @@ element.addEventListener(TAB_CHANGE, (e) =&gt; { /* type-safe */ });</code></pre
 
 <p>When nested components emit identically-named events, listeners on ancestors fire for both. This is not hypothetical &mdash; it happens as soon as you compose blocks:</p>
 
-<pre><code class="language-html">&lt;!-- Outer component listens for "toggle" to track visibility --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Outer component listens for "toggle" to track visibility --&gt;
 &lt;div id="app"&gt;
   &lt;!-- A View-managed panel fires "toggle" --&gt;
   &lt;section view&gt;
@@ -467,7 +467,7 @@ element.addEventListener(TAB_CHANGE, (e) =&gt; { /* type-safe */ });</code></pre
     // e.detail has the same shape in both cases.
     // Only e.target differs.
   });
-&lt;/script&gt;</code></pre>
+&lt;/script&gt;</code></pre></we-code-view>
 
 <h3>Today's Mitigations (All Inadequate)</h3>
 
@@ -522,7 +522,7 @@ element.addEventListener(TAB_CHANGE, (e) =&gt; { /* type-safe */ });</code></pre
 
 <p>A utility or patched <code>addEventListener</code> that accepts an Event class instead of a string. Only events that are instances of that class trigger the handler.</p>
 
-<pre><code class="language-typescript">// blocks/tabs/events.ts
+<we-code-view><pre><code class="language-typescript">// blocks/tabs/events.ts
 export class TabChangeEvent extends CustomEvent&lt;TabChangeEventDetail&gt; {
   static readonly type = 'tab-change';
   constructor(detail: TabChangeEventDetail) {
@@ -542,11 +542,11 @@ listenFor(element, TabChangeEvent, (e) =&gt; {
 // Option 2: Patched addEventListener
 element.addEventListener(TabChangeEvent, (e) =&gt; {
   // Same effect, more ergonomic
-});</code></pre>
+});</code></pre></we-code-view>
 
 <p><strong>Implementation of <code>listenFor</code> is trivial:</strong></p>
 
-<pre><code class="language-typescript">function listenFor&lt;T extends Event&gt;(
+<we-code-view><pre><code class="language-typescript">function listenFor&lt;T extends Event&gt;(
   target: EventTarget,
   EventClass: { new(...args: any[]): T; readonly type: string },
   handler: (event: T) =&gt; void,
@@ -557,7 +557,7 @@ element.addEventListener(TabChangeEvent, (e) =&gt; {
   };
   target.addEventListener(EventClass.type, wrapper, options);
   return () =&gt; target.removeEventListener(EventClass.type, wrapper, options);
-}</code></pre>
+}</code></pre></we-code-view>
 
 <table>
   <thead>
@@ -578,7 +578,7 @@ element.addEventListener(TabChangeEvent, (e) =&gt; {
 
 <p>Events carry a protocol identifier (a string or Symbol) that listeners can filter on. This uses data comparison rather than object identity.</p>
 
-<pre><code class="language-typescript">// A well-known Symbol for tagging events with protocol identity
+<we-code-view><pre><code class="language-typescript">// A well-known Symbol for tagging events with protocol identity
 const EVENT_PROTOCOL = Symbol.for('we:event-protocol');
 
 // blocks/tabs/events.ts
@@ -598,7 +598,7 @@ element.addEventListener('tab-change', (e) =&gt; {
 });
 
 // Or with a utility:
-listenForProtocol(element, 'we:tabs:change', (e) =&gt; { ... });</code></pre>
+listenForProtocol(element, 'we:tabs:change', (e) =&gt; { ... });</code></pre></we-code-view>
 
 <table>
   <thead>
@@ -619,7 +619,7 @@ listenForProtocol(element, 'we:tabs:change', (e) =&gt; { ... });</code></pre>
 
 <p>Instead of global <code>addEventListener</code>, listeners register through a scoped registry that knows which events belong to which blocks. The registry handles discrimination internally.</p>
 
-<pre><code class="language-typescript">// Each block registers its events in its own scope
+<we-code-view><pre><code class="language-typescript">// Each block registers its events in its own scope
 const tabEvents = new EventScope('tabs');
 tabEvents.define('change', { detail: TabChangeEventDetail, bubbles: true });
 
@@ -631,7 +631,7 @@ tabEvents.dispatch(element, 'change', { from: 'a', to: 'b' });
 // Consumer listens through the scope — no collision possible
 tabEvents.on(element, 'change', (e) =&gt; {
   // Only receives events dispatched through the 'tabs' scope
-});</code></pre>
+});</code></pre></we-code-view>
 
 <p>This is similar to CSS's <code>@scope</code> concept &mdash; the scope boundary determines which events are visible.</p>
 
@@ -658,7 +658,7 @@ tabEvents.on(element, 'change', (e) =&gt; {
 
 <p><strong>The insight:</strong> A global registry is problematic because of name collisions. But a <strong>scoped registry</strong> works if it "provides" a specific event class for a specific use case. And while we can't use a global registry, events <em>do</em> carry their <code>target</code> &mdash; which can be used to resolve the <strong>current scoped event provider</strong> for that specific element via the injector system.</p>
 
-<pre><code class="language-typescript">// ── A block provides its event class through the injector ──
+<we-code-view><pre><code class="language-typescript">// ── A block provides its event class through the injector ──
 // In a component's setup:
 const injector = InjectorRoot.getInjectorOf(this.element);
 injector.set('customEvents:modal-closed', ModalClosedEvent);
@@ -683,7 +683,7 @@ element.addEventListener('modal-closed', (event) => {
   }
   // Otherwise: this is a 'modal-closed' event from an unknown source.
   // Ignore it — it's not ours.
-});</code></pre>
+});</code></pre></we-code-view>
 
 <p>This is the same DOM-tree scoping pattern that the injector system already uses for services, stores, and contexts &mdash; extended to events. The key components:</p>
 
@@ -694,7 +694,7 @@ element.addEventListener('modal-closed', (event) => {
   <li><strong><code>instanceof</code> validates the match</strong> &mdash; once we have the expected class from the injector, a standard <code>instanceof</code> check confirms the event came from a known provider.</li>
 </ol>
 
-<pre><code class="language-typescript">// ── listenForScoped utility ──
+<we-code-view><pre><code class="language-typescript">// ── listenForScoped utility ──
 function listenForScoped&lt;T extends Event&gt;(
   target: EventTarget,
   eventType: string,
@@ -714,9 +714,9 @@ function listenForScoped&lt;T extends Event&gt;(
   };
   target.addEventListener(eventType, wrapper, options);
   return () =&gt; target.removeEventListener(eventType, wrapper, options);
-}</code></pre>
+}</code></pre></we-code-view>
 
-<pre><code class="language-typescript">// Usage — works even when different subtrees provide different event classes
+<we-code-view><pre><code class="language-typescript">// Usage — works even when different subtrees provide different event classes
 listenForScoped(
   document.querySelector('#app'),
   'modal-closed',
@@ -726,7 +726,7 @@ listenForScoped(
     // whose injector scope provides a matching event class.
     console.log('Modal closed:', event.detail);
   },
-);</code></pre>
+);</code></pre></we-code-view>
 
 <h4>Why this works for protocol-based architecture</h4>
 
@@ -858,7 +858,7 @@ listenForScoped(
 
 <p>Both <code>listenFor</code> and <code>listenForScoped</code> build on a common event class contract:</p>
 
-<pre><code class="language-typescript">/**
+<we-code-view><pre><code class="language-typescript">/**
  * Contract for a typed, self-describing custom event class.
  *
  * Every block event class implements this interface. The static `type`
@@ -885,14 +885,14 @@ interface TypedEvent&lt;TDetail = unknown&gt; extends CustomEvent&lt;TDetail&gt;
  * Return type for both listenFor and listenForScoped: a function that
  * removes the event listener when called.
  */
-type Unsubscribe = () =&gt; void;</code></pre>
+type Unsubscribe = () =&gt; void;</code></pre></we-code-view>
 
 
 <h3><code>listenFor</code> &mdash; Lightweight Alternative</h3>
 
 <p>A zero-infrastructure shortcut for when you have the event class in hand (direct import) and don't need injector-based resolution. Useful in unit tests, standalone utilities, or code that should not depend on the injector system. Not a separate tier &mdash; it's the same <code>instanceof</code> primitive without the injector lookup.</p>
 
-<pre><code class="language-typescript">/**
+<we-code-view><pre><code class="language-typescript">/**
  * Listen for events of a specific class. Only events that pass an
  * `instanceof` check against EventClass trigger the handler.
  *
@@ -907,9 +907,9 @@ function listenFor&lt;TDetail&gt;(
   EventClass: TypedEventClass&lt;TDetail&gt;,
   handler: (event: TypedEvent&lt;TDetail&gt;) =&gt; void,
   options?: AddEventListenerOptions,
-): Unsubscribe;</code></pre>
+): Unsubscribe;</code></pre></we-code-view>
 
-<pre><code class="language-typescript">// ── Producer: define and export a typed event class ──
+<we-code-view><pre><code class="language-typescript">// ── Producer: define and export a typed event class ──
 export interface TabChangeDetail {
   from: string | null;
   to: string;
@@ -937,7 +937,7 @@ const unsub = listenFor(app, TabChangeEvent, (event) =&gt; {
 });
 
 // Clean up
-unsub();</code></pre>
+unsub();</code></pre></we-code-view>
 
 <h4>When to use</h4>
 
@@ -951,7 +951,7 @@ unsub();</code></pre>
 
 <p>Two blocks both fire events with the string name <code>toggle</code>. An ancestor listens for both without ambiguity:</p>
 
-<pre><code class="language-typescript">// blocks/view/events.ts
+<we-code-view><pre><code class="language-typescript">// blocks/view/events.ts
 export class ViewToggleEvent extends CustomEvent&lt;ViewToggleDetail&gt; {
   static readonly type = 'toggle';
   constructor(detail: ViewToggleDetail) {
@@ -980,11 +980,11 @@ listenFor(app, DropdownToggleEvent, (e) =&gt; {
 });
 
 // A native Popover 'toggle' event fires neither handler — it's a plain ToggleEvent,
-// not an instance of ViewToggleEvent or DropdownToggleEvent.</code></pre>
+// not an instance of ViewToggleEvent or DropdownToggleEvent.</code></pre></we-code-view>
 
 <h4>Example: Lifecycle cleanup in a CustomAttribute</h4>
 
-<pre><code class="language-typescript">import { TabChangeEvent } from 'blocks/tabs';
+<we-code-view><pre><code class="language-typescript">import { TabChangeEvent } from 'blocks/tabs';
 
 class MyBehavior extends CustomAttribute {
   #unsub?: Unsubscribe;
@@ -1004,13 +1004,13 @@ class MyBehavior extends CustomAttribute {
     // Guaranteed typed detail — no runtime shape checking needed
     console.log(`Switched to tab: ${detail.to}`);
   }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h4>Example: Broadcast commands</h4>
 
 <p><code>listenFor</code> also solves broadcast commands naturally. Dispatch on <code>document</code>, listen on <code>document</code>:</p>
 
-<pre><code class="language-typescript">// commands/modals.ts
+<we-code-view><pre><code class="language-typescript">// commands/modals.ts
 export class CloseAllModalsCommand extends CustomEvent&lt;void&gt; {
   static readonly type = 'close-modals';
   constructor() {
@@ -1036,7 +1036,7 @@ class ModalBehavior extends CustomAttribute {
   }
 
   #close() { /* hide the modal */ }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <p>Other teams dispatching unrelated <code>'close-modals'</code> events won't trigger the handler &mdash; only <code>CloseAllModalsCommand</code> instances pass the <code>instanceof</code> check.</p>
 
@@ -1045,7 +1045,7 @@ class ModalBehavior extends CustomAttribute {
 
 <p>The single event discrimination API for Web Everything. The injector resolves the expected event class from <code>event.target</code>'s scope at runtime, then validates via <code>instanceof</code>. Covers all scenarios: same-project events (register at document level), plugin architectures (register per scope), broadcast commands (dispatch on <code>document</code>), and implementation swapping (different scopes provide different classes).</p>
 
-<pre><code class="language-typescript">/**
+<we-code-view><pre><code class="language-typescript">/**
  * Listen for events whose class is resolved at runtime from the
  * injector scope of the event's target element.
  *
@@ -1066,9 +1066,9 @@ function listenForScoped&lt;TDetail&gt;(
   providerKey: string,
   handler: (event: TypedEvent&lt;TDetail&gt;) =&gt; void,
   options?: AddEventListenerOptions,
-): Unsubscribe;</code></pre>
+): Unsubscribe;</code></pre></we-code-view>
 
-<pre><code class="language-typescript">// ── Provider A: standard modal implementation ──
+<we-code-view><pre><code class="language-typescript">// ── Provider A: standard modal implementation ──
 export class ModalClosedEvent extends CustomEvent&lt;{ reason: string }&gt; {
   static readonly type = 'modal-closed';
   constructor(detail: { reason: string }) {
@@ -1103,7 +1103,7 @@ const unsub = listenForScoped(
     // Ignores 'modal-closed' events from unknown sources
     console.log('Modal closed:', event.detail.reason);
   },
-);</code></pre>
+);</code></pre></we-code-view>
 
 <h4>When to use</h4>
 
@@ -1116,7 +1116,7 @@ const unsub = listenForScoped(
 
 <h4>Example: Plugin dashboard with unknown widgets</h4>
 
-<pre><code class="language-typescript">// ── Widget protocol: any widget can fire 'widget-action' ──
+<we-code-view><pre><code class="language-typescript">// ── Widget protocol: any widget can fire 'widget-action' ──
 // Team A's widget
 export class ChartActionEvent extends CustomEvent&lt;{ action: string; data: unknown }&gt; {
   static readonly type = 'widget-action';
@@ -1153,11 +1153,11 @@ listenForScoped(
     // Ignores 'widget-action' from an unknown third-party script
     console.log('Widget action:', event.detail.action, event.detail.data);
   },
-);</code></pre>
+);</code></pre></we-code-view>
 
 <h4>Example: Swappable form field validation</h4>
 
-<pre><code class="language-typescript">// ── Two validation implementations that adhere to the same protocol ──
+<we-code-view><pre><code class="language-typescript">// ── Two validation implementations that adhere to the same protocol ──
 
 // Default: simple HTML5 validation
 class SimpleValidationEvent extends CustomEvent&lt;{ valid: boolean; message?: string }&gt; {
@@ -1190,11 +1190,11 @@ listenForScoped(
       showError(event.detail.message);
     }
   },
-);</code></pre>
+);</code></pre></we-code-view>
 
 <h4>Example: Lifecycle in a framework layer</h4>
 
-<pre><code class="language-typescript">// A reusable container behavior that reacts to child events
+<we-code-view><pre><code class="language-typescript">// A reusable container behavior that reacts to child events
 // without knowing the concrete child implementations.
 class ContainerBehavior extends CustomAttribute {
   #unsubs: Unsubscribe[] = [];
@@ -1222,7 +1222,7 @@ class ContainerBehavior extends CustomAttribute {
 
   #handleSelection(detail: unknown) { /* ... */ }
   #handleRemoval(detail: unknown) { /* ... */ }
-}</code></pre>
+}</code></pre></we-code-view>
 
 
 <h3>Plugged Mode: Browser-Native Ergonomics</h3>
@@ -1233,7 +1233,7 @@ class ContainerBehavior extends CustomAttribute {
 
 <p>The plug extends <code>AddEventListenerOptions</code> with a <code>provider</code> key. When present, the listener resolves the expected event class from <code>event.target</code>'s injector scope and validates via <code>instanceof</code> &mdash; all transparently.</p>
 
-<pre><code class="language-typescript">// ── The plug (applied by bootstrap.ts) ──
+<we-code-view><pre><code class="language-typescript">// ── The plug (applied by bootstrap.ts) ──
 const origAddEventListener = EventTarget.prototype.addEventListener;
 const origRemoveEventListener = EventTarget.prototype.removeEventListener;
 
@@ -1280,11 +1280,11 @@ EventTarget.prototype.addEventListener = function(
 
   // Plain string — standard behavior
   return origAddEventListener.call(this, type, listener, options);
-};</code></pre>
+};</code></pre></we-code-view>
 
 <p>With this plug applied, event discrimination feels like a native browser feature:</p>
 
-<pre><code class="language-typescript">// ── Plugged mode: provider option on addEventListener ──
+<we-code-view><pre><code class="language-typescript">// ── Plugged mode: provider option on addEventListener ──
 
 // Standard addEventListener call — the provider option triggers
 // injector-based resolution at runtime
@@ -1308,9 +1308,9 @@ form.addEventListener('field-validated', (event) =&gt; {
 // Standard string-based listener still works — no breaking change
 app.addEventListener('click', (e) =&gt; {
   console.log('Clicked:', e.target);
-});</code></pre>
+});</code></pre></we-code-view>
 
-<pre><code class="language-html">&lt;!-- Full plugged demo --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Full plugged demo --&gt;
 &lt;script type="module"&gt;
   // No imports needed for the listening side — just standard addEventListener
   // with an extra option. The plug + injector handle the rest.
@@ -1326,7 +1326,7 @@ app.addEventListener('click', (e) =&gt; {
 
   // Meanwhile, each widget registers its event class through the injector
   // when it mounts — this is the provider side, unchanged from unplugged mode.
-&lt;/script&gt;</code></pre>
+&lt;/script&gt;</code></pre></we-code-view>
 
 <p>The key property: <strong>this is additive, not breaking</strong>. Passing no <code>provider</code> option works exactly as standard <code>addEventListener</code>. Adding the option enables discrimination transparently.</p>
 
@@ -1372,9 +1372,9 @@ app.addEventListener('click', (e) =&gt; {
 
 <p>Module-prefixed naming reduces accidental collisions even for consumers using plain <code>addEventListener</code>. This is always applied as a baseline alongside <code>listenForScoped</code>:</p>
 
-<pre><code class="language-text">Standard-aligned events:   Use the standard name (beforetoggle, toggle)
+<we-code-view><pre><code class="language-text">Standard-aligned events:   Use the standard name (beforetoggle, toggle)
 Module-scoped events:      module-eventname (tab-change, route-change)
-Custom commands:           --module-action (--view-show, --tab-activate)</code></pre>
+Custom commands:           --module-action (--view-show, --tab-activate)</code></pre></we-code-view>
 
 <p>Convention is belt-and-suspenders &mdash; it helps, but <code>instanceof</code> is the structural guarantee.</p>
 
@@ -1383,7 +1383,7 @@ Custom commands:           --module-action (--view-show, --tab-activate)</code><
 
 <p>Regardless of which utility is used, blocks declare their events in the documentation layer (JSON + CEM):</p>
 
-<pre><code class="language-json">{
+<we-code-view><pre><code class="language-json">{
   "events": {
     "tab-change": {
       "taxonomy": "notification",
@@ -1394,7 +1394,7 @@ Custom commands:           --module-action (--view-show, --tab-activate)</code><
       "provider": "customEvents:tab-change"
     }
   }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <p>This enables tooling validation, documentation cross-references, and CEM generation. The <code>provider</code> field maps to the injector provider key used by <code>listenForScoped</code>.</p>
 

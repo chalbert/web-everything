@@ -1,0 +1,112 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The <a href="/backlog/854-scope-declarative-scoped-registration-spelling-on-component/">#854</a>
+  scoped-component model has two halves and only one is built. <strong>Identity isolation</strong> — the
+  same tag resolving to a <em>different impl per view</em> — ships today (the declarative registry +
+  <code>attachShadow({ customElementRegistry })</code> in <code>we:plugs/webregistries/</code>). But its
+  <strong>style isolation</strong> — what keeps one view's button CSS from leaking into another view using
+  the same tag — is <strong>implicit and unimplemented</strong>: a grep of both repos found
+  <strong>zero</strong> runtime impl (no <code>adoptedStyleSheets</code>, no constructable stylesheets, no
+  unique-class scope-keying). FUI blocks just use ad-hoc global classes + <code>var(--…)</code> tokens.
+  <a href="/backlog/1321-variant-component-surface-and-per-variant-loading-one-polymo/">#1321</a>
+  (button variants) surfaced this and now <em>consumes</em> the contract. This research grounds the WE
+  standard that fills the gap: <strong>one contract, one Layer-1 native-compile proposal, two impl
+  layers</strong>.
+</p>
+
+<h2>The contract (fixed, not a fork)</h2>
+<p>
+  A scoped component's styling is <strong>self-contained</strong>: authored with self-referential rules
+  (<code>[variant]</code> / <code>:host([variant])</code>) + <strong>token DI</strong> (custom properties
+  read source-blind), <strong>never</strong> ancestor-coupled (<code>.parent button</code> /
+  <code>@scope (.parent)</code>). The <em>system</em> — not the author — delivers per-scope isolation; any
+  scope-keying is machine-generated (#1321's self-styling requirement). Every impl below conforms to this
+  one contract.
+</p>
+
+<h2>Prior art — the decisive findings</h2>
+<ol>
+  <li>
+    <strong>No shipping platform feature gives light-DOM in+out isolation without a shadow root.</strong>
+    CSS <code>@scope</code> (Baseline Dec 2025) is <strong>out-scoping only</strong> — an external
+    <code>button {}</code> still matches <em>inside</em> a scope, and inherited properties leak through the
+    donut hole. (It <em>is</em> self-rootable: a prelude-less <code>@scope {}</code> in a
+    <code>&lt;style&gt;</code> scopes to that style's parent element — no ancestor selector needed.)
+  </li>
+  <li>
+    <strong>There is one live standards effort that matches the goal exactly:</strong>
+    <a href="https://github.com/w3c/csswg-drafts/issues/11002">csswg-drafts #11002 — "Can we use
+    <code>@scope</code> for style isolation?"</a> (opened Oct 2024, css-cascade-6/7). It proposes an
+    <code>isolate</code> keyword — <code>@scope isolated (root) to (limit) {…}</code> — that blocks the
+    inbound cascade. It is <strong>open, with no spec text yet</strong>. Lineage: the removed
+    <a href="https://caniuse.com/style-scoped"><code>&lt;style scoped&gt;</code></a> (Firefox-only, pulled
+    ~2016 for lack of vendor interest; revival thread
+    <a href="https://github.com/w3c/csswg-drafts/issues/3547">#3547</a> is considered superseded by
+    <code>@scope</code>) and the foundational
+    <a href="https://github.com/w3c/csswg-drafts/issues/5809">#5809</a>. <em>Note:</em> the CSS
+    <code>isolation</code> property is unrelated (stacking contexts only) — a name to avoid.
+  </li>
+  <li>
+    <strong>Build-time transforms are unanimous on the pattern.</strong>
+    <a href="https://github.com/vanilla-extract-css/vanilla-extract">vanilla-extract</a> (zero-runtime),
+    <a href="https://github.com/css-modules/css-modules">CSS Modules</a>, and styled-components/Emotion all
+    <em>hash a unique class per scope and rewrite the scope's self-referential selectors to it</em>,
+    emitting static CSS (SSR-trivial). Vue SFC <code>&lt;style scoped&gt;</code> is the attribute-hash
+    variant (<code>[data-v-xxxx]</code>). <strong>All scope outbound only</strong> — none block inbound
+    leaks; only shadow DOM does.
+  </li>
+  <li>
+    <strong>The runtime path is Baseline.</strong> Constructable
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/Document/adoptedStyleSheets"><code>adoptedStyleSheets</code></a>
+    has been Baseline since Mar 2023 and applies to <strong>both <code>Document</code> (light DOM) and
+    <code>ShadowRoot</code></strong> — so a runtime unique-class scheme can inject scoped CSS into the
+    document. The alternative, <strong>shadow-per-component</strong>, gives native in+out isolation
+    <em>today</em> but costs the native <code>&lt;button&gt;</code>'s form participation and label
+    association (re-forward via
+    <a href="https://css-tricks.com/creating-custom-form-controls-with-elementinternals/"><code>ElementInternals</code></a>).
+    That is the central S1-vs-S2 tension.
+  </li>
+  <li>
+    <strong>Scoped custom element registries are very fresh.</strong> The API graduated WICG → WHATWG HTML
+    (<a href="https://developer.chrome.com/blog/scoped-registries">Chrome 146 stable Mar 2026 + Safari 26,
+    no Firefox</a>; polyfill <code>@webcomponents/scoped-custom-element-registry</code>) — already honored
+    by the #854 registry.
+  </li>
+</ol>
+
+<h2>How the survey reshaped the forks</h2>
+<p>
+  The original item listed <strong>five</strong> open questions. The survey + the standing fork-existence
+  test leaves <strong>two genuine forks</strong>; the other three dissolve to "supported by default."
+</p>
+<ul>
+  <li>
+    <strong>Fork 1 — Layer-1 proposal form.</strong> The survey found the platform is <em>already
+    working on this exact thing</em> (#11002 <code>@scope isolated</code>). Native-first says
+    <strong>track #11002</strong> rather than mint a competing form (a bespoke property would collide with
+    the existing <code>isolation</code> name and duplicate live work). Default ~80%.
+  </li>
+  <li>
+    <strong>Fork 2 — placement.</strong> Own plug vs fold into <code>webregistries</code>. The
+    separate-and-decouple bias and the fact that style isolation recurs independently of identity
+    isolation argue for its <strong>own plug</strong> (default ~70%); the coherent counter is cohesion
+    with the scoped-component system it completes.
+  </li>
+  <li>
+    <strong>Dissolved (supported by default):</strong> both strategies <strong>S1</strong> (unique-class
+    light DOM, a11y-free, not immune to external hostile CSS) and <strong>S2</strong> (shadow-per-component,
+    immune, a11y re-forward cost) are conformant impls of the Layer-1 contract — a per-deployment
+    Configurator choice, not a WE mandate (flavor default S1, the native-first floor; soft/revisitable).
+    Both impl <strong>layers</strong> ship (build-transform primary, runtime polyfill fallback). And
+    token DI <strong>composes with both</strong> — custom properties inherit across the shadow boundary, so
+    even S2 keeps theming. None of these has an excluded branch, so none is a decision.
+  </li>
+</ul>
+
+<p>
+  Full grounding — the per-claim survey with sources and the concrete <code>file:line</code> refs — is in
+  <code>we:reports/2026-06-20-scoped-component-css-isolation.md</code>, and the prepared forks live on
+  <a href="/backlog/1349-light-dom-scoped-component-css-isolation-native-compile-prop/">#1349</a>.
+</p>
+{% endraw %}

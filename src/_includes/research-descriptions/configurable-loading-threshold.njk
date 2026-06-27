@@ -93,13 +93,13 @@
 
 <p>Angular's <code>@defer</code> block (Angular 17+) provides the most explicit configurable loading timing of any major framework:</p>
 
-<pre><code>@defer {
+<we-code-view><pre><code>@defer {
   &lt;large-component /&gt;
 } @loading (after 100ms; minimum 1s) {
   &lt;img alt="loading..." src="loading.gif" /&gt;
 } @placeholder (minimum 500ms) {
   &lt;p&gt;Placeholder content&lt;/p&gt;
-}</code></pre>
+}</code></pre></we-code-view>
 
 <table>
   <thead>
@@ -166,18 +166,18 @@
 
 <p>The Loader Intent already defines the architectural surface for timing configuration:</p>
 
-<pre><code>// From intents.json — timing dimension
+<we-code-view><pre><code>// From intents.json — timing dimension
 "timing": {
   "values": ["immediate", "debounced"],
   "contract": {
     "immediate": "Loading indicator appears as soon as operation starts (0ms delay).",
     "debounced": "Defaults to 400ms (Configurable). Prevents flicker for fast operations."
   }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <p>And the <code>LoaderConfig</code> example already shows how custom timing values are provided:</p>
 
-<pre><code>const LoaderConfig = {
+<we-code-view><pre><code>const LoaderConfig = {
     timings: {
         debounced: 400,   // Default threshold
         complex: 800      // Longer threshold for known-slow operations
@@ -185,7 +185,7 @@
     defaults: {
         region: { strategy: 'soft', timing: 'debounced', context: 'transition' }
     }
-};</code></pre>
+};</code></pre></we-code-view>
 
 <p>The architecture is in place. What's missing is formalization of the <strong>two-parameter model</strong> and the <strong>configuration flow</strong>.</p>
 
@@ -218,7 +218,7 @@
 
 <h3>TypeScript Interface</h3>
 
-<pre><code>interface TimingProfile {
+<we-code-view><pre><code>interface TimingProfile {
   /** Milliseconds before showing the loading indicator (default: 400) */
   delay: number;
   /** Minimum display duration once shown (default: 500) */
@@ -242,7 +242,7 @@ const config: LoaderConfig = {
     region:  { strategy: 'soft', timing: 'debounced' },
     viewport: { strategy: 'hard', timing: 'debounced' },
   },
-};</code></pre>
+};</code></pre></we-code-view>
 
 <h3>Configuration Flow</h3>
 
@@ -302,7 +302,7 @@ const config: LoaderConfig = {
 
 <p>The <a href="/blocks/router/">Router</a> consumes <code>LoaderIntent</code> from the injector chain. Per-route attributes map directly to timing profiles:</p>
 
-<pre><code>&lt;!-- Fast route: uses app-level debounced default --&gt;
+<we-code-view><pre><code>&lt;!-- Fast route: uses app-level debounced default --&gt;
 &lt;template route="/dashboard" route:loader="loadDashboard"&gt;
   ...
 &lt;/template&gt;
@@ -320,7 +320,7 @@ const config: LoaderConfig = {
           route:loader="loadUser"
           route:loader-timing="immediate"&gt;
   ...
-&lt;/template&gt;</code></pre>
+&lt;/template&gt;</code></pre></we-code-view>
 
 
 <h2>Design System Timing Conventions</h2>

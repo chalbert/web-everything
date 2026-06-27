@@ -114,17 +114,17 @@
 <div class="syntax-compare">
   <div>
     <div class="col-header">DSL</div>
-<pre><code>provide MyStore
+<we-code-view><pre><code>provide MyStore
   as 'customContexts:state';
-</code></pre>
+</code></pre></we-code-view>
   </div>
   <div>
     <div class="col-header">Runtime API</div>
-<pre><code>injector.set(
+<we-code-view><pre><code>injector.set(
   'customContexts:state',
   MyStore
 );
-</code></pre>
+</code></pre></we-code-view>
   </div>
 </div>
 
@@ -132,20 +132,20 @@
 <div class="syntax-compare">
   <div>
     <div class="col-header">DSL</div>
-<pre><code>provide { 'my-btn': Button }
+<we-code-view><pre><code>provide { 'my-btn': Button }
   in 'customElements';
-</code></pre>
+</code></pre></we-code-view>
   </div>
   <div>
     <div class="col-header">Runtime API</div>
-<pre><code>const elements =
+<we-code-view><pre><code>const elements =
   injector.get('customElements')
   ?? new CustomElementRegistry();
 
 elements.define('my-btn', Button);
 injector.set('customElements',
   elements);
-</code></pre>
+</code></pre></we-code-view>
   </div>
 </div>
 
@@ -153,17 +153,17 @@ injector.set('customElements',
 <div class="syntax-compare">
   <div>
     <div class="col-header">DSL</div>
-<pre><code>// All providers
+<we-code-view><pre><code>// All providers
 provide * from import.injector;
 
 // Selected providers
 provide { 'customElements' }
   from import.injector;
-</code></pre>
+</code></pre></we-code-view>
   </div>
   <div>
     <div class="col-header">Runtime API</div>
-<pre><code>// All providers
+<we-code-view><pre><code>// All providers
 for (const [key, value]
   of parent.entries()) {
   injector.set(key, value);
@@ -176,7 +176,7 @@ if (elements) {
   injector.set('customElements',
     elements);
 }
-</code></pre>
+</code></pre></we-code-view>
   </div>
 </div>
 
@@ -184,21 +184,21 @@ if (elements) {
 <div class="syntax-compare">
   <div>
     <div class="col-header">DSL</div>
-<pre><code>consume nav
+<we-code-view><pre><code>consume nav
   from 'customContexts:nav';
 
 // nav is Consumable — not awaited
 const { value } = await nav;
-</code></pre>
+</code></pre></we-code-view>
   </div>
   <div>
     <div class="col-header">Runtime API</div>
-<pre><code>const nav = injector.consume(
+<we-code-view><pre><code>const nav = injector.consume(
   'customContexts:nav', this
 );
 // Returns Consumable&lt;T&gt;
 const { value } = await nav;
-</code></pre>
+</code></pre></we-code-view>
   </div>
 </div>
 
@@ -206,18 +206,18 @@ const { value } = await nav;
 <div class="syntax-compare">
   <div>
     <div class="col-header">DSL</div>
-<pre><code>consume state
+<we-code-view><pre><code>consume state
   from 'customContexts:state';
 
 for await (const { value }
   of state) {
   this.render(value);
 }
-</code></pre>
+</code></pre></we-code-view>
   </div>
   <div>
     <div class="col-header">Runtime API</div>
-<pre><code>const state = injector.consume(
+<we-code-view><pre><code>const state = injector.consume(
   'customContexts:state', this
 );
 
@@ -225,7 +225,7 @@ for await (const { value }
   of state) {
   this.render(value);
 }
-</code></pre>
+</code></pre></we-code-view>
   </div>
 </div>
 
@@ -233,19 +233,19 @@ for await (const { value }
 <div class="syntax-compare">
   <div>
     <div class="col-header">DSL</div>
-<pre><code>consume { nav, redux }
+<we-code-view><pre><code>consume { nav, redux }
   from 'customContexts';
-</code></pre>
+</code></pre></we-code-view>
   </div>
   <div>
     <div class="col-header">Runtime API</div>
-<pre><code>const nav = injector.consume(
+<we-code-view><pre><code>const nav = injector.consume(
   'customContexts:nav', this
 );
 const redux = injector.consume(
   'customContexts:redux', this
 );
-</code></pre>
+</code></pre></we-code-view>
   </div>
 </div>
 
@@ -253,7 +253,7 @@ const redux = injector.consume(
 <div class="syntax-compare">
   <div>
     <div class="col-header">DSL</div>
-<pre><code>injector AppScope {
+<we-code-view><pre><code>injector AppScope {
   provide AppStore
     as 'customContexts:state';
   provide Router
@@ -265,11 +265,11 @@ injector TestScope
   provide MockStore
     as 'customContexts:state';
 }
-</code></pre>
+</code></pre></we-code-view>
   </div>
   <div>
     <div class="col-header">Runtime API</div>
-<pre><code>const AppScope =
+<we-code-view><pre><code>const AppScope =
   new Injector('AppScope');
 AppScope.set('customContexts:state',
   AppStore);
@@ -281,7 +281,7 @@ const TestScope =
 TestScope.parentInjector = AppScope;
 TestScope.set('customContexts:state',
   MockStore);
-</code></pre>
+</code></pre></we-code-view>
   </div>
 </div>
 
@@ -289,15 +289,15 @@ TestScope.set('customContexts:state',
 <div class="syntax-compare">
   <div>
     <div class="col-header">DSL</div>
-<pre><code>provide Logger
+<we-code-view><pre><code>provide Logger
   as 'customContexts:logger';
 consume config
   from 'customContexts:config';
-</code></pre>
+</code></pre></we-code-view>
   </div>
   <div>
     <div class="col-header">Runtime API</div>
-<pre><code>const mod = new InjectableModule(
+<we-code-view><pre><code>const mod = new InjectableModule(
   'my-mod', import.meta, (m) =&gt; {
     m.provide(
       'customContexts:logger',
@@ -310,7 +310,7 @@ consume config
   }
 );
 mod.bootstrap();
-</code></pre>
+</code></pre></we-code-view>
   </div>
 </div>
 
@@ -325,17 +325,17 @@ mod.bootstrap();
 <div class="syntax-compare">
   <div>
     <div class="col-header">Plugged</div>
-<pre><code>// Node.prototype patches
+<we-code-view><pre><code>// Node.prototype patches
 const inj =
   element.getClosestInjector();
-</code></pre>
+</code></pre></we-code-view>
   </div>
   <div>
     <div class="col-header">Unplugged</div>
-<pre><code>// InjectorRoot static methods
+<we-code-view><pre><code>// InjectorRoot static methods
 const inj = root
   .ensureInjector(element);
-</code></pre>
+</code></pre></we-code-view>
   </div>
 </div>
 
@@ -343,7 +343,7 @@ const inj = root
 <div class="syntax-compare">
   <div>
     <div class="col-header">Plugged</div>
-<pre><code>element.getOwnInjector();
+<we-code-view><pre><code>element.getOwnInjector();
 element.hasOwnInjector();
 element.getClosestInjector();
 
@@ -351,11 +351,11 @@ for (const inj
   of element.injectors()) {
   console.log(inj.providers);
 }
-</code></pre>
+</code></pre></we-code-view>
   </div>
   <div>
     <div class="col-header">Unplugged</div>
-<pre><code>InjectorRoot.getProviderOf(
+<we-code-view><pre><code>InjectorRoot.getProviderOf(
   element, 'customContexts:nav');
 InjectorRoot.getProvidersOf(element);
 
@@ -363,7 +363,7 @@ for (const inj of InjectorRoot
   .getInjectorChain(element)) {
   console.log(inj.providers);
 }
-</code></pre>
+</code></pre></we-code-view>
   </div>
 </div>
 
@@ -371,7 +371,7 @@ for (const inj of InjectorRoot
 <div class="syntax-compare">
   <div>
     <div class="col-header">Plugged</div>
-<pre><code>element.getContext('nav');
+<we-code-view><pre><code>element.getContext('nav');
 element.getOwnContext('nav');
 element.hasContext('nav');
 element.ensureContext('nav');
@@ -379,11 +379,11 @@ element.createContext('nav');
 element.queryContext(
   'nav', 'path.to.value');
 element.createElement('my-button');
-</code></pre>
+</code></pre></we-code-view>
   </div>
   <div>
     <div class="col-header">Unplugged</div>
-<pre><code>InjectorRoot.getProviderOf(
+<we-code-view><pre><code>InjectorRoot.getProviderOf(
   element, 'customContexts:nav');
 
 // No convenience wrappers —
@@ -394,7 +394,7 @@ InjectorRoot.getValueInProviderOf(
   element,
   'customElements',
   'my-button');
-</code></pre>
+</code></pre></we-code-view>
   </div>
 </div>
 
@@ -432,7 +432,7 @@ InjectorRoot.getValueInProviderOf(
   <li><strong>AsyncIterator-compatible</strong> — supports <code>for await (const { value } of consumable)</code> for reactive watching</li>
   <li><strong>Multi-resolving</strong> — <code>provide(value)</code> can be called multiple times, each time resolving the current pending promise and creating a new one</li>
 </ul>
-<pre><code>// One-shot
+<we-code-view><pre><code>// One-shot
 const { value } = await consumable;
 
 // Reactive
@@ -442,7 +442,7 @@ for await (const { value } of consumable) {
 
 // Rejection (provider removed)
 consumable.reject(new Error('Provider disposed'));
-</code></pre>
+</code></pre></we-code-view>
 
 <h3>3.5 Injector Chain</h3>
 <p>
@@ -469,7 +469,7 @@ consumable.reject(new Error('Provider disposed'));
 </table>
 
 <h3>3.7 Provider Lifecycle</h3>
-<pre><code>Created        → injector.set(key, provider)
+<we-code-view><pre><code>Created        → injector.set(key, provider)
   ↓
 Claimed        → claim(provider) notifies existing consumers
   ↓
@@ -477,7 +477,7 @@ Updated        → consumable.provide(newValue) — triggers await/for-await
   ↓
 Disposed       → consumable.reject(error) — exits for-await loops
                   injector.delete(key) + unclaim(provider)
-</code></pre>
+</code></pre></we-code-view>
 
 <hr>
 
@@ -616,11 +616,11 @@ Disposed       → consumable.reject(error) — exits for-await loops
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
-    <td><pre><code>provide MyStore as 'customContexts:state';</code></pre></td>
+    <td><we-code-view><pre><code>provide MyStore as 'customContexts:state';</code></pre></we-code-view></td>
   </tr>
   <tr>
     <td>Runtime</td>
-    <td><pre><code>injector.set('customContexts:state', MyStore);</code></pre></td>
+    <td><we-code-view><pre><code>injector.set('customContexts:state', MyStore);</code></pre></we-code-view></td>
   </tr>
 </table>
 
@@ -629,14 +629,14 @@ Disposed       → consumable.reject(error) — exits for-await loops
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
-    <td><pre><code>provide { 'my-button': Button, 'my-input': Input } as 'customElements';</code></pre></td>
+    <td><we-code-view><pre><code>provide { 'my-button': Button, 'my-input': Input } as 'customElements';</code></pre></we-code-view></td>
   </tr>
   <tr>
     <td>Runtime</td>
-    <td><pre><code>const registry = new CustomElementRegistry();
+    <td><we-code-view><pre><code>const registry = new CustomElementRegistry();
 registry.define('my-button', Button);
 registry.define('my-input', Input);
-injector.set('customElements', registry);</code></pre></td>
+injector.set('customElements', registry);</code></pre></we-code-view></td>
   </tr>
 </table>
 
@@ -646,13 +646,13 @@ injector.set('customElements', registry);</code></pre></td>
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
-    <td><pre><code>provide { 'my-button': Button } in 'customElements';</code></pre></td>
+    <td><we-code-view><pre><code>provide { 'my-button': Button } in 'customElements';</code></pre></we-code-view></td>
   </tr>
   <tr>
     <td>Runtime</td>
-    <td><pre><code>const registry = injector.get('customElements') ?? new CustomElementRegistry();
+    <td><we-code-view><pre><code>const registry = injector.get('customElements') ?? new CustomElementRegistry();
 registry.define('my-button', Button);
-injector.set('customElements', registry);</code></pre></td>
+injector.set('customElements', registry);</code></pre></we-code-view></td>
   </tr>
 </table>
 <p>
@@ -667,15 +667,15 @@ injector.set('customElements', registry);</code></pre></td>
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
-    <td><pre><code>// All providers
+    <td><we-code-view><pre><code>// All providers
 provide * from import.injector;
 
 // Selected providers
-provide { 'customElements', 'customAttributes' } from import.injector;</code></pre></td>
+provide { 'customElements', 'customAttributes' } from import.injector;</code></pre></we-code-view></td>
   </tr>
   <tr>
     <td>Runtime</td>
-    <td><pre><code>// All providers
+    <td><we-code-view><pre><code>// All providers
 for (const [key, provider] of parentInjector.entries()) {
   injector.set(key, provider);
 }
@@ -684,12 +684,12 @@ for (const [key, provider] of parentInjector.entries()) {
 for (const key of ['customElements', 'customAttributes']) {
   const provider = parentInjector.get(key);
   if (provider) injector.set(key, provider);
-}</code></pre></td>
+}</code></pre></we-code-view></td>
   </tr>
 </table>
 
 <h3>5.4 Provide from URL (Deferred)</h3>
-<pre><code>provide * from 'https://lib.company.com/shared';</code></pre>
+<we-code-view><pre><code>provide * from 'https://lib.company.com/shared';</code></pre></we-code-view>
 <p>
   <strong>Status:</strong> Deferred to Phase 2.
   Requires dynamic <code>import()</code> combined with injector binding.
@@ -733,12 +733,12 @@ for (const key of ['customElements', 'customAttributes']) {
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
-    <td><pre><code>consume nav from 'customContexts:nav';</code></pre></td>
+    <td><we-code-view><pre><code>consume nav from 'customContexts:nav';</code></pre></we-code-view></td>
   </tr>
   <tr>
     <td>Runtime</td>
-    <td><pre><code>const nav = injector.consume('customContexts:nav', this);
-// nav: Consumable&lt;NavigationContext&gt;</code></pre></td>
+    <td><we-code-view><pre><code>const nav = injector.consume('customContexts:nav', this);
+// nav: Consumable&lt;NavigationContext&gt;</code></pre></we-code-view></td>
   </tr>
 </table>
 
@@ -747,12 +747,12 @@ for (const key of ['customElements', 'customAttributes']) {
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
-    <td><pre><code>consume { nav, redux } from 'customContexts';</code></pre></td>
+    <td><we-code-view><pre><code>consume { nav, redux } from 'customContexts';</code></pre></we-code-view></td>
   </tr>
   <tr>
     <td>Runtime</td>
-    <td><pre><code>const nav = injector.consume('customContexts:nav', this);
-const redux = injector.consume('customContexts:redux', this);</code></pre></td>
+    <td><we-code-view><pre><code>const nav = injector.consume('customContexts:nav', this);
+const redux = injector.consume('customContexts:redux', this);</code></pre></we-code-view></td>
   </tr>
 </table>
 <p>
@@ -765,11 +765,11 @@ const redux = injector.consume('customContexts:redux', this);</code></pre></td>
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
-    <td><pre><code>consume { 'foo.bar[0]' as item } from 'customContexts:data';</code></pre></td>
+    <td><we-code-view><pre><code>consume { 'foo.bar[0]' as item } from 'customContexts:data';</code></pre></we-code-view></td>
   </tr>
   <tr>
     <td>Runtime</td>
-    <td><pre><code>const item = injector.consume('customContexts:data/foo.bar[0]', this);</code></pre></td>
+    <td><we-code-view><pre><code>const item = injector.consume('customContexts:data/foo.bar[0]', this);</code></pre></we-code-view></td>
   </tr>
 </table>
 <p>
@@ -788,7 +788,7 @@ const redux = injector.consume('customContexts:redux', this);</code></pre></td>
   prefetches all consumed modules in parallel, and makes consumed values available synchronously
   when the block body executes — exactly like ES module <code>import</code> bindings.
 </p>
-<pre><code>// DSL — consumed values are synchronous
+<we-code-view><pre><code>// DSL — consumed values are synchronous
 injector AppScope {
   provide DateFnsAdapter as '@date/core';
   consume { format } from '@date/core';
@@ -796,7 +796,7 @@ injector AppScope {
   // 'format' is available here synchronously,
   // just like an import binding.
   const title = format(new Date(), 'MMMM yyyy');
-}</code></pre>
+}</code></pre></we-code-view>
 <p>
   The async resolution phase (fetching modules, resolving the tree) happens <em>before</em> the block body runs.
   This is not fundamentally different from how <code>import</code> works — there is an async loading/linking phase,
@@ -812,7 +812,7 @@ injector AppScope {
   <li><strong>Reactive consumption:</strong> The <code>for await...of</code> protocol enables watching for provider changes over time. An awaited value would be a snapshot, losing reactivity.</li>
   <li><strong>Deferred resolution:</strong> A provider may not exist yet when <code>consume()</code> is called. The Consumable resolves when a matching provider is registered via the claim/unclaim system.</li>
 </ol>
-<pre><code>// Runtime API — consumed values are async
+<we-code-view><pre><code>// Runtime API — consumed values are async
 class MyElement extends HTMLElement {
   #nav = injector.consume('customContexts:nav', this);
 
@@ -825,7 +825,7 @@ class MyElement extends HTMLElement {
       this.render(nav);
     }
   }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h4>Summary</h4>
 <table>
@@ -865,20 +865,20 @@ class MyElement extends HTMLElement {
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
-    <td><pre><code>injector AppScope {
+    <td><we-code-view><pre><code>injector AppScope {
   provide * from import.injector;
   provide { 'my-button': Button } as 'customElements';
   provide AppStore as 'customContexts:state';
-}</code></pre></td>
+}</code></pre></we-code-view></td>
   </tr>
   <tr>
     <td>Runtime</td>
-    <td><pre><code>const AppScope = new Injector('AppScope');
+    <td><we-code-view><pre><code>const AppScope = new Injector('AppScope');
 for (const [k, v] of parentInjector.entries()) AppScope.set(k, v);
 const reg = new CustomElementRegistry();
 reg.define('my-button', Button);
 AppScope.set('customElements', reg);
-AppScope.set('customContexts:state', AppStore);</code></pre></td>
+AppScope.set('customContexts:state', AppStore);</code></pre></we-code-view></td>
   </tr>
 </table>
 
@@ -887,17 +887,17 @@ AppScope.set('customContexts:state', AppStore);</code></pre></td>
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
-    <td><pre><code>injector TestScope extends AppScope {
+    <td><we-code-view><pre><code>injector TestScope extends AppScope {
   provide { 'my-button': MockButton } as 'customElements';
-}</code></pre></td>
+}</code></pre></we-code-view></td>
   </tr>
   <tr>
     <td>Runtime</td>
-    <td><pre><code>const TestScope = new Injector('TestScope');
+    <td><we-code-view><pre><code>const TestScope = new Injector('TestScope');
 TestScope.parentInjector = AppScope;
 const reg = new CustomElementRegistry();
 reg.define('my-button', MockButton);
-TestScope.set('customElements', reg);</code></pre></td>
+TestScope.set('customElements', reg);</code></pre></we-code-view></td>
   </tr>
 </table>
 <p>
@@ -911,29 +911,29 @@ TestScope.set('customElements', reg);</code></pre></td>
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
-    <td><pre><code>injector Sandbox isolate {
+    <td><we-code-view><pre><code>injector Sandbox isolate {
   provide SandboxStore as 'customContexts:state';
   // No parent — all providers must be explicit
-}</code></pre></td>
+}</code></pre></we-code-view></td>
   </tr>
   <tr>
     <td>Runtime</td>
-    <td><pre><code>const Sandbox = new Injector('Sandbox');
+    <td><we-code-view><pre><code>const Sandbox = new Injector('Sandbox');
 // parentInjector remains null
-Sandbox.set('customContexts:state', SandboxStore);</code></pre></td>
+Sandbox.set('customContexts:state', SandboxStore);</code></pre></we-code-view></td>
   </tr>
 </table>
 <p><code>extends</code> and <code>isolate</code> are mutually exclusive.</p>
 
 <h3>7.4 Anonymous Block</h3>
-<pre><code>// DSL
+<we-code-view><pre><code>// DSL
 injector {
   provide * from import.injector;
 }
 
 // Runtime — no name needed
 const scope = new Injector();
-for (const [k, v] of parentInjector.entries()) scope.set(k, v);</code></pre>
+for (const [k, v] of parentInjector.entries()) scope.set(k, v);</code></pre></we-code-view>
 
 <h3>7.5 Consume Inside Injector Blocks</h3>
 <p>
@@ -942,7 +942,7 @@ for (const [k, v] of parentInjector.entries()) scope.set(k, v);</code></pre>
   <code>provide</code> and <code>consume</code> statement statically, build the complete dependency graph,
   and resolve all dependencies <em>before</em> the block body executes.
 </p>
-<pre><code>// DSL — consume inside an injector block
+<we-code-view><pre><code>// DSL — consume inside an injector block
 injector AppScope {
   provide DateFnsAdapter as '@date/core';
   provide FloatingUIDOM   as '@ui/floating';
@@ -953,9 +953,9 @@ injector AppScope {
 
   // Consumed values are synchronous — like import bindings
   provide AppCalendar as 'customElements:hollow-calendar';
-}</code></pre>
+}</code></pre></we-code-view>
 <p>The transformer desugars this to:</p>
-<pre><code>// Compiled output — async resolution wrapped around synchronous body
+<we-code-view><pre><code>// Compiled output — async resolution wrapped around synchronous body
 const AppScope = await (async () => {
   const scope = new Injector('AppScope');
   scope.set('@date/core', DateFnsAdapter);
@@ -967,7 +967,7 @@ const AppScope = await (async () => {
 
   scope.set('customElements:hollow-calendar', AppCalendar);
   return scope;
-})();</code></pre>
+})();</code></pre></we-code-view>
 <p>
   <strong>Key insight:</strong> The async resolution phase is invisible to the developer.
   Inside the block, consumed values appear synchronous — exactly like <code>import</code> bindings
@@ -991,11 +991,11 @@ const AppScope = await (async () => {
   that refers to the current module's injector context.
   It is used as a source in <code>provide ... from</code> statements.
 </p>
-<pre><code>// Inside an injector block
+<we-code-view><pre><code>// Inside an injector block
 injector AppScope {
   provide * from import.injector;            // re-provide all from module's parent
   provide { 'customElements' } from import.injector; // re-provide specific registries
-}</code></pre>
+}</code></pre></we-code-view>
 
 <h3>8.2 The ES Module Singleton Problem</h3>
 <p>
@@ -1011,26 +1011,26 @@ injector AppScope {
 
 <h3>8.3 Compile-Time Solution</h3>
 <p>A transformer replaces <code>import.injector</code> with a scope-resolution function call:</p>
-<pre><code>// Source (DSL)
+<we-code-view><pre><code>// Source (DSL)
 provide * from import.injector;
 
 // Compiled output
 provide * from __resolveInjector(import.meta);
 // __resolveInjector uses a WeakMap&lt;ImportMeta, Injector&gt; to look up
-// the injector that was active when this module was loaded.</code></pre>
+// the injector that was active when this module was loaded.</code></pre></we-code-view>
 <p>
   The injector binding happens at module initialization time.
   The build tool inserts a registration call at the top of the compiled module:
 </p>
-<pre><code>// Inserted by transformer
-__registerModuleInjector(import.meta, __currentInjector);</code></pre>
+<we-code-view><pre><code>// Inserted by transformer
+__registerModuleInjector(import.meta, __currentInjector);</code></pre></we-code-view>
 
 <h3>8.4 Runtime Fallback (Factory Pattern)</h3>
 <p>
   Without a transformer, modules participate in injection via the
   <code>InjectableModule</code> pattern — a factory function that receives the injector as a parameter:
 </p>
-<pre><code>// Module exports a factory
+<we-code-view><pre><code>// Module exports a factory
 export function setup(injector) {
   const parsers = injector.get('customExpressionParsers');
   injector.set('customContexts:state', new AppStore());
@@ -1039,7 +1039,7 @@ export function setup(injector) {
 // Consumer calls the factory with the appropriate scope
 import { setup } from './my-module.js';
 const myInjector = new ModuleInjector(import.meta);
-setup(myInjector);</code></pre>
+setup(myInjector);</code></pre></we-code-view>
 <p>This is the approach used by the plateau project's <code>InjectableModule</code> class and is the recommended Tier 1 pattern.</p>
 
 <hr>
@@ -1123,7 +1123,7 @@ setup(myInjector);</code></pre>
 
 <h3>9.2 Unplugged Mode (Static methods)</h3>
 <p>All DOM injection operations are available without patches via <code>InjectorRoot</code> static methods:</p>
-<pre><code>// Get a specific provider
+<we-code-view><pre><code>// Get a specific provider
 const provider = InjectorRoot.getProviderOf(element, 'customContexts:nav');
 
 // Get all providers available to an element
@@ -1144,11 +1144,11 @@ const ButtonCls = InjectorRoot.getValueInProviderOf(element, 'customElements', '
 const root = new InjectorRoot();
 root.attach(document);
 const injector = root.ensureInjector(element);
-injector.set('customContexts:state', myStore);</code></pre>
+injector.set('customContexts:state', myStore);</code></pre></we-code-view>
 
 <h3>9.3 HTML Declarative Forms (Deferred to Phase 2)</h3>
 <p>These forms require the <code>customScriptTypes</code> registry which is not yet built:</p>
-<pre><code>&lt;!-- Script type: injector --&gt;
+<we-code-view><pre><code>&lt;!-- Script type: injector --&gt;
 &lt;script type="injector" name="AppScope"&gt;
   provide AppStore as 'customContexts:state';
   provide Router as 'customContexts:route';
@@ -1162,7 +1162,7 @@ injector.set('customContexts:state', myStore);</code></pre>
 &lt;!-- Isolated scope --&gt;
 &lt;div injector="Sandbox" isolate&gt;
   &lt;!-- no parent chain --&gt;
-&lt;/div&gt;</code></pre>
+&lt;/div&gt;</code></pre></we-code-view>
 
 <h3>9.4 Creation Injector Context</h3>
 <p>
@@ -1171,11 +1171,11 @@ injector.set('customContexts:state', myStore);</code></pre>
   The system handles this via <code>InjectorRoot.creationInjector</code> — a static property
   set before element creation to capture the intended injector scope:
 </p>
-<pre><code>// Internal mechanism (handled automatically in plugged mode)
+<we-code-view><pre><code>// Internal mechanism (handled automatically in plugged mode)
 InjectorRoot.creationInjector = parentInjector;
 const element = document.createElement('my-element');
 // element's constructor can access InjectorRoot.creationInjector
-InjectorRoot.creationInjector = null;</code></pre>
+InjectorRoot.creationInjector = null;</code></pre></we-code-view>
 
 <hr>
 
@@ -1183,18 +1183,18 @@ InjectorRoot.creationInjector = null;</code></pre>
 
 <h3>10.1 ModuleInjector</h3>
 <p>A specialized injector for ES Module scopes. Targets <code>ImportMeta</code> instead of DOM elements.</p>
-<pre><code>import { ModuleInjector } from 'web-everything/unplugged';
+<we-code-view><pre><code>import { ModuleInjector } from 'web-everything/unplugged';
 
 const moduleInjector = new ModuleInjector(import.meta);
 moduleInjector.set('customContexts:config', appConfig);
-moduleInjector.set('customElements', myRegistry);</code></pre>
+moduleInjector.set('customElements', myRegistry);</code></pre></we-code-view>
 
 <h3>10.2 InjectableModule</h3>
 <p>
   A convenience facade that wraps <code>ModuleInjector</code> with a name, setup callback, and exports tracking.
   This is the recommended Tier 1 pattern for module-level injection.
 </p>
-<pre><code>import { InjectableModule } from 'web-everything/unplugged';
+<we-code-view><pre><code>import { InjectableModule } from 'web-everything/unplugged';
 
 const module = new InjectableModule('my-module', import.meta, (mod) => {
   // Setup: provide into this module's injector
@@ -1205,14 +1205,14 @@ const module = new InjectableModule('my-module', import.meta, (mod) => {
 });
 
 // Bootstrap triggers the setup function
-module.bootstrap();</code></pre>
+module.bootstrap();</code></pre></we-code-view>
 
 <h3>10.3 Cross-Scope Bridging</h3>
 <p>
   Module injectors and DOM injectors can be connected in a parent-child hierarchy.
   This allows module-level providers to flow into the DOM tree:
 </p>
-<pre><code>// Module-level injector (provides app-wide dependencies)
+<we-code-view><pre><code>// Module-level injector (provides app-wide dependencies)
 const appModule = new ModuleInjector(import.meta);
 appModule.set('customContexts:config', appConfig);
 
@@ -1223,7 +1223,7 @@ const docInjector = root.ensureInjector(document);
 docInjector.parentInjector = appModule;
 
 // Now any element in the document can consume 'customContexts:config'
-// because the chain traverses: element → ... → document → appModule</code></pre>
+// because the chain traverses: element → ... → document → appModule</code></pre></we-code-view>
 
 <p>
   <strong>Type compatibility note:</strong> <code>HTMLInjector</code> expects querier type <code>Node</code>,
@@ -1239,7 +1239,7 @@ docInjector.parentInjector = appModule;
   A custom element class is defined in a module but lives in a DOM tree.
   These are separate scopes with different injector chains:
 </p>
-<pre><code>// Module scope: resolved at class definition time
+<we-code-view><pre><code>// Module scope: resolved at class definition time
 // (via import.injector or InjectableModule)
 consume { format } from import.injector;
 
@@ -1252,7 +1252,7 @@ class MyElement extends HTMLElement {
     // Module-scope values are captured in closure
     this.textContent = format(nav.currentRoute);
   }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <hr>
 
@@ -1263,7 +1263,7 @@ class MyElement extends HTMLElement {
   The <code>ProviderTypeMap</code> interface maps provider keys to their value types.
   Applications extend it via module augmentation:
 </p>
-<pre><code>// types/providers.d.ts
+<we-code-view><pre><code>// types/providers.d.ts
 declare module 'web-everything' {
   interface ProviderTypeMap {
     'customElements': CustomElementRegistry;
@@ -1273,9 +1273,9 @@ declare module 'web-everything' {
     'customContexts:state': AppStore;
     'customContexts:route': RouteContext;
   }
-}</code></pre>
+}</code></pre></we-code-view>
 <p>This enables typed <code>get()</code>, <code>set()</code>, and <code>consume()</code> calls:</p>
-<pre><code>// TypeScript infers the return type from the key
+<we-code-view><pre><code>// TypeScript infers the return type from the key
 const nav = injector.get('customContexts:nav');
 // nav: NavigationContext | undefined
 
@@ -1283,19 +1283,19 @@ const consumable = injector.consume('customContexts:state', this);
 // consumable: Consumable&lt;AppStore&gt;
 
 injector.set('customContexts:nav', new NavigationContext());
-// Type-checks: value must be NavigationContext</code></pre>
+// Type-checks: value must be NavigationContext</code></pre></we-code-view>
 
 <h3>11.2 Typed Consume</h3>
 <p>When the ProviderTypeMap doesn't cover a key, explicit typing is available:</p>
-<pre><code>const consumable = injector.consume&lt;MyService&gt;('custom:my-service', this);
-// consumable: Consumable&lt;MyService&gt;</code></pre>
+<we-code-view><pre><code>const consumable = injector.consume&lt;MyService&gt;('custom:my-service', this);
+// consumable: Consumable&lt;MyService&gt;</code></pre></we-code-view>
 
 <h3>11.3 Aspirational: <code>declare injector</code> (Deferred)</h3>
 <p>
   A TypeScript language extension for declaring typed injector scopes.
   This would require TypeScript team adoption and is not actionable today.
 </p>
-<pre><code>// Aspirational — requires TS language extension
+<we-code-view><pre><code>// Aspirational — requires TS language extension
 declare injector AppScope {
   provides: {
     'customContexts:redux': ReduxStore;
@@ -1304,7 +1304,7 @@ declare injector AppScope {
   consumes: {
     'customContexts:config': AppConfig;
   }
-}</code></pre>
+}</code></pre></we-code-view>
 
 <hr>
 
@@ -1362,7 +1362,7 @@ declare injector AppScope {
   The Runtime API (Tier 1) requires <strong>no build tooling</strong>.
   All injector operations use standard JavaScript:
 </p>
-<pre><code>import { InjectorRoot, HTMLInjector } from 'web-everything/unplugged';
+<we-code-view><pre><code>import { InjectorRoot, HTMLInjector } from 'web-everything/unplugged';
 
 const root = new InjectorRoot();
 root.attach(document);
@@ -1372,7 +1372,7 @@ injector.set('customContexts:state', new AppStore());
 
 // Consume
 const consumable = injector.consume('customContexts:state', myElement);
-const { value } = await consumable;</code></pre>
+const { value } = await consumable;</code></pre></we-code-view>
 
 <h3>12.3 Light-Tool Path (Phase 2)</h3>
 <p>
@@ -1380,14 +1380,14 @@ const { value } = await consumable;</code></pre>
   (by file extension <code>.injector.ts</code> or a pragma comment)
   and transforms them to standard TypeScript before the compiler processes them.
 </p>
-<pre><code>// vite.config.mts
+<we-code-view><pre><code>// vite.config.mts
 import { injectorTransform } from 'web-everything/tools';
 
 export default {
   plugins: [
     injectorTransform(),  // transforms .injector.ts files
   ],
-};</code></pre>
+};</code></pre></we-code-view>
 <p>The plugin would:</p>
 <ol>
   <li>Parse the DSL syntax with a JavaScript-based parser</li>
