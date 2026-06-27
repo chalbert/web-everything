@@ -3,6 +3,7 @@ kind: story
 size: 13
 status: open
 priority: low
+unsplittableReason: foundational
 locus: frontierui
 relatedProject: webexpressions
 relatedReport: reports/2026-06-27-split-analysis-1827.md
