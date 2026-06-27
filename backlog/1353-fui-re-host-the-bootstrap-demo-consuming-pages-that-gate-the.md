@@ -1,8 +1,10 @@
 ---
 kind: epic
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-06-20"
+dateResolved: "2026-06-27"
+graduatedTo: none
 tags: [frontierui, demos, dogfood, fui-build-gate]
 ---
 
