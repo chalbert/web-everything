@@ -57,3 +57,13 @@ Ran a 20-item parallel batch (77-pt budget): **17 resolved / 2 carried (#1013 ou
 ## Blocked-in-fact (batch-2026-06-19-1150-1141 serial close-out)
 
 The fix-#1 follow-up above is carved to **#1159** (scope `check:standards --local --files` to skip global-consistency rules in isolation), which is still `open` — added `blockedBy: 1159`. A meaningful **third** `/workflow` run only makes sense AFTER #1159 lands (else the same false-red fallback recurs). Also: this item's acceptance is a *parallel `/workflow` run + close audit*, which a **serial `/batch`** session cannot perform (wrong tool; a parallel batch needs its own session and the closing-session skill audits it). So it cannot be resolved from a serial lane — released back to `open`, correctly blocked on #1159.
+
+## Third real multi-lane run — 2026-06-27 (`batch-2026-06-27-1787-1834`)
+
+Ran a 12-item parallel batch (88-pt budget): **11 resolved / 1 re-homed (#1827 → FUI, consumer-parked)**. Partition **5 concurrent / 7 serial / 5 conflict-replays**; `multiLaneFiles` = `we:src/_layouts/base.njk`, `we:src/css/style.css` — eyeballed clean via the green landed build (all lanes' edits present, no clobber). Derived artifacts regenerated once. Landed-tree gate green for the changeset (the sole error was an *untracked concurrent-session* card #1867's wiki-link, not this batch).
+
+**Two NEW defects — carved to #1869 (parent #1147), both silent-loss risks:**
+1. **Integration landed on `main` directly** — no `batch-parallel/*` branch existed to merge; HEAD was already the derived-regen commit. The "workflow never writes the live branch; main agent merges once" contract did **not** hold this run (regressed vs the 2026-06-19 fix #2, which validated the isolated-worktree integrate — so the landing-on-main path is a *different* code path or a regression).
+2. **Ledger reported #1829 `resolved` but its commit was stranded** on `worktree-wf_c5c5c953-077-15`, never merged to `main`. The close audit's ledger-vs-tree reconcile caught it (`status: open` on `main` despite ledger `resolved`); the main agent cherry-picked it. Without that reconcile the work would have been lost on worktree prune.
+
+The conflict→serial-replay safety net and per-item gating behaved; the **landing/ledger-integrity** half is the regression. **Verdict: still do NOT settle** — #1869 (landing + ledger-truth) joins #1159 (in-worktree false-red) as the open fixes before a clean run can settle this item and #1143.
