@@ -1,0 +1,89 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/1871-which-project-include-card-surfaces-migrate-to-we-card-and-h/">#1871</a>
+  (unblocks <a href="/backlog/1608-/">#1608</a>, parent epic #1601 — moving the docs site's own surfaces onto
+  FUI blocks). This is the <em>content-card</em> sibling of the
+  <a href="/research/catalog-tile-we-card-mapping/">catalog-tile → we-card</a> mapping (#1820): the
+  catalog tiles on <a href="/intents/">/intents/</a> and <a href="/blocks/">/blocks/</a> carried status
+  pills + dimension chips; the <code>we:src/_includes/project-*.njk</code> includes do <strong>not</strong>.
+  Verified against the tree — a grep finds <strong>zero</strong> <code>.project-card</code> and no
+  status-pill / dimension-chip vocabulary in those includes — so the #1820 Fork-1a badge+tag mapping does
+  not apply here. What they carry are two <em>content-card</em> surfaces, and converting them is a different
+  migration with its own scope + anchor-semantics call.
+</p>
+
+<h2>The two surfaces — grounded</h2>
+<ul>
+  <li>
+    <strong><code>.section-card</code> (225)</strong> — <code>&lt;section id="…" class="section-card"&gt;</code>
+    content-section wrappers with <code>h3</code>/<code>h4</code> children, deep-linked via
+    <code>.section-card:target</code> + <code>scroll-margin-top</code>
+    (<code>we:src/css/style.css:817-845,1427-1430</code>). The anchor <code>id</code> sits on the
+    <strong>wrapper</strong> (<code>we:src/_includes/project-webcomponents.njk:3,20,64</code>).
+  </li>
+  <li>
+    <strong><code>.standard-card</code> (29, across 14 files)</strong> —
+    <code>&lt;div class="standard-card"&gt;</code> with an <code>&lt;h4&gt;</code> + prose. The anchor
+    <code>id</code> sits on the <strong>child <code>&lt;h4&gt;</code></strong>
+    (<code>id="scope-vocab"</code> etc. — <code>we:src/_includes/project-webcharts.njk:24,31,39</code>,
+    <code>we:src/_includes/project-weblayout.njk:31,41,50</code>,
+    <code>we:src/_includes/project-webrouting.njk:38,48,58</code>), <strong>not</strong> the wrapper. The
+    <code>we:src/_includes/project-webtraits.njk:10</code> pillar headings are <code>no-toc</code> with no id.
+  </li>
+</ul>
+
+<h2>The load-bearing mechanism — what <code>we-card</code> does on upgrade</h2>
+<p>
+  <code>&lt;we-card&gt;</code> is a <code>TransientElement</code> (#1455). On <code>connectedCallback</code>
+  it resolves to an <code>&lt;article&gt;</code> (<code>fui:blocks/card/CardElement.ts:18-20</code>),
+  <strong>transfers every attribute</strong> except <code>is</code>, <code>data-transient-*</code>, and the
+  config attributes <code>title</code>/<code>heading-level</code>
+  (<code>fui:blocks/transient/TransientElement.ts:59-64</code>), then
+  <code>replaceWith()</code>-es the host (<code>TransientElement.ts:75</code>). The <code>title=</code>
+  attribute generates an <strong>id-less</strong> <code>fui-card__title</code> heading at
+  <code>heading-level</code> (default 3, <code>fui:blocks/card/CardElement.ts:38-47</code>,
+  <code>fui:blocks/card/Card.ts:28,56-58</code>).
+</p>
+<p>
+  <strong>Premise correction.</strong> #1871's draft said the card "drops the id used by #anchor TOC links".
+  That is wrong: because attributes transfer, <code>&lt;we-card id="overview" class="section-card"&gt;</code>
+  becomes <code>&lt;article id="overview" class="section-card fui-card"&gt;</code> — the wrapper id rides
+  through, and <code>.section-card:target</code> keeps matching if the class is kept. The genuine residual
+  losses are narrower: (1) the <code>&lt;section&gt;</code>→<code>&lt;article&gt;</code> element-name change,
+  and (2) child-heading ids when <code>title=</code> is used (the generated heading has no id, so a
+  standard-card's <code>&lt;h4 id="scope-vocab"&gt;</code> anchor breaks unless the explicit heading is kept
+  in the body).
+</p>
+
+<h2>Web-platform grounding — <code>&lt;section&gt;</code> vs <code>&lt;article&gt;</code></h2>
+<p>
+  <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/article">MDN</a> (verified 2026-06-27):
+  <code>&lt;article&gt;</code> is "a <strong>self-contained composition</strong> … intended to be
+  <strong>independently distributable or reusable</strong> (e.g., in syndication) … a <strong>product
+  card</strong>, a user-submitted comment, an interactive widget." <code>&lt;section&gt;</code> is a generic
+  thematic grouping <em>within</em> a larger composition. So a <code>.standard-card</code> (a discrete
+  pillar/plane card) is correctly an <code>&lt;article&gt;</code> — a semantic <em>upgrade</em> — while a
+  <code>.section-card</code> is a page's thematic content section; re-declaring 225 of them as
+  <code>&lt;article&gt;</code> mis-states the outline and is a downgrade. <code>&lt;section id&gt;</code> is
+  the right element and should stay.
+</p>
+
+<h2>The forks at DoR</h2>
+<p>
+  <strong>Fork 1 — scope:</strong> <em>standard-card only</em> (the genuine self-contained card; default)
+  vs <em>both</em> (flawed — erasing 225 <code>&lt;section&gt;</code> landmarks to <code>&lt;article&gt;</code>
+  downgrades the document outline) vs <em>neither</em> (dominated; a real card surface exists and the #1601
+  epic wants it dogfooded).
+</p>
+<p>
+  <strong>Fork 2 — heading/anchor preservation:</strong> <em>keep the explicit <code>&lt;hN id&gt;</code>
+  heading inside the card body</em> (default; preserves heading level + anchor id exactly) vs <em>use
+  <code>title=</code>/<code>heading-level=</code></em> (flawed for the ~17 anchor-bearing standard-card
+  headings — drops their id, breaking live in-page anchors; acceptable only for <code>no-toc</code> headings
+  like the webtraits pillars). The wrapper-id / <code>:target</code> survival is <strong>not</strong> a fork —
+  it is preserved for free by attribute transfer.
+</p>
+<p>
+  Full grounding (refs + line numbers) in
+  <code>we:reports/2026-06-27-project-include-we-card-migration.md</code>.
+</p>

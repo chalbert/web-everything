@@ -1,0 +1,22 @@
+{
+  "id": "project-include-we-card-migration",
+  "title": "project-* include content-cards → we-card (scope + anchor/heading semantics)",
+  "status": "open",
+  "summary": "Grounds decision #1871 (unblocks #1608, epic #1601 docs-dogfooding): which content-card surfaces in the we:src/_includes/project-*.njk includes migrate to FUI's <we-card>, and how to keep in-page anchors. Verified in the tree: these includes carry NO catalog tiles / status pills (the #1820/#1607 fork does not apply) — they carry two content-card surfaces: .section-card (225 — <section id=> content-section wrappers with .section-card:target deep-links + h3/h4 children, id on the wrapper) and .standard-card (29 across 14 files, but split by tag: 22 <div class=standard-card> content cards with an <h4 id=> + prose, anchor id on the CHILD h4 not the wrapper; + 7 <a href class=standard-card> LINK tiles that are catalog-tile-shaped, #1820's surface, not content cards). we-card is a TransientElement that resolves to <article> and transfers EVERY non-title/heading-level attribute (incl. id + class) onto it before replaceWith()-ing the host (fui:blocks/transient/TransientElement.ts:59-75, fui:blocks/card/CardElement.ts:18-49). Premise correction: the wrapper id therefore rides through automatically — we-card does NOT drop the section id; .section-card:target keeps matching if the class is kept. The genuine residual losses are narrower: (1) <section>→<article> is a sectioning-semantics downgrade for the 225 thematic page-sections (MDN: <article> = self-contained/syndicatable composition e.g. a product card; <section> = thematic grouping within a larger composition), and (2) we-card's title= generates an id-LESS fui-card__title heading, so a standard-card's <h4 id=scope-vocab> anchor breaks unless the explicit heading is kept inside the body rather than lifted into title=. Forks at DoR: Fork 1 scope — the 22 <div> standard-cards only (default; the 7 <a> link tiles excluded — we-card resolves to a non-linkable <article>, so they ride #1820's outer-anchor pattern) vs both (flawed: erasing 225 <section> landmarks to <article> downgrades the outline) vs neither (dominated). Fork 2 heading/anchor — keep the explicit <hN id> heading in the card body (default; preserves heading level + anchor id exactly) vs use title=/heading-level= (flawed for the ~17 anchor-bearing headings; OK only for no-toc ones like the webtraits pillars). A refute-only skeptic attacked both defaults; verdicts recorded on the item. Full grounding in reports/2026-06-27-project-include-we-card-migration.md.",
+  "dateOpened": "2026-06-27",
+  "lastReviewed": "2026-06-27",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "blocks",
+    "card",
+    "we-card",
+    "content-card",
+    "sectioning-semantics",
+    "anchor-preservation",
+    "docs-dogfooding",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}
