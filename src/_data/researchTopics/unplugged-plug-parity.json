@@ -1,0 +1,20 @@
+{
+  "id": "unplugged-plug-parity",
+  "title": "Unplugged plug parity — delivery default, packaging granularity & the plugged-only residue bar",
+  "status": "open",
+  "summary": "Prep survey for three decision children of epic #1836 (make every plug public API functional unplugged): #1837 (per-plug npm packages vs the @frontierui/plugs monolith), #1838 (default MaaS-served form = unplugged), #1839 (the plugged-only residue bar + 3-state parity table). Shared doctrine ground: #606 (plugs runtime FUI-owned; unplugged = the product surface, plugged = POC/demo proof-vehicle) + #1826/#1807 (plug = a proposed missing standard; plugged/unplugged is a delivery+enforcement axis over ONE contract, platform-decisions.md:845). PACKAGING (#1837): the industry consolidated FROM many packages TO fewer — Radix now ships a unified `radix-ui` umbrella, Chakra v3 collapsed to a single `@chakra-ui/react`, React Aria ships `react-aria-components` as one package — all citing version-skew/dedup hell, and noting subpath `exports` + tree-shaking already deliver the minimal install per-package used to be the only way to get. Our plugs are MORE interdependent (shared runtime registries/contexts) than UI components, so skew risk is higher; the current @frontierui/plugs monolith already ships 8 subpath exports and every consumer imports deep subpaths. Recommendation: keep the monolith (#1045 holds); the only legitimate split axis is Lit's stability-tier (@lit-labs/*), never one-package-per-plug. DEFAULT FORM (#1838): the serve-path IR `form` param (servePathIR.ts:138-145) is catalog-gated with an injected default; doctrine forces default = unplugged (the product surface), plugged = `?form=plugged` opt-in, plugged-only residue served plugged + X-MaaS-Lossy. PARITY VOCAB (#1839): a 3-state model with a partial middle is the established norm — caniuse y/a/n(+d for flag-gated), MDN BCD partial_implementation+required notes. Our works/works-with-caveat/plugged-only maps to caniuse y/a/d; plugged-only is structurally the flag-gated `d`, distinct from partial `a`, so the three states are genuinely distinct. Borrow BCD's discipline: the caveat state carries a mandatory note. Residue bar (strict): plugged-only iff the observable contract requires patching a global/prototype the plug doesn't own a handle to and cannot be reproduced via WeakMap-keyed out-of-band attachment (the injectors createElement-patch is real residue; the registry/behaviors attach-keyed methods are NOT). Full grounding in reports/2026-06-27-unplugged-plug-parity.md.",
+  "dateOpened": "2026-06-27",
+  "lastReviewed": "2026-06-27",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "plugs",
+    "unplugged",
+    "maas",
+    "packaging",
+    "parity",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webplugs"
+}

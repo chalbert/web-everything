@@ -1,0 +1,90 @@
+{% raw %}
+<h2>Question</h2>
+<p>
+  Prep survey for three <code>kind: decision</code> children of epic
+  <a href="/backlog/1836-make-every-plug-public-api-functional-unplugged-parity-matri/">#1836</a> (make every
+  plug public API functional <em>unplugged</em>). Three calls share one prior-art base — the
+  plugged/unplugged delivery model, npm packaging granularity, and capability-parity tables:
+</p>
+<ul>
+  <li><a href="/backlog/1837-decide-per-plug-npm-packages-vs-the-single-frontierui-plugs-/">#1837</a> — one npm package per plug, or the single <code>@frontierui/plugs</code> monolith with subpath exports?</li>
+  <li><a href="/backlog/1838-ratify-default-maas-served-ir-is-unplugged/">#1838</a> — what form does the MaaS origin serve by default?</li>
+  <li><a href="/backlog/1839-decide-the-plugged-only-residue-bar-and-how-the-parity-table/">#1839</a> — what bar makes a capability <em>plugged-only</em>, and how does the parity table mark it?</li>
+</ul>
+
+<h2>The shared doctrine ground</h2>
+<p>
+  Two ratified rulings settle most of the framing before any survey.
+  <strong><a href="/backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth/">#606</a></strong>: the plugs
+  runtime is <strong>FUI-owned</strong> (<code>@frontierui/plugs</code>); WE keeps contracts only. Every plug
+  must have a non-invasive <strong>unplugged</strong> form — <em>the real product surface</em> — and the
+  global-patching <strong>plugged</strong> mode is POC/demo only.
+  <strong><a href="/backlog/1826-decision-prep-doctrine-a-plug-is-a-proposed-missing-standard/">#1826</a>/#1807</strong>:
+  a plug is a proposed missing web standard as runnable code; <em>unplugged</em> = safe-today usage of only
+  what the platform ships, <em>plugged</em> = the proposed-standard prollyfill carrying enforcement/polyfill;
+  the two are a <strong>delivery + enforcement axis over ONE contract</strong>, not two contracts
+  (<code>we:docs/agent/platform-decisions.md:845</code>).
+</p>
+
+<h2>#1837 — packaging: the industry consolidated away from per-package</h2>
+<p>
+  The leading design systems all moved <strong>from many packages to fewer</strong>, citing the same pain
+  — version-skew, dependency duplication, peer-dep/dedup hell:
+</p>
+<ul>
+  <li><strong>Radix</strong> — was per-primitive <code>@radix-ui/react-*</code>; now ships a unified <code>radix-ui</code> umbrella as the recommended default ("prevents version conflicts/duplication", tree-shakeable).</li>
+  <li><strong>Chakra v3</strong> — collapsed many <code>@chakra-ui/*</code> packages into a single <code>@chakra-ui/react</code> (the headline v3 change): simpler install, cohesive API, less maintenance surface.</li>
+  <li><strong>React Aria</strong> — ships <code>react-aria-components</code> as one package; the team found per-component packages "proven to have significant overhead" and is moving to a monopackage.</li>
+  <li><strong>MUI / Lit</strong> — monolith + subpath exports; Lit's only sub-package split is by <em>stability tier</em> (<code>@lit-labs/*</code>), never per-feature.</li>
+</ul>
+<p>
+  The only thing per-package granularity bought — minimal install — is now delivered by <code>exports</code>-map
+  subpaths + bundler tree-shaking. The current <code>@frontierui/plugs</code> monolith already exposes 8
+  domain subpaths and every WE/plateau consumer imports deep subpaths, never the root. Our plugs are
+  <em>more</em> interdependent (shared runtime registries/contexts) than UI components, so skew risk is
+  higher. <strong>Recommendation: keep the monolith (<a href="/backlog/1045-package-frontierui-plugs-as-frontierui-plugs-dual-exports-su/">#1045</a> holds);</strong>
+  the only legitimate split is a future <code>@frontierui/plugs-labs/*</code> stability tier. The W6 per-plug ask
+  (<a href="/backlog/1846-ship-each-plug-as-its-own-npm-package/">#1846</a>) is reframed — subpath exports already
+  give its minimal-install goal.
+</p>
+
+<h2>#1838 — default form: forced unplugged by doctrine</h2>
+<p>
+  The serve-path IR already has the seam: the <code>form</code> query param
+  (<code>we:blocks/renderers/module-service/servePathIR.ts:138-145</code>) is catalog-gated (#662) with an
+  injected default value the neutral contract deliberately doesn't fix. A default is what a consumer gets
+  <em>without opting in</em>, so it must be the product surface — <strong>unplugged</strong> — with
+  <code>?form=plugged</code> the explicit opt-in. A plugged-only residue capability (see #1839) that can't honour
+  the unplugged default is served plugged and marked with the existing <code>X-MaaS-Lossy</code> header. The
+  rival (default plugged) is excluded: it would ship invasive <code>window</code>/prototype mutation as the
+  unmarked default, contradicting #606/#1826.
+</p>
+
+<h2>#1839 — a 3-state parity table is the norm; the residue bar is strict</h2>
+<p>
+  The canonical web-capability tables all use a <strong>3-state model with a partial middle</strong>:
+  caniuse <code>y</code>/<code>a</code> (almost/partial)/<code>n</code>, plus <code>d</code> for "exists but
+  needs a flag"; MDN BCD encodes the middle as <code>partial_implementation: true</code> with a
+  <strong>required <code>notes</code> string</strong>. Our three states map cleanly — <code>works</code> ≈
+  caniuse <code>y</code>, <code>works-with-caveat</code> ≈ <code>a</code> / BCD <code>partial_implementation</code>,
+  <code>plugged-only</code> ≈ caniuse <code>d</code> (flag/plug-gated). Crucially, plugged-only is structurally
+  the <em>gated</em> state <code>d</code>, distinct from partial <code>a</code> — so the three states are
+  genuinely distinct, validating a 3-state (not 2-state) table. Borrow BCD's discipline: the caveat state
+  carries a mandatory note.
+</p>
+<p>
+  The <strong>residue bar is strict</strong>: a capability is plugged-only iff its observable contract requires
+  patching a global/prototype the plug doesn't own a handle to <em>and</em> cannot be reproduced via
+  WeakMap-keyed out-of-band attachment. The injectors <code>Document.prototype.createElement</code> patch
+  (<code>fui:plugs/webinjectors/Node.injectors.patch.ts:101</code>) is real residue — you cannot tag
+  arbitrarily-created nodes without patching the factory. The registry/behaviors methods that attach through an
+  explicit <code>attach(el)</code> call are <em>not</em> residue — they port to a WeakMap. Keeping the bar
+  strict keeps the residue ≈ the genuinely-missing-platform-standard set, the whole point of the parity epic.
+</p>
+
+<h2>Full grounding</h2>
+<p>
+  Session report: <code>we:reports/2026-06-27-unplugged-plug-parity.md</code> (file:line grounding + the full
+  survey tables and sources).
+</p>
+{% endraw %}
