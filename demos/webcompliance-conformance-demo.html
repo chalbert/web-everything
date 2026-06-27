@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Compliance Conformance Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/conformance-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">Web Everything</div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Web Compliance Conformance Demo</h1>
+      <p>
+        The runnable proof that the Web Compliance gate is <strong>conformant</strong>. The runtime — the
+        #437 gate runner (<code>runGate</code>), the #438 waiver machinery (<code>applyWaivers</code>), and
+        the #439 audit mapping — is <strong>relocated to Frontier UI</strong>
+        (<a href="/backlog/1814-relocate-the-webcompliance-runtime-gate-waiver-audit-to-fui/">#1814</a>; WE
+        holds zero executable, #1282). Its conformance runs through the <strong>plateau-hosted conformance
+        runner</strong>
+        (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a> /
+        <a href="/backlog/1790-plateau-origin-conformance-runner-docs-surface-end-to-end-smo/">#1790</a>),
+        which drives the WE-owned webcompliance vector suite
+        (<a href="/backlog/1809-webcompliance-conformance-binding-we-vector-corpus/">#1809</a>: a policy +
+        measured signals in, the gate verdict + waiver effects out) against the FUI binding.
+      </p>
+      <p class="play-caveat">
+        The pass/fail panel below is rendered <strong>at plateau-origin inside an iframe</strong> — the
+        cross-origin runtime boundary (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a>
+        ratified (b)) that reaches the shared, neutral runner with no implementer→runner edge. WE owns only
+        the build-agnostic vectors and the <code>CompliancePolicy</code> meta-schema (#436); the engine impl
+        is FUI's, the runner is plateau's. A green result proves conformance independent of how the gate is
+        built (#899).
+      </p>
+    </header>
+    <div id="play-root">Loading demo&hellip;</div>
+  </main>
+
+  <script type="module" src="/demos/webcompliance-conformance-demo.ts"></script>
+</body>
+</html>

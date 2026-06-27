@@ -1,0 +1,12 @@
+{
+  "id": "webcompliance-conformance-demo",
+  "name": "Web Compliance Conformance Demo",
+  "summary": "The runnable proof that the Web Compliance gate is conformant. The runtime (the #437 gate runner, #438 waivers, #439 audit mapping) is relocated to Frontier UI (#1814, WE holds zero executable); its conformance runs through the plateau-hosted conformance runner (#1788/#1790) driving the WE-owned webcompliance vector suite (#1809: policy + measured signals → gate verdict + waiver effects) against the FUI binding. The pass/fail panel is rendered at plateau-origin inside a cross-origin iframe.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runnable proof that the Web Compliance gate is <strong>conformant</strong>. The runtime — the #437 gate runner (<code>runGate</code>), the #438 waiver machinery (<code>applyWaivers</code>), and the #439 audit mapping — is <strong>relocated to Frontier UI</strong> (<a href=\"/backlog/1814-relocate-the-webcompliance-runtime-gate-waiver-audit-to-fui/\">#1814</a>; WE holds zero executable, #1282). Its conformance runs through the <strong>plateau-hosted conformance runner</strong> (<a href=\"/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/\">#1788</a> / <a href=\"/backlog/1790-plateau-origin-conformance-runner-docs-surface-end-to-end-smo/\">#1790</a>), driving the WE webcompliance vector suite (<a href=\"/backlog/1809-webcompliance-conformance-binding-we-vector-corpus/\">#1809</a>) against the FUI binding.</p><h3>Verified contract</h3><p>WE owns only the build-agnostic vectors and the <code>CompliancePolicy</code> meta-schema (#436); the engine impl is FUI's, the runner is plateau's. The pass/fail panel is rendered <strong>at plateau-origin inside an iframe</strong> — the cross-origin boundary (#1788 ratified (b)) reaching the shared, neutral runner with no implementer→runner edge. A green result proves conformance independent of how the gate is built (#899).</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webcompliance-conformance-demo.html",
+  "projects": [
+    "webcompliance"
+  ]
+}
