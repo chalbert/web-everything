@@ -22,7 +22,28 @@ So the goal is a **bounded index**, not a bounded corpus.
 |---|---|---|
 | Index size (`MEMORY.md`) | **≤ 22 KB** (warn ≥ 20 KB) | headroom under the ~24.4 KB harness truncation limit |
 | Per index line | **≤ 200 chars** | title + one short hook; detail lives in the topic file |
-| Index pointer integrity | every line links to an existing file; every topic file has one index line | no orphans / no unindexed files |
+| Index pointer integrity | every leaf reachable from the map or a sub-index; the map links **only** `index-*` sub-indexes | no orphans; no flat-surface regrowth |
+
+## The index is a tree (#1893) {#index-tree}
+
+`MEMORY.md` is **not** a flat list — it is a three-tier tree (adopted #1893, amending #1868):
+
+1. **Tier 1 — `MEMORY.md` (always-loaded):** a ~10-line **category map** (each line links one
+   `index-<category>.md` sub-index) **+** a small **core-invariants block** (~12 load-bearing rules kept
+   always-on as `- N. Title — hook` lines). This is the only auto-loaded surface.
+2. **Tier 2 — `index-<category>.md` sub-indexes (recall-gated):** the cluster's one-liners as bare
+   `- N. Title — hook`. The agent opens one when the map line's keywords match the task (the **router
+   pattern** — an explicit read from an always-loaded pointer, *not* `description` auto-recall).
+3. **Tier 3 — leaf files `N-slug.md` (the fact):** reached via `node scripts/memory-resolve.mjs <N>`
+   (by number or slug; `--cat` prints the body). `name:` stays the slug, so `[[slug]]` links resolve.
+
+**Add a rule:** create the next `N-slug.md`, add a `- N. Title — hook` line to its **sub-index** (never
+to `MEMORY.md`). Promote to the core-invariants block only if it must be always-loaded.
+
+**Why this is safe under #1868** (whose negative recall test covered only *fully-unindexed* files): every
+sub-index is reachable from the always-loaded map, and the core-invariants block keeps rule-level
+awareness for the highest-stakes rules. `check:memory` enforces the shape — the map may link only
+`index-*` sub-indexes (a leaf link there is denied), and every leaf must be reachable.
 
 ## The four rules
 
@@ -36,9 +57,10 @@ So the goal is a **bounded index**, not a bounded corpus.
    memory, ask: does this belong in `platform-decisions.md` instead?* If yes, codify it there and (at
    most) leave a one-line memory pointer.
 
-2. **Bounded index, detail in files.** Each index line is `- [Title](file.md) — <≤1-line hook>`, ≤ 200
-   chars. Never put memory content in `MEMORY.md`; the file is the home for the fact, the why, and the
-   `[[links]]`.
+2. **Bounded index, detail in files.** Each line is ≤ 200 chars. The map links a sub-index
+   (`- **[Category](index-x.md)** — keywords (N rules)`); a core/sub-index line is `- N. Title — hook`
+   (see [The index is a tree](#index-tree)). Never put memory content in `MEMORY.md`; the leaf file is the
+   home for the fact, the why, and the `[[links]]`.
 
 3. **One canonical memory per idea.** When a new fact extends an existing one, **update that file** —
    don't add a parallel memory. Consolidate clusters (several files orbiting one idea) into a single file
@@ -68,6 +90,12 @@ index line.** *(Which rules are "core" is a judgment call, revisited when the se
 > the **existence** (the pointer must always load). The only way to drop a line safely is **rule 1** — move
 > the rule into `platform-decisions.md` + the `AGENTS.md` router, which the agent reaches on-demand via the
 > router (an explicit-read path that works), not via memory recall.
+>
+> **Amended by #1893:** the negative test above covered only *fully-unindexed* files. The adopted index
+> **tree** applies this same router pattern one level deeper — leaf one-liners live in recall-gated
+> `index-<category>.md` sub-indexes that the always-loaded map links, so they stay reachable (explicit-read
+> from the map) without bloating the always-loaded surface. Core invariants stay always-loaded. See
+> [The index is a tree](#index-tree).
 
 ## Lifecycle
 
@@ -107,7 +135,7 @@ The field has converged on **just-in-time retrieval**: keep the always-loaded su
 
 | Lever | Status | Card |
 |---|---|---|
-| Shrink the always-loaded surface — **right-home / prune only; eviction CLOSED** | **RATIFIED 2026-06-27, recall-tested 2026-06-27.** A fresh-session recall test read **NEGATIVE** — the harness auto-loads only the index; unindexed topic files are unreachable. So **evict-to-recall-only is closed** (would lose the fact), not merely deferred. The only safe reclaim is **rule 1** (right-home durable rules into `platform-decisions.md` + `AGENTS.md`, agent-read on-demand) + pruning genuinely-stale/redundant memories — a **modest** saving (most memories carry nuance beyond canon, per #1881). Gate tracks the documented ~24.4 KB limit (22 KB ceiling). | [#1868](../../backlog/1868-reconcile-the-always-loaded-memory-index-with-the-harness-co.md) |
+| Shrink the always-loaded surface — **right-home / prune only; eviction CLOSED** | **RATIFIED 2026-06-27, recall-tested 2026-06-27.** A fresh-session recall test read **NEGATIVE** — the harness auto-loads only the index; unindexed topic files are unreachable. So **evict-to-recall-only is closed** (would lose the fact), not merely deferred. The only safe reclaim is **rule 1** (right-home durable rules into `platform-decisions.md` + `AGENTS.md`, agent-read on-demand) + pruning genuinely-stale/redundant memories — a **modest** saving (most memories carry nuance beyond canon, per #1881). Gate tracks the documented ~24.4 KB limit (22 KB ceiling). **Amended by #1893:** the router-**tree** is the adopted reclaim beyond right-homing — sub-indexes reachable from the always-loaded map were the case this negative test didn't cover; index now ~3 KB. | [#1868](../../backlog/1868-reconcile-the-always-loaded-memory-index-with-the-harness-co.md) |
 | **Write-time UPDATE/DELETE/NOOP** + a minimal `last-affirmed` stamp (over merge-only-at-budget) | **OPEN** — direction set, needs prep/ratify | [#1879](../../backlog/1879-sharpen-memory-write-time-discipline-update-delete-noop-plus.md) |
 | **Close-out as a consolidation/reflection pass** (the scheduled-consolidation cadence, propose-not-auto) | **OPEN** — story filed | [#1878](../../backlog/1878-close-out-as-memory-instruction-self-improvement-loop.md) |
 

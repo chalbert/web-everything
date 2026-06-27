@@ -78,25 +78,45 @@ if (!existsSync(MEM_DIR) || !existsSync(INDEX)) {
 const content = readFileSync(INDEX, 'utf8');
 const { v, bytes } = checkBudget(content);
 
-// Pointer integrity: every index line → existing file; every topic file → one index line.
-const linkRe = /\]\(([^)]+\.md)\)/;
-const indexedFiles = new Set();
-content.split('\n').forEach((ln, i) => {
-  const m = ln.match(linkRe);
-  if (!m) return;
-  indexedFiles.add(m[1]);
-  if (!existsSync(join(MEM_DIR, m[1]))) v.push(`line ${i + 1} points to a missing file: ${m[1]}`);
-});
+// Pointer integrity across the index TREE: the always-loaded MEMORY.md map + every recall-gated
+// `index-<category>.md` sub-index. A leaf is "indexed" if it is linked (markdown) OR referenced by its
+// stable number prefix (`- N.`) from any of those index files; a sub-index must itself be linked from
+// MEMORY.md (else it's unreachable). This lets the index be a tree (lazy per category) and lets leaf
+// lines drop the long filename for a bare `- N.` number (resolved via scripts/memory-resolve.mjs).
 const topicFiles = readdirSync(MEM_DIR).filter((f) => f.endsWith('.md') && f !== 'MEMORY.md');
-const orphans = topicFiles.filter((f) => !indexedFiles.has(f));
-for (const f of orphans) v.push(`topic file has no index line: ${f} (add one ≤ ${MAX_LINE} chars, or it's unreachable by recall context)`);
+const numberedFiles = new Map(); // "N" -> "N-slug.md"
+for (const f of topicFiles) { const m = f.match(/^(\d+)-/); if (m) numberedFiles.set(m[1], f); }
+const isSubIndex = (f) => /^index-.*\.md$/.test(f);
+const indexSources = ['MEMORY.md', ...topicFiles.filter(isSubIndex)];
+const indexed = new Set();
+for (const src of indexSources) {
+  readFileSync(join(MEM_DIR, src), 'utf8').split('\n').forEach((ln, i) => {
+    let m; const lre = /\]\(([^)]+\.md)\)/g;
+    while ((m = lre.exec(ln))) {
+      indexed.add(m[1]);
+      if (!existsSync(join(MEM_DIR, m[1]))) v.push(`${src} line ${i + 1} points to a missing file: ${m[1]}`);
+      // Tree shape: the always-loaded MEMORY.md links ONLY category sub-indexes — a leaf link here would
+      // regrow the always-loaded surface (the regression the tree exists to prevent).
+      if (src === 'MEMORY.md' && !/^index-.*\.md$/.test(m[1]))
+        v.push(`MEMORY.md line ${i + 1} links a leaf (${m[1]}) — the map links only index-*.md sub-indexes; put this rule as a "- N. Title — hook" line in its sub-index instead`);
+    }
+    const nm = ln.match(/^\s*-\s*(\d+)\.\s/);
+    if (nm) {
+      const file = numberedFiles.get(nm[1]);
+      if (file) indexed.add(file);
+      else v.push(`${src} line ${i + 1} references #${nm[1]} but no ${nm[1]}-*.md leaf exists`);
+    }
+  });
+}
+const orphans = topicFiles.filter((f) => !indexed.has(f));
+for (const f of orphans) v.push(`topic file not reachable from any index: ${f} (link it from MEMORY.md, or add a \`- N.\` line in its sub-index)`);
 
 const lineCount = content.split('\n').filter((l) => l.trim()).length;
 
 // Front-A watch metrics (#1880, model-usage watch #1855): corpus skew by type — a redundancy-likelihood
 // signal (a type bucket far larger than the others is where dedup/right-home pressure lives).
 const TYPES = ['feedback', 'project', 'user', 'reference'];
-const skew = Object.fromEntries(TYPES.map((t) => [t, topicFiles.filter((f) => f.startsWith(`${t}_`) || f === `${t}.md`).length]));
+const skew = Object.fromEntries(TYPES.map((t) => [t, topicFiles.filter((f) => { const s = f.replace(/^\d+-/, ''); return s.startsWith(`${t}_`) || s === `${t}.md`; }).length]));
 const metrics = {
   indexBytes: bytes,
   indexKB: +(bytes / 1024).toFixed(1),
