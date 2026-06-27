@@ -1,10 +1,11 @@
 ---
 kind: epic
-status: active
+status: resolved
 parent: "314"
-ongoing: true
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-11"
+dateResolved: "2026-06-27"
+graduatedTo: "reports/2026-06-11-exercise-app-loan-origination-requirements.md (requirements scoped + sliced; build delivered via phase cards #371-374, #378-388 — all resolved)"
 relatedReport: reports/2026-06-11-exercise-app-loan-origination-requirements.md
 tags: [exercise-app, financial, loan-origination, requirements, validation, business-rules]
 crossRef: { url: /backlog/314-flagship-exercise-apps/, label: "Flagship exercise apps (#314)" }

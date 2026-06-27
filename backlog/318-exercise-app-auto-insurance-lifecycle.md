@@ -1,10 +1,11 @@
 ---
 kind: epic
-status: active
+status: resolved
 parent: "314"
-ongoing: true
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-12"
+dateResolved: "2026-06-27"
+graduatedTo: "reports/2026-06-12-exercise-app-auto-insurance-requirements.md (requirements scoped + sliced; build delivered via phase cards #411-421 — all resolved)"
 relatedReport: reports/2026-06-12-exercise-app-auto-insurance-requirements.md
 tags: [exercise-app, insurance, policy-lifecycle, claims, requirements, configurator]
 crossRef: { url: /backlog/314-flagship-exercise-apps/, label: "Flagship exercise apps (#314)" }
