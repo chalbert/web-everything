@@ -1303,6 +1303,15 @@ The a11y contract of a block (its roles, focus order, keyboard model, aria surfa
 **single-sourced on the base block**. Every sanctioned HTML-first re-skin strategy must be
 **add-only** to that contract — it may *extend* the surface, never *override or remove* it.
 
+**The contract clause (citable; #1832):** for each of the four sanctioned composition strategies —
+**slots, behavior/decoration, sub-component (scoped) replacement, abstract-piece split** — the composed
+result MUST be **non-destructive** over the base block's a11y contract across all four dimensions:
+it MAY *add* roles, *add* to the focus order, *add* keyboard bindings, and *add* aria attributes/state;
+it MUST NOT *override* or *remove* a base role, reorder/drop a focusable, rebind/suppress a base key,
+or strip/contradict a base aria attribute. Crossing any of those is, by definition, no longer a re-skin
+of the base block but the authoring of a **new** block (the developer test below). The invariant is a
+**forced** property of the strategy set, not a per-variant opt-in.
+
 **The developer test (cite this to inform any block/component-shape API):** *does the variation need
 to **change** the base's a11y contract — different roles, focus order, or keyboard model?* **Yes → a
 new component** (structural; a distinct block under the same intent). **No, it only adds → the same
@@ -1332,9 +1341,11 @@ live downstream per [conformance-verifier-vs-subject] / WE-zero-standard-impleme
 **Lineage:** #1795 (HTML-first composition strategies — Fork 1 = compose-over-base; a11y
 non-destructiveness ratified as a forced invariant; the support-all set classified). Extends
 [open-numbered-variants](#open-numbered-variants) (adds the a11y-contract tier below the CSS-reachable
-diagnostic) and composes [compose-dont-handroll](#compose-dont-handroll). Build follow-ups filed as the
-composition non-destructiveness contract, the `nav-list` a11y vector corpus, the strategy seams
-(scoped-replace blocked on the webregistries re-home), and a current-block-interface compliance review.
+diagnostic) and composes [compose-dont-handroll](#compose-dont-handroll). The composition
+non-destructiveness **contract clause** above was landed by #1832 (the add-only invariant stated across
+the four roles/focus/keyboard/aria dimensions as a citable conformance target). Remaining build
+follow-ups: the `nav-list` a11y vector corpus, the strategy seams (scoped-replace blocked on the
+webregistries re-home), and a current-block-interface compliance review.
 
 ### A layout role's identity is its composition-intent; CSS-mechanism is impl, landmark is annotation {#layout-role-composition-intent}
 
