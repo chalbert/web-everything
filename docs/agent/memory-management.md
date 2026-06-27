@@ -54,10 +54,20 @@ So the goal is a **bounded index**, not a bounded corpus.
 
 A handful of rules are load-bearing enough that re-deriving them wrong is costly, so they stay in the
 always-loaded index even though they're project rules — each as a **pointer** into
-`platform-decisions.md`, not a full restatement. Keep this set small (≈ ≤ 12). Everything else is
-on-demand-only: it lives as a topic file recalled by description match, and need not have an index line at
-all once the index is at budget. *(Which rules are "core" is a judgment call, revisited when the set
-grows.)*
+`platform-decisions.md`, not a full restatement. Keep this set small (≈ ≤ 12). The "core" distinction is
+only about *how much* a line carries (a fuller pointer vs a terse one): **every topic file still keeps an
+index line.** *(Which rules are "core" is a judgment call, revisited when the set grows.)*
+
+> **The index is the sole recall surface (verified #1868, 2026-06-27).** A fresh-session recall test
+> confirmed the harness auto-loads only `MEMORY.md`'s one-line pointers — **topic-file bodies are never
+> auto-recalled by `description`; an agent reads a body only because it first saw the pointer.** So an
+> *unindexed* topic file is **unreachable**, not "lazily recalled." The `description` field aids the agent's
+> *choice* of what to read once it sees the line — it is not a retrieval key. Consequence: you cannot evict a
+> line to a recall-only pool without losing the fact (the eviction branch of #1868 is **closed**), and the
+> gate's error on any unindexed topic file is correct. What *is* lazy is the **body** (loaded on read), not
+> the **existence** (the pointer must always load). The only way to drop a line safely is **rule 1** — move
+> the rule into `platform-decisions.md` + the `AGENTS.md` router, which the agent reaches on-demand via the
+> router (an explicit-read path that works), not via memory recall.
 
 ## Lifecycle
 
@@ -97,7 +107,7 @@ The field has converged on **just-in-time retrieval**: keep the always-loaded su
 
 | Lever | Status | Card |
 |---|---|---|
-| Shrink the always-loaded surface — **right-home-first, eviction deferred** | **RATIFIED 2026-06-27** — shrink *now* via the proven lever (rule 1: right-home durable rules into `platform-decisions.md` + `AGENTS.md`, on-demand). The **evict-to-recall-only** branch is deferred until the armed recall check reads positive (does the harness surface an *unindexed* topic file by its `description`?) — evidence leans against free recall, so rigor is not bet on it. Gate tracks the documented ~24.4 KB limit (22 KB ceiling); the ~17.1 KB figure is dismissed as unverified. | [#1868](../../backlog/1868-reconcile-the-always-loaded-memory-index-with-the-harness-co.md) |
+| Shrink the always-loaded surface — **right-home / prune only; eviction CLOSED** | **RATIFIED 2026-06-27, recall-tested 2026-06-27.** A fresh-session recall test read **NEGATIVE** — the harness auto-loads only the index; unindexed topic files are unreachable. So **evict-to-recall-only is closed** (would lose the fact), not merely deferred. The only safe reclaim is **rule 1** (right-home durable rules into `platform-decisions.md` + `AGENTS.md`, agent-read on-demand) + pruning genuinely-stale/redundant memories — a **modest** saving (most memories carry nuance beyond canon, per #1881). Gate tracks the documented ~24.4 KB limit (22 KB ceiling). | [#1868](../../backlog/1868-reconcile-the-always-loaded-memory-index-with-the-harness-co.md) |
 | **Write-time UPDATE/DELETE/NOOP** + a minimal `last-affirmed` stamp (over merge-only-at-budget) | **OPEN** — direction set, needs prep/ratify | [#1879](../../backlog/1879-sharpen-memory-write-time-discipline-update-delete-noop-plus.md) |
 | **Close-out as a consolidation/reflection pass** (the scheduled-consolidation cadence, propose-not-auto) | **OPEN** — story filed | [#1878](../../backlog/1878-close-out-as-memory-instruction-self-improvement-loop.md) |
 

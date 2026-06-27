@@ -34,6 +34,15 @@ Corrected picture:
 
 Action: **no deletions taken.** Recommend re-scoping #1881 from "bulk right-home" to "(1) per-memory prune of genuinely-stale memories (rule 3), and (2) revisit index reclaim once #1868's recall check resolves the eviction branch." Pending the human's call.
 
+### Re-scoped 2026-06-27 — eviction is closed (recall read NEGATIVE)
+
+[#1868](/backlog/1868-reconcile-the-always-loaded-memory-index-with-the-harness-co/)'s recall check read **NEGATIVE** (fresh session recalled only the index; unindexed files unreachable). So this card's scope is now **right-home + prune only — no eviction-to-orphan**:
+
+1. **Right-home** a memory only when its *full* content (not just the topic keyword) is in `we:docs/agent/platform-decisions.md` **and** the `we:AGENTS.md` router points to it — then delete the memory (line + file) since it's reachable on-demand via the router. The audit showed this set is **small** (most memories carry nuance the statute doesn't).
+2. **Prune** genuinely stale/superseded memories (rule 3) — surfaced each close-out by `npm run reflect` (#1878).
+
+Expected reclaim is **modest** (a few hundred bytes to ~1–2 KB), not a structural shrink — the test proved the big lever doesn't exist. Lower-priority, incremental; no bulk pass.
+
 ## Boundaries
 
 - **No eviction-to-recall-only** — that branch stays deferred to the [#1868](/backlog/1868-reconcile-the-always-loaded-memory-index-with-the-harness-co/) recall read-out. This pass only *moves* rules to canon, never drops a fact to an unreachable pool.

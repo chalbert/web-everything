@@ -74,6 +74,12 @@ Rather than un-index a load-bearing memory (which would risk a real fact during 
 
 Until the read-out, the gate stays red on this one file **by design** — it is the live probe, not an unaddressed defect.
 
+### Recall read-out — NEGATIVE (2026-06-27)
+
+A fresh, uncontaminated session was asked to list the memories auto-recalled into its context without reading any files. It returned **exactly the 139 `we:MEMORY.md` index lines and nothing else** — the unindexed specimen was **absent**, and **no topic-file bodies were recalled at all**. This is a mechanism finding, not just an absence: in this harness **auto-recall = the always-loaded index; topic-file bodies are reached only by an explicit agent read after seeing the pointer.** Converges with the literature (documented Claude memory tool does no embedding auto-search) and the earlier in-session observation.
+
+**Resolves Fork 2 to the policy-clarification branch; the eviction branch is CLOSED** (an unindexed file is unreachable, so eviction loses the fact). Follow-through codified: corrected the disproven "need not have an index line" line in `we:docs/agent/memory-management.md`, updated the strategy lever (eviction closed), and re-scoped [#1881](/backlog/1881-right-home-durable-memory-rules-into-platform-decisions-and-/) to right-home + prune only. Residual edge (minor): this tested session-*start* recall; mid-session topical recall is untested but not relied upon.
+
 ## Lineage
 
 Surfaced 2026-06-27 when the harness compaction hook fired repeatedly during the [#1864](/backlog/1864-memory-index-prune-dedup-pass-index-is-at-the-22kb-ceiling/) prune (`graduatedTo` "deep compaction → #1868"), under the model-usage watch [#1855](/backlog/1855-model-usage-watch-keep-claude-s-use-of-the-agent-system-effi/). Prepared 2026-06-27: gate + memory-dir survey establishing the real sizes, the unverified 17.1 KB figure, and the policy↔gate contradiction, published as research topic `always-loaded-memory-index-tiering` and report [we:reports/2026-06-27-always-loaded-memory-index-tiering.md](reports/2026-06-27-always-loaded-memory-index-tiering.md). The existing policy is codified at [we:docs/agent/memory-management.md](docs/agent/memory-management.md).
