@@ -4,6 +4,7 @@ size: 5
 parent: "777"
 status: open
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
 tags: []
 ---
 
@@ -21,3 +22,29 @@ Split from #1208 (taxonomy/badge half delivered there). The /backlog/ filter row
 ## Acceptance
 - Every filter group (status/kind/size/tier/readiness/split/summary) toggles, persists to localStorage, and re-applies on reload exactly as before — verified live on the running /backlog/.
 - `npm run verify` green; a real-browser check confirms the chips upgrade with no console error and no FOUC.
+
+## Pre-flight finding (batch-2026-06-26-1806-1825) — a buried sub-fork on the summary pills; released unbuilt
+
+Grounded the full scope before building. **Good news (de-risks the bulk):** every consuming script selects
+chips by **`data-*` attribute**, never by the `.status-filter-chip` class — `we:src/assets/js/home-display.js`
+keys off `[data-status-chip]/[data-kind-chip]/[data-size-chip]/[data-tier-chip]`, and
+`we:src/assets/js/backlog-table-sort.js` off `[data-pready]/[data-pkind]/[data-psplit]/[data-pfilter]`. Those
+`data-*` hooks **survive** the `we-filter-chip` transient upgrade (only `selected`/`count`/`value` are
+excluded — `fui:blocks/filter-chip/FilterChipElement.ts`), so selectors stay stable and the only JS rewrite is
+the pressed-state style mirror `.is-active → fui-filter-chip--selected` in those two scripts (the other two,
+`we:src/assets/js/backlog-graph.js` / `we:src/assets/js/backlog-burndown.js`, drive graph/burndown controls,
+not these filter pills). The plain filter chips (status/kind/size/tier + readiness/kind/split) are a clean,
+faithful `we-filter-chip` swap.
+
+**The sub-fork:** the Prioritisation **summary `data-pfilter` pills** (batchable / agent-ready / epics /
+program / decision / not-ready) are NOT plain chips — each has a distinct semantic **background colour** and a
+**rich structured count** (nested colour-coded sub-spans: "· N in flight", "· N to split", "· N ✓ prepared",
+"· N preparing"). `we-filter-chip` decorate rebuilds the button from flattened `textContent` + a single
+scalar `count`, which **destroys** that inner structure and colour — so converting them is **lossy**, conflicting
+with the "exactly as before" acceptance. Three ways out, a real call:
+1. **Scope #1825 to the plain filter chips** (faithful now); carve the summary-pill conversion to a follow-up.
+2. **Extend `we-filter-chip`** first with a rich-count / variant-colour slot (a FUI change), then convert.
+3. **Accept the flatten** (uniform chips, lose the per-category colour + sub-tallies).
+
+Recommendation: **(1)** — migrate the plain chips now (the item's core, faithful), file the summary-pill
+conversion as a successor needing either (2) or (3). Released `active → open` pending that scope call.
