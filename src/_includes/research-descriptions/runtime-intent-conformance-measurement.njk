@@ -53,13 +53,24 @@
   </li>
 </ul>
 
-<h2>The three residual forks #1791 must rule</h2>
+<h2>How #1791 ruled (2026-06-26) — a layer split</h2>
+<p>
+  This is a <strong>UX-intent-conformance oracle over density + motion only.</strong> The deciding move was
+  that <strong>a11y-level is not an intent</strong> — by the ratified intents-are-UX-only principle a WCAG
+  conformance tier is a technical platform-config value (the three-layer carve, #1780/#1702), emitted on the
+  #1689 conformance channel (<code>kind:conformance</code>+<code>tier</code>) and measured absolutely by axe,
+  not an axis of this oracle.
+</p>
 <ol>
-  <li><strong>a11y-level</strong> — delegate wholly to the absolute axe lane (default) vs mint a declared
-    a11y-level intent + attribute. No a11y-level intent exists today.</li>
-  <li><strong>Reality-field home</strong> — extend the existing <code>Observation</code> (default) vs a
-    parallel intent-observation. #1698 explicitly rides the existing single collector.</li>
-  <li><strong>Density metric</strong> — touch-target hit-size (default) vs whitespace/spacing density.</li>
+  <li><strong>a11y-level</strong> → not an axis here. Absolute axe stays; a declared-relative
+    <em>overclaim</em> check is a conformance-lane follow-up (#1805, maturityGated until a consumer emits a
+    tier). The earlier "mint <code>data-intent-a11y-level</code>" option was withdrawn as a category error.</li>
+  <li><strong>Reality-field home</strong> → extend the existing <code>Observation</code> (field-count is not
+    schema-coupling, #1662); motion-reality adds a second observe-time
+    <code>emulateMedia({reducedMotion:'reduce'})</code> render.</li>
+  <li><strong>Density metric</strong> → <strong>spacing/whitespace ratio</strong>, not touch-target hit-size
+    (refuted: a one-sided floor re-badges WCAG/axe and is the a11y layer leaking into a UX measurement).
+    Gated on quantified spacing bands in <code>density.json</code> (#1804).</li>
 </ol>
 
 <h2>Constellation placement</h2>
