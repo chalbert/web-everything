@@ -13,6 +13,7 @@ export { validatorResolutionSuite } from './validator-resolution.vectors.js';
 export { sessionReplayEnvelopeSuite } from './session-replay-envelope.vectors.js';
 export { slideTransitionReducedMotionSuite } from './slide-transition-reduced-motion.vectors.js';
 export { presentationA11ySuite } from './presentation-a11y.vectors.js';
+export { navListA11ySuite } from './nav-list-a11y.vectors.js';
 export { textNodeSuite } from './text-node.vectors.js';
 export { treegridArbitrationSuite } from './treegrid-arbitration.vectors.js';
 export { webpolicySuite } from './webpolicy.vectors.js';
@@ -26,6 +27,7 @@ import { validatorResolutionSuite } from './validator-resolution.vectors.js';
 import { sessionReplayEnvelopeSuite } from './session-replay-envelope.vectors.js';
 import { slideTransitionReducedMotionSuite } from './slide-transition-reduced-motion.vectors.js';
 import { presentationA11ySuite } from './presentation-a11y.vectors.js';
+import { navListA11ySuite } from './nav-list-a11y.vectors.js';
 import { textNodeSuite } from './text-node.vectors.js';
 import { treegridArbitrationSuite } from './treegrid-arbitration.vectors.js';
 import { webpolicySuite } from './webpolicy.vectors.js';
@@ -37,6 +39,7 @@ export const conformanceSuites: ReadonlyArray<ConformanceVectorSuite> = [
   sessionReplayEnvelopeSuite,
   slideTransitionReducedMotionSuite,
   presentationA11ySuite,
+  navListA11ySuite,
   textNodeSuite,
   treegridArbitrationSuite,
   webpolicySuite,
