@@ -5,7 +5,7 @@ parent: "746"
 status: open
 blockedBy: []
 dateOpened: "2026-06-22"
-dateStarted: "2026-06-26"
+dateStarted: "2026-06-27"
 tags: []
 ---
 
@@ -26,6 +26,8 @@ tags: []
 > blocker is cleared (`blockedBy: []`). This is now ready to **rescope + build** — not blocked, just stale-bodied:
 > re-scope both residuals onto #1752's FUI `/_maas/` loader + thin-descriptor registry (the WE artifact is gone
 > per #1730), then wire the workbench panel to read block descriptors from the served URL. A focused FUI session.
+>
+> **Claimed + released unbuilt (batch-2026-06-26-1813-1208-1618) — it's not clean wiring; two small design sub-calls block the build.** Traced the FUI tree: the 9 `<component>` case definitions relocated into FUI as `fui:blocks/renderers/component/__fixtures__/component-cases.ts` (the SoT), and FUI can lower a def to **3 of the 5** author-mode forms — `declarative` (the def text), `wc-class` (`fui:blocks/renderers/component/declarativeComponent.ts`), `functional` (`fui:blocks/renderers/functional/functionalComponent.ts` `generateFunctionalSource`) — but there is **no `html`/`jsx` source-text emitter and no `lossy`/`diagnostics` computation** in the tree. So generating `AuthorModeSource` for source-only blocks needs **(a)** a form-set decision (build the missing `html`/`jsx` emitters + lossy signal, or scope the panel to the 3 forms FUI faithfully emits) and **(b)** a generation-home decision (build-emit JSON the registry carries vs a live `/_maas/` author-source endpoint — note the `/_maas/` route in `fui:vite.maas.config.mts` today serves only consume-mode *wrapper* bytes, not author-mode *source*). Both are small but real calls — `/prepare` or a focused FUI session pins them, then builds. Released `active → open`; FUI-locus.
 
 # Wire the WE author-mode-source artifact into the live FUI workbench (transport + declarative-component blocks)
 
