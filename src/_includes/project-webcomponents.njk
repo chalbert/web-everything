@@ -242,24 +242,24 @@ class TransientElement extends HTMLElement {
                 <tr>
                     <td><strong>Shadow DOM component</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;my-card&gt;
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;my-card&gt;
   &lt;template shadowrootmode="open"&gt;
     &lt;style&gt;...&lt;/style&gt;
     &lt;h2&gt;Title&lt;/h2&gt;
     &lt;slot&gt;&lt;/slot&gt;
   &lt;/template&gt;
   Slotted content here
-&lt;/my-card&gt;</code></pre>
+&lt;/my-card&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST emit Declarative Shadow DOM (<code>&lt;template shadowrootmode="open"&gt;</code>). Browser attaches shadow root during HTML parsing — no JS needed for initial render.</td>
                 </tr>
                 <tr>
                     <td><strong>Light DOM component</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;user-card&gt;
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;user-card&gt;
   &lt;h3&gt;John Doe&lt;/h3&gt;
   &lt;p&gt;john@example.com&lt;/p&gt;
-&lt;/user-card&gt;</code></pre>
+&lt;/user-card&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server emits the custom element tag with its rendered children. Content is visible before upgrade.</td>
                 </tr>

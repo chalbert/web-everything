@@ -423,37 +423,37 @@ declare const customComments: CustomCommentRegistry;
                 <tr>
                     <td><strong>for-each</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- control:for-each items="users" key="id" --&gt;
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- control:for-each items="users" key="id" --&gt;
 &lt;div class="user-row" data-key="1"&gt;Alice&lt;/div&gt;
 &lt;div class="user-row" data-key="2"&gt;Bob&lt;/div&gt;
-&lt;!-- /control:for-each --&gt;</code></pre>
+&lt;!-- /control:for-each --&gt;</code></pre></we-code-view>
                     </td>
                     <td>All items expanded. Comment boundaries SHOULD be included for client diffing. Keyed items MUST include <code>data-key</code> attribute.</td>
                 </tr>
                 <tr>
                     <td><strong>if</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- control:if condition="isAdmin" --&gt;
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- control:if condition="isAdmin" --&gt;
 &lt;button class="admin-action"&gt;Delete&lt;/button&gt;
-&lt;!-- /control:if --&gt;</code></pre>
+&lt;!-- /control:if --&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST evaluate the condition. Only the matching branch is emitted. If false, emit empty markers only.</td>
                 </tr>
                 <tr>
                     <td><strong>switch / case</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- control:switch value="status" --&gt;
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- control:switch value="status" --&gt;
 &lt;span class="badge success"&gt;Active&lt;/span&gt;
-&lt;!-- /control:switch --&gt;</code></pre>
+&lt;!-- /control:switch --&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST evaluate the active case and emit only that branch.</td>
                 </tr>
                 <tr>
                     <td><strong>resource:loader</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- resource:loader name="user-profile" --&gt;
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- resource:loader name="user-profile" --&gt;
 &lt;user-card&gt;...resolved data...&lt;/user-card&gt;
-&lt;!-- /resource:loader --&gt;</code></pre>
+&lt;!-- /resource:loader --&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST evaluate the data state and emit the corresponding template (success, empty, or error). For streaming SSR, loading template MAY be emitted first.</td>
                 </tr>

@@ -269,18 +269,18 @@ function listenFor<TDetail>(
                 <tr>
                     <td><strong>Event attributes</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;button on:click="save($event)"&gt;
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;button on:click="save($event)"&gt;
   Save
-&lt;/button&gt;</code></pre>
+&lt;/button&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST emit <code>on:*</code> attributes exactly as authored. This is a subset of the <a href="/projects/webbehaviors/#ssr">Web Behaviors</a> attribute passthrough contract.</td>
                 </tr>
                 <tr>
                     <td><strong>Broadcast attributes</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;button broadcast="customEvents:close-modals"&gt;
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;button broadcast="customEvents:close-modals"&gt;
   Close All Modals
-&lt;/button&gt;</code></pre>
+&lt;/button&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST emit <code>broadcast</code> attributes as-is. The value is an injector key referencing a scoped event class.</td>
                 </tr>

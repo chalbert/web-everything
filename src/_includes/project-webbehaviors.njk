@@ -261,18 +261,18 @@ interface Window {
                 <tr>
                     <td><strong>Custom attributes</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;input validate-email
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;input validate-email
   auto-save="/api/draft"
-  bind-value="form.email"&gt;</code></pre>
+  bind-value="form.email"&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST emit all custom attributes exactly as authored. Attribute names and values are preserved verbatim — no transformation or stripping.</td>
                 </tr>
                 <tr>
                     <td><strong>Event attributes</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;button on:click="save($event)"&gt;
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;button on:click="save($event)"&gt;
   Save
-&lt;/button&gt;</code></pre>
+&lt;/button&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST emit <code>on:*</code> attributes as-is. The colon in the attribute name is valid HTML and preserved by all parsers.</td>
                 </tr>
@@ -284,9 +284,9 @@ interface Window {
                 <tr>
                     <td><strong>Behavior with native fallback</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;a href="/page" history-link&gt;
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;a href="/page" history-link&gt;
   Navigate
-&lt;/a&gt;</code></pre>
+&lt;/a&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server SHOULD use native elements with custom attributes so the element works without JS. The <code>&lt;a&gt;</code> navigates normally; <code>history-link</code> enhances it with History API navigation on the client.</td>
                 </tr>

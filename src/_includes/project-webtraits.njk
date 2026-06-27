@@ -86,12 +86,12 @@
     <div class="traits-vision-grid">
         <div>
             <h5 class="text-sm font-bold text-gray-500 uppercase mb-2">Developer writes (DX)</h5>
-            <pre class="code-block-dark"><code>{{ traits.example.usage }}</code></pre>
+            <we-code-view><pre class="code-block-dark"><code>{{ traits.example.usage }}</code></pre></we-code-view>
             <p class="text-sm text-gray-600">Simple, declarative. No manual imports of specific features.</p>
         </div>
         <div>
             <h5 class="text-sm font-bold text-gray-500 uppercase mb-2">User gets (UX)</h5>
-            <pre class="code-block-dark"><code>{{ traits.example.result }}</code></pre>
+            <we-code-view><pre class="code-block-dark"><code>{{ traits.example.result }}</code></pre></we-code-view>
     </div>
 </section>
 <section style="margin-top: var(--spacing-lg);">
@@ -115,7 +115,7 @@
         <div class="traits-vision-box" style="margin-top: 0;">
             <h4 id="{{ step.title | slug }}" class="text-lg font-bold mb-2">{{ step.title }}</h4>
             <p class="text-gray-600 text-sm mb-4">{{ step.desc }}</p>
-            <pre class="code-block-dark mb-0"><code>{{ step.code }}</code></pre>
+            <we-code-view><pre class="code-block-dark mb-0"><code>{{ step.code }}</code></pre></we-code-view>
         </div>
         {% endfor %}
     </div>

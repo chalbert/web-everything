@@ -1252,23 +1252,23 @@ function Modal(props) {
                 <tr>
                     <td><strong>Portal content (logical position)</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;div class="card"&gt;
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;div class="card"&gt;
   &lt;!-- portal:modal-root --&gt;
   &lt;div class="modal" data-portal="modal-root"&gt;
     &lt;h2&gt;Confirm Delete&lt;/h2&gt;
     &lt;p&gt;Are you sure?&lt;/p&gt;
   &lt;/div&gt;
   &lt;!-- /portal:modal-root --&gt;
-&lt;/div&gt;</code></pre>
+&lt;/div&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST render portal content at its <strong>logical position</strong> in the component tree, wrapped in comment boundary markers. The <code>data-portal</code> attribute identifies the target container.</td>
                 </tr>
                 <tr>
                     <td><strong>Portal target container</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;div id="modal-root"
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;div id="modal-root"
   data-portal-target&gt;
-&lt;/div&gt;</code></pre>
+&lt;/div&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST emit the portal target container as an empty element. The client moves content into it during hydration.</td>
                 </tr>

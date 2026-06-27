@@ -67,9 +67,9 @@
   </ul>
 
   <h4>Suggested API Shape</h4>
-  <pre><code>trace(value, { attributes });
+  <we-code-view><pre><code>trace(value, { attributes });
 effect(operation, { input, output, attributes });
-  </code></pre>
+  </code></pre></we-code-view>
   <p>This approach is compatible with both distributed and local tracing needs, and aligns with industry and academic best practices.</p>
 </section>
 
@@ -87,9 +87,9 @@ effect(operation, { input, output, attributes });
     </p>
 
     <h4>Suggested Client API Shape</h4>
-    <pre><code>trace(value, { attributes });
+    <we-code-view><pre><code>trace(value, { attributes });
 effect(operation, { input, output, attributes });
-    </code></pre>
+    </code></pre></we-code-view>
     <p>Compatible with both distributed and local tracing needs; aligns with OpenTelemetry's span/context model.</p>
 
     <h4>Trace Context Propagation</h4>
@@ -100,7 +100,7 @@ effect(operation, { input, output, attributes });
     <ul class="list-disc ml-6 text-gray-600 text-sm">
         <li><strong>Header propagation:</strong> Server MUST propagate <code>traceparent</code> and <code>tracestate</code> headers per the <a href="https://www.w3.org/TR/trace-context/">W3C Trace Context</a> specification.</li>
         <li><strong>Trace ID embedding:</strong> Server MAY embed the trace ID in a <code>&lt;meta&gt;</code> tag so client-side traces can reference the server trace:
-<pre style="margin: 0.5rem 0; font-size: 0.8em;"><code>&lt;meta name="trace-id" content="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"&gt;</code></pre>
+<we-code-view><pre style="margin: 0.5rem 0; font-size: 0.8em;"><code>&lt;meta name="trace-id" content="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"&gt;</code></pre></we-code-view>
         </li>
         <li><strong>Client-only:</strong> All span creation, context propagation, sampling, attribute attachment, and exporter configuration are client-side operations. No server rendering contract is needed for trace instrumentation.</li>
     </ul>

@@ -44,40 +44,40 @@
                 <tr>
                     <td><strong>Fetched data embedding</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;script type="application/json"
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;script type="application/json"
   data-store="resource:users"&gt;
 [{"id":1,"name":"Alice"},
  {"id":2,"name":"Bob"}]
-&lt;/script&gt;</code></pre>
+&lt;/script&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST execute the resource request and serialize the response using the <a href="/projects/webstates/#ssr">Web States</a> JSON block format. The <code>data-store</code> key uses a <code>resource:</code> prefix to distinguish resource data from application state.</td>
                 </tr>
                 <tr>
                     <td><strong>Resource state templates</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- Server renders the success
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- Server renders the success
      template with fetched data --&gt;
 &lt;ul class="user-list"&gt;
   &lt;li&gt;Alice&lt;/li&gt;
   &lt;li&gt;Bob&lt;/li&gt;
-&lt;/ul&gt;</code></pre>
+&lt;/ul&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST render the appropriate state template (success, error, or empty) based on the fetch result. See <a href="/projects/webdirectives/#ssr">Web Directives SSR</a> for <code>resource:loader</code> directive expansion.</td>
                 </tr>
                 <tr>
                     <td><strong>Prefetch hints</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;link rel="prefetch"
-  href="/api/users?page=2"&gt;</code></pre>
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;link rel="prefetch"
+  href="/api/users?page=2"&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MAY emit <code>&lt;link rel="prefetch"&gt;</code> hints for resources the client is likely to need next (e.g., next page of paginated data).</td>
                 </tr>
                 <tr>
                     <td><strong>Error state</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;div class="error-state"&gt;
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;div class="error-state"&gt;
   Failed to load users.
-&lt;/div&gt;</code></pre>
+&lt;/div&gt;</code></pre></we-code-view>
                     </td>
                     <td>If the server request fails, the server MUST render the error template rather than leaving the resource in a loading state.</td>
                 </tr>

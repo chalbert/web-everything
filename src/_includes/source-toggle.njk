@@ -66,10 +66,10 @@
         </div>
     </div>
     <div class="mode-content" data-mode-content="{{ id }}" data-mode="html" style="display: block;">
-        <pre class="source-toggle-code"><code class="language-html">{{ html | trim | highlightCode("html") | safe }}</code></pre>
+        <we-code-view><pre class="source-toggle-code"><code class="language-html">{{ html | trim | highlightCode("html") | safe }}</code></pre></we-code-view>
     </div>
     <div class="mode-content" data-mode-content="{{ id }}" data-mode="jsx" style="display: none;">
-        <pre class="source-toggle-code"><code class="language-tsx">{{ html | htmlToJsx | highlightCode("tsx") | safe }}</code></pre>
+        <we-code-view><pre class="source-toggle-code"><code class="language-tsx">{{ html | htmlToJsx | highlightCode("tsx") | safe }}</code></pre></we-code-view>
     </div>
 </div>
 {% endmacro %}
@@ -99,13 +99,13 @@
         </div>
     </div>
     <div class="mode-content" data-mode-content="{{ id }}" data-mode="html" style="display: block;">
-        <pre class="source-toggle-code"><code class="language-html">{{ html | trim | highlightCode("html") | safe }}</code></pre>
+        <we-code-view><pre class="source-toggle-code"><code class="language-html">{{ html | trim | highlightCode("html") | safe }}</code></pre></we-code-view>
     </div>
     <div class="mode-content" data-mode-content="{{ id }}" data-mode="jsx" style="display: none;">
-        <pre class="source-toggle-code"><code class="language-tsx">{{ html | htmlToJsx | highlightCode("tsx") | safe }}</code></pre>
+        <we-code-view><pre class="source-toggle-code"><code class="language-tsx">{{ html | htmlToJsx | highlightCode("tsx") | safe }}</code></pre></we-code-view>
     </div>
     <div class="mode-content" data-mode-content="{{ id }}" data-mode="jsx-fn" style="display: none;">
-        <pre class="source-toggle-code"><code class="language-tsx">{{ html | htmlToJsx | eventHandlerToFunctionProp | highlightCode("tsx") | safe }}</code></pre>
+        <we-code-view><pre class="source-toggle-code"><code class="language-tsx">{{ html | htmlToJsx | eventHandlerToFunctionProp | highlightCode("tsx") | safe }}</code></pre></we-code-view>
     </div>
 </div>
 {% endmacro %}

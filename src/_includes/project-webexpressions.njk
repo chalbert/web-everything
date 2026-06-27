@@ -164,14 +164,14 @@
     <p class="text-gray-600 text-sm mb-3">
         Escape the opening delimiter using numeric or named entities:
     </p>
-<pre><code class="language-html">&lt;!-- Renders literally as: {{ '{{' }}name{{ '}}' }} --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Renders literally as: {{ '{{' }}name{{ '}}' }} --&gt;
 &lt;span&gt;&amp;#123;&amp;#123;name&amp;#125;&amp;#125;&lt;/span&gt;
 
 &lt;!-- Renders literally as: [[value]] --&gt;
 &lt;span&gt;&amp;#91;&amp;#91;value&amp;#93;&amp;#93;&lt;/span&gt;
 
 &lt;!-- Only the opening delimiter needs escaping --&gt;
-&lt;span&gt;&amp;#123;{name}}&lt;/span&gt;</code></pre>
+&lt;span&gt;&amp;#123;{name}}&lt;/span&gt;</code></pre></we-code-view>
 
     <p class="text-gray-600 text-sm mt-3">
         Common character codes: <code>&amp;#123;</code> = <code>{{ '{' }}</code>, <code>&amp;#125;</code> = <code>{{ '}' }}</code>,
@@ -183,13 +183,13 @@
         Parsers can define elements where expression parsing is skipped by default.
         Text nodes inside these elements are left as plain text:
     </p>
-<pre><code class="language-typescript">class DoubleCurlyBracketParser extends CustomTextNodeParser {
+<we-code-view><pre><code class="language-typescript">class DoubleCurlyBracketParser extends CustomTextNodeParser {
     openingIdentifier = '{{ '{{' }}';
     closingIdentifier = '{{ '}}' }}';
 
     // Skip parsing inside these elements
     excludedElements = ['code', 'pre', 'script', 'style', 'textarea'];
-}</code></pre>
+}</code></pre></we-code-view>
     <p class="text-gray-600 text-sm mt-3">
         With this configuration, <code>&lt;code&gt;{{ '{{' }}name{{ '}}' }}&lt;/code&gt;</code> renders literally without needing character entities.
         To opt back in, use <code>customExpressions.upgrade(el)</code> on the specific element.
@@ -248,7 +248,7 @@
     <p class="text-gray-600 text-sm mb-3">
         Hide elements containing expressions until they're upgraded. The simplest client-side approach:
     </p>
-<pre><code class="language-css">/* Hide elements with unprocessed expressions */
+<we-code-view><pre><code class="language-css">/* Hide elements with unprocessed expressions */
 [cloak] {
     display: none !important;
 }
@@ -256,13 +256,13 @@
 /* Or use opacity for layout stability */
 [cloak] {
     opacity: 0;
-}</code></pre>
-<pre><code class="language-html">&lt;!-- Add cloak attribute to elements with expressions --&gt;
+}</code></pre></we-code-view>
+<we-code-view><pre><code class="language-html">&lt;!-- Add cloak attribute to elements with expressions --&gt;
 &lt;div cloak&gt;
     Hello, {{ '{{' }}user.name{{ '}}' }}!
 &lt;/div&gt;
 
-&lt;!-- Expression parser removes cloak after upgrade --&gt;</code></pre>
+&lt;!-- Expression parser removes cloak after upgrade --&gt;</code></pre></we-code-view>
     <p class="text-gray-600 text-sm mt-3">
         The parser automatically removes the <code>cloak</code> attribute after upgrading expressions within the element.
     </p>
@@ -271,7 +271,7 @@
     <p class="text-gray-600 text-sm mb-3">
         Keep expressions exclusively inside <code>&lt;template&gt;</code> elements. Document HTML contains only static content:
     </p>
-<pre><code class="language-html">&lt;!-- Static shell in document --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Static shell in document --&gt;
 &lt;div id="user-card"&gt;&lt;/div&gt;
 
 &lt;!-- Expressions safely hidden in template --&gt;
@@ -286,7 +286,7 @@
     const template = document.getElementById('user-template');
     const clone = template.content.cloneNode(true); // Expressions upgrade here
     document.getElementById('user-card').append(clone);
-&lt;/script&gt;</code></pre>
+&lt;/script&gt;</code></pre></we-code-view>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">Strategy 3: Server-Side Rendering</h4>
     <p class="text-gray-600 text-sm mb-3">
@@ -331,7 +331,7 @@
     <p class="text-gray-600 text-sm mb-3">
         Show a placeholder or skeleton until content is ready:
     </p>
-<pre><code class="language-html">&lt;!-- Skeleton shown until expressions upgrade --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Skeleton shown until expressions upgrade --&gt;
 &lt;div class="user-card"&gt;
     &lt;div class="skeleton" cloak-placeholder&gt;
         &lt;div class="skeleton-line"&gt;&lt;/div&gt;
@@ -341,9 +341,9 @@
         &lt;h2&gt;{{ '{{' }}user.name{{ '}}' }}&lt;/h2&gt;
         &lt;p&gt;{{ '{{' }}user.email{{ '}}' }}&lt;/p&gt;
     &lt;/div&gt;
-&lt;/div&gt;</code></pre>
-<pre><code class="language-css">[cloak] { display: none; }
-[cloak-placeholder]:has(+ :not([cloak])) { display: none; }</code></pre>
+&lt;/div&gt;</code></pre></we-code-view>
+<we-code-view><pre><code class="language-css">[cloak] { display: none; }
+[cloak-placeholder]:has(+ :not([cloak])) { display: none; }</code></pre></we-code-view>
 </section>
 
 <section id="parser-priority" class="section-card">
@@ -352,18 +352,18 @@
         When multiple parsers are registered, they are evaluated in <strong>registration order</strong>.
         The first parser whose delimiters match wins. This allows layering parsers with overlapping patterns:
     </p>
-<pre><code class="language-typescript">// Register more specific parser first
+<we-code-view><pre><code class="language-typescript">// Register more specific parser first
 customTextNodeParsers.define('raw', new TripleCurlyParser());    // {{ '{{{' }} {{ '}}}' }}
 customTextNodeParsers.define('mustache', new DoubleCurlyParser()); // {{ '{{' }} {{ '}}' }}
 
 // {{ '{{{' }}raw{{ '}}}' }} matches 'raw' parser (first match)
-// {{ '{{' }}name{{ '}}' }} matches 'mustache' parser</code></pre>
+// {{ '{{' }}name{{ '}}' }} matches 'mustache' parser</code></pre></we-code-view>
 </section>
 
 <section id="flow" class="section-card">
     <h3 id="parsing-flow">Parsing Flow</h3>
     <div class="bg-slate-50 rounded-lg p-4 mt-4 text-sm">
-        <pre class="text-gray-700"><code>HTML Input: &lt;span&gt;Hello {{ '{{' }}user.name{{ '}}' }}!&lt;/span&gt;
+        <we-code-view><pre class="text-gray-700"><code>HTML Input: &lt;span&gt;Hello {{ '{{' }}user.name{{ '}}' }}!&lt;/span&gt;
 
 1. Text Node Parser (DoubleCurlyBracket)
    ├── Detects {{ '{{' }} ... {{ '}}' }} pattern
@@ -379,7 +379,7 @@ customTextNodeParsers.define('mustache', new DoubleCurlyParser()); // {{ '{{' }}
    └── Returns executable graph for binding system
 
 4. Binding System (outside Web Expressions scope)
-   └── Subscribes to data changes, updates textContent</code></pre>
+   └── Subscribes to data changes, updates textContent</code></pre></we-code-view>
     </div>
 </section>
 
@@ -390,7 +390,7 @@ customTextNodeParsers.define('mustache', new DoubleCurlyParser()); // {{ '{{' }}
     <p class="text-gray-600 text-sm mb-3">
         Create parsers by extending <code>CustomTextNodeParser</code> and specifying delimiters:
     </p>
-<pre><code class="language-typescript">// Mustache-style: {{ '{{' }} expression {{ '}}' }}
+<we-code-view><pre><code class="language-typescript">// Mustache-style: {{ '{{' }} expression {{ '}}' }}
 class DoubleCurlyBracketParser extends CustomTextNodeParser {
     openingIdentifier = '{{ '{{' }}';
     closingIdentifier = '{{ '}}' }}';
@@ -404,13 +404,13 @@ class DoubleSquareBracketParser extends CustomTextNodeParser {
 
 // Register globally
 customTextNodeParsers.define('mustache', new DoubleCurlyBracketParser());
-customTextNodeParsers.define('polymer', new DoubleSquareBracketParser());</code></pre>
+customTextNodeParsers.define('polymer', new DoubleSquareBracketParser());</code></pre></we-code-view>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">Defining a Custom Text Node</h4>
     <p class="text-gray-600 text-sm mb-3">
         Implement the behavior for parsed expressions by extending <code>CustomTextNode</code>:
     </p>
-<pre><code class="language-typescript">class InterpolationNode extends CustomTextNode {
+<we-code-view><pre><code class="language-typescript">class InterpolationNode extends CustomTextNode {
     #expression: string;
     #unsubscribe?: () => void;
 
@@ -434,13 +434,13 @@ customTextNodeParsers.define('polymer', new DoubleSquareBracketParser());</code>
 }
 
 // Register the implementation
-customTextNodes.define('interpolation', InterpolationNode);</code></pre>
+customTextNodes.define('interpolation', InterpolationNode);</code></pre></we-code-view>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">Defining an Expression Parser</h4>
     <p class="text-gray-600 text-sm mb-3">
         Parse expression strings into executable structures:
     </p>
-<pre><code class="language-typescript">class KeypathParser extends CustomExpressionParser {
+<we-code-view><pre><code class="language-typescript">class KeypathParser extends CustomExpressionParser {
     parse(text: string) {
         // Handle simple keypaths: "user.profile.name"
         const parts = text.split('.');
@@ -457,13 +457,13 @@ customTextNodes.define('interpolation', InterpolationNode);</code></pre>
     }
 }
 
-customExpressionParsers.define('keypath', new KeypathParser());</code></pre>
+customExpressionParsers.define('keypath', new KeypathParser());</code></pre></we-code-view>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">HTML Template Example</h4>
     <p class="text-gray-600 text-sm mb-3">
         Once parsers are registered, use them directly in HTML:
     </p>
-<pre><code class="language-html">&lt;!-- Using Mustache-style syntax --&gt;
+<we-code-view><pre><code class="language-html">&lt;!-- Using Mustache-style syntax --&gt;
 &lt;div class="user-card"&gt;
     &lt;h2&gt;{{ '{{' }}user.name{{ '}}' }}&lt;/h2&gt;
     &lt;p&gt;Email: {{ '{{' }}user.email{{ '}}' }}&lt;/p&gt;
@@ -478,14 +478,14 @@ customExpressionParsers.define('keypath', new KeypathParser());</code></pre>
             &lt;td&gt;[[item.name]]&lt;/td&gt;
         &lt;/tr&gt;
     &lt;/template&gt;
-&lt;/data-table&gt;</code></pre>
+&lt;/data-table&gt;</code></pre></we-code-view>
 </section>
 
 <section id="interfaces" class="section-card">
     <h3 id="core-interfaces">Core Interfaces</h3>
 
     <h4 class="font-semibold text-gray-800 mt-4 mb-2">CustomTextNodeParser</h4>
-<pre><code class="language-typescript">abstract class CustomTextNodeParser {
+<we-code-view><pre><code class="language-typescript">abstract class CustomTextNodeParser {
     // Delimiters to detect (e.g., '{{ '{{' }}' and '{{ '}}' }}')
     abstract openingIdentifier: string;
     abstract closingIdentifier: string;
@@ -495,10 +495,10 @@ customExpressionParsers.define('keypath', new KeypathParser());</code></pre>
 
     // Splits text into Text and UndeterminedTextNode instances
     parse(text: string): Text[];
-}</code></pre>
+}</code></pre></we-code-view>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">CustomTextNode</h4>
-<pre><code class="language-typescript">abstract class CustomTextNode extends Text {
+<we-code-view><pre><code class="language-typescript">abstract class CustomTextNode extends Text {
     // The parser that created this node
     readonly parserName: string | null;
 
@@ -506,13 +506,13 @@ customExpressionParsers.define('keypath', new KeypathParser());</code></pre>
     connectedCallback?(): void;
     disconnectedCallback?(): void;
     textChangedCallback?(oldValue: string, newValue: string): void;
-}</code></pre>
+}</code></pre></we-code-view>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">CustomExpressionParser</h4>
-<pre><code class="language-typescript">abstract class CustomExpressionParser {
+<we-code-view><pre><code class="language-typescript">abstract class CustomExpressionParser {
     // Parses a string into an executable graph
     abstract parse(text: string): Graph;
-}</code></pre>
+}</code></pre></we-code-view>
 </section>
 
 <section id="expression-parser-protocol" class="section-card">
@@ -541,7 +541,7 @@ customExpressionParsers.define('keypath', new KeypathParser());</code></pre>
     <p class="text-gray-600 text-sm mb-3">
         Every parsed expression implements this interface, declaring its dependencies as queries:
     </p>
-<pre><code class="language-typescript">interface ParsedExpression {
+<we-code-view><pre><code class="language-typescript">interface ParsedExpression {
     /** Type discriminator */
     type: string;
 
@@ -568,7 +568,7 @@ interface MagicQuery {
     name: string;  // 'event', 'element', 'target'
 }
 
-type Query = ContextQuery | MagicQuery;</code></pre>
+type Query = ContextQuery | MagicQuery;</code></pre></we-code-view>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">Query Types</h4>
     <p class="text-gray-600 text-sm mb-3">
@@ -622,13 +622,13 @@ type Query = ContextQuery | MagicQuery;</code></pre>
     <p class="text-gray-600 text-sm mb-3">
         Consumer resolves queries and passes them to <code>evaluate()</code>:
     </p>
-<pre><code class="language-typescript">interface ResolvedValues {
+<we-code-view><pre><code class="language-typescript">interface ResolvedValues {
     /** Resolved contexts (from injector chain) */
     contexts: Record&lt;string, unknown&gt;;
 
     /** Magic values (from consumer runtime) */
     magic: Record&lt;string, unknown&gt;;
-}</code></pre>
+}</code></pre></we-code-view>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">Expression Types</h4>
     <div class="comparison-table-wrapper mt-4 mb-4">
@@ -674,7 +674,7 @@ type Query = ContextQuery | MagicQuery;</code></pre>
     <p class="text-gray-600 text-sm mb-3">
         The registry's <code>parse()</code> method returns aggregated results:
     </p>
-<pre><code class="language-typescript">interface RegistryParseResult {
+<we-code-view><pre><code class="language-typescript">interface RegistryParseResult {
     /** The compiled expression (or null if parsing failed) */
     expression: ParsedExpression | null;
 
@@ -686,13 +686,13 @@ type Query = ContextQuery | MagicQuery;</code></pre>
 
     /** Whether parsing was successful */
     success: boolean;
-}</code></pre>
+}</code></pre></we-code-view>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">Consumer Usage</h4>
     <p class="text-gray-600 text-sm mb-3">
         Consumers follow a simple pattern: parse, resolve queries, evaluate:
     </p>
-<pre><code class="language-typescript">// 1. Parse expression
+<we-code-view><pre><code class="language-typescript">// 1. Parse expression
 const result = registry.parse('save($event, @item.id)');
 if (!result.success) return;
 
@@ -710,7 +710,7 @@ for (const query of result.queries) {
 }
 
 // 3. Evaluate
-const returnValue = result.expression.evaluate(resolved);</code></pre>
+const returnValue = result.expression.evaluate(resolved);</code></pre></we-code-view>
     <p class="text-gray-600 text-sm mt-3">
         Context queries come from the injector chain; magic values are runtime values the consumer already has.
     </p>

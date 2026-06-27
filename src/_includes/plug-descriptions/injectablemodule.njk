@@ -5,7 +5,7 @@
 </p>
 
 <h3 id="interface">Interface</h3>
-<pre><code class="language-typescript">class InjectableModule {
+<we-code-view><pre><code class="language-typescript">class InjectableModule {
     readonly name: string;
     readonly injector: ModuleInjector;
 
@@ -29,10 +29,10 @@
     // Execute the setup function
     bootstrap(): void;
 }
-</code></pre>
+</code></pre></we-code-view>
 
 <h3 id="usage-example">Usage Example</h3>
-<pre><code class="language-typescript">import { InjectableModule } from '@web-everything/webinjectors';
+<we-code-view><pre><code class="language-typescript">import { InjectableModule } from '@web-everything/webinjectors';
 
 const appModule = new InjectableModule('app', import.meta, (m) => {
     // Provide values eagerly
@@ -50,7 +50,7 @@ appModule.bootstrap();
 
 // Later, consume from another module
 const config = await appModule.injector.consume('customContexts:config', import.meta);
-</code></pre>
+</code></pre></we-code-view>
 
 <p class="text-sm text-gray-600 mt-4">
     See <a href="/plugs/moduleinjector/">ModuleInjector</a> for the underlying injector, and <a href="/projects/webinjectors/">Web Injectors</a> for the full dependency injection system.

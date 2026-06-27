@@ -77,7 +77,7 @@ title: Web Everything — Presets
       {% for f in preset.files %}
       <details style="margin-top: 0.5rem;">
         <summary style="cursor: pointer; font-size: 0.85em; font-family: var(--font-mono, monospace); color: var(--color-text-muted);">{{ f.path }}</summary>
-        <pre style="margin: 0.5rem 0 0; overflow-x: auto; max-height: 22rem; background: var(--color-code-bg, #0f172a); color: #e2e8f0; padding: 1rem; border-radius: 8px; font-size: 0.8em;"><code>{{ f.content }}</code></pre>
+        <we-code-view><pre style="margin: 0.5rem 0 0; overflow-x: auto; max-height: 22rem; background: var(--color-code-bg, #0f172a); color: #e2e8f0; padding: 1rem; border-radius: 8px; font-size: 0.8em;"><code>{{ f.content }}</code></pre></we-code-view>
       </details>
       {% endfor %}
       {% if preset.cem %}

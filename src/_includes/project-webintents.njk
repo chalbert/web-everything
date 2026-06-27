@@ -140,18 +140,18 @@ withMode(Component); // applies mode trait
                 <tr>
                     <td><strong>Intent configuration</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;html data-intent-density="compact"
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;html data-intent-density="compact"
       data-intent-motion="immediate"
-      data-intent-mode="night"&gt;</code></pre>
+      data-intent-mode="night"&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST read the intent configuration (e.g., <code>intents.json</code>) and emit the active profile as <code>data-intent-*</code> attributes on the root element or relevant scope.</td>
                 </tr>
                 <tr>
                     <td><strong>Density-driven styles</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;div style="padding: 4px 8px;"&gt;
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;div style="padding: 4px 8px;"&gt;
   Compact item
-&lt;/div&gt;</code></pre>
+&lt;/div&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST apply the active density profile's spacing values to rendered components. Build-time intent resolution allows dead-code elimination of unused density implementations.</td>
                 </tr>
@@ -163,12 +163,12 @@ withMode(Component); // applies mode trait
                 <tr>
                     <td><strong>Context serialization</strong></td>
                     <td>
-<pre style="margin: 0; font-size: 0.8em;"><code>&lt;script type="application/json"
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;script type="application/json"
   data-store="intents:active"&gt;
 {"density":"compact",
  "motion":"immediate",
  "mode":"night"}
-&lt;/script&gt;</code></pre>
+&lt;/script&gt;</code></pre></we-code-view>
                     </td>
                     <td>Server MUST serialize the active intent profile using the <a href="/projects/webstates/#ssr">Web States</a> JSON block format so the client can hydrate without re-reading configuration.</td>
                 </tr>
