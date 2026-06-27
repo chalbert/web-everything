@@ -13,5 +13,26 @@
       ]
     }
   },
-  "description": "<h3>Spatial Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>comfortable</code>: <strong>44px+</strong> touch targets. Whitespace is used for grouping (Consumer standard).</li><li><code>compact</code>: <strong>32px</strong> targets. High information density, border-based grouping (Enterprise standard).</li><li><code>wafer</code>: <strong>24px</strong> targets. Maximum data visibility for complex tooling/IDE interfaces.</li></ul>"
+  "metrics": {
+    "description": "Quantified, machine-measurable ranges per level — the contract the #1698 density-reality oracle divergence-checks against. The DENSITY signal is interElementGap (the spacing/whitespace ratio); touchTargetFloor is the separate a11y lane (measured absolutely by axe/WCAG 2.5.5/2.5.8, NOT the density metric — refuted as such in #1791) and is carried here only to keep the level vocabulary complete.",
+    "interElementGap": {
+      "description": "Typical spacing (px) between sibling content elements at this level — list rows, stacked form controls, card-grid items. The oracle measures rendered inter-element gaps and flags a page whose median falls outside its declared level's band. Bands are contiguous and bounded so both 'too tight' and 'too sparse' diverge.",
+      "unit": "px",
+      "bands": {
+        "comfortable": { "min": 16, "max": 32 },
+        "compact": { "min": 8, "max": 16 },
+        "wafer": { "min": 2, "max": 8 }
+      }
+    },
+    "touchTargetFloor": {
+      "description": "Minimum interactive hit-box size (px) per level. A11y lane, not the density metric (#1791). comfortable maps to WCAG 2.5.5 AAA (44px), wafer to 2.5.8 AA (24px).",
+      "unit": "px",
+      "bands": {
+        "comfortable": { "min": 44 },
+        "compact": { "min": 32 },
+        "wafer": { "min": 24 }
+      }
+    }
+  },
+  "description": "<h3>Spatial Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>comfortable</code>: <strong>44px+</strong> touch targets, <strong>16&ndash;32px</strong> inter-element gaps. Whitespace is used for grouping (Consumer standard).</li><li><code>compact</code>: <strong>32px</strong> targets, <strong>8&ndash;16px</strong> gaps. High information density, border-based grouping (Enterprise standard).</li><li><code>wafer</code>: <strong>24px</strong> targets, <strong>2&ndash;8px</strong> gaps. Maximum data visibility for complex tooling/IDE interfaces.</li></ul><p class=\"text-sm text-gray-600\">Quantified bands live in <code>metrics</code> &mdash; the density-reality oracle (#1698) measures the rendered inter-element spacing/whitespace ratio against the declared level's <code>interElementGap</code> band.</p>"
 }
