@@ -1186,6 +1186,20 @@ try {
   err(`Vite proxy allowlist check failed: ${e.message}`);
 }
 
+// ── 9a-rules. Cross-doc codifiedIn anchor-resolution gate (#1828, #1792 Fork 1 → (c)) ──
+// The statute layer (docs/agent/platform-decisions.md + 3 siblings) renders at /rules/, and ~229
+// `codifiedIn:` frontmatter values across backlog/*.md cite anchors in it. platform-decisions.md is
+// edited every decision-resolve, so a renamed heading would silently 404 every inbound cite. Assert each
+// codifiedIn doc-cite resolves to a rendered anchor (re-using the loader's anchor extraction, so the gate
+// and the page can never disagree). Pure rule lives in scripts/lib/validate-rules-anchors.cjs.
+try {
+  const { validateRulesAnchors, buildAnchorIndex, collectCodifiedCites } = require('./lib/validate-rules-anchors.cjs');
+  const { errors: re } = validateRulesAnchors(buildAnchorIndex(), collectCodifiedCites(join(ROOT, 'backlog')));
+  for (const e of re) err(e.message, e.descriptor);
+} catch (e) {
+  err(`Rules codifiedIn anchor-resolution check failed: ${e.message}`);
+}
+
 // ── 9b. Module-resolution exports-lock (#274/#271) ──
 // Gather every `@frontierui/*` (locked-scope) entry from the project's SHIPPED native resolution
 // manifests — vite `resolve.alias` + every `<script type="importmap">` in the served catalog pages

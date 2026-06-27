@@ -120,6 +120,22 @@ permalink: /governance/
 </div>
 
 <div class="content-box" style="margin-top: 3rem;">
+    <h2>Governance documents</h2>
+    <p>
+        The narrative docs that govern how to work here, alongside the cite-able
+        <a href="/rules/">statute rules</a>:
+    </p>
+    <ul style="display: grid; gap: 0.75rem; margin-top: 1rem; list-style: none; padding: 0;">
+        {% for doc in governanceNarratives %}
+        <li>
+            <a href="/governance/{{ doc.id }}/" style="font-weight: 600;">{{ doc.title }}</a>
+            <span style="color: var(--color-text-muted); font-size: 0.85em;"> — {{ doc.kind }}</span>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+
+<div class="content-box" style="margin-top: 3rem;">
     <h2>A deliberately humble commitment</h2>
     <p>
         To be clear about what this page is and is not: it is <strong>not</strong> a claim that Web

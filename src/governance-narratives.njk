@@ -1,0 +1,35 @@
+---
+pagination:
+    data: governanceNarratives
+    size: 1
+    addAllPagesToCollections: true
+    alias: doc
+permalink: "governance/{{ doc.id }}/"
+layout: base.njk
+eleventyComputed:
+    title: "Governance - {{ doc.title }}"
+---
+
+<div class="plug-detail-header">
+    <div class="plug-detail-header-inner">
+        <nav class="plug-breadcrumb">
+            <a href="/governance/" class="plug-crumb">Governance</a>
+            <svg class="plug-crumb-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="plug-crumb plug-crumb-current">{{ doc.title }}</span>
+        </nav>
+        <div class="plug-title-row">
+            <h1 class="plug-title">{{ doc.title }}</h1>
+            <div class="plug-status"><span class="status-pill">{{ doc.kind }}</span></div>
+        </div>
+        <p style="margin: 0.5rem 0 0; font-size: 0.85em; color: var(--color-text-muted);">
+            Rendered from <code>{{ doc.file }}</code>. This is a human-read narrative; for cite-able statute
+            rules see <a href="/rules/">Rules</a>.
+        </p>
+    </div>
+</div>
+
+<div class="container block-detail-page">
+    <div class="block-body content rules-doc">
+        {{ doc.html | safe }}
+    </div>
+</div>

@@ -1,0 +1,42 @@
+---
+layout: base.njk
+title: Rules - Web Everything
+permalink: /rules/
+---
+
+<div class="intro">
+    <h1>Rules</h1>
+    <p class="lead" style="font-size: 1.35rem; line-height: 1.45; color: var(--color-text-muted); margin-bottom: 2rem;">
+        The project's standing rules — its <strong>statute layer</strong>. These are the cite-able
+        governance docs that decisions point at via <code>codifiedIn:</code>; every anchor below
+        resolves to a stable URL on this site (a gate enforces it on every decision-resolve).
+    </p>
+</div>
+
+<div class="content-box" style="margin-bottom: 2.5rem;">
+    <p>
+        The rules are authored as markdown under <code>docs/agent/</code> and rendered here verbatim —
+        the markdown stays the source of truth. For the human-read narrative on <em>how</em> these
+        decisions get made (and how that is designed to change), see <a href="/governance/">Governance</a>.
+    </p>
+</div>
+
+{% for rule in rules %}
+<section class="content-box" style="margin-bottom: 2.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap;">
+        <h2 style="margin: 0;"><a href="/rules/{{ rule.id }}/">{{ rule.title }}</a></h2>
+        <code style="font-size: 0.8em; color: var(--color-text-muted);">{{ rule.file }}</code>
+    </div>
+    {% if rule.headings.length %}
+    <ul style="columns: 2; column-gap: 2rem; margin-top: 1rem; list-style: none; padding: 0;">
+        {% for h in rule.headings %}
+        {% if h.level <= 3 %}
+        <li style="margin-bottom: 0.35rem; {% if h.level == 3 %}padding-left: 1rem;{% endif %} break-inside: avoid;">
+            <a href="/rules/{{ rule.id }}/#{{ h.anchor }}" style="{% if h.level <= 2 %}font-weight: 600;{% endif %}">{{ h.text }}</a>
+        </li>
+        {% endif %}
+        {% endfor %}
+    </ul>
+    {% endif %}
+</section>
+{% endfor %}

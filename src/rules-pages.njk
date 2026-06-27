@@ -1,0 +1,34 @@
+---
+pagination:
+    data: rules
+    size: 1
+    addAllPagesToCollections: true
+    alias: rule
+permalink: "rules/{{ rule.id }}/"
+layout: base.njk
+eleventyComputed:
+    title: "Rules - {{ rule.title }}"
+---
+
+<div class="plug-detail-header">
+    <div class="plug-detail-header-inner">
+        <nav class="plug-breadcrumb">
+            <a href="/rules/" class="plug-crumb">Rules</a>
+            <svg class="plug-crumb-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="plug-crumb plug-crumb-current">{{ rule.title }}</span>
+        </nav>
+        <div class="plug-title-row">
+            <h1 class="plug-title">{{ rule.title }}</h1>
+        </div>
+        <p style="margin: 0.5rem 0 0; font-size: 0.85em; color: var(--color-text-muted);">
+            Rendered from <code>{{ rule.file }}</code> — the markdown is the source of truth. Anchors on this
+            page are stable <code>codifiedIn:</code> cite targets.
+        </p>
+    </div>
+</div>
+
+<div class="container block-detail-page">
+    <div class="block-body content rules-doc">
+        {{ rule.html | safe }}
+    </div>
+</div>

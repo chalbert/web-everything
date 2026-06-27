@@ -1,8 +1,11 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-27"
+dateResolved: "2026-06-27"
+graduatedTo: "we:src/rules.njk — /rules/ read-path (rules-loader.cjs render + validate-rules-anchors.cjs codifiedIn anchor gate); Fork 2 governance narratives at /governance/<id>/"
 tags: []
 ---
 

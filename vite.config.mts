@@ -6,7 +6,6 @@ import { dirname, resolve } from 'node:path';
 // sibling checkout (a build-time plugin can't go through `resolve.alias`, so this is a direct sibling
 // import — same `../<sibling>` assumption the `@frontierui/*` aliases below already rely on).
 import { devPanel } from '../plateau-app/tools/dev-panel/vite-plugin';
-import { moduleService } from './tools/maas/vite-plugin';
 
 // #449 (per #606): plugs is FUI's impl; WE consumes it as a no-leakage client via the
 // `@frontierui/plugs` package, dev-time-resolved to the sibling Frontier UI source (mirrors FUI's
@@ -101,7 +100,6 @@ function routerDemoFallback(): Plugin {
 export default defineConfig({
   plugins: [
     devPanel(),
-    moduleService(),
     routerDemoFallback(),
     webEverythingPatches(),
     // The Enforcer (the build-time trait-manifest generator) relocated to FUI with the rest of the
@@ -124,7 +122,7 @@ export default defineConfig({
       },
       // Proxy doc pages and assets to 11ty server (but not demos/*.html, TypeScript plugs, or blocks)
       // Note: /blocks/*.ts are served by Vite, /blocks/ doc pages are proxied
-      '^/(projects|adapters|intents|capabilities|compat|protocols|design-systems|presets|plugs/(?!.*\\.ts)|cases|mission|semantics|states|resources|author|governance|research|backlog|validation-rules|conformance|project-lifecycle|assets|css|js|sitemap.xml|build-id.json)': {
+      '^/(projects|adapters|intents|capabilities|compat|protocols|design-systems|presets|plugs/(?!.*\\.ts)|cases|mission|semantics|states|resources|author|governance|rules|research|backlog|validation-rules|conformance|project-lifecycle|assets|css|js|sitemap.xml|build-id.json)': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
