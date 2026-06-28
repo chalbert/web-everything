@@ -3,7 +3,7 @@ kind: story
 size: 8
 status: parked
 parkedReason: maturityGated
-maturityTrigger: "externalConsumers>=1: a real host needs to embed the workbench stage for UNTRUSTED/third-party blocks (today only the FUI-owned fui:demos/workbench-host.html demo harness embeds it, with no postMessage sandbox need)"
+maturityTrigger: "adoptionSignal: a real host needs to embed the workbench stage for UNTRUSTED/third-party blocks (today only the FUI-owned fui:demos/workbench-host.html demo harness embeds it, with no postMessage sandbox need)"
 parent: "1836"
 blockedBy: ["1900"]
 dateOpened: "2026-06-27"
