@@ -1,8 +1,9 @@
 ---
 kind: epic
 parent: "1143"
-status: open
+status: active
 dateOpened: "2026-06-28"
+dateStarted: "2026-06-28"
 tags: []
 ---
 
@@ -46,3 +47,13 @@ These are pre-decided with a recommended default each — captured for build, no
 - **Cross-repo** (slice 4) is the hard part — the constellation (WE → frontierui → plateau-app) means a single item often spans repos; clone-per-lane multiplies per repo.
 - **Derived artifacts + monolithic registries** — same once-only-regen and serial-lane-for-monolith constraints as the worktree model carry over (see the orchestrator header's effects-manifest notes).
 - **`multiLaneFiles` detection** must run against the assembled tree (the worktree run's detector missed a real `we:src/_data/intents/surface.json` overlap because the tree never assembled).
+
+## Progress
+
+- **Status:** active — design forks resolved, build underway.
+- **Decisions (all resolved):** #1935 merge-risk reservation, #1936 cross-session lock primitive, #1937 gate location.
+- **Slices:**
+  - ✅ **1** — guard carve-out (#1934, resolved): `lane/*` + `batch-parallel/*` push allowed; main still denied.
+  - ✅ **2** — lane-clone provisioning (#1940, resolved): `we:scripts/lane-pool.mjs` — persistent `--reference`-shared pool under `~/workspace/.lanes/<repo>/`, fetch+reset refresh, repo-parameterized for slice 4. 14/14 verify.
+  - ⬜ **3** — orchestrator rewrite: replace worktree-add with lane-clone dispatch (consume `lane-pool list`/`path`) + push to `lane/*` + central fetch/merge/rebase-retry/cleanup + derived regen once. Reuses the #1869 ledger reconcile. **Next slice.**
+  - ⬜ **4** — cross-repo lanes (frontierui/plateau-app); v1 may scope WE-only to ship sooner.
