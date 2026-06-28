@@ -102,8 +102,9 @@ files); everything beneath it is already-open WE standards.
 
 ## Axis 1 — who owns the Protocol → **A (mint a WE node)**
 
-- **A — Mint a WE-constellation node that owns the Protocol** (internal slug TBD — `webdelivery` /
-  `webprocess` / `webautonomy` / …; it is a node id, not a public brand). Own project entry +
+- **A — Mint a WE-constellation node that owns the Protocol** (minted as **`webprocess`** —
+  `we:src/_data/projects/webprocess.json`, owning the `self-driven-project-artefact-contract` Protocol;
+  a node id, not a public brand). Own project entry +
   `project-<id>.njk` partial (carrying the protocol anchor), per the #091 layering. Satisfies the
   we:protocols.json invariant the clean way; matches how every other Protocol is homed. With the fit test
   above, the node is a **bounded capstone**, not a category expansion. **Chosen.**
