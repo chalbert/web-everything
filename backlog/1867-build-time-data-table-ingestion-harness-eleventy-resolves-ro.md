@@ -2,15 +2,23 @@
 kind: decision
 size: 5
 parent: "1600"
-status: active
+status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-28"
+graduatedTo: none
 preparedDate: "2026-06-27"
 relatedReport: reports/2026-06-27-ssr-data-table-build-harness-boundary.md
+codifiedIn: "docs/agent/platform-decisions.md#ssr-data-table-build-harness"
 tags: [data-table, ssr, build-integration, embed-boundary, webexpressions]
 ---
 
-# DECISION: Build-time data-table ingestion harness — the WE→FUI evaluate/render boundary + the serialized-context format
+# DECISION: Build-time data-table ingestion harness — the WE→FUI evaluate/render boundary + the interactive-cell format
+
+> **RESOLVED 2026-06-27.** Fork 1 → (a) FUI build-CLI subprocess (FUI-compute → WE-build, keyed-batch, version-pinned).
+> Fork 2 → (c) `data-*`-on-cell + in-place DOM enhancer (no JSON island, no re-render — the build↔client skew class is
+> structurally gone). Codified at `we:docs/agent/platform-decisions.md#ssr-data-table-build-harness`. Build graduates to
+> **#1902**; the #1600 family (#1609–#1613) repointed there.
 
 ## Digest
 
@@ -45,10 +53,10 @@ Both forks are grounded against a published prior-art survey — see `relatedRep
 
 ## Recommended path at a glance
 
-| Fork | Recommended default | Confidence |
+| Fork | Recommended default | Status |
 | --- | --- | --- |
-| **1 — evaluate/render boundary** | **(a) FUI build-CLI, batched one process (keyed-array in/out), harness re-homed to FUI** | medium — (c) DAG-defeated; (a) vs (b) is a hermetic-build-vs-reuse-served-path trade. Prior art (dart-sass / Bazel) **and** `#workbench-inert-data-static-slot` both favor (a) |
-| **2 — serialized-context format** | **(a) evaluated-result payload, nested-child inert `<script type="application/json">`, raw field values, plain JSON over the JSON-native `Cell`** | medium — five items inherit it; the JSON-native `Cell` removes the codec question, leaving carries-result-vs-context + anchoring |
+| **1 — evaluate/render boundary** | **(a) FUI build-CLI, batched one process (keyed-array in/out), harness re-homed to FUI** | **✅ RATIFIED 2026-06-27** — skeptic survived-with-amendment (version-pin, keyed-batch, direction-naming); (c) DAG-defeated, (b) killed by `#workbench-inert-data-static-slot` |
+| **2 — interactive-cell payload format** | **(c) co-located `data-*` attrs on cells + in-place DOM enhancer (no re-render)** | **✅ RATIFIED 2026-06-27** — surfaced in discussion as the native-first third option; **dissolves the build↔client skew risk** (one rendered table, client reorders existing rows); (a) JSON-island and (b) input-context both retired as defaults |
 
 ### Supported by default (not forks)
 
@@ -59,7 +67,12 @@ Both forks are grounded against a published prior-art survey — see `relatedRep
   an impl detail *internal to the FUI harness*, not a WE-side fork. (The shim/serializer version is pinned — see Fork 1.)
 - **Function-valued `.config` never serializes** — settled by #1818; the wire carries only the declarative subset.
 
-## Fork 1 — the evaluate/render boundary mechanism
+## Fork 1 — the evaluate/render boundary mechanism — ✅ RATIFIED 2026-06-27 → (a)
+
+**Ruling:** (a) FUI build-CLI, batched single process (keyed-array in / keyed-array out), harness re-homed to FUI
+(`locus`/`relatedProject: frontierui`); WE's Eleventy orchestrates over the process boundary. Carries all three
+skeptic amendments (locked FUI build-artifact version incl. DOM-shim/serializer, keyed-batch isolation, the
+codified rule names the FUI-compute → WE-build direction and forbids the build reading the dev `/_maas/data/` route).
 
 *Fork-existence: option (c) is the **excluded/broken** branch — a WE→FUI runtime dependency inverts the DAG (only
 the type-only contracts package may cross WE→FUI), a forced invariant. (a) and (b) are two coherent branches that
@@ -106,54 +119,63 @@ route** (that route is the dev-freshness seam per `#workbench-inert-data-static-
 folded the hermetic-version-pin, keyed-batch, and direction-naming amendments. No flip: (a) beats (b) on
 hermeticity for an offline build; (b)'s only edge (dev freshness) is owned by a different seam.
 
-## Fork 2 — the serialized-context format
+## Fork 2 — the interactive-cell payload format — ✅ RATIFIED 2026-06-27 → (c)
+
+**Ruling:** (c) co-located **`data-*` attributes on the SSR cells** + a small **in-place DOM enhancer** (client
+sort/filter/page reorder the *existing* `<tr>`s; **no re-render, no JSON island**). Carries the **raw typed value**
+on each cell (`<td data-sort-value="2026">`) so typed sort/group read a real key, never the display text. Live/app
+data (the *full context hookup*) is the established **#1827** case and is explicitly out of scope here.
 
 *Fork-existence: the **excluded/broken** branch is "recover sort keys from rendered `<td>` text" — a forced-invariant
-violation of #1818's correctness rule (a key read from `Baseline 2026` / `✅` sorts wrong). The two coherent branches
-that cannot coexist as one wire-form: ship the **evaluated result** vs ship the **raw input context** — exactly one
-payload shape is emitted, and five items (#1609–#1613) inherit it.*
+violation of #1818's correctness rule (a key read from `Baseline 2026` / `✅` sorts wrong); (c) defeats it by carrying
+the raw key in a `data-*` attr. The coherent branches are three ways to get the raw value to the client — on the cell
+(c), in a co-located JSON blob (a), or as the un-projected input the client re-binds (b) — exactly one is emitted,
+and five items (#1609–#1613) inherit it.*
 
-The inert `<script type="application/json">` payload for the **deterministic + interactive** cell (build-resolved
-baseline the client re-renders on sort/filter):
+- **(c) co-located `data-*` attrs + in-place enhancer** *(ratified)* — the SSR `<table>` **is** the table; raw typed
+  values ride on the cells (`<td data-sort-value>`, `<th data-type="number" data-sortable>`); a small client enhancer
+  reorders/hides the existing rows. **No second render path → the build↔client skew risk is structurally gone** (only
+  one rendered table ever exists). Native-first (rule 75): plain HTML, inspectable, survives DOM moves, no `:scope >`
+  island bookkeeping. Cost: a small **in-place enhancer** distinct from `renderDataTable` (which builds *from* rows and
+  cannot operate on a DOM it did not create); **grouping** in-place (insert group-header rows, recompute aggregates) is
+  fiddlier than via re-render — acceptable since the docs/backlog surfaces are sort/filter, not group-heavy.
+- **(a) evaluated-result JSON island + re-render** *(retired)* — nested-child `<script type="application/json">`
+  carrying raw `rows` + declarative `config`; client `JSON.parse` → `renderDataTable`. Reuses the renderer, but ships a
+  duplicate payload **and** introduces *two* render paths (build SSR vs client re-render) that must be version-pinned or
+  every table silently reflows on hydration — the skew risk (c) avoids entirely.
+- **(b) ship the raw input context** *(retired)* — client re-runs `evaluate()` to re-bind: ships the un-projected input
+  and re-runs evaluation client-side (skew). This is really the live-context shape — it belongs to #1827, not here.
 
-- **(a) ship the evaluated result** *(default)* — resolved `rows` + the declarative `config` subset
-  (`field`/`label`/`sortable`/`type`) as **plain JSON**, **co-located as a nested-child** `<script type="application/json">`
-  inside the `<we-data-table>` (structural association — no id bookkeeping, survives DOM moves), carrying **raw field
-  values** (not formatted display text). Client re-renders directly via `renderDataTable`.
-- **(b) ship the raw input context** map; the client re-runs `evaluate()` to re-bind. "Same source of truth" phrasing,
-  but ships the binding + the (potentially larger) un-projected input context, and re-running `evaluate()` on the
-  client risks build≠client skew.
-
-**Prior art.** Islands frameworks **co-locate the hydration payload with the element instance** (Astro's `props`
-attribute, Eleventy `<is-land>`'s nested `<template>`, Lit SSR's declarative shadow DOM) rather than a page-global
-blob (`__NEXT_DATA__`, Qwik). A **type-preserving codec** (devalue, superjson, turbo-stream) is needed **only for
-non-JSON-native values** — WE's `Cell` is JSON-native, so plain JSON suffices. (a) wins on payload minimality, not
-leaking un-projected source data, and build-once determinism.
-
-**Skeptic amendments folded in:** (i) the no-codec rule is **conditional** — plain JSON *iff* the projected value set
-is JSON-total; **widening `Cell` beyond JSON-native triggers a codec decision**, it does not silently widen the format;
-(ii) the nested `<script>` is **non-slotted** and read via **direct-child query, not descendant** (so a nested table
-doesn't grab the wrong payload, and shadow-DOM slotting doesn't capture it); (iii) **one formatter, one pinned
-`renderDataTable`** — the SSR `<table>` text is the serialized output of the *same* renderer the client hydrates with,
-so the cell text never reflows on hydration. Per `#single-authoring-sot-derived-projection`, the JSON is the **derived
-projection** of the `[[ ref ]]` + `config` authoring SoT, and the SSR text is rendered *from it* — one authoring home.
+**Prior art.** Carrying the sort key on the cell as a `data-*` attribute and enhancing the existing table in place is the
+canonical progressive-enhancement pattern (GOV.UK `moj-sortable-table` `data-sort-value`, WHATWG/HTML `sortable` lineage,
+classic `tablesorter`). Islands frameworks **co-locate** the hydration data with the element — (c) takes that to its
+native limit: the data co-locates *on the cells themselves*, no separate payload node. The `data-*` value is the
+**derived projection** of the `[[ ref ]]` + `config` authoring SoT (`#single-authoring-sot-derived-projection`); the SSR
+text and the sort key are two faces of the *same* build-time projection — one authoring home, one render.
 
 ```html
-<!-- (a) default: evaluated-result payload as a NON-SLOTTED, direct-child inert island -->
-<we-data-table>
-  <table class="data-table" data-order="filter>sort>group>page"> … server-rendered baseline … </table>
-  <script type="application/json" data-we-data-table="resolved">
-    { "rows":   [ { "name": "webcards", "since": 2026 } ],          /* RAW field values, not "Baseline 2026" */
-      "config": { "columns": [ { "field": "name", "label": "Name", "sortable": true, "type": "string" },
-                               { "field": "since", "label": "Since", "sortable": true, "type": "number" } ] } }
-  </script>
+<!-- (c) ratified: raw typed values on the cells; the SSR table IS the table, client reorders it in place -->
+<we-data-table data-order="filter>sort>group>page">
+  <table class="data-table">
+    <thead><tr>
+      <th data-field="name"  data-type="string" data-sortable>Name</th>
+      <th data-field="since" data-type="number" data-sortable>Since</th>
+    </tr></thead>
+    <tbody>
+      <tr><td data-sort-value="webcards">webcards</td><td data-sort-value="2026">Baseline 2026</td></tr>
+    </tbody>
+  </table>
 </we-data-table>
-<!-- hydration: querySelector(':scope > script[data-we-data-table]'), JSON.parse, renderDataTable(rows, config) -->
+<!-- enhance: read data-sort-value (raw key, NOT the "Baseline 2026" text), reorder existing <tr>s in place -->
 ```
 
-**Skeptic: SURVIVES-WITH-AMENDMENT** — folded the JSON-total conditional, non-slotted/direct-child rule, and the
-one-renderer-no-skew constraint. No flip: ship-result beats ship-context on minimality, leakage, and determinism;
-raw-values is the correctness requirement (#1818), not negotiable.
+**Skeptic: SURVIVES-WITH-AMENDMENT** — the strongest case against (c) is owning a *second* client engine (the in-place
+enhancer) and in-place **grouping** being fiddlier than re-render. Folded amendments: (i) the enhancer is **FUI-homed**
+(it is the `<we-data-table>` CE's own client behavior — the renderer's sibling, not a WE concern); (ii) it is the
+**sole** client path (no `renderDataTable` re-render on the client), which is precisely what removes the skew class;
+(iii) if a docs surface ever needs heavy in-place grouping and that proves too costly, *that specific surface* may opt
+into an island — a localized exception, not a reopening of the default. No flip: (c) dominates (a)/(b) on skew-safety and
+native-first, and the raw-key-on-cell satisfies #1818's raw-values correctness rule.
 
 ## Statute-overlap reconciliation (for any eventual `codifiedIn`)
 
@@ -168,18 +190,23 @@ No collision; a narrow extension that **composes** with the field:
   and protects (a)**, and the build must never read the dev route.
 - **`#block-data-ingestion`** (#1818) — #1867 *fills* its three named-open residuals (determinism predicate / build
   harness / serialized-context format); it does **not** re-decide the determinism×interactivity rule.
-- **`#single-authoring-sot-derived-projection`** — Fork 2's JSON is the derived projection; the `[[ ref ]]` + config
-  remain the single authoring SoT, and SSR text is rendered from the projection (one formatter — Fork 2 amendment iii).
+- **`#single-authoring-sot-derived-projection`** — Fork 2's cell `data-*` values are the derived projection; the
+  `[[ ref ]]` + config remain the single authoring SoT, and the SSR cell text + its raw `data-sort-value` are emitted
+  from that one projection in a single build pass (Fork 2 residual-risk mitigation).
 
-## Most dangerous residual risk (carry to ratification)
+## Most dangerous residual risk (carry to the build)
 
-**Build-vs-client render skew through two independently-pinned renderers.** Fork 1 pins a DOM-shim serializer in the
-FUI build-CLI to emit SSR HTML; Fork 2 hydrates with `renderDataTable` in a real browser. Nothing *automatically*
-forces those two render paths to be the same code at the same version — if they drift, every interactive table
-silently reflows on hydration, a correctness bug that passes every build gate because each side is internally
-consistent. **Mitigation (must be in the ratified rule): the build-CLI and the client runtime are the same pinned FUI
-version, and SSR text is the serialized output of the same `renderDataTable` the client hydrates with — one renderer,
-two execution contexts, never two renderers.**
+The original skew risk — *build-vs-client render through two independently-pinned renderers* — is **dissolved by Fork 2
+(c)**: there is now only **one** rendered table (the SSR `<table>`); the client reorders the existing rows in place and
+never re-renders, so two render paths cannot drift. That was the prepared default's biggest worry and (c) removes the
+whole class.
+
+The residual that remains is narrower: **the build's SSR `<td>` text and the cell's `data-sort-value` are two faces of
+one projection and must stay consistent** — if the display text is formatted (`Baseline 2026`) but the raw key
+(`2026`) is stamped by a different code path, a typed sort could disagree with what the user reads. **Mitigation (build
+rule): a single build-time emit produces both the cell text and its `data-*` raw value from the same resolved row — one
+projection, two attributes — never two passes.** Lower-severity than the retired skew class (it is build-internal and
+unit-testable, not a silent client-only reflow).
 
 ## Lineage
 

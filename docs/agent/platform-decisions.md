@@ -1019,7 +1019,9 @@ kernel's contract; the two kernel shapes never mix in one element.
 with the resolution-locus + client-payload axes. Surfaced by #1787 / the #1600 table→data-table family (all
 deterministic, ship without #1827). Follow-on: #1827 (SSR injector-context hydration, app-facing). Open impl
 residuals (mechanism may flex, goal fixed): the determinism predicate, the build-time evaluation harness, the
-serialized-context format.
+serialized-context format — **all three filled by #1867** ([#ssr-data-table-build-harness](#ssr-data-table-build-harness)),
+which refines the "JSON island" sketch above to a **`data-*`-on-cell + in-place enhancer** interactive format (the
+raw-typed-value correctness invariant is preserved; only the transport mechanism changed).
 
 ### Forward (generation) adapters for polyglot reach {#forward-generation-adapters}
 
@@ -1223,6 +1225,47 @@ Once a derived **inert display artifact** is generated wholly inside FUI (e.g. a
 
 **Lineage:** #1865 (author-mode source generation-home, ratified-with-caveat). Refines [#we-data-crosses-via-fui-served-route](#we-data-crosses-via-fui-served-route) (static-slot baseline vs route-as-dev-seam for inert data); applies #1730/#1282 (WE generator deleted → generation is a FUI concern), #1731 (`cem`/source crossing) and #954/#1701 (author-mode data placement).
 
+### FUI-resident table compute reaches WE's offline build via a pinned subprocess (FUI-compute → WE-build), never a served route; the interactive cell carries its raw sort key as a `data-*` attribute on the SSR `<table>`, never a re-rendering payload {#ssr-data-table-build-harness}
+
+The `<we-data-table>` evaluator and renderer both live in **FUI** (`CustomExpressionParser.evaluate`,
+`renderDataTable`); WE's Eleventy build **cannot import** them (a WE→FUI code import is a banned backward DAG edge
+per [constellation-placement](#constellation-placement)). So WE's offline build resolves a deterministic
+`rows="[[ ref ]]"` binding into an SSR `<table>` across a **process boundary**, on two settled facets:
+
+1. **Boundary mechanism (Fork 1 → a).** WE's Eleventy build **shells out to a FUI build-CLI** — deterministic context
+   in (stdin), SSR `<table>` HTML out (stdout) — homing the harness in **FUI** (`locus`/`relatedProject: frontierui`);
+   WE orchestrates over the subprocess. This is the **inverse direction** of
+   [#we-data-crosses-via-fui-served-route](#we-data-crosses-via-fui-served-route) (that rule is WE-data → FUI-runtime;
+   this is **FUI-compute → WE-build**), and it is a **subprocess, not a served route** — the offline-build sibling.
+   Three forced amendments: the CLI is a **locked FUI build-artifact version** (incl. the DOM-shim/serializer),
+   **never PATH-resolved** (else the build is non-reproducible); the request is **one batched process, keyed-array in
+   / keyed-array out**, so one malformed table fails in isolation and is attributable; and **the build never reads the
+   dev `/_maas/data/` route** — that route is the dev-freshness HMR seam ([#workbench-inert-data-static-slot](#workbench-inert-data-static-slot)),
+   not a build transport. A build-time *fetch from a running origin* is the rejected branch (Bazel-style hermeticity:
+   network-during-build breaks reproducibility); a WE→FUI *runtime package* dep is excluded (inverts the DAG).
+2. **Interactive-cell format (Fork 2 → c).** The deterministic + **interactive** cell carries its **raw typed value as
+   a `data-*` attribute on the SSR cell** (`<td data-sort-value="2026">Baseline 2026</td>`,
+   `<th data-type="number" data-sortable>`); a small **in-place DOM enhancer** (the `<we-data-table>` CE's own FUI-homed
+   client behavior) reorders/hides the **existing** rows. There is **no JSON island and no client re-render** — so the
+   build↔client **render-skew class is structurally gone** (only one rendered table ever exists; nothing can drift).
+   This **refines** [#block-data-ingestion](#block-data-ingestion)'s anticipated "serialized resolved context / JSON
+   island" sketch (#1818 left the format open — "mechanism may flex, goal fixed"): the goal it fixed is preserved
+   (the client sorts on **raw `field` values, never reparsed `<td>` text** — the correctness invariant), with a
+   **native-first** ([native-first-baseline](#native-first-baseline)) mechanism — the raw key rides the cell as plain
+   HTML (GOV.UK `data-sort-value` / `tablesorter` lineage). The cell text and its `data-*` key are **two attributes of
+   one build-time projection** ([single-authoring-sot-derived-projection](#single-authoring-sot-derived-projection)),
+   emitted in a single pass so the displayed value and its sort key can never disagree. In-place **grouping** is
+   fiddlier than re-render; a surface that ever needs heavy grouping may opt *that surface* into an island — a localized
+   exception, not a reopening of the default.
+
+**Lineage:** #1867 (ratified 2026-06-27 — Fork 1 → (a) FUI build-CLI subprocess, keyed-batch, version-pinned
+[skeptic SURVIVES-WITH-AMENDMENT]; Fork 2 → (c) `data-*`-on-cell + in-place enhancer [skeptic SURVIVES-WITH-AMENDMENT];
+prep `reports/2026-06-27-ssr-data-table-build-harness-boundary.md`). Fills the [#block-data-ingestion](#block-data-ingestion)
+(#1818) build residuals (determinism predicate / build harness / interactive format). Inverse-direction sibling of
+[#we-data-crosses-via-fui-served-route](#we-data-crosses-via-fui-served-route); shares the offline-vs-dev-seam line with
+[#workbench-inert-data-static-slot](#workbench-inert-data-static-slot). Prerequisite for the #1600 table→data-table
+family (#1609–#1613, repointed off #1867 onto the build story). The non-deterministic app case is #1827.
+
 ### Runtime-DI seam vs devtools provider seam {#runtime-di-vs-devtools-provider-seam}
 
 A capability is a **runtime-DI standard seam** — a mandated `CustomXRegistry` or protocol — **only if
@@ -1411,66 +1454,87 @@ values that fail the membership test stay **intent-local tokens** — `progress`
 `neutral | danger` regardless (#1337, non-negotiable). Realized by #1458 (palette + statute) / #1459 (rename
 sweep). Composes [intents-ux-only](#intents-ux-only) (tone is UX-only; the theme owns the hex).
 
-### A component's identity is its semantic element; its look is an orthogonal composable style {#identity-semantic-look-composable}
+### Component composition lives on three substrates — WE contract / FUI primitive / product component {#identity-semantic-look-composable}
 
-**A component's *identity* is its semantic element; its *look* is an orthogonal, composable style layer
-applied *to* that element. Visual similarity is never semantic identity.** Two consequences:
+**Every "how do we build component X" question reduces to one: which substrate owns the responsibility.**
+Fix the boundary once and the 100s of downstream calls (does a card have a title? what namespace? section
+or article? where does the heading go?) become **mechanical placements, not decisions**. The card is this
+principle's worked example.
+
+**The substrate boundary.**
+
+| Substrate | Owns | Deliberately does NOT own |
+|---|---|---|
+| **WE** — *standard* | the **contract**: semantic identity + the minimal invariant; names what a thing *is*. **Under-specifies on purpose** — any "a card has a title" claim is contradicted by the next design. | concrete structure, optional parts, look values |
+| **FUI** — *implementation* | the **primitive**: the reusable mechanism realizing the contract — transient root-binding, root resolution, the tokenized base style hook (`.fui-card`, token-driven `CARD_CSS`), slot/prop machinery. Product-agnostic. | any product-specific design opinion (titles, footers, menus) |
+| **Product** — *composition* | **concrete, semantically-named, namespaced components** composing primitives into what *this* product needs (title, footer, items, menus, behaviors). Lives in the **product's own frontend** (e.g. the WE website), **not** WE/FUI. | the standard/primitive — it *consumes*, never re-mints |
+
+**Two consequences of "identity = semantic element, look = orthogonal style":**
 
 1. **Different semantic value ⇒ different element.** A card (`<article>`, a self-contained composition)
    and a section (`<section>`, a thematic region) have different semantic value → different elements.
-   They may share a *look*; that shared look is a **style**, never a shared element. (The role/variant
-   minting contract restated: *different arrangement → distinct entity; same arrangement, different look
-   → variant* — see [tagname-naming](#tagname-naming)'s "name by semantics, not by uniformity".)
+   They may share a *look*; that shared look is a **style**, never a shared element. (Role/variant minting
+   restated: *different arrangement → distinct entity; same arrangement, different look → variant* — see
+   [tagname-naming](#tagname-naming)'s "name by semantics, not by uniformity".)
 2. **Native elements are the semantic standards; WE recognizes, it does not re-mint.** Settling thought
    experiment: *if HTML had no `<article>`/`<section>`, would WE mint standards for them? Yes.* So they
    are semantic standards the platform already provides — [native-first](#native-first-baseline) means WE
-   builds the orthogonal style layer on top, never wraps a custom element around a sufficient native one.
+   builds the style layer on top, never wraps a custom element around a sufficient native one.
 
-**The card, as the worked example (#1886).**
+**Delivery is a composed web component — never a classname.** At *both* the FUI-primitive and
+product-composition layers the deliverable is a custom element (own tag, multiple elements, props, slots,
+behaviors), **not** a hand-authored class. `<section class="fui-card">` is only the degenerate look-only
+*runtime residue*, never the authored artifact. **Native-first is preserved as a constraint *on the
+composition*:** each component composes the correct native root internally (landmarks/roles/a11y) and never
+reinvents a sufficient native primitive — but the unit delivered is the component.
 
-- **A card is a root-agnostic structure+style standard**, carrying **no semantic identity of its own** —
-  structure (a titled surface: header/body/footer slots, `fui:blocks/card/Card.ts`) + a tokenized style
-  surface, *applied to* a native-semantic root that supplies the semantics.
-- **`we-card` = the card bound to an `<article>` root** — the declarative convenience: `CardElement
-  extends TransientElement`, `resolveTag(): 'article'` (`fui:blocks/card/CardElement.ts:17-21`), so
-  `<we-card>` is **transient** — it erases to `<article class="fui-card">`. Composition, not subclassing.
-- **A `<section>` that wants the look keeps `<section>` and wears the card *style*** via the named style
-  hook `.fui-card` (`fui:blocks/card/Card.ts:34` `BASE_CLASS`): `<section class="fui-card">`, never
-  hand-rolled bespoke CSS.
+**The card, worked example (#1886).**
+
+- **WE** — the card *contract* only: "a styleable surface bound to a self-contained-composition root." No
+  title/footer claim.
+- **FUI** — the **transient primitives**: `we-card` (`resolveTag(): 'article'`,
+  `fui:blocks/card/CardElement.ts:17-21`) and `we-section-card` (`resolveTag(): 'section'`). Authored as
+  tags, they **erase to** `<article class="fui-card">` / `<section class="fui-card">` at runtime (transient
+  — composition, not subclassing). Base style hook `.fui-card` (`fui:blocks/card/Card.ts:34` `BASE_CLASS`),
+  token-driven `CARD_CSS`.
+- **Product** — the WE website composes `standard-card` (`= we-card` + title + footer + items + …) and a
+  section-rooted `standard-section` (`= we-section-card` + …), keeping each `<hN id>` heading verbatim so
+  in-page anchors survive. **These live in the website, not WE/FUI.** The FUI-vs-product line, when it
+  blurs, is settled by [reusable-against-all-implementers → neutral home](#reusable-neutral-home):
+  product-agnostic + reusable ⇒ graduate to an FUI primitive; product-specific ⇒ stays in the product.
 
 **Root polymorphism — intrinsic-yes / extrinsic-author-fiat-no (#1886 Fork 1).** Reject the *extrinsic
-author-fiat* `<we-card as="section|article">` — one custom-element name whose DOM root is chosen by an
-author *override* that can contradict content. It imports React's `as=`, which exists because JSX has no
-element-erasure mechanism; WE already has one (`TransientElement`), so `as=` solves a constraint WE lacks
-— the author just writes the native element + the style hook. **But not** polymorphism *per se*:
-**intrinsic, evidence-based** resolution where the element reads its **own** content to pick its tag is
-**blessed** and already shipped — `ButtonTransientElement.resolveTag()` returns
-`this.hasAttribute('href') ? 'a' : 'button'` (`fui:blocks/button/ButtonTransientElement.ts:17-18`). The
-line is **who chooses the root**: intrinsic evidence (DOM identity follows the element's own content) =
-blessed; extrinsic author-fiat override = rejected.
+author-fiat* `<we-card as="section|article">` — one tag whose DOM root is an author *override* that can
+contradict content. It imports React's `as=` (a workaround for JSX's lack of element-erasure; WE has
+`TransientElement`, so the author just writes the right primitive — `we-section-card`). **But not**
+polymorphism *per se*: **intrinsic, evidence-based** resolution where the element reads its **own** content
+to pick its tag is **blessed** and shipped — `ButtonTransientElement.resolveTag()` returns
+`this.hasAttribute('href') ? 'a' : 'button'` (`fui:blocks/button/ButtonTransientElement.ts:17-18`). The line
+is **who chooses the root**: intrinsic evidence = blessed; extrinsic author-fiat = rejected.
 
-**Where the look lives — FUI tokenized base + product/flavor values (#1886 Fork 2).** The standard
-three-layer carve: **WE** owns only the *contract* (root-agnostic structure + surface-styleable, no
-values); **FUI** ships the *base* card — structure + behavior + a **tokenized neutral surface** that
-already exists and is already token-driven (`CARD_CSS` = `var(--color-border, …)`, `var(--radius-md, …)`,
-`var(--color-surface-card, …)`, `fui:blocks/card/Card.ts:90-103`), reskinnable by *setting tokens*, never
-forked; **flavor (product layer)** supplies token *values*, composed/authored by the **Plateau
-assembler** (per [managed-offering constellation layering]: standard→WE, primitives→FUI, product→plateau;
-the default ships **zero** flavors). **Hardcoding the look in FUI core is rejected** — it bakes one
-register in, forcing a CSS fork to reskin, defeating the `var(--token, fallback)` indirection already
-shipped. The card surface is one *recipe* of the broader presentation-trait vocabulary (#1884); it ships
-on **plain tokens now** and retrofits to traits later, so #1884 does not block it.
+**Where the look *values* live — FUI tokenized base + product values (#1886 Fork 2).** **FUI** ships the base
+card's **tokenized neutral surface**, already token-driven (`CARD_CSS` = `var(--color-border, …)`,
+`var(--radius-md, …)`, `var(--color-surface-card, …)`, `fui:blocks/card/Card.ts:90-103`), reskinnable by
+*setting tokens*, never forked; the **product layer** supplies token *values* (and composes the concrete
+components above) per [managed-offering constellation layering] (standard→WE, primitives→FUI,
+product→plateau/site; default ships **zero** flavors). **Hardcoding the look in FUI core is rejected.** The
+card surface is one *recipe* of the broader presentation-trait vocabulary (#1884); it ships on **plain tokens
+now**, so #1884 does not block it.
 
-**Lineage:** #1886 (this ruling — both forks ratified 2026-06-27; parent #1287; `relatedReport`
-`reports/2026-06-27-project-include-we-card-migration.md`). Grounds the #1871 catalog-card migration and
-the #1608 frame-swap build. Refines [native-first-baseline](#native-first-baseline) and
-[tagname-naming](#tagname-naming); the Fork-2 carve applies the constellation three-layer split. Sibling
-of [composition-preserves-a11y-contract](#composition-preserves-a11y-contract) (#1832), which governs
-when a *composed variation* of a base block becomes a new component by its **a11y-contract** test —
-adjacent turf, consistent outcome (a section wears the card look as a `<section class="fui-card">`
-re-skin, not by overriding a custom element's root). *Confidence: high — both forks are grounded in
-already-shipped code (`resolveTag`, `CARD_CSS`, `BASE_CLASS`); the prepare-time skeptics survived with
-the intrinsic/extrinsic amendment folded.*
+**Namespace.** `we-*` is reserved for the standard+primitive layer; the **product** owns its own namespace
+via a **config knob (default empty)** — the WE website uses unprefixed `standard-card`/`standard-section`;
+the config lets any *published* product namespace its components without code change.
+
+**Lineage:** #1886 — prepared + ratified 2026-06-27, then **reopened the same day and re-ratified** when the
+human ruling corrected the delivery vehicle (a component is not a classname) and surfaced the real principle:
+the **substrate boundary**. Parent #1287; `relatedReport`
+`reports/2026-06-27-project-include-we-card-migration.md`. Grounds the #1871 docs migration (which authors
+the product `standard-card`/`standard-section`) and spawns the FUI `we-section-card` primitive. Refines
+[native-first-baseline](#native-first-baseline), [tagname-naming](#tagname-naming), and the constellation
+three-layer split; uses [reusable-neutral-home](#reusable-neutral-home) as the FUI-vs-product tie-breaker.
+Sibling of [composition-preserves-a11y-contract](#composition-preserves-a11y-contract) (#1832). *The original
+"a section wears the look as `<section class="fui-card">`" framing is **superseded** — that bare class is the
+runtime residue of the transient primitive, not an authored deliverable.*
 
 ### Composition preserves the base block's a11y contract; changing it means a new component {#composition-preserves-a11y-contract}
 

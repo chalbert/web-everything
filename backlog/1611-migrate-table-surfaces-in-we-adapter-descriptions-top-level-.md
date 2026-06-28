@@ -3,7 +3,7 @@ kind: story
 size: 2
 parent: "1600"
 status: open
-blockedBy: ["1867"]
+blockedBy: ["1902"]
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-27"
 tags: []
@@ -23,5 +23,6 @@ the build must resolve that binding to a plain SSR `<table>` — and **that buil
 not exist** (no Eleventy shortcode/transform invokes `CustomExpressionParser.evaluate()`; zero `rows="[[`
 bindings authored). #1818 itself lists it as an **open impl residual**. So #1787 (the runtime transient-CE
 embed + `we-data-table{}` CSS) was a **false `blockedBy`** — the real prerequisite is the build harness, now
-filed as **#1867** and repointed (`blockedBy: ["1867"]`, was `["1787"]`). Released unbuilt; the whole #1600
-data-table family (#1609/#1610/#1612/#1613) carries the same correction. Cascades clean once #1867 lands.
+filed as the build harness. #1867 (the design **decision**) ratified the boundary + interactive-cell format
+(`#ssr-data-table-build-harness`); the build itself is **#1902**, which this now `blockedBy`. Released unbuilt;
+the whole #1600 data-table family (#1609/#1610/#1612/#1613) carries the same correction. Cascades clean once #1902 lands.
