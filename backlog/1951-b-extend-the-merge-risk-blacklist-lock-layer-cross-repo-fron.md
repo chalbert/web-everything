@@ -1,0 +1,13 @@
+---
+kind: story
+size: 5
+parent: "1949"
+status: open
+blockedBy: ["1950"]
+dateOpened: "2026-06-28"
+tags: []
+---
+
+# B: extend the merge-risk blacklist + lock layer cross-repo (frontierui / plateau-app)
+
+The lock blacklist (RESERVED_MERGE_RISK) and the #1945 file-lock layer are WE-only (locks acquired in the WE clone; the denylist lists only WE paths). So cross-repo contention — two items both touching fui:tsconfig.json / fui:package.json / a shared barrel — has NO lock path and falls through to whole-item serial (the dominant cause of batch-2026-06-28-1946-1945's collapse: 7/8 items were cross-repo). Add a per-repo RESERVED_MERGE_RISK set + a per-repo lock root (we:scripts/readiness/file-locks.mjs --root parameterized per affected clone) so a lane briefly reserves a shared impl-repo file instead of being demoted to serial. Pairs with slice A (which routes shared-but-non-monolith files to lock/optimistic instead of serial).
