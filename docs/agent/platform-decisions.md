@@ -1465,6 +1465,36 @@ values that fail the membership test stay **intent-local tokens** — `progress`
 `neutral | danger` regardless (#1337, non-negotiable). Realized by #1458 (palette + statute) / #1459 (rename
 sweep). Composes [intents-ux-only](#intents-ux-only) (tone is UX-only; the theme owns the hex).
 
+### The presentation/style axis is intent-owned — never a parallel cross-cutting style vocabulary {#presentation-axis-is-intent-owned}
+
+A standing temptation is to mint a **cross-cutting presentation vocabulary** — a `finishes`/style sibling to
+intents (`rounded=md`, `shadowed=heavy`, `bordered`, `hover=shine`) that applies to *any* surface. **Rejected on
+merit.** The presentation/style axis is owned by **intents** (one open model for *all* UI/UX config); a parallel
+vocabulary over an axis an intent already homes is the *second home* that [realize a declared axis; never stand
+up a second home](#) forbids, and the lone-card consumer never met the *real cross-cutting consumer* bar. Two
+clarifications make this operative:
+
+- **"UX-only" means semantic/declarative (what/why, no impl refs — the #030 intent/trait split), NOT
+  "non-presentational."** `texture=glass` / `elevation=3` are legitimate **presentational intents** because each
+  carries a semantic story; the trait resolver maps them to CSS. Presentation-as-declared-semantic belongs in
+  intents.
+- **The pure-decoration edge → theme tokens, not a vocabulary.** A CSS knob whose "what/why" is genuinely thin
+  (a raw corner radius with no semantic role) stays a **theme token** (`--radius-*`), owned by webtheme. "Belongs
+  to no intent" argues *token*, never *new intent-sibling vocabulary*. Where a presentation value **does** carry
+  semantics, **extend the owning intent's dimensions** (add `radius`/`border` to `surface`) — standardize the
+  meta-schema, not the list.
+
+So every presentation concern routes to one of two existing homes — **intent dimension** (semantic) or **theme
+token** (decoration) — never a third cross-cutting style home. **Reversibility:** a *future* real consumer that
+needs one vocabulary spanning **multiple** intents, and **proves** intent-owns-the-axis cannot carry it, reopens
+this as a fresh merit fork (a hypothesis of cross-cutting need is not such a proof).
+
+**Lineage:** #1884 (ruled NO to a parallel presentation-trait vocabulary; prep's NOT-YET reframed to a merit
+ruling — prioritization is not a fork branch). Composes [intents-ux-only](#intents-ux-only) (open never-finished
+system; custom intents coexist), [open-numbered-variants](#open-numbered-variants), realize-a-declared-axis, and
+no-orchestrator-until-real-consumer. Follow-ups: #1911 (realize `surface`) · #1912 (extend for `radius`/`border`
+residual) · #1913 (realize app-authored custom intents — the open-system promise).
+
 ### Component composition lives on three substrates — WE contract / FUI primitive / product component {#identity-semantic-look-composable}
 
 **Every "how do we build component X" question reduces to one: which substrate owns the responsibility.**
