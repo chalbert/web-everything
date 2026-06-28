@@ -893,6 +893,42 @@ A capability is **plugged-only** (genuine residue ≈ the missing platform stand
 
 **Lineage:** #1839 (this ruling — both forks ratified 2026-06-27); refines #1826 ("residue minimal + justified") and [native-first-baseline](#native-first-baseline)'s plug corollary; grounds the #1840 re-audit (the bar = its per-API verdict) and #1844 (the parity-table schema). Prior art: caniuse `y`/`a`/`n`/`d` + MDN BCD `partial_implementation` + note. *Confidence: high — both alternatives are defeated by forced invariants (the epic's minimise-residue goal; the #1282 contract↔impl cut), and the contract-vs-capability discriminator is grounded in two real cases.*
 
+### Observe-only posture spectrum between unplugged and plugged — semantics never altered; deferred-not-sync; pure-observation folds into unplugged {#observe-only-posture-spectrum}
+
+Between **unplugged** (manual `register`/`upgrade`, zero global footprint) and **plugged** (full prototype
+patching that reaches true residue) sits a family of **observe-only postures** whose **invariant is that native
+method semantics are never altered** — they only observe and, at most, schedule a deferred `upgrade(root)`.
+Three forced rules govern this band:
+
+- **Substrate is a prototype-method wrapper, not a `Proxy`.** Mirror what plugged already does — `const o =
+  proto.m; proto.m = function(…){ observe(this); return o.apply(this,…) }` — because plugged itself reassigns
+  prototype members (there is **no `new Proxy` in the plugs tree**). This is strictly safer than a `Proxy` (no
+  identity break, no `instanceof` surprise). The observation **instrument is global, never per-root**: per-root
+  cannot see roots unowned code never hands you (whatwg/dom#1287 "extremely wasteful"; native
+  `customElements.upgrade` uses a realm-level candidate registry).
+- **Upgrade scheduling is deferred (microtask-batched), never synchronous-on-detect.** Synchronous upgrade
+  mid-call is **behaviorally equivalent to plugged** — it re-enters the page's own mutation with the same
+  construct-and-swap — so choosing it **dissolves the posture boundary** that justifies the band existing. Batch
+  into a dirty-`Set`, flush once per microtask over a snapshot; ship a synchronous **`flush()`** escape hatch for
+  the foreseeable live-read-before-flush window. (Dedup is **cost-load-bearing**, not cosmetic: `upgrade` re-walks
+  every plug with no early-return.)
+- **Pure-observation that patches *nothing* belongs inside unplugged, not as a separate rung.** A capability
+  recoverable by a **global `MutationObserver`** alone (any connected insertion, post-hoc) patches no prototype
+  member, so it does **not** violate unplugged's no-patching invariant and should **fold into unplugged** as a
+  config-selectable `autoUpgrade` knob (candidate default-on, but always overridable — a global observer is
+  semantics-safe yet **not footprint-free**). A posture only earns separate-rung status when it **must** patch a
+  method to do its job (e.g. **diagnostic** needs call-site + creation-time attribution that `MutationObserver`
+  cannot give). The boundary with plugged stays the [residue bar](#plugged-only-residue-bar): true residue
+  (`createElement`-at-creation tagging) is reachable only by patching, so it stays plugged-only.
+
+**Lineage:** #1872 (this ruling — both forks ratified 2026-06-27), under epic #1836 (every plug functional
+unplugged). Builds on the [residue bar](#plugged-only-residue-bar) (the live portability predicate this band
+applies) and [native-first-baseline](#native-first-baseline); the selected-posture value is a
+[config-extends-platform-default](#config-extends-platform-default) dimension (enum/contract → WE type-only,
+instrument + queue → FUI, value → project config). Successor build #1899. *Confidence: high — per-root and
+sync-on-detect are each defeated by forced invariants (un-handed roots; the posture-boundary collapse); the
+wrapper-vs-`MutationObserver` instrument split is left to a measured capture investigation in #1899.*
+
 ### Shape a new contract's surface by platform idiom, not capability {#contract-surface-platform-idiom}
 
 When inventing a **new** protocol surface, pick the API shape the platform already uses for that *kind* of
@@ -1897,6 +1933,29 @@ via the running Vite middleware — both reloads the server and leaks vendor dep
 **Lineage:** #1499 (ruling — the workbench live-test #1030/#912 serves the wrapper cross-origin; this is why
 #1030's `setup` human-gate was wrong and was removed). Coheres with the FUI vendor-deps-quarantined-to-a-
 sub-package rule and [framework-free-core-vendor-segregation](#framework-free-core-vendor-segregation).
+
+---
+
+### A plugged-vs-unplugged faithfulness surface needs a clean realm per mode; same-document direct injection is the isolation *showcase*, the iframe is a consumer-distribution mode {#plug-gap-clean-realm-per-mode}
+
+When a surface exists to **show the gap** between a plugged (proposed-standard) and unplugged (safe-now)
+rendering, a same-document re-mount toggle is **unfaithful**: plugging irreversibly patches realm globals with
+no teardown, so an "unplugged" re-mount inherits the lingering plugged globals and **falsely reports "works"** —
+faking the very result the surface exists to expose. Faithfulness therefore requires a **clean realm per mode**,
+and the cheapest correct mechanism is a **reload-scoped param** (`?plug=on|off` selecting the boot path at load,
+reusing the surface's existing URL-state serialization) — ship that first. Two corollaries: **(1)** keeping the
+stage *same-document* (no iframe) is itself the honest **isolation showcase** — it demonstrates *the platform's*
+isolation, whereas an iframe demonstrates the *browser's* sandbox and masks whether the platform isolates; so
+prefer same-document for the demo. **(2)** The iframe-isolated stage is not the toggle mechanism but a separate
+**consumer-distribution mode** — sandboxed embedding for *untrusted/third-party* blocks, where isolation is the
+product and the async postMessage DOM bridge cost is justified — filed as a follow-up that reuses the
+reload-scoped `?plug` param as its per-iframe seed. Governed by most-flexible-default: ship the cheapest correct
+clean-realm mechanism now; the richer iframe mode is opt-in later.
+
+**Lineage:** #1845 (ruling — the FUI block-workbench plug toggle; (c) reload-scoped chosen, (b) same-document
+re-mount excluded on the lingering-globals correctness bug, (a) iframe reframed as the consumer-distribution
+follow-up #1901, build slice #1900). Builds on the plug = proposed-missing-standard lineage and the
+same-document-stage contract (`fui:workbench/mount.ts:6-11`).
 
 ---
 

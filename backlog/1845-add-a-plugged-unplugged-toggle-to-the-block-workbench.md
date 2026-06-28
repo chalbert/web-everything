@@ -2,10 +2,13 @@
 kind: decision
 size: 3
 parent: "1836"
-status: open
+status: resolved
 blockedBy: []
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-28"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#plug-gap-clean-realm-per-mode"
 preparedDate: "2026-06-27"
 relatedReport: reports/2026-06-22-workbench-live-render-target.md
 tags: [plugs, unplugged, workbench, dev-experience]
@@ -68,15 +71,29 @@ same-document inspector contract (`fui:workbench/mount.ts:6-11`) and needs a new
   the URL (`fui:workbench/mount.ts:838-929`), so a reload does **not** lose workbench state; the mode is just
   one more serialized key. Cost: it is **not a live toggle** — flipping modes is a full reload, and you cannot
   see both modes on screen at once.
+  **Affirmative upside (surfaced in ratification discussion):** keeping the stage *same-document* (no iframe)
+  is itself the honest **isolation showcase** — rendering in the host document and having the platform's own
+  boundaries hold demonstrates *WE's* isolation, whereas an iframe would demonstrate the *browser's* sandbox and
+  mask whether the platform isolates. (c) preserves that showcase; the clean realm comes from the reload, not a
+  sandbox. So (c) is not merely the cheaper option — it is the one that keeps the demo faithful to the thing the
+  workbench exists to prove.
 - **(a) iframe-isolated stage per mode** *(follow-up).* Render the block stage inside an iframe whose document
   boots the chosen mode, so each mode (or both, side by side) gets a clean realm in one page. Correct and the
   richer end-state (a live toggle, even simultaneous plugged-vs-unplugged), **but** it breaks the same-document
   inspector/trait panel (`fui:workbench/mount.ts:6-11`) — those synchronous `querySelector`/`getComputedStyle`
   reads must become an async postMessage bridge (precedent: the cross-origin Plateau-creator bridge
   `fui:workbench/manifestBridge.ts`, and the creator iframe at `fui:workbench/mount.ts:381-415`) — and that
-  bridge build exceeds the size-3 budget. File it as the follow-up the day a live/side-by-side toggle is
-  wanted; (c)'s `?plug` param + serialization is the substrate it reuses (each iframe is seeded with a
-  serialized `?plug=…` URL), not throwaway work.
+  bridge build exceeds the size-3 budget. File it as the follow-up; (c)'s `?plug` param + serialization is the
+  substrate it reuses (each iframe is seeded with a serialized `?plug=…` URL), not throwaway work.
+  **Reframed in ratification discussion:** the iframe's load-bearing value is *not* primarily a live/side-by-side
+  toggle (a nicety) — it is a **consumer-distribution mode**: a host embedding the workbench stage for
+  *untrusted / third-party blocks* needs the sandbox, and *there* the bridge cost is justified because isolation
+  is the product, not the demo. The six same-document advantages — synchronous inspector, no cross-frame theming
+  marshalling for `--token` custom props (`fui:workbench/mount.ts:5`) or the CQ simulator
+  (`fui:workbench/mount.ts:117`), no HMR `handle.refresh` bridge, no inspector latency, no new origin-validation
+  surface, and the isolation showcase above — are all costs of iframe-*as-the-toggle-mechanism*, not of
+  iframe-*as-a-future-consumer-mode*. So the follow-up is scoped to that consumer use case, not to re-litigating
+  the toggle.
 - **(b) same-document re-mount, accept lingering globals** — *Rejected.* Cheap, but the gap demo is
   **incorrect** for plugged-only capabilities: the lingering globals from a prior plugged render make an
   "unplugged" re-mount falsely succeed (`fui:plugs/bootstrap.ts:114-184`, no teardown). A demo that fakes the
@@ -126,5 +143,29 @@ live toggle is opt-in later). Nothing here graduates to a WE standard.
 
 Ratifying **(c)** unblocks a clean size-3 FUI slice: add a `plug` key to the workbench's serialized state,
 branch the boot path on it in `fui:demos/workbench.ts`, and render the mode toggle as a reload link in the
-chrome. The richer live/side-by-side **(a)** iframe-stage + inspector-bridge is filed as the follow-up under
-epic #1836 if/when a live in-page toggle is wanted.
+chrome. The richer **(a)** iframe-stage is filed as the follow-up under epic #1836 — reframed as a
+*consumer-distribution* (sandboxed-embedding) mode for untrusted/third-party blocks, not merely a live toggle.
+
+## Decision — ratified 2026-06-27
+
+**Ruling: (c) reload-scoped mode.** `?plug=on|off` selects the boot path (`fui:plugs/bootstrap.ts` vs
+`fui:plugs/unplugged.ts`) at load; each load is a clean realm; the mode is one more key on the existing
+serialized URL state. The reload cost (no live/simultaneous view) was explicitly accepted by the human.
+
+Two sharpenings the discussion produced, both folded above:
+1. **Direct injection has affirmative value, not just lower cost** — keeping the stage same-document is the
+   honest *isolation showcase* (it demonstrates *the platform's* isolation, where an iframe would demonstrate
+   the *browser's* sandbox and mask the platform's). (c) is the only faithful-and-showcase option.
+2. **The iframe is reframed as a consumer-distribution mode** — its real value is sandboxed embedding for
+   untrusted/third-party blocks, not a live toggle; (c)'s `?plug` param is its substrate.
+
+**Red-team:** the prepared skeptic pass already SURVIVED ("reload loses state" false — `serializeState()`
+round-trips everything; "iframe is free here" false — the only iframe is the cross-origin Plateau creator, not
+the stage). The live discussion stress-tested (a) from the *isolation-showcase* and *consumer-future* angles and
+both reinforced (c). Attack failed → ratified.
+
+**Classification holds:** pure FUI workbench impl, no WE contract surface — nothing graduates (`graduatedTo:
+none`).
+
+**Downstream:** the (c) build slice and the (a) consumer-mode follow-up are filed as their own items under epic
+#1836.
