@@ -1,194 +1,158 @@
 ---
 kind: decision
 parent: "1831"
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-28"
+dateResolved: "2026-06-28"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#native-first-baseline"
 preparedDate: "2026-06-28"
 relatedReport: reports/2026-06-28-custom-states-plugged-interception.md
 relatedProject: webcomponents
-tags: [custom-state-set, states, element-internals, plug-unplugged, residue-bar]
+tags: [custom-state-set, states, element-internals, plug-unplugged, declarestates-contract]
 ---
 
-# custom-states slice B: plugged validation + polyfill + declareStates plug-hook (FUI)
+# custom-states slice B: the `declareStates` standard contract (+ FUI build)
 
-Slice B of epic #1831, under ruling #1807 (slice A #1891 **resolved** — `states=` parse + lowering + twin-lag
-fix + the unplugged floor `fui:blocks/renderers/component/customStates.ts` all shipped). This is the
-impl-architecture call #1807 deferred to the build: **how the plugged form intercepts a toggle of an
-un-declared `internals.states` value.** Contract: `we:src/_data/plugs/customstates.json`.
+Slice B of epic #1831, under ruling #1807 (slice A #1891 **resolved** — the `states=` parse + lowering + the
+unplugged floor `fui:blocks/renderers/component/customStates.ts` all shipped). The custom-states **plug is a
+proposed missing web standard**: a *declared, validated* custom-state vocabulary, which no spec ships today
+(`CustomStateSet`/`:state()` are present and open; the declaration+validation layer is absent — #1807's
+partition). So the **only thing this decision ratifies is the WE contract** — `declareStates` — as a future
+first-class web-platform proposal. **How FUI implements it is secondary and out of scope here** (see
+*Implementation — FUI, non-binding*). Contract home: `we:src/_data/plugs/customstates.json` (type-only, #606/#1282).
 
-## Grounding digest
+> **Scope discipline (`we:docs/agent/platform-decisions.md#native-first-baseline` → *Decision-discipline
+> corollary*, #1892).** A plug decision ratifies the **contract**, never the implementation mechanism. The
+> mechanism (prototype patch vs out-of-band, the residue classification, polyfill shape) is FUI-local, swappable,
+> and could even come from a different library — valid as long as it conforms to this contract. This item earlier
+> mis-scoped itself as the mechanism call ("how does the plugged form *intercept*?") and burned a session on it;
+> that material is retained only as the *audit trail* below, demoted to non-binding. The lesson is now codified —
+> this item is its worked example.
 
-#1807 ratified the *shape* (two postures over one single-substrate contract; `--strict`-style enforcement
-axis) and labelled its code *"the authoring shape, not a final API spec — #1794's build pins exact names."*
-Slice B picks the mechanism. The item posed it as a **"wrapper-vs-proxy architecture + reject/warn"** pair of
-calls. Prep finds the **proxy pole is already dead** (two ways, below), so the real space is two genuine
-forks — **(1)** out-of-band-no-patch vs prototype-wrapper-patch, and **(2)** non-throwing decline+report vs
-throw — each with a statute-backed default (the skeptic pass flipped Fork 2's first instinct) that makes this a
-*fast-ratification* candidate. Context-resolution and polyfill-
-scope are **settled** (precedent / #1807), not forks. Full survey: `we:reports/2026-06-28-custom-states-plugged-interception.md`
-(research topic `/research/#custom-states-validation-interception`).
+## ✅ Ratified ruling (2026-06-28)
 
-## Axis-framing — what is actually open
+**RATIFIED:** the WE standard is **`declareStates(internals, vocab, { severity? })`** — a closed, opt-in
+**validated** custom-state vocabulary constraining the native `internals.states` (Definition A); undeclared
+toggles are a validation error (severity = a `#config-extends-platform-default` dimension, default `report`,
+opt-in `throw`); no declaration ⇒ open native floor; only the JS declaration/validation layer is in scope
+(`:state()` native). **Scope: `declareStates` is the sole new standard surface** — `toggleState`/`addStates` are
+**FUI implementation**, not part of the contract. Implementation mechanism (patch / out-of-band / residue) is
+**FUI-local and non-binding** (#1794 picks a conforming impl). Codifies the meta-rule it exemplifies: a plug
+decision ratifies the contract, never the implementation mechanism
+(`we:docs/agent/platform-decisions.md#native-first-baseline` → Decision-discipline corollary).
 
-The unplugged floor already exists and is plug-owned: `addStates(internals, names)` and
-`toggleState(internals, name, force)` (`fui:blocks/renderers/component/customStates.ts:28,35`), with the
-declarative `<component>` lowering calling them in the runtime twin (`fui:blocks/renderers/component/declarativeComponent.ts:252`)
-and emitting raw `this.#internals.states.add('<s>')` in the **self-contained** standalone-ESM class form
-(`fui:blocks/renderers/component/declarativeComponent.ts:196`; the emitted form is deliberately import-seam-free,
-ibid. ~222). Plugged mode must add: a **declared vocabulary**, **validation** of toggles against it, and a
-**polyfill** of that layer — resolved from plug context like every sibling plug
-(`fui:plugs/validationUnplugged.ts`, `fui:plugs/guardsUnplugged.ts`: `InjectorRoot.getProviderOf` nearest-
-scope-wins + `window` fallback).
+## The WE decision — the `declareStates` contract (this is what gets ratified)
 
-Two statutes pre-decide most of the space:
-
-- **#1872** (`we:docs/agent/platform-decisions.md#observe-only-posture-spectrum`): *"no `new Proxy` in the
-  plugs tree"* — substrate is a prototype-method wrapper, not a Proxy. **And** JS semantics: built-in `Set`
-  methods read internal slots, so a `Proxy` over a `CustomStateSet` **cannot trap `.add`/`.delete` at all**.
-  → the "proxy" pole is non-viable, twice.
-- **#1839** (`we:docs/agent/platform-decisions.md#plugged-only-residue-bar`): a plugged capability may patch
-  an unowned global **only if** its contract (incl. transparency) *cannot* be reproduced WeakMap-keyed out-of-
-  band through the plug's own API. → governs Fork 1.
-
-### Recommended path at a glance
-
-| Concern | Recommended default | Main alternative (excluded/opt-down) | Confidence |
-|---|---|---|---|
-| **Fork 1 · interception** | **WeakMap-keyed out-of-band; NO `CustomStateSet.prototype` patch** (not residue per #1839) | prototype-method-wrapper patch (only if raw-call transparency becomes contractual) | high |
-| **Fork 2 · severity** | **non-throwing decline + dev report** on un-declared toggle through the declared surface | `severity:'throw'` opt-up (both ship) | med-high |
-| Context resolution | injector registry, nearest-scope-wins + `window` fallback | — (settled by precedent) | high |
-| Polyfill scope | JS declaration/validation layer **only** | — (`:state()` CSS unpolyfillable; #1807) | high |
-| Parity marking | FUI-side `fui:plugs/customstates/parity.json` = `plugged-only`; WE type-only | — (settled #1839/#1844) | high |
-
-## Fork 1 — interception mechanism: out-of-band (no patch) vs prototype-wrapper patch
-
-**Fork exists because:** the two branches produce *different observable contracts that cannot coexist* — either
-a raw `internals.states.add('typo')` (bypassing the plug helper) is transparently rejected (requires a global
-patch of `CustomStateSet.prototype`) or it is an **open escape hatch** (no patch). One contract must ship. The
-"proxy" third option the item named is **not** a live branch — excluded by #1872 *and* by JS internal-slot
-semantics (a Proxy can't trap built-in Set methods).
-
-- **(a · DEFAULT) WeakMap-keyed out-of-band — no global patch.** `declareStates(internals, vocab)` (resolved
-  from plug context) registers the vocabulary in a `WeakMap<ElementInternals, Set<string>>`; the plug-resolved
-  `toggleState`/`addStates` consult it and reject un-declared names. Raw `internals.states.add('typo')` by
-  external code stays an **open native escape hatch** (most-permissive floor). Per #1839 clause (ii) the
-  contract is reproducible out-of-band through the plug's own API ⇒ **custom-states validation is NOT residue
-  ⇒ do not patch.** **Twin-coherence amendment (skeptic):** `ElementInternals` exposes no back-reference to its
-  host, so the vocab cannot be read from the `states=` attribute at toggle time — it must be *registered* by a
-  `declareStates` call. To keep registration coherent across **both** lowering paths without breaking the
-  import-seam-free emitted ESM (`fui:blocks/renderers/component/declarativeComponent.ts:~222`), the plugged
-  emitter and the runtime twin both register via an **ambient global** —
-  `window.customStates?.declareStates(this.#internals, [...vocab])` (no-op when unplugged, so mode-agnostic and
-  seam-free) — *not* an `import` (breaks self-containment) and *not* a prototype patch (#1839). This closes the
-  emitter-vs-twin divergence the skeptic surfaced while preserving both invariants.
-- **(b) Prototype-method-wrapper patch of `CustomStateSet.prototype.add`/`.delete`.** Transparent interception
-  of *every* toggle incl. raw native calls (matches #1807's illustrative throwing example). Wrapper, **not**
-  Proxy (#1872). Justified **only** if raw-call transparency is genuinely contractual — and must then discharge
-  #1839's residue audit: cite the unowned global (`CustomStateSet.prototype.add`), why no handle (raw `.add` on
-  a set the plug did not create), and the missing platform hook (a "validate state vocabulary" lifecycle).
-  Rejected as default: #1807's throwing raw-add is *illustrative*, and the realistic un-declared-toggle surface
-  for a **bodyless** declarative component is near-empty (no author class body) — so the patch buys global
-  mutation for an escape hatch the most-permissive floor wants open.
-
-```js
-// Fork 1 (a) — out-of-band, no patch. Plug-resolved helpers consult a WeakMap; native floor stays open.
-const declaredVocab = new WeakMap(); // ElementInternals -> Set<string>
-
-// declareStates: resolved from plug context (injector nearest-scope-wins + window fallback), like guardsUnplugged.
-export function declareStates(internals, vocab) {
-  declaredVocab.set(internals, new Set(vocab));
-}
-// Plug-owned toggle seam (slice A's helper, now validating when a vocab is declared):
-export function toggleState(internals, name, force) {
-  const vocab = declaredVocab.get(internals);
-  if (vocab && !vocab.has(name)) reject(name, vocab); // Fork 2 decides throw vs warn
-  // ...native add/delete as today...
-}
-// Vocab registered via ambient global (seam-free, no-op when unplugged) — from both twin and emitted ESM:
-window.customStates?.declareStates(this.#internals, ['open', 'active']);
-// Escape hatch UNTOUCHED — no CustomStateSet.prototype patch:
-internals.states.add('typo'); // ✓ still works (open native floor); only the declared *surface* validates.
+```ts
+declareStates(
+  internals: ElementInternals,
+  vocab: Iterable<string>,
+  options?: { severity?: 'report' | 'throw' }   // omitted ⇒ resolve up the config chain (see Severity)
+): void
 ```
 
-**Skeptic:** SURVIVES-WITH-AMENDMENT — the no-patch mechanism is correct (residue bar is dispositive), but the
-prep's original "vocab discoverable from the `states=` attribute / emitted form needs no change" was false:
-`ElementInternals` has no host back-reference, and the emitted ESM emits raw `.add`, so twin and emitted form
-would disagree on validation. Folded the **ambient-global `declareStates` registration** (option a) to close
-the divergence without breaking the import-seam-free emitted ESM or adding a prototype patch.
+**Observable semantics (as a web-platform proposal):**
+- `declareStates` declares `vocab` as the **closed** set of valid custom states for `internals.states`.
+- After declaration, toggling a state **outside** `vocab` is a **validation error** — the state is **not applied**
+  (declined) and reported; under `severity:'throw'`, it throws. The constraint is on **`internals.states`
+  itself** — i.e. *any* path that sets an undeclared state is subject to the vocabulary, because a platform
+  standard is enforced by the platform, not by which helper you happened to call.
+- **Opt-in, per element.** With **no** `declareStates`, `internals.states` is the **open native set** — the
+  native-first floor is preserved; the constraint exists only where an author opts in by declaring.
+- **Polyfill/proposal scope:** only the **JS declaration+validation layer** is the proposal. `:state()` CSS
+  matching is native Baseline-2024 machinery and is **not** part of it.
+- **Surface scope — `declareStates` is the *only* new standard surface.** Toggling stays the **native**
+  `internals.states.add/delete/has`; validation targets those native operations. `toggleState`/`addStates`
+  (slice A) and any other ergonomic wrappers are **FUI implementation** over the native primitive — **not** part
+  of this contract, never `@webeverything` surface. A consumer programs to `declareStates` + native
+  `internals.states`; the WE standard adds exactly one verb.
 
-## Fork 2 — enforcement severity: non-throwing decline+report (default) vs throw opt-up
+**Why a *validated* set, not a lint (the one substantive standard call).** Two coherent contracts exist:
+**(A)** the declared vocabulary constrains the primitive — an undeclared state is invalid *regardless of how it
+is set* (a real platform feature with teeth); **(B)** only the framework's declared/mediated surface validates,
+and a raw `internals.states.add('typo')` is an out-of-scope escape hatch (a *framework lint*). **The contract is
+A.** B isn't a valid *plug* at all: a plug is a proposed **platform** standard, and a constraint a caller can
+trivially bypass by using the native method is tooling, not a standard. A's enforcement stays native-first
+because it is opt-in *at declaration* (B's "keep the primitive open" concern is met by the no-declaration floor,
+not by leaving a bypass inside a declared element). This is the call to **ratify**.
 
-**Fork exists because:** a single un-declared toggle through the declared surface either is **declined** (state
-not added) reported non-fatally, or it **throws** (aborts the call stack). These are mutually exclusive per-call
-behaviors. A `severity` option lets both ship, but the **shipped default** is a real call with downstream effect
-(what #1794's adoption inherits).
+## Severity — a config dimension on the contract (settled by statute)
 
-- **(a · DEFAULT) Non-throwing decline + dev-visible report.** The un-declared toggle is **not applied** (the
-  set is not mutated) and a `console.error` is emitted — the **data-violation** posture every sibling plug uses:
-  webvalidation reports an invalid value via the *non-throwing* `internals.setValidity({customError:true}, msg)`
-  (`fui:plugs/webvalidation/applyMergedValidity.ts:51`), never a `throw`. This is *not* the hollow
-  warn-that-still-adds #1807 killed — the state is **declined**, just without crashing the page. Mirrors the
-  open native `CustomStateSet` surface (`we:docs/agent/platform-decisions.md#native-first-baseline`, ~line 861,
-  which names `CustomStateSet` as an *open* primitive) per the polyfill-surface-fidelity corollary (~line 867).
-- **(b) `severity:'throw'` opt-up.** Hard `--strict` for authors who want an undeclared toggle to abort. Ships
-  as the documented opt-**up**, not the default. (Throw stays the default only for the *misconfiguration* class —
-  an unknown provider name — exactly as the registries already do, e.g. `UnknownGuardProviderError`,
-  `fui:plugs/webguards/CustomGuardRegistry.ts:62`.)
+Severity has two legitimate end-states, so per `#config-extends-platform-default` it is a **config dimension**,
+not a baked behavior: the **enum `'report' | 'throw'` is the contract** (WE type-only); the **value** resolves
+**nearest-wins** (#1662): per-call `declareStates({severity})` → app/fragment config → **team/project config** →
+**platform-default flavor `report`** (Q6 most-permissive; `throw` is the author opt-in). A team that wants strict
+states in CI sets `severity:'throw'` once in its `webeverything.config`; a call site can override locally. Ship
+the **baseline** chain first; a **sealed** (non-overridable team mandate) entry is a later add only if a team
+needs to *enforce* rather than *default*. (`throw` stays the baked behavior only for the *misconfiguration* class
+— an unknown provider name, e.g. `UnknownGuardProviderError` — which is not a data violation and not part of this
+dimension.)
 
-```js
-// Fork 2 — severity option; default = decline+report (non-throwing). Reached only for a toggle through the
-// DECLARED surface; the raw native floor (Fork 1) is never reached here.
-function rejectUndeclared(set, name, vocab, severity = 'report') {
-  const msg = `[customstates] '${name}' is not in the declared vocabulary {${[...vocab].join(', ')}}`;
-  if (severity === 'throw') throw new TypeError(msg);  // opt-up: hard --strict
-  console.error(msg);                                  // DEFAULT: decline (do NOT set.add) + report
-  return false;                                        // state declined, page keeps running
-}
-```
+## Implementation — FUI, non-binding (NOT part of this ratification)
 
-**Skeptic:** REFUTED → **default flipped**. The original `throw` default collided with the most-permissive /
-native-first doctrine (`we:docs/agent/platform-decisions.md`, ~line 1308 — restriction is the author's opt-in,
-not the default) and was inconsistent with every sibling plug (data violations report via `setValidity`, never
-throw; throw is reserved for registry *misconfiguration*). Flipped to **non-throwing decline+report** as the
-default, `severity:'throw'` as the opt-up — which also dissolves the statute collision (see below).
+How FUI realizes the contract is FUI's call (#1794's build), recorded here as **candidates only** — any of these
+(or a third, or another library's) is valid **iff it conforms to the contract above**:
 
-## Supported by default (settled — not forks)
+- **(candidate) prototype-method wrapper** — patch `CustomStateSet.prototype.add`/`.delete` (a **wrapper**, not
+  `Proxy` — #1872) to consult a `declareStates`-populated WeakMap. This is the natural way to honor "constrain the
+  primitive itself" (A), and the declarative lowering can additionally emit the check **inline** so the
+  self-contained ESM (`fui:blocks/renderers/component/declarativeComponent.ts:196,222`) validates without
+  importing the plug. Whether the prototype patch counts as [residue](../../docs/agent/platform-decisions.md#plugged-only-residue-bar)
+  is an **FUI** classification, not a WE call.
+- **(candidate) out-of-band helpers** — the plug-resolved `toggleState`/`addStates` validate; cheaper, but catches
+  only the mediated surface (an FUI coverage choice about how completely it delivers A's "regardless of call-site").
+- **Context resolution** mirrors the injector precedent (`fui:plugs/validationUnplugged.ts` /
+  `fui:plugs/guardsUnplugged.ts`: `InjectorRoot.getProviderOf` nearest-scope + `window` fallback) — also FUI-internal.
+- **Parity marking** is FUI-side (`fui:plugs/customstates/parity.json`, #1839/#1844); WE stays type-only.
 
-- **Context resolution** follows the injector-registry precedent verbatim: a `customStates` provider `.set()` on
-  the document injector (nearest-scope-wins via `InjectorRoot.getProviderOf`) + a `window.customStates` fallback,
-  wired in a plugged bootstrap block and a `setupCustomStatesUnplugged(root)` seam mirroring
-  `fui:plugs/validationUnplugged.ts` / `fui:plugs/guardsUnplugged.ts`. No design call.
-- **Polyfill scope** is fixed by #1807's layer partition: the `CustomStateSet`/`:state()` **primitive is
-  Baseline-2024 (present)**; only the **JS declaration/validation layer** is polyfilled. `:state()` CSS matching
-  is browser CSS-engine machinery and **cannot** be polyfilled in JS; the slice-A floor already no-ops when
-  `internals.states` is unavailable (`fui:blocks/renderers/component/customStates.ts:30`).
-- **Parity marking** is FUI-side per #1839/#1844: `fui:plugs/customstates/parity.json`, 3-state vocabulary, the
-  declaration/validation layer marked `plugged-only`; WE's `we:src/_data/plugs/customstates.json` stays type-only
-  (#606/#1282 zero-impl).
-- **The native imperative floor** (`internals.states.add/delete/has`) is always available, plugged or not (#1807).
+**Feasibility floor (the only impl constraint the contract carries):** the contract must be *implementable* — it
+is (the wrapper candidate demonstrates a conforming impl exists). That is all WE needs to confirm.
 
-## Statute-overlap reconciliation (for the eventual `codifiedIn`)
+## Audit trail — why this took a session (the worked example for "ratify contract, not mechanism")
 
-The rule #1892 will codify (a new `#component-dc` DC-N): *"custom-states plugged validation is WeakMap-keyed
-out-of-band — no `CustomStateSet.prototype` patch; vocab registered via an ambient `declareStates` seam from
-both lowering paths; the raw native floor stays an open escape hatch; an un-declared toggle through the declared
-surface is **declined + reported non-fatally** (`severity:'throw'` opt-up); parity FUI-side."*
+Kept as the lesson, not as live forks. The decision oscillated because it was scoped to *implementation*:
 
-- **Fork 1 — CLEAN.** It is the **clause-(ii) application** of #1839 (custom-states classified *not-residue*),
-  respects #1872 (no Proxy; wrapper only if it were residue), and extends the `#component-dc` cluster #1807
-  already lists (DC-14). No prior residue classification contradicts it.
-- **Fork 2 — collision found by the skeptic, reconciled by the flip.** The original `throw` default collided
-  with the most-permissive / native-first doctrine (~line 1308; restriction is the author's opt-in) and the
-  polyfill-surface-fidelity corollary (~line 867; the plug mirrors the *open* native surface). Flipping the
-  default to **non-throwing decline+report** (throw → opt-up) **removes** the collision: the codified rule no
-  longer ships a hard restriction as the default, and it now *matches* the house style for data violations
-  (`setValidity`-style report, `fui:plugs/webvalidation/applyMergedValidity.ts:51`). No anchor is duplicated or
-  overridden.
+1. **Prep:** out-of-band, "not residue" — reached by *narrowing* the contract to "validate the helper".
+2. **Review reframe:** flipped to a prototype patch, "residue" — reached by *widening* the contract to "enforce
+   regardless of call-site". Ratified.
+3. **Red-team (pre-resolve):** refuted the patch on three axes — but all three (mechanism gap on the seam-free
+   ESM, residue/no-handle, global-mutation cost) are **implementation** concerns. The skeptic was attacking FUI
+   build details that **WE never ratifies**.
+4. **Resolution:** none of (1)–(3) was a WE decision. The mechanism is FUI's (above, non-binding). The WE call
+   is just the `declareStates` **contract** (A + severity dimension). Both the prep's *narrowing* and the
+   review's *widening* were **contract-gerrymandering** — picking a contract to force a mechanism verdict, the
+   exact failure rules 139/140 name; this item adds rule 141 (a mechanism "fork" is not a standards decision).
 
----
+## Statute-overlap reconciliation (for `codifiedIn`)
 
-**Lineage.** Epic #1831 → slice B. Ruling #1807 (the shape) · slice A #1891 (the floor, resolved). Governed by
-#1839 (residue bar) + #1872 (no-Proxy substrate) + #1826 (plug-as-proposed-standard). Adoption #1794 consumes
-the FUI build this graduates into.
+The WE rule #1892 codifies (a `#component-dc` entry, extending the cluster #1807 lists): *"the custom-states plug
+contract is `declareStates(internals, vocab, {severity?})` — a closed, opt-in **validated** custom-state
+vocabulary constraining `internals.states`; undeclared toggles are a validation error (severity = a
+`#config-extends-platform-default` dimension, default `report`); no declaration ⇒ open native floor; only the JS
+declaration/validation layer is in scope (`:state()` native). Implementation is FUI-local and non-binding."*
+Plus the meta-rule it exemplifies: **a plug decision ratifies the contract, never the implementation mechanism**
+(`we:docs/agent/platform-decisions.md#native-first-baseline` → Decision-discipline corollary).
+
+- Clean against #1826 (plug = proposed standard), #606/#1282 (contract WE / impl FUI), `#native-first-baseline`
+  (opt-in constraint preserves the open primitive), `#config-extends-platform-default` (severity dimension). No
+  residue classification is asserted here — it is deliberately left to FUI, which is the point.
+
+## Progress
+
+- **Status:** RATIFIED (2026-06-28) → resolving. See *✅ Ratified ruling*.
+- **Done:** Ratified the WE **`declareStates`** contract (Definition A: opt-in validated vocabulary + `severity`
+  config dimension), scoped so `declareStates` is the **only** new standard surface (`toggleState`/`addStates`
+  are FUI impl). Implementation mechanism left FUI-local + non-binding. Codified the meta-rule
+  (`we:docs/agent/platform-decisions.md#native-first-baseline` → Decision-discipline corollary) + memory rules
+  139/140/141.
+- **Next:** FUI build #1794 picks a conforming implementation of the contract.
+- **Notes:** The mid-session "ratified" on the *patch* was superseded by the pre-resolve red-team and dissolved
+  as out-of-scope (impl, not standard); the actual ratification is the contract above.
+
+**Lineage.** Epic #1831 → slice B. Ruling #1807 (the plug shape + layer partition) · slice A #1891 (the floor,
+resolved). Governed by #1826 (plug = proposed standard) + #606/#1282 (contract WE / impl FUI) +
+`#native-first-baseline` (open primitive; plug = contract, impl secondary — the #1892 corollary) +
+`#config-extends-platform-default`/#1662 (severity dimension). Adoption #1794 consumes the FUI build.
