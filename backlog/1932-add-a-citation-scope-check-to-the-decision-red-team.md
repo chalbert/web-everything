@@ -1,7 +1,10 @@
 ---
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-06-28"
+dateStarted: "2026-06-28"
+dateResolved: "2026-06-28"
+graduatedTo: "we:docs/agent/backlog-workflow.md#red-team-the-default"
 tags: []
 ---
 

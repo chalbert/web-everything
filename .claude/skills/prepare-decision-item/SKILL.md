@@ -108,7 +108,7 @@ output is the rewritten body, not a message:
    Close it at the source: after authoring each fork's default, **spin up a throwaway skeptic sub-agent
    (prompted *only* to refute — `general-purpose`, default "this default is wrong") and have it attack the
    recommended branch of every fork, hardest on the high-leverage / high-`gates` ones.** The skeptic's
-   prompt **must carry three attack axes, not one**: (0) **classification** *(run first — the #1892 axis)* —
+   prompt **must carry four attack axes, not one**: (0) **classification** *(run first — the #1892 axis)* —
    is this even the right *kind* of question? try to re-route it: is the `## Fork N` actually a **config
    dimension** (`#config-extends-platform-default` — two values of one knob, not a fork), a *support-both*, or
    *settled by precedent*; and if the classification turns on a **contract** (residue #1839 / which-layer),
@@ -121,7 +121,13 @@ output is the rewritten body, not a message:
    same-subject anchors, and have the skeptic try to find the collision — the axis whose miss is
    un-recoverable downstream (a statute conflict found at *resolve* lands after the human has ratified, when
    the call is immutable and the only honest move is a new reconciliation item; prep is the last cheap fix).
-   Then **resolve its
+   Then (3) **citation-scope** (*backlog-workflow.md → Red-team the default → Citation-scope check*, #1932) —
+   *for each anchor a default cites to **authorize** a branch, does the cited rule's authoring scope actually
+   reach this case?* A value-default rule must not be cited as authority over an engine-robustness question; a
+   single-author / catalog-evolution rule must not authorize cross-author extension. Read the cited anchor's
+   own scope; if it governs a narrower turf, downgrade the citation from *authority* to *supporting context*
+   and re-derive the default on its merits (the #1913 miss: `:385`'s value-default clause cited against an
+   unknown-**id** robustness fork). Then **resolve its
    findings into the item before stamping**: REFUTED → flip the default + rewrite the rationale; SURVIVES →
    record the surviving rationale (the attack it beat); SURVIVES-WITH-AMENDMENT → fold the amendment in;
    **statute overlap found → reconcile it in the item now** (cite the sibling anchor, state how the two rules
