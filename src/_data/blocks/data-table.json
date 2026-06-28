@@ -15,7 +15,11 @@
   "exports": [
     "DataTableModule",
     "DataTableBehavior",
-    "registerDataTable"
+    "registerDataTable",
+    "DataTableEnhancer",
+    "DataTableEnhancedElement",
+    "enhanceDataTables",
+    "registerDataTableEnhancer"
   ],
   "implementsIntent": "collection-operations",
   "dependsOn": [
