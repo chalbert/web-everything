@@ -190,6 +190,53 @@ describe('validateIntent — fields, dimensions, requiresCapabilities', () => {
   });
 });
 
+// ── Custom-intent meta-schema (#1929, ruling #1913 custom-intents-namespace-by-ownership) ──
+describe('validateIntent — custom-intent meta-schema (#1929)', () => {
+  const surface = {
+    id: 'surface', name: 'Surface', summary: 's', status: 'draft',
+    dimensions: { texture: { values: ['solid', 'glass'] }, locked: { values: ['a', 'b'], closed: true } },
+  };
+  const ctx = { capabilityIds: new Set(), intentById: new Map([['surface', surface]]) };
+  const cbase = { name: 'Lozenge', summary: 's', status: 'draft', dimensions: {} };
+  const runC = (o) => validateIntent({ ...cbase, ...o }, ctx);
+
+  it('accepts a standalone namespaced custom intent (no extends)', () => {
+    expect(runC({ id: 'acme:lozenge', provenance: 'npm:@acme/ui' }).errors).toEqual([]);
+  });
+  it('accepts additive extends — namespaced new dim + owner:value into an open inherited dim', () => {
+    expect(runC({
+      id: 'acme:lozenge', extends: 'surface',
+      dimensions: { 'acme:fizz': { values: ['x'] }, texture: { values: ['acme:matte'] } },
+    }).errors).toEqual([]);
+  });
+  it('rejects a malformed namespace (uppercase / not owner:intent)', () => {
+    expect(messages(runC({ id: 'acme:Lozenge' }))).toContainEqual(expect.stringContaining('must be namespaced'));
+  });
+  it('rejects a non-namespaced new dimension under extends', () => {
+    expect(messages(runC({ id: 'acme:lozenge', extends: 'surface', dimensions: { bareDim: { values: ['x'] } } })))
+      .toContainEqual(expect.stringContaining('non-namespaced dimension'));
+  });
+  it('rejects a bare value-addition to an inherited open dimension', () => {
+    expect(messages(runC({ id: 'acme:lozenge', extends: 'surface', dimensions: { texture: { values: ['matte'] } } })))
+      .toContainEqual(expect.stringContaining('bare value "matte"'));
+  });
+  it('rejects widening a closed inherited dimension even when namespaced (#1337)', () => {
+    expect(messages(runC({ id: 'acme:lozenge', extends: 'surface', dimensions: { locked: { values: ['acme:c'] } } })))
+      .toContainEqual(expect.stringContaining('closed enum'));
+  });
+  it('rejects an extends that does not resolve', () => {
+    expect(messages(runC({ id: 'acme:lozenge', extends: 'made-up' })))
+      .toContainEqual(expect.stringContaining('does not resolve'));
+  });
+  it('rejects a non-boolean mustUnderstand', () => {
+    expect(messages(runC({ id: 'acme:lozenge', mustUnderstand: 'yes' })))
+      .toContainEqual(expect.stringContaining('mustUnderstand'));
+  });
+  it('leaves bare standard intents unaffected by the custom-intent rules', () => {
+    expect(validateIntent(surface, ctx).errors).toEqual([]);
+  });
+});
+
 // ── Capabilities + build-matrix (§6c-bis) — the gnarliest logic ──────────────
 describe('validateCapability — vocab shape', () => {
   const base = { id: 'c1', label: 'C1', webFeaturesKey: 'c-1', baseline: '2024', polyfill: 'polyfillable', summary: 's' };

@@ -460,7 +460,7 @@ const matrixImpls = arr(capabilityMatrix.impls);
 
 // Intents (§6c) compose `validateIntent` here, now that `capabilityIds` exists — it covers the field/
 // status/dimensions rules AND the requiresCapabilities → capabilities.json resolution in one pass.
-const intentCtx = { capabilityIds };
+const intentCtx = { capabilityIds, intentById };
 for (const intent of intents) {
   const { errors: ie, warnings: iw } = validateIntent(intent, intentCtx);
   for (const e of ie) err(e.message, e.descriptor);

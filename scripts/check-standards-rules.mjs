@@ -954,10 +954,22 @@ export function validateDesignSystem(ds, ctx) {
 /**
  * Validate a single intent (§6c) — required fields, status, `dimensions` presence (warn), and
  * `requiresCapabilities` resolution (every declared id must resolve in capabilities.json).
- * @param ctx { capabilityIds: Set }
+ *
+ * Custom-intent meta-schema (#1929, ruling #1913 `custom-intents-namespace-by-ownership`): a product-minted
+ * intent is namespaced **`owner:intent`** (single colon, lowercase kebab); standard intents stay bare, so
+ * promotion = drop the prefix (alias, never rename — RFC 6648: namespace by ownership, not status). The
+ * optional meta-schema fields are `extends` (a standard intent id), `mustUnderstand` (boolean fail-fast
+ * opt-in), and `provenance` (ownership anchor). `extends` is **additive**:
+ *  - new dimensions a custom intent introduces must be **`owner:`-namespaced** keys;
+ *  - it may add **`owner:value`-namespaced** values to an **open** inherited dimension (every value listed
+ *    under an inherited key is treated as an addition and must carry the `owner:` prefix);
+ *  - it may **never** widen a `closed: true` inherited dimension (#1337, untouchable by anyone) and never
+ *    add a bare (unnamespaced) value — both are rejected at validate-time.
+ * A dimension is **open** unless it declares `closed: true`. Standard (bare-id) intents are unaffected.
+ * @param ctx { capabilityIds: Set, intentById?: Map }
  */
 export function validateIntent(intent, ctx) {
-  const { capabilityIds } = ctx;
+  const { capabilityIds, intentById } = ctx;
   const errors = [];
   const warnings = [];
   const err = (m, descriptor) => errors.push({ message: m, descriptor });
@@ -981,6 +993,41 @@ export function validateIntent(intent, ctx) {
         if (!capabilityIds.has(capId))
           err(`Intent "${intent.id}" requires unknown capability "${capId}" — not in capabilities.json`,
             dUnresolvedRef('Intent', intent.id, fileFor('Intent', intent.id), 'requiresCapabilities', capId, 'capabilities.json'));
+    }
+  }
+
+  // ── Custom-intent meta-schema (#1929, ruling #1913) ──────────────────────────────────────────────
+  // Only a namespaced (colon) id is a product-minted custom intent; bare standard intents skip this block.
+  const id = String(intent.id ?? '');
+  if (id.includes(':')) {
+    if (!/^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/.test(id))
+      err(`Custom intent "${id}" must be namespaced \`owner:intent\` (lowercase kebab, a single colon) — RFC 6648: namespace by ownership, never status (#1913)`);
+    const owner = id.split(':')[0];
+    if (intent.mustUnderstand !== undefined && typeof intent.mustUnderstand !== 'boolean')
+      err(`Custom intent "${id}" \`mustUnderstand\` must be a boolean (the per-intent fail-fast opt-in)`);
+    if (intent.extends !== undefined) {
+      const base = intentById && intentById.get(intent.extends);
+      if (!base)
+        err(`Custom intent "${id}" \`extends\` "${intent.extends}" does not resolve to a known intent`,
+          dUnresolvedRef('Intent', id, fileFor('Intent', id), 'extends', intent.extends, 'intents.json'));
+      else {
+        const inherited = base.dimensions && typeof base.dimensions === 'object' ? base.dimensions : {};
+        const own = intent.dimensions && typeof intent.dimensions === 'object' ? intent.dimensions : {};
+        for (const [dimKey, dimDef] of Object.entries(own)) {
+          const inheritedDim = inherited[dimKey];
+          if (inheritedDim) {
+            // Re-listing an inherited dimension key = a value-addition (never a redefinition/override).
+            if (inheritedDim.closed === true)
+              err(`Custom intent "${id}" cannot widen inherited dimension "${dimKey}" — it is a closed enum (#1337, untouchable by anyone)`);
+            for (const v of (Array.isArray(dimDef && dimDef.values) ? dimDef.values : []))
+              if (!String(v).startsWith(`${owner}:`))
+                err(`Custom intent "${id}" adds bare value "${v}" to inherited dimension "${dimKey}" — cross-author additions must be \`${owner}:value\`-namespaced (#1913 Fork 3d)`);
+          } else if (!dimKey.startsWith(`${owner}:`)) {
+            // A brand-new dimension a custom intent introduces must itself be owner-namespaced.
+            err(`Custom intent "${id}" adds non-namespaced dimension "${dimKey}" — new custom dimensions must be \`${owner}:dimension\`-namespaced (#1913 Fork 3)`);
+          }
+        }
+      }
     }
   }
   return { errors, warnings };
