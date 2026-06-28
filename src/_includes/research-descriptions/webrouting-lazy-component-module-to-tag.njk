@@ -1,0 +1,77 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/1897-lazy-route-component-module-to-stamped-tag-contract-webrouti/">#1897</a>
+  (parent <a href="/backlog/1684-/">#1684</a>, blocks <a href="/backlog/1720-/">#1720</a>): the focused
+  sub-question <a href="/backlog/1823-webrouting-runtime-dynamic-route-ingestion-mechanism-provide/">#1823</a>
+  explicitly deferred. #1823 settled that a lazy <code>route:component</code> is a
+  <code>() =&gt; import()</code> thunk (JS) / bare specifier (DOM) — but <strong>not</strong> how the
+  imported <em>module</em> becomes a stampable custom-element <em>tag</em>.
+</p>
+
+<h2>Current mechanism</h2>
+<p>
+  The engine stamps a matched route by cloning a <code>&lt;template&gt;</code>:
+  <code>templateDef.template.content.cloneNode(true)</code>
+  (<code>fui:blocks/router/elements/RouteViewElement.ts:498</code>), inside the <strong>sync</strong>
+  <code>#stampAllRoutes</code>. A <code>RouteDefinition</code> carries a concrete
+  <code>template: HTMLTemplateElement</code> (<code>we:blocks/router/types.ts:218-227</code>); matching is
+  sync (<code>matchRoute</code>, <code>types.ts:240-266</code>). A lazy <code>component</code> yields a
+  <strong>module, not a template</strong>, and the load is <strong>async</strong> — so the engine needs
+  another way to obtain a renderable element. <code>route:component</code> / <code>RouteComponentRef</code> /
+  <code>customContexts:routes</code> are <strong>not built yet</strong> (#1720 is the blocked build), so this
+  is a contract decision over not-yet-shipped code.
+</p>
+
+<h2>Prior art — module→element mapping (not "is the import inline")</h2>
+<p>
+  The <strong>custom-element-native</strong> routers (Vaadin Router — route carries a tag string + a separate
+  self-registering <code>action</code> import; <code>@lit-labs/router</code> — async <code>enter</code>
+  imports for side-effect, the <code>render</code> template names the tag) put <code>customElements.define</code>
+  in the <strong>module</strong> and stamp a <strong>tag carried on the route</strong>. The virtual-DOM
+  routers (React <code>lazy</code>, Vue default-export, Angular <code>loadComponent</code> returns the class)
+  default-export the component and define it framework-internally — but they have <strong>no platform tag
+  registry</strong>, so they are weak analogs for an "engine defines" option.
+</p>
+
+<h2>The decisive in-house precedent (#1731)</h2>
+<p>
+  WE already ratified this exact shape for a sibling concern. The block loader runs the import step then
+  returns a tag factory: <code>await shape.load()</code> (or <code>import(shape.servedUrl)</code>) then
+  <code>createElement(shape.tag)</code> (<code>fui:workbench/loader.ts:56-68</code>). The module
+  <strong>self-registers as an import side-effect</strong>, the <strong>tag rides on the descriptor</strong>
+  (<code>shape.tag</code>, a sibling of <code>shape.load</code> — <em>not</em> read off the module), and the
+  engine <strong>never calls <code>customElements.define</code></strong>. The MaaS serve-path invariant says
+  the same: "the served bytes register their own element as an import side effect"
+  (<code>#maas-serves-self-contained-modules-only</code>).
+</p>
+
+<h2>What the skeptic pass changed</h2>
+<ul>
+  <li><strong>MERIT — SURVIVES-WITH-AMENDMENT.</strong> Keep "module self-registers, engine never defines on
+    the default path," but <strong>drop</strong> the prep's first idea of an engine-read <code>mod.tag</code>
+    export (a fabricated convention with no prior art that force-fails on third-party vendor elements) in
+    favour of <strong>tag-on-route</strong> — matching Vaadin, <code>fui:workbench/loader.ts</code>, and
+    #1823's route-object shape.</li>
+  <li><strong>STATUTE — COLLISION FOUND.</strong> <code>#config-extends-platform-default</code>
+    (<code>we:docs/agent/platform-decisions.md:1249-1257</code>) already names <strong>auto-define</strong>
+    (explicit / eager-barrel / on-import / on-first-use / build-parse / declarative-map / convention / SSR)
+    as a <strong>ratified configurable dimension</strong> (lineage #227, open/default-less
+    <code>CustomAutoDefineRegistry</code>). So #1897 must <strong>not</strong> codify "the engine NEVER
+    defines" as an invariant — it sets the route engine's <strong>default</strong> to the native-first value
+    (on-import / self-register / tag-on-route), leaving <code>engine-defines</code> a per-scope override, and
+    sets <code>codifiedIn</code> to <strong>instance</strong> the anchor, not author a standalone route-only
+    rule.</li>
+</ul>
+
+<h2>The call, at a glance</h2>
+<p>
+  <strong>Not a three-way fork — the auto-define configurable dimension applied to lazy route components</strong>
+  (the same reframe #1823's Fork 3 took: fork → dimension via config-extends-default). #1897 sets the
+  router's <strong>default</strong>: native-first <strong>on-import self-registration, tag carried on the
+  route value</strong>, engine <code>createElement(tag)</code>, engine never defines on the default path
+  (mirrors <code>fui:workbench/loader.ts:56-68</code>). Option (b) <em>engine-defines</em> is the per-scope
+  override, never foreclosed; option (c) <em>thunk-returns-tag</em> folds in as a JS shorthand. Async-stamp
+  wiring, route-context delivery via the existing <code>customContexts:route</code> injector, and
+  template/component exclusivity are supported-by-default; loading-state/suspense UX is explicitly out of
+  scope.
+</p>

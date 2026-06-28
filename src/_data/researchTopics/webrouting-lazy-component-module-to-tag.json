@@ -1,0 +1,21 @@
+{
+  "id": "webrouting-lazy-component-module-to-tag",
+  "title": "webrouting lazy route:component — how a loaded module maps to a stamped custom-element tag",
+  "status": "open",
+  "summary": "Grounds decision #1897 (parent epic #1684, blocks #1720): the focused sub-question #1823 explicitly deferred — given a lazy route:component resolves to a MODULE (a () => import() thunk / bare specifier), how does that module become a stampable custom-element tag? The engine today stamps a matched route by cloning a <template> (templateDef.template.content.cloneNode(true), fui:blocks/router/elements/RouteViewElement.ts:498) and a RouteDefinition carries a concrete template:HTMLTemplateElement (we:blocks/router/types.ts:218-227); a lazy component yields a module, not a template, and the load is async while match+stamp are sync (matchRoute, we:blocks/router/types.ts:240-266). route:component / RouteComponentRef / customContexts:routes are NOT built yet (grep-empty; #1720 is the blocked build) so this is a contract decision over not-yet-shipped code. Prior-art delta on module->ELEMENT mapping (distinct from #1823's 'is the import inline'): custom-element-NATIVE routers (Vaadin Router: route carries a tag string + a separate self-registering action import; @lit-labs/router: async enter imports for side-effect, render names the tag) put customElements.define in the MODULE and stamp a TAG CARRIED ON THE ROUTE; virtual-DOM routers (React lazy / Vue default-export / Angular loadComponent-returns-class) default-export the component and define it framework-internally, but have NO platform tag registry so are weak analogs for an 'engine defines' option. DECISIVE in-house precedent (#1731): the block loader does await shape.load() (or import(shape.servedUrl)) then createElement(shape.tag) — the module self-registers as an import side-effect, the TAG RIDES ON THE DESCRIPTOR (shape.tag, sibling of shape.load, NOT read off the module), and the engine NEVER calls customElements.define (fui:workbench/loader.ts:56-68). A refute-only skeptic ran both axes: MERIT SURVIVES-WITH-AMENDMENT — keep 'module self-registers, engine never defines on the default path' but DROP the prep's first idea of an engine-read mod.tag export (fabricated convention, no prior art, force-fails on third-party vendor elements) in favour of TAG-ON-ROUTE (matches Vaadin + loader.ts + #1823's route-object shape); STATUTE COLLISION FOUND — the #config-extends-platform-default anchor (docs/agent/platform-decisions.md:1249-1257) already names 'auto-define: explicit/eager-barrel/on-import/on-first-use/build-parse/declarative-map/convention/SSR' as a RATIFIED configurable strategy dimension (lineage #227, open/default-less CustomAutoDefineRegistry), so #1897 must NOT codify 'engine NEVER defines' as an invariant (that hard-bakes on-import and forecloses engine-defines) — it must set the route engine's DEFAULT on that dimension to the native-first value (on-import/self-register, tag-on-route) leaving engine-defines a per-scope override, and set codifiedIn to INSTANCE #config-extends-platform-default not author a standalone route-only rule. Net reframe (mirroring #1823's Fork-3 fork->dimension reframe): the module->tag question is a DIMENSION-DEFAULT call, not a three-way either/or; default = on-import self-register + tag-on-route + createElement(tag), option (b) engine-defines is the override, option (c) thunk-returns-tag folds in as a JS shorthand. Async-stamp wiring, route-context delivery via the existing customContexts:route injector, and template/component exclusivity are supported-by-default; loading-state/suspense UX is explicitly out of scope (a future #1720 card). Full grounding in reports/2026-06-28-webrouting-lazy-component-module-to-tag.md.",
+  "dateOpened": "2026-06-28",
+  "lastReviewed": "2026-06-28",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webrouting",
+    "router",
+    "route-view",
+    "lazy-loading",
+    "custom-elements",
+    "auto-define",
+    "decision-prep"
+  ],
+  "relatedBlocks": ["router"],
+  "relatedPlugs": ["injectorroot"],
+  "relatedProject": "webrouting"
+}
