@@ -1,12 +1,14 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 parent: "1836"
 locus: frontierui
 blockedBy: ["1926"]
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-28"
+dateResolved: "2026-06-28"
+graduatedTo: "fui:demos/workbench.ts"
 tags: [plugs, unplugged, workbench, dev-experience]
 ---
 
