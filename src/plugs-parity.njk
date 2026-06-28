@@ -1,0 +1,66 @@
+---
+permalink: "plugs/parity/"
+layout: base.njk
+title: Web Everything — Plugs · Unplugged Parity
+---
+
+{#- #1844 (epic #1836, the #1839-reshaped pipeline tail slice). The plugs unplugged-parity table.
+    Unlike the build-time catalog-auto-render pages (which read `we:src/_data/*`), this page fetches the
+    verdicts from the FUI MaaS parity route AT RUNTIME (`${links.frontierUrl}/_maas/parity/`, #1890) —
+    the cross-origin data path #1839 mandates. WE holds ONLY the type-only schema (#1888); the measured
+    3-state verdict VALUES are a FUI-runtime fact (#1839/#1282 zero-impl) and never live in a WE data file.
+    The `data-parity-origin` attribute hands the (dev vs prod) FUI origin to the runtime fetcher. -#}
+
+<section class="intro">
+  <h1>Plug parity — works unplugged</h1>
+  <p>
+    Every plug runs today as a standalone library whether or not its capability ever ships natively — but
+    "runs as a library" is not the same as "needs no plug". This table is the honest, per-public-API
+    answer: for each plug capability, does it still work with the plug
+    <strong>unplugged</strong> (the runtime patches removed), and if not, exactly what platform hook is
+    missing.
+  </p>
+</section>
+
+<section class="content-box" style="margin: 0 0 2rem;">
+  <h2 style="margin-top: 0;">How to read the verdicts</h2>
+  <p>The marking vocabulary is the 3-state bar ratified in the unplugged-parity decision (caniuse-shaped):</p>
+  <ul style="margin: 0.5rem 0 0; padding-left: 1.25rem;">
+    <li>
+      <we-badge tone="success">works</we-badge>
+      &mdash; proven unplugged by an automated test exercising the real capability.
+    </li>
+    <li>
+      <we-badge tone="warning">works with caveat</we-badge>
+      &mdash; reachable unplugged but the surface is partial; carries a <strong>mandatory note</strong>.
+      A capability that is merely <em>not-yet-ported</em> (portable, no genuine residue) also lands here,
+      with a link to the fix card that will move it to <em>works</em>.
+    </li>
+    <li>
+      <we-badge tone="danger">plugged-only</we-badge>
+      &mdash; genuine residue: the contract requires interception the plug holds no handle to. Carries a
+      <strong>residue justification</strong> naming the missing platform hook.
+    </li>
+  </ul>
+  <p style="margin: 0.75rem 0 0; color: var(--color-text-muted); font-size: 0.9em;">
+    The verdicts are measured live by Frontier UI and fetched from its data origin when this page loads &mdash;
+    Web Everything itself holds only the parity schema, never the values.
+  </p>
+</section>
+
+<section style="margin: 1.5rem 0 1rem;">
+  <div style="flex: 1; min-width: 220px; max-width: 420px;">
+    <h3 style="margin: 0 0 0.5rem; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted);">Search</h3>
+    <input type="search" id="parity-search" placeholder="Filter by plug, capability, note, or residue…"
+           style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.9em; background: var(--color-surface, #fff);">
+  </div>
+</section>
+
+<div id="parity-root" data-parity-origin="{{ links.frontierUrl }}">
+  <p id="parity-loading" style="color: var(--color-text-muted); margin: 1.5rem 0;">Loading parity verdicts…</p>
+  <p id="parity-error" hidden style="margin: 1.5rem 0;"></p>
+  <div id="parity-domains"></div>
+  <p id="parity-empty" hidden style="text-align: center; color: var(--color-text-muted); margin: 2rem 0;">No capabilities match.</p>
+</div>
+
+<script src="/assets/js/plug-parity.js"></script>

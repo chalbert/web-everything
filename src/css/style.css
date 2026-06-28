@@ -1862,3 +1862,17 @@ we-data-table thead th[aria-sort="descending"] button::after { content: "▼"; f
 we-data-table thead th[aria-sort="none"]       button::after { content: "↕"; font-size: 0.6rem; opacity: 0.4; }
 we-data-table .group-row th { background: #eef2ff; color: #3730a3; font-weight: 600; }
 we-data-table .data-table-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* Plug unplugged-parity table (#1844). Runtime-fetched 3-state verdicts, one section per plug domain. */
+.parity-domain { margin: 0 0 2rem; }
+.parity-domain-title { margin: 0 0 0.5rem; font-size: 1.05rem; display: flex; align-items: baseline; gap: 0.6rem; }
+.parity-domain-meta { font-size: 0.75em; font-weight: 400; color: var(--color-text-muted); letter-spacing: 0.02em; }
+.parity-table { width: 100%; border-collapse: collapse; font-size: 0.92em; }
+.parity-table th, .parity-table td { text-align: left; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--color-border); vertical-align: top; }
+.parity-table thead th { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); }
+.parity-table .parity-verdict { width: 10rem; white-space: nowrap; }
+.parity-cap { font-weight: 500; }
+.parity-note, .parity-residue { margin-top: 0.35rem; font-weight: 400; font-size: 0.9em; color: var(--color-text-muted); }
+.parity-pending { display: inline; }
+.parity-grounding { margin-top: 0.35rem; font-size: 0.8em; }
+.parity-grounding code { color: var(--color-text-muted); word-break: break-all; }
