@@ -1,0 +1,7 @@
+{
+  "category": "syntax",
+  "id": "functional-component-adapter",
+  "name": "Functional Component Adapter",
+  "status": "poc",
+  "summary": "Functional-style components (a function returning JSX) lowered to a class-based Web Component. A POC generator exists; served as a form of <a href=\"/backlog/081-module-as-a-service-provider/\">Module-as-a-Service</a>."
+}

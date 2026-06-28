@@ -33,6 +33,7 @@ import { loadBlocks } from './lib/blocks-loader.cjs';
 import { loadIntents } from './lib/intents-loader.cjs';
 import { loadProtocols } from './lib/protocols-loader.cjs';
 import { loadDemos } from './lib/demos-loader.cjs';
+import { loadAdapterItems } from './lib/adapters-loader.cjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BL = join(ROOT, 'backlog');
@@ -71,10 +72,16 @@ function loadRegistries() {
       reg.set(kind, ids);
       continue;
     }
+    if (kind === 'adapter') {
+      // Per-adapter specs (#1938) — assembled from src/_data/adapters/<id>.json; the `adapters.json#<id>`
+      // graduatedTo anchor stays virtual (the monolith file is gone).
+      try { ids = new Set(loadAdapterItems().map((a) => a.id).filter(Boolean)); } catch { /* none → empty */ }
+      reg.set(kind, ids);
+      continue;
+    }
     try {
       const raw = JSON.parse(readFileSync(join(ROOT, 'src/_data', file), 'utf8'));
       const arr = Array.isArray(raw) ? raw : raw.items || [];
-      // adapters.json nests its entries under items[] per top-level group
       ids = new Set(arr.flatMap((x) => (x.items ? x.items.map((i) => i.id) : [x.id])).filter(Boolean));
     } catch { /* registry absent → empty */ }
     reg.set(kind, ids);

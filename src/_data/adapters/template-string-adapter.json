@@ -1,0 +1,7 @@
+{
+  "category": "rendering",
+  "id": "template-string-adapter",
+  "name": "Template String Adapter",
+  "status": "draft",
+  "summary": "Tagged template literals (<code>html\\`...\\`</code>) that compile to the same primitives as HTML and JSX."
+}

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "rendering",
+    "order": 0,
+    "title": "Rendering Adapters",
+    "description": "Format-agnostic authoring layers that compile to Web Everything primitives. All three formats are interconvertible via AST transformers."
+  },
+  {
+    "id": "syntax",
+    "order": 1,
+    "title": "Syntax Adapters",
+    "description": "Developer-facing layers that provide convenient syntax (sugar) compiling to standard protocols."
+  },
+  {
+    "id": "lib",
+    "order": 2,
+    "title": "Library Adapters",
+    "description": "Implementation layers that bridge third-party ecosystem libraries to Web Blocks protocols."
+  }
+]

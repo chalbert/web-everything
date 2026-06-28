@@ -241,15 +241,14 @@ ${fuiHostScript}`;
   });
 
   // Flatten adapters from categories for pagination.
-  // Read the file fresh each build (not `require`, which Node module-caches) so adapter additions
-  // hot-reload on the watch server like blocks/projects/intents do via the data cascade — see
-  // backlog/050-eleventy-adapter-require-cache.md. The watch target below triggers the rebuild.
+  // Assemble fresh each build via the shared one-file-per-adapter loader (#1938) — NOT a top-level
+  // `require` of a cached module — so adapter additions hot-reload on the watch server like
+  // blocks/projects/intents do via the data cascade (the loader itself is `require`d, but it re-reads
+  // src/_data/adapters/ from disk on every call). See backlog/050-eleventy-adapter-require-cache.md. The
+  // watch target below triggers the rebuild.
   eleventyConfig.addCollection("flatAdapters", function(collectionApi) {
-    const fs = require("fs");
-    const adapters = JSON.parse(fs.readFileSync(__dirname + "/src/_data/adapters.json", "utf8"));
-    return adapters.flatMap(category =>
-      category.items.map(item => ({ ...item, category: category.id, categoryTitle: category.title }))
-    );
+    const { loadAdapterItems } = require("./scripts/lib/adapters-loader.cjs");
+    return loadAdapterItems();
   });
 
   // The backlog feeds off backlog/*.md (parsed by src/_data/backlog.js, which
@@ -258,9 +257,9 @@ ${fuiHostScript}`;
   // report must refresh the backlog that loads it.
   eleventyConfig.addWatchTarget("backlog");
   eleventyConfig.addWatchTarget("reports");
-  // adapters.json is read fresh in the flatAdapters collection (not the data cascade), so watch it
-  // explicitly — otherwise new adapter pages 404 on the live dev server until restart.
-  eleventyConfig.addWatchTarget("src/_data/adapters.json");
+  // The per-adapter files are read fresh in the flatAdapters collection (not the data cascade), so watch
+  // the directory explicitly — otherwise new adapter pages 404 on the live dev server until restart.
+  eleventyConfig.addWatchTarget("src/_data/adapters");
 
   eleventyConfig.addPassthroughCopy("src/css");
   eleventyConfig.addPassthroughCopy("src/assets");

@@ -19,6 +19,7 @@ import { loadIntents } from '../lib/intents-loader.cjs';
 import { loadProtocols } from '../lib/protocols-loader.cjs';
 import { loadDemos } from '../lib/demos-loader.cjs';
 import { loadDataRegistry } from '../lib/registry-loader.cjs';
+import { loadAdapters } from '../lib/adapters-loader.cjs';
 import { buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -174,7 +175,7 @@ describe('validateBacklogItem — real backlog stays clean', () => {
   const protocols = loadProtocols(); // per-protocol specs src/_data/protocols/<id>.json, assembled (#1146)
   const projects = loadDataRegistry('projects'); // per-project specs src/_data/projects/<id>.json (#1157)
   const plugs = loadDataRegistry('plugs'); // per-plug specs src/_data/plugs/<id>.json (#1157)
-  const adapters = loadJson('adapters.json');
+  const adapters = loadAdapters(); // per-adapter specs src/_data/adapters/<id>.json + _groups.json, assembled (#1938)
   const demos = loadDemos(); // per-demo specs src/_data/demos/<id>.json, assembled (#1146)
   const capabilityIds = new Set(loadDataRegistry('capabilities').map((c) => c.id)); // per-cap specs (#1157)
   const loadBacklog = require(join(ROOT, 'src/_data/backlog.js'));

@@ -123,8 +123,9 @@ export function isCanonicalGraduated(value, graduatedKinds) {
 /**
  * Build the graduatedTo `kind → { ids, file }` resolution table from the loaded registries. A
  * graduatedTo written in the compact `kind:slug` form is resolved against the matching registry, so a
- * typo'd kind or a stale slug is caught instead of silently silencing the nudge. Adapters live nested
- * under adapters.json `items[]`.
+ * typo'd kind or a stale slug is caught instead of silently silencing the nudge. Adapters are assembled
+ * from the per-adapter specs (src/_data/adapters/<id>.json, #1938) into the nested `items[]` groups; the
+ * `adapters.json#<id>` graduatedTo anchor stays virtual (the monolith file is gone).
  */
 export function buildGraduatedKinds({ blocks = [], intents = [], protocols = [], projects = [], plugs = [], capabilityIds = new Set(), adapters = [], demos = [] }) {
   return {

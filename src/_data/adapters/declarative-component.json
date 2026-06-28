@@ -1,0 +1,7 @@
+{
+  "category": "syntax",
+  "id": "declarative-component",
+  "name": "Declarative Component Adapter",
+  "status": "concept",
+  "summary": "Deterministic build-time AST transform that lowers the declarative <code>&lt;component&gt;</code> element to an equivalent class-based custom element + <code>customElements.define()</code>. The intended implementation of the <strong>Component block</strong>."
+}

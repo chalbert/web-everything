@@ -1,0 +1,8 @@
+{
+  "category": "rendering",
+  "id": "html-adapter",
+  "name": "HTML Adapter",
+  "status": "implemented",
+  "summary": "The canonical format. Standard HTML with Web Everything enhancements (custom elements, behaviors, directives).",
+  "isCanonical": true
+}

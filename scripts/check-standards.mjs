@@ -34,6 +34,7 @@ import { loadDemos } from './lib/demos-loader.cjs';
 import { loadSemantics } from './lib/semantics-loader.cjs';
 import { loadPresets } from './lib/presets-loader.cjs';
 import { loadDataRegistry } from './lib/registry-loader.cjs';
+import { loadAdapters } from './lib/adapters-loader.cjs';
 import {
   BACKLOG_STATUSES, BACKLOG_KINDS, FIB, FILE, blockSpecFile,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated, detectClassificationCollapse, computeNativeFirstConformance, computeDesignKnowledgeConformance,
@@ -122,7 +123,7 @@ const designSystems = arr(loadDataRegistry('designSystems')); // per-entry src/_
 const projects = arr(loadDataRegistry('projects')); // per-project specs src/_data/projects/<id>.json (#1157)
 const intents = arr(loadIntents()); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
 const capabilities = arr(loadDataRegistry('capabilities')); // per-capability specs src/_data/capabilities/<id>.json (#1157)
-const adapters = arr(readJson('adapters.json'));
+const adapters = arr(loadAdapters()); // per-adapter specs src/_data/adapters/<id>.json + _groups.json, assembled (#1938)
 const demos = arr(loadDemos()); // per-demo specs src/_data/demos/<id>.json, assembled (#1146)
 const capabilityMatrix = readJson('capabilityMatrix.json') || {};
 // Backlog feeds off backlog/*.md via the shared data-file loader (single source).
@@ -148,7 +149,8 @@ for (const r of research)
 // otherwise blind to that njk render, so a missing partial would only surface as a build crash (#1388,
 // hit by the #1374 graph plugs). Mirror the block/plug/research coverage so the failure shifts left to a
 // gate error. The page paginates collections.flatAdapters = adapters.flatMap(c => c.items), so iterate
-// the same flat item set (adapters.json is [ { id, items: [ { id, … } ] } ]).
+// the same flat item set (adapters is the assembled [ { id, items: [ { id, … } ] } ] nested-group array,
+// per-adapter files src/_data/adapters/<id>.json since #1938).
 for (const cat of adapters)
   for (const a of (Array.isArray(cat.items) ? cat.items : []))
     if (a.id && !hasDesc('adapter-descriptions', a.id))
@@ -487,7 +489,8 @@ for (const item of backlog) {
 // #614 tightened the rest: the field must LEAD with a resolvable entity reference (`none`, `kind:slug`,
 // a repo path, or a bare registry id) so entity-graph joins + the G3 lineage walk can read it; pure prose
 // where the entity is buried is non-canonical and surfaced as one aggregated nudge below (not per-item).
-// Adapters live nested under adapters.json `items[]`. (Table + rule body live in check-standards-rules.mjs
+// Adapters live nested under the assembled `items[]` (per-adapter files since #1938; `adapters.json#<id>`
+// stays a virtual graduatedTo anchor). (Table + rule body live in check-standards-rules.mjs
 // so they're unit-tested with fixtures — #251.)
 const graduatedKinds = buildGraduatedKinds({ blocks, intents, protocols, projects, plugs, capabilityIds, adapters, demos });
 

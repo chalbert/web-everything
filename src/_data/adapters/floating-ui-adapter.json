@@ -1,0 +1,7 @@
+{
+  "category": "lib",
+  "id": "floating-ui-adapter",
+  "name": "Floating UI Adapter",
+  "status": "concept",
+  "summary": "Bridges the <strong>Floating UI</strong> library to the <strong>Positioning plug</strong> as a provider for the <strong>Anchor Intent</strong>."
+}
