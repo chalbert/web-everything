@@ -1,7 +1,9 @@
 ---
 kind: epic
-status: open
+status: resolved
 dateOpened: "2026-06-23"
+dateResolved: "2026-06-28"
+graduatedTo: webrouting
 locus: webeverything
 relatedReport: reports/2026-06-23-1684-split-analysis.md
 tags: [webrouting, routing, url-state, sitemap, standard, build]
