@@ -21,6 +21,7 @@ export { webcomplianceSuite } from './webcompliance.vectors.js';
 export { intlSuite } from './intl.vectors.js';
 export { analyticsSuite } from './analytics.vectors.js';
 export { reliabilitySuite } from './reliability.vectors.js';
+export { webthemeSuite } from './webtheme.vectors.js';
 // The Doc Spec suite (#1163) is a pure (manifest, cases) → DocsSite golden-vector suite, a different shape
 // from the interaction-script ConformanceVectorSuite — exported on its own, not in `conformanceSuites`.
 export { webdocsDocSpecSuite, assertDocSpecSuite, DocSpecSchemaError } from './webdocs.vectors.js';
@@ -38,6 +39,7 @@ import { webcomplianceSuite } from './webcompliance.vectors.js';
 import { intlSuite } from './intl.vectors.js';
 import { analyticsSuite } from './analytics.vectors.js';
 import { reliabilitySuite } from './reliability.vectors.js';
+import { webthemeSuite } from './webtheme.vectors.js';
 
 /** The registry of shipped per-standard suites — what the #899 driver enumerates. */
 export const conformanceSuites: ReadonlyArray<ConformanceVectorSuite> = [
@@ -53,4 +55,5 @@ export const conformanceSuites: ReadonlyArray<ConformanceVectorSuite> = [
   intlSuite,
   analyticsSuite,
   reliabilitySuite,
+  webthemeSuite,
 ];

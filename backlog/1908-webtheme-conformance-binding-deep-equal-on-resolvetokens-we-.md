@@ -2,10 +2,12 @@
 kind: story
 size: 3
 parent: "1294"
-status: active
+status: resolved
 blockedBy: ["1907"]
 dateOpened: "2026-06-28"
 dateStarted: "2026-06-28"
+dateResolved: "2026-06-28"
+graduatedTo: "we:conformance-vectors/webtheme.vectors.ts + fui:webtheme/webthemeConformance.ts"
 tags: []
 ---
 
