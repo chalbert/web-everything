@@ -1,0 +1,82 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    Ruling <a href="/backlog/1807-declarative-custom-state-surface-how-a-component-declares-to/">#1807</a>
+    ratified that a <code>&lt;component&gt;</code>'s custom-state surface ships as <strong>two postures over
+    one contract</strong>: <em>unplugged</em> — the open native <code>CustomStateSet</code> floor, no
+    enforcement; <em>plugged</em> — a declared state <em>vocabulary</em> with validation + a polyfill of that
+    nowhere-native declaration/validation layer. Slice B
+    (<a href="/backlog/1892-custom-states-slice-b-plugged-validation-polyfill-declaresta/">#1892</a>) is the
+    impl-architecture call the ruling deferred: <strong>how does the plugged form intercept a toggle of an
+    un-declared state?</strong> The item framed this as a <em>"wrapper-vs-proxy architecture"</em> fork. This
+    survey shows that framing collapses against two already-ratified WE statutes and one fact of JavaScript.
+</p>
+
+<h2>Finding 1 — the "proxy" pole is dead twice over</h2>
+<p>
+    A <code>Proxy</code>-based interceptor over <code>internals.states</code> is excluded <strong>before any
+    judgment</strong>, on two independent grounds:
+</p>
+<ul>
+    <li><strong>Ratified statute #1872</strong>
+        (<code>#observe-only-posture-spectrum</code>): the plugs substrate is a
+        <em>prototype-method wrapper, not a <code>Proxy</code></em> — <em>"there is no <code>new Proxy</code>
+        in the plugs tree"</em> (no identity break, no <code>instanceof</code> surprise).</li>
+    <li><strong>JavaScript semantics</strong> (MDN <em>Proxy</em>): built-in <code>Set</code> methods read
+        <strong>internal slots</strong> directly, not through <code>[[Get]]</code>/<code>[[Set]]</code>, so a
+        <code>Proxy</code> over a Set-like <code>CustomStateSet</code> <strong>cannot trap
+        <code>.add()</code>/<code>.delete()</code> at all</strong> — proxied built-ins throw on internal-slot
+        access. The approach is non-functional, not merely discouraged.</li>
+</ul>
+<p>
+    So the live axis is <strong>WeakMap-keyed out-of-band validation (no global patch)</strong> vs a
+    <strong>prototype-method-wrapper patch of <code>CustomStateSet.prototype</code></strong> — the proxy pole
+    is removed.
+</p>
+
+<h2>Finding 2 — the residue bar (#1839) decides Fork 1</h2>
+<p>
+    <code>#plugged-only-residue-bar</code> is the mechanical test for whether a plugged capability may patch
+    an unowned global: residue <strong>iff both</strong> (i) the contract requires intercepting a native call
+    on a node <strong>the plug holds no handle to</strong>, <strong>and</strong> (ii) the contract — including
+    <em>transparency</em> — cannot be reproduced by <strong>WeakMap-keyed out-of-band state through the plug's
+    own API</strong>. custom-states validation <strong>fails</strong> the test: <code>declareStates(internals,
+    vocab)</code> already holds the handle, and toggles route through slice-A's plug-owned helpers
+    (<code>addStates</code> / <code>toggleState</code>). The contract <em>"a toggle through the declared
+    surface of an un-declared state is rejected"</em> is reproducible out-of-band (vocab in a
+    <code>WeakMap&lt;ElementInternals, Set&lt;string&gt;&gt;</code>) — so it is <strong>not residue → do not
+    patch</strong>. The prototype-wrapper is the alternative <em>only</em> if transparency of the raw native
+    call (<code>internals.states.add('typo')</code> bypassing the helper) is genuinely contractual — and
+    #1807 labels that throwing example <em>"the authoring shape, not a final API spec."</em>
+</p>
+
+<h2>Recommendation (to ratify in #1892)</h2>
+<ol>
+    <li><strong>Fork 1 — interception mechanism:</strong> <strong>WeakMap-keyed out-of-band validation, no
+        <code>CustomStateSet.prototype</code> patch</strong> (per the #1839 residue bar). The raw native
+        <code>internals.states.add</code> floor stays an open escape hatch (most-permissive default). The
+        prototype-method-wrapper patch is the alternative, available only by discharging #1839's residue audit
+        if raw-call transparency later becomes contractual.</li>
+    <li><strong>Fork 2 — enforcement severity:</strong> ship a <code>severity</code> option;
+        <strong>default = non-throwing decline + dev report</strong> — the undeclared toggle is not applied and a
+        <code>console.error</code> fires, the <em>data-violation</em> posture every sibling plug uses
+        (webvalidation reports via the non-throwing <code>internals.setValidity</code>, never a
+        <code>throw</code>; throw is reserved for registry <em>misconfiguration</em>). <code>severity:'throw'</code>
+        is the documented opt-<strong>up</strong> for hard <code>--strict</code>. (A throw default would collide
+        with the most-permissive / native-first doctrine — the native <code>CustomStateSet</code> is open.)</li>
+    <li><strong>Settled, not forks:</strong> context resolution follows the injector-registry precedent
+        (nearest-scope-wins + <code>window</code> fallback); the polyfill covers the <em>JS declaration/
+        validation layer only</em> — <code>:state()</code> CSS matching is browser machinery and cannot be
+        polyfilled; parity is recorded FUI-side (<code>plugged-only</code>) per #1839/#1844, WE type-only.</li>
+</ol>
+
+<h2>Why this matters</h2>
+<p>
+    This is the <strong>second application of the plug-as-proposed-standard doctrine</strong> (#1826) and the
+    <strong>first to be governed end-to-end by the residue bar</strong> (#1839): it demonstrates the bar
+    pushing a capability <em>out</em> of residue (no patch) where a naive "polyfill = patch the global"
+    instinct would have patched <code>CustomStateSet.prototype</code> unnecessarily. The worked classification
+    — handle held + helper-routed ⇒ out-of-band ⇒ not residue — is the reusable pattern for future plug
+    validation layers.
+</p>
+{% endraw %}

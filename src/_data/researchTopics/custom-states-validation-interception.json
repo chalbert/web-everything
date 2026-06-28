@@ -1,0 +1,26 @@
+{
+  "id": "custom-states-validation-interception",
+  "title": "custom-states plugged validation — how the plug intercepts an un-declared internals.states toggle",
+  "status": "open",
+  "summary": "Prior-art + architecture survey grounding decision #1892 (slice B of epic #1831; under ruling #1807). #1807 ratified the two-posture-over-one-contract shape (unplugged = open-set native floor; plugged = declared vocabulary + validation + polyfill); slice B is the impl-architecture call for the PLUGGED interception mechanism. The item framed it as a 'wrapper-vs-proxy architecture' fork — this survey shows that framing collapses. The proxy pole is dead twice over: (1) ratified statute #1872 (we:docs/agent/platform-decisions.md#observe-only-posture-spectrum) mandates a prototype-method-wrapper, NOT a Proxy — 'no new Proxy in the plugs tree' (identity / instanceof safety); and (2) JS semantics — built-in Set methods access internal slots directly, so a Proxy over a CustomStateSet cannot trap .add()/.delete() at all (proxied built-ins throw on internal-slot access). So the live Fork 1 is WeakMap-keyed out-of-band validation through the plug's own toggle API (NO global patch) vs a prototype-method-wrapper patch of CustomStateSet.prototype.add/.delete (transparent interception of even raw native calls). That choice is decided by the #1839 plugged-only-residue bar (we:docs/agent/platform-decisions.md#plugged-only-residue-bar): a capability is residue (patch allowed) only iff its contract requires intercepting a call on a node the plug holds no handle to AND cannot be reproduced WeakMap-keyed out-of-band through the plug's own API. custom-states validation FAILS that test — declareStates(internals, vocab) holds the handle and toggles already route through slice-A's plug-owned helpers (fui:blocks/renderers/component/customStates.ts:28,35) — so it is NOT residue: default = WeakMap-out-of-band, no patch; the prototype-wrapper is the alternative only if raw-call transparency is genuinely contractual (#1807's throwing raw .add example is labelled illustrative, not contractual). Context resolution follows the established injector-registry precedent (fui:plugs/validationUnplugged.ts / guardsUnplugged.ts: InjectorRoot.getProviderOf nearest-scope-wins + window fallback) — not a fork. Polyfill scope is settled by #1807: only the JS declaration/validation layer is polyfilled (the CustomStateSet primitive is Baseline-2024); :state() CSS matching CANNOT be polyfilled in JS (browser CSS-engine machinery), and the slice-A floor already no-ops when internals.states is absent. Second genuine fork (Fork 2): severity of an un-declared toggle through the declared surface — both ship via a severity option, but the default is the call. The skeptic pass FLIPPED prep's first instinct: default = non-throwing decline+report (state declined, console.error), NOT throw — because every sibling plug reports data violations the non-throwing way (webvalidation via internals.setValidity, fui:plugs/webvalidation/applyMergedValidity.ts:51; throw is reserved for misconfiguration), and a throw-default collided with the most-permissive/native-first doctrine (open native CustomStateSet) + the polyfill-surface-fidelity corollary. severity:'throw' is the opt-up for hard --strict. Parity recorded FUI-side (fui:plugs/customstates/parity.json, plugged-only) per #1839/#1844; WE exposes type-only. Full grounding in we:reports/2026-06-28-custom-states-plugged-interception.md.",
+  "dateOpened": "2026-06-28",
+  "lastReviewed": "2026-06-28",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "custom-state-set",
+    "states",
+    "element-internals",
+    "plug-unplugged",
+    "prototype-patch",
+    "weakmap-out-of-band",
+    "residue-bar",
+    "candidate-standard"
+  ],
+  "relatedBlocks": [
+    "component"
+  ],
+  "relatedPlugs": [
+    "customstates"
+  ],
+  "relatedProject": "webcomponents"
+}
