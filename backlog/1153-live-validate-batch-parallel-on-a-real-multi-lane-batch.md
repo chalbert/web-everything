@@ -67,3 +67,17 @@ Ran a 12-item parallel batch (88-pt budget): **11 resolved / 1 re-homed (#1827 �
 2. **Ledger reported #1829 `resolved` but its commit was stranded** on `worktree-wf_c5c5c953-077-15`, never merged to `main`. The close audit's ledger-vs-tree reconcile caught it (`status: open` on `main` despite ledger `resolved`); the main agent cherry-picked it. Without that reconcile the work would have been lost on worktree prune.
 
 The conflict→serial-replay safety net and per-item gating behaved; the **landing/ledger-integrity** half is the regression. **Verdict: still do NOT settle** — #1869 (landing + ledger-truth) joins #1159 (in-worktree false-red) as the open fixes before a clean run can settle this item and #1143.
+
+## Fourth real multi-lane run — 2026-06-28 (`batch-parallel-2026-06-28`, run wf_6764346c-18c)
+
+Ran an 11-item parallel batch (86-pt budget, 28 agents, ~78 min). **NEW root-cause blocker, harder than #1159/#1869:** the user-global `guard-git-branch` hook **unconditionally denies `git worktree add` and branch creation** in the shared checkout. The Workflow tool's `isolation:'worktree'` framework worktrees were created (2 concurrent items), but every agent-issued `git worktree add` (the integration worktree) + the `batch-parallel/*` branch was **DENIED by the hook** → integration/merge/reconcile all failed, `branchOk=false`, the script's own reconcile said **"do NOT land."**
+
+**What actually happened (degraded, but no data lost):**
+- Serial-lane agents **fell back to committing directly on `main`** (which is correct here per *Commit On Current Branch* #104) — 6 items landed clean & gate-green (#1906/#1915/#1916/#1844/#1911/#1927).
+- 3 items stranded as orphan framework-worktree commits (#1904/#1912/#1914); #1926 reported `carried` though its impl was already committed in **frontierui** (`a43fd66`).
+- Both **#1869 defects recurred and amplified**: nothing could land via the contract path, and the ledger marked items `resolved`/`carried` out of sync with `main`. The #1869 ledger-vs-tree reconcile is what made salvage *possible* (it flagged the stranded resolves).
+- **`multiLaneFiles` detection was incomplete** — it reported only `we:contracts/package.json`, but `we:src/_data/intents/surface.json` was edited by BOTH #1911 and #1912 and actually conflicted on cherry-pick. Because the integration tree never assembled, the multi-lane detector couldn't see the real overlap.
+
+**Manual salvage (main agent):** cherry-picked the 3 stranded commits onto `main` (resolved the `we:src/_data/intents/surface.json` #1911/#1912 conflict by keeping all four dimensions), flipped #1926's md to resolved (impl in frontierui), regen derived (already current), removed orphan worktrees, released holds. Final: **10/11 resolved, gate 0 errors**. #1608 stayed open — its `blocked-in-fact` drop was a **false** classification (the integration-worktree failure, not a real item blocker; still workable, needs a focused session for product-component authoring + :8080 render).
+
+**Verdict: the orchestrator is structurally blocked in THIS repo by the git guard hook — a stronger stop than #1159/#1869.** Until either (a) the `guard-git-branch` hook is amended to allow `we:.claude/worktrees/` paths + `batch-parallel/*` branches, or (b) the orchestrator detects the guard and degrades to in-place serial, **use serial `/batch` here — not `/workflow`.** Memory: [[parallel-workflow-blocked-by-git-guard]]. Keep this item + #1143 open.
