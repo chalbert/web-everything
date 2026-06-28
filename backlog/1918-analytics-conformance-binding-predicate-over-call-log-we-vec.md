@@ -2,9 +2,12 @@
 kind: story
 size: 3
 parent: "1294"
-status: open
+status: resolved
 blockedBy: ["1915"]
 dateOpened: "2026-06-28"
+dateStarted: "2026-06-28"
+dateResolved: "2026-06-28"
+graduatedTo: "fui:plugs/webanalytics/analyticsConformance.ts"
 tags: []
 ---
 
