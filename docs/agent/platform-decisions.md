@@ -1271,6 +1271,18 @@ per [constellation-placement](#constellation-placement)). So WE's offline build 
    fiddlier than re-render; a surface that ever needs heavy grouping may opt *that surface* into an island — a localized
    exception, not a reopening of the default.
 
+**Pinned artifact + build ordering (#1946).** The "locked build-artifact, never PATH-resolved" amendment
+resolves to a concrete pin: FUI's `npm run build:tools` typechecks the CLI (`fui:tsconfig.tools.json`) then
+esbuild-bundles it to **one self-contained ESM file at the fixed path
+`../frontierui/dist/tools/data-table-build/cli.mjs`** (the main `build:plugs`/`tsconfig.json` cannot emit it —
+its `@webeverything/*` sibling path-aliases root the program at the workspace parent, so `tools/` would land at
+an unstable `dist/frontierui/tools/…`). `node_modules` deps stay external (happy-dom's CJS transitive deps
+can't be ESM-bundled), so the artifact is invoked **from within the FUI checkout** against FUI's locked
+lockfile — reproducible, not PATH-resolved. WE's Eleventy orchestration (#1905) resolves this **fixed relative
+path** (no PATH lookup, no version probe) and shells `node <that> < batch.json > out.json`. **Build ordering:**
+FUI `build:tools` MUST run before WE's `build:docs` (Eleventy) — WE's build assumes the pinned artifact already
+exists; it does not build FUI. (A missing artifact is a hard build error, never a silent skip.)
+
 **Lineage:** #1867 (ratified 2026-06-27 — Fork 1 → (a) FUI build-CLI subprocess, keyed-batch, version-pinned
 [skeptic SURVIVES-WITH-AMENDMENT]; Fork 2 → (c) `data-*`-on-cell + in-place enhancer [skeptic SURVIVES-WITH-AMENDMENT];
 prep `reports/2026-06-27-ssr-data-table-build-harness-boundary.md`). Fills the [#block-data-ingestion](#block-data-ingestion)
