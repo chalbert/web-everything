@@ -19,6 +19,24 @@
         "lift",
         "scale"
       ]
+    },
+    "elevation": {
+      "description": "Z-axis depth relative to the parent (0 base → 5 floating). Resolves to a shadow recipe; 0 = no shadow. Realizes the elevation field its protocol already declares (#1884/#1911).",
+      "values": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ]
+    },
+    "variant": {
+      "description": "Visual variation of the surface — default vs high-contrast alt. Realizes the variant field its protocol already declares (#1884/#1911).",
+      "values": [
+        "default",
+        "alt"
+      ]
     }
   },
   "description": "<h3>Elevation Semantics (Z-Axis)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>0</code>: Base. Application background.</li><li><code>1-2</code>: Grouping content. (Cards, Lists).</li><li><code>3-5</code>: Floating content. (Sticky Headers, Modals, Tooltips).</li></ul><h3>Material Texture</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>solid</code>: Opaque. Standard for Material Design 3 (Surface Tones).</li><li><code>glass</code>: Blurred background. Standard for macOS/iOS (Vibrancy) and Windows (Mica/Acrylic).</li><li><code>transparent</code>: Layout-only containment.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SurfaceMaterial = 'solid' | 'glass' | 'transparent';\ntype SurfaceInteraction = 'static' | 'lift' | 'scale';\n\ninterface SurfaceIntent {\n    // Z-axis position relative to parent (0-5)\n    elevation: number;\n    \n    // Physical texture of the surface\n    texture: SurfaceMaterial;\n    \n    // Visual variation (Default vs High Contrast)\n    variant: 'default' | 'alt';\n    \n    // Interaction physics\n    interaction: SurfaceInteraction;\n}</code></pre>"
