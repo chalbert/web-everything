@@ -7,10 +7,6 @@ metadata:
   originSessionId: 80b26a4d-d06f-4836-85f8-2733da82853e
 ---
 
-On any "one combined thing vs. two composed things" fork, **always bias toward separation and decoupling** — default to two. Split a reusable axis into its own intent/protocol/plug that others *compose*, rather than absorbing it into a larger one.
+Statute-restating body collapsed to a pointer (#1896) — the full rule (default to **separation** on a combine-vs-split fork; burden of proof on *combining*; the recurrence-without-neighbour test) lives in the statute, which carries the same substance **plus** the schema/ownership-coupling-not-file-count nuance this body lacked.
 
-**Why:** a concept that recurs without its neighbour (disclosure without a tree; positioning without a droplist) is a distinct paradigm; folding it in forces unrelated consumers to drag in a host they don't need. Decoupling keeps each home thin and reusable — the composition-over-monolith logic the WE constellation is built on.
-
-**How to apply:** the burden of proof is on *combining*, not separating — couple only when the split has a concrete, named cost. E.g. #064 → `disclosure` (open/closed) is its own intent that `hierarchy` composes, not absorbed into it. Part of the per-fork classification pass in docs/agent/backlog-workflow.md. Pairs with [[feedback_harvest_cross_cutting_paradigms]], [[feedback_most_flexible_default]], [[feedback_dimension_vs_fixed_mechanic]].
-
-**Codified:** the canonical rule is `docs/agent/platform-decisions.md#bias-toward-separation` (the statute is source-of-truth; any `#NNN` above is provenance, not the reference).
+**Codified:** the canonical rule is `docs/agent/platform-decisions.md#bias-toward-separation` (the statute is source-of-truth; any `#NNN` is provenance, not the reference). Related: [[feedback_harvest_cross_cutting_paradigms]], [[feedback_most_flexible_default]], [[feedback_dimension_vs_fixed_mechanic]].
