@@ -19,6 +19,7 @@
     "./guard": "./guard.ts",
     "./positioning": "./positioning.ts",
     "./push-delivery": "./push-delivery.ts",
+    "./reliability": "./reliability.ts",
     "./resources": "./resources.ts",
     "./resource-cache": "./resource-cache.ts",
     "./transport-negotiation": "./transport-negotiation.ts",
