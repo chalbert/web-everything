@@ -2,7 +2,7 @@
   "id": "surface",
   "name": "Surface Intent",
   "status": "draft",
-  "summary": "Protocol defining Z-Axis depth, material texture (Glass/Solid), and interactions across lighting modes.",
+  "summary": "Protocol defining Z-Axis depth, material texture (Glass/Solid), interactions, corner-radius character, and edge delineation across lighting modes.",
   "dimensions": {
     "texture": {
       "description": "Physical material of the surface",
@@ -37,7 +37,23 @@
         "default",
         "alt"
       ]
+    },
+    "radius": {
+      "description": "Corner-radius character of the surface — the semantic what/why of its corners, not an arbitrary pixel value (per #1884's pure-decoration-edge test). Only the values that carry a distinct surface story earn a dimension; specific radii beyond these stay raw theme tokens.",
+      "values": [
+        "sharp",
+        "soft",
+        "pill"
+      ]
+    },
+    "border": {
+      "description": "Edge delineation of the surface — whether and how strongly the surface declares its own boundary, distinct from elevation/texture. Carries a what/why (containment strength); specific stroke widths/colors stay raw theme tokens (per #1884's pure-decoration-edge test).",
+      "values": [
+        "none",
+        "hairline",
+        "emphasis"
+      ]
     }
   },
-  "description": "<h3>Elevation Semantics (Z-Axis)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>0</code>: Base. Application background.</li><li><code>1-2</code>: Grouping content. (Cards, Lists).</li><li><code>3-5</code>: Floating content. (Sticky Headers, Modals, Tooltips).</li></ul><h3>Material Texture</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>solid</code>: Opaque. Standard for Material Design 3 (Surface Tones).</li><li><code>glass</code>: Blurred background. Standard for macOS/iOS (Vibrancy) and Windows (Mica/Acrylic).</li><li><code>transparent</code>: Layout-only containment.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SurfaceMaterial = 'solid' | 'glass' | 'transparent';\ntype SurfaceInteraction = 'static' | 'lift' | 'scale';\n\ninterface SurfaceIntent {\n    // Z-axis position relative to parent (0-5)\n    elevation: number;\n    \n    // Physical texture of the surface\n    texture: SurfaceMaterial;\n    \n    // Visual variation (Default vs High Contrast)\n    variant: 'default' | 'alt';\n    \n    // Interaction physics\n    interaction: SurfaceInteraction;\n}</code></pre>"
+  "description": "<h3>Elevation Semantics (Z-Axis)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>0</code>: Base. Application background.</li><li><code>1-2</code>: Grouping content. (Cards, Lists).</li><li><code>3-5</code>: Floating content. (Sticky Headers, Modals, Tooltips).</li></ul><h3>Material Texture</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>solid</code>: Opaque. Standard for Material Design 3 (Surface Tones).</li><li><code>glass</code>: Blurred background. Standard for macOS/iOS (Vibrancy) and Windows (Mica/Acrylic).</li><li><code>transparent</code>: Layout-only containment.</li></ul><h3>Corner Radius (Semantic, not pixels)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>sharp</code>: Square corners. Structural / data-dense surfaces (tables, panes) where precision reads over friendliness.</li><li><code>soft</code>: Gently rounded. The default approachable container (cards, dialogs).</li><li><code>pill</code>: Fully rounded. Self-contained tokens — chips, tags, avatars, badges.</li></ul><p class=\"text-xs text-gray-500\">Per #1884: only radii that carry a distinct surface story are dimensioned; arbitrary pixel radii remain raw theme tokens.</p><h3>Edge Delineation</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>none</code>: No drawn border; the surface reads from elevation/texture alone.</li><li><code>hairline</code>: Subtle 1px boundary. Quiet containment without visual weight.</li><li><code>emphasis</code>: Strong, structural separation. Deliberate boundary (data regions, callouts).</li></ul><p class=\"text-xs text-gray-500\">Per #1884: stroke presence/weight earns a dimension (containment strength); specific widths/colors stay raw theme tokens.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SurfaceMaterial = 'solid' | 'glass' | 'transparent';\ntype SurfaceInteraction = 'static' | 'lift' | 'scale';\ntype SurfaceRadius = 'sharp' | 'soft' | 'pill';\ntype SurfaceBorder = 'none' | 'hairline' | 'emphasis';\n\ninterface SurfaceIntent {\n    // Z-axis position relative to parent (0-5)\n    elevation: number;\n    \n    // Physical texture of the surface\n    texture: SurfaceMaterial;\n    \n    // Visual variation (Default vs High Contrast)\n    variant: 'default' | 'alt';\n    \n    // Interaction physics\n    interaction: SurfaceInteraction;\n    \n    // Corner-radius character (semantic, not raw px)\n    radius: SurfaceRadius;\n    \n    // Edge delineation strength\n    border: SurfaceBorder;\n}</code></pre>"
 }
