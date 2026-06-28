@@ -102,6 +102,11 @@ const budgetPoints = Number.isFinite(a.budgetPoints) ? a.budgetPoints : Infinity
 // lane/* namespace the #1934 carve-out allows (push + delete). One per batch (slug-scoped). WE-only: the
 // pre-claim (backlog + claims.json) lives only in WE, so only WE's origin gets a _base ref.
 const baseRef = `lane/_base-${batchSlug}`;
+// The CENTRAL lock authority (#1945/#1936 Fork-1a): the ONE local lock home all lanes share. The
+// orchestrator runs in the PRIMARY WE checkout, so this is `<primary>/.claude/locks`. Lanes are clones,
+// so they point `--root` at THIS absolute path (not their own clone's) — a single lock dir = a single
+// reservation authority across concurrent lanes. Local + never committed/pushed (sidesteps O_EXCL-on-NFS).
+const CENTRAL_LOCK_ROOT = `${process.cwd()}/.claude/locks`;
 
 // ── The constellation (#96) — cross-repo registry (slice 4) ────────────────────
 // `we` is implicit for every item (its backlog/<NNN>.md + claims.json live here) and is the primary checkout
@@ -114,6 +119,43 @@ const REPOS = {
   'plateau-app': { name: 'plateau-app', path: '~/workspace/plateau-app', gate: 'npm run build' },
 };
 const INTEGRATION_ORDER = ['frontierui', 'plateau-app', 'we']; // impl repos first, WE last (carries the resolve)
+
+// ── The MANDATORY write-time lock layer (#1945 — the #1935 Fork-2 / #1936 pessimistic tier) ─────
+// The optimistic git-merge floor (slice 3, #1942) only DETECTS a clean-but-wrong structured merge after
+// the fact (the post-hoc `multiLaneFiles` scan, Phase 4d). This adds the pessimistic tier #1935 Fork 2 +
+// #1936 ratified: BEFORE a lane edits a merge-risk file it RESERVES that path via an atomic O_EXCL/lock-dir
+// primitive under the central checkout (#1936 Fork 1a) with a heartbeat-TTL lease for stale-lock reclaim
+// (#1936 Fork 2a + a same-machine PID-liveness fast path); a second lane needing a held path WAITS or DEFERS.
+// CANONICAL, TESTED home of the lock logic (lease floor + PID fast-path + broker fencing): the pure module
+// `we:scripts/readiness/file-locks.mjs` (proved by `we:scripts/readiness/__tests__/file-locks.test.mjs`).
+// Mirrored here as a CONTRACT because a workflow script has no filesystem read at runtime (same pattern as
+// RETURN_HYGIENE). Lanes acquire/release via `node scripts/readiness/file-locks-cli.mjs` in their WE clone.
+//
+// RESERVED_MERGE_RISK = the residual ③ static denylist AFTER #1938 shrank the monolith set (adapters split
+// per-entry + the 3 pure-derived artifacts now regenerate-on-merge, so they LEFT the lock-set). These are
+// the genuinely-monolithic shared WE files no format change makes disjoint — a lane editing one MUST hold its
+// lock. Per-entry registry files (src/_data/<reg>/<id>.json, INCLUDING src/_data/adapters/<id>.json) are
+// disjoint by construction and are NEVER reserved. The DERIVED artifacts are regenerated once post-merge
+// (Phase 4c), never lane-edited, so they are not here either.
+const RESERVED_MERGE_RISK = [
+  'src/_data/traits.json', 'src/_data/capabilityMatrix.json', 'src/_data/docs.json',
+  'src/_data/webhandlers.json', 'src/_data/webportals.json',
+  'src/_data/benchmarkCorpus.json', 'src/_data/workbenchTools.json', 'src/_data/workbenchFeatures.json',
+  'vite.config.mts', 'tsconfig.json',
+  'AGENTS.md', // its hand-authored PROSE body is locked; the AUTO-GENERATED inventory sub-block is derived (regen-on-merge), not locked
+];
+// The merge-risk WE paths a given item intends to touch — its probed `touchesMonolith` ∩ the reserved set
+// (benchmark*/workbench* matched by prefix). These are the paths the item must RESERVE before editing.
+function reservedPathsFor(entry) {
+  const probe = entry && entry.probe;
+  const wants = (probe && Array.isArray(probe.touchesMonolith)) ? probe.touchesMonolith.map(String) : [];
+  const out = new Set();
+  for (const w of wants) {
+    const f = w.replace(/^we:/, '');
+    if (RESERVED_MERGE_RISK.includes(f) || /^src\/_data\/(benchmark|workbench)/.test(f)) out.add(f);
+  }
+  return [...out];
+}
 
 if (items.length === 0) {
   log('No packed items passed — nothing to execute.');
@@ -460,6 +502,8 @@ function laneItemPrompt(it, laneDirs) {
   const repos = affectedReposOf(it); // impl-first, WE last
   const weDir = laneDirs.we || '';
   const implRepos = repos.filter((r) => r !== 'we');
+  const reserved = reservedPathsFor(it); // merge-risk WE paths this item must LOCK before editing (#1945)
+  const lockOwner = `${batchSlug}-${it.num}`; // the lease owner identity for this lane
   const lines = [
     RETURN_HYGIENE,
     ``,
@@ -478,6 +522,19 @@ function laneItemPrompt(it, laneDirs) {
   lines.push(
     `   Ensure deps in each clone (the pool installed them; if node_modules is missing run \`npm ci\` there).`,
     ``,
+    ...(reserved.length ? [
+      `1b. RESERVE the merge-risk WE path(s) you will edit — the MANDATORY write-time lock (#1945 / #1936). This`,
+      `   item's probe flagged these monolithic shared paths: ${JSON.stringify(reserved)}. BEFORE editing any of`,
+      `   them, acquire its lease from the CENTRAL lock authority (one dir all lanes share — NOT your clone's):`,
+      `     \`node scripts/readiness/file-locks-cli.mjs reserve --owner=${lockOwner} --root=${CENTRAL_LOCK_ROOT} --pid=$$ ${reserved.join(' ')}\``,
+      `   (run it FROM your WE clone ${weDir}; the --root is the absolute CENTRAL path above, so all lanes contend`,
+      `   on the SAME lock). Exit 0 = you hold every path, proceed. Exit 3 = a LIVE lane holds one (the JSON's`,
+      `   \`blocked[]\` names it) → you may NOT edit it: STOP and report status:"carried" drop:"blocked-in-fact"`,
+      `   (a second lane needing a held path WAITS or DEFERS — #1936; do not steal it). A stale (lease-expired) or`,
+      `   provably-dead owner is reclaimed for you automatically. While you work, if your edits take long, refresh`,
+      `   the lease: \`… file-locks-cli.mjs heartbeat --owner=${lockOwner} --root=${CENTRAL_LOCK_ROOT} --pid=$$ ${reserved.join(' ')}\`.`,
+      ``,
+    ] : []),
     `2. WORK the item across its repos — full single-item arc MINUS the claim (already done). Edit ONLY this`,
     `   item's own files in each clone: its WE impl/code + its own we:backlog/${it.file} in the WE clone, and its`,
     `   own impl files in ${implRepos.length ? implRepos.join('/') : '(no other repos)'}.`,
@@ -504,9 +561,23 @@ function laneItemPrompt(it, laneDirs) {
     `  scripts/backlog.mjs resolve ${it.num} [--graduated-to=…]\`). Then COMMIT each repo's own files (git add`,
     `  <explicit paths>; NEVER -A; NEVER stage claims.json or derived). Commit message per repo: \`backlog:`,
     `  resolve #${it.num} — <slug>\`.`,
+    ...(reserved.length ? [
+      `• 3b. FENCE before pushing (#1936 insurance invariant — the broker fencing point). If you reserved any`,
+      `  merge-risk path, FIRST confirm your lease was not reclaimed mid-flight (the Kleppmann race: you paused`,
+      `  past the lease, another lane reclaimed + edited the path, you'd now silently clobber it):`,
+      `    \`node scripts/readiness/file-locks-cli.mjs fence --owner=${lockOwner} --root=${CENTRAL_LOCK_ROOT} ${reserved.join(' ')}\``,
+      `  Exit 0 = you still hold every path → push. Exit 3 = a lease was reclaimed (the JSON's \`reclaimed[]\` names`,
+      `  it) → DO NOT PUSH: set status:"carried" drop:"blocked-in-fact" and push NOTHING (re-attempt next run).`,
+    ] : []),
     `• 4. PUSH each repo's commit to its lane ref (the ONLY pushes you make) — SAME ref name "${ref}" in each`,
     `  repo's own origin: \`git push --force origin HEAD:${ref}\` from each clone (--force replaces a stale ref;`,
     `  lane/* is allowed by #1934).`,
+    ...(reserved.length ? [
+      `• 5. RELEASE your locks after pushing (or on any early stop) so a queued lane can proceed:`,
+      `  \`node scripts/readiness/file-locks-cli.mjs release --owner=${lockOwner} --root=${CENTRAL_LOCK_ROOT} ${reserved.join(' ')}\`.`,
+      `  (Release only frees locks YOU own; a reclaimed-away path is skipped. Stale leases also self-reclaim, so a`,
+      `  crash that skips this never wedges the fleet — the next contender reclaims after the lease.)`,
+    ] : []),
     ``,
     `Report: num, status, cost, pushedRefs (an array of {repo, ref:"${ref}"} — one entry PER repo you pushed),`,
     `resolveCommit (the full SHA — \`git rev-parse HEAD\` in the WE clone after your resolve commit), changedFiles`,
