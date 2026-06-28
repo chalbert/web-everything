@@ -246,7 +246,22 @@ time with the **full** gate per merge (#1937: the central gate is the authority)
 conflict** (never force; a real semantic conflict that survives the rebase is replayed serially — the JS
 loop's single thread is the merge mutex), **deletes the remote ref after a clean land**, then regenerates
 **derived artifacts once** (the #1935 Fork-2 regen-on-merge set). It returns `{ ledger, concurrentItems,
-serialItems, multiLaneFiles, conflictsReplayed, stranded, baseRef, … }`.
+serialItems, crossRepoItems, multiLaneFiles, partialCrossRepo, reposProvisioned, conflictsReplayed,
+stranded, baseRef, … }`.
+
+**Cross-repo lanes — the constellation (slice 4, #1943).** A single item's impl often spans the constellation
+(#96: WE → frontierui → plateau-app). The backlog item + `claims.json` **always live in WE** (so WE is
+implicit for every item); the probe additionally reports any **non-WE repos** it touches (`extraRepos`). The
+orchestrator then **repo-qualifies every predicted file** (`"<repo>:<path>"`) so partition disjointness holds
+*across* repos (an `index.ts` in WE and one in frontierui no longer collide spuriously), **provisions a lane
+pool per affected repo** (`lane-pool.mjs` is repo-parameterized — slice 2), dispatches each concurrent item
+across its **coupled clones** (one per repo it touches), and pushes `lane/<slug>-<n>` to **each repo's own
+origin**. **Cross-repo atomicity** is handled by *ordering*, not a distributed transaction: the integrator
+merges **impl repos first, WE last** — WE carries the `active→resolved` flip, so it lands only after every impl
+repo lands clean. A failed impl merge therefore **never leaves a false `resolved`** (worst case is
+impl-landed-but-item-still-`active`, a recoverable partial recorded in `r.partialCrossRepo`); a WE-only item
+that fails still serial-replays on main (the slice-3 floor). The integrator runs each repo's **own** gate
+(`check:standards` for WE/frontierui, `build` for plateau-app) per merge.
 
 **The integrator lands directly on the primary checkout's main — the main agent does NOT do a landing
 merge.** This is the deliberate, decision-mandated safety-model shift from the worktree model: instead of
@@ -256,13 +271,15 @@ failure loses nothing (refs persist; each is deleted only *after* its merge land
 (the primary checkout = the tree the human watches, #1936) does the N merges itself. So after a green return
 the main agent has **no git landing op** — it just folds `r.ledger` into the standard closure block and
 **surfaces `r.multiLaneFiles`** (files touched by >1 item — the residual silent clean-but-wrong-merge risk,
-the #1935 Option-D optimistic floor's post-hoc detector) + `r.stranded` (resolves that didn't land, #1869)
-for a human glance; the close-skill audit re-checks them. If `r` reports `aborted` or a red final gate,
+the #1935 Option-D optimistic floor's post-hoc detector) + `r.stranded` (resolves that didn't land, #1869) +
+`r.partialCrossRepo` (cross-repo items whose impl landed in some repos but whose WE resolve did not — re-attempt
+next run) for a human glance; the close-skill audit re-checks them. If `r` reports `aborted` or a red final gate,
 **don't trust the run** — surface it and fall back to a serial `/batch`.
 
-> **Pre-lock layer is a follow-up, not in this orchestrator.** Slice 3 ships the **optimistic git-merge
-> floor** (#1935 Option D) with post-hoc `multiLaneFiles` detection. The mandatory pre-lock reservation layer
-> (#1935 Fork 2 / the #1936 lock primitive / the #1938 `adapters.json` split) lands as a later slice.
+> **Pre-lock layer is a follow-up, not in this orchestrator.** Slices 3–4 ship the **optimistic git-merge
+> floor** (#1935 Option D) with post-hoc `multiLaneFiles` detection, now constellation-wide (cross-repo, #1943).
+> The mandatory pre-lock reservation layer (#1935 Fork 2 / the #1936 lock primitive / the #1938 `adapters.json`
+> split) lands as a later slice (#1945).
 
 **What the registry split (#1145/#1146) changed:** shared registries are now per-entry files
 (`src/_data/<reg>/<id>.json`), so a lane that adds/edits a registry entry just writes its OWN file — disjoint,

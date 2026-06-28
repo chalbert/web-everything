@@ -1,17 +1,18 @@
 export const meta = {
   name: 'batch-parallel-execute',
-  description: 'Execute a /workflow (parallel) batch on the #1933 CLONE model: probe → partition into provably-independent items + a serial lane → central pre-claim (push a lane/_base ref) → work each independent item as its OWN agent in a persistent LANE CLONE (own HEAD, guard-immune), push HEAD:lane/<n> → central integrator (primary checkout) merges each lane into main one-at-a-time with a full gate per merge, rebase-and-retry on conflict, deletes the remote temp ref, regenerates derived artifacts once. Per-item progress. Returns a ledger.',
+  description: 'Execute a /workflow (parallel) batch on the #1933 CLONE model, CROSS-REPO (slice 4): probe each item for its real touch-set ACROSS the constellation (WE → frontierui → plateau-app) → partition into provably-independent items (repo-qualified disjointness) + a serial lane → central pre-claim in WE (push a lane/_base ref) → work each independent item as its OWN agent across COUPLED lane clones (one clone per affected repo, own HEAD, guard-immune), push HEAD:lane/<n> in EACH repo → central integrator merges each repo into its main IMPL-REPOS-FIRST, WE LAST (WE carries the resolve, so a failed impl never leaves a false "resolved"), full gate per merge, rebase-and-retry on conflict, deletes the remote refs, regenerates derived artifacts once. Per-item progress. Returns a ledger.',
   whenToUse: 'Invoked by the batch-backlog-items skill ONLY for /workflow (or --parallel), after the main loop has done the conversational pack/plan/one-"go". Not for the default serial /batch.',
   phases: [
-    { title: 'Probe', detail: 'predict each item\'s real touch-set (frontmatter files are a lower bound)' },
-    { title: 'Claim', detail: 'central pre-claim ALL items + provision the lane pool + push the lane/_base ref' },
-    { title: 'Lanes', detail: 'one agent per provably-independent item, each in its own persistent clone, concurrent → push lane/<n>' },
-    { title: 'Integrate', detail: 'serial lane on main, then merge each lane ref one-at-a-time (full gate per merge, rebase-retry on conflict), delete refs, regen derived once' },
+    { title: 'Probe', detail: 'predict each item\'s real touch-set across the constellation (frontmatter files are a lower bound)' },
+    { title: 'Claim', detail: 'central pre-claim ALL items in WE + provision a lane pool PER affected repo + push the lane/_base ref' },
+    { title: 'Lanes', detail: 'one agent per provably-independent item, working its COUPLED clones (one per repo), concurrent → push lane/<n> in each repo' },
+    { title: 'Integrate', detail: 'serial lane on main, then merge each item\'s repos impl-first/WE-last (full gate per merge, rebase-retry on conflict), delete refs, regen derived once' },
   ],
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// /workflow (parallel) execute phase — the #1933 CLONE-based orchestrator (epic #1933, slice 3 = #1942).
+// /workflow (parallel) execute phase — the #1933 CLONE-based orchestrator, CROSS-REPO (epic #1933,
+// slice 3 = #1942 WE-only floor; slice 4 = #1943 lifts it to the constellation).
 //
 // WHY CLONES, NOT WORKTREES (the #1153 4th-run finding): the previous orchestrator isolated lanes with
 // `git worktree add` + assembled on a throwaway `batch-parallel/*` branch. The user-global git-branch guard
@@ -22,53 +23,73 @@ export const meta = {
 // guard carve-out) and the central integrator merges those into main. Push auth is prompt-free (ssh-agent +
 // macOS Keychain).
 //
+// CROSS-REPO (slice 4 = #1943). The constellation (#96) is WE → frontierui → plateau-app: a single item's
+// impl often spans repos (e.g. a standard authored in WE, implemented in frontierui, surfaced in plateau-app).
+// The backlog item itself + claims.json ALWAYS live in WE, so WE is implicit for every item; the probe also
+// reports any NON-WE repos it touches (extraRepos). The orchestrator then:
+//   • Repo-qualifies every predicted file ("<repo>:<path>") so partition disjointness holds ACROSS repos —
+//     `index.ts` in WE and `index.ts` in frontierui no longer collide spuriously.
+//   • Provisions a lane pool PER affected repo (scripts/lane-pool.mjs is repo-parameterized — slice 2 #1940),
+//     and dispatches each concurrent item across its COUPLED clones (one clone per repo it touches).
+//   • Pushes the item's work to a `lane/<slug>-<n>` ref in EACH repo's own origin (per-repo, so the same ref
+//     name never collides), then integrates each repo into its OWN main.
+//
+// CROSS-REPO ATOMICITY — the ordering / rollback story (the slice-4 hard part). One logical change spanning
+// two repos is TWO independent merges; there is no distributed transaction. We bound the damage by ORDERING:
+//   IMPL REPOS FIRST, WE LAST. WE carries the item's `active→resolved` flip (the commit point), so it lands
+//   only AFTER every impl repo has landed clean. Consequences:
+//     • If an impl-repo merge fails, WE is NOT merged → the resolve never lands → the item stays `active`
+//       (the #1869 reconcile, keyed off WE's backlog status, correctly does NOT count it resolved). Worst
+//       case is impl-landed-but-item-still-active — a recoverable partial, never a false "resolved".
+//     • All lane work for every repo is durable on its origin (`lane/*` refs) BEFORE any merge; a per-repo
+//       ref is deleted only AFTER that repo's merge lands. A mid-integration failure loses nothing.
+//     • A failed cross-repo item is reported in `partialCrossRepo` (which repos landed, where it stopped) and
+//       left `carried`; the human / next run re-attempts. (A WE-only item that fails still serial-replays on
+//       main, the slice-3 floor — only true cross-repo items skip auto-replay, since replaying coupled work
+//       across primary checkouts is out of this v1's scope.)
+//
 // THE DESIGN CONTRACT (mirrors SKILL.md "Parallel lanes" + the ratified decisions #1935/#1936/#1937):
 //   1. Serial is the safe baseline. Anything not PROVABLY independent runs in the serial lane (on main).
-//   2. Partition only on provable independence: an item runs concurrently ONLY if its predicted touch-set is
-//      disjoint from EVERY other item's AND it is on no blockedBy edge with another item. Else → serial.
-//   3. Central pre-claim (#1933 choice 2). The orchestrator claims ALL items up front in the PRIMARY checkout
-//      (`backlog.mjs claim` → status:active + the central claims.json), commits, and pushes the post-claim
-//      state to a throwaway `lane/_base-<slug>` ref. Lanes `reset --hard` to that base, so each item is
-//      already `active` in its clone — lanes NEVER run claim and NEVER stage claims.json (the per-lane
-//      claim+push race choice 2 rejects can't happen). Because the merge-base is `lane/_base`, an item's
-//      `active→resolved` flip is a one-sided change → every lane→main merge is conflict-free on that file.
-//   4. Git is the conflict detector: merge each lane into main ONE AT A TIME; a conflict ⇒ rebase the lane
-//      onto current main and retry (#1933) — NEVER force; if a real semantic conflict survives the rebase,
-//      replay that item serially on main. A FULL gate runs per merge (#1937: the central gate is the
-//      authority). The remote `lane/*` ref is deleted only AFTER its merge lands (so nothing is lost on a
-//      mid-integration failure — all lane work stays durable on origin until then).
-//   5. No silent speculation: every partition decision + every rebase/replay is logged (per item).
+//   2. Partition only on provable independence: an item runs concurrently ONLY if its repo-qualified
+//      touch-set is disjoint from EVERY other item's AND it is on no blockedBy edge with another item.
+//   3. Central pre-claim in WE (#1933 choice 2). The orchestrator claims ALL items up front in the PRIMARY WE
+//      checkout (`backlog.mjs claim` → status:active + the central claims.json), commits, and pushes the
+//      post-claim state to a throwaway `lane/_base-<slug>` ref in WE's origin. Each item's WE lane clone
+//      `reset --hard`s to that base (already `active`); the impl-repo clones reset to their own origin/main
+//      (no backlog there). Because the WE merge-base is `lane/_base`, the `active→resolved` flip is a
+//      one-sided change → the WE lane→main merge is conflict-free on that file.
+//   4. Git is the conflict detector: merge each repo ONE AT A TIME; a conflict ⇒ rebase the lane onto current
+//      main and retry (#1933) — NEVER force; if a real semantic conflict survives, that repo's merge fails
+//      (→ partial / replay). A FULL gate runs per merge in THAT repo (#1937). The remote `lane/*` ref is
+//      deleted only AFTER its merge lands.
+//   5. No silent speculation: every partition decision + every rebase/replay/partial is logged (per item).
 //
 // SAFETY-MODEL SHIFT vs the worktree model (deliberate, decision-mandated): the worktree model's "workflow
 // NEVER writes the live branch; the main agent lands" is replaced by "all lane work is durable on origin
-// before any merge, so the central integrator lands directly on the primary checkout's main." The abort-point
-// safety is preserved differently — the source of truth is the remote `lane/*` refs, not a local throwaway
-// branch. The MAIN AGENT therefore does NOT do a landing merge after this returns; it reports the ledger and
-// surfaces multiLaneFiles/stranded.
+// before any merge, so the central integrator lands directly on each repo's main." The MAIN AGENT therefore
+// does NOT do a landing merge after this returns; it reports the ledger and surfaces multiLaneFiles / stranded
+// / partialCrossRepo.
 //
 // REGISTRY SPLIT (#1145/#1146/#1157): every hand-authored COLLECTION registry is per-entry files
 // (src/_data/<reg>/<id>.json) — an item adding/editing a registry entry writes its OWN file (disjoint, merges
 // clean, NO integrator-applied manifest). The effects-manifest is NARROW: only the residual shared mutations
 // an item must NOT commit itself — DERIVED artifacts regenerated once (AGENTS.md inventory block,
-// src/_data/referenceIndex.json, src/_data/capabilityWorkedExample.json — the #1935 Fork-2 "regenerate-on-
-// merge" set) and the handful of genuinely-monolithic single-doc registries (src/_data/{traits,docs,
-// capabilityMatrix}.json, adapters.json, webhandlers/webportals.json, the sweep artifacts workbench*/
-// benchmark*.json), which force the touching item into the serial lane.
-//
-// OUT OF SCOPE for slice 3 (follow-up slices): the pre-lock reservation layer (#1935 Fork 2 / #1936 lock
-// primitive / #1938 adapters.json split). This slice ships the OPTIMISTIC git-merge FLOOR (Option D) with
-// post-hoc multiLaneFiles detection, per #1942's body and #1935's ratified "D-is-the-floor" ruling.
+// src/_data/referenceIndex.json, src/_data/capabilityWorkedExample.json) and the handful of genuinely-
+// monolithic single-doc registries, which force the touching item into the serial lane.
 //
 // This script runs in the Workflow JS sandbox: no fs, no child_process, no Date/Math.random. ALL side effects
 // (git, lane-pool.mjs, backlog.mjs, npm gates) happen INSIDE agents via Bash; the script only does control flow.
 //
 // args (passed by the main loop after the conversational pack/plan/"go"):
 //   { batchSlug, budgetPoints, items: [ { num, slug, file, locus, cost, declaredFiles: [..], blockedBy: [..] } … ] }
-// Returns: { ledger, concurrentItems, serialItems, conflictsReplayed, stranded, multiLaneFiles,
-//            derivedRegenerated, pointsSpent, budgetPoints, baseRef }
-//   The result is already landed on the primary checkout's main — there is NO integrationBranch to land.
-//   stranded (#1869 defect 2): items an agent reported `resolved` whose resolve commit was NOT verified
-//   reachable from HEAD (a post-assembly git reconcile) — reclassified, never counted resolved.
+// Returns: { ledger, concurrentItems, serialItems, crossRepoItems, conflictsReplayed, stranded,
+//            multiLaneFiles, partialCrossRepo, reposProvisioned, derivedRegenerated, pointsSpent,
+//            budgetPoints, baseRef }
+//   The result is already landed on each repo's main — there is NO integration branch for the main agent.
+//   stranded (#1869 defect 2): items an agent reported `resolved` whose WE resolve was NOT verified reachable
+//   from HEAD (a post-assembly git reconcile) — reclassified, never counted resolved.
+//   partialCrossRepo (slice 4): cross-repo items whose impl landed in some repos but whose WE resolve did NOT
+//   land (so the item is `active`, not `resolved`) — surfaced for a human / next-run re-attempt.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // `args` may arrive as a parsed object OR as a JSON string (the Workflow runtime serializes it in some
@@ -77,13 +98,26 @@ const a = (typeof args === 'string' ? (() => { try { return JSON.parse(args); } 
 const items = Array.isArray(a.items) ? a.items : [];
 const batchSlug = a.batchSlug || 'batch-parallel';
 const budgetPoints = Number.isFinite(a.budgetPoints) ? a.budgetPoints : Infinity;
-// The throwaway base ref carrying the central post-claim state lanes reset to. Slashes keep it under the
-// lane/* namespace the #1934 carve-out allows (push + delete). One per batch (slug-scoped).
+// The throwaway base ref carrying the central post-claim state WE lanes reset to. Slashes keep it under the
+// lane/* namespace the #1934 carve-out allows (push + delete). One per batch (slug-scoped). WE-only: the
+// pre-claim (backlog + claims.json) lives only in WE, so only WE's origin gets a _base ref.
 const baseRef = `lane/_base-${batchSlug}`;
+
+// ── The constellation (#96) — cross-repo registry (slice 4) ────────────────────
+// `we` is implicit for every item (its backlog/<NNN>.md + claims.json live here) and is the primary checkout
+// the workflow's agents run in. The non-WE repos are coupled clones an item works when its impl spans them.
+// `path` is shell-expandable (agents `cd` into it); `gate` is that repo's own local gate. INTEGRATION_ORDER
+// puts WE LAST so its resolve commit is the last write — the cross-repo atomicity guarantee (see header).
+const REPOS = {
+  we: { name: 'webeverything', path: null /* primary checkout = the agents' cwd */, gate: 'npm run check:standards', primary: true },
+  frontierui: { name: 'frontierui', path: '~/workspace/frontierui', gate: 'npm run check:standards' },
+  'plateau-app': { name: 'plateau-app', path: '~/workspace/plateau-app', gate: 'npm run build' },
+};
+const INTEGRATION_ORDER = ['frontierui', 'plateau-app', 'we']; // impl repos first, WE last (carries the resolve)
 
 if (items.length === 0) {
   log('No packed items passed — nothing to execute.');
-  return { ledger: [], concurrentItems: 0, serialItems: 0, conflictsReplayed: 0, derivedRegenerated: false, baseRef };
+  return { ledger: [], concurrentItems: 0, serialItems: 0, crossRepoItems: 0, conflictsReplayed: 0, partialCrossRepo: [], derivedRegenerated: false, baseRef };
 }
 
 // ── Subagent return-hygiene contract (#1861, model-usage watch #1855) ──────────
@@ -104,6 +138,7 @@ const RETURN_HYGIENE = [
 
 // A per-item effect probe: the REAL touch-set predicted from the body, not just the frontmatter (a lower
 // bound — work spills past the declared files). `confident` gates a guess down to "must serialize".
+// `extraRepos` (slice 4) reports the NON-WE constellation repos the item's impl spans.
 const PROBE_SCHEMA = {
   type: 'object',
   required: ['num', 'predictedFiles', 'confident'],
@@ -112,19 +147,30 @@ const PROBE_SCHEMA = {
     num: { type: 'string', description: 'the backlog NNN this probe is for' },
     predictedFiles: {
       type: 'array', items: { type: 'string' },
-      description: 'every repo-relative file this item will plausibly create or edit — code, its own backlog/NNN.md, and any per-entry registry file (src/_data/<reg>/<id>.json). Err WIDE: a missed file corrupts a merge.',
+      description: 'every WE-repo-relative file this item will create or edit in webeverything — code, its own backlog/NNN.md, and any per-entry registry file (src/_data/<reg>/<id>.json). Files in OTHER constellation repos go in extraRepos, NOT here. Err WIDE: a missed file corrupts a merge.',
+    },
+    extraRepos: {
+      type: 'array',
+      items: {
+        type: 'object', required: ['repo', 'files'], additionalProperties: false,
+        properties: {
+          repo: { type: 'string', enum: ['frontierui', 'plateau-app'], description: 'a NON-WE constellation repo this item touches' },
+          files: { type: 'array', items: { type: 'string' }, description: 'every repo-relative file this item will create or edit in THAT repo' },
+        },
+      },
+      description: 'CROSS-REPO (slice 4): constellation repos OTHER than WE this item\'s impl spans (#96 — frontierui, plateau-app). The backlog item + claims.json always live in WE, so WE is implicit; list here only the non-WE repos + their repo-relative files. Empty/omit for a WE-only item (the common case).',
     },
     touchesMonolith: {
       type: 'array', items: { type: 'string' },
-      description: 'genuinely-monolithic shared files it must edit (the single-doc registries src/_data/{traits,docs,capabilityMatrix}.json, adapters.json, webhandlers/webportals.json, sweep artifacts workbench*/benchmark*.json) — these force the serial lane, list them explicitly. Per-entry registry files (src/_data/<reg>/<id>.json) are NOT monolithic — never list them.',
+      description: 'genuinely-monolithic shared files it must edit (the single-doc registries src/_data/{traits,docs,capabilityMatrix}.json, webhandlers/webportals.json, the curated-sweep artifacts workbench*/benchmark*.json, and the hand-authored PROSE body of AGENTS.md — its AUTO-GENERATED inventory block is a derived artifact, see derivedArtifacts) — these force the serial lane, list them explicitly. Per-entry registry files (src/_data/<reg>/<id>.json, INCLUDING src/_data/adapters/<id>.json since #1938) are NOT monolithic — never list them.',
     },
-    confident: { type: 'boolean', description: 'TRUE when every predicted file is one this item OWNS (its own impl/code, its own demo page, its own backlog/NNN.md, its own per-entry registry entries, its own test file). FALSE *only* when work plausibly spills into a SHARED surface another item could also touch: a still-monolithic registry, shared runtime (plugs/bootstrap.ts), a shared *.njk include, shared test specs, build config (tsconfig/vite/package.json), or a broad cross-file refactor. Routine uncertainty about the exact file COUNT is NOT a reason for false; only genuine shared-surface risk is. Per-entry registry writes do NOT lower confidence. False forces the serial lane.' },
+    confident: { type: 'boolean', description: 'TRUE when every predicted file (in WE AND every extraRepo) is one this item OWNS (its own impl/code, its own demo page, its own backlog/NNN.md, its own per-entry registry entries, its own test file). FALSE *only* when work plausibly spills into a SHARED surface another item could also touch: a still-monolithic registry, shared runtime (plugs/bootstrap.ts), a shared *.njk include, shared test specs, build config (tsconfig/vite/package.json), or a broad cross-file refactor — in ANY affected repo. Routine uncertainty about the exact file COUNT is NOT a reason for false; only genuine shared-surface risk is. Per-entry registry writes do NOT lower confidence. False forces the serial lane.' },
   },
 };
 
 // What each ITEM agent returns. NARROW effects manifest (see header): items never commit derived artifacts or
 // splice monolithic registries; they report what the integrator must do. CLONE model: a concurrent item
-// reports the `lane/*` ref it PUSHED (pushedRef); a serial item works in-place on main (no ref).
+// reports the `lane/*` ref it PUSHED in EACH affected repo (pushedRefs); a serial item works in-place (no ref).
 const ITEM_RESULT_SCHEMA = {
   type: 'object',
   required: ['num', 'status', 'gate'],
@@ -134,15 +180,23 @@ const ITEM_RESULT_SCHEMA = {
     status: { type: 'string', enum: ['resolved', 'carried', 'dropped'] },
     cost: { type: 'number' },
     drop: { type: 'string', description: 'drop-reason if not resolved (taken/blocked-in-fact/not-batchable/outgrew)' },
-    pushedRef: { type: 'string', description: 'the lane/<NNN>-<n> ref this concurrent item PUSHED to origin, for the integrator to fetch + merge (concurrent lane items only; omit for serial-lane items already committed on main).' },
-    resolveCommit: { type: 'string', description: 'the full SHA of the commit that resolved this item (git rev-parse HEAD right after the resolve commit). The integrator asserts this commit is reachable from HEAD before trusting status:"resolved" — an un-merged resolve is reclassified "stranded", never silently reported resolved (#1869 defect 2).' },
+    pushedRef: { type: 'string', description: 'DEPRECATED single-repo field — the WE lane/<NNN>-<n> ref. Prefer pushedRefs (cross-repo). Kept for back-compat: if set and pushedRefs is empty, the integrator treats it as the WE ref.' },
+    pushedRefs: {
+      type: 'array',
+      items: {
+        type: 'object', required: ['repo', 'ref'], additionalProperties: false,
+        properties: { repo: { type: 'string', description: 'we | frontierui | plateau-app' }, ref: { type: 'string', description: 'the lane/<NNN>-<n> ref pushed to THAT repo\'s origin' } },
+      },
+      description: 'cross-repo: every {repo, lane ref} this concurrent item pushed — one per affected repo (we + any frontierui/plateau-app). The integrator merges these impl-first/WE-last. For a WE-only item this is just [{repo:"we", ref:"…"}]. Omit for serial-lane items (already on main).',
+    },
+    resolveCommit: { type: 'string', description: 'the full SHA of the WE commit that resolved this item (git rev-parse HEAD in the WE clone right after the resolve commit). The integrator asserts this commit is reachable from WE HEAD before trusting status:"resolved" — an un-merged resolve is reclassified "stranded" (#1869 defect 2).' },
     changedFiles: {
       type: 'array', items: { type: 'string' },
-      description: 'EVERY repo-relative file this item actually changed (git diff --name-only vs base). Used to surface files touched by more than one item — the residual silent-merge risk a human should eyeball.',
+      description: 'EVERY file this item actually changed, REPO-QUALIFIED as "<repo>:<repo-relative-path>" (e.g. "we:backlog/1943.md", "frontierui:src/foo.ts"). Used to surface files touched by more than one item across the constellation — the residual silent-merge risk a human should eyeball.',
     },
     derivedArtifacts: {
       type: 'array', items: { type: 'string' },
-      description: 'derived files this item WOULD have regenerated but deliberately did NOT (AGENTS.md, src/_data/referenceIndex.json, src/_data/capabilityWorkedExample.json) — the integrator regenerates once.',
+      description: 'WE derived files this item WOULD have regenerated but deliberately did NOT (the AGENTS.md inventory block — NOT its hand-authored prose body, which is a monolith edit; src/_data/referenceIndex.json; src/_data/capabilityWorkedExample.json) — the integrator regenerates once.',
     },
     monolithEdits: {
       type: 'array',
@@ -152,7 +206,7 @@ const ITEM_RESULT_SCHEMA = {
       },
       description: 'edits to still-monolithic shared registries the item is NOT committing — the integrator applies them serially.',
     },
-    gate: { type: 'string', enum: ['green', 'red'], description: 'result of this item\'s gate (per-item LOCAL fast-fail gate for lane items, whole-repo check:standards for serial-lane items).' },
+    gate: { type: 'string', enum: ['green', 'red'], description: 'AGGREGATE gate across ALL the item\'s affected repos: green only if EVERY repo\'s local gate passed. A red in any repo → green:"red" and do NOT push.' },
     notes: { type: 'string' },
   },
 };
@@ -163,22 +217,41 @@ const INTEGRATE_SCHEMA = {
   additionalProperties: true,
   properties: {
     num: { type: 'string' },
-    merged: { type: 'boolean', description: 'true if the lane ref merged (clean, or clean after a rebase-retry) into main.' },
+    repo: { type: 'string', description: 'which constellation repo this per-repo merge was for' },
+    merged: { type: 'boolean', description: 'true if the lane ref merged (clean, or clean after a rebase-retry) into that repo\'s main.' },
     rebased: { type: 'boolean', description: 'true if the first merge conflicted and the lane was rebased onto main before a successful retry.' },
-    conflicted: { type: 'boolean', description: 'true if a real semantic conflict SURVIVED the rebase-retry (partition was wrong → replay serially). NOT set for a conflict the rebase resolved.' },
-    gate: { type: 'string', enum: ['green', 'red'], description: 'full check:standards on the merged tree.' },
+    conflicted: { type: 'boolean', description: 'true if a real semantic conflict SURVIVED the rebase-retry. NOT set for a conflict the rebase resolved.' },
+    gate: { type: 'string', enum: ['green', 'red'], description: 'full gate on the merged tree in THAT repo.' },
     refDeleted: { type: 'boolean', description: 'true if the remote lane/* ref was deleted after a clean land.' },
     notes: { type: 'string' },
   },
 };
 
 // ── Helpers (pure — exercised by the verification harness) ─────────────────────
+// Files are REPO-QUALIFIED ("<repo>:<path>") so disjointness holds across the constellation: the same path in
+// two different repos never collides, and a genuine same-repo overlap still does. For a WE-only item this
+// degenerates to the slice-3 behaviour with a uniform "we:" prefix.
 function filesOf(entry) {
   const p = entry.probe;
-  const base = new Set([`backlog/${entry.file}`]);
-  if (p && Array.isArray(p.predictedFiles)) for (const f of p.predictedFiles) base.add(f);
-  if (Array.isArray(entry.declaredFiles)) for (const f of entry.declaredFiles) base.add(f);
+  const base = new Set([`we:backlog/${entry.file}`]);
+  if (p && Array.isArray(p.predictedFiles)) for (const f of p.predictedFiles) base.add(`we:${f}`);
+  if (Array.isArray(entry.declaredFiles)) for (const f of entry.declaredFiles) base.add(`we:${f}`);
+  if (p && Array.isArray(p.extraRepos)) {
+    for (const er of p.extraRepos) {
+      if (er && REPOS[er.repo] && Array.isArray(er.files)) for (const f of er.files) base.add(`${er.repo}:${f}`);
+    }
+  }
   return base;
+}
+// Repos an item touches, ordered impl-first / WE-last. WE is always present (the backlog item lives there).
+function affectedReposOf(entry) {
+  const repos = new Set(['we']);
+  const p = entry.probe;
+  if (p && Array.isArray(p.extraRepos)) for (const er of p.extraRepos) if (er && REPOS[er.repo]) repos.add(er.repo);
+  return INTEGRATION_ORDER.filter((r) => repos.has(r));
+}
+function isCrossRepo(entry) {
+  return affectedReposOf(entry).some((r) => r !== 'we');
 }
 function disjoint(setA, setB) {
   for (const f of setA) if (setB.has(f)) return false;
@@ -197,14 +270,30 @@ function conflicts(x, y) {
   return !disjoint(filesOf(x), filesOf(y)) || blockEdge(x, y);
 }
 // The lane/* ref an item pushes — namespaced under lane/ (the #1934 carve-out) and scoped by slug + num so
-// concurrent batches never collide on a ref name.
+// concurrent batches never collide on a ref name. The SAME name is used in each affected repo's own origin
+// (different remotes ⇒ no collision); the integrator fetches it per-repo.
 function laneRefFor(num) {
   return `lane/${batchSlug}-${num}`;
+}
+// Per-repo lane assignment: for each repo, the concurrent items touching it form an ordered list, and an
+// item's lane index in that repo = its position in that list. So we provision exactly as many lanes per repo
+// as items touch it (no over-provisioning), and item↔lane mapping is deterministic without threading state.
+function repoLanePlan(concurrentItems) {
+  const plan = {}; // repo -> [item, …] in stable order
+  for (const it of concurrentItems) {
+    for (const repo of affectedReposOf(it)) {
+      (plan[repo] || (plan[repo] = [])).push(it);
+    }
+  }
+  return plan;
+}
+function laneIndexOf(plan, it, repo) {
+  return (plan[repo] || []).indexOf(it);
 }
 
 // ── Phase 1 — Probe each item's real touch-set (parallel), then partition (pure JS) ──────────────
 phase('Probe');
-log(`Probing ${items.length} packed item(s) for their real touch-sets…`);
+log(`Probing ${items.length} packed item(s) for their real touch-sets across the constellation…`);
 
 let probedCount = 0;
 const probes = await parallel(items.map((it) => () =>
@@ -213,38 +302,49 @@ const probes = await parallel(items.map((it) => () =>
       RETURN_HYGIENE,
       ``,
       `You are scoping backlog item #${it.num} ("${it.slug}") for a PARALLEL batch. Read we:backlog/${it.file}`,
-      `and any files it references. Predict EVERY repo-relative file this item will create or edit if worked now:`,
-      `its impl/code files, its own we:backlog/${it.num}.md, and any per-entry registry file it would add`,
-      `(src/_data/<registry>/<id>.json — every collection registry is one-file-per-entry since #1145/#1146/#1157).`,
-      `Frontmatter declares: ${JSON.stringify(it.declaredFiles || [])} — treat that as a LOWER BOUND only.`,
+      `and any files it references. Predict EVERY file this item will create or edit if worked now, ACROSS the`,
+      `constellation (#96): webeverything (WE), frontierui, and plateau-app.`,
+      ``,
+      `• WE files (predictedFiles, WE-repo-relative): its impl/code in WE, its own we:backlog/${it.num}.md, and`,
+      `  any per-entry registry file (src/_data/<registry>/<id>.json — every collection registry is one-file-`,
+      `  per-entry since #1145/#1146/#1157).`,
+      `• NON-WE files (extraRepos): if the item's impl SPANS frontierui or plateau-app (e.g. a standard authored`,
+      `  in WE but implemented in frontierui, or surfaced in plateau-app), list each such repo + its repo-`,
+      `  relative files. The backlog item + claims.json ALWAYS live in WE, so WE is implicit — extraRepos is for`,
+      `  the IMPL spill only. Most items are WE-only: leave extraRepos empty unless the body clearly reaches`,
+      `  into another repo.`,
+      ``,
+      `Frontmatter declares (WE): ${JSON.stringify(it.declaredFiles || [])} — treat that as a LOWER BOUND only.`,
       `Per-entry registry files (src/_data/<registry>/<id>.json) are DISJOINT by construction (#1145/#1146/#1157):`,
-      `writing your OWN new/edited entry never collides with another item, so do NOT list them in touchesMonolith`,
-      `and they do NOT lower your confidence. List in touchesMonolith ONLY the genuinely-monolithic shared files`,
-      `(the single-doc registries src/_data/{traits,docs,capabilityMatrix}.json, adapters.json, webhandlers/`,
-      `webportals.json, the sweep artifacts workbench*/benchmark*.json; plus plugs/bootstrap.ts, build config).`,
-      `Set confident=TRUE when every file you'll touch is one this item clearly OWNS — its own impl/code, its own`,
-      `demo page, its own we:backlog/${it.num}.md, its own per-entry registry entries, its own test file.`,
+      `writing your OWN new/edited entry never collides, so do NOT list them in touchesMonolith and they do NOT`,
+      `lower confidence (this INCLUDES src/_data/adapters/<id>.json — split per-adapter since #1938). List in`,
+      `touchesMonolith ONLY the genuinely-monolithic shared WE files (the single-doc registries`,
+      `src/_data/{traits,docs,capabilityMatrix}.json, webhandlers/webportals.json, the curated-sweep artifacts`,
+      `workbench*/benchmark*.json, the AGENTS.md hand-authored prose body; plus plugs/bootstrap.ts, build config).`,
+      `Set confident=TRUE when every file you'll touch — in EVERY affected repo — is one this item clearly OWNS.`,
       `Set confident=FALSE *only* when the work plausibly SPILLS into a shared surface another item could also`,
       `touch (a monolithic registry, plugs/bootstrap.ts, a shared *.njk include, a shared test spec, tsconfig/vite/`,
-      `package.json, or a broad cross-file refactor). Routine uncertainty about the exact file COUNT is NOT a reason`,
-      `for false — only genuine shared-surface risk is; default disjoint-looking work to TRUE. Return ONLY the structured object.`,
+      `package.json, or a broad cross-file refactor) in ANY repo. Routine uncertainty about the exact file COUNT`,
+      `is NOT a reason for false; default disjoint-looking work to TRUE. Return ONLY the structured object.`,
     ].join(' '),
     { label: `probe:${it.num}`, phase: 'Probe', schema: PROBE_SCHEMA, effort: 'low' },
   ).then((p) => {
     probedCount++;
     const fileN = p && Array.isArray(p.predictedFiles) ? p.predictedFiles.length : 0;
+    const xr = p && Array.isArray(p.extraRepos) ? p.extraRepos.filter((e) => e && REPOS[e.repo]).map((e) => e.repo) : [];
+    const xrTag = xr.length ? ` + ${xr.join('/')}` : '';
     const verdict = !p ? 'no result → serial' : p.confident === false ? 'low-confidence → serial' :
-      (p.touchesMonolith && p.touchesMonolith.length) ? 'touches monolith → serial' : `${fileN} file(s), candidate for concurrent`;
+      (p.touchesMonolith && p.touchesMonolith.length) ? 'touches monolith → serial' : `${fileN} WE file(s)${xrTag}, candidate for concurrent`;
     log(`  probe ${probedCount}/${items.length}: #${it.num} — ${verdict}`);
     return { ...it, probe: p };
   }).catch(() => { probedCount++; log(`  probe ${probedCount}/${items.length}: #${it.num} — probe FAILED → serial`); return { ...it, probe: null }; }),
 ));
 
-// Partition into a CONCURRENT set (each item provably independent of every other → its own lane clone, run
-// concurrently) and a SERIAL lane (everything else: probe-uncertain, touches a monolith, or shares files /
-// a blockedBy edge with another item → run one-at-a-time on main). An item is concurrent ONLY if it conflicts
-// with NO other candidate — so the concurrent set is pairwise-disjoint by construction and its lanes merge
-// clean (no replay among them).
+// Partition into a CONCURRENT set (each item provably independent of every other → its own coupled lane
+// clones, run concurrently) and a SERIAL lane (everything else: probe-uncertain, touches a monolith, or
+// shares files / a blockedBy edge with another item → run one-at-a-time on main). An item is concurrent ONLY
+// if it conflicts with NO other candidate — so the concurrent set is pairwise-disjoint (repo-qualified) by
+// construction and its lanes merge clean.
 const probed = probes.filter(Boolean);
 const serialFromProbe = probed.filter(mustSerialize);
 const candidates = probed.filter((e) => !mustSerialize(e));
@@ -255,27 +355,34 @@ for (const item of candidates) {
   (clashes ? entangled : concurrent).push(item);
 }
 const serialItems = [...serialFromProbe, ...entangled];
+const crossRepoCount = concurrent.filter(isCrossRepo).length + serialItems.filter(isCrossRepo).length;
 
-log(`Partition: ${concurrent.length} independent item(s) → own lane clone, concurrent; ${serialItems.length} item(s) → serial lane (sequential on main). ` +
+log(`Partition: ${concurrent.length} independent item(s) → coupled lane clones, concurrent; ${serialItems.length} item(s) → serial lane (sequential on main); ${crossRepoCount} cross-repo item(s) span >1 repo. ` +
     (concurrent.length === 0 ? 'No provably-independent item → this degenerates to a serial batch (correct, not a failure).' : ''));
 for (const e of concurrent) {
-  log(`  concurrent: #${e.num} (${e.slug}) — disjoint files: ${[...filesOf(e)].slice(0, 4).join(', ')}…`);
+  const repos = affectedReposOf(e);
+  log(`  concurrent: #${e.num} (${e.slug}) — repos: ${repos.join('+')} — disjoint files: ${[...filesOf(e)].slice(0, 4).join(', ')}…`);
 }
 for (const e of serialItems) {
   const why = !e.probe ? 'probe failed' : e.probe.confident === false ? 'low-confidence touch-set' :
     (e.probe.touchesMonolith && e.probe.touchesMonolith.length) ? 'touches a monolithic registry' : 'shares files / a blockedBy edge with another item';
-  log(`  serial: #${e.num} (${e.slug}) — ${why}`);
+  log(`  serial: #${e.num} (${e.slug}) — ${why}${isCrossRepo(e) ? ` (cross-repo: ${affectedReposOf(e).join('+')})` : ''}`);
 }
 
-// ── Phase 2 — Central pre-claim ALL items + provision the lane pool + push the lane/_base ref ─────
-// SAFETY: this is the ONLY place claims.json is written for the batch (#1933 choice 2 — lanes never touch it).
-// We claim EVERY item (concurrent + serial) in the PRIMARY checkout, commit the post-claim state, and push it
-// to the throwaway `lane/_base-<slug>` ref the concurrent lanes reset to. Provisioning the persistent lane
-// pool (slice 2, scripts/lane-pool.mjs) is folded in here so the lane dirs are ready before dispatch.
+// ── Phase 2 — Central pre-claim ALL items in WE + provision a lane pool PER repo + push the base ──
+// SAFETY: the pre-claim (backlog + claims.json) is WE-only (#1933 choice 2 — lanes never touch it). We claim
+// EVERY item (concurrent + serial) in the PRIMARY WE checkout, commit, and push to the throwaway
+// `lane/_base-<slug>` ref the concurrent WE lanes reset to. Provisioning the persistent lane pools (slice 2)
+// runs PER affected repo here so the coupled lane dirs are ready before dispatch.
 phase('Claim');
 
 const numsAll = items.map((it) => String(it.num));
-let laneDirs = [];
+const lanePlan = repoLanePlan(concurrent);
+// What to provision: each repo that any concurrent item touches, sized to how many concurrent items touch it.
+const provisionPlan = INTEGRATION_ORDER
+  .filter((repo) => (lanePlan[repo] || []).length > 0)
+  .map((repo) => ({ repo, name: REPOS[repo].name, path: REPOS[repo].path, count: lanePlan[repo].length }));
+let lanePools = {}; // repo -> [absolute lane dir, …] (index-aligned to lanePlan[repo])
 let baseReady = false;
 if (concurrent.length > 0 || serialItems.length > 0) {
   const setup = await agent(
@@ -283,29 +390,32 @@ if (concurrent.length > 0 || serialItems.length > 0) {
       RETURN_HYGIENE,
       ``,
       `You are the CENTRAL SETUP step of a #1933 clone-based parallel batch (slug ${batchSlug}), running in the`,
-      `PRIMARY checkout (the user's live working tree, on branch main). Do EXACTLY this, in order, and report`,
+      `PRIMARY WE checkout (the user's live working tree, on branch main). Do EXACTLY this, in order, and report`,
       `the result. NEVER push to main; the ONLY pushes allowed are to lane/* refs (the #1934 guard carve-out).`,
       ``,
-      `1. PRE-CLAIM all items (#1933 choice 2 — this is the ONLY place claims.json is written for this batch).`,
-      `   For EACH of these nums, run: \`node scripts/backlog.mjs claim <NNN> --session=${batchSlug}\``,
-      `   (flips backlog/<NNN>-*.md status open→active + dateStarted, and records the central claims.json`,
-      `   baseline). Nums: ${JSON.stringify(numsAll)}. If an item is already active (a prior partial run), skip`,
-      `   it — do NOT --force. Then commit the post-claim state in ONE commit:`,
+      `1. PRE-CLAIM all items (#1933 choice 2 — claims.json + backlog live ONLY in WE; this is the ONLY place`,
+      `   they are written for this batch). For EACH num, run: \`node scripts/backlog.mjs claim <NNN>`,
+      `   --session=${batchSlug}\` (flips backlog/<NNN>-*.md status open→active + dateStarted, records the central`,
+      `   claims.json baseline). Nums: ${JSON.stringify(numsAll)}. If an item is already active (a prior partial`,
+      `   run), skip it — do NOT --force. Then commit the post-claim state in ONE commit:`,
       `   \`git add backlog/*.md .claude/skills/batch-backlog-items/claims.json`,
       `   .claude/skills/batch-backlog-items/reservations.json && git commit -m "batch ${batchSlug}: pre-claim`,
       `   ${numsAll.length} item(s)"\` (stage ONLY those paths; never \`git add -A\`).`,
       ``,
-      `2. PUSH the post-claim base to the throwaway ref so the lanes can reset to it:`,
+      `2. PUSH the post-claim base to WE's throwaway ref so the WE lanes can reset to it:`,
       `   \`git push --force origin HEAD:${baseRef}\` (a lane/* ref → allowed; --force because a re-run replaces`,
       `   a stale base). Confirm it succeeded.`,
       ``,
-      `3. PROVISION the lane pool for the ${concurrent.length} concurrent item(s) (skip if 0):`,
-      `   \`node scripts/lane-pool.mjs provision --count=${Math.max(concurrent.length, 1)}\` then`,
-      `   \`node scripts/lane-pool.mjs list --json\`. Return the resulting lane directory paths (absolute) in`,
-      `   laneDirs, in order. The pool is PERSISTENT (slice 2) — a re-run reuses existing clones (fast).`,
+      `3. PROVISION a lane pool PER affected repo (cross-repo, slice 4). scripts/lane-pool.mjs is repo-`,
+      `   parameterized — run it from THIS WE checkout, passing --repo for non-WE repos. For each entry below,`,
+      `   run \`node scripts/lane-pool.mjs provision --count=<count> [--repo=<path>]\` (omit --repo for WE) then`,
+      `   \`node scripts/lane-pool.mjs list --json [--repo=<path>]\`. The pools are PERSISTENT (slice 2) — a`,
+      `   re-run reuses existing clones (fast). Provision plan (JSON): ${JSON.stringify(provisionPlan)}.`,
+      `   (If the plan is empty, there are no concurrent items — skip provisioning.)`,
       ``,
-      `Report: claimedNums (the nums you actually flipped to active this run), baseRefPushed (boolean),`,
-      `laneDirs (array of absolute lane clone paths), and gate is irrelevant here. Return ONLY the object.`,
+      `Report: claimedNums (the nums you actually flipped to active this run), baseRefPushed (boolean), and`,
+      `lanePools — an OBJECT keyed by repo ("we"/"frontierui"/"plateau-app") whose value is the ORDERED array of`,
+      `that repo's absolute lane-clone dirs (lane-1, lane-2, … as listed). Return ONLY the object.`,
     ].join(' '),
     {
       label: 'setup:pre-claim+provision', phase: 'Claim',
@@ -314,7 +424,7 @@ if (concurrent.length > 0 || serialItems.length > 0) {
         properties: {
           claimedNums: { type: 'array', items: { type: 'string' } },
           baseRefPushed: { type: 'boolean' },
-          laneDirs: { type: 'array', items: { type: 'string' } },
+          lanePools: { type: 'object', additionalProperties: { type: 'array', items: { type: 'string' } } },
           notes: { type: 'string' },
         },
       },
@@ -323,207 +433,256 @@ if (concurrent.length > 0 || serialItems.length > 0) {
   if (!setup || setup.baseRefPushed !== true) {
     log(`⚠ central pre-claim / base-ref push FAILED — cannot dispatch lanes safely. Aborting the parallel run; ` +
         `fall back to a serial /batch. (No lane work was pushed; the user's checkout holds only the pre-claim commit.)`);
-    return { ledger: [], concurrentItems: 0, serialItems: serialItems.length, conflictsReplayed: 0, stranded: [], multiLaneFiles: [], derivedRegenerated: false, pointsSpent: 0, budgetPoints, baseRef, aborted: 'setup-failed' };
+    return { ledger: [], concurrentItems: 0, serialItems: serialItems.length, crossRepoItems: crossRepoCount, conflictsReplayed: 0, stranded: [], multiLaneFiles: [], partialCrossRepo: [], reposProvisioned: [], derivedRegenerated: false, pointsSpent: 0, budgetPoints, baseRef, aborted: 'setup-failed' };
   }
   baseReady = true;
-  laneDirs = Array.isArray(setup.laneDirs) ? setup.laneDirs : [];
-  log(`Central pre-claim done: ${(setup.claimedNums || []).length} item(s) flipped active, base pushed to ${baseRef}, ${laneDirs.length} lane clone(s) ready.`);
+  lanePools = setup.lanePools && typeof setup.lanePools === 'object' ? setup.lanePools : {};
+  const poolSummary = Object.keys(lanePools).map((r) => `${r}:${(lanePools[r] || []).length}`).join(', ') || 'none';
+  log(`Central pre-claim done: ${(setup.claimedNums || []).length} item(s) flipped active, base pushed to ${baseRef}; lane pools — ${poolSummary}.`);
 }
 
-// ── Phase 3 — Work each independent item concurrently, ONE agent per item in its OWN lane clone ───
+// ── Phase 3 — Work each independent item concurrently across its COUPLED clones (one agent per item) ──
 phase('Lanes');
 
-function laneItemPrompt(it, laneDir) {
+// The coupled lane dirs for an item: one per affected repo, looked up by the item's per-repo lane index.
+function laneDirsForItem(it) {
+  const dirs = {}; // repo -> dir
+  for (const repo of affectedReposOf(it)) {
+    const idx = laneIndexOf(lanePlan, it, repo);
+    const pool = lanePools[repo] || [];
+    dirs[repo] = pool[idx] || pool[idx % Math.max(pool.length, 1)] || '';
+  }
+  return dirs;
+}
+
+function laneItemPrompt(it, laneDirs) {
   const ref = laneRefFor(it.num);
-  return [
+  const repos = affectedReposOf(it); // impl-first, WE last
+  const weDir = laneDirs.we || '';
+  const implRepos = repos.filter((r) => r !== 'we');
+  const lines = [
     RETURN_HYGIENE,
     ``,
-    `You are PARALLEL batch item #${it.num} ("${it.slug}") running in your OWN persistent lane CLONE at`,
-    `${laneDir} (its own HEAD — the git-branch guard never fires on it). The item is ALREADY claimed`,
-    `(status:active) in the central base ref; you do NOT run claim and you NEVER touch claims.json (#1933`,
-    `choice 2). Do EXACTLY this, in order:`,
+    `You are PARALLEL batch item #${it.num} ("${it.slug}") running across your OWN persistent lane CLONES (each`,
+    `has its own HEAD — the git-branch guard never fires on it). This item spans these repos: ${repos.join(', ')}.`,
+    `Lane clones: ${JSON.stringify(laneDirs)}. The item is ALREADY claimed (status:active) in WE's central base`,
+    `ref; you do NOT run claim and you NEVER touch claims.json (#1933 choice 2). Do EXACTLY this, in order:`,
     ``,
-    `1. cd ${laneDir} && git fetch origin --prune --quiet && git reset --hard origin/${baseRef} --quiet`,
-    `   (this points the clone at the central post-claim base — item #${it.num} is already active here).`,
-    `   Ensure deps are present (the pool installed them; if node_modules is missing run \`npm ci\`).`,
-    `2. WORK the item — full single-item arc MINUS the claim (already done). Edit ONLY this item's own files:`,
-    `   impl/code, its own we:backlog/${it.file}, and any per-entry registry file (src/_data/<reg>/<id>.json).`,
+    `1. PREP each clone:`,
+    `   • WE clone (${weDir}): \`cd ${weDir} && git fetch origin --prune --quiet && git reset --hard`,
+    `     origin/${baseRef} --quiet\` (points it at the central post-claim base — #${it.num} is already active here).`,
+  ];
+  for (const r of implRepos) {
+    lines.push(`   • ${r} clone (${laneDirs[r]}): \`cd ${laneDirs[r]} && git fetch origin --prune --quiet && git reset --hard origin/main --quiet\` (impl repos have no backlog; reset to their own main).`);
+  }
+  lines.push(
+    `   Ensure deps in each clone (the pool installed them; if node_modules is missing run \`npm ci\` there).`,
+    ``,
+    `2. WORK the item across its repos — full single-item arc MINUS the claim (already done). Edit ONLY this`,
+    `   item's own files in each clone: its WE impl/code + its own we:backlog/${it.file} in the WE clone, and its`,
+    `   own impl files in ${implRepos.length ? implRepos.join('/') : '(no other repos)'}.`,
     ``,
     `HARD RULES (the parallel-safety contract):`,
-    `• Do NOT edit any other item's files, do NOT stage claims.json, and do NOT splice a still-monolithic`,
-    `  shared registry (src/_data/{traits,docs,capabilityMatrix}.json, adapters.json, webhandlers/`,
-    `  webportals.json, sweep artifacts workbench*/benchmark*.json). If this item genuinely needs that, STOP,`,
-    `  mark status:"dropped" drop:"outgrew", and report it in monolithEdits for the integrator.`,
-    `• Do NOT regenerate or stage derived artifacts: AGENTS.md, src/_data/referenceIndex.json,`,
-    `  src/_data/capabilityWorkedExample.json. If your work changes the inventory, just LIST them in`,
-    `  derivedArtifacts — the integrator regenerates once.`,
-    `• Lane fast-fail gate (#1937 best-effort): \`npm run check:standards -- --local --files=<your changed`,
-    `  files>\` (#1144/#1159 mode). A red on YOUR files → status carried/dropped and gate:"red"; do NOT push.`,
-    `• 3. RESOLVE only after the local gate is green: \`node scripts/backlog.mjs resolve ${it.num}`,
-    `  [--graduated-to=…]\`. Then COMMIT this item's own files (git add <explicit paths>; NEVER -A; NEVER`,
-    `  stage claims.json or derived artifacts): \`git commit -m "backlog: resolve #${it.num} — <slug>"\`.`,
-    `• 4. PUSH your commit to the lane ref (the ONLY push you make): \`git push --force origin HEAD:${ref}\``,
-    `  (--force because a re-run replaces a stale lane ref; lane/* is allowed by the #1934 carve-out).`,
+    `• Do NOT edit any other item's files in ANY repo, do NOT stage claims.json, and do NOT splice a still-`,
+    `  monolithic shared registry in WE (src/_data/{traits,docs,capabilityMatrix}.json,`,
+    `  webhandlers/webportals.json, curated-sweep artifacts, the AGENTS.md prose body). If this item genuinely`,
+    `  needs that, STOP, mark status:"dropped" drop:"outgrew", and report it in monolithEdits for the integrator.`,
+    `• Do NOT regenerate or stage WE derived artifacts (the AGENTS.md inventory block — NOT its prose body;`,
+    `  src/_data/referenceIndex.json; src/_data/capabilityWorkedExample.json) — just LIST them in`,
+    `  derivedArtifacts; the integrator regens once.`,
+    `• GATE each repo locally (best-effort fast-fail, #1937): in the WE clone`,
+    `  \`npm run check:standards -- --local --files=<your WE changed files>\`; in each impl clone run THAT repo's`,
+    `  gate (${implRepos.map((r) => `${r}: ${REPOS[r].gate}`).join('; ') || 'n/a'}). Your AGGREGATE gate is green`,
+    `  ONLY if EVERY repo's gate passed. If ANY repo's gate is red → set gate:"red", status carried/dropped, and`,
+    `  do NOT push ANY ref (leave nothing half-landed).`,
+    `• 3. Only after ALL repos' gates are green: RESOLVE in the WE clone (\`node scripts/backlog.mjs resolve`,
+    `  ${it.num} [--graduated-to=…]\`). Then COMMIT each repo's own files (git add <explicit paths>; NEVER -A;`,
+    `  NEVER stage claims.json or derived). Commit message per repo: \`backlog: resolve #${it.num} — <slug>\`.`,
+    `• 4. PUSH each repo's commit to its lane ref (the ONLY pushes you make) — SAME ref name "${ref}" in each`,
+    `  repo's own origin: \`git push --force origin HEAD:${ref}\` from each clone (--force replaces a stale ref;`,
+    `  lane/* is allowed by #1934).`,
     ``,
-    `Report: num, status, cost, pushedRef ("${ref}" if you pushed; omit otherwise), resolveCommit (the full`,
-    `SHA — \`git rev-parse HEAD\` after your resolve commit), changedFiles (git diff --name-only vs`,
-    `origin/${baseRef} — used to flag files touched by >1 item), derivedArtifacts you deferred, any`,
-    `monolithEdits, and gate green/red. Return ONLY the structured object.`,
-  ].join('\n');
+    `Report: num, status, cost, pushedRefs (an array of {repo, ref:"${ref}"} — one entry PER repo you pushed),`,
+    `resolveCommit (the full SHA — \`git rev-parse HEAD\` in the WE clone after your resolve commit), changedFiles`,
+    `(REPO-QUALIFIED "<repo>:<path>" — git diff --name-only vs each repo's base, prefixed by repo), derivedArtifacts`,
+    `you deferred, any monolithEdits, and gate green/red (the aggregate). Return ONLY the structured object.`,
+  );
+  return lines.join('\n');
 }
 
 if (concurrent.length > 0) {
-  log(`Working ${concurrent.length} independent item(s) concurrently, each in its own lane clone — each item is logged the instant it lands…`);
+  log(`Working ${concurrent.length} independent item(s) concurrently across their coupled clones — each item is logged the instant it lands…`);
 }
 let itemsDone = 0;
-const concurrentResults = await parallel(concurrent.map((it, i) => () => {
-  const laneDir = laneDirs[i] || laneDirs[i % Math.max(laneDirs.length, 1)] || '';
-  if (!laneDir) {
+const concurrentResults = await parallel(concurrent.map((it) => () => {
+  const laneDirs = laneDirsForItem(it);
+  if (!laneDirs.we) {
     itemsDone++;
-    log(`  ✗ #${it.num} (${itemsDone}/${concurrent.length}): no lane clone available → will replay serially [${it.slug}]`);
+    log(`  ✗ #${it.num} (${itemsDone}/${concurrent.length}): no WE lane clone available → will replay serially [${it.slug}]`);
     return Promise.resolve(null);
   }
-  return agent(laneItemPrompt(it, laneDir), { label: `lane:#${it.num}`, phase: 'Lanes', schema: ITEM_RESULT_SCHEMA })
+  return agent(laneItemPrompt(it, laneDirs), { label: `lane:#${it.num}`, phase: 'Lanes', schema: ITEM_RESULT_SCHEMA })
     .then((r) => {
       itemsDone++;
-      log(`  ${r && r.status === 'resolved' && r.pushedRef ? '✓' : '~'} #${it.num} (${itemsDone}/${concurrent.length}): ${r ? r.status + ', gate ' + r.gate + (r.pushedRef ? ', pushed ' + r.pushedRef : ', not pushed') : 'no result → replay'} [${it.slug}]`);
+      const refN = r && Array.isArray(r.pushedRefs) ? r.pushedRefs.length : (r && r.pushedRef ? 1 : 0);
+      log(`  ${r && r.status === 'resolved' && refN > 0 ? '✓' : '~'} #${it.num} (${itemsDone}/${concurrent.length}): ${r ? r.status + ', gate ' + r.gate + (refN ? `, pushed ${refN} ref(s)` : ', not pushed') : 'no result → replay'} [${it.slug}]`);
       return r ? { ...r, num: r.num || String(it.num), _item: it } : null;
     })
     .catch(() => { itemsDone++; log(`  ✗ #${it.num} (${itemsDone}/${concurrent.length}) died → will replay serially [${it.slug}]`); return null; });
 }));
 
-// ── Phase 4 — Integrate on main: serial lane FIRST, then merge each lane ref one at a time ────────
-// SAFETY (the clone model): every concurrent item's work is durable on origin (its lane/* ref) before any
-// merge, so a mid-integration failure loses nothing — refs are deleted only AFTER their merge lands. The
-// central integrator works in the PRIMARY checkout on main (the tree the human watches, #1936); the
-// merge-base is the lane/_base commit, so an item's active→resolved flip merges clean. Full gate per merge
-// (#1937: central gate is the authority). The JS loop is single-threaded → merges are naturally serialized.
+// ── Phase 4 — Integrate: serial lane FIRST, then merge each item's repos impl-first/WE-last ───────
+// SAFETY (the clone model): every concurrent item's work is durable on each repo's origin (its lane/* refs)
+// before any merge, so a mid-integration failure loses nothing — refs are deleted only AFTER their merge
+// lands. The integrator works each repo's PRIMARY checkout on main. For WE the merge-base is lane/_base, so
+// the active→resolved flip merges clean. Full gate per merge per repo (#1937). The JS loop is single-threaded
+// → merges are naturally serialized. Cross-repo ORDER: impl repos first, WE last (the atomicity guarantee).
 phase('Integrate');
 
 const ledger = [];
+const partialCrossRepo = [];
 let conflictsReplayed = 0;
 
-// 4a. The serial lane runs FIRST, on main in the primary checkout, ONE item per agent. These items could not
-// be PROVEN independent (monolith-touching / uncertain / blockedBy edge), so they're the safe baseline the
-// lane refs merge on top of. They are already `active` from the pre-claim, so they go straight to work.
+// 4a. The serial lane runs FIRST, ONE item per agent. These items could not be PROVEN independent, so they're
+// the safe baseline the lane refs merge on top of. They are already `active` from the pre-claim. A cross-repo
+// serial item works each affected repo's PRIMARY checkout directly (no lanes), naturally serialized.
 if (serialItems.length > 0) {
   log(`Serial lane: working ${serialItems.length} item(s) sequentially on main…`);
   let sIdx = 0;
   for (const it of serialItems) {
     sIdx++;
+    const repos = affectedReposOf(it);
+    const implRepos = repos.filter((r) => r !== 'we');
     const r = await agent(
       [
         RETURN_HYGIENE,
         ``,
         `You are the SERIAL segment of a #1933 clone-based parallel batch (slug ${batchSlug}), working item`,
-        `#${it.num} ("${it.slug}") IN PLACE in the PRIMARY checkout on branch main (never cd into a lane clone).`,
-        `This item is here because it could not be PROVEN independent (uncertain touch-set, touches a monolithic`,
-        `registry, or shares files / a blockedBy edge with another item). It is ALREADY claimed (status:active)`,
-        `from the central pre-claim — do NOT run claim, do NOT touch claims.json. Work the FULL arc minus the`,
-        `claim: work → FULL whole-repo gate (\`npm run check:standards\`, no flags) → resolve (\`node`,
-        `scripts/backlog.mjs resolve ${it.num} [--graduated-to=…]\`) → commit this item's files on main`,
-        `(git add <explicit paths>; NEVER -A; NEVER push). Resolve only after the gate is green; if red, leave`,
-        `main clean (revert your edits), report status carried/dropped + gate:"red". Return the structured ITEM`,
-        `result (include changedFiles and resolveCommit = git rev-parse HEAD after your resolve commit).`,
+        `#${it.num} ("${it.slug}") IN PLACE in the PRIMARY checkouts on branch main (never cd into a lane clone).`,
+        `This item is here because it could not be PROVEN independent. It spans these repos: ${repos.join(', ')}.`,
+        implRepos.length
+          ? `For NON-WE repos, work directly in their primary checkouts on main: ${implRepos.map((r2) => `${r2} = ${REPOS[r2].path}`).join('; ')}.`
+          : `It is WE-only — work in the WE primary checkout (your cwd).`,
+        `It is ALREADY claimed (status:active) from the central pre-claim — do NOT run claim, do NOT touch`,
+        `claims.json. Work the FULL arc minus the claim, ORDERED impl-repos-first / WE-last (so the WE resolve is`,
+        `the last write): in each impl repo, work → that repo's FULL gate (${implRepos.map((r2) => REPOS[r2].gate).join(' / ') || 'n/a'}) → commit explicit paths on its main (NEVER push). THEN in WE: work → FULL`,
+        `\`npm run check:standards\` (no flags) → resolve (\`node scripts/backlog.mjs resolve ${it.num}`,
+        `[--graduated-to=…]\`) → commit WE's files on main (git add <explicit paths>; NEVER -A; NEVER push).`,
+        `Resolve only after every gate is green; if any gate is red, leave every repo's main clean (revert your`,
+        `edits), report status carried/dropped + gate:"red". Return the structured ITEM result (changedFiles`,
+        `REPO-QUALIFIED "<repo>:<path>", resolveCommit = git rev-parse HEAD in WE after your resolve commit).`,
       ].join(' '),
       { label: `serial:#${it.num}`, phase: 'Integrate', schema: ITEM_RESULT_SCHEMA },
     ).catch(() => null);
     log(`  serial ${sIdx}/${serialItems.length}: #${it.num} — ${r ? r.status + ' (gate ' + r.gate + ')' : 'no result'}`);
-    if (r) ledger.push({ num: r.num || String(it.num), status: r.status, cost: r.cost, drop: r.drop, lane: 'serial', changedFiles: r.changedFiles, derivedArtifacts: r.derivedArtifacts, resolveCommit: r.resolveCommit });
+    if (r) ledger.push({ num: r.num || String(it.num), status: r.status, cost: r.cost, drop: r.drop, lane: 'serial', repos, changedFiles: r.changedFiles, derivedArtifacts: r.derivedArtifacts, resolveCommit: r.resolveCommit });
   }
 }
 
-// 4b. Merge each concurrent item's lane ref in turn, one at a time, full gate per merge. The concurrent set is
-// pairwise-disjoint, so these merge clean; the only residual conflict risk is vs the serial lane — a conflict
-// triggers rebase-and-retry (never force), and a real semantic conflict that survives the rebase is replayed
-// serially on the merged result.
-const mergeable = concurrentResults.filter((cr) => cr && cr.gate === 'green' && cr.pushedRef);
-if (mergeable.length > 0) {
-  log(`Integrating ${mergeable.length} lane ref(s) into main one at a time, full gate per merge…`);
-  // Fetch all lane refs once up front so each merge agent works from local refs.
-  await agent(
-    [
-      `In the PRIMARY checkout on main, fetch the parallel batch's lane refs so they can be merged:`,
-      `\`git fetch origin --prune ${mergeable.map((cr) => `"+refs/heads/${cr.pushedRef}:refs/remotes/origin/${cr.pushedRef}"`).join(' ')}\`.`,
-      `Confirm each ref fetched. Never push, never merge here — just fetch. Return { fetched: <count> }.`,
-    ].join(' '),
-    { label: 'integrate:fetch-lanes', phase: 'Integrate', schema: { type: 'object', additionalProperties: true, properties: { fetched: { type: 'number' } } } },
-  ).catch(() => null);
+// 4b. Merge each concurrent item's repos in turn. Per ITEM: integrate its repos in INTEGRATION_ORDER (impl
+// first, WE last). If an impl repo fails to land, STOP that item — do NOT merge WE → the resolve never lands
+// → the item is not falsely resolved (recorded in partialCrossRepo). The concurrent set is pairwise-disjoint
+// (repo-qualified), so within a repo these merge clean; residual conflict risk is only vs the serial lane.
+function integratePrompt(it, repo, ref) {
+  const r = REPOS[repo];
+  const where = r.primary ? `the PRIMARY WE checkout (your cwd) on branch main` : `the ${repo} primary checkout (\`cd ${r.path}\`) on branch main`;
+  return [
+    `In ${where}, integrate parallel batch item #${it.num} from its ${repo} lane ref "${ref}". Steps:`,
+    `1. Fetch the ref into THIS checkout: \`git fetch origin --prune "+refs/heads/${ref}:refs/remotes/origin/${ref}"\`.`,
+    `2. \`git merge --no-ff origin/${ref} -m "batch ${batchSlug}: merge #${it.num} (${repo})"\`.`,
+    `3. If git reports a CONFLICT: \`git merge --abort\`, then REBASE-AND-RETRY (#1933): make a temp local branch`,
+    `   at the lane ref, \`git rebase main\` it onto current main; if the rebase is clean, re-run the merge from`,
+    `   the rebased branch (set rebased:true). If the rebase ITSELF conflicts (a real semantic conflict),`,
+    `   \`git rebase --abort\`, leave main untouched, report conflicted:true, merged:false — do NOT force.`,
+    `4. On a clean merge, run THIS repo's FULL gate \`${r.gate}\` on the merged tree → report gate green/red.`,
+    `   If gate RED, the merge stands but flag it (a regression on the assembled tree).`,
+    `5. If merged clean AND gate green, DELETE the remote lane ref: \`git push origin --delete ${ref}\` (delete`,
+    `   of a lane/* ref → allowed by #1934). Set refDeleted:true. NEVER push main.`,
+    `Return { num:"${it.num}", repo:"${repo}", merged, rebased, conflicted, gate, refDeleted, notes }.`,
+  ].join(' ');
 }
 
 for (let i = 0; i < concurrentResults.length; i++) {
   const cr = concurrentResults[i];
   const it = concurrent[i];
-  if (!cr) { log(`#${it.num} produced no result (died/skipped) — replaying serially on main.`); }
-  if (cr && cr.gate === 'red') { log(`#${it.num} lane gate RED — not merging; replaying serially on main.`); }
-  if (cr && cr.gate === 'green' && !cr.pushedRef) { log(`#${it.num} gate green but never pushed a lane ref — replaying serially on main.`); }
+  // Source of truth for which refs to merge: what the agent actually pushed (pushedRefs), back-compat to pushedRef.
+  let refs = cr && Array.isArray(cr.pushedRefs) && cr.pushedRefs.length
+    ? cr.pushedRefs.filter((x) => x && x.repo && x.ref && REPOS[x.repo])
+    : (cr && cr.pushedRef ? [{ repo: 'we', ref: cr.pushedRef }] : []);
+  // Order impl-first / WE-last regardless of report order.
+  refs = INTEGRATION_ORDER.flatMap((repo) => refs.filter((x) => x.repo === repo));
 
-  const canMerge = cr && cr.gate === 'green' && cr.pushedRef;
-  let integrated = null;
+  const canMerge = cr && cr.gate === 'green' && refs.length > 0;
+  if (!cr) log(`#${it.num} produced no result (died/skipped).`);
+  else if (cr.gate === 'red') log(`#${it.num} lane gate RED — not merging.`);
+  else if (refs.length === 0) log(`#${it.num} gate green but pushed no lane ref — cannot merge.`);
+
+  let weLanded = false;
+  let stoppedAt = null;
+  const landedRepos = [];
   if (canMerge) {
-    log(`  merging ${cr.pushedRef} (#${it.num}, ${i + 1}/${concurrentResults.length})…`);
-    integrated = await agent(
-      [
-        `In the PRIMARY checkout on branch main, integrate parallel batch item #${it.num} from its lane ref`,
-        `"origin/${cr.pushedRef}". Merge it one-at-a-time, NEVER force, full gate per merge:`,
-        `1. \`git merge --no-ff origin/${cr.pushedRef} -m "batch ${batchSlug}: merge #${it.num}"\`.`,
-        `2. If git reports a CONFLICT: \`git merge --abort\`, then REBASE-AND-RETRY (#1933): create a temp local`,
-        `   branch at the lane ref, \`git rebase main\` it onto current main, and if the rebase is clean,`,
-        `   re-run the merge from the rebased branch (set rebased:true). If the rebase ITSELF conflicts (a real`,
-        `   semantic conflict), \`git rebase --abort\`, leave main untouched, and report conflicted:true,`,
-        `   merged:false — do NOT force.`,
-        `3. On a clean merge (with or without the rebase), run the FULL gate \`npm run check:standards\` (no`,
-        `   flags) on the merged tree → report gate green/red. If gate RED, the merge stands but flag it`,
-        `   (a regression on the assembled tree).`,
-        `4. If merged clean AND gate green, DELETE the remote lane ref (it's served its purpose):`,
-        `   \`git push origin --delete ${cr.pushedRef}\` (delete of a lane/* ref → allowed by #1934). Set`,
-        `   refDeleted:true. NEVER push main.`,
-        `Return { num:"${it.num}", merged, rebased, conflicted, gate, refDeleted, notes }.`,
-      ].join(' '),
-      { label: `integrate:#${it.num}`, phase: 'Integrate', schema: INTEGRATE_SCHEMA },
-    ).catch(() => null);
+    log(`  integrating #${it.num} (${i + 1}/${concurrentResults.length}) across ${refs.map((x) => x.repo).join('+')}, impl-first/WE-last…`);
+    for (const { repo, ref } of refs) {
+      const res = await agent(integratePrompt(it, repo, ref), { label: `integrate:#${it.num}:${repo}`, phase: 'Integrate', schema: INTEGRATE_SCHEMA }).catch(() => null);
+      const ok = res && res.merged && !res.conflicted && res.gate !== 'red';
+      log(`    ${ok ? '✓' : '✗'} #${it.num} ${repo}: ${res ? (res.merged ? 'merged' : 'NOT merged') + (res.rebased ? ' (rebased)' : '') + ', gate ' + res.gate : 'no result'}`);
+      if (ok) { landedRepos.push(repo); if (repo === 'we') weLanded = true; }
+      else { stoppedAt = repo; break; } // impl-first ordering: a failed impl stops the item BEFORE WE lands
+    }
   }
 
-  const needsReplay = !canMerge || !integrated || integrated.conflicted || !integrated.merged || integrated.gate === 'red';
-  if (needsReplay) {
+  const fullyLanded = weLanded && stoppedAt === null;
+  if (fullyLanded) {
+    ledger.push({ num: cr.num || String(it.num), status: cr.status, cost: cr.cost, drop: cr.drop, lane: `#${it.num}`, repos: refs.map((x) => x.repo), changedFiles: cr.changedFiles, derivedArtifacts: cr.derivedArtifacts, resolveCommit: cr.resolveCommit });
+  } else if (isCrossRepo(it)) {
+    // CROSS-REPO ROLLBACK (slice 4): impl may have landed in some repos but WE's resolve did NOT — the item is
+    // still `active`, never falsely resolved. We do NOT auto-replay coupled work across primary checkouts in
+    // this v1; record the partial (which repos landed, where it stopped) + leave the un-merged refs durable on
+    // origin for the human / next run. The item is carried, not resolved.
+    conflictsReplayed++; // counts as a non-clean land for the summary
+    const reason = !canMerge ? 'lane red / no ref' : `merge failed at ${stoppedAt || '?'}`;
+    partialCrossRepo.push({ num: String(it.num), slug: it.slug, landed: landedRepos, stoppedAt: stoppedAt || (canMerge ? null : 'pre-merge'), reason });
+    ledger.push({ num: cr ? cr.num || String(it.num) : String(it.num), status: 'carried', drop: 'cross-repo-partial', cost: cr && cr.cost, lane: `#${it.num}-partial`, repos: refs.map((x) => x.repo), changedFiles: cr && cr.changedFiles });
+    log(`⚠ #${it.num} is CROSS-REPO and did not fully land (${reason}); landed in [${landedRepos.join(', ') || 'none'}], WE resolve NOT landed → carried (item stays active). Un-merged lane refs remain on origin for re-attempt.`);
+  } else {
+    // WE-only item that failed → serial-replay on main (the slice-3 floor).
     conflictsReplayed++;
-    const reason = !canMerge ? 'lane red / not pushed / no result' : integrated && integrated.conflicted ? 'semantic conflict survived rebase' : integrated && integrated.gate === 'red' ? 'post-merge gate red' : 'merge did not land';
-    log(`#${it.num} could not land clean (${reason}) — replaying it serially on main.`);
+    const reason = !canMerge ? 'lane red / not pushed / no result' : `merge did not land (stopped at ${stoppedAt || 'we'})`;
+    log(`#${it.num} (WE-only) could not land clean (${reason}) — replaying it serially on main.`);
+    const weRef = (refs.find((x) => x.repo === 'we') || {}).ref || '';
     const replay = await agent(
       [
         RETURN_HYGIENE,
         ``,
-        `In the PRIMARY checkout on branch main, replay parallel batch item #${it.num} ("${it.slug}") SERIALLY`,
+        `In the PRIMARY WE checkout on branch main, replay parallel batch item #${it.num} ("${it.slug}") SERIALLY`,
         `(its lane merge was aborted/failed). It is ALREADY claimed (status:active) from the central pre-claim —`,
         `do NOT run claim, do NOT touch claims.json. Redo the edits on the CURRENT main tree, FULL whole-repo`,
         `gate (\`npm run check:standards\`), resolve (\`node scripts/backlog.mjs resolve ${it.num}\`), commit`,
-        `(git add <explicit paths>; NEVER -A; NEVER push). If its lane ref "${cr && cr.pushedRef || ''}" still`,
-        `exists on origin, delete it after a clean replay (\`git push origin --delete\`). Return the structured`,
-        `ITEM result (include changedFiles and resolveCommit = git rev-parse HEAD after your resolve commit).`,
+        `(git add <explicit paths>; NEVER -A; NEVER push). If its lane ref "${weRef}" still exists on origin,`,
+        `delete it after a clean replay (\`git push origin --delete ${weRef}\`). Return the structured ITEM result`,
+        `(changedFiles REPO-QUALIFIED "<repo>:<path>", resolveCommit = git rev-parse HEAD after your resolve commit).`,
       ].join(' '),
       { label: `replay:#${it.num}`, phase: 'Integrate', schema: ITEM_RESULT_SCHEMA },
     ).catch(() => null);
     const src = replay || cr;
-    if (src) ledger.push({ num: src.num || String(it.num), status: src.status, cost: src.cost, drop: src.drop, lane: `#${it.num}-replayed`, changedFiles: src.changedFiles, derivedArtifacts: src.derivedArtifacts, resolveCommit: src.resolveCommit });
+    if (src) ledger.push({ num: src.num || String(it.num), status: src.status, cost: src.cost, drop: src.drop, lane: `#${it.num}-replayed`, repos: ['we'], changedFiles: src.changedFiles, derivedArtifacts: src.derivedArtifacts, resolveCommit: src.resolveCommit });
     log(`  replay #${it.num}: ${replay ? replay.status + ' (gate ' + replay.gate + ')' : 'no result'}`);
-  } else {
-    ledger.push({ num: cr.num || String(it.num), status: cr.status, cost: cr.cost, drop: cr.drop, lane: `#${it.num}`, changedFiles: cr.changedFiles, derivedArtifacts: cr.derivedArtifacts, resolveCommit: cr.resolveCommit });
   }
 }
 
-// 4c. Regenerate derived artifacts ONCE on the fully-merged main, then a final whole-repo gate. The #1935
-// Fork-2 "regenerate-on-merge" set: the AGENTS.md inventory block, src/_data/referenceIndex.json, and
-// src/_data/capabilityWorkedExample.json — all reproduced by their deterministic generators from the merged
-// inputs, so they leave the lock-set as outputs.
+// 4c. Regenerate WE derived artifacts ONCE on the fully-merged WE main, then a final whole-repo gate. The
+// #1935 Fork-2 "regenerate-on-merge" set: the AGENTS.md inventory block, src/_data/referenceIndex.json, and
+// src/_data/capabilityWorkedExample.json — all reproduced by their deterministic generators. (Derived
+// artifacts are WE-only; impl repos have their own build outputs handled by their own gates.)
 const derived = new Set();
 for (const l of ledger) if (l && Array.isArray(l.derivedArtifacts)) for (const d of l.derivedArtifacts) derived.add(d);
 for (const cr of concurrentResults) if (cr && Array.isArray(cr.derivedArtifacts)) for (const d of cr.derivedArtifacts) derived.add(d);
 let derivedRegenerated = false;
 if (derived.size > 0) {
-  log(`Regenerating ${derived.size} derived artifact(s) once on the merged main: ${[...derived].join(', ')}`);
+  log(`Regenerating ${derived.size} WE derived artifact(s) once on the merged main: ${[...derived].join(', ')}`);
   const regen = await agent(
     [
-      `In the PRIMARY checkout on branch main, regenerate the derived artifacts the items deferred:`,
+      `In the PRIMARY WE checkout on branch main, regenerate the derived artifacts the items deferred:`,
       `${[...derived].join(', ')}. Run the canonical generators (e.g. \`npm run gen:inventory\` for the`,
       `AGENTS.md inventory block, \`npm run gen:reference-index\` for src/_data/referenceIndex.json), then run`,
       `the FULL gate (\`npm run check:standards\`) and commit the regenerated artifacts in ONE commit. NEVER`,
@@ -536,8 +695,9 @@ if (derived.size > 0) {
 }
 
 // 4d. Surface files touched by MORE THAN ONE item — the residual silent-merge risk (a clean-but-wrong merge).
-// The concurrent set is disjoint by construction, so this flags only a concurrent item overlapping a
-// serial-lane item. This is the OPTIMISTIC-floor (#1935 Option D) post-hoc detector this slice ships.
+// changedFiles are REPO-QUALIFIED ("<repo>:<path>"), so this detects overlaps WITHIN any constellation repo
+// (and never spuriously across repos). The concurrent set is disjoint by construction, so this flags a
+// concurrent item overlapping a serial-lane item. This is the OPTIMISTIC-floor (#1935 Option D) post-hoc detector.
 const fileItemCount = new Map();
 for (const l of ledger) {
   if (!l || !Array.isArray(l.changedFiles)) continue;
@@ -548,11 +708,9 @@ if (multiLaneFiles.length > 0) {
   log(`⚠ ${multiLaneFiles.length} file(s) were changed by more than one item — eyeball for a silent clean-but-wrong merge: ${multiLaneFiles.join(', ')}`);
 }
 
-// 4e. RECONCILE (#1869 defect 2) — independently verify, via git on main, that every ledger-`resolved` item's
-// resolve actually LANDED on HEAD. The ledger status is each agent's self-report; a lane resolve that failed
-// to merge (or an agent that over-reported) would otherwise be returned `resolved` and silently lost. This
-// re-checks reality and reclassifies any un-landed resolve as `stranded` — never a false `resolved`.
-// (Adapted for the clone model: the target IS main/HEAD, the live branch, not a throwaway integration branch.)
+// 4e. RECONCILE (#1869 defect 2) — independently verify, via git on WE main, that every ledger-`resolved`
+// item's resolve actually LANDED on HEAD. The resolve lives in WE (and, by the impl-first/WE-last ordering,
+// a landed WE resolve implies the impl landed too), so WE is authoritative for the "resolved" determination.
 const resolvedToVerify = ledger
   .filter((l) => l && l.status === 'resolved')
   .map((l) => ({ num: String(l.num), resolveCommit: l.resolveCommit || '' }));
@@ -560,10 +718,9 @@ let stranded = [];
 if (resolvedToVerify.length > 0) {
   const recon = await agent(
     [
-      `In the PRIMARY checkout on branch main, RECONCILE the parallel batch ledger against git reality (#1869`,
+      `In the PRIMARY WE checkout on branch main, RECONCILE the parallel batch ledger against git reality (#1869`,
       `defect 2). Confirm \`git rev-parse --abbrev-ref HEAD\` is "main" (set branchOk). Then, for EACH item`,
-      `below, verify its resolve actually landed on HEAD — it is STRANDED (resolve did not land) if BOTH`,
-      `signals say so:`,
+      `below, verify its resolve actually landed on WE HEAD — it is STRANDED if BOTH signals say so:`,
       `  (a) commit reachability: if resolveCommit is non-empty, \`git merge-base --is-ancestor <resolveCommit>`,
       `      HEAD\` exits NON-zero (commit not reachable from main);`,
       `  (b) backlog ground truth: \`backlog/<num>-*.md\` on main does NOT contain a line \`status: resolved\`.`,
@@ -591,19 +748,18 @@ if (resolvedToVerify.length > 0) {
       const entry = ledger.find((l) => l && String(l.num) === String(s.num) && l.status === 'resolved');
       if (entry) {
         entry.status = 'stranded';
-        log(`⚠ #${s.num} reported resolved but its resolve did NOT land on main (${s.reason || 'not reachable / backlog status not resolved'}) — reclassified STRANDED, not counted resolved.`);
+        log(`⚠ #${s.num} reported resolved but its resolve did NOT land on WE main (${s.reason || 'not reachable / backlog status not resolved'}) — reclassified STRANDED, not counted resolved.`);
       }
     }
-    if (stranded.length === 0) log(`Reconcile: all ${resolvedToVerify.length} resolved item(s) verified present on main.`);
+    if (stranded.length === 0) log(`Reconcile: all ${resolvedToVerify.length} resolved item(s) verified present on WE main.`);
   }
 }
 
-// 4f. Clean up the throwaway base ref now that every lane has merged (best-effort — a leftover lane/_base is
-// harmless, just clutter on origin).
+// 4f. Clean up the throwaway WE base ref now that every lane has merged (best-effort — harmless clutter).
 if (baseReady) {
   await agent(
     [
-      `In the PRIMARY checkout, delete the throwaway parallel-batch base ref now that integration is done:`,
+      `In the PRIMARY WE checkout, delete the throwaway parallel-batch base ref now that integration is done:`,
       `\`git push origin --delete ${baseRef}\` (delete of a lane/* ref → allowed by #1934). Best-effort — if it`,
       `is already gone, that's fine. Return { deleted: boolean }.`,
     ].join(' '),
@@ -613,19 +769,22 @@ if (baseReady) {
 
 const resolved = ledger.filter((l) => l.status === 'resolved');
 const spent = resolved.reduce((s, l) => s + (Number(l.cost) || 0), 0);
-log(`Parallel batch (clone model) landed on main: ${resolved.length}/${ledger.length} resolved, ${stranded.length} stranded, ${conflictsReplayed} item(s) replayed serially, ${multiLaneFiles.length} multi-item file(s), ${spent}/${budgetPoints} points. The result is ALREADY on the primary checkout's main — the main agent does NOT do a landing merge; it reports the ledger and surfaces multiLaneFiles/stranded.`);
+const reposProvisioned = Object.keys(lanePools).filter((r) => (lanePools[r] || []).length > 0);
+log(`Parallel batch (clone model, cross-repo) landed: ${resolved.length}/${ledger.length} resolved, ${stranded.length} stranded, ${partialCrossRepo.length} cross-repo partial, ${conflictsReplayed} item(s) replayed/failed-to-land, ${multiLaneFiles.length} multi-item file(s), ${spent}/${budgetPoints} points. The result is ALREADY on each repo's main — the main agent does NOT do a landing merge; it reports the ledger and surfaces multiLaneFiles / stranded / partialCrossRepo.`);
 
 return {
-  // The clone integrator already landed every lane on the primary checkout's main — there is no
-  // integration branch for the main agent to merge. Lane work was durable on origin (lane/* refs) until each
-  // merge landed; refs are deleted after a clean land. The main agent reports + surfaces; no landing op.
+  // The clone integrator already landed every lane on each repo's main — there is no integration branch for
+  // the main agent to merge. Lane work was durable on each origin (lane/* refs) until each merge landed.
   baseRef,
   ledger,
   concurrentItems: concurrent.length,
   serialItems: serialItems.length,
+  crossRepoItems: crossRepoCount,        // items spanning >1 constellation repo (slice 4)
   conflictsReplayed,
-  stranded,             // #1869 defect 2: items reported resolved whose resolve did NOT land on main — reclassified, never counted resolved
-  multiLaneFiles,       // files touched by >1 item — the close-skill audit surfaces these for a human glance
+  stranded,                              // #1869 defect 2: resolves that did NOT land on WE main — reclassified, never counted resolved
+  multiLaneFiles,                        // files (repo-qualified) touched by >1 item — the close-skill audit surfaces these
+  partialCrossRepo,                      // slice 4: cross-repo items whose impl landed in some repos but whose WE resolve did NOT — re-attempt next run
+  reposProvisioned,                      // which constellation repos got a lane pool this batch
   derivedRegenerated,
   pointsSpent: spent,
   budgetPoints,
