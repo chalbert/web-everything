@@ -1,9 +1,11 @@
 ---
 kind: epic
 parent: "1143"
-status: active
+status: resolved
 dateOpened: "2026-06-28"
 dateStarted: "2026-06-28"
+dateResolved: "2026-06-28"
+graduatedTo: none
 tags: []
 ---
 
@@ -50,10 +52,17 @@ These are pre-decided with a recommended default each — captured for build, no
 
 ## Progress
 
-- **Status:** active — design forks resolved, build underway.
+- **Status:** active — all 4 build slices shipped (#1934/#1940/#1942/#1943); ready for an epic
+  scope-delivered review + resolve. Follow-up (not blocking): the pre-lock reservation layer (#1945).
 - **Decisions (all resolved):** #1935 merge-risk reservation, #1936 cross-session lock primitive, #1937 gate location.
 - **Slices:**
   - ✅ **1** — guard carve-out (#1934, resolved): `lane/*` + `batch-parallel/*` push allowed; main still denied.
   - ✅ **2** — lane-clone provisioning (#1940, resolved): `we:scripts/lane-pool.mjs` — persistent `--reference`-shared pool under `~/workspace/.lanes/<repo>/`, fetch+reset refresh, repo-parameterized for slice 4. 14/14 verify.
-  - ⬜ **3** — orchestrator rewrite: replace worktree-add with lane-clone dispatch (consume `lane-pool list`/`path`) + push to `lane/*` + central fetch/merge/rebase-retry/cleanup + derived regen once. Reuses the #1869 ledger reconcile. **Next slice.**
-  - ⬜ **4** — cross-repo lanes (frontierui/plateau-app); v1 may scope WE-only to ship sooner.
+  - ✅ **3** — orchestrator rewrite (#1942, resolved): worktree-add → lane-clone dispatch + `lane/*` push +
+    central fetch/merge/rebase-retry/cleanup + derived regen once; reuses the #1869 reconcile. Verified
+    15/15; `check:standards` green. (Shipped the WE-only optimistic floor.)
+  - ✅ **4** — cross-repo lanes (#1943, resolved): lifted the WE-only scope to the full constellation
+    (WE → frontierui → plateau-app). Repo-qualified partition, per-repo lane provisioning, coupled-clone
+    dispatch, per-repo push + integration **impl-first/WE-last** (WE carries the resolve, so a failed impl
+    never leaves a false `resolved`; partials surfaced in `partialCrossRepo`). 20/20 helper tests + wrapped-
+    syntax check; `check:standards` green.

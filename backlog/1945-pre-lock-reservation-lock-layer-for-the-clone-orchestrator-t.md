@@ -1,7 +1,7 @@
 ---
 kind: story
 size: 8
-parent: "1933"
+parent: "1143"
 status: open
 blockedBy: ["1938"]
 dateOpened: "2026-06-28"
