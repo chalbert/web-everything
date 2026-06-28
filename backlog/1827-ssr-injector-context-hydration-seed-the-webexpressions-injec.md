@@ -1,13 +1,14 @@
 ---
 kind: story
 size: 13
-status: active
-unsplittableReason: foundational
+status: resolved
 locus: frontierui
 relatedProject: webexpressions
 relatedReport: reports/2026-06-27-split-analysis-1827.md
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-28"
+dateResolved: "2026-06-28"
+graduatedTo: none
 tags: [webexpressions, injector-context, ssr, hydration, fui-runtime]
 ---
 
@@ -37,8 +38,11 @@ This card is **FUI-homed and buildable now, test-first.** It was previously mis-
 
 ## Progress
 
-- **Status:** active — disposition corrected; build not yet started.
-- **Locus / repo:** frontierui (`fui:plugs/webinjectors/`).
-- **Done:** un-parked (dropped `priority: low` + `awaiting-consumer` tag); rewrote the disposition (no-consumer park was wrong, fixture = consumer); codified the rule in `we:docs/agent/backlog-workflow.md` (hold model) + memory #19.
-- **Next:** in `frontierui`, write a failing vitest fixture encoding #1818's non-deterministic cell (client-only context → block with `rows="[[ @ctx ]]"` → assert injector chain seeded at upgrade so binding resolves), then implement seeding in `InjectorRoot`/`declarativeInjector`. Close with FUI's gate; commit in frontierui.
-- **Notes:** size 13 — consider a test+mechanism slice vs a later "wire to a real dogfooded interactive surface" slice if it runs long.
+- **Status:** resolved — mechanism + fixture delivered (the card's DoD: "a FUI vitest fixture … is a valid consumer … No production app surface is needed"). Production wiring carved to **#1928**.
+- **Locus / repo:** frontierui (`fui:plugs/webinjectors/`). Committed `8804320`.
+- **Done:**
+  - Un-parked (dropped `priority: low` + `awaiting-consumer` tag); rewrote the disposition (no-consumer park was wrong, fixture = consumer); codified the rule in `we:docs/agent/backlog-workflow.md` (hold model) + memory #19.
+  - **`seedDeclarativeInjector(injectorRoot, scope, domain, provide, {id?, into?})`** in `fui:plugs/webinjectors/declarativeInjector.ts` — the imperative twin of `applyDeclarativeInjectors` for the non-deterministic / client-only cell of #1818's `#block-data-ingestion`: seeds a runtime value into the injector chain at a scope (`ensureInjector` + `injector.set`), carrying the **raw typed value** (#1818 invariant — no stringify/reparse), so a descendant's `[[ ref ]]` resolves through the same chain at upgrade. Exported from `fui:plugs/webinjectors/index.ts`.
+  - Failing-first vitest fixture `fui:plugs/webinjectors/__tests__/unit/seedDeclarativeInjector.test.ts` (8 tests): client-only seed → descendant resolves; **proven on the real platform read path** (`InjectorRoot.getProviderOf('customContexts:…')`, the same key AutoHeading/ResourceLoader/droplist read); raw-typed-value identity; subtree isolation; explicit `injector="id"`; `into` accumulation; falsy-provide honoured; empty-domain throws.
+  - Gate green: full `webinjectors` suite 205 passed, `tsc` clean for webinjectors, `check:standards` 0 errors.
+- **Notes:** `domain` is the verbatim injector key, so the primitive is general for both `@scope/name` Protocol domains and `customContexts:name` context keys. The `@name → customContexts:name` key-derivation sugar and real-surface wiring land in **#1928** (gated on a real interactive non-deterministic consumer existing — "Prep: Verify Mechanism Has A Consumer").
