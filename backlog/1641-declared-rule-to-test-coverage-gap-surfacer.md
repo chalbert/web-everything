@@ -4,7 +4,6 @@ size: 5
 parent: "142"
 status: open
 priority: low
-blockedBy: ["1689"]
 locus: plateau-app
 dateOpened: "2026-06-23"
 preparedDate: "2026-06-23"

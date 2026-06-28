@@ -1,7 +1,9 @@
 ---
 kind: story
 size: 5
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "adoptionSignal: a live non-deterministic interactive search/filter surface exists on a dogfooded site to host the @ctx rows binding (today seedDeclarativeInjector has only a FUI test fixture, no production consumer)"
 blockedBy: ["1827"]
 dateOpened: "2026-06-28"
 tags: []

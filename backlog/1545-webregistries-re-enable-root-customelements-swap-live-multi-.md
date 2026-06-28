@@ -4,8 +4,7 @@ size: 3
 parent: "1483"
 status: open
 locus: frontierui
-blockedBy: ["1593"]
-humanGate: { kind: setup, what: "Re-enables the root `window.customElements` swap that previously white-paged the plateau site; acceptance requires live-verifying plateau-app (:4000) + WE site (:3000) + FUI demos render with no upgrade crash while OWNING the dev-server lifecycle. A concurrent batch can't restart/recover the user's running :3000/:4000 (don't-kill-dev-server). Needs a focused session that owns the servers — the reason 4 prior batch pre-flights declined it." }
+humanGate: { kind: setup, short: "Live-verify the root customElements swap on :3000 / :4000 / FUI demos from a session that owns the dev servers.", what: "Re-enables the root `window.customElements` swap that previously white-paged the plateau site; acceptance requires live-verifying plateau-app (:4000) + WE site (:3000) + FUI demos render with no upgrade crash while OWNING the dev-server lifecycle. A concurrent batch can't restart/recover the user's running :3000/:4000 (don't-kill-dev-server). Needs a focused session that owns the servers — the reason 4 prior batch pre-flights declined it." }
 dateOpened: "2026-06-22"
 tags: []
 ---

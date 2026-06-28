@@ -2,7 +2,7 @@
 kind: story
 size: 5
 parent: "718"
-status: open
+status: parked
 parkedReason: maturityGated
 maturityTrigger: "adoptionSignal: a real SWC/Turbopack trait consumer"
 dateOpened: "2026-06-23"

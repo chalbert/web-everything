@@ -1,6 +1,5 @@
 ---
-kind: story
-size: 13
+kind: epic
 status: open
 locus: frontierui
 dateOpened: "2026-06-21"
@@ -10,7 +9,7 @@ tags: []
 
 # webregistries plugged-mode root-scope determination — re-enable global customElements swap
 
-FUI #1387 turned on webregistries plugged-mode (swapped window.customElements for the scoped CustomElementRegistryImpl). Its define() registers an empty native stand-in under the real tag, leaning on a per-scope determination pass that only fires for elements entering a scoped shadow host — there is NO root-document path. So autonomous custom elements parsed in top-level HTML (e.g. route-view) upgraded to the empty stand-in, lost their real prototype, and crashed at runtime (took down the plateau site). Mitigated by disabling the root swap in fui:plugs/webregistries/index.ts. This item: implement root-scope determination so root-parsed elements upgrade to their real class, then re-enable the swap.
+Umbrella for re-enabling FUI webregistries plugged-mode root-scope (the #1387 regression). Sliced into #A (root-scope determination impl + unit test — bounded, gate-verifiable, no live re-enable) and #B (the high-stakes re-enable + live multi-app verification — a focused frontierui session owning the dev-server lifecycle). #1387's `window.customElements` swap white-paged the plateau site because root-parsed autonomous elements upgraded to an empty stand-in; the mitigation (root swap disabled in `fui:plugs/webregistries/index.ts`) is in place. *(Sliced 2026-06-22 by `/split all`.)*
 
 ## Background
 

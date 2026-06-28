@@ -2,7 +2,7 @@
 kind: task
 parent: "081"
 status: open
-blockedBy: ["451"]
+blockedBy: ["554"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-13"
 tags: []

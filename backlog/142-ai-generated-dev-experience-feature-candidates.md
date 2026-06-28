@@ -66,6 +66,29 @@ verifiable* instead of heuristic and framework-bound — and can know not just *
 - [#1651](/backlog/1651-semantic-search-over-the-running-app/) — **Semantic search over the running app** (grep over meaning).
 - [#1652](/backlog/1652-jump-to-source-from-any-live-element/) — **Jump-to-source from any live element**.
 
+## Triage verdict (2026-06-23 — fork-existence test over all 22 children)
+
+A `/prepare` pass ran the **fork-existence test** over every child to find which are genuinely *decisions*
+(a real merit either/or) vs. *build-stories* (a coherent capability whose only open knob is timing — "do we
+build X **and on what trigger**" is roadmap ordering, **not** a fork). Result: **only #1636 is a genuine
+merit fork** — the rest pose no design either/or in the capability's *shape*, only build-vs-not.
+
+- **Merit fork → prepared (decide via `/next decision`):** **#1636** (role-scoped lenses) — forces a real
+  layer either/or (lens as a first-class surface-model primitive every feature registers against, vs.
+  independent per-role panels with no lens abstraction). `preparedDate: 2026-06-23`. Architecturally
+  *upstream* of the panel-shaped siblings, so decide it first.
+- **Duplicate → fold:** **#1639** (semantic handoff packets) self-describes as "generalises the shareable
+  repro (#1631)" — same artifact + role metadata. Fold into **#1631** rather than carry separately.
+- **Build-stories (20) — not decisions; reclassify to `story` and schedule by trigger, no decision turn
+  needed:** #1631, #1632, #1633, #1634, #1635, #1637, #1638, #1640, #1641, #1642, #1643, #1644, #1645,
+  #1646, #1647, #1648, #1649, #1650, #1651, #1652. Each is a coherent capability riding the shared
+  trace/replay + introspection substrate; the "net-new vs incumbent" lines (vs Apollo / axe / MobX /
+  inspect-element / Onlook) are **white-space/value claims**, not merit either/ors. (#1637 borderline-subsumes
+  #1635; #1640/#1650 lean on already-homed #095 / #086.)
+
+**Not yet applied** — the reclassification (retype the 20 to `story`, fold #1639) is a state change held for
+a human go; this verdict is recorded so it isn't re-derived.
+
 ## Already-homed candidates (cross-ref, not spawned)
 
 These six folded into existing items at triage rather than becoming their own decisions:
