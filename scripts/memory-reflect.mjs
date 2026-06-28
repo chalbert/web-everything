@@ -32,8 +32,24 @@ if (!existsSync(MEM_DIR) || !existsSync(INDEX)) {
 
 const index = readFileSync(INDEX, 'utf8');
 const indexBytes = Buffer.byteLength(index, 'utf8');
-const indexedFiles = new Set([...index.matchAll(/\]\(([^)]+\.md)\)/g)].map((m) => m[1]));
 const topicFiles = readdirSync(MEM_DIR).filter((f) => f.endsWith('.md') && f !== 'MEMORY.md');
+
+// Reachability across the index TREE — mirror the gate (check-memory.mjs): the always-loaded MEMORY.md map
+// links ONLY the `index-<category>.md` sub-indexes, and each sub-index references its leaves by NUMBER
+// (`- N. Title — hook`, resolved via memory-resolve.mjs N), not by markdown link. A leaf is reachable if it
+// is linked OR its number is referenced from MEMORY.md or any sub-index. The old check read MEMORY.md alone
+// and matched links only, so every number-keyed leaf one level down looked orphaned (#1517/#1868 tree model).
+const numberedFiles = new Map();
+for (const f of topicFiles) { const m = f.match(/^(\d+)-/); if (m) numberedFiles.set(m[1], f); }
+const indexSources = ['MEMORY.md', ...topicFiles.filter((f) => /^index-.*\.md$/.test(f))];
+const indexedFiles = new Set();
+for (const src of indexSources) {
+  for (const ln of readFileSync(join(MEM_DIR, src), 'utf8').split('\n')) {
+    for (const m of ln.matchAll(/\]\(([^)]+\.md)\)/g)) indexedFiles.add(m[1]);
+    const nm = ln.match(/^\s*-\s*(\d+)\.\s/);
+    if (nm && numberedFiles.has(nm[1])) indexedFiles.add(numberedFiles.get(nm[1]));
+  }
+}
 const orphans = topicFiles.filter((f) => !indexedFiles.has(f));
 
 // Per-file description (frontmatter `description:`) — the recall-relevance line; the natural dedup key.
@@ -62,7 +78,9 @@ for (let i = 0; i < descs.length; i++) {
 dups.sort((x, y) => y.jac - x.jac);
 
 const TYPES = ['feedback', 'project', 'user', 'reference'];
-const skew = TYPES.map((t) => `${topicFiles.filter((f) => f.startsWith(`${t}_`) || f === `${t}.md`).length} ${t}`).join(' · ');
+// Leaves are named `<N>-<type>_<slug>.md` (type FOLLOWS the number) — match on that, not a bare `type_` prefix.
+const typeOf = (f) => (f.match(/^\d+-([a-z]+)_/) || f.match(/^([a-z]+)_/) || [])[1];
+const skew = TYPES.map((t) => `${topicFiles.filter((f) => typeOf(f) === t).length} ${t}`).join(' · ');
 
 const ln = (s = '') => console.log(s);
 ln('memory-reflect — close-out consolidation pass (#1878, propose-only — nothing is written)');
