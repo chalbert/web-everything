@@ -2,9 +2,12 @@
 kind: story
 size: 3
 parent: "1294"
-status: open
+status: resolved
 blockedBy: ["1916"]
 dateOpened: "2026-06-28"
+dateStarted: "2026-06-28"
+dateResolved: "2026-06-28"
+graduatedTo: "fui:reliability/reliabilityConformance.ts"
 tags: []
 ---
 
