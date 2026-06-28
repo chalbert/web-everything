@@ -59,6 +59,11 @@
       "description": "On a child <template>: target named outlet (omit for the primary outlet)."
     },
     {
+      "name": "route:title",
+      "type": "string",
+      "description": "On a child <template>: the document title for this route (the Document Title intent's `route` source). May reference route params (e.g. \"User :id\"). Registered as a `base`-layer contribution in CustomTitleRegistry and resolved on route-change; the site template, notification count, and transient overrides compose on top."
+    },
+    {
       "name": "lazy",
       "type": "boolean",
       "description": "On a child <template>: lazy-load the route content on first navigation."
@@ -152,7 +157,8 @@
     "persistence": "url"
   },
   "consumesIntent": [
-    "loader"
+    "loader",
+    "document-title"
   ],
   "dependsOn": [
     "view",
@@ -237,6 +243,7 @@
         "route:loader",
         "route:error",
         "route:outlet",
+        "route:title",
         "lazy"
       ],
       "rationale": "Noun-based prefix consistent with view: and on: conventions. Component tag names use route- prefix. Template attributes are plain HTML read by the view component — no registry needed."
@@ -335,6 +342,12 @@
       ],
       "description": "Control scroll position on navigation",
       "rationale": "Navigation API provides native scroll restoration"
+    },
+    "documentTitle": {
+      "attribute": "route:title",
+      "description": "Per-route document title (the Document Title intent's `route` source). The router does NOT write document.title directly — it registers the matched route's title as a `base`-layer contribution in CustomTitleRegistry and triggers a refresh on route-change, so the site template, notification count (Notification Marker's `title` surface), and transient overrides compose on top without clobbering.",
+      "announce": "On a client-side route change the title change is announced to assistive tech via the registry's live region (the intent's `announce: live` axis, WCAG 2.4.2) — paired with the autofocus-on-activation focus landing so a view change is perceivable.",
+      "rationale": "Title is routing-driven but not router-owned: the single document.title writer is a shared seam (CustomTitleRegistry) so independent sources layer cleanly. Mirrors Angular's TitleStrategy and Next.js per-route metadata title."
     },
     "prefetching": {
       "modes": [

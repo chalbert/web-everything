@@ -1,0 +1,10 @@
+{
+  "id": "customtitlecontributor",
+  "name": "CustomTitleContributor",
+  "status": "concept",
+  "type": "Contract",
+  "summary": "The contract every source of title text satisfies to take part in the composed document.title. A contributor declares its layer (base | template | decoration | transient), a priority within that layer, and a contribute(current) function that returns its share of the title given the lower layers' result. The route's base title, a site template, the Notification Marker count prefix, and a transient 'Saving…' override are all just contributors registered in CustomTitleRegistry — the registry orders them by layer and folds them into one string.",
+  "projects": [
+    "webrouting"
+  ]
+}

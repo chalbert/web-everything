@@ -1,0 +1,10 @@
+{
+  "id": "customtitleregistry",
+  "name": "CustomTitleRegistry",
+  "status": "concept",
+  "type": "Global",
+  "summary": "Exposes window.customTitleContributors as the single owner of the document.title write. Independent sources (the active route's base title, a site-level template, the Notification Marker count prefix, a transient 'Saving…' override) register as named, layered contributors instead of each calling document.title = … and clobbering the others. The registry resolves the ordered layers — base → template → decoration → transient — into one string, keeps the <title> element in sync, and announces base changes to assistive tech on client-side navigation. Realizes the Document Title intent.",
+  "projects": [
+    "webrouting"
+  ]
+}

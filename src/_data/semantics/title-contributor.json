@@ -1,0 +1,5 @@
+{
+  "term": "title contributor",
+  "definition": "A registered source of title text that takes part in the composed document.title rather than writing it directly. Declares a title layer (base / template / decoration / transient) and a contribute(current) function returning its share given the lower layers' result. The route base title, a site template, the Notification Marker count prefix, and a transient 'Saving…' override are all title contributors.",
+  "usage": "Defined by the CustomTitleContributor plug; folded into one string and written once by CustomTitleRegistry. Lets many independent sources influence the title without clobbering one another."
+}

@@ -1,0 +1,5 @@
+{
+  "term": "title layer",
+  "definition": "One of the fixed ordering bands a title contributor folds into: base (the page/route/static title), template (the site-level wrapper, e.g. `%s | Acme`), decoration (ambient prefixes/suffixes like an unread count, an unsaved dot, an environment tag), and transient (an auto-restoring override such as 'Saving…'). The registry composes layers innermost-to-outermost into the single document.title write.",
+  "usage": "The macro priority axis of the Document Title Intent. A contributor's `priority` only disambiguates within a layer; the four-band order is fixed so the common case stays declarative."
+}

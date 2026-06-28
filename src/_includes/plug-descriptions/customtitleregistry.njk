@@ -1,0 +1,112 @@
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
+<p>
+    Exposes <code>window.customTitleContributors</code> as the <strong>single owner of the
+    <code>document.title</code> write</strong>. In a real app several independent sources want to influence
+    the title at once — the active route's base title, a site-level template (<code>%s | Acme</code>), the
+    unread count from <a href="/intents/notification-marker/">Notification Marker</a>, a transient
+    <code>Saving…</code> status. If each calls <code>document.title = …</code> directly they clobber one
+    another (last writer wins). Instead each registers as a named <a
+    href="/plugs/customtitlecontributor/"><code>CustomTitleContributor</code></a>, and the registry folds the
+    ordered <strong>layers</strong> — <code>base → template → decoration → transient</code> — into one string,
+    performs the one write, keeps the <code>&lt;title&gt;</code> element in sync, and announces base changes to
+    assistive tech on client-side navigation. Realizes the <a href="/intents/document-title/">Document Title
+    intent</a>; owned by <a href="/projects/webrouting/">Web Routing</a>, since the base title is routing-driven.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document/title">document.title</a></td>
+        <td>Baseline</td>
+        <td>The registry is the sole writer; the resolved layered string is assigned here and reflected on the <code>&lt;title&gt;</code> element.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/title">&lt;title&gt;</a></td>
+        <td>Baseline</td>
+        <td>Kept in sync with <code>document.title</code>; the contract treats them as one surface.</td>
+    </tr>
+    <tr>
+        <td><a href="https://www.w3.org/WAI/WCAG22/Understanding/page-titled">WCAG 2.4.2 Page Titled</a></td>
+        <td>AA</td>
+        <td>On a client-side navigation the registry announces the new base title via a polite live region — a fresh page load reads <code>&lt;title&gt;</code> automatically, a SPA route change does not.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+interface CustomTitleRegistry extends CustomRegistry<CustomTitleContributor> {
+    readonly localName = 'customTitleContributors';
+
+    // Register a named contributor (e.g. 'route', 'site-template', 'unread', 'transient')
+    define(name: string, contributor: CustomTitleContributor): void;
+    remove(name: string): void;
+
+    // Recompute the layered title and write it once to document.title + <title>.
+    // Called automatically when any contributor signals a change.
+    refresh(): void;
+}
+{% endhighlight %}
+
+<h3 id="layers">Layer order</h3>
+<p class="text-sm text-gray-600">
+    Contributors are folded innermost-to-outermost; each receives the lower layers' result and returns its share.
+</p>
+<table>
+    <tr><th>Layer</th><th>Who contributes</th><th>Example</th></tr>
+    <tr><td><code>base</code></td><td>the active route / static page / dynamic state</td><td><code>Inbox</code></td></tr>
+    <tr><td><code>template</code></td><td>the site-level wrapper</td><td><code>Inbox | Acme</code></td></tr>
+    <tr><td><code>decoration</code></td><td>Notification Marker count, unsaved dot, env tag</td><td><code>(3) • Inbox | Acme</code></td></tr>
+    <tr><td><code>transient</code></td><td>an auto-restoring override</td><td><code>Saving… | Acme</code></td></tr>
+</table>
+
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("title-registry-example", code=true) }}
+{% highlight "javascript" %}
+// The router registers the per-route base title.
+customTitleContributors.define('route', {
+    layer: 'base', priority: 0,
+    contribute: () => currentRoute.title ?? null,
+});
+
+// A site template wraps it once.
+customTitleContributors.define('site-template', {
+    layer: 'template', priority: 0,
+    contribute: (base) => base ? `${base} | Acme` : 'Acme',
+});
+
+// Notification Marker's `title` surface is just a decoration — it never writes document.title itself.
+customTitleContributors.define('unread', {
+    layer: 'decoration', priority: 0,
+    contribute: (current) => unread > 0 ? `(${unread}) ${current}` : current,
+});
+{% endhighlight %}
+
+{{ unpluggedContent("title-registry-example", code=true) }}
+{% highlight "javascript" %}
+consume { customTitleContributors } of '@web-routing';
+
+customTitleContributors.define('route', {
+    layer: 'base', priority: 0,
+    contribute: () => currentRoute.title ?? null,
+});
+{% endhighlight %}
+
+{{ endContent() }}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>One writer, many contributors.</strong> The clobbering problem is structural: many sources, one <code>document.title</code>. A layered registry is the native-first fix — no contributor needs to know about the others, and removing one (e.g. clearing the unread count) recomputes cleanly.</li>
+    <li><strong>Native-first.</strong> The default impl writes <code>document.title</code> and the <code>&lt;title&gt;</code> element directly — no library. There is nothing to bundle; contributors are plain objects.</li>
+    <li><strong>Announcement is part of the write.</strong> Because the registry owns the single write, it is the right place to satisfy WCAG 2.4.2 on SPA navigation — the <code>announce</code> axis of the intent resolves to a live-region update here, paired with the Navigation intent's focus-landing contract.</li>
+    <li><strong>Routing-owned, notification-aware.</strong> The base title is routing-driven so the seam lives in <a href="/projects/webrouting/">Web Routing</a>; the Notification Marker count plugs in as a <code>decoration</code> contributor rather than a second writer.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Contributors satisfy the <a href="/plugs/customtitlecontributor/"><code>CustomTitleContributor</code></a>
+    contract. Realizes the <a href="/intents/document-title/">Document Title intent</a>; see
+    <a href="/projects/webrouting/">Web Routing</a>.
+</p>

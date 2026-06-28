@@ -1,0 +1,5 @@
+{
+  "term": "Document Title Intent",
+  "definition": "The UX vocabulary for the browser/page title — the text in the tab, window, history entry, and bookmark (document.title / the <title> element). Declares the base title's source (static / route / dynamic), how a site-level template wraps it (template / absolute / default, mirroring the Next.js metadata title model), and whether a title change is announced to assistive tech on client-side navigation. Treats the title as a composed, layered string rather than a single owned value.",
+  "usage": "Standardized by the Document Title Intent (Web Routing). The base layer is routing-driven; ambient decorations compose on top via the title contributor contract."
+}

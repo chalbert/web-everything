@@ -1,0 +1,58 @@
+<h3 id="overview">Overview</h3>
+<p>
+    <code>CustomTitleContributor</code> is the single contract every source of title text implements to take
+    part in the composed <code>document.title</code>. A contributor declares its <strong>layer</strong>
+    (<code>base | template | decoration | transient</code>) and a <strong>priority</strong> within that layer,
+    and exposes one <code>contribute(current)</code> method that returns its share of the title given the result
+    of all lower layers. The route's base title, a site template, the
+    <a href="/intents/notification-marker/">Notification Marker</a> count prefix, and a transient
+    <code>Saving…</code> override are all just contributors — which is what lets
+    <a href="/plugs/customtitleregistry/">the registry</a> treat them interchangeably and fold them into one
+    string without any of them knowing about the others.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document/title">document.title</a></td>
+        <td>Baseline</td>
+        <td>A contributor never assigns <code>document.title</code> itself; it returns a string the registry composes and writes once.</td>
+    </tr>
+    <tr>
+        <td><a href="https://nextjs.org/docs/app/api-reference/functions/generate-metadata#title">Next.js metadata title</a></td>
+        <td>De-facto</td>
+        <td>The <code>template</code> / <code>absolute</code> / <code>default</code> behaviour mirrors the widely-adopted Next.js title model, expressed as <code>template</code>-layer contributors.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+type TitleLayer = 'base' | 'template' | 'decoration' | 'transient';
+
+interface CustomTitleContributor {
+    // Which layer this contributor folds into. The registry orders base → template → decoration → transient.
+    readonly layer: TitleLayer;
+    // Order within the layer (ascending). Lower runs first / innermost.
+    readonly priority?: number;
+
+    // Return this contributor's title given the lower layers' resolved result.
+    // - base: ignore `current`, return the page/route title (or null to defer to a sibling)
+    // - template/decoration: wrap or prefix `current`
+    // - transient: return an override string, or null when inactive (the title auto-restores)
+    contribute(current: string | null): string | null;
+}
+{% endhighlight %}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>One method, fold not overwrite.</strong> <code>contribute(current)</code> receives the lower layers' result so each contributor only adds its share — the registry composes, no contributor clobbers.</li>
+    <li><strong>Layer is the priority axis.</strong> The four layers fix the macro order; <code>priority</code> only disambiguates within a layer (two decorations). This keeps the common case declarative.</li>
+    <li><strong>Null = abstain.</strong> Returning <code>null</code> means "I have nothing to add right now" — a transient that is inactive, a base that defers to a fallback <code>default</code>. The title auto-restores when a transient abstains.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Registered through <a href="/plugs/customtitleregistry/"><code>CustomTitleRegistry</code></a>.
+    Realizes the <a href="/intents/document-title/">Document Title intent</a>; see
+    <a href="/projects/webrouting/">Web Routing</a>.
+</p>
