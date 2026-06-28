@@ -4,7 +4,7 @@ parent: "1287"
 status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
-dateResolved: "2026-06-27"
+dateResolved: "2026-06-28"
 graduatedTo: none
 codifiedIn: "docs/agent/platform-decisions.md#identity-semantic-look-composable"
 preparedDate: "2026-06-27"
@@ -25,6 +25,93 @@ grounded in shipped code, so a fast ratify): **Fork 1** — root-agnostic compos
 *extrinsic author-fiat* `<we-card as>` (but **not** the intrinsic, content-driven polymorphism `we-button`
 already ships); **Fork 2** — the look lives as a FUI tokenized base + product/flavor values, not hardcoded in
 core. On resolve, codify the principle to `we:docs/agent/platform-decisions.md`.
+
+## REVISION 2026-06-27 — REOPENED: the real principle is the SUBSTRATE BOUNDARY
+
+**Human ruling.** The prepare-time framing got the *layer* wrong, and chasing it surfaced the actual
+principle: **every "how do we do component X" question is one question — which substrate owns the
+responsibility.** Fix the boundary once and the 100s of downstream calls (does a card have a title? what
+namespace? section or article? where does the heading go?) become **mechanical placements**, not decisions.
+The card is just this principle's worked example.
+
+### The substrate boundary (this is what codifies)
+
+| Substrate | Owns | Deliberately does NOT own | Card example |
+|---|---|---|---|
+| **WE** — *standard* | the **contract**: semantic identity + the minimal invariant. Names what a thing *is*. **Under-specifies on purpose** — any "a card has a title" claim is contradicted by the next design. | concrete structure, optional parts, look values | "a card is a styleable surface bound to a self-contained-composition root" — nothing more |
+| **FUI** — *implementation* | the **primitive**: the reusable mechanism realizing the contract — transient root-binding, root resolution, the tokenized base style hook, slot/prop machinery. Product-agnostic. | any product-specific design opinion (titles, footers, menus) | `we-card` (→`<article>`), `we-section-card` (→`<section>`) |
+| **Product** — *composition* | **concrete, semantically-named, namespaced components** composing primitives into what *this* product needs (title, footer, items, menus, behaviors). | the underlying standard/primitive (it consumes, never re-mints them) | `standard-card` = `we-card` + title + footer + … |
+
+**Placement is explicit and load-bearing.** The product-composition components (`standard-card`,
+`standard-section`) live in the **product** substrate — for the docs, *the WE website's own frontend* — **not
+in WE and not in FUI**. `we-*` names belong to the standard+primitive layer; `standard-*` is product UI that
+*consumes* the primitives. (The WE website's frontend co-locating in the `webeverything` repo, which also
+hosts the WE standards, does **not** make `standard-card` a standard — it is product code dogfooding FUI, so
+no conflict with "WE holds zero standard impl".) The FUI-vs-product line, when it blurs, is decided by the
+existing [reusable-against-all-implementers → neutral home](docs/agent/platform-decisions.md#reusable-neutral-home)
+statute: product-agnostic + reusable ⇒ graduate to an FUI primitive; product-specific ⇒ stays in the product.
+
+**Delivery vehicle (the original error).** A component is **not** delivered as a classname. It is a
+**composed web component** — own tag, multiple elements, props, behaviors, slots — at *both* the FUI-primitive
+and product-composition layers. `<section class="fui-card">` was only ever the degenerate look-only residue,
+never the authored deliverable.
+
+**Native-first is preserved as a constraint on the composition**, not a ban on the component: each layer's
+component composes the correct native root internally (landmarks/roles/a11y) and never reinvents a sufficient
+native primitive — but the deliverable is the custom element.
+
+**FUI primitives are TRANSIENT (ruled).** `we-card`/`we-section-card` are authored as tags and **erase to
+their native DOM at runtime** (`we-card`→`<article class="fui-card">`); the product component composes them.
+Chosen: **(a) transient + (i) native-first-as-internal-constraint** (rejected: (b) a persistent custom element
+that costs the landmark role; (ii) custom-element-as-identity with native roots optional).
+
+### Every prior sub-question, dissolved by placement
+
+- *"Does the card mandate a title?"* → **product** (`standard-card`); not WE, not the FUI primitive. **So old Fork 2 (heading/title on `we-card`) DISSOLVES — nothing to ratify on the primitive.** `standard-card` composes the `<hN id>` heading the docs need, ids preserved.
+- *"Namespace / prefix?"* → `we-*` is reserved for the standard+primitive layer; the **product** owns its own namespace via a **config knob (default empty)** — the WE docs site uses unprefixed `standard-card`; the config lets any *published* product namespace its components without code change.
+- *"`<section>` or `<article>` root?"* → **FUI** ships both primitives; the **product** picks per surface.
+
+### Worked example (the substrate boundary in code)
+
+```html
+<!-- FUI primitives: root binding + base style hook + slot/prop machinery; NO design opinion -->
+<we-card> … </we-card>                          <!-- transient → <article class="fui-card"> -->
+<we-section-card id="overview"> … </we-section-card>   <!-- transient → <section id="overview" class="fui-card"> -->
+
+<!-- PRODUCT concrete component: composes a primitive + THIS site's structure; semantic name, own namespace -->
+<standard-card>                                 <!-- composes we-card + title + footer + items + menus -->
+  <h4 id="scope-vocab">W3C selector vocabulary, wholesale</h4>
+  <p>…</p>
+</standard-card>
+<!-- runtime: <article class="fui-card …"> with the <h4 id="scope-vocab"> preserved exactly as the product composed it -->
+
+<!-- still REJECTED (Fork 1, unchanged): extrinsic author-fiat root override — the author writes the right primitive -->
+<we-card as="section"> … </we-card>             <!-- ✗ use <we-section-card> -->
+<!-- still BLESSED (Fork 1, unchanged): intrinsic, content-driven resolution -->
+<we-button href="/x">Open</we-button>           <!-- resolveTag(): href ? 'a' : 'button' -->
+```
+
+**Edge to flag for the FUI build (not a fork — a transient limit).** A fully-transient primitive erases its
+host, so a **custom behavior** on the *product* component (e.g. collapse) must be **delegated onto the
+resulting native DOM** (document-level, attribute-keyed) — or that behavior lives in the product component's
+own lifecycle around the erased primitive. The docs cards are structure-only, so this doesn't gate #1871;
+capture it when `we-section-card` / `standard-card` are specced.
+
+**What of the original survives unchanged:** **Fork 1** (intrinsic root resolution blessed; extrinsic
+author-fiat `as=` rejected) and **Fork 2's token layering** (the *look values* live as FUI tokenized base +
+product/flavor values) both hold — they are now seen as *consequences of the substrate boundary* (the boundary
+is the general rule; token-layering is its style-axis instance). Only the "deliver via a bare native element +
+class" claim, and the idea that title/heading is a `we-card`-level question, are superseded.
+
+**Downstream re-scope:**
+- **#1871** — docs author the **product component `standard-card`** (composing `we-card`) and a section-rooted
+  concrete card (composing `we-section-card`); title/heading/`<hN id>` live there; **its old Fork 2 drops**.
+- **New builds** — FUI primitive `we-section-card` (`CardElement`-style transient, `resolveTag(): 'section'`)
+  + the product `standard-card` component (in the website); namespace config (default empty).
+- **Re-codify** `we:docs/agent/platform-decisions.md#identity-semantic-look-composable` on re-resolve: lead
+  with the **substrate boundary** (general), demote the card to its worked example, fold in the
+  composed-transient-component delivery + the product-composition + namespace tiers. Consequences
+  (different-semantic⇒different-element; native-first) hold.
 
 ## The principle (codify on resolve)
 
@@ -100,11 +187,16 @@ style" must be ergonomic, so the card's style hook is the named class `.fui-card
 
 *Code example (Fork 1 — the blessed shapes vs the rejected one):*
 
+> ⚠️ **The `<section class="fui-card">` "RECOMMENDED" line below is SUPERSEDED** by the 2026-06-27 REVISION
+> above — a section card is now delivered as a transient composed component (`<we-section-card>`), not a
+> hand-authored class. The bare class survives only as the *runtime residue*. The rest of this block
+> (article `we-card`, rejected `as=`, blessed intrinsic `we-button`) is unchanged.
+
 ```html
 <!-- RECOMMENDED: card-composition on its default <article> root (we-card is transient → <article class="fui-card">) -->
 <we-card heading="Quarterly report"> … </we-card>
 
-<!-- RECOMMENDED: a <section> wears the card LOOK by applying the style hook — same look, honest semantics -->
+<!-- SUPERSEDED (see REVISION): authored as <we-section-card> now; this is only the runtime-erased residue -->
 <section class="fui-card"> … </section>
 
 <!-- BLESSED intrinsic polymorphism already shipped (root from the element's OWN content, not author fiat) -->

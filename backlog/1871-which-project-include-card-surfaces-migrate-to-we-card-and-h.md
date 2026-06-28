@@ -1,10 +1,13 @@
 ---
 kind: decision
 parent: "1601"
-status: open
+status: resolved
 blockedBy: ["1886"]
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-28"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-27"
 relatedReport: "reports/2026-06-27-project-include-we-card-migration.md"
 relatedProject: webdocs
@@ -60,30 +63,68 @@ through onto the `<article>` *automatically* — `.section-card:target` keeps ma
 `<h4 id="scope-vocab">` is an anchor target, and `we-card`'s `title=` would emit an id-less heading — so the
 fork is whether to use the card's `title=` header slot or keep the explicit `<hN id>` in the body.
 
-## Blocked on the governing decision #1886 (the deep concept)
+## Governing decision #1886 — REOPENED, re-scoped onto the substrate boundary (re-blocked)
 
-This item is the **docs application**. The architecture it rests on — *a card is a root-agnostic
-structure+style applied to a native element; `we-card` = the `<article>` binding; not element-polymorphic;
-FUI base + flavor values; "different semantic ⇒ different element / look ≠ identity"* — was hoisted into
-its own governing decision **#1886** (source of truth). Once #1886 ratifies, this item's two forks resolve
-**mechanically**:
+> ⚠️ **#1886 was reopened 2026-06-27** and re-framed around the **substrate boundary** (WE contract → FUI
+> primitive → product concrete component — see #1886's *REVISION*). This item is the **docs application** of
+> that boundary; it is re-blocked on #1886 and re-scoped on its ratification. **Old Fork 2 (heading/title on
+> the card) is dissolved** — title/heading is a *product-component* responsibility, not a `we-card` question.
 
-- **Fork 1 (scope)** → article-cards (the 22 `<div class="standard-card">`) bind to `we-card`; the 279
-  `<section class="section-card">` stay native `<section>` + card *style* (no bespoke CSS); the 7
-  `<a class="standard-card">` link tiles stay `<a>` + card style. (This is default (a), now justified by
-  #1886's principle, not by an impl limit.)
-- **Fork 2 (heading/anchor)** → unchanged and independent of #1886: keep the explicit `<hN id>` in the
-  card body (default (b)), preserving the ~17 live anchor ids; `title=` only for `no-toc`, id-less headings.
+This item authors the **product-composition substrate** of #1886's boundary for the WE docs site:
 
-The follow-up residual (unify the card-surface style across `<article>`/`<section>` rather than today's
-overlapping `we:.section-card` + `fui:.fui-card`) is folded into #1886's base/flavor layering.
+- **FUI primitives (consumed, not built here):** `we-card` (→`<article>`), `we-section-card` (→`<section>`)
+  — transient root-bindings + base `.fui-card` style hook. No title/footer opinion.
+- **Product concrete component (the actual #1871 migration):** the docs author a semantically-named
+  **`standard-card`** (and a section-rooted variant) that **composes** the primitive + this site's structure
+  (title, footer, items, menus) and keeps the explicit `<hN id>` heading the docs need. Namespace per the
+  config knob (default empty → unprefixed `standard-card`).
+
+**Scope (single axis now — which surface becomes which product component):**
+- the 22 `<div class="standard-card">` content cards → the **`standard-card`** product component (composes
+  `we-card` → `<article class="fui-card">`);
+- the 279 `.section-card` `<section>` wrappers → a **section-rooted concrete card** (composes
+  `we-section-card` → `<section class="fui-card">`), keeping the `<section>` landmark + wrapper `id`;
+- the 7 `<a class="standard-card">` link tiles **stay `<a>`** on the #1820 catalog-tile pattern (a
+  non-linkable card component can't hold a link tile).
+
+**The ~17 anchored `<hN id>` headings ride inside the product component** (it composes the heading element
+verbatim), so `#scope-vocab`-style deep-links + `:target` are preserved — *without* any heading decision at
+the `we-card` layer.
+
+**New builds this spawns:** (1) FUI primitive `we-section-card` (`CardElement`-style transient,
+`resolveTag(): 'section'`); (2) the product `standard-card` component(s) in the website; (3) the namespace
+config knob (default empty). Scaffolded on #1886 ratification.
+
+**Folded in — the bespoke-style retirement (was #1895).** The product components compose the primitive's
+`.fui-card` look, so today's WE-local `we:.section-card` / `we:.standard-card` frame CSS
+(`we:src/css/style.css:817-845,1329-1351,1427`) retires *through* the components (bespoke classes drop to
+only their non-look bits — `:target` margin, heading rules). #1895 is re-pointed/closed at ratification.
 
 ## Recommended path at a glance
 
-| Fork | Axis | Options | Recommended default |
-|---|---|---|---|
-| 1 | Scope — which surface converts | (a) `<div>` standard-cards only · (b) + section-cards · (c) neither | **(a) the 22 `<div class="standard-card">` content cards** — `<section>` wrappers + `<a>` link tiles excluded |
-| 2 | Heading/anchor of converted cards | (a) use `title=`/`heading-level=` · (b) keep explicit `<hN id>` in body | **(b) keep explicit `<hN id>` in body** (preserves heading level + anchor id) |
+| Axis | Resolution |
+|---|---|
+| Which product component per surface | 22 `<div>` → **`standard-card`** (composes `we-card`); 279 `<section>` → **section-rooted concrete card** (composes `we-section-card`); 7 `<a>` link tiles stay `<a>` (#1820) |
+| Heading / anchor | owned by the **product component** (composes the `<hN id>` verbatim) — *no `we-card`-level fork; old Fork 2 dissolved* |
+| Namespace | product owns it via config knob, default empty → unprefixed `standard-card`; `we-*` reserved for standard+primitive |
+
+Example (revised — a `<section>` content card authored as the **product component**, composing the FUI primitive):
+
+```njk
+{# before #}
+<section id="overview" class="section-card">
+  <h3 id="scope-vocab">W3C selector vocabulary, wholesale</h3>
+  <p>…</p>
+</section>
+
+{# after — author the PRODUCT component; it composes we-section-card and keeps the <h3 id> the docs need #}
+<standard-section id="overview">
+  <h3 id="scope-vocab">W3C selector vocabulary, wholesale</h3>
+  <p>…</p>
+</standard-section>
+{# runtime DOM: <section id="overview" class="fui-card …"><h3 id="scope-vocab">…</h3><p>…</p></section> #}
+{# landmark + #overview + #scope-vocab anchors preserved; bespoke .section-card frame retired #}
+```
 
 ### Supported by default (not forks)
 
@@ -97,12 +138,21 @@ overlapping `we:.section-card` + `fui:.fui-card`) is folded into #1886's base/fl
 The transferred `class="standard-card"` lands on the same `<article>` as the component's own `fui-card`
 class. Both declare `border` / `border-radius` / `background` (`we:src/css/style.css:1329-1351` vs
 `fui:blocks/card/Card.ts:91-93`) — these are the *same* properties on one element, so it is a **last-wins
-redundancy, not a literal double border**, but one rule set is then dead weight. Reconcile during #1608:
-either drop the `standard-card` class (let `fui-card` own the frame, keep only `standard-card h4` if its
-heading rule is wanted) or keep `standard-card` and rely on it. Confirm `fui-card`'s CSS is actually present
-on the docs page (the transient renders into light DOM — the `CARD_CSS` must be globally injected).
+redundancy, not a literal double border**, but one rule set is then dead weight. This reconciliation —
+drop the `standard-card`/`section-card` frame rules in favour of the shared `fui-card` look, keeping only
+the non-look bits (`standard-card h4` heading, `.section-card:target` scroll-margin) — is the **#1895**
+style-migration, not #1608's element swap. #1608 only confirms `fui-card`'s CSS is actually present on the
+docs page (the transient renders into light DOM — the `CARD_CSS` must be globally injected); the look
+unification rides #1895.
 
 ## Fork 1 — scope: which content-card surface converts
+
+> ⚠️ **SUPERSEDED by the revised #1886 (see the Governing-decision section above).** The analysis below
+> framed the choice as *"should the 279 `<section>`s convert to `<article>`?"* and rejected (b) on
+> downgrade grounds. Under the revised composed-component model that question is **moot**: sections become a
+> **`<we-section-card>` transient that erases back to `<section>`** (not `<article>`), so there is no
+> downgrade — both surfaces become card *components* on their correct native roots. The historical
+> `(a)/(b)/(c)` reasoning is kept below for the audit trail only.
 
 *Fork exists because branch (b) is flawed:* `<section id>` content wrappers are sectioning landmarks
 (document outline + `:target` deep-links), not self-contained compositions — erasing 279 of them to
@@ -145,6 +195,11 @@ the 29 standard-cards" was wrong: 7 of the 29 are `<a href>` link tiles that can
 tiles carved out to the #1820/#1607 outer-anchor pattern.
 
 ## Fork 2 — heading/anchor of the converted cards
+
+> ⚠️ **DISSOLVED by the revised #1886 (substrate boundary).** This fork asked "where does the heading go on
+> `we-card`?" — but heading/title is a **product-component** responsibility, not a primitive question. The
+> product `standard-card` composes the explicit `<hN id>` heading verbatim, so the anchors are preserved with
+> **no decision at the `we-card` layer**. The analysis below is kept for the audit trail only.
 
 *Fork exists because branch (a) is flawed for anchor-bearing headings:* `we-card`'s `title=` generates an
 id-less `fui-card__title`, so using it drops the `<h4 id="scope-vocab">` ids that ~17 in-page anchors target

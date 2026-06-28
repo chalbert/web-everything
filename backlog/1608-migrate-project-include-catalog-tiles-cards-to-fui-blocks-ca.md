@@ -3,14 +3,30 @@ kind: story
 size: 3
 parent: "1601"
 status: open
-blockedBy: ["1871"]
+blockedBy: ["1903"]
 dateOpened: "2026-06-22"
 tags: []
 ---
 
-# Migrate project-* include catalog tiles/cards to FUI blocks/card
+# Migrate project-* include card surfaces to product components (standard-card / standard-section)
 
-Migrate the catalog tile/card surfaces in the `we:src/_includes/project-*.njk` includes to FUI blocks/card via the **transient-CE mount** (`<we-card>`, #1621 rule-7 model — the card counterpart to the #1598/#1758 badge dogfood, **not** the retired mode-C inline mount). Gate npm run verify + a :8080 render check.
+Author the **product-substrate components** for the WE website and migrate the `we:src/_includes/project-*.njk`
+card surfaces onto them, per the #1886 substrate boundary (resolved 2026-06-28 —
+`we:docs/agent/platform-decisions.md#identity-semantic-look-composable`). **The original "swap to `<we-card>`"
+framing is superseded:** a card surface is delivered as a **product component that composes the FUI
+primitive**, not a hand-applied `<we-card>`/class.
+
+- **the 22 `<div class="standard-card">` content cards → `<standard-card>`** (product component composing the
+  FUI `we-card` primitive → `<article class="fui-card">`);
+- **the 279 `.section-card` `<section>` wrappers → `<standard-section>`** (product component composing the FUI
+  `we-section-card` primitive **#1903** → `<section class="fui-card">`), keeping the `<section>` landmark +
+  wrapper `id` + each `<hN id>` heading verbatim (so `#anchor` TOC links + `.section-card:target` survive);
+- **the 7 `<a class="standard-card">` link tiles stay `<a>`** on the #1820 catalog-tile pattern.
+
+`standard-card` / `standard-section` live in the **WE website's own frontend, not WE/FUI**, namespace via the
+config knob (default empty → unprefixed). Heading/title is owned by the product component (composes the
+`<hN id>` it needs) — there is no `we-card`-level heading decision. Gate `npm run verify` + a `:8080` render
+check (landmarks, deep-link `:target`, and the ~17 `#…` heading anchors all intact).
 
 ## Pre-flight (batch-2026-06-27-1842-1720) — premise is stale; re-pointed `blockedBy: ["1871"]`
 
