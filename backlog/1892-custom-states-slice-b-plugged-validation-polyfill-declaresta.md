@@ -1,6 +1,5 @@
 ---
-kind: story
-size: 5
+kind: decision
 parent: "1831"
 status: open
 blockedBy: ["1891"]
