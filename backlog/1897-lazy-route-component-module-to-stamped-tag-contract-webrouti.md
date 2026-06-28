@@ -1,12 +1,15 @@
 ---
 kind: decision
 parent: "1684"
-status: open
+status: resolved
 relatedItems: ["1720", "1823", "1731", "227"]
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-28"
+dateResolved: "2026-06-28"
+graduatedTo: none
 preparedDate: "2026-06-28"
 relatedReport: reports/2026-06-28-webrouting-lazy-component-module-to-tag.md
+codifiedIn: "docs/agent/platform-decisions.md#lazy-route-component-auto-define-default"
 tags: [webrouting, route-view, lazy-component, runtime-ingestion, auto-define]
 ---
 
@@ -15,11 +18,13 @@ tags: [webrouting, route-view, lazy-component, runtime-ingestion, auto-define]
 Prepared and ready to ratify. **Reframed by the prep: this is not a three-way fork — it is the ratified
 `auto-define` configurable dimension applied to lazy route components, so the call is "set the router's
 default value," not "pick one of three mechanisms"** (the same fork→dimension reframe #1823's Fork 3 took).
-Recommended default: **on-import self-registration with the tag carried on the route value** — the lazy
+Recommended stance: **on-import self-registration with the tag carried on the route value** — the lazy
 module defines its own element as a pure import side-effect, the route object carries the `tag`, and the
-engine `createElement(tag)`s and **never calls `customElements.define`** on the default path (mirroring the
-ratified block loader, `fui:workbench/loader.ts:56-68`). `engine-defines` stays a **per-scope override** on
-the auto-define dimension, never foreclosed. Grounded in
+engine `createElement(tag)`s and **never calls `customElements.define`** (mirroring the ratified block
+loader, `fui:workbench/loader.ts:56-68`). **Per `#config-extends-platform-default`, the route-engine code
+itself holds NO baked default — it derives the auto-define strategy from resolved platform settings; this
+on-import value is the stance we ship in the platform-preset flavor, not a constant in the engine.**
+`engine-defines` stays a **per-scope override** on the auto-define dimension, never foreclosed. Grounded in
 [the prep report](../reports/2026-06-28-webrouting-lazy-component-module-to-tag.md) and
 [the research topic](/research/webrouting-lazy-component-module-to-tag/).
 
@@ -81,7 +86,9 @@ three-way framing is dissolved: (a) is the default, (b) is the override, (c) is 
   string case); the engine `await`s the load, then `createElement(tag)` — and **never calls
   `customElements.define`**. This is the native-first / most-permissive value of the auto-define dimension
   and mirrors the ratified loader field-for-field (`load` + `tag` → async resolve → sync `create()`,
-  `fui:workbench/loader.ts:56-68`).
+  `fui:workbench/loader.ts:56-68`). **The route-engine code carries no baked default** — it reads the
+  resolved auto-define strategy from platform settings; (a) is the value the **platform-preset flavor**
+  ships (`#config-extends-platform-default`), so a scope can re-set it without touching engine code.
 - **(b) engine-defines** — the module's **default export is the constructor** and the **engine** derives a
   stable tag and calls `customElements.define(tag, Ctor)`. **Not excluded — it is the non-default strategy**
   of the same auto-define dimension, reachable as a **per-scope override** through `CustomAutoDefineRegistry`
@@ -177,5 +184,8 @@ defines" as an invariant** (which would foreclose the `engine-defines` strategy)
   `createElement`); statute #227 / `#config-extends-platform-default` (the auto-define dimension this
   instances).
 - **On ratify, `codifiedIn`** should **instance** `#config-extends-platform-default`
-  (`we:docs/agent/platform-decisions.md`), extending the `#webrouting-runtime-route-ingestion` cluster — a
-  default on the auto-define dimension, **not** a standalone route-only auto-define rule.
+  (`we:docs/agent/platform-decisions.md`), extending the `#webrouting-runtime-route-ingestion` cluster — the
+  **platform-preset flavor** sets the auto-define dimension to **on-import self-register + tag-on-route**
+  while the **route-engine code stays default-less** (derives the strategy from resolved settings); **not** a
+  standalone route-only auto-define rule, and **not** an "engine never defines" invariant (that would
+  foreclose the `engine-defines` per-scope override).
