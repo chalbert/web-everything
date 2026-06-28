@@ -23,19 +23,32 @@
  * supplies explicit per-step values that bypass derivation — still validated, so brand can't silently ship
  * an inaccessible step. Pure + dependency-free.
  */
-import { type DtcgDocument, flattenTokens, resolveTokens } from './tokens';
+import type {
+  AccentStep,
+  ContrastPolicy,
+  DeriveOptions,
+  DtcgDocument,
+  Rgb,
+  SchemeRoles,
+  SchemeRuntime,
+  StepValidation,
+} from './contract';
+import { flattenTokens, resolveTokens } from './tokens';
+
+export type {
+  AccentStep,
+  ContrastPolicy,
+  DeriveOptions,
+  Rgb,
+  SchemeRoles,
+  SchemeRuntime,
+  StepValidation,
+} from './contract';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Color model — parse → sRGB → luminance. Supports the formats the default token
 // set uses (oklch/oklab) plus hex and rgb(); enough to validate a derived scale.
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** An sRGB color, each channel gamma-encoded in [0, 1]. Alpha dropped (contrast is opaque). */
-export interface Rgb {
-  r: number;
-  g: number;
-  b: number;
-}
 
 const clamp01 = (n: number): number => (n < 0 ? 0 : n > 1 ? 1 : n);
 
@@ -178,83 +191,12 @@ export function apcaLc(text: Rgb, bg: Rgb): number {
 // Scheme + accent derivation
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** A derived tonal step: the native CSS the runtime uses, plus its literal (for the contrast gate only). */
-export interface AccentStep {
-  /** Step id, e.g. `'accent-9'`. */
-  readonly id: string;
-  /** Target oklch lightness for this step (0–1) — the tonal ramp position. */
-  readonly lightness: number;
-  /** The native relative-color CSS expression the runtime emits (tracks the seed at runtime). */
-  readonly css: string;
-  /** The literal sRGB this resolves to, computed here ONLY to validate contrast. */
-  readonly value: Rgb;
-  /**
-   * When the theme is **scheme-paired** (#1314 — a `color.accent-dark` anchor present), the dark-scheme
-   * literal this step resolves to (derived from the dark seed), validated against the dark background.
-   * Absent on single-seed themes, where `value` serves both schemes.
-   */
-  readonly valueDark?: Rgb;
-}
-
-export interface SchemeRoles {
-  /** `light-dark(...)` background — switches with `color-scheme`. */
-  readonly bg: string;
-  /** `light-dark(...)` foreground/text. */
-  readonly fg: string;
-}
-
-/** Accessibility thresholds a derived step must clear. Defaults: WCAG AA body + APCA Lc 60. */
-export interface ContrastPolicy {
-  /** Minimum WCAG ratio (default 4.5 — AA normal text). */
-  readonly wcagMin?: number;
-  /** Minimum |APCA Lc| (default 60 — readable body text on the APCA scale). */
-  readonly apcaMin?: number;
-}
-
-/** One step's contrast verdict against the scheme background it is meant to read on. */
-export interface StepValidation {
-  readonly step: string;
-  readonly against: 'bg-light' | 'bg-dark';
-  readonly wcag: number;
-  readonly apca: number;
-  readonly passes: boolean;
-  readonly reason: 'ok' | 'wcag-below-min' | 'apca-below-min';
-}
-
-export interface SchemeRuntime {
-  readonly scheme: SchemeRoles;
-  /** High-contrast scheme — pure white/black extremes for the `prefers-contrast: more` path. */
-  readonly highContrast: SchemeRoles;
-  readonly accent: AccentStep[];
-  readonly validation: StepValidation[];
-  /** True iff every accent step cleared the policy on at least one scheme background. */
-  readonly accessible: boolean;
-  /**
-   * True when a `color.accent-dark` anchor is present (#1314): the accent scale flips per scheme via
-   * `light-dark(...)` so a system's dark-mode primary surface is expressible from one theme. False for a
-   * single scheme-invariant `color.accent` seed (the scale then tracks that one seed across both schemes).
-   */
-  readonly schemePaired: boolean;
-}
-
 const DEFAULT_POLICY: Required<ContrastPolicy> = { wcagMin: 4.5, apcaMin: 60 };
 
 /** The default tonal ramp (perceptual oklch lightness per step) — an MD3-style descending scale. */
 const DEFAULT_RAMP: Record<string, number> = {
   'accent-1': 0.98, 'accent-3': 0.92, 'accent-6': 0.74, 'accent-9': 0.55, 'accent-11': 0.45, 'accent-12': 0.32,
 };
-
-export interface DeriveOptions {
-  /** Per-step oklch lightness ramp (default {@link DEFAULT_RAMP}). */
-  readonly ramp?: Record<string, number>;
-  /** Contrast thresholds (default WCAG AA + APCA 60). */
-  readonly policy?: ContrastPolicy;
-  /**
-   * Curated override (brand precision): explicit literal values for named steps that bypass derivation.
-   * Still validated against the policy — brand cannot silently ship an inaccessible step.
-   */
-  readonly curated?: Record<string, string>;
-}
 
 /** Read a flat literal token value out of a DTCG document by dot-path (resolving aliases). */
 function tokenValue(doc: DtcgDocument, path: string): string {

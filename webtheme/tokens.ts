@@ -19,35 +19,23 @@
  * token document deep-merges over the {@link defaultTokens platform default} — config-extends-platform-
  * default, never authored from scratch) and **alias resolution** (a `{group.token}` ref → its target,
  * cycle- and dangling-ref-checked). The DTCG→CSS compile is its sibling {@link ./compile}. Pure + dependency-free.
+ *
+ * The DTCG schema types ({@link DtcgType}, {@link DtcgToken}, {@link DtcgGroup}, {@link DtcgDocument},
+ * {@link FlatToken}, {@link ResolvedToken}) are the **pure contract** — extracted to {@link ./contract}
+ * (the `@webeverything/contracts/webtheme` entry, #1294 T1) so FUI imports them over the FUI→WE arrow. This
+ * runtime module `import type`s them and re-exports the surface, so importers reach types + runtime from one
+ * site.
  */
+import type {
+  DtcgDocument,
+  DtcgGroup,
+  DtcgToken,
+  DtcgType,
+  FlatToken,
+  ResolvedToken,
+} from './contract';
 
-/** The DTCG `$type`s Web Theme's primitive + component tiers use. A group's `$type` is inherited by its tokens. */
-export type DtcgType = 'color' | 'dimension' | 'number' | 'duration' | 'fontFamily' | 'fontWeight' | 'shadow';
-
-/** A DTCG token leaf: a concrete `$value` (or a `{group.token}` alias string) and an optional own `$type`. */
-export interface DtcgToken {
-  $value: string | number;
-  $type?: DtcgType;
-  $description?: string;
-}
-
-/** A DTCG group: an optional `$type` (inherited by descendants) plus child groups/tokens, keyed by name. */
-export interface DtcgGroup {
-  $type?: DtcgType;
-  $description?: string;
-  [name: string]: DtcgGroup | DtcgToken | DtcgType | string | undefined;
-}
-
-/** A whole DTCG token document — the root group. */
-export type DtcgDocument = DtcgGroup;
-
-/** A token flattened out of the tree: its dot-path segments, resolved `$type`, raw value, description. */
-export interface FlatToken {
-  readonly path: readonly string[];
-  readonly type: DtcgType | undefined;
-  readonly value: string | number;
-  readonly description?: string;
-}
+export type { DtcgDocument, DtcgGroup, DtcgToken, DtcgType, FlatToken, ResolvedToken } from './contract';
 
 const META_KEYS = new Set(['$type', '$value', '$description']);
 
@@ -127,14 +115,6 @@ export class TokenResolutionError extends Error {
     super(`webtheme token resolution — ${reason}`);
     this.name = 'TokenResolutionError';
   }
-}
-
-/** A flat token plus its resolved-to-literal value and the path it aliases (if any). */
-export interface ResolvedToken extends FlatToken {
-  /** The final non-alias literal this token resolves to (alias chains followed to the end). */
-  readonly resolved: string | number;
-  /** When this token is an alias, the dot-path it points at (for `var(--ref)` compilation); else null. */
-  readonly aliasOf: string | null;
 }
 
 /**

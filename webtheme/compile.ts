@@ -8,10 +8,8 @@
  * matching the #403 example `--button-radius: var(--radius-md)`), while its `@property` `initial-value`
  * uses the fully-resolved literal. No build-time value baking beyond this; no second runtime.
  */
+import type { CompileOptions, CompileResult, DtcgDocument, DtcgType, ResolvedToken } from './contract';
 import {
-  type DtcgDocument,
-  type DtcgType,
-  type ResolvedToken,
   cssVarName,
   flattenTokens,
   isTemplated,
@@ -19,18 +17,7 @@ import {
   resolveTokens,
 } from './tokens';
 
-export interface CompileOptions {
-  /** The selector the custom properties are emitted under. Defaults to `:root`. */
-  readonly selector?: string;
-  /** Emit `@property` registrations for typed numerics (default true). */
-  readonly registerProperties?: boolean;
-}
-
-export interface CompileResult {
-  readonly css: string;
-  /** Tokens whose `$type` has no CSS `@property` syntax (e.g. fontFamily/shadow) — registered as a plain var only. */
-  readonly diagnostics: readonly string[];
-}
+export type { CompileOptions, CompileResult } from './contract';
 
 /** DTCG `$type` → CSS `@property` `syntax` descriptor; types with no registrable syntax map to null. */
 const PROPERTY_SYNTAX: Record<DtcgType, string | null> = {

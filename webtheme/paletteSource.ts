@@ -25,14 +25,9 @@
  * fork (#1274). This slice ships the registry + the trivial DTCG passthrough + the Tailwind parser + the
  * shared value normalizer; the remaining source parsers register against the same contract later.
  */
-import type { DtcgGroup, DtcgToken } from './tokens';
+import type { DtcgGroup, DtcgToken, PaletteSourceParser } from './contract';
 
-/**
- * A palette-source parser: normalizes one external palette `raw` shape into a DTCG color {@link DtcgGroup}
- * (a `$type: color` group of `{ $value }` leaves) in webtheme's pivot. Pure; throws on a malformed shape
- * (lossy-but-loud, never a silent bad token).
- */
-export type PaletteSourceParser = (raw: unknown) => DtcgGroup;
+export type { PaletteSourceParser } from './contract';
 
 /** Thrown when a source payload doesn't match its parser's expected shape. */
 export class PaletteSourceError extends Error {

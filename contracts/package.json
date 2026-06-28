@@ -39,6 +39,7 @@
     "./webcontexts": "./webcontexts.ts",
     "./webpolicy": "./webpolicy.ts",
     "./webcompliance": "./webcompliance.ts",
+    "./webtheme": "./webtheme.ts",
     "./plug-parity": "./plug-parity.ts"
   }
 }
