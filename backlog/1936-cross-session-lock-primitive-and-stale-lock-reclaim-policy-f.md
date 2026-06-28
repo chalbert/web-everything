@@ -1,8 +1,11 @@
 ---
 kind: decision
 parent: "1933"
-status: open
+status: resolved
 dateOpened: "2026-06-28"
+dateResolved: "2026-06-28"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-28"
 relatedReport: reports/2026-06-28-cross-session-lock-primitive.md
 tags: []
@@ -52,6 +55,16 @@ Kleppmann's Redlock critique describes the live hazard for #1933: an owner pause
 | Fork 1 — primitive | (a) atomic lock dir / `O_EXCL` lockfile per path, `{owner-session, heartbeat-at}` JSON under the local central checkout | Race-free across separate invocations, daemon-free, no single-file contention point; local home avoids `O_EXCL`-on-NFS; `flock` fd-lifetime doesn't fit cross-invocation clients | High |
 | Fork 2 — reclaim | (a)+(b): heartbeat-TTL lease + same-machine PID-liveness fast path | Lease = correctness floor (Chubby/etcd/ZK convergence; mirrors the advisory TTL precedent); PID layered for fast clean-crash recovery; manual-only wedges the fleet | High |
 | Insurance | Broker rejects pushes from a lane whose lease was reclaimed (fencing at the integration point) | Closes the Kleppmann lease-expiry race without lock-entry fencing tokens; fits #1933's sole-authority model | Medium-High |
+
+## Ratified (2026-06-28)
+
+Both forks ratified at their recommended defaults; no override.
+
+- **Fork 1 — primitive: (a)** atomic lock directory / `O_EXCL` lockfile **per reserved path** under the *local* central checkout, holding `{ owner-session, heartbeat-at }` JSON. Race-free across separate invocations, daemon-free, no single-file write-contention point; local home avoids the `O_EXCL`-on-NFS unreliability; `flock`'s fd-lifetime model doesn't fit cross-invocation clients. Shared-registry (c) rejected — it reintroduces the committed-file push-race #1933 already rejected for `we:.claude/skills/batch-backlog-items/claims.json`, and a single mutated file is itself the contention point under true-parallel lanes. The governing principle: a **mandatory write-time** lock cannot share the advisory tier's self-correcting single-file shape.
+- **Fork 2 — reclaim: (a)+(b)** heartbeat-TTL lease as the correctness floor (Chubby/etcd/ZooKeeper convergence; mirrors the existing advisory `we:.claude/skills/batch-backlog-items/reservations.json` TTL precedent) **plus** a same-machine PID-liveness *fast path* for immediate reclaim of a provably-dead owner. PID-liveness is layered, never primary (PID-reuse hazard → verify the PID's command line before trusting it). Manual-unlock-only (c) rejected — a hung lane would wedge the autonomous fleet.
+- **Insurance invariant (ratified):** the central broker is the **fencing point** — it rejects a push from a lane whose lease was reclaimed mid-flight — rather than baking fencing tokens into the lock entry. Closes the Kleppmann lease-expiry race (owner pauses past TTL, gets reclaimed, wakes and writes anyway) while keeping the lock entry simple, and fits #1933's sole-integration-authority model. *Confidence on this invariant: Medium-High; recorded as rationale, not load-bearing on the primitive.*
+
+This ruling drives the lock slice of #1933; it is a design decision, not a new entity (`graduatedTo: none`). Implementation of the lock primitive + reclaim policy happens under #1933's lock slice.
 
 ## Definition of ready
 
