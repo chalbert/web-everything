@@ -179,8 +179,9 @@ items one-at-a-time on the branch), so you get a line per item, not per multi-it
 for live progress; the main chat shows the final ledger on completion.
 
 The non-negotiables (in priority order). *(A "lane" below is now **per item**: each concurrent item runs alone
-in its own worktree, and the serial lane is worked one item at a time — so "lane of N" reads as "N independent
-items." The guarantees are unchanged; only the granularity got finer.)*
+in its own persistent **clone** (#1933 clone model — own HEAD, guard-immune; pushes to a `lane/*` ref), and
+the serial lane is worked one item at a time on main — so "lane of N" reads as "N independent items." The
+guarantees are unchanged; only the granularity got finer and isolation moved from worktrees to clones.)*
 
 1. **Serial is the safe baseline, always reachable.** Any item that can't be *proven* independent runs
    in the serial chain, and `/batch` (or `--serial`) forces the whole batch onto it. Parallelism (`/workflow`)
@@ -192,13 +193,15 @@ items." The guarantees are unchanged; only the granularity got finer.)*
    lane, serial.** Declared files are treated as a *lower bound*, not the truth (work spills past the
    frontmatter) — which is why git, not the metadata, is the real arbiter (rule 4).
 3. **Each lane keeps the full serial arc.** Within a lane, items still run one-after-another through
-   claim → work → close-out **gate at every seam**, and the **stop rule** applies per lane. Lanes run
-   in **isolated git worktrees** so concurrent edits can't corrupt each other. A red gate in one lane
-   contains to that lane — nothing merges until it's individually green.
-4. **Git is the conflict detector, not the file declaration.** Merge clean lanes back **one at a
-   time**. A merge conflict *is* the proof the partition was wrong — **abort that lane and replay its
-   items serially** on top of the merged result. Never force-merge. After all lanes land, run **one
-   final gate** (`tests` + `check:standards`) on the merged tree before close-out is final.
+   work → close-out **gate at every seam**, and the **stop rule** applies per lane (the *claim* is
+   pre-assigned centrally, #1933 choice 2 — lanes never claim). Lanes run in **isolated clones** (own
+   HEAD) so concurrent edits can't corrupt each other. A red gate in one lane contains to that lane —
+   nothing merges until it's individually green.
+4. **Git is the conflict detector, not the file declaration.** Merge each lane's `lane/*` ref into main
+   **one at a time**. A merge conflict triggers **rebase-and-retry** (#1933) — never force; a real
+   semantic conflict that survives the rebase is the proof the partition was wrong, so **replay that
+   item serially** on top of the merged result. A **full gate runs per merge** (#1937: the central gate
+   is the authority), so the merged tree is verified before the next lane lands.
 5. **No silent speculation.** Report the partition up front (which items in which lane, and *why* each
    pair is independent), and `log` any lane that conflicted and was replayed serially — so a
    fallback reads as a fallback, never as "ran in parallel" when it didn't.
@@ -208,7 +211,7 @@ When the ready pool has no provably-disjoint pair (everything touches the same s
 materializes when the batchable list genuinely spans independent subsystems; reliability is identical
 either way. Full design + rationale: backlog **#083 agent-file-lock-coordination**.
 
-### Execute phase runs on the Workflow tool (#1147)
+### Execute phase runs on the Workflow tool — the #1933 CLONE model (#1147 → #1942)
 
 The **main loop still does the conversational part unchanged** — pack, plan, the single "go", the reserve,
 and the close-out/calibration. Under `/workflow` (or `--parallel`) it then hands the **execute phase**
@@ -221,34 +224,45 @@ const r = Workflow({
 })
 ```
 
-The script (read its header for the full contract): per-item **effect-probe** (frontmatter files are a
-lower bound, so an agent predicts the real touch-set; low-confidence → forced serial) → pure-JS **partition**
-into a **serial lane** (probe-uncertain, monolith-touching, or anything sharing files / a `blockedBy` edge
-with another item) + a **concurrent set of provably-independent items** (each disjoint from *every* other
-item) → `parallel()` **one agent per concurrent item in `isolation:'worktree'`** (per-item granularity — each
-item logs as it lands) that gates locally with `check:standards --local --files=…` (#1144) → a serial
-**integrate** loop that works the serial lane first (one agent per item on the branch), then merges each
-clean worktree one at a time **onto a throwaway integration branch**, runs the **full** gate per merge, and
-**replays a conflicted/red item serially** (the JS loop's single thread is the merge mutex) → regenerates
-**derived artifacts once**. It returns `{ integrationBranch, ledger, concurrentItems, serialItems,
-multiLaneFiles, conflictsReplayed, … }`. **One agent per item** is what gives `/workflows` a progress line as
-each item resolves (the earlier model bundled several items into one lane agent and reported once).
+**Why clones, not worktrees (#1153 4th-run finding).** The earlier orchestrator isolated lanes with `git
+worktree add` + a throwaway `batch-parallel/*` branch — but the user-global git-branch guard denies *both*
+worktree-add and branch creation in the shared checkout, so that model is **structurally blocked**. The
+#1933 clone model sidesteps the guard entirely: **each lane is its own persistent CLONE with its own HEAD**
+(`we:scripts/lane-pool.mjs`, slice 2), and convergence happens **through the remote** — a lane pushes its
+commit to a throwaway `lane/*` ref (the #1934 guard carve-out) and the central integrator merges those into
+main.
 
-**The main agent does the landing** (not the workflow — the workflow NEVER writes the live branch). After a
-green return, merge the integration branch onto the working branch in ONE op, then delete it:
+The script (read its header for the full contract): per-item **effect-probe** (frontmatter files are a lower
+bound, so an agent predicts the real touch-set; low-confidence → forced serial) → pure-JS **partition** into
+a **serial lane** (probe-uncertain, monolith-touching, or anything sharing files / a `blockedBy` edge) + a
+**concurrent set of provably-independent items** → **central pre-claim** (claims ALL items up front in the
+primary checkout — the only place `claims.json` is written, #1933 choice 2 — and pushes the post-claim state
+to a throwaway `lane/_base-<slug>` ref) → `parallel()` **one agent per concurrent item in its own lane clone**
+(`cd <lane>` → `reset --hard origin/lane/_base` so the item is already `active`; lanes never run claim, never
+stage `claims.json`) that works its own files, gates locally with `check:standards --local --files=…`
+(#1937 best-effort fast-fail), resolves, commits explicit paths, and **pushes `HEAD:lane/<slug>-<n>`** → a
+serial **integrate** loop on main that works the serial lane first, then merges each `lane/*` ref one at a
+time with the **full** gate per merge (#1937: the central gate is the authority), **rebase-and-retry on
+conflict** (never force; a real semantic conflict that survives the rebase is replayed serially — the JS
+loop's single thread is the merge mutex), **deletes the remote ref after a clean land**, then regenerates
+**derived artifacts once** (the #1935 Fork-2 regen-on-merge set). It returns `{ ledger, concurrentItems,
+serialItems, multiLaneFiles, conflictsReplayed, stranded, baseRef, … }`.
 
-```
-git merge --no-ff batch-parallel/<slug>     # the single write to the live branch; resolve once if a
-                                            # concurrent session moved it. If it conflicts/red → don't
-                                            # land; surface and fall back to a serial replay.
-git branch -D batch-parallel/<slug>
-```
+**The integrator lands directly on the primary checkout's main — the main agent does NOT do a landing
+merge.** This is the deliberate, decision-mandated safety-model shift from the worktree model: instead of
+"the workflow never writes the live branch; the main agent lands a throwaway integration branch," the clone
+model makes **all lane work durable on `origin` (`lane/*` refs) before any merge**, so a mid-integration
+failure loses nothing (refs persist; each is deleted only *after* its merge lands). The central integrator
+(the primary checkout = the tree the human watches, #1936) does the N merges itself. So after a green return
+the main agent has **no git landing op** — it just folds `r.ledger` into the standard closure block and
+**surfaces `r.multiLaneFiles`** (files touched by >1 item — the residual silent clean-but-wrong-merge risk,
+the #1935 Option-D optimistic floor's post-hoc detector) + `r.stranded` (resolves that didn't land, #1869)
+for a human glance; the close-skill audit re-checks them. If `r` reports `aborted` or a red final gate,
+**don't trust the run** — surface it and fall back to a serial `/batch`.
 
-This is the safety win: every risky multi-actor git write is quarantined to worktrees + the throwaway
-branch; the shared branch sees exactly **one** merge, with a natural **abort point** (a bad assembly never
-touches your branch) and per-item commit history preserved. Fold `r.ledger` into the standard closure block,
-and **surface `r.multiLaneFiles`** (files touched by >1 lane — the residual silent clean-but-wrong-merge
-risk) for a human glance; the close-skill audit re-checks them.
+> **Pre-lock layer is a follow-up, not in this orchestrator.** Slice 3 ships the **optimistic git-merge
+> floor** (#1935 Option D) with post-hoc `multiLaneFiles` detection. The mandatory pre-lock reservation layer
+> (#1935 Fork 2 / the #1936 lock primitive / the #1938 `adapters.json` split) lands as a later slice.
 
 **What the registry split (#1145/#1146) changed:** shared registries are now per-entry files
 (`src/_data/<reg>/<id>.json`), so a lane that adds/edits a registry entry just writes its OWN file — disjoint,
