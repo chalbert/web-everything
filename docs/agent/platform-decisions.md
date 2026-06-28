@@ -2076,6 +2076,29 @@ same-document-stage contract (`fui:workbench/mount.ts:6-11`).
 
 ---
 
+### The authoritative gate runs once, on the merged tree; the lane gate is a best-effort scoped fast-fail {#gate-on-merged-tree-lane-fast-fail}
+
+In a lane-to-central parallel pipeline (agents work in lane clones, push `lane/*` branches, a central broker
+merges + gates + pushes `main`), the **binding verdict gate runs once, centrally, on the *merged* tree** — the
+full no-flag `npm run check:standards` (+ tests) after the broker merges `lane/*` into `main`, before pushing to
+`origin`. This is the "Not Rocket Science Rule" invariant every mature merge queue enforces (Bors fast-forwards
+only a green *merged* commit; GitHub gates the speculative merge commit; Zuul gates the assembled DAG), and it is
+the **only** place a consistent — and, for cross-repo lanes, *assembled multi-repo* — tree exists. A **lane gate
+cannot be the authority**: an isolated lane tree *false-reds* on whole-repo consistency rules that can't pass
+without sibling lanes present (live-measured: #1153's 4-of-7 lanes red'd in isolation, green on merge). The lane
+**may** run a gate, but only the **scoped** `check:standards --local --files=<lane's edited files>` (#1159's
+partition, which demotes global-consistency findings) as a **best-effort pre-push fast-fail** — it catches the
+author's own file-local mistakes before a wasted push+merge round-trip, but is an *optimization, not a
+correctness gate*: skipping it costs only a round-trip, never correctness. The two halves are non-overlapping by
+construction (#1159 deliberately removed the global rules from the lane gate and defers them to the unflagged
+central gate), so this is a clean file-local-fast vs global-authoritative split, not redundant double-running.
+
+**Lineage:** #1937 (ruling — Fork C adopted: central full gate = authority/mandatory, lane scoped fast-fail =
+best-effort; report `we:reports/2026-06-28-gate-location-lane-central.md`). Under parent #1933 (the parallel-batch
+pipeline); lane fast-fail build = follow-up #1939. Reuses the #1159 gate-partition (`we:scripts/check-standards.mjs:1385-1410`).
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from

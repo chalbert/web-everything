@@ -1,8 +1,11 @@
 ---
 kind: decision
 parent: "1933"
-status: open
+status: resolved
 dateOpened: "2026-06-28"
+dateResolved: "2026-06-28"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#gate-on-merged-tree-lane-fast-fail"
 preparedDate: "2026-06-28"
 relatedReport: reports/2026-06-28-gate-location-lane-central.md
 tags: []
@@ -97,3 +100,28 @@ lane-gate-best-effort + central-gate-mandatory. Grounding: #1159 (the existing p
 full gate after merge is the authority (Fork B), and the lane runs the #1159 scoped fast-fail as a best-effort
 pre-push convenience (Fork A scoped). This mirrors merge-queue practice and reuses the gate-partition the repo
 already built.
+
+## Ruling (ratified 2026-06-28)
+
+**Adopt Fork C.** Two gates, non-overlapping by construction:
+
+1. **Central gate = the authority (Fork B, mandatory, non-negotiable).** The broker merges `lane/*` into
+   `main` and runs the FULL no-flag `npm run check:standards` (+ tests where relevant) on the assembled tree
+   before pushing `main` to `origin`. This is the "Not Rocket Science Rule" invariant — gate the *merged*
+   commit, false-red-free because the tree is now consistent, and it is the only place #1933 slice 4's
+   cross-repo assembled tree (WE→frontierui→plateau-app) can be built. **This is the must-build.**
+
+2. **Lane gate = best-effort fast-fail (Fork A scoped, optimization, NOT the authority).** The lane runs
+   `check:standards --local --files=<lane's edited files>` (#1159 mode) before pushing `lane/*` to catch the
+   author's own file-local mistakes before a wasted push+merge round-trip. It deliberately does NOT verify
+   global-consistency rules (#1159 partitioned those out) — so it cannot false-red the way a full lane gate
+   does (#1153's 4-of-7). Skipping it costs only a round-trip; nothing is lost but latency.
+
+**Red-team outcome:** the strongest objection — "don't build the lane gate at all, let central catch
+everything" — has force but does not defeat Fork C; it only sets priority. The lane fast-fail is an
+optimization, not a correctness gate. **Resolution: central gate is the correctness must-build; the lane
+scoped fast-fail is best-effort and may land as a follow-up item, not a prerequisite.** No principle
+(impl-is-not-a-standard, the merge-queue prior art) is violated by either gate.
+
+Implementation rolls under parent #1933's broker pipeline; the lane fast-fail is captured as a separate
+best-effort follow-up so it doesn't gate the central authority's delivery.
