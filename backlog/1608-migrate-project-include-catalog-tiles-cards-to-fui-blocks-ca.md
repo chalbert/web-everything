@@ -1,9 +1,8 @@
 ---
 kind: story
-size: 3
+size: 13
 parent: "1601"
 status: open
-blockedBy: ["1903"]
 dateOpened: "2026-06-22"
 tags: []
 ---
@@ -27,6 +26,18 @@ primitive**, not a hand-applied `<we-card>`/class.
 config knob (default empty → unprefixed). Heading/title is owned by the product component (composes the
 `<hN id>` it needs) — there is no `we-card`-level heading decision. Gate `npm run verify` + a `:8080` render
 check (landmarks, deep-link `:target`, and the ~17 `#…` heading anchors all intact).
+
+## Carry (batch-2026-06-28-1905-1945) — outgrew size·3 → re-sized 13, needs /split
+
+Claimed and grounded the real surface set: **~300 `.section-card`/`.standard-card` occurrences across 40+
+`we:src/_includes/project-*.njk` files** (e.g. webexpressions 14, webadapters/webcomponents/webcontexts 11
+each), **plus authoring two new product web-components** (`standard-card`, `standard-section`) that do not yet
+exist, **plus a namespace config knob**, **plus a live `:8080` render check** verifying landmarks + deep-link
+`:target` + heading anchors survive across every migrated surface. That is comfortably 13+ pts, not the
+estimated 3 — it **outgrew on grounding** (real counts, not a pre-claim guess). Re-sized 13 (drops it from the
+batch pool) and released to `open`; the prior `blockedBy: ["1903"]` is resolved. **Next:** `/split` into a
+component-authoring slice (the two components + config knob, agent-ready) + per-file migration slices that each
+carry their own render check — then those slices batch.
 
 ## Pre-flight (batch-2026-06-27-1842-1720) — premise is stale; re-pointed `blockedBy: ["1871"]`
 
