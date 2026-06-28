@@ -1,8 +1,10 @@
 ---
 name: index-arch
-description: Where code lives across the WE→FrontierUI→Plateau constellation: WE holds zero impl, contract-vs-impl-vs-values carve, placement/consume-runtime tests, backward-edge import boundaries, contract.ts slicing, reusable→neutral home, plug definition, separation defaults, vendor-dep quarantine, repo constellation. Recall when deciding where something belongs, moving code between repos, or designing module/import boundaries.
-metadata:
+description: "Where code lives across the WE→FrontierUI→Plateau constellation: WE holds zero impl, contract-vs-impl-vs-values carve, placement/consume-runtime tests, backward-edge import boundaries, contract.ts slicing, reusable→neutral home, plug definition, separation defaults, vendor-dep quarantine, repo constellation. Recall when deciding where something belongs, moving code between repos, or designing module/import boundaries."
+metadata: 
+  node_type: memory
   type: reference
+  originSessionId: 18c9313a-e757-4229-bd70-33e84dd750dd
 ---
 
 Constellation & Placement cluster — open a leaf with `node scripts/memory-resolve.mjs <N>` (or `--cat`):
@@ -27,3 +29,4 @@ Constellation & Placement cluster — open a leaf with `node scripts/memory-reso
 - 95. Plug = Proposed Missing Standard — plugged=proposed standard; unplugged=safe-now; #1826/#1807
 - 96. Repo Constellation — WE (standard+plugs)→Frontier UI (impl)→plateau-app (product); legacy `plateau` ABANDONED
 - 97. Reusable Home Rule — reusable→plateau; impl-specific→its impl; #1788
+- 139. Component Substrate Boundary — per-component Q = a placement: WE contract / FUI primitive / product component; deliver a composed web component NEVER a classname; title/footer=product; #1886
