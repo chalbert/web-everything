@@ -3,7 +3,7 @@ kind: story
 size: 2
 parent: "1600"
 status: open
-blockedBy: ["1902"]
+blockedBy: ["1905"]
 dateOpened: "2026-06-22"
 dateStarted: "2026-06-27"
 tags: []
@@ -24,5 +24,7 @@ not exist** (no Eleventy shortcode/transform invokes `CustomExpressionParser.eva
 bindings authored). #1818 itself lists it as an **open impl residual**. So #1787 (the runtime transient-CE
 embed + `we-data-table{}` CSS) was a **false `blockedBy`** — the real prerequisite is the build harness, now
 filed as the build harness. #1867 (the design **decision**) ratified the boundary + interactive-cell format
-(`#ssr-data-table-build-harness`); the build itself is **#1902**, which this now `blockedBy`. Released unbuilt;
-the whole #1600 data-table family (#1609/#1610/#1612/#1613) carries the same correction. Cascades clean once #1902 lands.
+(`#ssr-data-table-build-harness`); the build was **#1902**, now **sliced** (2026-06-28) into A=#1902 (FUI build-CLI),
+B=#1904 (in-place enhancer), C=#1905 (WE Eleventy orchestration). This surface needs the full harness, so it now
+`blockedBy` the integration slice **#1905**. Released unbuilt; the whole #1600 data-table family
+(#1609/#1610/#1612/#1613) carries the same correction. Cascades clean once #1905 lands.
