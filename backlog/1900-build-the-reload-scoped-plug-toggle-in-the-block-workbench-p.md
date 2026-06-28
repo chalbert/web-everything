@@ -3,8 +3,10 @@ kind: story
 size: 3
 status: open
 parent: "1836"
-blockedBy: []
+locus: frontierui
+blockedBy: ["1926"]
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-28"
 tags: [plugs, unplugged, workbench, dev-experience]
 ---
 
@@ -24,3 +26,24 @@ Implements the ratified (c) mechanism from #1845: add a 'plug' key to the workbe
 - The toggle is a reload link that preserves all other serialized workbench state across the switch.
 - A plugged-only capability visibly differs between the two modes (the gap the workbench exists to show is honest, not faked by lingering globals).
 - `check:standards` + workbench e2e green.
+
+## Pre-flight finding (batch-2026-06-27) — `blockedBy: ["1926"]`, dropped `outgrew`/blocked-in-fact
+
+Claimed and grounded; the `?plug=off` half outgrew the size-3 estimate on a **missing prerequisite**, not a
+design fork. Two grounding facts:
+
+1. **Plugged is the status quo via a vite auto-inject (premise confirmed).** The `bootstrapPatches()` plugin
+   in `fui:vite.config.mts:20-30` injects the `fui:plugs/bootstrap.ts` script into every demo HTML (skips if
+   already present), so the workbench is plugged today and `?plug=on` is a no-op — the `?plug=on` branch is
+   "skip the workbench page in that plugin / import bootstrap from `fui:demos/workbench.ts`", trivial.
+2. **The unplugged half has nothing to drive.** Acceptance bullets 1 + 3 require "render via the unplugged
+   path" + "a plugged-only capability **visibly differs**" — but there is **no functional standard-plug
+   register-set**: `fui:plugs/bootstrap.ts` couples its realm-global patches to 13 `register*()` calls, and
+   `fui:plugs/unplugged.ts` exposes only primitive `register()`/`upgrade()` with **zero non-test importers**
+   (no demo drives unplugged). "Drive the unplugged register/upgrade path" has nothing to call until that
+   register-set exists.
+
+Filed the prerequisite **#1926** (functional standard-plug register-set / `bootstrapUnplugged()`); repointed
+`blockedBy [] → ["1926"]`. This is a real dependency edge, not a forced design call — once #1926 lands, this
+item is a clean wire-up (`?plug=off → bootstrapUnplugged()`, skip the vite auto-inject for the workbench
+page, render the gap). Released unbuilt (`active → open`).
