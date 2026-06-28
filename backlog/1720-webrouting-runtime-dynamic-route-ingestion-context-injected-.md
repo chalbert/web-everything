@@ -2,11 +2,13 @@
 kind: story
 size: 8
 parent: "1684"
-status: open
+status: resolved
 locus: frontierui
 blockedBy: []
 dateOpened: "2026-06-23"
-dateStarted: "2026-06-27"
+dateStarted: "2026-06-28"
+dateResolved: "2026-06-28"
+graduatedTo: 1927
 tags: []
 ---
 
@@ -57,3 +59,29 @@ unblocked — build it against the ratified mechanism. Note the body's "reuses t
 route-map as the INPUT contract" is **superseded** by #1823: the skeptic pass proved the #1685 projection
 *cannot* be the runtime engine input (it drops `pattern`/`template`); the runtime path uses a distinct
 route-object shape over the reused injector mechanism.
+
+## Progress (batch-2026-06-27) — slice A delivered; slice B (lazy component) carved to #1927
+
+When grounded, the now-buildable scope was **two** ratified mechanisms (#1823 runtime ingestion + #1897 lazy
+`route:component`, the latter ratified *after* this was sized at 8). Per the body's explicit A/B slice
+sanction, split: **slice A (runtime route-object ingestion) landed here**; **slice B (lazy component
+auto-define) carved to #1927** (build-ready, #1897-backed).
+
+**Slice A — landed in `frontierui` (the #1823 mechanism):**
+- `fui:blocks/router/types.ts`: a `RuntimeRouteObject` shape (`path`, live `template`, `guard`/`guardLeave`/
+  `loader` as **name OR inline fn**, `outlet`, `isErrorBoundary`) — the distinct runtime shape, **not** the
+  #1685 projection; `compileRuntimeRoutes()` compiles them to `RouteDefinition`s (adding inline `guardFn`/
+  `guardLeaveFn`/`loaderFn` for the inline-override half); `mergeRouteDefinitions()` merges the three surfaces
+  under `MergePrecedence` (default `static-first`, first-match-wins + a `console.warn` shadow diagnostic;
+  error boundaries excluded from shadow detection — they legitimately share a path).
+- `fui:blocks/router/elements/RouteViewElement.ts`: the **three authoring surfaces** merge in
+  `#recomputeRoutes()` — static `<template route>` parse + the `customContexts:routes` injector provider +
+  the **settable `routes` property** (the getter now returns the effective merged set; the setter ingests
+  runtime objects). `mergePrecedence` property/`merge-precedence` attr (config-extends-default). A nested
+  route-view **merges** the inherited provider routes with its local statics (never shadow). Guard/loader
+  resolution now honours an **inline override** before falling back to name-DI.
+- Tests: 5 new in `fui:blocks/__tests__/unit/router/RouteViewElement.test.ts` (property-ingestion stamp,
+  provider ingestion, inline-loader override, `dynamic-first` precedence, shadow warning). Full router suite
+  **98 tests green**; `check:standards` + router `tsc` green.
+
+This story is **resolved as slice A**; the lazy-component renderable is #1927.
