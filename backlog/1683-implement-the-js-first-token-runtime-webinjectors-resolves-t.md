@@ -1,10 +1,12 @@
 ---
 kind: epic
 workItem: epic
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-06-23"
 dateStarted: "2026-06-27"
+dateResolved: "2026-06-28"
+graduatedTo: none
 relatedProject: webinjectors
 tags: [design-tokens, theme, webinjectors, webtheme]
 ---
