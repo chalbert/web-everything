@@ -77,7 +77,12 @@ output is the rewritten body, not a message:
    intent dimension? · expose the whole axis? · fixed mechanic or dimension? · DI-injectable? · most-
    permissive default? · seam between intents?) on every element, and record the classification in the
    item — it *is* much of the eventual ruling. Honour the standing bias: separate and decouple (burden of
-   proof is on combining).
+   proof is on combining). **Two verdicts are *dispositive non-fork* routes — apply them, don't write a
+   `## Fork N` anyway** (the #1892 misses): a **config dimension** (Q4 = "both branches legitimate
+   end-states" → `#config-extends-platform-default`: not a fork, no ratifiable default, default = the
+   most-permissive *platform-default flavor* from Q6) and a **contract-derived classification** (Q1
+   which-layer / the residue bar #1839 — *derive the contract from #1826 first, independently, then run the
+   test; never narrow the contract to fit the answer you want*).
 3. **Author the prepared-fork shape** (*backlog-workflow.md → The prepared-fork shape*) — rewrite the
    body to that shape. WE-specific reminders: pin each axis to concrete `file:line` refs into the real
    tree (go read the code, cite it — an authored snippet never substitutes); **open every `## Fork N`
@@ -103,7 +108,12 @@ output is the rewritten body, not a message:
    Close it at the source: after authoring each fork's default, **spin up a throwaway skeptic sub-agent
    (prompted *only* to refute — `general-purpose`, default "this default is wrong") and have it attack the
    recommended branch of every fork, hardest on the high-leverage / high-`gates` ones.** The skeptic's
-   prompt **must carry two attack axes, not one**: (1) *merit* — is the default wrong on correctness /
+   prompt **must carry three attack axes, not one**: (0) **classification** *(run first — the #1892 axis)* —
+   is this even the right *kind* of question? try to re-route it: is the `## Fork N` actually a **config
+   dimension** (`#config-extends-platform-default` — two values of one knob, not a fork), a *support-both*, or
+   *settled by precedent*; and if the classification turns on a **contract** (residue #1839 / which-layer),
+   is the contract the **coherent-standard** one (#1826) or one **narrowed to fit the answer**? — then
+   (1) *merit* — is the default wrong on correctness /
    composability / a11y / lock-in? and (2) **statute-overlap** (*backlog-workflow.md → Red-team the default
    → Statute-overlap check*, #1886) — *if this decision will set `codifiedIn`, does the rule it would write
    collide with or duplicate an anchor already in [platform-decisions.md](../../../docs/agent/platform-decisions.md)
@@ -134,7 +144,13 @@ A prepared decision is **still open** — the call hasn't been made. So `release
    "mint `webpush` vs fold the protocol into an existing project" fork), or carve it to a child item that
    is *itself* prepared and rewrite the parent fork to "→ delegated to #NNN (prepared)". A body still
    carrying a bare "needs a human call" / "confirm X" / "TBD" / slash-name (`webpush`/`webpermissions`)
-   fork is not prepared — do not stamp it. Walk every `## Fork N` and confirm each has its fork-existence
+   fork is not prepared — do not stamp it. **Scan the *whole body*, not just the `## Fork N` headings, for
+   a live choice left as prose** (*backlog-workflow.md → no live choice may sit outside a `## Fork N`*):
+   "open residue", "decide at ratification", "whether v1 ships X or Y", a "TBD"/"to be decided" anywhere, a
+   glance-table footnote, a "Net mechanism … open question:" trailer. Each such aside is an un-prepared fork
+   in disguise — the structural reason `prepare` and the decision turn *diverge* (#1935); promote it to its
+   own `## Fork N` (research it now), fold it into an existing fork's default, or drop it. Then walk every
+   `## Fork N` and confirm each has its fork-existence
    justification line (#819), named options,
    tradeoffs, a bold default, **and a `Skeptic:` verdict line** (the pass-4 attack was run and its findings
    folded in — a fork with no `Skeptic:` note is un-attacked, so not at DoR; do not stamp it) — **plus a

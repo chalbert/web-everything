@@ -1194,6 +1194,37 @@ describe('lintBacklogItemRendering (#845 — the shared per-item rendering lint)
       expect(lintBacklogItemRendering({ item: epic(), body }).errors).toEqual([]);
     });
   });
+
+  describe('dangling-residue guard (#1935)', () => {
+    const decision = (over = {}) => item({ kind: 'decision', ...over });
+    const residueBody = '# T\n\nOption C is the default. Open residue for the ratification turn: ship C or A-first.\n';
+
+    it('warns on a prose-deferred choice in a RESOLVED decision', () => {
+      const { warnings } = lintBacklogItemRendering({ item: decision({ status: 'resolved' }), body: residueBody });
+      expect(warnings.some((w) => /defers a choice in prose/.test(w))).toBe(true);
+    });
+
+    it('warns on a prose-deferred choice in a prepared (still-open) decision', () => {
+      const { warnings } = lintBacklogItemRendering({ item: decision({ preparedDate: '2026-06-28' }), body: residueBody });
+      expect(warnings.some((w) => /defers a choice in prose/.test(w))).toBe(true);
+    });
+
+    it('does not fire on an OPEN, un-prepared decision (mid-research deferral is legitimate)', () => {
+      const { warnings } = lintBacklogItemRendering({ item: decision(), body: residueBody });
+      expect(warnings.some((w) => /defers a choice in prose/.test(w))).toBe(false);
+    });
+
+    it('does not fire on a non-decision, or when the body has no deferral language', () => {
+      expect(lintBacklogItemRendering({ item: item({ status: 'resolved' }), body: residueBody }).warnings.some((w) => /defers a choice in prose/.test(w))).toBe(false);
+      const clean = '# T\n\nFork 2 ratified: Option C (static ∪ dynamic).\n';
+      expect(lintBacklogItemRendering({ item: decision({ status: 'resolved' }), body: clean }).warnings.some((w) => /defers a choice in prose/.test(w))).toBe(false);
+    });
+
+    it('ignores deferral phrasing inside a fenced code block', () => {
+      const body = '# T\n\n```\nopen residue: TBD\n```\n';
+      expect(lintBacklogItemRendering({ item: decision({ status: 'resolved' }), body }).warnings.some((w) => /defers a choice in prose/.test(w))).toBe(false);
+    });
+  });
 });
 
 // ── #1247 classification-axis loud-fail ──────────────────────────────────────

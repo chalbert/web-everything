@@ -687,6 +687,33 @@ export function lintBacklogItemRendering({ item, body }) {
         `tracking item (#NNN). If it was simply never sliced, reopen and carve it rather than closing the umbrella over it.`);
   }
 
+  // Dangling-residue guard (#1935). A `kind: decision` that is either RESOLVED or carries a truthful
+  // `preparedDate` (prepared, awaiting ratification) must not leave a live choice as PROSE outside a
+  // `## Fork N` — an "open residue / decide-at-ratification / TBD" aside is an un-prepared fork in disguise,
+  // and the structural reason `prepare` and the decision turn diverge (the decider can only ratify the
+  // item's default, so a deferred sub-choice forces a cold call). The fork-shape walks scan headings, so a
+  // prose residue slips past them — catch it here. Scoped to resolved|prepared (an OPEN, un-prepared
+  // decision is mid-research, where deferral language is legitimate; ACTIVE is the discussion phase, where a
+  // staged `AWAITING RATIFICATION` block may transiently hold such phrasing). WARN: heuristic, the real
+  // enforcement is the prep close-out judgment in docs/agent/backlog-workflow.md.
+  if (item.kind === 'decision' && (item.status === 'resolved' || item.preparedDate)) {
+    const DEFERRED_CHOICE_RE = /\b(open residue|residue for the ratification|(?:at|for|in) the ratification turn|to be decided|decide(?:d)? (?:this |it )?later|decide at ratification|\bTBD\b)/i;
+    const residueTells = [];
+    let inFence = false;
+    body.split('\n').forEach((raw, i) => {
+      const l = raw.trim();
+      if (/^```/.test(l)) { inFence = !inFence; return; }
+      if (inFence) return;
+      if (DEFERRED_CHOICE_RE.test(l)) residueTells.push(i + 1);
+    });
+    if (residueTells.length)
+      warnings.push(`Backlog item "${id}" is a ${item.status === 'resolved' ? 'RESOLVED' : 'prepared'} decision whose body ` +
+        `still defers a choice in prose @ line(s) ${residueTells.join(', ')} ("open residue" / "decide at ratification" / ` +
+        `"TBD"-style) — a live choice left OUTSIDE a \`## Fork N\` is an un-prepared fork in disguise (#1935). Promote it to ` +
+        `its own \`## Fork N\` with a bold default (research it now), fold it into an existing fork's default, or drop it as ` +
+        `not-actually-a-choice. See docs/agent/backlog-workflow.md → "no live choice may sit outside a Fork N".`);
+  }
+
   return { errors, warnings };
 }
 
