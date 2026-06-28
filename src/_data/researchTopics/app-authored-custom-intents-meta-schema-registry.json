@@ -1,0 +1,32 @@
+{
+  "id": "app-authored-custom-intents-meta-schema-registry",
+  "title": "App-authored custom intents — meta-schema, namespacing, and build-time vs runtime registration (prior-art survey)",
+  "status": "open",
+  "summary": "Prep research for decision #1913. Intent-UX-Only (platform-decisions.md:378) ratified that intents are an open, never-finished system — \"custom non-standard intents must coexist conflict-free; standardize the meta-schema, not the list.\" This surveys how seven established systems let third parties extend a fixed standard vocabulary conflict-free, and synthesizes the transferable shape for product-minted WE intents. Convergent findings: (1) NAMESPACING — the platform-native move is to reserve one structural marker the standard promises never to use (custom-elements' mandatory dash; CSS custom-props' `--`; DTCG's `$`-prefix reservation) and hand authors the whole space behind it, collision-free against current AND future standard names with zero central registry; finer cross-author collision-avoidance anchors names to something globally unique the author already owns (RDF/Java reverse-DNS, npm `@scope/`, DTCG `$extensions` reverse-DNS keys). The named guardrail is RFC 6648, which DEPRECATED the `X-` status-prefix convention because experimental names leak into the standard space and force interop-breaking renames on promotion — so namespace by OWNERSHIP, never by status (`custom-`/`x-`). (2) REGISTRATION — every declarative token/schema system (DTCG, JSON-Schema/OpenAPI, Tailwind `@theme`, Style Dictionary) registers build-time/statically so the vocabulary is analyzable without running the app; only the imperative web-platform runtime registries (customElements.define, CustomStateSet) register at runtime, and they pay for it with runtime-throw collision detection and loss of static analyzability. WE's intent→trait resolver (webtraits/intentProfileResolver.ts) is already a PURE BUILD-TIME function over the registries, so build-time/declarative registration is the native fit. (3) CLOSED-vs-OPEN — ARIA roles (closed catalog, unknown ignored, fallback-token chain) vs custom states (open, author-minted behind a `--`/`:state()` fence) show the platform makes the call per-term by who must interoperate on the meaning: cross-actor meaning → closed; component-private meaning → open-but-fenced. Recommendation: scope-style `owner:intent` namespace anchored to the app's existing identity (collision-free like reverse-DNS without the dotted verbosity, npm's choice); declarative build-time registration via a per-product manifest globbed into the registry exactly like src/_data/researchTopics/ and src/_data/intents/; unknown-intent → graceful most-permissive default (ignore, don't throw), mirroring JSON-Schema unknown-keyword + WE's most-permissive-default ruling; a `must-understand` opt-in (JSON-Schema `$vocabulary` required-flag) for intents that must fail-fast; meta-schema minimally = namespaced id + dimensions{values} + per-dimension default + optional extends + provenance. Full grounding + per-system citation table in reports/2026-06-28-app-authored-custom-intents-meta-schema-registry.md.",
+  "dateOpened": "2026-06-28",
+  "lastReviewed": "2026-06-28",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "intents",
+    "meta-schema",
+    "namespacing",
+    "extensibility",
+    "registry",
+    "custom-elements",
+    "css-custom-properties",
+    "design-tokens",
+    "dtcg",
+    "json-schema",
+    "openapi",
+    "aria",
+    "custom-states",
+    "rfc-6648",
+    "reverse-dns",
+    "build-time",
+    "native-first",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}

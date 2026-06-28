@@ -1,0 +1,281 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  <a href="/intents/">Intents</a> are ratified as <strong>UX-only and open</strong>
+  (<code>docs/agent/platform-decisions.md:378</code>, <em>intents-are-UX-only</em>):
+  <em>"Intents are an open, never-finished system: custom non-standard intents must coexist conflict-free —
+  standardize the meta-schema, not the list."</em> That promise is <strong>unrealized</strong>: WE ships a
+  fixed catalog (<code>src/_data/intents/*.json</code>) with no seam for a product to mint and use its
+  <em>own</em> intent. Decision
+  <a href="/backlog/1913-realize-app-authored-custom-intents-meta-schema-registry-for/">#1913</a> asks for the
+  shape: how a product <strong>declares</strong> a custom intent (the meta-schema), <strong>registers</strong>
+  it conflict-free against the standard catalog (namespacing), and whether resolution against the trait
+  resolver (<code>webtraits/intentProfileResolver.ts</code>) is <strong>build-time</strong> or
+  <strong>runtime</strong>. The principle is settled; the registry/authoring shape is the open call.
+</p>
+<p>
+  This is squarely a <a href="/research/">native-first</a> question — "prefer patterns that mirror how the web
+  platform itself handles extensibility." So the survey leads with the platform's own answers
+  (custom elements, CSS custom properties, custom states) and reads the tooling/schema precedents
+  (Design Tokens, JSON Schema/OpenAPI, Tailwind, reverse-DNS/scope registries) as corroboration or caution.
+</p>
+
+<h2>Prior art at a glance</h2>
+<table>
+  <thead>
+    <tr>
+      <th>System</th>
+      <th>Extension mechanism</th>
+      <th>Collision-avoidance / namespace</th>
+      <th>Registration</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Custom Elements</strong> (<code>customElements.define</code>)</td>
+      <td>Define a new element type; one global <code>CustomElementRegistry</code> per window (scoped registries emerging)</td>
+      <td><strong>Mandatory hyphen</strong> — name MUST contain a <code>-</code>; platform reserves dash-free names for itself "now and going forward," so author names can never collide with current or future built-ins</td>
+      <td><strong>Runtime / imperative</strong> — JS call; re-define throws <code>NotSupportedError</code> (first-writer-wins)</td>
+    </tr>
+    <tr>
+      <td><strong>CSS custom properties</strong> (<code>--*</code>, <code>@property</code>)</td>
+      <td>Mint any <code>--x</code> with zero registration; <code>@property</code> / <code>CSS.registerProperty()</code> optionally adds a type contract</td>
+      <td><strong>The <code>--</code> marker</strong> — "&lt;dashed-ident&gt; will never be defined in CSS"; a structural guaranteed-collision-free space. Finer prefixes (<code>--tw-</code>, <code>--app-</code>) are convention only</td>
+      <td><strong>Both</strong> — <code>@property</code> declarative (CSS) or <code>CSS.registerProperty()</code> runtime (JS wins on tie); values resolved at runtime by the cascade</td>
+    </tr>
+    <tr>
+      <td><strong>W3C Design Tokens (DTCG)</strong></td>
+      <td>Type catalog is <em>closed</em> (extend only via spec revision); proprietary data rides the <code>$extensions</code> sidecar</td>
+      <td><strong>Two layers:</strong> leading-<code>$</code> reserved for format properties (token/group names MUST NOT start with <code>$</code>) → future spec props never clash with author names; <code>$extensions</code> keys use <strong>reverse-DNS</strong> ("recommended for this purpose")</td>
+      <td><strong>Declarative / build-time</strong> — a static JSON interchange format; MUST-preserve-unknown-extension-data</td>
+    </tr>
+    <tr>
+      <td><strong>JSON Schema / OpenAPI</strong></td>
+      <td>OpenAPI <code>x-*</code> extension fields; JSON Schema unknown keywords ignored-as-annotations; <code>$vocabulary</code> declares custom keyword sets</td>
+      <td><code>x-</code> prefix reserved for third parties (spec never defines an <code>x-</code> field); JSON Schema namespaces vocabularies by <strong>URI you own</strong>. <strong>RFC 6648 cautionary tale</strong> below</td>
+      <td><strong>Declarative / build-time</strong> — extensions live in the static description; <code>$vocabulary</code> required-flag is a load-time must-understand handshake</td>
+    </tr>
+    <tr>
+      <td><strong>ARIA roles vs custom states</strong></td>
+      <td>Roles = <em>closed</em> catalog (authors can't mint; unknown ignored; fallback-token chain). Custom states = <em>open</em> (<code>ElementInternals.states</code> mint arbitrary identifiers)</td>
+      <td>Custom states were originally fenced with <strong><code>--</code></strong> (<code>:--checked</code>, mirroring custom props for collision-avoidance), now <code>:state(checked)</code> — same goal, a dedicated namespace function</td>
+      <td>Roles declarative (attribute, closed catalog). Custom states <strong>runtime / imperative only</strong> (no declarative surface)</td>
+    </tr>
+    <tr>
+      <td><strong>Tailwind / Style Dictionary / Radix-shadcn</strong></td>
+      <td>Default closed set + <strong>merge/extend</strong> hatch — Tailwind <code>theme.extend</code> / <code>@theme</code>, Style Dictionary <code>register*</code>, Radix CSS-var override, shadcn own-the-code</td>
+      <td>New keys merge into a <strong>named namespace</strong> (<code>--color-*</code>, transform <code>name</code>, <code>--accent-*</code>); collisions resolve <strong>last-write-wins on key name</strong></td>
+      <td><strong>Build-time config</strong> — compiled; no runtime registry for new token types</td>
+    </tr>
+    <tr>
+      <td><strong>Reverse-DNS / URI / scope registries</strong></td>
+      <td>RDF/XML (full IRI), Java (<code>com.example.*</code>), npm (<code>@scope/name</code>), schema.org (small reviewed core + <code>pending</code> + external extensions on owner's domain)</td>
+      <td>Anchor every name to something <strong>globally unique the author already controls</strong> — DNS domain (reverse-DNS/URI) or a centrally-issued <strong>scope</strong> (npm). No per-name coordination</td>
+      <td><strong>Declarative</strong> — resolved at compile/parse/publish time; no runtime registry needed</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Finding 1 — the native pattern for namespacing is a reserved structural marker, not a managed prefix table</h2>
+<p>
+  The three web-platform precedents converge on the <em>same</em> device. Custom elements require a
+  <strong>mandatory hyphen</strong>; the WHATWG rationale is explicit — the dash is for "namespacing and
+  forward compatibility (since no elements will be added to HTML, SVG, or MathML with hyphen-containing local
+  names going forward)." CSS custom properties use the <strong><code>--</code></strong> marker, and MDN states
+  the guarantee plainly: <em>"&lt;dashed-ident&gt;s will never be defined in CSS."</em> Custom states
+  <em>originally</em> reused that very <code>--</code> marker (<code>:--checked</code>) for the identical
+  reason. DTCG generalizes it to a sigil: the <strong>leading <code>$</code></strong> is reserved for
+  format properties so <em>"token and group names MUST NOT begin with the <code>$</code> character"</em> —
+  future spec growth can never collide with author names.
+</p>
+<p>
+  The load-bearing move in every case: <strong>the standard concedes one side of a syntactic boundary to
+  authors and permanently keeps the other for itself.</strong> No central "who owns which prefix" table is
+  maintained — the platform did not solve collision by policing prefix ownership; it carved the namespace in
+  two with one rule, so any author name is provably collision-free against the <em>entire current and future
+  standard vocabulary</em>, with zero coordination. Collision detection then degrades to a cheap local check
+  (the custom-elements <code>NotSupportedError</code> throw), and when even one namespace is too tight the
+  answer is <strong>scoping</strong> (per-subtree registries), not a bigger reservation table.
+</p>
+
+<h2>Finding 2 — finer cross-author collision-avoidance anchors names to owned identity; namespace by ownership, NEVER by status</h2>
+<p>
+  The structural marker stops app-vs-<em>standard</em> collisions. App-vs-<em>app</em> collisions (two products
+  both minting <code>card</code>) are solved by anchoring the name to something globally unique the author
+  already controls: a DNS domain (RDF IRIs, Java <code>com.example.*</code>, schema.org external extensions),
+  or a centrally-issued <strong>scope</strong> (npm <code>@scope/name</code>). DTCG applies exactly this to its
+  extension keys — <em>"reverse domain name notation is recommended"</em> (<code>com.example.tool-a</code>).
+  The per-<em>term</em> act needs no coordination: once you own the prefix, you mint freely, and two owners'
+  prefixes can never coincide.
+</p>
+<p>
+  <strong>The named guardrail is RFC 6648.</strong> The IETF used the same idea — prefix experimental
+  parameters with <code>X-</code> to keep them out of the standard namespace — and then
+  <strong>deprecated it</strong>: <em>"Creators of new parameters … SHOULD NOT prefix their parameter names
+  with 'X-' or similar constructs."</em> The reason is precisely our scenario:
+  <em>"Unstandardized parameters have a tendency to leak into the protected space of standardized parameters,
+  thus introducing the need for migration from the 'X-' name to a standardized name. Migration, in turn,
+  introduces interoperability issues."</em> <code>x-gzip</code> became a de-facto standard, the prefix
+  <em>lied</em> about its status, and renaming it split old and new implementations forever. The lesson is
+  sharp: <strong>namespace by OWNERSHIP (a scope/URI the author owns), never by STATUS</strong>
+  (<code>custom-</code>, <code>x-</code>, <code>experimental-</code>). A status prefix is a future migration
+  debt; an ownership prefix is stable across promotion — a custom intent graduating to standard becomes an
+  <em>alias/registration</em>, not a rename.
+</p>
+
+<h2>Finding 3 — declarative/build-time registration is the schema-world norm; runtime registries pay for it</h2>
+<p>
+  Every <em>declarative</em> precedent registers <strong>build-time / statically</strong>: DTCG is a static
+  JSON file; OpenAPI extensions live in the static description; Tailwind <code>@theme</code> and Style
+  Dictionary compile before runtime. The payoff is that <strong>"what vocabulary exists" is answerable without
+  running the app</strong> — statically analyzable, diffable, lintable. The two web-platform <em>runtime</em>
+  registries (<code>customElements.define</code>, <code>CustomStateSet</code>) are imperative precisely
+  because their members are <em>code</em> (a class, live element state) that can't be expressed as static
+  data — and they pay for it: collision is a runtime throw, and the catalog is invisible to static tooling
+  (custom states have <em>no</em> declarative surface at all).
+</p>
+<p>
+  An intent is <strong>data</strong> (UX dimensions + values), not code — so it sits with the declarative
+  precedents, not the runtime ones. This is reinforced by WE's own architecture: the intent→trait resolver
+  <code>webtraits/intentProfileResolver.ts</code> is a <em>"pure, dependency-free resolver over the WE
+  registries"</em> that returns a <em>build-time</em> bundle plan (<code>resolveTraits</code> /
+  <code>bundlePlan</code>, scope per #776 is "build-time inclusion + delivery only"). A custom intent that
+  resolves through this layer is naturally a build-time registration. CSS's duality is the useful nuance:
+  <code>@property</code> shows the canonical shape — <strong>declarative-first, with an optional runtime
+  escape hatch</strong> and a defined precedence when both exist.
+</p>
+
+<h2>Finding 4 — closed-vs-open is decided per intent by who must interoperate on the meaning</h2>
+<p>
+  ARIA puts two opposite choices in the <em>same</em> platform area. <strong>Roles are closed</strong> —
+  authors can't mint them, unknown roles are ignored, and the only extension point is the
+  <strong>fallback-token chain</strong> (<code>role="doc-biblioentry listitem"</code> degrades an unknown
+  token to a known one). They're closed because a role is a <em>shared contract</em> with a third party the
+  author doesn't control (assistive technology): an author-invented role is worthless because AT won't know
+  it. <strong>Custom states are open</strong> — arbitrary author identifiers — because they're
+  <em>component-private</em>: the meaning lives entirely between the element and its own stylesheet, so no
+  external party needs to pre-agree; the platform still <em>fences</em> them behind a namespace marker.
+</p>
+<p>
+  Transferred: WE should decide <em>per intent dimension/value</em> which lane it's in. WE already does this —
+  the open-numbered <code>variant</code>/<code>tone</code>/<code>disposition</code> axes on Action Intent
+  (<code>src/_data/intents/action.json</code>) are explicitly <em>"recommended core set, not a closed enum …
+  authors may mint additional members"</em> (the <a href="/research/action-emphasis-axis/">#1318</a>
+  open-numbered-variants contract). Custom <em>intents</em> are the next ring out: the same open-but-fenced
+  discipline, applied to whole intents rather than to values within a standard intent.
+</p>
+
+<h2>Web-standards alignment</h2>
+<ul>
+  <li><strong>Reserved structural marker</strong> (custom-elements dash, CSS <code>--</code>, DTCG <code>$</code>) —
+    WE keeps standard intent ids bare/dash-free-equivalent and reserves a separator that names a custom intent,
+    so a product intent can never collide with a current or future standard intent.</li>
+  <li><strong>Ownership-anchored namespace</strong> (npm scope, reverse-DNS) — a custom intent carries its
+    author's scope, so two products never collide.</li>
+  <li><strong>Most-permissive default</strong> (<em>intents-are-UX-only</em> ruling) — an unknown intent
+    degrades to the most-permissive default (ignored), mirroring JSON Schema's unknown-keyword-as-annotation,
+    rather than throwing.</li>
+  <li><strong>Declarative/build-time</strong> — fits <code>intentProfileResolver.ts</code> (a pure build-time
+    function) and the one-file-per-entry registry convention (<code>src/_data/intents/</code>,
+    <code>src/_data/researchTopics/</code>).</li>
+</ul>
+
+<h2>Recommendations for the decision</h2>
+
+<h3>Namespacing convention</h3>
+<p>
+  <strong>Recommended: scope-style <code>owner:intent</code> (or <code>@owner/intent</code>), anchored to the
+  product's existing app identity — not full reverse-DNS, not a bare status prefix.</strong> All four
+  decentralized-naming precedents anchor to owned identity, but npm's choice is the tell: a <em>short
+  centrally-issued scope</em> buys the same collision-freedom as reverse-DNS <em>without the dotted
+  verbosity</em>, when the platform already has a notion of app identity (and WE/Plateau does — products have
+  ids). The structural separator (the <code>:</code> / <code>@…/</code>) plays the custom-elements-dash role:
+  standard intents stay bare (<code>action</code>, <code>navigation</code>), so a scoped id can never collide
+  with a standard one, current or future. Explicitly <strong>reject a status prefix</strong>
+  (<code>x-</code>, <code>custom-</code>) per RFC 6648 — it lies on promotion and forces a rename. Keep a
+  schema.org-style <code>pending</code>/graduation path so a custom intent can be <em>aliased</em> into the
+  standard catalog later, never renamed.
+</p>
+
+<h3>Build-time/declarative vs runtime/imperative</h3>
+<p>
+  <strong>Recommended: declarative, build-time registration — a per-product intent manifest globbed into the
+  registry, exactly like <code>src/_data/intents/*.json</code> + <code>src/_data/researchTopics/</code>.</strong>
+  The prior art overwhelmingly favors declarative for <em>data</em> vocabularies (DTCG, OpenAPI, Tailwind,
+  Style Dictionary all build-time); only code-valued registries (custom elements, custom states) go runtime,
+  and they lose static analyzability for it. An intent is data, and WE's resolver is already a pure build-time
+  function — so build-time keeps the custom catalog diffable, lintable by <code>check:standards</code>, and
+  answerable without running the app. <strong>Tradeoff / escape hatch:</strong> borrow CSS's
+  <code>@property</code> duality — declarative-first with an <em>optional</em> runtime
+  register-an-intent API for genuinely dynamic products (plugin hosts, user-authored dashboards), with the
+  JS registration winning on a name tie. Pair it with JSON Schema's <code>$vocabulary</code> idea: a
+  <code>mustUnderstand</code> opt-in so a product can declare "fail-fast if you don't know this intent" versus
+  the default graceful-ignore.
+</p>
+
+<h3>Meta-schema shape (minimum fields)</h3>
+<p>
+  Mirror the existing intent JSON (<code>id</code> + <code>dimensions{ name → { description, values } }</code>),
+  add namespacing + extension + provenance:
+</p>
+<pre><code class="language-jsonc">{
+  "id": "acme:lozenge",            // scope-prefixed; standard ids stay bare
+  "name": "Lozenge Intent",        // human label
+  "extends": "tag",                // OPTIONAL — inherit a standard intent's dimensions, then add/override
+  "dimensions": {                  // the UX axes (same shape as standard intents)
+    "emphasis": {
+      "description": "...",
+      "values": ["subtle", "bold"],
+      "default": "subtle"          // per-dimension most-permissive default (WE ruling)
+    }
+  },
+  "mustUnderstand": false,         // OPTIONAL — false (default) = graceful ignore on unknown;
+                                   //            true = fail-fast (JSON-Schema $vocabulary required-flag)
+  "provenance": "com.acme",        // OWNER anchor (reverse-DNS or scope), for audit/dedupe — NOT status
+  "$extensions": { }               // OPTIONAL — DTCG-style namespaced sidecar; MUST be preserved untouched
+}</code></pre>
+<ul>
+  <li><strong>Required:</strong> <code>id</code> (scoped), <code>dimensions</code> with per-dimension
+    <code>values</code> + <code>default</code>.</li>
+  <li><strong>Recommended:</strong> <code>extends</code> (compose off a standard intent — Tailwind
+    <code>extend</code> merge semantics, last-write-wins on dimension name), <code>provenance</code> (owner
+    anchor), <code>mustUnderstand</code> (interop handshake).</li>
+  <li><strong>Optional:</strong> <code>$extensions</code> (preserve-unknown sidecar) for tool-specific data
+    that must round-trip without the engine understanding it.</li>
+</ul>
+
+<h2>The prepared forks</h2>
+<ul>
+  <li>
+    <strong>Fork 1 — Namespacing convention.</strong> Scope-style <code>owner:intent</code>
+    <em>(recommended)</em> vs full reverse-DNS <code>com.acme.lozenge</code> (verbose; only pays off with no
+    registry, which WE doesn't lack) vs a bare status prefix <code>custom-lozenge</code> (<strong>broken</strong>
+    per RFC 6648 — lies on promotion).
+  </li>
+  <li>
+    <strong>Fork 2 — Registration timing.</strong> Declarative build-time manifest <em>(recommended)</em> vs
+    runtime register-API. Recommend declarative-first <strong>plus</strong> an optional runtime hatch
+    (<code>@property</code> duality) for dynamic hosts.
+  </li>
+  <li>
+    <strong>Fork 3 — Unknown-intent behavior.</strong> Graceful most-permissive ignore <em>(recommended
+    default)</em> vs throw. Recommend ignore-by-default with a per-intent <code>mustUnderstand:true</code>
+    opt-in for fail-fast (JSON-Schema <code>$vocabulary</code> required-flag).
+  </li>
+  <li>
+    <strong>Fork 4 — Composition.</strong> Allow <code>extends</code> a standard intent (merge/override
+    dimensions, Tailwind-extend semantics) <em>(recommended)</em> vs standalone-only (forces re-declaring
+    shared dimensions, drift).
+  </li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Backlog <a href="/backlog/1913-realize-app-authored-custom-intents-meta-schema-registry-for/">#1913</a> — the decision this research prepares.</li>
+  <li><a href="/intents/">Web Intents catalog</a> — the fixed standard catalog being extended.</li>
+  <li><a href="/research/action-emphasis-axis/">Open-numbered variants (#1318)</a> — the value-level precedent (open axis within a standard intent); custom intents are the intent-level ring out.</li>
+  <li><a href="/backlog/1884-presentation-trait-style-vocabulary-intents-parallel-style-a/">#1884</a> — the surfacing item (single intent model owns all UI/UX config only if apps can extend it).</li>
+  <li><em>intents-are-UX-only</em> (<code>docs/agent/platform-decisions.md:378</code>) — the ratified "standardize the meta-schema, not the list" principle.</li>
+  <li>Full grounding + per-system citations: <code>reports/2026-06-28-app-authored-custom-intents-meta-schema-registry.md</code>.</li>
+</ul>
+{% endraw %}
