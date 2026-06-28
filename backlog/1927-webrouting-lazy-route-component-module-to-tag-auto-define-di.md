@@ -3,8 +3,12 @@ kind: story
 size: 5
 parent: "1684"
 locus: frontierui
-status: open
+status: resolved
 dateOpened: "2026-06-28"
+dateStarted: "2026-06-28"
+dateResolved: "2026-06-28"
+graduatedTo: "fui:blocks/router/componentAutoDefine.ts"
+codifiedIn: "docs/agent/platform-decisions.md#lazy-route-component-auto-define-default"
 tags: [webrouting, lazy, auto-define, router]
 ---
 
@@ -12,17 +16,13 @@ tags: [webrouting, lazy, auto-define, router]
 
 ## Digest
 
-Slice B of #1720 (split batch-2026-06-27 after slice A — runtime route-object ingestion — landed). Add the
-lazy **`route:component`** facet to the router: a runtime route object's `component` = `() => import()` thunk
-(JS) / bare specifier string (DOM), resolved to a stampable custom-element **tag** per the ratified #1897
-auto-define dimension. The engine stays **default-less** (resolves the auto-define strategy from settings,
-never a constant); the platform-preset flavor ships **on-import self-register + tag-on-route**: the lazy
-module self-registers its element as an import side-effect, the **tag rides on the route value**
-(`component-tag` companion / `route:component-tag` attr, never read off the module), and the engine
-`await`s the load then `createElement(tag)` and **never** calls `customElements.define`. `engine-defines`
-(default-export ctor → engine defines) is the per-scope override via `CustomAutoDefineRegistry` /
-config-extends-default — never foreclosed. Mirrors the block loader (`fui:workbench/loader.ts:56-68`, #1731)
-field-for-field. Locus FUI.
+Slice B of #1720. Add the lazy **`route:component`** facet to the router: a runtime route's `component` =
+`() => import()` thunk (JS) / bare specifier string (DOM), resolved to a stampable custom-element **tag** per
+the ratified #1897 auto-define dimension. The engine stays **default-less**; the platform-preset flavor ships
+**on-import self-register + tag-on-route** — the lazy module self-registers, the **tag rides on the route**
+(never read off the module), the engine `await`s the load then `createElement(tag)` and **never** calls
+`customElements.define`. `engine-defines` (default-export ctor → engine defines) is the per-scope override.
+Mirrors the block loader (`fui:workbench/loader.ts:56-68`, #1731). Locus FUI.
 
 ## Why this is separate (split batch-2026-06-27 from #1720)
 
@@ -50,3 +50,29 @@ sanctioned the A/B split.
 
 Lineage: #1720 (slice A — runtime ingestion), #1897 (lazy auto-define ruling), #1823 (runtime ingestion
 mechanism), #1731 (block-loader precedent), epic #1684.
+
+## Resolution (batch-parallel-2026-06-28)
+
+Shipped in FUI (locus):
+
+1. **`fui:blocks/router/types.ts`** — `RuntimeRouteObject`/`RouteDefinition` gained `component`
+   (`RouteComponent` = `() => import()` thunk | bare specifier string) + `componentTag`; added
+   `loadRouteComponent()` (thunk-invoke vs `import(/* @vite-ignore */ specifier)`). `compileRuntimeRoutes`
+   relaxed the slice-A "no template → skip" guard to "no renderable → skip" (template **or** component), and
+   skips a component route lacking `componentTag` (tag rides on the route — #1897, never `mod.tag`).
+2. **`fui:blocks/router/componentAutoDefine.ts`** (new) — the **default-less** route-component auto-define
+   dimension: `RouteComponentAutoDefineRegistry extends CustomRegistry` (config-extends-platform-default,
+   mirrors `CustomAutoDefineRegistry` field-for-field), strategies `tagOnRouteStrategy` (preset default —
+   `await load()` self-registers, `createElement(componentTag)`, engine **never** defines) and
+   `engineDefinesStrategy` (override — default-export ctor → idempotent `defineElement`). `createPlatformRouteComponentFlavor()`
+   ships `tag-on-route` default with `engine-defines` reachable; bare registry has **no** default.
+3. **`fui:blocks/router/elements/RouteViewElement.ts`** — `#stampAllRoutes` is now `async` (awaited at the
+   single call site); a component route resolves the strategy from `customContexts:routeComponentAutoDefine`
+   (falling back to the preset flavor — preset default, not an engine constant) and `await`s
+   `strategy.stamp(...)`. Stamped-node tracking keys on `isComponentRoute`, **not** `instanceof
+   DocumentFragment` (unreliable across realms — would leak un-unstampable nodes).
+4. **Tests** — 8 new cases in the router suite: thunk + bare-specifier (data: URL) resolution,
+   tag-on-route (ignores a `mod.tag` export), engine-defines override (engine defines the default-export
+   ctor), missing-`componentTag` skip, and registry default-less / config-extends / setDefault-override
+   (`fui:blocks/__tests__/unit/router/RouteViewElement.test.ts`). Router suite green (40/40); `npm run
+   check:standards` green.
