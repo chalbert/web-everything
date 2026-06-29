@@ -11,6 +11,7 @@ export default defineConfig({
     'tests/a11y/**/*.spec.ts',
     'tests/content/**/*.spec.ts',
     'tests/smoke/**/*.spec.ts',
+    'tests/visual/**/*.spec.ts',
     'tests/interaction/**/*.spec.ts',
   ],
   // The 11ty default build copies `.spec.ts` source files into `_site/`, where `testMatch` would

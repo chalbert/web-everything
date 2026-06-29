@@ -1,0 +1,20 @@
+{
+  "_comment": "Curated page set for the interim visual-regression guard (#1966, epic #800, #799 option-C bootstrap). Keep this SMALL and visually STABLE — prefer detail/resolved pages over data-volatile catalog indexes (a growing grid churns full-page baselines). Each entry: { name, path, mask?: [css selectors painted over before the snapshot — use for dates/live counts/'currently-doing' status that change without a code edit] }. Add a page when a shared visual surface isn't covered; refresh baselines deliberately with `npm run check:visual:update` after an INTENDED look change. Baselines are committed PNGs under ./rendered-site-visual.spec.ts-snapshots/ and are platform-tagged (captured on the dev machine) — this is the in-repo LOCAL bootstrap; CI/hosted rendering stays deferred per #799.",
+  "pages": [
+    {
+      "name": "home",
+      "path": "/",
+      "mask": []
+    },
+    {
+      "name": "backlog-detail-section-card",
+      "path": "/backlog/014-gap-7-webscroll-project/",
+      "mask": []
+    },
+    {
+      "name": "capability-adapter-detail-standard-card",
+      "path": "/capabilities/adapters/face/",
+      "mask": []
+    }
+  ]
+}

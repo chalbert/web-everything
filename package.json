@@ -23,6 +23,8 @@
     "test:e2e": "playwright test --project=chromium",
     "test:smoke": "playwright test --project=chromium tests/smoke",
     "test:a11y": "playwright test --project=chromium tests/a11y",
+    "check:visual": "playwright test --project=chromium tests/visual",
+    "check:visual:update": "playwright test --project=chromium tests/visual --update-snapshots",
     "test:interaction": "playwright test --project=interaction",
     "test:coverage": "vitest run --coverage",
     "gen:inventory": "node scripts/gen-inventory.mjs",
