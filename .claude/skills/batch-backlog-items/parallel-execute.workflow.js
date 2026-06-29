@@ -111,7 +111,11 @@ const baseRef = `lane/_base-${batchSlug}`;
 // orchestrator runs in the PRIMARY WE checkout, so this is `<primary>/.claude/locks`. Lanes are clones,
 // so they point `--root` at THIS absolute path (not their own clone's) — a single lock dir = a single
 // reservation authority across concurrent lanes. Local + never committed/pushed (sidesteps O_EXCL-on-NFS).
-const CENTRAL_LOCK_ROOT = `${process.cwd()}/.claude/locks`;
+// The sandbox has no `process` (see header) — the PRIMARY WE checkout's absolute path is passed in via
+// args.primaryRoot by the main loop (which knows its own cwd). Fallback to a relative path keeps a
+// degenerate run from crashing, though lane clones need the absolute form.
+const PRIMARY_ROOT = a.primaryRoot || '.';
+const CENTRAL_LOCK_ROOT = `${PRIMARY_ROOT}/.claude/locks`;
 
 // ── The constellation (#96) — cross-repo registry (slice 4) ────────────────────
 // `we` is implicit for every item (its backlog/<NNN>.md + claims.json live here) and is the primary checkout
