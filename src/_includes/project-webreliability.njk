@@ -37,7 +37,7 @@
     <strong>Compose</strong> = deferred to an existing Web Everything standard.
   </p>
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 680px;">
+    <we-data-table><table style="min-width: 680px;">
       <thead>
         <tr><th>Feature</th><th>Applies To</th><th>What it does</th><th>Built-in</th><th>Compose</th></tr>
       </thead>
@@ -56,7 +56,7 @@
         <tr><td><strong>Fallback content</strong></td><td>Resource consumers</td><td>Skeleton, empty, or stale-previous on exhaustion</td><td colspan="2">🔗 <a href="/intents/reliability/">Reliability Intent</a> fallback dimension</td></tr>
         <tr><td><strong>Error boundary</strong></td><td>Component trees</td><td>Structural error containment above the failed subtree</td><td colspan="2">🔗 Router error boundary</td></tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
 {{ pc.endStandardSection() }}
 
@@ -108,7 +108,7 @@ async function loadWithRecovery(context: RecoveryContext): Promise<void> {
 
   <h4 id="scope-mechanism-failure">Scope: Mechanism Failure Only</h4>
   <p>The Error Recovery Protocol is strictly for <strong>operation / system failure</strong>. Do not conflate with input validation:</p>
-  <table>
+  <we-data-table><table>
     <thead>
       <tr><th>Domain</th><th>Failure Kind</th><th>Example</th><th>Owned By</th></tr>
     </thead>
@@ -126,7 +126,7 @@ async function loadWithRecovery(context: RecoveryContext): Promise<void> {
         <td><a href="/projects/webvalidation/#protocol-validation">Validation Protocol</a></td>
       </tr>
     </tbody>
-  </table>
+  </table></we-data-table>
 
   <h4 id="consumer-pattern">How Consumers Use the Registry</h4>
   <p>
@@ -162,7 +162,7 @@ async function runWithRecovery(
 
   <h4 id="observable-states">Observable States</h4>
   <p>A conformant consumer must reflect these states to the <a href="/intents/reliability/">Reliability Intent</a> UX dimensions:</p>
-  <table>
+  <we-data-table><table>
     <thead>
       <tr><th>State</th><th>Condition</th><th>Reliability Intent Dimension</th></tr>
     </thead>
@@ -183,10 +183,10 @@ async function runWithRecovery(
         <td><code>tolerance: terminal</code></td>
       </tr>
     </tbody>
-  </table>
+  </table></we-data-table>
 
   <h4 id="web-standards-alignment">Web Standards Alignment</h4>
-  <table>
+  <we-data-table><table>
     <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
     <tr>
       <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/AbortController">AbortController</a></td>
@@ -203,7 +203,7 @@ async function runWithRecovery(
       <td>Baseline</td>
       <td><code>RecoveryContext.error</code> carries the raw <code>Error</code> from any rejected promise. Handlers inspect it to determine whether they accept the failure.</td>
     </tr>
-  </table>
+  </table></we-data-table>
 
   <h4 id="interface">Interface</h4>
   {% highlight "typescript" %}
@@ -257,7 +257,7 @@ abstract class CustomRecoveryHandler {
   </ul>
 
   <h4 id="exports">Exports</h4>
-  <table>
+  <we-data-table><table>
     <thead>
       <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
     </thead>
@@ -269,7 +269,7 @@ abstract class CustomRecoveryHandler {
       <tr><td><code>FailureDisposition</code></td><td>Type</td><td>#1032 Fork&nbsp;1 — <code>'transient' | 'terminal' | 'deferred'</code> (normalized recoverability)</td></tr>
       <tr><td><code>RecoveryPhase</code></td><td>Type</td><td>#1032 Fork&nbsp;2 — open meta-schema; core <code>'retrying' | 'queued' | 'awaiting-manual'</code> + registered extensions</td></tr>
     </tbody>
-  </table>
+  </table></we-data-table>
 {{ pc.endStandardSection() }}
 
 {{ pc.standardSection('id="composition"') }}

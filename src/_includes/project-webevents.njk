@@ -78,7 +78,7 @@ app.addEventListener('click', (e) => {
     </ol>
 
     <h4 id="what-this-solves">What This Solves</h4>
-    <table>
+    <we-data-table><table>
         <thead>
             <tr><th>Problem</th><th>How Web Events Solves It</th></tr>
         </thead>
@@ -104,14 +104,14 @@ app.addEventListener('click', (e) => {
                 <td>Each MFE brings its own injector scope with its own event providers &mdash; no global coordination</td>
             </tr>
         </tbody>
-    </table>
+    </table></we-data-table>
 {{ pc.endStandardSection() }}
 
 {{ pc.standardSection('id="event-taxonomy"') }}
     <h3 id="event-taxonomy-title">Event Taxonomy</h3>
     <p>Web Events identifies three communication patterns that DOM events conflate:</p>
 
-    <table>
+    <we-data-table><table>
         <thead>
             <tr><th></th><th>Notification</th><th>Targeted Command</th><th>Broadcast Command</th></tr>
         </thead>
@@ -147,7 +147,7 @@ app.addEventListener('click', (e) => {
                 <td><a href="/blocks/broadcast/"><code>broadcast</code> attribute</a></td>
             </tr>
         </tbody>
-    </table>
+    </table></we-data-table>
 {{ pc.endStandardSection() }}
 
 {{ pc.standardSection('id="protocol-typed-event"') }}
@@ -195,7 +195,7 @@ function listenFor<TDetail>(
 
 {{ pc.standardSection('id="standards"') }}
     <h3 id="standards-alignment">Standards Alignment</h3>
-    <table>
+    <we-data-table><table>
         <thead>
             <tr><th>Standard</th><th>Status</th><th>How We Relate</th></tr>
         </thead>
@@ -221,7 +221,7 @@ function listenFor<TDetail>(
                 <td>Establishes the precedent that scoping is needed &mdash; we extend it to events</td>
             </tr>
         </tbody>
-    </table>
+    </table></we-data-table>
 {{ pc.endStandardSection() }}
 
 {{ pc.standardSection('id="broadcast"') }}
@@ -258,7 +258,7 @@ function listenFor<TDetail>(
 
     <h4 id="ssr-server-output">Server Output Requirements</h4>
     <div class="comparison-table-wrapper mt-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <thead>
                 <tr>
                     <th>Feature</th>
@@ -291,7 +291,7 @@ function listenFor<TDetail>(
                     <td>Event classes (<code>customEvents:*</code> injector keys) are registered on the client. No serialization needed.</td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
 
     <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>

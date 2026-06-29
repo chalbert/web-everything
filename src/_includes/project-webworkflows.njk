@@ -44,7 +44,7 @@
     Everything standard.
   </p>
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 720px;">
+    <we-data-table><table style="min-width: 720px;">
       <thead>
         <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
       </thead>
@@ -59,7 +59,7 @@
         <tr><td><strong>Authorization</strong></td><td>CASL, OpenFGA, server authz</td><td><em>May THIS actor advance this transition?</em> &mdash; a guard predicate</td><td>🔗 Compose &mdash; <a href="/projects/webguards/">Web Guards</a></td></tr>
         <tr><td><strong>Linear navigation</strong></td><td>Router, history API</td><td><code>structure:linear</code> / <code>guard</code> / <code>history</code> dimensions reused, not reinvented</td><td>🔗 Compose &mdash; <a href="/intents/navigation/">navigation intent</a></td></tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
 {{ pc.endStandardSection() }}
 
@@ -123,7 +123,7 @@ const ev = await engine.advance(checkout, 'pay', currentUser); // guard-checked 
     is recorded here, not dropped, so promoting an operator later is a status flip, not a re-survey.
   </p>
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 720px;">
+    <we-data-table><table style="min-width: 720px;">
       <thead>
         <tr><th>Tier</th><th>Operators</th><th>Why here</th></tr>
       </thead>
@@ -132,7 +132,7 @@ const ev = await engine.advance(checkout, 'pay', currentUser); // guard-checked 
         <tr><td><strong>Tier-2 &mdash; common (optional)</strong></td><td>parallel fork/join · back/undo · gate/wait-for-event</td><td>Recurs across surveyed systems &amp; UI wizards; optional, not structural.</td></tr>
         <tr><td><strong>Tier-3 &mdash; deferred (known, not standardized)</strong></td><td>fan-out/matrix · inclusive-OR · history/resume · retry · compensation/saga</td><td>Redundant via existing primitives (matrix &rarr; parallel; inclusive-OR &rarr; parallel + per-branch guards) or durable-execution <em>backend</em> concerns that belong to the engine behind the provider, never the contract.</td></tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
 
   <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">

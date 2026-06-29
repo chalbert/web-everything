@@ -39,7 +39,7 @@
 
     <h4 id="ssr-server-output">Server Output Requirements</h4>
     <div class="comparison-table-wrapper mt-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <thead>
                 <tr>
                     <th>Feature</th>
@@ -69,7 +69,7 @@
                     <td>Server MUST render all store-derived content using the serialized state values.</td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
 
     <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
@@ -210,7 +210,7 @@ function observe(target: object, onChange: (r: ChangeRecord) => void): Disposabl
   <h4 id="ct-observable-events">Observable Change Events</h4>
   <p>A conformant store/signal emits these events; they reconcile with the
     <a href="/intents/validation/">Validation Intent</a>'s existing vocabulary so a form is just one consumer.</p>
-  <table>
+  <we-data-table><table>
     <thead>
       <tr><th>Event</th><th>Condition</th><th>Validation Intent equivalent</th></tr>
     </thead>
@@ -220,10 +220,10 @@ function observe(target: object, onChange: (r: ChangeRecord) => void): Disposabl
       <tr><td><code>change-committed</code></td><td>The change is durably accepted into state (post-validation, post-merge)</td><td><code>value-commit</code></td></tr>
       <tr><td><code>change-reverted</code></td><td>An inverse patch / undo / failed-merge rolled the change back</td><td>—</td></tr>
     </tbody>
-  </table>
+  </table></we-data-table>
 
   <h4 id="ct-standards-alignment">Web Standards Alignment</h4>
-  <table>
+  <we-data-table><table>
     <thead>
       <tr><th>Standard</th><th>Role in the protocol</th></tr>
     </thead>
@@ -235,10 +235,10 @@ function observe(target: object, onChange: (r: ChangeRecord) => void): Disposabl
       <tr><td><strong>W3C Trace Context</strong></td><td><code>ChangeSource.traceparent</code> links a change to its initiating span (<a href="/projects/webtraces/">Web Traces</a>)</td></tr>
       <tr><td><strong>CRDTs</strong> (Shapiro et al.)</td><td>The convergence rules for concurrent multi-source merge normalization</td></tr>
     </tbody>
-  </table>
+  </table></we-data-table>
 
   <h4 id="ct-design-decisions">Design Decisions</h4>
-  <table>
+  <we-data-table><table>
     <thead>
       <tr><th>Decision</th><th>Rationale</th></tr>
     </thead>
@@ -249,7 +249,7 @@ function observe(target: object, onChange: (r: ChangeRecord) => void): Disposabl
       <tr><td><strong>Attribution on the record</strong></td><td>"Who caused this" is the gap no existing strategy fills natively. Carrying <code>source</code> lets one mutation's origin survive into validation, traces, and analytics.</td></tr>
       <tr><td><strong>Contracts, not implementations</strong></td><td>The protocol ships interfaces and a registry pattern. <code>CustomChangeStrategy</code> / <code>CustomChangeStrategyRegistry</code> would be materialized as plugs, and concrete strategies as adapters, when the standard advances past <code>concept</code>.</td></tr>
     </tbody>
-  </table>
+  </table></we-data-table>
 {{ pc.endStandardSection() }}
 
 {{ pc.standardSection('id="protocol-storage"') }}
@@ -333,7 +333,7 @@ async function persist<T>(scope: string, id: string, value: T): Promise<void> {
     deliberately does <strong>not</strong> become one monolith. This protocol owns the durable
     structured-record store and nothing else; the neighbouring facets stay with their natural owners:
   </p>
-  <table>
+  <we-data-table><table>
     <thead>
       <tr><th>Facet</th><th>Owner</th><th>Why not here</th></tr>
     </thead>
@@ -343,7 +343,7 @@ async function persist<T>(scope: string, id: string, value: T): Promise<void> {
       <tr><td><strong>Durable outbox / replay</strong></td><td>🔗 <a href="/projects/webreliability/">webreliability</a></td><td>a fixed mechanism over this store + the offline-queue; no swappable-vendor story</td></tr>
       <tr><td><strong>Conflict merge</strong></td><td>🔗 <a href="#protocol-change-tracking">change-tracking</a> sync dimension</td><td>a merge over change representations that protocol already owns</td></tr>
     </tbody>
-  </table>
+  </table></we-data-table>
   <p style="font-size: 0.9rem; color: var(--color-text-muted);">
     No <code>webpersistence</code> project is minted. This protocol can graduate into one only if a real
     cross-cutting sync-orchestration consumer (cache invalidation ↔ outbox replay ↔ conflict merge under one

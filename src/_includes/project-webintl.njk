@@ -44,7 +44,7 @@
     <strong>Compose</strong> = deferred to an existing Web Everything standard.
   </p>
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 680px;">
+    <we-data-table><table style="min-width: 680px;">
       <thead>
         <tr><th>Feature</th><th>Applies To</th><th>What it does</th><th>Built-in</th><th>Adapter / Compose</th></tr>
       </thead>
@@ -66,7 +66,7 @@
         <tr><td><strong>Lazy catalog loading</strong></td><td>Network</td><td>Code-split translations; loading states</td><td colspan="2">🔗 <a href="/intents/loader/">Loader Intent</a> for load states</td></tr>
         <tr><td><strong>Locale routing</strong></td><td>URL</td><td><code>/fr/…</code> URL segment → locale store</td><td colspan="2">🔗 Router (<code>&lt;route-view&gt;</code> locale parameter)</td></tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
 {{ pc.endStandardSection() }}
 
@@ -155,7 +155,7 @@ function resolveMessage(
 
   <h4 id="observable-states">Observable States</h4>
   <p>A conformant consumer reflects these states while a catalog loads or a key is missing:</p>
-  <table>
+  <we-data-table><table>
     <thead>
       <tr><th>State</th><th>Condition</th><th>Maps To</th></tr>
     </thead>
@@ -176,10 +176,10 @@ function resolveMessage(
         <td>Missing-key strategy (render key, or dev-time warning)</td>
       </tr>
     </tbody>
-  </table>
+  </table></we-data-table>
 
   <h4 id="web-standards-alignment">Web Standards Alignment</h4>
-  <table>
+  <we-data-table><table>
     <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
     <tr>
       <td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl"><code>Intl.*</code></a></td>
@@ -206,7 +206,7 @@ function resolveMessage(
       <td>Baseline</td>
       <td>The default signal for locale detection and negotiation when no explicit URL/cookie preference exists.</td>
     </tr>
-  </table>
+  </table></we-data-table>
 
   <h4 id="interface">Interface</h4>
   {% highlight "typescript" %}
@@ -240,7 +240,7 @@ interface MessageFormatter {
   </ul>
 
   <h4 id="exports">Exports</h4>
-  <table>
+  <we-data-table><table>
     <thead>
       <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
     </thead>
@@ -250,7 +250,7 @@ interface MessageFormatter {
       <tr><td><code>LocaleNegotiation</code></td><td>Interface</td><td>Expands a requested locale into an ordered fallback chain</td></tr>
       <tr><td><code>MessageFormatter</code></td><td>Interface</td><td>Compiles an MF2 source into a <code>MessageFn</code></td></tr>
     </tbody>
-  </table>
+  </table></we-data-table>
 {{ pc.endStandardSection() }}
 
 {{ pc.standardSection('id="composition"') }}

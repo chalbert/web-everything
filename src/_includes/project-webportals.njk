@@ -587,7 +587,7 @@ html`
 
   <div class="comparison-block" style="background: rgba(34, 197, 94, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #22c55e; margin: 1.5rem 0;">
     <h4 style="margin-top: 0; color: #16a34a; font-size: 1rem;">The Complete Picture</h4>
-    <table style="width: 100%; font-size: 0.9rem; margin-top: 0.75rem;">
+    <we-data-table><table style="width: 100%; font-size: 0.9rem; margin-top: 0.75rem;">
       <tr>
         <td style="padding: 0.25rem 0;"><strong>Visual escaping:</strong></td>
         <td style="padding: 0.25rem 0;">Popover API / Top Layer / position: fixed</td>
@@ -604,7 +604,7 @@ html`
         <td style="padding: 0.25rem 0;"><strong>Context preservation:</strong></td>
         <td style="padding: 0.25rem 0;"><strong>Web Portals</strong> (this proposal)</td>
       </tr>
-    </table>
+    </table></we-data-table>
   </div>
 {{ pc.endStandardSection() }}
 
@@ -835,7 +835,7 @@ html`
     The web platform has evolved to address some portal use cases natively:
   </p>
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 600px;">
+    <we-data-table><table style="min-width: 600px;">
       <thead>
         <tr>
           <th>API</th>
@@ -865,7 +865,7 @@ html`
           <td>Browser-controlled; not arbitrary target locations</td>
         </tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
   <p style="margin-top: 1rem; font-size: 0.9rem; color: var(--color-text-muted);">
     These APIs solve the <em>visual</em> problem (escaping stacking contexts) but don't address the <em>logical</em> problem (maintaining context and event relationships). Web Portals complements these APIs by providing the missing logical layer.
@@ -920,7 +920,7 @@ html`
   <p>A critical comparison of what can and cannot be polyfilled:</p>
 
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 700px;">
+    <we-data-table><table style="min-width: 700px;">
       <thead>
         <tr>
           <th>Feature</th>
@@ -959,7 +959,7 @@ html`
           <td>Standard DOM operations. Context preservation via Web Injectors/Contexts is fully polyfillable.</td>
         </tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
 
   <div class="comparison-block" style="background: rgba(99, 102, 241, 0.05); padding: 1.25rem; border-radius: 8px; border-left: 4px solid var(--color-primary); margin: 1.5rem 0;">
@@ -982,7 +982,7 @@ html`
   <p>Analysis of portal implementations across major frameworks:</p>
 
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 800px;">
+    <we-data-table><table style="min-width: 800px;">
       <thead>
         <tr>
           <th>Framework</th>
@@ -1029,7 +1029,7 @@ html`
           <td>CSS selector or DOM node</td>
         </tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
 {{ pc.endStandardSection() }}
 
@@ -1181,7 +1181,7 @@ function Modal(props) {
   <h3 id="gap-analysis">Gap Analysis</h3>
   <p>What frameworks provide that native HTML lacks:</p>
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 600px;">
+    <we-data-table><table style="min-width: 600px;">
       <thead>
         <tr>
           <th>Capability</th>
@@ -1221,7 +1221,7 @@ function Modal(props) {
           <td>No</td>
         </tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
   <p style="margin-top: 1rem;">
     <strong>Conclusion:</strong> The core gap is the concept of a "logical tree" that's independent of the DOM tree. Web Portals proposes using the injector hierarchy (from Web Injectors) as this logical backbone, enabling context queries, event proxying, and lifecycle management to follow the logical structure rather than the physical DOM.
@@ -1241,7 +1241,7 @@ function Modal(props) {
 
     <h4 id="ssr-server-output">Server Output Requirements</h4>
     <div class="comparison-table-wrapper mt-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <thead>
                 <tr>
                     <th>Feature</th>
@@ -1284,7 +1284,7 @@ function Modal(props) {
                     <td>Server MUST resolve injector values from the portal's <strong>logical</strong> ancestors, not the target container's ancestors. See <a href="/projects/webinjectors/#ssr">Web Injectors SSR</a>.</td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
 
     <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
@@ -1333,13 +1333,13 @@ function Modal(props) {
         independently of its host URL.
     </p>
     <div class="comparison-table-wrapper mt-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <tr><th>Direction</th><th>Message</th><th>Carries</th></tr>
             <tr><td>host → deck</td><td><code>goto</code></td><td>a slide address (slide + optional fragment/vertical) to navigate to.</td></tr>
             <tr><td>host → deck</td><td><code>advance</code> / <code>retreat</code></td><td>step the sequence forward / back (fragment-aware).</td></tr>
             <tr><td>deck → host</td><td><code>state</code></td><td>current address, active fragment, total slides — emitted on every change.</td></tr>
             <tr><td>deck → host</td><td><code>ended</code></td><td>the sequence reached its final position (for host-driven autoplay chaining).</td></tr>
-        </table>
+        </table></we-data-table>
     </div>
     <p class="text-gray-600 text-sm mt-3">
         Composes the <a href="../webintents/">Navigation</a> intent and the slide-addressing semantic — it

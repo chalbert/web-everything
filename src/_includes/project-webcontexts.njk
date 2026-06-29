@@ -201,7 +201,7 @@ if (stateContext) {
 
     <h4 id="ssr-server-output">Server Output Requirements</h4>
     <div class="comparison-table-wrapper mt-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <thead>
                 <tr>
                     <th>Feature</th>
@@ -230,7 +230,7 @@ if (stateContext) {
                     <td>Server SHOULD serialize context state using the same <code>&lt;script type="context"&gt;</code> pattern already used in declarative HTML. See <a href="/projects/webstates/#ssr">Web States SSR</a> for the JSON serialization format.</td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
 
     <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
@@ -289,7 +289,7 @@ if (stateContext) {
   <p>This section compares major web context APIs, framework implementations, and the HTML Injector approach.</p>
 
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 700px;">
+    <we-data-table><table style="min-width: 700px;">
       <thead>
         <tr>
           <th>Spec/Framework</th>
@@ -350,7 +350,7 @@ if (stateContext) {
           <td>Closest to DOM-based context, observable, declarative</td>
         </tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
 
   <h4>How Close is HTML Injector to a Web Context API?</h4>
@@ -363,7 +363,7 @@ if (stateContext) {
 
 {{ pc.standardSection('id="feature-analysis"') }}
   <h3 id="feature-analysis">Feature Analysis: Lookup, Observation, Negotiation</h3>
-  <table style="min-width: 700px; overflow-x: auto;">
+  <we-data-table><table style="min-width: 700px; overflow-x: auto;">
     <thead>
       <tr>
         <th>Spec/Framework</th>
@@ -410,7 +410,7 @@ if (stateContext) {
         <td>Supports lookup by name/domain. True negotiation (provider can decline to answer and defer to parent) is not yet built-in, but could be added for advanced scenarios.</td>
       </tr>
     </tbody>
-  </table>
+  </table></we-data-table>
   <ul>
     <li><strong>Lookup:</strong> All systems support lookup by key or token; HTML Injector supports domain-based lookup, covering most i18n/service scenarios.</li>
     <li><strong>Observation:</strong> Frameworks use reactivity or re-rendering; native/HTML approaches could use events or MutationObserver.</li>

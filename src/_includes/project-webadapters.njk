@@ -184,7 +184,7 @@ class UserCard extends HTMLElement {
     </div>
 
     <h4 id="coverage-summary">Coverage Summary</h4>
-    <table style="font-size: 0.85rem;">
+    <we-data-table><table style="font-size: 0.85rem;">
         <tr>
             <th>Category</th>
             <th style="background:#28a745;color:#fff;">Covered</th>
@@ -213,7 +213,7 @@ class UserCard extends HTMLElement {
             <td style="color:#856404;">7 (9%)</td>
             <td style="color:#dc3545;">20 (27%)</td>
         </tr>
-    </table>
+    </table></we-data-table>
 
     <h4 id="strongest-areas">Strongest Areas (at or above parity)</h4>
     <ul style="font-size: 0.9rem;">
@@ -227,7 +227,7 @@ class UserCard extends HTMLElement {
     <p style="font-size: 0.9rem; color: var(--color-text-muted); margin-bottom: 1rem;">
         These features exist conceptually in Web Everything but need a syntax bridge or thin adapter layer:
     </p>
-    <table style="font-size: 0.85rem;">
+    <we-data-table><table style="font-size: 0.85rem;">
         <tr><th>Adapter</th><th>Description</th><th>Priority</th></tr>
         <tr>
             <td><code>bind:attr</code></td>
@@ -264,7 +264,7 @@ class UserCard extends HTMLElement {
             <td>CustomTextNode parser for <code>{{ "{{ expression }}" }}</code> syntax</td>
             <td style="color: #7f8c8d; font-weight: 600;">Low</td>
         </tr>
-    </table>
+    </table></we-data-table>
 
     <h4 id="biggest-gaps">Biggest Gaps (require new primitives)</h4>
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-top: 1rem;">
@@ -376,13 +376,13 @@ class UserCard extends HTMLElement {
         option is a rule that omits a byte-determining input — it silently serves drifted bytes, the exact failure
         versioning exists to prevent. The hashed inputs:
     </p>
-    <table>
+    <we-data-table><table>
         <tr><th>Input</th><th>Moves when</th></tr>
         <tr><td><strong>Authored definition</strong></td><td>the author edits the <code>&lt;component&gt;</code> source</td></tr>
         <tr><td><strong>Transform/compiler version</strong></td><td>the <code>webadapters</code> AST core or esbuild version/options change</td></tr>
         <tr><td><strong>Params</strong> — <code>form</code> · <code>target</code> · <code>strategy</code></td><td>per request (the resolved render strategy is part of identity, not a side channel)</td></tr>
         <tr><td><strong>Provenance</strong> (folded in)</td><td>the producing core/compiler version changes — see §3</td></tr>
-    </table>
+    </table></we-data-table>
 {% highlight "typescript" %}
 // The id is opaque: a hash digest, not a parse target. Inputs are canonicalized
 // (stable key order, normalized params) before hashing so equal inputs ⇒ equal id.
@@ -405,12 +405,12 @@ interface ArtifactIdentity {
         immutable build" shape (npm's <code>tag → version → tarball</code>). Floating and exact pins are
         <em>revalidatable redirects</em>; the content-hash URL is terminal and never revalidates.
     </p>
-    <table>
+    <we-data-table><table>
         <tr><th>Rung</th><th>Example</th><th>Resolves to</th><th>Cache policy</th></tr>
         <tr><td><strong>Floating tag</strong></td><td><code>/_maas/user-card@latest.js</code></td><td>the current exact semver → its hash URL</td><td>short-TTL, revalidate</td></tr>
         <tr><td><strong>Exact semver</strong></td><td><code>/_maas/user-card@1.4.2.js</code></td><td>the content-hash URL it was built as</td><td>short-TTL, revalidate</td></tr>
         <tr><td><strong>Content hash</strong></td><td><code>/_maas/user-card@sha256-9f86d08….js</code></td><td>itself (terminal)</td><td><code>immutable</code>, max-age forever</td></tr>
-    </table>
+    </table></we-data-table>
     <p class="text-gray-600 text-sm">
         Unit of version is <strong>dual, not either/or</strong>: an author may carry a human semver on the definition
         <em>and</em> the derived content hash always exists (semver = the human contract, hash = the integrity

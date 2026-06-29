@@ -42,7 +42,7 @@
     publishes standalone in Web Intents and is coordinated here.
   </p>
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 720px;">
+    <we-data-table><table style="min-width: 720px;">
       <thead>
         <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
       </thead>
@@ -59,7 +59,7 @@
         <tr><td><strong>notification-marker</strong></td><td>Unread dots, badges</td><td>The in-app unread/badge marker render</td><td>🔗 Member — render intent (forthcoming)</td></tr>
         <tr><td><strong>Permission state</strong></td><td>Permissions API</td><td>The cross-cutting <code>granted/denied/prompt</code> tri-state — intent-shaped, NOT owned here</td><td>🔗 Compose — <a href="/intents/permission/">Permissions intent</a></td></tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
 {{ pc.endStandardSection() }}
 
@@ -122,7 +122,7 @@ const receipt = await provider.send(sub, { title: 'Build green', body: '#456 shi
     enhancements. A consuming project negotiates against this; the default needs no third party.
   </p>
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 600px;">
+    <we-data-table><table style="min-width: 600px;">
       <thead>
         <tr><th>Capability</th><th>Web Push (native default)</th><th>Hub provider (FCM/OneSignal/Novu)</th></tr>
       </thead>
@@ -133,7 +133,7 @@ const receipt = await provider.send(sub, { title: 'Build green', body: '#456 shi
         <tr><td>Delivery analytics / receipts</td><td>△ endpoint status</td><td>✅ rich receipts</td></tr>
         <tr><td>Cross-device targeting</td><td>△ per-subscription</td><td>✅ user-keyed</td></tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
 {{ pc.endStandardSection() }}
 
