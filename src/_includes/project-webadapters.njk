@@ -1,6 +1,7 @@
 {% from "project-status.njk" import projectStatus %}
+{% import "product-components.njk" as pc %}
 
-<section id="overview" class="section-card">
+{{ pc.standardSection('id="overview"') }}
     <h3 id="overview-heading">Overview</h3>
     <p>
         <strong>Web Adapters</strong> bridge the Web Everything standards with the broader ecosystem—whether that's alternative authoring syntaxes (JSX, template literals) or third-party libraries (Floating UI, Mousetrap).
@@ -8,9 +9,9 @@
     <p>
         The goal is pragmatic interoperability: use the tools and syntax you prefer while compiling to the same underlying primitives.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="rendering" class="section-card">
+{{ pc.standardSection('id="rendering"') }}
     <h3 id="rendering-adapters">Rendering Adapters</h3>
     <p>
         Rendering Adapters enable <strong>format-agnostic authoring</strong>. Write components in HTML, JSX, or tagged template literals—they all compile to the same Web Everything primitives and can be <strong>converted between each other</strong> via AST transformers.
@@ -98,9 +99,9 @@ class UserCard extends HTMLElement {
 }
         {% endhighlight %}
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="ast-transformation" class="section-card">
+{{ pc.standardSection('id="ast-transformation"') }}
     <h3 id="ast-transformers">AST Transformation</h3>
     <p>
         Because all three formats compile to the same primitives, bidirectional conversion is possible:
@@ -118,49 +119,49 @@ class UserCard extends HTMLElement {
         <li>Build-time format selection based on target environment</li>
         <li>Component library publishing in multiple formats from a single source</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="syntax" class="section-card">
+{{ pc.standardSection('id="syntax"') }}
     <h3 id="syntax-adapters">Syntax Adapters</h3>
     {% for category in adapters %}
         {% if category.id == "syntax" %}
     <p>{{ category.description }}</p>
     <div class="standards-grid" style="margin-top: 1rem;">
             {% for adapter in category.items %}
-        <div class="standard-card">
+        {{ pc.standardCard() }}
             <div class="flex justify-between items-start mb-2">
                 <h4 style="margin: 0; font-size: 1rem;">{{ adapter.name }}</h4>
             </div>
             <p style="font-size: 0.85rem; color: var(--color-text-muted); margin: 0 0 0.75rem 0;">{{ adapter.summary | safe }}</p>
             {{ projectStatus(adapter.status) }}
-        </div>
+        {{ pc.endStandardCard() }}
             {% endfor %}
     </div>
         {% endif %}
     {% endfor %}
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="lib" class="section-card">
+{{ pc.standardSection('id="lib"') }}
     <h3 id="library-adapters">Library Adapters</h3>
     {% for category in adapters %}
         {% if category.id == "lib" %}
     <p>{{ category.description }}</p>
     <div class="standards-grid" style="margin-top: 1rem;">
             {% for adapter in category.items %}
-        <div class="standard-card">
+        {{ pc.standardCard() }}
             <div class="flex justify-between items-start mb-2">
                 <h4 style="margin: 0; font-size: 1rem;">{{ adapter.name }}</h4>
             </div>
             <p style="font-size: 0.85rem; color: var(--color-text-muted); margin: 0 0 0.75rem 0;">{{ adapter.summary | safe }}</p>
             {{ projectStatus(adapter.status) }}
-        </div>
+        {{ pc.endStandardCard() }}
             {% endfor %}
     </div>
         {% endif %}
     {% endfor %}
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="framework-comparison" class="section-card">
+{{ pc.standardSection('id="framework-comparison"') }}
     <h3 id="framework-feature-comparison">Framework Feature Comparison</h3>
     <p>
         How does Web Everything compare to the feature sets of React, Angular, Vue, Svelte, Lit, Solid, and Qwik?
@@ -315,9 +316,9 @@ class UserCard extends HTMLElement {
             It includes 74 features across 14 categories with color-coded tables showing framework-specific implementations mapped to Web Everything equivalents.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="ssr" class="section-card">
+{{ pc.standardSection('id="ssr"') }}
     <h3 id="ssr-contract">SSR: Delegation to Target Primitives</h3>
     <p>
         <strong>Web Adapters</strong> do not define their own SSR contract. Adapters compile down to underlying Web Everything primitives
@@ -335,9 +336,9 @@ class UserCard extends HTMLElement {
         Adapter authors MUST ensure that their compilation output produces HTML conforming to the target primitives' SSR contracts.
         No additional server-side logic is needed beyond what the target primitives specify.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-maas-versioning" class="section-card">
+{{ pc.standardSection('id="protocol-maas-versioning"') }}
     <h3 id="maas-versioning-heading">MaaS Served-Artifact Versioning Protocol</h3>
     <p>
         <strong>Module-as-a-Service</strong> is the serve-time twin of the build-time rendering adapters above: where
@@ -455,4 +456,4 @@ interface RuntimeCompat {
         change) and the <em>opt-in validator</em>. The validator is inert unless the consumer chooses it — advertise +
         offer, never mandate.
     </p>
-</section>
+{{ pc.endStandardSection() }}

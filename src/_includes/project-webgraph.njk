@@ -1,3 +1,5 @@
+{% import "product-components.njk" as pc %}
+
 <section class="intro-section mb-12">
     <h3 id="mission">Mission</h3>
     <p>
@@ -14,7 +16,7 @@
     </p>
 </section>
 
-<section id="scope" class="section-card">
+{{ pc.standardSection('id="scope"') }}
     <h3 id="scope-heading">Scope</h3>
     <p>
         What sets a graph apart from a chart is a positioning <strong>degree of freedom</strong>: a chart
@@ -28,7 +30,7 @@
         <a href="/backlog/1351-scaffold-the-webgraph-standard-project-graphspec-profile-lay/">#1351</a>.
     </p>
     <div class="standards-grid">
-        <div class="standard-card flex flex-col">
+        {{ pc.standardCard('', 'flex flex-col') }}
             <h4 id="scope-semantic" class="text-lg font-bold m-0 text-gray-900">Semantic plane</h4>
             <p class="text-gray-600 text-sm leading-relaxed mb-0">
                 A presentation-free <code>GraphSpec</code> profile describes the graph's meaning &mdash; nodes,
@@ -37,8 +39,8 @@
                 shapes. <span class="text-gray-400">(Authored in slice B,
                 <a href="/backlog/1373-webgraph-slice-b-graphspec-semantic-profile-terms/">#1373</a>.)</span>
             </p>
-        </div>
-        <div class="standard-card flex flex-col">
+        {{ pc.endStandardCard() }}
+        {{ pc.standardCard('', 'flex flex-col') }}
             <h4 id="scope-presentation" class="text-lg font-bold m-0 text-gray-900">Presentation plane (two seams)</h4>
             <p class="text-gray-600 text-sm leading-relaxed mb-0">
                 Because position is <em>invented</em>, the seam splits: a <code>CustomGraphLayout</code> Protocol
@@ -49,8 +51,8 @@
                 contracts. <span class="text-gray-400">(Authored in slice C,
                 <a href="/backlog/1374-webgraph-slice-c-two-seam-swap-protocol-customgraphlayout-cu/">#1374</a>.)</span>
             </p>
-        </div>
-        <div class="standard-card flex flex-col">
+        {{ pc.endStandardCard() }}
+        {{ pc.standardCard('', 'flex flex-col') }}
             <h4 id="scope-conformance" class="text-lg font-bold m-0 text-gray-900">Conformance</h4>
             <p class="text-gray-600 text-sm leading-relaxed mb-0">
                 A suite scores three axes &mdash; semantic fidelity, theme application, and
@@ -61,7 +63,7 @@
                 a11y research in slice E,
                 <a href="/backlog/1375-webgraph-slice-e-graph-a11y-model-research-topic-tier-2-grou/">#1375</a>.)</span>
             </p>
-        </div>
+        {{ pc.endStandardCard() }}
     </div>
     <div class="bg-blue-50 border-l-4 border-blue-400 p-3 mt-6 text-xs text-blue-800">
         <strong>Status:</strong> concept &mdash; this is the project skeleton (slice A of epic
@@ -71,9 +73,9 @@
         Per the constellation rule the contract lives here in <code>@webeverything</code> and the renderer
         runtime ships in Frontier UI.
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="graphspec" class="section-card">
+{{ pc.standardSection('id="graphspec"') }}
     <h3 id="graphspec-profile">GraphSpec Profile</h3>
     <p>
         The portable webgraph artifact is a <strong>GraphSpec</strong> — the thin <strong>semantic core</strong>.
@@ -143,9 +145,9 @@ type LayoutStrategy = 'layered' | 'force' | 'tree' | 'radial';
             <code>GraphEdge {from, to, kind, confidence, seam}</code> so the standard reproduces a real
             consumer rather than inventing a shape.</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-custom-graph-layout" class="section-card">
+{{ pc.standardSection('id="protocol-custom-graph-layout"') }}
     <h3 id="layout-protocol">CustomGraphLayout Protocol</h3>
     <p>
         Because a graph's position is <em>invented</em>, not derived, the renderer seam <strong>splits in
@@ -190,9 +192,9 @@ interface CustomGraphLayout {
         <li><strong>Spec is the only lock:</strong> swapping the layered default for an ELK / dagre / D3-force
             adapter leaves the <a href="#graphspec"><code>GraphSpec</code></a> untouched.</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-custom-graph-renderer" class="section-card">
+{{ pc.standardSection('id="protocol-custom-graph-renderer"') }}
     <h3 id="renderer-protocol">CustomGraphRenderer Protocol</h3>
     <p>
         The second seam: <code>CustomGraphRenderer</code> takes a <strong>PositionedGraph</strong> (coordinates
@@ -231,4 +233,4 @@ interface GraphHandle {
             theme application (honours <a href="/projects/webtheme/">Web Theme</a> tokens) + accessibility as a
             first-class axis (the <code>describe()</code> adjacency floor).</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}

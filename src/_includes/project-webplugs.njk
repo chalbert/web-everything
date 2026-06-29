@@ -1,6 +1,7 @@
 {% from "project-status.njk" import projectStatus %}
+{% import "product-components.njk" as pc %}
 
-<section id="overview" class="section-card">
+{{ pc.standardSection('id="overview"') }}
     <h3 id="overview">Overview</h3>
     <p>
         <strong>Web Plugs</strong> is the foundational layer of the Web Everything platform.
@@ -23,9 +24,9 @@
             </div>
         </div>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="plugged-unplugged" class="section-card">
+{{ pc.standardSection('id="plugged-unplugged"') }}
     <h3>Plugged vs Unplugged</h3>
     <p>
         Web Plugs can be consumed in two distinct modes, offering a choice between native-like integration and explicit library usage.
@@ -90,12 +91,12 @@
             <strong>Note:</strong> In unplugged mode, a single <code class="text-xs bg-blue-100 px-1 rounded">upgrade(root)</code> call processes the DOM tree based on which plugs have been activated for your project. This provides a unified entry point regardless of the specific features you're using.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
 {% macro renderProjectPlugs(projectId, projectName) %}
     {% set projectPlugs = plugs | filterByProject(projectId) %}
     {% if projectPlugs.length > 0 %}
-    <section class="section-card">
+    {{ pc.standardSection() }}
         <h3 id="{{ projectId }}">{{ projectName }} Plugs</h3>
         <div class="standards-grid">
             {% for plug in projectPlugs %}
@@ -125,7 +126,7 @@
                 </a>
             {% endfor %}
         </div>
-    </section>
+    {{ pc.endStandardSection() }}
     {% endif %}
 {% endmacro %}
 

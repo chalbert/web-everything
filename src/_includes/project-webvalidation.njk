@@ -1,3 +1,5 @@
+{% import "product-components.njk" as pc %}
+
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -27,7 +29,7 @@
   </div>
 </section>
 
-<section id="protocol-validation" class="section-card">
+{{ pc.standardSection('id="protocol-validation"') }}
   <h3 id="validation-protocol">Validation Protocol</h3>
   <p>
     Interop contract for form validation: observable states and events across
@@ -326,28 +328,28 @@ interface ValidationCapabilityManifest {
   <p><strong>Level 0:</strong> Honour the UX intents. No state/event contract required.</p>
   <p><strong>Level 1:</strong> Surface observable states via documented attributes (<code>data-pending</code>, <code>data-dirty</code>, <code>data-severity</code>, etc.) and emit stable-id events with documented <code>detail</code> shapes. Implementations become <strong>swappable</strong>.</p>
   <p><strong>Level 2:</strong> Normalize hand-off shapes (<code>ValueSnapshot</code>, <code>SourceResult</code>, <code>MergedValidity</code>, <code>InteractionState</code>, <code>DisplayDecision</code>) and register decomposed concerns via DI. Concerns become <strong>combinable</strong> across creators.</p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <ul style="font-size: 0.9rem;">
     <li><strong><a href="/intents/loader/">Loader Intent</a>:</strong> Async validators emit pending states. Pending aggregates form hierarchy to gate submission.</li>
     <li><strong>Feedback + Message Intents:</strong> Share unified severity vocabulary (error/warning/info/success + caution).</li>
     <li><strong><a href="/projects/webreliability/">Web Reliability</a>:</strong> Validation owns input invalidity. Reliability owns mechanism failure (async validator crash, server unreachable).</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Validation is in <strong>concept</strong> phase. The contract is specified via the
     <a href="#protocol-validation">Validation Protocol</a> above; concrete implementations
     (Frontier UI form controls, async resolvers, commitment policies) are the first planned deliverables.
   </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="research" class="section-card">
+{{ pc.standardSection('id="research"') }}
   <h3 id="research">Research &amp; References</h3>
   <p><strong>Assessment:</strong> <a href="/reports/2026-05-30-form-validation-standard-assessment/">2026-05-30 Form Validation Standard Assessment</a> — UX catalog, philosophy axes (architecture, rule definition, timing), framework research, async strategy comparison.</p>
   <p><strong>Spec versioning &amp; adherence:</strong> <a href="/reports/2026-05-30-validation-spec-versioning-adherence/">2026-05-30 Validation Spec Versioning &amp; Adherence</a> — Decision register, feature bundles, out-of-capability detection.</p>
-</section>
+{{ pc.endStandardSection() }}

@@ -1,3 +1,5 @@
+{% import "product-components.njk" as pc %}
+
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -33,7 +35,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What a reporting standard covers. <strong>Protocol</strong> = fixed by the Report model schema (the only
@@ -62,9 +64,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-report-model" class="section-card">
+{{ pc.standardSection('id="protocol-report-model"') }}
   <h3 id="how-it-works">Report Model Protocol</h3>
   <p>
     A producer never bundles a rendering or an export format. It emits a <strong>Report</strong> &mdash; the
@@ -135,9 +137,9 @@ const fromCi: Report = ingestSarif(ciSarif);    // an ingest adapter (#433)
       renderers consistent, while producers extend it &mdash; the same pattern as the Decision Record
       outcome vocabulary.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <ul style="font-size: 0.9rem;">
     <li><strong><a href="/projects/webadapters/">Web Adapters</a></strong> &mdash; the ingest/export bridge:
@@ -150,9 +152,9 @@ const fromCi: Report = ingestSarif(ciSarif);    // an ingest adapter (#433)
     <li><strong>Conformance tooling (<a href="/backlog/314-flagship-exercise-apps/">#314</a>)</strong> &mdash;
       the output layer <code>check:app-conformance</code> renders through.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Reporting is in <strong>concept</strong> phase; the Report model protocol's schema is specified here
@@ -174,4 +176,4 @@ const fromCi: Report = ingestSarif(ciSarif);    // an ingest adapter (#433)
     <li>Should the base severity set name a <code>pass</code>/positive tier, or stay failure-only and let a
       score express the positive roll-up?</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
