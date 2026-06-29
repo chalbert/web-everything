@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
     <h3 id="mission">Mission</h3>
     <p>
@@ -7,7 +8,7 @@
     </p>
 </section>
 
-<section id="philosophy" class="section-card">
+{{ pc.standardSection('id="philosophy"') }}
     <h3 id="design-philosophy">Design Philosophy</h3>
     <p>
         Unlike frameworks that hardcode a specific interpolation syntax, <strong>Web Expressions</strong> separates concerns into three distinct layers:
@@ -21,9 +22,9 @@
         This means you can use Mustache-style <code>{{ '{{' }}{{ '}}' }}</code>, Polymer-style <code>[[]]</code>, or any custom syntax—
         all within the same application, each handled by its own parser.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="architecture" class="section-card">
+{{ pc.standardSection('id="architecture"') }}
     <h3 id="architecture-overview">Architecture Overview</h3>
     <div class="mt-4">
         <h4 class="font-semibold text-gray-800 mb-2">1. Text Node Parsing</h4>
@@ -44,9 +45,9 @@
             <code>CustomExpressionParser</code> handles this, supporting keypaths, method calls, and computed properties.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="upgrade-triggers" class="section-card">
+{{ pc.standardSection('id="upgrade-triggers"') }}
     <h3 id="expression-upgrade-triggers">Expression Upgrade Triggers</h3>
     <p class="text-gray-600 text-sm mb-4">
         Rather than observing every DOM mutation (which would be expensive), expressions are upgraded at specific, well-defined moments.
@@ -151,9 +152,9 @@
         </table>
     </div>
     <p class="text-sm text-gray-500 mt-3">* Nodes cloned from templates are already upgraded at clone time.</p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="escaping" class="section-card">
+{{ pc.standardSection('id="escaping"') }}
     <h3 id="escaping-expressions">Escaping Expressions</h3>
     <p class="text-gray-600 text-sm mb-4">
         To output literal delimiter characters without triggering expression parsing, use HTML character entities.
@@ -194,9 +195,9 @@
         With this configuration, <code>&lt;code&gt;{{ '{{' }}name{{ '}}' }}&lt;/code&gt;</code> renders literally without needing character entities.
         To opt back in, use <code>customExpressions.upgrade(el)</code> on the specific element.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="fouc" class="section-card">
+{{ pc.standardSection('id="fouc"') }}
     <h3 id="avoiding-fouc">Avoiding Flash of Unparsed Content</h3>
     <p class="text-gray-600 text-sm mb-4">
         When expressions are present in visible HTML, users may briefly see raw syntax like <code>{{ '{{' }}name{{ '}}' }}</code> before the parser upgrades them.
@@ -344,9 +345,9 @@
 &lt;/div&gt;</code></pre></we-code-view>
 <we-code-view><pre><code class="language-css">[cloak] { display: none; }
 [cloak-placeholder]:has(+ :not([cloak])) { display: none; }</code></pre></we-code-view>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="parser-priority" class="section-card">
+{{ pc.standardSection('id="parser-priority"') }}
     <h3 id="parser-priority-resolution">Parser Priority</h3>
     <p class="text-gray-600 text-sm mb-4">
         When multiple parsers are registered, they are evaluated in <strong>registration order</strong>.
@@ -358,9 +359,9 @@ customTextNodeParsers.define('mustache', new DoubleCurlyParser()); // {{ '{{' }}
 
 // {{ '{{{' }}raw{{ '}}}' }} matches 'raw' parser (first match)
 // {{ '{{' }}name{{ '}}' }} matches 'mustache' parser</code></pre></we-code-view>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="flow" class="section-card">
+{{ pc.standardSection('id="flow"') }}
     <h3 id="parsing-flow">Parsing Flow</h3>
     <div class="bg-slate-50 rounded-lg p-4 mt-4 text-sm">
         <we-code-view><pre class="text-gray-700"><code>HTML Input: &lt;span&gt;Hello {{ '{{' }}user.name{{ '}}' }}!&lt;/span&gt;
@@ -381,9 +382,9 @@ customTextNodeParsers.define('mustache', new DoubleCurlyParser()); // {{ '{{' }}
 4. Binding System (outside Web Expressions scope)
    └── Subscribes to data changes, updates textContent</code></pre></we-code-view>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="examples" class="section-card">
+{{ pc.standardSection('id="examples"') }}
     <h3 id="usage-examples">Usage Examples</h3>
 
     <h4 class="font-semibold text-gray-800 mt-4 mb-2">Defining a Text Node Parser</h4>
@@ -479,9 +480,9 @@ customExpressionParsers.define('keypath', new KeypathParser());</code></pre></we
         &lt;/tr&gt;
     &lt;/template&gt;
 &lt;/data-table&gt;</code></pre></we-code-view>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="interfaces" class="section-card">
+{{ pc.standardSection('id="interfaces"') }}
     <h3 id="core-interfaces">Core Interfaces</h3>
 
     <h4 class="font-semibold text-gray-800 mt-4 mb-2">CustomTextNodeParser</h4>
@@ -513,9 +514,9 @@ customExpressionParsers.define('keypath', new KeypathParser());</code></pre></we
     // Parses a string into an executable graph
     abstract parse(text: string): Graph;
 }</code></pre></we-code-view>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="expression-parser-protocol" class="section-card">
+{{ pc.standardSection('id="expression-parser-protocol"') }}
     <h3 id="parser-protocol">Expression Parser Protocol (Draft)</h3>
     <p class="text-gray-600 text-sm mb-4">
         This protocol defines how expression parsers return structured results that abstract evaluation and declare dependencies.
@@ -732,9 +733,9 @@ const returnValue = result.expression.evaluate(resolved);</code></pre></we-code-
         <li>Should queries include full paths or just context roots?</li>
         <li>Error handling strategy for missing contexts or magic values?</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="comparison" class="section-card">
+{{ pc.standardSection('id="comparison"') }}
     <h3 id="framework-comparison">Comparison with Frameworks</h3>
     <div class="comparison-table-wrapper mt-4">
         <table class="comparison-table">
@@ -779,9 +780,9 @@ const returnValue = result.expression.evaluate(resolved);</code></pre></we-code-
             </tbody>
         </table>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="ssr" class="section-card">
+{{ pc.standardSection('id="ssr"') }}
     <h3 id="ssr-contract">SSR Contract</h3>
     <p>
         This section defines the server-side rendering contract for <strong>Web Expressions</strong>.
@@ -863,9 +864,9 @@ const returnValue = result.expression.evaluate(resolved);</code></pre></we-code-
             Web Expressions does not ship an SSR runtime — it ships this specification.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="plugs" class="section-card">
+{{ pc.standardSection('id="plugs"') }}
     <h3 id="related-plugs">Related Plugs</h3>
     <div class="standards-grid mt-4">
         {% set expressionPlugs = plugs | filterByProject("webexpressions") %}
@@ -884,4 +885,4 @@ const returnValue = result.expression.evaluate(resolved);</code></pre></we-code-
         </a>
         {% endfor %}
     </div>
-</section>
+{{ pc.endStandardSection() }}

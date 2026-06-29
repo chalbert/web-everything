@@ -1,21 +1,22 @@
-<section id="protocol" class="section-card">
+{% import "product-components.njk" as pc %}
+{{ pc.standardSection('id="protocol"') }}
             <h3 id="the-protocol">The Protocol</h3>
             <p>
                 <strong>Web Registries</strong> define a standard interface for creating scoped, hierarchical registries on the web platform. 
                 Where standard <code>Map</code> or <code>CustomElementRegistry</code> are flat and global, Web Registries are designed for **inheritance** and **scoping**.
             </p>
-        </section>
+        {{ pc.endStandardSection() }}
 
-        <section id="features" class="section-card">
+        {{ pc.standardSection('id="features"') }}
             <h3 id="key-features">Key Features</h3>
             <ul>
                 <li><strong>Standard Interface:</strong> All registries implement a common <code>get</code>, <code>has</code>, <code>set</code> (via <code>define</code>) API.</li>
                 <li><strong>Inheritance:</strong> A registry can extend one or more parent registries. Lookups traverse the chain automatically.</li>
                 <li><strong>Scoping:</strong> Enables different parts of an application to have different definitions for the same key (e.g., scoping icons or formatters to a specific routed view).</li>
             </ul>
-        </section>
+        {{ pc.endStandardSection() }}
 
-        <section id="standards" class="section-card">
+        {{ pc.standardSection('id="standards"') }}
             <h3 id="proposed-standards">Proposed Standards</h3>
             <p>The <strong>Web Everything</strong> platform proposes standardizing registries for nearly every aspect of the DOM, allowing for unprecedented extensibility:</p>
             
@@ -48,9 +49,9 @@
                     </ul>
                 </div>
             </div>
-        </section>
+        {{ pc.endStandardSection() }}
 
-        <section id="examples" class="section-card">
+        {{ pc.standardSection('id="examples"') }}
             <h3 id="userland-examples">Userland Examples</h3>
             
             <h4 id="example-1-icon-system">Example 1: Icon System</h4>
@@ -103,9 +104,9 @@ adminIcons.define('menu', '<svg viewBox="0 0 24 24">...<!-- Admin Menu --></svg>
 <ui-icon name="menu"></ui-icon>         <!-- Renders standard menu -->
 <ui-icon name="menu" admin></ui-icon>   <!-- Renders admin menu (via scoped registry) -->
             {% endhighlight %}
-        </section>
+        {{ pc.endStandardSection() }}
 
-<section id="ssr" class="section-card">
+{{ pc.standardSection('id="ssr"') }}
     <h3 id="ssr-contract">SSR Contract</h3>
     <p>
         This section defines the server-side rendering contract for <strong>Web Registries</strong>.
@@ -171,9 +172,9 @@ adminIcons.define('menu', '<svg viewBox="0 0 24 24">...<!-- Admin Menu --></svg>
             Web Registries does not ship an SSR runtime — it ships this specification.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-provider-consumer-graph" class="section-card">
+{{ pc.standardSection('id="protocol-provider-consumer-graph"') }}
     <h3 id="provider-consumer-graph-heading">Provider–Consumer Graph Protocol</h3>
     <p>
         Everything in Web Everything resolves through <strong>introspectable</strong> registries, injectors,
@@ -262,4 +263,4 @@ interface SeamContract {
         <a href="/protocols/">protocol</a> registry (the provider-side conformance contract it reuses), and the
         Decision/Audit protocols where a governance product records why an edge changed.
     </p>
-</section>
+{{ pc.endStandardSection() }}

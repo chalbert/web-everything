@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p><strong>Web Traces</strong> aims to standardize execution flow monitoring and distributed tracing for the web, aligning with <a href="https://www.w3.org/TR/trace-context/">W3C Trace Context</a> and <a href="https://opentelemetry.io/">OpenTelemetry</a>. This document summarizes research into current standards, proposals, and libraries, and clarifies the terminology landscape.</p>
@@ -9,7 +10,7 @@
   </summary>
   <div style="padding: 1rem 0;">
 
-<section class="section-card">
+{{ pc.standardSection() }}
   <h3 id="research">Research & Terminology</h3>
   <ul>
     <li><strong>OpenTelemetry</strong>: Industry standard for distributed tracing, metrics, and logging. Key terms: <em>trace</em>, <em>span</em>, <em>context</em>, <em>attribute</em>. API: <code>startSpan</code>, <code>setAttribute</code>, context propagation.</li>
@@ -71,12 +72,12 @@
 effect(operation, { input, output, attributes });
   </code></pre></we-code-view>
   <p>This approach is compatible with both distributed and local tracing needs, and aligns with industry and academic best practices.</p>
-</section>
+{{ pc.endStandardSection() }}
 
   </div>
 </details>
 
-<section id="protocol-trace-observability" class="section-card">
+{{ pc.standardSection('id="protocol-trace-observability"') }}
     <h3 id="ssr-contract">Trace Observability Protocol</h3>
     <p>
         Aligns Web Traces with <a href="https://www.w3.org/TR/trace-context/">W3C Trace Context</a>
@@ -104,9 +105,9 @@ effect(operation, { input, output, attributes });
         </li>
         <li><strong>Client-only:</strong> All span creation, context propagation, sampling, attribute attachment, and exporter configuration are client-side operations. No server rendering contract is needed for trace instrumentation.</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-session-replay-envelope" class="section-card">
+{{ pc.standardSection('id="protocol-session-replay-envelope"') }}
     <h3 id="session-replay-envelope">Session-Replay Envelope Protocol</h3>
     <p>
         Ratified in <a href="/backlog/992-design-the-trace-replay-substrate-webtraces-webevents-the-14/">#992</a>.
@@ -136,4 +137,4 @@ effect(operation, { input, output, attributes });
         behavioral conformance vectors at <code>we:conformance-vectors/session-replay-envelope.vectors.ts</code>
         judge a replayer's observable outcome (drift-refused vs. applied; off-journal disclosed vs. reproduced).
     </p>
-</section>
+{{ pc.endStandardSection() }}

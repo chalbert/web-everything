@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -35,7 +36,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What a changelog-manifest standard covers, and how each capability is fulfilled.
@@ -63,9 +64,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="how" class="section-card">
+{{ pc.standardSection('id="how"') }}
   <h3 id="how-it-works">How It Works</h3>
   <p>
     A release publishes one manifest. Each entry names a module, its change severity and type, a human
@@ -105,9 +106,9 @@
     the release <code>major</code>), routes the breaking entries through their migrations, and — for a clean
     update — applies them without a human editing a single call site.
   </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-changelog-manifest" class="section-card">
+{{ pc.standardSection('id="protocol-changelog-manifest"') }}
   <h3 id="changelog-manifest-protocol">Changelog Manifest Protocol</h3>
   <p>
     Conformance reference for a release's machine-readable change description. A conformant manifest is a dual
@@ -185,9 +186,9 @@ interface ChangelogManifest {
       <tr><td><a href="/backlog/088-module-service-versioning/">MaaS versioning (#088)</a></td><td>derived release severity</td><td>content-address the version bump</td></tr>
     </tbody>
   </table>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-update-policy" class="section-card">
+{{ pc.standardSection('id="protocol-update-policy"') }}
   <h3 id="update-policy-protocol">Update Policy Protocol</h3>
   <p>
     The <a href="#protocol-changelog-manifest">Changelog Manifest</a> records <em>what changed</em>; the
@@ -229,9 +230,9 @@ interface ChangelogManifest {
     build." No industry analogue — this is the standard's net-new edge over renovate/dependabot, which can
     only test <em>after</em> a version ships.
   </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-app-shell-compatibility" class="section-card">
+{{ pc.standardSection('id="protocol-app-shell-compatibility"') }}
   <h3 id="app-shell-compatibility-protocol">App Shell Compatibility Protocol</h3>
   <p>
     Conformance reference for the <strong>flat coexistence manifest</strong> each micro-app authors so a
@@ -348,9 +349,9 @@ interface AppShellCompatibilityManifest {
     <a href="/backlog/502-plateau-app-shell-compatibility-map-dashboard-computed-bcd-s/">Plateau map's (#502)</a>
     job — they read this manifest, they are not authored into it.
   </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="pattern-deprecation-lifecycle" class="section-card">
+{{ pc.standardSection('id="pattern-deprecation-lifecycle"') }}
   <h3 id="deprecation-lifecycle">Component Deprecation Lifecycle</h3>
   <p>
     Versioning identity answers "what makes two artifacts the same?" (<a href="/backlog/088-module-service-versioning/">#088</a>,
@@ -396,4 +397,4 @@ interface AppShellCompatibilityManifest {
     working (flagged, not hidden) until the announced removal. <em>Deprecate-don't-delete</em> is the
     component-level analogue of the standard's <em>deprecate-don't-rename</em> identity rule.
   </p>
-</section>
+{{ pc.endStandardSection() }}
