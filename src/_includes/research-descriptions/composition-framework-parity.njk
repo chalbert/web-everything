@@ -1,0 +1,73 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Decision <a href="/backlog/1963-composition-rubric-re-judged-to-framework-parity-strict-per-/">#1963</a> sets a
+  strict per-case composition-mechanism rubric for Web Everything, judged against a <strong>framework-parity,
+  zero-compromise bar</strong>: ergonomics ≥ React/Vue/Svelte/Solid, zero layout/CSS/a11y compromise, a solution
+  for every case, open to net-new mechanisms, and clean in plain HTML <em>and</em> JSX. This survey benchmarks
+  each case against the leading frameworks and against the FUI tree, and asks the hard question directly: can a
+  native-custom-elements system match framework composition DX, and where (if anywhere) must it invent? Catalog
+  companion: <a href="/research/dom-less-composition/">dom-less-composition</a>.
+</p>
+
+<h2>The spine — the host node is the API surface, so it is a budgeted resource</h2>
+<p>
+  A framework component is a <strong>function/object</strong> in a virtual tree or compiled output; only leaf
+  elements reify as DOM, so ten nested providers cost <strong>zero</strong> DOM nodes. A custom element is
+  <strong>defined as a DOM element</strong> — <code>customElements.define</code> binds behaviour to a <em>tag</em>,
+  and a tag is a node with a layout box, an event-path position, an accessibility entry, and a <code>:host</code>.
+  Slotting, Shadow-DOM scoping, <code>connectedCallback</code> lifecycle, <code>ElementInternals</code> semantics,
+  and focus are <strong>all keyed off that node</strong> — you cannot have them and not have the node.
+</p>
+<p>
+  So the platform charges per node <em>for a reason</em>, and no emerging standard removes it. The correct
+  response is not to wait for a primitive but to <strong>budget the host node</strong>: pay it only where you need
+  slot / shadow / AX-identity / lifecycle; for everything else use a <strong>zero-node mechanism</strong>. That is
+  exactly what frameworks do — they compile structural layers away into functions/directives. <strong>Framework
+  parity for WE is a discipline, not a missing feature.</strong>
+</p>
+
+<h2>Per-case benchmark</h2>
+<we-data-table>
+<table class="data-table">
+  <thead>
+    <tr><th>Case</th><th>Framework approach</th><th>CE-must-do</th><th>Parity today</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1. Real <code>&lt;button&gt;</code> presentational</td><td>emit the literal native element; component leaves no host</td><td>emit-to-native (transient) or persistent host + <code>ElementInternals</code> + hand-rolled focus/keyboard</td><td><strong>Partial</strong> — emit-native = full; <code>is=</code> blocked by Safari</td></tr>
+    <tr><td>2. Grouped / reactive control</td><td>shared reactive state + binding</td><td>group CE + form-associated child CEs + a reactivity primitive</td><td><strong>Yes</strong></td></tr>
+    <tr><td>3. Multi-root / Fragment</td><td>React <code>&lt;&gt;</code>, Vue multi-root, <code>ng-container</code></td><td>compile away the host, or <code>:host{display:contents}</code></td><td><strong>Partial</strong> (display:contents box-erase)</td></tr>
+    <tr><td>4/5. if / for / switch regions</td><td><strong>comment-node anchors</strong> (Vue, Svelte, Solid, Lit)</td><td>comment anchor markers + mutate between them</td><td><strong>Yes</strong> — WE has <code>CustomComment</code></td></tr>
+    <tr><td>6. Context / DI provider, no layout</td><td>React <code>Context.Provider</code> adds zero DOM</td><td><code>display:contents</code> CE on the injector chain</td><td><strong>Yes*</strong> (AX confirm)</td></tr>
+    <tr><td>7. N behaviours on one element</td><td>hooks / composables / directives / controllers (non-wrapping)</td><td>mixins + attribute-driven behaviours — zero node</td><td><strong>Yes</strong></td></tr>
+    <tr><td>8. Behaviour on an <em>existing</em> native element</td><td><code>is=</code> customized built-in</td><td>autonomous CE + <code>ElementInternals</code>; <code>is=</code> PE-only</td><td><strong>Compromise</strong> — Safari refuses <code>is=</code></td></tr>
+    <tr><td>9. Teleport / portal</td><td>portals keep logical parent</td><td>logical-tree portal + <code>moveBefore()</code> (state-preserving)</td><td><strong>Yes*</strong> (cross-browser <code>moveBefore</code>)</td></tr>
+    <tr><td>10. Deep STRUCTURAL composition</td><td>structural layers <strong>compiled away</strong> → 0 nodes</td><td>function/directive render (0 node), or display:contents host (cheap node); hosts budgeted</td><td><strong>By discipline</strong> — see below</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+
+<h2>The contested case — deep structural composition</h2>
+<p>
+  No shipping or proposed standard makes a <em>registered</em> custom element cost zero nodes — they reduce
+  per-node <em>cost</em>, not node <em>count</em>: <code>display:contents</code> removes the box (AX regression
+  fixed Safari&nbsp;16 / Firefox&nbsp;62; can't be a focusable host); <code>subgrid</code> aligns through a
+  wrapper; <code>Node.moveBefore()</code> (Chrome&nbsp;133) makes reparenting non-destructive; <strong>DOM Parts
+  <code>ChildNodePart</code></strong> is proposal-stage (since 2017, unshipped) and targets <em>content</em>
+  regions, not CE hosts. The pattern that reaches zero-node parity — Haunted <code>virtual()</code>, Lit
+  directives, Stencil functional components — does so by <strong>abandoning the registered host</strong>.
+</p>
+<p>
+  Two honest readings survive, and #1963 forks on them: (a) <strong>discipline</strong> — parity is achievable
+  today by routing structural layers through zero-node function/directive render (WE has JSX functional components
+  and comment-anchor directives), reserving registered hosts for slot/shadow/AX/lifecycle; (b) <strong>invent</strong>
+  — HTML-declarative true-zero-node deep nesting still wants a primitive (or a generalized transient-to-comments
+  bridge), since plain HTML has only elements, not functions. DOM Parts is the standards-track watch item, not a
+  blocker.
+</p>
+
+<p>
+  Full grounding, the per-case <code>file:line</code> evidence, and all citations in
+  <code>reports/2026-06-29-composition-framework-parity.md</code>.
+</p>
+{% endraw %}
