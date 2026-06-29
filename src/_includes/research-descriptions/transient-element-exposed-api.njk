@@ -1,0 +1,111 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  A <strong>transient</strong> (A-family) custom element — <code>TransientElement</code>,
+  <code>fui:blocks/transient/TransientElement.ts</code> — replaces itself with a native element during
+  <code>connectedCallback</code>: it copies attributes, moves children, then calls
+  <code>this.replaceWith(nativeEl)</code> so the custom element <strong>erases itself</strong>, leaving only
+  the native element. Decision
+  <a href="/backlog/1961-transient-element-exposed-api-the-stable-read-event-surface-/">#1961</a> asks what
+  <strong>stable read/event surface</strong> such an element should guarantee, because today the surface a
+  consumer reads <em>renames</em> across the swap (authored <code>selected</code> &rarr; computed
+  <code>aria-pressed</code>; <code>value</code> &rarr; <code>data-value</code>), host-bound listeners are
+  discarded, and a held reference becomes a <em>detached</em> node whose methods silently no-op.
+</p>
+<p>
+  This is a <a href="/research/">native-first</a> question — so the survey leads with the platform's own rules
+  for node liveness and toggle-state semantics (WHATWG DOM/HTML, CSSOM-View, WAI-ARIA APG) and reads the leading
+  design systems as corroboration.
+</p>
+
+<h2>Standards — a replaced host is detached, not dead</h2>
+<ul>
+  <li><strong><code>Node.isConnected</code></strong> is true iff the node's shadow-including root is a document
+    (<a href="https://dom.spec.whatwg.org/#dom-node-isconnected">WHATWG DOM &sect;4.4</a>) — a host removed via
+    <code>replaceWith</code> reports <code>false</code>. This is the one reliable liveness signal.</li>
+  <li><strong>Methods don't throw on a detached node</strong> — the DOM mutation algorithms operate on trees
+    rooted anywhere and throw only for hierarchy errors, never for "not in a document." So
+    <code>setAttribute</code>/<code>append</code>/<code>querySelector</code> run against the orphan subtree and
+    are simply never observed. <em>This is why the misuse is silent.</em></li>
+  <li><strong><code>getBoundingClientRect()</code> returns a zero rect</strong> because a not-rendered element
+    generates no CSS boxes (<a href="https://drafts.csswg.org/cssom-view/#dom-element-getboundingclientrect">CSSOM-View</a>)
+    — the cause is "not rendered" (covers <code>display:none</code> too), not "disconnected".</li>
+  <li><strong><code>focus()</code> is a no-op</strong> — a non-rendered element is not a "focusable area"
+    (<a href="https://html.spec.whatwg.org/multipage/interaction.html#focusing-steps">WHATWG HTML</a>).</li>
+  <li><strong>Self-replacement is not a sanctioned pattern</strong> — HTML warns authors to avoid manipulating
+    the node tree in reactions, and notes <code>connectedCallback</code> can run with
+    <code>isConnected === false</code> and can fire more than once
+    (<a href="https://html.spec.whatwg.org/multipage/custom-elements.html">WHATWG HTML &sect;custom-elements</a>).
+    Any unwrap must be idempotent and <code>isConnected</code>-guarded.</li>
+  <li><strong>No native <code>change</code> on <code>&lt;button&gt;</code></strong> — only <code>click</code>;
+    change semantics must be added.</li>
+</ul>
+
+<h2>Almost nobody self-replaces at runtime</h2>
+<p>
+  HTML web components (Jeremy Keith), Lit, Shoelace and Web Awesome all <strong>persist the host</strong> as the
+  stable API surface. Compile-away frameworks (Enhance, WebC, Astro islands) unwrap at <strong>build/server</strong>
+  time, not via runtime <code>connectedCallback</code> self-erasure — Astro is even working to remove leftover
+  <code>&lt;astro-island&gt;</code> wrappers. htmx swaps nodes wholesale and answers lost listeners with
+  <strong>event delegation on a stable ancestor</strong>. The standards-blessed
+  <strong>customized built-in</strong> (<code>is="button"</code>) is the sanctioned way to get a real button with
+  inherited semantics, but
+  <a href="https://github.com/WebKit/standards-positions/issues/97">WebKit will never ship it</a> — which is
+  precisely why people hand-roll self-replacement. <em>The entire stale-ref / lost-listener / rename problem set
+  exists only because the host erases itself.</em>
+</p>
+
+<h2>How design systems expose toggle state</h2>
+<we-data-table>
+<table class="data-table">
+  <thead>
+    <tr><th>Library / standard</th><th>Toggle-state read</th><th>Change signal</th><th>Reflects authored attrs?</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Native button + WAI-ARIA APG</td><td>read <code>aria-pressed</code> after <code>click</code></td><td><strong>no custom event</strong></td><td><code>aria-pressed</code> is the canonical state attr</td></tr>
+    <tr><td>Shoelace / Web Awesome</td><td><code>.checked</code> (reflects)</td><td>custom <code>sl-change</code> ("not <code>click</code>")</td><td>yes — props reflect</td></tr>
+    <tr><td>Adobe Spectrum ToggleButton</td><td><code>isSelected</code> prop</td><td><code>onChange</code></td><td>React-prop model</td></tr>
+    <tr><td>GitHub Primer ToggleSwitch</td><td>native button + <code>aria-pressed</code></td><td>click-driven (bubbles+composed)</td><td>native button semantics</td></tr>
+    <tr><td>GoogleChromeLabs HowTo</td><td><code>aria-pressed</code> &harr; <code>pressed</code> prop</td><td>custom event, user-action only</td><td>yes</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+<p>
+  Two lessons. <strong>APG's blessed baseline is <code>click</code> + read <code>aria-pressed</code></strong> —
+  it never mints a change event; <code>aria-pressed</code> is the single stable reflected key. And design systems
+  <strong>keep the authored name reflected</strong> — they do not rename an authored input attr into a different
+  computed ARIA attr. <em>The rename (<code>selected</code>&rarr;<code>aria-pressed</code>,
+  <code>value</code>&rarr;<code>data-value</code>) is the real anti-pattern</em>, orthogonal to self-replacement.
+  Adding a custom <code>change</code> event is supported but carries the <strong>double-fire trap</strong> (custom
+  event <em>and</em> native <code>click</code> both bubble) — mitigate by emitting only one.
+</p>
+
+<h2>What the FUI tree actually does</h2>
+<ul>
+  <li>The rename is <strong>not</strong> A-family-wide — only the two <strong>toggle controls</strong>
+    (<code>FilterChipElement</code>, <code>ButtonTransientElement</code>) rename. The rest are pure-presentational
+    (Badge/Tag/Card — no state) or fully rebuilt (TextField/Progress/Meter/NumberInput — state in nested native
+    controls).</li>
+  <li><code>data-value</code> is <strong>already</strong> a phase-agnostic convention, and read-helpers already
+    exist — <code>isFilterChipSelected(el)</code> reads <code>aria-pressed === 'true'</code>.</li>
+  <li><strong>No A-family element dispatches a CustomEvent</strong>; only persistent B-family behaviors do
+    (<code>step-change</code>/<code>tab-change</code>, <code>StepperBehavior.ts</code>).</li>
+</ul>
+
+<h2>Implications</h2>
+<ul>
+  <li><strong>Scope narrows to the two toggle controls</strong> — not an A-family-wide change.</li>
+  <li><strong><code>aria-pressed</code> is the ARIA-mandated canonical survivor key</strong> — not a fork.</li>
+  <li>Prior art favors making the read <strong>mechanism</strong> stable (stop renaming) over a doc-only contract;
+    a custom change event is complementary but carries the double-fire trap (coordinate with #1960 Fork 2).</li>
+  <li><strong>"Don't self-replace / host persists"</strong> (the dominant real-world choice) and
+    <strong>"customized built-in <code>is=</code>"</strong> are out of scope here by precedent — the transient
+    self-replacement pattern is ratified (block-standard family A), and <code>is=</code> is foreclosed by Safari.
+    Recorded with reasons rather than re-litigated.</li>
+</ul>
+
+<p>
+  Full grounding, concrete <code>file:line</code> refs, and sources in
+  <code>reports/2026-06-29-transient-element-exposed-api.md</code>.
+</p>
+{% endraw %}
