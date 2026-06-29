@@ -1,13 +1,23 @@
 ---
-kind: story
-size: 13
+kind: epic
 parent: "1601"
 status: open
+relatedReport: reports/2026-06-29-backlog-split-analysis.md
 dateOpened: "2026-06-22"
 tags: []
 ---
 
 # Migrate project-* include card surfaces to product components (standard-card / standard-section)
+
+**Storied epic (`/split`, 2026-06-29, see relatedReport).** Outgrew `size·13` on grounding — pure volume,
+all design forks resolved (#1871/#1886/#1903/#1786/#1820). Sliced into a foundational
+component-authoring slice (the two product components + namespace config knob + a `/webportals` pilot
+migration as end-to-end proof) that blocks six **file-disjoint** migration slices (~44 `project-*.njk`
+files in volume-balanced buckets, each carrying its own `:8080` render check). The six are mutually
+independent → parallel-batchable once the component slice lands. The umbrella scope below is unchanged;
+it now lives in the children.
+
+---
 
 Author the **product-substrate components** for the WE website and migrate the `we:src/_includes/project-*.njk`
 card surfaces onto them, per the #1886 substrate boundary (resolved 2026-06-28 —
