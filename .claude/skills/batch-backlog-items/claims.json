@@ -431,7 +431,20 @@
         "backlog/1610-migrate-table-surfaces-in-we-src-includes-plug-descriptions-.md",
         "backlog/1612-migrate-table-surfaces-in-we-src-includes-block-descriptions.md",
         "backlog/1613-migrate-table-surfaces-in-we-src-includes-research-descripti.md",
-        "backlog/1953-author-standard-card-standard-section-product-components-nam.md"
+        "backlog/1953-author-standard-card-standard-section-product-components-nam.md",
+        "src/_data/site.js",
+        ".eleventy.js",
+        "src/_includes/product-components.njk",
+        "src/css/style.css",
+        "src/_includes/adapter-descriptions/declarative-component.njk",
+        "src/_includes/adapter-descriptions/jsx-adapter.njk",
+        "src/compat.njk",
+        "src/capabilities.njk",
+        "src/capability-pages.njk",
+        "src/presets.njk",
+        "src/validation-rules.njk",
+        "src/intent-pages.njk",
+        "src/block-pages.njk"
       ],
       "at": "2026-06-29T11:14:49.173Z"
     }
