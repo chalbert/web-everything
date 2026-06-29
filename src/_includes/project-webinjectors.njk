@@ -1,12 +1,13 @@
-<section id="concept" class="section-card">
+{% import "product-components.njk" as pc %}
+{{ pc.standardSection('id="concept"') }}
     <h3 id="the-concept">The Concept</h3>
     <p>
         <strong>Web Injectors</strong> introduces a first-class language construct related to managing dependency injection and scope flow directly in TypeScript/JavaScript.
         It moves beyond "Import Maps" by allowing dynamic, hierarchical, and domain-based resolution of resources.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="syntax" class="section-card">
+{{ pc.standardSection('id="syntax"') }}
     <h3 id="core-syntax">Core Syntax</h3>
     <ul>
         <li><code>injector</code>: Declares a new dependency container. Similar to a <code>namespace</code> or <code>module</code> but specifically for dependency resolution.</li>
@@ -14,9 +15,9 @@
         <li><code>consume</code>: Injects values from a specific domain into the current scope.</li>
         <li><code>domain</code>: A string identifier (e.g., <code>'@app/core'</code>). <strong>This is the contract.</strong> It acts as a universal namespace that prevents naming collisions (e.g., <code>@auth/session</code> vs <code>@analytics/session</code>) and decouples the interface from the implementation.</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="deep-dive" class="section-card">
+{{ pc.standardSection('id="deep-dive"') }}
     <h3 id="deep-dive-syntax-usage">Deep Dive: Syntax & Usage</h3>
 
     <h4 id="1-basic-injector-definition">1. Basic Injector Definition</h4>
@@ -70,13 +71,13 @@ injector Component extends import.injector {
     provide { Logger } from import.injector, './console-logger';
 }
     {% endhighlight %}
-</section>
+{{ pc.endStandardSection() }}
 
 <!-- CASE STUDY MOVED BELOW -->
 </section>
 
 
-<section id="declarative-html-example" class="section-card">
+{{ pc.standardSection('id="declarative-html-example"') }}
   <h3 id="declarative-html-injector">Declarative HTML Injector Example</h3>
   <p>
     You can use Web Injectors declaratively in HTML by associating a <code>&lt;script type="injector"&gt;</code> block with a node via the standard <code>id</code> and <code>injector</code> attributes. This enables zero-build, framework-agnostic dependency injection directly in markup.
@@ -124,9 +125,9 @@ injector Component extends import.injector {
     <p>
         The <code>&lt;script type="injector"&gt;</code> functionality uses the <strong>customScriptType</strong> registry, an extensibility point that enables custom script behaviors in HTML. This registry allows defining new script types with specialized upgrade and lifecycle logic. While currently used internally for injectors and contexts (see <a href="/projects/webcontexts/">Web Contexts</a>), this pattern may be formalized for userland use if additional compelling use cases emerge.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="case-study" class="section-card">
+{{ pc.standardSection('id="case-study"') }}
     <h3 id="case-study-the-hollow-calendar-widget">Case Study: The "Hollow" Calendar Widget</h3>
     <p>
         Modern UI libraries (like <code>react-calendar</code> or <code>mui-datepicker</code>) are often monolithic bundles containing date math, formatting logic, positioning engines, and styling.
@@ -217,19 +218,19 @@ provide * to '@ui/icons'      from FontAwesomeIcons;
 // Now render the app
 // <hollow-calendar> will automatically receive the provided implementations.
     {% endhighlight %}
-</section>
+{{ pc.endStandardSection() }}
 
 
-<section id="why" class="section-card">
+{{ pc.standardSection('id="why"') }}
     <h3 id="why-this-matters">Why This Matters?</h3>
     <p>
         This pattern allows for true <strong>Inversion of Control</strong> at the language level.
         Your <code>consumer.ts</code> never needs to know where <code>Resource</code> comes from, or even if it was mocked for testing.
         The <code>main</code> injector acts as the composition root, binding <code>RealService</code> to <code>@service</code> in production, or <code>MockService</code> to <code>@service</code> in tests.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="dom-api" class="section-card">
+{{ pc.standardSection('id="dom-api"') }}
   <h3 id="dom-api-reference">DOM API Reference</h3>
   <p>
     This section documents the proposed DOM API extensions for working with injectors. These APIs extend the <code>Node</code> interface to support hierarchical injector lookup and management throughout the DOM tree.
@@ -294,9 +295,9 @@ logger.info('Accessed from injector hierarchy');
     <li><strong>Traversal-aware:</strong> Injector lookup respects shadow DOM and template boundaries</li>
     <li><strong>Generator-based:</strong> The <code>injectors()</code> API uses generators for efficient iteration without building arrays</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="ssr" class="section-card">
+{{ pc.standardSection('id="ssr"') }}
     <h3 id="ssr-contract">SSR Contract</h3>
     <p>
         This section defines the server-side rendering contract for <strong>Web Injectors</strong>.
@@ -370,4 +371,4 @@ logger.info('Accessed from injector hierarchy');
             Web Injectors does not ship an SSR runtime — it ships this specification.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}

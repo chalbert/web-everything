@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -30,7 +31,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What a credential standard covers, and how each capability is fulfilled. <strong>Protocol</strong> =
@@ -60,9 +61,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-credential-management" class="section-card">
+{{ pc.standardSection('id="protocol-credential-management"') }}
   <h3 id="how-it-works">Credential Management Protocol</h3>
   <p>
     A requesting surface never bundles a ceremony. It declares the <strong>families</strong> it accepts and
@@ -152,9 +153,9 @@ if (result.ok) identity.signIn(result.descriptor);   // feeds the auth-state pre
     <li><strong>Protocol renamed <code>credential-acquisition</code> &rarr; <code>credential-management</code></strong> — once the member set expanded past <code>get</code>, the protocol <em>is</em> the full Credential Management API surface; the native anchor is literally that API.</li>
     <li><strong>Configurator domain omitted</strong> (Fork 3-A) — technical defaults ride the provider registry + config-flavors; an identity Configurator domain is carved to plateau-app as non-blocking <a href="/backlog/499-identity-ceremony-configurator-domain-plateau-app-explore-on/">#499</a>, added only on real authoring need.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <p>
     Web Identity owns <em>acquiring and managing the credential</em>, not who-may-do-what, not the browser's
@@ -166,9 +167,9 @@ if (result.ok) identity.signIn(result.descriptor);   // feeds the auth-state pre
     <li><strong>Browser Permissions (webpermissions)</strong> — the native Permissions API (camera, geolocation) is a device-capability axis, not app-level identity; do not conflate.</li>
     <li><strong><a href="/intents/loader/">Loader</a> / <a href="/intents/feedback/">Feedback</a></strong> — a non-<code>silent</code> mediation in flight drives the Loader intent; an auth-state transition is announced through Feedback — composed via the #482 intent, not re-invented here.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Identity is in <strong>concept</strong> phase. The Credential Management protocol's seam (request +
@@ -185,4 +186,4 @@ if (result.ok) identity.signIn(result.descriptor);   // feeds the auth-state pre
     <li>How does a multi-family request whose providers disagree (one returns, one rejects) resolve — first-success, or an explicit family preference order?</li>
     <li>Whether <code>session-mediation</code>'s origin-global scope needs a per-surface override for embedded contexts (iframes / portals).</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}

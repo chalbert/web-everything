@@ -1,4 +1,5 @@
-<section id="problem" class="section-card">
+{% import "product-components.njk" as pc %}
+{{ pc.standardSection('id="problem"') }}
     <h3 id="the-problem">The Problem</h3>
     <p>
         DOM events use globally-scoped string names. When nested components fire identically-named events (e.g., two blocks both dispatching <code>toggle</code>), ancestors listening for that name receive <strong>both</strong> &mdash; with no structural way to tell them apart. This is not hypothetical: it happens as soon as you compose blocks from different teams.
@@ -6,9 +7,9 @@
     <p>
         Convention-based naming (prefixing event names) helps but doesn't scale to cross-organization, multi-team architectures. The platform provides no event scoping mechanism &mdash; the WHATWG DOM spec explicitly states namespace support "is not planned."
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="solution" class="section-card">
+{{ pc.standardSection('id="solution"') }}
     <h3 id="the-solution">The Solution: Provider-Based Discrimination</h3>
     <p>
         Web Events introduces a single discrimination primitive: <strong><code>listenForScoped</code></strong>. When an event arrives, the injector system resolves the expected event class from <code>event.target</code>'s scope. If the event passes <code>instanceof</code> against that class, the handler fires. Otherwise, it's silently ignored.
@@ -41,9 +42,9 @@ const unsub = listenForScoped(
   },
 );
     {% endhighlight %}
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="plugged" class="section-card">
+{{ pc.standardSection('id="plugged"') }}
     <h3 id="plugged-mode">Plugged Mode</h3>
     <p>
         In plugged mode, <code>listenForScoped</code> becomes a <code>provider</code> option on standard <code>addEventListener</code>. No new API to learn &mdash; just an extra option on the method every web developer already knows.
@@ -62,9 +63,9 @@ app.addEventListener('click', (e) => {
   console.log('Clicked:', e.target);
 });
     {% endhighlight %}
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="how-it-works" class="section-card">
+{{ pc.standardSection('id="how-it-works"') }}
     <h3 id="how-it-works-title">How It Works</h3>
 
     <h4 id="discrimination-flow">Discrimination Flow</h4>
@@ -104,9 +105,9 @@ app.addEventListener('click', (e) => {
             </tr>
         </tbody>
     </table>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="event-taxonomy" class="section-card">
+{{ pc.standardSection('id="event-taxonomy"') }}
     <h3 id="event-taxonomy-title">Event Taxonomy</h3>
     <p>Web Events identifies three communication patterns that DOM events conflate:</p>
 
@@ -147,9 +148,9 @@ app.addEventListener('click', (e) => {
             </tr>
         </tbody>
     </table>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-typed-event" class="section-card">
+{{ pc.standardSection('id="protocol-typed-event"') }}
     <h3 id="api-reference">Typed Event Protocol — API Reference</h3>
 
     <h4 id="typed-event-class">TypedEventClass</h4>
@@ -190,9 +191,9 @@ function listenFor<TDetail>(
   options?: AddEventListenerOptions,
 ): Unsubscribe;
     {% endhighlight %}
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="standards" class="section-card">
+{{ pc.standardSection('id="standards"') }}
     <h3 id="standards-alignment">Standards Alignment</h3>
     <table>
         <thead>
@@ -221,9 +222,9 @@ function listenFor<TDetail>(
             </tr>
         </tbody>
     </table>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="broadcast" class="section-card">
+{{ pc.standardSection('id="broadcast"') }}
     <h3 id="broadcast-block">Broadcast: The Declarative Bridge</h3>
     <p>
         Invoker Commands give HTML a declarative model for targeted commands (<code>commandfor</code>/<code>command</code>).
@@ -244,9 +245,9 @@ function listenFor<TDetail>(
         constructs an instance, and dispatches on <code>document</code>. Listeners using <code>listenForScoped</code>
         receive the event with full <code>instanceof</code> discrimination.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="ssr" class="section-card">
+{{ pc.standardSection('id="ssr"') }}
     <h3 id="ssr-contract">SSR Contract</h3>
     <p>
         This section defines the server-side rendering contract for <strong>Web Events</strong>.
@@ -325,11 +326,11 @@ function listenFor<TDetail>(
             See also: <a href="/projects/webbehaviors/#ssr">Web Behaviors SSR Contract</a> for the full attribute passthrough specification.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="research" class="section-card">
+{{ pc.standardSection('id="research"') }}
     <h3 id="research-link">Research</h3>
     <p>
         This project emerged from the <a href="/research/custom-events/">Custom Event Scoping &amp; Registry</a> research topic, which explores the full design space: Symbol-based events, protocol tags, scoped registries, and listener discrimination approaches. The research concluded that provider-based <code>instanceof</code> discrimination is the simplest primitive that covers all scenarios.
     </p>
-</section>
+{{ pc.endStandardSection() }}

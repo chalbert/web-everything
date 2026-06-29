@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -29,7 +30,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What an audit standard covers, and where each capability is fulfilled. <strong>Protocol</strong> =
@@ -55,9 +56,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-audit-trail" class="section-card">
+{{ pc.standardSection('id="protocol-audit-trail"') }}
   <h3 id="how-it-works">Audit Trail Protocol</h3>
   <p>
     A producer never bundles an audit store. It constructs an <strong>AuditEvent</strong>, resolves the
@@ -114,9 +115,9 @@ lifecycleProvider.subscribe((ev) =>
       <code>ChangeRecord</code>; lifecycle transitions auto-feed the log; correlationId reaches Web
       Traces. Web Audit owns only the append-only, actor-attributed record and its query seam.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-reproduction-parity" class="section-card">
+{{ pc.standardSection('id="protocol-reproduction-parity"') }}
   <h3 id="reproduction-parity">Reproduction-Parity Verdict/Delta Protocol</h3>
   <p>
     A second, cross-repo conformance surface Web Audit hosts: the thin contract the <strong>Plateau</strong>
@@ -168,9 +169,9 @@ interface ReproductionParityReport {
       (type-only, zero runtime emit); Plateau depends on it &mdash; the one new cross-repo surface the
       reproduction-conformance charter mints.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <ul style="font-size: 0.9rem;">
     <li><strong><a href="/intents/audit-timeline/">Audit Timeline intent</a></strong> &mdash; the UX half:
@@ -185,9 +186,9 @@ interface ReproductionParityReport {
       <em>consumer</em>: its enforcement-evidence trail reuses the AuditEvent schema at the platform level
       (same shape, different subject). Domain audit is not folded into the compliance project.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Audit is in <strong>concept</strong> phase; the Audit Trail protocol's seam (AuditEvent + provider
@@ -205,4 +206,4 @@ interface ReproductionParityReport {
     <li>Retention / redaction of PII in <code>before/after</code> &mdash; a provider concern, or a
       protocol-level field policy?</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}

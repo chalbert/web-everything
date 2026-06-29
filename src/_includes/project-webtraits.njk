@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
     <h3 id="mission">Mission</h3>
     <p>{{ traits.mission }}</p>
@@ -6,12 +7,12 @@
     <h3 id="the-trinity" class="text-xl font-bold mb-6">The Trinity</h3>
     <div class="traits-trinity-grid">
         {% for pillar in traits.pillars %}
-        <div class="standard-card">
+        {{ pc.standardCard() }}
             <h4 class="text-lg font-bold m-0 text-gray-900 no-toc">{{ pillar.title }}</h4>
             <span class="text-xs uppercase tracking-wider text-blue-600 font-bold mb-2 block">{{ pillar.subtitle | safe }}</span>
             <p class="text-gray-600 text-sm leading-relaxed mb-3">{{ pillar.desc | safe }}</p>
             <p class="text-xs text-gray-500 italic border-t pt-2 mt-auto">{{ pillar.details | safe }}</p>
-        </div>
+        {{ pc.endStandardCard() }}
         {% endfor %}
     </div>
 </section>
