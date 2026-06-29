@@ -20,7 +20,7 @@ const we = (...predictedFiles) => ({ predictedFiles, confident: true });
 describe('isMergeRiskFile — only WE-qualified blacklist paths', () => {
   it('matches a reserved single-doc registry', () => {
     expect(isMergeRiskFile('we:src/_data/traits.json')).toBe(true);
-    expect(isMergeRiskFile('we:tsconfig.json')).toBe(true);
+    expect(isMergeRiskFile('we:src/_data/docs.json')).toBe(true);
   });
   it('matches the curated-sweep prefix', () => {
     expect(isMergeRiskFile('we:src/_data/benchmarkFoo.json')).toBe(true);
@@ -29,6 +29,11 @@ describe('isMergeRiskFile — only WE-qualified blacklist paths', () => {
   it('does NOT match per-entry registry files or ordinary source', () => {
     expect(isMergeRiskFile('we:src/_data/adapters/foo.json')).toBe(false);
     expect(isMergeRiskFile('we:src/foo.ts')).toBe(false);
+  });
+  it('does NOT match BUILD CONFIG (#1952 — line-structured, merges optimistically)', () => {
+    expect(isMergeRiskFile('we:tsconfig.json')).toBe(false);
+    expect(isMergeRiskFile('we:vite.config.mts')).toBe(false);
+    expect(isMergeRiskFile('we:package.json')).toBe(false);
   });
   it('is WE-only — a same-named path in another repo is NOT merge-risk (slice B extends this)', () => {
     expect(isMergeRiskFile('frontierui:tsconfig.json')).toBe(false);
@@ -48,11 +53,12 @@ describe('filesOf — repo-qualified, backlog file always included', () => {
 
 describe('mergeRiskFilesOf — touchesMonolith ∪ blacklist members of the touch-set', () => {
   it('folds touchesMonolith (WE-qualified) and a blacklist predicted file', () => {
-    const e = entry(1, { predictedFiles: ['tsconfig.json', 'src/own.ts'], touchesMonolith: ['src/_data/traits.json'], confident: true });
+    const e = entry(1, { predictedFiles: ['src/_data/docs.json', 'tsconfig.json', 'src/own.ts'], touchesMonolith: ['src/_data/traits.json'], confident: true });
     const m = mergeRiskFilesOf(e);
     expect(m.has('we:src/_data/traits.json')).toBe(true); // from touchesMonolith
-    expect(m.has('we:tsconfig.json')).toBe(true);          // blacklist member of predictedFiles
-    expect(m.has('we:src/own.ts')).toBe(false);            // ordinary file is not merge-risk
+    expect(m.has('we:src/_data/docs.json')).toBe(true);   // blacklist member of predictedFiles
+    expect(m.has('we:tsconfig.json')).toBe(false);        // build config is NOT merge-risk (#1952)
+    expect(m.has('we:src/own.ts')).toBe(false);           // ordinary file is not merge-risk
   });
 });
 
@@ -81,6 +87,13 @@ describe('conflicts — the optimistic-first pairwise gate', () => {
   it('confident items sharing only an ORDINARY file run concurrent (optimistic floor handles it)', () => {
     const x = entry(1, we('src/shared.ts', 'src/x.ts'));
     const y = entry(2, we('src/shared.ts', 'src/y.ts'));
+    expect(conflicts(x, y)).toBe(false);
+  });
+  it('(#1952) two confident items sharing the SAME build-config file run concurrent', () => {
+    // tsconfig.json left RESERVED_MERGE_RISK in slice C, so a shared WE tsconfig is an ordinary overlap →
+    // the optimistic floor merges the distinct-line edits; only a real same-line clash would replay serially.
+    const x = entry(1, { predictedFiles: ['tsconfig.json', 'src/x.ts'], confident: true });
+    const y = entry(2, { predictedFiles: ['tsconfig.json', 'src/y.ts'], confident: true });
     expect(conflicts(x, y)).toBe(false);
   });
   it('(d) a low-confidence item overlapping another on ANY file stays same-lane', () => {

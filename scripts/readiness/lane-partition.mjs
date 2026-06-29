@@ -28,11 +28,17 @@
 // adapters per-entry and the 3 pure-derived artifacts moved to regenerate-on-merge, this is the residual set.
 // Per-entry registry files (src/_data/<reg>/<id>.json, INCLUDING src/_data/adapters/<id>.json) are disjoint
 // by construction and are NEVER here. WE-only for now; the per-repo extension is slice B (#1951).
+//
+// NOT here (#1952, slice C): BUILD CONFIG (tsconfig.json, vite.config.mts, package.json, vitest.config.ts).
+// Unlike a structured single-doc registry, build config is LINE-structured — concurrent edits land on distinct
+// lines (a `scripts` entry, an `include`, a `paths` key, a vitest glob) and git's line-merge is trustworthy; a
+// genuine same-line clash (two version bumps) is a REAL git conflict that rebase-retry/serial-replay catches.
+// So it belongs in the optimistic-merge bucket, not the clean-but-wrong blacklist. The blacklist is reserved
+// for files where a conflict-FREE merge can still be wrong (ordered/relational/rollup JSON), which config isn't.
 export const RESERVED_MERGE_RISK = [
   'src/_data/traits.json', 'src/_data/capabilityMatrix.json', 'src/_data/docs.json',
   'src/_data/webhandlers.json', 'src/_data/webportals.json',
   'src/_data/benchmarkCorpus.json', 'src/_data/workbenchTools.json', 'src/_data/workbenchFeatures.json',
-  'vite.config.mts', 'tsconfig.json',
   'AGENTS.md', // its hand-authored PROSE body is a monolith edit; the AUTO-GENERATED inventory sub-block is derived (regen-on-merge), not a merge-risk lane edit
 ];
 

@@ -142,11 +142,14 @@ const INTEGRATION_ORDER = ['frontierui', 'plateau-app', 'we']; // impl repos fir
 // lock. Per-entry registry files (src/_data/<reg>/<id>.json, INCLUDING src/_data/adapters/<id>.json) are
 // disjoint by construction and are NEVER reserved. The DERIVED artifacts are regenerated once post-merge
 // (Phase 4c), never lane-edited, so they are not here either.
+// NOT here (#1952, slice C): BUILD CONFIG (tsconfig.json, vite.config.mts, package.json, vitest.config.ts) —
+// it is LINE-structured (concurrent edits land on distinct lines; a real same-line clash is a git conflict
+// rebase-retry/serial-replay catches), so it lives in the optimistic-merge bucket, not the clean-but-wrong
+// blacklist. The blacklist is for files where a conflict-FREE merge can still be wrong (ordered/relational JSON).
 const RESERVED_MERGE_RISK = [
   'src/_data/traits.json', 'src/_data/capabilityMatrix.json', 'src/_data/docs.json',
   'src/_data/webhandlers.json', 'src/_data/webportals.json',
   'src/_data/benchmarkCorpus.json', 'src/_data/workbenchTools.json', 'src/_data/workbenchFeatures.json',
-  'vite.config.mts', 'tsconfig.json',
   'AGENTS.md', // its hand-authored PROSE body is locked; the AUTO-GENERATED inventory sub-block is derived (regen-on-merge), not locked
 ];
 // The merge-risk WE paths a given item intends to touch — its probed `touchesMonolith` ∩ the reserved set
@@ -211,7 +214,7 @@ const PROBE_SCHEMA = {
       type: 'array', items: { type: 'string' },
       description: 'genuinely-monolithic shared files it must edit (the single-doc registries src/_data/{traits,docs,capabilityMatrix}.json, webhandlers/webportals.json, the curated-sweep artifacts workbench*/benchmark*.json, and the hand-authored PROSE body of AGENTS.md — its AUTO-GENERATED inventory block is a derived artifact, see derivedArtifacts) — list them explicitly. These are the merge-risk (blacklist) files: an item serializes against ANOTHER item only when BOTH touch the same one (a clean git merge of two edits to one of these can be silently wrong); a lone toucher still runs concurrent. Per-entry registry files (src/_data/<reg>/<id>.json, INCLUDING src/_data/adapters/<id>.json since #1938) are NOT monolithic — never list them.',
     },
-    confident: { type: 'boolean', description: 'TRUE when every predicted file (in WE AND every extraRepo) is one this item OWNS (its own impl/code, its own demo page, its own backlog/NNN.md, its own per-entry registry entries, its own test file). FALSE *only* when work plausibly spills into a SHARED surface another item could also touch: a still-monolithic registry, shared runtime (plugs/bootstrap.ts), a shared *.njk include, shared test specs, build config (tsconfig/vite/package.json), or a broad cross-file refactor — in ANY affected repo. Routine uncertainty about the exact file COUNT is NOT a reason for false; only genuine shared-surface risk is. Per-entry registry writes do NOT lower confidence. NOTE (#1950): confident:false NO LONGER forces the serial lane on its own — it only tightens the pairwise check (a low-confidence item serializes against ANOTHER item it overlaps on any file). A confident:false item that is file-disjoint from every other still runs concurrent under the optimistic floor.' },
+    confident: { type: 'boolean', description: 'TRUE when every predicted file (in WE AND every extraRepo) is one this item OWNS (its own impl/code, its own demo page, its own backlog/NNN.md, its own per-entry registry entries, its own test file). FALSE *only* when work plausibly spills into a SHARED surface another item could also touch: a still-monolithic registry, shared runtime (plugs/bootstrap.ts), a shared *.njk include, shared test specs, or a broad cross-file refactor — in ANY affected repo. Build config (tsconfig/vite/package.json/vitest.config) does NOT lower confidence (#1952): it is line-structured and merges optimistically, so a build-config edit is owned, not shared-risk. Routine uncertainty about the exact file COUNT is NOT a reason for false; only genuine shared-surface risk is. Per-entry registry writes do NOT lower confidence. NOTE (#1950): confident:false NO LONGER forces the serial lane on its own — it only tightens the pairwise check (a low-confidence item serializes against ANOTHER item it overlaps on any file). A confident:false item that is file-disjoint from every other still runs concurrent under the optimistic floor.' },
   },
 };
 
@@ -396,11 +399,13 @@ const probes = await parallel(items.map((it) => () =>
       `lower confidence (this INCLUDES src/_data/adapters/<id>.json — split per-adapter since #1938). List in`,
       `touchesMonolith ONLY the genuinely-monolithic shared WE files (the single-doc registries`,
       `src/_data/{traits,docs,capabilityMatrix}.json, webhandlers/webportals.json, the curated-sweep artifacts`,
-      `workbench*/benchmark*.json, the AGENTS.md hand-authored prose body; plus plugs/bootstrap.ts, build config).`,
+      `workbench*/benchmark*.json, the AGENTS.md hand-authored prose body; plus plugs/bootstrap.ts). Build config`,
+      `(tsconfig/vite/package.json/vitest.config) is NOT a monolith (#1952) — it merges optimistically; never list it.`,
       `Set confident=TRUE when every file you'll touch — in EVERY affected repo — is one this item clearly OWNS.`,
       `Set confident=FALSE *only* when the work plausibly SPILLS into a shared surface another item could also`,
-      `touch (a monolithic registry, plugs/bootstrap.ts, a shared *.njk include, a shared test spec, tsconfig/vite/`,
-      `package.json, or a broad cross-file refactor) in ANY repo. Routine uncertainty about the exact file COUNT`,
+      `touch (a monolithic registry, plugs/bootstrap.ts, a shared *.njk include, a shared test spec, or a broad`,
+      `cross-file refactor) in ANY repo — but NOT build config, which is line-structured and merges clean.`,
+      `Routine uncertainty about the exact file COUNT`,
       `is NOT a reason for false; default disjoint-looking work to TRUE. (#1950: confident:false no longer forces`,
       `serial by itself — it only tightens the pairwise overlap check — so don't agonize; an honest false on a`,
       `genuinely-disjoint touch-set still runs concurrent.) Return ONLY the structured object.`,
