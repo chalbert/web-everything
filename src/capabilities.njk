@@ -39,7 +39,7 @@ title: Web Everything — Capabilities
   {% set tierFg = { 'native-ok': '#166534', 'polyfill-ok': '#92400e', 'capability-hard': '#991b1b', 'supported': '#166534', 'partial': '#92400e', 'unsupported': '#6b7280' } %}
 
   <div style="overflow-x: auto;">
-    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em; background: #fff;">
+    <we-data-table><table style="width: 100%; border-collapse: collapse; font-size: 0.9em; background: #fff;">
       <thead>
         <tr>
           <th style="text-align: left; padding: 0.6rem 0.75rem; border-bottom: 2px solid var(--color-border);">Capability</th>
@@ -71,7 +71,7 @@ title: Web Everything — Capabilities
         </tr>
         {% endfor %}
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
   <p style="font-size: 0.85em; color: var(--color-text-muted); margin-top: 0.75rem;">
     The differential is the point: <code>customizable-select</code> and <code>cross-root-aria</code> are

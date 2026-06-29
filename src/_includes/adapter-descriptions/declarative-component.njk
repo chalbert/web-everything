@@ -84,7 +84,7 @@ customElements.define('user-card', UserCard);
         class is strictly more expressive than a declarative definition (arbitrary lifecycle, imperative logic,
         observed attributes), so <code>class → &lt;component&gt;</code> is not generally recoverable.
     </p>
-    <table>
+    <we-data-table><table>
         <tr><th></th><th>JSX adapter</th><th>Declarative Component adapter</th></tr>
         <tr><td>Maps</td><td>HTML ⇄ JSX — same tree, two spellings</td><td>declarative <code>&lt;component&gt;</code> → class custom element</td></tr>
         <tr><td>Directionality</td><td><strong>Two-way</strong> (bidirectional)</td><td><strong>One-way</strong> (lowering / desugaring)</td></tr>
@@ -92,7 +92,7 @@ customElements.define('user-card', UserCard);
         <tr><td>Transform time</td><td>Build-time AST (<code>jsxToHtml</code>/<code>htmlToJsx</code>)</td><td>Build-time AST (runtime twin in the playground)</td></tr>
         <tr><td>Output</td><td>The other authoring format (peer)</td><td>A registered custom element (lower layer)</td></tr>
         <tr><td>Category</td><td>Rendering (format peer of HTML)</td><td>Syntax (sugar → class)</td></tr>
-    </table>
+    </table></we-data-table>
     <p style="margin-bottom: 0;">
         So the <a href="/blocks/component/">block page's</a> declarative↔class toggle shows <em>input beside
         generated output</em>, not two interchangeable spellings. The two adapters <strong>compose</strong>: a
