@@ -1,6 +1,7 @@
+{% import "product-components.njk" as pc %}
 {% from "project-status.njk" import projectStatus %}
 
-<section id="overview" class="section-card">
+{{ pc.standardSection('id="overview"') }}
     <h3 id="mission">Mission</h3>
     <p>
         <strong>Web Components</strong> extends the native Custom Elements API with patterns for scoped registries, dependency injection integration, and element lifecycle enhancements.
@@ -15,9 +16,9 @@
         <li><strong>Transient Components:</strong> Custom elements that replace themselves with semantically correct native HTML — solving the "dynamic tag" problem without permanent wrapper nodes.</li>
         <li><strong>Declarative Definition:</strong> Define a brand-new custom element entirely from HTML — tag name, template, and shadow options — via the <a href="/blocks/component/"><code>&lt;component&gt;</code> element</a>, with a deterministic build-time AST transform to the class form.</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="declarative-definition" class="section-card">
+{{ pc.standardSection('id="declarative-definition"') }}
     <h3 id="declarative-definition-heading">Declarative Definition</h3>
     <p>
         Declarative Shadow DOM lets you ship an element's <em>shadow content</em> in markup, and
@@ -59,9 +60,9 @@
             <a href="/blocks/component/#open-questions">Component block's open questions</a>).
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="scoped-registries" class="section-card">
+{{ pc.standardSection('id="scoped-registries"') }}
     <h3 id="scoped-registries-heading">Scoped Registries</h3>
     <p>
         The standard <code>customElements.define()</code> is a global, one-time operation. Two libraries defining <code>&lt;my-button&gt;</code> will collide.
@@ -91,9 +92,9 @@ class AppShell extends HTMLElement {
             Web Plugs provides a polyfill that follows the proposal's API shape. When the standard ships, the polyfill becomes a no-op.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="injector-integration" class="section-card">
+{{ pc.standardSection('id="injector-integration"') }}
     <h3 id="injector-integration-heading">Injector Integration</h3>
     <p>
         Custom elements typically rely on module scope, global variables, or manual event dispatching to access shared services.
@@ -115,9 +116,9 @@ class UserCard extends HTMLElement {
     <p>
         This follows the same pattern as Angular's hierarchical DI and React's Context — but it works with <strong>any</strong> custom element, not just those from a specific framework.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="transient-components" class="section-card">
+{{ pc.standardSection('id="transient-components"') }}
     <h3 id="transient-components-heading">Transient Components</h3>
     <p>
         A <strong>Transient Component</strong> is a custom element that replaces itself with a semantically correct native HTML element during initialization.
@@ -205,9 +206,9 @@ class TransientElement extends HTMLElement {
     <p style="margin-top: 1rem;">
         See the full specification on the <a href="/blocks/transient-component/">Transient Component</a> block page, including AutoHeading code examples, SSR strategies, and pitfalls.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="safari" class="section-card">
+{{ pc.standardSection('id="safari"') }}
     <h3 id="safari-constraints">Safari &amp; Customized Built-ins</h3>
     <p>
         Safari refuses to implement the <code>is=""</code> attribute for customized built-in elements.
@@ -218,9 +219,9 @@ class TransientElement extends HTMLElement {
         <li><strong>Transient Components</strong> are the portable alternative to <code>is=""</code> — an autonomous element that becomes a native element via self-replacement.</li>
         <li><strong>Web Directives</strong> uses <code>&lt;template is="for-each"&gt;</code> with a polyfill from <a href="/projects/webplugs/">Web Plugs</a> for Safari.</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="ssr" class="section-card">
+{{ pc.standardSection('id="ssr"') }}
     <h3 id="ssr-contract">SSR Contract</h3>
     <p>
         This section defines the server-side rendering contract for <strong>Web Components</strong>.
@@ -318,9 +319,9 @@ class TransientElement extends HTMLElement {
             See also: the <a href="/blocks/transient-component/">Transient Component</a> block page for detailed SSR strategies.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-render-strategy" class="section-card">
+{{ pc.standardSection('id="protocol-render-strategy"') }}
     <h3 id="render-strategy-heading">Render Strategy Protocol</h3>
     <p>
         A conformance contract for <strong>how a component's element tree updates over time</strong> —
@@ -418,9 +419,9 @@ interface RenderStrategy {
         contract declares this boundary lossy — the compiler treats <code>{% raw %}{{ }}{% endraw %}</code> as <code>bind-*</code> by
         convention, never as eager <code>{}</code>, or refuses the round-trip with a diagnostic.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-auto-define-strategy" class="section-card">
+{{ pc.standardSection('id="protocol-auto-define-strategy"') }}
     <h3 id="auto-define-strategy-heading">Auto-Define Strategy Protocol</h3>
     <p>
         A conformance contract for <strong>how and when a custom element gets registered</strong>
@@ -509,9 +510,9 @@ function defineElement(tag: string, ctor: CustomElementConstructor): void {
         concrete strategies ship in <a href="../frontierui/">Frontier UI</a>. Carries the concept from
         plateau, never its render-time-WeakMap POC.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-deck-document-model" class="section-card">
+{{ pc.standardSection('id="protocol-deck-document-model"') }}
     <h3>Protocol — Deck Document Model</h3>
     <p class="text-gray-600 text-sm">
         A <strong>content/interchange schema</strong> for what a slide and a deck carry, defined at the
@@ -541,9 +542,9 @@ function defineElement(tag: string, ctor: CustomElementConstructor): void {
         <code>webdecks</code> project); Web Components ships the schema, <a href="../frontierui/">Frontier
         UI</a> renders it, plateau adds import / versioning.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="standards" class="section-card">
+{{ pc.standardSection('id="standards"') }}
     <h3 id="web-standards">Web Standards Alignment</h3>
     <table>
         <tr><th>Standard</th><th>Status</th><th>How We Use It</th></tr>
@@ -578,4 +579,4 @@ function defineElement(tag: string, ctor: CustomElementConstructor): void {
             <td>Safe lifecycle deferral for transient element replacement.</td>
         </tr>
     </table>
-</section>
+{{ pc.endStandardSection() }}

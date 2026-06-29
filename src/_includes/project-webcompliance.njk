@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -35,7 +36,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What an enforcement standard covers. <strong>Config</strong> = fixed by the policy model (the canonical
@@ -61,9 +62,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="policy-model" class="section-card">
+{{ pc.standardSection('id="policy-model"') }}
   <h3 id="how-it-works">The Policy / Rule Model</h3>
   <p>
     A compliance policy is <strong>config, not a protocol</strong> &mdash; a versioned set of rules, each
@@ -117,9 +118,9 @@ const effective = resolvePolicy(projectPolicy);   // → the gates that actually
     <li><strong>Config, not a protocol:</strong> there is no cross-vendor policy-interchange contract in v1.
       The <em>results</em> are what interoperate, and they ride Web Reporting's report model.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <ul style="font-size: 0.9rem;">
     <li><strong><a href="/projects/webreporting/">Web Reporting</a></strong> &mdash; the audit/evidence
@@ -132,9 +133,9 @@ const effective = resolvePolicy(projectPolicy);   // → the gates that actually
       vocabulary for <em>domain</em> rules; same "policy-as-code, versioned, extends a default" shape,
       different subject (business actions vs. standards conformance).</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Compliance is in <strong>PoC</strong> phase: the policy/rule model is specified here as the
@@ -165,4 +166,4 @@ const effective = resolvePolicy(projectPolicy);   // → the gates that actually
     <li>Does a rule own its waiver policy inline, or is the waiver register a separate scope keyed by
       <code>rule.id</code> (the waivers slice, <a href="/backlog/438-add-waivers-exceptions-tracked-expiring-audited-overrides/">#438</a>)?</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}

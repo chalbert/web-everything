@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
     <h3 id="mission">Mission</h3>
     <p>
@@ -16,7 +17,7 @@
     </p>
 </section>
 
-<section id="scope" class="section-card">
+{{ pc.standardSection('id="scope"') }}
     <h3 id="scope-heading">Scope</h3>
     <p>
         The load-bearing surface is not route format alone but <strong>the URL as a state store many stateful
@@ -73,9 +74,9 @@
         in the following slices. Per the constellation rule the contract lives here in
         <code>@webeverything</code> and the router runtime ships in Frontier UI.
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="route-format-profile-section" class="section-card">
+{{ pc.standardSection('id="route-format-profile-section"') }}
     <h3 id="route-format-profile">Route-format profile</h3>
     <p>
         The portable webrouting artifact is the <strong>route table</strong> — the thin <strong>semantic
@@ -116,9 +117,9 @@ interface RouteFormatEntry {
             the serializable <a href="#route-format-sot">route-map projection</a> (#1721) is its derived,
             non-DOM read for sitemap / prerender / config tooling.</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="route-format" class="section-card">
+{{ pc.standardSection('id="route-format"') }}
     <h3 id="route-format-sot">Route-format source-of-truth</h3>
     <p>
         Routes are authored as <strong>declarative DOM</strong>, not a hand-written data table: today
@@ -178,9 +179,9 @@ interface RouteMap {
             <a href="/backlog/1688-webrouting-sitemap-derivation-scope-which-artifact-set-ships/">#1688</a>);
             slice B ships the schema + vectors only.</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-custom-url-codec-strategy-section" class="section-card">
+{{ pc.standardSection('id="protocol-custom-url-codec-strategy-section"') }}
     <h3 id="protocol-custom-url-codec-strategy">CustomUrlCodecStrategy Protocol</h3>
     <p>
         The second webrouting surface (after the route table) is the <strong>URL as a state store</strong>:
@@ -224,9 +225,9 @@ interface CustomUrlCodecStrategy<T> {
             (<code>url | session | memory</code>) generalized per slice. The URL facet is owned here under
             webrouting, distinct from the durable-record <a href="/projects/webstates/">storage</a> protocol.</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="url-state-seam-section" class="section-card">
+{{ pc.standardSection('id="url-state-seam-section"') }}
     <h3 id="url-state-seam">URL-as-state declaration &amp; coordinator seam</h3>
     <p>
         A component <strong>declares</strong> which state slices sync &mdash; <strong>router-agnostically</strong>,
@@ -272,4 +273,4 @@ interface UrlStateCoordinator {
             non-URL default; back/forward (<code>popstate</code>/<code>navigate</code>) is the read source of
             truth, restoring the true state. Migrates pagination's ad-hoc <code>urlSync</code> onto the seam.</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}

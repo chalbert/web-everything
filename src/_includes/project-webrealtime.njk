@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -32,7 +33,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What a realtime-transport standard covers. <strong>Protocol</strong> = fixed by the
@@ -60,9 +61,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-transport-negotiation" class="section-card">
+{{ pc.standardSection('id="protocol-transport-negotiation"') }}
   <h3 id="how-it-works">Transport Negotiation Protocol</h3>
   <p>
     A producer never hard-wires a socket. It resolves a <strong>CustomTransportProvider</strong> and
@@ -112,9 +113,9 @@ conn.onmessage((msg) => render(msg));
       (<a href="/projects/webnotifications/">Web Notifications</a>) — a separate home, never a fallback
       target of this protocol.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="capability-matrix" class="section-card">
+{{ pc.standardSection('id="capability-matrix"') }}
   <h3 id="capability-matrix-heading">Transport Capability Matrix</h3>
   <p>
     What each channel supplies behind the one contract, and where it sits in the negotiation order. A
@@ -133,9 +134,9 @@ conn.onmessage((msg) => render(msg));
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <ul style="font-size: 0.9rem;">
     <li><strong><a href="/projects/webnotifications/">Web Notifications</a></strong> &mdash; the
@@ -150,9 +151,9 @@ conn.onmessage((msg) => render(msg));
     <li><strong><a href="/projects/webaudit/">Web Audit</a> / <a href="/projects/webreporting/">Web
       Reporting</a></strong> &mdash; connection lifecycle events are a report/audit source.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Realtime is in <strong>concept</strong> phase; the transport-negotiation protocol's contract is
@@ -170,4 +171,4 @@ conn.onmessage((msg) => render(msg));
     <li>Does the protocol standardize a message envelope (so channels are wire-compatible) or stay
       payload-opaque like the push <code>DeliveryReceipt</code>?</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}

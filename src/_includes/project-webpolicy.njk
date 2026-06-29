@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -32,7 +33,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What a domain-policy standard covers. <strong>Protocol</strong> = fixed by the Policy Rule meta-schema;
@@ -59,9 +60,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-policy-rule" class="section-card">
+{{ pc.standardSection('id="protocol-policy-rule"') }}
   <h3 id="how-it-works">Policy Rule Meta-Schema (DMN-aligned)</h3>
   <p>
     A rule is a <strong>decision table</strong>, the DMN model: named inputs, a set of rules each mapping
@@ -119,9 +120,9 @@ const approvals: PolicyRuleSet = {
     <li><strong>Authoring is a Configurator domain:</strong> a ruleSet is built in the plateau-app Technical
       Configurator (the data-driven decision tool), not hand-written, for non-developer authors.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <ul style="font-size: 0.9rem;">
     <li><strong><a href="/projects/webexpressions/">Web Expressions</a></strong> &mdash; evaluates each FEEL
@@ -137,9 +138,9 @@ const approvals: PolicyRuleSet = {
     <li><strong>Technical Configurator (plateau-app)</strong> &mdash; rule authoring surfaces as a
       Configurator domain.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Policy is in <strong>concept</strong> phase; the Policy Rule (DMN-aligned) meta-schema is specified
@@ -160,4 +161,4 @@ const approvals: PolicyRuleSet = {
     <li>Is the FEEL subset WE adopts the full grammar, or a constrained safe subset Web Expressions can
       guarantee to evaluate deterministically?</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}

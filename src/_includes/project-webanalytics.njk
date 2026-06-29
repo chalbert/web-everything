@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -11,7 +12,7 @@
   </p>
 </section>
 
-<section id="protocol-analytics-vocabulary" class="section-card">
+{{ pc.standardSection('id="protocol-analytics-vocabulary"') }}
   <h3 id="analytics-vocabulary-protocol">Analytics Event Vocabulary Protocol</h3>
   <p>
     Conformance reference for vendor-neutral analytics instrumentation. Adopts the
@@ -107,20 +108,20 @@ interface AnalyticsBackend {
     Vocabulary addition only — the running app calls <code>resolve().track('Experiment Exposed', …)</code>
     against the same conformant sink; #1414's experiment intent records exposure this way (#1476).
   </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <ul style="font-size: 0.9rem;">
     <li><strong><a href="/projects/webtraces/">Web Traces</a></strong> — analytics records <em>what users did</em>; traces record <em>how the system processed it</em>. They share trace IDs when correlated.</li>
     <li><strong><a href="/projects/webevents/">Web Events</a></strong> — analytics adapters can subscribe to typed events emitted by other blocks to instrument without sprinkling <code>track()</code> calls.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Analytics is in <strong>draft</strong> phase. The vocabulary is fixed (Segment Spec); the
     adapter ecosystem (Segment, Mixpanel, GA4, self-hosted) is the next deliverable.
   </p>
-</section>
+{{ pc.endStandardSection() }}
