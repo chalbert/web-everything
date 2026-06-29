@@ -3,51 +3,157 @@ kind: decision
 status: open
 locus: webeverything
 dateOpened: "2026-06-29"
+dateStarted: "2026-06-29"
+preparedDate: "2026-06-29"
+relatedReport: reports/2026-06-29-we-fui-chip-upgrade-listener-contract.md
 tags: [webcomponents, fui-boundary, filter-chip, transient-element, decision]
 ---
 
-# WE↔FUI chip-upgrade listener contract: delegation-required vs FUI listener-preserving / event API
+# WE↔FUI chip-upgrade listener contract: codify the consumer rule; gate it? ship a FUI event?
 
 A FUI `<we-filter-chip>` is a transient custom element (the `TransientElement` self-replacement pattern,
-[we:block-standard.md:243](../docs/agent/block-standard.md#L243)): on upgrade it **replaces itself with a
-native `<button class="fui-filter-chip">`**, and the original element — with any listeners bound directly to
-it — is detached and discarded. WE-side JS that drives those chips therefore loses any handler it attached
-*before* the upgrade, and any cached element reference goes stale.
+[we:block-standard.md:243](../docs/agent/block-standard.md#L243), family **(A)**): on upgrade it **replaces
+itself with a native `<button class="fui-filter-chip">`** ([fui:blocks/transient/TransientElement.ts](../../frontierui/blocks/transient/TransientElement.ts)
+`queueMicrotask(() => this.replaceWith(el))`), and the original element — with any listeners bound directly
+to it — is detached and discarded. WE-side JS that wires those chips loses any handler it attached *before*
+the upgrade, and any cached element reference goes stale. This shipped twice as a regression on the
+`/backlog/` Prioritisation table; the summary count pills (`data-pfilter`) used direct `addEventListener` and
+silently stopped filtering the moment the FUI module loaded.
 
-This is not hypothetical: it shipped twice as a regression on the `/backlog/` Prioritisation table. The
-readiness/kind chips survived only because they happened to use a **document-delegated** click handler; the
-summary count pills (`data-pfilter`) used direct `addEventListener` and silently stopped filtering the
-moment the FUI module loaded. The fix delegated them too. But "remember to delegate, and never cache a chip
-reference" is tribal knowledge enforced by nothing — the next interactive FUI-chip surface will reintroduce
-the same class of bug. WE consumes `we-filter-chip` as a cross-repo dependency, so the contract for *how a
-consumer safely wires behaviour onto a self-replacing element* belongs in the boundary, not in each call
-site's memory.
+## Grounding digest (from prep — [relatedReport](../reports/2026-06-29-we-fui-chip-upgrade-listener-contract.md))
 
-## The fork (real either/or)
+- **Only the *host* element's own listeners are lost.** The base **moves** child nodes
+  ([fui:blocks/transient/TransientElement.ts](../../frontierui/blocks/transient/TransientElement.ts), lines
+  ~67–68) so listeners on *children* survive; `decorate`
+  ([fui:blocks/filter-chip/FilterChipElement.ts](../../frontierui/blocks/filter-chip/FilterChipElement.ts)
+  lines 56–84) **copies every attribute** onto the native button (so `data-pfilter`/`data-pready` and a
+  computed `aria-pressed` **survive the upgrade**). The DOM exposes **no API to enumerate/transfer an
+  element's own listeners** — so a "preserve the bound handlers" fix is *mechanically impossible*.
+- **The fix already shipped and is regression-netted.** [we:src/assets/js/backlog-table-sort.js:198-235](../src/assets/js/backlog-table-sort.js#L198)
+  delegates on `document` and live-re-queries for *every* chip class; the deterministic interaction lane
+  [we:tests/interaction/backlog-priority-filters.spec.ts](../tests/interaction/backlog-priority-filters.spec.ts)
+  drives a **mock self-replacing chip** and asserts post-upgrade filtering still works.
+- **FUI has a stable-event precedent — but only on *persistent* (B-family) hosts** (`tab-change`,
+  `step-change`, `dock`; convention `new CustomEvent(name, { detail, bubbles: true, cancelable })`,
+  [fui:blocks/stepper/StepperBehavior.ts](../../frontierui/blocks/stepper/StepperBehavior.ts) lines 20–21).
+  **Every transient (A-family) element** (`we-button`/`we-badge`/`we-meter`/`we-text-field`/`we-filter-chip`)
+  exposes state via native events + attributes, **never a CustomEvent**.
+- **An open `addEventListener` sniff is already a *rejected* gate shape** — `compose-dont-handroll` (#933,
+  [we:platform-decisions.md:728](../docs/agent/platform-decisions.md#L728)) rules it a "false-positive
+  factory" and mandates a **curated, selector-scoped deny-list** instead (working precedent:
+  `COMPOSE_DENY_LIST`, [we:scripts/check-standards-rules.mjs:1624](../scripts/check-standards-rules.mjs#L1624)).
 
-Both readings are coherent; they put the invariant on opposite sides of the WE↔FUI boundary.
+## The axis
 
-- **Fork A — Delegation is the consumer's contract (WE-side rule).** FUI keeps the transient
-  self-replacement as-is; the WE rule becomes explicit and enforced: *never bind a listener directly to a
-  `we-filter-chip`, never cache its reference — delegate on a stable ancestor and re-query live.* Codify in
-  `docs/agent/*` and back it with a lint/gate (e.g. flag `addEventListener` on a `[data-pfilter]`/`[data-pready]`
-  selector, or a `querySelector('we-filter-chip')` stored in a variable). Cheapest; keeps FUI dumb; but the
-  burden stays on every consumer forever and the gate is heuristic.
+The framing in the original card — *"which side of the WE↔FUI boundary owns the durable fix, A or B"* — is a
+**false dichotomy** (the pass-0 / skeptic finding that reshaped this prep). WE must codify a consumer-facing
+rule **either way**: even under a full Fork-B, WE "only consumes it and codifies the consumer-facing
+contract" (WE holds zero implementation, #1282). And a FUI event would be **additive**, not exclusive —
+native `click` still bubbles to the same delegated ancestor, so an event *supplements* delegation, it does
+not replace it. So the decision is not one boundary fork; it decomposes into one **forced invariant** (codify
+the consumer rule — already shipped) plus **two genuine residual choices**: *how to enforce it*, and *whether
+FUI should additionally ship a stable event now*.
 
-- **Fork B — FUI guarantees a stable interaction surface (FUI-side rule).** FUI either (b1) preserves
-  listeners across the upgrade (re-emit bound handlers onto the replacement, or upgrade in place without
-  detaching), or (b2) exposes a stable change-event API (a `we-filter-chip` `change`/`toggle` CustomEvent on a
-  persistent host element, or a documented `aria-pressed` mutation contract) so consumers never touch the
-  transient node directly. Removes the footgun at the source for *all* consumers (WE today, plateau-app
-  tomorrow); costs FUI work and a possible API addition, and must not regress the native-form/a11y benefit
-  that motivated self-replacement in the first place.
+## Recommended path at a glance
 
-**Leaning (not yet prepared):** Fork B2 — a stable event API on a persistent host is the durable boundary
-fix, since the self-replacement exists for good reasons (native `<button>` semantics) and shouldn't be
-unwound, but consumers shouldn't have to know the node identity churns. Fork A is the safe fallback if FUI
-can't take the change. Needs `/prepare`: survey how FUI's other transient elements expose state, confirm
-whether a delegated-only rule is gate-able without false positives, and decide where the codified rule lives
-(WE `docs/agent` vs a FUI-side contract doc).
+| Element | Verdict | Why |
+|---|---|---|
+| **WE consumer contract** (delegate on a stable ancestor; never cache the transient node; read `data-*`/`aria-pressed`, which survive upgrade) | **Supported by default — codify, not a fork** | The alternative (bind directly to the chip) is the *shipped regression*; forced invariant. Anchors to [we:block-standard.md:271](../docs/agent/block-standard.md#L271) (transient ⇒ native events kept). |
+| **Fork 1 — enforcement** | **interaction-test lane only (no source gate)** | #933 bans open `addEventListener` sniffing; the deterministic lane already nets the real regression. |
+| **Fork 2 — FUI ships a stable `chip-change` event?** | **No, not now** (advisory; revisit on trigger) | Delegation works today; a `chip-change` event **double-fires with native `click`**; YAGNI until a consumer genuinely can't delegate. |
+
+## Supported by default — the WE consumer contract (forced invariant; codify)
+
+This is **not a fork** (fork-existence test: the only alternative — bind a listener directly to the
+`we-filter-chip` / cache its reference — is *broken*, it is exactly the shipped regression). Codify as a
+consumer rule, anchored to the transient-family's *native-events-kept* guarantee
+([we:block-standard.md:271](../docs/agent/block-standard.md#L271)) and the `we-fui-embed-boundary` cluster:
+
+> **Wiring behaviour onto a transient (self-replacing) FUI element:** delegate the listener on a **stable
+> ancestor** (container or `document`) and **re-query live**; **never** bind directly to the transient
+> element and **never** cache its node reference. Read state from the attributes that **survive the upgrade**
+> (`data-*`, `aria-pressed`) on the resulting native element, not from the pre-upgrade node.
+
+```js
+// ✓ survives the we-filter-chip → <button> upgrade (the shipped fix, backlog-table-sort.js:216-233)
+document.addEventListener('click', function (e) {
+  var chip = e.target.closest('[data-pfilter]');      // re-query live; data-* survived the upgrade
+  if (!chip) return;
+  applyFilter(chip.getAttribute('data-pfilter'),
+              chip.getAttribute('aria-pressed') !== 'true');  // aria-pressed set on the native button
+});
+// ✗ the regression: dead the instant the FUI module upgrades the chip to <button>
+chip.addEventListener('click', ...);   // listener bound to a node that replaceWith() discards
+```
+
+`codifiedIn` target: `we:docs/agent/platform-decisions.md` (`we-fui-embed-boundary` cluster) + a cross-ref
+from the transient-family note in `we:docs/agent/block-standard.md`.
+
+## Fork 1 — how is the consumer rule enforced?
+
+*Fork-existence:* a real either/or — both branches are coherent end-states (a runtime regression test vs a
+static source gate), and they genuinely trade off (the gate adds author-time coverage but carries
+maintenance + the #933 false-positive constraint). The excluded reading is "open `addEventListener` sniff,"
+which is *broken* per #933.
+
+- **(a) — interaction-test lane only; no new source gate.** *(default)* The deterministic mock-chip lane
+  ([we:tests/interaction/backlog-priority-filters.spec.ts](../tests/interaction/backlog-priority-filters.spec.ts))
+  already reproduces the self-replace and asserts post-upgrade filtering — it nets the **actual** regression
+  (a chip stops filtering), which a source sniff only approximates. Cheapest; no false-positive surface.
+- **(b) — add a #933-shaped curated deny-list gate.** A `check:standards` rule, warn-first → ERROR, keyed to
+  the *known* chip selectors (`[data-pfilter]`/`[data-pready]` + a stored `querySelector('we-filter-chip')`),
+  following `COMPOSE_DENY_LIST` ([we:scripts/check-standards-rules.mjs:1624](../scripts/check-standards-rules.mjs#L1624)).
+  Static author-time coverage — but brittle (only catches today's selectors, cannot generalise to "any
+  self-replacing element" without becoming the rejected open sniff), and duplicative of the lane.
+
+**Default: Fork 1 (a) — interaction-test lane only.** The lane catches the real failure mode; a source gate
+is constrained by #933 to a brittle curated list that adds maintenance without catching the general class.
+
+`Skeptic:` SURVIVES-WITH-AMENDMENT — the skeptic confirmed Fork A's *rule* is fine but its originally-proposed
+heuristic gate is unconstitutional under #933 (open `addEventListener` sniffing rejected). Amendment folded
+in: the default is now *no source gate* (lane only); option (b) is constrained to the #933 curated-deny-list
+shape if ever added.
+
+## Fork 2 — should FUI *additionally* ship a stable `chip-change` event now?
+
+*Fork-existence:* a genuine go/no-go — you either add the public API or you don't, and both are coherent
+end-states (a future framework/non-DOM consumer might want the event; today's consumers don't). It is
+*additive*, so it does not compete with the consumer rule above.
+
+- **(a) — no, not now.** *(default)* Delegation on native `click` + reading `aria-pressed`/`data-*` already
+  works for every current consumer. A `chip-change` event would **double-fire with native `click`** (both
+  bubble to the same ancestor), re-introducing a "bind the right event" footgun of the same *kind* the rule
+  removes; and it adds a permanent public API to a control whose transient family was chosen precisely to
+  lean on **native events kept** ([we:block-standard.md:271](../docs/agent/block-standard.md#L271)), not to
+  mint new ones. Keep it advisory/parked.
+- **(b) — yes, ship `chip-change` now.** A built-in bubbling CustomEvent on the upgraded native button,
+  reusing the FUI (B-family) convention. Removes any need for consumers to know the toggle semantics
+  (`aria-pressed` flip). Costs cross-repo FUI work + a permanent API, and lives with the native-`click`
+  double-signal.
+
+```js
+// Fork 2 (b) — what shipping the event looks like, and the double-fire it carries:
+btn.addEventListener('click', () => {
+  const pressed = btn.getAttribute('aria-pressed') === 'true';
+  btn.dispatchEvent(new CustomEvent('chip-change',
+    { detail: { value: btn.dataset.value, pressed }, bubbles: true }));  // bubbles to document…
+});
+// …but native `click` ALSO bubbles to document — a delegated consumer now sees BOTH signals per toggle
+// and must bind exactly one. Fork 2 (a) avoids this: read aria-pressed on the existing `click`.
+```
+
+**Default: Fork 2 (a) — no, not now (advisory).** Un-gate trigger (concrete): a *second* consumer
+(e.g. plateau-app) that genuinely **cannot** satisfy its need via delegate-on-native-`click` + `aria-pressed`
+read — for instance a framework/non-DOM binding that needs the change signal without a DOM listener. Until a
+named such consumer exists, shipping the event is YAGNI and nets a double-signal.
+
+`Skeptic:` REFUTED the original B/B2-default — the prep's first pass recommended FUI ship the event (Fork 2
+(b)); the skeptic flipped it on four axes: (0) classification (false dichotomy — WE codifies a rule either
+way; the FUI event is a *separately-prioritized additive build*, not a boundary fork); (1) merit (the event
+**double-fires with native `click`**); (2) statute-overlap (a bespoke event sits in tension with #1381's
+*native-events-kept* clause for family A); (3) citation-scope (#1381 governs *mechanism-selection*, not
+event-API design — its native-events-kept clause argues *for* delegating on native `click`, the opposite of
+what the original prep cited it for). Default flipped (b)→(a) and folded into the shape above.
 
 ## Context
 
@@ -55,5 +161,5 @@ whether a delegated-only rule is gate-able without false positives, and decide w
   dead summary pills + a silently-emptied table, both rooted in the upgrade dropping consumer wiring.
 - Locked in by a deterministic interaction-test lane (`tests/interaction/`) whose **mock `<we-filter-chip>`**
   reproduces the self-replace; that harness is the regression net regardless of which fork is ratified.
-- Boundary rule: WE holds zero implementation — so if Fork B wins, the listener/event guarantee is built in
-  FUI; WE only consumes it and codifies the consumer-facing contract.
+- Boundary rule: WE holds zero implementation — so the consumer contract is codified WE-side as a *rule*
+  (gates/validate-scripts are the only thing permitted in WE); any FUI event (Fork 2 (b)) is built in FUI.
