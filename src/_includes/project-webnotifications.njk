@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -33,7 +34,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What a notification standard covers. <strong>Protocol</strong> = fixed by the push-delivery contract;
@@ -60,9 +61,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-push-delivery" class="section-card">
+{{ pc.standardSection('id="protocol-push-delivery"') }}
   <h3 id="how-it-works">Push Delivery Protocol</h3>
   <p>
     A producer never bundles a push service. It resolves a <strong>CustomPushProvider</strong> &mdash;
@@ -112,9 +113,9 @@ const receipt = await provider.send(sub, { title: 'Build green', body: '#456 shi
       (<a href="/backlog/455-server-to-client-delivery-transport-home-by-purpose-vs-by-me/">#455</a>) — they
       can't degrade to push and earn their own home.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="capability-matrix" class="section-card">
+{{ pc.standardSection('id="capability-matrix"') }}
   <h3 id="capability-matrix-heading">Provider Capability Matrix</h3>
   <p>
     What each push provider supplies behind the one contract — the native baseline vs. the hub
@@ -134,9 +135,9 @@ const receipt = await provider.send(sub, { title: 'Build green', body: '#456 shi
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <ul style="font-size: 0.9rem;">
     <li><strong>Render intents (Web Intents)</strong> &mdash; <code>system-notification</code> (the OS
@@ -151,9 +152,9 @@ const receipt = await provider.send(sub, { title: 'Build green', body: '#456 shi
       &mdash; the sibling open-app delivery family; the by-purpose split keeps push and realtime in
       distinct homes.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Notifications is in <strong>concept</strong> phase; the push-delivery protocol's contract is
@@ -172,4 +173,4 @@ const receipt = await provider.send(sub, { title: 'Build green', body: '#456 shi
     <li>Does a <code>DeliveryReceipt</code> standardize a status vocabulary, or stay an open string the
       provider supplies (mirroring the Report/Decision open-vocabulary pattern)?</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
