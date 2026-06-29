@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -30,7 +31,7 @@
   </div>
 </section>
 
-<section id="protocol-editor-engine" class="section-card">
+{{ pc.standardSection('id="protocol-editor-engine"') }}
   <h3 id="editor-engine-protocol">Editor Engine Protocol</h3>
   <p>
     Interop contract for the rich-text editing engine: an engine <strong>attaches</strong> to a host element,
@@ -62,4 +63,4 @@
     <a href="/backlog/590-candidate-standard-rich-text-contenteditable-editing/">#590</a> Fork 2 (ratified),
     epic <a href="/backlog/618-graduate-the-rich-text-editing-standard-webediting-project-s/">#618</a>.
   </p>
-</section>
+{{ pc.endStandardSection() }}

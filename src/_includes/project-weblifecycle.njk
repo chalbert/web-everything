@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -29,7 +30,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What a lifecycle standard covers, and where each capability is fulfilled. <strong>Protocol</strong> =
@@ -56,9 +57,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-lifecycle" class="section-card">
+{{ pc.standardSection('id="protocol-lifecycle"') }}
   <h3 id="how-it-works">Lifecycle Protocol</h3>
   <p>
     An entity never bundles its workflow rules. It declares a <strong>lifecycle definition</strong> (status
@@ -121,9 +122,9 @@ const ev = await provider.transition(loan, 'underwriting', currentUser); // guar
       composition seam for audit-trail (<a href="/backlog/357-audit-trail-standard/">#357</a>) and reporting
       &mdash; the standard does not own the log, only the event.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <ul style="font-size: 0.9rem;">
     <li><strong><a href="/intents/status-indicator/">Status Indicator intent</a></strong> &mdash; the UX half:
@@ -138,9 +139,9 @@ const ev = await provider.transition(loan, 'underwriting', currentUser); // guar
       reactive state; a status change is a Change Record. Web Lifecycle adds the <em>legal-move</em> layer
       on top of the primitive.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Lifecycle is in <strong>concept</strong> phase; the Lifecycle protocol's seam (status set +
@@ -158,4 +159,4 @@ const ev = await provider.transition(loan, 'underwriting', currentUser); // guar
     <li>How does an <em>automatic</em> transition (no actor, fired by a condition) express its trigger &mdash;
       a guard that returns "fire", or a separate scheduler concern?</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}

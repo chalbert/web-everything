@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
     <h3 id="mission">Mission</h3>
     <p>
@@ -10,7 +11,7 @@
     </p>
 </section>
 
-<section id="scope" class="section-card">
+{{ pc.standardSection('id="scope"') }}
     <h3 id="scope-heading">Scope</h3>
     <p>
         The standard adopts a thin <strong>Vega-Lite L1 profile</strong> as its semantic core (higher tiers are
@@ -50,9 +51,9 @@
         Vega-Lite L1 schema, the <code>CustomChartRenderer</code> protocol, and the conformance suite land in
         the following slices.
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="vega-lite-l1" class="section-card">
+{{ pc.standardSection('id="vega-lite-l1"') }}
     <h3 id="profile-schema">Vega-Lite L1 Profile</h3>
     <p>
         The portable webcharts artifact is a <strong>Vega-Lite L1 profile</strong> — a thin, semantic core.
@@ -118,9 +119,9 @@ interface Legend { title?: string; }
         <li><strong>Thin L1 core, additive tiers:</strong> data/mark/encoding + scales/axes/legends is all L1 requires. Selections, transforms, and composition are L2+ — a conformant L1 renderer ignores them gracefully.</li>
         <li><strong>Accessibility is derivable:</strong> axis/legend titles + measurement types let an a11y description be generated from the semantic spec — the conformance suite (slice d) scores it as a first-class axis.</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-custom-chart-renderer" class="section-card">
+{{ pc.standardSection('id="protocol-custom-chart-renderer"') }}
     <h3 id="renderer-protocol">CustomChartRenderer Protocol</h3>
     <p>
         The standard is the <strong>spec, not the renderer</strong>. <code>CustomChartRenderer</code> is the
@@ -167,9 +168,9 @@ interface ChartHandle {
         <li><strong>Tiered conformance:</strong> a renderer declares the L-tier it supports (L1 required, L2+ additive) and is scored on <em>semantic fidelity</em> + <em>theme application</em>, with <em>accessibility</em> a first-class axis (a description derivable from the spec).</li>
         <li><strong>Protocol, not intent:</strong> this fixes the renderer contract, the tier declaration, and the conformance axes — it owns no chart schema (that is the Vega-Lite L1 profile) and no picker/legend UX.</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="conformance" class="section-card">
+{{ pc.standardSection('id="conformance"') }}
     <h3 id="conformance-suite">Conformance</h3>
     <p>
         A renderer either conforms or is told exactly where it falls short. The suite scores a
@@ -209,4 +210,4 @@ interface ChartHandle {
         project &rarr; profile &rarr; protocol &rarr; conformance); renderer adapters and a chart-description
         intent are deferred follow-ons per <a href="/backlog/105-data-visualization-charts/">#105</a>.
     </p>
-</section>
+{{ pc.endStandardSection() }}

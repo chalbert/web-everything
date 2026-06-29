@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
     <h3 id="mission">Mission</h3>
     <p>
@@ -5,7 +6,7 @@
         By elevating Stores, Signals, and Schemas to first-class primitives, we decouple state logic from UI frameworks.
     </p>
 </section>
-<section id="proposed-states" class="section-card">
+{{ pc.standardSection('id="proposed-states"') }}
     <h3 id="proposed-standards">Proposed Standards</h3>
     <div class="standards-grid">
         {% for state in states %}
@@ -20,7 +21,7 @@
         </a>
         {% endfor %}
     </div>
-</section>
+{{ pc.endStandardSection() }}
 <section>
   <h3>Design Note: Observation as a Web States Role</h3>
   <p>
@@ -28,7 +29,7 @@
   </p>
 </section>
 
-<section id="ssr" class="section-card">
+{{ pc.standardSection('id="ssr"') }}
     <h3 id="ssr-contract">SSR Contract</h3>
     <p>
         This section defines the server-side rendering contract for <strong>Web States</strong>.
@@ -102,9 +103,9 @@
             Web States does not ship an SSR runtime — it ships this specification.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-change-tracking" class="section-card">
+{{ pc.standardSection('id="protocol-change-tracking"') }}
   <h3 id="change-tracking-protocol">Change Tracking Protocol</h3>
   <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1rem 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 0 0 1.5rem 0;">
     <p style="margin: 0; font-size: 0.95rem;">
@@ -249,9 +250,9 @@ function observe(target: object, onChange: (r: ChangeRecord) => void): Disposabl
       <tr><td><strong>Contracts, not implementations</strong></td><td>The protocol ships interfaces and a registry pattern. <code>CustomChangeStrategy</code> / <code>CustomChangeStrategyRegistry</code> would be materialized as plugs, and concrete strategies as adapters, when the standard advances past <code>concept</code>.</td></tr>
     </tbody>
   </table>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-storage" class="section-card">
+{{ pc.standardSection('id="protocol-storage"') }}
   <h3 id="storage-protocol">Storage Protocol</h3>
   <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1rem 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 0 0 1.5rem 0;">
     <p style="margin: 0; font-size: 0.95rem;">
@@ -348,4 +349,4 @@ async function persist<T>(scope: string, id: string, value: T): Promise<void> {
     cross-cutting sync-orchestration consumer (cache invalidation ↔ outbox replay ↔ conflict merge under one
     owner) ever appears — until then it stays a thin facet of Web States.
   </p>
-</section>
+{{ pc.endStandardSection() }}

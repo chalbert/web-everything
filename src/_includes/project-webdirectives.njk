@@ -1,4 +1,5 @@
-<section id="concept" class="section-card">
+{% import "product-components.njk" as pc %}
+{{ pc.standardSection('id="concept"') }}
     <h3 id="the-concept">The Concept</h3>
     <p>
         <strong>Web Directives</strong> extends HTML with structural control flow via two complementary primitives:
@@ -8,9 +9,9 @@
         The key innovation is <strong>virtual elements</strong>—logic anchors that don't pollute the DOM tree.
         Unlike framework-specific syntax, Web Directives work at runtime with standard HTML, no build step required.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="case-study" class="section-card">
+{{ pc.standardSection('id="case-study"') }}
     <h3 id="case-study-layout-preservation">Case Study: Layout Preservation</h3>
     <p>
         Consider a CSS Grid with direct children. Traditional frameworks force you to wrap conditional content in elements, breaking the grid relationship:
@@ -47,11 +48,11 @@
             The comments aren't just debug artifacts; they're the foundation for tooling integration.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
 {% from "format-selector.njk" import formatSelector, jsxContent, templateContent, endFormat %}
 
-<section id="two-layers" class="section-card">
+{{ pc.standardSection('id="two-layers"') }}
     <h3 id="authoring-vs-runtime">Two Layers: Authoring &amp; Runtime</h3>
 
     <p>Web Directives separates <strong>how you write</strong> directives from <strong>how they appear</strong> in the live DOM.</p>
@@ -123,9 +124,9 @@ html`
     <p style="font-size: 0.85rem; color: var(--color-text-muted); margin-top: 0.5rem;">
         Template is gone. Comments remain as inspectable debug markers.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="complex-directives" class="section-card">
+{{ pc.standardSection('id="complex-directives"') }}
     <h3 id="multi-template-directives">Multi-Template Directives</h3>
     <p>
         Some directives require <strong>multiple templates</strong> for different states or slots:
@@ -207,9 +208,9 @@ html`
             </tbody>
         </table>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="specs" class="section-card">
+{{ pc.standardSection('id="specs"') }}
     <h3 id="standard-specification-draft">Standard Specification (Draft)</h3>
 
     <h4 id="1-customtemplatedirective">1. class CustomTemplateDirective</h4>
@@ -314,9 +315,9 @@ declare const customComments: CustomCommentRegistry;
             Web Plugs provides a polyfill that fits naturally with the "plugged/unplugged" model—the same infrastructure already patches other native APIs.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="examples" class="section-card">
+{{ pc.standardSection('id="examples"') }}
     <h3 id="directive-examples">Directive Examples</h3>
 
     <div class="features-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-top: 1.5rem; margin-bottom: 2rem;">
@@ -386,9 +387,9 @@ declare const customComments: CustomCommentRegistry;
         </div>
 
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="why" class="section-card">
+{{ pc.standardSection('id="why"') }}
     <h3 id="why-this-matters">Why This Matters</h3>
     <ul>
         <li><strong>Layout Integrity:</strong> No wrapper elements breaking CSS Grid, Flexbox, or table structures.</li>
@@ -398,9 +399,9 @@ declare const customComments: CustomCommentRegistry;
         <li><strong>Progressive Enhancement:</strong> Enhance existing markup rather than replacing it.</li>
         <li><strong>Familiar Patterns:</strong> Lifecycle callbacks mirror Custom Elements, reducing learning curve.</li>
     </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="ssr" class="section-card">
+{{ pc.standardSection('id="ssr"') }}
     <h3 id="ssr-contract">SSR Contract</h3>
     <p>
         This section defines the server-side rendering contract for <strong>Web Directives</strong>.
@@ -499,4 +500,4 @@ declare const customComments: CustomCommentRegistry;
             See also: <a href="/projects/webexpressions/#ssr">Web Expressions SSR</a> for expression resolution within directive content.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
