@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -29,7 +30,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What a guard standard covers, and how each capability is fulfilled. <strong>Protocol</strong> = fixed by
@@ -60,9 +61,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-guard" class="section-card">
+{{ pc.standardSection('id="protocol-guard"') }}
   <h3 id="how-it-works">Guard Protocol</h3>
   <p>
     A guarded surface never bundles a policy. It identifies its <strong>region</strong>, hooks the
@@ -134,9 +135,9 @@ if (!decision.allow) entryGuard.deny(decision.reason);   // member maps reason â
     <li><strong>The authz provider gets its own contract treatment</strong> (async / server-authoritative /
       revocable), not a verbatim reuse of the positioning provider â€” see above.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <p>
     Web Guards owns <em>whether a region may transition</em>, not authentication, not the browser's
@@ -148,9 +149,9 @@ if (!decision.allow) entryGuard.deny(decision.reason);   // member maps reason â
     <li><strong>Browser Permissions (webpermissions)</strong> â€” the native Permissions API (camera, geolocation, notifications) is a different axis; do not conflate app-level authorization with device-capability grants.</li>
     <li><strong>Background Task</strong> â€” its <code>navigationGuard</code> dimension collapses to referencing the exit-guard member rather than redefining the machinery.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Guards is in <strong>concept</strong> phase. The Guard protocol's seam (region + event + predicate +
@@ -163,4 +164,4 @@ if (!decision.allow) entryGuard.deny(decision.reason);   // member maps reason â
     <li>How does a region express its identity to the provider when it spans both a route and a rendered element (the #178 dual-surface case) â€” one shared key, or two registrations?</li>
     <li>Default debounce / batching for <code>subscribe()</code> invalidation so a revoked ability doesn't thrash every guarded surface at once.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}

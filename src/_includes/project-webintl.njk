@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -34,7 +35,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What a localization standard covers, and how each capability is fulfilled.
@@ -67,9 +68,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="how" class="section-card">
+{{ pc.standardSection('id="how"') }}
   <h3 id="how-it-works">How It Works</h3>
   <p>
     A consumer never bundles a translation table. It reads messages through the reactive <code>@t</code>
@@ -103,9 +104,9 @@ function t(key: string, params?: Record<string, unknown>): string {
     <li><strong>One registry:</strong> <a href="/plugs/customtranslationproviderregistry/"><code>CustomTranslationProviderRegistry</code></a> (<code>window.customTranslations</code>) holds providers in priority order.</li>
     <li><strong>One message shape:</strong> <code>type MessageFn = (params?: Record&lt;string, unknown&gt;) =&gt; string</code> — the common interface for runtime (MF2) and compile-time (Paraglide-style) messages alike.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-localization" class="section-card">
+{{ pc.standardSection('id="protocol-localization"') }}
   <h3 id="localization-protocol">Localization Protocol</h3>
   <p>
     Conformance reference for localization interop. Defines the
@@ -250,9 +251,9 @@ interface MessageFormatter {
       <tr><td><code>MessageFormatter</code></td><td>Interface</td><td>Compiles an MF2 source into a <code>MessageFn</code></td></tr>
     </tbody>
   </table>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <p>
     Web Intl owns <em>message composition and locale negotiation</em>, not <em>how the
@@ -267,9 +268,9 @@ interface MessageFormatter {
     <li><strong>Router</strong> — URL-based locale routing (<code>/fr/…</code> → locale store) via a <code>&lt;route-view&gt;</code> locale parameter.</li>
     <li><strong><a href="/projects/webadapters/">Web Adapters</a></strong> — FormatJS, i18next, Lingui, and Paraglide bridges register as providers behind the same contract.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Intl is in <strong>concept</strong> phase. The contract and provider registry are
@@ -285,4 +286,4 @@ interface MessageFormatter {
     <li>Normalize translation file formats (JSON / PO / XLIFF / ARB / Fluent) at build time, or constrain to one canonical format?</li>
     <li>Should the missing-key strategy (render key vs. throw vs. dev-warn) be a Locale Intent dimension or a registry option?</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
