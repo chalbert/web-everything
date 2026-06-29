@@ -813,15 +813,14 @@ h1, h2, h3, h4, h5, h6 {
     border-left-color: var(--color-primary);
 }
 
-/* Content Sections as Cards */
+/* Content Sections as Cards.
+   #1895 (cleanup tail of #1608): the frame (border/radius/background/shadow/padding) now comes from the
+   shared `.fui-card` look — the migrated surface emits `class="section-card fui-card"` (product-components.njk),
+   so the bespoke frame here is redundant last-wins dead weight against `.fui-card`. Retired. What stays is the
+   non-look residue `.section-card` still owns: the deep-link `scroll-margin-top` offset (the `.fui-card` /
+   `we-card{}` baselines don't carry it) and the `h3`/`h4` heading rules below. */
 .section-card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    padding: var(--spacing-lg);
-    box-shadow: var(--shadow-sm);
-    margin-bottom: var(--spacing-lg);
-    scroll-margin-top: 100px; /* Offset for sticky headers if any */
+    scroll-margin-top: 100px; /* deep-link / sticky-header offset — non-look, .fui-card doesn't carry it */
 }
 
 .section-card h3 {
@@ -1326,22 +1325,14 @@ a.plug-crumb:hover {
     margin-top: 1.5rem;
 }
 
+/* #1895 (cleanup tail of #1608): the migrated surface emits `class="standard-card fui-card"`
+   (product-components.njk), so the frame (background/border/radius/padding) AND the hover lift both come from
+   the shared `.fui-card` look — the bespoke frame + `:hover` here were redundant last-wins dead weight and are
+   retired. What stays is `.standard-card`'s non-look residue: `min-width:0` (grid-blowout guard, a layout
+   concern `.fui-card` doesn't own) and the `h4` heading rule below. (`display:block` is supplied by the
+   `standard-card{}` tag baseline.) */
 .standard-card {
-    display: block;
-    background-color: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-    padding: 1.5rem;
-    text-decoration: none;
-    color: inherit;
-    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-    min-width: 0; /* Prevents grid blowout from long code blocks */
-}
-
-.standard-card:hover {
-    box-shadow: var(--shadow-md);
-    border-color: var(--color-primary);
-    transform: translateY(-2px);
+    min-width: 0; /* Prevents grid blowout from long code blocks — layout, not look */
 }
 
 .standard-card h4 {
