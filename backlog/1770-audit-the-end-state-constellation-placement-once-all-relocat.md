@@ -11,6 +11,8 @@ tags: [placement, constellation, zero-implementation, devtools-placement, review
 
 A holding review-gate: once every in-flight relocation has moved its impl/runtime to its correct constellation home, audit the resulting end-state placement as a whole and confirm the zero-implementation line actually holds — rather than trusting that the sum of the individual moves landed tight.
 
+> **Prep assessment (2026-06-29, `/prepare all`):** not preppable ahead — deliberately deferred, not skipped. This is an *audit* gate, not a design fork: its "decision" (A tight / B residuals) **is** the constellation-wide inventory, which cannot be performed until the relocations land. 3 of 6 `blockedBy` are still open (**#1294**, **#1245**, **#872**; #1730 / #1577 / #1768 resolved), so the end-state to inventory does not yet exist — there is no prior art to survey ahead and no fork to shape (the A/B branches + concrete re-check list are already stated). Re-assess for prep only once all `blockedBy` resolve and the un-park trigger fires; at that point it is the audit pass itself, not a prep turn.
+
 ## Why this exists
 
 The placement rules are ratified and individually sound — `we:docs/agent/platform-decisions.md` (#1246/#1282: WE = contract/protocol/interface only, *never* hosts delivery runtime "not even as a reference implementation"; #1565 devtools-placement; #1747 explorer→Plateau). What is **not** yet verified is the **aggregate end-state**: that after every in-flight move lands, every tool/runtime actually sits on the correct side of the standard·impl·product line, with no orphaned copy, no drifted vendored fixture, and no residual runtime left in WE that each individual story scoped past.

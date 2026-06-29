@@ -2,9 +2,10 @@
 kind: story
 size: 5
 parent: "1601"
-status: open
+status: active
 blockedBy: ["1608"]
 dateOpened: "2026-06-27"
+dateStarted: "2026-06-29"
 tags: [we-card, fui-card, card-style, base-flavor, dogfooding, css-dedup]
 relatedProject: webdocs
 ---

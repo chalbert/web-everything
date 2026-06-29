@@ -1,10 +1,14 @@
 ---
-kind: story
-size: 5
+kind: decision
 status: open
 dateOpened: "2026-06-28"
 tags: []
 ---
+
+> **Retyped story·5 → decision (2026-06-29, batch-2026-06-29d pre-flight).** Body carries an unresolved
+> placement fork — does product-intent resolution live in the **FUI build** vs the **plateau-app build**
+> (#1913's "FUI/product" is ambiguous). That's a design call, not batchable build work, so it leaves the
+> Tier-A pool until ratified. Decide the placement first; the substrate build then becomes a clean story.
 
 # FUI/product intent-resolution substrate — build-time custom-intent catalog assembly + resolver invocation seam
 
