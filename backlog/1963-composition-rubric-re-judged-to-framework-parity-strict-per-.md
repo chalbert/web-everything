@@ -110,6 +110,34 @@ honesty — no compromised cell is graded green.*
    (`CustomComment` #1130 → `ForEach`/`ViewIf`/`ViewSwitch`,
    [fui:plugs/webdirectives/CustomComment.ts](../../frontierui/plugs/webdirectives/CustomComment.ts)); behaviours
    → mixins + `CustomAttribute`. Zero-node, HTML + JSX, built.
+   - **Worked proof — case 7, the non-UI / HOC-feature composition the React analog needs** (the part that *must*
+     compose flat because the platform charges per node). A React HOC bundles three things that compose zero-node
+     on the platform: **(i) props/attrs**, **(ii) content before/after**, **(iii) callback integration**
+     (validate / trace / log). All three are **behavioural**, so none needs a wrapper — the wrapper-per-layer
+     cost is *only* the **structural** case (Fork 2). Five features on one element, **zero wrappers**, both
+     surfaces:
+     ```html
+     <!-- Declarative (CustomAttribute, fui:plugs/webbehaviors/) — 5 features, 1 element, 0 wrappers.
+          After <we-button> transient-erases (case 1 / #1962) the attrs ride the real <button>. -->
+     <we-button log trace validate="stock>0" analytics="cta:buy" affix="↗">Buy</we-button>
+     ```
+     ```ts
+     // Programmatic (functional mixins) — same 5 features, 1 class, 1 node. super-call chaining = AOP before/after.
+     const Button = WithLog(WithTrace(WithValidate(WithAnalytics(WithAffix(HTMLElement)))));
+     // each layer: (i) props → ownerElement.dataset / observedAttributes; (ii) content → ownerElement.append()
+     //   or ::before/::after (a SIBLING/child, never a wrapping parent); (iii) callback → capture-phase listener
+     //   / super.connectedCallback() wrap. Grounded in CustomAttribute lifecycle (attachedCallback,
+     //   attributeChangedCallback, ownerElement) — fui:plugs/webbehaviors/CustomAttribute.ts:65-410.
+     ```
+     The rejected alternative is the naive `<with-log><with-trace>…<button/></with-trace></with-log>` — **5 wrapper
+     nodes** that break flex/grid direct-child, AX pairing, `:nth-child`, and `::part` chains (the #1962 cost
+     enumeration). The full menu of zero-node options (mixins · custom-attributes · decorators · reactive
+     controllers · ancestor event-delegation for truly cross-cutting log/trace · `::before`/`::after` &
+     adjacent-DOM for content) and this worked example live in the
+     [composition-viability survey](../reports/2026-06-29-transient-self-erasure-concept-viability.md) §3 and
+     [/research/dom-less-composition](/research/dom-less-composition/). **Honest residual:** the *declarative*
+     custom-attribute form is a **plug** (proposed standard, not shipped native) — the mechanism is at parity, but
+     that layer's standards-track status is the one caveat, tracked under the plug corollary (#95/#1826).
 4. **Case 2 (grouped/reactive) — parity *pending* a confirm, not clear.** The group-CE + form-associated-children
    split is **already ratified (#1456/#1457 — this card *cites*, not re-decides it)**; but ergonomic parity
    (bar-rule 1) assumes a framework-grade reactivity primitive (signals / observed properties). **Demote to
