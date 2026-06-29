@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -26,7 +27,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What a positioning standard covers, and how each capability is fulfilled. <strong>Built-in</strong> = the
@@ -62,9 +63,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-anchor-positioning" class="section-card">
+{{ pc.standardSection('id="protocol-anchor-positioning"') }}
   <h3 id="how-it-works">Anchor Positioning Protocol</h3>
   <p>
     A component never bundles a positioning engine. It declares its <a href="/intents/">Anchor Intent</a>,
@@ -94,9 +95,9 @@ const cleanup = provider.position(anchorEl, floatingEl, {
     <li><strong>One registry:</strong> <a href="/plugs/custompositioningregistry/"><code>CustomPositioningRegistry</code></a> (<code>window.customPositioning</code>) holds the named providers.</li>
     <li><strong>Injector resolution:</strong> components get the app-configured provider, so swapping engines is a one-line change with zero component edits.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <p>
     Web Positioning owns <em>where</em> a floating element sits, not <em>how it escapes the DOM</em> or
@@ -108,9 +109,9 @@ const cleanup = provider.position(anchorEl, floatingEl, {
     <li><strong>Surface Intent</strong> — elevation and z-stacking of the floating surface.</li>
     <li><strong>Modal / View blocks</strong> — light dismiss, focus trapping, open/close lifecycle.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Positioning is in <strong>concept</strong> phase. The contract and provider registry are specified;
@@ -122,4 +123,4 @@ const cleanup = provider.position(anchorEl, floatingEl, {
     <li>Arrow placement math — built-in basic vs. always defer to an adapter?</li>
     <li>RTL and safe-area (notch / virtual keyboard) handling in the native default provider.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}

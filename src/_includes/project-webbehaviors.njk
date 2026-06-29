@@ -1,12 +1,13 @@
- <section id="concept" class="section-card">
+{% import "product-components.njk" as pc %}
+ {{ pc.standardSection('id="concept"') }}
             <h3 id="the-concept">The Concept</h3>
             <p>
                 <strong>Web Behaviors</strong> enable developers to attach rich functionality to any DOM element using custom attributes.
                 This brings the "Decorator" pattern to HTML, allowing for powerful composition without the need for component wrappers. Web Behaviors are registered to the <code>CustomAttributeRegistry</code>.
             </p>
-        </section>
+        {{ pc.endStandardSection() }}
 
-        <section id="case-study" class="section-card">
+        {{ pc.standardSection('id="case-study"') }}
             <h3 id="case-study-router-links">Case Study: Router Links</h3>
             <p>
                 In many SPAs, you need a special component (like <code>&lt;Link&gt;</code> or <code>&lt;router-link&gt;</code>) to handle navigation without reloading the page.
@@ -32,9 +33,9 @@
                     <strong>Web Behaviors</strong> allow for <strong style="color: var(--color-primary);">composition</strong>, meaning you can attach as many independent functional attributes as needed to a single element.
                 </p>
             </div>
-        </section>
+        {{ pc.endStandardSection() }}
 
-        <section id="implementation" class="section-card">
+        {{ pc.standardSection('id="implementation"') }}
             <h3 id="the-implementation">The Implementation</h3>
             <p>
                 Following the reference implementation in <strong>Web Plugs</strong>, a Behavior is a class that receives the <code>ownerElement</code> and uses standard lifecycle hooks.
@@ -71,9 +72,9 @@ class HistoryLink extends CustomAttribute {
 // Register the behavior
 customAttributes.define('history-link', HistoryLink);
             {% endhighlight %}
-        </section>
+        {{ pc.endStandardSection() }}
 
-        <section id="specs" class="section-card">
+        {{ pc.standardSection('id="specs"') }}
             <h3 id="standard-specification-draft">Standard Specification (Draft)</h3>
             <p>To formalize Web Behaviors as a platform standard, the following interfaces and augmentations would be introduced to the HTML specification.</p>
 
@@ -129,9 +130,9 @@ interface Window {
                     <li><strong>DOM Mutation API:</strong> The polyfill implementation (Web Plug) relies on <code>MutationObserver</code> to detect attribute additions/removals. A native browser implementation would optimize this event loop internally.</li>
                 </ul>
             </div>
-        </section>
+        {{ pc.endStandardSection() }}
 
-        <section id="examples" class="section-card">
+        {{ pc.standardSection('id="examples"') }}
             <h3 id="userland-examples">Userland Examples</h3>
             <p>
                 Behaviors are exceptionally versatile. Here is a showcase of potential use cases ranging from UI interactions to data management.
@@ -228,18 +229,18 @@ interface Window {
                 </div>
 
             </div>
-        </section>
+        {{ pc.endStandardSection() }}
 
-        <section id="why" class="section-card">
+        {{ pc.standardSection('id="why"') }}
             <h3 id="why-this-matters">Why This Matters?</h3>
             <ul>
                 <li><strong>Styling Preserved:</strong> No extra <code>&lt;div&gt;</code> wrappers breaking Flexbox or Grid layouts.</li>
                 <li><strong>Accessibility:</strong> You enhance native elements definition (progressive enhancement) rather than replacing them with semantically ambiguous custom tags.</li>
                 <li><strong>Composition:</strong> An element can have multiple behaviors simultaneously: <br><code>&lt;input validate-email track-change auto-save&gt;</code>.</li>
             </ul>
-        </section>
+        {{ pc.endStandardSection() }}
 
-<section id="ssr" class="section-card">
+{{ pc.standardSection('id="ssr"') }}
     <h3 id="ssr-contract">SSR Contract</h3>
     <p>
         This section defines the server-side rendering contract for <strong>Web Behaviors</strong>.
@@ -327,4 +328,4 @@ interface Window {
             See also: <a href="/projects/webevents/#ssr">Web Events SSR Contract</a> for event-specific attribute handling.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
