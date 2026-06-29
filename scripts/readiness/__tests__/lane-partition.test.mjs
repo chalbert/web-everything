@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
-  RESERVED_MERGE_RISK, isMergeRiskFile, filesOf, mergeRiskFilesOf, disjoint, blockEdge,
+  RESERVED_MERGE_RISK, RESERVED_MERGE_RISK_BY_REPO, isMergeRiskFile, filesOf, mergeRiskFilesOf, disjoint, blockEdge,
   mustSerialize, conflicts, partition, serialReason,
 } from '../lane-partition.mjs';
 
@@ -35,8 +35,20 @@ describe('isMergeRiskFile — only WE-qualified blacklist paths', () => {
     expect(isMergeRiskFile('we:vite.config.mts')).toBe(false);
     expect(isMergeRiskFile('we:package.json')).toBe(false);
   });
-  it('is WE-only — a same-named path in another repo is NOT merge-risk (slice B extends this)', () => {
-    expect(isMergeRiskFile('frontierui:tsconfig.json')).toBe(false);
+  it('(#1951) matches a CROSS-REPO monolith against its OWN repo set', () => {
+    expect(isMergeRiskFile('frontierui:src/_data/blocks.json')).toBe(true);
+    expect(isMergeRiskFile('frontierui:src/_data/adapters.js')).toBe(true);
+    expect(isMergeRiskFile('frontierui:src/foo.ts')).toBe(false);        // ordinary frontierui source
+    expect(isMergeRiskFile('frontierui:tsconfig.json')).toBe(false);     // build config, off the set (#1952)
+    expect(isMergeRiskFile('plateau-app:src/anything.ts')).toBe(false);  // plateau-app set is empty
+  });
+  it('(#1951) is repo-specific — a WE registry path is not frontierui-risk and vice-versa', () => {
+    expect(isMergeRiskFile('we:src/_data/blocks.json')).toBe(false);     // WE blocks are per-entry (a dir), not this monolith
+    expect(isMergeRiskFile('frontierui:src/_data/capabilityMatrix.json')).toBe(false); // a WE-only monolith
+  });
+  it('exposes the per-repo map (WE alias intact)', () => {
+    expect(RESERVED_MERGE_RISK).toBe(RESERVED_MERGE_RISK_BY_REPO.we);
+    expect(RESERVED_MERGE_RISK_BY_REPO['plateau-app']).toEqual([]);
   });
 });
 
@@ -109,6 +121,16 @@ describe('conflicts — the optimistic-first pairwise gate', () => {
   it('cross-repo: same path in different repos does NOT collide', () => {
     const x = entry(1, { predictedFiles: [], extraRepos: [{ repo: 'frontierui', files: ['tsconfig.json'] }], confident: true });
     const y = entry(2, { predictedFiles: [], extraRepos: [{ repo: 'plateau-app', files: ['tsconfig.json'] }], confident: true });
+    expect(conflicts(x, y)).toBe(false);
+  });
+  it('(#1951) two confident items sharing a CROSS-REPO monolith serialize (closes A\'s gap)', () => {
+    const x = entry(1, { predictedFiles: [], extraRepos: [{ repo: 'frontierui', files: ['src/_data/blocks.json', 'src/x.ts'] }], confident: true });
+    const y = entry(2, { predictedFiles: [], extraRepos: [{ repo: 'frontierui', files: ['src/_data/blocks.json', 'src/y.ts'] }], confident: true });
+    expect(conflicts(x, y)).toBe(true);
+  });
+  it('(#1951) the SAME monolith filename in DIFFERENT repos does NOT collide', () => {
+    const x = entry(1, { predictedFiles: ['src/_data/traits.json'], confident: true });        // we:…/traits.json
+    const y = entry(2, { predictedFiles: [], extraRepos: [{ repo: 'frontierui', files: ['src/_data/traits.json'] }], confident: true });
     expect(conflicts(x, y)).toBe(false);
   });
 });

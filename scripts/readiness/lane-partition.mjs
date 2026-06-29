@@ -23,32 +23,50 @@
 // SUPERSEDES the prior conservative gate (`confident:false → serial` and `any-file-overlap → serial`), which
 // forced provably-disjoint items serial: batch-2026-06-28-1946-1945 ran 8 pairwise-disjoint items in 0 lanes.
 
-// RESERVED_MERGE_RISK = the genuinely-monolithic shared WE files where a CLEAN git merge can still be
-// semantically wrong (single-doc registries + the AGENTS.md hand-authored prose body). After #1938 split
-// adapters per-entry and the 3 pure-derived artifacts moved to regenerate-on-merge, this is the residual set.
-// Per-entry registry files (src/_data/<reg>/<id>.json, INCLUDING src/_data/adapters/<id>.json) are disjoint
-// by construction and are NEVER here. WE-only for now; the per-repo extension is slice B (#1951).
+// RESERVED_MERGE_RISK_BY_REPO = the genuinely-monolithic shared files, PER REPO, where a CLEAN git merge can
+// still be semantically wrong (collection registries co-edited in one document + the AGENTS.md prose body).
+// Per-entry registry files (src/_data/<reg>/<id>.json, INCLUDING src/_data/adapters/<id>.json) are disjoint by
+// construction and are NEVER here. The lists are REPO-relative; `isMergeRiskFile` matches a repo-qualified path
+// against its own repo's set, so the same path in two repos never collides (the slice-B fix, #1951): without
+// it, slice A gave cross-repo monoliths NO clean-but-wrong protection (isMergeRiskFile only matched `we:`).
 //
-// NOT here (#1952, slice C): BUILD CONFIG (tsconfig.json, vite.config.mts, package.json, vitest.config.ts).
-// Unlike a structured single-doc registry, build config is LINE-structured — concurrent edits land on distinct
-// lines (a `scripts` entry, an `include`, a `paths` key, a vitest glob) and git's line-merge is trustworthy; a
-// genuine same-line clash (two version bumps) is a REAL git conflict that rebase-retry/serial-replay catches.
-// So it belongs in the optimistic-merge bucket, not the clean-but-wrong blacklist. The blacklist is reserved
-// for files where a conflict-FREE merge can still be wrong (ordered/relational/rollup JSON), which config isn't.
-export const RESERVED_MERGE_RISK = [
-  'src/_data/traits.json', 'src/_data/capabilityMatrix.json', 'src/_data/docs.json',
-  'src/_data/webhandlers.json', 'src/_data/webportals.json',
-  'src/_data/benchmarkCorpus.json', 'src/_data/workbenchTools.json', 'src/_data/workbenchFeatures.json',
-  'AGENTS.md', // its hand-authored PROSE body is a monolith edit; the AUTO-GENERATED inventory sub-block is derived (regen-on-merge), not a merge-risk lane edit
-];
+// NOT here (#1952, slice C): BUILD CONFIG (tsconfig.json, vite.config.mts, package.json, vitest.config.ts) and
+// other LINE-structured singletons (a site-config object). Concurrent edits land on distinct lines and git's
+// line-merge is trustworthy; a genuine same-line clash is a REAL git conflict that rebase-retry/serial-replay
+// catches. So they belong in the optimistic-merge bucket. The blacklist is reserved for files where a
+// conflict-FREE merge can still be wrong (a collection registry: append/edit-by-id, structure/order matters).
+//
+// frontierui: its monolithic single-document registries (blocks/plugs/traits arrays, the adapters/demos maps).
+// plateau-app: none — its shared surfaces are CODE (.ts), where a real conflict surfaces and replays; add an
+// entry only if a structured plateau registry emerges.
+export const RESERVED_MERGE_RISK_BY_REPO = {
+  we: [
+    'src/_data/traits.json', 'src/_data/capabilityMatrix.json', 'src/_data/docs.json',
+    'src/_data/webhandlers.json', 'src/_data/webportals.json',
+    'src/_data/benchmarkCorpus.json', 'src/_data/workbenchTools.json', 'src/_data/workbenchFeatures.json',
+    'AGENTS.md', // its hand-authored PROSE body is a monolith edit; the AUTO-GENERATED inventory sub-block is derived (regen-on-merge), not a merge-risk lane edit
+  ],
+  frontierui: [
+    'src/_data/blocks.json', 'src/_data/plugs.json', 'src/_data/traits.json',
+    'src/_data/adapters.js', 'src/_data/demos.js',
+  ],
+  'plateau-app': [],
+};
+// Back-compat alias: the WE set (the `reservedPathsFor` lock-planner consumes WE-relative paths).
+export const RESERVED_MERGE_RISK = RESERVED_MERGE_RISK_BY_REPO.we;
 
-// Is a REPO-QUALIFIED path ("<repo>:<path>") a merge-risk file? WE-only for slice A: a `we:`-qualified path
-// whose remainder is in the reserved set or matches the curated-sweep prefix. (Slice B extends this per-repo.)
+// Is a REPO-QUALIFIED path ("<repo>:<path>") a merge-risk file? Matches the remainder against THAT repo's
+// reserved set; the curated-sweep prefix (benchmark*/workbench*) is WE-only. An unknown/unqualified repo → false.
 export function isMergeRiskFile(repoQualifiedPath) {
   const s = String(repoQualifiedPath);
-  if (!s.startsWith('we:')) return false;
-  const f = s.slice(3);
-  return RESERVED_MERGE_RISK.includes(f) || /^src\/_data\/(benchmark|workbench)/.test(f);
+  const i = s.indexOf(':');
+  if (i < 0) return false;
+  const repo = s.slice(0, i);
+  const f = s.slice(i + 1);
+  const set = RESERVED_MERGE_RISK_BY_REPO[repo];
+  if (!set) return false;
+  if (set.includes(f)) return true;
+  return repo === 'we' && /^src\/_data\/(benchmark|workbench)/.test(f);
 }
 
 // The repo-qualified file set an item will touch. Files are "<repo>:<path>" so disjointness holds across the

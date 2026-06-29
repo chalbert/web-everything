@@ -142,16 +142,29 @@ const INTEGRATION_ORDER = ['frontierui', 'plateau-app', 'we']; // impl repos fir
 // lock. Per-entry registry files (src/_data/<reg>/<id>.json, INCLUDING src/_data/adapters/<id>.json) are
 // disjoint by construction and are NEVER reserved. The DERIVED artifacts are regenerated once post-merge
 // (Phase 4c), never lane-edited, so they are not here either.
-// NOT here (#1952, slice C): BUILD CONFIG (tsconfig.json, vite.config.mts, package.json, vitest.config.ts) —
-// it is LINE-structured (concurrent edits land on distinct lines; a real same-line clash is a git conflict
-// rebase-retry/serial-replay catches), so it lives in the optimistic-merge bucket, not the clean-but-wrong
-// blacklist. The blacklist is for files where a conflict-FREE merge can still be wrong (ordered/relational JSON).
-const RESERVED_MERGE_RISK = [
-  'src/_data/traits.json', 'src/_data/capabilityMatrix.json', 'src/_data/docs.json',
-  'src/_data/webhandlers.json', 'src/_data/webportals.json',
-  'src/_data/benchmarkCorpus.json', 'src/_data/workbenchTools.json', 'src/_data/workbenchFeatures.json',
-  'AGENTS.md', // its hand-authored PROSE body is locked; the AUTO-GENERATED inventory sub-block is derived (regen-on-merge), not locked
-];
+// PER-REPO merge-risk map (#1951, slice B). The clean-but-wrong-merge blacklist, keyed by repo so a cross-repo
+// monolith (e.g. frontierui:src/_data/blocks.json) gets the same protection a WE one does — without this, slice
+// A's repo-qualified partition gave cross-repo monoliths NONE (isReservedMergeRisk only matched `we:`). NOT here
+// (#1952): build config + line-structured singletons (optimistic-merge bucket). frontierui = its monolithic
+// single-doc registries (blocks/plugs/traits arrays, the adapters/demos maps). plateau-app = none (its shared
+// surfaces are CODE, where a real conflict surfaces and replays). MIRROR of lane-partition.mjs — keep in sync.
+const RESERVED_MERGE_RISK_BY_REPO = {
+  we: [
+    'src/_data/traits.json', 'src/_data/capabilityMatrix.json', 'src/_data/docs.json',
+    'src/_data/webhandlers.json', 'src/_data/webportals.json',
+    'src/_data/benchmarkCorpus.json', 'src/_data/workbenchTools.json', 'src/_data/workbenchFeatures.json',
+    'AGENTS.md', // its hand-authored PROSE body is locked; the AUTO-GENERATED inventory sub-block is derived (regen-on-merge), not locked
+  ],
+  frontierui: [
+    'src/_data/blocks.json', 'src/_data/plugs.json', 'src/_data/traits.json',
+    'src/_data/adapters.js', 'src/_data/demos.js',
+  ],
+  'plateau-app': [],
+};
+// The WE set — the `reservedPathsFor` runtime lock-planner (the #1945 backstop) is WE-scoped: it reserves the
+// WE merge-risk paths an item touches. Cross-repo merge-risk is handled at the PARTITION level (a shared
+// cross-repo monolith → same lane via conflicts()), with multiLaneFiles catching any unpredicted spill post-hoc.
+const RESERVED_MERGE_RISK = RESERVED_MERGE_RISK_BY_REPO.we;
 // The merge-risk WE paths a given item intends to touch — its probed `touchesMonolith` ∩ the reserved set
 // (benchmark*/workbench* matched by prefix). These are the paths the item must RESERVE before editing.
 function reservedPathsFor(entry) {
@@ -317,13 +330,18 @@ function disjoint(setA, setB) {
 // lean on the optimistic floor (rebase-retry → serial-replay → multiLaneFiles). A wrong "concurrent" call costs
 // SPEED (a replay), never correctness — so reliability is unchanged while disjoint work stops collapsing to one
 // serial chain. SUPERSEDES the prior `confident:false → serial` + `any-overlap → serial` gate.
-// Is a REPO-QUALIFIED path ("<repo>:<path>") a reserved merge-risk file? WE-only for slice A (the per-repo
-// extension is slice B #1951) — a `we:`-qualified path in RESERVED_MERGE_RISK or the curated-sweep prefix.
+// Is a REPO-QUALIFIED path ("<repo>:<path>") a reserved merge-risk file? Matches the remainder against THAT
+// repo's set (#1951, slice B); the curated-sweep prefix is WE-only. Unknown/unqualified repo → false.
 function isReservedMergeRisk(repoQualifiedPath) {
   const s = String(repoQualifiedPath);
-  if (!s.startsWith('we:')) return false;
-  const f = s.slice(3);
-  return RESERVED_MERGE_RISK.includes(f) || /^src\/_data\/(benchmark|workbench)/.test(f);
+  const i = s.indexOf(':');
+  if (i < 0) return false;
+  const repo = s.slice(0, i);
+  const f = s.slice(i + 1);
+  const set = RESERVED_MERGE_RISK_BY_REPO[repo];
+  if (!set) return false;
+  if (set.includes(f)) return true;
+  return repo === 'we' && /^src\/_data\/(benchmark|workbench)/.test(f);
 }
 // The MERGE-RISK files an item touches = its touchesMonolith (WE-qualified) ∪ any blacklist member of its set.
 function mergeRiskFilesOf(entry) {
