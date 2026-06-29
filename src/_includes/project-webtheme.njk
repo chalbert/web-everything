@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -35,7 +36,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What a design-token standard covers. <strong>Protocol</strong> = fixed by the Design Tokens (DTCG &harr;
@@ -63,9 +64,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-design-tokens" class="section-card">
+{{ pc.standardSection('id="protocol-design-tokens"') }}
   <h3 id="how-it-works">Design Tokens Protocol (DTCG &harr; CSS)</h3>
   <p>
     The contract has two halves. <strong>Authoring/interchange</strong> is W3C DTCG 2025.10 &mdash; a
@@ -131,9 +132,9 @@
       format + runtime. The semantic role names are the intents, which resolve <em>into</em> a primitive
       token &mdash; no parallel vocabulary is defined here.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <ul style="font-size: 0.9rem;">
     <li><strong><a href="/projects/webintents/">Web Intents</a></strong> &mdash; owns the semantic tier
@@ -146,9 +147,9 @@
     <li><strong><a href="/projects/webvalidation/">Web Validation</a> / APCA-WCAG</strong> &mdash; the
       contrast-validation gate reuses an accessibility check, not a new one, to qualify derived steps.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Theme is in <strong>concept</strong> phase; the Design Tokens (DTCG &harr; CSS) protocol is specified
@@ -169,4 +170,4 @@
     <li>Is the WCAG/APCA contrast gate a build-time check, a runtime <code>@supports</code> fallback, or
       both?</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}

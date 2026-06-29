@@ -2,10 +2,12 @@
 kind: story
 size: 2
 parent: "1608"
-status: active
+status: resolved
 blockedBy: ["1953"]
 dateOpened: "2026-06-29"
 dateStarted: "2026-06-29"
+dateResolved: "2026-06-29"
+graduatedTo: "we:src/_includes/project-{webexpressions,webregistries,webmanifests,webtraces,webtheme,webintents,weblayout}.njk migrated to standard-section/standard-card product components (44 surfaces: 39 section-cards + 3 standard-card content cards; intro-section/details/a.standard-card link tiles preserved)"
 tags: []
 ---
 
