@@ -86,7 +86,10 @@ export const meta = {
 // (git, lane-pool.mjs, backlog.mjs, npm gates) happen INSIDE agents via Bash; the script only does control flow.
 //
 // args (passed by the main loop after the conversational pack/plan/"go"):
-//   { batchSlug, budgetPoints, items: [ { num, slug, file, locus, cost, declaredFiles: [..], blockedBy: [..] } … ] }
+//   { batchSlug, budgetPoints, primaryRoot, items: [ { num, slug, file, locus, cost, declaredFiles, blockedBy } … ],
+//     laneModel? }  — laneModel (e.g. 'sonnet') downgrades ONLY the concurrent lane work agents; set it for
+//   a mechanically-clear, file-disjoint pack. Drops re-adjudicate + resolves re-gate on the default model, so
+//   the quality floor is unchanged (see the laneModel comment below). Omit → all agents inherit the session model.
 // Returns: { ledger, concurrentItems, serialItems, crossRepoItems, conflictsReplayed, stranded,
 //            multiLaneFiles, partialCrossRepo, reposProvisioned, derivedRegenerated, pointsSpent,
 //            budgetPoints, baseRef }
@@ -103,6 +106,19 @@ const a = (typeof args === 'string' ? (() => { try { return JSON.parse(args); } 
 const items = Array.isArray(a.items) ? a.items : [];
 const batchSlug = a.batchSlug || 'batch-parallel';
 const budgetPoints = Number.isFinite(a.budgetPoints) ? a.budgetPoints : Infinity;
+// OPTIONAL per-batch model downgrade for the CONCURRENT lane work agents only (e.g. laneModel: 'sonnet').
+// "Sonnet only when no effect on quality": this applies SOLELY to the provably-independent concurrent items
+// (the mechanical, file-disjoint edit work). Quality stays protected by two existing floors that need no
+// extra code — so a downgraded lane can only ever speed up, never weaken correctness:
+//   1. A downgraded lane that DROPS (or fails to push) produces no ref → it falls through to the serial
+//      REPLAY on the DEFAULT model (Phase 4b, the Opus floor), which RE-ADJUDICATES the drop. So an
+//      over-cautious cheap-model drop is caught and corrected by the strong model — never silently carried.
+//   2. A downgraded lane that RESOLVES still has its work re-gated by the DEFAULT-model integrate step
+//      (the full per-merge gate, #1937) before it lands. The cheap model never has the final say.
+// Everything else stays on the inherited (default) model: the probe, the partition/claim setup, the SERIAL
+// lane (higher-judgment, un-provable-independence items whose drop is final), the integrate/replay/regen/
+// reconcile steps. Omit laneModel → every agent inherits the session model (unchanged behaviour).
+const laneModel = typeof a.laneModel === 'string' && a.laneModel ? a.laneModel : undefined;
 // The throwaway base ref carrying the central post-claim state WE lanes reset to. Slashes keep it under the
 // lane/* namespace the #1934 carve-out allows (push + delete). One per batch (slug-scoped). WE-only: the
 // pre-claim (backlog + claims.json) lives only in WE, so only WE's origin gets a _base ref.
@@ -667,6 +683,7 @@ function laneItemPrompt(it, laneDirs) {
 
 if (concurrent.length > 0) {
   log(`Working ${concurrent.length} independent item(s) concurrently across their coupled clones — each item is logged the instant it lands…`);
+  if (laneModel) log(`  concurrent lanes run on '${laneModel}' (per-batch downgrade); drops re-adjudicate + resolves re-gate on the default model — no quality floor lowered.`);
 }
 let itemsDone = 0;
 const concurrentResults = await parallel(concurrent.map((it) => () => {
@@ -676,7 +693,7 @@ const concurrentResults = await parallel(concurrent.map((it) => () => {
     log(`  ✗ #${it.num} (${itemsDone}/${concurrent.length}): no WE lane clone available → will replay serially [${it.slug}]`);
     return Promise.resolve(null);
   }
-  return agent(laneItemPrompt(it, laneDirs), { label: `lane:#${it.num}`, phase: 'Lanes', schema: ITEM_RESULT_SCHEMA })
+  return agent(laneItemPrompt(it, laneDirs), { label: `lane:#${it.num}`, phase: 'Lanes', schema: ITEM_RESULT_SCHEMA, ...(laneModel ? { model: laneModel } : {}) })
     .then((r) => {
       itemsDone++;
       const refN = r && Array.isArray(r.pushedRefs) ? r.pushedRefs.length : (r && r.pushedRef ? 1 : 0);
