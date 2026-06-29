@@ -14,6 +14,12 @@ onto it, then `this.replaceWith(native)` and vanishes. This card reconsiders tha
 level** — not "what API does it expose" (#1961) or "how do consumers wire it" (#1960), but **is a self-erasing
 element the right idea at all, given what the standards bodies actually endorse?**
 
+> **Scope note — this is now case 1's facet of #1963.** The umbrella decision
+> [#1963](1963-composition-rubric-re-judged-to-framework-parity-strict-per-.md) re-judges the *whole*
+> composition rubric against a framework-parity / zero-compromise bar; transient (family A) is **case 1** in
+> its matrix. Resolve this card's A/B/C/D positions **under that bar** — it is the worked re-judgment that
+> feeds the umbrella, not an isolated call.
+
 ## Why this is on the table now
 
 The #1961 prep survey ([report](../reports/2026-06-29-transient-element-exposed-api.md)) surfaced two
