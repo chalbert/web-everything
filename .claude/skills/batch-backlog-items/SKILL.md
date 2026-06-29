@@ -187,11 +187,18 @@ guarantees are unchanged; only the granularity got finer and isolation moved fro
    in the serial chain, and `/batch` (or `--serial`) forces the whole batch onto it. Parallelism (`/workflow`)
    is a layer *on top of* that baseline — it never replaces it: the serial lane is always where uncertainty
    lands, so even an all-`/workflow` run can only speed up a provably-clean partition, never weaken the floor.
-2. **Partition only on provable independence.** Two items may share a parallel **lane boundary** only
-   if their **declared file paths are disjoint** *and* neither sits on the other's `blockedBy` edge
-   (a DAG edge forces same-lane-after, never concurrent). Overlapping or ambiguous file sets → **same
-   lane, serial.** Declared files are treated as a *lower bound*, not the truth (work spills past the
-   frontmatter) — which is why git, not the metadata, is the real arbiter (rule 4).
+2. **Partition optimistic-first (#1950).** Items run **concurrently by default**; an item is pulled into
+   the serial lane ONLY when it actually needs to be — (a) its probe failed (unknown touch-set), (b) it
+   sits on another item's `blockedBy` edge (a DAG edge forces same-lane-after, never concurrent), (c) it
+   shares a **merge-risk (blacklist) file** with another item — the single case a clean git merge can be
+   silently wrong (a structured monolith registry), or (d) it is **low-confidence** *and* overlaps another
+   item on any file. A confident item whose only overlaps are **ordinary** (build config, barrels, its own
+   code spilling onto a shared source file) stays concurrent and leans on the optimistic floor — git merges
+   it, a real conflict rebase-retries, and a surviving one serial-replays (rule 4). This **supersedes** the
+   former "any declared-file overlap → serial" gate, which collapsed provably-disjoint items to one serial
+   chain. Declared/probed files are a *lower bound*, not the truth — so git, not the metadata, is the final
+   arbiter (rule 4); the partition just avoids the few overlaps git can't safely resolve. The pure predicate
+   lives in `we:scripts/readiness/lane-partition.mjs` (tested), mirrored inline in the orchestrator.
 3. **Each lane keeps the full serial arc.** Within a lane, items still run one-after-another through
    work → close-out **gate at every seam**, and the **stop rule** applies per lane (the *claim* is
    pre-assigned centrally, #1933 choice 2 — lanes never claim). Lanes run in **isolated clones** (own

@@ -49,9 +49,14 @@ export const meta = {
 //       across primary checkouts is out of this v1's scope.)
 //
 // THE DESIGN CONTRACT (mirrors SKILL.md "Parallel lanes" + the ratified decisions #1935/#1936/#1937):
-//   1. Serial is the safe baseline. Anything not PROVABLY independent runs in the serial lane (on main).
-//   2. Partition only on provable independence: an item runs concurrently ONLY if its repo-qualified
-//      touch-set is disjoint from EVERY other item's AND it is on no blockedBy edge with another item.
+//   1. Serial is the safe baseline, always reachable — but reached only when NEEDED (optimistic-first, #1950),
+//      never pre-emptively. A failed probe, or a real conflict with another item, lands in the serial lane.
+//   2. Partition optimistic-first (#1950 — see the partition predicate below): an item runs concurrently
+//      UNLESS it (a) has no usable probe, (b) sits on a blockedBy edge with another item, (c) shares a
+//      merge-risk (blacklist) file with another — the clean-but-wrong structured-merge case the optimistic
+//      floor can't catch — or (d) is low-confidence AND overlaps another on any file. Confident items whose
+//      only overlaps are ordinary (build config, barrels, own spill) run concurrent and lean on the optimistic
+//      floor (rebase-retry → serial-replay). A wrong "concurrent" call costs a replay, never correctness.
 //   3. Central pre-claim in WE (#1933 choice 2). The orchestrator claims ALL items up front in the PRIMARY WE
 //      checkout (`backlog.mjs claim` → status:active + the central claims.json), commits, and pushes the
 //      post-claim state to a throwaway `lane/_base-<slug>` ref in WE's origin. Each item's WE lane clone
@@ -204,9 +209,9 @@ const PROBE_SCHEMA = {
     },
     touchesMonolith: {
       type: 'array', items: { type: 'string' },
-      description: 'genuinely-monolithic shared files it must edit (the single-doc registries src/_data/{traits,docs,capabilityMatrix}.json, webhandlers/webportals.json, the curated-sweep artifacts workbench*/benchmark*.json, and the hand-authored PROSE body of AGENTS.md — its AUTO-GENERATED inventory block is a derived artifact, see derivedArtifacts) — these force the serial lane, list them explicitly. Per-entry registry files (src/_data/<reg>/<id>.json, INCLUDING src/_data/adapters/<id>.json since #1938) are NOT monolithic — never list them.',
+      description: 'genuinely-monolithic shared files it must edit (the single-doc registries src/_data/{traits,docs,capabilityMatrix}.json, webhandlers/webportals.json, the curated-sweep artifacts workbench*/benchmark*.json, and the hand-authored PROSE body of AGENTS.md — its AUTO-GENERATED inventory block is a derived artifact, see derivedArtifacts) — list them explicitly. These are the merge-risk (blacklist) files: an item serializes against ANOTHER item only when BOTH touch the same one (a clean git merge of two edits to one of these can be silently wrong); a lone toucher still runs concurrent. Per-entry registry files (src/_data/<reg>/<id>.json, INCLUDING src/_data/adapters/<id>.json since #1938) are NOT monolithic — never list them.',
     },
-    confident: { type: 'boolean', description: 'TRUE when every predicted file (in WE AND every extraRepo) is one this item OWNS (its own impl/code, its own demo page, its own backlog/NNN.md, its own per-entry registry entries, its own test file). FALSE *only* when work plausibly spills into a SHARED surface another item could also touch: a still-monolithic registry, shared runtime (plugs/bootstrap.ts), a shared *.njk include, shared test specs, build config (tsconfig/vite/package.json), or a broad cross-file refactor — in ANY affected repo. Routine uncertainty about the exact file COUNT is NOT a reason for false; only genuine shared-surface risk is. Per-entry registry writes do NOT lower confidence. False forces the serial lane.' },
+    confident: { type: 'boolean', description: 'TRUE when every predicted file (in WE AND every extraRepo) is one this item OWNS (its own impl/code, its own demo page, its own backlog/NNN.md, its own per-entry registry entries, its own test file). FALSE *only* when work plausibly spills into a SHARED surface another item could also touch: a still-monolithic registry, shared runtime (plugs/bootstrap.ts), a shared *.njk include, shared test specs, build config (tsconfig/vite/package.json), or a broad cross-file refactor — in ANY affected repo. Routine uncertainty about the exact file COUNT is NOT a reason for false; only genuine shared-surface risk is. Per-entry registry writes do NOT lower confidence. NOTE (#1950): confident:false NO LONGER forces the serial lane on its own — it only tightens the pairwise check (a low-confidence item serializes against ANOTHER item it overlaps on any file). A confident:false item that is file-disjoint from every other still runs concurrent under the optimistic floor.' },
   },
 };
 
@@ -299,9 +304,34 @@ function disjoint(setA, setB) {
   for (const f of setA) if (setB.has(f)) return false;
   return true;
 }
-function mustSerialize(entry) {
+// ── Optimistic-first partition predicate (#1950, slice A) — INLINE MIRROR of the canonical, TESTED module
+// `we:scripts/readiness/lane-partition.mjs` (the sandbox can't import; that module + its test are the spec —
+// keep these in sync). THE MODEL: serial is reached ONLY when actually needed, never pre-emptively. An item
+// is forced serial ONLY by (a) a failed/absent probe (mustSerialize), (b) a real blockedBy edge, (c) a shared
+// MERGE-RISK (blacklist) file — the one case the optimistic git-merge floor can't catch (a clean-but-wrong
+// structured merge of a monolith), or (d) a low-confidence item that ALSO overlaps another on ANY file.
+// Confident items whose only overlaps are ORDINARY (build config, barrels, their own spill) run CONCURRENT and
+// lean on the optimistic floor (rebase-retry → serial-replay → multiLaneFiles). A wrong "concurrent" call costs
+// SPEED (a replay), never correctness — so reliability is unchanged while disjoint work stops collapsing to one
+// serial chain. SUPERSEDES the prior `confident:false → serial` + `any-overlap → serial` gate.
+// Is a REPO-QUALIFIED path ("<repo>:<path>") a reserved merge-risk file? WE-only for slice A (the per-repo
+// extension is slice B #1951) — a `we:`-qualified path in RESERVED_MERGE_RISK or the curated-sweep prefix.
+function isReservedMergeRisk(repoQualifiedPath) {
+  const s = String(repoQualifiedPath);
+  if (!s.startsWith('we:')) return false;
+  const f = s.slice(3);
+  return RESERVED_MERGE_RISK.includes(f) || /^src\/_data\/(benchmark|workbench)/.test(f);
+}
+// The MERGE-RISK files an item touches = its touchesMonolith (WE-qualified) ∪ any blacklist member of its set.
+function mergeRiskFilesOf(entry) {
+  const out = new Set();
   const p = entry.probe;
-  return !p || p.confident === false || (Array.isArray(p.touchesMonolith) && p.touchesMonolith.length > 0);
+  if (p && Array.isArray(p.touchesMonolith)) for (const f of p.touchesMonolith) out.add(`we:${String(f).replace(/^we:/, '')}`);
+  for (const f of filesOf(entry)) if (isReservedMergeRisk(f)) out.add(f);
+  return out;
+}
+function mustSerialize(entry) {
+  return !entry.probe; // only a genuinely-unknown touch-set is unconditional; the rest is the pairwise check
 }
 function blockEdge(x, y) {
   const xbb = new Set((x.blockedBy || []).map(String));
@@ -309,7 +339,11 @@ function blockEdge(x, y) {
   return xbb.has(String(y.num)) || ybb.has(String(x.num));
 }
 function conflicts(x, y) {
-  return !disjoint(filesOf(x), filesOf(y)) || blockEdge(x, y);
+  if (blockEdge(x, y)) return true;                                       // (b) real dependency
+  if (!disjoint(mergeRiskFilesOf(x), mergeRiskFilesOf(y))) return true;   // (c) shared merge-risk file
+  const lowConf = (x.probe && x.probe.confident === false) || (y.probe && y.probe.confident === false);
+  if (lowConf && !disjoint(filesOf(x), filesOf(y))) return true;          // (d) low-confidence + any overlap
+  return false;                                                          // confident + only ordinary overlap → concurrent
 }
 // The lane/* ref an item pushes — namespaced under lane/ (the #1934 carve-out) and scoped by slug + num so
 // concurrent batches never collide on a ref name. The SAME name is used in each affected repo's own origin
@@ -367,7 +401,9 @@ const probes = await parallel(items.map((it) => () =>
       `Set confident=FALSE *only* when the work plausibly SPILLS into a shared surface another item could also`,
       `touch (a monolithic registry, plugs/bootstrap.ts, a shared *.njk include, a shared test spec, tsconfig/vite/`,
       `package.json, or a broad cross-file refactor) in ANY repo. Routine uncertainty about the exact file COUNT`,
-      `is NOT a reason for false; default disjoint-looking work to TRUE. Return ONLY the structured object.`,
+      `is NOT a reason for false; default disjoint-looking work to TRUE. (#1950: confident:false no longer forces`,
+      `serial by itself — it only tightens the pairwise overlap check — so don't agonize; an honest false on a`,
+      `genuinely-disjoint touch-set still runs concurrent.) Return ONLY the structured object.`,
     ].join(' '),
     { label: `probe:${it.num}`, phase: 'Probe', schema: PROBE_SCHEMA, effort: 'low' },
   ).then((p) => {
@@ -375,18 +411,22 @@ const probes = await parallel(items.map((it) => () =>
     const fileN = p && Array.isArray(p.predictedFiles) ? p.predictedFiles.length : 0;
     const xr = p && Array.isArray(p.extraRepos) ? p.extraRepos.filter((e) => e && REPOS[e.repo]).map((e) => e.repo) : [];
     const xrTag = xr.length ? ` + ${xr.join('/')}` : '';
-    const verdict = !p ? 'no result → serial' : p.confident === false ? 'low-confidence → serial' :
-      (p.touchesMonolith && p.touchesMonolith.length) ? 'touches monolith → serial' : `${fileN} WE file(s)${xrTag}, candidate for concurrent`;
+    const verdict = !p ? 'no result → serial' :
+      (p.touchesMonolith && p.touchesMonolith.length) ? `${fileN} WE file(s)${xrTag} + monolith touch — concurrent unless another item shares it` :
+      p.confident === false ? `${fileN} WE file(s)${xrTag}, low-confidence — concurrent unless it overlaps another item` :
+      `${fileN} WE file(s)${xrTag}, candidate for concurrent`;
     log(`  probe ${probedCount}/${items.length}: #${it.num} — ${verdict}`);
     return { ...it, probe: p };
   }).catch(() => { probedCount++; log(`  probe ${probedCount}/${items.length}: #${it.num} — probe FAILED → serial`); return { ...it, probe: null }; }),
 ));
 
 // Partition into a CONCURRENT set (each item provably independent of every other → its own coupled lane
-// clones, run concurrently) and a SERIAL lane (everything else: probe-uncertain, touches a monolith, or
-// shares files / a blockedBy edge with another item → run one-at-a-time on main). An item is concurrent ONLY
-// if it conflicts with NO other candidate — so the concurrent set is pairwise-disjoint (repo-qualified) by
-// construction and its lanes merge clean.
+// clones, run concurrently) and a SERIAL lane. OPTIMISTIC-FIRST (#1950): an item goes serial ONLY if its
+// probe failed (mustSerialize) or it `conflicts` with another candidate — i.e. a real blockedBy edge, a shared
+// merge-risk (blacklist) file, or (when low-confidence) any file overlap. A confident item whose only overlaps
+// are ordinary (build config, barrels, its own spill) runs concurrent and leans on the optimistic floor. An
+// item is concurrent ONLY if it conflicts with NO other candidate — so the concurrent set is pairwise-non-
+// conflicting by construction and its lanes merge clean (or self-correct via rebase-retry / serial-replay).
 const probed = probes.filter(Boolean);
 const serialFromProbe = probed.filter(mustSerialize);
 const candidates = probed.filter((e) => !mustSerialize(e));
@@ -406,8 +446,18 @@ for (const e of concurrent) {
   log(`  concurrent: #${e.num} (${e.slug}) — repos: ${repos.join('+')} — disjoint files: ${[...filesOf(e)].slice(0, 4).join(', ')}…`);
 }
 for (const e of serialItems) {
-  const why = !e.probe ? 'probe failed' : e.probe.confident === false ? 'low-confidence touch-set' :
-    (e.probe.touchesMonolith && e.probe.touchesMonolith.length) ? 'touches a monolithic registry' : 'shares files / a blockedBy edge with another item';
+  // Name the SPECIFIC predicate that fired (mirror of lane-partition.mjs serialReason): a failed probe, the
+  // contending item's #, a shared merge-risk file, or a low-confidence overlap — never a blanket "monolith".
+  const rest = serialItems.concat(concurrent).filter((o) => o !== e);
+  let why;
+  if (!e.probe) why = 'probe failed — unknown touch-set';
+  else {
+    const dep = rest.find((o) => blockEdge(e, o));
+    const risk = !dep && rest.find((o) => !disjoint(mergeRiskFilesOf(e), mergeRiskFilesOf(o)));
+    const ov = !dep && !risk && e.probe.confident === false && rest.find((o) => !disjoint(filesOf(e), filesOf(o)));
+    why = dep ? `blockedBy edge with #${dep.num}` : risk ? `shares a merge-risk file with #${risk.num}`
+      : ov ? `low-confidence touch-set overlapping #${ov.num}` : 'serial';
+  }
   log(`  serial: #${e.num} (${e.slug}) — ${why}${isCrossRepo(e) ? ` (cross-repo: ${affectedReposOf(e).join('+')})` : ''}`);
 }
 
