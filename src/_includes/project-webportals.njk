@@ -1,5 +1,6 @@
 {% from "project-status.njk" import projectStatus %}
 {% from "format-selector.njk" import formatSelector, jsxContent, templateContent, endFormat %}
+{% import "product-components.njk" as pc %}
 
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
@@ -18,7 +19,7 @@
   </div>
 </section>
 
-<section id="when-needed" class="section-card">
+{{ pc.standardSection('id="when-needed"') }}
   <h3 id="when-you-need-portals">When You Actually Need Portals</h3>
   <p>
     With the Popover API and CSS Anchor Positioning, many traditional portal use cases (modals, tooltips, dropdowns) can now be solved without moving DOM nodes. <strong>Portals are for when you need content to render in a specific container</strong>, not just escape stacking contexts.
@@ -87,9 +88,9 @@
     </div>
 
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="when-not-needed" class="section-card">
+{{ pc.standardSection('id="when-not-needed"') }}
   <h3 id="when-you-dont-need-portals">When You Don't Need Portals</h3>
   <p>
     If your only goal is <strong>visual escaping</strong> (z-index, overflow, stacking contexts) and you can target modern browsers, use native APIs instead:
@@ -150,9 +151,9 @@ html`
       <li>You're targeting browsers with Popover API support (Baseline 2024)</li>
     </ul>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="concept" class="section-card">
+{{ pc.standardSection('id="concept"') }}
   <h3 id="the-concept">How Web Portals Works</h3>
   <p>
     Web Portals uses a <code>&lt;template is="portal"&gt;</code> directive (via <a href="/projects/webdirectives/">Web Directives</a>) that renders content at a target DOM location while maintaining logical relationships:
@@ -278,9 +279,9 @@ html`
       </p>
     </div>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="primitives" class="section-card">
+{{ pc.standardSection('id="primitives"') }}
   <h3 id="proposed-primitives">Proposed Primitives (Draft)</h3>
   <p>
     To enable native portal functionality equivalent to framework implementations, we propose the following browser primitives. These build on <a href="/projects/webinjectors/">Web Injectors</a> and <a href="/projects/webcontexts/">Web Contexts</a>.
@@ -507,9 +508,9 @@ html`
 `
 {% endhighlight %}
   {{ endFormat() }}
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="integration" class="section-card">
+{{ pc.standardSection('id="integration"') }}
   <h3 id="integration-with-native-apis">Integration with Native APIs (HTML)</h3>
   <p>
     In declarative HTML, Web Portals can combine with native APIs when you need content in a <strong>specific container</strong> that also uses popover/dialog for visual behavior.
@@ -605,9 +606,9 @@ html`
       </tr>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="advanced" class="section-card">
+{{ pc.standardSection('id="advanced"') }}
   <h3 id="advanced-patterns">Advanced Patterns</h3>
 
   <h4>Nested Portals</h4>
@@ -826,9 +827,9 @@ html`
 `
 {% endhighlight %}
   {{ endFormat() }}
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="native-alternatives" class="section-card">
+{{ pc.standardSection('id="native-alternatives"') }}
   <h3 id="native-alternatives">Native Alternatives</h3>
   <p>
     The web platform has evolved to address some portal use cases natively:
@@ -869,9 +870,9 @@ html`
   <p style="margin-top: 1rem; font-size: 0.9rem; color: var(--color-text-muted);">
     These APIs solve the <em>visual</em> problem (escaping stacking contexts) but don't address the <em>logical</em> problem (maintaining context and event relationships). Web Portals complements these APIs by providing the missing logical layer.
   </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3>Status</h3>
   <p>
     Web Portals is in <strong>draft specification</strong> phase. The primitives above represent the proposed API surface.
@@ -894,7 +895,7 @@ html`
     <li><strong>Focus scopes</strong> — struck as a portal primitive; the portal composes the <a href="/intents/focus-containment/">Focus Containment Intent</a>.</li>
     <li><strong>Deferred resolution</strong> — deferred-by-default (attach-or-observe via the shared <code>InjectorRoot</code> observer); structural diagnostic trigger (DOMContentLoaded / one <code>requestAnimationFrame</code>), with a <code>required</code> opt-out for fail-fast.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
 <details class="section-card" style="margin-top: 2rem;">
   <summary style="cursor: pointer; font-size: 1.25rem; font-weight: 600; padding: 1rem; background: rgba(99, 102, 241, 0.05); border-radius: 8px; user-select: none; list-style: none;">
@@ -902,7 +903,7 @@ html`
   </summary>
   <div style="padding: 1rem 0;">
 
-<section id="research-summary" class="section-card">
+{{ pc.standardSection('id="research-summary"') }}
   <div class="comparison-block" style="background: rgba(99, 102, 241, 0.1); padding: 1.5rem; border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.2); margin: 1rem 0;">
     <h4 style="margin-top: 0; color: var(--color-primary);">Summary of Research</h4>
     <p>
@@ -912,9 +913,9 @@ html`
       <strong>Key Insight:</strong> Framework portals operate at the virtual/component tree level, not the DOM level. Native HTML has no equivalent concept of a "logical tree" separate from the DOM tree. Web Portals proposes using the injector hierarchy (from <a href="/projects/webinjectors/">Web Injectors</a>) as this logical backbone.
     </p>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="polyfillability" class="section-card">
+{{ pc.standardSection('id="polyfillability"') }}
   <h3 id="polyfillability-analysis">Polyfillability Analysis</h3>
   <p>A critical comparison of what can and cannot be polyfilled:</p>
 
@@ -974,9 +975,9 @@ html`
     <li><strong>CSS Anchor Positioning:</strong> Chrome 125+, Firefox 145 (behind flag), Safari: no support</li>
     <li><strong>Web Portals:</strong> Works in all browsers via polyfill (DOM operations are universal)</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="framework-comparison" class="section-card">
+{{ pc.standardSection('id="framework-comparison"') }}
   <h3 id="framework-implementations">Framework Implementations</h3>
   <p>Analysis of portal implementations across major frameworks:</p>
 
@@ -1030,9 +1031,9 @@ html`
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="react-analysis" class="section-card">
+{{ pc.standardSection('id="react-analysis"') }}
   <h4>React: createPortal</h4>
   <p>
     React's <code>createPortal</code> renders children into a DOM node outside the parent component's DOM hierarchy, while maintaining the React component tree relationship.
@@ -1052,9 +1053,9 @@ function Modal({ children }) {
     <li><strong>Events:</strong> Bubble through React tree, not DOM tree (potential source of confusion)</li>
     <li><strong>Pitfall:</strong> Click-outside handlers may fire unexpectedly since events follow React tree</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="vue-analysis" class="section-card">
+{{ pc.standardSection('id="vue-analysis"') }}
   <h4>Vue 3: Teleport</h4>
   <p>
     Vue 3 introduced <code>&lt;Teleport&gt;</code> as a built-in component (evolved from the portal-vue library). It supports deferred target resolution (Vue 3.5+) and multiple teleports to the same target.
@@ -1076,9 +1077,9 @@ function Modal({ children }) {
     <li><strong>Deferred Targets:</strong> Vue 3.5+ allows targeting elements rendered later in the component tree</li>
     <li><strong>Multiple Teleports:</strong> Content appends in order to shared targets</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="angular-analysis" class="section-card">
+{{ pc.standardSection('id="angular-analysis"') }}
   <h4>Angular: CDK Portal</h4>
   <p>
     Angular's Component Dev Kit (CDK) provides a lower-level Portal abstraction, typically used with the Overlay service for modals, tooltips, and menus.
@@ -1100,9 +1101,9 @@ overlayRef.attach(this.portal());
     <li><strong>Overlay Integration:</strong> Works with positioning, scroll strategies, and backdrop handling</li>
     <li><strong>Modern Signals:</strong> Angular v19+ uses signal-based APIs (<code>viewChild.required</code>)</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="solid-analysis" class="section-card">
+{{ pc.standardSection('id="solid-analysis"') }}
   <h4>SolidJS: Portal</h4>
   <p>
     Solid's <code>&lt;Portal&gt;</code> component renders to a specified mount point while preserving the reactive context and event propagation.
@@ -1126,9 +1127,9 @@ function Modal(props) {
     <li><strong>SSR Note:</strong> Portal only runs on client with hydration disabled</li>
     <li><strong>Simplicity:</strong> Noted as "just working" compared to React's more complex setup</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="native-apis" class="section-card">
+{{ pc.standardSection('id="native-apis"') }}
   <h3 id="native-web-apis">Native Web Platform APIs</h3>
   <p>Recent web platform additions that address related (but distinct) problems:</p>
 
@@ -1165,18 +1166,18 @@ function Modal(props) {
     <li><strong>Scroll Tethering:</strong> Anchored elements scroll with their anchors</li>
     <li><strong>Limitation:</strong> Solves positioning, not context or event propagation</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="wicg-portals" class="section-card">
+{{ pc.standardSection('id="wicg-portals"') }}
   <h3 id="wicg-portals-note">Note: WICG Portals (Different Concept)</h3>
   <div class="content-box" style="background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3);">
     <p style="margin: 0; font-size: 0.9rem;">
       <strong>Important:</strong> The <a href="https://wicg.github.io/portals/" target="_blank" rel="noopener">WICG Portals proposal</a> addresses a completely different problem: seamless navigation transitions between pages. It introduces a <code>&lt;portal&gt;</code> element for embedding and activating other pages (similar to an iframe that can be "promoted" to the top-level document). This is unrelated to the React-style portals that Web Portals aims to standardize.
     </p>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="gap-analysis" class="section-card">
+{{ pc.standardSection('id="gap-analysis"') }}
   <h3 id="gap-analysis">Gap Analysis</h3>
   <p>What frameworks provide that native HTML lacks:</p>
   <div style="overflow-x: auto; max-width: 100%;">
@@ -1225,12 +1226,12 @@ function Modal(props) {
   <p style="margin-top: 1rem;">
     <strong>Conclusion:</strong> The core gap is the concept of a "logical tree" that's independent of the DOM tree. Web Portals proposes using the injector hierarchy (from Web Injectors) as this logical backbone, enabling context queries, event proxying, and lifecycle management to follow the logical structure rather than the physical DOM.
   </p>
-</section>
+{{ pc.endStandardSection() }}
 
   </div>
 </details>
 
-<section id="ssr" class="section-card">
+{{ pc.standardSection('id="ssr"') }}
     <h3 id="ssr-contract">SSR Contract</h3>
     <p>
         This section defines the server-side rendering contract for <strong>Web Portals</strong>.
@@ -1320,9 +1321,9 @@ function Modal(props) {
             Web Portals does not ship an SSR runtime — it ships this specification.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-embedded-deck" class="section-card">
+{{ pc.standardSection('id="protocol-embedded-deck"') }}
     <h3>Protocol — Embedded-Deck postMessage Contract</h3>
     <p class="text-gray-600 text-sm">
         Embeds a <strong>live, interactive deck</strong> inside another document via an iframe, with state
@@ -1347,4 +1348,4 @@ function Modal(props) {
         this specification; <a href="../frontierui/">Frontier UI</a> renders the embeddable deck. Homed
         here per the ratified distributed placement (<a href="/backlog/1175/">#1175</a>).
     </p>
-</section>
+{{ pc.endStandardSection() }}

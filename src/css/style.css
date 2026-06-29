@@ -1777,6 +1777,19 @@ we-card {
   overflow: hidden;
 }
 
+/* #1953 (slice of #1608): box-model baseline for the WE-website PRODUCT components `standard-section`
+   / `standard-card` (src/_includes/product-components.njk), which compose the FUI `we-section-card` /
+   `we-card` primitives. Custom-element tags default to `display:inline`, so an un-upgraded product tag
+   must be coerced to block to render the section/card box. The full look is carried by the
+   `.section-card` / `.standard-card` classes the macros also emit (so `.section-card:target` deep-links
+   + headings keep their existing styling); this tag-keyed rule only supplies the block formatting the
+   bare custom tag lacks — mirroring the `we-card{}` baseline above. The product surfaces are content
+   regions, not the flex card chrome, so they stay plain block. */
+standard-section,
+standard-card {
+  display: block;
+}
+
 /* #1208 (prereq #1817): SSR baseline + categorical vocabulary for the FUI transient `<we-tag>` the docs
    server-render for the backlog TAXONOMY pills (kind / size / tier / topic-tags / meta). Like the badge/
    card pills above, `TagElement` self-replaces into a light-DOM `<span class="fui-tag…">` once the cross-

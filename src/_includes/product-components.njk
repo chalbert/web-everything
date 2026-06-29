@@ -1,0 +1,48 @@
+{#-
+  Product-substrate components for the WE website (#1953, slice of epic #1608).
+
+  The three-substrate boundary (ratified #1886 — docs/agent/platform-decisions.md
+  #identity-semantic-look-composable): WE owns the *contract*, FUI owns the *primitive*
+  (`we-card`, `we-section-card`), and the **product** (this website) owns the concrete,
+  semantically-named, namespaced **components** that compose those primitives into what the docs
+  actually need. These macros ARE those product components — the authored deliverable is a
+  component (own tag), never a hand-applied class.
+
+  - `standardSection(attrs)` / `endStandardSection()` — the `<section>`-rooted content-card surface.
+    Composes the FUI `we-section-card` primitive (which erases to `<section class="fui-card">`): we emit
+    the product tag carrying `class="section-card fui-card"`, so it renders on the FUI base-style hook
+    with the existing `.section-card` look, AND is a real section landmark. `attrs` is a RAW attribute
+    string the caller passes verbatim — typically `id="…"` (so the wrapper `id` stays a literal in the
+    source `.njk`, which both the deep-link `:target` and the protocol-anchor source-probe in
+    check-standards-rules.mjs require). The caller also keeps each `<hN id>` heading verbatim BETWEEN the
+    open/close (per #1608: so `#anchor` TOC links survive). Heading/title is owned by the product
+    component — the caller writes the `<hN id>` it needs; there is no `we-card`-level heading.
+  - `standardCard(attrs)` / `endStandardCard()` — the `<article>`-rooted prose content-card surface.
+    Composes the FUI `we-card` primitive (erases to `<article class="fui-card">`). Same residue + raw-attrs
+    contract; emits `class="standard-card fui-card"`.
+
+  Namespace knob (#1953, ratified #1886 "Namespace"): the product tag is namespaced via the
+  `componentTag()` Nunjucks global (default empty → unprefixed `standard-section` / `standard-card`);
+  see src/_data/site.js `componentNamespace`. A published product sets COMPONENT_NAMESPACE to namespace
+  its components with no change to these macros.
+
+  WE-side SSR baseline for the product tags (display:block + the section/card box) lives in
+  src/css/style.css keyed on `standard-section` / `standard-card`, mirroring the `we-card{}` baseline —
+  so the surface renders correctly with zero FUI registration (the docs site stays WE-only here).
+-#}
+
+{% macro standardSection(attrs="") %}
+<{{ componentTag("standard-section") }} class="section-card fui-card"{% if attrs %} {{ attrs | safe }}{% endif %}>
+{% endmacro %}
+
+{% macro endStandardSection() %}
+</{{ componentTag("standard-section") }}>
+{% endmacro %}
+
+{% macro standardCard(attrs="") %}
+<{{ componentTag("standard-card") }} class="standard-card fui-card"{% if attrs %} {{ attrs | safe }}{% endif %}>
+{% endmacro %}
+
+{% macro endStandardCard() %}
+</{{ componentTag("standard-card") }}>
+{% endmacro %}

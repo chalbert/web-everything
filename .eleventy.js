@@ -7,6 +7,14 @@ const { spliceDataTables } = require("./scripts/lib/data-table-build-hook.cjs");
 module.exports = function (eleventyConfig) {
   eleventyConfig.addPlugin(syntaxHighlight);
 
+  // Product-component namespace knob (#1953, ratified #1886 — platform-decisions.md
+  // #identity-semantic-look-composable "Namespace"). Exposed as a Nunjucks GLOBAL so the
+  // product-components.njk macros can read it: macros do not see the template data cascade
+  // (`site.*`), but Nunjucks globals are visible inside macro bodies. Single-sources the value
+  // from src/_data/site.js so the data cascade (`site.componentNamespace`) and the macro path agree.
+  const { componentNamespace } = require("./src/_data/site.js");
+  eleventyConfig.addNunjucksGlobal("componentTag", (base) => `${componentNamespace}${base}`);
+
   // Research-freshness badge derivation (#441 Fork 4 / #477): the same now-injected helper backing
   // check:standards' warn-only rule (a CJS module so this sync Eleventy 2.x config can require it; the
   // ESM rules module re-exports it). Returns { state: 'fresh'|'stale'|'unreviewed', dueDate, ... } so
