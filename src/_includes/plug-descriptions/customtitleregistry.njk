@@ -16,7 +16,7 @@
 </p>
 
 <h3 id="standards">Web Standards Alignment</h3>
-<table>
+<we-data-table><table>
     <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
     <tr>
         <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Document/title">document.title</a></td>
@@ -33,7 +33,7 @@
         <td>AA</td>
         <td>On a client-side navigation the registry announces the new base title via a polite live region — a fresh page load reads <code>&lt;title&gt;</code> automatically, a SPA route change does not.</td>
     </tr>
-</table>
+</table></we-data-table>
 
 <h3 id="interface">Interface</h3>
 {% highlight "typescript" %}
@@ -54,13 +54,13 @@ interface CustomTitleRegistry extends CustomRegistry<CustomTitleContributor> {
 <p class="text-sm text-gray-600">
     Contributors are folded innermost-to-outermost; each receives the lower layers' result and returns its share.
 </p>
-<table>
+<we-data-table><table>
     <tr><th>Layer</th><th>Who contributes</th><th>Example</th></tr>
     <tr><td><code>base</code></td><td>the active route / static page / dynamic state</td><td><code>Inbox</code></td></tr>
     <tr><td><code>template</code></td><td>the site-level wrapper</td><td><code>Inbox | Acme</code></td></tr>
     <tr><td><code>decoration</code></td><td>Notification Marker count, unsaved dot, env tag</td><td><code>(3) • Inbox | Acme</code></td></tr>
     <tr><td><code>transient</code></td><td>an auto-restoring override</td><td><code>Saving… | Acme</code></td></tr>
-</table>
+</table></we-data-table>
 
 <h3 id="usage-example">Usage Example</h3>
 

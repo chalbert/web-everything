@@ -30,10 +30,10 @@ const nodes = parser.parse('Hello {{ '{{' }}name{{ '}}' }}!');
 {% endhighlight %}
 
 <h3 id="api">API Reference</h3>
-<table>
+<we-data-table><table>
     <tr><th>Member</th><th>Type</th><th>Description</th></tr>
     <tr><td><code>openingIdentifier</code></td><td><code>string</code></td><td>Opening delimiter (e.g., <code>{{ '{{' }}</code>)</td></tr>
     <tr><td><code>closingIdentifier</code></td><td><code>string</code></td><td>Closing delimiter (e.g., <code>{{ '}}' }}</code>)</td></tr>
     <tr><td><code>localName</code></td><td><code>string | null</code></td><td>Registered name, set by the registry</td></tr>
     <tr><td><code>parse(text)</code></td><td><code>Text[]</code></td><td>Splits text into Text and UndeterminedTextNode instances</td></tr>
-</table>
+</table></we-data-table>
