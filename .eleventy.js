@@ -2,6 +2,7 @@ const syntaxHighlight = require("@11ty/eleventy-plugin-syntaxhighlight");
 
 const { deriveResearchFreshness } = require("./scripts/lib/research-freshness.cjs");
 const { buildTechnicalConfiguratorUrl } = require("./scripts/lib/technical-configurator-url.cjs");
+const { spliceDataTables } = require("./scripts/lib/data-table-build-hook.cjs");
 
 module.exports = function (eleventyConfig) {
   eleventyConfig.addPlugin(syntaxHighlight);
@@ -249,6 +250,21 @@ ${fuiHostScript}`;
   eleventyConfig.addCollection("flatAdapters", function(collectionApi) {
     const { loadAdapterItems } = require("./scripts/lib/adapters-loader.cjs");
     return loadAdapterItems();
+  });
+
+  // SSR data-table build orchestration (#1905, slice C of the #1867 harness) — detect a deterministic
+  // `<we-data-table rows="[[ ref ]]">` web-expression binding in the rendered page HTML, resolve the bare
+  // ref from the build-known data cascade, shell out to the version-pinned FUI build-CLI over the
+  // subprocess boundary (keyed-batch in / keyed-batch out), and splice the returned SSR `<table>`. The
+  // evaluator + renderer live in FUI (a WE→FUI import is a banned backward DAG edge), so WE orchestrates
+  // the FUI compute over a process boundary; the build NEVER reads the dev /_maas/data/ route — that's the
+  // dev-freshness HMR seam, not a build transport. See docs/agent/platform-decisions.md#ssr-data-table-build-harness.
+  // Non-deterministic / unresolved bindings are left intact for the client runtime; non-table pages pay a
+  // single substring check. The pinned FUI artifact MUST already exist (FUI `build:tools` before WE
+  // `build:docs`, ratified #1946) — a missing artifact is a hard build error, never a silent skip.
+  eleventyConfig.addTransform("weDataTableSSR", function (content) {
+    if (!/\.html?$/.test(this.page && this.page.outputPath || "")) return content;
+    return spliceDataTables(content, this.data || {}, __dirname);
   });
 
   // The backlog feeds off backlog/*.md (parsed by src/_data/backlog.js, which
