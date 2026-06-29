@@ -1,3 +1,5 @@
+{% import "product-components.njk" as pc %}
+
 <section class="intro-section mb-12">
     <h3 id="mission">Mission</h3>
     <p>The <strong>Web Blocks</strong> project aims to establish a set of standard protocols for interoperable modules—both visual components and behavioral traits. By focusing on the <em>protocol</em> rather than the implementation, we ensure that parts from different libraries can work together to provide consistent UX and accessibility.</p>
@@ -50,7 +52,7 @@
     <p id="no-results" style="display: none; text-align: center; color: #475569; padding: 2rem;">No blocks match your filters.</p>
 </section>
 
-<section id="governance" class="section-card">
+{{ pc.standardSection('id="governance"') }}
     <h3 id="block-standard-governance">Block Standard — governance &amp; schema</h3>
     <p>
         A <strong>block</strong> is a declarative, registry-rendered UI standard: a <strong>contract</strong>
@@ -75,7 +77,7 @@
         <strong>composability</strong> — implements-vs-composes, trait/dimension discipline
         (<a href="/backlog/1094-block-composability-rules-governance/">#1094</a>).
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
 <style>
 .filter-btn.active {

@@ -1,3 +1,5 @@
+{% import "product-components.njk" as pc %}
+
 <section class="intro-section mb-12">
     <h3 id="mission">Mission</h3>
     <p>
@@ -13,7 +15,7 @@
     </p>
 </section>
 
-<section id="scope" class="section-card">
+{{ pc.standardSection('id="scope"') }}
     <h3 id="scope-heading">Scope</h3>
     <p>
         The standard owns the <strong>anchoring seam only</strong>: <code>Range</code> &rarr; serialized
@@ -23,7 +25,7 @@
         comment-thread product are explicitly <em>out</em> of scope &mdash; compose, never merge.
     </p>
     <div class="standards-grid">
-        <div class="standard-card flex flex-col">
+        {{ pc.standardCard('', 'flex flex-col') }}
             <h4 id="scope-vocab" class="text-lg font-bold m-0 text-gray-900">W3C selector vocabulary, wholesale</h4>
             <p class="text-gray-600 text-sm leading-relaxed mb-0">
                 The wire layer adopts the
@@ -32,8 +34,8 @@
                 <code>TextPositionSelector</code> (offset-exact), <code>RangeSelector</code> (cross-element).
                 Standards-bodies are upstream; nothing is re-minted.
             </p>
-        </div>
-        <div class="standard-card flex flex-col">
+        {{ pc.endStandardCard() }}
+        {{ pc.standardCard('', 'flex flex-col') }}
             <h4 id="scope-bundle" class="text-lg font-bold m-0 text-gray-900">Bundle + fuzzy + orphan</h4>
             <p class="text-gray-600 text-sm leading-relaxed mb-0">
                 Robustness comes from storing <em>several</em> selectors together (a
@@ -42,8 +44,8 @@
                 text is gone (the Hypothesis / RecogitoJS precedent) &mdash; never a thrown error or a silent
                 drop.
             </p>
-        </div>
-        <div class="standard-card flex flex-col">
+        {{ pc.endStandardCard() }}
+        {{ pc.standardCard('', 'flex flex-col') }}
             <h4 id="scope-strategy" class="text-lg font-bold m-0 text-gray-900">anchorStrategy dimension</h4>
             <p class="text-gray-600 text-sm leading-relaxed mb-0">
                 <code>quote | position | bundle</code>, default <strong><code>bundle</code></strong> &mdash; the
@@ -51,11 +53,11 @@
                 branch). Homed here per <a href="/backlog/1408-decision-content-annotation-anchor-payload-placement/">#1408</a>
                 Fork&nbsp;3.
             </p>
-        </div>
+        {{ pc.endStandardCard() }}
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="contract" class="section-card">
+{{ pc.standardSection('id="contract"') }}
     <h3 id="contract-heading">Contract &amp; placement</h3>
     <p>
         The <code>RangeAnchor</code> serialize/resolve interface is the <strong>only lock</strong>; the runtime
@@ -66,9 +68,9 @@
         first. Re-resolution outcomes are a closed set &mdash; <code>anchored</code> | <code>fuzzy</code> |
         <code>orphan</code>.
     </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-durable-range-anchor" class="section-card">
+{{ pc.standardSection('id="protocol-durable-range-anchor"') }}
     <h3 id="protocol-heading">Protocol &mdash; <code>DurableRangeAnchor</code></h3>
     <p>
         The conformance reference fixes the <code>RangeAnchor</code> serialize/resolve contract, the W3C
@@ -78,4 +80,4 @@
         (<code>anchored | fuzzy | orphan</code>). The serializer/resolver + fuzzy matcher are impl in
         <a href="/projects/frontierui/">Frontier UI</a>; the contract is the only lock.
     </p>
-</section>
+{{ pc.endStandardSection() }}

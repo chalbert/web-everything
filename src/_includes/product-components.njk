@@ -31,16 +31,16 @@
   so the surface renders correctly with zero FUI registration (the docs site stays WE-only here).
 -#}
 
-{% macro standardSection(attrs="") %}
-<{{ componentTag("standard-section") }} class="section-card fui-card"{% if attrs %} {{ attrs | safe }}{% endif %}>
+{% macro standardSection(attrs="", cls="") %}
+<{{ componentTag("standard-section") }} class="section-card fui-card{% if cls %} {{ cls }}{% endif %}"{% if attrs %} {{ attrs | safe }}{% endif %}>
 {% endmacro %}
 
 {% macro endStandardSection() %}
 </{{ componentTag("standard-section") }}>
 {% endmacro %}
 
-{% macro standardCard(attrs="") %}
-<{{ componentTag("standard-card") }} class="standard-card fui-card"{% if attrs %} {{ attrs | safe }}{% endif %}>
+{% macro standardCard(attrs="", cls="") %}
+<{{ componentTag("standard-card") }} class="standard-card fui-card{% if cls %} {{ cls }}{% endif %}"{% if attrs %} {{ attrs | safe }}{% endif %}>
 {% endmacro %}
 
 {% macro endStandardCard() %}
