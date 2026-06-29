@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -34,7 +35,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What a workflow standard covers, and where each capability is fulfilled. <strong>Protocol</strong> =
@@ -60,9 +61,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-workflow" class="section-card">
+{{ pc.standardSection('id="protocol-workflow"') }}
   <h3 id="how-it-works">Workflow Protocol</h3>
   <p>
     A flow never bundles its orchestration into the step-intents. It declares a <strong>workflow
@@ -148,9 +149,9 @@ const ev = await engine.advance(checkout, 'pay', currentUser); // guard-checked 
       composition seam for the <a href="/intents/flow-progress/">Flow Progress intent</a>, audit, and
       reporting &mdash; the standard owns the event, not the log.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <ul style="font-size: 0.9rem;">
     <li><strong><a href="/intents/flow-progress/">Flow Progress intent</a></strong> &mdash; the UX half: the
@@ -165,9 +166,9 @@ const ev = await engine.advance(checkout, 'pay', currentUser); // guard-checked 
     <li><strong><a href="/projects/webguards/">Web Guards</a></strong> &mdash; resolves each transition's
       guard predicate (authorization / precondition).</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Workflows is in <strong>concept</strong> phase; the Workflow protocol's seam (orchestration graph +
@@ -181,4 +182,4 @@ const ev = await engine.advance(checkout, 'pay', currentUser); // guard-checked 
     The native-first default engine adapter and a reference wizard block are the first planned work, on top
     of this contract &mdash; filed as separately-prioritized builds.
   </p>
-</section>
+{{ pc.endStandardSection() }}

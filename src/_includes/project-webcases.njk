@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -26,7 +27,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Mock Contract — Feature Surface</h3>
   <p>
     What the mock/contract schema covers, and where each capability sits. <strong>OpenAPI</strong> = borrowed
@@ -58,9 +59,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-mock-contract" class="section-card">
+{{ pc.standardSection('id="protocol-mock-contract"') }}
   <h3 id="how-it-works">Mock Contract Protocol</h3>
   <p>
     The standard is the <strong>schema, not the server</strong>. A Mock Contract is a portable document of
@@ -135,9 +136,9 @@ interface ConditionalRule {
     <li><strong>Use A — mock:</strong> a conformant dev server reads the contract and serves the interactions, with the behavior layer applied.</li>
     <li><strong>Use B — drift-check:</strong> the same interactions are verified against the live service in Web Cases; a mismatch is a contract breach, surfaced before it reaches production.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <p>
     Web Cases owns the <em>portable, checkable artifact</em> — not the server, the console, or the policy it
@@ -150,9 +151,9 @@ interface ConditionalRule {
     <li><strong>OpenAPI</strong> — borrowed substrate for the response shape; the Mock Contract references it rather than restating schemas.</li>
     <li><strong>Provider/consumer graph (<a href="/backlog/092-provider-consumer-graph-platform-manager/">#092</a>)</strong> — a verified contract is one edge in the cross-team seam graph; drift-checking proves the edge still holds.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Cases is in <strong>concept</strong> phase. The <strong>Mock Contract</strong> schema — the portable,
@@ -166,4 +167,4 @@ interface ConditionalRule {
     <li>Whether the interaction-bearing artifact reuses an existing Web Cases case format or defines a thin superset for the HTTP-interaction shape.</li>
     <li>The latency-distribution vocabulary (fixed / uniform / normal / fixed+jitter) — borrow an existing chaos-tool grammar or define a minimal one.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}

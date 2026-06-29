@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -28,7 +29,7 @@
   </div>
 </section>
 
-<section id="features" class="section-card">
+{{ pc.standardSection('id="features"') }}
   <h3 id="feature-surface">Feature Surface</h3>
   <p>
     What a reliability standard covers, and how each capability is fulfilled.
@@ -57,9 +58,9 @@
       </tbody>
     </table>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="how" class="section-card">
+{{ pc.standardSection('id="how"') }}
   <h3 id="how-it-works">How It Works</h3>
   <p>
     A consumer (Resource Loader, form submission handler, background task) never contains retry logic.
@@ -91,9 +92,9 @@ async function loadWithRecovery(context: RecoveryContext): Promise<void> {
     <li><strong>One registry:</strong> <a href="/plugs/customrecoveryhandlerregistry/"><code>CustomRecoveryHandlerRegistry</code></a> (<code>window.customRecovery</code>) holds handlers in priority order.</li>
     <li><strong>First that accepts wins:</strong> returning <code>null</code> declines without side effects; the next handler is tried. Registration order is the priority — explicit and reviewable.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol-error-recovery" class="section-card">
+{{ pc.standardSection('id="protocol-error-recovery"') }}
   <h3 id="error-recovery-protocol">Error Recovery Protocol</h3>
   <p>
     Conformance reference for handling mechanism failures through pluggable recovery handlers.
@@ -269,9 +270,9 @@ abstract class CustomRecoveryHandler {
       <tr><td><code>RecoveryPhase</code></td><td>Type</td><td>#1032 Fork&nbsp;2 — open meta-schema; core <code>'retrying' | 'queued' | 'awaiting-manual'</code> + registered extensions</td></tr>
     </tbody>
   </table>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition">Composition With Other Standards</h3>
   <p>
     Web Reliability owns <em>whether and how to retry</em>, not <em>how loading states are shown</em> or
@@ -282,9 +283,9 @@ abstract class CustomRecoveryHandler {
     <li><strong><a href="/intents/loader/">Loader Intent</a></strong> — loading-state UX (skeleton, overlay, stale) shown by Resource Loader during retry attempts.</li>
     <li><strong><a href="/blocks/resource-loader/">Resource Loader</a></strong> — primary consumer; delegates failure handling to the registry rather than containing retry logic itself.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Reliability is in <strong>concept</strong> phase. The contract and handler registry are specified
@@ -305,4 +306,4 @@ abstract class CustomRecoveryHandler {
     <code>fetchStatus</code> split); the Loader Intent UX binds to the phase it understands and treats unknown
     phases as generic <code>recovering</code>.
   </p>
-</section>
+{{ pc.endStandardSection() }}

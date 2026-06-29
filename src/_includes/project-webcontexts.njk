@@ -1,4 +1,5 @@
-<section id="protocol-draft" class="section-card">
+{% import "product-components.njk" as pc %}
+{{ pc.standardSection('id="protocol-draft"') }}
   <h3 id="draft-claim-query-protocol">Draft: Web Context Claim/Query Protocol</h3>
   <p>
     The <strong>Web Context Claim/Query Protocol</strong> enables HTML-native, hierarchical, and selective data exposure for declarative HTML—specifically for tokens embedded in text nodes and attributes. Context instances are attached to nodes via their injector's registry, and can <em>claim</em> or <em>decline</em> to provide data in response to a query, supporting advanced scenarios like scoped state, feature flags, and conditional context activation.
@@ -65,9 +66,9 @@ class AppStateContext extends CustomContext {
   <p>
     This protocol enables flexible, secure, and declarative data flow in HTML-based applications, supporting both simple and advanced context scenarios.
   </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="protocol" class="section-card">
+{{ pc.standardSection('id="protocol"') }}
   <h3 id="the-protocol">Web Context Protocol</h3>
   <p>
     <strong>Web Contexts</strong> define a protocol for exposing data or services to declarative HTML—specifically to tokens parsed from text nodes and attributes—via hierarchical, string-based queries. <strong>Contexts always control exactly which data is exposed to tokens, adding a layer of security and encapsulation.</strong> While behaviors and components can access injectors directly through JavaScript, Web Contexts provide a controlled interface specifically for declarative HTML consumption.
@@ -81,10 +82,10 @@ class AppStateContext extends CustomContext {
   <p>
     <strong>Summary:</strong> <em>Observation</em> is a property of the injected object (see Web States); <em>lookup</em> is the role of the injector; <em>HTML-scoped queries</em> are the domain of Web Contexts. <strong>Explicit context exposure is a security and encapsulation feature.</strong>
   </p>
-</section>
+{{ pc.endStandardSection() }}
 
 
-<section id="use-cases" class="section-card">
+{{ pc.standardSection('id="use-cases"') }}
   <h3 id="key-use-cases">Key Use Cases</h3>
   <ul>
     <li><strong>Template Data Binding:</strong> Bind HTML attributes or text nodes to the closest exposed context value (e.g., <code>state</code>, <code>theme</code>).</li>
@@ -94,10 +95,10 @@ class AppStateContext extends CustomContext {
     <li><strong>Plugin/Extension Points:</strong> Enable plugins to expose capabilities for template/behavior use, with negotiation for fallback or selection.</li>
     <li><strong>Strict vs. Flexible Lookup:</strong> Support both strict (stop at first match) and flexible (traverse parent chain) context resolution, as needed by framework or use case.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
 
-        <section id="dom-api" class="section-card">
+        {{ pc.standardSection('id="dom-api"') }}
   <h3 id="dom-api-reference">DOM API Reference</h3>
   <p>
     This section documents the proposed DOM API extensions for implementing the contexts protocol. These APIs extend the <code>Node</code> interface to support hierarchical context lookup and management throughout the DOM tree.
@@ -174,15 +175,15 @@ if (stateContext) {
     <li><strong>Type-based:</strong> Contexts are identified and queried by string type names</li>
     <li><strong>Query Protocol:</strong> Advanced querying via <code>queryContext()</code> enables selective resolution</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-        <section id="try-it" class="section-card">
+        {{ pc.standardSection('id="try-it"') }}
             <h3 id="try-it-out">Try It Out</h3>
             <p>
                 This protocol is fully implemented and available for use today.
                 Check out the reference implementation in the <strong><a href="/projects/webplugs/">Web Plugs</a></strong> collection.
             </p>
-        </section>
+        {{ pc.endStandardSection() }}
 
 <section>
   <h3>Design Note: Observation vs. Context</h3>
@@ -191,7 +192,7 @@ if (stateContext) {
   </p>
 </section>
 
-<section id="ssr" class="section-card">
+{{ pc.standardSection('id="ssr"') }}
     <h3 id="ssr-contract">SSR Contract</h3>
     <p>
         This section defines the server-side rendering contract for <strong>Web Contexts</strong>.
@@ -263,7 +264,7 @@ if (stateContext) {
             See also: <a href="/projects/webstates/#ssr">Web States SSR</a> for state serialization format.
         </p>
     </div>
-</section>
+{{ pc.endStandardSection() }}
 
 <details class="section-card" style="margin-top: 2rem;">
   <summary style="cursor: pointer; font-size: 1.25rem; font-weight: 600; padding: 1rem; background: rgba(99, 102, 241, 0.05); border-radius: 8px; user-select: none; list-style: none;">
@@ -271,7 +272,7 @@ if (stateContext) {
   </summary>
   <div style="padding: 1rem 0;">
 
-<section id="comparison" class="section-card">
+{{ pc.standardSection('id="comparison"') }}
   <div class="comparison-block" style="background: rgba(99, 102, 241, 0.1); padding: 1.5rem; border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.2); margin: 2rem 0;">
     <h4 id="current-standardization-vs-web-contexts" style="margin-top: 0; color: var(--color-primary);">Summary of Research</h4>
     <p>
@@ -281,9 +282,9 @@ if (stateContext) {
       <strong>Key Insight:</strong> Web Contexts are not a registry of all dependencies, but a protocol for exposing only the data intended for public/template/behavior consumption, resolved via hierarchical, string-based queries.
     </p>
   </div>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="analysis" class="section-card">
+{{ pc.standardSection('id="analysis"') }}
   <h3 id="spec-implementation-analysis">Spec & Implementation Analysis</h3>
   <p>This section compares major web context APIs, framework implementations, and the HTML Injector approach.</p>
 
@@ -358,9 +359,9 @@ if (stateContext) {
     <li><strong>What a Web Context Standard might add:</strong> Standardized API for context lookup, observable context changes, protocol negotiation, unified registry, lifecycle/fallback handling.</li>
     <li><strong>Key observation:</strong> HTML Injector is very close to a DOM-native context API; the main gap is a browser-native API for lookup, observation, and richer protocol negotiation.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="feature-analysis" class="section-card">
+{{ pc.standardSection('id="feature-analysis"') }}
   <h3 id="feature-analysis">Feature Analysis: Lookup, Observation, Negotiation</h3>
   <table style="min-width: 700px; overflow-x: auto;">
     <thead>
@@ -417,9 +418,9 @@ if (stateContext) {
   </ul>
   <p><strong>Note:</strong> Many common use cases (i18n, theming, service lookup) are already covered by hierarchical lookup. True negotiation is most valuable when a provider needs to filter, transform, or selectively decline requests based on protocol, capability, or runtime conditions.</p>
   <p><strong>Design Note:</strong> Negotiation is best viewed as an advanced feature of the <em>injector</em> (the provider/registry), rather than of the context consumer. This allows injectors to implement custom logic for filtering, protocol matching, or fallback, while keeping the context API simple for most consumers.</p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="negotiation-use-cases" class="section-card">
+{{ pc.standardSection('id="negotiation-use-cases"') }}
   <h3 id="negotiation-use-cases">Use Cases for Context Negotiation</h3>
   <ul>
     <li><strong>Theming with Protocols:</strong> <em>Usually covered by lookup.</em> Negotiation is only needed if a provider wants to filter or transform requests (e.g., only answer for certain theme types).</li>
@@ -430,7 +431,7 @@ if (stateContext) {
     <li><strong>Plugin/Extension Points:</strong> <em>Strong use case for negotiation.</em> Multiple plugins may register for a protocol; negotiation allows the best or most appropriate to answer, or for fallback to occur.</li>
   </ul>
   <p><strong>Summary:</strong> Most context use cases are covered by hierarchical lookup. True negotiation is most valuable for advanced scenarios: polyfill interop, plugin selection, or protocol-based filtering where a provider may choose to defer to a parent or another provider.</p>
-</section>
+{{ pc.endStandardSection() }}
 
   </div>
 </details>

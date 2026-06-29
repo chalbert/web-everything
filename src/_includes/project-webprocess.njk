@@ -1,3 +1,4 @@
+{% import "product-components.njk" as pc %}
 <section class="intro-section mb-12">
   <h3 id="mission">Mission</h3>
   <p>
@@ -39,7 +40,7 @@
   </div>
 </section>
 
-<section id="protocol-self-driven-project" class="section-card">
+{{ pc.standardSection('id="protocol-self-driven-project"') }}
   <h3 id="how-it-works">Self-Driven Project Artefact Contract</h3>
   <p>
     The contract fixes <strong>one seam</strong> &mdash; a portable, declarative artefact structure that
@@ -100,9 +101,9 @@
     default recipe + the GitOps / OSCAL / SPDX prior art are specified in the
     <a href="/reports/2026-06-15-self-driven-project-artefact-contract-spec/">artefact-contract spec report</a>.
   </p>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="composition" class="section-card">
+{{ pc.standardSection('id="composition"') }}
   <h3 id="composition-heading">Composition With Other Standards</h3>
   <ul style="font-size: 0.9rem;">
     <li><strong><a href="/projects/webworkflows/">Web Workflows</a></strong> &mdash; the SDLC step graph is a different instance of the Workflow Protocol's orchestration machinery (possibly with an extension), not a new orchestrator.</li>
@@ -111,9 +112,9 @@
     <li><strong><a href="/projects/webdecisions/">Web Decisions</a></strong> &mdash; the request-to-intervene / human-handoff record.</li>
     <li><strong><a href="/backlog/100-requirement-as-code/">#100 requirement-as-code</a></strong> &mdash; requirement artefacts the contract references rather than redefines.</li>
   </ul>
-</section>
+{{ pc.endStandardSection() }}
 
-<section id="status" class="section-card">
+{{ pc.standardSection('id="status"') }}
   <h3 id="status">Status</h3>
   <p>
     Web Process is in <strong>concept</strong> phase; the Self-Driven Project Artefact Contract is registered
@@ -126,4 +127,4 @@
     meta-schema registries, the default recipe, and the Plateau recipe configurator are separately-prioritized
     builds on top of this contract.
   </p>
-</section>
+{{ pc.endStandardSection() }}
