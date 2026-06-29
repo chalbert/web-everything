@@ -3,8 +3,9 @@ kind: story
 size: 5
 parent: "1600"
 locus: webeverything
-status: open
+status: active
 dateOpened: "2026-06-28"
+dateStarted: "2026-06-29"
 tags: [data-table, ssr, build-integration, eleventy]
 ---
 
