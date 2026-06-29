@@ -2,15 +2,34 @@
 kind: story
 size: 5
 parent: "1601"
-status: resolved
+status: open
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-29"
-dateResolved: "2026-06-29"
 tags: [we-card, fui-card, card-style, base-flavor, dogfooding, css-dedup]
 relatedProject: webdocs
 ---
 
 # project-include card surfaces wear the shared fui-card look; retire bespoke section-card/standard-card style
+
+## REOPENED 2026-06-29 — the resolve was REVERTED (false premise, caused a visual regression)
+
+The resolve removed the bespoke `.section-card` / `.standard-card` frame on the theory that **every**
+such surface also carries `.fui-card` (from #1608's migration) and so gets its frame there. **That premise
+is false.** Those classes are used **bare** (no `.fui-card`) across ~14 templates — `we:src/backlog-pages.njk`,
+`we:src/state-pages.njk`, `we:src/conformance.njk`, `we:src/plug-pages.njk`, `we:src/demos.njk`, and more.
+Removing the frame stripped the white container from all of them — confirmed on `/backlog/NNN/` detail pages
+(the `.section-card` wrapper computed to transparent bg / 0 border / 0 radius / 0 padding; content floated
+on the bare page background). Reverted the `we:src/css/style.css` change; the bespoke frame is load-bearing
+and stays.
+
+**What would actually unblock this dead-CSS sweep:** first migrate the bare `.section-card` / `.standard-card`
+surfaces so they *also* emit `.fui-card` (a #1601 sibling, broad), OR confirm `.fui-card` is globally loaded
+on every page that uses these classes (it currently lands cross-origin only where the FUI registration ESM
+loads — not on `/backlog/`). Until one of those holds, the frame can't be removed. **Lesson:** a "dead CSS"
+removal must grep *every* consumer of the class, not just the migrated one — and a before/after visual check
+on a sample page would have caught this immediately.
+
+---
 
 The **CSS-cleanup tail** of the card migration. #1608 migrates each card surface to a product component
 (`standard-card`/`standard-section`) that composes the FUI primitive and thus wears the shared `.fui-card`

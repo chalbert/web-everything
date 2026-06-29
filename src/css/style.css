@@ -814,13 +814,20 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Content Sections as Cards.
-   #1895 (cleanup tail of #1608): the frame (border/radius/background/shadow/padding) now comes from the
-   shared `.fui-card` look — the migrated surface emits `class="section-card fui-card"` (product-components.njk),
-   so the bespoke frame here is redundant last-wins dead weight against `.fui-card`. Retired. What stays is the
-   non-look residue `.section-card` still owns: the deep-link `scroll-margin-top` offset (the `.fui-card` /
-   `we-card{}` baselines don't carry it) and the `h3`/`h4` heading rules below. */
+   NOTE (#1895 reverted 2026-06-29): the frame below was briefly retired on the theory that every
+   `.section-card` surface also carries `.fui-card` (from #1608's migration) and so gets its frame there.
+   That premise is FALSE — `.section-card` is used BARE (no `.fui-card`) across ~14 templates
+   (backlog-pages.njk, state-pages.njk, conformance.njk, plug-pages.njk, …), so removing the frame stripped
+   the white container from all of them (the /backlog/NNN/ detail-page regression). The bespoke frame is
+   therefore load-bearing and stays; the dedup can only happen once those surfaces actually emit `.fui-card`. */
 .section-card {
-    scroll-margin-top: 100px; /* deep-link / sticky-header offset — non-look, .fui-card doesn't carry it */
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: var(--spacing-lg);
+    scroll-margin-top: 100px; /* Offset for sticky headers if any */
 }
 
 .section-card h3 {
@@ -1325,14 +1332,24 @@ a.plug-crumb:hover {
     margin-top: 1.5rem;
 }
 
-/* #1895 (cleanup tail of #1608): the migrated surface emits `class="standard-card fui-card"`
-   (product-components.njk), so the frame (background/border/radius/padding) AND the hover lift both come from
-   the shared `.fui-card` look — the bespoke frame + `:hover` here were redundant last-wins dead weight and are
-   retired. What stays is `.standard-card`'s non-look residue: `min-width:0` (grid-blowout guard, a layout
-   concern `.fui-card` doesn't own) and the `h4` heading rule below. (`display:block` is supplied by the
-   `standard-card{}` tag baseline.) */
+/* NOTE (#1895 reverted 2026-06-29): same false premise as `.section-card` above — `.standard-card` is used
+   bare (no `.fui-card`) on non-migrated surfaces, so its frame + hover lift are load-bearing and stay. */
 .standard-card {
-    min-width: 0; /* Prevents grid blowout from long code blocks — layout, not look */
+    display: block;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 1.5rem;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    min-width: 0; /* Prevents grid blowout from long code blocks */
+}
+
+.standard-card:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--color-primary);
+    transform: translateY(-2px);
 }
 
 .standard-card h4 {
