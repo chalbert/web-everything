@@ -15,3 +15,4 @@ Batch · Commit · Git Hygiene cluster — open a leaf with `node scripts/memory
 - 103. Concurrent Resolve Revert — concurrent write can revert `resolve` pre-commit; verify it persisted; #1742
 - 104. Commit On Current Branch — commit on checked-out branch, never branch-first; `checkout -b` corrupts sessions; never-push
 - 122. Batch Conflict Avoidance — per-item claim (status:active) dodges races, NOT git-status; splice data edits
+- [Monolith-split vs partition for parallel capacity](monolith-split-vs-partition-capacity.md) — only entry-COLLECTIONS split; for docs/matrices/sweeps the lever is a precise pairwise partition + optimistic merge, not splitting; #1949
