@@ -1,7 +1,8 @@
 ---
 kind: epic
-status: open
+status: resolved
 dateOpened: "2026-06-28"
+dateResolved: "2026-06-29"
 tags: []
 ---
 
