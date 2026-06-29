@@ -44,7 +44,7 @@
     <strong>Compose</strong> = deferred to an existing vocabulary or Web Everything standard.
   </p>
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 680px;">
+    <we-data-table><table style="min-width: 680px;">
       <thead>
         <tr><th>Feature</th><th>Applies To</th><th>What it does</th><th>Built-in</th><th>Compose</th></tr>
       </thead>
@@ -62,7 +62,7 @@
         <tr><td><strong>Incremental delivery</strong></td><td>Bundler / CDN</td><td>Ship only the modules whose entries changed</td><td colspan="2">🔗 <a href="/backlog/103-incremental-delivery/">Incremental delivery (#103)</a></td></tr>
         <tr><td><strong>Served-artifact versioning</strong></td><td>Module-as-a-Service</td><td>Content-address the version bumps this manifest records</td><td colspan="2">🔗 <a href="/backlog/088-module-service-versioning/">MaaS versioning (#088)</a></td></tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
 {{ pc.endStandardSection() }}
 
@@ -175,7 +175,7 @@ interface ChangelogManifest {
   </p>
 
   <h4 id="consumer-pattern">How Consumers Use the Manifest</h4>
-  <table>
+  <we-data-table><table>
     <thead>
       <tr><th>Consumer</th><th>Reads</th><th>To</th></tr>
     </thead>
@@ -185,7 +185,7 @@ interface ChangelogManifest {
       <tr><td><a href="/backlog/103-incremental-delivery/">Incremental delivery (#103)</a></td><td>changed module list</td><td>ship only the modules whose entries changed</td></tr>
       <tr><td><a href="/backlog/088-module-service-versioning/">MaaS versioning (#088)</a></td><td>derived release severity</td><td>content-address the version bump</td></tr>
     </tbody>
-  </table>
+  </table></we-data-table>
 {{ pc.endStandardSection() }}
 
 {{ pc.standardSection('id="protocol-update-policy"') }}

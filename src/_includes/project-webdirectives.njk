@@ -186,7 +186,7 @@ html`
 
     <div class="content-box" style="margin-top: 1.5rem;">
         <h4 id="when-to-use-which" style="margin: 0 0 0.75rem 0; color: var(--color-primary);">When to Use Which</h4>
-        <table style="width: 100%; font-size: 0.9rem; border-collapse: collapse;">
+        <we-data-table><table style="width: 100%; font-size: 0.9rem; border-collapse: collapse;">
             <thead>
                 <tr style="border-bottom: 2px solid #e5e7eb;">
                     <th style="text-align: left; padding: 0.5rem 0;">Pattern</th>
@@ -206,7 +206,7 @@ html`
                     <td style="padding: 0.5rem 0;"><code>resource:loader</code>, <code>switch</code></td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
 {{ pc.endStandardSection() }}
 
@@ -412,7 +412,7 @@ declare const customComments: CustomCommentRegistry;
 
     <h4 id="ssr-server-output">Server Output Requirements</h4>
     <div class="comparison-table-wrapper mt-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <thead>
                 <tr>
                     <th>Directive</th>
@@ -464,7 +464,7 @@ declare const customComments: CustomCommentRegistry;
                     <td>Lazy directives are client-only. Server emits nothing (the content loads on demand).</td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
 
     <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>

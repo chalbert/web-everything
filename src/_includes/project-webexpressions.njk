@@ -54,7 +54,7 @@
         The table below lists all DOM update scenarios and indicates when expression parsing is applied.
     </p>
     <div class="comparison-table-wrapper mt-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <thead>
                 <tr>
                     <th>DOM Operation</th>
@@ -149,7 +149,7 @@
                     <td>Explicit opt-in for manual control</td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
     <p class="text-sm text-gray-500 mt-3">* Nodes cloned from templates are already upgraded at clone time.</p>
 {{ pc.endStandardSection() }}
@@ -206,7 +206,7 @@
 
     <h4 class="font-semibold text-gray-800 mt-4 mb-2">Rendering Contexts</h4>
     <div class="comparison-table-wrapper mt-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <thead>
                 <tr>
                     <th>Context</th>
@@ -241,7 +241,7 @@
                     <td>Upgrade before inserting, or insert into hidden container</td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
     <p class="text-sm text-gray-500 mt-3">* Assuming shadow DOM content is populated programmatically, not via <code>declarative shadow DOM</code> in HTML source.</p>
 
@@ -295,7 +295,7 @@
         (see the full <a href="#ssr-contract">SSR Contract</a> below):
     </p>
     <div class="comparison-table-wrapper mt-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <thead>
                 <tr>
                     <th>Hydration Method</th>
@@ -325,7 +325,7 @@
                     <td>Simplest, but causes FOUC</td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">Strategy 4: Loading States</h4>
@@ -576,7 +576,7 @@ type Query = ContextQuery | MagicQuery;</code></pre></we-code-view>
         Two query types: <strong>context</strong> (from injector chain) and <strong>magic</strong> (runtime values from consumer):
     </p>
     <div class="comparison-table-wrapper mt-4 mb-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <thead>
                 <tr>
                     <th>Syntax</th>
@@ -616,7 +616,7 @@ type Query = ContextQuery | MagicQuery;</code></pre></we-code-view>
                     <td>State value (default context)</td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">Resolved Values</h4>
@@ -633,7 +633,7 @@ type Query = ContextQuery | MagicQuery;</code></pre></we-code-view>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">Expression Types</h4>
     <div class="comparison-table-wrapper mt-4 mb-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <thead>
                 <tr>
                     <th>Type</th>
@@ -668,7 +668,7 @@ type Query = ContextQuery | MagicQuery;</code></pre></we-code-view>
                     <td><code>[{ type: 'context', context: 'state', path: 'name' }, { type: 'context', context: 'filters', path: 'uppercase' }]</code></td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">Registry Protocol</h4>
@@ -738,7 +738,7 @@ const returnValue = result.expression.evaluate(resolved);</code></pre></we-code-
 {{ pc.standardSection('id="comparison"') }}
     <h3 id="framework-comparison">Comparison with Frameworks</h3>
     <div class="comparison-table-wrapper mt-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <thead>
                 <tr>
                     <th>Aspect</th>
@@ -778,7 +778,7 @@ const returnValue = result.expression.evaluate(resolved);</code></pre></we-code-
                     <td>No</td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
 {{ pc.endStandardSection() }}
 
@@ -796,7 +796,7 @@ const returnValue = result.expression.evaluate(resolved);</code></pre></we-code-
         To enable client-side hydration, the server SHOULD also emit hydration markers using one of the following strategies:
     </p>
     <div class="comparison-table-wrapper mt-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <thead>
                 <tr>
                     <th>Feature</th>
@@ -831,7 +831,7 @@ const returnValue = result.expression.evaluate(resolved);</code></pre></we-code-
                     <td>See <a href="/projects/webdirectives/#ssr">Web Directives SSR</a> for structural conditionals.</td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
 
     <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>

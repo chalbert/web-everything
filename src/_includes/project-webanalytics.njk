@@ -21,7 +21,7 @@
   </p>
 
   <h4 id="canonical-events">Canonical Events</h4>
-  <table>
+  <we-data-table><table>
     <thead>
       <tr><th>Event</th><th>Purpose</th><th>Required Fields</th></tr>
     </thead>
@@ -42,7 +42,7 @@
         <td>All optional; vendor fills missing fields from <code>document</code>.</td>
       </tr>
     </tbody>
-  </table>
+  </table></we-data-table>
 
   <h4 id="contract-shape">Contract Shape</h4>
   {% highlight "typescript" %}
@@ -72,7 +72,7 @@ interface AnalyticsBackend {
     <a href="../webcomponents/#protocol-deck-document-model">Deck Document Model</a>, so impressions,
     attention, and drop-off are measurable without a bespoke schema.
   </p>
-  <table>
+  <we-data-table><table>
     <thead>
       <tr><th>Event</th><th>Purpose</th><th>Key Properties</th></tr>
     </thead>
@@ -82,7 +82,7 @@ interface AnalyticsBackend {
       <tr><td><code>Deck Completed</code> / <code>Deck Abandoned</code></td><td>Reached the end vs left early (drop-off + the last slide seen).</td><td><code>deckId</code> · <code>lastSlideId</code> · <code>completedPct</code></td></tr>
       <tr><td><code>Slide Interaction</code></td><td>A within-slide action — fragment revealed, link/control activated.</td><td><code>slideId</code> · <code>interaction</code> (verb)</td></tr>
     </tbody>
-  </table>
+  </table></we-data-table>
   <p>
     The names follow the Segment verb-noun convention so the same call site reaches any conformant
     backend; the deck layer adds the vocabulary, not a new transport. Homed in webanalytics per the
@@ -96,14 +96,14 @@ interface AnalyticsBackend {
     exposure <em>is</em> a <code>track()</code> call, so experiment-exposure composes with telemetry by
     emitting <em>through</em> this emission seam rather than minting a second transport.
   </p>
-  <table>
+  <we-data-table><table>
     <thead>
       <tr><th>Event</th><th>Purpose</th><th>Key Properties</th></tr>
     </thead>
     <tbody>
       <tr><td><code>Experiment Exposed</code></td><td>The subject was exposed to a variant of an experiment / feature flag (the exposure event ad-hoc analyses key on).</td><td><code>experimentId</code> · <code>variant</code> · <code>subjectId</code> (the assignment unit)</td></tr>
     </tbody>
-  </table>
+  </table></we-data-table>
   <p>
     Vocabulary addition only — the running app calls <code>resolve().track('Experiment Exposed', …)</code>
     against the same conformant sink; #1414's experiment intent records exposure this way (#1476).

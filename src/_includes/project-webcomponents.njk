@@ -125,7 +125,7 @@ class UserCard extends HTMLElement {
         The transient element exists only long enough to determine <em>what</em> to render — then it disappears, leaving no wrapper node in the DOM.
     </p>
 
-    <table>
+    <we-data-table><table>
         <tr><th>Problem</th><th>Framework Solution</th><th>Web Everything Solution</th></tr>
         <tr>
             <td>Heading level depends on nesting</td>
@@ -142,7 +142,7 @@ class UserCard extends HTMLElement {
             <td>Svelte: <code>&lt;svelte:element this={tag}&gt;</code></td>
             <td>Any <code>TransientElement</code> subclass: resolves tag, transfers attributes &amp; children, self-replaces</td>
         </tr>
-    </table>
+    </table></we-data-table>
 
     <h4 id="self-replacement-lifecycle">Self-Replacement Lifecycle</h4>
     <ol>
@@ -174,7 +174,7 @@ class TransientElement extends HTMLElement {
     {% endhighlight %}
 
     <h4 id="use-cases">Concrete Use Cases</h4>
-    <table>
+    <we-data-table><table>
         <tr><th>Element</th><th>Replaces With</th><th>Logic</th></tr>
         <tr>
             <td><code>&lt;auto-heading&gt;</code></td>
@@ -201,7 +201,7 @@ class TransientElement extends HTMLElement {
             <td>Comment markers + repeated content</td>
             <td>Ergonomic directive syntax</td>
         </tr>
-    </table>
+    </table></we-data-table>
 
     <p style="margin-top: 1rem;">
         See the full specification on the <a href="/blocks/transient-component/">Transient Component</a> block page, including AutoHeading code examples, SSR strategies, and pitfalls.
@@ -231,7 +231,7 @@ class TransientElement extends HTMLElement {
 
     <h4 id="ssr-server-output">Server Output Requirements</h4>
     <div class="comparison-table-wrapper mt-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <thead>
                 <tr>
                     <th>Component Type</th>
@@ -280,7 +280,7 @@ class TransientElement extends HTMLElement {
                     <td>Server MUST resolve scoped registry lookups and use the correct element names for each shadow root's scope.</td>
                 </tr>
             </tbody>
-        </table>
+        </table></we-data-table>
     </div>
 
     <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
@@ -383,13 +383,13 @@ interface RenderStrategy {
     </p>
 
     <h4 id="render-strategy-catalog">Registered strategies</h4>
-    <table>
+    <we-data-table><table>
         <tr><th>Strategy</th><th>How it updates</th><th>Iteration / conditionals</th><th>Reactivity source</th></tr>
         <tr><td><strong>declarative-static</strong> <span class="text-xs text-gray-500">(default)</span></td><td>parse-once DOM + <code>bind-*</code> + <code>{% raw %}{{ }}{% endraw %}</code> + directives</td><td><code>&lt;template is="for-each"&gt;</code>, <code>&lt;template is="if"&gt;</code></td><td>binds by path; no records needed</td></tr>
         <tr><td><strong>vdom</strong></td><td><code>render()</code> returns a tree; diff + patch</td><td>plain JS — <code>items.map(…)</code>, <code>cond &amp;&amp; &lt;X/&gt;</code></td><td>self-contained diff</td></tr>
         <tr><td><strong>fine-grained</strong></td><td>expressions become reactive computations; surgical DOM, no diff</td><td>plain JS, tracked at read-time</td><td>consumes a <code>native-signals</code> Change Strategy</td></tr>
         <tr><td><strong>imperative</strong></td><td>direct, hand-written manipulation</td><td><code>for</code> loop + <code>createElement</code></td><td>author-managed</td></tr>
-    </table>
+    </table></we-data-table>
     <p class="text-gray-600 text-sm">
         The registry is open, not a fixed enum — a future platform target (DOM Parts / Template Instantiation)
         registers as another provider without touching the contract. Directives belong to this axis, not the syntax
@@ -406,13 +406,13 @@ interface RenderStrategy {
         and every crossing of the lossy <code>{% raw %}{ }{% endraw %}</code> boundary raises a diagnostic
         (<code>result.lossy</code>) rather than corrupting silently.
     </p>
-    <table>
+    <we-data-table><table>
         <tr><th>JS control-flow (vdom / fine-grained)</th><th>⇄</th><th>declarative-static primitive</th><th>Reversible?</th></tr>
         <tr><td><code>items.map(i =&gt; …)</code></td><td>⇄</td><td><code>&lt;template is="for-each" items key&gt;</code></td><td>✅ structural</td></tr>
         <tr><td><code>cond &amp;&amp; &lt;X/&gt;</code> / ternary</td><td>⇄</td><td><code>&lt;template is="if" condition&gt;</code></td><td>✅ structural</td></tr>
         <tr><td><code>{expr}</code> (eager JS value)</td><td>⇄</td><td><code>{% raw %}{{ expr }}{% endraw %}</code> / <code>bind-text</code></td><td>⛔ lossy boundary</td></tr>
         <tr><td><code>onclick={namedFn}</code></td><td>⇄</td><td><code>on:click="namedFn($event)"</code></td><td>✅ named handlers</td></tr>
-    </table>
+    </table></we-data-table>
     <p class="text-gray-600 text-sm">
         <strong>The one hard boundary:</strong> eager JS <code>{expr}</code> has no faithful inverse to a reactive
         runtime path <code>{% raw %}{{ expr }}{% endraw %}</code>. Lowering can emit a binding; lifting cannot recover author intent. The
@@ -496,13 +496,13 @@ function defineElement(tag: string, ctor: CustomElementConstructor): void {
     </p>
 
     <h4 id="auto-define-strategy-catalog">Registered strategies (open, not an enum)</h4>
-    <table>
+    <we-data-table><table>
         <tr><th>Strategy</th><th>Trigger</th><th>Decider</th><th>Resolves unknown tags?</th></tr>
         <tr><td><strong>explicit</strong> <span class="text-xs text-gray-500">(native baseline)</span></td><td>import</td><td>author / generator</td><td>no — module already imported</td></tr>
         <tr><td><strong>lazy-dom</strong></td><td>first-use / DOM-presence</td><td>tool-inferred</td><td>yes — MutationObserver dynamic-imports on tag appearance</td></tr>
         <tr><td><strong>build-parsed</strong></td><td>build-time</td><td>tool-inferred</td><td>yes — parses HTML usage, injects imports / emits a manifest</td></tr>
         <tr><td><strong>manifest / convention / server</strong></td><td>varies</td><td>config / convention / server</td><td>yes — tag→module via manifest, naming convention, or SSR set</td></tr>
-    </table>
+    </table></we-data-table>
     <p class="text-gray-600 text-sm">
         The registry is open — a team plugs a bespoke strategy (e.g. server-driven) that coexists
         conflict-free, without forking. The standard defines the <em>contract</em> and resolution rules;
@@ -523,7 +523,7 @@ function defineElement(tag: string, ctor: CustomElementConstructor): void {
         deck serializes to and imports from.
     </p>
     <div class="comparison-table-wrapper mt-4">
-        <table class="comparison-table">
+        <we-data-table><table class="comparison-table">
             <tr><th>Field</th><th>Level</th><th>Carries</th></tr>
             <tr><td><code>id</code></td><td>deck / section / slide</td><td>stable identity for deep-linking and addressing (a slide's id anchors <code>navigation</code> + the 2D addressing extension).</td></tr>
             <tr><td><code>title</code></td><td>deck / section / slide</td><td>human label; feeds the outline / overview-grid and analytics.</td></tr>
@@ -531,7 +531,7 @@ function defineElement(tag: string, ctor: CustomElementConstructor): void {
             <tr><td><code>fragments</code></td><td>slide</td><td>ordered list of incremental-reveal steps within the slide.</td></tr>
             <tr><td><code>layout</code></td><td>slide</td><td>reference to a slide layout-template (title / two-column / code / image / quote …).</td></tr>
             <tr><td><code>background</code></td><td>slide / section</td><td>per-slide / per-section background, scoped via the design-tokens override mechanism.</td></tr>
-        </table>
+        </table></we-data-table>
     </div>
     <p class="text-gray-600 text-sm mt-3">
         Slot and section content interpolates via <a href="../webexpressions/">Web Expressions</a>
@@ -546,7 +546,7 @@ function defineElement(tag: string, ctor: CustomElementConstructor): void {
 
 {{ pc.standardSection('id="standards"') }}
     <h3 id="web-standards">Web Standards Alignment</h3>
-    <table>
+    <we-data-table><table>
         <tr><th>Standard</th><th>Status</th><th>How We Use It</th></tr>
         <tr>
             <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Components/Using_custom_elements">Custom Elements v1</a></td>
@@ -578,5 +578,5 @@ function defineElement(tag: string, ctor: CustomElementConstructor): void {
             <td>Baseline</td>
             <td>Safe lifecycle deferral for transient element replacement.</td>
         </tr>
-    </table>
+    </table></we-data-table>
 {{ pc.endStandardSection() }}

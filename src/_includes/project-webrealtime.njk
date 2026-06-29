@@ -41,7 +41,7 @@
     <strong>Compose</strong> = a concern owned by a separate home.
   </p>
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 720px;">
+    <we-data-table><table style="min-width: 720px;">
       <thead>
         <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
       </thead>
@@ -59,7 +59,7 @@
         <tr><td><strong>Closed-app push</strong></td><td>Web Push API</td><td>The non-fungible sibling — survives tab close</td><td>🔗 Compose — <a href="/projects/webnotifications/">Web Notifications</a></td></tr>
         <tr><td><strong>Presence / live render</strong></td><td>Live regions</td><td>How live data is shown/announced — a render intent, not the transport</td><td>🔗 Compose — Web Intents</td></tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
 {{ pc.endStandardSection() }}
 
@@ -122,7 +122,7 @@ conn.onmessage((msg) => render(msg));
     consuming app declares a preference; the provider resolves to the best the platform actually serves.
   </p>
   <div style="overflow-x: auto; max-width: 100%;">
-    <table style="min-width: 640px;">
+    <we-data-table><table style="min-width: 640px;">
       <thead>
         <tr><th>Channel</th><th>Direction</th><th>Platform support</th><th>Role</th></tr>
       </thead>
@@ -132,7 +132,7 @@ conn.onmessage((msg) => render(msg));
         <tr><td>WebTransport</td><td>Bidirectional (HTTP/3)</td><td>△ Chrome/Edge — no Safari</td><td>Capability-gated upgrade, probed</td></tr>
         <tr><td>Long-poll / poll</td><td>Server&rarr;client (emulated)</td><td>✅ everywhere</td><td>Degradation floor — always works</td></tr>
       </tbody>
-    </table>
+    </table></we-data-table>
   </div>
 {{ pc.endStandardSection() }}
 
