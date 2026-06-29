@@ -41,7 +41,8 @@
     (AccName&nbsp;1.2)</a> defines, step by step, how every browser derives an element's accessible name
     from a fixed precedence:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead><tr><th>Priority</th><th>Source</th><th>Notes</th></tr></thead>
     <tbody>
         <tr><td>1 (highest)</td><td><code>aria-labelledby</code></td><td>Concatenates referenced elements' text; wins when present and valid.</td></tr>
@@ -50,6 +51,7 @@
         <tr><td>4 (lowest)</td><td><code>title</code></td><td>Fallback only.</td></tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     A higher-priority non-empty source wins; lower ones are ignored. The accessible name is therefore
     <strong>read-only computed state</strong> — you do not "implement" it, you provide the <em>inputs</em>
@@ -74,13 +76,15 @@
 
 <h3>Finding 3 — the recurring policy is small, non-trivial, and identical everywhere</h3>
 <p>Two declarative axes recur unchanged across glyph/icon/media/image:</p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead><tr><th>Axis</th><th>Values</th><th>Effect</th></tr></thead>
     <tbody>
         <tr><td><code>naming</code></td><td>meaningful · decorative</td><td>Meaningful → <code>role="img"</code> + a label; decorative → author opts into <code>aria-hidden="true"</code>.</td></tr>
         <tr><td><code>labelSource</code></td><td>explicit · referenced · derived-fallback</td><td><code>aria-label</code> · <code>aria-labelledby</code> · a fallback that is <strong>never empty</strong> (CLDR short name for emoji per #587; <code>alt</code> for images; <strong>never</strong> a raw codepoint or filename). Custom images/stickers have no derived fallback, so the label is <em>required</em>, not defaulted.</td></tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     Most-permissive default (Q6): <strong>meaningful with a derived fallback</strong> — the author opts
     <em>into</em> decorative, never into silence. This matches the #587 ruling exactly, which is what a

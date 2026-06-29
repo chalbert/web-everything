@@ -27,7 +27,8 @@
 </p>
 
 <h2>WE status legend</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
   <tbody>
     {% for s in workbenchFeatures.weStatusScale %}
@@ -35,11 +36,13 @@
     {% endfor %}
   </tbody>
 </table>
+</we-data-table>
 
 <h2>The feature surface</h2>
 {% for g in workbenchFeatures.featureGroups %}
 <h3>{{ g.label }}</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Feature</th><th>Ubiquity</th><th>WE status</th><th>Maps to</th><th>What a WE-native version needs</th></tr></thead>
   <tbody>
     {% for f in workbenchFeatures.features %}{% if f.group == g.id %}
@@ -53,11 +56,13 @@
     {% endif %}{% endfor %}
   </tbody>
 </table>
+</we-data-table>
 {% endfor %}
 
 <h2>Tool coverage per feature</h2>
 <p>The cross-tab — which landscape tools ship each capability (tool ids from the workbench-tools registry).</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Feature</th><th>Tools that ship it</th></tr></thead>
   <tbody>
     {% for f in workbenchFeatures.features %}
@@ -65,6 +70,7 @@
     {% endfor %}
   </tbody>
 </table>
+</we-data-table>
 
 <h2>Re-running this sweep</h2>
 <p>

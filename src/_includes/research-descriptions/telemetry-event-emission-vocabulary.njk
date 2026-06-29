@@ -58,7 +58,8 @@
 </p>
 
 <h2>Finding 2 — the convergent prior-art shape is a thin declarative binding over a sink</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>System</th><th>Declarative emission shape</th><th>Controlled vocabulary</th></tr></thead>
   <tbody>
     <tr><td>OpenTelemetry (semconv)</td><td>an <em>Event</em> = a name that uniquely identifies its structure + typed attributes (distinct from logs/metrics)</td><td>Semantic Conventions — named events + attribute keys</td></tr>
@@ -68,6 +69,7 @@
     <tr><td>Segment / Amplitude</td><td><code>track(event, props)</code></td><td>Segment Spec (what WE adopted) / governed taxonomy (verb_noun)</td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   The convergent shape: a <strong>declarative annotation</strong> — event name + typed payload from a
   controlled vocabulary — placed on an element, bound once at runtime, <strong>routed to a swappable

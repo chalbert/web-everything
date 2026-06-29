@@ -24,7 +24,8 @@
   models</strong>, each with its own state shape and mechanics. They are <strong>not interchangeable</strong>
   and do not unify into one contract:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Model</th><th>What it is</th><th>State shape</th><th>Mechanics</th><th>Lead libraries</th></tr></thead>
   <tbody>
     <tr>
@@ -51,6 +52,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   A split-tree cannot leave a gap or hold free-floating tiles; a flat grid cannot express a tab-stack
   nested two splits deep that resizes its sibling. <strong>Inside each model, drag + resize + collision +
@@ -94,7 +96,8 @@
 </p>
 
 <h2>Finding 4 — the gesture layer is native &amp; Baseline; the interaction semantics are not</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Primitive</th><th>Role for spatial manipulation</th><th>Baseline status</th></tr></thead>
   <tbody>
     <tr><td>Pointer Events + <code>setPointerCapture</code></td><td>the drag substrate for <em>all three</em> models</td><td><strong>Baseline widely available</strong> — the correct foundation (never HTML DnD)</td></tr>
@@ -110,6 +113,7 @@
     <tr><td>Native splitter / dashboard element</td><td>—</td><td><strong>Does not exist; no Open UI / CSSWG proposal in flight</strong> (confirmed gap)</td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   The <em>gesture / observation / layout</em> layers are native and mostly Baseline. The
   <em>interaction semantics</em> — splitter resize, snap-to-cell dragging, dashboard arrangement, and their

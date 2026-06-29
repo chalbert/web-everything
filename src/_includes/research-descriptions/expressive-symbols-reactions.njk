@@ -93,7 +93,8 @@
 </ul>
 
 <h2>Layer classification (per-fork)</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Paradigm</th><th>Layer</th><th>Why</th></tr></thead>
   <tbody>
     <tr><td>Glyph rendering</td><td>Intent (new, sibling to <code>icon</code>)</td><td>Declarative "what" — render a meaningful symbol; axis differs from icon's size/weight/style.</td></tr>
@@ -102,6 +103,7 @@
     <tr><td>Reaction</td><td>Block + Intent</td><td>Ships runnable toggle/aggregate behavior (block) with declarative set/roster dimensions (intent); consumes glyph rendering.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   <strong>None is a protocol.</strong> There is no swappable-vendor / engine-interop story (the
   <code>ReactionSummary</code> shape is a data contract, not a multi-vendor conformance surface), so
@@ -109,7 +111,8 @@
 </p>
 
 <h2>Recommended decomposition at a glance</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Standard</th><th>Kind</th><th>Depends on</th><th>Default</th></tr></thead>
   <tbody>
     <tr><td>Expressive-glyph rendering</td><td>Intent</td><td>—</td><td>meaningful (<code>role="img"</code>) · native-font</td></tr>
@@ -118,6 +121,7 @@
     <tr><td>Sticker</td><td>Mode of glyph</td><td>glyph</td><td>custom-image-glyph w/ alt text</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h2>Citations</h2>
 <ul>

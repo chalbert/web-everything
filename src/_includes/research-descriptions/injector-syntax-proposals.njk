@@ -6,7 +6,8 @@
 </p>
 
 <h2>Syntax Layers Overview</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Layer</th><th>Where Found</th><th>Status in Plateau</th><th>Carry Forward?</th></tr>
   <tr>
     <td>1. Runtime API</td>
@@ -33,6 +34,7 @@
     <td>Document as aspirational — requires tooling</td>
   </tr>
 </table>
+</we-data-table>
 
 <h2>Layer 1: Runtime API</h2>
 <p>These are the programmatic primitives that make injection usable. They exist in plateau's implementation and are partially ported to Web Everything.</p>
@@ -92,7 +94,8 @@ const { redux, nav, data } = await consumable;
 
 <h3>1.4 Node Context Convenience Methods</h3>
 <p>Plateau patches these onto <code>Node.prototype</code> for ergonomic context access:</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Method</th><th>Signature</th><th>Behavior</th></tr>
   <tr>
     <td><code>getContext</code></td>
@@ -135,6 +138,7 @@ const { redux, nav, data } = await consumable;
     <td>Resolve custom elements from <code>customElements</code> registries in injector chain</td>
   </tr>
 </table>
+</we-data-table>
 <p><strong>Status in Web Everything:</strong> None of these are patched. Only injector traversal methods exist (<code>getClosestInjector</code>, <code>injectors</code>, <code>getOwnInjector</code>, <code>hasOwnInjector</code>).</p>
 
 <h3>1.5 Also Explored on Node (Commented Out in Plateau)</h3>
@@ -238,7 +242,8 @@ class MyElement extends CustomElement {
 <h2>Key Concept: Registries vs Domains</h2>
 <p>The plateau DSL made a fundamental architectural distinction between two kinds of namespaces. Understanding this distinction is essential to the provide/consume syntax.</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Concept</th><th>Prefix</th><th>Purpose</th><th>Examples</th></tr>
   <tr>
     <td><strong>Registry</strong></td>
@@ -253,13 +258,15 @@ class MyElement extends CustomElement {
     <td><code>@date/core</code>, <code>@ui/icons</code>, <code>@auth/session</code></td>
   </tr>
 </table>
+</we-data-table>
 
 <p>Registries are about <strong>what kind of provider</strong> (elements, contexts, stores). Domains are about <strong>what capability</strong> (date math, icons, auth). An injector can provide to both.</p>
 
 <p>The domain convention prevents naming collisions — <code>@auth/session</code> and <code>@analytics/session</code> can coexist — and decouples the interface from the implementation. <strong>The domain IS the contract.</strong></p>
 
 <p>This distinction affects the provide/consume prepositions:</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Preposition</th><th>Target</th><th>Semantics</th><th>Example</th></tr>
   <tr>
     <td><code>as</code></td>
@@ -292,6 +299,7 @@ class MyElement extends CustomElement {
     <td><code>consume nav from 'customContexts:nav'</code></td>
   </tr>
 </table>
+</we-data-table>
 
 <h2>Layer 4: Language-Level DSL</h2>
 <p>These are the most ambitious proposals — new JavaScript syntax constructs that would require esbuild plugins or TypeScript transformers to compile.</p>
@@ -321,7 +329,8 @@ injector TestPage extends PageName {
 </code></pre></we-code-view>
 
 <h3>4.2 Provide Statement</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Syntax</th><th>Semantics</th></tr>
   <tr>
     <td><code>provide { Button1 } as 'customElements'</code></td>
@@ -352,6 +361,7 @@ injector TestPage extends PageName {
     <td>Provide all exports from URL</td>
   </tr>
 </table>
+</we-data-table>
 <p>Key design decisions: <code>as</code> = replace, <code>in</code> = extend/merge, <code>to</code> = target domain. See <a href="#key-concept-registries-vs-domains">Registries vs Domains</a> for the full preposition table.</p>
 
 <h4>Fallback Providers</h4>
@@ -402,7 +412,8 @@ consume { redux, nav, data } from 'customContexts';
   <li><strong>URL resolution is a separate concern</strong> — the browser's native <code>&lt;script type="importmap"&gt;</code> handles bare specifier mapping at the loader level, which is orthogonal to runtime injection.</li>
   <li><strong>Two keywords for overlapping semantics increases cognitive load</strong> without adding expressiveness.</li>
 </ul>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>#</th><th>Original Map Example</th><th>Provide Equivalent</th></tr>
   <tr>
     <td>1</td>
@@ -425,6 +436,7 @@ consume { redux, nav, data } from 'customContexts';
     <td><code>provide module { ... } as 'react'</code></td>
   </tr>
 </table>
+</we-data-table>
 <p>See <a href="/reports/2026-02-24-map-statement-analysis/">Map Statement Analysis</a> for the full rationale.</p>
 
 <h3>4.5 import.injector</h3>
@@ -440,7 +452,8 @@ provide class Button1 extends CustomElement {
 
 <h2>Layer 5: TypeScript Type Proposals (Tangential)</h2>
 <p>These are TypeScript language proposals that support injection patterns but are independent concerns:</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Proposal</th><th>Syntax</th><th>Injection Relevance</th></tr>
   <tr>
     <td>with-statement</td>
@@ -463,6 +476,7 @@ provide class Button1 extends CustomElement {
     <td>Express "anything except" in provider type maps</td>
   </tr>
 </table>
+</we-data-table>
 <p>These are TypeScript team-level proposals (some referencing existing TS issues). Not actionable for Web Everything directly but document the type-safety aspirations of the injection system.</p>
 
 <h2>Case Study: The "Hollow" Calendar Widget</h2>
@@ -513,7 +527,8 @@ export injector AppEnvironment {
 <h2>Evaluation: What Should Carry Forward</h2>
 
 <h3>Definite — Runtime Primitives</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Feature</th><th>Priority</th><th>Rationale</th></tr>
   <tr>
     <td>Consumable class</td>
@@ -536,9 +551,11 @@ export injector AppEnvironment {
     <td>Needed for injector-scoped custom element resolution</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Evaluate — Design Concepts</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Feature</th><th>Priority</th><th>Notes</th></tr>
   <tr>
     <td>Domain concept (<code>@domain</code>)</td>
@@ -556,9 +573,11 @@ export injector AppEnvironment {
     <td>The comma-separated <code>from</code> clause pattern. Useful for libraries that need to be self-sufficient while remaining extensible.</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Evaluate — May Not Be Needed</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Feature</th><th>Concern</th></tr>
   <tr>
     <td>Batch consume (array/object forms)</td>
@@ -577,9 +596,11 @@ export injector AppEnvironment {
     <td>Interesting but overlaps with text node interpolation and attribute parsers already in Web Everything</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Aspirational — Requires Tooling</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Feature</th><th>Dependency</th></tr>
   <tr>
     <td>injector blocks with <code>export</code></td>
@@ -598,6 +619,7 @@ export injector AppEnvironment {
     <td>TypeScript language team adoption</td>
   </tr>
 </table>
+</we-data-table>
 <p>The language-level DSL is the most compelling long-term vision but cannot be adopted without build tooling. The key design ideas to preserve from this layer are: the <code>as</code>/<code>in</code>/<code>to</code> preposition semantics, the <code>of</code>/<code>from</code> consumption distinction, the <code>import.injector</code> concept, and the domain-based architecture demonstrated by the Hollow Calendar case study. The <code>map</code> statement was removed after analysis showed it overlaps entirely with <code>provide</code>.</p>
 
 <h2>Cross-References</h2>

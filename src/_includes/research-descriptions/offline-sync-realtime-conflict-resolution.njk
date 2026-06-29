@@ -21,7 +21,8 @@
   change-tracking protocol's sync dimension &mdash; each tracked under its own owner&rdquo;</em>
   (<code>src/_data/protocols/storage.json:4</code>, ratified from #011).
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Sub-concern</th><th>Already-ruled home</th><th>Evidence (real tree)</th></tr></thead>
   <tbody>
     <tr><td>offline queue + replay</td><td><strong>webreliability</strong> outbox + the <code>mutation</code> intent (apply/reconcile/rollback)</td><td><code>storage.json:4</code>; <code>mutation.json:6</code> (#1395); running queue = <code>resource-action</code>'s <code>withOptimisticMutation</code></td></tr>
@@ -30,6 +31,7 @@
     <tr><td>presence / collaboration</td><td>render = a UX intent; transport = webrealtime; a co-edit presence primitive already ships</td><td><code>draft-persistence.json:54,88</code> (<code>CoEditCoordinator</code>, &ldquo;does not merge state&rdquo;); <code>reaction.json:5</code> (&ldquo;multi-user sync is a <strong>composed webrealtime concern, never baked in</strong>&rdquo;)</td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   So the question is not &ldquo;where does a homeless sync standard live.&rdquo; It is: should WE mint a
   <em>new</em> orchestration owner that <em>composes</em> these four ratified homes, or is offline-first sync

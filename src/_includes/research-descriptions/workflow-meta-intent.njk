@@ -77,7 +77,8 @@
   already cited by <a href="/research/domain-entity-lifecycle/">#616</a>. Its operator kernel maps
   one-to-one onto a workflow:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Operator</th><th>XState</th><th>SCXML</th><th>Role in a workflow</th></tr>
   </thead>
@@ -91,6 +92,7 @@
     <tr><td>Current position</td><td>active state value</td><td>active configuration</td><td>the cursor</td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   A serialized statechart is a <strong>portable interchange</strong>: an engine parses the graph and
   lets the calling code decide what guards mean and what actions do — verbatim the
@@ -107,7 +109,8 @@
   should not absorb a process-engine scope.&rdquo;</em> That excluded scope is precisely a workflow.
   The two concerns share the SCXML transition-map <em>form</em> but differ in subject and semantics:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th></th><th>Lifecycle (#616)</th><th>Workflow (#634)</th></tr>
   </thead>
@@ -118,6 +121,7 @@
     <tr><td>Persistence</td><td>the entity's own concern (durable)</td><td>session/draft (often discarded on abandon)</td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   Per the standing <strong>bias to separation</strong> (burden of proof is on combining) and #616's
   own exclusion, these are <strong>siblings over a shared transition-map form</strong>, not one protocol.

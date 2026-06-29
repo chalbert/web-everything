@@ -53,7 +53,8 @@
 </p>
 
 <h3>Finding 3 — the dominant home is a headless instance, not docs-only and not a rendered block</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead><tr><th>Library</th><th>Coordinator home</th><th>Pager</th></tr></thead>
     <tbody>
         <tr><td><a href="https://tanstack.com/table/latest/docs/guide/row-models">TanStack Table v8</a></td><td>Headless "table instance" — owns the row-model pipeline, no markup</td><td>Terminal row-model stage</td></tr>
@@ -61,6 +62,7 @@
         <tr><td><a href="https://mui.com/x/react-data-grid/pagination/">MUI X DataGrid</a></td><td>Fused into a monolithic component</td><td>Internal (<code>paginationModel</code>)</td></tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     TanStack and AG Grid ship a state/instance object that owns the whole pipeline and delegates
     rendering. <strong>Nobody recommends option B</strong> ("here is the order, wire it yourself"). MUI

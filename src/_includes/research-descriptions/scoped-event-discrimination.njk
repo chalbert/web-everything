@@ -21,7 +21,8 @@
 
 <p>The answer is <strong>scope isolation</strong>, not class isolation. There are three patterns:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>How It Works</th><th>When to Use</th></tr>
   </thead>
@@ -43,12 +44,14 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>What Scoped Events Actually Prevent</h3>
 
 <p>The primary value of scoped events for resource loaders is <strong>cross-concern collision</strong>, not same-concern disambiguation:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Scenario</th><th>Without Scoped Events</th><th>With Scoped Events</th></tr>
   </thead>
@@ -70,6 +73,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p><strong>Key insight:</strong> Scoped events solve the <em>type collision</em> problem (different things with the same name). For <em>instance disambiguation</em> (same type of thing happening in two places), use DOM tree proximity or event detail filtering.</p>
 
@@ -78,7 +82,8 @@
 
 <p>The Resource Loader dispatches four typed events at state transitions:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Event Name</th><th>Class</th><th>Provider Key</th><th>Detail</th><th>When</th></tr>
   </thead>
@@ -113,6 +118,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>The <code>operation</code> field in the event detail is what enables instance-level filtering: it carries the resource key (e.g., <code>['users', 123]</code>) that uniquely identifies which data request completed.</p>
 
@@ -121,7 +127,8 @@
 
 <p>Tracing and event discrimination are <strong>orthogonal</strong> but complementary. They answer different questions:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th></th><th>Scoped Events</th><th>Tracing</th></tr>
   </thead>
@@ -148,12 +155,14 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Three Dimensions of "Knowing What Happened"</h3>
 
 <p>The plan raises an important observation about three kinds of provenance knowledge:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Dimension</th><th>Question</th><th>Mechanism in WE</th></tr>
   </thead>
@@ -175,6 +184,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>How Tracing and Events Connect</h3>
 
@@ -202,7 +212,8 @@ listenForScoped(app, 'resource-load-end', 'customEvents:resource-load-end', (eve
 
 <h3>Scenario 1: Route Loader vs Inline Loader</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Loader</th><th>Scope</th><th>Discrimination Strategy</th></tr>
   </thead>
@@ -219,12 +230,14 @@ listenForScoped(app, 'resource-load-end', 'customEvents:resource-load-end', (eve
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>DOM proximity solves this naturally &mdash; listen close to the source.</p>
 
 <h3>Scenario 2: Resource Loader vs Resource Action</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th></th><th>Resource Loader (reads)</th><th>Resource Action (writes)</th></tr>
   </thead>
@@ -245,6 +258,7 @@ listenForScoped(app, 'resource-load-end', 'customEvents:resource-load-end', (eve
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>Reads and writes are already distinguished by their event class hierarchy. No additional discrimination needed.</p>
 
@@ -260,7 +274,8 @@ listenForScoped(app, 'resource-load-end', 'customEvents:resource-load-end', (eve
 
 <h2>Summary</h2>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Problem</th><th>Mechanism</th><th>Layer</th></tr>
   </thead>
@@ -297,4 +312,5 @@ listenForScoped(app, 'resource-load-end', 'customEvents:resource-load-end', (eve
     </tr>
   </tbody>
 </table>
+</we-data-table>
 {% endraw %}

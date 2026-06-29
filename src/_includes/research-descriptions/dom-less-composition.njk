@@ -14,7 +14,8 @@
 
 <h2>What Frameworks Do</h2>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr>
       <th>Framework</th>
@@ -60,6 +61,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p><strong>Key insight:</strong> Every framework solves this either through <em>compile-time erasure</em> (removing grouping elements at build time) or <em>comment-based markers</em> (invisible DOM nodes that delimit regions). Web Everything already uses both patterns.</p>
 
@@ -68,7 +70,8 @@
 
 <h3>Category A: Compile-Time Erasure</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Relevance</th></tr>
   </thead>
@@ -99,10 +102,12 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Category B: Comment-Based Virtual Elements</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
   </thead>
@@ -127,10 +132,12 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Category C: Fragment-Based (One-Shot Insertion)</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
   </thead>
@@ -149,10 +156,12 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Category D: Self-Replacing / Transient Elements</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
   </thead>
@@ -171,10 +180,12 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Category E: CSS Layout Transparency</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Trade-offs</th></tr>
   </thead>
@@ -193,10 +204,12 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Category F: Data Association Without DOM</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
   </thead>
@@ -221,10 +234,12 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Category G: Behavioral Composition</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
   </thead>
@@ -249,10 +264,12 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Category H: Teleportation / Portals</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
   </thead>
@@ -265,10 +282,12 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Category I: The <code>is</code> Attribute (Customized Built-in Elements)</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
   </thead>
@@ -281,6 +300,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h2>The Primary Gap: DOM-Less Context Providers</h2>

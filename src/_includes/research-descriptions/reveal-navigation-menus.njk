@@ -39,7 +39,8 @@
   pattern</a> requires composite-widget focus management — roving tabindex, first-character type-ahead — that is
   for <em>application command menus</em> (think Google Docs), and is "unnecessary for typical site navigation."
 </p>
-<table class="text-sm w-full my-3">
+<we-data-table>
+<table class="text-sm w-full my-3 data-table">
   <thead><tr><th class="text-left">Concern</th><th class="text-left">Disclosure (site nav) — chosen</th><th class="text-left">Menu/Menubar (app commands)</th></tr></thead>
   <tbody>
     <tr><td>ARIA</td><td>native list/anchor + <code>aria-expanded</code> + <code>aria-controls</code></td><td><code>role=menu/menubar/menuitem</code>, <code>aria-haspopup</code></td></tr>
@@ -48,6 +49,7 @@
     <tr><td>Use it for</td><td>site navigation that reveals link lists</td><td>editor/app command surfaces</td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   This matches WE's existing <a href="/blocks/nav-list/">nav-list</a> ruling (<em>Disclosure Navigation</em>
   chosen over <em>ARIA menu role</em>) and the community consensus (Adrian Roselli, Terrill Thompson — "menus

@@ -32,7 +32,8 @@
 
 <h3>Taxonomy — the classification axes</h3>
 <p>Every strategy below is classified on eight axes; the first four are the ones a canonical change record is derived from.</p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead><tr><th>Axis</th><th>Values</th></tr></thead>
     <tbody>
         <tr><td><strong>Granularity</strong></td><td>whole-object · property/key · nested-path · collection-delta · field-within-value</td></tr>
@@ -45,13 +46,15 @@
         <tr><td><strong>Cost</strong></td><td>interception overhead · snapshot memory · diff CPU · subscription bookkeeping</td></tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Strategy Catalog</h3>
 <p>
     Confidence: ✅ adversarially verified from a primary source · 📄 sourced but unaudited · 🔶 catalogued
     from general knowledge, pending verification.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Strategy</th><th>Granularity</th><th>Eagerness</th><th>Representation</th><th>Reversibility</th><th>Transport</th><th>Soundness</th><th>Conf.</th></tr>
     </thead>
@@ -72,6 +75,7 @@
         <tr><td>Polling / equality checks</td><td>value</td><td>polled</td><td>flag / old/new</td><td>none</td><td>in-memory</td><td>sampled</td><td>🔶</td></tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h4>Verified highlights</h4>
 <ul>

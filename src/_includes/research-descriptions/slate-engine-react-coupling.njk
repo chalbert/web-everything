@@ -16,7 +16,8 @@
 <h2>What the survey found</h2>
 
 <h3>1 · Slate is the only one of the four whose view layer mandates a framework</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Library</th><th>Core</th><th>Official view layer</th><th>Framework-free engine adapter?</th></tr></thead>
   <tbody>
     <tr><td><strong>Quill</strong></td><td>Parchment / Delta model</td><td>vanilla — drives a DOM element directly</td><td><strong>Yes</strong></td></tr>
@@ -25,6 +26,7 @@
     <tr><td><strong>Slate</strong></td><td><code>slate</code> core is framework-agnostic</td><td><strong><code>slate-react</code> — the only mature view</strong></td><td><strong>No</strong> — the editing surface <em>is</em> React</td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   Slate's core was deliberately split so "other view layers like React Native or Vue.js" become
   <em>possible in the future</em> — i.e. not shipped today. The docs are explicit that <code>slate-react</code>

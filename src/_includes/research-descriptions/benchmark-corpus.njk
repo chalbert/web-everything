@@ -16,7 +16,8 @@
 
 <h2>Selection criteria</h2>
 <p>{{ benchmarkCorpus.inclusionRule }}</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Criterion</th><th>Test</th></tr></thead>
   <tbody>
     {% for c in benchmarkCorpus.selectionCriteria %}
@@ -24,6 +25,7 @@
     {% endfor %}
   </tbody>
 </table>
+</we-data-table>
 
 <h2>Category axes</h2>
 <p>
@@ -32,7 +34,8 @@
   the analysis <em>native-first</em>: a capability a library ships is only a real platform gap once weighed
   against what the web platform and standards already provide.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Axis</th><th>What it captures</th></tr></thead>
   <tbody>
     {% for cat in benchmarkCorpus.categories %}
@@ -40,11 +43,13 @@
     {% endfor %}
   </tbody>
 </table>
+</we-data-table>
 
 <h2>The corpus</h2>
 {% for cat in benchmarkCorpus.categories %}
 <h3>{{ cat.label }}</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Source</th><th>Vendor</th><th>Philosophy</th><th>Native alignment</th><th>Docs</th><th>In references</th></tr></thead>
   <tbody>
     {% for s in benchmarkCorpus.sources %}{% if s.category == cat.id and not s.retired %}
@@ -59,6 +64,7 @@
     {% endif %}{% endfor %}
   </tbody>
 </table>
+</we-data-table>
 {% endfor %}
 
 {% set retiredSources = benchmarkCorpus.sources | selectattr("retired") | list %}
@@ -71,7 +77,8 @@
   freshness</a> / reproducibility model). The retirement convention itself is being generalised beyond this
   corpus under the <strong>external reference health monitoring</strong> epic.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Source</th><th>Vendor</th><th>Axis</th><th>Retired</th><th>Why retired</th></tr></thead>
   <tbody>
     {% for s in retiredSources %}
@@ -85,6 +92,7 @@
     {% endfor %}
   </tbody>
 </table>
+</we-data-table>
 {% endif %}
 
 <h2>Re-running this sweep</h2>

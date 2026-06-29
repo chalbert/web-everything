@@ -42,7 +42,8 @@
 </p>
 
 <h2>Finding 2 — host comparison</h2>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Host</th><th>Free static</th><th>Git deploy</th><th>Native shared-code gate</th><th>Carries phases 3&ndash;5?</th></tr>
     </thead>
@@ -53,9 +54,11 @@
         <tr><td>GitHub Pages</td><td>✅</td><td>✅</td><td>❌ none</td><td>❌ would need an added edge layer anyway</td></tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h2>Finding 3 — gate mechanism comparison</h2>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Mechanism</th><th>Phase-1 fit</th><th>Cost / code</th><th>Carries to phase 3?</th></tr>
     </thead>
@@ -65,6 +68,7 @@
         <tr><td>Client-side JS gate</td><td>✅ for "keep the public out"</td><td>cheapest</td><td>❌ content ships to client; not real for per-person</td></tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     The client-side gate is acceptable <em>only</em> for phase 1 and explicitly not beyond — per-person
     codes in phase 3 need a server-side check.

@@ -56,7 +56,8 @@
 </p>
 
 <h3>Finding 3 — a shared spec doesn't guarantee interop; the conformance suite does</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead><tr><th>protobuf library</th><th>required-test failures (same spec)</th></tr></thead>
     <tbody>
         <tr><td>protobuf-es</td><td>0</td></tr>
@@ -64,6 +65,7 @@
         <tr><td>protobuf.js</td><td>1,847</td></tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     Protobuf ships 2,000+ conformance tests via a stdin/stdout runner; the same spec yields wildly different
     conformance (<a href="https://github.com/bufbuild/protobuf-conformance">scoreboard</a>), and the

@@ -7,7 +7,8 @@
 </p>
 
 <h2>Summary</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Module</th><th>Outstanding TODOs</th><th>Severity</th></tr>
   <tr>
     <td>webregistries</td>
@@ -50,13 +51,15 @@
     <td>—</td>
   </tr>
 </table>
+</we-data-table>
 <p><strong>Total: 20 TODOs</strong> across 4 modules. 9 are already tracked in <a href="/research/injector-migration-gaps/">Injector Migration Gaps</a>. This page covers the remaining 11.</p>
 
 <h2>webregistries — Module Patching &amp; CustomElementRegistry</h2>
 <p>The webregistries module has a complete <code>CustomElementRegistry</code> implementation (121 lines, 20 tests) but its plugged-mode interface and several methods are stubbed.</p>
 
 <h3>Plugged-Mode Patching (3 TODOs)</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>File</th><th>Line</th><th>TODO</th><th>Impact</th></tr>
   <tr>
     <td><code>webregistries/index.ts</code></td>
@@ -77,10 +80,12 @@
     <td><strong>Low</strong> — detection only</td>
   </tr>
 </table>
+</we-data-table>
 <p>These three form a set. They should be implemented together when plugged-mode registry replacement is needed.</p>
 
 <h3>CustomElementRegistry Methods (4 TODOs)</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>File</th><th>Line</th><th>TODO</th><th>Impact</th></tr>
   <tr>
     <td><code>CustomElementRegistry.ts</code></td>
@@ -107,11 +112,13 @@
     <td><strong>Low</strong> — no known use case yet</td>
   </tr>
 </table>
+</we-data-table>
 
 <h2>core/utils — Outdated Phase References</h2>
 <p>These TODOs reference "Phase 6+" but all 10 phases are already complete. The commented-out code may need to be re-evaluated — either the integration was done differently elsewhere, or these are genuinely incomplete despite the phase being marked done.</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>File</th><th>Line</th><th>TODO</th><th>Status</th></tr>
   <tr>
     <td><code>pathInsertionMethods.ts</code></td>
@@ -132,10 +139,12 @@
     <td><strong>Likely outdated</strong> — Phase 7 (webbehaviors) is complete. <code>CustomAttribute</code> exists and attribute handling is done via <code>CustomAttributeRegistry</code> + <code>MutationObserver</code>.</td>
   </tr>
 </table>
+</we-data-table>
 <p>These stubs live in the DOM insertion path (<code>appendChild</code>, <code>insertBefore</code>, etc.). When a node is inserted into the DOM, <code>pathInsertionMethods</code> walks the subtree and upgrades undetermined elements. The question is whether text node, comment, and attribute upgrades also need to happen at insertion time, or whether they're already handled by the <code>MutationObserver</code> in <code>InjectorRoot</code>.</p>
 
 <h2>webcomponents — Reversibility</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>File</th><th>Line</th><th>TODO</th><th>Impact</th></tr>
   <tr>
     <td><code>Element.insertion.patch.ts</code></td>
@@ -144,6 +153,7 @@
     <td><strong>Low</strong> — affects cleanup when elements are removed. May matter for memory-sensitive apps or SSR.</td>
   </tr>
 </table>
+</we-data-table>
 
 <h2>webinjectors — Covered Separately</h2>
 <p>The 9 TODOs in webinjectors are tracked in detail on the <a href="/research/injector-migration-gaps/">Web Injectors: Plateau Migration Gaps</a> page. The high-impact items are:</p>
@@ -157,7 +167,8 @@
 <h2>Priority Matrix</h2>
 <p>Combining this page with the <a href="/research/injector-migration-gaps/">Injector Migration Gaps</a>, here is the full priority view:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Priority</th><th>Item</th><th>Module</th><th>Rationale</th></tr>
   <tr>
     <td><strong>High</strong></td>
@@ -250,6 +261,7 @@
     <td>Deferred until build tooling</td>
   </tr>
 </table>
+</we-data-table>
 
 <h2>Modules With Zero Outstanding TODOs</h2>
 <p>These modules are fully migrated with no remaining stubs, placeholders, or TODOs:</p>

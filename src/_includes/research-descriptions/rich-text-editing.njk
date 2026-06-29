@@ -30,7 +30,8 @@
 
 <h3>Recommendation (the prepared defaults to ratify in #590)</h3>
 <p>The concern decomposes into orthogonal axes, each pinned to the layer its platform primitive implies:</p>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Axis</th><th>Platform primitive</th><th>WE layer</th><th>Prepared default</th></tr>
     <tr>
         <td><strong>Editing surface</strong> (where keystrokes land, IME)</td>
@@ -81,6 +82,7 @@
         <td>cross-ref <a href="/projects/webrealtime/">webrealtime</a> — non-fungible with editing</td>
     </tr>
 </table>
+</we-data-table>
 <p>
     The pivotal result: <strong>the document model is the only axis with a genuine swappable-vendor
     story</strong>, and therefore the only one that earns a Protocol (design-first §"which layer" Q2: a
@@ -92,7 +94,8 @@
 </p>
 
 <h3>The document-model field — every engine is incompatible</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Engine</th><th>Document model</th><th>Schema</th><th>Output</th></tr>
     <tr><td><a href="https://prosemirror.net/">ProseMirror</a></td><td>structured node tree (nodes + marks)</td><td>strict, enforced</td><td>doc JSON / HTML</td></tr>
     <tr><td><a href="https://lexical.dev/">Lexical</a> (Meta)</td><td>node-based immutable EditorState</td><td>node registry</td><td>JSON / HTML; 100k+ words</td></tr>
@@ -101,6 +104,7 @@
     <tr><td><a href="https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/">Atlassian</a></td><td><strong>ADF</strong> — block + inline nodes</td><td>ADF schema</td><td>ADF JSON</td></tr>
     <tr><td><a href="https://github.com/microsoft/roosterjs">roosterjs</a> (MS)</td><td>DOM-as-model (lighter)</td><td>none</td><td>HTML</td></tr>
 </table>
+</we-data-table>
 <p>
     The field splits two ways: a <strong>structured node tree</strong> (ProseMirror / Lexical / Slate / ADF —
     block + inline + marks) vs a <strong>flat op-list</strong> (Quill Delta). The tree is the broad
@@ -111,7 +115,8 @@
 </p>
 
 <h3>Web-standards alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Standard</th><th>Status</th><th>How WE adopts it</th></tr>
     <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/Guide/HTML/Editable_content">contenteditable</a></td><td>Baseline 2015 (<code>plaintext-only</code> 2025)</td><td>The editing-surface floor; capability <code>contenteditable</code>.</td></tr>
     <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/EditContext_API">EditContext API</a></td><td>Chromium 121 (not Baseline)</td><td>Capability-gated upgrade for IME/decoupled input; degrades to contenteditable.</td></tr>
@@ -120,6 +125,7 @@
     <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/CSS_Custom_Highlight_API">CSS Custom Highlight API</a></td><td>Baseline 2024</td><td>Non-destructive decorations (search / spellcheck / remote cursors); used by default.</td></tr>
     <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Selection">Selection / Range API</a></td><td>Baseline</td><td>The selection/range model the engine reads.</td></tr>
 </table>
+</we-data-table>
 
 <h3>Architecture classification (per-fork layer mapping)</h3>
 <ul>

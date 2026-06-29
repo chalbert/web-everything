@@ -29,7 +29,8 @@
 </p>
 
 <h2>The Five Dimensions</h2>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Dimension</th><th>Values</th><th>What the user perceives</th><th>Grounding</th></tr>
     <tr>
         <td><code>structure</code> <em>(kept)</em></td>
@@ -68,6 +69,7 @@
         <td>WHATWG URL vs <a href="https://developer.mozilla.org/en-US/docs/Web/API/History_API/Working_with_the_History_API">History <code>state</code></a> split</td>
     </tr>
 </table>
+</we-data-table>
 
 <h3>Why each one clears the bar</h3>
 <ul>
@@ -116,7 +118,8 @@
 </ul>
 
 <h2>Composition Boundary — What Navigation Does NOT Own</h2>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Concern</th><th>Verdict</th><th>Why</th></tr>
     <tr>
         <td>Prefetch eagerness</td>
@@ -139,6 +142,7 @@
         <td><code>page</code> for hierarchical/lateral, <code>step</code> for linear — a <em>function of</em> <code>structure</code>, so it fails orthogonality. The structure contract specifies the mapping.</td>
     </tr>
 </table>
+</we-data-table>
 <p>
     Classed <strong>implementation/config, not UX preference</strong> (kept out entirely): nested
     / parallel routing, base path, hash-vs-history router mode, deep-link 404 fallback,
@@ -147,7 +151,8 @@
 </p>
 
 <h2>Web Standards Alignment</h2>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Standard</th><th>Status</th><th>How It Grounds a Dimension</th></tr>
     <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigation/navigate">Navigation API <code>navigate()</code></a></td><td>Baseline 2024</td><td><code>history</code> (push/replace), <code>guard</code> (intercept/preventDefault)</td></tr>
     <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/NavigateEvent/intercept"><code>NavigateEvent.intercept()</code></a></td><td>Baseline 2024</td><td><code>scroll</code> (<code>scroll: after-transition|manual</code>), focus (<code>focusReset</code>, referenced)</td></tr>
@@ -156,6 +161,7 @@
     <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event"><code>beforeunload</code></a></td><td>Legacy / wide support</td><td><code>guard</code> for cross-document & tab-close</td></tr>
     <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/History_API/Working_with_the_History_API">History <code>state</code></a> vs URL</td><td>Baseline</td><td><code>persistence</code> url/session/memory split</td></tr>
 </table>
+</we-data-table>
 
 <h2>The Intent Was Lagging the Block</h2>
 <p>
@@ -163,7 +169,8 @@
     vocabulary closes a <a href="/research/">design-first</a> gap, it does not request new
     implementation:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Dimension</th><th>Existing Router surface</th></tr>
     <tr><td><code>scroll</code></td><td><code>&lt;route-view scroll="auto|manual|none"&gt;</code></td></tr>
     <tr><td><code>transition</code></td><td><code>&lt;route-view transition&gt;</code> + View Transitions integration</td></tr>
@@ -171,6 +178,7 @@
     <tr><td><code>history</code></td><td>Navigation API <code>history</code> option in <code>navigate(path, options)</code></td></tr>
     <tr><td><code>persistence</code></td><td>URLPattern params/query vs in-memory route state</td></tr>
 </table>
+</we-data-table>
 
 <h2>Open Points</h2>
 <ul>

@@ -13,7 +13,8 @@
 
 <h2>Three answers it gives the standard</h2>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Open question</th><th>Finding</th></tr></thead>
   <tbody>
     <tr><td>Mode-2 wire format (was "plural, TBD")</td><td>The de-facto format is already <strong>HTTP 422/204 + an error body</strong>; standardize on <strong>RFC 9457 <code>application/problem+json</code></strong> by default, richer formats via <code>Accept</code> negotiation.</td></tr>
@@ -21,6 +22,7 @@
     <tr><td>Is "single-source" one pattern?</td><td>No — <strong>three fidelities</strong> (portable rule language vs. shape-schema codegen vs. interface-consumer). The registry must not assume cross-field logic is portable.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h2>A gap to claim</h2>
 

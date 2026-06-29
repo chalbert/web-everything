@@ -65,7 +65,8 @@ export default traitEnforcerParcel({ traitMap: { sortable: '…', 'export-csv': 
   The single muddled "factory options vs <code>.parcelrc</code> + config file" question becomes
   <strong>one real call</strong> plus invariants that aren't decisions:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Element</th><th>Recommended</th><th>Main alternative</th><th>Confidence</th></tr>
   </thead>
@@ -90,6 +91,7 @@ export default traitEnforcerParcel({ traitMap: { sortable: '…', 'export-csv': 
     </tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   <strong>B</strong> keeps the epic's "one Map, every bundler" symmetry, introduces no new project-facing
   config format (in line with <em>minimize-lock-in / refuse project-facing formats</em>), and matches how

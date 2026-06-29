@@ -9,7 +9,8 @@
 
 <h3>1.1 Conformance Tiers</h3>
 <p>Every construct in this spec exists at three tiers. Only Tier 1 is normative; Tiers 2 and 3 are sugar that compiles down to Tier 1.</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Tier</th><th>Name</th><th>Requires</th><th>Status</th></tr>
   <tr>
     <td>1</td>
@@ -30,6 +31,7 @@
     <td>Aspirational. No tooling exists yet.</td>
   </tr>
 </table>
+</we-data-table>
 <p>
   <strong>Design principle:</strong> The DSL is syntactic sugar, not a separate system.
   If the transformer is unavailable, developers use the Runtime API directly with identical semantics.
@@ -452,7 +454,8 @@ consumable.reject(new Error('Provider disposed'));
 </p>
 
 <h3>3.6 Scope Types</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Scope</th><th>Injector Type</th><th>Target</th><th>Querier Validation</th></tr>
   <tr>
     <td>DOM scope</td>
@@ -467,6 +470,7 @@ consumable.reject(new Error('Provider disposed'));
     <td>Always valid — modules don't have containment hierarchy</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>3.7 Provider Lifecycle</h3>
 <we-code-view><pre><code>Created        → injector.set(key, provider)
@@ -491,7 +495,8 @@ Disposed       → consumable.reject(error) — exits for-await loops
   <li>The TypeScript <code>ProviderTypeMap</code> interface for typed lookups</li>
   <li>Future transformers for registry instantiation in DSL desugaring</li>
 </ul>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Key Pattern</th><th>Registry Constructor</th><th>Status</th><th>Notes</th></tr>
   <tr>
     <td><code>customElements</code></td>
@@ -542,6 +547,7 @@ Disposed       → consumable.reject(error) — exits for-await loops
     <td>Set directly on injector by key</td>
   </tr>
 </table>
+</we-data-table>
 <p>
   Keys not matching a known pattern are treated as <strong>direct providers</strong> —
   the value is stored and retrieved as-is, with no registry intermediary.
@@ -557,7 +563,8 @@ Disposed       → consumable.reject(error) — exits for-await loops
   It registers a mapping from a provider key to a module location (or value), similar to how
   <code>&lt;script type="importmap"&gt;</code> declares where bare specifiers resolve without loading them.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Construct</th><th>What It Does</th><th>When Loading Happens</th></tr>
   <tr>
     <td><code>import x from './mod'</code></td>
@@ -575,6 +582,7 @@ Disposed       → consumable.reject(error) — exits for-await loops
     <td>Never — only loads when a <code>consume</code> references the key</td>
   </tr>
 </table>
+</we-data-table>
 <p>
   This means an injector block can declare a complete map of every possible provider and their locations
   without incurring any loading cost. Only when a module issues a <code>consume</code> does the system
@@ -591,7 +599,8 @@ Disposed       → consumable.reject(error) — exits for-await loops
 <p>
   Three prepositions control the provide semantics:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Preposition</th><th>Semantics</th><th>Registry Behavior</th></tr>
   <tr>
     <td><code>as</code></td>
@@ -609,10 +618,12 @@ Disposed       → consumable.reject(error) — exits for-await loops
     <td>Used with <code>as</code>/<code>in</code> or alone for re-providing</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>5.1 Replace (<code>as</code>)</h3>
 <p>Creates or replaces the provider at the specified key.</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
@@ -623,9 +634,11 @@ Disposed       → consumable.reject(error) — exits for-await loops
     <td><we-code-view><pre><code>injector.set('customContexts:state', MyStore);</code></pre></we-code-view></td>
   </tr>
 </table>
+</we-data-table>
 
 <p>With registry entries (names must be explicit):</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
@@ -639,10 +652,12 @@ registry.define('my-input', Input);
 injector.set('customElements', registry);</code></pre></we-code-view></td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>5.2 Extend (<code>in</code>)</h3>
 <p>Merges entries into an existing registry, or creates one if none exists.</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
@@ -655,6 +670,7 @@ registry.define('my-button', Button);
 injector.set('customElements', registry);</code></pre></we-code-view></td>
   </tr>
 </table>
+</we-data-table>
 <p>
   <strong>Design note:</strong> The <code>in</code> desugaring uses get-or-create + define.
   No new runtime API method is needed — the existing <code>get()</code>, <code>set()</code>,
@@ -663,7 +679,8 @@ injector.set('customElements', registry);</code></pre></we-code-view></td>
 
 <h3>5.3 Re-provide from Source (<code>from</code>)</h3>
 <p>Copies providers from another injector into the current scope.</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
@@ -687,6 +704,7 @@ for (const key of ['customElements', 'customAttributes']) {
 }</code></pre></we-code-view></td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>5.4 Provide from URL (Deferred)</h3>
 <we-code-view><pre><code>provide * from 'https://lib.company.com/shared';</code></pre></we-code-view>
@@ -710,7 +728,8 @@ for (const key of ['customElements', 'customAttributes']) {
   The <code>consume</code> statement requests a provider from the injector chain.
   How it resolves depends on where it appears:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Context</th><th>Resolution</th><th>Access</th></tr>
   <tr>
     <td><strong>Inside an <code>injector</code> block (DSL)</strong></td>
@@ -723,13 +742,15 @@ for (const key of ['customElements', 'customAttributes']) {
     <td><strong>Asynchronous</strong> — returns a <code>Consumable&lt;T&gt;</code> that resolves when the provider is available</td>
   </tr>
 </table>
+</we-data-table>
 <p>
   The DSL <code>consume</code> gives the same guarantee as <code>import</code>: everything is resolved before your code runs.
   The Runtime API <code>consume()</code> gives you the <code>Consumable</code> async primitive because it cannot make that guarantee.
 </p>
 
 <h3>6.1 Basic Consume</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
@@ -741,9 +762,11 @@ for (const key of ['customElements', 'customAttributes']) {
 // nav: Consumable&lt;NavigationContext&gt;</code></pre></we-code-view></td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>6.2 Destructured Consume</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
@@ -755,13 +778,15 @@ for (const key of ['customElements', 'customAttributes']) {
 const redux = injector.consume('customContexts:redux', this);</code></pre></we-code-view></td>
   </tr>
 </table>
+</we-data-table>
 <p>
   Each destructured name becomes a separate consume call.
   The key is constructed by appending <code>:<em>name</em></code> to the source string.
 </p>
 
 <h3>6.3 Path Expression Consume</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
@@ -772,6 +797,7 @@ const redux = injector.consume('customContexts:redux', this);</code></pre></we-c
     <td><we-code-view><pre><code>const item = injector.consume('customContexts:data/foo.bar[0]', this);</code></pre></we-code-view></td>
   </tr>
 </table>
+</we-data-table>
 <p>
   The path expression is appended after a <code>/</code> separator.
   If the resolved provider implements the <code>Queryable</code> interface
@@ -828,7 +854,8 @@ class MyElement extends HTMLElement {
 }</code></pre></we-code-view>
 
 <h4>Summary</h4>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th></th><th>DSL (<code>consume</code> in injector block)</th><th>Runtime API (<code>injector.consume()</code>)</th></tr>
   <tr>
     <td><strong>Resolution</strong></td>
@@ -851,6 +878,7 @@ class MyElement extends HTMLElement {
     <td>Limited — dynamic calls are opaque to bundlers</td>
   </tr>
 </table>
+</we-data-table>
 
 <hr>
 
@@ -861,7 +889,8 @@ class MyElement extends HTMLElement {
 </p>
 
 <h3>7.1 Named Block</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
@@ -881,9 +910,11 @@ AppScope.set('customElements', reg);
 AppScope.set('customContexts:state', AppStore);</code></pre></we-code-view></td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>7.2 Inheritance (<code>extends</code>)</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
@@ -900,6 +931,7 @@ reg.define('my-button', MockButton);
 TestScope.set('customElements', reg);</code></pre></we-code-view></td>
   </tr>
 </table>
+</we-data-table>
 <p>
   <strong>Important:</strong> <code>extends</code> establishes a parent-chain relationship,
   not a copy of providers. <code>TestScope</code> inherits from <code>AppScope</code> via lookup —
@@ -907,7 +939,8 @@ TestScope.set('customElements', reg);</code></pre></we-code-view></td>
 </p>
 
 <h3>7.3 Isolation (<code>isolate</code>)</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Tier</th><th>Syntax</th></tr>
   <tr>
     <td>DSL</td>
@@ -923,6 +956,7 @@ TestScope.set('customElements', reg);</code></pre></we-code-view></td>
 Sandbox.set('customContexts:state', SandboxStore);</code></pre></we-code-view></td>
   </tr>
 </table>
+</we-data-table>
 <p><code>extends</code> and <code>isolate</code> are mutually exclusive.</p>
 
 <h3>7.4 Anonymous Block</h3>
@@ -1050,7 +1084,8 @@ setup(myInjector);</code></pre></we-code-view>
 <p>In plugged mode, <code>applyWebInjectorsPatches()</code> adds methods to <code>Node.prototype</code>:</p>
 
 <h4>Injector Traversal</h4>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Method</th><th>Signature</th><th>Behavior</th></tr>
   <tr>
     <td><code>getOwnInjector()</code></td>
@@ -1073,9 +1108,11 @@ setup(myInjector);</code></pre></we-code-view>
     <td>Yield all injectors up the chain</td>
   </tr>
 </table>
+</we-data-table>
 
 <h4>Context Methods (from plateau, not yet ported)</h4>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Method</th><th>Signature</th><th>Behavior</th><th>Status</th></tr>
   <tr>
     <td><code>getContext()</code></td>
@@ -1120,6 +1157,7 @@ setup(myInjector);</code></pre></we-code-view>
     <td>Not ported</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>9.2 Unplugged Mode (Static methods)</h3>
 <p>All DOM injection operations are available without patches via <code>InjectorRoot</code> static methods:</p>
@@ -1311,7 +1349,8 @@ declare injector AppScope {
 <h2>12. Tooling Requirements</h2>
 
 <h3>12.1 Tooling Matrix</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Tool</th><th>Capability</th><th>Limitation</th><th>Required Work</th><th>Phase</th></tr>
   <tr>
     <td><strong>esbuild</strong></td>
@@ -1356,6 +1395,7 @@ declare injector AppScope {
     <td>Phase 2+</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>12.2 No-Tool Path (Phase 1)</h3>
 <p>
@@ -1421,7 +1461,8 @@ export default {
 
 <h2>13. Open Questions</h2>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>#</th><th>Question</th><th>Impact</th><th>Current Position</th></tr>
   <tr>
     <td>1</td>
@@ -1466,13 +1507,15 @@ export default {
     <td>ModuleInjector.isQuerierValid returns true unconditionally. Works but loses type safety at boundary.</td>
   </tr>
 </table>
+</we-data-table>
 
 <hr>
 
 <h2>14. Phase Summary</h2>
 
 <h3>Phase 1 — Runtime API (no tooling required)</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Feature</th><th>Priority</th><th>Effort</th><th>Status</th></tr>
   <tr>
     <td>Consumable class (port from plateau)</td>
@@ -1523,9 +1566,11 @@ export default {
     <td>This page</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Phase 2 — DSL + Tooling</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Feature</th><th>Dependency</th></tr>
   <tr>
     <td><code>injector { }</code> block syntax</td>
@@ -1560,11 +1605,13 @@ export default {
     <td>TC39 decorators finalization</td>
   </tr>
 </table>
+</we-data-table>
 
 <hr>
 
 <h2>Appendix A: Full Desugaring Table</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>DSL Syntax</th><th>Runtime API Equivalent</th></tr>
   <tr>
     <td><code>injector Name { ... }</code></td>
@@ -1615,11 +1662,13 @@ export default {
     <td><code>__resolveInjector(import.meta)</code> (compile-time) or factory parameter (runtime)</td>
   </tr>
 </table>
+</we-data-table>
 
 <hr>
 
 <h2>Appendix B: Framework Comparison</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Framework</th><th>DI Mechanism</th><th>Scope Model</th><th>Compile-Time?</th><th>Web Everything Parallel</th></tr>
   <tr>
     <td><strong>Angular</strong></td>
@@ -1657,6 +1706,7 @@ export default {
     <td>Most aligned with web standards. Uses <code>context-request</code> events on DOM tree.</td>
   </tr>
 </table>
+</we-data-table>
 <p>
   <strong>Key differentiator:</strong> Web Everything's injector system is <em>registry-aware</em> —
   it doesn't just pass values through a tree, it manages named registries

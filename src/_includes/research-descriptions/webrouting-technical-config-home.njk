@@ -46,7 +46,8 @@
 </p>
 
 <h2>Prior art &mdash; each knob is config in some routers, code in others</h2>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Knob</th><th>Next.js</th><th>SvelteKit</th><th>Vue Router</th><th>TanStack Router</th><th>React Router</th></tr>
     </thead>
@@ -109,6 +110,7 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     The split is consistent: <strong>base path, prerender, trailing-slash and 404 fallback are declared CONFIG</strong>
     in the file-system frameworks (Next / SvelteKit) — they are deploy-shaped facts the bundler / host reads without a

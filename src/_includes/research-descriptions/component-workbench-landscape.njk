@@ -23,7 +23,8 @@
 
 <h2>Selection criteria</h2>
 <p>{{ workbenchTools.inclusionRule }}</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Criterion</th><th>Test</th></tr></thead>
   <tbody>
     {% for c in workbenchTools.selectionCriteria %}
@@ -31,6 +32,7 @@
     {% endfor %}
   </tbody>
 </table>
+</we-data-table>
 
 <h2>Category axes</h2>
 <p>
@@ -39,7 +41,8 @@
   workbench is a renderer over a format, and WE's web-component-native nature makes the
   <strong>Custom Elements Manifest (CEM)</strong> the strongest format to <em>emit</em>.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Axis</th><th>What it captures</th></tr></thead>
   <tbody>
     {% for cat in workbenchTools.categories %}
@@ -47,11 +50,13 @@
     {% endfor %}
   </tbody>
 </table>
+</we-data-table>
 
 <h2>The landscape</h2>
 {% for cat in workbenchTools.categories %}
 <h3>{{ cat.label }}</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Tool</th><th>Vendor</th><th>Model</th><th>License</th><th>Status</th><th>WE role</th><th>Docs</th></tr></thead>
   <tbody>
     {% for s in workbenchTools.sources %}{% if s.category == cat.id %}
@@ -67,6 +72,7 @@
     {% endif %}{% endfor %}
   </tbody>
 </table>
+</we-data-table>
 {% endfor %}
 
 <h2>Two load-bearing priors handed to #626</h2>

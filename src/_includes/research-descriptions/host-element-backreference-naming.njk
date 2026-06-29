@@ -38,7 +38,8 @@
     The web platform does <strong>not</strong> use one name for "the element this thing is attached to."
     It names the back-reference by the <strong>relationship's semantics</strong>:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Relationship</th><th>Property</th><th>Notes</th></tr>
     </thead>
@@ -50,6 +51,7 @@
         <tr><td>mutation → affected node</td><td><code>target</code></td><td><code>MutationRecord.target</code></td></tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     <code>target</code> is the <strong>dispatch-semantics</strong> word — it names "the node a transient
     dispatch or observation is currently about." An attribute's relationship to its element is

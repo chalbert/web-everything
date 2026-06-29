@@ -22,13 +22,15 @@
   Decompose what golden-layout / dockview / FlexLayout actually are and the model is a
   <strong>recursive tree of two node kinds WE already standardizes</strong>:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Node kind</th><th>What it is</th><th>WE already ships</th><th>Library names</th></tr></thead>
   <tbody>
     <tr><td><strong>Split node</strong> (row / column)</td><td>partitions its space among children with a draggable splitter between siblings</td><td>the <a href="/intents/resizable/">resizable</a> linear-split divider, applied recursively</td><td><code>row</code>/<code>column</code> (golden-layout), Splitview/Gridview (dockview)</td></tr>
     <tr><td><strong>Stack leaf</strong> (tab-stack)</td><td>a leaf holding N panels shown one-at-a-time behind a tab bar</td><td>the <strong>Tabs</strong> pattern as the <a href="/blocks/tabs/">tabs</a> block (native exclusive-group <code>name</code> + ARIA Tabs)</td><td><code>stack</code> (golden-layout), "group" (dockview)</td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   So the partition-tree adds <strong>no new gesture and no new leaf widget</strong>. It adds (a) a
   <strong>recursive container contract</strong> (a node is a row/column/stack, nesting arbitrarily, space
@@ -70,7 +72,8 @@
 </p>
 
 <h2>Finding 4 — native-substrate Baseline check: nothing new is needed below the model</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Primitive</th><th>Role for docking</th><th>Baseline status</th></tr></thead>
   <tbody>
     <tr><td>Pointer Events + <code>setPointerCapture</code></td><td>drag substrate for splitters + drag-to-dock</td><td><strong>Baseline</strong> — already #1384's substrate</td></tr>
@@ -82,6 +85,7 @@
     <tr><td>Native dock / tab-stack / split-view element</td><td>—</td><td><strong>Does not exist; no Open UI / CSSWG / WHATWG proposal in flight</strong></td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   <strong>Bottom line:</strong> the partition-tree needs <strong>no new substrate primitive</strong> below
   #1384's baseline. The gap is purely the <strong>compositional model</strong> (a recursive container

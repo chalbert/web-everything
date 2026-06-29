@@ -26,7 +26,8 @@
   readable and the config is build-time. #887 flips <strong>both</strong> distinguishing properties, so the rhyme
   resolves <em>oppositely</em> on the channel:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th></th><th>#881 (resolved)</th><th>#887 (this card)</th></tr>
   </thead>
@@ -36,6 +37,7 @@
     <tr><td>Resolved channel</td><td>DOM data on the mount point (no message)</td><td><strong><code>postMessage</code></strong> (cross-frame DOM reads are blocked by the same-origin policy)</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h2>Grounding the real trees</h2>
 <ul>
@@ -81,7 +83,8 @@
 </ul>
 
 <h2>Prior-art families for a cross-iframe runtime handoff</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Family</th><th>What it is</th><th>Prior art</th><th>Verdict for #887</th></tr>
   </thead>
@@ -106,6 +109,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h2>Net effect on the decision</h2>
 <p>

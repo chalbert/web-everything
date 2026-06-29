@@ -10,7 +10,8 @@
 </p>
 
 <h2>Coverage summary</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Covered</th><th>Native-covered</th><th>Partial</th><th>Missing</th><th>Total</th><th>Fileable gaps</th><th>Already tracked</th></tr></thead>
   <tbody>
     <tr>
@@ -24,13 +25,15 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   <strong>Native-first:</strong> {{ benchmarkCoverage.method.join }}
 </p>
 
 <h2>Gaps (input to #348)</h2>
 <p>Un-tracked partial/missing capabilities, ranked. Each becomes a candidate backlog item in phase 4.</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Rank</th><th>Capability</th><th>Coverage</th><th>Nearest WE entity</th><th>Native anchor</th><th>Gap</th><th>Effort</th></tr></thead>
   <tbody>
     {% for g in benchmarkCoverage.gaps %}
@@ -46,9 +49,11 @@
     {% endfor %}
   </tbody>
 </table>
+</we-data-table>
 
 <h2>Already tracked (deduped, not re-filed)</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Capability</th><th>WE entity</th><th>Tracked by</th><th>Note</th></tr></thead>
   <tbody>
     {% for t in benchmarkCoverage.alreadyTracked %}
@@ -56,6 +61,7 @@
     {% endfor %}
   </tbody>
 </table>
+</we-data-table>
 
 <h2>Skipped (low value, logged not filed)</h2>
 <p>{{ benchmarkCoverage.skippedReason }}</p>

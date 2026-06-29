@@ -37,7 +37,8 @@
     The survey's first result is that almost nothing here is greenfield. A replay record decomposes into
     parts each <em>already</em> specified in the tree:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead><tr><th>Part</th><th>Already specified by</th><th>Where</th></tr></thead>
     <tbody>
         <tr><td>State <strong>snapshot</strong></td><td>Web Contexts SSR serialization
@@ -60,6 +61,7 @@
             <td><code>protocols.json:154</code></td></tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     Crucially, <strong>Web States already carries <code>traceparent</code> on every change</strong> — the
     state&harr;trace seam #992 worries about is <em>already drawn</em>. The one genuinely new contract is the
@@ -73,7 +75,8 @@
     distinct ways to make replay deterministic — which reshapes #992's binary "is identity load-bearing"
     question into an A/B/C choice of <em>determinism anchor</em>:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead><tr><th>Paradigm</th><th>How it replays</th><th>Determinism</th><th>Maps to</th></tr></thead>
     <tbody>
         <tr><td><strong>A. State-diff re-application</strong> (rrweb)</td>
@@ -90,6 +93,7 @@
             <td>(out of scope)</td></tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     <strong>C is ruled out by scope:</strong> #140 frames feature&nbsp;9 as a "lightweight <em>local,
     semantic</em> repro (declared state + action trace), not a sampled DOM video … <em>Not a Sentry

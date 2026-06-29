@@ -22,7 +22,8 @@
   That asymmetry is the whole ruling — it says the cheap <em>gate</em> verdict can be automated with
   confidence, while the rich <em>codification</em> must stay human-in-the-loop.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Source</th><th>What it is</th><th>What we borrow</th></tr></thead>
   <tbody>
     <tr>
@@ -65,6 +66,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h2>One swappable provider, two call shapes</h2>
 <p>
@@ -75,7 +77,8 @@
   pattern — vision is infrastructure you plug in, not architecture you bake in, with no provider name in
   <code>scripts/design-refs.mjs</code> core), exposing two methods:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Method</th><th>Consumer</th><th>Returns</th><th>Cost</th></tr></thead>
   <tbody>
     <tr>
@@ -92,6 +95,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   This applies the #086 ruling correctly: #086 used <em>two</em> registries for analyzer-vs-generator
   because they move at different speeds — but here both calls are <em>analysis</em>, so they belong on the

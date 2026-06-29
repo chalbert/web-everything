@@ -9,7 +9,8 @@
 
 <p>Virtual elements belong in <strong>Web Directives</strong>. The reasoning is straightforward:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Criterion</th><th>Virtual Elements</th><th>Transient Elements</th></tr>
   </thead>
@@ -51,6 +52,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>Virtual elements are <strong>comment-based structural markers</strong>. They control <em>what</em> appears in the DOM, not <em>which tag</em> it uses. This is the defining characteristic of a directive, not a component.</p>
 
@@ -59,7 +61,8 @@
 
 <p>The comment-based virtual element pattern has a well-established lineage across frameworks:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Framework</th><th>Year</th><th>Pattern</th><th>Mechanism</th></tr>
   </thead>
@@ -102,6 +105,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p><strong>Key trend:</strong> Angular 17's migration from structural directives to compiler-built-in <code>@if</code>/<code>@for</code> shows that the pattern is evolving toward <em>compiler erasure</em> &mdash; removing even the comment anchors from the DOM. Web Everything's two-layer architecture (authoring templates + runtime comments) is positioned for a similar evolution if a build step is present.</p>
 
@@ -110,7 +114,8 @@
 
 <p>The <a href="https://github.com/nicolo-ribaudo/tc39-proposal-structs">W3C DOM Parts proposal</a> aims to standardize what frameworks currently do with comment-based markers:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>DOM Part Type</th><th>Purpose</th><th>Web Everything Equivalent</th></tr>
   </thead>
@@ -132,6 +137,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p><strong>Status (2025):</strong> Chrome filed an Intent to Prototype (January 2025). Firefox and Safari have given no signal. A W3C breakout session in March 2025 aimed to reach consensus on a concrete MVP. The proposal remains early-stage.</p>
 
@@ -142,7 +148,8 @@
 
 <p>Transient elements and virtual elements solve related but distinct problems:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Problem</th><th>Virtual Element Solution</th><th>Transient Element Solution</th></tr>
   </thead>
@@ -174,6 +181,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>The last row is where they overlap. A <code>&lt;for-each&gt;</code> custom element is a transient element that replaces itself with comment boundaries &mdash; it's an ergonomic authoring shortcut for what is fundamentally a directive. This is the <strong>transient-to-comments bridge</strong> identified in the <a href="/research/dom-less-composition/">DOM-Less Composition</a> research.</p>
 
@@ -182,7 +190,8 @@
 
 <p>A critical insight: transient elements exist primarily as an <strong>HTML authoring convenience</strong>. When using JSX, the same ergonomics are available natively:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>HTML Authoring</th><th>JSX Equivalent</th><th>Transient Needed?</th></tr>
   </thead>
@@ -213,6 +222,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>In JSX, a function component like <code>AutoHeading</code> returns a native element directly &mdash; there is no intermediate custom element that needs to self-replace. The <code>TransientElement</code> base class and its <code>queueMicrotask(() =&gt; this.replaceWith(el))</code> lifecycle are irrelevant.</p>
 
@@ -221,7 +231,8 @@
 
 <h2>Classification</h2>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>Project</th><th>Rationale</th></tr>
   </thead>
@@ -258,6 +269,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h2>Cross-Reference Requirements</h2>
@@ -274,7 +286,8 @@
 
 <h2>Summary</h2>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th></th><th>Virtual Elements</th><th>Transient Elements</th></tr>
   </thead>
@@ -288,4 +301,5 @@
     <tr><td><strong>Standards path</strong></td><td>W3C DOM Parts (<code>ChildNodePart</code>)</td><td>None needed &mdash; uses standard <code>customElements</code></td></tr>
   </tbody>
 </table>
+</we-data-table>
 {% endraw %}

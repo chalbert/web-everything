@@ -5,7 +5,8 @@
 
 <h2>What Web Standards Already Provide</h2>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>API</th><th>Status</th><th>What It Does</th></tr>
   </thead>
@@ -26,13 +27,15 @@
     <tr><td><code>lang</code> attribute</td><td>Baseline</td><td>Declare content language</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p><strong>The standards are strong for formatting individual values.</strong> The gaps are in <em>composing messages</em>, <em>managing translations</em>, and <em>reactive locale switching</em>.</p>
 
 
 <h2>Framework i18n Solutions</h2>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Framework</th><th>Primary Library</th><th>Key Features Beyond Standards</th></tr>
   </thead>
@@ -69,13 +72,15 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h2>Gap Analysis: What Frameworks Provide That Standards Do Not</h2>
 
 <h3>Critical Gaps</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Feature</th><th>Web Standard</th><th>Framework Solutions</th><th>Adoption Path for WE</th></tr>
   </thead>
@@ -106,10 +111,12 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>High-Priority Gaps</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Feature</th><th>Web Standard</th><th>Framework Solutions</th><th>Adoption Path for WE</th></tr>
   </thead>
@@ -134,10 +141,12 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Medium-Priority Gaps</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Feature</th><th>Web Standard</th><th>Framework Solutions</th><th>Adoption Path for WE</th></tr>
   </thead>
@@ -180,6 +189,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h2>Emerging Standards</h2>
@@ -222,7 +232,8 @@ mf.format({ name: 'World' }); // "Hello World!"</code></pre></we-code-view>
 
 <h2>Build-Time vs Runtime Translation</h2>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Approach</th><th>Libraries</th><th>Pros</th><th>Cons</th></tr>
   </thead>
@@ -259,6 +270,7 @@ mf.format({ name: 'World' }); // "Hello World!"</code></pre></we-code-view>
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Mapping to Web Everything</h3>
 
@@ -275,7 +287,8 @@ mf.format({ name: 'World' }); // "Hello World!"</code></pre></we-code-view>
 
 <h2>Web Component i18n Challenges</h2>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Challenge</th><th>Description</th><th>Lit's Solution</th><th>Web Everything Approach</th></tr>
   </thead>
@@ -312,13 +325,15 @@ mf.format({ name: 'World' }); // "Hello World!"</code></pre></we-code-view>
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h2>Proposed Architecture for Web Everything</h2>
 
 <p>Given the existing primitives (injectors, contexts, stores, expression parsers), i18n maps cleanly:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Concern</th><th>Maps To</th><th>Mechanism</th></tr>
   </thead>
@@ -333,6 +348,7 @@ mf.format({ name: 'World' }); // "Hello World!"</code></pre></we-code-view>
     <tr><td>Locale change notification</td><td>Store subscription</td><td>Like any other reactive state</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>The <code>@t</code> context already referenced in <code>blocks.json</code> (handler expression parser's context access patterns) is the right surface API:</p>
 

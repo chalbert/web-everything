@@ -35,7 +35,8 @@
 </ul>
 
 <h2>Prior art — named server-held param bundles are a settled CDN pattern</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>System</th><th>Mechanism</th><th>Carrier</th><th>Composition</th></tr></thead>
   <tbody>
     <tr><td>Cloudflare Images <em>variants</em></td><td>named option set or comma-list of params</td><td>path segment</td><td><em>flexible variants</em> also accept inline params</td></tr>
@@ -43,6 +44,7 @@
     <tr><td>Akamai <em>image policies</em></td><td>named server-side param bundle by id</td><td>query/header policy id</td><td>policy + per-request overrides</td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   Lessons: (1) the concept is validated — a short named token expanding to a held bundle is mainstream
   (vocabulary: <em>variant</em> / <em>named transformation</em> / <em>policy</em>); (2) composition is real

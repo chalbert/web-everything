@@ -30,7 +30,8 @@
     merely to decide whether to activate.
 </p>
 
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Tool / detector</th><th>Mechanism</th><th>Signal it reads</th><th>Cooperation needed?</th><th>Failure mode</th></tr>
     </thead>
@@ -86,6 +87,7 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h2>The recurring trade space</h2>
 <p>
@@ -110,7 +112,8 @@
     Each branch maps onto concrete WE code, which fixes how much each costs and what each can actually read on
     a live page <em>today</em>:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Branch</th><th>WE signal / artifact</th><th>Queryable on a live page today?</th><th>Mutates the page?</th></tr>
     </thead>
@@ -152,6 +155,7 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     A decisive in-tree fact: a DECLARED-only gate would today light up on <strong>zero</strong> pages, because
     no implementation ships a runtime manifest (<code>we:capability-manifest/check.ts:107</code>). And VERIFIED

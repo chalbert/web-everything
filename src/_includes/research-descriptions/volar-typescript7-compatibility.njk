@@ -18,7 +18,8 @@
 
 <p>The blocking dependency is tracked in two places:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Issue</th><th>Repository</th><th>Status</th><th>What It Tracks</th></tr>
   </thead>
@@ -43,6 +44,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Why It's Broken</h3>
 
@@ -52,7 +54,8 @@
 
 <h3>Interim Workarounds</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Approach</th><th>Description</th><th>Trade-offs</th></tr>
   </thead>
@@ -69,6 +72,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Volar Team Response</h3>
 
@@ -81,7 +85,8 @@
 
 <p>TypeScript 7's API is fundamentally different from the JavaScript-based "Strada" API (TypeScript 1.x&ndash;6.x). The new <strong>"Corsa" API</strong> uses <strong>inter-process communication (IPC)</strong> as its primary integration mechanism.</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Strada (TS 1&ndash;6)</th><th>Corsa (TS 7)</th></tr>
   </thead>
@@ -118,6 +123,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Key Technical Details</h3>
 
@@ -139,7 +145,8 @@
 
 <p>Volar is a <strong>Node.js/TypeScript framework</strong>. Its entire stack runs in a single Node.js process:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Layer</th><th>Package</th><th>Language</th><th>Purpose</th></tr>
   </thead>
@@ -170,6 +177,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>Volar language plugins must implement TypeScript interfaces (<code>LanguagePlugin</code>, <code>VirtualCode</code>, etc.) and run in the same Node.js process. There is <strong>no plugin boundary</strong> that would allow a Go module to participate directly.</p>
 
@@ -189,7 +197,8 @@
 
 <p>Several language servers and IDE tools successfully integrate native code with higher-level frameworks:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Tool</th><th>Native Language</th><th>Integration Pattern</th><th>Performance Gain</th></tr>
   </thead>
@@ -232,6 +241,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p><strong>Key observation:</strong> None of these examples integrate native code <em>into</em> Volar's framework. They either replace the entire language server with a native implementation or use WASM within a VS Code extension's TypeScript shell. The Oso pattern (Rust &rarr; WASM inside a TypeScript host) is the closest analogy to what a hypothetical "Go analysis engine inside a Volar plugin" would look like.</p>
 
@@ -244,7 +254,8 @@
 
 <h3>Known Bottlenecks</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Bottleneck</th><th>Cause</th><th>Severity</th><th>Mitigation</th></tr>
   </thead>
@@ -281,6 +292,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>What TypeScript 7 Could Fix</h3>
 
@@ -291,7 +303,8 @@
 
 <h3>Three Integration Patterns</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>Mechanism</th><th>Latency</th><th>Complexity</th><th>Precedent</th></tr>
   </thead>
@@ -319,6 +332,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Recommended Approach: IPC</h3>
 
@@ -357,7 +371,8 @@
 
 <h2>Timeline Outlook</h2>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Milestone</th><th>Estimated Timeline</th><th>Impact on Volar</th></tr>
   </thead>
@@ -384,6 +399,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h2>Key Takeaways</h2>

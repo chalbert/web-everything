@@ -7,7 +7,8 @@
 
 <p>The threshold sits precisely in the gap between two well-established perception boundaries:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Threshold</th><th>Perception</th><th>UX Guidance</th><th>Source</th></tr>
   </thead>
@@ -38,10 +39,12 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Convergent Evidence for 300&ndash;400ms</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Source</th><th>Value</th><th>Context</th></tr>
   </thead>
@@ -83,6 +86,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p><strong>Conclusion:</strong> 300&ndash;400ms is not arbitrary. It's the range where human perception transitions from "that was fast" to "something is happening." Below this range, any indicator creates more visual noise than value. Above it, the absence of feedback feels broken.</p>
 
@@ -101,7 +105,8 @@
   &lt;p&gt;Placeholder content&lt;/p&gt;
 }</code></pre></we-code-view>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Parameter</th><th>Purpose</th><th>Default</th></tr>
   </thead>
@@ -118,12 +123,14 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>This is the two-parameter model: <strong>delay before showing</strong> + <strong>minimum display duration</strong>. Both are essential.</p>
 
 <h3>Other Frameworks</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Framework</th><th>Configurable Delay?</th><th>Configurable Minimum?</th><th>Notes</th></tr>
   </thead>
@@ -160,6 +167,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h2>Current State in Web Everything</h2>
@@ -196,7 +204,8 @@
 
 <p>Following Angular's lead, each timing profile should define two values:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Parameter</th><th>Name in WE</th><th>Default</th><th>Purpose</th></tr>
   </thead>
@@ -215,6 +224,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>TypeScript Interface</h3>
 
@@ -260,7 +270,8 @@ const config: LoaderConfig = {
 
 <p>The <a href="/blocks/resource-loader/">Resource Loader</a> block already implements a state machine with <code>pending</code> &rarr; <code>loading</code> transition. The timing profile governs when the transition from <code>pending</code> (no indicator) to <code>loading</code> (indicator visible) occurs:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>State</th><th>With <code>immediate</code></th><th>With <code>debounced</code> (400ms)</th><th>With <code>patient</code> (800ms)</th></tr>
   </thead>
@@ -297,6 +308,7 @@ const config: LoaderConfig = {
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Router</h3>
 
@@ -327,7 +339,8 @@ const config: LoaderConfig = {
 
 <p>Major design systems have their own loading timing guidance:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Design System</th><th>Guidance</th><th>Timing Default</th></tr>
   </thead>
@@ -364,13 +377,15 @@ const config: LoaderConfig = {
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p><strong>Observation:</strong> No major design system specifies a debounce delay. This is treated as an implementation detail, not a design token. Web Everything's approach of making it configurable via Intents &mdash; alongside density, motion, and mode &mdash; is novel and fills a genuine gap.</p>
 
 
 <h2>Recommended Defaults</h2>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Profile Name</th><th>Delay</th><th>Minimum</th><th>Use Case</th></tr>
   </thead>
@@ -395,6 +410,7 @@ const config: LoaderConfig = {
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>These defaults can be overridden at any level of the injector hierarchy. The <code>prefers-reduced-motion</code> media query, when detected, can map <code>debounced</code> to <code>immediate</code> to reduce the perception of unresponsiveness for users with motion sensitivity.</p>
 

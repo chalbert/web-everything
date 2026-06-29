@@ -22,7 +22,8 @@
     from the query/read lifecycle (the <code>useQuery</code> vs <code>useMutation</code> split is itself
     near-universal):
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead><tr><th>Library</th><th>Apply (optimistic)</th><th>Reconcile (settle)</th><th>Rollback (on error)</th></tr></thead>
     <tbody>
         <tr><td><strong>TanStack Query</strong> <code>useMutation</code></td><td><code>onMutate</code> — cancel in-flight, snapshot, set predicted</td><td><code>onSettled</code> → <code>invalidateQueries</code></td><td><code>onError</code> restore snapshot</td></tr>
@@ -32,6 +33,7 @@
         <tr><td><strong>Relay</strong></td><td><code>optimisticUpdater</code></td><td>store commit</td><td>discard optimistic update</td></tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     The convergent shape: snapshot current state → apply a <em>predicted</em> result immediately → fire the
     mutation → on success reconcile/invalidate against the source of truth → on failure restore the snapshot.

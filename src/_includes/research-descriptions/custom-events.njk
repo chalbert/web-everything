@@ -17,7 +17,8 @@
 
 <p>Before solving scoping, we need clearer language for <em>what events are</em>. Today, DOM events conflate three fundamentally different communication patterns:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr>
       <th></th>
@@ -65,6 +66,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>The Broadcast Command Gap</h3>
 
@@ -108,7 +110,8 @@
 
 <h3>Event Inventory</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr>
       <th>Module</th>
@@ -170,6 +173,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>What Works Today</h3>
 
@@ -193,7 +197,8 @@
 
 <h3>What the Platform Provides</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr>
       <th>Standard</th>
@@ -241,12 +246,14 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Symbols: The Raw Constraint</h3>
 
 <p>The DOM spec requires <strong>DOMString</strong> for event types. Passing a Symbol to <code>addEventListener</code> or <code>new CustomEvent()</code> triggers Web IDL's <code>ToString()</code> coercion, which <strong>throws a TypeError</strong>. This is why every existing solution falls back to string conventions.</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Strings</th><th>Symbols</th></tr>
   </thead>
@@ -259,6 +266,7 @@
     <tr><td>Node.js EventEmitter</td><td>Yes</td><td>Yes (fully supported)</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>But this project already patches browser APIs &mdash; that's what <strong>plugs</strong> are. Could a polyfill bridge the gap?</p>
 
@@ -311,7 +319,8 @@ element.addEventListener(TAB_CHANGE, (e) =&gt; { /* type-safe */ });</code></pre
 
 <h4>Polyfill trade-offs</h4>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Assessment</th></tr>
   </thead>
@@ -346,6 +355,7 @@ element.addEventListener(TAB_CHANGE, (e) =&gt; { /* type-safe */ });</code></pre
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h4>Open design questions for Symbol approach</h4>
 <ul>
@@ -387,7 +397,8 @@ element.addEventListener(TAB_CHANGE, (e) =&gt; { /* type-safe */ });</code></pre
 
 <h3>How Frameworks Handle Events</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr>
       <th>Framework</th>
@@ -428,6 +439,7 @@ element.addEventListener(TAB_CHANGE, (e) =&gt; { /* type-safe */ });</code></pre
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Industry Trend</h3>
 
@@ -471,7 +483,8 @@ element.addEventListener(TAB_CHANGE, (e) =&gt; { /* type-safe */ });</code></pre
 
 <h3>Today's Mitigations (All Inadequate)</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Mitigation</th><th>Works?</th><th>Problem</th></tr>
   </thead>
@@ -503,6 +516,7 @@ element.addEventListener(TAB_CHANGE, (e) =&gt; { /* type-safe */ });</code></pre
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>The Key Insight</h3>
 
@@ -559,7 +573,8 @@ element.addEventListener(TabChangeEvent, (e) =&gt; {
   return () =&gt; target.removeEventListener(EventClass.type, wrapper, options);
 }</code></pre></we-code-view>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Assessment</th></tr>
   </thead>
@@ -572,6 +587,7 @@ element.addEventListener(TabChangeEvent, (e) =&gt; {
     <tr><td>Third-party adoption</td><td>Requires importing Event classes. Third-party blocks must export them.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h3>Approach B: Protocol-Tagged Events</h3>
@@ -600,7 +616,8 @@ element.addEventListener('tab-change', (e) =&gt; {
 // Or with a utility:
 listenForProtocol(element, 'we:tabs:change', (e) =&gt; { ... });</code></pre></we-code-view>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Assessment</th></tr>
   </thead>
@@ -613,6 +630,7 @@ listenForProtocol(element, 'we:tabs:change', (e) =&gt; { ... });</code></pre></w
     <tr><td>Overhead</td><td>Minimal &mdash; one property lookup per event dispatch</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h3>Approach C: Scoped Listener Registration</h3>
@@ -635,7 +653,8 @@ tabEvents.on(element, 'change', (e) =&gt; {
 
 <p>This is similar to CSS's <code>@scope</code> concept &mdash; the scope boundary determines which events are visible.</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Assessment</th></tr>
   </thead>
@@ -648,6 +667,7 @@ tabEvents.on(element, 'change', (e) =&gt; {
     <tr><td>Interop with native events</td><td>Separate &mdash; native events (<code>click</code>, <code>input</code>) stay on standard <code>addEventListener</code></td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h3>Approach D: Scoped Event Providers via Injectors</h3>
@@ -740,7 +760,8 @@ listenForScoped(
   <li><strong>No cross-realm limitation in practice</strong> &mdash; while <code>instanceof</code> fails across JavaScript realms (iframes), this is not a real concern for DOM events. Iframe boundaries are document boundaries: events dispatched inside an iframe stay in that iframe's document tree and don't bubble out to the parent. There are no shared DOM elements across realms. Iframe communication uses <code>postMessage</code>, which serializes data &mdash; no event objects cross. Shadow DOM, module federation, and dynamic imports all run in the same realm. For DOM event discrimination, <code>instanceof</code> is fully reliable.</li>
 </ul>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Assessment</th></tr>
   </thead>
@@ -755,11 +776,13 @@ listenForScoped(
     <tr><td>DevTools</td><td>Normal &mdash; standard addEventListener under the hood</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h3>Comparison: Listener Discrimination Approaches</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr>
       <th></th>
@@ -781,6 +804,7 @@ listenForScoped(
     <tr><td>Standards proposal path</td><td>Unlikely</td><td>Possible</td><td>Possible</td><td>Unlikely (framework-specific)</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h2>Exploration Axis 2: Symbol Events + Polyfill</h2>
@@ -810,7 +834,8 @@ listenForScoped(
 
 <p>The micro-frontend world faces the same cross-team event problem at a larger scale.</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr>
       <th>Pattern</th>
@@ -841,6 +866,7 @@ listenForScoped(
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>All of these fall back to string conventions. None provide structural isolation. The @trutoo/event-bus approach is the most rigorous (schema validation at registration time), but it still depends on unique string names.</p>
 
@@ -1332,7 +1358,8 @@ app.addEventListener('click', (e) =&gt; {
 
 <h4>Plugged mode summary</h4>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th></th><th>Unplugged (utility)</th><th>Plugged (patched API)</th></tr>
   </thead>
@@ -1364,6 +1391,7 @@ app.addEventListener('click', (e) =&gt; {
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>The plugged version requires <strong>no new API to learn</strong> &mdash; it extends the existing <code>addEventListener</code> options object that every web developer already knows. The unplugged utility (<code>listenForScoped</code>) remains available for tree-shaking or environments where patching browser globals is undesirable. The lightweight alternative (<code>listenFor</code>) is available for code that should not depend on the injector system.</p>
 
@@ -1432,7 +1460,8 @@ Custom commands:           --module-action (--view-show, --tab-activate)</code><
 
 <p>For reference &mdash; the existing convention-based approaches in the wild. These are the <strong>last resort</strong> if structural solutions (listener discrimination, Symbols) prove unworkable.</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr>
       <th>Pattern</th>
@@ -1474,6 +1503,7 @@ Custom commands:           --module-action (--view-show, --tab-activate)</code><
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>Convention works for a single team or coordinated teams. It does not scale to the cross-organization, multi-team scenario that Web Everything targets. If we resort to convention, it should be <em>in addition to</em> structural safeguards, not instead of them.</p>
 

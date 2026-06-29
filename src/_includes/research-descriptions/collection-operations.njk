@@ -44,7 +44,8 @@
     primitives the standard grounds in. Unrelated to the positioning <a href="/intents/anchor/">Anchor
     Intent</a>.)</em>
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead><tr><th>Operation</th><th>Native primitive</th><th>What it standardizes</th><th>Conf.</th></tr></thead>
     <tbody>
         <tr>
@@ -79,6 +80,7 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     <strong>Takeaway:</strong> sort is <em>not</em> ungrounded — its state model and comparison engine are both
     native standards the intent should adopt verbatim rather than redesign. Filter / page / group are the parts
@@ -91,13 +93,15 @@
     Headless table libraries have independently converged on the same architecture, which is the strongest
     available evidence for the intent's shape.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead><tr><th>Library</th><th>Model</th><th>Conf.</th></tr></thead>
     <tbody>
         <tr><td>TanStack Table</td><td>Each operation is an <em>optional row-model transformer</em>: <code>core → filtered → sorted → grouped → expanded → paginated</code>. Each stage takes the previous row model and produces the next. Sorting supports multi-column + built-in/custom sort fns; grouping moves matching rows into <code>subRows</code> with aggregation fns (sum/count/mean); filtering has column + global + faceting.</td><td>✅</td></tr>
         <tr><td>AG Grid / MUI DataGrid</td><td>Same separable model: independent sort / filter / pagination / grouping modules, client- or server-side, multi-sort by shift-click.</td><td>📄</td></tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     Two facts fall out that the intent should standardize:
 </p>
@@ -180,7 +184,8 @@ interface CollectionOperationsIntent {
     two channels — ambient Intent (DI, with call-site override) for <em>behavioral</em> dims, local Trait
     Selection (explicit) for <em>structural</em> ones. Collection Operations splits cleanly:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead><tr><th>Dimension</th><th>Channel</th><th>Why</th></tr></thead>
     <tbody>
         <tr><td>Default collation / locale <em>preference</em></td><td><strong>Ambient Intent (DI)</strong></td><td>App-wide UX preference; should match <a href="/intents/locale/">Locale Intent</a> so a French app sorts French by default. Behavioral. (The comparator <em>implementation</em> is technical — out of the intent.)</td></tr>
@@ -189,6 +194,7 @@ interface CollectionOperationsIntent {
         <tr><td>Multi-sort on/off, grouping on/off</td><td><strong>Trait Selection</strong></td><td>Which capability mixins compose (<code>withMultiSort</code>, <code>withGrouping</code>). Structural.</td></tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Cross-cutting paradigms harvested</h3>
 <p>Per repo practice, the reusable paradigms surfaced here — candidates beyond the immediate intent:</p>

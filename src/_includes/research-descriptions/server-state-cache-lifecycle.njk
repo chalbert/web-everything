@@ -44,7 +44,8 @@
 </p>
 
 <h3>Finding 1 — four libraries converged on one model with different vocabulary</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead><tr><th>Concept</th><th>TanStack</th><th>SWR</th><th>RTK Query</th><th>Apollo</th></tr></thead>
     <tbody>
         <tr><td>Cache key</td><td><code>queryKey</code></td><td><code>key</code></td><td>endpoint+args</td><td>normalized ID</td></tr>
@@ -54,6 +55,7 @@
         <tr><td>Dependent query</td><td><code>enabled</code></td><td>conditional key</td><td><code>skip</code></td><td><code>skip</code></td></tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     The model: a keyed store of <code>{data, status, freshUntil}</code> entries, with de-duped in-flight
     fetches, staleness-driven background revalidation, on-demand invalidation, and unused-entry GC. Same

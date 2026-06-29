@@ -26,7 +26,8 @@
 </p>
 {% for k in benchmarkCapabilities.kinds %}
 <h3>{{ k.label }}</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead><tr><th>Capability</th><th>Family</th><th>Ubiquity</th><th>Native anchor</th><th>Summary</th></tr></thead>
   <tbody>
     {% for c in benchmarkCapabilities.capabilities %}{% if c.kind == k.id %}
@@ -40,4 +41,5 @@
     {% endif %}{% endfor %}
   </tbody>
 </table>
+</we-data-table>
 {% endfor %}

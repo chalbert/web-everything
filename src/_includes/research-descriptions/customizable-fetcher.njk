@@ -9,7 +9,8 @@
 
 <p>Web Resources defines six sub-standards, three of which directly address this concern:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Sub-Standard</th><th>Interface</th><th>What It Swaps</th></tr>
   </thead>
@@ -31,6 +32,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>The key insight from the Web Resources mission:</p>
 
@@ -57,7 +59,8 @@ type Consumable&lt;T&gt; = Promise&lt;T&gt; | AsyncIterable&lt;T&gt; | Observabl
 
 <p>The <code>Consumable</code> return type supports three consumption patterns:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Pattern</th><th>Type</th><th>Use Case</th></tr>
   </thead>
@@ -79,6 +82,7 @@ type Consumable&lt;T&gt; = Promise&lt;T&gt; | AsyncIterable&lt;T&gt; | Observabl
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Injection via Injector</h3>
 
@@ -99,7 +103,8 @@ docInjector.set('customContexts:resourceClient', new MockClient(fixtures));</cod
 
 <h3>Framework Comparison: Transport Abstraction</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Library</th><th>Transport Pattern</th><th>Swappable?</th></tr>
   </thead>
@@ -131,6 +136,7 @@ docInjector.set('customContexts:resourceClient', new MockClient(fixtures));</cod
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p><strong>Web Everything's advantage:</strong> The injector system provides <strong>hierarchical scoping</strong> that no other library offers. A data grid inside a dashboard can use a different transport client than the rest of the app, simply by providing a scoped <code>customContexts:resourceClient</code> on its injector.</p>
 
@@ -174,7 +180,8 @@ class RetryMiddleware implements CustomMiddleware {
 
 <h3>Framework Comparison: Middleware</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Library</th><th>Middleware Pattern</th><th>Transport-Agnostic?</th></tr>
   </thead>
@@ -201,6 +208,7 @@ class RetryMiddleware implements CustomMiddleware {
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h2>Custom Cache: Policy Abstraction</h2>
@@ -218,7 +226,8 @@ class RetryMiddleware implements CustomMiddleware {
 
 <p>The <code>CustomCachePolicy</code> defines <em>how long</em> data is fresh and <em>when</em> to revalidate. The <em>where</em> (storage backend) is a separate concern:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Policy</th><th>Storage</th><th>Use Case</th></tr>
   </thead>
@@ -245,6 +254,7 @@ class RetryMiddleware implements CustomMiddleware {
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Integration with Resource Loader</h3>
 

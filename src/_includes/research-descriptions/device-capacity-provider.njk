@@ -21,7 +21,8 @@
   one decisive property the original framing missed: <strong>signal availability is not uniform across
   venues</strong>.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Signal</th><th>Native read</th><th>Edge / header</th><th>Lib?</th><th>Venues</th></tr>
   </thead>
@@ -33,6 +34,7 @@
     <tr><td>Battery</td><td><code>navigator.getBattery()</code></td><td>none</td><td>&mdash;</td><td><strong>excluded</strong></td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>
   <code>hardwareConcurrency</code> and GPU-tier are <strong>runtime-only</strong> — no request header
   carries them; <code>deviceMemory</code> and <code>Save-Data</code> also resolve at the edge. This is
@@ -88,7 +90,8 @@
 
 <h2>The decision shape</h2>
 <p>The survey reshapes #729 from two forks to <strong>three</strong> (the output-shape fork is new):</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Fork</th><th>Recommended default</th><th>Main alternative</th><th>Confidence</th></tr>
   </thead>
@@ -113,6 +116,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h2>Web-standards alignment</h2>
 <p>

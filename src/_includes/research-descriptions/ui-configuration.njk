@@ -9,7 +9,8 @@
 
 <h2>What Frameworks Do</h2>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr>
       <th>Framework</th>
@@ -63,6 +64,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p><strong>Key insight:</strong> Every framework provides three orthogonal mechanisms: <em>how to configure</em> (props/attributes/context), <em>how to inject content</em> (slots/children/projections), and <em>how to compose behavior</em> (hooks/directives/controllers). The question is which web standards map to each.</p>
 
@@ -71,7 +73,8 @@
 
 <h3>Strategy A: Behavioral Composition via CustomAttribute</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Details</th></tr>
   </thead>
@@ -98,6 +101,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>Example:</p>
 <we-code-view><pre><code>&lt;button on:click="save()" tooltip:show="Save changes" shortcut:key="ctrl+s"&gt;
@@ -109,7 +113,8 @@
 
 <h3>Strategy B: Consumer-Owned Markup (Headless Behaviors)</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Details</th></tr>
   </thead>
@@ -136,6 +141,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>Example &mdash; rich navigation with icons and badges:</p>
 <we-code-view><pre><code>&lt;nav aria-label="Main" nav:list&gt;
@@ -161,7 +167,8 @@
 
 <h3>Strategy C: Attribute-Based Configuration</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Details</th></tr>
   </thead>
@@ -188,6 +195,7 @@
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>Example:</p>
 <we-code-view><pre><code>&lt;nav nav:list orientation="horizontal" density="compact"&gt;</code></pre></we-code-view>
@@ -199,7 +207,8 @@ nav[density="compact"] a { padding: 0.25rem 0.75rem; font-size: 0.85rem; }</code
 
 <h3>Strategy D: CSS Custom Properties as Design Tokens</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Details</th></tr>
   </thead>
@@ -222,6 +231,7 @@ nav[density="compact"] a { padding: 0.25rem 0.75rem; font-size: 0.85rem; }</code
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>Three-tier token architecture:</p>
 <we-code-view><pre><code>/* Tier 1: Global primitives */
@@ -247,7 +257,8 @@ nav[density="compact"] {
 
 <h3>Strategy E: Injector-Based Context Configuration</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Details</th></tr>
   </thead>
@@ -274,6 +285,7 @@ nav[density="compact"] {
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>Example &mdash; different nav configuration per application:</p>
 <we-code-view><pre><code>&lt;!-- App A provides minimal nav config --&gt;
@@ -291,7 +303,8 @@ nav[density="compact"] {
 
 <h3>Strategy F: Named Slots (Shadow DOM)</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Details</th></tr>
   </thead>
@@ -314,6 +327,7 @@ nav[density="compact"] {
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>Example &mdash; a nav-item Custom Element with named slots:</p>
 <we-code-view><pre><code>&lt;!-- Shadow DOM template --&gt;
@@ -337,7 +351,8 @@ nav[density="compact"] {
 
 <h3>Strategy G: CSS <code>::part()</code> for Styling Hooks</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Details</th></tr>
   </thead>
@@ -360,6 +375,7 @@ nav[density="compact"] {
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>Example:</p>
 <we-code-view><pre><code>/* Consumer styles a nav-item's internal parts */
@@ -370,7 +386,8 @@ nav-item::part(badge) { background: var(--nav-badge-bg); border-radius: 9999px; 
 
 <h3>Strategy H: Custom States via <code>CustomStateSet</code></h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Aspect</th><th>Details</th></tr>
   </thead>
@@ -393,6 +410,7 @@ nav-item::part(badge) { background: var(--nav-badge-bg); border-radius: 9999px; 
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p>Example:</p>
 <we-code-view><pre><code>// Inside a Custom Element
@@ -406,7 +424,8 @@ nav-section:state(expanded) { --chevron-rotation: 180deg; }</code></pre></we-cod
 
 <h3>Strategy I: Emerging Platform APIs</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr>
       <th>API</th>
@@ -447,13 +466,15 @@ nav-section:state(expanded) { --chevron-rotation: 180deg; }</code></pre></we-cod
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h2>The WE Configuration Stack</h2>
 
 <p>Rather than picking one strategy, these compose into layers that play to WE's existing strengths:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr>
       <th>Layer</th>
@@ -501,6 +522,7 @@ nav-section:state(expanded) { --chevron-rotation: 180deg; }</code></pre></we-cod
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p><strong>Key finding:</strong> WE behaviors are <em>already headless by nature</em>. They attach to arbitrary elements and manage state/accessibility without dictating structure. This means the consumer always controls the markup &mdash; icons, badges, popovers, or any other content can be added directly in the HTML. The behavior layer neither adds nor constrains visual content.</p>
 
@@ -513,7 +535,8 @@ nav-section:state(expanded) { --chevron-rotation: 180deg; }</code></pre></we-cod
 
 <h3>Three Approaches to Fill the Gap</h3>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr>
       <th>Approach</th>
@@ -539,6 +562,7 @@ nav-section:state(expanded) { --chevron-rotation: 180deg; }</code></pre></we-cod
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 
 <h2>Headless UI: WE's Natural Position</h2>
@@ -547,7 +571,8 @@ nav-section:state(expanded) { --chevron-rotation: 180deg; }</code></pre></we-cod
 
 <p>WE does not have this coupling problem. Behaviors (CustomAttribute) never owned the rendering in the first place. The HTML <em>is</em> the rendering layer, and behaviors are pure orchestrators. This means:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr>
       <th>Headless Pattern</th>
@@ -578,6 +603,7 @@ nav-section:state(expanded) { --chevron-rotation: 180deg; }</code></pre></we-cod
     </tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p><strong>WE is more headless than headless libraries.</strong> Headless UI libraries still render DOM (a <code>&lt;div role="menu"&gt;</code>, etc). WE behaviors render nothing &mdash; they enhance whatever DOM the consumer provides.</p>
 

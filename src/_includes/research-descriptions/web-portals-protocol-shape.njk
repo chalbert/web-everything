@@ -25,7 +25,8 @@
   property.</strong>
 </p>
 <div class="comparison-table-wrapper">
-<table class="comparison-table">
+<we-data-table>
+<table class="comparison-table data-table">
   <thead><tr><th>Platform API</th><th>Shape</th><th>Writable?</th><th>Validation</th></tr></thead>
   <tbody>
     <tr><td><code>Node.parentNode</code></td><td>property</td><td>read-only</td><td>n/a (structure isn't assigned)</td></tr>
@@ -36,6 +37,7 @@
     <tr><td><code>HTMLElement.attachInternals()</code></td><td><strong>method</strong></td><td>once-only</td><td>throws if called twice</td></tr>
   </tbody>
 </table>
+</we-data-table>
 </div>
 <p>
   Reparenting is done by <strong>methods</strong> that throw <code>HierarchyRequestError</code>
@@ -104,7 +106,8 @@
 
 <h2>Q4 — deferred target resolution (target not in DOM yet)</h2>
 <div class="comparison-table-wrapper">
-<table class="comparison-table">
+<we-data-table>
+<table class="comparison-table data-table">
   <thead><tr><th>Framework</th><th>API</th><th>Missing-target behavior</th><th>Defer</th></tr></thead>
   <tbody>
     <tr><td>Vue 3.5</td><td><code>&lt;Teleport to&gt;</code></td><td><strong>errors</strong> if absent at mount</td><td><code>defer</code> prop — resolves after the current render cycle (still errors a tick later)</td></tr>
@@ -113,6 +116,7 @@
     <tr><td>SolidJS</td><td><code>&lt;Portal mount&gt;</code></td><td>defaults to <code>document.body</code> (always present)</td><td>—</td></tr>
   </tbody>
 </table>
+</we-data-table>
 </div>
 <p>
   No mainstream framework queues open-endedly; Vue's <code>defer</code> is deliberately one-tick-scoped.
