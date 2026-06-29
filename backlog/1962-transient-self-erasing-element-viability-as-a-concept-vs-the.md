@@ -70,6 +70,68 @@ Self-erasure was chosen for real reasons, and `ElementInternals` does **not** fu
 So this is a real either/or, not a slam-dunk: *true-native-element-but-self-erases* vs
 *persistent-host-but-only-near-native*.
 
+## Composition cost — a real platform weakness (worked example)
+
+A second pro-transient argument the persistent-host case has to answer: **the web platform's unit of
+composition is the DOM node**, so deep composition has an inherent node-cost that a virtual-DOM library does
+not. Take the user's case — a simple light-DOM button wrapped in **10 HOC-like layers**.
+
+**React** composes at the *component* layer; the rendered DOM stays flat — HOCs add **zero** nodes unless they
+choose to:
+
+```jsx
+// 10 HOCs fold into one component; the DOM is just <button>
+const Button10 = withA(withB(withC(/* …7 more… */ BaseButton)));
+// <Button10/>  →  <button>Go</button>      // 10 layers, 1 node
+```
+
+**Web components, composed structurally (nesting)** — the naive translation makes every layer a real node:
+
+```html
+<!-- DOM-layer composition: every wrapper IS a node -->
+<with-a><with-b><with-c><!-- …7 more… --><we-button>Go</we-button></with-c></with-b></with-a>
+<!-- → 10 wrapper elements per button in the DOM + AX tree; CSS/layout/slotting all cross all 10,
+     each shadow boundary nests slots (slot-in-slot) and breaks ::part chains. This is the "heavy". -->
+```
+
+**The honest rebuttal: most of that 10-deep composition is *behavioural*, and behaviour composes flat without
+transient.** The web-native analog of an HOC is a **functional class mixin** — N behaviours fold into **one**
+element class, leaving **one** DOM node:
+
+```ts
+// Behaviour-layer composition: 10 mixins → ONE element class → ONE node (the established pattern —
+// Fagnani "Real Mixins with JS Classes" / lit dedupeMixin; FUI's attribute-driven cousin is the
+// `*Behavior` concept, e.g. fui:blocks/stepper/StepperBehavior.ts)
+const Button = WithA(WithB(WithC(/* …7 more… */ HTMLElement)));
+customElements.define('we-button', class extends Button {});
+// <we-button>Go</we-button>   // 10 behaviours, 1 light-DOM node, zero wrappers, no transient needed
+```
+
+So the cost is **not** uniform across the 10 layers — it splits:
+
+- **Behavioural layers** (state, events, a11y wiring, validation, toggling): compose into one class via
+  mixins/decorators/attribute-behaviours → **flat DOM, good ergonomics, no transient, no persistent-host
+  penalty.** This is the bulk of real "HOC" composition and the platform answers it fine.
+- **Structural layers** (a layout wrapper, a provider boundary, an independently-slotted/styled shell): each
+  genuinely *needs* its own node → here the platform charges per layer. `display: contents` is the only relief
+  (drops the wrapper's *box* but keeps the node in the DOM/AX tree, with lingering a11y caveats), and there is
+  **no** platform equivalent to React's zero-DOM context-provider / render-prop. **This is the real weakness.**
+
+**Why this bears on the decision:** transient self-erasure is partly a *workaround for the structural-layer
+node-cost* — it lets you author wrapper/structured markup that **collapses to flat native DOM**. That refines
+the positions:
+
+- It **does not** rescue self-erasure for *behavioural* depth — mixins already give flat DOM there (weakens A
+  as a general justification).
+- It **does** strengthen the case where authored *structure* must collapse to a true native element — and it
+  is a real cost on **position B**: a persistent host under deep *structural* composition reintroduces exactly
+  the wrapper-node bloat above (unless every consumer reaches for `display:contents`).
+- It sharpens **position D**: keep transient where *structure must flatten onto a native element*; use
+  persistent hosts + mixins where the composition is *behavioural* (flat already).
+
+`/prepare` should ground this: survey the mixin/decorator/behaviour ergonomics actually in the FUI tree, and
+test the 10-deep case under each of A/B/D to see where node-count and slotting actually bite.
+
 ## Candidate positions (un-prepared — `/prepare` to shape defaults + skeptic)
 
 - **A — keep transient self-erasure (status quo).** Accept the #1960/#1961 mitigations as the cost of a real
