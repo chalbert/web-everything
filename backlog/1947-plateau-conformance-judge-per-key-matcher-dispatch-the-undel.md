@@ -2,13 +2,27 @@
 kind: story
 size: 5
 parent: "1294"
-status: active
+status: open
+blockedBy: ["1965"]
 dateOpened: "2026-06-28"
 dateStarted: "2026-06-29"
 tags: []
 ---
 
 # Plateau conformance-judge per-key matcher dispatch (the undelivered #1847 half)
+
+## Carry (batch-2026-06-29d parallel /workflow — lane WORKED, blocked by pre-existing plateau build-red)
+
+**Progress: the cross-repo false-drop is GONE.** After syncing `plateau-app:origin/main` (it was 66 commits
+behind local — the lane clones reset to `origin/main`, so they had been seeing a stale tree, the real root
+cause of the 2026-06-29 false-drops), this run's lane clone saw
+the real tree, did **correct** work (matcher dispatch in `plateau-app:src/conformance-engine/conformanceVectors.ts`
++ a new `.test.ts`), gated green in-lane, and pushed. It did **not** land only because the integrator's
+**unscoped** `npm run build` on plateau-app was **already red for a pre-existing reason** (#1965 — entry imports
+a deleted `@we` SimpleStore block), which has nothing to do with this item. Released `active→open`;
+now `blockedBy: #1965`. Once #1965 makes the plateau build green, re-attempt (serial `/batch` is fine; the
+lane work itself is proven). The lane refs `lane/batch-2026-06-29d-1947` linger on the WE + plateau-app origins
+with the impl if a salvage is wanted.
 
 The plateau conformance judge (plateau-app:src/conformance-engine/conformanceVectors.ts) still compares every non-special expect key with hardcoded strict equality (last[key] !== expected, ~lines 142-147) and never dispatches on the per-key matcher vocabulary #1847 defined. #1847 resolved but delivered ONLY the WE schema half (graduatedTo we:conformance-vectors/schema.ts); the Plateau judge half (treat 'matchers' as metadata; dispatch per-key exact / deep-equal / resolved-options-parts-structure / predicate) was never built, so any conformance suite whose vectors use a matcher fails ALL vectors with 'matchers expected {...}, observed undefined'. Cross-cutting: blocks the intl/analytics/reliability docs-page wirings (#1920/#1921/#1922) which need predicate/array comparison. Implement the dispatch in plateau-app:src/conformance-engine/conformanceVectors.ts, then the page-wiring slices become clean mirrors of #1801.
 

@@ -2,13 +2,27 @@
 kind: story
 size: 2
 parent: "1294"
-status: active
+status: open
+blockedBy: ["1965"]
 dateOpened: "2026-06-28"
 dateStarted: "2026-06-29"
 tags: []
 ---
 
 # Wire the webtheme docs conformance page via the plateau iframe
+
+## Carry (batch-2026-06-29d parallel /workflow — lane WORKED, blocked by pre-existing plateau build-red)
+
+**Progress: the cross-repo false-drop is GONE.** After syncing `plateau-app:origin/main` (it had been 66
+commits behind local, so the lane clones reset to a stale tree — the real root cause of the 2026-06-29
+false-drops), this run's lane clone saw the real tree and did
+**correct** work (registered webtheme in `plateau-app:src/conformance-engine/embedSuites.ts` + config wiring;
+authored `we:demos/webtheme-conformance-demo.*` + its `we:src/_data/demos/` entry), gated green in-lane, and
+pushed. It did **not** land only because the integrator's **unscoped** `npm run build` on plateau-app was
+**already red for a pre-existing reason** (#1965 — entry imports a deleted `@we` SimpleStore block), unrelated
+to this item. Released `active→open`; now `blockedBy: #1965`. Re-attempt once #1965 greens the plateau build.
+The lane refs `lane/batch-2026-06-29d-1909` linger on the WE + plateau-app origins with the work if a salvage
+is wanted.
 
 T4 of the webtheme relocation cascade (#1294). Wire the visible webtheme conformance docs page to surface the FUI binding via the plateau-hosted conformance iframe (#1788 ratified (b) — the runner stays a shared plateau tool), no forbidden build-time @frontierui import. Mirrors webcompliance C4 (#1810).
 
