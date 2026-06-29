@@ -3,7 +3,8 @@
 
 <h3>Menu vs. select — the distinction this block draws</h3>
 <p>The platform, and every surveyed library, separates three concerns a value-select does not:</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Concern</th><th>In a menu</th><th>Owned by</th></tr>
   </thead>
@@ -13,10 +14,12 @@
     <tr><td><strong>Submenu disclosure</strong></td><td><code>aria-expanded</code> + <code>aria-haspopup=menu</code> on a parent item.</td><td><a href="/intents/disclosure/">Disclosure intent</a> + <a href="/intents/anchor/">Anchor</a></td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>One block, three shapes</h3>
 <p>Menubar, popup menu, and context menu share the <em>entire</em> item / role / keyboard machinery; they differ only in how they are summoned and oriented. So they are one block with a <code>shape</code> dimension, not three blocks.</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th><code>shape</code></th><th>Summoning</th><th>Orientation (derived)</th><th>Platform delta</th></tr>
   </thead>
@@ -26,9 +29,11 @@
     <tr><td><code>context</code></td><td>Pointer right-click or <kbd>Shift</kbd>+<kbd>F10</kbd> at the focused element.</td><td>vertical</td><td>Binds the <code>contextmenu</code> event + <kbd>Shift</kbd>+<kbd>F10</kbd>; anchored to the pointer/element.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Composed intents</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Intent</th><th>What it contributes to a menu</th></tr>
   </thead>
@@ -42,9 +47,11 @@
     <tr><td><a href="/intents/action/">Action</a></td><td>Orthogonal visual <em>prominence</em> of an item (<code>primary</code> / <code>destructive</code>) — what it looks like, not what it does. An item composes both Command and Action.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Item roles &amp; trait surface</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Role</th><th>Composes</th><th>Notes</th></tr>
   </thead>
@@ -57,6 +64,7 @@
     <tr><td>submenu parent</td><td>Disclosure + Anchor</td><td><code>aria-haspopup=menu</code> + <code>aria-expanded</code>; opens its own nested anchored Menu.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Why a submenu is not a tree</h3>
 <p>A submenu <em>looks</em> hierarchical but is a different paradigm from the tree-select <a href="/backlog/064-tree-select-block/">hierarchy</a> intent. Hierarchy owns flatten-to-visible-rows, <code>aria-level</code>/<code>aria-setsize</code>/<code>aria-posinset</code>, and cross-level Up/Down traversal. A submenu has <em>none</em> of these: it is a fresh anchored surface, navigated by Right (open) / Left (close), each level its own <code>role=menu</code>. So it composes Disclosure + Anchor, not hierarchy.</p>
@@ -71,7 +79,8 @@
 </ul>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Standard</th><th>Role</th></tr>
   </thead>
@@ -82,9 +91,11 @@
     <tr><td><code>contextmenu</code> event + <kbd>Shift</kbd>+<kbd>F10</kbd></td><td>The platform summoning the <code>context</code> shape binds.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Framework Research</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Library</th><th>Packaging</th><th>What it confirms</th></tr>
   </thead>
@@ -95,5 +106,6 @@
     <tr><td>Shoelace</td><td>Menu + menu-item + submenu</td><td>Submenu as a nested anchored popup, not a data tree (Fork E).</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p style="font-size: 0.9rem; color: var(--color-text-muted);">Grounded in the menu / menubar / context-menu prior-art survey (<code>reports/2026-06-11-menu-menubar-block.md</code>; <a href="/research/menu-menubar-context-menu/">research topic</a>) and the seven forks ratified in <a href="/backlog/173-menu-menubar-block/">#173</a>. Composes the <a href="/intents/command/">command</a> intent (#299); the droplist "Menu button" roster demotion is the follow-on (#301). This page is the canonical standard.</p>

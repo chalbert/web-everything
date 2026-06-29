@@ -6,7 +6,8 @@
 </blockquote>
 
 <h3>Where it sits among the single-select members</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Member</th><th>Presentation</th><th>Immediacy</th><th>Best for</th></tr>
   </thead>
@@ -17,9 +18,11 @@
     <tr><td>Switch</td><td>Single toggle</td><td><code>live</code></td><td>A binary on/off (Selection <code>boolean</code>)</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Composition — nothing re-implemented</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Concern</th><th>Disposition</th><th>Notes</th></tr>
   </thead>
@@ -30,6 +33,7 @@
     <tr><td>Options as authored children</td><td><code>compose</code> — compound-child paradigm (see below)</td><td><code>&lt;segment&gt;</code> children map to value-model entries — the same shape as <code>&lt;tab&gt;</code> and <code>&lt;option&gt;</code>.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Altitude 1 — HTML, compound children</h3>
 <p>The author writes the options as children; the block maps each to the value model and the Focus Delegation Intent wires the roving keyboard:</p>

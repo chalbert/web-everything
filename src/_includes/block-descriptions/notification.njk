@@ -18,22 +18,26 @@
 </p>
 
 <h2>Web Standards Alignment</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr><td><a href="https://developer.mozilla.org/docs/Web/API/Popover_API">Popover API</a> (<code>popover="manual"</code>)</td><td>Baseline 2024</td><td>The region mounts to the top layer as a manual popover — present without being light-dismissed by unrelated clicks. The native-first substrate; no <code>position:fixed</code> + z-index stack.</td></tr>
   <tr><td><a href="https://www.w3.org/TR/wai-aria-1.2/#alert">role="alert"</a> / <a href="https://www.w3.org/TR/wai-aria-1.2/#status">role="status"</a> + <code>aria-live</code></td><td>WAI-ARIA 1.2</td><td>The region is a live region; politeness is derived from severity (status = polite, alert = assertive). Delegated to the Live-Region Status Intent.</td></tr>
   <tr><td><a href="https://www.w3.org/WAI/WCAG22/Understanding/timing-adjustable.html">WCAG 2.2.1 Timing Adjustable</a></td><td>WCAG 2.2</td><td>Auto-timeout pauses on hover/focus and is forced indefinite when an action is present, so a reader is never raced by a timer.</td></tr>
   <tr><td><a href="https://developer.mozilla.org/docs/Web/HTML/Element/dialog">Top layer</a> (via Web Portals fallback)</td><td>Baseline 2024</td><td>Where the Popover API is unavailable, a Web Portals top-layer mount provides the same stacking-free surface.</td></tr>
 </table>
+</we-data-table>
 
 <h2>Framework / Library Research</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Source</th><th>Key Patterns Adopted</th></tr>
   <tr><td><a href="https://www.radix-ui.com/primitives/docs/components/toast">Radix Toast</a></td><td>Provider + imperative enqueue; swipe/Escape dismissal; pause-on-hover; hotkey to focus the region.</td></tr>
   <tr><td><a href="https://m3.material.io/components/snackbar/overview">Material 3 Snackbar</a></td><td>Single-at-a-time default (stackLimit = 1), one optional action, duration tiers, bottom placement avoiding the FAB.</td></tr>
   <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/alert/">WAI-ARIA APG Alert</a></td><td>The announce-once live-region contract; assertive vs polite by urgency.</td></tr>
   <tr><td><a href="https://sonner.emilkowal.ski/">Sonner</a> / <a href="https://ui.shadcn.com/docs/components/sonner">shadcn</a></td><td>Stacked FIFO presentation, promise-bound lifecycle (loading → success/error), as an implementation style — not part of the contract.</td></tr>
 </table>
+</we-data-table>
 
 <h2>Contract</h2>
 <p>

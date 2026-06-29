@@ -8,20 +8,24 @@
 <p><strong>Type-ahead moves focus &mdash; it never filters.</strong> Items are never removed or hidden; only the focused/active item changes. Removing items as you type is <em>filtering</em> (a combobox concern, <code>aria-autocomplete="list"</code>) and is out of scope for this block.</p>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/">WAI-ARIA APG keyboard interface</a></td><td>Authoring Practices</td><td>Type-ahead / first-character navigation across the Listbox, Menu, Combobox, and Tree patterns</td></tr>
   <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/select">HTMLSelectElement</a></td><td>Baseline</td><td>Mirrors the native <code>&lt;select&gt;</code> prefix/first-character navigation that custom widgets lose</td></tr>
   <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key">KeyboardEvent.key</a></td><td>Baseline</td><td>Single-character, non-modifier keys feed the buffer; Arrow/Enter/Tab and modifier chords are ignored</td></tr>
 </table>
+</we-data-table>
 
 <h3>Framework Research</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Source</th><th>Key Patterns Adopted</th></tr>
   <tr><td><a href="https://floating-ui.com/docs/useTypeahead">Floating UI <code>useTypeahead</code></a></td><td>Buffered string match, configurable reset delay, <code>onMatch</code> callback &mdash; closest prior art</td></tr>
   <tr><td><a href="https://www.radix-ui.com/primitives/docs/components/dropdown-menu">Radix Menu / Select</a></td><td>Type-ahead over focusable items, ignores modifier combos, same-letter cycling</td></tr>
   <tr><td><a href="https://www.downshift-js.com/">Downshift</a> / <a href="https://headlessui.com/">Headless UI</a></td><td>Prefix accumulation with idle-timeout reset; focus moves rather than list filters</td></tr>
 </table>
+</we-data-table>
 
 <h3>Usage</h3>
 <p>Add the <code>type-ahead</code> attribute to any container whose children are the navigable items. Items are resolved by ARIA role (<code>option</code>, <code>menuitem</code>, <code>treeitem</code>) or by an explicit <code>[data-type-ahead-item]</code> marker.</p>
@@ -45,7 +49,8 @@
 &lt;ul role="listbox" type-ahead type-ahead-wrap&gt;...&lt;/ul&gt;</code></pre></we-code-view>
 
 <h3>Behavior</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Input</th><th>Result</th></tr>
   <tr><td>Printable key(s) in rapid succession</td><td>Accumulate into a buffer; focus moves to the first item whose label starts with the buffer</td></tr>
   <tr><td>Same key repeated (after buffer reset)</td><td>Cycle focus through items starting with that character (<code>cycle</code> / <code>prefix-then-cycle</code>)</td></tr>
@@ -53,6 +58,7 @@
   <tr><td>No item matches</td><td>Focus is unchanged (fires <code>typeahead-nomatch</code>)</td></tr>
   <tr><td>Arrow / Enter / Tab / modifier chord</td><td>Ignored &mdash; left to the host widget's own keyboard handling</td></tr>
 </table>
+</we-data-table>
 
 <h3>Composition with Composite Widget</h3>
 <p>Type-ahead only decides <em>which</em> item should receive focus. When the container is also a <a href="/blocks/composite-widget/">Composite Widget</a> (roving tabindex or <code>aria-activedescendant</code>), the actual focus move is delegated to that widget so a single source of truth manages the active element. Used standalone, the block focuses the matched item directly. This is distinct from <a href="/blocks/keyboard-shortcuts/">Keyboard Shortcuts</a>, which maps discrete key <em>combinations</em> to actions rather than buffering characters to navigate.</p>
@@ -61,12 +67,14 @@
 <p>Each item's searchable label is derived, in order: <code>aria-label</code> &rarr; the element referenced by <code>aria-labelledby</code> &rarr; <code>textContent</code>. Matching is case-insensitive and trims whitespace. Applications can override resolution by passing a <code>label</code> function via <code>TypeAheadOptions</code>.</p>
 
 <h3>Events</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Event</th><th>Detail</th><th>Cancelable</th></tr>
   <tr><td><code>typeahead-match</code></td><td><code>{ query, matched }</code></td><td>No</td></tr>
   <tr><td><code>typeahead-nomatch</code></td><td><code>{ query }</code></td><td>No</td></tr>
   <tr><td><code>typeahead-reset</code></td><td><code>{ query }</code></td><td>No</td></tr>
 </table>
+</we-data-table>
 
 <h3>Styling Hooks</h3>
 <we-code-view><pre><code class="language-css">/* The item type-ahead most recently moved focus to */
@@ -77,7 +85,8 @@
 </code></pre></we-code-view>
 
 <h3>Exports</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
   <tr><td><code>TypeAheadBehavior</code></td><td>Class</td><td>CustomAttribute behavior for the <code>type-ahead</code> attribute</td></tr>
   <tr><td><code>TypeAheadOptions</code></td><td>Interface</td><td>Programmatic options (matching, resetMs, wrap, label resolver)</td></tr>
@@ -85,5 +94,6 @@
   <tr><td><code>TypeAheadIntent</code></td><td>Interface</td><td>The <a href="/intents/type-ahead/">Type-Ahead Intent</a> contract this block implements</td></tr>
   <tr><td><code>TypeAheadMatchDetail</code></td><td>Interface</td><td>Detail shape for the <code>typeahead-match</code> event</td></tr>
 </table>
+</we-data-table>
 
 <p style="font-size: 0.9rem; color: var(--color-text-muted);"><strong>Status:</strong> The spec is authored; the implementation is an in-progress proof-of-concept. Full conformance coverage (cycling, wrap/clamp, RTL, Web Cases, E2E) lands as the block is promoted past <code>draft</code>.</p>

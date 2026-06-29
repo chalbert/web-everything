@@ -28,7 +28,8 @@
     The block's job is the <strong>isolation boundary</strong>, not the component being shown. A docs story must
     render an arbitrary component without its styles or scripts colliding with the docs chrome. Two tiers, native-first:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Tier</th><th>Boundary</th><th>When</th></tr>
     </thead>
@@ -37,6 +38,7 @@
         <tr><td>shadow-only</td><td>Shadow root style encapsulation</td><td>Opt-in for trusted, pure-component cases</td></tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Usage</h3>
 <we-code-view><pre><code class="language-html">&lt;!-- resolve a case by id against the page's webcases --&gt;

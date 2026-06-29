@@ -14,7 +14,8 @@
     The durable store sits behind one async <code>CustomStorageStrategy</code> contract (#011 Fork 1A), with a
     deterministic native-first pick:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Strategy</th><th>Role</th><th>Standard</th></tr>
     </thead>
@@ -24,6 +25,7 @@
         <tr><td><code>MemoryStorageStrategy</code></td><td>SSR / test fallback</td><td>in-memory map</td></tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Save, autosave, restore</h3>
 <we-code-view><pre><code class="language-typescript">const drafts = new DraftPersistence&lt;LoanForm&gt;({ version: 2 });

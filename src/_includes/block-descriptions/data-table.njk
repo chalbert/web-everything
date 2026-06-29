@@ -10,7 +10,8 @@
 </p>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr>
     <td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/table/">APG Sortable Table</a></td>
@@ -38,9 +39,11 @@
     <td>Each group is its own <code>&lt;tbody&gt;</code> led by a <code>scope="rowgroup"</code> summary row carrying the group key + aggregate, so assistive tech announces the grouping</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Framework Research</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
   <tr>
     <td><a href="https://tanstack.com/table/latest/docs/guide/row-models">TanStack Table</a></td>
@@ -55,6 +58,7 @@
     <td>Multi-column sort and per-group aggregate summaries — we name the aggregates after SQL rather than a bespoke set</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Architecture</h3>
 <p>Data Table is a <strong>Module</strong> that composes the <code>filter</code>, <code>sort</code>, and <code>group</code> stages of Collection Operations; it owns only set selection/ordering and the table projection, delegating the rest to its neighbours:</p>

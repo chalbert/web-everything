@@ -3,7 +3,8 @@
 
 <h3>Family vs. members</h3>
 <p>The word "dropdown" is overloaded. Throughout this standard we use these terms precisely:</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Term</th><th>Meaning</th></tr>
   </thead>
@@ -17,10 +18,12 @@
     <tr><td><strong>Native</strong></td><td>The browser-owned <code>&lt;select&gt;</code> / <code>&lt;optgroup&gt;</code> baseline. Zero composed traits — climb off it only when a requirement rules it out.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Two channels: ambient intent vs. trait selection</h3>
 <p>"Intent" used to do two jobs in this family. The standard now keeps them on separate channels — and structural dimensions never travel on the intent one.</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Channel</th><th>Owner</th><th>Carries</th><th>Mechanism</th></tr>
   </thead>
@@ -29,6 +32,7 @@
     <tr><td><strong>Trait selection</strong></td><td>Component author / developer</td><td><em>Structural</em> construction (<code>model</code>, <code>editable</code>, which traits compose) — local, total.</td><td>Attributes on the substrate (<code>selection="model=single"</code>) or <code>with*</code> composition.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>Per-dimension resolution: <code>explicit (local) ⊕ ambient intent (behavioral only) ⊕ trait default</code>. Structural dimensions stop at <code>explicit ⊕ default</code> — the ambient channel has no say. One app-level line can still make "every droplist here uses virtual focus and truncates" true, but it can never make a dropdown single or multiple. That stays where the widget is built.</p>
 
 <h4>Ambient intent in practice</h4>
@@ -42,7 +46,8 @@ injector.set('customContexts:droplistIntent', {
 
 <h3>How a trait reaches the page</h3>
 <p>A <strong>trait</strong> is the unit of composed behavior — a <code>with[Capability]</code> factory that applies DOM/ARIA/CSS/keyboard wiring and returns a handle that can undo it (the resource-loader contract, reused). The app author never writes that call directly. A trait surfaces in HTML as one of three things:</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Face</th><th>What it is</th><th>When the trait takes this face</th></tr>
   </thead>
@@ -52,6 +57,7 @@ injector.set('customContexts:droplistIntent', {
     <tr><td><strong>Provider</strong></td><td>A value/service set on the injector chain, consumed down-tree.</td><td>The trait is config or a shared service that many nodes read (intent profile, positioning strategy, the announcer).</td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p>Most droplist traits are <strong>behaviors</strong>; two own structure as <strong>components</strong>; three are best delivered as <strong>providers</strong>. See the trait surface map below for which is which.</p>
 
 <h3>Three altitudes: how to read any variant</h3>
@@ -63,7 +69,8 @@ injector.set('customContexts:droplistIntent', {
 </ol>
 
 <h3>Composed intents</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Intent</th><th>What it contributes to a droplist</th></tr>
   </thead>
@@ -79,10 +86,12 @@ injector.set('customContexts:droplistIntent', {
     <tr><td><a href="/intents/typography/">Typography</a></td><td><code>truncation</code> of long option/value labels with full-text recovery and Label-in-Name preserved.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Trait surface map</h3>
 <p>Every intent contributes exactly one trait, which surfaces in HTML as one of the three faces:</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Intent</th><th>Trait</th><th>HTML surface</th><th>Markup</th><th>Status</th></tr>
   </thead>
@@ -98,6 +107,7 @@ injector.set('customContexts:droplistIntent', {
     <tr><td><a href="/intents/typography/">Typography</a></td><td><code>withTruncation</code></td><td><strong>behavior</strong> (or CSS layer) on options</td><td><code>truncate</code></td><td>proposed</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>The substrate</h3>
 <p>Pulling it together, the <strong>droplist substrate</strong> is precisely:</p>
@@ -110,7 +120,8 @@ injector.set('customContexts:droplistIntent', {
 
 <h4>Concrete members as presets</h4>
 <p>Each concrete member is a different point in the substrate's dimension space — a preset of trait selections, not a distinct code path.</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Member</th><th>Focus</th><th>Selection</th><th>Filtering</th><th>ARIA shape</th></tr>
   </thead>
@@ -122,6 +133,7 @@ injector.set('customContexts:droplistIntent', {
     <tr><td>Native baseline</td><td><code>native</code></td><td><code>model=single</code>/<code>multiple</code></td><td>—</td><td><code>&lt;select&gt;</code> / <code>&lt;optgroup&gt;</code></td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Keyboard contract (family-level summary)</h3>
 <ul>

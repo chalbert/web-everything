@@ -8,7 +8,8 @@
 <h3>Web Standards Alignment</h3>
 <p>This design aligns with current and emerging web standards:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr>
     <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a></td>
@@ -41,6 +42,7 @@
     <td>Follow research, prepare for future native tabs</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Core Patterns</h3>
 
@@ -87,7 +89,8 @@
 <h3>Hidden Modes</h3>
 <p>Multiple ways to hide content, matching platform capabilities:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Mode</th><th>CSS/Attribute</th><th>Behavior</th><th>Use Case</th></tr>
   <tr>
     <td>display</td>
@@ -114,6 +117,7 @@
     <td>Preview, disabled states</td>
   </tr>
 </table>
+</we-data-table>
 
 <we-code-view><pre><code class="language-html">&lt;!-- Specify hidden mode --&gt;
 &lt;section view hidden-mode="until-found"&gt;Searchable content&lt;/section&gt;
@@ -157,7 +161,8 @@ element.addEventListener('toggle', (e) => {
 &lt;section view:case="preload" view:lazy="eager"&gt;...&lt;/section&gt;</code></pre></we-code-view>
 
 <h3>Framework Comparison</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Feature</th><th>Web Everything</th><th>Alpine</th><th>Vue</th><th>Angular</th><th>Platform</th></tr>
   <tr><td>Triggers</td><td>commandfor/command</td><td>@click</td><td>@click</td><td>(click)</td><td>Invoker Commands</td></tr>
   <tr><td>Exclusive groups</td><td>name attr</td><td>-</td><td>-</td><td>-</td><td>&lt;details name&gt;</td></tr>
@@ -166,6 +171,7 @@ element.addEventListener('toggle', (e) => {
   <tr><td>Switch/case</td><td>view:switch/case</td><td>-</td><td>-</td><td>ngSwitch</td><td>-</td></tr>
   <tr><td>Events</td><td>beforetoggle/toggle</td><td>-</td><td>-</td><td>-</td><td>Popover events</td></tr>
 </table>
+</we-data-table>
 
 <h3>Implementation Notes</h3>
 <ul>

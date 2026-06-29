@@ -9,7 +9,8 @@
 <p>The date/time/range pickers share one machinery contract, so that lives here once and each concrete picker is a shallow <strong>preset</strong> — a pin of <code>presentation</code> and <code>granularity</code> over this core, bound to one native anchor — not a re-implementation. This mirrors the <a href="/blocks/droplist/">droplist family</a> (one substrate, members are distinct selections). The key difference from the single-anchor <a href="/blocks/slider/">slider</a> (which needed no named members): the temporal family spans <strong>three</strong> native anchors — <code>input[type=date]</code>, <code>[type=time]</code>, <code>[type=datetime-local]</code> — each with its own parse/format and value shape, which is the concrete platform reason for named presets.</p>
 
 <h3>The dimension space — <code>presentation × granularity</code></h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Dimension</th><th>Values</th><th>Realization</th><th>Tier</th></tr>
   </thead>
@@ -25,6 +26,7 @@
     <tr><td>Surface roving (grid/clock/wheel)</td><td>—</td><td><code>compose</code> — <a href="/intents/focus-delegation/">Focus Delegation</a></td><td>2</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Altitude 1 — native input, the baseline every preset inherits</h3>
 <p>The common case (<code>presentation=input</code>) writes no JavaScript — the native control carries the value, the locale, and the form:</p>

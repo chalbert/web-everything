@@ -12,21 +12,25 @@
 </p>
 
 <h2>Web Standards Alignment</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr><td><a href="https://developer.mozilla.org/docs/Web/CSS/CSS_scroll_snap">CSS Scroll Snap</a> (<code>scroll-snap-type</code> / <code>scroll-snap-align</code>)</td><td>Baseline 2024</td><td>The substrate — paging, momentum, touch, and arrow-key scrolling for free. The block defaults to it.</td></tr>
   <tr><td><a href="https://developer.mozilla.org/docs/Web/CSS/::scroll-button">::scroll-button()</a> / <a href="https://developer.mozilla.org/docs/Web/CSS/::scroll-marker">::scroll-marker</a> (CSS Overflow 5)</td><td>Emerging (Open UI / CSS WG)</td><td>Native prev/next buttons and pagination dots where shipped — used instead of JS handlers; JS paging is the fallback only.</td></tr>
   <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/carousel/">WAI-ARIA APG Carousel</a></td><td>WAI-ARIA 1.2</td><td>Rotation announced via a live region; prev/next + slide-picker controls; slides as a named group. Baked in, not optional.</td></tr>
   <tr><td><a href="https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html">WCAG 2.2.2 Pause, Stop, Hide</a></td><td>WCAG 2.2</td><td>Autoplay (opt-in) requires a visible pause control and pauses on hover/focus; no auto-advance under <code>prefers-reduced-motion</code>.</td></tr>
 </table>
+</we-data-table>
 
 <h2>Framework / Library Research</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Source</th><th>Key Patterns Adopted</th></tr>
   <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/carousel/">WAI-ARIA APG</a></td><td>Live-region rotation announcement, pause control, slide grouping, keyboard model.</td></tr>
   <tr><td><a href="https://open-ui.org/components/carousel.explainer/">Open UI Carousel</a> / CSS WG</td><td>Native carousel via <code>::scroll-button()</code> + <code>scroll-marker-group</code> — the direction the platform is moving.</td></tr>
   <tr><td><a href="https://www.embla-carousel.com/">Embla</a> / <a href="https://splidejs.com/">Splide</a></td><td>Snap-based paging, optional autoplay with pause, accessible controls — as JS fallbacks.</td></tr>
 </table>
+</we-data-table>
 
 <h2>Behaviour</h2>
 <ul>

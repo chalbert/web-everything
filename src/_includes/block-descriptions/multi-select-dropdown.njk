@@ -5,7 +5,8 @@
 
 <h3>Trait selection at a glance</h3>
 <p>The multi-select dropdown's identity is fixed by these trait selections. The <strong>only</strong> difference from the dropdown is the <code>selection</code> row; the focus, anchor, and type-ahead picks are identical. Structural picks are <strong>local</strong> (an author cannot change them via props or ambient intent); behavioral picks are this component's <em>stance</em> and remain overridable by an ambient <code>droplistIntent</code>:</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Trait</th><th>Dimension</th><th>Value</th><th>Kind</th></tr>
   </thead>
@@ -16,6 +17,7 @@
     <tr><td><a href="/intents/anchor/">Anchor</a></td><td>placement / collision</td><td><code>bottom-start</code> / <code>flip,resize</code></td><td>behavioral</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Altitude 1 — HTML, explicit behaviors (the substrate)</h3>
 <p>The same substrate as the dropdown; only the <code>selection</code> attribute value changes, and the listbox carries <code>aria-multiselectable="true"</code>. <code>model=multiple</code> switches selection to the decoupled toggle model — Space toggles <code>aria-selected</code> on the focused option — and <code>selectionFollowsFocus=false</code> stops auto-commit, so the arrow keys move virtual focus only. The JSX mirror is near-identity — only the inline comments (<code>&lt;!-- --&gt;</code> → <code>{/* */}</code>) and the two-root wrapper (a <code>&lt;&gt;</code> fragment) differ:</p>
@@ -230,7 +232,8 @@ window.attributes.upgrade(document.body);</code></pre></we-code-view>
 
 <h3>Public API</h3>
 <p>Plural where the dropdown is singular — a <code>.values</code> array replaces <code>.value</code>, <code>.selectedOptions</code> replaces <code>.selectedOption</code>, and the form submits repeating entries.</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Surface</th><th>Shape</th><th>Notes</th></tr>
   </thead>
@@ -246,5 +249,6 @@ window.attributes.upgrade(document.body);</code></pre></we-code-view>
     <tr><td>Form participation</td><td><code>static formAssociated = true</code></td><td><code>FormData.getAll(name)</code>, reset, bfcache restore, <code>setValidity()</code>, <code>&lt;label for&gt;</code>.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p style="font-size: 0.9rem; color: var(--color-text-muted);">The single-select sibling is the <a href="/blocks/dropdown/">dropdown block</a>; family-level rules (intent vs. trait, three altitudes, trait surface map) live on the <a href="/blocks/droplist/">droplist family page</a>. Design history: <code>reports/2026-06-02-droplist-trait-language.md</code> ("Multi-dropdown — one trait flip"), <code>reports/2026-06-02-dropdown-trait-composition.md</code> (Step 2).</p>

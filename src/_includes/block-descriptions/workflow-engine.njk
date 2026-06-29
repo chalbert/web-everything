@@ -21,7 +21,8 @@
 
 <h3>Tiered operators (the #085 compliance posture)</h3>
 <p>The standardized operator set is tiered and stays an open meta-schema — an engine declares which operators it honors:</p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead><tr><th>Tier</th><th>Operators</th><th>Native engine</th></tr></thead>
     <tbody>
         <tr><td>TIER-1 core (mandatory)</td><td><code>sequence</code>, <code>branch</code>/guard, <code>nest</code> (sub-workflow), threaded <code>context</code>, <code>completion</code>, <code>current-position</code></td><td>✓</td></tr>
@@ -29,6 +30,7 @@
         <tr><td>TIER-3 deferred</td><td>history/resume, retry, compensation/saga</td><td>backend concern — behind the provider, not the contract</td></tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Example</h3>
 <we-code-view><pre><code class="language-typescript">import { customWorkflowEngine } from 'blocks/workflow-engine';

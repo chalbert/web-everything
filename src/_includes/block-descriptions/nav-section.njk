@@ -27,28 +27,34 @@
 &lt;/div&gt;</code></pre></we-code-view>
 
 <h3>ARIA Attributes Managed</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Attribute</th><th>Element</th><th>Description</th></tr>
   <tr><td><code>aria-expanded</code></td><td>Toggle button</td><td>Set to <code>"true"</code> when the section is expanded, <code>"false"</code> when collapsed. Toggled on activation.</td></tr>
   <tr><td><code>aria-controls</code></td><td>Toggle button</td><td>References the <code>id</code> of the controlled content element. Set by the author in markup.</td></tr>
   <tr><td><code>hidden</code></td><td>Content list</td><td>Applied when collapsed, removed when expanded. Uses the native <code>hidden</code> attribute.</td></tr>
 </table>
+</we-data-table>
 
 <h3>Public API</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Method</th><th>Description</th></tr>
   <tr><td><code>toggle()</code></td><td>Toggles the section between expanded and collapsed states.</td></tr>
   <tr><td><code>expand()</code></td><td>Expands the section, setting <code>aria-expanded="true"</code> and removing <code>hidden</code> from the content.</td></tr>
   <tr><td><code>collapse()</code></td><td>Collapses the section, setting <code>aria-expanded="false"</code> and adding <code>hidden</code> to the content.</td></tr>
   <tr><td><code>isExpanded</code></td><td>Read-only boolean property. Returns <code>true</code> if the section is currently expanded.</td></tr>
 </table>
+</we-data-table>
 
 <h3>Keyboard Interaction</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Key</th><th>Context</th><th>Action</th></tr>
   <tr><td>Enter</td><td>Toggle button</td><td>Toggles the section expanded/collapsed state</td></tr>
   <tr><td>Space</td><td>Toggle button</td><td>Toggles the section expanded/collapsed state</td></tr>
 </table>
+</we-data-table>
 <p>Note: <code>Enter</code> and <code>Space</code> are handled natively by the browser on <code>&lt;button&gt;</code> elements. NavSectionBehavior listens for the <code>click</code> event (which fires on both mouse click and keyboard activation) to toggle state.</p>
 
 <h3>Configuration</h3>

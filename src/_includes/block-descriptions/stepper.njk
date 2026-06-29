@@ -7,7 +7,8 @@
 
 <h3>Navigation Intent dimensions</h3>
 <p>The Stepper is the block that most exercises the navigation dimensions <em>in combination</em>, and the one that justifies keeping the intent's <code>session</code> persistence value (per <a href="/backlog/057-nav-persistence-grounding/">#057</a>):</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Dimension</th><th>Value</th><th>Why</th></tr>
   <tr><td><code>structure</code></td><td><code>linear</code></td><td>A fixed, ordered sequence of steps</td></tr>
   <tr><td><code>history</code></td><td><code>replace</code></td><td>Each step overwrites the last, so Back exits the flow rather than walking step-by-step</td></tr>
@@ -16,9 +17,11 @@
   <tr><td><code>guard</code></td><td><code>confirm</code></td><td>Leaving mid-flow prompts so progress is not silently lost</td></tr>
   <tr><td><code>persistence</code></td><td><code>session</code></td><td>The step survives Back/Forward and refresh, but is not a fresh shareable link — the canonical Wizard behavior</td></tr>
 </table>
+</we-data-table>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr>
     <td><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"><code>aria-current="step"</code></a></td>
@@ -41,6 +44,7 @@
     <td>Next/Back/Go-to-step controls use the <code>commandfor</code>/<code>command</code> pattern</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Progression model</h3>
 <p>Locked progression is what distinguishes a Wizard from Tabs, and is the safe default:</p>
