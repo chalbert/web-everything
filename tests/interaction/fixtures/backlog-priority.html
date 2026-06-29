@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Interaction fixture · Prioritisation table</title>
+  <style>
+    /* Minimal styles so `display:none` (the filter mechanism) and visibility are observable, and the
+       mock chip looks like a button. No FUI styles — the test asserts behaviour, not appearance. */
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    .fui-filter-chip { cursor: pointer; }
+    .fui-filter-chip--selected { font-weight: 700; }
+    table { border-collapse: collapse; }
+    th, td { border: 1px solid #ccc; padding: 0.25rem 0.5rem; }
+  </style>
+</head>
+<body>
+  <!-- MOCK of FUI's <we-filter-chip> (the FilterChipElement). The real one loads as a cross-origin module
+       and, on upgrade, REPLACES ITSELF with a native <button class="fui-filter-chip">, deriving aria-pressed
+       from the `selected` attribute — which is precisely what dropped the summary pills' direct click
+       listeners (the regression these specs lock in). The mock reproduces that self-replace, ASYNCHRONOUSLY
+       (after a microtask, like a real module load), so the table JS's post-upgrade MutationObserver path is
+       exercised. It deliberately carries NO behaviour of its own — only the upgrade. -->
+  <script>
+    class MockFilterChip extends HTMLElement {
+      connectedCallback() {
+        // Upgrade async, mirroring the real module's deferred load.
+        Promise.resolve().then(() => {
+          if (!this.isConnected) return;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          // Copy every attribute across (data-pfilter / data-pready / data-pkind / data-psplit / title…).
+          for (const a of Array.from(this.attributes)) btn.setAttribute(a.name, a.value);
+          const selected = this.hasAttribute('selected');
+          btn.setAttribute('aria-pressed', selected ? 'true' : (this.getAttribute('aria-pressed') || 'false'));
+          btn.className = 'fui-filter-chip' + (selected ? ' fui-filter-chip--selected' : '');
+          btn.innerHTML = this.innerHTML;
+          this.replaceWith(btn);
+        });
+      }
+    }
+    customElements.define('we-filter-chip', MockFilterChip);
+  </script>
+
+  <h1>Prioritisation</h1>
+
+  <!-- Summary count pills (data-pfilter) — one-click readiness shortcuts. Start unpressed (no `selected`). -->
+  <div>
+    <we-filter-chip data-pfilter="batchable" aria-pressed="false">3 batchable</we-filter-chip>
+    <we-filter-chip data-pfilter="agentready" aria-pressed="false">1 agent-ready</we-filter-chip>
+    <we-filter-chip data-pfilter="sliceable" aria-pressed="false">1 epic</we-filter-chip>
+    <we-filter-chip data-pfilter="program" aria-pressed="false">1 program</we-filter-chip>
+    <we-filter-chip data-pfilter="decision" aria-pressed="false">1 decision</we-filter-chip>
+    <we-filter-chip data-pfilter="notready" aria-pressed="false">1 not ready</we-filter-chip>
+  </div>
+
+  <!-- Filter bar: search + readiness chips + split toggle + kind chips + visible count. -->
+  <div>
+    <input type="search" data-ptable-search aria-label="Filter by # or title">
+    <span role="group" aria-label="Filter by readiness">
+      <we-filter-chip data-pready="batchable" selected>Batchable</we-filter-chip>
+      <we-filter-chip data-pready="agentready" selected>Agent-ready</we-filter-chip>
+      <we-filter-chip data-pready="sliceable" selected>Epics</we-filter-chip>
+      <we-filter-chip data-pready="program" selected>Programs</we-filter-chip>
+      <we-filter-chip data-pready="decision" selected>Decision</we-filter-chip>
+      <we-filter-chip data-pready="notready" selected>Not ready</we-filter-chip>
+    </span>
+    <span role="group" aria-label="Filter to split candidates">
+      <we-filter-chip data-psplit>Splittable only</we-filter-chip>
+    </span>
+    <span role="group" aria-label="Filter by kind">
+      <we-filter-chip data-pkind="story" selected>Story</we-filter-chip>
+      <we-filter-chip data-pkind="epic" selected>Epic</we-filter-chip>
+      <we-filter-chip data-pkind="task" selected>Task</we-filter-chip>
+      <we-filter-chip data-pkind="decision" selected>Decision</we-filter-chip>
+    </span>
+    <span><strong data-ptable-count>8</strong> shown</span>
+  </div>
+
+  <!-- The table. 8 sortable columns + a tbody of known rows spanning every readiness/kind bucket, with one
+       splittable story. data-search = "<num> <lowercased title>" (the contract the search box reads). -->
+  <table class="bd-ratetable sortable">
+    <thead><tr>
+      <th data-sort-key="item" data-sort-type="num">Item</th>
+      <th data-sort-key="kind" data-sort-type="text">Kind</th>
+      <th data-sort-key="size" data-sort-type="num">Size</th>
+      <th data-sort-key="readiness" data-sort-type="num">Readiness</th>
+      <th data-sort-key="frees" data-sort-type="num">Frees now</th>
+      <th data-sort-key="gates" data-sort-type="num">Gates</th>
+      <th data-sort-key="direct" data-sort-type="num">Direct</th>
+      <th>Would free</th>
+    </tr></thead>
+    <tbody>
+      <tr data-kind="task"     data-readiness="batchable"  data-search="101 alpha task">
+        <td data-sort-val="101">#101 Alpha task</td><td data-sort-val="task">task</td><td data-sort-val="2">2</td><td data-sort-val="4">A</td><td data-sort-val="3">3</td><td data-sort-val="5">5</td><td data-sort-val="2">2</td><td></td></tr>
+      <tr data-kind="story"    data-readiness="batchable"  data-search="102 beta story">
+        <td data-sort-val="102">#102 Beta story</td><td data-sort-val="story">story</td><td data-sort-val="5">5</td><td data-sort-val="4">A</td><td data-sort-val="1">1</td><td data-sort-val="2">2</td><td data-sort-val="1">1</td><td></td></tr>
+      <tr data-kind="task"     data-readiness="batchable"  data-search="103 gamma task">
+        <td data-sort-val="103">#103 Gamma task</td><td data-sort-val="task">task</td><td data-sort-val="2">2</td><td data-sort-val="4">A</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td></td></tr>
+      <tr data-kind="story"    data-readiness="agentready" data-search="104 delta big story" data-splittable="true">
+        <td data-sort-val="104">#104 Delta big story</td><td data-sort-val="story">story</td><td data-sort-val="13">13</td><td data-sort-val="3">A</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td></td></tr>
+      <tr data-kind="epic"     data-readiness="sliceable"  data-search="105 epsilon epic">
+        <td data-sort-val="105">#105 Epsilon epic</td><td data-sort-val="epic">epic</td><td data-sort-val="0">—</td><td data-sort-val="2.8">A</td><td data-sort-val="0">0</td><td data-sort-val="8">8</td><td data-sort-val="4">4</td><td></td></tr>
+      <tr data-kind="epic"     data-readiness="program"    data-search="106 zeta program">
+        <td data-sort-val="106">#106 Zeta program</td><td data-sort-val="epic">epic</td><td data-sort-val="0">—</td><td data-sort-val="2.6">A</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td></td></tr>
+      <tr data-kind="decision" data-readiness="decision"   data-search="107 eta decision">
+        <td data-sort-val="107">#107 Eta decision</td><td data-sort-val="decision">decision</td><td data-sort-val="0">—</td><td data-sort-val="2">B</td><td data-sort-val="0">0</td><td data-sort-val="3">3</td><td data-sort-val="3">3</td><td></td></tr>
+      <tr data-kind="story"    data-readiness="notready"   data-search="108 theta blocked story">
+        <td data-sort-val="108">#108 Theta blocked story</td><td data-sort-val="story">story</td><td data-sort-val="5">5</td><td data-sort-val="1">C</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td></td></tr>
+    </tbody>
+  </table>
+
+  <!-- The REAL shipped table JS — served from the repo tree, so this test guards the actual file. -->
+  <script src="/src/assets/js/backlog-table-sort.js"></script>
+</body>
+</html>

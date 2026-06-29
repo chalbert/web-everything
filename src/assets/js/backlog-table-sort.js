@@ -61,10 +61,37 @@
   // single ON/OFF toggle (default OFF) that AND-composes with the other filters: when on, narrow to rows
   // carrying `data-splittable`. `splitSummary` is the big "N to split" pill — a one-click shortcut to it.
   function splitChip() { return document.querySelector('[data-psplit]'); }
-  var splitSummary = document.querySelector('[data-psplitfilter]');
+  // Live accessor — the summary pills are <we-filter-chip> too, so they self-replace with a <button> on
+  // upgrade; a cached reference goes stale (its listeners and our style writes hit a detached node).
+  function splitSummaryEl() { return document.querySelector('[data-psplitfilter]'); }
   var search = document.querySelector('[data-ptable-search]');
   var countEl = document.querySelector('[data-ptable-count]');
   if (!readyChips().length && !kindChips().length && !search) return;
+
+  // Empty-state row — when the active filter (chip combo, the split toggle, or a persisted search term)
+  // hides every row, the table would otherwise look silently broken: a header and nothing under it, with
+  // no clue why or how to recover. A persisted filter survives reloads, so this is the common "nothing
+  // shows" report. We append one full-width row that names the cause and offers a one-click reset.
+  var tbodyEl = table.querySelector('tbody');
+  var colCount = table.querySelectorAll('thead th').length || 8;
+  var emptyRow = null;
+  function ensureEmptyRow() {
+    if (emptyRow) return emptyRow;
+    emptyRow = document.createElement('tr');
+    emptyRow.className = 'ptable-empty';
+    emptyRow.innerHTML = '<td colspan="' + colCount + '" style="text-align:center; padding:1.5rem 1rem; '
+      + 'color:var(--color-text-muted);">No rows match the current filter. '
+      + '<button type="button" data-ptable-reset style="appearance:none; border:1px solid var(--color-border); '
+      + 'background:var(--color-surface, #fff); border-radius:0.4rem; padding:0.25rem 0.7rem; font:inherit; '
+      + 'font-size:0.9em; cursor:pointer; color:var(--color-primary); font-weight:600;">Clear filters</button></td>';
+    emptyRow.querySelector('[data-ptable-reset]').addEventListener('click', function () {
+      clearSummary();
+      resetAllChips();
+      apply();
+    });
+    tbodyEl.appendChild(emptyRow);
+    return emptyRow;
+  }
 
   // ── Visual state + persistence ──────────────────────────────────────────────
   // A chip's pressed state lives in `aria-pressed`; the FUI chip styles highlight
@@ -141,6 +168,10 @@
       if (ok) shown++;
     });
     if (countEl) countEl.textContent = shown;
+    // Surface the empty-state when the filter hid everything (and keep it out of the way otherwise). The
+    // row is appended after the snapshot in `rows`, so it's never iterated above or counted in `shown`.
+    if (shown === 0) ensureEmptyRow().style.display = '';
+    else if (emptyRow) emptyRow.style.display = 'none';
     // Every code path that changes chip/search state calls apply() afterwards, so this is the single place
     // to mirror the pressed state onto the chips and persist the whole filter.
     syncVisual();
@@ -149,10 +180,12 @@
 
   // Summary count chips (data-pfilter) are one-click shortcuts that drive the readiness filter. Manually
   // touching a filter chip / search clears their "active" highlight so it never lies about the state.
-  var summaryChips = Array.prototype.slice.call(document.querySelectorAll('[data-pfilter]'));
+  // Live accessor (not a cached array) for the same upgrade-survives reason as the readiness chips.
+  function summaryChips() { return Array.prototype.slice.call(document.querySelectorAll('[data-pfilter]')); }
   function clearSummary() {
-    summaryChips.forEach(function (s) { s.setAttribute('aria-pressed', 'false'); s.style.boxShadow = ''; });
-    if (splitSummary) { splitSummary.setAttribute('aria-pressed', 'false'); splitSummary.style.boxShadow = ''; }
+    summaryChips().forEach(function (s) { s.setAttribute('aria-pressed', 'false'); s.style.boxShadow = ''; });
+    var ss = splitSummaryEl();
+    if (ss) { ss.setAttribute('aria-pressed', 'false'); ss.style.boxShadow = ''; }
   }
   function resetAllChips() {
     readyChips().forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });
@@ -175,43 +208,47 @@
   });
   if (search) search.addEventListener('input', function () { clearSummary(); apply(); });
 
-  // The "N to split" summary pill — a one-click shortcut: reset the groups to "all", then turn the split
-  // toggle on so the table isolates exactly the split candidates (any tier). Clicking it again clears.
-  if (splitSummary) {
-    splitSummary.addEventListener('click', function () {
-      var wasActive = splitSummary.getAttribute('aria-pressed') === 'true';
+  // The summary pills (data-pfilter shortcuts and the data-psplitfilter "N to split" pill) are
+  // <we-filter-chip>s that self-replace with a <button> on upgrade, so per-element listeners attached up
+  // front would die the moment the FUI module loads — that's why clicking a count pill stopped filtering.
+  // Delegate on document (like the readiness/kind/split chips) so the handler catches both the original
+  // element and its upgraded <button>.
+  document.addEventListener('click', function (e) {
+    // The "N to split" summary pill — reset the groups to "all", then turn the split toggle on so the
+    // table isolates exactly the split candidates (any tier). Clicking it again clears.
+    var ss = e.target.closest('[data-psplitfilter]');
+    if (ss) {
+      var wasSplitActive = ss.getAttribute('aria-pressed') === 'true';
       clearSummary();
       resetAllChips();
-      if (!wasActive) {
+      if (!wasSplitActive) {
         var sc = splitChip();
         if (sc) sc.setAttribute('aria-pressed', 'true');
-        splitSummary.setAttribute('aria-pressed', 'true');
-        splitSummary.style.boxShadow = '0 0 0 2px #334155';
+        ss.setAttribute('aria-pressed', 'true');
+        ss.style.boxShadow = '0 0 0 2px #334155';
       }
       apply();
-    });
-  }
-
-  summaryChips.forEach(function (chip) {
-    chip.addEventListener('click', function () {
-      var wasActive = chip.getAttribute('aria-pressed') === 'true';
-      clearSummary();
-      if (wasActive) {                         // clicking the active shortcut again clears the filter
-        resetAllChips();
-      } else {
-        var cats = (chip.getAttribute('data-pfilter') || '').split(',');
-        kindChips().forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });   // readiness-only shortcut
-        var sc = splitChip();
-        if (sc) sc.setAttribute('aria-pressed', 'false');   // a readiness shortcut is a fresh view — drop the split facet
-        if (search) search.value = '';
-        readyChips().forEach(function (c) {
-          c.setAttribute('aria-pressed', cats.indexOf(c.getAttribute('data-pready')) >= 0 ? 'true' : 'false');
-        });
-        chip.setAttribute('aria-pressed', 'true');
-        chip.style.boxShadow = '0 0 0 2px #334155';     // active ring, visible on every chip colour
-      }
-      apply();
-    });
+      return;
+    }
+    var chip = e.target.closest('[data-pfilter]');
+    if (!chip) return;
+    var wasActive = chip.getAttribute('aria-pressed') === 'true';
+    clearSummary();
+    if (wasActive) {                         // clicking the active shortcut again clears the filter
+      resetAllChips();
+    } else {
+      var cats = (chip.getAttribute('data-pfilter') || '').split(',');
+      kindChips().forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });   // readiness-only shortcut
+      var sc2 = splitChip();
+      if (sc2) sc2.setAttribute('aria-pressed', 'false');   // a readiness shortcut is a fresh view — drop the split facet
+      if (search) search.value = '';
+      readyChips().forEach(function (c) {
+        c.setAttribute('aria-pressed', cats.indexOf(c.getAttribute('data-pready')) >= 0 ? 'true' : 'false');
+      });
+      chip.setAttribute('aria-pressed', 'true');
+      chip.style.boxShadow = '0 0 0 2px #334155';     // active ring, visible on every chip colour
+    }
+    apply();
   });
 
   restore();
