@@ -16,7 +16,8 @@
 <h3>The Core Question: What Exists in the DOM?</h3>
 <p>The right block depends on what should be in the DOM when content is <strong>not active</strong>:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <tr>
     <th>DOM When Inactive</th>
     <th>Block</th>
@@ -48,6 +49,7 @@
     <td>Multi-step wizards, state-dependent UI, mode switching</td>
   </tr>
 </table>
+</we-data-table>
 
 <h4>Decision Guide</h4>
 <ol>
@@ -83,7 +85,8 @@
 </ol>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr>
     <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a></td>
@@ -121,6 +124,7 @@
     <td>Directives use comment markers today, ready to adopt DOM Parts when available</td>
   </tr>
 </table>
+</we-data-table>
 
 <!-- ═══════════════════════════════════════════════ -->
 <hr>
@@ -128,7 +132,8 @@
 <p>Not a block itself. The engine provides the mechanics that all View blocks and higher-level components share.</p>
 
 <h4>Hidden Modes</h4>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Mode</th><th>CSS / Attribute</th><th>In DOM</th><th>Accessible</th><th>Searchable (Ctrl+F)</th><th>Use Case</th></tr>
   <tr>
     <td><code>display</code></td>
@@ -163,6 +168,7 @@
     <td>Preview, disabled states</td>
   </tr>
 </table>
+</we-data-table>
 <p>Directives (ViewIf, ViewSwitch) don't use hidden modes by default &mdash; they remove content from the DOM entirely. Hidden modes apply when using <code>keep-alive</code> to cache previously-stamped content.</p>
 
 <h4>Toggle Events (Popover API pattern)</h4>
@@ -183,11 +189,13 @@ element.addEventListener('toggle', (e) => {
   console.log('View toggled:', e.newState);
 }, { provider: 'customEvents:view-toggle' });</code></pre></we-code-view>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Cancelable</th></tr>
   <tr><td><code>beforetoggle</code></td><td><code>ViewBeforeToggleEvent</code></td><td><code>customEvents:view-beforetoggle</code></td><td>Yes</td></tr>
   <tr><td><code>toggle</code></td><td><code>ViewToggleEvent</code></td><td><code>customEvents:view-toggle</code></td><td>No</td></tr>
 </table>
+</we-data-table>
 <p>Detail shape: <code>{ oldState: 'hidden'|'visible', newState: 'hidden'|'visible' }</code></p>
 
 <h4>Exclusive Groups</h4>
@@ -378,12 +386,14 @@ class Router {
 &lt;div view:show="!isLoading"&gt;Content ready&lt;/div&gt;</code></pre></we-code-view>
 
 <h4>Difference from ViewBehavior</h4>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th></th><th>ViewBehavior</th><th>ViewShowBehavior</th></tr>
   <tr><td>Trigger</td><td>Commands (buttons, API calls)</td><td>Expression evaluation (state changes)</td></tr>
   <tr><td>Control</td><td>Imperative</td><td>Declarative / reactive</td></tr>
   <tr><td>Typical use</td><td>User-triggered panels</td><td>State-driven UI regions</td></tr>
 </table>
+</we-data-table>
 
 <h4>Who uses this</h4>
 <ul>
@@ -423,7 +433,8 @@ class Router {
 </ul>
 
 <h4>Tradeoffs</h4>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th></th><th>ViewShowBehavior (<code>view:show</code>)</th><th>ViewIfDirective (<code>view:if</code>)</th></tr>
   <tr><td>DOM when inactive</td><td>Element exists, hidden</td><td>Nothing (comment marker only)</td></tr>
   <tr><td>State preservation</td><td>Automatic</td><td>Destroyed (unless <code>keep-alive</code>)</td></tr>
@@ -432,6 +443,7 @@ class Router {
   <tr><td>Accessibility when hidden</td><td>Configurable via hidden mode</td><td>None</td></tr>
   <tr><td>Ctrl+F findable</td><td>Yes (with <code>until-found</code>)</td><td>No</td></tr>
 </table>
+</we-data-table>
 
 <h4>Who uses this</h4>
 <ul>
@@ -475,7 +487,8 @@ class Router {
 <p>When using <code>keep-alive</code>, cached branches are hidden using the engine's hidden modes instead of being destroyed. This is the bridge between directive and behavior patterns &mdash; the directive handles structural stamping, but delegates hide/show of cached content to the engine.</p>
 
 <h4>Why not ViewBehavior with exclusive groups?</h4>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th></th><th>ViewBehavior + <code>name</code></th><th>ViewSwitchDirective</th></tr>
   <tr><td>Children in HTML</td><td>All declared statically</td><td>Templates, stamped on demand</td></tr>
   <tr><td>Initial DOM cost</td><td>All branches rendered</td><td>Only active branch</td></tr>
@@ -484,6 +497,7 @@ class Router {
   <tr><td>Accessibility when hidden</td><td>Configurable</td><td>None (unless cached)</td></tr>
   <tr><td>Best for</td><td>Tabs (few panels, always present)</td><td>Wizards, routed views, many branches</td></tr>
 </table>
+</we-data-table>
 
 <h4>Who uses this</h4>
 <ul>
@@ -497,7 +511,8 @@ class Router {
 <h3>How Higher-Level Components Use View</h3>
 <p>View provides the primitives. Components add domain-specific concerns:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Component</th><th>View Blocks Used</th><th>What the Component Adds</th></tr>
   <tr>
     <td><a href="/blocks/tabs/">Tabs</a></td>
@@ -525,9 +540,11 @@ class Router {
     <td>Nothing &mdash; these are used directly</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Framework Comparison</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Concern</th><th>Web Everything</th><th>Alpine</th><th>Vue</th><th>Angular</th><th>Solid</th></tr>
   <tr><td>Show (CSS)</td><td><code>view:show</code></td><td><code>x-show</code></td><td><code>v-show</code></td><td>&mdash;</td><td><code>&lt;Show&gt;</code></td></tr>
   <tr><td>If (DOM)</td><td><code>view:if</code></td><td><code>x-if</code></td><td><code>v-if</code></td><td><code>*ngIf</code></td><td><code>&lt;Show&gt;</code></td></tr>
@@ -537,6 +554,7 @@ class Router {
   <tr><td>Keep-alive</td><td><code>view:keep-alive</code></td><td>&mdash;</td><td><code>&lt;KeepAlive&gt;</code></td><td>&mdash;</td><td>&mdash;</td></tr>
   <tr><td>Events</td><td><code>beforetoggle/toggle</code></td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td></tr>
 </table>
+</we-data-table>
 
 <h3>Implementation Notes</h3>
 <ul>
@@ -551,7 +569,8 @@ class Router {
 </ul>
 
 <h3>Exports</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Export</th><th>Description</th></tr>
   <tr><td><code>ViewEngine</code></td><td>Shared core: hidden modes, toggle events, transitions, exclusive groups</td></tr>
   <tr><td><code>ViewBehavior</code></td><td>Behavior: imperative show/hide via Invoker Commands</td></tr>
@@ -560,3 +579,4 @@ class Router {
   <tr><td><code>ViewSwitchDirective</code></td><td>Directive: structural multi-branch rendering</td></tr>
   <tr><td><code>ViewEngineOptions</code></td><td>Configuration type for hidden mode, transition, group name</td></tr>
 </table>
+</we-data-table>

@@ -7,7 +7,8 @@
 
 <h3>Native-first — enhance only the gaps</h3>
 <p>The platform already ships a complete single-thumb slider. The feature inventory below marks where the native element suffices (<code>built-in</code>, tier 1) versus where the block must compose another intent or fall back to a custom track/thumb.</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Feature</th><th>Disposition</th><th>Tier</th><th>Notes</th></tr>
   </thead>
@@ -22,6 +23,7 @@
     <tr><td>Precise numeric entry / spinner</td><td><code>compose</code> — future numeric/stepper input</td><td>3</td><td>Out of scope: the slider is the <em>continuous-along-a-track</em> member, not a number field.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Altitude 1 — native single-thumb, enhanced in place</h3>
 <p>The common case writes no JavaScript. The native element carries the value and the form; the block layers ticks and formatted output on top:</p>

@@ -5,7 +5,8 @@
 
 <h3>Trait selection at a glance</h3>
 <p>The dropdown's identity is fixed by these trait selections. Structural picks are <strong>local</strong> (an author cannot change them via props or ambient intent); behavioral picks are this component's <em>stance</em> and remain overridable by an ambient <code>droplistIntent</code>:</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Trait</th><th>Dimension</th><th>Value</th><th>Kind</th></tr>
   </thead>
@@ -16,6 +17,7 @@
     <tr><td><a href="/intents/anchor/">Anchor</a></td><td>placement / collision</td><td><code>bottom-start</code> / <code>flip,resize</code></td><td>behavioral</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <h3>Altitude 1 — HTML, explicit behaviors (the substrate)</h3>
 <p>Each attribute is one trait; the attribute <em>value</em> is the trait selection. This is what the substrate looks like at the DOM level, with hardcoded items for clarity. The JSX mirror is near-identity — only the inline comments (<code>&lt;!-- --&gt;</code> → <code>{/* */}</code>) and the two-root wrapper (a <code>&lt;&gt;</code> fragment) differ:</p>
@@ -215,7 +217,8 @@ window.attributes.upgrade(document.body);</code></pre></we-code-view>
 </ul>
 
 <h3>Public API</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Surface</th><th>Shape</th><th>Notes</th></tr>
   </thead>
@@ -230,5 +233,6 @@ window.attributes.upgrade(document.body);</code></pre></we-code-view>
     <tr><td>Form participation</td><td><code>static formAssociated = true</code></td><td><code>FormData</code>, reset, bfcache restore, <code>setValidity()</code>, <code>&lt;label for&gt;</code>, <code>autocomplete</code> attribute.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p style="font-size: 0.9rem; color: var(--color-text-muted);">Family-level rules (intent vs. trait, three altitudes, trait surface map) live on the <a href="/blocks/droplist/">droplist family page</a>. Design history: <code>reports/2026-06-02-droplist-trait-language.md</code>, <code>reports/2026-06-02-dropdown-trait-composition.md</code>.</p>

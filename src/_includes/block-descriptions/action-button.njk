@@ -12,7 +12,8 @@
 </p>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
     <tr>
         <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a></td>
@@ -35,9 +36,11 @@
         <td>Action groups use <code>contain: layout</code> to prevent busy-state width changes from triggering ancestor reflow</td>
     </tr>
 </table>
+</we-data-table>
 
 <h3>Framework Research</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
     <tr>
         <td><a href="https://mui.com/material-ui/react-button/">Material UI</a></td>
@@ -56,13 +59,15 @@
         <td>Behavior without styling opinions; controlled state; closest to our intent-driven model</td>
     </tr>
 </table>
+</we-data-table>
 
 <h3>Busy State Management</h3>
 <p>
     When a <a href="/blocks/resource-action/">Resource Action</a> enters <code>pending</code> state,
     Action Button applies busy behavior to the trigger element. Two strategies are available:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Trait</th><th>Behavior</th><th>CSS Output</th><th>Use Case</th></tr>
     </thead>
@@ -81,6 +86,7 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     <strong>Why <code>aria-disabled</code> over <code>disabled</code>?</strong>
     The HTML <code>disabled</code> attribute removes the element from the tab order and prevents screen readers
@@ -108,7 +114,8 @@
     Confirmation dialogs and action groups have different button ordering conventions per platform.
     <code>withPlatformOrdering</code> reorders child action elements based on OS detection.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Platform</th><th>Primary Action Position</th><th>Example</th></tr>
     </thead>
@@ -125,6 +132,7 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     Detection uses <code>navigator.platform</code> (or <code>navigator.userAgentData.platform</code> where available).
     The ordering can be overridden via injector configuration for cross-platform consistency.
@@ -189,7 +197,8 @@
     Action Button exposes state via attributes and CSS custom properties, enabling styling without
     JavaScript coupling.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Selector / Property</th><th>Description</th></tr>
     </thead>
@@ -202,9 +211,11 @@
         <tr><td><code>--action-opacity</code></td><td>Opacity during busy-interactive state (default: 0.7)</td></tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Exports</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
     </thead>
@@ -217,3 +228,4 @@
         <tr><td><code>ActionButtonState</code></td><td>Type</td><td>State: idle | busy-disabled | busy-interactive</td></tr>
     </tbody>
 </table>
+</we-data-table>

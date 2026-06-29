@@ -83,7 +83,8 @@ customElements.define('user-card', UserCard);
 
 <section class="section-card">
     <h3 id="standards">Web Standards Alignment</h3>
-    <table>
+    <we-data-table>
+    <table class="data-table">
         <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
         <tr>
             <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Components/Using_custom_elements">Custom Elements v1</a></td>
@@ -116,22 +117,26 @@ customElements.define('user-card', UserCard);
             <td>Prior art (<code>&lt;definition&gt;</code>). We choose <code>&lt;component&gt;</code> and ship the static tier now, composing unshipped binding primitives later.</td>
         </tr>
     </table>
+    </we-data-table>
 </section>
 
 <section class="section-card">
     <h3 id="frameworks">Framework Research</h3>
-    <table>
+    <we-data-table>
+    <table class="data-table">
         <tr><th>Framework</th><th>Key Patterns</th><th>Relationship</th></tr>
         <tr><td><a href="https://vuejs.org/api/built-in-special-elements.html#component">Vue</a></td><td><code>&lt;component :is&gt;</code></td><td>The <em>instantiate-here</em> pattern our <em>define-here</em> element must not be confused with (DC-1).</td></tr>
         <tr><td><a href="https://svelte.dev/docs/special-elements#svelte-element">Svelte</a></td><td><code>&lt;svelte:element&gt;</code>, compile-time lowering</td><td>Compiles components to classes at build time — the same model as our AST adapter.</td></tr>
         <tr><td><a href="https://lit.dev/">Lit</a></td><td><code>@customElement</code>, static <code>html``</code></td><td>The class shape our transform emits resembles a Lit element.</td></tr>
         <tr><td><a href="https://github.com/justinfagnani/stampino-element">Stampino</a></td><td>declarative <code>&lt;template&gt;</code> components</td><td>Userland proof HTML-defined components are viable today.</td></tr>
     </table>
+    </we-data-table>
 </section>
 
 <section class="section-card">
     <h3 id="features">Feature Inventory</h3>
-    <table>
+    <we-data-table>
+    <table class="data-table">
         <tr><th>Feature</th><th>Disposition</th><th>Tier</th></tr>
         <tr><td>Register element by <code>name</code> from markup</td><td>built-in</td><td>1</td></tr>
         <tr><td>Shadow template (<code>shadow="open|closed"</code>, DSD-aligned)</td><td>built-in</td><td>1</td></tr>
@@ -153,6 +158,7 @@ customElements.define('user-card', UserCard);
         <tr><td>Live in-browser transform in the toggle</td><td>defer</td><td>2</td></tr>
         <tr><td>Inherit / extend another <code>&lt;component&gt;</code></td><td>compose</td><td>3</td></tr>
     </table>
+    </we-data-table>
     <p class="text-sm text-gray-600">
         Tier 1 ships the static, DSD-aligned definition. Tiers 2–3 <strong>compose</strong> with
         other Web Everything standards as they mature — they are not reimplemented here.

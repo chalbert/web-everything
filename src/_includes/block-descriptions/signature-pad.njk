@@ -20,20 +20,24 @@
 </p>
 
 <h2>Web Standards Alignment</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr><td><a href="https://developer.mozilla.org/docs/Web/HTML/Constraint_validation">Constraint Validation</a></td><td>Baseline</td><td>The typed legal-name field is a native text <code>&lt;input&gt;</code> (<code>required</code>, <code>checkValidity()</code>) — the per-control floor is native; the block adds only the affirmation gate and the record shape.</td></tr>
   <tr><td><a href="https://developer.mozilla.org/docs/Web/API/Pointer_events">Pointer Events</a></td><td>Baseline</td><td>The optional drawn path reads native Pointer events on a <code>&lt;canvas&gt;</code>, so one code path covers mouse, touch, and stylus.</td></tr>
   <tr><td><a href="https://www.w3.org/WAI/WCAG22/Understanding/">WCAG 2.2</a></td><td>WCAG 2.2</td><td>The typed path guarantees a keyboard- and AT-accessible way to sign; drawn capture is never the sole method.</td></tr>
 </table>
+</we-data-table>
 
 <h2>Framework / Library Research</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Source</th><th>Key Patterns Adopted</th></tr>
   <tr><td><a href="https://github.com/szimek/signature_pad">signature_pad</a></td><td>The drawn-canvas capture model (variable-width strokes, export to data-URL). Adopted as the enhancement implementation / an adapter target — not the baseline.</td></tr>
   <tr><td>DocuSign / Adobe Sign</td><td>The affirmation-before-commit gate (an explicit intent-to-sign consent), typed vs drawn vs adopted-signature methods, and a timestamped record as the durable artifact.</td></tr>
   <tr><td>ESIGN Act / UETA (conceptual)</td><td>The record's signer + intent + timestamp shape — captured as UX, with the legal/compliance evaluation left to the consuming app (out of the block's scope).</td></tr>
 </table>
+</we-data-table>
 
 <h2>Contract</h2>
 <p>
@@ -43,11 +47,13 @@
   intent-to-sign text; <code>required</code> by default), and <code>affirmation="none"</code> for the rare
   internal-initialing flow. It exposes <code>sign()</code> / <code>clear()</code> and emits:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Event</th><th>Detail</th><th>When</th></tr>
   <tr><td><code>sign</code></td><td><code>{ record: SignatureRecord }</code></td><td>The signature committed — affirmation accepted and a name typed (or a mark drawn). The record is frozen and never re-mutated.</td></tr>
   <tr><td><code>clear</code></td><td><code>{ method: SignatureMethod }</code></td><td>The in-progress typed name / drawn mark was reset before commit.</td></tr>
 </table>
+</we-data-table>
 <we-code-view><pre><code class="language-typescript">type SignatureMethod = 'typed' | 'drawn';
 
 interface SignatureRecord {

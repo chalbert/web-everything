@@ -12,7 +12,8 @@
 </p>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
     <tr>
         <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Speculation_Rules_API">Speculation Rules API</a></td>
@@ -40,9 +41,11 @@
         <td>For navigation prefetches, injects <code>&lt;link rel="prefetch"&gt;</code> into <code>&lt;head&gt;</code> for browser-native fetching</td>
     </tr>
 </table>
+</we-data-table>
 
 <h3>Framework Research</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
     <tr>
         <td><a href="https://remix.run/docs/en/main/components/link">Remix</a></td>
@@ -65,13 +68,15 @@
         <td>Chrome's native declarative prefetch/prerender with <code>eagerness</code> levels and document rules</td>
     </tr>
 </table>
+</we-data-table>
 
 <h3>Eagerness-to-Events Mapping</h3>
 <p>
     Each eagerness level maps to a specific DOM event or API that triggers prefetching at the optimal moment.
     Higher eagerness means earlier speculation &mdash; more wasted fetches, but faster navigation.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Eagerness</th><th>DOM Trigger</th><th>Timing</th><th>Speculation Rules Equivalent</th></tr>
     </thead>
@@ -102,6 +107,7 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Condition Suppression</h3>
 <p>
@@ -109,7 +115,8 @@
     If any condition matches, the prefetch is suppressed and a <code>prefetch-suppressed</code> event fires.
     APIs that are unavailable are treated as "condition not met" (graceful degradation).
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Condition</th><th>Browser API</th><th>Suppression Rule</th><th>Availability</th></tr>
     </thead>
@@ -140,6 +147,7 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 <p>
     <strong>Priority order:</strong> Data Saver &gt; Low Battery &gt; Slow Connection &gt; Reduced Motion.
     The user's explicit data-saving preference always wins.
@@ -202,7 +210,8 @@ docInjector.set('customContexts:prefetchConfig', {
     Prefetch Behavior dispatches typed event classes registered via <a href="/projects/webevents/">Web Events</a> provider keys.
     The <code>prefetch-triggered</code> event is cancelable &mdash; canceling it suppresses the prefetch.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Detail</th><th>Cancelable</th></tr>
     </thead>
@@ -230,6 +239,7 @@ docInjector.set('customContexts:prefetchConfig', {
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Interface</h3>
 <we-code-view><pre><code class="language-typescript">/** Prefetch eagerness levels */
@@ -266,7 +276,8 @@ interface PrefetchConfig {
 }</code></pre></we-code-view>
 
 <h3>Exports</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
     </thead>
@@ -282,3 +293,4 @@ interface PrefetchConfig {
         <tr><td><code>PrefetchEagerness</code></td><td>Type</td><td>Eagerness level: viewport | hover | interaction | immediate</td></tr>
     </tbody>
 </table>
+</we-data-table>

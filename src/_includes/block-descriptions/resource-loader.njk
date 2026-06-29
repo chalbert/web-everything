@@ -11,7 +11,8 @@
 </p>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
     <tr>
         <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API">Fetch API</a></td>
@@ -44,9 +45,11 @@
         <td><code>withDeterminate</code> trait renders native <code>&lt;progress&gt;</code> with <code>value</code>/<code>max</code> attributes</td>
     </tr>
 </table>
+</we-data-table>
 
 <h3>Framework Research</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
     <tr>
         <td><a href="https://tanstack.com/query">TanStack Query</a></td>
@@ -69,6 +72,7 @@
         <td>Route-level loader functions, <code>defer</code>/<code>Await</code> for streaming, <code>useNavigation</code> for loading state</td>
     </tr>
 </table>
+</we-data-table>
 
 <h3>How It Works</h3>
 <ol>
@@ -121,7 +125,8 @@ docInjector.set('customContexts:routeLoader', {
 
 <h3>Trait-to-Behavior Mapping</h3>
 <p>Each trait maps to a specific <a href="/intents/loader/">Loader Intent</a> dimension value and applies concrete DOM/ARIA/CSS changes.</p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr>
             <th>Trait</th>
@@ -172,9 +177,11 @@ docInjector.set('customContexts:routeLoader', {
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Strategy Comparison</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr>
             <th>Strategy</th>
@@ -210,6 +217,7 @@ docInjector.set('customContexts:routeLoader', {
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Registry-First Philosophy</h3>
 <p>
@@ -232,7 +240,8 @@ customResources.define('user-profile', {
 
 <h3>State Machine</h3>
 <p>The full lifecycle for a loading operation. Traits react to state transitions and apply the appropriate DOM changes.</p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr>
             <th>State</th>
@@ -278,6 +287,7 @@ customResources.define('user-profile', {
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Non-Router Consumers</h3>
 <p>
@@ -296,7 +306,8 @@ customResources.define('user-profile', {
     The <code>timing</code> dimension controls when loading indicators appear. This prevents the
     "flash of loading state" anti-pattern for fast operations.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr>
             <th>Timing</th>
@@ -322,6 +333,7 @@ customResources.define('user-profile', {
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Background Task Handoff</h3>
 <p>
@@ -353,7 +365,8 @@ customResources.define('user-profile', {
     Resource Loader is the <strong>UI consumption layer</strong> for the <a href="/projects/webresources/">Web Resources</a>
     infrastructure standards. It doesn't own data fetching &mdash; it owns the loading UX.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Sub-Standard</th><th>Role</th><th>How Resource Loader Uses It</th></tr>
     </thead>
@@ -390,13 +403,15 @@ customResources.define('user-profile', {
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Events</h3>
 <p>
     Resource Loader dispatches typed event classes registered via <a href="/projects/webevents/">Web Events</a> provider keys.
     This enables <code>listenForScoped</code> discrimination when multiple loaders coexist (e.g., router loader + inline data grid loader firing <code>load-end</code> simultaneously).
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Detail</th><th>Cancelable</th></tr>
     </thead>
@@ -431,6 +446,7 @@ customResources.define('user-profile', {
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Interface</h3>
 <we-code-view><pre><code class="language-typescript">/**
@@ -453,7 +469,8 @@ interface LoaderIntent {
 type LoaderState = 'idle' | 'pending' | 'loading' | 'success' | 'empty' | 'error' | 'stale';</code></pre></we-code-view>
 
 <h3>Exports</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
     </thead>
@@ -474,3 +491,4 @@ type LoaderState = 'idle' | 'pending' | 'loading' | 'success' | 'empty' | 'error
         <tr><td><code>ResourceStateChangeEvent</code></td><td>Event Class</td><td>Typed event for state transitions</td></tr>
     </tbody>
 </table>
+</we-data-table>

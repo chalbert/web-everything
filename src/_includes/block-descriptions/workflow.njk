@@ -16,7 +16,8 @@
     onboarding wizards with shareable links). Workflow handles <strong>state-based</strong> flows where
     URL changes are unnecessary or undesirable: modal wizards, in-page forms, short processes.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th></th><th>Router (URL-based)</th><th>Workflow (State-based)</th></tr>
     </thead>
@@ -53,9 +54,11 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
     <tr>
         <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Guides/Constraint_validation">Constraint Validation API</a></td>
@@ -88,9 +91,11 @@
         <td>When workflow is inside a <code>&lt;dialog&gt;</code>, focus management delegates to the browser's native dialog focusing steps</td>
     </tr>
 </table>
+</we-data-table>
 
 <h3>Framework Research</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
     <tr>
         <td><a href="https://material.angular.dev/cdk/stepper/overview">Angular CDK Stepper</a></td>
@@ -113,13 +118,15 @@
         <td><code>trigger()</code> for per-step field validation without full form submission</td>
     </tr>
 </table>
+</we-data-table>
 
 <h3>Progression Modes</h3>
 <p>
     The progression mode determines how users navigate between steps. Each mode is a trait
     that composes independently with validation and persistence traits.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Mode</th><th>Trait</th><th>Behavior</th><th>Use Case</th></tr>
     </thead>
@@ -144,9 +151,11 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Step Lifecycle</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>State</th><th>Description</th><th>DOM State</th></tr>
     </thead>
@@ -178,6 +187,7 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Declarative Structure</h3>
 
@@ -350,7 +360,8 @@ workflowEl.addEventListener('workflow-step-before-change', async (e) => {
     <code>withAutoSave</code> persists form data on each step change so users can resume after
     interruptions. Respects the configured storage backend.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Storage</th><th>Scope</th><th>Cleared On</th><th>Use Case</th></tr>
     </thead>
@@ -375,6 +386,7 @@ workflowEl.addEventListener('workflow-step-before-change', async (e) => {
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 {% highlight "html" %}
 <form workflow progression="linear" persistence="sessionStorage"
@@ -389,7 +401,8 @@ workflowEl.addEventListener('workflow-step-before-change', async (e) => {
     Step navigation uses the <a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a>
     for declarative, no-JS navigation buttons.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Command</th><th>Behavior</th></tr>
     </thead>
@@ -412,13 +425,15 @@ workflowEl.addEventListener('workflow-step-before-change', async (e) => {
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Events</h3>
 <p>
     Workflow dispatches typed event classes registered via <a href="/projects/webevents/">Web Events</a> provider keys.
     The <code>workflow-step-before-change</code> and <code>workflow-complete</code> events are cancelable for validation gating.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Detail</th><th>Cancelable</th></tr>
     </thead>
@@ -453,6 +468,7 @@ workflowEl.addEventListener('workflow-step-before-change', async (e) => {
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Interface</h3>
 <we-code-view><pre><code class="language-typescript">/** Step definition parsed from DOM */
@@ -488,7 +504,8 @@ interface WorkflowCompleteDetail {
 }</code></pre></we-code-view>
 
 <h3>Styling Hooks</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Selector / Property</th><th>Description</th></tr>
     </thead>
@@ -503,9 +520,11 @@ interface WorkflowCompleteDetail {
         <tr><td><code>--workflow-current-step</code></td><td>Current step index, 1-based (CSS custom property)</td></tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Exports</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
     </thead>
@@ -528,3 +547,4 @@ interface WorkflowCompleteDetail {
         <tr><td><code>registerWorkflow</code></td><td>Function</td><td>Registers elements with default names</td></tr>
     </tbody>
 </table>
+</we-data-table>

@@ -12,21 +12,25 @@
   <a href="/intents/modal/">Modal Intent</a>'s <code>placement</code> dimension
   (<code>center · top · bottom · start · end · fill</code>) over this one substrate:
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Member</th><th>Configuration</th><th>Status</th></tr>
   <tr><td>Centered modal</td><td><code>placement: center</code></td><td>future member</td></tr>
   <tr><td><a href="/backlog/360-drawer-sheet-block/">Drawer</a></td><td><code>placement: start | end</code> + slide motion</td><td>#360 (blocked on this)</td></tr>
   <tr><td>Bottom sheet</td><td><code>placement: bottom</code></td><td>future member</td></tr>
 </table>
+</we-data-table>
 
 <h2>Web Standards Alignment</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr><td><a href="https://developer.mozilla.org/docs/Web/HTML/Element/dialog">&lt;dialog&gt;</a> + <code>showModal()</code></td><td>Baseline 2022</td><td>The substrate. Gives the modal focus-trap, inert background, <code>::backdrop</code>, Escape-to-cancel, and a real top-layer paint for free; the block defaults to it.</td></tr>
   <tr><td><a href="https://developer.mozilla.org/docs/Web/API/Popover_API">Popover API</a></td><td>Baseline 2024</td><td>The non-modal mode (<code>mode=non-modal</code>) — a top-layer surface that leaves the page interactive.</td></tr>
   <tr><td><a href="https://developer.mozilla.org/docs/Web/CSS/::backdrop">::backdrop</a> + <code>inert</code></td><td>Baseline</td><td>Backdrop and background-inerting come from the platform, not a hand-rolled overlay div.</td></tr>
   <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/">WAI-ARIA APG Dialog (Modal)</a></td><td>WAI-ARIA 1.2</td><td>Focus placement on open, focus return on close, <code>aria-modal</code>, labelling — realized once here.</td></tr>
 </table>
+</we-data-table>
 
 <h2>What the substrate owns (so members inherit it)</h2>
 <ul>

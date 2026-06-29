@@ -13,7 +13,8 @@
 </p>
 
 <h3>Not the Loader, not Feedback</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th></th><th><a href="/intents/loader/">Loader</a></th><th>Background Task Surface</th><th><a href="/intents/feedback/">Feedback</a></th></tr>
     </thead>
@@ -44,9 +45,11 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Composition (defers, does not redefine)</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Intent</th><th>What this surface borrows</th></tr>
     </thead>
@@ -69,9 +72,11 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
     <tr>
         <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent">CustomEvent</a></td>
@@ -99,10 +104,12 @@
         <td>Because the surface is off the current view, completion and failure are announced via a polite live region so a screen-reader user learns a backgrounded task finished without watching the rail.</td>
     </tr>
 </table>
+</we-data-table>
 
 <h3>Task Lifecycle</h3>
 <p>A task entry moves through the Background Task Intent's states:</p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>State</th><th>Description</th><th>Surface behavior</th></tr>
     </thead>
@@ -114,6 +121,7 @@
         <tr><td><code>dismissed</code></td><td>Removed by the user or by auto-clear.</td><td>Entry leaves the rail.</td></tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Dimensions (offered choices) vs. fixed mechanics</h3>
 <p>
@@ -121,7 +129,8 @@
     different products. The registration mechanism and surface resolution are fixed (variants would
     fragment interop); the rest are dimensions.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Axis</th><th>Values</th><th>Kind</th><th>Trait (non-default)</th></tr>
     </thead>
@@ -134,6 +143,7 @@
         <tr><td><em>surface resolution</em></td><td>nearest-ancestor, global-by-default</td><td><strong>Fixed mechanic</strong></td><td>&mdash;</td></tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Registration handoff</h3>
 <p>
@@ -160,7 +170,8 @@ el.dispatchEvent(new CustomEvent('background-task-register', {
 {% endhighlight %}
 
 <h3>Events</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Event</th><th>Direction</th><th>Detail</th><th>Cancelable</th></tr>
     </thead>
@@ -171,6 +182,7 @@ el.dispatchEvent(new CustomEvent('background-task-register', {
         <tr><td><code>background-task-dismiss</code></td><td>Out (user / auto)</td><td><code>{ id, reason }</code></td><td>Yes</td></tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Interface</h3>
 <p>
@@ -198,7 +210,8 @@ interface BackgroundTasksConfig {
 }</code></pre></we-code-view>
 
 <h3>Exports</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
     </thead>
@@ -216,3 +229,4 @@ interface BackgroundTasksConfig {
         <tr><td><code>registerBackgroundTasks</code></td><td>Function</td><td>Registers the element with its default name</td></tr>
     </tbody>
 </table>
+</we-data-table>

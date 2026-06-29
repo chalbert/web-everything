@@ -11,7 +11,8 @@
 
 <h3>Trait selection at a glance</h3>
 <p>The autocomplete's identity is fixed by these trait selections. The two structural moves versus the dropdown are <strong>editable</strong> (the focus host becomes the input, via <code>focus-delegation</code>'s <code>controller</code>) and <strong>filter</strong> replacing <strong>type-ahead</strong> (mutually exclusive — both consume printable keys). Structural picks are <strong>local</strong> (an author cannot change them via props or ambient intent); behavioral picks are this component's <em>stance</em> and remain overridable by an ambient <code>droplistIntent</code>:</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Trait</th><th>Dimension</th><th>Value</th><th>Kind</th></tr>
   </thead>
@@ -25,6 +26,7 @@
     <tr><td><a href="/intents/anchor/">Anchor</a></td><td>placement / collision</td><td><code>bottom-start</code> / <code>flip,resize</code></td><td>behavioral</td></tr>
   </tbody>
 </table>
+</we-data-table>
 <p style="font-size: 0.9rem; color: var(--color-text-muted);">Only <code>focus-delegation</code> (now with <code>controller</code>), <code>selection</code>, and <code>anchor</code> are built today; <code>filter</code>, <code>clearable</code>, <code>live-status</code>, and <code>windowed</code> are spec-<strong>proposed</strong> trait surfaces. This page defines them as contracts — exactly as the family already does for <code>anchor</code>'s positioning strategy — not as shipped implementations.</p>
 
 <h3>Altitude 1 — HTML, explicit behaviors (the substrate)</h3>
@@ -233,7 +235,8 @@ window.attributes.upgrade(document.body);</code></pre></we-code-view>
 </ol>
 
 <h3>Public API</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <thead>
     <tr><th>Surface</th><th>Shape</th><th>Notes</th></tr>
   </thead>
@@ -249,5 +252,6 @@ window.attributes.upgrade(document.body);</code></pre></we-code-view>
     <tr><td>Form participation</td><td><code>static formAssociated = true</code></td><td><code>FormData</code>, reset, bfcache restore, <code>setValidity()</code>, <code>&lt;label for&gt;</code>, <code>autocomplete</code> attribute.</td></tr>
   </tbody>
 </table>
+</we-data-table>
 
 <p style="font-size: 0.9rem; color: var(--color-text-muted);">The non-editable siblings are the <a href="/blocks/dropdown/">dropdown</a> (single-select) and <a href="/blocks/multi-select-dropdown/">multi-select dropdown</a>; family-level rules (intent vs. trait, three altitudes, trait surface map) live on the <a href="/blocks/droplist/">droplist family page</a>. Design history: <code>reports/2026-06-02-dropdown-trait-composition.md</code> ("Autocomplete in detail" — focus host ≠ collection, the <code>controller</code> param, type-ahead → filter, the typing trace), <code>reports/2026-06-02-droplist-trait-language.md</code> ("Autocomplete — swap one trait, move the focus host").</p>

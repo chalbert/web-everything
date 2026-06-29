@@ -13,7 +13,8 @@
     loading states <strong>in-place</strong> (skeletons, overlays, stale content). Resource Action shows busy states
     <strong>on triggers</strong> (disabled buttons, spinners, width locking) and delivers feedback (toasts, revert).
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th></th><th>Resource Loader (Reads)</th><th>Resource Action (Writes)</th></tr>
     </thead>
@@ -45,9 +46,11 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
     <tr>
         <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API">Fetch API</a></td>
@@ -65,9 +68,11 @@
         <td><code>withBusyTrigger</code> applies <code>aria-disabled</code> + <code>pointer-events:none</code> during pending state</td>
     </tr>
 </table>
+</we-data-table>
 
 <h3>Framework Research</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
     <tr>
         <td><a href="https://tanstack.com/query">TanStack Query</a></td>
@@ -86,6 +91,7 @@
         <td><code>useSWRMutation</code> with manual <code>trigger()</code>, revalidation after mutation</td>
     </tr>
 </table>
+</we-data-table>
 
 <h3>Interaction Model</h3>
 <ol>
@@ -96,7 +102,8 @@
 </ol>
 
 <h3>Lifecycle State Machine</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>State</th><th>Description</th><th>Trait Behavior</th></tr>
     </thead>
@@ -123,6 +130,7 @@
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Usage Examples</h3>
 
@@ -165,7 +173,8 @@ docInjector.set('customContexts:resourceAction', {
     Resource Action dispatches typed event classes registered via <a href="/projects/webevents/">Web Events</a> provider keys.
     Enables <code>listenForScoped</code> discrimination between concurrent mutations.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Detail</th><th>Cancelable</th></tr>
     </thead>
@@ -200,6 +209,7 @@ docInjector.set('customContexts:resourceAction', {
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Interface</h3>
 <we-code-view><pre><code class="language-typescript">/**
@@ -223,7 +233,8 @@ interface OptimisticPrediction&lt;T&gt; {
 }</code></pre></we-code-view>
 
 <h3>Exports</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
     </thead>
@@ -238,3 +249,4 @@ interface OptimisticPrediction&lt;T&gt; {
         <tr><td><code>ResourceActionRevertEvent</code></td><td>Event Class</td><td>Typed event for optimistic revert</td></tr>
     </tbody>
 </table>
+</we-data-table>

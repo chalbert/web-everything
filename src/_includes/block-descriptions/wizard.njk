@@ -13,12 +13,14 @@
 </ul>
 
 <h3>Flow Progress Intent dimensions</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Dimension</th><th>Value</th><th>Why</th></tr>
   <tr><td><code>register</code></td><td><code>wizard</code></td><td>The dedicated-surface flow — the most-permissive default register</td></tr>
   <tr><td><code>stepStatus</code></td><td><code>wait</code> / <code>process</code> / <code>finish</code> / <code>error</code></td><td>Derived per step from the engine position (index-based) with <code>error</code> read from the threaded context, surfaced as <code>data-step-status</code> on each indicator</td></tr>
   <tr><td><code>movement</code></td><td><code>back-allowed</code></td><td>Back/undo via the instance's <code>back()</code> — the most-permissive default</td></tr>
 </table>
+</we-data-table>
 
 <h3>Droppable</h3>
 <p>Set <code>.graph</code> (and optionally <code>.options</code> for an engine name, the Next event type, or per-step labels) on a <code>&lt;wizard-flow&gt;</code> element. Author per-step content with <code>&lt;template data-step-id="…"&gt;</code> children; absent that, each panel renders its step label. Proven by its render test (current position, per-step status mapping, back/undo, error surfacing).</p>

@@ -9,7 +9,8 @@
 </p>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr>
     <td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/grid/">APG Data Grid</a></td>
@@ -27,9 +28,11 @@
     <td>The grid declares <code>aria-rowcount</code> / <code>aria-colcount</code> (header row included) and each row/cell carries its 1-based <code>aria-rowindex</code> / <code>aria-colindex</code>, so position is announced even when not all rows are realized</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Framework Research</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
   <tr>
     <td><a href="https://react-spectrum.adobe.com/react-aria/useGridList.html">React Aria</a></td>
@@ -44,6 +47,7 @@
     <td>Component-level cell navigation; no shared focus vocabulary — we anchor to the APG roving-tabindex model and the Focus Delegation intent instead</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Architecture</h3>
 <p>Data Grid is a <strong>Module</strong> that composes <a href="/intents/focus-delegation/">Focus Delegation</a>; it owns only the grid projection and the cell-navigation model, delegating the data operations to its read-only twin:</p>

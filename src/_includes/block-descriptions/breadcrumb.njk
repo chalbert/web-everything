@@ -16,19 +16,23 @@
 </p>
 
 <h2>Web Standards Alignment</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/breadcrumb/">WAI-ARIA APG Breadcrumb</a></td><td>WAI-ARIA 1.2</td><td><code>nav[aria-label]</code> landmark + ordered list; <code>aria-current="page"</code> on the current (non-link) crumb. The block's structure is the APG pattern verbatim.</td></tr>
   <tr><td><a href="https://developer.mozilla.org/docs/Web/HTML/Element/nav">&lt;nav&gt;</a> + <a href="https://developer.mozilla.org/docs/Web/HTML/Element/ol">&lt;ol&gt;</a></td><td>Baseline</td><td>The zero-JS baseline — landmark and ordered-list semantics for free; the block defaults to it.</td></tr>
   <tr><td>CSS generated content (<code>::before</code>) / <code>aria-hidden</code></td><td>Baseline</td><td>Separators are presentational only — never announced as text.</td></tr>
 </table>
+</we-data-table>
 
 <h2>Framework / Library Research</h2>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Source</th><th>Key Patterns Adopted</th></tr>
   <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/breadcrumb/">WAI-ARIA APG</a></td><td>nav landmark, ordered list, <code>aria-current="page"</code>, presentational separators.</td></tr>
   <tr><td><a href="https://carbondesignsystem.com/components/breadcrumb/usage/">Carbon</a> / <a href="https://design-system.service.gov.uk/components/breadcrumbs/">GOV.UK</a></td><td>Root-to-current ordering, overflow collapse behind an ellipsis, current page not a link.</td></tr>
 </table>
+</we-data-table>
 
 <h2>Structure (the native baseline)</h2>
 {% highlight "html" %}

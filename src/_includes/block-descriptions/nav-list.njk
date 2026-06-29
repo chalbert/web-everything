@@ -6,7 +6,8 @@
 </p>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr>
     <td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/">Disclosure Navigation</a></td>
@@ -34,9 +35,11 @@
     <td>Demo CSS disables expand/collapse animations when reduced motion is preferred</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Framework Research</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
   <tr>
     <td><a href="https://reactrouter.com/en/main/components/nav-link">React Router NavLink</a></td>
@@ -55,6 +58,7 @@
     <td>Arrow key navigation within sections; multi-level hierarchy</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Architecture</h3>
 <p>Navigation is a <strong>Module</strong> composed of two behaviors and enhanced router integration:</p>
@@ -97,7 +101,8 @@
 
 <h3>ARIA Implementation</h3>
 <p>Follows the <a href="https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/">W3C APG Disclosure Navigation</a> pattern:</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Attribute</th><th>Element</th><th>Managed By</th><th>Purpose</th></tr>
   <tr><td><code>aria-label</code></td><td><code>&lt;nav&gt;</code></td><td>Author</td><td>Identifies the navigation landmark when multiple exist on the page</td></tr>
   <tr><td><code>aria-current="page"</code></td><td><code>&lt;a&gt;</code></td><td>RouteLinkBehavior</td><td>Identifies the link matching the current URL; announced by screen readers as "current page"</td></tr>
@@ -106,9 +111,11 @@
   <tr><td><code>tabindex="0"</code></td><td>Active link</td><td>NavListBehavior</td><td>Makes the currently focused/active navigation item tabbable</td></tr>
   <tr><td><code>tabindex="-1"</code></td><td>Other links</td><td>NavListBehavior</td><td>Removes other links from tab order; reachable only via arrow keys</td></tr>
 </table>
+</we-data-table>
 
 <h3>Keyboard Interaction</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Key</th><th>Context</th><th>Action</th></tr>
   <tr><td>Arrow Down</td><td>Navigation list</td><td>Move focus to next link</td></tr>
   <tr><td>Arrow Up</td><td>Navigation list</td><td>Move focus to previous link</td></tr>
@@ -118,6 +125,7 @@
   <tr><td>Enter / Space</td><td>Section toggle button</td><td>Toggle the section expanded/collapsed state</td></tr>
   <tr><td>Escape</td><td>Expanded section</td><td>Collapse the section and return focus to the toggle button</td></tr>
 </table>
+</we-data-table>
 
 <h3>Configuration</h3>
 <we-code-view><pre><code class="language-html">&lt;!-- Orientation: vertical (default) or horizontal --&gt;

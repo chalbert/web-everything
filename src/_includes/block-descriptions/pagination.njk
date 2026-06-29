@@ -11,7 +11,8 @@
 </p>
 
 <h3>Web Standards Alignment</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr>
     <td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/landmark-regions/">Pagination nav landmark</a></td>
@@ -49,9 +50,11 @@
     <td>Each page is its own self-referencing canonical <code>?page=n</code>; server-rendered <code>&lt;a href&gt;</code> links are the indexable default. <code>rel=next/prev</code> is deprecated and never emitted as primary machinery</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Framework Research</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
   <tr>
     <td><a href="https://tanstack.com/table/latest/docs/guide/pagination">TanStack Table</a></td>
@@ -70,6 +73,7 @@
     <td>Prior art for the result-range label and page-size selector affordances (recommended defaults pending <a href="/backlog/060-pagination-range-labels-page-size/">#060</a>)</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Architecture</h3>
 <p>Pagination is a <strong>Module</strong> that composes the <code>page</code> stage of Collection Operations; it owns only the paging UI and URL/advance wiring, delegating rendering and lifecycle to its neighbours:</p>
@@ -81,11 +85,13 @@
 
 <h3>Presentation — two orthogonal axes</h3>
 <p><code>pageMode</code> (does advancing <em>replace</em> the slice or <em>grow</em> the list) and <code>advance</code> (is the next slice requested by a <em>click</em> or <em>automatically</em> at the scroll boundary) are independent. <strong>Infinite scroll is not a third mode</strong> — it is <code>append</code> + <code>advance:auto</code>, a derived opt-in carrying the documented infinite-scroll harms (unreachable footer, no stopping point), so it is never the default.</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th></th><th><code>advance: manual</code></th><th><code>advance: auto</code></th></tr>
   <tr><td><code>pageMode: paged</code></td><td>Numbered / prev-next — replace the slice on click (jump-to-page, known total)</td><td><em>Undefined</em> — you do not auto-replace a slice on scroll</td></tr>
   <tr><td><code>pageMode: append</code></td><td>Load-more button — grow the list on click</td><td>Infinite scroll — grow the list at an IntersectionObserver sentinel</td></tr>
 </table>
+</we-data-table>
 
 <h3>Accessibility contract (verified)</h3>
 <ul>

@@ -12,7 +12,8 @@
 <h3>Architecture</h3>
 <p>Router uses a <strong>hybrid pattern</strong>: components for structural boundaries, behaviors for enhancing existing elements, and plain HTML attributes for declarative metadata.</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Piece</th><th>Pattern</th><th>Rationale</th></tr>
   <tr>
     <td><code>&lt;route-view&gt;</code></td>
@@ -40,6 +41,7 @@
     <td>Metadata on links. Paired with <code>route:link</code>.</td>
   </tr>
 </table>
+</we-data-table>
 
 <p>Router is a <strong>navigation layer</strong> that uses <a href="/blocks/view/">ViewEngine</a> directly:</p>
 <ul>
@@ -51,7 +53,8 @@
 <h3>Web Standards Alignment</h3>
 <p>Router builds on modern platform APIs:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
   <tr>
     <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API">Navigation API</a></td>
@@ -79,11 +82,13 @@
     <td>Used only when Navigation API unavailable (Safari &lt;17.2)</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Framework Research</h3>
 <p>Design informed by established routing libraries:</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
   <tr>
     <td><a href="https://reactrouter.com/">React Router</a></td>
@@ -102,11 +107,13 @@
     <td>Type-safe params, search param handling, pending UI states</td>
   </tr>
 </table>
+</we-data-table>
 
 <h3>Context Providers</h3>
 <p>Router provides its data through the <code>customContexts</code> injector system. Route content receives context via the <code>@</code> prefix, just like any other context in the framework.</p>
 
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Context</th><th>Injector Key</th><th>Provided To</th><th>Contains</th></tr>
   <tr>
     <td><code>@route</code></td>
@@ -133,6 +140,7 @@
     <td><code>LoaderIntent</code> &mdash; see <a href="/intents/loader/">Loader Intent</a></td>
   </tr>
 </table>
+</we-data-table>
 
 <h4>Providing Guards and Loaders</h4>
 <p>Guard and loader functions are provided via context, following the same <code>customContexts</code> pattern used throughout the framework. The <code>route:guard</code> and <code>route:loader</code> attribute values on <code>&lt;template&gt;</code> elements are looked up by name from their respective contexts.</p>
@@ -770,7 +778,8 @@ docInjector.set('customContexts:loaderIntent', {
 &lt;/route-view&gt;</code></pre></we-code-view>
 
 <h4>Strategy-to-Behavior Mapping</h4>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Strategy</th><th>Router Behavior</th><th>Resource Loader Trait</th></tr>
   <tr>
     <td><code>soft</code></td>
@@ -793,9 +802,11 @@ docInjector.set('customContexts:loaderIntent', {
     <td><code>withOptimistic</code></td>
   </tr>
 </table>
+</we-data-table>
 
 <h4>Timing Behavior</h4>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Timing</th><th>Behavior</th></tr>
   <tr>
     <td><code>immediate</code></td>
@@ -806,9 +817,11 @@ docInjector.set('customContexts:loaderIntent', {
     <td>Loading indicator deferred by configured ms (default 400ms). If the loader resolves before the threshold, no indicator is ever shown &mdash; prevents flicker for fast operations.</td>
   </tr>
 </table>
+</we-data-table>
 
 <h4>Context Behavior</h4>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Context</th><th>Behavior</th></tr>
   <tr>
     <td><code>initial</code></td>
@@ -819,6 +832,7 @@ docInjector.set('customContexts:loaderIntent', {
     <td>Prior content visible. Keeps it visible (dimmed/stale via <code>withStaleWhileRevalidate</code>). Avoids the "spinner replacing content" anti-pattern.</td>
   </tr>
 </table>
+</we-data-table>
 
 <h4>Navigation Pipeline (Updated)</h4>
 <p>The loading phase of the navigation pipeline (step 5) now integrates with the Loader Intent:</p>
@@ -885,7 +899,8 @@ route-view .loader-skeleton {
 </p>
 
 <h4>Integration Map</h4>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Router Concern</th><th>Resource Block</th><th>Integration Point</th></tr>
     </thead>
@@ -917,6 +932,7 @@ route-view .loader-skeleton {
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h4>Error Recovery Integration</h4>
 <p>
@@ -1045,7 +1061,8 @@ docInjector.set('customContexts:resourceAction', {
     The resource pipeline populates route context in stages. Each block adds its data
     to the injector chain, making it available to all descendant expressions.
 </p>
-<table>
+<we-data-table>
+<table class="data-table">
     <thead>
         <tr><th>Stage</th><th>Context Key</th><th>Populated By</th><th>Contains</th></tr>
     </thead>
@@ -1076,10 +1093,12 @@ docInjector.set('customContexts:resourceAction', {
         </tr>
     </tbody>
 </table>
+</we-data-table>
 
 <h3>Events</h3>
 <p>Router dispatches typed event classes registered via <a href="/projects/webevents/">Web Events</a> provider keys. This enables discrimination when multiple routers coexist or when combining router events with other blocks firing similar event names.</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Target</th><th>Detail</th><th>Cancelable</th></tr>
   <tr><td><code>route-change</code></td><td><code>RouteChangeEvent</code></td><td><code>customEvents:route-change</code></td><td><code>&lt;route-view&gt;</code></td><td><code>{ from, to, matched }</code></td><td>Yes</td></tr>
   <tr><td><code>route-load-start</code></td><td><code>RouteLoadStartEvent</code></td><td><code>customEvents:route-load-start</code></td><td><code>&lt;route-view&gt;</code></td><td><code>{ route }</code></td><td>No</td></tr>
@@ -1088,6 +1107,7 @@ docInjector.set('customContexts:resourceAction', {
   <tr><td><code>beforetoggle</code></td><td colspan="2"><em>Inherited from <a href="/blocks/view/#toggle-events">ViewEngine</a></em></td><td><code>&lt;route-view&gt;</code> / <code>&lt;route-outlet&gt;</code></td><td>ViewEngine shape</td><td>Yes</td></tr>
   <tr><td><code>toggle</code></td><td colspan="2"><em>Inherited from <a href="/blocks/view/#toggle-events">ViewEngine</a></em></td><td><code>&lt;route-view&gt;</code> / <code>&lt;route-outlet&gt;</code></td><td>ViewEngine shape</td><td>No</td></tr>
 </table>
+</we-data-table>
 
 <h3>Programmatic Navigation</h3>
 <we-code-view><pre><code class="language-javascript">// Get the &lt;route-view&gt; element (renders in-place)
@@ -1108,16 +1128,19 @@ router.forward();
 const { params, path, query, hash } = router.currentRoute;</code></pre></we-code-view>
 
 <h3>URL Pattern Examples</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Pattern</th><th>Matches</th><th>Params</th></tr>
   <tr><td><code>/users/:id</code></td><td>/users/123</td><td>{ id: "123" }</td></tr>
   <tr><td><code>/posts/:year/:month?</code></td><td>/posts/2024, /posts/2024/01</td><td>{ year, month? }</td></tr>
   <tr><td><code>/files/*</code></td><td>/files/a/b/c</td><td>Wildcard capture</td></tr>
   <tr><td><code>/api/v:version/*</code></td><td>/api/v2/users</td><td>{ version: "2" }</td></tr>
 </table>
+</we-data-table>
 
 <h3>Exports</h3>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
   <tr><td><code>RouteViewElement</code></td><td>Class</td><td>Main orchestrator component. Renders matched content in-place. Extends <code>HTMLElement</code>.</td></tr>
   <tr><td><code>RouteOutletElement</code></td><td>Class</td><td>Named auxiliary outlet component. Extends <code>HTMLElement</code>.</td></tr>
@@ -1134,6 +1157,7 @@ const { params, path, query, hash } = router.currentRoute;</code></pre></we-code
   <tr><td><code>MatchedRoute</code></td><td>Interface</td><td>Runtime matched route with params.</td></tr>
   <tr><td><code>NavigationResult</code></td><td>Interface</td><td>Promise pair from programmatic navigation.</td></tr>
 </table>
+</we-data-table>
 
 <h3>Registration</h3>
 <we-code-view><pre><code class="language-typescript">/**
@@ -1162,7 +1186,8 @@ function registerRouter(attributes: CustomAttributeRegistry): void;</code></pre>
 
 <h3>Template Attributes Reference</h3>
 <p>These are plain HTML attributes on <code>&lt;template&gt;</code> elements inside <code>&lt;route-view&gt;</code>. They are read directly by the config component &mdash; no registry entries or classes needed.</p>
-<table>
+<we-data-table>
+<table class="data-table">
   <tr><th>Attribute</th><th>Value</th><th>Description</th></tr>
   <tr><td><code>route</code></td><td>URLPattern path</td><td>Route pattern to match (e.g., <code>/users/:id</code>)</td></tr>
   <tr><td><code>route:guard</code></td><td>Guard name</td><td>canActivate guard, resolved from <code>@routeGuard</code> context</td></tr>
@@ -1175,3 +1200,4 @@ function registerRouter(attributes: CustomAttributeRegistry): void;</code></pre>
   <tr><td><code>route:loader-timing</code></td><td><code>immediate</code> | <code>debounced</code> | ms value</td><td>Override Loader Intent timing for this route</td></tr>
   <tr><td><code>lazy</code></td><td>(boolean)</td><td>Lazy-load route content on first navigation</td></tr>
 </table>
+</we-data-table>

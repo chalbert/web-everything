@@ -11,7 +11,8 @@
 </ol>
 
 <h3 id="supported-expressions">Supported Expressions</h3>
-<table>
+<we-data-table>
+<table class="data-table">
     <tr><th>Expression</th><th>Example</th><th>Description</th></tr>
     <tr><td>State value</td><td><code>{{ '{{' }}name{{ '}}' }}</code></td><td>Resolves from <code>customContexts:state</code></td></tr>
     <tr><td>Nested path</td><td><code>{{ '{{' }}user.profile.name{{ '}}' }}</code></td><td>Dot-path resolution</td></tr>
@@ -19,6 +20,7 @@
     <tr><td>Pipe</td><td><code>{{ '{{' }}name | uppercase{{ '}}' }}</code></td><td>Filter through <code>customContexts:filters</code></td></tr>
     <tr><td>Literal</td><td><code>{{ '{{' }}42{{ '}}' }}</code></td><td>Literal values render as-is</td></tr>
 </table>
+</we-data-table>
 
 <h3 id="usage">Usage</h3>
 {% highlight "html" %}
