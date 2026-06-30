@@ -1,9 +1,11 @@
 ---
 kind: story
 size: 8
-status: active
+status: resolved
 dateOpened: "2026-06-30"
 dateStarted: "2026-06-30"
+dateResolved: "2026-06-30"
+graduatedTo: none
 tags: [webdirectives, registration, custom-type-registry, customtemplatetype, customscripttype, htmlregistry, fui]
 ---
 
@@ -22,4 +24,4 @@ The implementation of #1986 (ratified registration mechanism). Four chunks again
   - Fix — aligned the `CustomTemplateType` guard + tests with **#1987** (ratified 2026-06-30): core `type=` values are **bare** (`if`/`switch`), third-party `owner-kind` hyphen, **colon rejected** — chunk 2 had wrongly required a separator and registered `view:if` (FUI `055049e`).
   - All directive/injector/core/behavior suites green; tsc clean. (Pre-existing unrelated failures: `tools/maas` + `tools/gen-wrapper`, missing `we:src/_data/authorModeSource.json` — not my changeset.)
 - **Next (BLOCKED):** Chunk 4 — migrate `view:if`/`view:switch`/`for-each` off `CustomAttribute` onto `CustomTemplateTypeRegistry`, authored as `<template type="if|switch|for-each">`.
-- **Notes — chunk-4 blocker:** the directives currently read their **expression from the attribute value** of their colon name (`view:if="@state.loggedIn"`, `for-each="@items as user"`). The `type="if"` form has **no specified home** for that expression. #1987 settled the `type=` **value** spelling but did **not** enumerate the per-directive **option-attribute** names (the if-condition, the switch-selector). `for-each` is closest to specified (audit lists bare `items`/`as`/`key` sub-attrs) but if/switch are not. Picking those attribute names is **standard-authoring** (authored API) and belongs in WE, **not** invented in FUI impl ([[6. WE Holds ZERO Standard Implementation]]). Recommend carving chunk 4 into its own item blocked on a small spelling decision. `CustomElementRegistry` keeps its own `whenDefined` copy (separate family, out of #1986 scope) — candidate follow-up.
+- **Notes — chunk-4 blocker:** the directives currently read their **expression from the attribute value** of their colon name (`view:if="@state.loggedIn"`, `for-each="@items as user"`). The `type="if"` form has **no specified home** for that expression. #1987 settled the `type=` **value** spelling but did **not** enumerate the per-directive **option-attribute** names (the if-condition, the switch-selector). `for-each` is closest to specified (audit lists bare `items`/`as`/`key` sub-attrs) but if/switch are not. Picking those attribute names is **standard-authoring** (authored API) and belongs in WE, **not** invented in FUI impl (WE holds zero standard implementation; #1282). Recommend carving chunk 4 into its own item blocked on a small spelling decision. `CustomElementRegistry` keeps its own `whenDefined` copy (separate family, out of #1986 scope) — candidate follow-up.
