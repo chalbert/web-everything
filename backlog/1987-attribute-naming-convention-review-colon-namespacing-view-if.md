@@ -1,8 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-30"
 dateStarted: "2026-06-30"
+dateResolved: "2026-06-30"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#attribute-name-colon-namespacing"
 preparedDate: "2026-06-30"
 relatedReport: reports/2026-06-30-we-naming-convention.md
 tags: [naming, attribute-naming, webdirectives, block-standard, native-first, customattribute, decision]
@@ -100,6 +103,22 @@ to the directive *discriminator*, explicitly carving name-/value-namespacing **t
 
 ## Fork 1 — behavior/event attribute-name convention: keep colon vs migrate to hyphen
 
+**✅ RATIFIED 2026-06-30 → keep colon, with amended framing.** Operationally: colon stays for the ~30 behavior/event
+attribute names (`view:if`, `on:click`, `nav:list`); **no migration**. The red-team (throwaway skeptic, prompted
+only to refute) landed a real hit on **propose-in-platform-shape** — for an author-*extension* attribute the
+platform's closest convention is `data-*`/`aria-*` (hyphen) and the only *proposed* author-attribute standard is
+`enh-*` (hyphen), so presenting colon as *the native-shaped standard proposal* is the wrong claim. The hit was
+**absorbed by amendment, not overturn** (the skeptic itself concluded "don't-chase-an-unshipped-draft → defer, not
+migrate", and `:672` cites `nav:list`, not only `xml:lang`). The amended framing the codification must carry:
+
+1. Colon is WE's **current collision-safe internal authoring spelling** for namespaced directives — **not** claimed
+   as the platform-shaped standard proposal.
+2. The closest *proposed* author-attribute standard is **hyphen** (`enh-*`, [WICG#1029](https://github.com/WICG/webcomponents/issues/1029));
+   WE **declines to chase it while unshipped** (don't-chase-a-draft) — a deliberate hold, not a claim colon is more native.
+3. The **app-configurable separator** (posture settled here; mechanism deferred to a follow-up) is how WE reconciles
+   to the eventual ratified shape — the bridge between "colon today" and whatever the WG ratifies. **Never `we-*`**
+   (a pure vendor prefix); if hyphen ever wins it is `enh-*`.
+
 **Fork-existence:** a genuine either/or — both coherent, cannot both be the catalog convention. The excluded
 branch is *not* broken (so it's a weigh, not a reaffirmation): native-first + #1983's "colons are XML-only"
 language give the hyphen branch real force.
@@ -127,11 +146,15 @@ WE author marker; `we:docs/agent/platform-decisions.md:672` already permits a co
     namespace prefix (`xml:lang` → prefix `xml`). The codification **must state the honesty caveat**: WE's `:`
     is the `:672`/#1913 **ownership-colon idiom** (collision-safe-by-construction), **not** an XML-namespace
     declaration; WE declines the reserved-prefix hyphen form as verbose while #1029/#2271 are **unshipped**.
-- **(b) Migrate to native hyphen-prefix** (`enh-*`/`we-*` reserved) — *Rejected (the live alternative, fairly
-  weighed):* aligns with native-first's *letter* and the only proposed-standard author-attribute rule, and
+- **(b) Migrate to native hyphen-prefix** (`enh-*` reserved — **never `we-*`**) — *Rejected (the live alternative,
+  fairly weighed):* aligns with native-first's *letter* and the only proposed-standard author-attribute rule, and
   removes the XML-namespace semantic-mismatch — but the proposals are **unshipped**, the proper form is more
   verbose, colon already carries the *same* collision guarantee, and `:672` has ratified colon as permitted. The
   benefit is matching an unshipped proposal; the cost is a ~30-site migration. Not worth overturning a statute.
+  **If hyphen ever wins, the prefix must be `enh-*` (the actual [WICG#1029](https://github.com/WICG/webcomponents/issues/1029)
+  floated reserved prefix), not `we-*`:** a `we-*` prefix is a pure *vendor* prefix — it bakes "this is ours, not
+  the platform's" into the author surface, the exact opposite of proposing-in-platform-shape. The colon's edge is
+  that it sidesteps the vendor prefix entirely while staying collision-safe.
 
 `Skeptic: SURVIVES-WITH-AMENDMENT — the prep skeptic attacked keep-colon hardest on native-first/#1983-consistency
 ("colon must die everywhere"). It REFUTED that attack via citation: `we:docs/agent/platform-decisions.md:672-673`
@@ -140,7 +163,31 @@ colon-rejection to the directive discriminator, carving names to #1987 (`we:docs
 The one merit hit that landed — colon spec-means XML-namespace (F5) — is folded as the honesty caveat above, and
 the citation re-based from the un-ratified `we:docs/agent/conventions.md:10` to `:672`. Default held.`
 
+**Shipped-form ≠ final spelling (the deeper "why keep colon").** A ratified standard earns *bare* names by the act
+of ratification — ratifying *is* claiming the namespace. WE, pre-ratification, cannot claim it, so it **must**
+disambiguate (colon or reserved-hyphen-prefix); and whatever form WE ships is **never** the final spelling anyway
+(a WG would pick the canonical bytes — no `we-`, likely no colon). So "most standard-shaped" can't mean "guess the
+final spelling"; it means: ship the form that's collision-safe today, least verbose, and encodes the **durable
+semantics** (a namespaced directive) — leaving the *transitional* collision-marker out of the design. Colon encodes
+the durable namespacing idiom; a reserved-hyphen prefix encodes a transitional collision-marker. That is the
+sharper rationale: don't bake a provisional vendor/collision artifact into a proposed-standard's shape.
+
+**Configurability = the objector escape hatch + migration capability, not an author knob (posture settled here;
+mechanism deferred).** Ship **one** opinionated default (colon) — a single teachable convention keeps docs,
+examples, the comment parser, and matchers from forking. The answer to "colons are awful" is *not* to re-litigate
+the default but to point at deep config: the registry already mediates name→behavior binding, so the separator is
+swappable per-app via settings. This is the same capability that makes a future colon→ratified-spelling swap cheap
+and mechanical (the migration de-risker). The **stance** is ratified here (default colon; separator intended to be
+app-configurable as the escape hatch); the **config mechanism** itself is out of scope — spawned as a follow-up
+build item.
+
 ## Fork 2 — third-party `type=` value namespacing
+
+**✅ RATIFIED 2026-06-30 → `owner-kind` hyphen** (`type="acme-card"`; bare `type="if"` reserved for core). Red-team
+(strongest alt = colon `acme:card`, "match Fork 1's colon for consistency") **failed**: `:672` rules separators
+track per-namespace permission not uniformity, and a `type=` *value* surface has native precedent bare/slash-MIME,
+never colon — so matching the surface beats matching the sibling fork; `acme-card` is the native custom-element
+idiom and preserves RFC 6648 ownership-not-status without #1983's no-native-analog defect.
 
 **Fork-existence:** a genuine either/or on the third-party value spelling (the axis #1986 delegated). Core values
 are bare (settled); the only question is how a *third-party* kind is spelled so it can't collide with core or a
@@ -169,6 +216,9 @@ colon-in-value reopens #1983's no-native-analog defect and would contradict `we:
 idiom.`
 
 ## Conformance cleanup (triggered by the ruling — not forks)
+
+**Spawned at resolve:** the impl cleanup below → **#1991** (task, blocked by #1987); the deferred configurable-
+separator mechanism → **#1992** (story, blocked by #1987).
 
 - **Bare-hyphen behavior attrs** (`type-ahead`, `droplist-anchor/anchored/selection`, `focus-delegation`,
   `fui:blocks/droplist/registerDroplistMenu.ts:52-55`) are collision-unsafe under Fork 1(a)'s rationale (no

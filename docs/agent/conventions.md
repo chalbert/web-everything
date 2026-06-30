@@ -6,12 +6,40 @@
 ## Naming Conventions
 
 ### Attributes
-- **Component properties**: single-word or concatenated lowercase (`multiple`, `autofocus`).
-- **Behavior attributes**: colon-namespaced (`layout:grid`) when a Web Behavior attaches functionality.
-- **Event behaviors**: `namespace:event` (e.g. `on:click`) to bind interactions to abstract Actions.
-  - The attribute **value** is the **Action ID** (`save`, `next`).
-  - Pass static data with `arg-[name]` attributes (e.g. `arg-id="123"`).
-- ❌ Avoid hyphenated attributes (`allow-multiple`) except when mirroring `aria-*` / `data-*`.
+
+> **Ratified by [#1987](/backlog/1987-attribute-naming-convention-review-colon-namespacing-view-if/)** (2026-06-30),
+> resting on the `registry-name-guard` statute (`platform-decisions.md:672-673`: *attributes accept hyphen **or**
+> colon; the separator set tracks what each namespace permits, not uniformity*). Decided **per surface** — they do
+> not all want the same answer.
+
+- **Component properties** (native-aligned): single-word or concatenated **bare** lowercase (`multiple`, `autofocus`,
+  `open`). The native surface, preserved as-is.
+- **Behavior / event attribute *names***: **colon-namespaced** (`layout:grid`, `view:if`, `on:click`, `nav:list`)
+  when a Web Behavior attaches functionality. Colon is **collision-safe by construction** (a native HTML attribute
+  name never contains a colon).
+  - The event attribute **value** is the **Action ID** (`save`, `next`); pass static data with `arg-[name]`
+    attributes (e.g. `arg-id="123"`).
+  - **Framing (honesty caveat — load-bearing):** colon is WE's **current collision-safe *internal authoring*
+    spelling** for namespaced directives — it is **not** WE's claimed *platform-shaped standard proposal*. A colon
+    on an HTML attribute spec-*connotes* an XML namespace (`xml:lang`); WE's `:` is the ownership-colon idiom
+    (`platform-decisions.md:672` + #1913), **not** an XML-namespace declaration. The closest *proposed* author-
+    attribute standard is **hyphen** (`enh-*`, [WICG#1029](https://github.com/WICG/webcomponents/issues/1029));
+    WE **declines to chase it while unshipped** (don't-chase-a-draft). The separator is intended to be
+    **app-configurable** (mechanism TBD) — the reconciliation bridge to whatever the WG eventually ratifies.
+  - If a hyphen form is ever adopted it must use the **`enh-*`** reserved prefix — **never `we-*`** (a pure vendor
+    prefix contradicts proposing-in-platform-shape).
+- **Author data attributes**: `data-*` hyphen (`data-bind`, `data-track`). Author data, never behavior.
+- **Directive form** (`<template type=…>`) **value namespacing** (#1983 + #1987 Fork 2):
+  - **Core kinds → bare** keyword values (`type="if"`, `type="switch"`) — the `<script type="module">` / `<input
+    type="checkbox">` is-a idiom. Bare is **reserved for core**.
+  - **Third-party kinds → `owner-kind` hyphen** (`type="acme-card"`) — native `type` values are never colon-
+    namespaced; hyphen matches the custom-element `acme-card` idiom and keeps ownership-not-status (RFC 6648:
+    owner-prefix for third-party, drop on promotion to core). **Never** colon (`acme:card`) or reverse-DNS inside a
+    `type=` value.
+- **Comment-directive names**: colon `ns:name` (`snippet:define`) — grammar-locked; a comment can never collide
+  with a native attribute, so the native-shaped pressure does not reach it.
+- ❌ Avoid **bare-hyphen** behavior attributes (`type-ahead`, `allow-multiple`) — they sit in no reserved prefix and
+  are the *actually* collision-unsafe names; use the colon namespace instead. Exception: mirroring `aria-*` / `data-*`.
 
 ### Code identifiers
 - **Classes**: PascalCase — `SimpleStore`, `CallParser`.

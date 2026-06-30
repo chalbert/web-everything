@@ -2119,6 +2119,14 @@ In the same lane-to-central pipeline, a lane must **reserve (pre-lock) a file be
 
 ---
 
+### Behaviour/event attribute *names* are colon-namespaced — a collision-safe internal authoring spelling, not the platform-shaped standard proposal {#attribute-name-colon-namespacing}
+
+Decided **per surface** (separators track what each namespace permits, not uniformity — [registry-name-guard](#registry-name-guard-namespace) `:672`). **(Fork 1)** Behaviour/event attribute **names** stay **colon-namespaced** (`view:if`, `on:click`, `nav:list`) — collision-safe by construction (a native HTML attribute name never contains a colon). The load-bearing **framing**: colon is WE's *current collision-safe **internal authoring** spelling* for namespaced directives, **not** WE's claimed *platform-shaped standard proposal*. A colon on an HTML attribute spec-*connotes* an XML namespace (`xml:lang`); WE's `:` is the ownership-colon idiom (`:672` + #1913), **not** an XML-namespace declaration. The closest *proposed* author-attribute standard is **hyphen** (`enh-*`, WICG#1029/whatwg#2271); WE **declines to chase it while unshipped** (don't-chase-a-draft), and the separator is intended to be **app-configurable** (the reconciliation bridge to the eventual ratified spelling — mechanism deferred to #1992). If a hyphen form is ever adopted it is **`enh-*`**, **never `we-*`** (a pure vendor prefix contradicts proposing-in-platform-shape). **(Fork 2)** Third-party `<template type=…>` **values** are **`owner-kind` hyphen** (`type="acme-card"`; bare `type="if"` reserved for **core**) — native `type` values are never colon-namespaced, hyphen matches the custom-element idiom and keeps RFC 6648 ownership-not-status without reopening #1983's no-native-analog defect. **Settled by precedent (not forks):** native-aligned attrs → **bare** (`multiple`); author data → **`data-*`**; comment-directive names → colon `ns:name` (grammar-locked, no native-attribute collision risk). Detail codified in `conventions.md#attributes`.
+
+**Lineage:** #1987 (ratified 2026-06-30 — Fork 2 then Fork 1; report `we:reports/2026-06-30-we-naming-convention.md`). Fork 1 skeptic **landed** a propose-in-platform-shape hit, **absorbed by amendment not overturn** (the framing above; `:672` cites `nav:list` not only `xml:lang`; the skeptic itself concluded defer-don't-migrate). Fork 2 skeptic **flipped** the default colon→hyphen. Rests on [registry-name-guard](#registry-name-guard-namespace) (`:672`) + [#1913 ownership-not-status](#custom-intents-namespace-by-ownership) (`:1516`, principle only — its colon is scoped to intent IDs); #1983 carved value-namespacing here (`block-standard.md:382-401`). Triggers conformance cleanup #1991. Sibling marker-grammar question = #1989.
+
+---
+
 ## Standing process & method rules (codified in the topical docs — pointers)
 
 These are already enforced/written elsewhere; listed here so the platform's rules are findable from
