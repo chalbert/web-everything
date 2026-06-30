@@ -42,10 +42,12 @@
     {% endhighlight %}
 
     <div class="comparison-block" style="background: rgba(99, 102, 241, 0.05); padding: 1.25rem; border-radius: 8px; border-left: 4px solid var(--color-primary); margin: 2rem 0;">
-        <h4 id="devtools-vision" style="margin-top: 0; color: var(--color-primary); font-size: 1rem;">DevTools Vision</h4>
+        <h4 id="devtools-vision" style="margin-top: 0; color: var(--color-primary); font-size: 1rem;">DevTools Support</h4>
+        <p style="margin-bottom: 0.75rem; font-size: 0.95rem;">
+            Chrome DevTools renders these comment markers as opaque <code>&lt;!-- … --&gt;</code> text—no grouping, no bound state, no visible nesting. The comments aren't just debug artifacts; they're the foundation for tooling that surfaces directive regions as <strong>first-class entities</strong>: collapsible groups showing directive state, options, and nesting.
+        </p>
         <p style="margin-bottom: 0; font-size: 0.95rem;">
-            Imagine Chrome DevTools rendering these comment markers as <strong>first-class entities</strong> in the Elements panel—collapsible groups with a distinct color, showing directive state and options.
-            The comments aren't just debug artifacts; they're the foundation for tooling integration.
+            A reference <strong>directive inspector</strong> implements that surface today: it walks a subtree, recognises the directive marker conventions (<code>name:start (expr)</code> … <code>name:end</code> and <code>name …</code> … <code>/name</code>), and reconstructs each region's boundaries, bound-state expression, contained nodes, and nesting as an inspectable tree—logged as collapsible <code>console.group</code> entries. It is non-invasive: it only reads the markers the directives already emit, so any directive following the convention is surfaced for free.
         </p>
     </div>
 {{ pc.endStandardSection() }}
