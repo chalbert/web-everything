@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "1975"
-status: open
+status: resolved
 dateOpened: "2026-06-30"
 dateStarted: "2026-06-30"
+dateResolved: "2026-06-30"
+codifiedIn: "docs/agent/block-standard.md#directive-form"
+graduatedTo: "#1988 — portal-migration build child (rule codified in block-standard.md#directive-form; mechanism #1986, naming #1987)"
 preparedDate: "2026-06-30"
 relatedReport: reports/2026-06-30-directive-authoring-forms.md
 tags: [webdirectives, directive, composition, directive-form, block-standard]
@@ -47,6 +50,24 @@ below use bare keywords. Comment-form (live/mixed) directives keep the `<!-- ns:
 discriminator. *(Built directives use the bare-attribute `view:if` spelling today via `CustomAttribute`; the
 "Real implementation tree" and "contradiction" sections below describe that shipped reality — the ruled form is
 `type=`.)*
+
+## Ruling — ratified 2026-06-30
+
+Ratified by the decision-owner. Codified in the [Directive form standard](../docs/agent/block-standard.md#directive-form) section of the block standard.
+
+- **Forced invariant:** `is=` is **not** the minted directive-form contract; `portal` migrates off
+  `{extends:'template'}`. `is=` stays accepted-for-authors (lower-compliance opt-in), not built-to — composes
+  with #1963's "nothing forbidden."
+- **Fork 1 (single-region) → (a):** a typed `<template type="kind">` (inert body, fail-closed).
+- **Fork 2 (multi-region) → (a):** nested region-`<template>`s inside one `<template type="…">`.
+- **Discriminator:** `type=` — an **"is-a" kind** (`<script type>`-style); one `type` per template, compose by
+  nesting.
+- **Also codified:** the directive-vs-behavior gate (region-control = directive; decorate-connected = behavior);
+  the three forms by body shape (inert / live / mixed / none); mixed = comment boundary hosting a nested inert
+  `<template>`.
+- **Carved out (remain open):** the *registration mechanism* → #1986 (`CustomTemplateType`, retiring
+  `CustomTemplateDirective`); the `type`-*value* namespacing → #1987. Spin-offs: a portal-migration build child;
+  #1977 / #1976 / #1978–#1981 unblocked.
 
 ## Axis-framing
 

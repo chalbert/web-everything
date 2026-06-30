@@ -138,7 +138,7 @@ A block's `type` is one of six protocol categories (`BLOCK_TYPES` at
 | `Component` | A custom element — an author-facing tag with a CEM surface. | The block *is* a tag the author writes (`<we-foo>`). | registers `element`/`tagName` (`we-*`); has attributes/properties/events/slots. |
 | `Module` | A foundation that groups a shared engine + specialized sub-blocks; not itself one tag. | The block is a *family root* others build on (e.g. `view`: a render engine + behaviors + directives). | `exports` a shared engine; sub-entities carry their own `type`. |
 | `Behavior` | A customized built-in / attribute behavior attached to an existing element. | The block enhances any element via an attribute (`CustomAttribute`). | `extendsClass: CustomAttribute`. |
-| `Directive` | A template/comment directive that transforms markup at stamp time. | The block is a `<template is=…>` / `<!-- … -->` directive. | `extendsClass: CustomTemplateDirective` (or `CustomComment`). |
+| `Directive` | A template/comment directive that transforms markup at stamp time. | The block is a typed `<template type=…>` (inert) / `<!-- ns:name -->` (live) directive — **`is=`-free** (#1983, [directive form standard](#directive-form)). | comment-form → `CustomComment`; typed-template form registers via `CustomTemplateType`/`CustomAttribute` (mechanism: #1986). **Never `is=`** — `CustomTemplateDirective` is being retired (#1983/#1986). |
 | `Store` | A reactive state container. | The block holds observable state others bind to. | `extendsClass: CustomStore`. |
 | `Parser` | A registry-backed parser member (comment/expression/text-node). | The block contributes a parsing strategy to a registry. | `registryName`/`defaultParserName`. |
 
@@ -354,6 +354,52 @@ full per-case matrix, mechanism catalog, and worked examples live in #1963; the 
    (transient has no native-element target there); the residual is the **Phase-2 nested-directive
    lifecycle-composition** build (foundation #1130/#1217; the rest carved as a child of #1963). Providers are
    zero-node via the Context Protocol, so the residual is structural/layout layers only.
+
+## Directive form standard (#1983) {#directive-form}
+
+Ratified 2026-06-30 ([#1983](/backlog/1983-directive-form-standard-comment-vs-template-form-reconcile-t/)),
+extending composition-rubric **rule 6** (behaviour-vs-directive). The catalog-wide **authoring form** for a
+directive — the markup vehicle carrying its name + options + body. The rule #1977 / #1976 / #1978–#1981 apply.
+
+1. **`is=` is not the minted directive-form contract.** A directive is never *standardized* as a customized
+   built-in (`<template is="…">`, `extends HTMLTemplateElement`). `is=` stays **accepted-for-authors** — a
+   lower-compliance opt-in, per rule 2's "nothing forbidden" (#1321) — but **no catalog directive is built to
+   it** (Safari-never, *never load-bearing* per rubric rule 4). The built `portal` migrates off
+   `{extends:'template'}` (its `<template is="portal-directive">` shape supersedes the #1000 Fork-4 authoring
+   detail — cite in the migration child).
+
+2. **Three forms, by body shape:**
+
+   | Body | Canonical form |
+   |---|---|
+   | **inert** (deferred / branch-selected / held) | `<template type="kind">…</template>` — multi-region → nested `<template case\|slot="x">` |
+   | **live** (renders as-authored) | `<!-- ns:name -->live…<!-- /ns:name -->` comment boundary (**no `<template>`**) |
+   | **mixed** (live primary + inert auxiliary) | comment boundary **hosting a nested inert `<template>`** (error-boundary: live content + inert fallback; defer: live placeholder + inert content) — composes the two, no fourth form |
+   | **none** (metadata on a subtree) | structural annotation (attribute on a connected element / `<script type="…">`) |
+
+   A `<template>` appears **only** for inert content (it is the platform's only inert container).
+
+3. **`type=` is the typed-`<template>` discriminator — an "is-a" kind.** `<template type="if">` *is a*
+   conditional, exactly as `<input type="checkbox">` / `<script type="module">` — the platform's idiom for an
+   open registry of kinds on an inert container (`<script type>` is the direct precedent; `shadowrootmode` is a
+   *mode*, not the precedent). One `type` per template ⇒ **one directive kind per template, compose by nesting**
+   (a `for-each` whose body holds an `if`), never two stacked on one node. Colon-namespaced decorator attributes
+   (`view:if`) have **no native analog** (colons in HTML are XML/foreign-content only) and are not the form.
+
+4. **Directive-vs-behavior gate** (sharpens rule 6 at the form layer). These forms are for **directives** —
+   region control (whether / how-many / when / where / in-what-form content exists). A construct that decorates
+   or reactively updates a *connected* element is a **behavior**, not a directive, and takes **none** of these
+   forms — even a no-body annotation. Misroutes this catches: a **context provider** (decorates a subtree's
+   scope → `CustomAttribute`; semantics live in the Context Protocol #1968) and **text / attribute bindings**
+   (`${}` → `CustomTextNode`, `:attr` → webexpressions). The discriminator is **"no region control,"** not "no
+   body."
+
+5. **Open downstream (settled elsewhere, not here):** the *registration mechanism* — a `CustomTemplateType`
+   registry vs `CustomAttribute`, retiring `CustomTemplateDirective`
+   ([#1986](/backlog/1986-custom-type-registry-family-customtemplatetype-customscriptt/)) — and the `type`-**value**
+   namespacing (bare keyword vs prefixed; the colon review,
+   [#1987](/backlog/1987-attribute-naming-convention-review-colon-namespacing-view-if/)). #1983 settles the
+   **form + discriminator shape**; #1986/#1987 settle the **mechanism + value spelling**.
 
 ## What this home does *not* cover
 
