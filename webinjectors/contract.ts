@@ -72,3 +72,49 @@ export interface Consumable<T> {
 export interface Provide<T> {
   (value: T): void;
 }
+
+/**
+ * The **WC-CG Context Protocol** alignment surface (#1968, ratified under #1963 case-6c). Type-only,
+ * compile-erased: it declares the *standards-track wire shape* the injector's zero-node resolution path
+ * mirrors, so the plug can be **deprecated + migrated to native** when the Web Components Community Group
+ * Context Protocol ships (plug-to-direction — #95 / #1963 item 7). The runtime listener + event class that
+ * realise this shape are impl and live in FUI (`fui:plugs/webinjectors/ContextProtocol.ts`); only this
+ * contract crosses the seam (WE holds zero standard implementation).
+ *
+ * Resolution semantics: a consumer dispatches a *bubbling, composed* `context-request` event carrying a
+ * {@link ContextRequest.context} key and a {@link ContextRequest.callback}; the **nearest ancestor** that
+ * can satisfy the key invokes the callback with the value and stops propagation — **zero added node** (no
+ * `<provider>` wrapper; any existing ancestor is the provider). This is the `@lit/context`-proven mechanism.
+ * The pre-existing DOM-walk injector chain stays as the **cheap-node `display:contents` fallback**, not the
+ * primary path.
+ */
+
+/** The WC-CG event name — the single source of truth producers and consumers key on. */
+export type ContextRequestEventType = 'context-request';
+
+/**
+ * The callback a provider invokes with the resolved value. The optional `unsubscribe` is the WC-CG
+ * subscribe-to-future-values slot; WE's injector resolves once today, so it is omitted on the one-shot path
+ * — the slot is retained for migration fidelity to the native surface.
+ *
+ * @typeParam T — the resolved context value's type.
+ */
+export interface ContextCallback<T> {
+  (value: T, unsubscribe?: () => void): void;
+}
+
+/**
+ * The declared shape of a `context-request` event — the consumer side of the protocol. A non-DOM,
+ * compile-erased view of the bubbling event the injector answers; the FUI runtime's `ContextRequestEvent`
+ * (an `Event` subclass) structurally satisfies this.
+ *
+ * @typeParam T — the resolved context value's type for {@link context}.
+ */
+export interface ContextRequest<T> {
+  /** The context key being requested (the injector's provider key, e.g. `customContexts:theme`). */
+  readonly context: string;
+  /** Invoked by the nearest ancestor provider with the resolved value. */
+  readonly callback: ContextCallback<T>;
+  /** WC-CG: when true the consumer wants future updates too. One-shot today; carried for fidelity. */
+  readonly subscribe: boolean;
+}
