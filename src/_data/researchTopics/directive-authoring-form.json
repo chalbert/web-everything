@@ -1,0 +1,22 @@
+{
+  "id": "directive-authoring-form",
+  "title": "Directive authoring form — attribute-on-<template> vs comment-boundary vs the is=-customized-built-in, across frameworks",
+  "status": "open",
+  "summary": "Prep research for decision #1983 (parent epic #1975 directive catalog, we:reports/2026-06-30-directive-authoring-forms.md). The question: what AUTHORING FORM should structural directives take, given #1963 ruled the `is=` customized built-in (`<template is=\"ns:name\">`, `extends HTMLTemplateElement`) Safari-dead / lower-compliance / never-load-bearing? CODE-GROUNDING CORRECTION (decisive) — the item's premise that built `if`/`for-each`/`switch` use the `CustomComment` comment-form is STALE: in the real tree they are all `CustomAttribute` on a plain `<template>` (fui:blocks/view/ViewIfDirective.ts:31,46-62 → `<template view:if=\"@state.loggedIn\">…</template>`; ViewSwitchDirective.ts:34,52-68 nests `<template case=\"x\">` children; for-each mirrors it) — already is=-FREE and cross-browser. The ONLY directive still on `is=` is `portal` (fui:plugs/webportals/PortalDirective.ts:123 extends CustomTemplateDirective; webportals/index.ts:54 `define(…,{extends:'template'})`). So the is= problem is real but narrow (one directive). FINDING 1 — NO mainstream framework uses customized built-ins (`is=`) as its directive form; this corroborates #1963 from the prior-art angle, not just Safari-support. WebKit declined to implement customized built-ins. FINDING 2 — the dominant RUNTIME-HTML form for single-region structural directives is ATTRIBUTE-on-`<template>`: Alpine `<template x-if>`/`<template x-for>`, Vue `<template v-if>`/`<template v-for>`, Angular `*ngIf` desugars to `<ng-template [ngIf]>` — exactly WE's built `view:if`. Svelte `{#if}{/if}` is a compiler-only paired marker; Solid/JSX `<Show when>`/`<For each>` are components (host node). Lit uses directive functions in `html``. FINDING 3 — paired-boundary-marker forms (the `<!-- ns:name -->…<!-- /ns:name -->` comment boundary) appear in runtime-HTML systems only as COMPILER OUTPUT / runtime markers, not the primary hand-authored form; WE uses comment boundaries as (a) the SSR/runtime expansion of attribute-on-template directives (the `view-if:start/end` markers + the spec SSR contract) and (b) the authoring form for the MULTI-REGION case (`resource:loader` + sibling `<template slot>`, fui:plugs/webdirectives/multiTemplate.ts) where one template can't hold N regions. FINDING 4 — REGION COUNT is the real discriminator (not 'simple vs complex'): one region → one `<template attr>`; N named regions → a container of N region-templates. WE shipped TWO is=-free multi-region forms — switch nests `<template case>` inside one `<template view:switch>` (attribute form), resource:loader uses `<!-- ns:name -->` + sibling `<template slot>` (comment form) — so the multi-region form is genuinely unreconciled in-tree. FINDING 5 — the inert-template vs live-body merit axis: an attribute-on-`<template>` body is inert (renders nothing without JS/SSR) → fail-CLOSED (no flash-of-unauthorized-content for auth-gated `if`); a comment-boundary live body renders pre-JS → fail-OPEN footgun for gating directives. SSR expands either to live content + comment markers, so PE is satisfied via SSR in both. Two prepared forks for #1983: Fork 1 single-region form = attribute-on-`<template>` (default) vs comment-boundary; Fork 2 multi-region form = nested case-templates inside one `<template attr>` (default) vs comment-boundary + sibling slots. The is= drop is a forced invariant above both (migrate portal). Full grounding in we:reports/2026-06-30-directive-authoring-forms.md.",
+  "dateOpened": "2026-06-30",
+  "lastReviewed": "2026-06-30",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webdirectives",
+    "directive",
+    "directive-form",
+    "composition",
+    "block-standard",
+    "customized-built-in",
+    "native-first",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": ["webdirectives", "webportals"],
+  "relatedProject": "webdirectives"
+}

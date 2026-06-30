@@ -1,0 +1,122 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Web Directives give HTML structural control flow (<code>if</code>, <code>for-each</code>, <code>switch</code>,
+  <code>portal</code>, plus the proposed <code>defer</code>/<code>async</code>/<code>error-boundary</code>/…
+  catalog). Each directive needs an <strong>authoring form</strong> — the markup vehicle that carries its name,
+  options, and body. The web platform offers a customized built-in for this (<code>&lt;template
+  is="ns:name"&gt;</code>, a class that <code>extends HTMLTemplateElement</code>), and the current
+  <code>webdirectives</code> spec blesses it as the form for "simple" single-template directives. But
+  <strong>#1963 ruled <code>is=</code> customized built-ins Safari-dead, lower-compliance, and never
+  load-bearing.</strong> So #1983 asks: what is the catalog-wide directive form, once <code>is=</code> is off
+  the table?
+</p>
+
+<h2>Code-grounding correction (decisive) — the item's premise was stale</h2>
+<p>
+  The decision item claimed built <code>if</code>/<code>for-each</code>/<code>switch</code> use the
+  <code>CustomComment</code> comment-form. <strong>The real tree says otherwise.</strong> All three are a
+  <code>CustomAttribute</code> attached to a plain <code>&lt;template&gt;</code> — e.g.
+  <code>&lt;template view:if="@state.loggedIn"&gt;…&lt;/template&gt;</code>
+  (<code>fui:blocks/view/ViewIfDirective.ts:31,46-62</code>); <code>view:switch</code> nests
+  <code>&lt;template case="x"&gt;</code> children inside the one outer template
+  (<code>ViewSwitchDirective.ts:34,52-68</code>); <code>for-each</code> mirrors the pattern. These are
+  <strong>already <code>is=</code>-free and cross-browser</strong> (they ride the <code>CustomAttribute</code>
+  layer, not customized built-ins). The <strong>only</strong> directive still on <code>is=</code> is
+  <code>portal</code> (<code>fui:plugs/webportals/PortalDirective.ts:123</code> extends
+  <code>CustomTemplateDirective</code>; <code>webportals/index.ts:54</code> registers
+  <code>{ extends: 'template' }</code>). So the <code>is=</code> problem is real but <strong>narrow</strong>:
+  one directive to migrate, not a whole class.
+</p>
+
+<h2>Finding 1 — no mainstream framework uses customized built-ins for directives</h2>
+<p>
+  Surveyed across Angular, Vue, Svelte, Solid, React/JSX, Alpine, Lit, and the native platform:
+  <strong>none</strong> spell a structural directive as a customized built-in (<code>is=</code>). WebKit/Safari
+  declined to implement customized built-ins entirely. So <code>is=</code> is unique to (and a liability of)
+  WE's current <code>portal</code>. This corroborates #1963's ruling from the <em>prior-art</em> angle, not just
+  the Safari-support angle: every ecosystem already routed around the mechanism.
+</p>
+
+<h2>Finding 2 — the dominant runtime-HTML form is attribute-on-<code>&lt;template&gt;</code></h2>
+<p>
+  For single-region structural directives authored in <em>runtime HTML</em> (no build step), the convergent form
+  is a <strong>plain <code>&lt;template&gt;</code> + a directive attribute</strong>:
+</p>
+<ul>
+  <li><strong>Alpine</strong> — <code>&lt;template x-if="open"&gt;…&lt;/template&gt;</code>,
+    <code>&lt;template x-for="item in items"&gt;</code>.</li>
+  <li><strong>Vue</strong> — <code>&lt;template v-if&gt;</code> / <code>&lt;template v-for&gt;</code> (plain
+    template + attribute, no <code>is=</code>).</li>
+  <li><strong>Angular</strong> — the <code>*ngIf</code> microsyntax <em>desugars to</em>
+    <code>&lt;ng-template [ngIf]&gt;</code> — an attribute (the directive) on Angular's inert template
+    container.</li>
+</ul>
+<p>
+  This is <strong>exactly the form WE already built</strong> for <code>view:if</code>/<code>view:switch</code>/<code>for-each</code>
+  — so WE's shipped form is prior-art-aligned and <code>is=</code>-free; only the <em>spec doc</em> and
+  <code>portal</code> lag.
+</p>
+
+<h2>Finding 3 — comment boundaries are a runtime/SSR marker, not the primary authored form</h2>
+<p>
+  Paired-boundary markers appear in runtime-HTML systems as <strong>compiler output / runtime markers</strong>,
+  not the primary hand-authored form (Svelte's <code>{#if}…{/if}</code> is compiler-only). WE uses the
+  comment boundary <code>&lt;!-- ns:name --&gt;…&lt;!-- /ns:name --&gt;</code> in two distinct roles: (a) the
+  <strong>SSR / runtime expansion</strong> of an attribute-on-template directive (the
+  <code>&lt;!-- view-if:start --&gt;</code>/<code>&lt;!-- view-if:end --&gt;</code> markers the directive emits,
+  and the spec's SSR contract — "Template is gone. Comments remain as inspectable debug markers"), and (b) the
+  <strong>authoring form for the multi-region case</strong> (<code>resource:loader</code> + sibling
+  <code>&lt;template slot="loading|success|empty|error"&gt;</code>, scanned by
+  <code>fui:plugs/webdirectives/multiTemplate.ts</code>), where one <code>&lt;template&gt;</code> cannot hold N
+  named regions.
+</p>
+
+<h2>Finding 4 — region count is the real discriminator</h2>
+<p>
+  Not "simple vs complex" but <strong>how many regions the body has</strong>: one region maps cleanly to one
+  <code>&lt;template&gt;</code> (attribute form); N named regions need a container of N region-templates. WE
+  shipped <strong>two</strong> <code>is=</code>-free multi-region forms, and they disagree:
+  <code>switch</code> nests <code>&lt;template case="x"&gt;</code> inside one <code>&lt;template
+  view:switch&gt;</code> (attribute form), while <code>resource:loader</code> uses <code>&lt;!-- ns:name
+  --&gt;</code> + sibling <code>&lt;template slot&gt;</code> (comment form). So the multi-region form is
+  genuinely unreconciled in the codebase — a real fork for #1983, not bookkeeping.
+</p>
+
+<h2>Finding 5 — inert (fail-closed) vs live-body (fail-open) is the merit axis</h2>
+<p>
+  An attribute-on-<code>&lt;template&gt;</code> body is <strong>inert</strong> — it renders nothing until JS
+  stamps it (or SSR expands it) → <strong>fail-closed</strong>: an auth-gated <code>if</code> never flashes
+  its protected content. A comment-boundary <em>live</em> body renders pre-JS → <strong>fail-open</strong>: the
+  same auth-gated <code>if</code> would show the admin button to everyone until JS evaluates and removes it (a
+  flash-of-unauthorized-content). SSR expands <em>either</em> form to live content + comment markers, so the
+  progressive-enhancement baseline ("with zero JS all structural content is rendered") is satisfied via SSR in
+  both — meaning the live-body's only edge (works with zero JS <em>and</em> zero SSR) is precisely the
+  fail-open footgun. This tilts the catalog-wide single-region default toward the inert attribute form.
+</p>
+
+<h2>How this reshapes the decision</h2>
+<p>
+  Research flipped the item's cold default ("comment-boundary form for <em>all</em> directives") into a
+  <strong>region-count selection rule</strong> grounded in what is actually built and what the ecosystem
+  converged on:
+</p>
+<ul>
+  <li><strong>Forced invariant</strong> — <code>is=</code> is not minted as the directive-form contract;
+    <code>portal</code> migrates off the customized built-in. (Honoring #1963's "nothing forbidden":
+    <code>is=</code> stays accepted-for-authors, just not a first-class WE contract.)</li>
+  <li><strong>Fork 1 — single-region form</strong>: attribute-on-<code>&lt;template&gt;</code>
+    (<em>default</em>) vs comment-boundary.</li>
+  <li><strong>Fork 2 — multi-region form</strong>: nested <code>&lt;template case&gt;</code> inside one
+    <code>&lt;template attr&gt;</code> (<em>default</em>) vs comment-boundary + sibling
+    <code>&lt;template slot&gt;</code>.</li>
+</ul>
+
+<h2>Sources &amp; cross-refs</h2>
+<ul>
+  <li>Backlog <a href="/backlog/1983-directive-form-standard-comment-vs-template-form-reconcile-t/">#1983</a> — the decision this research prepares.</li>
+  <li>Backlog <a href="/backlog/1963-composition-rubric-re-judged-to-framework-parity-strict-per-/">#1963</a> — the composition rubric that ruled <code>is=</code> Safari-dead / lower-compliance.</li>
+  <li>Backlog <a href="/backlog/1975-directive-catalog-epic/">#1975</a> — the directive-catalog epic this feeds.</li>
+  <li><a href="/projects/webdirectives/">Web Directives</a> — the project spec whose "simple = <code>&lt;template is=&gt;</code>" convention #1983 reconciles.</li>
+</ul>
+{% endraw %}
