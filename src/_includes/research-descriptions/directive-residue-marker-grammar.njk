@@ -1,0 +1,119 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  #1986 ratified a <strong>family invariant</strong> (rule 5): authored directive nodes and the
+  <strong>region/residue annotations a directive <em>leaves when applied</em></strong> must occupy
+  <strong>disjoint, matcher-excluded grammars</strong> — every registry's <code>upgrade</code> walk claims
+  <strong>only authored nodes</strong> (residue is never re-upgraded), and the two read apart in raw DOM /
+  devtools. It delegated <strong>the exact reserved residue sigil</strong> — unifying today's
+  <code>:start</code>/<code>:end</code> vs <code>/</code>-close split — as a token-grammar question. #1989 makes
+  that call. It is a sibling of #1987 (authoring names/values) but a <em>distinct surface</em>:
+  <strong>machine-emitted markers, not author-typed names.</strong>
+</p>
+
+<h2>Code ground truth — two boundary conventions ship today</h2>
+<p>
+  The directive family emits <strong>two</strong> boundary conventions, and the inspector (#1973) understands both:
+</p>
+<ul>
+  <li>
+    <strong>Machine residue</strong> — paired <code>:start</code>/<code>:end</code>:
+    <code>&lt;!-- for-each:start (@users) --&gt;</code> … <code>&lt;!-- for-each:end --&gt;</code>, written by the
+    runtime when a template directive applies (<code>fui:blocks/for-each/ForEachBehavior.ts:105-106</code>,
+    <code>fui:blocks/view/ViewIfDirective.ts:56-57</code>, <code>fui:blocks/view/ViewSwitchDirective.ts:62-63</code>).
+  </li>
+  <li>
+    <strong>Authored</strong> — open/close <code>name</code>/<code>/name</code>:
+    <code>&lt;!-- control:if cond="x" --&gt;</code> … <code>&lt;!-- /control:if --&gt;</code>, hand-written
+    (<code>fui:plugs/webdirectives/CustomCommentParser.ts:60-73</code>).
+  </li>
+</ul>
+<p>
+  The matcher-exclusion <strong>seed</strong> is leading-<code>/</code> only: <code>directiveNameOf</code> returns
+  <code>null</code> for a <code>/</code>-prefixed token (<code>fui:plugs/webdirectives/CustomCommentRegistry.ts:39-43</code>),
+  as do <code>DefaultCommentParser.parse</code> and <code>multiTemplate.openingDirectiveName</code>. The inspector
+  reads both conventions and reconstructs a nested region tree labelled by directive <strong>name</strong> + bound
+  <strong>expression</strong> (<code>fui:plugs/webdirectives/directiveInspector.ts:88-150</code>).
+</p>
+
+<h2>The latent disjointness gap (why this is not cosmetic)</h2>
+<p>
+  <code>multiTemplate.openingDirectiveName</code> claims any comment whose leading token matches
+  <code>/^[\w-]+:[\w-]+$/</code> (<code>fui:plugs/webdirectives/multiTemplate.ts:34</code>). A residue
+  <strong>open</strong> token <code>for-each:start</code> matches that shape (<code>for-each</code> :
+  <code>start</code>) — and so does <code>for-each:end</code>. Neither starts with <code>/</code>, so the
+  leading-<code>/</code> seed does <strong>not</strong> exclude them. They are safe today only because
+  <strong>no registered directive happens to be named <code>for-each:start</code></strong> — disjointness by
+  <em>luck (absence of collision)</em>, not by <em>grammar</em>. The invariant wants the guarantee structural: a
+  residue marker must be un-claimable by construction, <strong>both halves</strong>, by a cheap test.
+</p>
+
+<h2>Prior art — machine-emitted DOM boundary markers</h2>
+<p>
+  Native HTML reserves <strong>no</strong> comment grammar (comments are opaque; the dead IE conditional-comment
+  <code>&lt;!--[if IE]&gt;</code> is the one historical exception, and it <em>led with <code>[</code></em>). So the
+  "platform shape" here is the <strong>cross-framework de-facto convention</strong> for zero-node region
+  boundaries — and it is strikingly consistent (all source-confirmed below except where noted):
+</p>
+<ul>
+  <li><strong>React</strong> Suspense — <code>&lt;!--$--&gt;</code> open, <code>&lt;!--/$--&gt;</code> close (+
+    <code>$!</code> fallback, <code>$?</code> pending). Paired, positional; the <code>/</code>-close echoes the
+    HTML end-tag.</li>
+  <li><strong>Vue 3</strong> — fragment anchors <code>&lt;!--[--&gt;</code>/<code>&lt;!--]--&gt;</code> + empty
+    <code>&lt;!----&gt;</code> <code>v-if</code> anchor. Bracket pair, positional.</li>
+  <li><strong>Svelte 5</strong> — <code>&lt;!--[--&gt;</code>/<code>&lt;!--]--&gt;</code> with state suffixes
+    (<code>&lt;!--[!--&gt;</code> else, <code>&lt;!--[?--&gt;</code> hydration-failed). Bracket pair, positional.</li>
+  <li><strong>lit-html</strong> — <code>&lt;!--?lit$NONCE$--&gt;</code>: a per-render random nonce as the payload.</li>
+  <li><strong>Solid</strong> — <code>&lt;!--$--&gt;</code>/<code>&lt;!--/--&gt;</code>, depth-counted; notably
+    <strong>migrated <code>#</code>→<code>$</code></strong> because <code>#</code>-leading comments collide with
+    server/CDN SSI directives — a cautionary tale that a "safe-looking" char isn't safe if some upstream claims it.</li>
+  <li><strong>Angular</strong> — <code>&lt;!--container--&gt;</code> / <code>&lt;!--bindings={…}--&gt;</code>: the
+    one mainstream scheme that embeds a human-readable <strong>label + reflected state</strong> (dev-mode for the
+    bindings payload — UNCERTAIN in production builds).</li>
+</ul>
+<p>
+  <strong>Cross-cutting:</strong> (a) every framework leads with a <strong>non-alphanumeric sigil authored content
+  never starts with</strong>, so detection is an <strong>O(1) <code>data[0]</code> test</strong>; (b) paired block
+  boundaries are overwhelmingly <strong>bracket-based</strong> — Vue and Svelte <em>independently</em> chose
+  <code>[</code>/<code>]</code>; (c) the <code>/</code>-close echoes the HTML end-tag (the same <code>/</code> FUI
+  already excludes); (d) markers are mostly <strong>anonymous-positional</strong> <em>except</em> Angular, which
+  carries readable labels — so FUI's name+expression payload has <strong>mainstream precedent</strong>.
+</p>
+
+<h2>Synthesis for #1989</h2>
+<p>
+  <strong>Forced invariant</strong> (from #1986 rule 5, not re-opened): authored opens are claimed;
+  <strong>both halves</strong> of any residue marker are excluded <em>by grammar</em>; residue reads apart from
+  authored directives.
+</p>
+<p>
+  <strong>Fork 1 — the reserved residue grammar:</strong> adopt the cross-framework <strong>bracket-sigil
+  pair</strong> <code>&lt;!--[name expr--&gt;</code> / <code>&lt;!--]name--&gt;</code>. A leading
+  <code>[</code>/<code>]</code> is the cheapest possible exclusion (<code>data[0]</code>), collision-free against
+  the authored <code>ns:name</code> opening-token shape (which starts with a word char), pairs by construction, and
+  reads as balanced open/close in devtools — closing the <code>multiTemplate</code> mis-claim gap that the current
+  suffix <code>:start</code>/<code>:end</code> leaves open. Alternatives: keep <code>:start</code>/<code>:end</code>
+  (shipped, but suffix-test costlier and <code>ns:name</code>-shaped) or a single reserved prefix char
+  (<code>%</code>/<code>~</code>, weaker precedent than brackets).
+</p>
+<p>
+  <strong>Fork 2 — unification scope:</strong> keep the <strong>authored</strong> <code>/name</code> close as-is
+  (it mirrors the native HTML end-tag <code>&lt;/tag&gt;</code> shape hand-authors already know — take the closest
+  native shape) and use the bracket sigil <strong>only</strong> for machine residue, but <strong>unify the matcher
+  behind one exclusion predicate</strong> that recognises both the <code>/</code>- and <code>[</code>/<code>]</code>-prefix.
+  This unifies the <em>predicate</em> (one rule) without forcing hand-authors onto an alien <code>]control:if</code>
+  close. The purist alternative folds <code>/name</code> into <code>]name</code> for one literal sigil, at an
+  author-ergonomics cost for no extra guarantee.
+</p>
+<p>
+  <strong>Name+expression payload</strong> is <strong>supported by default</strong> (not a fork): the #1973
+  non-invasive inspector (#606) requires it — start marker carries the expression (<code>[for-each @users</code>),
+  end marker is bare (<code>]for-each</code>).
+</p>
+<p>
+  <strong>Codifies into</strong> <code>we:docs/agent/block-standard.md#directive-registration-mechanism</code> rule
+  5 (turning the delegated-sigil placeholder into the ratified grammar) <strong>and corrects rule 5's stale
+  delegation pointer</strong>: block-standard delegates the residue sigil to #1987, but #1987 explicitly punts it
+  to #1989 — so the pointer must read #1989.
+</p>
+{% endraw %}
