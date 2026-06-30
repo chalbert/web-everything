@@ -1,0 +1,22 @@
+{
+  "id": "we-attribute-naming-convention",
+  "title": "WE attribute-naming convention — colon namespacing (view:if / on:click) vs native hyphen-prefix (data-*/aria-*/enh-*), per author-name surface",
+  "status": "open",
+  "summary": "Prep research for decision #1987 (triggered by #1983 directive-form + #1986; we:reports/2026-06-30-we-naming-convention.md). WE spells author markers in several conventions and #1983 moved directives off `view:if` colon onto `<template type=>` ('colons in HTML attributes exist only in XML/foreign content; no native attribute looks like view:if') — so the question now sits over EVERY author-name surface. AUDIT (both repos): ~30 colon attribute names (view:if/switch/show, nav:list/section, route:guard/loader/outlet, grid:cell-edit, on:click +~18 event variants — fui:blocks/view/registerViewDirectives.ts:14-16, fui:blocks/attributes/on-event/OnEventAttribute.ts:277-295); ~8 bare-hyphen (for-each, type-ahead, droplist-anchor/anchored/selection, focus-delegation — fui:blocks/droplist/registerDroplistMenu.ts:52-55); ~6 data-* (data-bind/track/portal); ~12 bare native-aligned/structural (multiple, active, case, key, as); ~6 comment-directive colon names grammar-locked (resource:loader, snippet:define, control:for-each, portal:TARGET — fui:plugs/webdirectives/CustomCommentParser.ts:34); ~6 bare type= VALUES (type=\"if\"/\"injector\"/\"context\" — we:docs/agent/block-standard.md:375); 1 @-prefixed injector domain VALUE (@date/core, never an attr name). DECISIVE GROUNDING: colon is ALREADY RATIFIED for attributes — we:docs/agent/platform-decisions.md:672-673 (the registry-name-guard ruling, derived from the native-first baseline) states the separator set tracks what each namespace PERMITS not uniformity: 'attributes accept hyphen OR colon (xml:lang, nav:list)' — naming a WE colon attribute legitimate; and #1983 SCOPED its colon-rejection to the directive KIND discriminator (→type=), explicitly carving name-/value-namespacing to #1987 (we:docs/agent/block-standard.md:399-401). Reinforced by the machine-checked #1913 custom-intents-namespace-by-ownership (we:docs/agent/platform-decisions.md:1516): custom intent IDs are owner:intent (single colon, RFC 6648 namespace-by-ownership-not-status), standard ids bare, promotion drops the prefix — BUT scoped to intent-ID JSON keys, NOT HTML attribute names or type= values. PRIOR ART (web): the platform's author-attribute convention is HYPHEN — data-*/aria-* (F1/F2), custom-ELEMENT names MUST contain a hyphen for collision-safety (F4, html.spec.whatwg.org/multipage/custom-elements.html), and the live proposals WICG/webcomponents#1029 + whatwg/html#2271 propose author ATTRIBUTES must contain a hyphen (floating an enh-* reserved prefix), NOT colon (F6/F6b, UNSHIPPED); no native HTML attribute uses a colon — colon = XML-namespace prefix (F5, the one real merit wound). BUT colon has heavy FRAMEWORK precedent (Svelte's whole surface on:click/bind:value/use:action; Vue :/@ — F7-F10; on:click IS Svelte's spelling) and is collision-safe BY CONSTRUCTION (native attr names never contain a colon). SYNTHESIS per surface: native-aligned attrs bare + data-* (settled); directive form type= + core values bare (settled #1983); comment names colon ns:name (no collision risk in a comment, settled); Fork 1 = behavior/event attribute NAMES keep colon (DEFAULT, on :672 + collision-safe-by-construction + unshipped-proposals + Svelte familiarity; with an explicit F5 honesty caveat that WE's : is the ownership-colon idiom, NOT an XML-namespace declaration) vs migrate to reserved-prefix hyphen (enh-*/we-*, verbose); Fork 2 = third-party type= VALUE namespacing = owner-kind HYPHEN acme-card (DEFAULT — flipped from an initial colon lean by the prep skeptic, because native type= values are bare/slash-MIME never colon, so colon-in-value reopens #1983's no-native-analog defect; #1913 colon is scoped to intent IDs not type= values) vs colon acme:card vs reverse-DNS. Two conformance cleanups (not forks): bare-hyphen behavior attrs (collision-unsafe) → colon; double-colon route:guard:leave (no precedent) → single-colon.",
+  "dateOpened": "2026-06-30",
+  "lastReviewed": "2026-06-30",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "naming",
+    "attribute-naming",
+    "webdirectives",
+    "native-first",
+    "block-standard",
+    "customattribute",
+    "rfc-6648",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": ["webdirectives", "webbehaviors"],
+  "relatedProject": "webdirectives"
+}

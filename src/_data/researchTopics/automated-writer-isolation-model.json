@@ -1,0 +1,22 @@
+{
+  "id": "automated-writer-isolation-model",
+  "title": "Automated-writer isolation & non-destructive closeout — changeset-scoped integration, lane-isolation as proto-PR seam, observe-only main",
+  "status": "open",
+  "summary": "Prep research for decision #1985 (extends the resolved #1933 clone model; we:reports/2026-06-30-automated-writer-isolation.md). A real incident (batch-2026-06-29e): a /workflow closeout ran in the SHARED primary checkout, diffed the DIRTY working tree to infer 'its own residue', mis-read a concurrent /prepare session's in-progress #1983 files as residue, and git-checkout/rm'd them (no loss only by luck) — we:backlog/1985-…:17-35, we:.claude/agent-memory/closeout-never-infers-ownership-from-dirty-tree.md. IN-REPO GROUNDING: #1933 clone model is built+proven (lanes = clones pushing lane/* refs, central integrator merges to main one-at-a-time with full gate, rebase-retry-never-force; proven WE-only batch-2026-06-29b 5/6, 0 stranded — but lane refs can fail-to-push and fall back to serial replay, parallel-workflow-blocked-by-git-guard.md:53-57). The #1153 branch guard denies git switch/worktree-add/checkout -b in the shared checkout (forced clones over worktrees); push to main now allowed, broad-stage git add -A still denied. Rule 105: claim ignores git state (ownership = status:active, never the tree). #083 ratified the repo coordinates via item-level status claims + worktrees/clones, routing AROUND file locks. Rung-3 blocker: the vite proxy is a hard-coded allowlist (#210) and .fui-card lands cross-origin only where the FUI registration ESM loads (#1895, blockedBy #1982), so per-lane visual rendering needs WE+FUI origins up and wired per lane ('the constellation, not one --port'). No PR-flow/observe-only-main item exists; the concept lives only inside #1985. PRIOR ART (SE practice): git worktrees share the object store/refs (only HEAD/index per-worktree) and refuse to check out a ref twice — a full clone avoids both (F1/F2, git-scm.com); worktrees give CODE isolation not RUNTIME isolation, shared object store/DB can still corrupt (F3/F7, blog-level) — why rung 3 needs full clones+ports not just a branch; trunk-based dev = short-lived single-owner branches converging to main via a review+CI gate (F4/F5, trunkbaseddevelopment.com, atlassian.com) — the faithful map for lane/* as proto-PR units; 2024-26 AI-agent norm gives each agent its own working dir+index (F6, blog-level); GitHub branch protection / GitLab 'Allowed to push: No one' ARE the institutional observe-only main (F8-F10, docs.github.com, docs.gitlab.com); Terraform state is 'a snapshot after the last apply, NOT a live representation' and plan→apply enacts exactly the recorded diff idempotently (F11/F12, developer.hashicorp.com) — the canonical 'act on your recorded changeset, never read ambient live state as truth', exactly rung 1. SYNTHESIS (3 archetypes): Rung 1 (non-destructive changeset-scoped closeout) = FORCED INVARIANT — the dirty-tree-ownership branch is broken (destroyed real work), Terraform plan→apply is the industry-standard shape, ratify; Rung 2 (lane-isolate ALL automated writers, lane/* as proto-PR seam) = MERIT FORK, default adopt (trunk-based + off-the-shelf branch-protection gate), counter-weight = once Rung 1 removes the destructive harm, what's left is the cross-session READ hazard + proto-PR forward-value vs clone latency + the proven lane-ref→serial fallback; Rung 3 (observe-only main for visual work via per-lane multi-origin dev server + headless Playwright) = VALIDATION-GATE verdict NOT-YET, concrete trigger = the per-lane multi-origin Playwright harness is built (the #210/#1895 cross-origin FUI wiring is the real gating cost), NOT a #1620 soft-park.",
+  "dateOpened": "2026-06-30",
+  "lastReviewed": "2026-06-30",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "parallel-batch",
+    "isolation",
+    "closeout",
+    "pr-flow",
+    "git-workflow",
+    "agent-orchestration",
+    "dev-server",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": null
+}

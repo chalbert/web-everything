@@ -1,0 +1,61 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  WE authors markers in several spellings — colon attribute names (<code>view:if</code>, <code>nav:list</code>,
+  <code>on:click</code>), bare-hyphen (<code>for-each</code>, <code>type-ahead</code>), <code>data-*</code>, bare
+  (<code>multiple</code>), and bare <code>type=</code> values (<code>type="if"</code>). #1983 moved
+  <em>directives</em> off <code>view:if</code> colon onto <code>&lt;template type=&gt;</code> on the grounds that
+  "colons in HTML attributes exist only in XML/foreign content." That reads as a blanket indictment of every
+  colon attribute. #1987 asks: <strong>is it catalog-wide, and what is the standards-shaped convention per
+  surface?</strong>
+</p>
+
+<h2>The decisive grounding — colon is already ratified for attributes</h2>
+<p>
+  The cold "kill the colons" read missed a <strong>ratified</strong> statute.
+  <code>we:docs/agent/platform-decisions.md:672-673</code> (the <code>registry-name-guard</code> ruling, derived
+  from the native-first baseline) states the separator set tracks <strong>what each namespace permits, not
+  uniformity</strong>: <em>"attributes accept hyphen <strong>or</strong> colon (<code>xml:lang</code>,
+  <code>nav:list</code>)"</em> — naming a WE colon attribute as legitimate. And #1983 <strong>scoped</strong> its
+  colon-rejection to the directive <em>kind discriminator</em> (&rarr; <code>type=</code>), explicitly carving
+  name-/value-namespacing to #1987 (<code>we:docs/agent/block-standard.md:399-401</code>). Reinforced by the
+  machine-checked #1913 (<code>owner:intent</code>, RFC 6648 namespace-by-ownership) — though that colon is scoped
+  to <em>intent-ID JSON keys</em>, not HTML attribute names or <code>type=</code> values.
+</p>
+
+<h2>Prior art — the platform's author-attribute convention is hyphen</h2>
+<ul>
+  <li><strong>F1/F2</strong> — <code>data-*</code>/<code>aria-*</code> are the platform's hyphen-prefixed author
+    namespaces (<a href="https://html.spec.whatwg.org/multipage/dom.html#embedding-custom-non-visible-data-with-the-data-*-attributes">HTML
+    spec</a>).</li>
+  <li><strong>F4</strong> — custom-<em>element</em> names MUST contain a hyphen, for collision-safety
+    (<a href="https://html.spec.whatwg.org/multipage/custom-elements.html#valid-custom-element-name">HTML
+    spec</a>).</li>
+  <li><strong>F5</strong> — no native HTML <em>attribute</em> uses a colon; a colon denotes an XML-namespace
+    prefix (<code>xml:lang</code>, <code>xlink:href</code>). <em>The one real merit wound against colon attribute
+    names.</em></li>
+  <li><strong>F6 / F6b</strong> — the live proposals
+    (<a href="https://github.com/WICG/webcomponents/issues/1029">WICG#1029</a>,
+    <a href="https://github.com/whatwg/html/issues/2271">whatwg#2271</a>) propose author <em>attributes</em> must
+    contain a <strong>hyphen</strong> (floating an <code>enh-*</code> reserved prefix) — <strong>not</strong>
+    colon. <em>Unshipped — directional, not law.</em></li>
+  <li><strong>F7–F10</strong> — colon/<code>@</code> markers are <em>framework</em> conventions (Vue
+    <code>:</code>/<code>@</code>; Svelte's whole surface — <code>on:click</code> is literally Svelte's spelling).
+    Strong framework precedent, zero native precedent.</li>
+</ul>
+
+<h2>Resulting prepared shape (per surface)</h2>
+<ul>
+  <li><strong>Settled:</strong> native-aligned attrs bare + <code>data-*</code>; directive form <code>type=</code>,
+    core values bare; comment names colon <code>ns:name</code> (no collision risk inside a comment); event values
+    bare Action IDs.</li>
+  <li><strong>Fork 1 — behavior/event attribute names: keep colon</strong> <em>(default)</em> vs migrate to a
+    reserved-prefix hyphen. Rests on the ratified <code>:672</code> + collision-safety-by-construction + the
+    unshipped status of the hyphen proposals; with an explicit honesty caveat that WE's <code>:</code> is the
+    ownership-colon idiom, <strong>not</strong> an XML-namespace declaration.</li>
+  <li><strong>Fork 2 — third-party <code>type=</code> value: <code>owner-kind</code> hyphen</strong>
+    (<code>acme-card</code>) <em>(default — flipped from an initial colon lean by the prep skeptic)</em>: native
+    <code>type=</code> values are bare/slash-MIME, never colon, so colon-in-value reopens #1983's no-native-analog
+    defect; hyphen preserves RFC 6648 ownership-not-status without it.</li>
+</ul>
+{% endraw %}

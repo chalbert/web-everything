@@ -1,0 +1,62 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  How much of the constellation's work must run <strong>isolated</strong> (a clone with its own HEAD, converging
+  via <code>origin</code>) versus directly in the <strong>shared primary checkout</strong> — and what an
+  automated closeout/integrator is allowed to touch. Triggered by a real incident where a parallel-batch closeout
+  destroyed a concurrent session's in-progress work.
+</p>
+
+<h2>The incident (the evidence, not a hypothetical)</h2>
+<p>
+  In <code>batch-2026-06-29e</code>, a <code>/workflow</code> closeout ran in the <strong>shared</strong> primary
+  checkout and diffed the <strong>dirty working tree</strong> to infer "its own residue." A concurrent
+  <code>/prepare</code> session was at that moment authoring decision #1983 (status flip, a research topic, a
+  report) — all uncommitted. Closeout mis-read that mid-flight state as batch residue and
+  <code>git checkout</code>/<code>rm</code>'d it. No permanent loss <em>only by luck</em>. Crucially, the
+  manifest <strong>already existed</strong> — the orchestrator records per-item <code>changedFiles</code> in its
+  ledger and its central reconcile steps are read-only — so the bug is the <strong>method</strong>
+  (dirty-tree-as-ownership), not a missing input.
+</p>
+
+<h2>Three rungs — three archetypes (the prep's reframe)</h2>
+<p>
+  The cold item framed one fork ("an escalation ladder; which rung, in what order"). The standing test splits it,
+  and that split <em>is</em> the decision — bundling them would smuggle a scope-reopen past the incident's
+  evidence:
+</p>
+<ul>
+  <li><strong>Rung 1 — non-destructive, changeset-scoped closeout = a forced invariant.</strong> The excluded
+    branch (infer ownership from the dirty tree) is <em>broken</em> — it destroyed real work. Act only on your own
+    recorded manifest; never revert/delete a file you didn't write; never read <code>git status</code> as
+    ownership. Terraform's "state is a snapshot, not live truth" (plan&rarr;apply enacts only the recorded diff)
+    is the canonical prior art. <strong>Ratify.</strong></li>
+  <li><strong>Rung 2 — lane-isolate all automated writers = settled by #1933 (not a live fork).</strong> Once
+    Rung 1 holds, generalizing the clone model to serial <code>/batch</code> addresses <em>no residual incident
+    harm</em>; #1933's <em>Scope decision (solo dev)</em> already ruled serial batch the day-to-day model and full
+    isolation "not a prerequisite for normal batching." It carries a proven lane-push-flakiness tax (2 of 6 lanes
+    fell back to serial in the first green run) and strands work from the watched dev server. <strong>Don't
+    generalize</strong> — the proto-PR-seam value is a roadmap note under #1933, gated on a future PR-flow
+    decision.</li>
+  <li><strong>Rung 3 — observe-only main for visual work = a validation-gate, not-yet.</strong> Feasible
+    institutionally (GitHub "require PR" / GitLab "push: no one" <em>are</em> observe-only main), but genuine
+    per-lane <em>visual</em> rendering needs full clones with their own ports (worktrees give code isolation, not
+    runtime isolation) plus the cross-origin WE+FUI wiring. Un-gate trigger sharpened to a <strong>falsifiable
+    acceptance test</strong>: a lane reproduces the #1895 transparent-<code>.fui-card</code> regression and its
+    fixed pass headlessly from the CLI.</li>
+</ul>
+
+<h2>Prior art (SE practice)</h2>
+<ul>
+  <li><strong>F1/F2</strong> — git worktrees share the object store/refs (only HEAD/index per-worktree) and
+    refuse to check out a ref twice; a full clone avoids both (git-scm.com).</li>
+  <li><strong>F3/F7</strong> — worktrees give code isolation, not <em>runtime</em> isolation (shared object
+    store/DB can still corrupt) — <em>blog-level</em>. Why rung 3 needs clones+ports, not a branch.</li>
+  <li><strong>F4/F5</strong> — trunk-based dev = short-lived single-owner branches converging via a review+CI
+    gate (trunkbaseddevelopment.com, atlassian.com) — the map for <code>lane/*</code> as proto-PR units.</li>
+  <li><strong>F8/F9/F10</strong> — GitHub branch protection / GitLab "Allowed to push: No one" <em>are</em> the
+    institutional observe-only main (docs.github.com, docs.gitlab.com).</li>
+  <li><strong>F11/F12</strong> — Terraform state is "a snapshot after the last apply, not a live representation";
+    plan&rarr;apply enacts exactly the recorded diff, idempotently (developer.hashicorp.com) — exactly Rung 1.</li>
+</ul>
+{% endraw %}
