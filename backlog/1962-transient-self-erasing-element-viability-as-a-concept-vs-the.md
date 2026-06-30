@@ -3,228 +3,239 @@ kind: decision
 status: open
 locus: webeverything
 dateOpened: "2026-06-29"
+dateStarted: "2026-06-29"
+preparedDate: "2026-06-29"
+relatedReport: reports/2026-06-29-transient-self-erasure-concept-viability.md
 tags: [webcomponents, transient-element, block-standard, standards-position, native-semantics, decision]
 ---
 
 # Transient (self-erasing) element — viability as a concept vs the standards-endorsed alternatives
 
-The transient / A-family pattern ([fui:blocks/transient/TransientElement.ts](../../frontierui/blocks/transient/TransientElement.ts))
-has an **autonomous custom element erase itself** on upgrade — it builds a native element, moves its content
-onto it, then `this.replaceWith(native)` and vanishes. This card reconsiders that pattern **at the concept
-level** — not "what API does it expose" (#1961) or "how do consumers wire it" (#1960), but **is a self-erasing
-element the right idea at all, given what the standards bodies actually endorse?**
+**Prepared.** This re-judges the **already-ratified** transient / A-family pattern
+([we:block-standard.md → Packaging governance, item 7](../docs/agent/block-standard.md), #1381) **at the concept
+level** — is self-erasure the right idea, given what the standards bodies endorse? Grounded in a prior-art survey
+([/research/transient-self-erasure-concept-viability](/research/transient-self-erasure-concept-viability/);
+report linked below) that fetched the **WebKit #97** reasoning verbatim and re-grounded the FUI tree. The
+*scoping* call is **already settled statute** (§7 / #1381 / #1456), so this card is **a concept-level
+confirmation + two codifications**: the **#97 reconciliation on record** (the `oppose` does *not* condemn family
+A) and a **self-replacement robustness rider**, while **refuting position D**. The ratifiable posture is in
+**bold** under Fork 1. **Case 1's facet** of
+[#1963](1963-composition-rubric-re-judged-to-framework-parity-strict-per-.md) — resolve under its framework-parity bar.
 
-> **Scope note — this is now case 1's facet of #1963.** The umbrella decision
-> [#1963](1963-composition-rubric-re-judged-to-framework-parity-strict-per-.md) re-judges the *whole*
-> composition rubric against a framework-parity / zero-compromise bar; transient (family A) is **case 1** in
-> its matrix. Resolve this card's A/B/C/D positions **under that bar** — it is the worked re-judgment that
-> feeds the umbrella, not an isolated call.
+> **Seed for review (2026-06-29) — the biggy: a hard, clear rule for WHEN transient vs wrapper/persistent element.**
+> Start from the **"is-a" test**: *is-a* a single native element (`<we-button>` **is a** button, `<we-date-picker>`
+> **is a** input) → **transient (A)**; a **composite / container** with no single native essence (`<we-card>` *has a*
+> header + body; a group *has* children) → **wrapper / persistent (B)**. This sharpens §7's existing rules (the
+> #1381 family pick; the #1457 *is-a vs can-do* element-vs-behaviour test) into a crisp transient-vs-wrapper call.
+> **Refine with #1963's transient audit** (the [framework-parity report](../reports/2026-06-29-composition-framework-parity.md)):
+> the is-a set splits into **irreplaceable-native** (text-field, number-input, date/time/datetime pickers — native
+> chrome/IME/validation can't be reproduced → transient is load-bearing, ~permanent) vs **replicable** (button, chip
+> — a persistent CE + `ElementInternals` could approximate → transient is the default but configurable). The 7
+> **soft-transient** presentational blocks (badge, tag, section-card, auto-heading, meter, progress, card) are
+> cleanliness-only → light-DOM is an equally valid opt-in (the configurable-variant rule; **#1974** carries the
+> per-block default re-eval, blocked on this). Watch `ElementInternals.type` ([whatwg/html#11061](https://github.com/whatwg/html/issues/11061))
+> — if it ships, a persistent CE could inherit native behaviour and transient could deprecate even for the hard set.
 
-## Why this is on the table now
+## The crux, in one paragraph
 
-The #1961 prep survey ([report](../reports/2026-06-29-transient-element-exposed-api.md)) surfaced two
-uncomfortable facts the mitigation cards route around:
+The transient element ([fui:blocks/transient/TransientElement.ts:53-76](../../frontierui/blocks/transient/TransientElement.ts#L53-L76))
+builds a native element, moves attributes + children onto it, then `queueMicrotask(() => this.replaceWith(native))`
+and vanishes — **zero wrapper**. The concept-level challenge has three real strands, each pinned to the tree:
+**(1)** the **WebKit #97** `oppose` on customized built-ins argues real native semantics are better reached by
+**keeping** a persistent host + `ElementInternals`, not deleting the element; **(2)** self-replacement is **not
+spec-sanctioned** (`connectedCallback` fires `>1×` / with `isConnected===false`) and **nobody self-erases at
+runtime** (#1961 survey); **(3)** a composition-cost argument that the platform charges per node. Grounding each
+strand against the real tree (`ElementInternals` used in only **2** places —
+[fui:blocks/droplist/AutoComplete.ts:52](../../frontierui/blocks/droplist/AutoComplete.ts#L52),
+[fui:blocks/renderers/component/declarativeComponent.ts:191-233](../../frontierui/blocks/renderers/component/declarativeComponent.ts#L191-L233);
+behaviour composes node-free via **35+** `CustomAttribute`s,
+[fui:plugs/webbehaviors/CustomAttribute.ts:65-410](../../frontierui/plugs/webbehaviors/CustomAttribute.ts#L65-L410);
+the §7 family cut already in [we:block-standard.md → Packaging governance, item 7](../docs/agent/block-standard.md),
+#1381) collapses the four candidate positions onto **one axis** — *which discriminator scopes self-erasure* —
+leaving everything else forced or already-settled.
 
-1. **Nobody else self-erases at runtime.** HTML web components (Keith), Lit, Shoelace, Web Awesome all keep
-   the host **persistent** as the API surface; compile-away frameworks unwrap at *build* time. The entire
-   stale-ref / lost-listener / attribute-rename problem set that #1960 and #1961 exist to paper over **exists
-   only because the host erases itself.**
-2. **Self-replacement is not a spec-sanctioned pattern** — the HTML spec warns authors against manipulating the
-   node tree inside custom-element reactions, and `connectedCallback` can fire >1× / with `isConnected===false`.
-   The pattern is a tolerated workaround, not a blessed mechanism.
+## Recommended path at a glance
 
-The transient pattern is, in effect, a **workaround for customized built-ins (`is="button"`) being
-unavailable** — and that unavailability is owed to a deliberate standards position, which is the crux the user
-asked to engage.
+| # | Element | Recommended | Main alternative (excluded) | Confidence |
+|---|---|---|---|---|
+| **Fork 1** | Scoping discriminator for self-erasure | **(a) Reaffirm §7's persistent-ref cut** — transient for behaviour-free leaves + single native form controls; persistent for reactive/grouped/ref-bound | (b) D's native-payoff cut · (c) abandon for persistent everywhere | **High — reaffirms settled §7/#1456 statute; low divergence** |
+| Forced | `is=` (customized built-in, position C) | **Dead + statute-barred** — PE-only, never load-bearing | (rely on `is=` cross-browser) — Safari will never ship it | High (ratify) |
+| Forced | Self-replacement robustness rider | **Mandatory: idempotent + `isConnected`-guarded + microtask-deferred** (idempotent + defer present; the `isConnected` leg is a real new requirement) | (unguarded self-replacement) — broken under `>1×` / `isConnected===false` reaction | High (ratify) |
 
-## The WebKit argument ([standards-positions #97](https://github.com/WebKit/standards-positions/issues/97))
+## Supported by default (forced — not forks)
 
-> *Verbatim thread quoting deferred to `/prepare` — WebFetch sees only the issue metadata, not the comment
-> thread; a prepare pass must fetch rniwa's full reasoning before ratification.*
+- **`is=` / customized built-ins (position C) are dead and statute-barred — recorded, not re-litigated.**
+  Safari's permanent `oppose` ([WebKit #97](https://github.com/WebKit/standards-positions/issues/97)) **plus**
+  the native-first **single-substrate floor**
+  ([we:platform-decisions.md#native-first-baseline](../docs/agent/platform-decisions.md#native-first-baseline)
+  — a spec never carries a dual native-vs-shimmed contract) forbid making `is=` load-bearing. This is **demote,
+  not forbid** (§7's *compliance-is-a-spectrum*, #1321): `is=` may *enhance* a native element where present,
+  degrading to the plain native element in Safari. Identical to #1963's same ruling — cited, not re-decided.
+- **Self-replacement carries a mandatory robustness rider** — the legitimate residue of strand (2), and the
+  one part of this card that is **not already shipped**. Because `connectedCallback` can fire `>1×` and with
+  `isConnected===false`, and the HTML spec warns against tree manipulation in reactions, a family-A unwrap
+  **must** be **idempotent** (re-entry guard), **`isConnected`-guarded**, and **microtask-deferred**. This is a
+  **forced invariant** (the alternative — unguarded self-replacement — is *broken*, not a coherent choice). The
+  current base **satisfies two of the three legs**: idempotent via the `#replaced` guard
+  ([fui:blocks/transient/TransientElement.ts:54-55](../../frontierui/blocks/transient/TransientElement.ts#L54-L55))
+  and deferred via `queueMicrotask` ([:75](../../frontierui/blocks/transient/TransientElement.ts#L75)) — **but it
+  does *not* check `this.isConnected`** before replacing, so the `isConnected` leg is a **real (small) new
+  requirement**, not a no-op. Codify all three as a family-A conformance rider so the next transient block
+  inherits it; the build is a one-line guard (`if (!this.isConnected) return;`) filed as a separately-prioritized
+  item, not part of this ruling.
+- **A non-binding watch (not a fork):** if a *sanctioned* declarative "render-as-native" primitive ever ships —
+  DOM Parts, or the parser-level mechanism WebKit floated for the `td`/`template` case
+  ([whatwg/html#8114](https://github.com/whatwg/html/issues/8114)) — revisit whether it supersedes the unwrap.
+  A future contingency with no present excluded branch, so it is a rider, not a `## Fork`.
 
-What is verified from the position itself: **WebKit's position is `oppose`**, and the issue states *"WebKit
-supports autonomous custom elements, but hasn't implemented this aspect of custom elements"* (customized
-built-ins). The well-established rniwa/Apple reasoning behind that `oppose`:
+## Fork 1 — the scoping discriminator for self-erasure
 
-- **Subclassing built-in elements is the wrong primitive.** Native elements carry complex, partly-hidden
-  internal state and behaviour; letting author classes subclass them couples author code to that internals and
-  **constrains the platform's freedom to evolve those elements**. Apple frames this as a long-term
-  platform-health cost.
-- **The constructive half — prefer autonomous custom elements + composition.** WebKit's endorsed direction is
-  autonomous elements that obtain native-grade semantics through the platform's *newer* primitives —
-  **`ElementInternals` / form-associated custom elements, ARIA/AOM reflection** — and by composing/wrapping a
-  real native control, **not** by becoming one via `is=`.
+*Fork-existence:* a genuine either/or at the *concept-posture* altitude (standing-test case b) — three
+**coherent** scoping postures, mutually exclusive (the standard must name **one**; you cannot say both
+"badge → transient" and "badge → persistent"). The composability probe does not dissolve it: "support both
+families, scoped" *is* what (a) is, so the residual choice is genuinely *which discriminator draws the cut*.
+**Honest confidence caveat (skeptic pass-0):** this is a **low-divergence** fork — branches (b) and (c) are
+**already excluded by ratified statute**, not wide open: §7 item 7 / #1381 already rejected persistent-everywhere
+and #1456 already rejected transient-for-groups, drawing *exactly* the cut (a) reaffirms (the discriminator —
+*does the primary consumer need a persistent live ref / composite live-binding surface* — is verbatim the #1456
+rationale). So Fork 1 is the **concept-level confirmation** the user asked for (does the #97 + unsanctioned-ness
+challenge force abandoning or re-scoping family A — **no**), *not* a fresh wide-open call. Its two genuinely-new
+outputs are the **#97-reconciliation-on-record** and the **robustness rider** above. This is *not* a
+prioritization fork — each branch's downside is a **merit** (a11y / native-behaviour / node-cost) difference,
+never cost/effort.
 
-**Why that bears on self-erasure, not just on `is=`:** the WE transient element is a *third* thing — neither a
-customized built-in (`is=`) nor a persistent autonomous element. Its whole reason to exist is "leave a **real**
-native element in the final DOM." But WebKit's constructive recommendation (a **persistent** autonomous element
-that gets native semantics via `ElementInternals`/ARIA) is precisely the alternative the survey found everyone
-else already uses — so #97 is not merely "why the escape hatch is dead," it is an articulated argument that the
-goal self-erasure chases (real native semantics) is better reached by **keeping the element**, not deleting it.
+**Crux with refs.** The honest justification for transient narrows (per the survey's category check, §*Context*)
+to exactly one property it uniquely buys: **a real native element in the final DOM, authored declaratively, with
+zero wrapper** — free focus/activation/form/AT, SSR-degradable. `ElementInternals` (WebKit's alternative) grants
+**form association + default ARIA role + custom states** only
+([fui:renderers/component/declarativeComponent.ts:191-233](../../frontierui/blocks/renderers/component/declarativeComponent.ts#L191-L233)),
+**not** native behaviour (focus ring, keyboard activation, implicit submit, label click-through are hand-wired) —
+and only on *your own* element. So the cost of transient (a microtask-lived node + an unsanctioned deletion) is
+borne **only where a consumer holds a live ref / a composite live-binding surface exists**; where none does, the
+cost is ~0. That is the axis the discriminator must track.
 
-## The genuine counter-weight (don't strawman the status quo)
-
-Self-erasure was chosen for real reasons, and `ElementInternals` does **not** fully replace them:
-
-- A transient element leaves a **true native element** in the DOM (a real `<button>`: native focus, activation,
-  form participation, AT semantics — all *free*). An autonomous host + `ElementInternals` gets form-association
-  and some ARIA, but you **re-implement** click/keyboard/focus/activation behaviour by hand.
-- **Zero wrapper** — no extra node to fight in CSS/layout (the exact problem Astro is removing from
-  `<astro-island>`).
-- **Progressive enhancement / SSR** — the authored markup degrades to plain native HTML with no JS.
-
-So this is a real either/or, not a slam-dunk: *true-native-element-but-self-erases* vs
-*persistent-host-but-only-near-native*.
-
-## Composition cost — a real platform weakness (worked example)
-
-A second pro-transient argument the persistent-host case has to answer: **the web platform's unit of
-composition is the DOM node**, so deep composition has an inherent node-cost that a virtual-DOM library does
-not. Take the user's case — a simple light-DOM button wrapped in **10 HOC-like layers**.
-
-**React** composes at the *component* layer; the rendered DOM stays flat — HOCs add **zero** nodes unless they
-choose to:
-
-```jsx
-// 10 HOCs fold into one component; the DOM is just <button>
-const Button10 = withA(withB(withC(/* …7 more… */ BaseButton)));
-// <Button10/>  →  <button>Go</button>      // 10 layers, 1 node
-```
-
-**Web components, composed structurally (nesting)** — the naive translation makes every layer a real node:
-
-```html
-<!-- DOM-layer composition: every wrapper IS a node -->
-<with-a><with-b><with-c><!-- …7 more… --><we-button>Go</we-button></with-c></with-b></with-a>
-<!-- → 10 wrapper elements per button in the DOM + AX tree; CSS/layout/slotting all cross all 10,
-     each shadow boundary nests slots (slot-in-slot) and breaks ::part chains. This is the "heavy". -->
-```
-
-**The honest rebuttal: most of that 10-deep composition is *behavioural*, and behaviour composes flat without
-transient.** The web-native analog of an HOC is a **functional class mixin** — N behaviours fold into **one**
-element class, leaving **one** DOM node:
+- **(a) Reaffirm §7's persistent-ref cut.** *(default)* Transient (family A) for **behaviour-free leaves +
+  single native form controls** (badge, tag, card, button, filter-chip, progress, meter, text-field,
+  number-input, temporal pickers — the cases where no consumer holds a live ref; stateful ones keep their toggle
+  on a `CustomAttribute` on the **surviving native** element). Persistent (family B) for **reactive / grouped /
+  ref-bound** blocks (tabs, stepper, checkbox-group, AutoComplete, data-grid — a stable identity / composite
+  `value` surface is needed). Discriminator = *does a consumer need a persistent live ref or composite
+  live-binding surface*. **#97 is consistent with this** — it recommends persistent-host exactly where §7 routes
+  to B, and never contemplated emit-a-true-native (family A).
+- **(b) D's native-payoff cut.** *Rejected — wrong discriminator.* Scopes transient by *native-semantics payoff*
+  (keep for form controls/buttons; persistent for badge/tag/card). But badge/tag/card are the **cleanest**
+  transient cases — no state, no ref, no rename problem (#1961), zero wrapper — so moving them to persistent
+  **adds a wrapper node** to avoid a fragility cost that is already ~0. *(Skeptic correction: a persistent
+  `<we-badge style="display:contents">` erases its **box**, so this is **not** "full layout cost" — flex/grid
+  direct-child breakage is avoided. But `display:contents` removes the box, **not the node**: the AX-tree entry,
+  HTML content-model position, structural-selector / `:nth-child` shift, and the tree-walk node all remain — the
+  exact "cheap node, not zero" #1963's spine draws. So persistent-badge is cheaper than first stated, yet still
+  strictly costlier than zero-wrapper transient.)* The payoff axis mis-identifies *where transient's cost
+  actually lands* (on ref-holders, not on no-semantics blocks).
+- **(c) Abandon — persistent autonomous host + `ElementInternals` everywhere.** *Rejected — strictly worse for
+  leaves.* It is coherent (Lit/Shoelace ship it) but for a behaviour-free leaf it **reimplements** native
+  focus/activation/keyboard by hand, gets only *near*-native semantics, and **adds a persistent wrapper node** —
+  the very bloat the composition-cost argument warns against. WebKit's own rec is *narrower* than "abandon": it
+  targets *owned* semantics, which is family B's existing domain, not a mandate to drop family A.
 
 ```ts
-// Behaviour-layer composition: 10 mixins → ONE element class → ONE node (the established pattern —
-// Fagnani "Real Mixins with JS Classes" / lit dedupeMixin; FUI's attribute-driven cousin is the
-// `*Behavior` concept, e.g. fui:blocks/stepper/StepperBehavior.ts)
-const Button = WithA(WithB(WithC(/* …7 more… */ HTMLElement)));
-customElements.define('we-button', class extends Button {});
-// <we-button>Go</we-button>   // 10 behaviours, 1 light-DOM node, zero wrappers, no transient needed
+// Fork 1 (a) — the discriminator, by family. The SAME authoring surface (<we-*>) backs both.
+
+// Family A (transient): behaviour-free leaf / single native control → emit a TRUE native element, zero wrapper.
+// Real focus/activation/form/AT are FREE; the host is gone after a microtask.
+class BadgeElement extends TransientElement {            // fui:blocks/badge/BadgeElement.ts
+  resolveTag() { return 'span'; }                        // <we-badge> → <span class="fui-badge"> ; no ref held → cost ~0
+}
+// Family B (persistent): a consumer holds a live ref / composite value → KEEP the host as the binding surface.
+// ElementInternals gives form+role+state; native click/keyboard/focus are HAND-WIRED on the host.
+class WeCheckboxGroup extends HTMLElement {              // fui:blocks/checkbox/CheckboxElements.ts
+  static formAssociated = true;
+  #internals = this.attachInternals();
+  get values() { /* composite live surface — the reason the host must persist */ return []; }
+  // …focus roving, keyboard, label wiring all explicit (no real native group element to erase into)
+}
+// (b) would push BadgeElement onto the WeCheckboxGroup shape — paying a wrapper node for a block that needs none.
 ```
 
-So the cost is **not** uniform across the 10 layers — it splits:
+`Skeptic:` SURVIVES-WITH-AMENDMENT (throwaway refute-only sub-agent, four axes). **Pass-0 (classification):** the
+substance holds but the strongest hit landed — Fork 1(b)/(c) are *already excluded by §7/#1456 statute*, so this
+is a **low-divergence confirmation**, not a wide-open Med-high fork; re-labelled as such + the two genuinely-new
+outputs (#97-on-record, robustness rider) foregrounded. Config-dimension re-route **failed** (A/B is a
+design-time per-block rule keyed to *primary consumer need*, not an author-flippable per-instance knob).
+**Pass-1 (merit):** default (a) **stands** — beat the `display:contents`-makes-persistent-badge-free attack
+(box erased, but node/AX/content-model/selector cost remains > zero-wrapper transient); the over-stated "full
+layout cost" was corrected in (b). **Pass-2 (statute-overlap):** SURVIVES — no collision with
+`native-first-baseline` / `persistent-b-data-source` / `config-extends-platform-default`; but the `codifiedIn`
+target was a **dangling `§7.7`** — fixed to *Packaging governance item 7 (#1381)*. **Pass-3 (citation-scope):**
+the #97 reading is faithful (used to kill `is=` and show #97 is *silent* on family A, never stretched to
+"authorize" self-erasure); the single-substrate floor is scoped to `is=`, not the timing question; but the
+rider's "already satisfied" claim was **false on the `isConnected` leg** (`TransientElement` has no `isConnected`
+guard) — corrected to a real new requirement. Net: posture (a) ratified-shape; four amendments folded in.
 
-- **Behavioural layers** (state, events, a11y wiring, validation, toggling): compose into one class via
-  mixins/decorators/attribute-behaviours → **flat DOM, good ergonomics, no transient, no persistent-host
-  penalty.** This is the bulk of real "HOC" composition and the platform answers it fine.
-- **Structural layers** (a layout wrapper, a provider boundary, an independently-slotted/styled shell): each
-  genuinely *needs* its own node → here the platform charges per layer. `display: contents` is the only relief
-  (drops the wrapper's *box* but keeps the node in the DOM/AX tree, with lingering a11y caveats), and there is
-  **no** platform equivalent to React's zero-DOM context-provider / render-prop. **This is the real weakness.**
+## Context (the grounded analysis — below the call)
 
-### What an added DOM level actually costs (not just bloat — breakage)
+### The WebKit #97 argument, and what it actually condemns
 
-Inserting a wrapper purely to carry *behaviour* is not neutral; a DOM node is a layout/CSS/semantic/parser
-participant whether you wanted it to be or not. The impacts, worst-first:
+WebKit's position ([standards-positions #97](https://github.com/WebKit/standards-positions/issues/97), closed,
+`oppose`; `rniwa`/`annevk`) opposes **customized built-ins** because: form-associated custom elements solve the
+form-control case better; `ElementInternals`/`ARIAMixin` give autonomous elements good a11y; customized
+built-ins can't access shadow/`ElementInternals` (*"second-class"*); they can't have good built-in a11y
+(*"logically different from the element they extend"*); progressive enhancement *"falls short"* (child elements
+are HTML's established fallback — `canvas`/`picture`); the `is=` syntax violates the Priority of Constituencies;
+only the HTML-**parser** case (`td`/`template`) is retained, to be solved differently
+([whatwg/html#8114](https://github.com/whatwg/html/issues/8114)). The community counter (WebReflection) argues
+`is=` gives best-a11y-free + no-FOUC + works-without-JS; romainmenke counters that async JS leaves elements
+*"un-upgraded … behaving as native elements before being customized."*
 
-1. **Layout breakage (the headline).** Flex and grid only apply to **direct** children. A
-   `<behaviour-wrapper>` between a flex/grid container and its items makes the *wrapper* the flex/grid item; the
-   real items collapse into normal flow inside it — the layout silently breaks even though the wrapper "does
-   nothing visual." `gap` no longer reaches the real items, margins re-collapse, `:nth-child` ordering shifts.
-   *New CSS partially rescues this:* `display: contents` (wrapper generates no box, children lay out as if it
-   weren't there) and `subgrid` (for nested grid) — but `display:contents` is all-or-nothing (the wrapper can
-   then carry **no** box, background, border, padding) and doesn't help replaced elements.
-2. **HTML content-model / parser breakage — *CSS cannot fix this*.** Some parent→child relationships must be
-   **direct** per the HTML parser: `<table>`→`<tr>`→`<td>`, `<ul>/<ol>`→`<li>`, `<dl>`→`<dt>/<dd>`,
-   `<select>`→`<option>`, `<picture>`→`<source>`. A wrapper element in those slots is invalid, and inside
-   `<table>` the parser **foster-parents** the stray node *out of the table entirely* — before any CSS runs. So
-   `display:contents` is no rescue here: the box is gone but the node was already ejected/invalid. Behavioural
-   wrappers are simply **illegal** in these contexts.
-3. **Accessibility-tree breakage.** Roles like `list`/`listitem`, `table`/`row`/`cell`, `group`/`option`
-   require a direct structural relationship; a wrapper between them breaks the semantic pairing, so AT no longer
-   announces "list, 5 items" / table navigation. `display:contents` now (mostly) passes a *generic* wrapper
-   through the AX tree in modern engines, but the historical bug lingered for years and any wrapper *with* a
-   role still injects it.
-4. **Structural CSS selectors shift.** Child combinator `>`, `:first/last/nth-child`, sibling `+`/`~`, and
-   `:scope > *` all target/count the wrapper, not the real element — author and consumer stylesheets silently
-   mis-target. (Descendant selectors and inherited properties still pass through, which is why it's *silent*.)
-5. **JS tree-walking shifts.** `el.children`, `.parentElement`, `.closest`, `:scope` queries, and index-based
-   walks all move by one level per wrapper — any code that assumed adjacency breaks.
-6. **Per-node engine cost.** Each custom-element wrapper is an upgrade + constructor + `connectedCallback`
-   (+ possible shadow root), and adds to style-recalc / layout / paint / memory. At 10× per control across a
-   list, it compounds into real jank.
-7. **Shadow/slot multiplication** (if wrappers use shadow DOM): nested boundaries mean slot-in-slot forwarding,
-   `::part` chains that must be re-exported through *every* level, and multiplied style scoping.
+**Why this bears on self-erasure, not just `is=`:** every objection is about customizing an existing native
+element *in place*. The transient element is a **third thing** — it *emits* a real native element and deletes
+itself. WebKit's constructive rec (persistent host + `ElementInternals`) is an argument for **family B** and for
+*owned near-native* semantics on an element you **keep** — it does not deliver a *true native element*. So #97
+**reaffirms** the §7 cut (persistent where you need owned semantics) rather than condemning family A.
 
-The throughline: **the only cost-free composition is the one that adds no node.** That is exactly why class
-**mixins** (zero added nodes) dominate behavioural composition, and why a *wrapper* is the wrong tool for
-non-visual behaviour — it pays all seven costs above to carry logic that belongs on the element itself.
-Transient self-erasure attacks the same problem from the other side (let the authored wrapper exist, then
-**delete it** so none of 1–7 survive to runtime) — which is its genuine appeal, *and* its fragility (the node
-exists for a microtask, and the deletion is the unsanctioned part).
+### The genuine counter-weight (the real either/or)
 
-**Why this bears on the decision:** transient self-erasure is partly a *workaround for the structural-layer
-node-cost* — it lets you author wrapper/structured markup that **collapses to flat native DOM**. That refines
-the positions:
+Self-erasure was chosen for real reasons `ElementInternals` does not replace: a transient element leaves a
+**true native element** (free focus/activation/form/AT — all *re-implemented by hand* on a persistent host);
+**zero wrapper** (no extra node to fight in CSS/layout — the exact problem Astro is removing from
+`<astro-island>`); **progressive-enhancement/SSR** (degrades to plain native HTML with no JS). So the call is
+real: *true-native-but-self-erases* vs *persistent-host-but-only-near-native* — decided on **how much that one
+property is worth** against the detached-node / unsanctioned-deletion cost, *per the discriminator above*.
 
-- It **does not** rescue self-erasure for *behavioural* depth — mixins already give flat DOM there (weakens A
-  as a general justification).
-- It **does** strengthen the case where authored *structure* must collapse to a true native element — and it
-  is a real cost on **position B**: a persistent host under deep *structural* composition reintroduces exactly
-  the wrapper-node bloat above (unless every consumer reaches for `display:contents`).
-- It sharpens **position D**: keep transient where *structure must flatten onto a native element*; use
-  persistent hosts + mixins where the composition is *behavioural* (flat already).
-
-`/prepare` should ground this: survey the mixin/decorator/behaviour ergonomics actually in the FUI tree, and
-test the 10-deep case under each of A/B/D to see where node-count and slotting actually bite.
-
-### Is transient *the* web approach for composition that adds no DOM element? (category check)
-
-**No — and this is a category error worth pinning, because it changes what justifies the pattern.** Two
-different needs get conflated:
+### Composition cost — mis-attributed to transient (category check)
 
 | Need | Web-native answer | Adds a node? |
 |---|---|---|
-| Compose **N behaviours** onto one element | **class mixin** (`WithA(WithB(WithC(HTMLElement)))`) — folds N behaviours into one element class; the HOC analog | **no** (the real zero-node composition primitive) |
-| Attach behaviour to an **existing native** element with no wrapper | customized built-in `is="button"` | no — **but dead in Safari (#97)** |
-| Emit a **true native element** with no custom wrapper in the output | **transient self-erasure** | the node exists, then is **deleted** |
+| Compose **N behaviours** onto one element | **`CustomAttribute` mixin** (35+ in FUI, WeakMap out-of-band) | **no** — the real zero-node composition primitive |
+| Attach behaviour to an **existing native** element with no wrapper | customized built-in `is=` | no — **but dead in Safari (#97)** |
+| Emit a **true native element** with no wrapper in the output | **transient self-erasure** | the node exists, then is **deleted** |
 
-Transient is in the **third** row, not the first. It is a **1:1 lowering** — author `<we-button>` → emit a
-native `<button>` — **not** a stacking mechanism: each `replaceWith` yields exactly one element, so you cannot
-compose 10 transient layers onto one button (nested transients would fight or produce nested natives). It is
-**node-*elimination*** ("add a node, then delete it"), not **node-*avoidance*** ("compose without a node,"
-which is mixins).
-
-**Why this is decision-relevant:** if the case for transient rests on *"the web has no zero-DOM composition, so
-we self-erase,"* that case is **mis-attributed** — class mixins already give zero-DOM behavioural composition
-(position B + mixins inherits this for free). Transient's *honest* justification therefore narrows to exactly
-one thing it uniquely buys: **a real native element in the final DOM, authored declaratively, with zero
-wrapper** — the native-semantics + SSR-degradability case above. Strip the composition argument away and the
-A-vs-B-vs-D call is decided purely on *how much that one property is worth* against the detached-node /
-unsanctioned-deletion cost.
-
-## Candidate positions (un-prepared — `/prepare` to shape defaults + skeptic)
-
-- **A — keep transient self-erasure (status quo).** Accept the #1960/#1961 mitigations as the cost of a real
-  native element in the DOM.
-- **B — persistent autonomous host (dominant prior art + WebKit's constructive rec).** Element stays as the
-  stable read/event/listener surface; native semantics via `ElementInternals`/ARIA + an internal native
-  control. Dissolves the stale-ref/rename problem set; costs a wrapper node and hand-wired native behaviour.
-- **C — customized built-in `is="button"`.** The standards mechanism for the exact goal — **foreclosed by
-  Safari** (#97 `oppose`); would need a polyfill. Recorded as dead, not viable.
-- **D — scope by need (hybrid).** Keep transient self-erasure only where a *true* native element pays off
-  (form controls, buttons), and use persistent hosts for purely-presentational blocks (badge/tag/card) that
-  have **no** native-semantics payoff — which is exactly where #1961's grounding found *no* rename problem.
-  This narrows self-erasure to the cases that justify its cost.
+Transient is the **third** row — a **1:1 node-elimination** (author `<we-button>` → emit one `<button>`), not a
+stacking mechanism (you cannot nest 10 transient layers onto one node). So *"the web has no zero-DOM
+composition, so we self-erase"* is **mis-attributed**: behavioural depth already composes node-free via
+`CustomAttribute`, and deep *structural* composition is **#1963 Fork 2's** turf. Strip the composition argument
+away and transient's justification is exactly the one property in §*the genuine counter-weight*. The full
+seven-cost enumeration of an added DOM level (layout/content-model/AX/selector/tree-walk/engine/shadow) lives in
+the [survey report](../reports/2026-06-29-transient-self-erasure-concept-viability.md) and underpins #1963's bar.
 
 ## Relationships
 
-- **Reconsiders** the ratified transient pattern, [we:block-standard.md:243](../docs/agent/block-standard.md#L243)
-  — a Tier-0 statute; a ruling here amends or reaffirms it.
+- **Reconsiders** the ratified transient pattern,
+  [we:block-standard.md → Packaging governance, item 7](../docs/agent/block-standard.md) (#1381) — a Tier-0
+  statute; a ruling here **amends or reaffirms** it (the recommended default reaffirms, adding the robustness
+  rider + the #97 reconciliation). On resolve, `codifiedIn` → that *Packaging governance item 7* anchor (there is
+  **no** §7.7 sub-section — skeptic pass-2 caught the dangling citation).
+- **Case 1's facet of [#1963](1963-composition-rubric-re-judged-to-framework-parity-strict-per-.md)** — which
+  already found emit-to-native (transient) is *full parity* for behaviour-free leaves and delegated the mechanism
+  choice here. **`blockedBy: #1963`** — this card *resolves under #1963's framework-parity bar* (a hard
+  prerequisite: the bar + the budgeted-host-node spine must lock before case 1 is ratified against them). The
+  edge is **one-directional and acyclic**: #1963 only *delegates* case 1 here (it does not decide it), so #1963
+  can ratify its bar + cases 2–10 first, then this card ratifies case 1 under the locked bar — settling #1963's
+  delegated case-1 row (the #581 delegated-fork pattern). **Ratify #1963 first, then #1962.**
 - **Higher-altitude than #1960 / #1961**, which *mitigate* the current pattern. **No `blockedBy` edge** — those
-  mitigations stand and ship regardless (the skeptic on #1961 validated keeping them unblocked). But if this
-  card rules **B** (abandon self-erasure), it **supersedes** #1960/#1961; if **A** or **D-keep**, they remain
-  the live contract.
-- Not yet prepared: needs a `/prepare` pass to fetch the verbatim #97 reasoning, survey `ElementInternals`
-  coverage vs the native-semantics gap, classify A–D into forks with bold defaults, and run the skeptic.
+  mitigations stand and ship regardless. If this card ruled **(c) abandon** it would supersede them; the
+  recommended **(a) reaffirm** keeps them the live contract.
+- **Statute reconciliation:** the discriminator refines §7's per-block rule (#1381) on the *same turf* — stated
+  as a reaffirmation, not a rival; consistent with [native-first-baseline](../docs/agent/platform-decisions.md#native-first-baseline)
+  (transient leaves a real native element = **single substrate**, no shim) and the persistent-B cluster
+  (#1456/#1457). No statute collision (skeptic pass-0/2).

@@ -1,0 +1,117 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The <strong>transient</strong> (A-family) pattern — <code>fui:blocks/transient/TransientElement.ts</code> —
+  has an autonomous custom element <strong>erase itself</strong> on upgrade: it builds a native element, moves
+  its attributes and children onto it, then calls <code>this.replaceWith(native)</code> and vanishes, leaving
+  <em>zero wrapper</em> in the DOM. Decision
+  <a href="/backlog/1962-transient-self-erasing-element-viability-as-a-concept-vs-the/">#1962</a> reconsiders
+  this <strong>at the concept level</strong> — not <em>what API it exposes</em>
+  (<a href="/backlog/1961-transient-element-exposed-api-the-stable-read-event-surface-/">#1961</a>) or
+  <em>how consumers wire it</em> (#1960), but <strong>is a self-erasing element the right idea at all, given
+  what the standards bodies endorse?</strong> It is <strong>case 1's facet</strong> of the framework-parity
+  umbrella <a href="/backlog/1963-composition-rubric-re-judged-to-framework-parity-strict-per-/">#1963</a>.
+</p>
+<p>
+  This is a <a href="/research/">native-first</a> question, so the survey leads with the platform's own
+  standards positions (WebKit / WHATWG) and grounds every claim in the real FUI tree.
+</p>
+
+<h2>The WebKit #97 argument — what it actually condemns</h2>
+<p>
+  WebKit's position on <strong>customized built-in elements</strong>
+  (<a href="https://github.com/WebKit/standards-positions/issues/97">standards-positions #97</a>, state:
+  <strong>oppose</strong>) is the crux. Its verbatim reasoning (annevk, opening comment): form-associated custom
+  elements solve the form-control use case <em>better</em>; <code>ElementInternals</code> + <code>ARIAMixin</code>
+  give autonomous elements good a11y; customized built-ins can't access shadow / <code>ElementInternals</code>
+  (<em>"a kind of second-class custom element"</em>); they can't have good built-in a11y because they are
+  <em>"logically different from the element they extend"</em>; progressive enhancement <em>"falls short"</em>
+  because child elements are HTML's established fallback (<code>canvas</code>/<code>picture</code>); the
+  <code>is=</code> syntax violates the Priority of Constituencies; only the HTML-<strong>parser</strong> case
+  (<code>td</code>/<code>template</code>) is retained, to be solved differently.
+</p>
+<p>
+  <strong>The load-bearing observation:</strong> every WebKit objection is about customizing an <em>existing
+  native element <strong>in place</strong></em> via <code>is=</code>. The transient element is a
+  <strong>third thing</strong> — it neither subclasses a native element nor persists as an autonomous host; it
+  <strong>emits</strong> a real native element and deletes itself. So WebKit's <em>constructive</em>
+  recommendation — a <strong>persistent</strong> autonomous host granted near-native semantics via
+  <code>ElementInternals</code> — argues for the <strong>persistent-B family</strong> and addresses
+  <em>owned</em> author-defined semantics on an element you <em>keep</em>. It does <strong>not</strong> deliver a
+  <em>true native element</em> (a real <code>&lt;button&gt;</code> with free focus/activation/form/AT), which is
+  the only thing transient exists to produce. <strong>#97 is therefore consistent with the existing §7 cut</strong>
+  — it recommends persistent-host exactly where §7 already routes to family B — not a refutation of it.
+</p>
+
+<h2>ElementInternals coverage vs the native-semantics gap</h2>
+<p>
+  <code>ElementInternals</code> is the primitive WebKit offers in place of <code>is=</code>. In the FUI tree it
+  appears in exactly <strong>two</strong> places — <code>fui:blocks/droplist/AutoComplete.ts</code> (form
+  participation: <code>formAssociated</code>, <code>attachInternals</code>, <code>setFormValue</code>) and the
+  <code>fui:blocks/renderers/component/declarativeComponent.ts</code> generator (form + default-ARIA +
+  custom states). What it grants is narrow: <strong>form association, a default ARIA role, and custom states</strong>.
+  What it does <strong>not</strong> grant — and a real native element gives free — is <strong>focusability/focus
+  ring, keyboard activation, implicit form submit, label click-through, native click semantics</strong>; on a
+  persistent host those are <em>hand-wired</em>. And it applies only to <em>your own</em> autonomous element,
+  never a foreign one. So WebKit's "persistent + <code>ElementInternals</code>" reaches <em>near-native</em>, while
+  transient reaches the <strong>whole</strong> native element — the genuine either/or, not a strawman.
+</p>
+
+<h2>Composition cost — behaviour composes flat without transient</h2>
+<p>
+  The "the web charges per node for deep composition" argument splits once grounded. <strong>Behavioural</strong>
+  layers compose to <strong>zero nodes</strong> via <code>CustomAttribute</code> — FUI has 35+ behaviors
+  (<code>fui:plugs/webbehaviors/CustomAttribute.ts</code>) attaching <em>out-of-band via a WeakMap</em>, adding no
+  DOM node — so a 10-deep behavioural stack folds onto one element and transient buys nothing there.
+  <strong>Structural</strong> layers genuinely need a node, but that is <a href="/backlog/1963-composition-rubric-re-judged-to-framework-parity-strict-per-/">#1963</a>
+  Fork 2's turf. Transient is a <strong>1:1 node-elimination</strong> (author <code>&lt;we-button&gt;</code> →
+  emit one <code>&lt;button&gt;</code>), <em>not</em> a stacking mechanism — so its honest justification narrows
+  to one property: <strong>a real native element in the final DOM, authored declaratively, with zero wrapper.</strong>
+</p>
+
+<h2>Self-replacement is unsanctioned — a robustness rider, not an abandonment trigger</h2>
+<p>
+  No mainstream library self-erases at runtime (Lit/Shoelace/Web Awesome persist the host; compile-away
+  frameworks unwrap at build time; htmx delegates on a stable ancestor — #1961 survey). And self-replacement is
+  <strong>not spec-sanctioned</strong>: HTML warns against tree manipulation in custom-element reactions, and
+  <code>connectedCallback</code> can fire <code>&gt;1×</code> and with <code>isConnected === false</code>. But
+  this is a <strong>robustness contract</strong>, not a verdict: the unwrap must be <strong>idempotent +
+  <code>isConnected</code>-guarded + microtask-deferred</strong> — already satisfied by
+  <code>TransientElement</code>'s <code>#replaced</code> guard + <code>queueMicrotask</code>. And the
+  un-upgraded-first FOUC concern is mitigated because the authored markup degrades to <em>the native element
+  itself</em> under no-JS; the upgrade only removes a wrapper.
+</p>
+
+<h2>Why position D's discriminator is wrong (the survey's reshaping result)</h2>
+<p>
+  The item's position <strong>D</strong> scopes transient by <em>native-semantics payoff</em> (keep it for
+  form controls/buttons, use persistent for badge/tag/card). <strong>Grounding refutes this cut.</strong>
+  Badge/tag/card are the <em>cleanest</em> transient cases — no state, no consumer ref, no rename problem
+  (#1961), so transient's whole cost is <strong>~zero</strong> there. Moving them to persistent <em>adds</em> a
+  wrapper node, paying the full layout / content-model / AX / selector / tree-walk cost — to avoid a fragility
+  cost that is already ~0. The <strong>correct discriminator is "does a consumer need a persistent live ref /
+  composite live-binding surface"</strong> — precisely §7's existing cut. The FUI tree corroborates it:
+  <strong>13 transient (A)</strong> behaviour-free-leaf / single-native-control blocks (badge, tag, card, button,
+  filter-chip, progress, meter, number-input, text-field, temporal pickers — stateful ones keep their toggle on a
+  <code>CustomAttribute</code> on the <em>surviving native</em> element) vs <strong>26 persistent (B)</strong>
+  reactive / grouped / ref-bound blocks (tabs, stepper, checkbox-group, AutoComplete, data-grid, app-shell).
+</p>
+
+<h2>Net for the decision</h2>
+<ul>
+  <li><strong>is= (position C) is dead and statute-barred</strong> — Safari's permanent <code>oppose</code> (#97)
+    + the native-first single-substrate floor; usable only as opt-in progressive enhancement.</li>
+  <li><strong>The genuine call is the scoping discriminator</strong> — and the grounded recommendation is
+    <strong>reaffirm §7's persistent-ref cut</strong>: #97 doesn't bite emit-a-true-native, transient strictly
+    dominates persistent for ref-free leaves, position D's cut is the wrong discriminator, and abandonment
+    reimplements native behaviour by hand.</li>
+  <li><strong>A mandatory robustness rider</strong> (idempotent + <code>isConnected</code>-guarded +
+    microtask-deferred) is the concept-level challenge's legitimate residue — already satisfied, codify it.</li>
+  <li><strong>A non-binding watch</strong> on a future sanctioned declarative "render-as-native" primitive
+    (DOM Parts / whatwg-html#8114) — a contingency, not a present fork.</li>
+</ul>
+<p>
+  Full grounding, verbatim #97 quotes, and <code>file:line</code> citations in
+  <code>reports/2026-06-29-transient-self-erasure-concept-viability.md</code>.
+</p>
+{% endraw %}
