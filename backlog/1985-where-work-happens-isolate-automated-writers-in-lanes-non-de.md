@@ -1,8 +1,8 @@
 ---
 kind: decision
-parent: "1933"
 status: open
 dateOpened: "2026-06-30"
+relatedItems: ["1933", "083"]
 tags: [parallel-batch, isolation, closeout, dev-server, playwright, pr-flow]
 ---
 
