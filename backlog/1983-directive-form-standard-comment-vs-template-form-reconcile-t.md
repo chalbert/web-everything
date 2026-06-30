@@ -221,16 +221,27 @@ the inner mechanism; migrate the `resource:loader` *spec* onto this form. No sta
 
 | Body shape | Canonical form |
 |---|---|
-| 1 region, inert until stamped (gate / defer / project / iterate) | `<template ns:name="opts">…</template>` *(Fork 1 (a))* |
-| **N named regions** (branches / states / slots) | `<template ns:name="opts">` + nested `<template case|slot="x">` *(Fork 2 (a))* |
-| 1 region that must render **live, in place** | `<!-- ns:name -->live body<!-- /ns:name -->` *(tolerated; Fork 1 (b))* |
+| 1 region, inert until stamped (gate / defer-content / project / iterate) | `<template ns:name="opts">…</template>` *(Fork 1 (a))* |
+| **N named INERT regions**, one selected (branches / states) | `<template ns:name="opts">` + nested `<template case|slot="x">` *(Fork 2 (a))* |
+| 1 region that renders **live, in place** | `<!-- ns:name -->live body<!-- /ns:name -->` *(Fork 1 (b))* |
+| **MIXED** — a **live** primary region **+** an **inert** auxiliary (error-boundary: live guarded content + inert fallback; defer: live placeholder + inert content) | `<!-- ns:name -->live primary <template slot="aux">…</template><!-- /ns:name -->` — the comment boundary (Fork 1 (b)) **hosting a nested inert `<template>`**; composes the two forms, no fourth form |
 | no body — metadata on a subtree | structural annotation (`<script type="injector">` / attribute) |
 
-**Invariant (three forms, by body shape):** an **inert** body → `<template>`-anchored, directive name in a
+**Invariant (forms by body shape):** an **inert** body → `<template>`-anchored, directive name in a
 `<template>` **attribute** (canonical); a **live** body → a `ns:name` **comment boundary** wrapping live
-content (**no `<template>`** — e.g. a context provider); **no** body → structural annotation (attribute on a
-connected element, or `<script type="injector">`). A `<template>` appears **only** for inert content; **no
-`is=`** is minted into any catalog directive.
+content (**no `<template>`** — e.g. a context provider); a **mixed** body → the comment boundary hosting nested
+inert `<template>` auxiliaries; **no** body → structural annotation. A `<template>` appears **only** for inert
+content; **no `is=`** is minted into any catalog directive.
+
+**Directive-vs-behavior gate (the exclusion the trichotomy was missing).** These forms are for **directives** —
+constructs that control a *region* (whether / how-many / when / where / in-what-form content exists, before or
+around connection). A construct that *decorates or reactively updates a **connected** element* is a **behavior**,
+**not** a directive, and takes **none** of these forms even when it looks like a no-body `Ⓐ` annotation — per
+the ratified behaviour-vs-directive rule (#1963 / block-standard rule 6). Two recurring misroutes this gate
+catches: a **context provider** (decorates a subtree's scope → `CustomAttribute`; see above), and **text /
+attribute bindings** (`${}` interpolation = `CustomTextNode`; `:attr` = `resolveBinding`) — these are
+**webexpressions / behaviors that update a live element**, never region directives, so they are out of this
+standard's scope. "No region control" is the discriminator, not "no body."
 
 ---
 
@@ -264,9 +275,10 @@ the directive-layer analog of blocks' uniform `<we-button>` surface).
 
 ### The catalog in the chosen form (proposed + built, code only)
 
-*Every directive in the ruled form — name in a `<template>` attribute, regions as nested `<template>`s, zero
-`is=`. ✅ built · 📋 spec'd · 🆕 #1975 proposal. (Namespaces follow the spec/#1975; the `view:`-vs-`control:`
-namespace question is a separate naming concern, not this form decision.)*
+*Every directive in the ruled form, by body shape — inert → `<template ns:name>` (attribute); live → `<!-- ns:name
+-->`; mixed → comment boundary hosting a nested inert `<template>`; zero `is=`. ✅ built · 📋 spec'd · 🆕 #1975
+proposal. (Namespaces follow the spec/#1975; the `view:`-vs-`control:` namespace question is a separate naming
+concern, not this form decision.)*
 
 ```html
 <template view:if="loggedIn"><a href="/account">Account</a></template>        <!-- ✅ -->
@@ -281,21 +293,21 @@ namespace question is a separate naming concern, not this form decision.)*
   <template slot="success"><user-card data-bind="data"></user-card></template>
   <template slot="error"><error-message data-bind="error"></error-message></template>
 </template>
-<template defer on="visible" prefetch="idle">                                  <!-- 🆕 #1977 -->
-  <template slot="placeholder"><div class="skeleton"></div></template>
-  <template slot="content"><heavy-chart data="@sales"></heavy-chart></template>
-</template>
-<template async value="@user">                                               <!-- 🆕 #1976 -->
+<!-- defer on="visible" prefetch="idle" -->                                   <!-- 🆕 #1977 — MIXED: live placeholder + inert content -->
+  <div class="skeleton"></div>                              <!-- live placeholder, painted at once -->
+  <template slot="content"><heavy-chart data="@sales"></heavy-chart></template>   <!-- inert until trigger -->
+<!-- /defer -->
+<template async value="@user">                                               <!-- 🆕 #1976 — all branches inert (data-gated) -->
   <template slot="pending"><spinner></spinner></template>
   <template slot="then"><user-card data-bind="value"></user-card></template>
   <template slot="catch"><error-message data-bind="error"></error-message></template>
 </template>
-<template error-boundary>                                                     <!-- 🆕 #1978 -->
-  <template slot="content"><risky-widget></risky-widget></template>
-  <template slot="fallback"><p>Something went wrong.</p></template>
-</template>
-<template snippet:define name="row" params="item"><li data-bind="item.name"></li></template>  <!-- 🆕 #1980 -->
-<template content-security zone="trusted"><div data-bind="userHtml"></div></template>  <!-- 🆕 #1981 -->
+<!-- error-boundary -->                                                       <!-- 🆕 #1978 — MIXED: live guarded content + inert fallback -->
+  <risky-widget></risky-widget>                             <!-- live guarded content -->
+  <template slot="fallback"><p>Something went wrong.</p></template>     <!-- inert fallback -->
+<!-- /error-boundary -->
+<template snippet:define name="row" params="item"><li data-bind="item.name"></li></template>  <!-- 🆕 #1980 — inert hold-for-reuse -->
+<template content-security zone="trusted"><div data-bind="userHtml"></div></template>  <!-- 🆕 #1981 — inert: policy runs BEFORE admission (live-then-sanitize = security hole) -->
 ```
 
 ## Progress
@@ -305,6 +317,12 @@ namespace question is a separate naming concern, not this form decision.)*
   the attribute-on-`<template>` form; the forced-invariant wording reworded to "`is=` accepted-for-authors, not
   minted as a first-class WE contract" so it composes with #1963's "nothing-forbidden" statute. Research
   published as [`directive-authoring-form`](/research/directive-authoring-form/).
+- **Catalog audit (grounded vs #1976–#1981):** added the missing **directive-vs-behavior gate** (context
+  providers + text/attr bindings are behaviors, not directives — out of scope); added the **mixed-liveness**
+  form (live primary + nested inert auxiliary — error-boundary, defer) as a composition of Fork 1 (b) + an
+  inert `<template>`, no fourth form; fixed catalog renderings (error-boundary, defer were wrongly all-inert).
+  content-security/trusted/sanitize confirmed correctly **inert** (policy must run before admission). Noted
+  but **not folded:** error-boundary's #1963-bar criterion-4 gap (no native migration target) → #1978's call.
 - **Next (at ratification):** confirm the two fork defaults → codify the region-count selection rule + `is=`
   reconciliation into `we:docs/agent/block-standard.md` (directive section) → spin a `blockedBy` build child to
   migrate `portal` off `{extends:'template'}` → unblock #1977 / #1976 / #1978–#1981.
