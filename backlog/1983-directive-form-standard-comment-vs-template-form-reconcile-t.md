@@ -38,9 +38,11 @@ contract — see below. It is not in the glance table because there is no branch
 ## Axis-framing
 
 A directive's *form* is the markup vehicle carrying its **name + options + body**. Three things are settled
-and three are not. The settled spine: a directive must be `<template>`-anchored (the only inert container the
-platform gives; "deferred content can't be a bare live child" is platform-forced), behaviour-vs-directive is
-already ratified (#1963 / block-standard rule 6), and the comment *syntax* is a configurable parser
+and three are not. The settled spine: **only inert-required content must live in a `<template>`** (it is the
+only inert container the platform gives; "deferred content can't be a bare live child" is platform-forced) — a
+directive with a **live** body (a context provider, a region transition) is *not* `<template>`-anchored at all;
+behaviour-vs-directive is already ratified (#1963 / block-standard rule 6), and the comment *syntax* is a
+configurable parser
 (`fui:plugs/webdirectives/CustomCommentParser.ts:34`, the `ns:name` grammar). What's open is **which
 `<template>`-anchored grammar is canonical**, decomposed along the one axis the research surfaced — **region
 count** — plus the **`is=` reconciliation** that sits above both.
@@ -191,10 +193,18 @@ the inner mechanism; migrate the `resource:loader` *spec* onto this form. No sta
 ## Supported by default (not decisions)
 
 - **Live, in-place content → the comment-boundary form (Fork 1 (b)) is the tolerated vehicle.** The one thing
-  attribute-on-`<template>` cannot do is bound content that must render **live** as-authored (e.g. a future
-  region-transition or an error-boundary guarding already-live siblings). For that case `<!-- ns:name
-  -->live<!-- /ns:name -->` is available — not the catalog default, but not removed. Built directives don't
-  need it today (all are inert-stamp), so it stays a capability, not a recommendation.
+  attribute-on-`<template>` cannot do is bound content that must render **live** as-authored. Concrete consumer:
+  a **context provider** (React `<Context.Provider value>`-style) — its children render live and it adds no
+  node, so it is **not** `<template>`-anchored. Routing: it is a **behavior first**, not a directive — per
+  behaviour-vs-directive (#1963 / block-standard rule 6) a context provider decorates a *connected* subtree
+  root and controls no region, so the default is a `CustomAttribute` on an existing element
+  (`<section context:provide="@theme">…live children…</section>`). Only when there is **no wrapper** and a
+  zero-node scope over bare siblings is required does it become a *directive*, and then — live body — it takes
+  the comment boundary `<!-- context:provide theme="@dark" -->live siblings<!-- /context:provide -->`, never
+  attribute-on-`<template>`. (Context *semantics* — propagation/resolution — live in the Context Protocol
+  #1968, not here; #1983 settles only the markup form. #1968 not re-grounded this session.) Same form serves a
+  future region-transition / an error-boundary guarding already-live siblings. Built directives don't need it
+  today (all are inert-stamp), so it stays a capability, not a recommendation.
 - **No-body directives → structural annotation (Ⓐ).** A directive with no body of its own (metadata on a
   subtree, scope/provider, `snippet:render`) is a config element (`<script type="injector">`) or an attribute —
   no `<template>`, no boundary. Codified as the third form, no fork.
@@ -216,9 +226,11 @@ the inner mechanism; migrate the `resource:loader` *spec* onto this form. No sta
 | 1 region that must render **live, in place** | `<!-- ns:name -->live body<!-- /ns:name -->` *(tolerated; Fork 1 (b))* |
 | no body — metadata on a subtree | structural annotation (`<script type="injector">` / attribute) |
 
-**Invariant:** every directive is `<template>`-anchored or annotation; the directive name lives in a
-`<template>` **attribute** (canonical) or a `ns:name` **comment boundary** (live-body case); **no `is=`** is
-minted into any catalog directive.
+**Invariant (three forms, by body shape):** an **inert** body → `<template>`-anchored, directive name in a
+`<template>` **attribute** (canonical); a **live** body → a `ns:name` **comment boundary** wrapping live
+content (**no `<template>`** — e.g. a context provider); **no** body → structural annotation (attribute on a
+connected element, or `<script type="injector">`). A `<template>` appears **only** for inert content; **no
+`is=`** is minted into any catalog directive.
 
 ---
 
