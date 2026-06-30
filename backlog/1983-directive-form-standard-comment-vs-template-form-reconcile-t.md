@@ -341,3 +341,11 @@ comment boundary; mixed → comment boundary hosting a nested inert `<template>`
 - **Next (at ratification):** confirm the two fork defaults → codify the region-count selection rule + `is=`
   reconciliation into `we:docs/agent/block-standard.md` (directive section) → spin a `blockedBy` build child to
   migrate `portal` off `{extends:'template'}` → unblock #1977 / #1976 / #1978–#1981.
+- **Portal migration (scoped — it's a clean move).** `portal` → `<template type="portal">` transfers cleanly:
+  inert content (portal *moves* `.content`, doesn't even stamp a copy), the persistent `<template>` as the
+  `logicalParent` declaration anchor, and connect/disconnect lifecycle all carry over. The **one** non-trivial
+  task is replicating the native `observedAttributes`/`attributeChangedCallback` for `target`/`disabled`/`required`
+  (`fui:plugs/webportals/PortalDirective.ts:124`) — a capability the `CustomTemplateType` registry must provide
+  (#1986 registry-capability requirement). It also **supersedes the `<template is="portal-directive">` authoring
+  detail** traced to the ratified **#1000 Fork 4** contract — verify against #1000 and cite the supersession in
+  the migration child rather than silently overriding a ratified call.

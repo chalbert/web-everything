@@ -72,6 +72,16 @@ the browser leaves the value inert, WE reads it. `<template shadowrootmode>` is 
   the colon-vs-hyphen-vs-bare review. Research against the WHATWG/OpenUI custom-attributes/"enhancements"
   proposals. Separate from Fork A (*which registry*).
 
+## Registry capability requirements (grounded)
+
+- **`observedAttributes` / `attributeChangedCallback` equivalent.** `CustomTemplateType` must let a directive
+  react to changes in **sibling attributes** of its host `<template>`, not just the `type` value. Grounded in
+  `portal`, which reacts to `target` / `disabled` / `required` (`fui:plugs/webportals/PortalDirective.ts:124`,
+  `observedAttributes`). The `is=` customized built-in gets this **natively**; the registry form must provide a
+  CE-style `observedAttributes` API or directives fall back to a hand-rolled `MutationObserver`. Verify what
+  `CustomAttribute` already offers here before designing it — it's the one capability the `is=`→registry
+  migration can't get for free.
+
 ## Prep checklist (for `/prepare 1986`)
 
 - Ground the existing **`<script type="injector">` / injector proposal** in the backlog + the `InjectorRoot`
