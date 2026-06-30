@@ -46,9 +46,10 @@ describe('backlog.mjs claim never refuses on the whole working tree (#510, recon
     expect(SRC).toMatch(/execFileSync\('git', \['status', '--porcelain', '--', rel\]/);
     // …and refuses (best-effort) only on that file's own pre-claim edits, overridable with --force.
     expect(SRC).toMatch(/!argv\.includes\('--force'\)/);
-    // (2) the attribution snapshot reads the whole tree, gated on the opt-in `--session` flag…
+    // (2) the attribution snapshot reads the whole tree, gated on a session derived from the `--session`
+    //     flag (with the #1723 inference fallbacks: else the reserving session, else the most-recent claim)…
     expect(SRC).toMatch(/execFileSync\('git', \['status', '--porcelain'\]/);
-    expect(SRC).toMatch(/const session = flag\('session'\);\s*\n\s*if \(session\) \{/);
+    expect(SRC).toMatch(/const session = flag\('session'\)[^\n]*;\s*\n\s*if \(session\) \{/);
   });
 
   it('wraps each git read in a try/catch so a git/IO hiccup can never block a claim', () => {

@@ -36,10 +36,13 @@ describe('backlog dependency graph — SVG rendering', () => {
   it('draws one node per rendered node and one line per edge (All view = edge participants)', () => {
     const svg = mount(graph); // forces the "all" view, which renders only edge-participating nodes (#257)
     const rendered = graph.nodes.filter((n: any) => n.inEdge);
-    // Each node draws one circle; a batchable (Tier-A task / story ≤5) node adds a detached outer ring,
-    // so the circle count is rendered-nodes + batchable-among-them (see backlog-graph.js `if (n.batchable)`).
-    const rings = rendered.filter((n: any) => n.batchable).length;
-    expect(svg.querySelectorAll('circle').length).toBe(rendered.length + rings);
+    // Each node draws one circle; extra circles come from two mutually-exclusive overlays (see
+    // backlog-graph.js): a batchable (Tier-A task / story ≤8) node adds ONE detached green outer ring
+    // (`if (n.batchable)`), and a human-gated node adds TWO — a dashed "held" outer ring + a lock-badge
+    // dot (`if (n.humanGate)` ×2). So circles = rendered-nodes + batchable rings + 2×human-gated.
+    const batchableRings = rendered.filter((n: any) => n.batchable).length;
+    const heldOverlays = rendered.filter((n: any) => n.humanGate).length * 2;
+    expect(svg.querySelectorAll('circle').length).toBe(rendered.length + batchableRings + heldOverlays);
     // All edges connect two edge participants, so every edge renders in the All view.
     expect(svg.querySelectorAll('line').length).toBe(graph.edges.length);
   });
