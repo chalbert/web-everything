@@ -393,4 +393,197 @@ const el = &lt;ul&gt;&lt;List items={['a', 'b', 'c']} /&gt;&lt;/ul&gt;;</code></
   <li>When TransientElement replaces itself with comments (transient-to-comments bridge), how should the comment lifecycle callbacks wire up to the original element's logic?</li>
   <li>Should the framework provide a <code>&lt;provider&gt;</code> custom element out of the box, or let users create their own <code>display: contents</code> elements?</li>
 </ol>
+
+
+<h2 id="composition-guide">Dev guide: which mechanism, and why</h2>
+
+<p>The catalog above surveys <em>every</em> pattern. This section is the <strong>decision guide</strong> ratified under
+<a href="/backlog/1963-composition-rubric-re-judged-to-framework-parity-strict-per-/">#1963</a>: the menu you actually pick
+from, with pros, cons and when-to-use, plus the questions every developer asks &mdash; <em>why not <code>is=</code>?</em>,
+<em>directive or behaviour?</em>, <em>transient or persistent?</em> The rule of thumb up top: <strong>reach for a behaviour
+first, a directive only for region/pre-connection control, and emit a real native element for a presentational leaf.</strong></p>
+
+<h3>Two angles: dev freedom vs the standard's fixed floor</h3>
+
+<p>Read every ruling below through one of two lenses. As an <strong>app developer</strong> you get the full menu and
+maximum freedom &mdash; the standard constrains only a small fixed floor. As an implementor of the <strong>block
+standard</strong>, the same surface partitions into what is forced vs what is a per-project option:</p>
+
+<we-data-table>
+<table class="data-table">
+  <thead>
+    <tr><th>Tier</th><th>Who decides</th><th>Covers</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>FIXED</strong></td>
+      <td>The standard forces it</td>
+      <td>The 5-point acceptance bar; the budgeted-host-node spine; the per-layer native/plug partition; irreplaceable-native blocks (real inputs/pickers) <strong>must emit native</strong>; the statute bars &mdash; no load-bearing <code>is=</code>, the single-substrate floor, MaaS serves only platform-correct variants.</td>
+    </tr>
+    <tr>
+      <td><strong>CONFIGURABLE</strong></td>
+      <td>Per-project option &mdash; platform-correct variants only</td>
+      <td>Transient &harr; persistent light-DOM for <em>soft / replicable</em> blocks (badge, tag, card, button, chip); the leaf default (<a href="/backlog/1962-leaf-default-transient-vs-persistent-the-mechanism-rule-for/">#1962</a>); which sanctioned variant the configurator / MaaS assembles. Native-first is the <strong>default</strong>, the alternative an <strong>opt-in</strong>. A substrate swap (a load-bearing non-standard shim) is <em>never</em> configurable.</td>
+    </tr>
+    <tr>
+      <td><strong>FREEDOM</strong></td>
+      <td>The dev's call</td>
+      <td>Which mechanism per case, from the menu below. The standard gates only the FIXED floor; everything else is yours.</td>
+    </tr>
+  </tbody>
+</table>
+</we-data-table>
+
+<p>So <strong>dev-freedom = CONFIGURABLE + FREEDOM</strong>, sitting on top of the non-negotiable FIXED native-first floor.</p>
+
+<h3>The mechanism menu (pros, cons, when to use)</h3>
+
+<we-data-table>
+<table class="data-table">
+  <thead>
+    <tr><th>Mechanism</th><th>Adds nodes?</th><th>Pros</th><th>Cons</th><th>Reach for it when&hellip;</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Behaviour</strong> (<code>CustomAttribute</code>)</td>
+      <td>Zero</td>
+      <td>In-place, cross-browser, single-substrate; attaches to <em>any</em> connected element; composes freely; clean in HTML and JSX.</td>
+      <td>Runs only <em>after</em> its element connects &mdash; cannot gate or multiply the connection.</td>
+      <td><strong>First choice.</strong> You want to enhance an element that already exists &mdash; add capability, wire events, decorate.</td>
+    </tr>
+    <tr>
+      <td><strong>Directive</strong> (comment-anchor)</td>
+      <td>Two comments (layout-invisible)</td>
+      <td>Zero wrapper element; gates/repeats/transforms a region; keyed reconciliation (<code>ForEach</code>); HTML + JSX.</td>
+      <td>Heavier mental model than a behaviour; reserved for the cases a behaviour structurally cannot do.</td>
+      <td><strong>The exception:</strong> region or pre-connection control &mdash; gating <em>whether</em> an element connects (<code>ViewIf</code>), <em>how many times</em> (<code>ForEach</code>), or transforming a region before its contents upgrade.</td>
+    </tr>
+    <tr>
+      <td><strong>Transient</strong> (emit-to-native)</td>
+      <td>Zero after replacement</td>
+      <td>Full framework parity for a presentational leaf &mdash; the real native element, with native behaviour, AX and focus for free. Exactly what React/Svelte/Solid do.</td>
+      <td>The custom element vanishes &mdash; no persistent instance to hold state or own form identity.</td>
+      <td>A behaviour-free presentational leaf that should <em>be</em> a real <code>&lt;button&gt;</code>/<code>&lt;a&gt;</code>/heading.</td>
+    </tr>
+    <tr>
+      <td><strong>Persistent light-DOM CE</strong> (family B)</td>
+      <td>One host node (budgeted)</td>
+      <td>A live instance: owns form identity (<code>attachInternals()</code>), groups form-associated children, holds state/reactivity.</td>
+      <td>Pays for the host node &mdash; justified only when you need slot/shadow/AX-identity/lifecycle.</td>
+      <td>A grouped/reactive control (e.g. a checkbox group) or any block that needs a durable identity.</td>
+    </tr>
+    <tr>
+      <td><strong><code>display:contents</code> provider</strong></td>
+      <td>One layout-transparent node</td>
+      <td>Joins the injector/DI chain while dropping its layout box &mdash; children lay out as the grandparent's.</td>
+      <td>Node still present for AX (mostly fixed 2023+); not for inherently-semantic elements.</td>
+      <td>Context/DI with no layout impact. The <code>&lt;script type="injector"&gt;</code> form is even cleaner &mdash; zero rendered node, no AX entry.</td>
+    </tr>
+    <tr>
+      <td><strong>Mixin / decorator</strong></td>
+      <td>Zero</td>
+      <td>Class-level composition of cross-cutting concerns; pure JS surface.</td>
+      <td>Author-time only &mdash; not a declarative HTML surface.</td>
+      <td>You are authoring a class and want to fold in reusable capability (e.g. self-replacement).</td>
+    </tr>
+  </tbody>
+</table>
+</we-data-table>
+
+<h3>Worked example: directive vs behaviour</h3>
+
+<p>The single most-asked design question. <strong>Behaviour is first-choice</strong> because a behaviour attaches
+<em>after</em> its element connects &mdash; it can decorate but it cannot prevent or multiply that connection. Only a
+directive, sitting as a comment <em>before</em> the element exists, can gate or repeat it. So the test is:
+<em>do you need to control whether/how-many-times an element connects, or transform a region before it upgrades?</em>
+Yes &rarr; directive. No &rarr; behaviour.</p>
+
+<p><strong>Behaviour</strong> &mdash; enhance an element that already connected (the default):</p>
+<we-code-view><pre><code>&lt;!-- decorate a connected element in place; zero extra nodes --&gt;
+&lt;a href="/report.pdf" download-progress&gt;Download report&lt;/a&gt;
+
+class DownloadProgress extends CustomAttribute {
+  connectedCallback() { /* the &lt;a&gt; already exists &mdash; wire progress UI onto it */ }
+}</code></pre></we-code-view>
+
+<p><strong>Directive</strong> &mdash; region / pre-connection control, the two canonical cases:</p>
+<we-code-view><pre><code>&lt;!-- ViewIf: gate WHETHER the element connects at all --&gt;
+&lt;!-- control:if when="loggedIn" --&gt;
+  &lt;a href="/account"&gt;Account&lt;/a&gt;
+&lt;!-- /control:if --&gt;
+
+&lt;!-- ForEach: control HOW MANY TIMES &mdash; keyed siblings, no wrapper element --&gt;
+&lt;ul&gt;
+  &lt;!-- control:for-each items="members" --&gt;
+    &lt;li class="member"&gt;${item.name}&lt;/li&gt;
+  &lt;!-- /control:for-each --&gt;
+&lt;/ul&gt;</code></pre></we-code-view>
+
+<p>A behaviour could never write either of these: by the time <code>connectedCallback</code> runs, the element has
+already connected once &mdash; too late to suppress it (<code>ViewIf</code>) or to fan it out (<code>ForEach</code>).</p>
+
+<h3>FAQ: why not <code>is=</code>?</h3>
+
+<p><code>is=</code> (customized built-in elements) looks attractive &mdash; <code>&lt;button is="my-button"&gt;</code> upgrades a
+real native element with zero wrapper. <strong>It is not a WE mechanism.</strong> Every job <code>is=</code> could do is
+dominated by a mechanism that is cross-browser and single-substrate:</p>
+
+<we-data-table>
+<table class="data-table">
+  <thead>
+    <tr><th>The job</th><th>Use this instead</th><th>Why it dominates <code>is=</code></th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Load-bearing native output (a real button/link/heading)</td>
+      <td><strong>Transient</strong> (emit-to-native)</td>
+      <td>You get the genuine native element with no upgrade step and no polyfill &mdash; full parity, every browser.</td>
+    </tr>
+    <tr>
+      <td>Behaviour on an authored element</td>
+      <td><strong><code>CustomAttribute</code></strong></td>
+      <td>In-place, cross-browser, single-substrate &mdash; beats <code>is=</code> on every axis, and Safari never ships <code>is=</code> for autonomous-equivalent needs.</td>
+    </tr>
+    <tr>
+      <td>A persistent live instance</td>
+      <td><strong>Persistent light-DOM CE</strong> (family B)</td>
+      <td>A durable host you actually own, with <code>ElementInternals</code> &mdash; not a borrowed native tag.</td>
+    </tr>
+  </tbody>
+</table>
+</we-data-table>
+
+<p>Because every job is dominated, <code>is=</code> is never a block mechanism and never a default. WE documents it
+<strong>only as an explicit opt-in developer option</strong> (a polyfill in Frontier UI, lower-compliance, on the §7
+spectrum) &mdash; for a developer who knowingly wants it, never as something the standard reaches for.</p>
+
+<h3>FAQ: <code>is=</code> vs transient &mdash; aren't they the same?</h3>
+
+<p>No, and the distinction is the reason transient wins. <strong><code>is=</code> upgrades an <em>existing</em> native element
+in place</strong> &mdash; one substrate, but it depends on a browser feature Safari refuses and so needs a load-bearing
+polyfill. <strong>Transient is broader</strong>: a custom element that replaces <em>itself</em> with native output. That
+breadth is the point &mdash; transient is <strong>multi-root</strong> (it can emit a fragment or a comment-pair, not just a
+single tag), <strong>polymorphic</strong> (it resolves <em>which</em> native element at runtime &mdash; <code>AutoHeading</code>
+becoming the right <code>h1&hellip;h6</code>), and rides a <strong>single substrate</strong> with no non-standard shim. <code>is=</code>
+is the narrow, shim-dependent special case; transient is the general, standard-aligned mechanism that subsumes it.</p>
+
+
+<h3>The acceptance bar (what every choice is judged against)</h3>
+
+<p>Whichever mechanism you pick, #1963 grades it against a five-point, zero-compromise bar &mdash; a native-first system
+that can't match framework composition DX never wins first-level adoption:</p>
+
+<ol>
+  <li><strong>Ergonomics &ge; frameworks</strong> &mdash; DX competitive with React/Vue/Svelte/Solid, not merely "good for web components."</li>
+  <li><strong>Zero compromise</strong> &mdash; no breakage of layout (flex/grid direct-child), CSS (selector/cascade) or accessibility (AX tree + content model).</li>
+  <li><strong>A no-compromise solution for <em>every</em> case</strong> &mdash; an uncovered case becomes a build item, never a tolerated gap.</li>
+  <li><strong>Open to net-new mechanisms</strong> &mdash; where nothing clears the bar, invent a plug (a proposed standard), authored to deprecate + migrate when the native standard ships.</li>
+  <li><strong>Authoring-surface-agnostic</strong> &mdash; clean in plain HTML (declarative/SSR) <em>and</em> JSX.</li>
+</ol>
+
+<p>Today cases 4/5 (if/for/switch) and 7 (behaviours) are at parity; cases 2, 3, 6 and 9 are at parity pending a named
+confirm; case 1 routes to <a href="/backlog/1962-leaf-default-transient-vs-persistent-the-mechanism-rule-for/">#1962</a>;
+case 8 (the <code>is=</code> jobs) is covered. The one honest open gap is <strong>case 10 &mdash; deep <em>structural</em>
+nesting in declarative HTML</strong>, where the platform reaches only cheap-node (not zero-node) composition; that residual
+is a tracked build under #1963, not something the menu above papers over.</p>
 {% endraw %}
