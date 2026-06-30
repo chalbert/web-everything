@@ -121,14 +121,16 @@ carried by an **attribute on a plain `<template>`** or by a **comment boundary**
   (#1963).
 
 ```html
-<!-- Fork 1 (a) — DEFAULT: attribute on a plain <template> (is=-free, fail-closed). -->
-<template view:if="@state.loggedIn">
+<!-- Fork 1 (a) — DEFAULT: a typed <template> (is=-free, fail-closed). -->
+<!-- Spelling shown is the proposed CustomTemplateType `type=` discriminator (#1986); the FORM ratified here is
+     "template-anchored, is=-free" — registration mechanism + discriminator spelling are #1986's call. -->
+<template type="view:if" value="@state.loggedIn">
   <a href="/account">Account</a>
 </template>
 
-<!-- portal migrated off `is=` to the same form (was <template is="portal-directive">): -->
+<!-- portal migrated off `is=` to the same typed-template form (was <template is="portal-directive">): -->
 <portal-outlet id="modal-outlet"></portal-outlet>
-<template portal target="modal-outlet">
+<template type="portal" target="modal-outlet">
   <div class="modal" role="dialog">Modal content</div>
 </template>
 ```
