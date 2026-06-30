@@ -34,7 +34,7 @@ three native inert containers:
 | Native inert container | Discriminator | Registry | Status |
 |---|---|---|---|
 | `<!-- ns:name -->` | the `ns:name` comment grammar | `CustomCommentRegistry` | ✅ built |
-| `<template …>` | a `type`-style attribute (spelling TBD) | **`CustomTemplateType`** | 🆕 proposed (replaces `is=` + the CustomAttribute path) |
+| `<template …>` | a dedicated directive-name attribute, **`shadowrootmode`-shaped** (spelling TBD — **not** `type=`) | **`CustomTemplate…`** registry (name follows the chosen discriminator) | 🆕 proposed (replaces `is=` + the CustomAttribute path) |
 | `<script type="…">` | the native `type` attribute | **`CustomScriptType`** | 🆕 proposed (injector / context) |
 
 **Native-first honesty:** `<script type>` rides a *genuine* native extension point — the browser treats unknown
@@ -55,10 +55,17 @@ template-type convention there, and be honest it's a WE convention, not a native
 - **Fork C — `CustomScriptType` registry vs per-consumer `querySelectorAll('script[type=x]')`.** A registry
   earns its place only if there is shared lifecycle (parse / upgrade-on-insert / `whenDefined`); if consumers
   just query once, no registry needed. Resolve against the injector/context lifecycle.
-- **Independent sub-question (not a fork): the discriminator spelling.** A template-type *registry* does **not**
-  force a `type="view:if"` spelling — it can dispatch on the bare `ns:name` attribute and keep the nicer
-  `<template view:if>` authoring form (matching Alpine/Vue/Angular). Separate *which registry* (Fork A) from
-  *the attribute spelling* (this) — they are independent calls.
+- **Independent sub-question (not a fork): the discriminator spelling — and it MUST be *standards-shaped*
+  (#1826 plug-as-proposed-standard).** The registry must **not** force a `type=` spelling: `type` is overloaded
+  (`<script type>` MIME, `<input type>`, `<ol type>`) and `<template>` has **no native `type` dispatch**, so it
+  fails the "could become a standard" bar. The native precedent is **`<template shadowrootmode>`** — a
+  *dedicated attribute* that selects special template processing. So the shape is a directive-name attribute on
+  `<template>`; the open axis is the **namespacing**: plain (`<template if>`, collision-prone with future native
+  attrs), colon (`<template view:if>`, framework-ish — what's built), or **hyphen-prefixed** (`<template
+  control-if>`, mirroring the platform's own `data-*`/`aria-*` namespacing — likely the most standards-shaped).
+  Research against `shadowrootmode` + the WHATWG/OpenUI custom-attributes/"enhancements" proposals. NB: the
+  registry NAME ("CustomTemplateType") is provisional — it should follow the chosen discriminator, not presuppose
+  `type=`. Separate from Fork A (*which registry*) and from #1983's deferred namespace-naming concern.
 
 ## Prep checklist (for `/prepare 1986`)
 

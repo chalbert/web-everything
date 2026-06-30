@@ -122,15 +122,17 @@ carried by an **attribute on a plain `<template>`** or by a **comment boundary**
 
 ```html
 <!-- Fork 1 (a) — DEFAULT: a typed <template> (is=-free, fail-closed). -->
-<!-- Spelling shown is the proposed CustomTemplateType `type=` discriminator (#1986); the FORM ratified here is
-     "template-anchored, is=-free" — registration mechanism + discriminator spelling are #1986's call. -->
-<template type="view:if" value="@state.loggedIn">
+<!-- The FORM ratified here is "template-anchored, is=-free" (generic `ns:name` placeholder shown). The
+     discriminator SPELLING + registration mechanism are #1986's call, and must be STANDARDS-SHAPED — modeled on
+     the native `<template shadowrootmode>` (a dedicated attribute selecting special template processing), NOT
+     `is=` (Safari-dead) and NOT `type=` (overloaded: script MIME / input / ol). -->
+<template view:if="@state.loggedIn">
   <a href="/account">Account</a>
 </template>
 
 <!-- portal migrated off `is=` to the same typed-template form (was <template is="portal-directive">): -->
 <portal-outlet id="modal-outlet"></portal-outlet>
-<template type="portal" target="modal-outlet">
+<template portal target="modal-outlet">
   <div class="modal" role="dialog">Modal content</div>
 </template>
 ```
