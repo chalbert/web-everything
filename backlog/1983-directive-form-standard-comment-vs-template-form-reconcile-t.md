@@ -29,11 +29,24 @@ directive-form rule that #1977 / #1976 / #1978–#1981 must *apply* rather than 
 
 | Fork | Recommended default | Main alternative | Confidence |
 |---|---|---|---|
-| **Fork 1** — single-region form | **attribute-on-plain-`<template>`** (`<template ns:name="opts">…</template>`) | comment-boundary `<!-- ns:name -->…<!-- /ns:name -->` | high |
-| **Fork 2** — multi-region form | **nested region-`<template>`s inside one `<template ns:name>`** (switch's built form) | comment-boundary + sibling `<template slot>` | med-high |
+| **Fork 1** — single-region form | **typed `<template>`** (`<template type="if">…</template>`) | comment-boundary `<!-- ns:name -->…<!-- /ns:name -->` | high |
+| **Fork 2** — multi-region form | **nested region-`<template>`s inside one `<template type="switch">`** (switch's built form) | comment-boundary + sibling `<template slot>` | med-high |
 
 *Above the forks sits one **forced invariant** (ratify, not weigh): `is=` is not minted as the directive-form
 contract — see below. It is not in the glance table because there is no branch to pick.*
+
+**Discriminator (decided 2026-06-30): `type=`.** For the template-anchored (inert) forms, the directive's kind
+lives in the `<template>`'s **`type`** attribute — an **"is-a" classification** (`<template type="if">` *is a*
+conditional, exactly as `<input type="checkbox">` *is a* checkbox and `<script type="module">` *is a* module),
+**not** a colon-namespaced decorator attribute (`view:if` has **no** native analog — colons in HTML attributes
+exist only in XML/foreign content). One `type` per template → **one directive kind per template, compose by
+nesting**. Registration is the `CustomTemplateType` registry ([#1986](/backlog/1986-custom-type-registry-family-customtemplatetype-customscriptt/)),
+**not** `CustomAttribute` (directives aren't behaviors). The `type` **value's** naming/namespacing (bare `if`
+vs a prefixed form) is under review ([#1987](/backlog/1987-attribute-naming-convention-review-colon-namespacing-view-if/)) — examples
+below use bare keywords. Comment-form (live/mixed) directives keep the `<!-- ns:name -->` grammar as their
+discriminator. *(Built directives use the bare-attribute `view:if` spelling today via `CustomAttribute`; the
+"Real implementation tree" and "contradiction" sections below describe that shipped reality — the ruled form is
+`type=`.)*
 
 ## Axis-framing
 
@@ -99,8 +112,9 @@ are (c)/(d) below.
 **Crux:** for a directive with one region (gate / iterate / defer / project a single subtree), is the name
 carried by an **attribute on a plain `<template>`** or by a **comment boundary** wrapping the body?
 
-- **(a) Attribute on a plain `<template>`** — `<template ns:name="opts">…</template>`, the directive is a
-  `CustomAttribute`; the body is inert in `template.content`, stamped on connect. *(default)* Wins on three
+- **(a) Typed `<template>`** — `<template type="name">…</template>` (kind in `type=`, an "is-a"; registered via
+  `CustomTemplateType` #1986, not `CustomAttribute`); the body is inert in `template.content`, stamped on
+  connect. *(default)* Wins on three
   merit axes: **prior-art** — this is the universal runtime-HTML form (Alpine `<template x-if>`, Vue `<template
   v-if>`, Angular `*ngIf`→`<ng-template [ngIf]>`); the comment-boundary form has **zero** framework precedent.
   **Security/PE** — inert body is **fail-closed**: an auth-gated `if` never flashes its protected content; the
@@ -121,18 +135,14 @@ carried by an **attribute on a plain `<template>`** or by a **comment boundary**
   (#1963).
 
 ```html
-<!-- Fork 1 (a) — DEFAULT: a typed <template> (is=-free, fail-closed). -->
-<!-- The FORM ratified here is "template-anchored, is=-free" (generic `ns:name` placeholder shown). The
-     discriminator SPELLING + registration mechanism are #1986's call, and must be STANDARDS-SHAPED — modeled on
-     the native `<template shadowrootmode>` (a dedicated attribute selecting special template processing), NOT
-     `is=` (Safari-dead) and NOT `type=` (overloaded: script MIME / input / ol). -->
-<template view:if="@state.loggedIn">
+<!-- Fork 1 (a) — DEFAULT: a typed <template> — type= carries the directive's "is-a" kind (is=-free, fail-closed). -->
+<template type="if" value="@state.loggedIn">
   <a href="/account">Account</a>
 </template>
 
 <!-- portal migrated off `is=` to the same typed-template form (was <template is="portal-directive">): -->
 <portal-outlet id="modal-outlet"></portal-outlet>
-<template portal target="modal-outlet">
+<template type="portal" target="modal-outlet">
   <div class="modal" role="dialog">Modal content</div>
 </template>
 ```
@@ -156,8 +166,9 @@ point is one form for the catalog).
 **Crux:** where do the N region-`<template>`s live — **nested inside one attribute-bearing `<template>`**, or
 **as siblings inside a comment boundary**?
 
-- **(a) Nested region-`<template>`s inside one `<template ns:name>`** — `<template view:switch="@s.status">` with
-  inner `<template case="…">` / `<template default>` children, selected by the directive (built:
+- **(a) Nested region-`<template>`s inside one `<template type="…">`** — `<template type="switch" value="@s.status">`
+  with inner `<template case="…">` / `<template default>` children, selected by the directive (built today as
+  `<template view:switch>`:
   `fui:blocks/view/ViewSwitchDirective.ts:104-120`). *(default)* Wins on **uniformity** — it's the exact same
   substrate as Fork 1 (a): a directive is *always* an attribute on a `<template>`, single-region uses the body,
   multi-region uses nested region-templates. One grammar for the whole catalog. And it **matches the only built
@@ -172,15 +183,15 @@ point is one form for the catalog).
   tolerated alternative, but not canonical.
 
 ```html
-<!-- Fork 2 (a) — DEFAULT: nested region-templates inside one attribute-bearing <template>. -->
-<template view:switch="@state.status">
+<!-- Fork 2 (a) — DEFAULT: nested region-templates inside one typed <template>. -->
+<template type="switch" value="@state.status">
   <template case="active"><span class="badge success">Active</span></template>
   <template case="pending"><span class="badge">Pending</span></template>
   <template default><span class="badge">Unknown</span></template>
 </template>
 
-<!-- A proposed multi-state directive (resource:loader) in the SAME form (migrated off the comment sketch): -->
-<template resource:loader name="user-profile" src="/api/user">
+<!-- A proposed multi-state directive (resource-loader) in the SAME form (migrated off the comment sketch): -->
+<template type="resource-loader" name="user-profile" src="/api/user">
   <template slot="loading"><skeleton-card></skeleton-card></template>
   <template slot="success"><user-card data-bind="data"></user-card></template>
   <template slot="empty"><p>No user found.</p></template>
@@ -225,17 +236,17 @@ the inner mechanism; migrate the `resource:loader` *spec* onto this form. No sta
 
 | Body shape | Canonical form |
 |---|---|
-| 1 region, inert until stamped (gate / defer-content / project / iterate) | `<template ns:name="opts">…</template>` *(Fork 1 (a))* |
-| **N named INERT regions**, one selected (branches / states) | `<template ns:name="opts">` + nested `<template case|slot="x">` *(Fork 2 (a))* |
+| 1 region, inert until stamped (gate / defer-content / project / iterate) | `<template type="name">…</template>` *(Fork 1 (a))* |
+| **N named INERT regions**, one selected (branches / states) | `<template type="name">` + nested `<template case|slot="x">` *(Fork 2 (a))* |
 | 1 region that renders **live, in place** | `<!-- ns:name -->live body<!-- /ns:name -->` *(Fork 1 (b))* |
 | **MIXED** — a **live** primary region **+** an **inert** auxiliary (error-boundary: live guarded content + inert fallback; defer: live placeholder + inert content) | `<!-- ns:name -->live primary <template slot="aux">…</template><!-- /ns:name -->` — the comment boundary (Fork 1 (b)) **hosting a nested inert `<template>`**; composes the two forms, no fourth form |
 | no body — metadata on a subtree | structural annotation (`<script type="injector">` / attribute) |
 
-**Invariant (forms by body shape):** an **inert** body → `<template>`-anchored, directive name in a
-`<template>` **attribute** (canonical); a **live** body → a `ns:name` **comment boundary** wrapping live
-content (**no `<template>`** — e.g. a context provider); a **mixed** body → the comment boundary hosting nested
-inert `<template>` auxiliaries; **no** body → structural annotation. A `<template>` appears **only** for inert
-content; **no `is=`** is minted into any catalog directive.
+**Invariant (forms by body shape):** an **inert** body → `<template>`-anchored, the directive kind in the
+`<template>`'s **`type`** attribute (the "is-a" discriminator, `<script type>`-style); a **live** body → a
+`ns:name` **comment boundary** wrapping live content (**no `<template>`** — e.g. a context provider); a
+**mixed** body → the comment boundary hosting nested inert `<template>` auxiliaries; **no** body → structural
+annotation. A `<template>` appears **only** for inert content; **no `is=`** is minted into any catalog directive.
 
 **Directive-vs-behavior gate (the exclusion the trichotomy was missing).** These forms are for **directives** —
 constructs that control a *region* (whether / how-many / when / where / in-what-form content exists, before or
@@ -257,7 +268,7 @@ WE's directives split across two outer forms today, and one is on deprecated gro
 
 | Built directive | Real mechanism | Outer form | Cross-browser? |
 |---|---|---|---|
-| `view:if`, `view:switch`, `for-each` | `CustomAttribute` on `<template>` | `<template ns:name="opts">` (+ nested region templates) | ✅ yes |
+| `view:if`, `view:switch`, `for-each` | `CustomAttribute` on `<template>` | `<template view:if="…">` (bare attr today; ruled form is `type=`) | ✅ yes |
 | `portal` (only) | **customized built-in** (`extends HTMLTemplateElement`, `{extends:'template'}`) | `<template is="portal-directive">` | ❌ **Safari never** |
 
 Reconciliation: don't mint `is=` as the directive-form contract (forced invariant), migrate `portal` to the
@@ -279,20 +290,20 @@ the directive-layer analog of blocks' uniform `<we-button>` surface).
 
 ### The catalog in the chosen form (proposed + built, code only)
 
-*Every directive in the ruled form, by body shape — inert → attribute-on-`<template>`; live → comment boundary;
-mixed → comment boundary hosting a nested inert `<template>`; zero `is=`. ✅ built · 📋 spec'd · 🆕 #1975
-proposal. (Namespaces follow the spec/#1975; the `view:`-vs-`control:` namespace question is a separate naming
-concern, not this form decision.)*
+*Every directive in the ruled form, by body shape — inert → `<template type="kind">`; live → `<!-- ns:name -->`
+comment boundary; mixed → comment boundary hosting a nested inert `<template>`; zero `is=`. ✅ built · 📋 spec'd ·
+🆕 #1975 proposal. (Values shown as bare keywords; the `type`-value naming/namespacing — and the comment-form
+`ns:name` separator — are under review #1987, not this form decision.)*
 
 ```html
-<template view:if="loggedIn"><a href="/account">Account</a></template>        <!-- ✅ -->
-<template for-each="users" key="id"><div class="user-row" data-bind="name"></div></template>  <!-- ✅ -->
-<template view:switch="status">                                               <!-- ✅ -->
+<template type="if" value="loggedIn"><a href="/account">Account</a></template>   <!-- ✅ (built today: view:if) -->
+<template type="for-each" items="users" key="id"><div class="user-row" data-bind="name"></div></template>  <!-- ✅ -->
+<template type="switch" value="status">                                       <!-- ✅ -->
   <template case="active"><span class="badge success">Active</span></template>
   <template default><span class="badge">Unknown</span></template>
 </template>
-<template portal target="modal-outlet"><div class="modal" role="dialog">…</div></template>   <!-- ✅ migrated off is= -->
-<template resource:loader name="user-profile" src="/api/user">                 <!-- 📋 -->
+<template type="portal" target="modal-outlet"><div class="modal" role="dialog">…</div></template>   <!-- ✅ migrated off is= -->
+<template type="resource-loader" name="user-profile" src="/api/user">          <!-- 📋 -->
   <template slot="loading"><skeleton-card></skeleton-card></template>
   <template slot="success"><user-card data-bind="data"></user-card></template>
   <template slot="error"><error-message data-bind="error"></error-message></template>
@@ -301,7 +312,7 @@ concern, not this form decision.)*
   <div class="skeleton"></div>                              <!-- live placeholder, painted at once -->
   <template slot="content"><heavy-chart data="@sales"></heavy-chart></template>   <!-- inert until trigger -->
 <!-- /defer -->
-<template async value="@user">                                               <!-- 🆕 #1976 — all branches inert (data-gated) -->
+<template type="async" value="@user">                                        <!-- 🆕 #1976 — all branches inert (data-gated) -->
   <template slot="pending"><spinner></spinner></template>
   <template slot="then"><user-card data-bind="value"></user-card></template>
   <template slot="catch"><error-message data-bind="error"></error-message></template>
@@ -310,8 +321,8 @@ concern, not this form decision.)*
   <risky-widget></risky-widget>                             <!-- live guarded content -->
   <template slot="fallback"><p>Something went wrong.</p></template>     <!-- inert fallback -->
 <!-- /error-boundary -->
-<template snippet:define name="row" params="item"><li data-bind="item.name"></li></template>  <!-- 🆕 #1980 — inert hold-for-reuse -->
-<template content-security zone="trusted"><div data-bind="userHtml"></div></template>  <!-- 🆕 #1981 — inert: policy runs BEFORE admission (live-then-sanitize = security hole) -->
+<template type="snippet-define" name="row" params="item"><li data-bind="item.name"></li></template>  <!-- 🆕 #1980 — inert hold-for-reuse -->
+<template type="content-security" zone="trusted"><div data-bind="userHtml"></div></template>  <!-- 🆕 #1981 — inert: policy runs BEFORE admission (live-then-sanitize = security hole) -->
 ```
 
 ## Progress

@@ -34,14 +34,17 @@ three native inert containers:
 | Native inert container | Discriminator | Registry | Status |
 |---|---|---|---|
 | `<!-- ns:name -->` | the `ns:name` comment grammar | `CustomCommentRegistry` | ✅ built |
-| `<template …>` | a dedicated directive-name attribute, **`shadowrootmode`-shaped** (spelling TBD — **not** `type=`) | **`CustomTemplate…`** registry (name follows the chosen discriminator) | 🆕 proposed (replaces `is=` + the CustomAttribute path) |
+| `<template …>` | the **`type` attribute** — an "is-a" kind, `<script type>`/`<input type>`-style (`<template type="if">`); value-namespacing → #1987 | **`CustomTemplateType`** | 🆕 proposed (replaces `is=` + the CustomAttribute path) |
 | `<script type="…">` | the native `type` attribute | **`CustomScriptType`** | 🆕 proposed (injector / context) |
 
 **Native-first honesty:** `<script type>` rides a *genuine* native extension point — the browser treats unknown
 script types as inert data (importmap, speculationrules, `application/json`), so `CustomScriptType` is strongly
-native-anchored. `<template type>` is weaker (`type` is not a native template dispatch) but **rhymes** with
-`<template shadowrootmode>`, where the platform already keys template *processing* off an attribute — anchor the
-template-type convention there, and be honest it's a WE convention, not a native hook like the script case.
+native-anchored. `<template type>` applies the same idiom to the *sibling* inert container: `type` is the
+platform's **"is-a kind"** discriminator (`<input type>`, `<script type>`), and an *open registry of kinds* is
+exactly the `<script type>` shape (`module` / `importmap` / `speculationrules`). It's honestly a WE convention
+(the browser won't dispatch `<template type>`), but **conceptually identical** to `<script type="injector">` —
+the browser leaves the value inert, WE reads it. `<template shadowrootmode>` is **not** the precedent: that is a
+*mode* (adjectival, has-a), whereas a directive is an *is-a kind* — `type` is the exact fit.
 
 ## Forks to prepare (sketch — not yet researched/attacked)
 
@@ -55,17 +58,19 @@ template-type convention there, and be honest it's a WE convention, not a native
 - **Fork C — `CustomScriptType` registry vs per-consumer `querySelectorAll('script[type=x]')`.** A registry
   earns its place only if there is shared lifecycle (parse / upgrade-on-insert / `whenDefined`); if consumers
   just query once, no registry needed. Resolve against the injector/context lifecycle.
-- **Independent sub-question (not a fork): the discriminator spelling — and it MUST be *standards-shaped*
-  (#1826 plug-as-proposed-standard).** The registry must **not** force a `type=` spelling: `type` is overloaded
-  (`<script type>` MIME, `<input type>`, `<ol type>`) and `<template>` has **no native `type` dispatch**, so it
-  fails the "could become a standard" bar. The native precedent is **`<template shadowrootmode>`** — a
-  *dedicated attribute* that selects special template processing. So the shape is a directive-name attribute on
-  `<template>`; the open axis is the **namespacing**: plain (`<template if>`, collision-prone with future native
-  attrs), colon (`<template view:if>`, framework-ish — what's built), or **hyphen-prefixed** (`<template
-  control-if>`, mirroring the platform's own `data-*`/`aria-*` namespacing — likely the most standards-shaped).
-  Research against `shadowrootmode` + the WHATWG/OpenUI custom-attributes/"enhancements" proposals. NB: the
-  registry NAME ("CustomTemplateType") is provisional — it should follow the chosen discriminator, not presuppose
-  `type=`. Separate from Fork A (*which registry*) and from #1983's deferred namespace-naming concern.
+- **Discriminator: `type=` (decided in discussion 2026-06-30; #1983 examples already use it).** The directive's
+  kind goes in the `<template>`'s **`type`** attribute — an **"is-a" classification** (`<template type="if">`
+  *is a* conditional, like `<input type="checkbox">` / `<script type="module">`), **not** a colon-namespaced
+  decorator attribute (`view:if` has no native analog — colons in HTML are XML/foreign-content only). Rationale,
+  all standards-shape (#1826): matches the **closest existing standard** (`<script type>` = an open registry of
+  kinds on an inert container — exactly our model + the `CustomScriptType` sibling); **collision-safe** (kinds
+  live in the *value* space, not the attribute-name space — the reason `data-*` exists); **one-kind-per-template**
+  (one `type` per element → compose by nesting). `<template shadowrootmode>` is the *wrong* precedent (a mode,
+  not an is-a kind). The registry name `CustomTemplateType` now matches the `type=` discriminator.
+- **Still-open sub-question → #1987: the `type` *value* namespacing.** Bare keywords for core (`type="if"`, like
+  `importmap`/`module`) vs a prefixed/separated form for third-party (`type="acme:card"` vs `type="acme-card"`) —
+  the colon-vs-hyphen-vs-bare review. Research against the WHATWG/OpenUI custom-attributes/"enhancements"
+  proposals. Separate from Fork A (*which registry*).
 
 ## Prep checklist (for `/prepare 1986`)
 
