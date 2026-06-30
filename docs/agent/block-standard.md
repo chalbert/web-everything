@@ -138,7 +138,7 @@ A block's `type` is one of six protocol categories (`BLOCK_TYPES` at
 | `Component` | A custom element — an author-facing tag with a CEM surface. | The block *is* a tag the author writes (`<we-foo>`). | registers `element`/`tagName` (`we-*`); has attributes/properties/events/slots. |
 | `Module` | A foundation that groups a shared engine + specialized sub-blocks; not itself one tag. | The block is a *family root* others build on (e.g. `view`: a render engine + behaviors + directives). | `exports` a shared engine; sub-entities carry their own `type`. |
 | `Behavior` | A customized built-in / attribute behavior attached to an existing element. | The block enhances any element via an attribute (`CustomAttribute`). | `extendsClass: CustomAttribute`. |
-| `Directive` | A template/comment directive that transforms markup at stamp time. | The block is a typed `<template type=…>` (inert) / `<!-- ns:name -->` (live) directive — **`is=`-free** (#1983, [directive form standard](#directive-form)). | comment-form → `CustomComment`; typed-template form registers via `CustomTemplateType`/`CustomAttribute` (mechanism: #1986). **Never `is=`** — `CustomTemplateDirective` is being retired (#1983/#1986). |
+| `Directive` | A template/comment directive that transforms markup at stamp time. | The block is a typed `<template type=…>` (inert) / `<!-- ns:name -->` (live) directive — **`is=`-free** (#1983, [directive form standard](#directive-form)). | comment-form → `CustomComment`; typed-template form → `CustomTemplateType` (registered via `CustomTemplateTypeRegistry`, **not** `CustomAttribute` — [#1986](#directive-registration-mechanism)); `<script type>` → `CustomScriptType`. **Never `is=`** — `CustomTemplateDirective` is retired (#1983/#1986). |
 | `Store` | A reactive state container. | The block holds observable state others bind to. | `extendsClass: CustomStore`. |
 | `Parser` | A registry-backed parser member (comment/expression/text-node). | The block contributes a parsing strategy to a registry. | `registryName`/`defaultParserName`. |
 
@@ -394,12 +394,56 @@ directive — the markup vehicle carrying its name + options + body. The rule #1
    (`${}` → `CustomTextNode`, `:attr` → webexpressions). The discriminator is **"no region control,"** not "no
    body."
 
-5. **Open downstream (settled elsewhere, not here):** the *registration mechanism* — a `CustomTemplateType`
-   registry vs `CustomAttribute`, retiring `CustomTemplateDirective`
-   ([#1986](/backlog/1986-custom-type-registry-family-customtemplatetype-customscriptt/)) — and the `type`-**value**
-   namespacing (bare keyword vs prefixed; the colon review,
-   [#1987](/backlog/1987-attribute-naming-convention-review-colon-namespacing-view-if/)). #1983 settles the
-   **form + discriminator shape**; #1986/#1987 settle the **mechanism + value spelling**.
+5. **Downstream (settled separately):** the *registration mechanism* is ratified below
+   ([Directive registration mechanism (#1986)](#directive-registration-mechanism)); the `type`-**value**
+   namespacing (bare keyword vs prefixed; the colon review) is
+   [#1987](/backlog/1987-attribute-naming-convention-review-colon-namespacing-view-if/). #1983 settles the
+   **form + discriminator shape**; #1986 settles the **mechanism**; #1987 settles the **value spelling**.
+
+## Directive registration mechanism (#1986) {#directive-registration-mechanism}
+
+Ratified 2026-06-30 ([#1986](/backlog/1986-custom-type-registry-family-customtemplatetype-customscriptt/)),
+settling the slot rule 5 above left open. Given the #1983 *form*, this is **which registry implements `type=`**.
+The mechanism **completes one pattern across the three native inert containers** — `<!-- -->` / `<template>` /
+`<script>` — each extended via a discriminator + a `define`/`upgrade`/`whenDefined` registry.
+
+1. **Typed-`<template>` directives register via a minted `CustomTemplateTypeRegistry`** — a **value-space**
+   registry whose `upgrade(root)` walk matches `<template>` by its `type` **value** (template-scoped candidate
+   set). **Not** `CustomAttribute`: hosting `type=` on the behavior registry keys by attribute *name* (matched
+   tree-wide against every `<input/button/script type>`, re-implementing value-dispatch inside one entry) and
+   re-merges the two catalogs rule 4's directive-vs-behavior gate splits. `CustomTemplateDirective` / `is=` is
+   retired as the directive registration path (the rule 1 forced invariant); behaviors stay on `CustomAttribute`.
+
+2. **Three concrete sibling registries on `HTMLRegistry`, not one parameterized registry.** The family is
+   `CustomCommentRegistry` (shipped) / `CustomTemplateTypeRegistry` / `CustomScriptTypeRegistry`, each adding only
+   its own `upgrade` walk (`SHOW_COMMENT` walk / `<template type>` value-match / `<script type>` scan). The shared
+   shape already lives in the `HTMLRegistry` base, so a god-object `CustomTypeRegistry` would re-implement the base
+   and couple three divergent walks behind one surface. **Amendment:** lift the currently copy-pasted
+   `whenDefined` + resolver-map up into `HTMLRegistry` so three siblings don't become three copies.
+
+3. **`CustomScriptTypeRegistry` is built now**, absorbing the existing `<script type="injector">` boot-scan
+   (`applyDeclarativeInjectors`) as its `upgrade()` — building against a real shipped consumer and deleting the
+   bespoke scanner. "No consumer yet" is not a hold (#1620); deferral would only seed a second bespoke scanner.
+
+4. **Capability parity is a requirement, not a fork.** Whichever node a directive rides, it must react to
+   sibling-attribute changes on its host (`portal` watches `target`/`disabled`/`required`). This is provided by
+   the same `MutationObserver` machinery `CustomAttributeRegistry` already owns — so retiring the `is=` customized
+   built-in (which got `attributeChangedCallback` natively) loses no capability.
+
+5. **Family invariant — authored vs residue grammars are disjoint and matcher-excluded.** Authored directive
+   nodes and the region/residue annotations a directive *leaves when applied* must occupy non-overlapping
+   grammars, so every registry's `upgrade` walk claims **only authored nodes** (residue is never re-upgraded — cf.
+   the leading-`/` exclusion that already keeps closing markers out of the opening-directive keyspace) and the two
+   are visually distinguishable in raw DOM / devtools. The **exact reserved residue sigil** (unifying today's
+   `:start`/`:end` vs `/`-close split) is a token-grammar question delegated to
+   [#1987](/backlog/1987-attribute-naming-convention-review-colon-namespacing-view-if/).
+
+6. **Naming + namespace guard.** Base classes (`CustomComment` / `CustomTemplateType` / `CustomScriptType`) extend
+   the native nodes; their registries carry the machine-checked `Custom[Name]Registry` suffix. Because
+   `<template type>` *values* enter a host-shared DOM namespace (the `type` attribute, where
+   `module`/`importmap`/`speculationrules` are platform-reserved on `<script>`),
+   `CustomTemplateTypeRegistry.define()` **must** guard its key namespace as `CustomAttributeRegistry` does — the
+   precise reserved-token/prefix grammar being the #1987 value-namespacing question.
 
 ## What this home does *not* cover
 

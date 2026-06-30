@@ -1,9 +1,12 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-30"
 dateStarted: "2026-06-30"
+dateResolved: "2026-06-30"
+graduatedTo: "#1990 — registry-family build (+#1988 portal migration, #1989 residue grammar); rule codified block-standard.md#directive-registration-mechanism"
 preparedDate: "2026-06-30"
+codifiedIn: "docs/agent/block-standard.md#directive-registration-mechanism"
 relatedReport: reports/2026-06-30-typed-inert-container-registries.md
 tags: [webdirectives, registration, custom-type-registry, customattribute, customcomment, block-standard, decision]
 ---
@@ -65,15 +68,42 @@ vs `acme-card`) is a separate axis **delegated to #1987**.
 
 ## Recommended path at a glance
 
-| Fork | Recommended default | Main alternative | Confidence |
-|---|---|---|---|
-| **Fork 1** — directive registry: mint vs extend | **mint `CustomTemplateTypeRegistry`** (value-space, template-scoped) | extend `CustomAttribute` to host a `type`-value branch | high |
-| **Fork 2** — registry shape | **three concrete siblings on `HTMLRegistry`** (lift shared `whenDefined` into the base) | one parameterized `CustomTypeRegistry` | high |
-| **Fork 3** — `CustomScriptType` now? | **build now** — absorb the existing `applyDeclarativeInjectors` boot-scan as its `upgrade()` | defer until a future consumer | med-high |
+| Fork | Recommended default | Main alternative | Confidence | Ruling |
+|---|---|---|---|---|
+| **Fork 1** — directive registry: mint vs extend | **mint `CustomTemplateTypeRegistry`** (value-space, template-scoped) | extend `CustomAttribute` to host a `type`-value branch | high | ✅ **RATIFIED 2026-06-30** (mint) |
+| **Fork 2** — registry shape | **three concrete siblings on `HTMLRegistry`** (lift shared `whenDefined` into the base) | one parameterized `CustomTypeRegistry` | high | ✅ **RATIFIED 2026-06-30** (three siblings + base-lift) |
+| **Fork 3** — `CustomScriptType` now? | **build now** — absorb the existing `applyDeclarativeInjectors` boot-scan as its `upgrade()` | defer until a future consumer | med-high | ✅ **RATIFIED 2026-06-30** (build now) |
 
 *Above the forks sits one **forced invariant** (ratify, not weigh): `is=` / `CustomTemplateDirective` is retired
 as the directive registration path; `portal` migrates off `{extends:'template'}`. It is not in the glance table
 because there is no branch to pick.*
+
+## Ratification log
+
+- **Fork 1 — mint `CustomTemplateTypeRegistry`** (2026-06-30). Final red-team: strongest pro-*extend-`CustomAttribute`*
+  case (already exists, owns the `MutationObserver` lifecycle, already value-sub-dispatches via `-active`/`-when`)
+  **fails** — hosting directives on the behavior registry re-merges the two catalogs #1983's directive-vs-behavior
+  gate just split (principle violation), and keying `type` by attribute *name* forces value-dispatch + host-tag
+  filtering re-implemented inside one entry (re-implementation, not reuse). Cost of the new class is bounded (only
+  an `upgrade()` walk; shape is in the base). **SURVIVES.**
+- **Fork 2 — three concrete siblings on `HTMLRegistry` + lift `whenDefined`/resolver-map into the base** (2026-06-30).
+  Final red-team: strongest pro-*god-object* (DRY) case **fails** — the shared shape already lives in the
+  `HTMLRegistry` base, so a parameterized `CustomTypeRegistry` would re-implement the base and couple three
+  divergent `upgrade` walks behind one param surface; the one real duplication (`whenDefined`+resolver-map) is
+  captured by the base-lift amendment without that coupling. **SURVIVES.**
+- **Fork 3 — build `CustomScriptTypeRegistry` now, absorbing the `applyDeclarativeInjectors` boot-scan** (2026-06-30).
+  Final red-team: strongest pro-*defer* (YAGNI) case **fails** — a built `<script type="injector">` consumer already
+  ships, so folding its scan into `upgrade()` builds against a real consumer *and deletes* the bespoke scanner;
+  "no consumer yet" is a banned defer reason (#1620); the defer's named trigger (#1968 as a script annotation) is
+  counterfactual (#1968 resolved zero-node as an event front door). **SURVIVES.**
+- **Family invariant (raised 2026-06-30, ratified as a requirement):** authored directive nodes and runtime-emitted
+  region/residue annotations must occupy **disjoint, matcher-excluded grammars** — every registry's `upgrade`
+  walk claims only authored nodes (residue never re-upgraded; cf. `directiveNameOf` already excluding `/`-prefixed
+  closing markers, `fui:plugs/webdirectives/CustomCommentRegistry.ts:39`), and the two are visually distinguishable
+  in raw DOM/devtools. Codified in `we:docs/agent/block-standard.md#directive-registration-mechanism` rule 5. The
+  exact reserved residue sigil (unify the current `:start`/`:end` vs `/`-close split) is a token-grammar question
+  spun out as its own item **#1989** (blocked by this). *Not a fork (no either/or); a capability the winning
+  registries must satisfy.*
 
 ## Supported by default (not forks)
 
