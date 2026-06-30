@@ -275,8 +275,8 @@ the directive-layer analog of blocks' uniform `<we-button>` surface).
 
 ### The catalog in the chosen form (proposed + built, code only)
 
-*Every directive in the ruled form, by body shape — inert → `<template ns:name>` (attribute); live → `<!-- ns:name
--->`; mixed → comment boundary hosting a nested inert `<template>`; zero `is=`. ✅ built · 📋 spec'd · 🆕 #1975
+*Every directive in the ruled form, by body shape — inert → attribute-on-`<template>`; live → comment boundary;
+mixed → comment boundary hosting a nested inert `<template>`; zero `is=`. ✅ built · 📋 spec'd · 🆕 #1975
 proposal. (Namespaces follow the spec/#1975; the `view:`-vs-`control:` namespace question is a separate naming
 concern, not this form decision.)*
 
