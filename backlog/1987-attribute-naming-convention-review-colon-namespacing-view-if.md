@@ -81,6 +81,12 @@ to the directive *discriminator*, explicitly carving name-/value-namespacing **t
 
 *No forced invariant sits above these — the directive-form/`is=` retirement is #1983's, not re-opened here.*
 
+> **Adjacent, not in scope here:** the **directive applied-residue / region-annotation marker grammar** (unify
+> today's `:start`/`:end` vs `/`-close split into one reserved, matcher-excluded sigil) — raised by #1986's family
+> invariant — is a sibling token-grammar question but a *distinct* surface from the *authoring* names/values this
+> review buckets. Tracked separately as **#1989** (blocked by #1986, resolved); cross-referenced so the reserved
+> grammars stay consistent when both ratify.
+
 ## Settled by precedent (not forks)
 
 - **Native-aligned attributes → bare lowercase** (`multiple`, `active`, `open`) and **author data → `data-*`**
