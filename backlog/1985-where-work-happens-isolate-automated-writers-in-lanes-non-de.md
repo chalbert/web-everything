@@ -1,8 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-30"
 dateStarted: "2026-06-30"
+dateResolved: "2026-06-30"
+graduatedTo: 1996
+codifiedIn: "docs/agent/platform-decisions.md#non-destructive-closeout-prflow"
 preparedDate: "2026-06-30"
 relatedItems: ["1933", "083"]
 relatedReport: reports/2026-06-30-automated-writer-isolation.md
@@ -11,13 +14,22 @@ tags: [parallel-batch, isolation, closeout, dev-server, playwright, pr-flow]
 
 # Where work happens: isolate automated writers in lanes + non-destructive closeout (escalation ladder toward observe-only main)
 
-**Prepared, ready to ratify.** How much of the constellation's work must run **isolated** (clone, own HEAD,
-merge via `origin`) vs directly in the **shared primary checkout**, and what the automated closeout may touch.
-Grounded in a real incident, the resolved #1933 clone model, and an SE-practice prior-art survey published as the
+**Status — RESOLVED 2026-06-30. Rung 1 ratified (forced invariant); Rung 2 direction ratified (adopt
+PR-flow / multi-session); Rung 3 folded into the Rung-2 mechanism decision, prepared as #1996.** How much of the constellation's work runs **isolated** (clone, own HEAD,
+merge via `origin`) vs directly in the **shared primary checkout**, what an automated closeout may touch, and
+what operating model the constellation's writers target. Grounded in a real incident, the resolved #1933 clone
+model, and an SE-practice prior-art survey published as the
 [`automated-writer-isolation-model`](/research/automated-writer-isolation-model/) topic (report via
-`relatedReport`). **The prep skeptic materially reshaped the cold scaffold:** the three "rungs" are *three
-different archetypes*, and only one is a ratifiable new call — bundling them would smuggle a scope-reopen past the
-incident's evidence.
+`relatedReport`). The decision splits into **three archetypes** — they are not one ladder, and bundling them
+would smuggle a scope question and an unbuilt harness past the incident that only proves Rung 1.
+
+## The decision at a glance
+
+| Element | Archetype | Call | Confidence |
+|---|---|---|---|
+| **Rung 1** — non-destructive, changeset-scoped closeout | forced invariant | **RATIFIED** — act only on your own manifest; never revert/delete a file you didn't write; never read `git status` as ownership | high |
+| **Rung 2** — operating model for the constellation's writers | live operating-model fork | **RATIFIED — adopt PR-flow / multi-session** (direction); lane/\* push is the general transport (reliable via #1995); mechanism prepared as **#1996** | direction high / mechanism TBD |
+| **Rung 3** — observe-only main for visual work | sub-question of Rung 2's mechanism | **folds into #1996**; carries the #1895 Playwright acceptance test | med-high |
 
 ## Grounding digest
 
@@ -35,32 +47,24 @@ as truth**; headless Playwright doesn't need the human's screen.
 
 ## Axis-framing
 
-The cold item framed one fork — "an escalation ladder; which rung, in what order." The standing test splits it
-into **three archetypes**, and that split is the decision:
+The cold item framed one fork — "an escalation ladder; which rung, in what order." The decision splits it into
+**three archetypes**, each its own call:
 
 - **Rung 1 — non-destructive, changeset-scoped closeout** is a **forced invariant** (the dirty-tree-ownership
-  branch is *broken* — it destroyed real work). This is the one genuinely-new ratifiable call.
-- **Rung 2 — lane-isolate *all* automated writers** is **not a live fork** — it is **settled by #1933's scope
-  decision** (`we:backlog/1933-multi-clone-central-push-retry-parallel-batching-replace-gua.md:22-24`: *serial
-  `/batch` on disjoint items is the day-to-day model; full isolation is the true-parallel path for when scale
-  justifies it, **not** a prerequisite for normal batching*). Once Rung 1 holds, Rung 2 addresses **no residual
-  incident harm**, so reopening that scope here would be a config-knob preference, not a merit call.
-- **Rung 3 — observe-only main for visual work** is a **validation-gate** (a go/no-go on a candidate harness),
-  verdict **not-yet**.
+  branch is *broken* — it destroyed real work). The one genuinely-new ratifiable call. **Ratified.**
+- **Rung 2 — operating model for the constellation's writers** is a **live operating-model fork**: do the
+  constellation's writers (agent *and* human sessions, not just `/workflow` batches) collaborate **through the
+  remote** in a PR-flow (clone → push → gate → review → merge), or keep writing the **shared primary checkout**?
+  The **direction is to adopt PR-flow**; the rollout mechanism is prepared as its own decision.
+- **Rung 3 — observe-only main for visual work** is the **visual-verification sub-question of Rung 2's
+  mechanism** — observe-only `main` is the end state of PR-flow — so it folds into that decision rather than
+  standing alone.
 
-**Split the ratification:** ratify Rung 1 on its evidence; do **not** bundle Rung 2/3 — ratifying the ladder as
-one unit smuggles a scope-reopen (Rung 2) and an unbuilt harness (Rung 3) past the incident that only proves
-Rung 1.
+Rung 1 is ratified on the incident's evidence. Rung 2's **direction** is ratified (adopt PR-flow); its
+mechanism and Rung 3 are deferred to a dedicated prepared decision (#1996) — bundling them here would have
+ratified an operating-model rollout and an unbuilt harness cold.
 
-## Recommended path at a glance
-
-| Element | Archetype | Recommended call | Confidence |
-|---|---|---|---|
-| **Rung 1** — non-destructive, changeset-scoped closeout | **forced invariant** | **ratify** — act only on your own manifest; never revert/delete a file you didn't write; never read `git status` as ownership | high |
-| **Rung 2** — lane-isolate all automated writers | settled by #1933 (non-fork) | **don't** — serial `/batch` + central steps keep writing the shared checkout, made safe by Rung 1; the proto-PR seam is a roadmap note under #1933 | high |
-| **Rung 3** — observe-only main for visual work | **validation-gate** | **not-yet** — gated on a *falsifiable* per-lane multi-origin Playwright acceptance test (below) | med-high |
-
-## Rung 1 — non-destructive, changeset-scoped closeout (forced invariant, ratify)
+## Rung 1 — non-destructive, changeset-scoped closeout (forced invariant, ratified)
 
 **Fork-existence:** case (a), a forced invariant — the excluded branch ("infer my residue from the dirty tree /
 react destructively to ambient working-tree state") is **broken**: it `checkout`/`rm`'d a concurrent session's
@@ -83,9 +87,10 @@ Why it is forced, not one option among many (the skeptic's classification attack
   `plan→apply` enacts only the recorded diff — the canonical "operate on your recorded changeset, never infer
   from ambient live state."
 
-This ratifies the durable principle the memory rule already encodes
-(`we:.claude/agent-memory/closeout-never-infers-ownership-from-dirty-tree.md:23` — *"durable until the #1985
-rung-1 fix lands — and the principle holds after"*) and is the **codification target** of this decision.
+**Codified (2026-06-30):** the invariant is ratified into the durable memory rule
+`we:.claude/agent-memory/closeout-never-infers-ownership-from-dirty-tree.md` (marked ratified by this item) and
+is already practised by the scoped close-out gate in `we:docs/agent/backlog-workflow.md` (*Closing out a
+completed item* / pre-flight (b)).
 
 `Skeptic: SURVIVES — the prep skeptic tried to demote it to "one option in a design space" (lock / commit-first);
 both alternatives reduce to this invariant or need cooperation the incident proves absent, so it is genuinely
@@ -94,100 +99,105 @@ forced. Bonus the attack surfaced and was folded in: the manifest already existe
 steps are read-only — so the destructive act was a main-agent prose closeout off `git status` despite a correct
 ledger, proving the bug is the method.`
 
-## Rung 2 — lane-isolate all automated writers (settled by #1933 — not a live fork)
+## Rung 2 — operating model for the constellation's writers (live fork; direction: adopt PR-flow)
 
-**Classification: not a ratifiable fork here.** The cold scaffold proposed "generalize the #1933 clone model to
-*every* automated writer (serial `/batch`, the orchestrator's central steps), default **adopt next**." The prep
-skeptic **refuted** that default, on four grounds — folded here so the decision turn doesn't re-litigate:
+**The fork.** Do the constellation's writers — agent *and* human sessions, not just `/workflow` parallel
+batches — collaborate **through the remote** in a PR-flow (each works in its own clone/ref → push → gate →
+review → merge), or keep writing the **shared primary checkout**? This is an **operating-model** call, distinct
+from Rung 1: Rung 1 makes the *shared-checkout* model safe; Rung 2 chooses what model the constellation targets
+as it grows to multiple concurrent sessions.
 
-1. **No residual harm to fix.** With Rung 1 in force, the incident's harm (destructive ops + dirty-read) is gone
-   — and the item itself concedes concurrent commits to `main` are safe. The only thing left, a cross-session
-   *read* hazard, is **exactly what Rung 1's "never read `git status` as ownership" already bans.** There is no
-   third harm requiring serial `/batch` to run in a clone — the tell of a config-knob, not a merit fork
-   (`we:.claude/agent-memory/fork-vs-config-classification-gate.md` — *two "branches" that are two values of one
-   dial*).
-2. **It reopens a ratified scope without new evidence.** #1933's *Scope decision (solo dev)*
-   (`we:backlog/1933-multi-clone-central-push-retry-parallel-batching-replace-gua.md:22-24`) already ruled serial
-   `/batch` on disjoint items the day-to-day model and full isolation the *true-parallel* path "**not** a
-   prerequisite for normal batching." The incident is about *closeout safety*, not serial-batch contention — so
-   it is not the evidence that would justify revisiting that call.
-3. **Proven cost, real DX harm.** Lane-ref push is a known-flaky tax — in the first green run **2 of 6 lanes
-   failed to push and fell back to serial replay** (`we:.claude/agent-memory/parallel-workflow-blocked-by-git-guard.md:53-57`)
-   — and Rung 2 would impose it on every serial batch that today commits to `main` cleanly, while **stranding
-   automated work away from the single watched dev server** (HMR rooted at the primary checkout — the item's own
-   argument against cloning humans, which applies hardest to serial `/batch`).
-4. **Citation-scope.** The incident proves Rung 1 and nothing about serial batch (uninvolved) or the central
-   steps (read-only, fine).
+**Direction: adopt PR-flow / multi-session.** The goal is multiple concurrent sessions collaborating via the
+remote rather than sharing one dirty working tree. The **lane/\* push-ref transport already implements this for
+`/workflow`** and is the general primitive — now made reliable by #1995's bounded push retry. The institutional
+form is off-the-shelf (trunk-based dev + branch protection, F4/F8–F10); the WE-specific build is the
+multi-origin dev-server harness (below / Rung 3).
 
-**Call: don't generalize.** Serial `/batch` and the orchestrator's central steps keep writing the shared
-checkout, made safe by Rung 1. The one survivor is the **proto-PR-seam idea** (`lane/*` refs → branch→gate→
-review→merge), which is real forward value (trunk-based dev + off-the-shelf branch protection, F4/F8-F10) — but
-it belongs as a **roadmap note under #1933, gated on a future PR-flow decision that does not yet exist**, never a
-Rung-2 "default adopt" bundled into this ratification.
+**Why this is a real fork now, not "settled by #1933."** The incident alone does **not** justify it — with Rung
+1 in force the incident's harm is gone, so closeout-safety is no carrier for an operating-model change. What
+makes it live is the **stated target operating model**: #1933's *solo-dev, serial-batch-is-day-to-day* scope
+(`we:backlog/1933-multi-clone-central-push-retry-parallel-batching-replace-gua.md:22-24`) was premised on a solo
+developer, and "support multiple concurrent sessions working together" is exactly the premise that reopens it —
+deliberately, on new evidence (the direction), not retroactively on the incident.
 
-`Skeptic: REFUTED the cold "default adopt next" → reclassified as settled-by-#1933 (non-fork), default "don't".
-Grounds: Rung 1 leaves no residual incident harm (config-knob, not merit fork); reopens #1933's ratified
-solo-dev scope (`we:backlog/1933-multi-clone-central-push-retry-parallel-batching-replace-gua.md:22-24`) without
-new evidence; proven lane-push-flakiness tax + DX strand from the watched server. Proto-PR seam survives only as
-a separate roadmap note under #1933.`
+**The DX cost is the price of the model, not a veto.** The prior worry — cloning strands work from the single
+watched dev server (HMR rooted at the primary checkout) — was a **solo-dev artifact**: in a multi-session model
+each session runs its own dev server in its own clone. Real cost (a port per clone, per-clone vite proxy
+allowlist), but it is the cost of the chosen model rather than a reason to refuse it.
 
-## Rung 3 — observe-only main for visual work (validation-gate, not-yet)
+**Mechanism → prepare as its own decision (not ratified here).** The *direction* is the call on this item; the
+*rollout* has genuine sub-forks owed research + a bold default before any ruling:
 
-**Why this isn't a classic fork, and is still a decision:** a one-sided go/no-go on a candidate mechanism (the
-per-lane multi-origin dev server + headless before/after Playwright gate), no rival branch to weigh.
+- **Clone scope (the main hinge):** does *every* session work in a clone, or only sessions doing substantive
+  multi-item work, with trivial interactive edits still allowed direct-to-`main`?
+- **Per-clone dev server / HMR** for interactive + visual work (own port per clone; vite proxy allowlist per
+  clone).
+- **Landing gate:** auto-merge on gate-green vs a human review gate (and what "review" means for an all-agent
+  push).
+- **Branch-protection shape:** observe-only `main` (GitHub "require PR" / GitLab "Allowed to push: No one",
+  F8/F10) and how it composes with the #1153 branch guard and the removed never-push default.
+- **Visual verification:** Rung 3's acceptance test (below).
 
-- **Verdict: not-yet (med-high).** Observe-only main is feasible *institutionally* — GitHub "require PR" / GitLab
-  "Allowed to push: No one" *are* observe-only main (F8/F10) — but genuine per-lane **visual** rendering needs
-  full clones with their own ports, because worktrees give code isolation, **not runtime** isolation (F1/F3/F7),
-  and the visual class hinges on **cross-origin** behaviour (`.fui-card` lands only where the FUI registration
-  ESM loads, `we:backlog/1895-the-fui-card-class-cross-origin-styling-on-non-fui-routes.md:18-31`; the vite proxy
-  is a hand-maintained allowlist, `we:backlog/210-catalog-authoring-vite-proxy-allowlist.md:11-23`). Per-lane
-  bring-up is "the constellation, not one `--port`" — WE + FUI origins up and wired per lane.
-- **Un-gate trigger (sharpened from the cold "the harness is built" — the skeptic's amendment):** a
-  **falsifiable acceptance test** — *a lane boots WE + FUI cross-origin and a headless Playwright run reproduces
-  the #1895 transparent-`.fui-card` regression **and** its fixed pass, both from the CLI with no human screen.*
-  This ties un-gating to the exact gross-regression class Rung 3 exists to catch and forecloses a half-built
-  single-origin harness being declared "done."
-- **Prior-art delta:** the institutional form exists off-the-shelf (F8-F10); the **multi-origin dev-server
-  harness** is the WE-specific build, file it under #1933 / the explorer-judge epics (#1167/#1552). The human's
-  eye still wins on design-quality nuance; Rung 3 reliably catches only the **gross-regression** class (a surface
-  going transparent/unstyled is screenshot-obvious).
+`Skeptic: the incident-driven case for generalizing is correctly refuted (Rung 1 removes the harm) — so this
+fork stands or falls on the operating-model goal alone, and only the DIRECTION is ratified here; the mechanism
+is deferred to a prepared decision precisely so a rollout isn't ratified cold.`
 
-`Skeptic: SURVIVES-WITH-AMENDMENT — correct archetype (a real validation-gate, not a #1620 soft-park: it names a
-concrete mechanism + dependency). The merit hit that landed: "build the harness" hid unbounded scope ("the
-constellation, not one --port"), so the trigger is sharpened to the falsifiable #1895-reproduction acceptance
-test above. Verdict NOT-YET held.`
+## Rung 3 — observe-only main for visual work (folds into Rung 2's mechanism)
 
-## Considered and rejected (recorded)
+Observe-only `main` is the **end state of PR-flow** (nothing pushes to `main` directly; everything lands via
+gate→review→merge), so it is the **visual-verification sub-question of Rung 2's mechanism**, not a standalone
+call. It carries forward into that decision intact:
 
-- **Observe-only main for *humans too*, via clones** — strands interactive/visual work away from the watched dev
-  server (HMR rooted at the primary checkout); steep DX tax, and the static gate can't certify visual
-  correctness anyway. Rung 3's per-lane Playwright harness is the non-DX-breaking way to get the same guarantee
-  for *automation*; humans keep the live checkout.
-- **Branch-based isolation (feature branch in the live checkout)** — the normal PR-shop shape, would preserve
-  HMR — but the #1153 branch guard denies branch creation in the shared checkout (forced clones over worktrees),
-  so it isn't available without revisiting the guard; the clone + per-lane-port path (Rung 3) reaches the same
-  end without touching it.
+- **What it needs.** Observe-only main is feasible *institutionally* off-the-shelf (F8/F10), but genuine per-lane
+  **visual** rendering needs full clones with their own ports — worktrees give code isolation, **not runtime**
+  isolation (F1/F3/F7) — and the visual class hinges on **cross-origin** behaviour (`.fui-card` lands only where
+  the FUI registration ESM loads, `we:backlog/1895-the-fui-card-class-cross-origin-styling-on-non-fui-routes.md:18-31`;
+  the vite proxy is a hand-maintained allowlist, `we:backlog/210-catalog-authoring-vite-proxy-allowlist.md:11-23`).
+  Per-lane bring-up is "the constellation, not one `--port`" — WE + FUI origins up and wired per lane.
+- **Acceptance test (the un-gate trigger).** A falsifiable test, not "the harness is built": *a lane boots WE +
+  FUI cross-origin and a headless Playwright run reproduces the #1895 transparent-`.fui-card` regression **and**
+  its fixed pass, both from the CLI with no human screen.* This ties go/no-go to the exact gross-regression class
+  it exists to catch and forecloses a half-built single-origin harness being declared "done."
+- **Scope.** The multi-origin dev-server harness is the WE-specific build (file under #1933 / the explorer-judge
+  epics #1167/#1552). The human eye still wins on design-quality nuance; this reliably catches only the
+  **gross-regression** class (a surface going transparent/unstyled is screenshot-obvious).
+
+## Open mechanism options (carried to the Rung-2 mechanism decision)
+
+These were *rejected under the prior solo-dev framing*; adopting PR-flow turns them into live options for the
+mechanism decision rather than settled rejections.
+
+- **Do human sessions clone too?** Previously rejected as a DX tax (cloning strands interactive/visual work from
+  the single watched dev server). Under PR-flow this is exactly the **clone-scope hinge**: each cloning session
+  runs its own dev server, so the question is *which* sessions clone (all vs substantive-work-only), not whether
+  the DX tax is acceptable in the abstract.
+- **Branch-based isolation (feature branch in the live checkout)** — the normal PR-shop shape, preserves HMR, but
+  the #1153 branch guard denies branch creation in the shared checkout (forced clones over worktrees). A live
+  option only if the mechanism decision revisits that guard; otherwise the clone + per-clone-port path stands.
 
 ## Statute-overlap (reconciled here)
 
 - **#1933 scope decision** (`we:backlog/1933-multi-clone-central-push-retry-parallel-batching-replace-gua.md:22-24`)
-  — Rung 2 would *reopen* it; this prep **defers to it** (don't generalize) rather than collide. Rung 1 is the
-  genuinely-new part #1933 didn't cover (closeout safety).
+  — Rung 2 **deliberately reopens** it: #1933's solo-dev premise is superseded by the multi-session PR-flow
+  direction. Rung 1 is the genuinely-new part #1933 didn't cover (closeout safety).
 - **Rule 105 — claim ignores git state** (`we:.claude/agent-memory/105-feedback_claim_ignores_git_state.md`) —
   *composes* with Rung 1: the dirty tree is the normal baseline (an argument *for* tolerating shared-checkout
   writes under a non-destructive closeout, against evicting them).
 - **#083 file-lock coordination** (`we:backlog/083-agent-file-lock-coordination.md:155-167`) — Rung 1 is the
   no-bad-actor-needed form of #083's parked advisory lock; composes (status-claim + non-destructive discipline,
   not a hard lock).
-- **#1153 branch guard / never-push-removed** — bound Rung 3's mechanism (clones over worktrees) and confirm
-  shared-checkout commits to `main` are now allowed (so Rung 2's clone-isolation buys less than it did).
+- **#1153 branch guard / never-push-removed** — a sub-fork of Rung 2's mechanism: the PR-flow rollout must
+  reconcile branch-protection with the #1153 branch guard, and confirm shared-checkout commits to `main` are now
+  allowed (the never-push default was removed 2026-06-29).
 
 ## Relationships
 
-- **Extends** #1933 (clone model) — Rung 1 adds closeout safety #1933 didn't cover; Rung 2 defers to #1933's
-  scope; Rung 3's harness files under #1933.
-- **Roadmap note (Rung 2 survivor):** the proto-PR seam (`lane/*` → review→merge) → a future PR-flow decision
-  (none exists yet), filed under #1933.
+- **Extends** #1933 (clone model) — Rung 1 adds closeout safety #1933 didn't cover; Rung 2 reopens #1933's
+  solo-dev scope toward PR-flow; the Rung-2 mechanism (incl. Rung 3's harness) files under #1933.
+- **Spawns:** a `type:decision` to **prepare** the PR-flow rollout mechanism (clone scope, per-clone dev
+  server/HMR, landing gate, branch protection, visual-verification harness) — scaffolded on ratification, this
+  item `graduatedTo` it.
+- **#1995** — bounded retry on transient lane-push ref-lock contention; makes the lane/\* push transport
+  reliable enough to be the general PR-flow primitive.
 - Motivating incident recorded in `we:.claude/agent-memory/closeout-never-infers-ownership-from-dirty-tree.md`
   and the new `we:reports/2026-06-30-automated-writer-isolation.md`.

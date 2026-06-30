@@ -2117,6 +2117,42 @@ In the same lane-to-central pipeline, a lane must **reserve (pre-lock) a file be
 
 **Lineage:** #1935 (ratified 2026-06-28 — Fork 1: optimistic-floor + pre-lock layer [D-alone rejected]; Fork 2: Option C static[③] ∪ dynamic-B, static-first→B-promptly rollout [skeptic SURVIVES-WITH-AMENDMENT → AGENTS.md is locked-prose-not-output, curated-sweep stay locked, B prioritized not deferred]; report `we:reports/2026-06-28-merge-risk-file-determination.md`). Under parent #1933; format-change precursor = #1938 (`blockedBy: ["1935"]`, shrinks the at-risk set). Sibling of [gate-on-merged-tree-lane-fast-fail](#gate-on-merged-tree-lane-fast-fail) in the #1933 cluster.
 
+### Automated closeout is non-destructive and changeset-scoped; the writer operating model targets PR-flow / multi-session {#non-destructive-closeout-prflow}
+
+Two rulings on *where* the constellation's work happens and what an automated closeout may touch.
+
+**(Rung 1 — forced invariant) Non-destructive, changeset-scoped closeout.** Any agent / closeout / integrator
+acts **only** on files in its own recorded manifest (the orchestrator ledger's `changedFiles`, or a session's
+own edits), **never reverts or deletes a file it did not itself write**, and **never reads the dirty working
+tree as ownership truth**. The shared primary checkout's dirty state is the normal baseline (other sessions'
+uncommitted work lives there); inferring "what I own" from `git status` cannot tell your residue from a
+stranger's live edits, so any destructive reaction (`checkout`/`rm`/`stash`) can erase another session's work —
+which is exactly what happened (`batch-2026-06-29e` clobbered a concurrent `/prepare`'s in-progress #1983
+files). It is a **forced** invariant, not one option: the alternatives (a session-scoped lock; a
+commit-before-closeout discipline) both require cooperation the colliding **stranger** session cannot be made
+to give, so "act only on your own manifest" is the only no-bad-actor-needed mechanism. Practised by the scoped
+close-out gate in [backlog-workflow.md](backlog-workflow.md) (*Closing out a completed item* / pre-flight) and
+the durable rule `we:.claude/agent-memory/closeout-never-infers-ownership-from-dirty-tree.md`.
+
+**(Rung 2 — operating-model direction) Writers collaborate through the remote in a PR-flow.** The
+constellation's writers — **agent *and* human sessions, not just `/workflow` parallel batches** — target
+collaborating **through the remote** (each works in its own clone/ref → push → gate → review → merge) rather
+than sharing one dirty primary checkout, so multiple concurrent sessions can work together. The **`lane/*`
+push-ref transport is the general primitive** (made reliable by #1995's bounded push-retry on transient
+ref-lock contention), not a `/workflow`-only mechanism. This is a *direction*; the rollout **mechanism** —
+clone scope (every session vs substantive-work-only), per-clone dev server/HMR, landing gate
+(auto-merge-on-green vs human review), branch-protection shape (observe-only `main`, reconciled with the #1153
+branch guard + the removed never-push default), and the visual-verification harness (Rung 3's #1895
+acceptance test) — is **prepared as its own decision, #1996**, not ratified here.
+
+**Lineage:** #1985 (ratified 2026-06-30 — Rung 1 forced invariant; Rung 2 direction *adopt PR-flow*, reframed
+in discussion from the prep's "don't generalize" once the goal was set as a multi-session operating model, not
+incident-remediation; Rung 3 folds into #1996; report `we:reports/2026-06-30-automated-writer-isolation.md`).
+Under parent #1933; extends its clone model with closeout safety + the operating-model direction. Push
+reliability = #1995. Mechanism to prepare = #1996. Sibling of
+[gate-on-merged-tree-lane-fast-fail](#gate-on-merged-tree-lane-fast-fail) and
+[merge-risk-optimistic-with-targeted-lock](#merge-risk-optimistic-with-targeted-lock) in the #1933 cluster.
+
 ---
 
 ### Behaviour/event attribute *names* are colon-namespaced — a collision-safe internal authoring spelling, not the platform-shaped standard proposal {#attribute-name-colon-namespacing}
