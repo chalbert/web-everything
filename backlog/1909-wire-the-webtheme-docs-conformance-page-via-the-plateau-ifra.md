@@ -21,8 +21,8 @@ authored `we:demos/webtheme-conformance-demo.*` + its `we:src/_data/demos/` entr
 pushed. It did **not** land only because the integrator's **unscoped** `npm run build` on plateau-app was
 **already red for a pre-existing reason** (#1965 — entry imports a deleted `@we` SimpleStore block), unrelated
 to this item. Released `active→open`; now `blockedBy: #1965`. Re-attempt once #1965 greens the plateau build.
-The lane refs `lane/batch-2026-06-29d-1909` linger on the WE + plateau-app origins with the work if a salvage
-is wanted.
+The impl is small and fully described above — just re-do it; the throwaway `lane/batch-2026-06-29d-1909` refs
+were cleaned off the WE + plateau-app origins (no salvage needed).
 
 T4 of the webtheme relocation cascade (#1294). Wire the visible webtheme conformance docs page to surface the FUI binding via the plateau-hosted conformance iframe (#1788 ratified (b) — the runner stays a shared plateau tool), no forbidden build-time @frontierui import. Mirrors webcompliance C4 (#1810).
 

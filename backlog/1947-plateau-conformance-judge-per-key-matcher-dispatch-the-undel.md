@@ -21,8 +21,8 @@ the real tree, did **correct** work (matcher dispatch in `plateau-app:src/confor
 **unscoped** `npm run build` on plateau-app was **already red for a pre-existing reason** (#1965 — entry imports
 a deleted `@we` SimpleStore block), which has nothing to do with this item. Released `active→open`;
 now `blockedBy: #1965`. Once #1965 makes the plateau build green, re-attempt (serial `/batch` is fine; the
-lane work itself is proven). The lane refs `lane/batch-2026-06-29d-1947` linger on the WE + plateau-app origins
-with the impl if a salvage is wanted.
+lane work itself is proven). The impl is small and fully described above — just re-do it; the throwaway
+`lane/batch-2026-06-29d-1947` refs were cleaned off the WE + plateau-app origins (no salvage needed).
 
 The plateau conformance judge (plateau-app:src/conformance-engine/conformanceVectors.ts) still compares every non-special expect key with hardcoded strict equality (last[key] !== expected, ~lines 142-147) and never dispatches on the per-key matcher vocabulary #1847 defined. #1847 resolved but delivered ONLY the WE schema half (graduatedTo we:conformance-vectors/schema.ts); the Plateau judge half (treat 'matchers' as metadata; dispatch per-key exact / deep-equal / resolved-options-parts-structure / predicate) was never built, so any conformance suite whose vectors use a matcher fails ALL vectors with 'matchers expected {...}, observed undefined'. Cross-cutting: blocks the intl/analytics/reliability docs-page wirings (#1920/#1921/#1922) which need predicate/array comparison. Implement the dispatch in plateau-app:src/conformance-engine/conformanceVectors.ts, then the page-wiring slices become clean mirrors of #1801.
 
