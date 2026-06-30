@@ -84,3 +84,60 @@ Angular [ng-container](https://angular.dev/api/core/ng-container) · Lit [commen
 [chrome moveBefore](https://developer.chrome.com/blog/movebefore-api) · [MDN moveBefore](https://developer.mozilla.org/en-US/docs/Web/API/Element/moveBefore) ·
 [MDN display:contents](https://developer.mozilla.org/en-US/docs/Web/CSS/display) · [hidde.blog display:contents a11y](https://hidde.blog/more-accessible-markup-with-display-contents/) ·
 [web.dev subgrid](https://web.dev/articles/css-subgrid) · [Haunted](https://github.com/matthewp/haunted)
+
+---
+
+## Follow-up — declarative-HTML composition ecosystem & standards sweep (2026-06-29) {#ecosystem-sweep}
+
+**Question.** Does any shipping feature, standards proposal, or framework deliver **runtime, wrapper-free,
+zero-node deep STRUCTURAL composition in plain declarative HTML** (many nested provider/layout/boundary layers, no
+DOM node per layer breaking flex/grid direct-child, `:nth-child`, content model, AX tree)? Trivial in JS/JSX
+(function composition); plain HTML has only elements, not functions.
+
+**Bottom line.** **No — it is an ecosystem-wide gap**, *but narrower than it looks*: provider/context layers need
+no DOM nesting at all.
+
+### Web-platform standards & proposals (status as of 2026)
+
+| Standard | Removes the node? | Status |
+|---|---|---|
+| **DOM Parts** (`ChildNodePart`) | content regions only — **not CE hosts** | prototype-only, unshipped; declarative form **template/parse-scoped**; **stalled** ([W3C Mar 2025](https://www.w3.org/2025/03/26-webcomponents-minutes.html), energy → [declarative partial updates Nov 2025](https://www.w3.org/2025/11/12-decl-partial-updates-minutes.html)) |
+| **Template Instantiation** | n/a | decomposed/parked (DOM Parts = its first sub-piece) |
+| **HTML Modules** | n/a — a *loading* mechanism | revived 2025 (MS Edge), prototype/flagged, unshipped ([chromestatus](https://chromestatus.com/feature/4854408103854080)) |
+| **Declarative Custom Elements** (`<definition>`) | **no — materializes a host node** | WICG strawman, unshipped |
+| **Declarative Shadow DOM** (`<template shadowrootmode>`) | **no — host node stays** | shipped, Baseline 2024 — not a node-elision tool |
+| **`display:contents`** | box yes, node/event/AX no | shipped; AX **fixed 2023** (FF 113 / Chrome 115 / Safari 17) for non-interactive structural; residual = **interactive/focusable** only ([Roselli](https://adrianroselli.com/2022/07/its-mid-2022-and-browsers-mostly-safari-still-break-accessibility-via-display-properties.html)) |
+| **`Node.moveBefore()`** | no — preserves a node across a move | **Chrome 133 / FF 144; Safari ✗ → blocks Baseline**; needs fallback ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/Element/moveBefore)) |
+
+**Zero-node *context/DI* mechanisms (not structure):** the **Context Protocol** (WC-CG; bubbling `context-request`
+event, any existing ancestor answers, **zero added node**, `@lit/context`-proven, framework-agnostic —
+[protocol](https://github.com/webcomponents-cg/community-protocols/blob/main/proposals/context.md) ·
+[@lit/context](https://lit.dev/docs/data/context/)) and **CSS custom properties** (ambient inherited context, zero
+node, strings/typed only).
+
+### Community / framework approaches
+
+| System | True zero-node? | When | Mechanism |
+|---|---|---|---|
+| **React** | **yes — no DOM node** (fragments/context) | runtime, virtual | Fiber-tree position; cost = reconciliation identity |
+| **Astro** | **yes — boundary erased** | build-time | compile to static HTML |
+| **11ty WebC** | **yes — but only asset-free** components | build-time | rootless HTML-only = zero-overhead HTML |
+| **Enhance** | **no — host tag kept by design** | runtime SSR | round-trippable HTML; one node/layer |
+| **Lit / Svelte / Vue / Solid** | element-wrapper-free, **comment/text anchor node** | runtime | `<!--?lit$-->` / `$$anchor` / `<!--v-if-->` / marker node |
+| **Alpine / petite-vue** | no — scope is element-bound | runtime | attribute enhancement, not structure |
+| **HTMX** | partial (server output + `hx-swap`) | runtime | swap/transport, no context concept |
+
+### Verdict & consequences
+
+1. **Unsolved across the ecosystem.** True zero-node only via a **virtual tree** (React) or **compile-away**
+   (Astro/WebC/Svelte/JSX) — build-time/JS. In **live HTML** the best is **comment-anchor nodes**
+   (Lit/Svelte/Vue/Solid) = exactly WE's `CustomComment`; `display:contents` is the cheap-node fallback. No
+   standard rescues it (DOM Parts unshipped/template-scoped/CE-silent; DCE materializes a host).
+2. **The narrowing.** "10 nested providers" conflates *context* with *structure*. Context layers are **zero-node**
+   via the Context Protocol / CSS custom properties — no wrapper. The genuine UNMET residual is only the
+   **structural / layout / boundary** layers.
+3. **For #1963:** case 6 (DI provider) gains the **Context Protocol** as a zero-node mechanism (better than
+   `display:contents`), and `webinjectors` (#1044) should **align to it** (plug-to-direction). Case-10b's UNMET
+   shrinks to structural layers; the transient-to-comments bridge (DOM-Parts-aligned) is the interim plug. Factual
+   corrections folded: `moveBefore` (Chrome 133 / FF 144 / Safari ✗), `display:contents` AX (fixed 2023,
+   interactive-only residual).

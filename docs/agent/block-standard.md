@@ -304,6 +304,57 @@ per-block *mechanism pick* for the button (the worked example) is carved to
      / generate flavors of → **element/block**; a capability you attach to enhance a host → **behavior**;
      they compose, the element is the styled product, the behavior the floor.
 
+## Composition rubric (#1963) {#composition-rubric}
+
+Ratified by [#1963](/backlog/1963-composition-rubric-re-judged-to-framework-parity-strict-per-/) (2026-06-29). §7
+(Packaging governance) governs a *block's runtime shape* (A/B/C); this rubric is the **higher standing test** over
+the **broader composition surface** (the dom-less A–I catalog) and licenses future mechanism choices. Different
+altitudes — where they touch the same cell, **this rubric governs and §7's consumer-need applies beneath it.** The
+full per-case matrix, mechanism catalog, and worked examples live in #1963; the codified rules:
+
+1. **The 5-point acceptance bar** (the standing test for any mechanism choice): ergonomics ≥ frameworks · zero
+   layout/CSS/a11y compromise (#1962 cost enum) · a no-compromise solution for *every* case · invent-a-plug where
+   none clears (*Plug = Proposed Missing Standard*, #95) · clean in **plain HTML and JSX**. Codifying the test and
+   grading a cell already-passed are different rulings — the bar's first act is to mark the cell it **fails**
+   (case-10-in-HTML).
+2. **The budgeted-host-node spine — *scoped*.** The host node is the API surface (slot/shadow/AX-identity/lifecycle
+   are keyed off it), so **budget it**: pay a registered host only for those, route everything else through a
+   zero-node mechanism. Yields full zero-node parity on **JS/JSX**; **cheap-node (not zero) on declarative HTML** —
+   deep structural nesting there is an open gap (rule 7).
+3. **Two audiences — FIXED / CONFIGURABLE / FREEDOM.**
+   - **FIXED** (the standard forces): the bar; the scoped spine; the per-layer native/plug partition (rule 5);
+     irreplaceable-native blocks emit native; the statute bars (no load-bearing `is=`; single-substrate floor;
+     MaaS serves only platform-correct variants).
+   - **CONFIGURABLE** (per-project, **platform-correct variants only**): transient ↔ persistent light-DOM for
+     soft / replicable blocks, and which sanctioned variant the configurator/MaaS assembles — native-first
+     **default**, alternative **opt-in**. A **substrate swap** (a load-bearing non-standard shim like polyfilled
+     `is=`) is **never** configurable.
+   - **FREEDOM** (the dev's call): which mechanism per case, from the catalog/matrix with pros/cons.
+4. **`is=` is not a WE mechanism.** Every job is dominated — load-bearing native output → **transient**; behaviour
+   on an authored element → **`CustomAttribute`** (in-place, cross-browser, single-substrate — beats `is=` on every
+   axis); persistent live instance → **(B)**; foreign in-place → no real need. WE documents `is=` **only as an
+   opt-in developer option** (polyfill in FUI, enabled by explicit dev choice; lower-compliance, §7-spectrum) —
+   never a block mechanism, never default.
+5. **Per-layer native/plug + plug-to-direction.** Decompose a capability: a layer **present** in a shippable
+   browser → **native** (emit-to-native / transient — never polyfill what already ships); a layer **absent** from
+   every spec → **plug**, riding the transient survivor as a `CustomAttribute`. Author each plug to align with its
+   **standards-track candidate** (DOM Parts `ChildNodePart`; `ElementInternals.type` #11061; the WC-CG Context
+   Protocol; the signals proposal; `moveBefore()`) so it **deprecates + migrates to native** when the standard
+   ships.
+6. **Behaviour vs directive — behaviour is first-choice.** `CustomAttribute` (decorate a *connected* element) is
+   the default; a comment-anchor **directive** is the exception, for **pre-connection / region control** only —
+   gating *whether* an element connects (`ViewIf`), *how many times* (`ForEach`), or transforming a region before
+   its contents upgrade. A behaviour attaches *after* its element connects, so it cannot prevent/multiply that
+   connection — only a directive can.
+7. **Per-case verdicts** (full matrix in #1963): cases 4/5, 7 ✅; cases 2, 3, 6, 9 ◐ (named confirms — **case 6 is
+   strongest via the Context Protocol**, zero-node DI; `webinjectors` #1044 aligns to it); case 1 → **#1962** (the
+   transient-vs-wrapper mechanism rule). **Case 8 is covered** (`is=` jobs all dominated; the owned-element
+   behavioural residual is a standards-watch on `ElementInternals.type` #11061). **Case 10 declarative-HTML deep
+   *structural* nesting is ⚠️ UNMET** — the structural mechanism is **comment-anchor directives, not transient**
+   (transient has no native-element target there); the residual is the **Phase-2 nested-directive
+   lifecycle-composition** build (foundation #1130/#1217; the rest carved as a child of #1963). Providers are
+   zero-node via the Context Protocol, so the residual is structural/layout layers only.
+
 ## What this home does *not* cover
 
 The three governance areas this schema reference sliced out — **lifecycle** (#1092), **taxonomy** (#1093),
