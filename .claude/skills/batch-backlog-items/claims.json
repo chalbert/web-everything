@@ -3,27 +3,31 @@
   "ttlMinutes": 120,
   "sessions": [
     {
-      "session": "batch-2026-06-29d",
+      "session": "batch-2026-06-29e",
       "ids": [
-        "1947-plateau-conformance-judge-per-key-matcher-dispatch-the-undel",
-        "1909-wire-the-webtheme-docs-conformance-page-via-the-plateau-ifra",
-        "1609-migrate-table-surfaces-in-we-src-includes-project-to-fui-dat",
-        "1895-project-include-card-surfaces-wear-the-shared-fui-card-look-"
+        "1965-plateau-app-build-red-entry-imports-a-deleted-simplestore-bl",
+        "1969-case-9-portal-cross-browser-movebefore-fallback-safari-block",
+        "1970-reactivity-primitive-parity-confirm-cases-2-and-4",
+        "1972-dev-facing-composition-guide-mechanism-menu-when-to-use-why-",
+        "1968-align-the-injector-di-provider-to-the-wc-cg-context-protocol",
+        "1973-devtools-for-comment-anchor-directives-surface-directive-reg"
       ],
       "baseline": [
         ".claude/agent-memory/19-feedback_prep_verify_mechanism_has_consumer.md",
-        ".claude/agent-memory/MEMORY.md",
         ".claude/agent-memory/index-dec.md",
         ".claude/agent-memory/index-verif.md",
         ".claude/skills/batch-backlog-items/capacity.json",
         ".claude/skills/batch-backlog-items/claims.json",
         ".claude/skills/batch-backlog-items/reservations.json",
+        "AGENTS.md",
         "audits/backlog-health-audit.md",
-        "backlog/1770-audit-the-end-state-constellation-placement-once-all-relocat.md",
-        "backlog/1931-runtime-register-api-for-custom-intents-demand-gated.md",
-        "backlog/1947-plateau-conformance-judge-per-key-matcher-dispatch-the-undel.md",
-        "backlog/1948-fui-product-intent-resolution-substrate-build-time-custom-in.md",
-        "backlog/1962-transient-self-erasing-element-viability-as-a-concept-vs-the.md",
+        "backlog/1895-project-include-card-surfaces-wear-the-shared-fui-card-look-.md",
+        "backlog/1965-plateau-app-build-red-entry-imports-a-deleted-simplestore-bl.md",
+        "backlog/1976-directive-proposal-async-region-await-then-catch-suspense-fa.md",
+        "backlog/1978-directive-proposal-error-boundary-catch-render-error-in-a-re.md",
+        "backlog/1979-directive-proposal-virtualized-iteration-windowed-list-conte.md",
+        "backlog/1980-directive-proposal-snippet-render-named-parameterized-reusab.md",
+        "backlog/1981-directive-proposal-content-security-zones-trusted-html-sanit.md",
         "blocks/renderers/auto-define/CustomAutoDefineRegistry.ts",
         "blocks/renderers/auto-define/buildParsedStrategy.ts",
         "blocks/renderers/auto-define/lazyDomStrategy.ts",
@@ -35,14 +39,14 @@
         "vite.config.mts",
         ".claude/agent-memory/decision-default-mirrors-story-no-divergence.md",
         ".claude/agent-memory/fork-vs-config-classification-gate.md",
-        ".claude/agent-memory/parallel-workflow-blocked-by-git-guard.md",
         ".claude/agent-memory/plug-decision-ratifies-contract-not-impl.md",
         ".claude/agent-memory/red-team-each-decision-update.md",
-        ".claude/agent-memory/workflow-crossrepo-lanes-falsedrop.md",
         ".claude/commands/ready.md",
         "analytics/contract.d.ts",
         "analytics/contract.js",
-        "backlog/1963-composition-rubric-re-judged-to-framework-parity-strict-per-.md",
+        "backlog/1977-directive-proposal-defer-hydration-trigger-on-idle-visible-i.md",
+        "backlog/1982-migrate-bare-section-card-standard-card-surfaces-to-also-emi.md",
+        "backlog/1983-directive-form-standard-comment-vs-template-form-reconcile-t.md",
         "capability-manifest/check.d.ts",
         "capability-manifest/check.js",
         "capability-manifest/fixtures.d.ts",
@@ -165,6 +169,7 @@
         "src/_data/researchTopics/dev-browser-free-paid-capability-line.json",
         "src/_data/researchTopics/dev-browser-panel-embed-boundary.json",
         "src/_data/researchTopics/dev-browser-role-scoped-lenses.json",
+        "src/_data/researchTopics/directive-catalog-brainstorm.json",
         "src/_data/researchTopics/docking-tiling-partition-tree.json",
         "src/_data/researchTopics/docs-site-own-component-distribution.json",
         "src/_data/researchTopics/edit-in-place-lifecycle.json",
@@ -183,6 +188,7 @@
         "src/_data/researchTopics/verdict-classifier-training-readiness-gate.json",
         "src/_data/researchTopics/webplugs-standard-vs-runtime-split.json",
         "src/_includes/research-descriptions/declarative-custom-state-surface.njk",
+        "src/_includes/research-descriptions/directive-catalog-brainstorm.njk",
         "src/_includes/research-descriptions/plug-as-proposed-standard-doctrine.njk",
         "src/_includes/research-descriptions/reactive-consume-handle-shape.njk",
         "src/_includes/research-descriptions/ssr-data-table-docs-ingestion.njk",
@@ -206,11 +212,13 @@
         "webcases/requirementValidator.js"
       ],
       "touched": [
-        "backlog/1909-wire-the-webtheme-docs-conformance-page-via-the-plateau-ifra.md",
-        "backlog/1609-migrate-table-surfaces-in-we-src-includes-project-to-fui-dat.md",
-        "backlog/1895-project-include-card-surfaces-wear-the-shared-fui-card-look-.md"
+        "backlog/1969-case-9-portal-cross-browser-movebefore-fallback-safari-block.md",
+        "backlog/1970-reactivity-primitive-parity-confirm-cases-2-and-4.md",
+        "backlog/1972-dev-facing-composition-guide-mechanism-menu-when-to-use-why-.md",
+        "backlog/1968-align-the-injector-di-provider-to-the-wc-cg-context-protocol.md",
+        "backlog/1973-devtools-for-comment-anchor-directives-surface-directive-reg.md"
       ],
-      "at": "2026-06-29T20:12:29.145Z"
+      "at": "2026-06-30T00:37:04.680Z"
     }
   ]
 }

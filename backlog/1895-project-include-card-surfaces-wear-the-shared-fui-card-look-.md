@@ -5,6 +5,7 @@ parent: "1601"
 status: open
 dateOpened: "2026-06-27"
 dateStarted: "2026-06-29"
+blockedBy: ["1982"]
 tags: [we-card, fui-card, card-style, base-flavor, dogfooding, css-dedup]
 relatedProject: webdocs
 ---
