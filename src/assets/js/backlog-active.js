@@ -59,18 +59,66 @@
       '/" style="color:inherit; text-decoration:none; font-variant-numeric:tabular-nums;">#' + esc(num) + '</a>';
   }
 
-  function agentChip(a) {
-    var cls = stateClass(a.state);
-    // Dedup label vs num: "slice:1622" + num 1622 → "slice #1622" (not "#1622 slice:1622").
-    var inner;
+  // Label inner HTML, deduped against the num: "slice:1622" + num 1622 → "slice #1622" (not
+  // "#1622 slice:1622"; and a bare "#1622" label → just "#1622", not "#1622 #1622"). Shared by the chip
+  // and the message header so the two render the item identically.
+  function agentLabelInner(a) {
     if (a.num) {
       var role = String(a.label || '').replace(/[#:]?\s*\b\d{2,4}\b/, '').replace(/[:\-\s]+$/, '').trim();
-      inner = (role ? esc(role) + ' ' : '') + numLink(a.num);
-    } else {
-      inner = esc(a.label || a.agentId || 'agent');
+      return (role ? esc(role) + ' ' : '') + numLink(a.num);
     }
+    return esc(a.label || a.agentId || 'agent');
+  }
+
+  // `colorCls` is the state to COLOUR by — the item's rolled-up state (see itemStates), so every chip for
+  // the same #NNN reads one colour even when its pipeline stages are in different states. Falls back to the
+  // agent's own state for an agent with no num.
+  function agentChip(a, colorCls) {
+    var cls = colorCls || stateClass(a.state);
     var tip = a.lastLine ? ' title="' + esc(a.lastLine) + '"' : '';
-    return '<span class="aw-agent ' + cls + '"' + tip + '><span class="dot"></span>' + inner + '</span>';
+    return '<span class="aw-agent ' + cls + '"' + tip + '><span class="dot"></span>' + agentLabelInner(a) + '</span>';
+  }
+
+  // Roll every agent's state up to its #NNN, so an item worked by several pipeline-stage agents has ONE
+  // colour. Precedence: still-running wins (the item is live), then failed (needs attention), then pending,
+  // else done. Returns num → state-class.
+  var STATE_RANK = { running: 3, failed: 2, pending: 1, done: 0 };
+  function itemStates(agents) {
+    var m = {};
+    agents.forEach(function (a) {
+      if (!a.num) return;
+      var c = stateClass(a.state);
+      if (!(a.num in m) || STATE_RANK[c] > STATE_RANK[m[a.num]]) m[a.num] = c;
+    });
+    return m;
+  }
+
+  // Newest step time for an agent (0 if none) — used to pick the "current" stage to represent an item.
+  function agentActivity(a) {
+    if (a.steps && a.steps.length) { var t = Date.parse(a.steps[a.steps.length - 1].at); if (t) return t; }
+    return 0;
+  }
+
+  // A /workflow runs the same #NNN through several pipeline-stage agents, so the raw agent list repeats
+  // each item once per stage. Collapse to ONE entry per item: the stage best reflecting where the item is
+  // now (a stage in the item's rolled-up state, most-recently-active). Agents with no num pass through
+  // individually. Preserves first-appearance order. Returns [{ num|null, rep }].
+  function collapseToItems(agents) {
+    var order = [], groups = {}, out = [];
+    agents.forEach(function (a) {
+      if (!a.num) { out.push({ num: null, rep: a }); return; }
+      if (!(a.num in groups)) { groups[a.num] = []; order.push(a.num); }
+      groups[a.num].push(a);
+    });
+    var states = itemStates(agents);
+    var items = order.map(function (num) {
+      var pool = groups[num].filter(function (a) { return stateClass(a.state) === states[num]; });
+      if (!pool.length) pool = groups[num];
+      var rep = pool.reduce(function (best, a) { return agentActivity(a) >= agentActivity(best) ? a : best; }, pool[0]);
+      return { num: num, rep: rep, state: states[num] };
+    });
+    // Keep numless agents (if any) after the item entries.
+    return items.concat(out);
   }
 
   var TERMINAL = { completed: 1, failed: 1, aborted: 1, cancelled: 1 };
@@ -79,10 +127,11 @@
 
   // One agent's message block: label (state-coloured) + its message — a running agent shows its live
   // step stream, a finished agent shows its final message (its result), a pending one just its name.
-  function agentMsg(a) {
-    var cls = stateClass(a.state);
-    var head = '<span style="font-size:0.78em; font-weight:600; color:' + (stateColor[cls] || '#475569') + ';">' +
-      esc(a.label || a.agentId || 'agent') + (a.num ? ' ' + numLink(a.num) : '') + '</span>';
+  function agentMsg(a, colorCls) {
+    var cls = stateClass(a.state);              // the agent's OWN state — drives the body (stream vs result)
+    var headCls = colorCls || cls;              // the item's rolled-up state — drives the header colour
+    var head = '<span style="font-size:0.78em; font-weight:600; color:' + (stateColor[headCls] || '#475569') + ';">' +
+      agentLabelInner(a) + '</span>';
     var body = '';
     if (cls === 'running' && a.steps && a.steps.length) body = '<div class="aw-stream">' + streamHtml(a.steps.slice(-4)) + '</div>';
     else if (a.lastLine) body = '<div style="font-size:0.78em; color:var(--color-text-muted);">' + esc(a.lastLine) + '</div>';
@@ -91,7 +140,8 @@
 
   function runCard(run) {
     var agents = Array.isArray(run.agents) ? run.agents : [];
-    var done = agents.filter(function (a) { return stateClass(a.state) === 'done'; }).length;
+    var items = collapseToItems(agents);   // one entry per #NNN (stages collapsed), numless agents trail
+    var doneItems = items.filter(function (it) { return (it.state || stateClass(it.rep.state)) === 'done'; }).length;
     var statusColor = run.status === 'completed' ? '#166534'
       : run.status === 'failed' || run.status === 'aborted' ? '#991b1b' : '#1e40af';
     // Default expanded for a running run (you want to follow it); collapsed for a finished one. A click
@@ -103,18 +153,21 @@
     h += '<button type="button" data-run-toggle="' + esc(run.id) + '" style="appearance:none; background:none; border:none; cursor:pointer; font:inherit; font-weight:700; padding:0; color:inherit;">' + (open ? '▾' : '▸') + ' ' + esc(run.name || run.id) + '</button>';
     h += '<span style="font-size:0.72em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:' + statusColor + ';">' + esc(run.status || 'running') + '</span>';
     if (run.phase) h += '<span style="font-size:0.8em; color:var(--color-text-muted);">phase: <strong>' + esc(run.phase) + '</strong></span>';
-    h += '<span style="font-size:0.78em; color:var(--color-text-muted); font-variant-numeric:tabular-nums;">' + done + '/' + agents.length + ' agents</span>';
+    // Provisional = reconstructed from live subagent transcripts before the harness journalled the run.
+    // Labels/phase aren't available yet, so flag it rather than imply the thin labels are the whole story.
+    if (run.provisional) h += '<span title="Live from subagent transcripts — full labels/phase appear once the run is journalled." style="font-size:0.72em; color:var(--color-text-muted); font-style:italic;">live · pre-journal</span>';
+    h += '<span style="font-size:0.78em; color:var(--color-text-muted); font-variant-numeric:tabular-nums;">' + doneItems + '/' + items.length + ' items · ' + agents.length + ' agents</span>';
     if (run.updatedAt) h += '<span style="margin-left:auto; font-size:0.72em; color:var(--color-text-muted);">' + esc(ago(run.updatedAt)) + '</span>';
     h += '</div>';
 
     if (open) {
-      // State chips (compact overview of every agent).
-      h += '<div style="display:flex; flex-wrap:wrap; gap:0.35rem;">' + agents.map(agentChip).join('') + '</div>';
-      // Each agent's message — the part you asked to see. Show agents that produced one; if none have a
-      // transcript (pruned for an old run), say so rather than render emptiness.
-      var withMsg = agents.filter(function (a) { return a.lastLine || (a.steps && a.steps.length); });
+      // State chips — one per ITEM (pipeline stages collapsed), coloured by the item's rolled-up state.
+      h += '<div style="display:flex; flex-wrap:wrap; gap:0.35rem;">' + items.map(function (it) { return agentChip(it.rep, it.state || stateClass(it.rep.state)); }).join('') + '</div>';
+      // One message per item — the representative (current) stage's message: a live item shows its step
+      // stream, a finished one its final result. If none have a transcript (pruned), say so.
+      var withMsg = items.filter(function (it) { return it.rep.lastLine || (it.rep.steps && it.rep.steps.length); });
       h += '<div style="margin-top:0.6rem; display:flex; flex-direction:column;">';
-      if (withMsg.length) h += withMsg.map(agentMsg).join('');
+      if (withMsg.length) h += withMsg.map(function (it) { return agentMsg(it.rep, it.state || stateClass(it.rep.state)); }).join('');
       else h += '<div style="font-size:0.74em; color:var(--color-text-muted); opacity:0.8;">No agent messages captured — subagent transcripts may be pruned for this run.</div>';
       h += '</div>';
     }
