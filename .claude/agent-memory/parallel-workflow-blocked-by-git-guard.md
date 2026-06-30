@@ -54,7 +54,11 @@ Three runs on 2026-06-29 to get it green, each exposing one real defect:
    on main, gate green (0 errors), **0 stranded / 0 multiLaneFiles / 0 partialCrossRepo**. 4 concurrent + 2
    serial; 2 concurrent lanes (#1611/#1613) passed gate but **failed to push their lane ref** → the integrator
    **serial-replayed** them and they resolved (the optimistic floor works — but "concurrent" was lost for those
-   two; residual push-reliability bug worth chasing).
+   two; residual push-reliability bug worth chasing). **FIXED 2026-06-30 (#1995):** distinct lane refs never
+   collide, but concurrent pushes into the ONE shared origin contend on git's ref-transaction lock
+   (`packed-refs.lock` / per-ref `.lock`) → transient "cannot lock ref" rejects. Step-4 push now wraps a bounded
+   retry (≤5 attempts, 0.3–0.8s jittered backoff) in `parallel-execute.workflow.js`; force-push to a lane-owned
+   ref is idempotent so retry is correctness-safe → the lane stays concurrent instead of dropping to replay.
 
 **Lane agents over-drop, recurringly.** Every carry across these runs was a **false-drop on a misjudged
 premise**, not a real blocker: cross-repo lanes (#1947/#1909) reported plateau-app code "absent" (the clone
