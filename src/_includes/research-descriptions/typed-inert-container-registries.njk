@@ -1,0 +1,132 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  #1983 ratified the directive <strong>form</strong> — a typed <code>&lt;template type="kind"&gt;</code> (inert)
+  or <code>&lt;!-- ns:name --&gt;</code> (live), deliberately <strong><code>is=</code>-free</strong> — and
+  explicitly <strong>carved the <em>registration mechanism</em> out to #1986</strong>. So this topic does
+  <em>not</em> re-litigate the <code>type=</code> discriminator (settled); it asks the mechanism question
+  underneath: <strong>which registry implements the ratified <code>type=</code> form, is it one parameterized
+  registry or three concrete siblings, and does a <code>&lt;script type&gt;</code> sibling earn its place
+  yet?</strong>
+</p>
+
+<h2>Code ground truth (the shared shape already exists)</h2>
+<p>
+  Two registries already ship as <strong>concrete siblings on one base</strong>: <code>CustomCommentRegistry</code>
+  and <code>CustomAttributeRegistry</code> both <code>extends HTMLRegistry</code>
+  (<code>fui:plugs/core/HTMLRegistry.ts:21</code>). The base already carries the common
+  <code>define</code>/<code>get</code>/<code>getLocalNameOf</code>/bidirectional-name-map shape; each sibling adds
+  only its own <code>upgrade(root)</code> walk. So the "shared shape" a parameterized
+  <code>CustomTypeRegistry</code> would provide <strong>already exists — as the base class, not a god-object.</strong>
+</p>
+<p>
+  The one capability feared lost in the <code>is=</code>&rarr;registry migration —
+  <code>observedAttributes</code>/<code>attributeChangedCallback</code> — is <strong>not</strong>
+  <code>is=</code>-only. <code>CustomAttributeRegistry</code> already provides it for <em>non-element</em> hosts via
+  a <code>MutationObserver</code> it owns (<code>fui:plugs/webbehaviors/CustomAttributeRegistry.ts:526-576,425-427</code>).
+  <code>portal</code> (the only <code>is=</code> directive, <code>fui:plugs/webportals/PortalDirective.ts:123</code>,
+  <code>static observedAttributes = ['target','disabled','required']</code>) gets attribute reactivity natively
+  today; migrating it onto a <code>type=</code> registry swaps the native callback for the same MutationObserver
+  machinery <code>CustomAttribute</code> already ships. <strong>The migration loses no capability.</strong>
+</p>
+
+<h2>Finding F1 — <code>&lt;script type&gt;</code> is a native open kind-space</h2>
+<p>
+  The HTML spec defines unrecognized <code>&lt;script type&gt;</code> values as <strong>"data blocks… not
+  processed by the user agent, but instead by author script or other tools"</strong>
+  (<a href="https://html.spec.whatwg.org/multipage/scripting.html">html.spec.whatwg.org</a>). So
+  <code>CustomScriptType</code> rides a <em>genuine</em> native extension point — the browser already leaves the
+  value inert for tools to interpret. <strong>Caveat:</strong> the spec recommends a non-JS-MIME string for data
+  blocks, so a bare <code>type="injector"</code> is mildly off-guidance (<code>application/we-injector</code> vs
+  <code>injector</code> — a #1987 naming call).
+</p>
+
+<h2>Finding F2 — but native gives inertness, not a registry</h2>
+<p>
+  <code>HTMLScriptElement.supports()</code> is a <strong>closed</strong> set
+  (<code>classic</code>/<code>module</code>/<code>importmap</code>/<code>speculationrules</code>); there is no
+  native <em>open registration</em> over script types. The registry +
+  <code>define</code>/<code>upgrade</code>/<code>whenDefined</code> lifecycle is a <strong>WE invention over a
+  native inert substrate</strong> — be honest in framing: WE rides native inertness and invents the registry.
+</p>
+
+<h2>Finding F3 — <code>&lt;template type&gt;</code> has no native precedent (collision-safe)</h2>
+<p>
+  Every standardized <code>&lt;template&gt;</code> attribute is a shadow-root <strong>modifier</strong>
+  (<code>shadowrootmode</code>, <code>shadowrootclonable</code>, …), and <code>shadowrootmode</code> is explicitly
+  a <em>mode</em> (adjectival), not an is-a kind
+  (<a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/template">MDN</a>).
+  <code>type</code> is undefined on <code>&lt;template&gt;</code>, so a WE convention won't clash with any standard
+  attribute. The mode-vs-kind distinction <em>validates the design's own framing</em>: the platform reaches for
+  adjectival <code>…mode</code> when it means "has-a config" and reserves <code>type</code> for "is-a kind."
+</p>
+
+<h2>Finding F4 — <code>type=</code>-as-is-a-kind is the platform's pervasive idiom</h2>
+<p>
+  <code>&lt;input type&gt;</code>, <code>&lt;button type&gt;</code>, <code>&lt;ol type&gt;</code>,
+  <code>&lt;script type&gt;</code> all select <em>which kind</em> of an element you have, contrasted against
+  adjectival <code>…mode</code>/boolean config attrs. So <code>&lt;template type="if"&gt;</code> ("this template
+  <em>is</em> an if-block") is in the grain of native <code>type=</code> semantics. <em>(Partly uncertain —
+  inferred from the cross-element pattern + the <code>shadowrootmode</code> contrast, not one explicit "type means
+  is-a" citation.)</em>
+</p>
+
+<h2>Finding F5 — <code>is=</code> customized built-ins are vendor-rejected</h2>
+<p>
+  WebKit's standards-position on customized built-ins is <strong>"oppose"</strong>
+  (<a href="https://github.com/WebKit/standards-positions/issues/97">WebKit/standards-positions#97</a>); the active
+  platform replacement is <code>ElementInternals.type</code>
+  (<a href="https://github.com/whatwg/html/issues/11061">whatwg/html#11061</a>) — <em>discriminate-on-the-element</em>,
+  not a customized-built-in subclass. Replacing <code>is=</code> with <code>type=</code> follows where the
+  standards bodies actually went.
+</p>
+
+<h2>Finding F6 — the native template-instantiation roadmap anticipates conditionals/loops + a processor seam</h2>
+<p>
+  Template Instantiation &rarr; DOM Parts; the
+  <a href="https://www.w3.org/2025/03/26-webcomponents-minutes.html">March-2025 WG minutes</a> note
+  "standardization of looping, conditionals, plus customization"
+  (<a href="https://github.com/WICG/webcomponents/blob/gh-pages/proposals/Template-Instantiation.md">Template-Instantiation
+  proposal</a>). So <code>&lt;template type="if"&gt;</code> is a <strong>forward-compatible bet in the platform's
+  direction</strong> — though the native proposals lean toward a <em>JS-passed processor</em>, not a
+  <code>type</code> attribute, so the attribute-keyed part is a WE invention <em>(uncertain)</em>.
+</p>
+
+<h2>Finding F7 — a runtime registry keyed by an element discriminator is the dominant framework model</h2>
+<p>
+  Vue (<code>app.directive('highlight', …)</code>), Angular, and Alpine all register/match directives at
+  <strong>runtime</strong> by a discriminator on the element
+  (<a href="https://vuejs.org/guide/reusability/custom-directives">Vue custom directives</a>); Svelte is
+  compile-time, Lit a per-call factory. WE's <code>type</code>-keyed registry mirrors the dominant
+  Vue/Angular/Alpine shape — the pattern is mainstream, not exotic.
+</p>
+
+<h2>Finding F8 — lifecycle parity target = <code>CustomElementRegistry</code></h2>
+<p>
+  <code>define</code>/<code>upgrade</code>/<code>whenDefined</code> +
+  <code>observedAttributes</code>/<code>attributeChangedCallback</code>
+  (<a href="https://developer.mozilla.org/en-US/docs/Web/API/CustomElementRegistry">MDN</a>).
+  <code>upgrade</code> matters because inert containers, like un-upgraded custom elements, can exist in the DOM
+  <em>before</em> the registry loads — the registration-vs-presence race the native API was designed for. Copying
+  this surface verbatim is the right move.
+</p>
+
+<h2>What this means for #1986</h2>
+<ul>
+  <li><strong>The <code>type=</code> form must register through a <em>value-space</em> registry —
+    <code>CustomAttribute</code> cannot implement it.</strong> <code>CustomAttribute</code> dispatches on attribute
+    <em>name</em> (<code>view:if</code>), tree-wide; the ratified form dispatches on the <code>type</code>
+    attribute's <em>value</em> on <code>&lt;template&gt;</code>. Hosting <code>type=</code> in
+    <code>CustomAttribute</code> would match every <code>&lt;input type&gt;</code>/<code>&lt;script type&gt;</code>
+    and re-implement value-dispatch internally — so the new registry is a <strong>forced consequence of #1983</strong>,
+    not a fresh weigh.</li>
+  <li><strong>Three concrete siblings on <code>HTMLRegistry</code> beat one parameterized god-object</strong>
+    (which would re-implement the base). Separate-and-decouple + the two shipped siblings.</li>
+  <li><strong><code>CustomScriptType</code> is <em>build-now</em></strong> (the prep skeptic flipped an initial
+    not-yet) — <code>&lt;script type="injector"&gt;</code> already ships an idempotent boot-scan
+    (<code>applyDeclarativeInjectors</code>, <code>fui:plugs/webinjectors/declarativeInjector.ts:107-147</code>)
+    that <em>is</em> an <code>upgrade(root)</code> walk, so the registry absorbs it and deletes the duplicate
+    scanner; "no consumer yet" is a banned defer reason once the contract is codified, and the once-named defer
+    trigger (#1968) resolved zero-node.</li>
+</ul>
+{% endraw %}
