@@ -16,7 +16,7 @@ applies to every "does it work / why is it broken" moment, not just to written t
     to the *script file's* directory, **not** the cwd — so a script in `/tmp` fails even when you
     launch it from the repo root. Write the throwaway script **inside the repo tree** (e.g. a
     git-ignored `./.probe.mjs`), `node ./.probe.mjs`, then delete it. The first port is whatever the
-    user named; otherwise probe 3000/8080 (WE) and 3001/8082 (FUI). Always capture `page.on('console')`
+    user named; otherwise probe 3000/8080 (WE) and 6000/6080 (FUI). Always capture `page.on('console')`
     + `page.on('pageerror')` so silent client-side failures surface. For "is the current page marked?"
     questions, dump each nav link's `aria-current` and class — don't eyeball the screenshot.
 - **The render layer is not the server output.** A page can be in the DOM yet invisible because of

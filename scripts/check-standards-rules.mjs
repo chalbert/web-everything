@@ -69,7 +69,7 @@ export const isEntityGraduation = (graduatedTo) => {
 // (frontierui / plateau-app / exercise-app) must stay a subset of these keys.
 export const LOCI = {
   webeverything: { repoPath: '.', gateCommand: 'npm run check:standards', devServerProbe: 3000, commitTarget: 'webeverything' },
-  frontierui: { repoPath: '../frontierui', gateCommand: 'npm run check:standards', devServerProbe: 3001, commitTarget: 'frontierui' },
+  frontierui: { repoPath: '../frontierui', gateCommand: 'npm run check:standards', devServerProbe: 6000, commitTarget: 'frontierui' },
   'plateau-app': { repoPath: '../plateau-app', gateCommand: 'npm test', devServerProbe: 4000, commitTarget: 'plateau-app' },
   'exercise-app': {
     repoPath: '.',

@@ -88,9 +88,9 @@ module.exports = function (eleventyConfig) {
   // fuiDemo (#701): embed a Frontier-UI-hosted demo inline next to its standard page via a sandboxed
   // <iframe> — no cross-repo import (the #700 ruling). The demo stays a FUI deliverable and keeps FUI
   // branding (the chrome lives in this WE wrapper). The FUI base URL is parameterised: the dev server
-  // (:3001) by default, or a published demos host via FUI_DEMO_BASE in prod. Generalises to ANY FUI demo
+  // (:6000) by default, or a published demos host via FUI_DEMO_BASE in prod. Generalises to ANY FUI demo
   // — pass the demo's file name; the first consumer is the #038 component-converter on /blocks/component/.
-  const FUI_DEMO_BASE = (process.env.FUI_DEMO_BASE || "http://localhost:3001").replace(/\/$/, "");
+  const FUI_DEMO_BASE = (process.env.FUI_DEMO_BASE || "http://localhost:6000").replace(/\/$/, "");
   // Per-demo render mode opt-in (#807/#786, ruled by #732/#765). The escape/resize/mount impl is the
   // FUI-owned embed SDK WE loads (impl→FUI; never the #700 source import) — WE only passes the mode
   // token. With no mode the iframe is the legacy static embed, byte-for-byte. Canonical tokens mirror

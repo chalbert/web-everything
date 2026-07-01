@@ -624,7 +624,7 @@ Every item carries a `locus` — its **gate home**, the repo whose gate can *hon
 |---|---|
 | `repoPath` | Dir to run the gate in, relative to the WE root (`.` = this repo; `../frontierui`, `../plateau-app` for siblings). |
 | `gateCommand` | The close-out gate that must be **green** before an item of this locus is `resolve`d (WE/FUI: `npm run check:standards`; plateau-app: `npm test`; exercise-app: `check:standards && check:app-conformance`). |
-| `devServerProbe` | The canonical dev port to **detect-or-skip** for a render check (WE `3000`, FUI `3001`, plateau-app `4000`) — never spin up or kill a server ([don't-kill-dev-server]). |
+| `devServerProbe` | The canonical dev port to **detect-or-skip** for a render check (WE `3000`, FUI `6000`, plateau-app `4000`) — never spin up or kill a server ([don't-kill-dev-server]). |
 | `commitTarget` | The repo the per-item commit lands in. Commits are **per-repo** — never `git add -A` across repos. |
 | `closeoutDiscipline?` | An extra, non-skippable close-out rule beyond the gate. Set only for **exercise-app**: platform-first build, else tag a GAP (the `/exercise-app` rule). |
 
