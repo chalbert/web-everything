@@ -1,9 +1,12 @@
 ---
 kind: decision
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-06-29"
-dateStarted: "2026-06-29"
+dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
+graduatedTo: none
+codifiedIn: "docs/agent/block-standard.md#transient-exposed-api"
 preparedDate: "2026-06-29"
 relatedReport: reports/2026-06-29-transient-element-exposed-api.md
 tags: [webcomponents, fui-boundary, transient-element, api-surface, decision]
@@ -22,6 +25,22 @@ is gone post-upgrade — **neither read is correct in both phases.**
 This card decides the **stable API a transient element exposes** so a consumer gets one consistent
 read/event surface regardless of upgrade timing. **Blocks #1960** — the WE consumer-rule wording depends
 on what this surface is.
+
+## Ruling — ratified 2026-07-01
+
+1. **Fork 1 → (b)-narrow.** Fix the *gratuitous* identity rename: stop excluding `value` so the base copies
+   the authored `value` verbatim onto the survivor — identity is read by the **same name** in both phases.
+   `selected`→`aria-pressed` stays the one *forced* a11y state rename, documented as the explicit carve-out to
+   [we:block-standard.md:271](../docs/agent/block-standard.md#L271) (no statute amendment; a cross-ref states the
+   carve-out). Free, no sync burden, statute-honoring.
+2. **Forced invariants ratified as stated:** `aria-pressed` is the canonical survivor state key; the
+   detached-host stance (a replaced host is detached-not-dead — never hold a ref across upgrade, re-query from a
+   stable ancestor, gate on `Node.isConnected`).
+3. **Event API — deferred (not a merit fork).** No `chip-change`/`toggle` CustomEvent now; YAGNI, double-fires
+   with native `click`. Un-gate trip-wire (a named non-delegating consumer) carried on **#1960**.
+
+**Gated work turned agent-ready:** the FUI (b)-narrow build (un-exclude `value` on the toggle controls + the
+:271 carve-out cross-ref) and the WE consumer-rule codification on #1960.
 
 **Scope (narrowed by the prep survey — [relatedReport](../reports/2026-06-29-transient-element-exposed-api.md)):**
 the attribute *rename* is **not** A-family-wide. Of the ~14 `TransientElement` subclasses, only the two
@@ -96,7 +115,7 @@ custom guard. This holds regardless of which guarantee (Fork 1/2) is chosen belo
 | **`aria-pressed` is the canonical survivor state key** | **Supported by default — not a fork** | ARIA-mandated for a toggle button ([WAI-ARIA APG Button](https://www.w3.org/WAI/ARIA/apg/patterns/button/)); the survivor *must* carry it for a11y, so it can't be "designed away". |
 | **Detached-host stance** (never hold a ref across upgrade; re-query / delegate; gate on `isConnected`) | **Supported by default — not a fork** | The only alternative (trust a held ref) is the *shipped regression*; forced invariant. |
 | **Fork 1 — phase-stable read mechanism** | **(b)-narrow: fix the *gratuitous* rename — identity survives un-renamed** *(default, flipped by skeptic)* | The survey ranks "make the mechanism stable" **above** "rely on docs". Un-excluding `value` is **free** (no sync burden) and *honors* [we:block-standard.md:271](../docs/agent/block-standard.md#L271) ("attribute-shaped reactivity is kept"); `aria-pressed` stays the one *forced* a11y rename. |
-| **Fork 2 — ship a stable `chip-change`/`toggle` event now?** | **(a) no, not now** (advisory) | APG's baseline is `click`+read `aria-pressed`, no event; a custom event **double-fires** with native `click`; no A-family element ships one today. YAGNI until a non-delegating consumer exists. |
+| **Event API — ship a stable `chip-change`/`toggle` event now?** *(not a merit fork — a timing deferral)* | **Defer** (advisory; trip-wire on #1960) | APG's baseline is `click`+read `aria-pressed`, no event; a custom event **double-fires** with native `click`; no A-family element ships one today. YAGNI until a non-delegating consumer exists — a *prioritization* call, not a design one. |
 
 ## Supported by default (forced invariants — not forks)
 
@@ -197,12 +216,15 @@ rename (`value`→`data-value`), dissolving the card's false (a)-vs-expensive-(b
 downgraded — it authorizes only the *state* key, not the identity/phase question, so it no longer "blesses" the
 `value` rename.
 
-## Fork 2 — should the transient element ship a stable change event now?
+## Not a merit fork — deferral: should the transient element ship a stable change event now?
 
-*Fork-existence:* a genuine go/no-go — add the public event API or don't; both coherent (a future
-framework/non-DOM consumer might want it; today's consumers don't). Additive, so it does not compete with the
-read contract. **Supersedes #1960's Fork 2** — the event is a FUI build, so it is decided here (FUI locus) and
-#1960 consumes the outcome.
+**This is a prioritization call, not a design decision, and should not be ratified as a peer fork to Fork 1.**
+The *design* is already settled (if shipped: a bubbling `CustomEvent` reusing the B-family convention, below).
+The only open question is **timing** — build it now vs. defer — which is resolved by YAGNI/sequencing, not by a
+principle. Recorded here so the ruling shows it was considered; the live trip-wire lives on **#1960**.
+
+*Sequencing:* additive, so it does not compete with the read contract. **Supersedes #1960's Fork 2** — the event
+is a FUI build, so if it is ever built it is built here (FUI locus) and #1960 consumes the outcome.
 
 - **(a) — no, not now.** *(default)* APG's blessed baseline is native `click` + read `aria-pressed`, **no**
   custom event; delegation already works for every current consumer. A `chip-change` CustomEvent would

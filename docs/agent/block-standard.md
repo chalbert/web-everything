@@ -303,6 +303,24 @@ per-block *mechanism pick* for the button (the worked example) is carved to
      opt-in. **Generalizable rule:** *is it a thing or a capability?* A thing you instantiate / style / name
      / generate flavors of → **element/block**; a capability you attach to enhance a host → **behavior**;
      they compose, the element is the styled product, the behavior the floor.
+8. **Transient (A) exposed-API contract — the stable read surface across self-replacement (#1961).** {#transient-exposed-api}
+   Ratified by [#1961](/backlog/1961-transient-element-exposed-api-the-stable-read-event-surface-/) (2026-07-01):
+   - **A replaced transient host is *detached*, not *dead*.** Per the DOM standard a removed node is a valid
+     *disconnected* node — operations on it **silently no-op, never throw** (`getBoundingClientRect` all-zero,
+     `addEventListener` binds-but-never-fires, etc.), so misuse is invisible, not loud. **Never hold a
+     transient-element reference across its upgrade; re-query live from a stable ancestor.** If a ref genuinely
+     must be retained, gate on **`Node.isConnected`** — the platform's own liveness primitive — not a bespoke
+     `isAlive` flag or `try/catch` (native-first, #75).
+   - **Identity is phase-stable — the survivor keeps the authored identity attribute *un-renamed*.** The base
+     must **not** exclude the identity attribute (e.g. `value`), so it copies verbatim onto the survivor and a
+     consumer reads the **same attribute name** pre- and post-upgrade. This *is* item 7's "attribute-shaped
+     reactivity is kept" (:271) applied to identity — free, no sync burden.
+   - **The one sanctioned rename is the a11y state key.** `selected`→`aria-pressed` (ARIA-forced for a toggle
+     button) is the single explicit carve-out to the keep-the-attribute rule above; read the live
+     `aria-pressed` at interaction time. No *identity* rename is ever justified.
+   - **No stable change `CustomEvent` by default** (deferred, not shipped — YAGNI; a custom event double-fires
+     with native `click`). Consumers delegate on native `click` + read `aria-pressed`. Un-gate trigger (a named
+     non-delegating consumer) is tracked on #1960.
 
 ## Composition rubric (#1963) {#composition-rubric}
 

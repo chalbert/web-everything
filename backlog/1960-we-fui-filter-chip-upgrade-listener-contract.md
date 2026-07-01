@@ -5,7 +5,6 @@ locus: webeverything
 dateOpened: "2026-06-29"
 dateStarted: "2026-06-29"
 preparedDate: "2026-06-29"
-blockedBy: ["1961"]
 relatedReport: reports/2026-06-29-we-fui-chip-upgrade-listener-contract.md
 tags: [webcomponents, fui-boundary, filter-chip, transient-element, decision]
 ---
