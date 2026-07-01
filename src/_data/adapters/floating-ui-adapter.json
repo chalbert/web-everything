@@ -2,6 +2,6 @@
   "category": "lib",
   "id": "floating-ui-adapter",
   "name": "Floating UI Adapter",
-  "status": "concept",
-  "summary": "Bridges the <strong>Floating UI</strong> library to the <strong>Positioning plug</strong> as a provider for the <strong>Anchor Intent</strong>."
+  "status": "implemented",
+  "summary": "Bridges the <strong>Floating UI</strong> library to the <strong>Positioning plug</strong> as a provider for the <strong>Anchor Intent</strong>. Implemented as a factory (<code>createFloatingUiStrategy</code>) that wraps the host's own <code>@floating-ui/dom</code> module behind the swappable <code>PositioningStrategy</code> contract (the #149 seam) — native-first stays the default, Floating UI is opt-in."
 }
