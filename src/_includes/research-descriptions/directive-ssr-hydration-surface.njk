@@ -1,0 +1,89 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    Web Everything's <a href="/projects/webdirectives/">webdirectives</a> render <strong>zero-layout-node</strong>
+    regions: a <code>for-each</code>, <code>view:if</code>, <code>view:switch</code>, or a
+    <code>CustomComment</code> (e.g. <code>resource:loader</code>) is delimited at runtime only by raw HTML
+    comments — <code>&lt;!-- for-each:start (@users) --&gt;…&lt;!-- for-each:end --&gt;</code>. The client
+    lifecycle (<code>CustomCommentRegistry.upgrade(root)</code>, the nested-region inspector, the
+    connect/refresh cascade) is written entirely against a <strong>live <code>document</code></strong>
+    (<code>document.createTreeWalker(root, NodeFilter.SHOW_COMMENT)</code>). There is <strong>no server
+    renderer and no hydration hook</strong> in FrontierUI today — the spec describes SSR as a
+    <em>contract</em> ("the build system or server framework is responsible for expanding directives") but
+    ships no implementation. This survey grounds the foundational call (<a
+    href="/backlog/2030-foundational-ssr-hydration-surface-for-comment-anchor-direct/">#2030</a>, blocking
+    <a href="/backlog/2005-ssr-hydration-of-comment-anchor-directive-regions/">#2005</a>) on how the field
+    actually does SSR-plus-adopt for comment-marked regions.
+</p>
+
+<h3>The four moving parts (and who solved each how)</h3>
+
+<h4>(a) Region markers as comments</h4>
+<ul>
+    <li><strong>Lit SSR</strong> (<code>@lit-labs/ssr</code>) emits paired
+        <code>&lt;!--lit-part <em>[digest]</em>--&gt;</code> … <code>&lt;!--/lit-part--&gt;</code> markers around
+        each template's dynamic region, and <code>&lt;!--lit-node <em>n</em>--&gt;</code> markers at bound
+        attribute positions. The <em>same</em> markers the server writes are what the client reads — one
+        grammar, both sides. (Server-only templates omit the markers as an optimization when no update is
+        needed.)</li>
+    <li><strong>DOM Parts / <code>ChildNodePart</code></strong> (WICG Template-Instantiation → DOM Parts) is the
+        standards-track successor to the comment-marker technique: a <code>ChildNodePart</code> bounds a run of
+        child nodes between a <code>previousSibling</code> and <code>nextSibling</code> marker — <em>exactly</em>
+        the shape FUI's <code>name:start</code>/<code>name:end</code> pair already has, and a nested
+        <code>ChildNodePart</code> maps onto a nested region owned by its parent. FUI keeps its convention
+        <strong>forward-compatible</strong> with this (an <em>alignment note, not adoption</em>).</li>
+    <li><strong>FUI's own convention</strong> is already comment-marker-native and already
+        SSR-shaped: the <code>directiveInspector</code> reconstructs the nested region tree purely by
+        <em>reading</em> those comments, so any HTML that emits the same grammar (from a server, a build step, or
+        the client) hydrates identically.</li>
+</ul>
+
+<h4>(b) Per-region state serialized into / near the markers</h4>
+<ul>
+    <li><strong>Qwik</strong> consolidated its state into a <code>&lt;script type="qwik/json"&gt;</code> block —
+        flattened JSON with reference keys, some keys used as element-attribute values — so the framework's
+        execution context is embedded in the page and <em>resumed</em> rather than replayed.</li>
+    <li><strong>Lit</strong> carries a per-template <em>digest</em> in the <code>lit-part</code> marker so
+        <code>hydrate()</code> can verify the client template matches what the server rendered before adopting.</li>
+    <li><strong>In-marker attributes</strong> — the WE spec already mandates <code>data-key</code> on
+        <code>for-each</code> items for keyed reconciliation, i.e. state co-located with the rendered nodes rather
+        than in a side-channel blob.</li>
+</ul>
+
+<h4>(c) Recognize-and-adopt (hydrate without re-render)</h4>
+<ul>
+    <li><strong>Lit <code>hydrate()</code></strong> (<code>@lit-labs/ssr-client</code>) walks the server-rendered
+        container, re-associates each template expression with the existing nodes, and adds event listeners —
+        <em>without</em> re-creating DOM. It must be called with the same template + data before the first
+        <code>render()</code>. The <code>defer-hydration</code> attribute holds a subtree back until it's ready.</li>
+    <li><strong>Resumability</strong> (Qwik; Marko 6) is the stronger form: no adopt-walk at all — the serialized
+        state + lazy-loaded listeners mean the client never re-executes render logic; it resumes from the
+        embedded context on the first interaction.</li>
+</ul>
+
+<h4>(d) Streaming / lazy boundaries</h4>
+<ul>
+    <li><strong>Astro islands</strong> gate hydration per-component with <code>client:load</code> /
+        <code>client:idle</code> / <code>client:visible</code> / <code>client:media</code> / <code>client:only</code>,
+        and defer server-render with <code>server:defer</code> (server islands rendered on demand).</li>
+    <li><strong>React Server Components</strong> draw a hydration <em>boundary</em> at each client component; the
+        server-only tree ships as inert markup with no client bundle.</li>
+    <li>For WE this maps directly onto the already-prepared
+        <a href="/backlog/1977-directive-proposal-defer-hydration-trigger-on-idle-visible-i/">#1977</a>
+        <code>defer</code> directive (<code>on = idle | visible | interaction | media | timer</code>) — so
+        "eager vs. streamed/deferred hydration" is a <em>configuration</em> of the per-region trigger vocabulary,
+        not a separate architecture.</li>
+</ul>
+
+<h3>What it settles for #2030</h3>
+<p>
+    The survey supports keeping <strong>one marker grammar shared by server and client</strong> (Lit's proven
+    pattern), <strong>reusing the DOM-Node code path against a lightweight DOM shim</strong> for the server render
+    (so the lifecycle/inspector logic is written once), <strong>serializing region state into the existing
+    marker/attribute grammar</strong> rather than a side-channel blob, adding a <strong><code>hydrate(root)</code>
+    adopt path</strong> beside <code>upgrade(root)</code>, and treating <strong>streaming/lazy as the #1977 defer
+    dimension</strong>. The full fork-by-fork options, defaults, and skeptic pass live in the linked
+    <a href="/backlog/2030-foundational-ssr-hydration-surface-for-comment-anchor-direct/">#2030</a> decision item
+    and its session report.
+</p>
+{% endraw %}

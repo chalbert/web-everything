@@ -1,0 +1,23 @@
+{
+  "id": "directive-ssr-hydration-surface",
+  "title": "SSR + Hydration Surface for Comment-Anchor Directive Regions",
+  "status": "open",
+  "summary": "Prior-art survey grounding the #2030 foundational decision — how FrontierUI should server-render comment-anchor directive regions (for-each / view:if / view:switch and the CustomComment family) and then adopt them client-side without re-stamping. Surveys the four moving parts across the SSR+hydration field: (a) how frameworks encode region markers as HTML comments (Lit's <!--lit-part-->/<!--/lit-part--> pair, the FUI runtime's own name:start/name:end convention, and the WHATWG DOM Parts ChildNodePart the convention is kept forward-compatible with); (b) how per-region state serializes into or near those markers (Qwik's qwik/json reference-keyed blob, Lit's digest, in-marker attribute encoding); (c) recognize-and-adopt (hydrate-without-re-render) mechanics — Lit hydrate() re-associating expressions to existing nodes and the defer-hydration attribute, versus resumability (Qwik/Marko 6) which skips replay entirely; (d) streaming and lazy boundaries — Astro's client:*/server:defer islands, RSC hydration boundaries, and how they map onto the already-prepared #1977 defer directive. Establishes that FUI has zero SSR surface today (plugs/webdirectives is parse + client-DOM lifecycle only) so this is greenfield, and pins each of #2030's forks to the substrate it must align to.",
+  "dateOpened": "2026-07-01",
+  "tags": [
+    "webdirectives",
+    "ssr",
+    "hydration",
+    "comment-anchor",
+    "dom-parts",
+    "childnodepart",
+    "resumability",
+    "islands",
+    "composition"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [
+    "webdirectives"
+  ],
+  "relatedProject": "webcomponents"
+}
