@@ -36,7 +36,7 @@ eleventyComputed:
 
 <div class="container block-detail-page">
     <div class="block-body content">
-        <div class="section-card">
+        <div class="section-card fui-card">
             {% include "capability-adapter-descriptions/" + impl.id + ".njk" %}
             <p style="font-size:0.85em; color:var(--color-text-muted); margin-top:1rem;">
                 Registered row in the <a href="/capabilities/#:~:text=registered%20capability%20adapter%20table">capability adapter table</a>
@@ -45,7 +45,7 @@ eleventyComputed:
             </p>
         </div>
 
-        <div class="section-card mt-8">
+        <div class="section-card fui-card mt-8">
             <h2>Tier breakdown</h2>
             <p class="mb-6 text-slate-600">
                 How this adapter serves every capability in the grid, grouped by tier. The
@@ -73,7 +73,7 @@ eleventyComputed:
             {% endfor %}
         </div>
 
-        <div class="section-card mt-8">
+        <div class="section-card fui-card mt-8">
             <h2>The other registered adapters</h2>
             <p class="mb-6 text-slate-600">Every impl the <a href="/capabilities/">capability provider</a> can enumerate when it resolves native-first.</p>
             <div class="standards-grid">

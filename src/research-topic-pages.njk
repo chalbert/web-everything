@@ -36,14 +36,14 @@ eleventyComputed:
            the per-page signal. The full chain renders in the revision-history card below. #}
         {% if topic.status == 'superseded' %}
         {% set _newer = topic.supersededBy if topic.supersededBy and topic.supersededBy is iterable and topic.supersededBy is not string else ([topic.supersededBy] if topic.supersededBy else []) %}
-        <div class="section-card" style="border-left: 3px solid var(--color-warning-text, #b45309); background: var(--color-warning-surface, #fef3c7); color: var(--color-warning-text, #b45309);">
+        <div class="section-card fui-card" style="border-left: 3px solid var(--color-warning-text, #b45309); background: var(--color-warning-surface, #fef3c7); color: var(--color-warning-text, #b45309);">
             <strong>Superseded revision.</strong> A newer dated report has replaced this one.
             {% if _newer.length %}See the current version:
                 {% for id in _newer %}{% for t in researchTopics %}{% if t.id == id %}<a href="/research/{{ t.id }}/">{{ t.title }}</a>{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}{% endfor %}.
             {% endif %}
         </div>
         {% endif %}
-        <div class="section-card">
+        <div class="section-card fui-card">
             <p class="mb-4 text-slate-600" style="font-size: 1.1em; line-height: 1.6;">{{ topic.summary }}</p>
 
             {% if topic.tags %}
@@ -62,19 +62,19 @@ eleventyComputed:
             </div>
         </div>
 
-        <div class="section-card mt-8">
+        <div class="section-card fui-card mt-8">
             {% include "research-descriptions/" + topic.id + ".njk" %}
         </div>
 
         {% set _rev = revisionHistory(topic, researchTopics) %}
         {% if _rev | trim %}
-        <div class="section-card mt-8">
+        <div class="section-card fui-card mt-8">
             {{ _rev | safe }}
         </div>
         {% endif %}
 
         {% if topic.relatedBlocks %}
-        <div class="section-card mt-8">
+        <div class="section-card fui-card mt-8">
             <h2>Related Blocks</h2>
             <div class="standards-grid">
                 {% for blockId in topic.relatedBlocks %}

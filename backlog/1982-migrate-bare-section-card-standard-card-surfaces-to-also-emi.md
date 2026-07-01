@@ -2,8 +2,11 @@
 kind: story
 size: 13
 parent: "1601"
-status: open
+status: resolved
 dateOpened: "2026-06-30"
+dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
+graduatedTo: none
 tags: [card, fui-card, product-component, dead-css]
 ---
 
@@ -77,3 +80,32 @@ the slices. The mechanical transform is proven safe: `class="section-card` → `
 
 Then #1895 (still `blockedBy #1982`) retires the bespoke `.section-card` / `.standard-card` frame CSS, leaving
 only its non-look bits (`:target` scroll-margin, heading rules).
+
+## Done (session 2026-07-01 — migrated in place as ONE uniform co-apply, not split)
+
+Executed the whole residual in a single pass rather than `/split`-ing: the transform is uniform across all
+three sub-cases (add `fui-card` as the second class on the existing tag — element type is irrelevant to a
+co-apply), and a **partial** migration can't unblock #1895, so splitting into A/B/C slices that all must land
+anyway added ceremony without reducing risk. The two genuine judgment spots were verified individually.
+
+**What actually shipped** (anchored transform `<(section|div|details) class="section-card"` → `… fui-card …`,
+negative-lookahead so it never double-applies; anchored on the real opening tag so escaped `&lt;section` /
+`<code>` doc-samples are naturally skipped):
+
+- **26 templates touched**, **111 real occurrences** co-applied. Grounding corrected two scope errors in the
+  survey above: (a) sub-case A page-template cards are `<div class="section-card">` (49), **not** `<section>`
+  as written — irrelevant to the co-apply but noted; the section-card content cards are 58 `<section>` (mostly
+  the adapter/block-description partials) + 4 `<details>`. (b) The 2
+  `we:src/_includes/research-descriptions/project-include-we-card-migration.njk` "sub-case B" occurrences are
+  **documentation** (escaped `&lt;section … class="section-card"&gt;` inside `<code>`), never real cards —
+  correctly excluded. `.standard-card` link tiles stayed bare (`<a>` tiles, per #1871), as scoped.
+- **Verified before/after on the running `:3000` dev server**, one surface per case: `/blocks/action-button/`
+  (A, `<div>` cards), `/adapters/html-adapter/` (B, `<section>` cards + code-sample reflow),
+  `/projects/webtraces/` (C, `<details>` disclosure), `/semantics/` (the `p-0 overflow-hidden` full-bleed
+  hotspot). All show the accepted project-* convergence (radius 16px→8px, block→flex-column) with **no
+  regression**: the `<details>` collapsed card is pixel-identical; the `p-0` full-bleed list keeps its
+  edge-to-edge rows (`.p-0 { padding:0 !important }` overrides the fui-card padding, flex-column just stacks
+  the already-full-width rows as block flow did).
+- **0 real bare `.section-card` elements remain** (only the two escaped doc-samples, unaffected by CSS
+  deletion). `check:standards` green for all touched templates (the 1 pre-existing gate error is in #1733, a
+  code-path locus, untouched here). **#1895 is unblocked.**

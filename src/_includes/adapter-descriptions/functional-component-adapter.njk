@@ -3,7 +3,7 @@
     The Functional Component Adapter allows writing functional-style components that map to class-based Web Components.
 </p>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="status">Status</h3>
     <p class="text-sm text-gray-600">
         <strong>POC:</strong> A first generator exists — it lowers a <code>&lt;component&gt;</code> definition to a
@@ -14,7 +14,7 @@
     </p>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="poc-shape">POC shape &amp; the import-map seam</h3>
     <p>
         The current generator emits a function returning the template as JSX (via the shared <code>htmlToJsx</code>
@@ -33,7 +33,7 @@
     {% endhighlight %}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="concept">Concept</h3>
     <p>
         Write components as simple functions while the adapter generates class-based Custom Elements under the hood:
@@ -59,7 +59,7 @@ customElements.define('counter-element', CounterElement);
     {% endhighlight %}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="related">Related</h3>
     <ul style="margin-bottom: 0;">
         <li><a href="/adapters/jsx-adapter/">JSX Adapter</a></li>

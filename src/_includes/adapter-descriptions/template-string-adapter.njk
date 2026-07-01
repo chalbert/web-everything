@@ -4,7 +4,7 @@
     This format is familiar to users of lit-html, htm, or similar libraries, and compiles to the same primitives as HTML and JSX.
 </p>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="design-principles">Design Principles</h3>
     <ul>
         <li><strong>No Build Step Required:</strong> Template literals can be interpreted at runtime or compiled ahead of time.</li>
@@ -14,7 +14,7 @@
     </ul>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="basic-syntax">Basic Syntax</h3>
     <p>The <code>html</code> tag creates template fragments:</p>
 
@@ -34,7 +34,7 @@ const UserCard = (user) => html`
     {% endhighlight %}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="directive-syntax">Directive Syntax</h3>
     <p>Web Directives are expressed using component-like tags or special syntax:</p>
 
@@ -90,7 +90,7 @@ const UserProfile = (userQuery) => html`
     {% endhighlight %}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="property-binding">Property vs Attribute Binding</h3>
     <p>Template strings distinguish between attributes and properties:</p>
 
@@ -109,7 +109,7 @@ html`<button @click=${handleClick}>Submit</button>`;{% endraw %}
 {% endhighlight %}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="behaviors">Behaviors</h3>
     <p>Web Behaviors are applied as hyphenated attributes:</p>
 
@@ -127,7 +127,7 @@ const NavButton = (url, onClose) => html`
     {% endhighlight %}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="composition">Composition &amp; Nesting</h3>
     <p>Templates compose naturally through interpolation:</p>
 
@@ -154,7 +154,7 @@ const List = html`
     {% endhighlight %}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="slots-projection">Slots &amp; Content Projection</h3>
     <p>Named slots work with the standard slot attribute:</p>
 
@@ -181,7 +181,7 @@ const CardUsage = () => html`
     {% endhighlight %}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="events">Event Handling</h3>
     <p>Events use the <code>@</code> prefix or <code>on:</code> syntax:</p>
 
@@ -204,7 +204,7 @@ html`
     {% endhighlight %}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="runtime-vs-compile">Runtime vs Compile-Time</h3>
     <p>The Template String Adapter supports both modes:</p>
 
@@ -234,7 +234,7 @@ export default {
     {% endhighlight %}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="ast-transformation">AST Transformation</h3>
     <p>Bidirectional transformation with other formats:</p>
 
@@ -257,7 +257,7 @@ const jsxAst = templateToJsx(templateAst, {
     {% endhighlight %}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="related">Related</h3>
     <ul style="margin-bottom: 0;">
         <li><a href="/adapters/html-adapter/">HTML Adapter</a> — The canonical format</li>

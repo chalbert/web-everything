@@ -20,7 +20,7 @@ permalink: "conformance/"
 
 <div class="container">
     {% if playgrounds.length > 0 %}
-    <div class="section-card" style="margin-bottom: 1.5rem; display: flex; gap: 2.5rem; flex-wrap: wrap;">
+    <div class="section-card fui-card" style="margin-bottom: 1.5rem; display: flex; gap: 2.5rem; flex-wrap: wrap;">
         <div>
             <div style="font-size: 2rem; font-weight: 700; line-height: 1;">{{ playgrounds.length }}</div>
             <div class="text-sm text-gray-500">conformance playgrounds</div>
@@ -60,7 +60,7 @@ permalink: "conformance/"
         {% endfor %}
     </div>
     {% else %}
-    <div class="section-card" style="text-align: center; padding: 3rem 2rem;">
+    <div class="section-card fui-card" style="text-align: center; padding: 3rem 2rem;">
         <h3 style="font-size: 1.25rem; margin-bottom: 0.5rem; color: var(--color-text-muted);">No conformance playgrounds yet</h3>
         <p style="color: var(--color-text-muted); max-width: 500px; margin: 0 auto;">
             Conformance playgrounds prove a standard is satisfied. They'll appear here as protocols ship.

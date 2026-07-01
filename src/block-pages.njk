@@ -46,13 +46,13 @@ eleventyComputed:
         <section class="block-tier block-tier-user" style="border-top: 4px solid var(--color-primary, #6366f1); padding-top: 0.5rem;">
             <p class="block-tier-label" style="margin: 0; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--color-primary, #6366f1);">Using this block</p>
 
-            <div class="section-card mt-4">
+            <div class="section-card fui-card mt-4">
                 <h2>Overview</h2>
                 <p class="text-slate-600">{{ block.summary | safe }}</p>
             </div>
 
             {% if block.fuiDemo %}
-            <div class="section-card mt-8">
+            <div class="section-card fui-card mt-8">
                 <h2>Live example</h2>
                 {% fuiDemo block.fuiDemo.file, block.fuiDemo.title, block.fuiDemo.height %}
             </div>
@@ -61,7 +61,7 @@ eleventyComputed:
             {# Quick start — the first Web Case is the copy-paste HTML a user starts from; remaining cases
                become "Common patterns" below. Derived from the conformance suite, never hand-authored. #}
             {% if blockCases and blockCases.length %}
-            <div class="section-card mt-8">
+            <div class="section-card fui-card mt-8">
                 <h2>Quick start</h2>
                 <p class="mb-3 text-slate-600">{{ blockCases[0].title }} — copy, paste, and adapt.</p>
                 <div class="case-code">
@@ -81,7 +81,7 @@ eleventyComputed:
                omitted when the block authors no member of that kind (most blocks carry events but no slots
                yet — the projection shows whatever the contract declares). #}
             {% if block.attributes or block.properties or block.events or block.slots or block.cssProperties or block.cssParts %}
-            <div class="section-card mt-8">
+            <div class="section-card fui-card mt-8">
                 <h2>API reference</h2>
                 <p class="mb-6 text-slate-600">The block's <strong>public contract</strong> — the surface a consumer programs against. This is the same data the <a href="/protocols/">Custom Elements Manifest</a> projects (<code>npm run gen:cem</code>), rendered here from the block's own <code>blocks.json</code> declaration.</p>
 
@@ -186,7 +186,7 @@ eleventyComputed:
                the conformance suite, so they double as runnable scenarios. Graceful absence: a block with
                ≤1 case shows no patterns panel. #}
             {% if blockCases and blockCases.length > 1 %}
-            <div class="section-card mt-8">
+            <div class="section-card fui-card mt-8">
                 <h2>Common patterns</h2>
                 <p class="mb-6 text-slate-600">Worked scenarios beyond the quick start — sourced from the conformance suite, so they double as runnable tests.</p>
 
@@ -215,7 +215,7 @@ eleventyComputed:
             <p class="block-tier-label" style="margin: 0; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--color-text-muted, #64748b);">Implementer reference</p>
             <p class="mt-1 mb-0 text-slate-600">Standards alignment, framework research, design decisions, and composition internals — for contributors building or extending this block.</p>
 
-            <div class="section-card mt-8">
+            <div class="section-card fui-card mt-8">
                 {% include "block-descriptions/" + block.id + ".njk" %}
             </div>
 
@@ -233,7 +233,7 @@ eleventyComputed:
             {% set providerCount = block.dependsOn | length %}
             {% set consumerBlocks = [] %}
             {% for other in blocks %}{% if block.id in (other.dependsOn or []) %}{% set consumerBlocks = (consumerBlocks.push(other), consumerBlocks) %}{% endif %}{% endfor %}
-            <div class="section-card mt-8">
+            <div class="section-card fui-card mt-8">
                 <h2>WE Standards overlay</h2>
                 <p class="mb-6 text-slate-600">WE-owned conformance proofs for the component embedded above, rendered from WE's <strong>own standard data</strong> — the demo runs in FrontierUI; these panels are Web&nbsp;Docs chrome and never travel into the iframe or to a third-party embedder (the <a href="/backlog/755/">#755</a>/<a href="/backlog/809/">#809</a> boundary split).</p>
 
@@ -275,7 +275,7 @@ eleventyComputed:
             {% endif %}
 
             {% if block.technicalConfig %}
-            <div class="section-card mt-8">
+            <div class="section-card fui-card mt-8">
                 <h2>Configure technical aspects</h2>
                 <p class="mb-4">These are <strong>technical</strong> delivery settings (render strategy, transport, trait lazy-loading, chunk splitting) — never UX dimensions on the block, and never a Web Everything mandate. Explore the tradeoffs for this block in the embedded <a href="/intents/">Plateau</a> configurator; the cost preview (chunk graph + bytes/requests/hydration) updates as you change a setting. Use <em>Open full configurator&nbsp;↗</em> for the project-wide decision.</p>
                 {% technicalConfigurator block.technicalConfig, block.technicalConfig.height %}
@@ -283,7 +283,7 @@ eleventyComputed:
             {% endif %}
 
             {% if block.implementsIntent %}
-            <div class="section-card mt-8">
+            <div class="section-card fui-card mt-8">
                 <h2>Implements Intent</h2>
                 {% for intent in intents %}
                     {% if intent.id == block.implementsIntent %}
@@ -311,7 +311,7 @@ eleventyComputed:
             {% endif %}
 
             {% if block.composesIntents %}
-            <div class="section-card mt-8">
+            <div class="section-card fui-card mt-8">
                 <h2>Composes Intents</h2>
                 <p class="mb-4 text-slate-600">This block is a <strong>composition manifest</strong> — it defers each behavior to the intent that owns it, rather than re-specifying them. It composes:</p>
                 <ul class="list-disc pl-5">
@@ -327,7 +327,7 @@ eleventyComputed:
             {% endif %}
 
             {% if block.traits %}
-            <div class="section-card mt-8">
+            <div class="section-card fui-card mt-8">
                 <h2>Traits</h2>
                 <p class="mb-6 text-slate-600">Composable behaviors loaded on-demand based on the active intent profile. Only the traits matching the application's chosen configuration are bundled.</p>
                 <we-data-table><table>
@@ -361,7 +361,7 @@ eleventyComputed:
                field shape is untouched; the raw key is preserved as a hover title for traceability. #}
             {% if block.webStandards %}
             {% set wsRows = block.webStandards | webStandardsRows %}
-            <div class="section-card mt-8">
+            <div class="section-card fui-card mt-8">
                 <h2>Accessibility &amp; Web Standards</h2>
                 <p class="mb-6 text-slate-600">The web-platform standards this block realizes — each concern names how the block satisfies it, with a link to the governing specification. Concerns are grouped by area and ordered for scanning.</p>
                 <we-data-table><table>
@@ -396,7 +396,7 @@ eleventyComputed:
                the literal it resolves to. Graceful absence — no field → no panel (the `fuiDemo` precedent). #}
             {% if block.componentTokens %}
             {% set tokenGroups = block.componentTokens if (block.componentTokens | string) != block.componentTokens else [block.componentTokens] %}
-            <div class="section-card mt-8">
+            <div class="section-card fui-card mt-8">
                 <h2>Component tokens</h2>
                 <p class="mb-6 text-slate-600">The design tokens this component exposes — each overridable CSS custom property, the primitive it <strong>aliases</strong>, and the literal it currently <strong>resolves</strong> to. Every token aliases a primitive so it can never drift from the scale. Same source as the <a href="/protocols/">Custom Elements Manifest</a> <code>cssProperties</code> emit.</p>
                 <we-data-table><table>
@@ -424,7 +424,7 @@ eleventyComputed:
             {% set usedByBlocks = [] %}
             {% for other in blocks %}{% if block.id in (other.dependsOn or []) %}{% set usedByBlocks = (usedByBlocks.push(other), usedByBlocks) %}{% endif %}{% endfor %}
             {% if (block.dependsOn | length) or (usedByBlocks | length) %}
-            <div class="section-card mt-8">
+            <div class="section-card fui-card mt-8">
                 <h2>Anatomy</h2>
                 <p class="mb-6 text-slate-600">Every piece this block composes, each linking to its own page. Together with the <strong>Implements / Composes Intents</strong> and <strong>Traits</strong> sections above, this is the block's full composition graph — the minimize-lock-in / graceful-degradation surface. A live <em>toggle-a-piece-off</em> exploded view layers on once in-document render lands (<a href="/backlog/786-mode-c-fui-embed-sdk-gains-a-shadow-dom-in-document-render-m/">#786</a>).</p>
                 {% if block.dependsOn | length %}

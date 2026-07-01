@@ -7,7 +7,7 @@
     It provides full type safety and IDE support while maintaining interconvertibility with other formats.
 </p>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="authoring-model">Authoring model — a mirror of HTML, not React</h3>
     <p>
         Because the goal is to define <em>any</em> element as HTML or JSX and toggle <strong>losslessly</strong>, JSX here is a
@@ -52,7 +52,7 @@
     </p>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="rendering-strategy">Rendering strategy — the second, orthogonal axis</h3>
     <p>
         The toggle above switches the <em>spelling</em> of one tree (Axis-1: HTML ⇄ JSX). This second
@@ -75,7 +75,7 @@
     {{ strategyToggle("users-list-strategy", renderStrategies, strategyExample) }}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="feature-mapping">Feature mapping — the contract</h3>
     <p>
         Each HTML-adapter construct has one JSX spelling of the <em>same</em> element tree. This is the reversible
@@ -103,7 +103,7 @@
     </table></we-data-table>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="design-principles">Design Principles</h3>
     <ul>
         <li><strong>Semantic Equivalence:</strong> Every JSX construct maps to the same HTML element tree (and most map back).</li>
@@ -113,7 +113,7 @@
     </ul>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="component-mapping">Component Definition</h3>
     <p>JSX provides the syntax for defining component templates within class-based Custom Elements:</p>
 
@@ -153,7 +153,7 @@ customElements.define('user-card', UserCard);
     </p>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="directive-syntax">Directive Syntax</h3>
     <p>
         The canonical directive spelling is the literal <code>&lt;template is="…"&gt;</code> customized built-in —
@@ -200,7 +200,7 @@ customElements.define('user-card', UserCard);
     </div>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="behaviors">Behaviors</h3>
     <p>Web Behaviors are applied as attributes with type-safe props:</p>
 
@@ -224,7 +224,7 @@ interface BehaviorAttributes {
     {% endhighlight %}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="slots-projection">Slots &amp; Content Projection</h3>
     <p>Named slots work naturally with JSX children:</p>
 
@@ -254,7 +254,7 @@ interface BehaviorAttributes {
     </p>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="events">Event Handling</h3>
     <p>
         The <strong>canonical, reversible</strong> form is the <code>on:*</code> <em>string</em> behavior — it has an HTML
@@ -280,7 +280,7 @@ interface BehaviorAttributes {
     </p>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="ast-transformation">The transform — built and running</h3>
     <p>
         The bidirectional transform is <strong>implemented and tested</strong>, not aspirational. Two small,
@@ -313,7 +313,7 @@ const html = jsxToHtml(jsx);
     </ul>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="wiring">Wiring into a project — the JSX runtime</h3>
     <p>
         An external project wires the adapter with the <strong>automatic</strong> JSX runtime — the native,
@@ -368,7 +368,7 @@ esbuild: {
     </p>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="related">Related</h3>
     <ul style="margin-bottom: 0;">
         <li><a href="/demos/jsx-adapter-demo.html">JSX Adapter Playground</a> — live mirror-dialect examples with conformance + round-trip badges</li>

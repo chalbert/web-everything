@@ -8,7 +8,7 @@
     output depends on a runtime beyond baseline DOM APIs.
 </p>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="status">Status</h3>
     <p class="text-sm text-gray-600">
         <strong>Concept Phase.</strong> Sibling to the
@@ -20,7 +20,7 @@
     </p>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="concept">Concept</h3>
     <p>The transform takes declarative markup in — the component's own children are the template (no nested <code>&lt;template&gt;</code> needed):</p>
     {% highlight "html" %}
@@ -60,7 +60,7 @@ customElements.define('user-card', UserCard);
     </p>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="guarantees">Determinism guarantees</h3>
     <ul>
         <li><strong>Byte-identical output</strong> for identical input — stable member ordering, no timestamps or content hashes — so generated files diff cleanly and cache well.</li>
@@ -75,7 +75,7 @@ customElements.define('user-card', UserCard);
     </p>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="directionality">Directionality &amp; compatibility</h3>
     <p>
         Unlike the <a href="/adapters/jsx-adapter/">JSX adapter</a> — a <strong>two-way</strong>, reversible
@@ -101,7 +101,7 @@ customElements.define('user-card', UserCard);
     </p>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="related">Related</h3>
     <ul style="margin-bottom: 0;">
         <li><a href="/demos/component-adapter-demo/">Component Adapter Playground</a> — live test surface: declarative source → generated class → rendered element</li>

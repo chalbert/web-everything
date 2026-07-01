@@ -47,7 +47,7 @@ customElements.define('user-card', UserCard);
 {% endhighlight %}
 {{ endSource() }}
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="status">Status</h3>
     <p class="text-sm text-gray-600">
         <strong>Concept.</strong> The standard ships with its design forks held
@@ -63,7 +63,7 @@ customElements.define('user-card', UserCard);
     </p>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="authoring">Authoring contract</h3>
     <ul>
         <li><code>name</code> — <strong>required</strong>. The custom element tag to register (must contain a hyphen).</li>
@@ -81,7 +81,7 @@ customElements.define('user-card', UserCard);
     </ul>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="standards">Web Standards Alignment</h3>
     <we-data-table>
     <table class="data-table">
@@ -120,7 +120,7 @@ customElements.define('user-card', UserCard);
     </we-data-table>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="frameworks">Framework Research</h3>
     <we-data-table>
     <table class="data-table">
@@ -133,7 +133,7 @@ customElements.define('user-card', UserCard);
     </we-data-table>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="features">Feature Inventory</h3>
     <we-data-table>
     <table class="data-table">
@@ -165,7 +165,7 @@ customElements.define('user-card', UserCard);
     </p>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="light-dom">Light-DOM components (<code>shadow="none"</code>)</h3>
     <p>When a component needs no style encapsulation, skip the shadow root entirely:</p>
     {{ sourceToggle("byline") }}
@@ -189,7 +189,7 @@ customElements.define('x-byline', XByline);
     {{ endSource() }}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="element-internals">Element internals (<code>form-associated</code>, <code>default-role</code>)</h3>
     <p>
         <code>attachInternals()</code> is the platform's imperative-only surface for form participation,
@@ -228,7 +228,7 @@ customElements.define('x-rating', XRating);
     {{ endSource() }}
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="composition">Composition</h3>
     <ul>
         <li><a href="/blocks/transient-component/">Transient Component</a> — <code>&lt;component&gt;</code> reuses the self-removal lifecycle; transient elements <em>resolve</em> to native HTML, this <em>defines</em> a reusable element.</li>
@@ -238,7 +238,7 @@ customElements.define('x-rating', XRating);
     </ul>
 </section>
 
-<section class="section-card">
+<section class="section-card fui-card">
     <h3 id="open-questions">Open questions (progressive resolution)</h3>
     <p>
         None of the design forks are resolved by fiat. Each is tracked as a
