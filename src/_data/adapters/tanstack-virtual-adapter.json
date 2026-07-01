@@ -1,0 +1,7 @@
+{
+  "category": "lib",
+  "id": "tanstack-virtual-adapter",
+  "name": "TanStack Virtual Adapter",
+  "status": "poc",
+  "summary": "Bridges <strong>TanStack Virtual</strong> to the <strong>Windowed-Collection intent</strong> (the <code>Windowed</code> behavior). A pure data transform maps TanStack's <code>Virtualizer</code> options and <code>VirtualItem[]</code> output onto the intent's own window math, with the library injected — the intent stays the lock, so the native scroll-window math and a TanStack virtualizer yield the same mounted slice."
+}

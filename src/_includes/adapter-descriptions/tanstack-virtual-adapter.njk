@@ -1,0 +1,62 @@
+<h2>TanStack Virtual Adapter</h2>
+<p>
+    The TanStack Virtual Adapter bridges the <a href="https://tanstack.com/virtual">TanStack Virtual</a>
+    library to Web Everything as a provider for the <a href="/blocks/droplist/">Windowed-Collection intent</a>
+    (the <code>Windowed</code> behavior). Only a small, fixed window of rows is ever mounted; the adapter
+    translates between TanStack's virtualizer and the intent's own window math, so a consumer already driving
+    a TanStack <code>Virtualizer</code> can feed the WE surface — and vice-versa — with no component edits.
+</p>
+
+<section class="section-card fui-card">
+    <h3 id="status">Status</h3>
+    <p class="text-sm text-gray-600">
+        <strong>Proof of concept:</strong> a pure, dependency-free data transform ships in Frontier UI
+        (<code>blocks/droplist/tanstackVirtualAdapter.ts</code>), verified for slice + spacer parity against
+        the native window math. The full TanStack-backed live runtime wiring (a real <code>Virtualizer</code>
+        driving a scroll container) is the deferred slice — the same posture as the XState engine adapter.
+    </p>
+</section>
+
+<section class="section-card fui-card">
+    <h3 id="concept">Concept</h3>
+    <p>
+        The intent is the lock: whichever producer — the native
+        <code>computeScrollWindow</code>/<code>spacerHeights</code> math or an injected TanStack
+        <code>Virtualizer</code> — must yield the same mounted <code>[start, end)</code> slice and the same
+        top/bottom spacer heights for a scroll offset. The adapter is two pure translations, so TanStack is
+        never a build-time dependency (the host injects the virtualizer):
+    </p>
+
+    {% highlight "typescript" %}
+import {
+  virtualItemsToWindow,
+  virtualItemsToSpacers,
+  toVirtualizerOptions,
+} from '@frontierui/blocks/droplist/tanstackVirtualAdapter';
+
+// intent WindowSpec -> the options a host passes to createVirtualizer()
+const options = toVirtualizerOptions({ total, itemHeight: 40, overscan: 3 });
+const virtualizer = createVirtualizer({ ...options, getScrollElement: () => scrollEl });
+
+// TanStack VirtualItem[] -> the intent's mounted slice + spacer pads
+const items = virtualizer.getVirtualItems();
+const { start, end } = virtualItemsToWindow(items);
+const { top, bottom } = virtualItemsToSpacers(items, virtualizer.getTotalSize());
+    {% endhighlight %}
+
+    <p>
+        Both the fixed-height (<code>itemHeight</code>) and variable-height (<code>measure</code>) paths of the
+        Windowed behavior are covered — the variable path reads each item's real <code>start</code>/<code>size</code>
+        so differing row heights stay correct. Because the translation is pure, a consumer can also drive the
+        intent with the native math alone and produce an identical <code>VirtualItem[]</code> shape.
+    </p>
+</section>
+
+<section class="section-card fui-card">
+    <h3 id="related">Related</h3>
+    <ul style="margin-bottom: 0;">
+        <li><a href="/blocks/droplist/">Droplist Block</a> — the <code>Windowed</code> behavior this adapter provides for</li>
+        <li><a href="/projects/webadapters/">Web Adapters</a> — the owning project</li>
+        <li><a href="/adapters/xstate-adapter/">XState Adapter</a> — the reference injected-library adapter pattern</li>
+    </ul>
+</section>
