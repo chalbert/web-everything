@@ -1,0 +1,61 @@
+<h2>Focus Trap Adapter</h2>
+<p>
+    The Focus Trap Adapter bridges the <a href="https://github.com/focus-trap/focus-trap">focus-trap</a>
+    library to Web Everything's <a href="/intents/focus-containment/">Focus Containment Intent</a>, so a
+    consumer already on <code>focus-trap</code> can drive it through the intent's declarative vocabulary
+    (<code>trap</code> / <code>background</code> / <code>initialFocus</code> / <code>restore</code>) instead
+    of hand-writing options.
+</p>
+
+<section class="section-card fui-card">
+    <h3 id="status">Status</h3>
+    <p class="text-sm text-gray-600">
+        <strong>Proof of Concept:</strong> a dependency-free bridge exists in Frontier UI
+        (<code>adapters/focus-trap/focusTrapAdapter.ts</code>) with a full unit suite. The library is
+        <em>injected</em>, not depended on — native <code>&lt;dialog&gt;.showModal()</code> +
+        <code>inert</code> remain the recommended default; this adapter is the opt-in path for consumers who
+        have already chosen <code>focus-trap</code>.
+    </p>
+</section>
+
+<section class="section-card fui-card">
+    <h3 id="concept">Concept</h3>
+    <p>
+        The adapter is a pure data transform in both directions plus a small runtime seam. The four intent
+        dimensions project onto <code>focus-trap</code>'s options, and a trap instance is adapted to the
+        intent's <code>contain</code> / <code>release</code> event contract:
+    </p>
+
+    {% highlight "typescript" %}
+import { createFocusTrap } from 'focus-trap';
+import { createContainment } from '@web-adapters/focus-trap';
+
+// The library is injected — the adapter never imports focus-trap itself.
+const containment = createContainment(createFocusTrap, '#dialog', {
+    trap: 'trap',            // confine focus to the surface
+    background: 'inert',     // seal off the rest of the page
+    initialFocus: 'first-tabbable',
+    restore: 'restore',      // return focus to the trigger on close
+});
+
+containment.contain();  // → focus-trap activate()
+containment.release();  // → focus-trap deactivate()
+    {% endhighlight %}
+
+    <p>
+        <code>toFocusTrapOptions(intent)</code> is the deterministic downward projection;
+        <code>fromFocusTrapOptions(options)</code> is the inverse (recovering the intent from an existing
+        trap config, preserving any unmapped option as residual). Consumers never bind to focus-trap's
+        option names — swapping to the native <code>&lt;dialog&gt;</code> baseline is an intent-level change,
+        not a rewrite.
+    </p>
+</section>
+
+<section class="section-card fui-card">
+    <h3 id="related">Related</h3>
+    <ul style="margin-bottom: 0;">
+        <li><a href="/intents/focus-containment/">Focus Containment Intent</a> — the contract this adapter fulfills</li>
+        <li><a href="/intents/focus-delegation/">Focus Delegation Intent</a> — movement <em>within</em> the contained region (composes)</li>
+        <li><a href="/intents/modal/">Modal Intent</a> — composes Focus Containment for its focus management</li>
+    </ul>
+</section>
