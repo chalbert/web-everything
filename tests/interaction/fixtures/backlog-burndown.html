@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Interaction fixture · Backlog burndown chart (backlog-burndown.js)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    [role="tabpanel"] { padding: 1rem; border: 1px solid #ccc; }
+    [data-bd-gran].is-active { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <!-- backlog-burndown.js does two things: the tab switcher (covered by backlog-tabs.spec.ts) and the CHART
+       render. This fixture supplies the burndown tab surface AND the #burndown-data model + #bd-chart svg so
+       the chart half runs. We assert the SVG render for a given payload and the granularity toggle
+       (daily/weekly/monthly, persisted in localStorage) re-renders — behaviour over the REAL shipped script,
+       not pixels.
+
+       Model: three granularity series (daily/weekly/monthly) each a short scope/done/remaining line, plus a
+       daily projection past `today`. `diverging:false` so the net projection line is also drawn. The series
+       are deliberately distinct per granularity so switching grain is observable (different tick counts). -->
+  <div class="backlog-tabs" role="tablist" aria-label="Backlog views">
+    <a href="#tracked"  class="backlog-tab is-active" role="tab" aria-selected="true"  id="tab-tracked"  data-bd-tab="tracked">Tracked</a>
+    <a href="#burndown" class="backlog-tab"           role="tab" aria-selected="false" id="tab-burndown" data-bd-tab="burndown">Burndown</a>
+  </div>
+  <div id="panel-tracked"  role="tabpanel">Tracked panel</div>
+  <div id="panel-burndown" role="tabpanel" hidden>
+    <div class="bd-gran">
+      <button type="button" data-bd-gran="daily">Daily</button>
+      <button type="button" data-bd-gran="weekly">Weekly</button>
+      <button type="button" data-bd-gran="monthly">Monthly</button>
+    </div>
+    <svg id="bd-chart" viewBox="0 0 900 360" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+
+  <script type="application/json" id="burndown-data">
+  {
+    "empty": false,
+    "diverging": false,
+    "today": "2026-06-15",
+    "series": {
+      "daily": [
+        { "date": "2026-06-10", "scope": 100, "done": 10, "remaining": 90 },
+        { "date": "2026-06-11", "scope": 100, "done": 20, "remaining": 80 },
+        { "date": "2026-06-12", "scope": 105, "done": 30, "remaining": 75 },
+        { "date": "2026-06-13", "scope": 105, "done": 45, "remaining": 60 },
+        { "date": "2026-06-14", "scope": 110, "done": 60, "remaining": 50 },
+        { "date": "2026-06-15", "scope": 110, "done": 70, "remaining": 40 }
+      ],
+      "weekly": [
+        { "date": "2026-05-25", "scope": 60, "done": 5, "remaining": 55 },
+        { "date": "2026-06-01", "scope": 90, "done": 25, "remaining": 65 },
+        { "date": "2026-06-08", "scope": 105, "done": 45, "remaining": 60 },
+        { "date": "2026-06-15", "scope": 110, "done": 70, "remaining": 40 }
+      ],
+      "monthly": [
+        { "date": "2026-04-15", "scope": 30, "done": 5, "remaining": 25 },
+        { "date": "2026-05-15", "scope": 80, "done": 30, "remaining": 50 },
+        { "date": "2026-06-15", "scope": 110, "done": 70, "remaining": 40 }
+      ]
+    },
+    "projection": {
+      "daily": [
+        { "date": "2026-06-15", "remainingFrozen": 40, "remainingNet": 40 },
+        { "date": "2026-06-16", "remainingFrozen": 34, "remainingNet": 36 },
+        { "date": "2026-06-17", "remainingFrozen": 28, "remainingNet": 32 },
+        { "date": "2026-06-18", "remainingFrozen": 22, "remainingNet": 28 }
+      ]
+    }
+  }
+  </script>
+
+  <!-- The REAL shipped tab/chart script. -->
+  <script src="/src/assets/js/backlog-burndown.js"></script>
+</body>
+</html>
