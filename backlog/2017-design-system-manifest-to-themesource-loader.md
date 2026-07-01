@@ -3,7 +3,7 @@ kind: story
 size: 5
 parent: "1226"
 status: open
-blockedBy: ["2026"]
+blockedBy: ["2049"]
 dateOpened: "2026-07-01"
 tags: [parity, webtheme, dtcg, flavor, keystone, integration-seam]
 ---

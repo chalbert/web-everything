@@ -15,8 +15,10 @@
 
 > **`../plateau/` is the abandoned single-repo prototype** — superseded by this repo + Frontier UI + plateau-app. New implementation work lands in **Frontier UI**, never plateau. You *may* read plateau as a **non-authoritative reference** when nothing more recent exists (a behavioral sketch to adapt), but it is **not a model**: it predates current decisions and may contradict them, so anything taken from it must be re-derived against the live spec/conventions and called out as plateau-sourced — never copy its architecture wholesale. (`plateau-app` is a live product and is fine.)
 
-## The website IS the spec
+## The spec data is the source of truth (and "WE" names two things)
 `src/_data/*.json` + `src/_includes/*-descriptions/*.njk` are the **source of truth**. Implementation follows documented API. If it isn't documented, document it first. These specs are large — **query one entry at a time** (grep/jq), never load whole.
+
+**Naming (#2006):** "**Web Everything / WE**" = the zero-implementation **standard** (the intent/block/plug/protocol/semantic defs, meta-schemas, conformance gate, backlog). "**the WE website / WE-docs**" = the **product surface** — the 11ty+Vite render that *consumes* those defs, a mis-homed product being extracted (end-state gated on #872; interim `site/**` boundary + fail-closed classifier per constellation rule 1). The spec **data** is WE; the **site** that renders it is not. Don't say "the website is the spec" — it conflates them.
 
 ## Hard rules (always apply)
 1. **Design-first**: document in JSON/njk before implementing. Respect `designDecisions`; discuss before overriding one.

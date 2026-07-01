@@ -103,7 +103,16 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    **remaining ~8 subsystems** stay put **as tracked relocation debt** under this rule (the non-engine ones
    gated on the deferred conformance-model decision #1784), **not** a sanctioned standing tier — and
    crucially **no _new_ WE-resident delivery runtime may be added.** Relocation tracked by #1294; the rule
-   is #1282.
+   is #1282. **#2006 extends this debt list to the WE *website*:** the 11ty+Vite render (`we:.eleventy.js`,
+   `we:vite.config.mts`, `we:src/*.njk`, `we:src/_data/*.js` loaders, `we:src/_includes/*-descriptions/`,
+   `we:src/assets/`) is artifact-producing delivery = a **mis-homed product**, not standard — ratified
+   end-state is extraction to a product-tier surface (own repo / package, e.g. `webeverything-docs`)
+   consuming the published standard as FUI does, **gated on #872**. **Interim classifier (#2006 Fork 2b):**
+   the website files lift under a `site/**` root while the standard `.json` defs + shared assembler-loader
+   seam (`we:scripts/lib/*`) stay classified in place, enforced by a **fail-closed `check:standards` rule**
+   — every tracked path classifies as exactly one of {standard-surface, site-surface}; an unclassified path
+   is a hard error, so new site code can never masquerade as standard. The conformance gate/tooling
+   (`we:capability-manifest/check.ts`) is **not** part of the website and stays WE regardless.
 2. **The file seam is the cut:** `contract.ts` (pure types, compile-erased) → WE; `provider.ts` +
    `registry.ts` (runtime) → FUI. Split mixed modules *mid-file* at this seam.
 3. **Distribution end-state:** FUI consumes WE contracts via a WE-published type-only package
@@ -1858,6 +1867,39 @@ categorical-taxonomy discussion). Realizing build: #1683 (injector resolves the 
 migrate the hand-authored `we:src/css/style.css` `:root` vars). Consumer: #1670 (categorical taxonomy).
 Refines the `design-tokens` protocol; composes [tone-meta-contract](#tone-meta-contract) (the `--tone-*`
 palette is one such emitted token family) and [native-first-baseline](#native-first-baseline).
+
+### The semantic-alias tier is part of the component contract; the injector co-emits it at every themed scope {#semantic-alias-co-emit}
+
+FUI components read **semantic role names** (`var(--color-border)`, `var(--radius-md)`, `--tone-*`) as
+ratified by **#1886 Fork 2** (the tokenized-base ruling above) — the reskinnable surface *is* that semantic
+role set, so the
+semantic names are the **component contract**, not an optional app override. Canonical
+`--token-<family>-<name>` values ([tokens-js-first](#tokens-js-first)) reach a component only through a
+**semantic-alias tier** (`--color-border: var(--token-color-border)`). **Browser-validated placement rule
+(#2026):** `var()` substitutes at the element that *declares* the alias, so a `:root`-only alias forwards
+only root-level canonical values and can **never** carry a component-scoped `--token-*` override (Chromium
+`getComputedStyle`: a child setting only `--token-color-border` renders the root colour until it
+re-declares the alias). **Therefore the alias tier must be co-emitted at every scope a theme targets, and
+its owner is FUI — the component-contract owner — not the consuming app or the website build.** The FUI
+injector (`fui:plugs/webtheme/` `applyTokenVars`) emits `--token-*` **and** the `--<family>-*` alias tier
+onto whatever scope element it themes (`:root` or a component host), both **derived from the single
+`LEGACY_ALIASES` source** (relocated into `fui:plugs/webtheme/`), never hand-authored in the emitter — this
+**satisfies** [tokens-js-first](#tokens-js-first)'s single-source / one-way rule (the alias is a JS→CSS
+projection off the same SoT, not a parallel map). **Rejected:** a **canonical-fallback read**
+(`var(--color-border, var(--token-color-border))`) that demotes the semantic tier to an app-optional
+override — it strips role-indirection from the default build and reclassifies the semantic read as
+app-owned, which #1886 declined; and **canonical-only reads** (no semantic tier), which discard role-remap
+entirely. The website-build alias (#1824) stays valid as build-time `:root` transport; this ruling
+**extends** the same single-sourced alias into the FUI runtime emit at *any* scope — a platform-runtime
+ruling #1824 explicitly did not make.
+
+**Lineage:** #2026 — prepared + ratified 2026-07-01 (Fork 1 = injector co-emit at every themed scope; Fork
+2 = badge tones bind to the `--tone-*` severity palette). Refines/composes
+[tokens-js-first](#tokens-js-first) (single source, one-way projection) and
+[tone-meta-contract](#tone-meta-contract) (the badge severity family). Follow-on builds — relocate
+`LEGACY_ALIASES`→FUI + runtime co-emit, close the three untokened card props, badge `--tone-*` migration,
+`#2017` loader acceptance — are `blockedBy` #2026. Deferred merit forks: full per-component theme isolation
+(F-iso) and per-slot theme inheritance (F-slot).
 
 ### Categorical vocabularies are a closed-set token-family meta-schema; behaviour-owned axes (status) are excluded {#categorical-taxonomy}
 

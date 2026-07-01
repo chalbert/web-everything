@@ -1,8 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-07-01"
 relatedReport: reports/2026-07-01-we-standard-vs-website-boundary.md
 relatedProject: webdocs
@@ -143,6 +146,31 @@ scripts/lib/ (assembler loaders)   # shared seam: standard data, consumed by bot
 drift-durability + down-payment grounds → flipped default to the directory boundary (2b). Amendment folded:
 whichever mechanism wins, it carries the **fail-closed classification gate rule** (an unclassified path errors)
 — that neutralizes the manifest's rot objection and keeps 2(a) a live alternative for a near-term #872.
+
+## Ruling (ratified 2026-07-01)
+
+- **Fork 1 → (a) extract to a product-tier surface.** The 11ty+Vite website render is artifact-producing
+  delivery → mis-homed product per constellation rule 1's file-seam test + statute :1537. End-state: it
+  moves to its own product-tier surface (own repo / package) consuming the published standard exactly as
+  FUI does. **Gated on #872** (contract distribution, currently `open`) — this is the ratified *direction*,
+  not near-term work. The suggested repo/package name (`webeverything-docs` / `@webeverything/docs`) rides
+  #872's contract-package identity, not a separate act here.
+- **Fork 2 → (b) directory boundary.** Interim: lift the unambiguous website files under a `site/**` root,
+  leaving standard `.json` defs + the shared assembler-loader seam classified in place. Self-enforcing
+  (misclassification becomes a *move*, not a forgotten edit) and a down-payment on 1(a) (`site/` lifts
+  cleanly to a repo). Chosen over 2(a)-manifest because #872 is not imminent, so the interim must be
+  durable, and a directory is self-enforcing where a manifest rots.
+- **Carried by both forks:** a fail-closed `check:standards` rule — every tracked path classifies as
+  exactly one of {standard, site}; an unclassified path is a hard error, so new site code can never
+  masquerade as standard. This neutralizes 2(a)'s rot objection and keeps it a live alternative if #872
+  turns near-term.
+- **Naming (supported default, done now):** adopt the prose convention "Web Everything / WE" = the
+  standard; "the WE website / WE-docs" = the product surface. Fixed the [we:AGENTS.md](../AGENTS.md)
+  "The website IS the spec" conflation.
+- **Statute effect:** amends constellation rule 1 (names the website as product-tier relocation debt +
+  the interim classifier); does **not** open a new platform-decisions anchor.
+- **Follow-on build:** Fork 2(b) `site/**` lift + the fail-closed classification gate rule is scaffolded
+  as its own agent-ready item (see below).
 
 ## Downstream / unblocks
 
