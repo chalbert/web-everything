@@ -14,6 +14,8 @@ import {
   runBuildBatch,
   renderComponents,
   renderIntentGrid,
+  renderProjectGrid,
+  projectIconHtml,
   statusTone,
   EXPECTED_PRODUCER,
   PINNED_CLI_RELATIVE,
@@ -48,10 +50,12 @@ const INTENTS = [
   { id: 'density', name: 'Density', status: 'draft', summary: 'Spacing scale.', dimensions: {} },
 ];
 
-describe('statusTone — intent status → badge tone', () => {
-  it('maps the four buckets', () => {
+describe('statusTone — status → badge tone', () => {
+  it('maps the intent + project status buckets', () => {
     expect(statusTone('active')).toBe('success');
+    expect(statusTone('stable')).toBe('success');
     expect(statusTone('draft')).toBe('info');
+    expect(statusTone('poc')).toBe('info');
     expect(statusTone('concept')).toBe('warning');
     expect(statusTone('experimental')).toBe('warning');
     expect(statusTone('anything-else')).toBe('neutral');
@@ -129,5 +133,58 @@ describe('renderIntentGrid — full render-from-data arc on a fixture', () => {
   });
   it('is empty-safe (no intents → empty grid, no subprocess crash)', () => {
     expect(renderIntentGrid([], stubRoot, fakeRunner)).toBe('<div class="project-grid" id="intent-grid"></div>');
+  });
+});
+
+const PROJECTS = [
+  { id: 'range-anchor', name: 'Durable Range Anchor', status: 'concept', category: 'standard',
+    isSvg: true, icon: '/assets/icons/range-anchor.svg', description: 'A <strong>range</strong> standard.' },
+  { id: 'webflows', name: 'Web Flows', status: 'poc', category: 'utility',
+    isSvg: false, icon: '\u{1F300}', description: 'Flow orchestration.' },
+];
+
+describe('projectIconHtml — icon block per project', () => {
+  it('emits an <img> for an SVG-icon project', () => {
+    expect(projectIconHtml(PROJECTS[0]))
+      .toBe('<img src="/assets/icons/range-anchor.svg" alt="Durable Range Anchor icon" width="48" height="48">');
+  });
+  it('emits the literal glyph for a non-SVG project', () => {
+    expect(projectIconHtml(PROJECTS[1])).toBe('\u{1F300}');
+  });
+});
+
+describe('renderProjectGrid — home/index grid render-from-data (#2019)', () => {
+  it('emits one linking anchor per project wrapping its SSR card, honoring gridClass', () => {
+    const html = renderProjectGrid(PROJECTS, {
+      repoRoot: stubRoot, hrefFor: (p) => `/projects/${p.id}/`, gridClass: 'project-grid project-grid--centered',
+    }, fakeRunner);
+    expect(html).toMatch(/^<div class="project-grid project-grid--centered">/);
+    expect(html).toContain('href="/projects/range-anchor/"');
+    expect((html.match(/class="project-card"/g) || []).length).toBe(2);
+    expect(html).toContain('data-k="project-0-card"');
+    expect(html).toContain('data-k="project-1-card"');
+  });
+  it('dispatches a status badge per tile (render-from-data, no markup-as-source)', () => {
+    const seen = [];
+    const spyRunner = (_c, _a, opts) => {
+      JSON.parse(opts.input).forEach((e) => seen.push(`${e.component}:${e.key}`));
+      return fakeRunner(_c, _a, opts);
+    };
+    renderProjectGrid(PROJECTS, { repoRoot: stubRoot, hrefFor: (p) => `/projects/${p.id}/` }, spyRunner);
+    expect(seen).toContain('badge:project-0-badge');
+    expect(seen).toContain('card:project-0-card');
+    expect(seen).toContain('badge:project-1-badge');
+  });
+  it('links external tiles with target=_blank when external', () => {
+    const html = renderProjectGrid(
+      [{ name: 'FrontierUI', status: 'active', isSvg: true, icon: '/x.svg', url: 'https://frontierui.dev', description: 'ref' }],
+      { repoRoot: stubRoot, external: true, hrefFor: (p) => p.url }, fakeRunner,
+    );
+    expect(html).toContain('href="https://frontierui.dev"');
+    expect(html).toContain('target="_blank" rel="noopener"');
+  });
+  it('is empty-safe (no projects → empty grid, no subprocess crash)', () => {
+    expect(renderProjectGrid([], { repoRoot: stubRoot, hrefFor: () => '/' }, fakeRunner))
+      .toBe('<div class="project-grid"></div>');
   });
 });

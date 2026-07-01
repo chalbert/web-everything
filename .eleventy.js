@@ -3,7 +3,7 @@ const syntaxHighlight = require("@11ty/eleventy-plugin-syntaxhighlight");
 const { deriveResearchFreshness } = require("./scripts/lib/research-freshness.cjs");
 const { buildTechnicalConfiguratorUrl } = require("./scripts/lib/technical-configurator-url.cjs");
 const { spliceDataTables } = require("./scripts/lib/data-table-build-hook.cjs");
-const { renderIntentGrid } = require("./scripts/lib/component-render-build-hook.cjs");
+const { renderIntentGrid, renderProjectGrid } = require("./scripts/lib/component-render-build-hook.cjs");
 
 module.exports = function (eleventyConfig) {
   eleventyConfig.addPlugin(syntaxHighlight);
@@ -288,6 +288,26 @@ ${fuiHostScript}`;
   // edge). The pinned FUI artifact MUST already exist (FUI `build:tools` before WE `build:docs`).
   eleventyConfig.addShortcode("weIntentGrid", function (intents) {
     return renderIntentGrid(intents, __dirname);
+  });
+
+  // Home/index landing grid (#2019) — the same #2016 SSR path generalized to the project tiles. Each
+  // project renders as a `we-card` (name → title, status → header `we-badge`, icon+description+status-meter
+  // → body) in ONE subprocess batch to the pinned FUI CLI (render-from-data per #2007). `hrefFor` supplies
+  // the tile link (internal `/projects/{id}/` for standards/protocols; external for the impls tiles), and
+  // `external` toggles `target="_blank"`. The client `<we-card>` CE upgrade (base.njk) is a pure
+  // enhancement over this JS-off-correct baseline.
+  eleventyConfig.addShortcode("weProjectGrid", function (projects, opts) {
+    const o = opts || {};
+    const external = !!o.external;
+    return renderProjectGrid(projects, {
+      repoRoot: __dirname,
+      external,
+      gridClass: o.gridClass || "project-grid",
+      hrefFor: (project) => {
+        if (o.href) return o.href(project);
+        return external ? project.url : `/projects/${project.id}/`;
+      },
+    });
   });
 
   // The backlog feeds off backlog/*.md (parsed by src/_data/backlog.js, which

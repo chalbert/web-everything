@@ -98,8 +98,9 @@ function renderComponents(specs, repoRoot, runner = execFileSync) {
 
 /** Map an intent status to its badge tone (mirrors the prior template ternary in `src/intents.njk`). */
 function statusTone(status) {
-  if (status === 'active') return 'success';
+  if (status === 'active' || status === 'stable') return 'success';
   if (status === 'draft') return 'info';
+  if (status === 'poc') return 'info';
   if (status === 'concept' || status === 'experimental') return 'warning';
   return 'neutral';
 }
@@ -199,12 +200,95 @@ function renderIntentGrid(intents, repoRoot, runner = execFileSync) {
   return `<div class="project-grid" id="intent-grid">${anchors.join('')}</div>`;
 }
 
+/**
+ * Render one project's icon block as trusted HTML (leading body row). `isSvg` projects carry an
+ * `<img>` path; the emoji/text projects carry a literal glyph. Mirrors the `.project-icon` markup the
+ * prior hand-rolled `.project-card` template emitted.
+ */
+function projectIconHtml(project) {
+  if (project && project.isSvg) {
+    const src = escapeAttr(project.icon);
+    const alt = escapeAttr(`${project.name || ''} icon`);
+    return `<img src="${src}" alt="${alt}" width="48" height="48">`;
+  }
+  // Trusted literal glyph (emoji or short text from our own project data).
+  return String(project && project.icon != null ? project.icon : '');
+}
+
+/**
+ * Render the home/index project grid to SSR HTML in ONE subprocess batch (#2019, generalizing the
+ * #2016 `renderIntentGrid` pattern from the intents catalog to the landing page). Each project becomes a
+ * `we-card` SSR tile: the name is the card title, the status is a header-trailing `we-badge` (render-from-
+ * data), and the body carries the icon + description + the existing status-meter progress bar. The outer
+ * click-through `<a class="project-card">` linking wrapper stays page chrome (same division of labour as
+ * `renderIntentGrid`); the anchor's own frame is stripped by `.project-card:has(> .fui-card)` in
+ * `style.css`, so the card is the sole visual frame.
+ *
+ * `projects` is the list to render; `hrefFor(project)` returns the tile's link target (the landing page
+ * links standard/protocol tiles to `/projects/{id}/` but the impls tile to an external URL, so the caller
+ * supplies it). `gridClass` is the wrapping grid's class list (e.g. `project-grid project-grid--centered`).
+ */
+function renderProjectGrid(projects, { repoRoot, hrefFor, gridClass = 'project-grid', external = false }, runner = execFileSync) {
+  const list = Array.isArray(projects) ? projects : [];
+
+  // Pass 1 — batch every tile's status badge in one subprocess call.
+  const badgeSpecs = list.map((project, i) => ({
+    key: `project-${i}-badge`,
+    component: 'badge',
+    config: { label: titleCase(project.status), tone: statusTone(project.status) },
+  }));
+  const badges = renderComponents(badgeSpecs, repoRoot, runner);
+
+  // Pass 2 — batch every tile's card shell, fed the pass-1 badge as the header actions. The body is an
+  // escape-safe PARTS list: the icon row + status-meter row are TRUSTED HTML (our own template data), the
+  // description is likewise trusted HTML (it carries authored `<strong>`/`<code>`/`<a>` markup, spliced by
+  // `| safe` in the prior template). None of it is user input.
+  const cardSpecs = list.map((project, i) => {
+    const badgeHtml = badges.get(`project-${i}-badge`) || '';
+    const meterHtml =
+      `<div class="status-meter status-${escapeAttr(project.status)}">`
+      + `<span class="status-label">Status: ${escapeAttr(titleCase(project.status))}</span>`
+      + `<div class="meter-track"><div class="meter-fill"></div></div></div>`;
+    const bodyParts = [
+      { tag: 'div', className: 'project-icon', html: projectIconHtml(project) },
+      { tag: 'p', className: 'project-desc', html: String(project.description || '') },
+      { tag: 'div', className: 'project-status-row', html: meterHtml },
+    ];
+    return {
+      key: `project-${i}-card`,
+      component: 'card',
+      config: {
+        title: project.name,
+        actionsHtml: badgeHtml,
+        bodyParts,
+        className: 'project-tile-card',
+      },
+    };
+  });
+  const cards = renderComponents(cardSpecs, repoRoot, runner);
+
+  // Assemble the grid: each card frame wrapped in its linking anchor.
+  const anchors = list.map((project, i) => {
+    const cardHtml = cards.get(`project-${i}-card`) || '';
+    const rel = external ? ' target="_blank" rel="noopener"' : '';
+    return (
+      `<a href="${escapeAttr(hrefFor(project))}" class="project-card" `
+      + `aria-label="View ${escapeAttr(project.name)}"${rel} `
+      + `style="text-decoration: none; color: inherit; display: block;">${cardHtml}</a>`
+    );
+  });
+
+  return `<div class="${escapeAttr(gridClass)}">${anchors.join('')}</div>`;
+}
+
 module.exports = {
   PINNED_CLI_RELATIVE,
   EXPECTED_PRODUCER,
   runBuildBatch,
   renderComponents,
   renderIntentGrid,
+  renderProjectGrid,
+  projectIconHtml,
   statusTone,
   intentTileSpecs,
 };

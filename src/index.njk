@@ -3,7 +3,6 @@ layout: base.njk
 title: Web Everything - Home
 ---
 
-{% from "project-status.njk" import projectStatus %}
 {% from "display-toolbar.njk" import displayToolbar %}
 
 <section class="intro">
@@ -29,27 +28,18 @@ title: Web Everything - Home
         <p class="section-desc">Low-level specifications expanding the capabilities of the platform.</p>
         {{ displayToolbar("standards") }}
     </div>
-    <div class="project-grid">
-        {% for project in projects %}
-        {% if project.category == 'standard' %}
-        <div class="project-card">
-            <a href="/projects/{{ project.id }}/" class="project-card-link" aria-label="View {{ project.name }}"></a>
-            <div class="project-header">
-                <div class="project-icon">
-                    {% if project.isSvg %}
-                        <img src="{{ project.icon }}" alt="{{ project.name }} icon" width="48" height="48">
-                    {% else %}
-                        {{ project.icon }}
-                    {% endif %}
-                </div>
-                <h2 class="project-title">{{ project.name }}</h2>
-            </div>
-            <p>{{ project.description | safe }}</p>
-            {{ projectStatus(project.status) }}
-        </div>
-        {% endif %}
-        {% endfor %}
-    </div>
+    {# #2019 (keystone #2016): the landing grid is SSR'd from our `we-card` at BUILD TIME. `weProjectGrid`
+       shells out to the pinned FUI build-CLI (render-from-data per #2007) and returns the whole grid as real
+       `<article class="fui-card">` / `<span class="fui-badge…">` HTML — correct with JS off, view-source-
+       visible. The transient `<we-card>`/`<we-badge>` client upgrade (base.njk) becomes a pure enhancement
+       (the SSR page carries the finished native element, no `<we-*>` wrapper, so nothing to re-upgrade). #}
+    {% set standardProjects = [] %}
+    {% for project in projects %}
+      {% if project.category == 'standard' %}
+        {% set standardProjects = (standardProjects.push(project), standardProjects) %}
+      {% endif %}
+    {% endfor %}
+    {% weProjectGrid standardProjects %}
 </section>
 
 <section>
@@ -58,56 +48,27 @@ title: Web Everything - Home
         <p class="section-desc">High-level standards for architecture, interoperability, and application design.</p>
         {{ displayToolbar("protocols") }}
     </div>
-    <div class="project-grid">
-        {% for project in projects %}
-        {% if project.category == 'utility' or project.category == 'ecosystem' %}
-        <div class="project-card">
-            <a href="/projects/{{ project.id }}/" class="project-card-link" aria-label="View {{ project.name }}"></a>
-            <div class="project-header">
-                <div class="project-icon">
-                    {% if project.isSvg %}
-                        <img src="{{ project.icon }}" alt="{{ project.name }} icon" width="48" height="48">
-                    {% else %}
-                        {{ project.icon }}
-                    {% endif %}
-                </div>
-                <h2 class="project-title">{{ project.name }}</h2>
-            </div>
-            <p>{{ project.description | safe }}</p>
-            {{ projectStatus(project.status) }}
-        </div>
-        {% endif %}
-        {% endfor %}
-    </div>
+    {% set protocolProjects = [] %}
+    {% for project in projects %}
+      {% if project.category == 'utility' or project.category == 'ecosystem' %}
+        {% set protocolProjects = (protocolProjects.push(project), protocolProjects) %}
+      {% endif %}
+    {% endfor %}
+    {% weProjectGrid protocolProjects %}
 </section>
 
 <section style="margin-top: 3rem;">
     <h2 class="section-title">Implementations &amp; Tools</h2>
     <p class="section-desc">Projects that bring Web Everything protocols to life, and the platforms built on top of them. Building your own? The protocols are open for anyone to implement.</p>
-    <div class="project-grid project-grid--centered">
-        <div class="project-card">
-            <a href="{{ links.frontierUrl }}" class="project-card-link" aria-label="View FrontierUI" target="_blank" rel="noopener"></a>
-            <div class="project-header">
-                <div class="project-icon">
-                    <img src="/assets/icons/frontierui.svg" alt="FrontierUI icon" width="48" height="48">
-                </div>
-                <h2 class="project-title">FrontierUI</h2>
-            </div>
-            <p>A reference implementation of Web Everything protocols. Production-ready building blocks for state management, routing, views, tabs, and more.</p>
-            {{ projectStatus('active') }}
-        </div>
-        <div class="project-card">
-            <a href="{{ links.plateauUrl }}" class="project-card-link" aria-label="View Plateau" target="_blank" rel="noopener"></a>
-            <div class="project-header">
-                <div class="project-icon">
-                    <img src="/assets/icons/plateau.svg" alt="Plateau icon" width="48" height="48">
-                </div>
-                <h2 class="project-title">Plateau</h2>
-            </div>
-            <p>An enterprise front-end platform management product, built natively on Web Everything. Catalogs applications, libraries, and standards across an organization, and ships configurator tools assembled entirely from the protocols.</p>
-            {{ projectStatus('poc') }}
-        </div>
-    </div>
+    {# The impls tiles are not in the `projects` data (they link out to external sites), so we compose an
+       inline list carrying each tile's `url`; `external: true` links them out with target=_blank. #}
+    {% set implProjects = [
+        { name: "FrontierUI", status: "active", isSvg: true, icon: "/assets/icons/frontierui.svg", url: links.frontierUrl,
+          description: "A reference implementation of Web Everything protocols. Production-ready building blocks for state management, routing, views, tabs, and more." },
+        { name: "Plateau", status: "poc", isSvg: true, icon: "/assets/icons/plateau.svg", url: links.plateauUrl,
+          description: "An enterprise front-end platform management product, built natively on Web Everything. Catalogs applications, libraries, and standards across an organization, and ships configurator tools assembled entirely from the protocols." }
+    ] %}
+    {% weProjectGrid implProjects, { external: true, gridClass: "project-grid project-grid--centered" } %}
 </section>
 
 <section class="creator-section">

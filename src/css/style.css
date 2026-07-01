@@ -1758,6 +1758,19 @@ table td, table th {
 .intent-card .intent-dim-row { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.75rem; }
 .intent-card .intent-dim-tag { font-family: ui-monospace, monospace; }
 
+/* Home/index project tiles (#2019, keystone #2016): the landing grid now SSR's each project as a
+   `.fui-card` (`weProjectGrid` → pinned FUI CLI). The card owns its own header/body frame; these rules
+   reproduce the prior `.project-card` body composition (leading icon chip, muted description that grows to
+   push the status-meter to the card foot). The card header (title + status `.fui-badge`) needs no extra
+   rules — the shared `.fui-card__header/__title` styles above cover it. The tile grows to fill its grid
+   cell so the status-meter stays bottom-aligned across a row. */
+.project-tile-card { height: 100%; }
+.project-tile-card .fui-card__body { display: flex; flex-direction: column; gap: 0.85rem; }
+.project-tile-card .project-desc {
+  margin: 0; color: var(--color-text-muted); font-size: 0.95rem; line-height: 1.5; flex-grow: 1;
+}
+.project-tile-card .project-status-row .status-meter { margin-top: 0; padding-top: 0; }
+
 /* #1758 (ratified #1748): SSR baseline for the FUI transient pills the docs server-render in bulk.
    `<we-badge>` / `<we-filter-chip>` upgrade in place to light-DOM `<span class="fui-badge…">` /
    `<button class="fui-filter-chip…">` once the cross-origin FUI registration ESM loads (base.njk),
