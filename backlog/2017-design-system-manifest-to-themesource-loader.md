@@ -2,36 +2,42 @@
 kind: story
 size: 5
 parent: "1226"
-status: active
+status: resolved
 blockedBy: ["2049"]
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
 tags: [parity, webtheme, dtcg, flavor, keystone, integration-seam]
 ---
 
 # Design-system manifest → ThemeSource loader (the parity integration seam)
 
-## Blocked — the visible-retheme acceptance depends on an undecided consumption seam (#2026, 2026-07-01 batch pre-flight)
+## Resolved — the loader is built; the consumption seam it depended on is ratified (#2026) and emitted (#2049)
 
-Claimed under a serial batch; a mid-work pre-flight found the Digest's core premise is **false as stated**.
-The Digest says *"the FUI components actually read the legacy family-based model
-(`fui:plugs/webtheme/resolveTheme.ts:25`)"* — but a grep for `resolveTheme` / `getRootTheme` / `ThemeSource`
-across `blocks/`, `demos/`, `workbench/`, `plugs/` finds **zero consumers** outside `fui:plugs/webtheme/`
-itself. No FUI component reads the theme runtime at all. The `we-card` / `we-badge` blocks read a
-hand-authored **site vocabulary** (`var(--color-border)`, `var(--color-surface-card)`, `var(--radius-md)`,
-`var(--shadow-sm)` — see `fui:blocks/card/Card.ts:91-100`), which is **neither** the legacy family emit
-(`--token-color-*` from `fui:plugs/webtheme/emitCss.ts`) **nor** the DTCG compile names.
+The blocker (#2026, projection-vocabulary + alias-tier ownership) ruled **(b′)**: the FUI injector co-emits the
+semantic-alias tier alongside canonical `--token-*` at every themed scope, and **#2049** implemented that runtime
+co-emit (`applyTokenVars` writes both tiers, sourced from the FUI-owned `LEGACY_ALIASES`). With that seam live,
+the loader's visible-retheme acceptance is meetable: an injected `ThemeSource`'s `--token-*` values are forwarded
+to the semantic names FUI components read (`var(--color-surface)`, `var(--radius-lg)`, `var(--color-border)`).
 
-**Consequence:** the loader + DTCG→legacy bridge + unit test (Acceptance 2 & 3) are mechanical and buildable,
-but Acceptance **1** — *"injecting it visibly re-themes a live `we-card` + `we-badge`"* — is **unmeetable** as a
-standalone: an injected `ThemeSource` paints `--token-*` props no component consumes. Making a card visibly
-re-theme requires first **deciding the projection-vocabulary contract** (does `ThemeSource` project onto the
-components' current `--color-*`/`--radius-*` names, or do the block CSS migrate onto `var(--token-*)`?) and the
-block-CSS migration path. A **lossy DTCG→`--wb-*` precedent** exists for the workbench stage **only** (#930-A,
-`fui:workbench/manifestBridge.ts`) — that decided the *demo* seam, not the real component seam. This is
-undecided platform design, so it is filed as **#2026** and this story is `blockedBy` it. Do **not** unilaterally
-pick a vocabulary to force batchability. Once #2026 rules, this story builds the loader + wires it to whatever
-projection #2026 chose.
+Built in FUI as `fui:plugs/webtheme/manifestLoader.ts`:
+- `loadManifestTheme(manifest, parent?)` — resolves the manifest's DTCG `themeTokens` over the platform default
+  (`extendTokens` + `resolveTokens`), bridges the resolved token set into the flat legacy `ResolvedTheme` families,
+  and returns an injectable `ThemeSource` parented on the ambient base (unbridged families inherit the default).
+  Ready for `setRootTheme(loaded.source)` (page-wide) or a scoped injector set (per-subtree).
+- `bridgeDtcgToLegacy(doc)` — the DTCG→legacy bridge, stated as an explicit, inspectable per-row map
+  (`DTCG_TO_LEGACY`, the #930-A "declared coverage, not a hidden transform" discipline): the DTCG `color.accent`
+  seed maps onto the legacy `primary` role, the `space` scale onto `spacing`, `elevation` onto `shadow`, the
+  `type` size ramp onto `font`, and so on. A row whose DTCG source is absent is recorded in `coverage.absent`,
+  never silently dropped.
+- Unit test `fui:plugs/webtheme/__tests__/unit/manifestLoader.test.ts` covers DTCG alias resolution (a base-derived
+  radius token resolves to its literal), templated `calc()` resolution, deep-merge over base, declared-absence
+  coverage, and the paint acceptance (`applyTokenVars` lands `--token-*` + the co-emitted alias tier a card reads).
+
+The loader takes a **resolved manifest object** (its `themeTokens` sidecar loaded by the caller via `fs`/`fetch`),
+so no component or the loader imports a design-system-specific token file (acceptance 3), and it stays Node/DOM-neutral.
+Follow-on: closing the three untokened card props is the separate active item #2050; the badge tone→`--tone-*`
+migration (#2026 Fork 2(a)) is its own follow-on.
 
 ## Digest
 
