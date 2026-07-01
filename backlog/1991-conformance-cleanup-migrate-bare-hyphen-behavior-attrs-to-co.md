@@ -1,57 +1,63 @@
 ---
 kind: decision
-status: active
+status: resolved
 preparedDate: "2026-07-01"
 dateOpened: "2026-06-30"
 dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#attribute-name-colon-namespacing"
 tags: [naming, colon-namespace, attribute-conformance, frontier-ui]
 ---
 
-# Colon-namespace target for `type-ahead` (the one unpinned name in the bare-hyphen → colon behavior-attr rename)
+# Behaviour-attr colon is family-only; family-less behaviours stay bare single-hyphen (`type-ahead`)
 
-Forked out of the former migration story (was `story·5`) because the mechanical rename cannot start until one
-name is ratified — an agent must not pick an attribute spelling unilaterally (naming-fork precedent
-discipline). #1987 Fork 1 already ratified the DIRECTION (colon is the collision-safe namespace; bare-hyphen
-behavior attrs are the actually-unsafe names) and the `namespace:member` pattern
-(`we:docs/agent/platform-decisions.md#attribute-name-colon-namespacing`). This decision pins the **one member
-that pattern doesn't cleanly resolve**, then the rename becomes mechanical.
+Forked out of the migration story to pin `type-ahead`'s colon target. The fork instead **exposed a
+weakness in #1987 Fork 1's blanket "all behaviour attrs colon-namespaced"**: `type-ahead` has no
+family, so the `namespace:member` grammar forced an *invented* namespace (`list:` / `nav:`) purely to
+satisfy the rule — a DevX cost for no collision benefit. Grounding the collision premise showed native
+HTML does **not** separate multi-word attribute names with hyphens — it **smashes** (`shadowrootmode`,
+`contenteditable`, `crossorigin`); bare hyphenated native attrs are two legacy cases (`accept-charset`,
+`http-equiv`) plus the `data-*` / `aria-*` prefix families. So a bare single-hyphen author attr is not
+at meaningful native-collision risk, and a colon on a *singleton* buys neither sibling-disambiguation
+nor readability.
 
-## The clean renames (no fork — settled by #1987's pattern, execute on ratification)
+## Ruling (amends #1987 Fork 1 — ratified 2026-07-01)
 
-First-hyphen → colon, member keeps any internal hyphen (like the ratified `grid:cell-navigation`):
+**Keep behaviour-attr names as simple as possible. The colon namespace is used only for a *family* — a
+surface/domain with ≥2 related members (or an established control-flow/event group). A *family-less*
+behaviour stays a bare single-hyphen name and takes no colon.**
 
-- `droplist-anchor` → `droplist:anchor`, `droplist-anchored` → `droplist:anchored`,
-  `droplist-selection` → `droplist:selection`
-- `focus-delegation` → `focus:delegation`
-- `navigation-guard` → `navigation:guard`
-- the double-colon outlier `route:guard:leave` (no precedent on any convention) → single-colon
-  `route:guard-leave`
+- `type-ahead` **stays `type-ahead`** (family-less). Not `list:type-ahead`, not `type:ahead`.
+- The colon still carries collision-safety-by-construction + sibling disambiguation *where a family
+  exists* — the only place those pay off.
+- A family-less name that later gains a sibling colon-ifies then (a one-time mechanical rename).
 
-## The fork — `type-ahead`'s colon target
+### Reclassification of the rename list (grounded in FUI `src`)
 
-`type-ahead` does **not** follow the first-hyphen→colon rule: there is no `type:` behavior family, and
-`type:ahead` both reads wrong and visually rhymes with the `type=` attribute (the exact collision the colon
-namespace exists to avoid). Options:
+**Families → colon** (rename where currently bare/double-colon):
+- `droplist-anchor` / `droplist-anchored` / `droplist-selection` → `droplist:anchor` / `droplist:anchored`
+  / `droplist:selection` (droplist family, 3 members)
+- `route:guard:leave` → `route:guard-leave` (route family: link/prefetch/…; double-colon collapses to a
+  single-colon hyphenated member)
+- already-ratified families, unchanged: `on:*`, `view:*`, `grid:*`, `nav:*`
 
-- **(a) `list:type-ahead` — RECOMMENDED.** Names the host surface (list / combobox) as the namespace and
-  keeps the compound member verbatim, exactly the `grid:cell-navigation` precedent. Reads as "the type-ahead
-  behavior of a list," no collision with `type=`, and the `list:` namespace generalizes to future
-  list behaviors.
-- (b) `nav:type-ahead` — same member-keeps-hyphen shape, but `nav:` mis-frames it (type-ahead is
-  incremental-search selection, not navigation) and overlaps `navigation:guard`'s intent.
-- (c) `type:ahead` — literal first-hyphen split; rejected above (reads wrong, rhymes with `type=`).
-- (d) leave `type-ahead` an accepted bare compound — but that re-opens the #1987 "bare-hyphen behavior attrs
-  are the unsafe names" ruling for this one attr, so it's the least consistent.
+**Family-less → bare single-hyphen** (no rename — already bare, and now ratified to *stay* bare):
+- `type-ahead` (standalone)
+- `focus-delegation` (no focus family)
+- `navigation-guard` (standalone leave-guard; not a member of `nav:`)
 
-Likely a **one-line addendum** to #1987's codified anchor (`we:docs/agent/platform-decisions.md#attribute-name-colon-namespacing`),
-not a standalone convention.
+Net effect: the migration **shrinks** — only genuine families (droplist, `route:guard-leave`) actually
+rename; the three family-less attrs stay put.
 
-## Graduates to (on ratification)
+### Known tradeoff (red-teamed, accepted)
+This reintroduces a per-attr "is it a family?" judgment that #1987's blanket rule eliminated. Accepted
+because that judgment is cheap and objective (does a registered sibling exist?) — unlike the
+collision-risk judgment #1987 rightly feared — the future-sibling colon-ify is mechanical and rare, and
+the DevX + honesty win (no invented `list:` namespace) outweighs it.
 
-The mechanical cross-repo rename, ~30 FUI code sites (`fui:blocks/type-ahead/registerTypeAhead.ts`,
-`fui:blocks/droplist/registerDroplistMenu.ts:52-55`, `getAttribute`/`matches` reads incl.
-`fui:blocks/router/types.ts:319` for `route:guard:leave`) **plus** 3 FUI demos under `fui:demos/`
-(data-grid, droplist-selection, autocomplete-unplugged) **plus** ~10 WE block-description docs under
-`we:src/_includes/block-descriptions/` **plus** back-compat aliases (author surfaces DO depend on the old
-names — those demos/docs) **plus** all-engine tests. Re-scaffold as a `story·5` (or execute inline) once the
-name is pinned.
+## Graduates to
+Statute amended: `we:docs/agent/platform-decisions.md#attribute-name-colon-namespacing` (Fork 1 +
+lineage carry the family-only clause). Successor mechanical rename → re-scaffold as a story: colon-ify
+only the family members (`droplist:*`, `route:guard-leave`), leave family-less attrs (`type-ahead`,
+`focus-delegation`, `navigation-guard`) bare. Back-compat aliases for any name that actually changes.
