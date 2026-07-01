@@ -3,6 +3,8 @@ kind: story
 size: 5
 status: open
 blockedBy: []
+locus: webeverything
+humanGate: { kind: setup, short: "Build in a focused session that boots its own WE+FUI cross-origin pair on the #1999/6000 + #1997 lane ports.", what: "Acceptance = a headless Playwright run that BOOTS a WE+FUI cross-origin pair (the `.fui-card` frame lands cross-origin only) on the #1997 Fork-2 ports and asserts the frame from the CLI. A concurrent serial batch cannot own that dev-server lifecycle (don't-kill/own-the-user's-dev-server), and the running FUI server is on pre-#1999 ports until a restart this session must not perform — so the harness must spin its own coupled pair. Same 'focused session that owns servers' bucket as #1695/#1696/#1697/#1545. The `fixed pass` fixture is also entangled with the unresolved #1895/#1982 visual state; a faithful #1895 reproduction wants #1982 settled first." }
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-01"
 tags: []
