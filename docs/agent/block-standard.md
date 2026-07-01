@@ -261,15 +261,25 @@ per-block *mechanism pick* for the button (the worked example) is carved to
    *config-extends-platform-default* + *most-flexible-default*). Base examples are standard-anchored
    (`we-button`), not implementer-spelled (FUI uses bare-kebab, no `fui-` prefix, #841; names need a hyphen,
    #1120).
-7. **Per-block mechanism selection — the decision rule (#1381).** Within the default **S1** strategy, pick a
-   block's runtime family by what its *primary* consumer needs, not by effort. Ratified by
-   [#1381](/backlog/1381-button-packaging-pick-runtime-shape-mechanism-transient-vs-p/) (2026-06-21), the
-   button as the worked example (→ **transient**):
-   - **Behavior-free presentational control** (button, badge, …) → **(A) transient self-erase → native**. The
-     reference shape. Behaviors ride `CustomAttribute`s on the *surviving* native element, which carry the
-     full lifecycle (observe-attribute, connect/disconnect, form participation) — so attribute-shaped
-     reactivity and native events are **kept**; only **imperative non-serializable property writes on a
-     persistent element ref** are given up (and for these blocks that surface is near-empty).
+7. **Per-block mechanism selection — the decision rule (#1381; amended by
+   [#1962](/backlog/1962-transient-self-erasing-element-viability-as-a-concept-vs-the/), 2026-07-01 →
+   wrapper-first).** Within the default **S1** strategy, pick a block's runtime family by what its *primary*
+   consumer needs, not by effort. Ratified by
+   [#1381](/backlog/1381-button-packaging-pick-runtime-shape-mechanism-transient-vs-p/) (2026-06-21); **#1962
+   reversed the default from transient (A) to persistent-wrapper / light-DOM** — web components are the common
+   case and self-erasure is spec-unsanctioned, so transient is avoided unless there is an absolute killer use case:
+   - **Behavior-free presentational leaf** (badge, tag, card, progress, meter, filter-chip) → **light-DOM** (a
+     `display:contents` wrapper where a box would break flex/grid). No self-erasure. Behaviors ride
+     `CustomAttribute`s on the element.
+   - **Single native control** (button, text-field, number-input, temporal/color/file pickers) → **(B) persistent
+     wrapper containing a real native control** (the Shoelace `<sl-input>` shape). The inner real element delivers
+     every native behaviour (focus/activation/form/IME/picker chrome/validation); the host persists as the styled,
+     nameable, CEM-carrying identity. Behaviors ride `CustomAttribute`s on the host or the inner control.
+   - **(A) Transient self-erase → native is RESERVED** for one absolute case — a **content-model-constrained
+     native child** (`<option>` in `<select>`, `<tr>`/`<td>` in `<table>`, `<summary>` in `<details>`) where a
+     wrapper structurally breaks the native parent (WebKit's retained parser case). No current block qualifies;
+     transient ships nowhere today. When used it carries the #1961 robustness rider (idempotent +
+     microtask-deferred + `isConnected`-guarded).
    - **Framework-bound / reactive** block (a consumer holding a JS ref that sets object/function properties
      post-mount) → **(B) persistent light-DOM element**. The only family that keeps a persistent element to
      bind to; also the shape a deployment upgrades to C when it opts into S2.
@@ -280,11 +290,11 @@ per-block *mechanism pick* for the button (the worked example) is carved to
    block conversions are a separately-prioritized build epic
    ([#1442](/backlog/1442-block-model-conversion-register-remaining-blocks-as-custom-e/)), not authored here.
    - *Worked example — form-control family
-     ([#1456](/backlog/1456-grouped-form-control-packaging-mechanism-transient-a-vs-pers/)):* a **single**
-     control (single checkbox, text-field, number-input) → **(A)** transient → native `<input>`; a
-     **grouped** control (checkbox-group, radio-group) → **(B)** persistent light-DOM, because the group's
-     composite `value`/`values` is a live two-way-binding surface and a group has no native single-element
-     to erase into.
+     ([#1456](/backlog/1456-grouped-form-control-packaging-mechanism-transient-a-vs-pers/); amended by #1962):* a
+     **single** control (single checkbox, text-field, number-input) → **(B)** persistent wrapper containing a real
+     native `<input>` (the input was already nested in a `<div class="fui-text-field">` — transient only erased the
+     outer host, buying nothing native); a **grouped** control (checkbox-group, radio-group) → **(B)** persistent
+     light-DOM, because the group's composite `value`/`values` is a live two-way-binding surface.
    - *Element-over-behavior — coordinator blocks
      ([#1457](/backlog/1457-behavior-blocks-do-stepper-deck-tabs-get-a-we-element-or-sta/)):* a block that
      coordinates a set of authored native semantic children (stepper, deck, tabs) ships **both facades over
@@ -304,7 +314,9 @@ per-block *mechanism pick* for the button (the worked example) is carved to
      / generate flavors of → **element/block**; a capability you attach to enhance a host → **behavior**;
      they compose, the element is the styled product, the behavior the floor.
 8. **Transient (A) exposed-API contract — the stable read surface across self-replacement (#1961).** {#transient-exposed-api}
-   Ratified by [#1961](/backlog/1961-transient-element-exposed-api-the-stable-read-event-surface-/) (2026-07-01):
+   Ratified by [#1961](/backlog/1961-transient-element-exposed-api-the-stable-read-event-surface-/) (2026-07-01).
+   **Scoped by #1962 (2026-07-01):** transient is now the *reserved* content-model-child mechanism, not a shipped
+   block shape — this contract governs that reserved case, not the (now wrapper/light-DOM) block catalog:
    - **A replaced transient host is *detached*, not *dead*.** Per the DOM standard a removed node is a valid
      *disconnected* node — operations on it **silently no-op, never throw** (`getBoundingClientRect` all-zero,
      `addEventListener` binds-but-never-fires, etc.), so misuse is invisible, not loud. **Never hold a
@@ -341,21 +353,25 @@ full per-case matrix, mechanism catalog, and worked examples live in #1963; the 
    deep structural nesting there is an open gap (rule 7).
 3. **Two audiences — FIXED / CONFIGURABLE / FREEDOM.**
    - **FIXED** (the standard forces): the bar; the scoped spine; the per-layer native/plug partition (rule 5);
-     irreplaceable-native blocks emit native; the statute bars (no load-bearing `is=`; single-substrate floor;
+     irreplaceable-native blocks emit native — **satisfied by a persistent wrapper *containing* a real native
+     control, not a self-erasing host (#1962)**; the statute bars (no load-bearing `is=`; single-substrate floor;
      MaaS serves only platform-correct variants).
-   - **CONFIGURABLE** (per-project, **platform-correct variants only**): transient ↔ persistent light-DOM for
-     soft / replicable blocks, and which sanctioned variant the configurator/MaaS assembles — native-first
-     **default**, alternative **opt-in**. A **substrate swap** (a load-bearing non-standard shim like polyfilled
-     `is=`) is **never** configurable.
+   - **CONFIGURABLE** (per-project, **platform-correct variants only**): which sanctioned variant the
+     configurator/MaaS assembles — native-first **default**, alternative **opt-in**. (**#1962 withdrew the
+     transient ↔ light-DOM per-project toggle for soft blocks**: presentational leaves are light-DOM full-stop, not
+     a self-erasure opt-in.) A **substrate swap** (a load-bearing non-standard shim like polyfilled `is=`) is
+     **never** configurable.
    - **FREEDOM** (the dev's call): which mechanism per case, from the catalog/matrix with pros/cons.
-4. **`is=` is not a WE mechanism.** Every job is dominated — load-bearing native output → **transient**; behaviour
+4. **`is=` is not a WE mechanism.** Every job is dominated — load-bearing native output → **a persistent wrapper
+   containing a real native control** (transient reserved for content-model children — #1962); behaviour
    on an authored element → **`CustomAttribute`** (in-place, cross-browser, single-substrate — beats `is=` on every
    axis); persistent live instance → **(B)**; foreign in-place → no real need. WE documents `is=` **only as an
    opt-in developer option** (polyfill in FUI, enabled by explicit dev choice; lower-compliance, §7-spectrum) —
    never a block mechanism, never default.
 5. **Per-layer native/plug + plug-to-direction.** Decompose a capability: a layer **present** in a shippable
-   browser → **native** (emit-to-native / transient — never polyfill what already ships); a layer **absent** from
-   every spec → **plug**, riding the transient survivor as a `CustomAttribute`. Author each plug to align with its
+   browser → **native** (a real native element inside a persistent wrapper — never polyfill what already ships;
+   transient reserved for content-model children, #1962); a layer **absent** from
+   every spec → **plug**, riding the real native element (the wrapper's inner control) as a `CustomAttribute`. Author each plug to align with its
    **standards-track candidate** (DOM Parts `ChildNodePart`; `ElementInternals.type` #11061; the WC-CG Context
    Protocol; the signals proposal; `moveBefore()`) so it **deprecates + migrates to native** when the standard
    ships.
@@ -365,8 +381,9 @@ full per-case matrix, mechanism catalog, and worked examples live in #1963; the 
    its contents upgrade. A behaviour attaches *after* its element connects, so it cannot prevent/multiply that
    connection — only a directive can.
 7. **Per-case verdicts** (full matrix in #1963): cases 4/5, 7 ✅; cases 2, 3, 6, 9 ◐ (named confirms — **case 6 is
-   strongest via the Context Protocol**, zero-node DI; `webinjectors` #1044 aligns to it); case 1 → **#1962** (the
-   transient-vs-wrapper mechanism rule). **Case 8 is covered** (`is=` jobs all dominated; the owned-element
+   strongest via the Context Protocol**, zero-node DI; `webinjectors` #1044 aligns to it); case 1 → **#1962**
+   (resolved 2026-07-01 → **wrapper-first**: persistent wrapper containing a real native control; transient
+   reserved for content-model children). **Case 8 is covered** (`is=` jobs all dominated; the owned-element
    behavioural residual is a standards-watch on `ElementInternals.type` #11061). **Case 10 declarative-HTML deep
    *structural* nesting is ⚠️ UNMET** — the structural mechanism is **comment-anchor directives, not transient**
    (transient has no native-element target there); the residual is the **Phase-2 nested-directive

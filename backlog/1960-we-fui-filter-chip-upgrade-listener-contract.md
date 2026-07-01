@@ -43,6 +43,19 @@ silently stopped filtering the moment the FUI module loaded.
   factory" and mandates a **curated, selector-scoped deny-list** instead (working precedent:
   `COMPOSE_DENY_LIST`, [we:scripts/check-standards-rules.mjs:1624](../scripts/check-standards-rules.mjs#L1624)).
 
+## #1962 context (2026-07-01, wrapper-first)
+
+#1962 ruled the block catalog **wrapper-first**: `we-filter-chip` (a behaviour-free leaf) is migrating off the
+transient self-erase shape to **persistent light-DOM** under the FUI transient→wrapper migration. Once it
+migrates, **the chip no longer self-replaces**, so the motivating regression here (host listeners lost on
+upgrade) **dissolves at the source** — there is no upgrade to survive. Two consequences:
+
+- The **specific filter-chip forks below become moot** post-migration; they stand as near-term mitigations until
+  the migration lands.
+- The **general consumer rule** ("delegate on a stable ancestor; never cache a self-replacing node") remains
+  valid — but now as guidance for the **reserved transient case** (content-model children), not the block
+  catalog. Re-scope the codified rule to that reserved case rather than "FUI transient elements" broadly.
+
 ## The axis
 
 The framing in the original card — *"which side of the WE↔FUI boundary owns the durable fix, A or B"* — is a
