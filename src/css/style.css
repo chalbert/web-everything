@@ -1694,6 +1694,67 @@ table td, table th {
   background: #fff;
 }
 
+/* #2016 (keystone of #777): CLASS-keyed SSR baseline for the card/badge/tag surfaces the docs now
+   server-render FROM DATA at build time (`weIntentGrid` shortcode → pinned FUI CLI, render-from-data
+   per #2007). Unlike the TAG-keyed `we-card{}`/`we-badge{}`/`we-tag{}` baselines below — which style the
+   PRE-upgrade custom-element and hand off to the FUI-injected stylesheet on CE upgrade — this build-time
+   path emits the FINISHED native `.fui-card`/`.fui-badge`/`.fui-tag` markup directly, with no `<we-*>`
+   wrapper to upgrade. So these class-keyed rules ARE the rendered look with JS off (and if the FUI host
+   never loads its stylesheet). Mirrors the FUI CARD_CSS / BADGE_CSS / TAG_CSS palettes
+   (fui:blocks/card/Card.ts, badge/Badge.ts, tag/Tag.ts); keep in sync if those change. */
+.fui-card {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--color-border, #e2e5ea);
+  border-radius: var(--radius-md, 10px);
+  background: var(--color-surface-card, #fff);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(17, 18, 29, 0.06));
+  overflow: hidden;
+}
+.fui-card__header {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+  padding: 0.85rem 1rem; border-bottom: 1px solid var(--color-border-light, #f1f2f8);
+}
+.fui-card__title { margin: 0; font-size: 1rem; font-weight: 600; }
+.fui-card__actions { display: inline-flex; gap: 0.4rem; }
+.fui-card__body { padding: 1rem; flex: 1; }
+.fui-card__footer {
+  padding: 0.75rem 1rem; border-top: 1px solid var(--color-border-light, #f1f2f8);
+  color: var(--color-text-secondary, #50526a); font-size: 0.85em;
+}
+
+.fui-badge {
+  font: inherit; font-size: 0.8em; font-weight: 600; line-height: 1;
+  display: inline-flex; align-items: center; gap: 0.35em; padding: 0.25em 0.55em;
+  border-radius: 999px; white-space: nowrap; border: 1px solid transparent;
+}
+.fui-badge__icon { display: inline-flex; }
+.fui-badge--neutral { background: #eef1f4; color: #3a4252; border-color: #dfe3e8; }
+.fui-badge--info    { background: #e7f0ff; color: #1d4ed8; border-color: #c7dbff; }
+.fui-badge--success { background: #e7f8ef; color: #047a45; border-color: #c2ecd4; }
+.fui-badge--warning { background: #fdf4e3; color: #9a6700; border-color: #f4e2b8; }
+.fui-badge--error   { background: #fdecec; color: #b42318; border-color: #f6cecb; }
+
+.fui-tag {
+  font: inherit; font-size: 0.8em; font-weight: 600; line-height: 1;
+  display: inline-flex; align-items: center; gap: 0.35em; padding: 0.25em 0.55em;
+  white-space: nowrap; border: 1px solid transparent;
+}
+.fui-tag__icon { display: inline-flex; }
+.fui-tag--shape-badge { border-radius: 4px; }
+.fui-tag--shape-pill  { border-radius: 999px; }
+.fui-tag--shape-tag   { border-radius: 4px 999px 999px 4px; padding-left: 0.7em; }
+.fui-tag--subtle.fui-tag--neutral  { background: #eef1f4; color: #3a4252; border-color: #dfe3e8; }
+.fui-tag--subtle.fui-tag--info     { background: #e7f0ff; color: #1d4ed8; border-color: #c7dbff; }
+.fui-tag--subtle.fui-tag--success  { background: #e7f8ef; color: #047a45; border-color: #c2ecd4; }
+.fui-tag--subtle.fui-tag--warning  { background: #fdf4e3; color: #9a6700; border-color: #f4e2b8; }
+.fui-tag--subtle.fui-tag--critical { background: #fdecec; color: #b42318; border-color: #f6cecb; }
+
+/* Intent-tile body composition (the summary + dimension-chip row inside the card body). Reproduces the
+   inline styles the prior `<we-card>` template markup carried (muted small summary; wrapping mono chips). */
+.intent-card .intent-summary { margin: 0; color: var(--color-text-muted); font-size: 0.9em; }
+.intent-card .intent-dim-row { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.75rem; }
+.intent-card .intent-dim-tag { font-family: ui-monospace, monospace; }
+
 /* #1758 (ratified #1748): SSR baseline for the FUI transient pills the docs server-render in bulk.
    `<we-badge>` / `<we-filter-chip>` upgrade in place to light-DOM `<span class="fui-badge…">` /
    `<button class="fui-filter-chip…">` once the cross-origin FUI registration ESM loads (base.njk),

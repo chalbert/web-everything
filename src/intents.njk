@@ -38,38 +38,15 @@ title: Web Everything — Intents
   </div>
 </section>
 
-<div class="project-grid" id="intent-grid">
-  {% for intent in intents %}
-    {% set dimKeys = [] %}
-    {% for key, _ in intent.dimensions %}{% set dimKeys = (dimKeys.push(key), dimKeys) %}{% endfor %}
-    {# #1607 (#1820 Fork 1a): the tile is a <we-card> frame the docs server-render (upgrades in place to
-       <article class="fui-card">); the click-through + filter data-* relocate to the OUTER <a> (the card
-       erases to a non-linkable <article>). Status pill → <we-badge> (#1319 status-indicator), dimension
-       chips → <we-tag> (#1319 tag). The anchor keeps .project-card for grid layout; its frame is stripped
-       by the `.project-card:has(> we-card)` rule in style.css so the card is the sole frame (no double box). #}
-    {% set statusTone = 'success' if intent.status == 'active' else ('info' if intent.status == 'draft' else ('warning' if (intent.status == 'concept' or intent.status == 'experimental') else 'neutral')) %}
-    <a href="/intents/{{ intent.id }}/"
-       class="project-card intent-tile"
-       data-status="{{ intent.status }}"
-       data-haystack="{{ intent.id }} {{ intent.name | lower }} {{ intent.summary | lower }} {{ dimKeys | join(' ') | lower }}"
-       style="text-decoration: none; color: inherit; display: block;">
-      <we-card>
-        <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
-          <h3 class="project-title" style="margin: 0;">{{ intent.name }}</h3>
-          <we-badge tone="{{ statusTone }}">{{ intent.status | title }}</we-badge>
-        </div>
-        <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ intent.summary }}</p>
-        {% if dimKeys.length %}
-        <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
-          {% for key in dimKeys %}
-          <we-tag shape="pill" style="font-family: ui-monospace, monospace;">{{ key }}</we-tag>
-          {% endfor %}
-        </div>
-        {% endif %}
-      </we-card>
-    </a>
-  {% endfor %}
-</div>
+{# #2016 (keystone of #777): the intents catalog is now SSR'd from our components at BUILD TIME. The
+   `weIntentGrid` shortcode shells out to the pinned FUI build-CLI (render-from-data per #2007) and returns
+   the whole grid as real `<article class="fui-card">` / `<span class="fui-badge…">` / `<span class="fui-tag…">`
+   HTML — correct with JS off, view-source-visible. The transient `<we-card>`/`<we-badge>`/`<we-tag>` client
+   upgrade (base.njk) becomes a pure enhancement: the SSR page carries the finished native elements (no
+   `<we-*>` wrapper), so there is nothing to re-upgrade (idempotent by construction). The status→tone map,
+   the outer linking `<a class="project-card intent-tile">`, and the search/filter data-* all live in the
+   build hook (`scripts/lib/component-render-build-hook.cjs`). #}
+{% weIntentGrid intents %}
 
 <p id="intent-empty" style="display: none; text-align: center; color: var(--color-text-muted); margin: 2rem 0;">No intents match.</p>
 

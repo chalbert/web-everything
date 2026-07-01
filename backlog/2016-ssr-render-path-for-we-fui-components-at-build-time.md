@@ -2,9 +2,11 @@
 kind: story
 size: 5
 parent: "777"
-status: active
+status: resolved
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
+graduatedTo: "frontierui:blocks/renderers/component-render/buildHarness.ts"
 tags: [dogfood, fui, ssr, eleventy, keystone, di-mount]
 ---
 

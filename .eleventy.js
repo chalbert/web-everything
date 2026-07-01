@@ -3,6 +3,7 @@ const syntaxHighlight = require("@11ty/eleventy-plugin-syntaxhighlight");
 const { deriveResearchFreshness } = require("./scripts/lib/research-freshness.cjs");
 const { buildTechnicalConfiguratorUrl } = require("./scripts/lib/technical-configurator-url.cjs");
 const { spliceDataTables } = require("./scripts/lib/data-table-build-hook.cjs");
+const { renderIntentGrid } = require("./scripts/lib/component-render-build-hook.cjs");
 
 module.exports = function (eleventyConfig) {
   eleventyConfig.addPlugin(syntaxHighlight);
@@ -274,6 +275,19 @@ ${fuiHostScript}`;
   eleventyConfig.addTransform("weDataTableSSR", function (content) {
     if (!/\.html?$/.test(this.page && this.page.outputPath || "")) return content;
     return spliceDataTables(content, this.data || {}, __dirname);
+  });
+
+  // SSR component-render (#2016, keystone of the #777 WE-docs dogfood epic) — the general build-time
+  // component→HTML render path. `{% weIntentGrid intents %}` renders the intents catalog's card/badge/tag
+  // tiles to real SSR HTML in ONE subprocess batch to the pinned FUI build-CLI (render-from-data per
+  // #2007 — the SSR tool emits the block's shape from data, it does NOT treat authored markup as source).
+  // The output is byte-identical to what the transient `<we-card>`/`<we-badge>`/`<we-tag>` elements upgrade
+  // to at runtime, so the page is correct with JS off and the client CE upgrade (`src/_layouts/base.njk`)
+  // becomes a pure enhancement. Same subprocess boundary + pinned-artifact/missing-artifact hard error as
+  // the data-table hook above; the block factories live in FUI (a WE→FUI import is a banned backward DAG
+  // edge). The pinned FUI artifact MUST already exist (FUI `build:tools` before WE `build:docs`).
+  eleventyConfig.addShortcode("weIntentGrid", function (intents) {
+    return renderIntentGrid(intents, __dirname);
   });
 
   // The backlog feeds off backlog/*.md (parsed by src/_data/backlog.js, which
