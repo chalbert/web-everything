@@ -1,6 +1,45 @@
 # Backlog split analysis — 2026-07-01
 
-Focused run: `/split 1994`.
+Focused run: `/split 1994`; appended `/slice 2005`.
+
+---
+
+# `/slice 2005` — SSR & hydration of comment-anchor directive regions
+
+Focused run on the childless epic **#2005** (`kind: epic`, parent #1971, no children).
+
+## Work-investigation pass (frontierui)
+
+The epic's own body claims "no SSR surface exists in FUI today." Verified against the tree:
+
+- **Comment-anchor directive surface is parse/lifecycle only** — `fui:plugs/webdirectives/` holds
+  `fui:plugs/webdirectives/CustomComment.ts`, `fui:plugs/webdirectives/CustomCommentParser.ts`,
+  `fui:plugs/webdirectives/CustomCommentParserRegistry.ts`,
+  `fui:plugs/webdirectives/CustomCommentRegistry.ts`, `fui:plugs/webdirectives/directiveLifecycle.ts`,
+  `fui:plugs/webdirectives/multiTemplate.ts`. **No server renderer, no `renderToString`, no hydration
+  hook** anywhere in this path.
+- **The only SSR/hydration tokens in FUI live in *other* plugs** —
+  `fui:plugs/webinjectors/declarativeInjector.ts` (#1827 client-only injector-context hydration),
+  `fui:plugs/webregistries/declarativeRegistry.ts` (an SSR *guard*, not a renderer),
+  `fui:plugs/webportals/__tests__/unit/webportals.ssr.test.ts` (a frozen SSR-**contract** kit that ships
+  *no* runtime). None is a comment-region server renderer or a comment-region hydration hook.
+- **Conclusion:** the four children the body proposes — serialize / server-render / hydrate / streaming —
+  have **no design and no impl** (a true GAP). The seams can't be `file:line`-grounded because the surface
+  they'd cut through does not exist.
+
+## Could not split — #2005
+
+| NNN | title | rubric condition failed | unblocking action |
+|-----|-------|-------------------------|-------------------|
+| #2005 | SSR & hydration of comment-anchor directive regions | **(1) Volume, not uncertainty** — every proposed child is design-gated behind a foundational "how does FUI server-render + hydrate a comment-anchor region" call with no design *and* no impl. Slicing would scatter the same unmade decision across serialize/server-render/hydrate/streaming children. Also fails **(2)/(3)** downstream — no `file:line`-citable surface to name in any slice. | **Resolve the foundational SSR-of-comment-regions design first.** File it as a `kind: decision` card (`status: open`), point #2005's `blockedBy` at it, set `childlessReason: blocked`, and de-bury the inline fork in #2005's body → pointer to the card. Re-run `/slice 2005` once the decision lands: it then cuts into serialize / server-render / hydrate / streaming stories with real seams. |
+
+**No partial split is available.** The only carve-able unit today is the single foundational design spike
+itself — that's *one* item, not the ≥2 independent slices rubric (2) requires, so it's a decision to file,
+not a split to execute.
+
+---
+
+# `/split 1994` (original run)
 
 ## Candidate
 
