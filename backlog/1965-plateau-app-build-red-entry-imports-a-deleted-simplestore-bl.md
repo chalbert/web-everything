@@ -1,9 +1,9 @@
 ---
 kind: task
-status: active
+status: resolved
 dateOpened: "2026-06-29"
 dateStarted: "2026-06-30"
-blockedBy: ["1984"]
+dateResolved: "2026-07-01"
 tags: []
 ---
 
@@ -27,3 +27,8 @@ plateau-app build gate red-blocked the correct cross-repo work of #1947/#1909 (b
   orchestrator's WE-last gate correctly held back this item's `active→resolved` flip (no false "resolved"). Now
   `blockedBy: 1984`; once #1984 lands, build-green is a trivial confirm-and-resolve. Item stays **active** (recoverable
   cross-repo partial).
+- **2026-07-01 (batch-2026-07-01 `/workflow`):** blocker **#1984 is resolved** (its #2033 fix — default-import +
+  destructure of the CJS `we:src/_data/credibilityWeighting.js` — landed on `plateau-app:origin/main`). Both prior
+  reds are now gone: `plateau-app:src/main.ts:15` reads `import SimpleStore from '@frontierui/blocks/stores/simple/SimpleStore'`
+  and `plateau-app:src/weight-tuning/data.ts` uses the default-import/destructure shape. Confirmed `npm run build`
+  in plateau-app goes **green** (508 modules transformed, exit 0). `blockedBy` cleared; resolving.
