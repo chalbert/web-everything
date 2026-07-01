@@ -344,6 +344,78 @@ per-block *mechanism pick* for the button (the worked example) is carved to
      with native `click`). Consumers delegate on native `click` + read `aria-pressed`. Un-gate trigger (a named
      non-delegating consumer) is tracked on #1960.
 
+## Native-element reproducibility taxonomy (#2059) {#reproducibility-taxonomy}
+
+Ratified by [#2059](/backlog/2059-native-element-reproducibility-taxonomy-classify-all-html-ta/) (2026-07-01). The
+[#2028](/backlog/2028-persistent-light-dom-base-element-contract-for-the-soft-7-pr/) **reproducibility test** (§7,
+:264–301) is a per-block judgment. This section **spends that judgment once, exhaustively**, so a new block wrapping a
+native tag inherits **one lookup instead of re-deriving the bucket**. Every native HTML tag is classified into exactly
+one of #2028's three buckets:
+
+1. **Host-reproducible (HR)** — the tag's *entire* contribution is a **role + ARIA + default CSS** that a
+   `<we-*>` custom element can carry itself via `ElementInternals` (role/aria) plus a `.fui-*` class (box/CSS). Shape:
+   **host-is-the-node, zero sub-element** — the custom element *is* the styled node. Reproducible because a bare
+   `<div>`/`<span>` + `role` + `aria-*` + CSS is behaviourally indistinguishable from the native tag.
+2. **Irreplaceable-native (IN)** — the tag renders **UA-drawn chrome or delivers interaction/behaviour** that a
+   `<div>`+ARIA cannot reproduce (native focus/activation, form participation & submission, IME/picker chrome,
+   validation, UA-painted controls, media pipelines, replaced-element layout). Shape: **wrap a real native child**
+   (`#1962` (B); the child gets role/aria, the host is `display:contents` or a persistent wrapper).
+3. **Content-model-constrained (CMC)** — the tag is HR/IN *and* its parent's **content model accepts only that exact
+   tag** (a wrapper would break parsing/layout of the native parent). Shape: **reserved transient** (`#1962` (A)) — the
+   only sanctioned use of self-erasure. This bucket is a *modifier* on 1/2: a tag is CMC only in the parent contexts
+   listed; standalone it falls back to its HR/IN base.
+
+### The classification table
+
+**Bucket 1 — Host-reproducible (host-is-the-node via `ElementInternals`).** Contribute only semantics + default box:
+
+- **Flow / phrasing containers & text:** `div`, `span`, `p`, `pre`, `blockquote`, `figure`, `figcaption`, `main`,
+  `header`, `footer`, `article`, `section`, `aside`, `nav`, `address`, `hgroup`, `search`, `menu`.
+- **Headings:** `h1`–`h6` (auto-heading rides here).
+- **Grouping & lists:** `ul`, `ol`, `dl`, `dt`, `dd`, `figure`, `hr` (semantic separator — a `role="separator"` box).
+- **Inline semantics (role/emphasis only):** `strong`, `em`, `b`, `i`, `u`, `s`, `small`, `mark`, `abbr`, `cite`,
+  `code`, `kbd`, `samp`, `var`, `dfn`, `q`, `sub`, `sup`, `time`, `data`, `bdi`, `bdo`, `ruby`/`rt`/`rp`, `wbr`, `span`.
+- **Sectioning label roles:** the FUI leaves that live here — **badge, tag, card, section-card** (a `.fui-*`-styled
+  box) — plus any presentational-only wrapper.
+
+**Bucket 2 — Irreplaceable-native (wrap a real native child).** Deliver UA chrome / interaction / replaced layout:
+
+- **Form controls & submission:** `input` (all `type=`), `textarea`, `select`, `button`, `output`, `label`,
+  `fieldset`, `legend`, `datalist`, `optgroup`, `option`, `form`. (Native focus/activation, form participation,
+  IME/picker chrome, constraint validation — none reproducible on a `<div>`.)
+- **UA-painted gauges:** `progress`, `meter` (the soft-7 wrap-child pair — the concrete #2028 (B) pilots).
+- **Disclosure & dialog:** `details`, `summary`, `dialog` (UA open/close + top-layer + backdrop + `::backdrop`).
+- **Media & embedded / replaced elements:** `img`, `picture`/`source`, `video`, `audio`, `track`, `canvas`, `svg`,
+  `math`, `iframe`, `embed`, `object`, `map`/`area`, `portal`.
+- **Interactive text:** `a` (only when `href` — the activation/navigation behaviour; a bare `<a>` with no `href` is
+  HR), `map`/`area`.
+- **Table rendering:** the `<table>` box model is UA-drawn (see also CMC below for its children).
+
+**Bucket 3 — Content-model-constrained (reserved transient; a modifier on the parent context).** Only these
+parent→child pairs force the exact tag, so a wrapper breaks the native parent:
+
+- `option` / `optgroup` inside `select` / `datalist`.
+- `tr`, `td`, `th`, `thead`, `tbody`, `tfoot`, `caption`, `colgroup`, `col` inside `table`.
+- `li` inside `ul` / `ol` / `menu`; `dt` / `dd` inside `dl`.
+- `summary` inside `details`.
+- `figcaption` inside `figure`; `legend` inside `fieldset`; `rt` / `rp` inside `ruby`.
+- `source` / `track` inside `picture` / `video` / `audio`; `area` inside `map`.
+
+Standalone (not under the listed parent) each of these falls back to its base bucket — e.g. a `<li>` used outside a
+list is HR. **No current block qualifies as CMC**, matching §7:288 — the reserved transient ships nowhere today.
+
+**Non-rendered / metadata tags** (`html`, `head`, `body`, `title`, `meta`, `link`, `base`, `style`, `script`,
+`noscript`, `template`, `slot`) are **out of scope** — they are not block-packaging candidates (no styled component
+wraps them).
+
+### How a block uses this
+
+At authoring time, look up the native tag the block wraps: **HR → host-is-the-node** (extend the #2028 base with
+`childTag() → null`); **IN → wrap-child** (`childTag() → '<tag>'`, `display:contents` host); **CMC → reserved
+transient** (only if the block is authored *inside* the constraining parent, which no catalog block is). This replaces
+the per-block reproducibility judgment with a table lookup; a genuinely novel tag not listed here is classified by
+applying the bucket-1/2/3 *definitions* above, and the table is extended.
+
 ## Feed-mechanism governance (#2007) {#feed-mechanism}
 
 Ratified by [#2007](/backlog/2007-feed-mechanism-governance-a-block-owning-rendered-shape-must/) (2026-07-01)
