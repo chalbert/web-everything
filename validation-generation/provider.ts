@@ -247,3 +247,81 @@ export function assertValidationAdapter(value: unknown): asserts value is Custom
   if (unknown.length > 0) throw new ValidationAdapterContractError(`unknown intent id(s): ${unknown.join(', ')}`);
   if (typeof a.emit !== 'function') throw new ValidationAdapterContractError('missing an "emit" method');
 }
+
+// ---- ingest: an external validation library → the neutral declaration --------------------------
+//
+// The **reverse** of {@link CustomValidationAdapter}. A `CustomValidationAdapter` *emits* the neutral
+// {@link ValidationDeclaration} into a target format (declaration → Zod/Pydantic/…); an ingest adapter
+// runs the boundary the other way — it *normalizes* an external validation source (a Zod schema, a
+// TanStack Form field config, …) back **into** the neutral declaration, so a WE component can carry an
+// author's existing library schema through the same intent vocabulary the emitters and the Mode-2
+// service consume. It is the field-shaped sibling of `jsonLogicToCel` (the cross-field boundary-open
+// ingest in `cel.ts`): a boundary format stays open, normalized in at the edge, never re-derived.
+//
+// **Lossy-is-visible, same rule as emit.** An external source can carry checks outside the neutral
+// vocabulary (a Zod `.transform`, a bespoke `.refine`). Those are surfaced in {@link IngestResult.unsupported}
+// — reported, never silently dropped (#085) — the ingest mirror of `GeneratedValidation.unsupported`.
+//
+// **A definition, not an implementation.** Like the emit contract, this module ships only the *shape*;
+// the concrete per-library ingest adapters (Zod, TanStack Form, …) live impl-side in Frontier UI's
+// `validation-generation/adapters/`, alongside the emitters they reverse.
+
+/**
+ * The result of ingesting one external field source — the recovered neutral declaration plus the list
+ * of source constructs the adapter could not map onto the neutral vocabulary (reported, never dropped).
+ */
+export interface IngestResult {
+  /** The recovered neutral declaration (the same shape an emitter consumes). */
+  readonly declaration: ValidationDeclaration;
+  /**
+   * Source constructs outside the neutral vocabulary the adapter could not recover — the ingest mirror
+   * of {@link GeneratedValidation.unsupported}. Free-form tokens (e.g. `'transform'`, `'refine'`) since
+   * an un-ingestable source construct has no neutral intent id to name it by.
+   */
+  readonly unsupported: readonly string[];
+}
+
+/**
+ * The contract a per-library **ingest** adapter implements — the reverse of {@link CustomValidationAdapter}.
+ * `intents` is the recovery surface: the subset of the neutral vocabulary this adapter can extract from
+ * its source. `ingest` takes one field's source object (structurally typed — an ingest adapter duck-types
+ * its library's shape rather than depending on the library package, exactly as the emitters emit source
+ * text without importing the target) plus the field name, and returns an {@link IngestResult}.
+ */
+export interface ValidationIngestAdapter {
+  /** Registration key (the source-library id), e.g. `'zod'` | `'tanstack-form'`. */
+  readonly key: string;
+  /** Human/source label surfaced in diagnostics, e.g. `'Zod schema'`. */
+  readonly source: string;
+  /** The validation intents this adapter can recover from its source. */
+  readonly intents: readonly ValidationIntentId[];
+  /** Normalize one field's external source into the neutral declaration. */
+  ingest(source: unknown, field: string): IngestResult;
+}
+
+/** Structural check: a non-empty `key`/`source`, a known-intent `intents[]`, and an `ingest` function. */
+export function isValidationIngestAdapter(value: unknown): value is ValidationIngestAdapter {
+  if (typeof value !== 'object' || value === null) return false;
+  const a = value as Partial<ValidationIngestAdapter>;
+  return (
+    typeof a.key === 'string' &&
+    a.key.length > 0 &&
+    typeof a.source === 'string' &&
+    a.source.length > 0 &&
+    Array.isArray(a.intents) &&
+    a.intents.every(isValidationIntentId) &&
+    typeof a.ingest === 'function'
+  );
+}
+
+/** Assert the ingest-adapter contract, throwing {@link ValidationAdapterContractError} on the first breach. */
+export function assertValidationIngestAdapter(value: unknown): asserts value is ValidationIngestAdapter {
+  if (typeof value !== 'object' || value === null) throw new ValidationAdapterContractError('not an object');
+  const a = value as Partial<ValidationIngestAdapter>;
+  if (typeof a.key !== 'string' || a.key.length === 0) throw new ValidationAdapterContractError('missing a non-empty "key"');
+  if (typeof a.source !== 'string' || a.source.length === 0) throw new ValidationAdapterContractError('missing a non-empty "source"');
+  if (!Array.isArray(a.intents)) throw new ValidationAdapterContractError('"intents" must be an array');
+  const unknown = a.intents.filter((i) => !isValidationIntentId(i));
+  if (unknown.length > 0) throw new ValidationAdapterContractError(`unknown intent id(s): ${unknown.join(', ')}`);
+  if (typeof a.ingest !== 'function') throw new ValidationAdapterContractError('missing an "ingest" method');
+}
