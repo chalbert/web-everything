@@ -1,9 +1,11 @@
 ---
 kind: task
 parent: "1522"
-status: active
+status: resolved
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
+graduatedTo: "plateau-app:tools/explorer/oracles/layoutShift.ts (no-excessive-cls advisory oracle) + playwrightCollector.ts (bounded PerformanceObserver CLS read)"
 tags: []
 ---
 
