@@ -3,11 +3,34 @@ kind: story
 size: 5
 parent: "1226"
 status: open
+blockedBy: ["2026"]
 dateOpened: "2026-07-01"
 tags: [parity, webtheme, dtcg, flavor, keystone, integration-seam]
 ---
 
 # Design-system manifest → ThemeSource loader (the parity integration seam)
+
+## Blocked — the visible-retheme acceptance depends on an undecided consumption seam (#2026, 2026-07-01 batch pre-flight)
+
+Claimed under a serial batch; a mid-work pre-flight found the Digest's core premise is **false as stated**.
+The Digest says *"the FUI components actually read the legacy family-based model
+(`fui:plugs/webtheme/resolveTheme.ts:25`)"* — but a grep for `resolveTheme` / `getRootTheme` / `ThemeSource`
+across `blocks/`, `demos/`, `workbench/`, `plugs/` finds **zero consumers** outside `fui:plugs/webtheme/`
+itself. No FUI component reads the theme runtime at all. The `we-card` / `we-badge` blocks read a
+hand-authored **site vocabulary** (`var(--color-border)`, `var(--color-surface-card)`, `var(--radius-md)`,
+`var(--shadow-sm)` — see `fui:blocks/card/Card.ts:91-100`), which is **neither** the legacy family emit
+(`--token-color-*` from `fui:plugs/webtheme/emitCss.ts`) **nor** the DTCG compile names.
+
+**Consequence:** the loader + DTCG→legacy bridge + unit test (Acceptance 2 & 3) are mechanical and buildable,
+but Acceptance **1** — *"injecting it visibly re-themes a live `we-card` + `we-badge`"* — is **unmeetable** as a
+standalone: an injected `ThemeSource` paints `--token-*` props no component consumes. Making a card visibly
+re-theme requires first **deciding the projection-vocabulary contract** (does `ThemeSource` project onto the
+components' current `--color-*`/`--radius-*` names, or do the block CSS migrate onto `var(--token-*)`?) and the
+block-CSS migration path. A **lossy DTCG→`--wb-*` precedent** exists for the workbench stage **only** (#930-A,
+`fui:workbench/manifestBridge.ts`) — that decided the *demo* seam, not the real component seam. This is
+undecided platform design, so it is filed as **#2026** and this story is `blockedBy` it. Do **not** unilaterally
+pick a vocabulary to force batchability. Once #2026 rules, this story builds the loader + wires it to whatever
+projection #2026 chose.
 
 ## Digest
 
