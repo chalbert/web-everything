@@ -144,12 +144,12 @@
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/app-shell/",
+      "path": "@frontierui/blocks/app-shell/AppShellElement.ts",
       "declarations": [
         {
           "kind": "class",
-          "name": "createAppShell",
-          "description": "Chrome layout primitive that frames a page: a (sticky) header with a brand lockup and a header-controls region, an optional nav landmark, the main content region (preceded by a skip link), and an optional footer. Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C).",
+          "name": "AppShellElement",
+          "description": "Chrome layout primitive that frames a page: a (sticky) header with a brand lockup and a header-controls region, an optional nav landmark, the main content region (preceded by a skip link), and an optional footer. Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C). Packaged as the persistent light-DOM `<we-app-shell>` custom element (#1617, B-mechanism per block-standard §7) whose reactive `config` property re-renders the shell; with `slotMain` it projects the element's authored light-DOM children into `<main>` (a real `<slot>` only projects in shadow DOM).",
           "x-webeverything": {
             "webStandards": {
               "landmarkRoles": {
@@ -179,10 +179,26 @@
       "exports": [
         {
           "kind": "js",
+          "name": "AppShellElement",
+          "declaration": {
+            "name": "AppShellElement",
+            "module": "@frontierui/blocks/app-shell/AppShellElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerAppShell",
+          "declaration": {
+            "name": "registerAppShell",
+            "module": "@frontierui/blocks/app-shell/AppShellElement.ts"
+          }
+        },
+        {
+          "kind": "js",
           "name": "createAppShell",
           "declaration": {
             "name": "createAppShell",
-            "module": "@frontierui/blocks/app-shell/"
+            "module": "@frontierui/blocks/app-shell/AppShellElement.ts"
           }
         },
         {
@@ -190,7 +206,15 @@
           "name": "mountAppShell",
           "declaration": {
             "name": "mountAppShell",
-            "module": "@frontierui/blocks/app-shell/"
+            "module": "@frontierui/blocks/app-shell/AppShellElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "mountAppShellLight",
+          "declaration": {
+            "name": "mountAppShellLight",
+            "module": "@frontierui/blocks/app-shell/AppShellElement.ts"
           }
         },
         {
@@ -198,7 +222,7 @@
           "name": "mountInDocument",
           "declaration": {
             "name": "mountInDocument",
-            "module": "@frontierui/blocks/app-shell/"
+            "module": "@frontierui/blocks/app-shell/AppShellElement.ts"
           }
         }
       ]
@@ -1397,6 +1421,38 @@
             "name": "registerDataTable",
             "module": "@frontierui/blocks/renderers/data-table/index.ts"
           }
+        },
+        {
+          "kind": "js",
+          "name": "DataTableEnhancer",
+          "declaration": {
+            "name": "DataTableEnhancer",
+            "module": "@frontierui/blocks/renderers/data-table/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DataTableEnhancedElement",
+          "declaration": {
+            "name": "DataTableEnhancedElement",
+            "module": "@frontierui/blocks/renderers/data-table/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "enhanceDataTables",
+          "declaration": {
+            "name": "enhanceDataTables",
+            "module": "@frontierui/blocks/renderers/data-table/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerDataTableEnhancer",
+          "declaration": {
+            "name": "registerDataTableEnhancer",
+            "module": "@frontierui/blocks/renderers/data-table/index.ts"
+          }
         }
       ]
     },
@@ -1870,12 +1926,12 @@
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/disclosure-nav/",
+      "path": "@frontierui/blocks/disclosure-nav/DisclosureNavElement.ts",
       "declarations": [
         {
           "kind": "class",
-          "name": "createDisclosureNav",
-          "description": "Horizontal APG Disclosure Navigation header: a row of section heads, each disclosing an absolutely-positioned dropdown panel below it (collapsing to an inline accordion under 940px). The horizontal-popup counterpart of the vertical sectioned-nav, it reproduces the WE-docs site nav and mounts in the #865 chrome header (#931). Click/Enter/Space toggles a section (opening one closes its siblings), Escape collapses the open one, an outside click dismisses, and the active link carries aria-current.",
+          "name": "DisclosureNavElement",
+          "description": "Horizontal APG Disclosure Navigation header: a row of section heads, each disclosing an absolutely-positioned dropdown panel below it (collapsing to an inline accordion under 940px). The horizontal-popup counterpart of the vertical sectioned-nav, it reproduces the WE-docs site nav and mounts in the #865 chrome header (#931). Packaged as the persistent light-DOM `<we-disclosure-nav>` custom element (#1615, B-mechanism per block-standard §7) whose reactive `config` property re-renders the nav; the headless nav:menubar + nav:section traits stay attachable to author markup. Click/Enter/Space toggles a section (opening one closes its siblings), Escape collapses the open one, an outside click dismisses, and the active link carries aria-current.",
           "x-webeverything": {
             "implementsIntent": "navigation",
             "webStandards": {
@@ -1900,10 +1956,26 @@
       "exports": [
         {
           "kind": "js",
+          "name": "DisclosureNavElement",
+          "declaration": {
+            "name": "DisclosureNavElement",
+            "module": "@frontierui/blocks/disclosure-nav/DisclosureNavElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerDisclosureNav",
+          "declaration": {
+            "name": "registerDisclosureNav",
+            "module": "@frontierui/blocks/disclosure-nav/DisclosureNavElement.ts"
+          }
+        },
+        {
+          "kind": "js",
           "name": "createDisclosureNav",
           "declaration": {
             "name": "createDisclosureNav",
-            "module": "@frontierui/blocks/disclosure-nav/"
+            "module": "@frontierui/blocks/disclosure-nav/DisclosureNavElement.ts"
           }
         },
         {
@@ -1911,7 +1983,15 @@
           "name": "mountDisclosureNav",
           "declaration": {
             "name": "mountDisclosureNav",
-            "module": "@frontierui/blocks/disclosure-nav/"
+            "module": "@frontierui/blocks/disclosure-nav/DisclosureNavElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "mountDisclosureNavLight",
+          "declaration": {
+            "name": "mountDisclosureNavLight",
+            "module": "@frontierui/blocks/disclosure-nav/DisclosureNavElement.ts"
           }
         },
         {
@@ -1919,7 +1999,7 @@
           "name": "mountInDocument",
           "declaration": {
             "name": "mountInDocument",
-            "module": "@frontierui/blocks/disclosure-nav/"
+            "module": "@frontierui/blocks/disclosure-nav/DisclosureNavElement.ts"
           }
         }
       ]
@@ -4633,11 +4713,11 @@
               "description": "On a child <template>: canActivate guard name, resolved from the @routeGuard context."
             },
             {
-              "name": "route:guard:leave",
+              "name": "route:guard-leave",
               "type": {
                 "text": "string"
               },
-              "description": "On a child <template>: canDeactivate guard name, resolved from the @routeGuard context."
+              "description": "On a child <template>: canDeactivate guard name, resolved from the @routeGuard context. Renamed from the double-colon route:guard:leave per #1991 (family-only colon: the route family carries the colon, the member name is a bare hyphen); the old spelling stays accepted as a back-compat alias."
             },
             {
               "name": "route:loader",
@@ -4659,6 +4739,13 @@
                 "text": "string"
               },
               "description": "On a child <template>: target named outlet (omit for the primary outlet)."
+            },
+            {
+              "name": "route:title",
+              "type": {
+                "text": "string"
+              },
+              "description": "On a child <template>: the document title for this route (the Document Title intent's `route` source). May reference route params (e.g. \"User :id\"). Registered as a `base`-layer contribution in CustomTitleRegistry and resolved on route-change; the site template, notification count, and transient overrides compose on top."
             },
             {
               "name": "lazy",
@@ -4918,12 +5005,12 @@
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/sectioned-nav/",
+      "path": "@frontierui/blocks/sectioned-nav/SectionedNavElement.ts",
       "declarations": [
         {
           "kind": "class",
-          "name": "createSectionedNav",
-          "description": "Sectioned-disclosure navigation panel: collapsible section heads (W3C APG Disclosure Navigation) over link lists — the sectioned counterpart of the flat nav-list block. Click toggles a section, Escape collapses the focused one, and the active link carries aria-current. Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C).",
+          "name": "SectionedNavElement",
+          "description": "Sectioned-disclosure navigation panel: collapsible section heads (W3C APG Disclosure Navigation) over link lists — the sectioned counterpart of the flat nav-list block. Click toggles a section, Escape collapses the focused one, and the active link carries aria-current. Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C). Packaged as the persistent light-DOM `<we-sectioned-nav>` custom element (#1616, B-mechanism per block-standard §7) whose reactive `config` property re-renders the nav; the headless nav:section trait stays attachable to author markup.",
           "x-webeverything": {
             "implementsIntent": "navigation",
             "webStandards": {
@@ -4948,10 +5035,26 @@
       "exports": [
         {
           "kind": "js",
+          "name": "SectionedNavElement",
+          "declaration": {
+            "name": "SectionedNavElement",
+            "module": "@frontierui/blocks/sectioned-nav/SectionedNavElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerSectionedNav",
+          "declaration": {
+            "name": "registerSectionedNav",
+            "module": "@frontierui/blocks/sectioned-nav/SectionedNavElement.ts"
+          }
+        },
+        {
+          "kind": "js",
           "name": "createSectionedNav",
           "declaration": {
             "name": "createSectionedNav",
-            "module": "@frontierui/blocks/sectioned-nav/"
+            "module": "@frontierui/blocks/sectioned-nav/SectionedNavElement.ts"
           }
         },
         {
@@ -4959,7 +5062,15 @@
           "name": "mountSectionedNav",
           "declaration": {
             "name": "mountSectionedNav",
-            "module": "@frontierui/blocks/sectioned-nav/"
+            "module": "@frontierui/blocks/sectioned-nav/SectionedNavElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "mountSectionedNavLight",
+          "declaration": {
+            "name": "mountSectionedNavLight",
+            "module": "@frontierui/blocks/sectioned-nav/SectionedNavElement.ts"
           }
         },
         {
@@ -4967,7 +5078,7 @@
           "name": "mountInDocument",
           "declaration": {
             "name": "mountInDocument",
-            "module": "@frontierui/blocks/sectioned-nav/"
+            "module": "@frontierui/blocks/sectioned-nav/SectionedNavElement.ts"
           }
         }
       ]
@@ -5869,7 +5980,7 @@
               "type": {
                 "text": "string"
               },
-              "description": "On <auto-heading>: explicit heading level (e.g. \"3\"); highest-priority source for the resolved <hN> tag, clamped to a maximum of 6.",
+              "description": "On <auto-heading>: an explicit heading level (e.g. \"3\"), clamped to a maximum of 6, is the default source for the resolved <hN> tag. The opt-in value \"auto\" instead computes the level from sectioning-ancestor depth — the document-outline behaviour native HTML never shipped — and overrides any injector-provided level (#2058).",
               "fieldName": "level"
             },
             {
@@ -5927,7 +6038,7 @@
               "headingElements": {
                 "status": "Standard",
                 "pattern": "<h1>–<h6> provide document heading hierarchy; WHATWG outline algorithm removed from spec",
-                "adoption": "AutoHeading replaces itself with the correct <hN> element based on nesting depth or injector-provided level",
+                "adoption": "AutoHeading replaces itself with the correct <hN> element based on an explicit level or injector-provided level; opt-in level=\"auto\" revives the removed WHATWG outline algorithm by computing the level from sectioning-ancestor depth (#2058)",
                 "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/Heading_Elements"
               },
               "ariaHeadingRole": {
