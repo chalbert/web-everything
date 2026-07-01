@@ -1,0 +1,84 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  #1985 Rung 2 ratified the <strong>direction</strong> — the constellation's writers collaborate through the
+  remote in a PR-flow (clone &rarr; push &rarr; gate &rarr; review &rarr; merge). This topic prepares the
+  <strong>rollout mechanism</strong>: how a multi-session writer clones, runs a dev server, gates, and lands —
+  driven to a concrete, buildable default with <em>no further decisions spawned</em> (it is meant to be the last
+  decision before the build).
+</p>
+
+<h2>In-repo grounding (the reframe)</h2>
+<p>
+  The clone/lane/push machinery is <strong>already built and proven</strong> (#1933, resolved): a persistent
+  <code>--reference</code>-shared lane pool (<code>scripts/lane-pool.mjs</code>), <code>lane/*</code> push, a
+  central integrator that merges one-at-a-time with a full gate and rebase-retry, and cross-repo coupled-clone
+  dispatch (#1943); #1995 made the lane push reliable. So the question is <strong>not</strong> "build
+  provisioning" — that exists. What is <em>not</em> built is <strong>per-clone dev servers</strong>, and the
+  single key finding collapses that to something small:
+</p>
+<ul>
+  <li><strong>FUI is not a port problem.</strong> It resolves by a <strong>relative</strong> path-alias to
+    <code>../frontierui</code> (<code>vite.config.mts:15,206</code>), so a coupled WE+FUI <em>sibling clone</em>
+    (already how #1943 provisions cross-repo lanes) wires FUI <strong>for free</strong>.</li>
+  <li>The entire unsolved coupling reduces to <strong>one pair of ports</strong> (vite <code>:3000</code> + 11ty
+    <code>:8080</code>) and <strong>one hardcoded cross-reference</strong> — the 11ty proxy targets, all
+    hardcoded to <code>localhost:8080</code> (<code>vite.config.mts:119-153</code>, a hand-maintained allowlist
+    per #210).</li>
+</ul>
+
+<h2>Prior art (dev-infra)</h2>
+<ul>
+  <li><strong>Vite idiom:</strong> read <code>server.port</code> and <code>proxy.target</code> from env (via
+    <code>loadEnv</code>), with <code>strictPort:true</code> (fail loud on collision, never silently +1) and
+    <code>changeOrigin:true</code> (rewrite the upstream <code>Host</code>). Only the <code>target</code> needs
+    parameterizing; keep the 11ty port internal behind the proxy.</li>
+  <li><strong>Deterministic offset vs dynamic scan:</strong> index/offset gives <em>stable, addressable</em>
+    URLs with no registry; a free-port scan (<code>get-port</code>/<code>portfinder</code>) is more
+    collision-robust but needs a registry/lockfile and loses run-to-run addressability.</li>
+  <li><strong>Monorepo / worktree convention:</strong> a hash-or-index &rarr; <em>reserved port-block</em> per
+    worktree, injected via a generated <code>.env.local</code>, with a <strong>linear probe</strong> on
+    collision (Superset <code>*_PORT_BASE</code> blocks; <code>portree</code>'s FNV32(branch:service)%range +
+    probe). The linear-probe folds the scan's robustness into the deterministic scheme.</li>
+  <li><strong>Compose lesson:</strong> isolating names &ne; isolating host ports — drive host ports from a
+    generated per-instance env <em>by script</em>, not by hand.</li>
+</ul>
+
+<h2>Synthesis — five forks, three support-both</h2>
+<ul>
+  <li><strong>Fork 1 — clone scope (merit fork) — decided isolate-by-default for automation:</strong> every
+    agent / <code>/workflow</code> session works in a clone and converges via the integrator's auto-merge
+    (<code>main</code> is convergence-only for agents); the <strong>human keeps direct-to-<code>main</code></strong>
+    as the single trusted writer. The prepared "tiered/file-overlap" default was refuted — the overlap line is
+    only computable for the orchestrator's own partition, never for an ad-hoc stranger writing <code>main</code>,
+    so it can't guarantee parallel safety, and it doesn't practice the PR-flow #1985 ratified.</li>
+  <li><strong>Fork 2 — per-lane port assignment (code-shape fork) — ratified:</strong>
+    <strong>pure deterministic offset by lane index + <code>strictPort</code></strong> (no linear probe — a
+    probe is dynamic discovery and would dissolve the fork), with <strong>per-repo thousands-bands: WE
+    <code>3000</code>/<code>8080</code>, plateau-app <code>4000</code>, Frontier UI <code>6000</code></strong>
+    (<code>5000</code>/<code>7000</code> are macOS-reserved; FUI's current <code>3001</code>/<code>3002</code>/<code>8082</code>
+    overlap WE and relocate to <code>6000s</code>). Ports and the proxy target are env-driven via a generated
+    <code>.env.local</code>.</li>
+  <li><strong>Fork 3 — landing gate (merit fork) — decided fully automatic:</strong>
+    <strong>auto-merge on gate-green, no manual merge and no human review</strong> ("no manual merge or test").
+    <code>check:standards</code> doesn't render, so the render gap is closed by <strong>automation, not a
+    human</strong> — the <em>mechanism</em> is decided in Fork 5. Per-item human review stays opt-in, never
+    required.</li>
+  <li><strong>Fork 4 — branch-protection shape (merit fork) — decided asymmetric:</strong>
+    <strong><code>main</code> writable by the human, observe-only for AI/agents</strong> (agents PR-flow only).
+    Enforcement is convention now + a bot-principal branch rule later; full observe-only <code>main</code> (the
+    Rung 3 end-state) stays a future flip for when a second human appears — by then agents are already off
+    direct <code>main</code>, so only the human's path would need to close.</li>
+  <li><strong>Fork 5 — how visual changes land safely under a no-human gate (merit fork):</strong> recommended
+    default <strong>(a) render-check in the gate — the per-lane visual harness is a v1 deliverable</strong> (a
+    visual-touching lane auto-merges only when a headless render check passes, still no human); fallback
+    <strong>(b)</strong> agents don't auto-land visual changes, the human owns visual surfaces via the Fork-4
+    direct-<code>main</code> path. Reclassified in review from a validation-gate — with Fork 3 taking no human
+    gate this is a forced either/or, not a "build the harness, when?". Acceptance test = a lane boots WE+FUI
+    cross-origin and a headless Playwright run reproduces the #1895 transparent-<code>.fui-card</code> regression
+    <em>and</em> its fix, from the CLI. Files under #1933 / the explorer-judge epics (#1167/#1552).</li>
+  <li><strong>Support-both (not forks):</strong> per-clone dev server/HMR, the proxy-target env
+    parameterization, and FUI sibling-clone wiring all fall out of Forks 1+2 with no coherent excluded
+    branch.</li>
+</ul>
+{% endraw %}
