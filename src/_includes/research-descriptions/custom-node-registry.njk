@@ -1,0 +1,90 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Is a <strong>node-kind extensibility standard</strong> worth proposing — a bounded, safe way to register new
+  delimiter-based syntaxes that materialize into DOM nodes — and in what shape? The idea
+  (<code>customNodes</code> : node kinds :: <code>customElements</code> : tags) surfaced when #1989's residue
+  markers were reframed as the <em>serialized wire-format of a would-be region node-kind</em>. This is prep for
+  decision #2074, which now blocks #1989.
+</p>
+
+<h2>Code ground truth — the pattern already ships, four times over</h2>
+<p>
+  Frontier UI already implements &ldquo;register a node kind + upgrade-walk to materialize it&rdquo; as
+  <strong>four parallel plug families</strong>, each a registry + an upgrade walk:
+</p>
+<ul>
+  <li><strong>webexpressions</strong> (<code>Text</code>) &mdash; <code>CustomTextNodeParserRegistry</code> &rarr;
+    <code>CustomTextNode</code>. The base parser already carries a <strong>2-char opening/closing delimiter
+    grammar</strong> (<code>openingIdentifier</code>/<code>closingIdentifier</code>), with shipped
+    <code>{{</code>/<code>}}</code> and <code>[[</code>/<code>]]</code> parsers.</li>
+  <li><strong>webdirectives (comment)</strong> (<code>Comment</code>) &mdash; <code>CustomCommentRegistry</code>
+    &rarr; <code>CustomComment</code>.</li>
+  <li><strong>webdirectives (template)</strong> (<code>HTMLTemplateElement</code>) &mdash;
+    <code>CustomTemplateTypeRegistry</code> &rarr; <code>CustomTemplateType</code>.</li>
+  <li><strong>webdirectives (script)</strong> (<code>HTMLScriptElement</code>) &mdash;
+    <code>CustomScriptTypeRegistry</code> &rarr; <code>CustomScriptType</code>.</li>
+</ul>
+<p>
+  The upgrade walks differ only by <code>NodeFilter</code> (<code>SHOW_COMMENT</code> vs <code>SHOW_TEXT</code>),
+  and the namespace guards already mirror the Custom Elements reserved-name technique. #1986 codified the three
+  directive registries as <strong>sibling</strong> registries. No <code>CustomNodeRegistry</code> exists &mdash; it
+  would be the generalization of these four.
+</p>
+
+<h2>Prior art &mdash; standards-track</h2>
+<ul>
+  <li><strong>DOM Parts / Template Instantiation</strong> (WICG) &mdash; the closest work: <code>{{ }}</code>
+    delimiter syntax <strong>inside the inert <code>&lt;template&gt;</code> carrier</strong> (no top-level parser
+    change), modelling the new thing as <strong>handles into existing nodes, deliberately avoiding a new
+    <code>Node</code> subclass</strong>. Stalled on scope / perf-wash / vendor consensus.</li>
+  <li><strong>Custom Elements hyphen rule</strong> &mdash; the canonical bounding technique: a name must contain a
+    hyphen, <em>&ldquo;for namespacing and forward compatibility.&rdquo;</em> The platform forfeits a naming subspace
+    so userland never collides with future built-ins.</li>
+  <li><strong>The node-kind set is closed</strong> (<code>Node.nodeType</code> is a small closed integer enum) and
+    there is <strong>no prior art for a new userland <code>nodeType</code></strong>. Every mechanism extends within
+    Element or adds handles onto existing nodes. This is the load-bearing risk in the &ldquo;node-KIND&rdquo;
+    framing.</li>
+  <li><strong>WHATWG PR #12118 (merged 2026-06-25)</strong> &mdash; HTML now parses <code>&lt;?target data?&gt;</code>
+    into a real <code>ProcessingInstruction</code> node, gated by a target-grammar + <code>xml</code>/<code>xml-stylesheet</code>
+    blocklist. The platform actively re-opening a delimiter&rarr;non-Element-node path with the exact grammar+blocklist
+    bounding technique this proposal wants.</li>
+  <li><strong>Inert-carrier / opt-in precedents</strong> &mdash; <code>&lt;template&gt;</code>,
+    <code>&lt;script type=importmap&gt;</code>, <code>&lt;!DOCTYPE html&gt;</code>, <code>"use strict"</code>.
+    Cross-cutting law: successful extensions hide new syntax in an already-inert carrier <em>or</em> reuse a token
+    legacy parsers tolerate as a no-op.</li>
+</ul>
+
+<h2>Prior art &mdash; framework delimiter grammars</h2>
+<ul>
+  <li><code>{{</code> <strong>dominates</strong> the interpolation opener (7/10 engines); 2-char openers are the
+    modal case.</li>
+  <li><strong>Per-character reflected close is well-precedented</strong>: <code>{%</code>&rarr;<code>%}</code>,
+    <code>{#</code>&rarr;<code>#}</code> (Jinja/Liquid family), <code>[(</code>&rarr;<code>)]</code> (Angular),
+    <code>@*</code>&rarr;<code>*@</code> (Razor). The proposed <code>{$</code>&rarr;<code>$}</code> is structurally
+    identical to Liquid's <code>{%</code>&rarr;<code>%}</code>. The lone counter-case is ERB
+    <code>&lt;%</code>&rarr;<code>%&gt;</code> (tag-echo, not mirror).</li>
+  <li>The <strong>expression-vs-statement two-family split</strong> (<code>{{ }}</code> emit-value vs
+    <code>{% %}</code> control-flow) is <strong>near-universal</strong> &mdash; keying node kinds by opening
+    delimiter is aligned with prior art.</li>
+  <li><strong>Escaping is universal and mandatory</strong>: every <code>{{</code>-engine ships a raw/verbatim escape
+    hatch and a delimiter-override, because <code>{{</code> collides when template layers stack.</li>
+</ul>
+
+<h2>Synthesis &mdash; the forks (see the decision item)</h2>
+<ol>
+  <li><strong>What is a custom node kind?</strong> Forced toward materializing into a <em>subclass of an existing
+    node kind</em> (Text/Comment/Element), <strong>not</strong> a new <code>nodeType</code> (zero prior art). The
+    literal new-kind is the documented north-star residual.</li>
+  <li><strong>Unification scope</strong> &mdash; one shared <code>CustomNodeKind</code> registration
+    <strong>contract</strong> that the per-carrier registries implement (interface unity, mirroring #1989 Fork 2 and
+    #1986's sibling structure), vs one monolithic registry (dominated).</li>
+  <li><strong>Delimiter grammar</strong> &mdash; 2-char opening + per-character reflected close + the two-family
+    split + a <strong>mandatory escape hatch/override</strong>, vs allowing non-reflected tag-echo closes (rejected).</li>
+</ol>
+<p>
+  Supported-by-default: extends-Element-or-not is per-kind config (the carrier decides); expression interpolation is
+  already one instance (webexpressions). This <strong>generalizes</strong> #1986 &mdash; its three registries become
+  instances of the node-kind contract.
+</p>
+{% endraw %}
