@@ -1,0 +1,92 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    WAI-ARIA <strong>1.3</strong> (editor's draft, Feb 2026) mints <code>role=suggestion</code> alongside
+    <code>role=comment</code> and <code>role=mark</code>. The first two are already covered by the shipped
+    <a href="/intents/annotation/">annotation intent</a> (<code>comment</code> &rarr; the
+    <code>commenting</code> motivation; <code>mark</code> &rarr; the <code>highlight</code> disposition via
+    the Custom Highlight API). Only <code>suggestion</code> exposes an unowned residual, because
+    <strong>accepting or rejecting a suggestion mutates the host document</strong> &mdash; and annotation is
+    UX-only and &ldquo;owns no host mutation.&rdquo; This survey grounds decision
+    <a href="/backlog/2029-suggestion-accept-reject-handoff-annotation-vs-rich-text-pla/">#2029</a>: where does
+    the propose&rarr;accept/reject <em>mutation-transaction</em> lifecycle live &mdash; the rich-text Editor
+    Engine, a standalone <code>suggested-edit</code> contract, or annotation end-to-end?
+</p>
+
+<h3>The discriminator this survey pins down</h3>
+<p>
+    A mutation transaction has exactly <strong>one</strong> owner, so the branches genuinely cannot coexist.
+    The load-bearing question across all prior art is therefore: <strong>who owns the mutation transaction,
+    and does the pattern work over a non-editable / read-only host?</strong> (a PDF, published HTML, a
+    Hypothesis-style overlay). The second half is the key test for a standalone contract: a read-only host
+    has no editor engine to delegate an <em>apply</em> to.
+</p>
+
+<h3>Native grounding &mdash; ARIA 1.3 ties suggestion to an editable document</h3>
+<p>
+    The <a href="https://w3c.github.io/aria/">WAI-ARIA 1.3</a> <code>role=suggestion</code> semantically
+    denotes <em>&ldquo;a single proposed change to an <strong>editable</strong> document&rdquo;</em> &mdash; the
+    element wraps one <code>insertion</code> role and one <code>deletion</code> role
+    (<a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/comment_role">MDN</a>). The
+    native semantic itself binds a suggestion to an <em>editable</em> surface; a read-only overlay is outside
+    the role's own framing. <code>aria-details</code> now takes multiple IDREFs, so several comments can hang
+    off one annotated span &mdash; but that is the <em>commenting</em> path, already covered.
+</p>
+
+<h3>Finding 1 &mdash; every editor product puts the mutation on the engine, gated on edit permission</h3>
+<p>
+    In <a href="https://support.google.com/docs/answer/6033474">Google Docs</a> you enter
+    &ldquo;Suggesting&rdquo; mode on an editable document; only users with <em>can edit</em> permission can
+    accept or reject, and <em>can view</em> users cannot even see suggestions until they are accepted.
+    <a href="https://www.notion.com/help/suggested-edits">Notion suggested edits</a> require a live editable
+    page (&ldquo;can comment&rdquo; and above). The apply/discard is owned by the editor, not by a separate
+    annotation layer.
+</p>
+
+<h3>Finding 2 &mdash; in code, accept/reject dispatch editor transactions</h3>
+<p>
+    <a href="https://github.com/davefowler/prosemirror-suggestion-mode">prosemirror-suggestion-mode</a>
+    exposes <code>acceptSuggestionsInRange</code> / <code>rejectSuggestionsInRange</code>: accepting
+    integrates the change into the document and discards the tracking metadata; rejecting reverts to the prior
+    state &mdash; both applied through <strong>ProseMirror's transaction system</strong>. Track-changes
+    (suggestions) are landing in <a href="https://docs.yjs.dev/ecosystem/editor-bindings/prosemirror">Yjs
+    14</a> as changesets/attributions in <code>y-prosemirror</code>. The mutation runs on the editor engine.
+</p>
+
+<h3>Finding 3 &mdash; CRDT-native editors separate the data layer, but there is still an engine</h3>
+<p>
+    <a href="https://block-suite.com/blog/document-centric.html">BlockSuite</a> separates the document
+    <em>data</em> layer (a CRDT doc) from editor <em>logic</em>, but a suggestion still resolves <em>into</em>
+    that content model &mdash; the CRDT doc is the mutation target. Separating data from logic is exactly the
+    &ldquo;engine is a protocol&rdquo; seam WE already draws; it does not move the mutation onto the
+    annotation layer.
+</p>
+
+<h3>Finding 4 &mdash; the read-only / foreign host has no engine, so the &ldquo;suggestion&rdquo; is a record</h3>
+<p>
+    Over a PDF, published HTML, or a <a href="https://web.hypothes.is/">Hypothesis</a>/RecogitoJS overlay
+    there is <strong>no editor engine</strong>: a suggestion is a proposal record (a marker plus proposed
+    replacement text) that <em>cannot be applied to the host</em> &mdash; you cannot mutate a PDF. This is a
+    degenerate suggestion, not the mainline editable-document accept/reject the ARIA role and every product
+    model. It is the one case where there is no engine to delegate to.
+</p>
+
+<h3>WE-tree decomposition</h3>
+<p>
+    The <a href="/intents/annotation/">annotation intent</a> is UX-only &mdash; its summary says it
+    &ldquo;owns no anchor machinery, no host mutation,&rdquo; and its <code>researchGaps</code> already asks
+    whether suggestion accept/reject is &ldquo;an annotation-intent concern (it mutates the host) or strictly
+    the rich-text model's&rdquo; and to &ldquo;define the handoff.&rdquo; The
+    <a href="/intents/rich-text/">rich-text intent</a> is <em>also</em> UX-only: it states the engine that
+    &ldquo;maintains the content model, applies operations, and serializes&rdquo; is the <strong>Editor Engine
+    protocol / a Technical Configurator concern, not part of this UX intent.</strong> So &ldquo;rich-text owns
+    the mutation&rdquo; already resolves to &ldquo;the Editor Engine protocol owns it&rdquo; &mdash; a separate
+    composed contract. The <a href="/backlog/1408-content-annotation-highlight-comment-on-selection-standard-p/">#1408</a>
+    precedent split the durable-range-anchor out of annotation into its own composed contract precisely
+    because that machinery is technical, not UX (<code>platform-decisions.md#intents-ux-only</code>), with
+    separate-and-decouple as the standing bias. The propose&rarr;accept/reject state machine is that same
+    technical machinery &mdash; the marker/payload stays on the UX intent; the transaction machinery splits
+    into a small composed <code>suggested-edit</code> contract whose <em>apply</em> step is delegated to the
+    Editor Engine protocol when the host is editable, or held inert when it is read-only.
+</p>
+{% endraw %}

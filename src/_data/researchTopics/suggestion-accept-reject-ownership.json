@@ -1,0 +1,26 @@
+{
+  "id": "suggestion-accept-reject-ownership",
+  "title": "Suggestion accept/reject — who owns the mutation transaction (annotation vs rich-text vs a standalone contract)",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #2029 (front-B ARIA-1.3 delta of the #1399 latent-standard discovery program): WAI-ARIA 1.3 (editor's draft Feb 2026) mints role=suggestion alongside role=comment and role=mark. comment -> annotation `commenting` motivation and mark -> annotation `highlight` disposition (Custom Highlight API) are both already covered by the shipped we:src/_data/intents/annotation.json; only `suggestion` exposes an unowned residual, because accepting/rejecting a suggestion MUTATES the host document (Google-Docs suggestion mode), which a UX-only annotation intent that 'owns no host mutation' cannot own. The open question is placement: who owns the propose->accept/reject mutation-transaction lifecycle. THE DECISIVE DISCRIMINATOR the survey establishes = who owns the mutation transaction in each prior-art system, and whether suggestions work over NON-EDITABLE / read-only hosts (the key test for candidate (b) a standalone contract). Findings: (1) The ARIA 1.3 spec itself scopes role=suggestion to 'a single proposed change to an EDITABLE document' — the element wraps an insertion role + a deletion role; the native semantic ties suggestion to an editable surface, not a read-only overlay. (2) Google Docs: you enter 'Suggesting' mode on an editable doc; only users with 'can edit' permission can accept/reject; 'can view' users cannot even SEE suggestions until accepted — the editor (engine) owns the transaction. Notion suggested edits: needs a live editable page ('can comment' and above). (3) ProseMirror suggestion-mode (davefowler/prosemirror-suggestion-mode) + y-prosemirror track-changes (Yjs 14 changesets/attributions): acceptSuggestionsInRange / rejectSuggestionsInRange dispatch EDITOR TRANSACTIONS through ProseMirror's transaction system — the editor engine integrates the change into the document (accept) or reverts (reject). The mutation transaction has ONE owner and it is the editor engine, never the annotation layer. (4) CRDT-native editors (BlockSuite) separate the document DATA layer from editor LOGIC, but a suggestion still resolves into a content model — there IS an engine; the CRDT doc is the mutation target. (5) THE READ-ONLY / FOREIGN-HOST CASE (PDF, published HTML, Hypothesis/RecogitoJS-style overlay annotators) is the genuine discriminator: there is NO editor engine, so a 'suggestion' over such a host is a PROPOSAL RECORD that cannot be applied to the host at all — you cannot mutate a PDF. This is a degenerate suggestion (a marker + proposed replacement text with no appliable target), not the mainline editable-document accept/reject the ARIA role and every editor product model. WE-tree grounding: annotation intent is UX-only and 'owns no host mutation' (its researchGaps array literally asks 'is accept/reject ... an annotation-intent concern (it mutates the host) or strictly the rich-text model's? Define the handoff'); the rich-text INTENT is ALSO UX-only and explicitly states 'the engine that maintains the content model, applies operations, and serializes — is the Editor Engine protocol / a Technical Configurator concern, NOT part of this UX intent' — so 'rich-text owns the mutation' resolves to 'the Editor Engine protocol owns it', which is already a separate composed contract. The #1408 precedent (codifiedIn platform-decisions.md#intents-ux-only) SPLIT the durable-range-anchor out of annotation into its own composed contract because serialize/re-resolve/fuzzy/orphan machinery is TECHNICAL not UX, with separate-and-decouple as the standing bias (burden of proof on combining). Recommendation to ratify in #2029: the suggestion propose->accept/reject state machine is technical mutation machinery, so per the #intents-ux-only corollary it is its own contract that BOTH annotation (as the suggestion motivation's body/marker) and the rich-text Editor Engine protocol COMPOSE — i.e. the propose/state-machine is a small standalone `suggested-edit` contract, and its APPLY step is delegated to whatever engine backs the editable host (the Editor Engine protocol) OR left as an inert proposal-record when the host is read-only. This is the #1408 shape re-applied: the marker/payload stays on the UX intent, the technical transaction machinery splits into a composed contract. Report: reports/2026-07-01-2029-suggestion-accept-reject-placement.md.",
+  "dateOpened": "2026-07-01",
+  "tags": [
+    "annotation",
+    "rich-text",
+    "suggestion",
+    "suggested-edit",
+    "track-changes",
+    "aria-1.3",
+    "role-suggestion",
+    "collaborative-editing",
+    "mutation-transaction",
+    "editor-engine-protocol",
+    "read-only-host"
+  ],
+  "relatedBlocks": [
+    "rich-text-editor",
+    "annotation"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webediting"
+}
