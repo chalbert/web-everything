@@ -21,7 +21,8 @@
         "2072-parallel-orchestrator-reopen-carried-unlanded-items-at-closeout",
         "2073-gated-push-main-to-origin-after-green-merge-close-fix-drift",
         "2018-dogfood-backlog-index-onto-we-card-badge-tag",
-        "2071-merge-time-id-collision-renumber-for-new-items-across-paralle"
+        "2071-merge-time-id-collision-renumber-for-new-items-across-paralle",
+        "2074-customnoderegistry-node-kind-extensibility-standard"
       ],
       "baseline": [
         ".claude/agent-memory/19-feedback_prep_verify_mechanism_has_consumer.md",
@@ -258,7 +259,24 @@
         "backlog/2072-parallel-orchestrator-reopen-carried-unlanded-items-at-closeout.md",
         "backlog/2073-gated-push-main-to-origin-after-green-merge-close-fix-drift.md",
         "backlog/2018-dogfood-backlog-index-onto-we-card-badge-tag.md",
-        "backlog/2071-merge-time-id-collision-renumber-for-new-items-across-paralle.md"
+        "backlog/2071-merge-time-id-collision-renumber-for-new-items-across-paralle.md",
+        "src/_includes/project-webdirectives.njk",
+        "backlog/1977-directive-proposal-defer-hydration-trigger-on-idle-visible-i.md",
+        "backlog/2076-build-the-defer-directive-in-fui-template-wrapper-trigger-vo.md",
+        "backlog/2074-customnoderegistry-node-kind-extensibility-standard.md",
+        "scripts/lib/component-render-build-hook.cjs",
+        ".eleventy.js",
+        "src/index.njk",
+        "src/css/style.css",
+        "scripts/lib/__tests__/component-render-build-hook.test.mjs",
+        ".claude/skills/batch-backlog-items/parallel-execute.workflow.js",
+        ".claude/skills/batch-backlog-items/SKILL.md",
+        "scripts/push-if-green.mjs",
+        "src/_data/weSiteTheme.js",
+        "backlog/1947-plateau-conformance-judge-per-key-matcher-dispatch-the-undel.md",
+        "scripts/lib/__tests__/token-css.test.mjs",
+        "backlog/2077-parallel-orchestrator-exclude-self-modifying-items-from-conc.md",
+        "backlog/2078-batch-gate-must-run-the-we-website-visual-lane-when-a-batch-.md"
       ],
       "at": "2026-07-01T22:59:05.436Z"
     }
