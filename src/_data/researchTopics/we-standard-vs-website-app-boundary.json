@@ -1,0 +1,21 @@
+{
+  "id": "we-standard-vs-website-app-boundary",
+  "title": "Making the WE-standard ↔ WE-website boundary legible inside one repo — spec-source vs docs-site separation prior art",
+  "status": "open",
+  "summary": "Grounds decision #2006 (surfaced ratifying #1948, recurring at #1913): the `webeverything` repo intermingles two surfaces under one name. WE-the-standard is the zero-impl authority — the intent/block/plug/protocol/semantic definitions (src/_data/*/*.json), the meta-schemas (capability-manifest/, conformance-vectors/, validation-generation/), the conformance gate (scripts/check-standards*.mjs), and the backlog/decision corpus. WE-the-website is a full 11ty+Vite product that RENDERS that standard — .eleventy.js, vite.config.mts, src/*.njk page templates, src/_data/*.js Eleventy loaders, src/_includes/*-descriptions/*.njk render partials, and its own client features (backlog board, burndown, graph, marketing landing #184). The two share a seam: the CJS assemblers scripts/lib/*-loader.cjs are require()d by BOTH the 11ty config and the ESM validators, so one spec source drives both the render and the gate. platform-decisions.md rule 6 already ratified 'the WE website ≠ the WE standard' — but on the WE↔FUI axis (source-dependency direction: the site may render/run FUI without inverting WE→FUI), NOT intra-repo legibility; and AGENTS.md:18 ('the website IS the spec') actively conflates the spec-data with the render-partials. So a placement call can't mechanically tell a standard file from a site file — the ambiguity behind #1913/#1948. Prior-art survey: standards bodies and framework projects overwhelmingly split the normative spec-SOURCE from the rendered docs/marketing SITE. Separate-repo camp: TypeScript (microsoft/TypeScript compiler+spec vs microsoft/TypeScript-Website), React (facebook/react vs reactjs/react.dev), Tailwind (tailwindlabs/tailwindcss vs tailwindlabs/tailwindcss.com), JSON Schema (spec repo vs json-schema-org/website). Same-repo-build-artifact camp: WHATWG HTML (whatwg/html spec source → html.spec.whatwg.org built from it in-repo), CSSWG drafts. The discriminator that predicts which camp: is the site a PURE render of the spec (build artifact → keep in-repo, WHATWG) or a PRODUCT with its own content + interactive features (separate repo → TS/React/Tailwind)? WE's site is the latter shape (board/burndown/graph/landing) — which argues for eventual product-tier separation — BUT WE's site uniquely also HOSTS the conformance gate that validates spec↔render sync (a coupling TS/React docs sites lack, because their docs don't gate the compiler). That coupling is the reason the cheap-and-durable move is a machine-legible internal boundary (a standard-surface manifest + a check:standards classification rule) rather than an immediate repo split, with product-tier extraction deferred behind #872 contract distribution. Classification: constellation/placement governance, not a new WE standard; binding statutes are #1246/#1282 (zero-impl), platform-decisions rule 6 (website≠standard, WE↔FUI axis), #872 (contract distribution as the split prerequisite). Three forks at DoR: separation mechanism (internal-boundary vs separate-repo vs docs-only); classification marker (manifest vs directory-move vs frontmatter); naming disambiguation (prose convention vs rename). Full grounding in reports/2026-07-01-we-standard-vs-website-boundary.md.",
+  "dateOpened": "2026-07-01",
+  "lastReviewed": "2026-07-01",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "constellation",
+    "placement",
+    "boundary",
+    "zero-implementation",
+    "website",
+    "repo-structure",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

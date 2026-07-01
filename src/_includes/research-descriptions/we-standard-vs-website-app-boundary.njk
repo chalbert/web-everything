@@ -1,0 +1,77 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/2006-differentiate-we-the-standard-from-we-the-website-app-make-t/">#2006</a>,
+  surfaced ratifying <a href="/backlog/1948-intent-resolution-substrate-home/">#1948</a> and recurring at
+  <a href="/backlog/1913-fui-product-placement/">#1913</a>: the <code>webeverything</code> repo conflates two
+  things under one name. <strong>WE-the-standard</strong> is the zero-implementation authority — the
+  intent/block/plug/protocol/semantic definitions (<code>src/_data/*/*.json</code>), the meta-schemas
+  (<code>capability-manifest/</code>, <code>conformance-vectors/</code>, <code>validation-generation/</code>),
+  the conformance gate (<code>scripts/check-standards*.mjs</code>), and the backlog/decision corpus.
+  <strong>WE-the-website</strong> is a full 11ty&nbsp;+&nbsp;Vite product that <em>renders</em> that standard —
+  <code>.eleventy.js</code>, <code>vite.config.mts</code>, <code>src/*.njk</code> page templates,
+  <code>src/_data/*.js</code> Eleventy loaders, <code>src/_includes/*-descriptions/*.njk</code> render
+  partials, and its own client features (backlog board, burndown, graph, the
+  <a href="/backlog/184-marketing-landing-pricing-site/">#184</a> marketing landing).
+</p>
+
+<h2>Why it is not already settled</h2>
+<p>
+  <a href="/governance/">platform-decisions.md</a> rule&nbsp;6 already ratifies <em>"the WE website ≠ the WE
+  standard"</em> — but explicitly on the <strong>WE↔FUI axis</strong>: its test is <em>"source-dependency
+  direction (WE→FUI), not runtime execution or rendered pixels"</em>, answering only "may the site render/run
+  FUI?" (yes, by construction). It does <em>not</em> reach <strong>intra-repo legibility</strong> — how a
+  placement call mechanically tells a standard file from a site file. Worse, <code>AGENTS.md</code> line&nbsp;18
+  (<em>"the website IS the spec"</em>) conflates the spec <em>data</em> (<code>src/_data/*.json</code>,
+  standard) with the render <em>partials</em> (<code>src/_includes/*-descriptions/*.njk</code>, website). That
+  unresolved ambiguity is the root of the <a href="/backlog/1913-fui-product-placement/">#1913</a> /
+  <a href="/backlog/1948-intent-resolution-substrate-home/">#1948</a> recurrences.
+</p>
+
+<h2>What the prior-art survey found</h2>
+<ol>
+  <li>
+    <strong>Standards bodies and framework projects overwhelmingly split the normative spec-SOURCE from the
+    rendered docs-SITE.</strong> The separate-repo camp is dominant among products with a real frontend:
+    <a href="https://github.com/microsoft/TypeScript-Website">TypeScript</a> (compiler+spec in
+    <code>microsoft/TypeScript</code>, site in <code>microsoft/TypeScript-Website</code>),
+    <a href="https://github.com/reactjs/react.dev">React</a> (<code>facebook/react</code> vs
+    <code>reactjs/react.dev</code>), <a href="https://github.com/tailwindlabs/tailwindcss.com">Tailwind</a>
+    (<code>tailwindlabs/tailwindcss</code> vs <code>tailwindlabs/tailwindcss.com</code>), and
+    <a href="https://github.com/json-schema-org/website">JSON&nbsp;Schema</a> (spec repo vs
+    <code>json-schema-org/website</code>).
+  </li>
+  <li>
+    <strong>The same-repo-build-artifact camp is the exception, and it predicts a condition.</strong>
+    <a href="https://github.com/whatwg/html">WHATWG&nbsp;HTML</a> keeps <code>html.spec.whatwg.org</code> in the
+    <code>whatwg/html</code> repo because the site is a <em>pure render</em> of the spec source (a Wattsi/Bikeshed
+    build artifact), not a product. The discriminator that predicts which camp a project lands in: <strong>is the
+    site a pure render of the spec (build artifact → keep in-repo) or a product with its own content and
+    interactive features (separate repo)?</strong>
+  </li>
+  <li>
+    <strong>WE's site has the product shape, but a coupling the frameworks lack.</strong> By content shape (board,
+    burndown, graph, marketing landing) WE's site is the <em>product</em> camp — which argues for eventual
+    product-tier separation, consistent with the identity-semantic-look-composable statute already treating "the
+    WE website" as a product frontend. <em>But</em> WE's site uniquely also <strong>hosts the conformance gate</strong>
+    that validates spec↔render sync: the CJS assemblers <code>scripts/lib/*-loader.cjs</code> are
+    <code>require()</code>d by <em>both</em> <code>.eleventy.js</code> and the ESM validators, so one spec source
+    drives both the render and the gate. TS/React docs sites carry no such gate over their compiler.
+  </li>
+</ol>
+
+<h2>How the survey shapes the forks</h2>
+<p>
+  The coupling in point&nbsp;3 is decisive on <em>sequencing</em>: an immediate repo split would sever the
+  single-gate dogfood and the shared loader seam for a confusion that is fundamentally a <em>legibility</em>
+  failure — better fixed by a machine-legible internal boundary (a <strong>standard-surface manifest</strong> +
+  a <code>check:standards</code> classification rule) now, with product-tier extraction deferred behind
+  <a href="/backlog/872-constellation-contract-distribution/">#872</a> contract distribution (which must land
+  first to give a split-out site something published to consume). This dissolves the raw "should we split the
+  repo?" question into three concrete forks at Definition&nbsp;of&nbsp;Ready — the <strong>separation
+  mechanism</strong> (internal boundary vs separate repo vs docs-only), the <strong>classification marker</strong>
+  (manifest vs directory-move vs frontmatter), and <strong>naming disambiguation</strong> (prose convention vs
+  rename). Classification: constellation/placement governance, not a new WE standard; binding statutes are
+  <a href="/governance/">#1246/#1282</a> (zero-impl), platform-decisions rule&nbsp;6 (website≠standard on the
+  WE↔FUI axis), and #872 (contract distribution as the split prerequisite). Full grounding in
+  <code>reports/2026-07-01-we-standard-vs-website-boundary.md</code>.
+</p>
