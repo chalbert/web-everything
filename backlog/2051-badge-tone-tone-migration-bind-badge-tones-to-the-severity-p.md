@@ -1,10 +1,10 @@
 ---
 kind: story
 size: 3
-status: active
-blockedBy: ["2049"]
+status: resolved
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
 tags: []
 ---
 
