@@ -445,6 +445,43 @@ The mechanism **completes one pattern across the three native inert containers**
    `CustomTemplateTypeRegistry.define()` **must** guard its key namespace as `CustomAttributeRegistry` does — the
    precise reserved-token/prefix grammar being the #1987 value-namespacing question.
 
+## Directive operand attribute names (#1993) {#directive-operand-attribute-names}
+
+Ratified 2026-07-01 ([#1993](/backlog/1993-directive-option-attribute-spelling-name-the-template-type-d/)),
+extending the directive-form section above. Given the #1983 *form* (`type=` carries directive **identity**) and
+#1987's convention (operand sub-attrs are **bare**), this names the per-directive operand role-words. It
+**inherits** bare-ness from #1987 — it does not re-decide the separator, only *which bare word* each operand
+takes. Unblocks the chunk-4 migration (#1991/#1994).
+
+1. **Operands are role-named per directive** (settled by precedent, not a fork). The operand attribute names the
+   operand's **role**, never echoes the directive (`<template type="if" if=…>`) and is never a uniform `expr=`.
+   Native universally role-names its operands (`for`/`list`/`value`/`scope`); uniform-naming has zero precedent.
+   Native has no conditional/switch/loop, and the framework siblings (Solid `<Show when>`, Lit `choose`) are
+   **JSX/JS props, not HTML attributes** — so each word below is a **merit** call, framework spelling as context.
+
+   | Directive | Operand attribute | Example |
+   |---|---|---|
+   | `if` | **`condition`** | `<template type="if" condition="@state.loggedIn">` |
+   | `switch` | **`match`** (discriminant) | `<template type="switch" match="@state.status">` |
+   | `for-each` | **`items`** (iterable+alias, fused) + bare **`key`** | `<template type="for-each" items="@users as user" key="@u.id">` |
+
+2. **`condition`** for `<template type="if">` — the literal role-word for a render-time predicate, self-documenting
+   for a proposed standard, zero connotation risk. Rejected `when`: imports a **temporal** ("when X happens" →
+   event) misread on an inert template, and its lone sibling (Solid) is a JSX prop, not HTML authority.
+
+3. **`match`** for `<template type="switch">` — role-accurate ("the value to match against the cases") and pairs
+   with the inner `case` (`match`↔`case`). Rejected `value`: `<option value>` is a form **payload** on the
+   *option* (= the case-equivalent), so its own precedent authorizes `value` on the `case`, not the discriminant.
+   `on` is a defensible runner-up (the `on:click` collision fear is void — events are colon-namespaced) but loses
+   to `match` on role-clarity. Inner branch words `case` / `default` were already settled (#1986-era, shipped).
+
+4. **`for-each` keeps the fused microsyntax** `items="@users as user"` (iterable+alias in one value, parsed by
+   the shipped `AS_REGEX`) plus a separate bare **`key`**. Every web framework (Vue/Angular/Svelte/Solid/Alpine)
+   fuses iterable+alias, so chunk-4 only re-homes identity to `type=` and renames the carrier to `items`. Rejected
+   the split (`items`/`as`/`key`): it would invent a zero-prior-art lone `as="user"` (meaningless without its
+   source) and rewrite working, cross-framework-aligned code — native has no iteration to anchor an "attribute
+   values are single values" analogy, so the *closest existing shape* is the microsyntax, not a hypothetical split.
+
 ## What this home does *not* cover
 
 The three governance areas this schema reference sliced out — **lifecycle** (#1092), **taxonomy** (#1093),

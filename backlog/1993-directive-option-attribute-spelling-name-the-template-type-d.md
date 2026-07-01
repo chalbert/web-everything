@@ -1,8 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-30"
-dateStarted: "2026-06-30"
+dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
+graduatedTo: none
+codifiedIn: "docs/agent/block-standard.md#directive-operand-attribute-names"
 preparedDate: "2026-06-30"
 relatedReport: reports/2026-06-30-directive-operand-attribute-naming.md
 tags: [webdirectives, naming, directive-form, attribute-naming, block-standard, decision]
@@ -10,7 +13,13 @@ tags: [webdirectives, naming, directive-form, attribute-naming, block-standard, 
 
 # Directive option-attribute spelling — name the `<template type=>` directive operand attributes (if-condition, switch-discriminant; reconcile for-each iterable/alias/key)
 
-**Prepared, ready to ratify.** #1983/#1986 moved the structural directives onto typed templates
+**Ratified 2026-07-01 — all three forks at their defaults** (`condition` / `match` / fused `items="… as …"` +
+bare `key`). Codified into
+[`we:docs/agent/block-standard.md#directive-operand-attribute-names`](../docs/agent/block-standard.md), extending
+the #1983 directive-form section and citing #1987 as the bare-convention authority it inherits. The fork detail
+below is the retained reasoning record (grounding + skeptic pass), not an open question.
+
+#1983/#1986 moved the structural directives onto typed templates
 (`<template type="if|switch|for-each">`) — so `type=` now carries the directive **identity**, and the operand
 expression that used to live in the attribute **value** (`view:if="@cond"`, `for-each="@items as user"`) has no
 specified home. #1987 settled the *convention* (operand sub-attrs are **bare**) but did **not** enumerate the
