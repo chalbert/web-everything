@@ -97,6 +97,15 @@ function routerDemoFallback(): Plugin {
   };
 }
 
+// #1997 (per #1996 Fork 2): per-lane dev-server ports are env-driven so a clone can boot on its own pair
+// without editing this file. Defaults are unchanged (WE's 3000/8080 band); a lane's generated `.env.local`
+// (written by scripts/lane-pool.mjs) sets these to its deterministic per-index offsets. Vite resolves this
+// config before `.env*` loads, so read `process.env` directly. `strictPort` fails loud on a collision
+// rather than silently binding the next port (which would desync the 11ty proxy target).
+const WE_VITE_PORT = Number(process.env.WE_VITE_PORT ?? 3000);
+const WE_ELEVENTY_PORT = process.env.WE_ELEVENTY_PORT ?? '8080';
+const ELEVENTY_TARGET = `http://localhost:${WE_ELEVENTY_PORT}`;
+
 export default defineConfig({
   plugins: [
     devPanel(),
@@ -110,45 +119,46 @@ export default defineConfig({
   ],
   root: './',
   server: {
-    port: 3000,
+    port: WE_VITE_PORT,
+    strictPort: true,
     fs: {
       strict: false,
     },
     proxy: {
       // Proxy Eleventy's live reload script
       '^/\\.11ty/': {
-        target: 'http://localhost:8080',
+        target: ELEVENTY_TARGET,
         changeOrigin: true,
       },
       // Proxy doc pages and assets to 11ty server (but not demos/*.html, TypeScript plugs, or blocks)
       // Note: /blocks/*.ts are served by Vite, /blocks/ doc pages are proxied
       '^/(projects|adapters|intents|capabilities|compat|protocols|design-systems|presets|plugs/(?!.*\\.ts)|cases|mission|semantics|states|resources|author|governance|rules|research|backlog|validation-rules|conformance|project-lifecycle|assets|css|js|sitemap.xml|build-id.json)': {
-        target: 'http://localhost:8080',
+        target: ELEVENTY_TARGET,
         changeOrigin: true,
       },
       // Proxy /blocks/ doc pages but not /blocks/*.ts files
       '^/blocks/(?!.*\\.ts)': {
-        target: 'http://localhost:8080',
+        target: ELEVENTY_TARGET,
         changeOrigin: true,
       },
       // Proxy demos directory and detail pages to 11ty (not individual .html demo files)
       // Demo HTML files are served directly by Vite for HMR and bootstrap injection
       '^/demos/?$': {
-        target: 'http://localhost:8080',
+        target: ELEVENTY_TARGET,
         changeOrigin: true,
       },
       '^/demos/index\\.html$': {
-        target: 'http://localhost:8080',
+        target: ELEVENTY_TARGET,
         changeOrigin: true,
       },
       // Proxy demo detail pages (e.g., /demos/declarative-spa/) to 11ty
       '^/demos/[\\w-]+/$': {
-        target: 'http://localhost:8080',
+        target: ELEVENTY_TARGET,
         changeOrigin: true,
       },
       // Proxy root and other doc pages
       '^/(index\\.html)?$': {
-        target: 'http://localhost:8080',
+        target: ELEVENTY_TARGET,
         changeOrigin: true,
       },
     },
