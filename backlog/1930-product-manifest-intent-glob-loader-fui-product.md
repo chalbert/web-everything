@@ -2,7 +2,6 @@
 kind: story
 size: 3
 status: open
-blockedBy: ["1948"]
 dateOpened: "2026-06-28"
 tags: []
 ---
@@ -15,3 +14,4 @@ Runtime impl side of #1913 (FUI/product, not WE): a per-product custom-intent ma
 
 - 2026-06-28 (batch-2026-06-28-1946-1945, parallel/serial lane): carried — lane agent flagged blocked-in-fact and reverted its edits, but the precise reason wasn't captured in the run ledger. Note for the next attempt: #1929 resolved as **definition + validate-script only, explicitly "no runtime loader"** (graduatedTo we:scripts/check-standards-rules.mjs), and frontierui has no `src/_data/intents/` glob or `loadIntents` substrate to mirror — so this slice likely has to stand up the FUI/product runtime intent-resolution substrate first, not just add a manifest glob. Re-investigate that substrate gap before re-claiming (may warrant a `blockedBy` prerequisite or a re-size).
 - 2026-06-28 (batch-2026-06-28-parallel pre-flight): **substrate gap VERIFIED, re-blocked.** Grepped frontierui — **zero** references to WE's `intentProfileResolver`/`resolveTraits`/`bundlePlan`, no `src/_data/intents/` glob, no `loadIntents`, no product-manifest concept anywhere. There is no FUI-side intent-catalog-assembly + resolver-invocation pipeline for a product manifest to feed into; the seam #1913 says to "mirror" (`src/_data/intents/`) exists only in WE. Filed the prerequisite **#1948** (FUI/product intent-resolution substrate) and re-pointed `blockedBy: ["1948"]` (the #1929 edge is resolved/satisfied). Dropped from this batch as `blocked-in-fact`, not a gut stop.
+- 2026-07-01: **#1948 ratified → unblocked.** Ruling: the reusable build-time substrate lives in **FUI** (`fui:tools/intent-resolver/`, twin of `fui:tools/trait-enforcer/vite-plugin.ts`) — glob `{WE standard catalog + product manifest}`, invoke the #776 WE resolver, emit a virtual module; plateau-app imports + wires it, supplying only its `owner:intent` manifest dir. So this story now builds **both** the FUI substrate module *and* the product-manifest glob wiring (no longer just a mirror of a missing seam). Cleared `blockedBy`. See #1948 Ruling + `we:docs/agent/platform-decisions.md#custom-intents-namespace-by-ownership` (Disambiguation).

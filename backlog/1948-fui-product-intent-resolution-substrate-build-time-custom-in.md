@@ -1,11 +1,14 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-06-28"
-dateStarted: "2026-06-29"
+dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
+graduatedTo: none
 preparedDate: "2026-06-29"
 relatedReport: reports/2026-06-28-app-authored-custom-intents-meta-schema-registry.md
 relatedProject: webintents
+codifiedIn: docs/agent/platform-decisions.md#custom-intents-namespace-by-ownership
 tags: [intents, placement, constellation, custom-intents, build-substrate]
 ---
 
@@ -15,6 +18,19 @@ tags: [intents, placement, constellation, custom-intents, build-substrate]
 > Tier-A pool until ratified. Decide the placement first; the substrate build then becomes a clean story.
 
 # FUI/product intent-resolution substrate — build-time custom-intent catalog assembly + resolver invocation seam
+
+## ✅ Ruling (ratified 2026-07-01)
+
+**Fork 1 → (a): the reusable build-time substrate lives in FUI** (`fui:tools/intent-resolver/`, the
+structural twin of `fui:tools/trait-enforcer/`). plateau-app imports and wires it into its own build,
+supplying only its `owner:intent` manifest dir + active profile. Rests on `#devtools-placement` rule 2
+(bundler plugin → FUI, by-name) as primary authority, plus impl-lives-once and the trait-enforcer
+precedent; `#constellation-placement` rule 1 + #1771 only exclude branch (c) (a new WE-resident
+substrate). The clarifying frame that settled it (discussion 2026-07-01): the substrate is a **reusable
+implementation of a WE standard** — impl (so not WE, zero-impl) but reusable-across-products (so not
+app-unique) — which *is* the definition of FUI. The **standard-vs-website-app** confusion this fork was a
+symptom of is a genuinely separate structural concern → spun off as its own item (does not gate this
+ruling). Codified as a disambiguation note on `#custom-intents-namespace-by-ownership`. Unblocks #1930.
 
 ## Digest
 
