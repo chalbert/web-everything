@@ -252,9 +252,9 @@ serial **integrate** loop on main that works the serial lane first, then merges 
 time with the **full** gate per merge (#1937: the central gate is the authority), **rebase-and-retry on
 conflict** (never force; a real semantic conflict that survives the rebase is replayed serially — the JS
 loop's single thread is the merge mutex), **deletes the remote ref after a clean land**, then regenerates
-**derived artifacts once** (the #1935 Fork-2 regen-on-merge set). It returns `{ ledger, concurrentItems,
-serialItems, crossRepoItems, multiLaneFiles, partialCrossRepo, reposProvisioned, conflictsReplayed,
-stranded, baseRef, … }`.
+**derived artifacts once** (the #1935 Fork-2 regen-on-merge set), and finally **reopens unlanded items** at
+closeout (#2072 — see below). It returns `{ ledger, concurrentItems, serialItems, crossRepoItems,
+multiLaneFiles, partialCrossRepo, reposProvisioned, conflictsReplayed, stranded, reopened, baseRef, … }`.
 
 **Cross-repo lanes — the constellation (slice 4, #1943).** A single item's impl often spans the constellation
 (#96: WE → frontierui → plateau-app). The backlog item + `claims.json` **always live in WE** (so WE is
@@ -282,6 +282,20 @@ the #1935 Option-D optimistic floor's post-hoc detector) + `r.stranded` (resolve
 `r.partialCrossRepo` (cross-repo items whose impl landed in some repos but whose WE resolve did not — re-attempt
 next run) for a human glance; the close-skill audit re-checks them. If `r` reports `aborted` or a red final gate,
 **don't trust the run** — surface it and fall back to a serial `/batch`.
+
+**Closeout reopens unlanded items (#2072).** Every item is flipped `open→active` at the central pre-claim, but
+only items whose lane **lands** get flipped to `resolved`. An item that fails to integrate — a serial-lane
+carry/drop, a WE-only replay that still didn't land, a **cross-repo-partial** (`partialCrossRepo`), or a
+reconcile-reclassified **`stranded`** — is otherwise left `status: active` on WE main with **no claim in
+`claims.json`**: a false-ownership signal that makes `readiness --select` exclude it as "active" (owned), so it
+silently vanishes from the pool though nobody is working it. The integrator's final step therefore **reconciles
+each un-resolved ledger entry back to `open`** (via `backlog.mjs release`, the canonical `active→open`
+transition — `dateStarted` stays as an attempt record) and reports them in **`r.reopened`**, so unlanded items
+honestly re-enter the next pack. Scoped to items **this run** flipped (never touches an item another session
+owns), and a cross-repo-partial's durable `lane/*` refs are **preserved** so the next run resumes rather than
+redoes. Distinct from the `stranded` *reclassify* (which only re-labels the ledger) and the concurrent-id merge
+self-healing (which heals colliding *new* items) — this fixes the on-disk backlog status of items that never
+merged at all.
 
 > **Pre-lock layer is a follow-up, not in this orchestrator.** Slices 3–4 ship the **optimistic git-merge
 > floor** (#1935 Option D) with post-hoc `multiLaneFiles` detection, now constellation-wide (cross-repo, #1943).

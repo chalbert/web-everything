@@ -534,6 +534,7 @@ const provisionPlan = INTEGRATION_ORDER
   .map((repo) => ({ repo, name: REPOS[repo].name, path: REPOS[repo].path, count: lanePlan[repo].length }));
 let lanePools = {}; // repo -> [absolute lane dir, …] (index-aligned to lanePlan[repo])
 let baseReady = false;
+let claimedThisRun = new Set(); // nums this run flipped open→active at pre-claim (scopes the closeout reopen)
 if (concurrent.length > 0 || serialItems.length > 0) {
   const setup = await agent(
     [
@@ -586,6 +587,10 @@ if (concurrent.length > 0 || serialItems.length > 0) {
     return { ledger: [], concurrentItems: 0, serialItems: serialItems.length, crossRepoItems: crossRepoCount, conflictsReplayed: 0, stranded: [], multiLaneFiles: [], partialCrossRepo: [], reposProvisioned: [], derivedRegenerated: false, pointsSpent: 0, budgetPoints, baseRef, aborted: 'setup-failed' };
   }
   baseReady = true;
+  // The nums THIS run actually flipped open→active at pre-claim (setup skips already-active items owned by
+  // another session). Closeout reopen (Phase 4g) is scoped to THIS set so an unlanded item another session
+  // owns is never reverted (boundary: "never touch an item another session owns").
+  claimedThisRun = new Set((setup.claimedNums || []).map(String));
   lanePools = setup.lanePools && typeof setup.lanePools === 'object' ? setup.lanePools : {};
   const poolSummary = Object.keys(lanePools).map((r) => `${r}:${(lanePools[r] || []).length}`).join(', ') || 'none';
   log(`Central pre-claim done: ${(setup.claimedNums || []).length} item(s) flipped active, base pushed to ${baseRef}; lane pools — ${poolSummary}.`);
@@ -962,10 +967,74 @@ if (baseReady) {
   ).catch(() => null);
 }
 
+// 4g. REOPEN unlanded items (#2072) — closeout status reconciliation. Every item was flipped open→active at
+// the central pre-claim (Phase 2), but ONLY items whose lane LANDED were flipped to `resolved`. An item that
+// failed to integrate (serial-lane carry/drop, a WE-only replay that still didn't land, a cross-repo-partial,
+// or a reconcile-reclassified `stranded`) is left `status: active` on WE main with NO claim in claims.json —
+// a FALSE ownership signal: `readiness --select` excludes it as "active" (owned) so it silently drops out of
+// the pool though nobody is working it. Reconcile each such ledger entry back to `open` (via `backlog.mjs
+// release`, which is the canonical active→open transition; it leaves dateStarted as an attempt record) so the
+// item honestly re-enters the next pack. Distinct from the #1869 stranded RECLASSIFY (which only re-labels the
+// ledger) and the concurrent-id merge self-healing (which heals colliding NEW items) — this fixes the on-disk
+// backlog status of items that never merged at all. Boundaries (#2072): only reopen items THIS run flipped
+// (claimedThisRun) so an item another session owns is never touched; a cross-repo-partial's durable lane refs
+// are PRESERVED (the partial path never deletes them) so the next run resumes rather than redoes.
+const reopened = [];
+if (baseReady) {
+  // Un-resolved ledger entries whose num this run actually claimed. `dropped:"taken"` can't occur here (setup
+  // skips already-active items), but scoping to claimedThisRun makes the boundary structural, not incidental.
+  const toReopen = [...new Set(
+    ledger
+      .filter((l) => l && l.status !== 'resolved')
+      .map((l) => String(l.num))
+      .filter((num) => claimedThisRun.size === 0 || claimedThisRun.has(num)),
+  )];
+  if (toReopen.length > 0) {
+    log(`Reopening ${toReopen.length} unlanded item(s) left active-but-unclaimed by this run so they re-enter the next pack: #${toReopen.join(', #')}`);
+    const reop = await agent(
+      [
+        RETURN_HYGIENE,
+        ``,
+        `In the PRIMARY WE checkout on branch main, RECONCILE the backlog status of items this parallel batch`,
+        `flipped to \`active\` at pre-claim but that NEVER landed \`resolved\` (#2072) — they are stuck`,
+        `\`status: active\` with no claim, a false-ownership signal that hides them from the next pack. For EACH`,
+        `num below, flip it back to open: \`node scripts/backlog.mjs release <NNN>\` (the canonical active→open`,
+        `transition; leaves dateStarted as an attempt record). It is idempotent-ish: if an item is NOT \`active\``,
+        `(e.g. it did resolve, or another session re-claimed it after this run started), \`release\` errors on the`,
+        `illegal from-status — SKIP that num and record it in \`skipped\` (do NOT --force; never revert an item`,
+        `another session owns). Do NOT touch claims.json (these items were never in it), do NOT delete any`,
+        `lane/* ref (a cross-repo-partial's refs must stay for the next run to resume). Nums (JSON):`,
+        `${JSON.stringify(toReopen)}. After releasing, commit ONLY the reopened backlog files in one commit:`,
+        `\`git add ${toReopen.map((n) => `backlog/${n}-*.md`).join(' ')} && git commit -m "batch ${batchSlug}:`,
+        `reopen ${toReopen.length} unlanded item(s) (#2072)"\` (stage ONLY those paths; never \`git add -A\`; if`,
+        `nothing was actually released, skip the commit). NEVER push. Return { reopened: [nums flipped to open],`,
+        `skipped: [{ num, reason }] }.`,
+      ].join(' '),
+      {
+        label: 'integrate:reopen-unlanded', phase: 'Integrate',
+        schema: {
+          type: 'object', required: ['reopened'], additionalProperties: true,
+          properties: {
+            reopened: { type: 'array', items: { type: 'string' } },
+            skipped: { type: 'array', items: { type: 'object', required: ['num'], additionalProperties: true, properties: { num: { type: 'string' }, reason: { type: 'string' } } } },
+          },
+        },
+      },
+    ).catch(() => null);
+    if (!reop) {
+      log('⚠ reopen-unlanded step produced no result — some items may remain active-but-unclaimed on main; the close-skill audit MUST re-check and reopen them by hand.');
+    } else {
+      for (const n of (Array.isArray(reop.reopened) ? reop.reopened : [])) reopened.push(String(n));
+      const skips = Array.isArray(reop.skipped) ? reop.skipped : [];
+      log(`Reopened ${reopened.length}/${toReopen.length} unlanded item(s) → open${skips.length ? `; skipped ${skips.length} (${skips.map((s) => `#${s.num}: ${s.reason || 'not active'}`).join(', ')})` : ''}. They re-enter the next readiness pack instead of hiding as active-but-unclaimed.`);
+    }
+  }
+}
+
 const resolved = ledger.filter((l) => l.status === 'resolved');
 const spent = resolved.reduce((s, l) => s + (Number(l.cost) || 0), 0);
 const reposProvisioned = Object.keys(lanePools).filter((r) => (lanePools[r] || []).length > 0);
-log(`Parallel batch (clone model, cross-repo) landed: ${resolved.length}/${ledger.length} resolved, ${stranded.length} stranded, ${partialCrossRepo.length} cross-repo partial, ${conflictsReplayed} item(s) replayed/failed-to-land, ${multiLaneFiles.length} multi-item file(s), ${spent}/${budgetPoints} points. The result is ALREADY on each repo's main — the main agent does NOT do a landing merge; it reports the ledger and surfaces multiLaneFiles / stranded / partialCrossRepo.`);
+log(`Parallel batch (clone model, cross-repo) landed: ${resolved.length}/${ledger.length} resolved, ${stranded.length} stranded, ${partialCrossRepo.length} cross-repo partial, ${conflictsReplayed} item(s) replayed/failed-to-land, ${reopened.length} unlanded item(s) reopened→open, ${multiLaneFiles.length} multi-item file(s), ${spent}/${budgetPoints} points. The result is ALREADY on each repo's main — the main agent does NOT do a landing merge; it reports the ledger and surfaces multiLaneFiles / stranded / partialCrossRepo.`);
 
 return {
   // The clone integrator already landed every lane on each repo's main — there is no integration branch for
@@ -979,6 +1048,7 @@ return {
   stranded,                              // #1869 defect 2: resolves that did NOT land on WE main — reclassified, never counted resolved
   multiLaneFiles,                        // files (repo-qualified) touched by >1 item — the close-skill audit surfaces these
   partialCrossRepo,                      // slice 4: cross-repo items whose impl landed in some repos but whose WE resolve did NOT — re-attempt next run
+  reopened,                              // #2072: unlanded items this run flipped active→open at closeout (else they'd hide as active-but-unclaimed) — re-enter the next pack
   reposProvisioned,                      // which constellation repos got a lane pool this batch
   derivedRegenerated,
   probeFailures,                         // #2040 watchdog: items whose probe died (→ forced serial); a mass die aborts earlier as aborted:'probe-storm'
