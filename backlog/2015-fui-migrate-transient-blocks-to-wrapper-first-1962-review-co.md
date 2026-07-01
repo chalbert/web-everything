@@ -1,6 +1,5 @@
 ---
 kind: epic
-size: 13
 status: open
 locus: frontierui
 relatedProject: webcomponents
