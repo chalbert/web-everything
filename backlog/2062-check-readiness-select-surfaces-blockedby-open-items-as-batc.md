@@ -22,7 +22,7 @@ and add a regression asserting a blockedBy-open item never appears in `batch.pic
 
 ## Likely locus
 The eligible/batchable derivation is duplicated (loader `we:src/_data/backlog.js` vs the readiness engine under
-`we:scripts/`) — see [[ui-loader-cli-engine-field-parity]]; the blockedBy gate is likely live in one path but
+`we:scripts/`) — the two derive batchability independently, so the blockedBy gate is likely live in one path but
 not the other (or skips `size ≥ 5` stories). Fix both derivations or unify them.
 
 ## Acceptance
