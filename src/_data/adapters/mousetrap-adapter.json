@@ -2,6 +2,6 @@
   "category": "lib",
   "id": "mousetrap-adapter",
   "name": "Mousetrap Adapter",
-  "status": "concept",
+  "status": "implemented",
   "summary": "Connects the Mousetrap library to the <strong>Keyboard Shortcuts Module</strong>."
 }
