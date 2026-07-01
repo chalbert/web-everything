@@ -27,6 +27,12 @@ const weSiteTheme = {
     primary: '#4f46e5', // Indigo-600 — darkened from Indigo-500 for WCAG AA contrast (#793)
     'primary-hover': '#4338ca',
     border: '#e2e8f0', // Slate-200
+    // Card surface tokens — FUI's dark defaultTheme defines these dark (#2050); the light site must
+    // override them by name like every other dark default, else the dogfooded `.fui-card` tiles (#2019)
+    // paint navy. Values reproduce the prior Card.ts light fallbacks so the site renders identically.
+    'surface-card': '#ffffff',
+    'border-light': '#f1f2f8',
+    'text-secondary': '#50526a',
   },
   spacing: {
     xs: '0.5rem',
