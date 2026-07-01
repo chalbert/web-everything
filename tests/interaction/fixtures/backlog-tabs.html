@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Interaction fixture · Backlog tabs (backlog-burndown.js)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    .backlog-tab.is-active { font-weight: 700; }
+    [role="tabpanel"] { padding: 1rem; border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <!-- The tablist + panels the tab switcher in backlog-burndown.js drives. The chart half of that script
+       early-returns when #burndown-data / #bd-chart are absent (they are here), so ONLY the tab logic runs:
+       is-active + aria-selected + roving tabindex on the tabs, hidden toggled on the panels, the active tab
+       mirrored to the URL hash, and restored from hash → localStorage → default on load. -->
+  <div class="backlog-tabs" role="tablist" aria-label="Backlog views">
+    <a href="#tracked"    class="backlog-tab is-active" role="tab" aria-selected="true"  id="tab-tracked"    data-bd-tab="tracked">Tracked work</a>
+    <a href="#active"     class="backlog-tab"           role="tab" aria-selected="false" id="tab-active"     data-bd-tab="active">Active work</a>
+    <a href="#priority"   class="backlog-tab"           role="tab" aria-selected="false" id="tab-priority"   data-bd-tab="priority">Prioritisation</a>
+    <a href="#humansetup" class="backlog-tab"           role="tab" aria-selected="false" id="tab-humansetup" data-bd-tab="humansetup">Human setup</a>
+    <a href="#graph"      class="backlog-tab"           role="tab" aria-selected="false" id="tab-graph"      data-bd-tab="graph">Graph</a>
+    <a href="#burndown"   class="backlog-tab"           role="tab" aria-selected="false" id="tab-burndown"   data-bd-tab="burndown">Burndown</a>
+  </div>
+
+  <div id="panel-tracked"    role="tabpanel">Tracked panel</div>
+  <div id="panel-active"     role="tabpanel" hidden>Active panel</div>
+  <div id="panel-priority"   role="tabpanel" hidden>Priority panel</div>
+  <div id="panel-humansetup" role="tabpanel" hidden>Human-setup panel</div>
+  <div id="panel-graph"      role="tabpanel" hidden>Graph panel</div>
+  <div id="panel-burndown"   role="tabpanel" hidden>Burndown panel</div>
+
+  <!-- The REAL shipped tab/chart script — the chart half no-ops without data; the tab half runs. -->
+  <script src="/src/assets/js/backlog-burndown.js"></script>
+</body>
+</html>

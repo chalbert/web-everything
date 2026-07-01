@@ -1,10 +1,13 @@
 ---
 kind: decision
 parent: "2015"
-status: open
+status: resolved
 preparedDate: "2026-07-01"
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
+graduatedTo: none
+codifiedIn: "docs/agent/block-standard.md#packaging-governance-1321"
 relatedReport: reports/2026-07-01-2028-light-dom-base-element-contract.md
 tags: [webcomponents, light-dom, display-contents, element-internals, transient-element, block-standard]
 ---
@@ -17,6 +20,26 @@ base-element contract: all seven leaves still extend
 [fui:blocks/transient/TransientElement.ts](../../frontierui/blocks/transient/TransientElement.ts) (self-erasing),
 and there is **no persistent light-DOM base class** in `fui:blocks/`. This item fixes the reference shape so the
 #1974 migration is mechanical. Soft-7 = **badge, tag, section-card, card, auto-heading, meter, progress**.
+
+## RULING (2026-07-01)
+
+**Per-leaf shape by the reproducibility test.** All five *presentational* leaves (**badge, tag, card, section-card,
+auto-heading**) are **host-is-the-node**: the `<we-*>` custom element carries the `.fui-*` class and its role/aria
+via `ElementInternals`, with **zero sub-element**. **progress** and **meter** **wrap a real native child**
+(`<progress>`/`<meter>` inside a `display:contents` host) — irreplaceable native, #1962 FIXED. The base class ships
+a `childTag()` hook (`null` → host-is-node; a tag → wrap-child); badge is the pilot.
+
+**The general rule this instantiates (the reproducibility test).** A block wrapping a native tag picks its shape by
+what the native element *contributes* — three buckets:
+1. **Host-reproducible** (semantics = role + ARIA only) → **host-is-node** via `ElementInternals`. Aligns with the
+   budgeted-host-node spine (we:block-standard.md:384-387, [link](../docs/agent/block-standard.md#L384)).
+2. **Irreplaceable-native** (unique rendering/interaction) → **persistent wrapper containing a real child** (#1962's
+   (B)).
+3. **Content-model-constrained** (parent accepts only the real tag) → the **reserved transient** break-glass (#1962's
+   (A)).
+
+The exhaustive tag-by-tag classification is **spun off** (not owned here) so #2028 stays the lean #1974 unblocker —
+see Follow-ups. Full discussion in *Fork 1* below.
 
 ## Grounding digest
 
@@ -59,141 +82,171 @@ and there is **no persistent light-DOM base class** in `fui:blocks/`. This item 
 
 ## What #1962 already settled — and what it left open
 
-**Settled (not re-litigated here).** #1962 ruled the soft-7 "emit their natural native tag
-(`<span>`/`<div>`/`<hN>`/`<progress>`/`<meter>`) **inside** a persistent, styleable, nameable host … a
-`display:contents` wrapper where a box would break flex/grid"
-([#1974:19-21](1974-expose-transient-vs-light-dom-as-a-configurable-per-project-.md), codifying
-[#1962](1962-transient-self-erasing-element-viability-as-a-concept-vs-the.md) →
-`we:docs/agent/block-standard.md#packaging-governance-1321`). "Native tag **inside** a persistent host" is
-**wrap-child**: the host persists, the real native tag is its child. So the original framing of this item
-("does the host **style itself** with `.fui-badge` + `internals.role`, OR wrap a native child?") is **already
-decided in favour of wrap-child** — a host-styles-itself branch (host *is* the `.fui-badge` node) is
-**statute-barred**. Two independent grounds confirm it (skeptic red-team, below): the a11y merit (§Fork 1) and
-no blast-radius advantage (grounding digest).
+**Settled (not re-litigated here).** #1962 barred exactly two things for these leaves: **self-erasure** (transient
+is demoted to a reserved break-glass mechanism) and, for **irreplaceable-native** blocks, it FIXED "a persistent
+wrapper *containing a real native control*" (we:block-standard.md:390-392,
+[link](../docs/agent/block-standard.md#L390)). That's the whole of the statute here. **Correction (2026-07-01,
+this session):** an earlier draft of this item read #1962/#1974 as ratifying **wrap-child for all seven** ("native
+tag *inside* a persistent host") and declared the host-styles-itself branch *statute-barred*. That was an
+**overread** — #1974's phrasing, not #1962's ruling. The "(B) contains a real native control" rule governs
+*native-control / irreplaceable-native* blocks (form controls, `<progress>`, `<meter>`); it says nothing about
+whether a **pure presentational leaf** (badge/tag/card) must nest an inner tag. (Verified by re-reading #1962's
+live ruling text against the earlier citation, per the "check ratified-#NNNN claims against live status" discipline.)
 
-**Left open (the genuine residual #2028 owns).** #1962 said "a `display:contents` wrapper **where a box would
-break flex/grid**." It did **not** decide the base-class *default*: does **every** soft-7 host carry
-`display:contents` (uniform shell, always adds a node), or **only** the box-breaking leaves — the inline-`<span>`
-leaves (badge/tag) instead letting the host be a plain `display:inline` styleable node with the native tag inside?
-That is a real base-class-shape fork with an a11y edge and a DOM-node-count edge. That — plus building the base
-class + piloting one leaf — is the whole of #2028.
+**What the standard actually prefers.** The composition rubric's **budgeted-host-node spine**
+(we:block-standard.md:384-387, [link](../docs/agent/block-standard.md#L384)): *"the host node is the API surface …
+budget it: pay a registered host only for [slot/AX-identity/lifecycle], route everything else through a zero-node
+mechanism."* For a presentational leaf that means: **the custom-element host *is* the styled/semantic node** (class
++ `ElementInternals` role/aria), adding **no** sub-element — unless the semantic can't be reproduced on a custom
+element, in which case a real native child is required.
+
+**Left open (the genuine fork #2028 owns).** Per leaf: is the host itself the node (zero sub-element), or must it
+contain a real native child? The answer splits by reproducibility — see Fork 1. The earlier "uniform vs
+box-conditional `display:contents`" framing is **moot for the host-is-node leaves** (a host that is the node has no
+box-of-its-own question; `display:contents` only arises where a real child *is* nested — progress/meter).
 
 ## Standing test on the three sub-questions
 
 | Sub-question | Verdict |
 |---|---|
-| **Q1 host-styles-itself vs wrap-native-child** | **NOT an open fork** — #1962 ratified wrap-child ("native tag inside a persistent host"). Grounding as statute, not a `## Fork`. The residual (below) is *within* wrap-child. |
-| **Q1′ (residual) `display:contents` on every host vs only box-breaking leaves** | **Genuine fork** → `## Fork 1`. Two coherent branches (uniform shell vs minimal-node) can't both be the default; the excluded branch is whichever loses. |
-| **Q2 where role/aria/naming/CEM land** | **Derived, not a fork.** Under wrap-child, role/aria land on the native child (where they already are — fui:BadgeElement.ts:43, fui:Progress.ts:71); CEM documents the host (the custom element is the API) in every branch. Folded into Fork 1 as a consequence line, not a `## Fork`. |
-| **Q3 zero-wrapper→wrapper regression surface** | **Grounding, not a fork.** No `.fui-badge >`/`querySelector('.fui-badge')` consumers exist; the change is node-count only. Treated as the pilot's verification scope. |
+| **Q1 host-is-the-node vs wrap-a-native-child** | **THE open fork** (`## Fork 1`) — *reopened 2026-07-01*. #1962 did **not** settle it for presentational leaves (see *What #1962 settled*); the budgeted-host-node spine actively prefers host-is-node. Splits per leaf by whether the semantic is host-reproducible. |
+| **Q2 where role/aria/naming/CEM land** | **Derived from Q1.** host-is-node → role/aria on the **host** via `ElementInternals`; wrap-child → on the native child (where they are today — fui:BadgeElement.ts:43, fui:Progress.ts:71). CEM documents the host (the custom element is the API) in every branch. |
+| **Q3 `display:contents` on the host** | **Only relevant to wrap-child leaves** (progress/meter). A host-is-node leaf has no separate box to make transparent. |
+| **Q4 regression surface** | **Grounding, not a fork.** No `.fui-badge >`/`querySelector('.fui-badge')` consumers exist (grep, both repos); the change is node-count/role-locus only. Pilot verification scope. |
 
 ## Glance table
 
-| Leaf | Native tag today | Already nested? | Needs its own box? | Recommended host |
-|---|---|---|---|---|
-| badge | `<span class="fui-badge">` | no (bare) | inline — no | `display:inline` host, `<span>` inside |
-| tag | `<span class="fui-tag">` | no (bare) | inline — no | `display:inline` host, `<span>` inside |
-| auto-heading | `<hN>` | no (bare) | block, semantic | `display:contents` host, `<hN>` inside |
-| card | `<article class="fui-card">` | no (bare) | block/landmark | `display:contents` host, `<article>` inside |
-| section-card | `<section class="fui-card">` | no (bare) | landmark | `display:contents` host, `<section>` inside |
-| progress | `<div class="fui-progress"><progress>` | **yes** | block | `display:contents` host, `<div>` inside |
-| meter | `<div class="fui-meter"><meter>` | **yes** | block | `display:contents` host, `<div>` inside |
+Shape is per-leaf, keyed to whether the host can reproduce the semantic (Fork 1). host-is-node = the
+`<we-*>` element carries the class + `ElementInternals` role/aria, **no** sub-element. **Ruling: all five
+presentational leaves are host-is-node; only progress/meter wrap** (they are irreplaceable native).
 
-## Fork 1 — `display:contents` on every host, or only where a box would break flex/grid?
+| Leaf | Native tag today | Host-reproducible semantic? | Shape |
+|---|---|---|---|
+| badge | `<span class="fui-badge">` role=status | **yes** (span carries no inherent semantics) | **host-is-node** — `<we-badge class>` + `internals.role=status` |
+| tag | `<span class="fui-tag">` decorative | **yes** (no role at all) | **host-is-node** — `<we-tag class>` |
+| card | `<article class="fui-card">` | **yes** (`internals.role=article`) | **host-is-node** |
+| section-card | `<section class="fui-card">` | **yes** (`internals.role=region`+name) | **host-is-node** |
+| auto-heading | `<hN>` | **yes** (`internals.role=heading`+`ariaLevel`) | **host-is-node** — see tooling consequence |
+| progress | `<div><progress>` | **no** — cannot reproduce `<progress>` on a custom element | **wrap real `<progress>`** (#1962 FIXED) |
+| meter | `<div><meter>` | **no** — cannot reproduce `<meter>` | **wrap real `<meter>`** (#1962 FIXED) |
 
-**Fork exists (#819):** both branches ship a persistent light-DOM base class emitting a real native tag inside the
-host; they diverge on the host's *own* box, which changes both the a11y-tree exposure of role-bearing leaves and
-the emitted node count — one branch must be the base-class default.
+**auto-heading tooling consequence.** Under host-is-node the heading is a `role=heading`+`aria-level` custom element,
+not a real `<hN>`. The a11y headings list (screen-reader rotor) is fed by ARIA-role headings the same as real tags,
+so **a11y is unaffected**. What changes: DOM tooling that scrapes `h1`–`h6` by tag misses it. The ratified stance
+(2026-07-01) is **build role-aware tooling** — read `[role=heading]`/`aria-level`, not the tag — which is correct
+regardless (it also catches ARIA headings). One live consumer today: we:src/_layouts/base.njk:319
+([link](../src/_layouts/base.njk#L319)), the WE-website TOC extractor (`h.querySelector('h1…h6')`); plateau-app
+gets role-aware tooling as it needs it. This becomes a follow-up item at closeout (no generic base/reset-stylesheet
+concern exists — WE/FUI style through the platform theme-base + intents system, keyed to component/token, never
+generic `h1–h6` selectors).
 
-- **(a) Uniform `display:contents` on every host.** The base class always sets the host to `display:contents`; the
-  inner native tag is the only box. Simple, one rule. **Cost — the a11y hazard:** `display:contents` historically
-  dropped the element from the accessibility tree; that was an Interop-2024 focus and is **fixed in Chrome (115,
-  after a 113 regression) and Firefox**, but **Safari 17 (Sept 2023) still breaks buttons and headings** under
-  `display:contents`. For badge in status mode (`role="status"`) and auto-heading (`<hN>`), a `display:contents`
-  **host** wrapping the role/heading node risks Safari dropping it. Since the *role lives on the inner tag* here
-  (not the host), the host being `display:contents` should be inert — but the Safari heading/button bug is exactly
-  in this zone, so this branch is the riskier one for the two role/heading leaves.
-- **(b) `display:contents` only where a box would break flex/grid; inline/plain host otherwise (bold default).**
-  Badge/tag hosts are `display:inline` real nodes carrying nothing but layout-transparency; auto-heading/card/
-  section-card/progress/meter hosts are `display:contents`. **This is #1962's literal text** ("where a box would
-  break flex/grid") and it keeps the a11y-sensitive leaves off the pattern with the least-settled Safari support
-  for exactly the inline leaves that never needed it. Slightly more per-leaf config (a `display` policy hook on the
-  base class), but the base class already needs a per-leaf `resolveTag()`; adding a `hostDisplay` getter is the
-  same shape.
+For the two wrap-child leaves (progress/meter) the host sets `display:contents` (transparent box) so the real child
+participates in flex/grid directly — the only place the old "uniform vs conditional `display:contents`" question
+survives, and there it is unconditional (`contents` always).
 
-**role/aria/naming/CEM (Q2, derived):** role/aria land on the **native child** in both branches — that's where
-they already are (fui:BadgeElement.ts:40-45, fui:Progress.ts:71-72), and no host `ElementInternals` is needed
-because the child is a real native tag with real semantics. Naming: the accessible name is the child's
-text/`aria-label` as today. CEM documents the **host** custom element (the authored API) in both branches;
-`fui:cemToRows.ts` reads it unchanged. The FUI `ElementInternals` mechanism (fui:declarativeComponent.ts:101-120)
-is **not** used by these leaves — it is the host-styles-itself path that #1962 barred; recorded here only to show
-host-ARIA was available and still not chosen.
+## Fork 1 — host-is-the-node, or wrap a real native child? (per leaf, by reproducibility)
 
-**Default: (b).** It is #1962's ratified phrasing, it minimises Safari `display:contents` exposure for the two
-role/heading leaves, and it adds no node where none is needed (inline leaves). (a)'s only win is uniformity, which
-a one-line `hostDisplay` getter neutralises.
+The base class must support **both** shapes because the seven leaves genuinely split:
 
-### Reference base class + pilot DOM (default (b))
+- **(A) host-is-the-node.** The `<we-*>` custom element *is* the presentational node: the `.fui-*` class goes on the
+  host, role/aria via `attachInternals()` + `internals.role`/`internals.aria*` (the mechanism already shipping at
+  fui:declarativeComponent.ts:101-120), author children stay in place. **Zero sub-element.** This is the
+  budgeted-host-node spine's zero-node ideal. Correct for **badge, tag** unconditionally — a `<span>` carries no
+  inherent semantics, so `<we-badge role=status>` is a11y-identical to `<span role=status>` with one fewer node.
+- **(B) wrap a real native child.** The host contains a real native tag and sets `display:contents` (transparent
+  box, child participates in flex/grid directly). **Required** for **progress, meter** — you cannot reproduce a real
+  `<progress>`/`<meter>` (native value semantics, bar rendering, `aria-valuenow`) on a custom element; #1962's
+  irreplaceable-native FIXED rule applies. role/aria stay on the real child, as today (fui:Progress.ts:71-72).
 
-Base class — a persistent light-DOM sibling of `TransientElement` (does **not** self-replace):
+**The two open judgment calls (⚖ in the glance table):**
+
+- **auto-heading** — `internals.role='heading'` + `internals.ariaLevel` reproduces the ARIA heading, but a real
+  `<hN>` also joins the **document outline** and matches `hN {}` author CSS / tooling that keys off the tag.
+  **Leaning (B) wrap real `<hN>`** — the outline/CSS coupling is a real win host-ARIA can't give.
+- **card / section-card** — `internals.role='article'` / `='region'`(+name) reproduces the landmark; a real
+  `<article>`/`<section>` is marginally more robust and needs no internals wiring. **Leaning (A) host-is-node**, but
+  weak — could go (B) for the same outline-ish robustness reason as heading.
+
+**Why this is the fork (not the old `display:contents` question):** with (A) there is no separate host box, so
+"uniform vs conditional `display:contents`" never arises for those leaves; it only applies to the (B) leaves, where
+it is unconditional (`contents` always, so the real child lays out directly). CEM documents the **host** custom
+element (the authored API) in both shapes; fui:cemToRows.ts reads it unchanged. Q4 (regression): no
+`.fui-badge >` / `querySelector('.fui-badge')` consumers in either repo, so the class-locus move is node-count only
+for (A) leaves.
+
+**Default (pending ratification, 2026-07-01):** badge/tag → **(A) host-is-node**; progress/meter → **(B) real
+child** (forced); auto-heading → **(B) real `<hN>`**; card/section-card → **(A)** (weak lean). Net: five host-is-node
+(badge, tag, card, section-card) + two forced wrap-child (progress, meter) + one wrap-child by judgment
+(auto-heading) — i.e. **4 host-is-node / 3 wrap-child**, awaiting the two ⚖ calls.
+
+### Reference base class + pilot DOM
+
+The base class exposes a **per-leaf shape hook** so a leaf declares (A) or (B); the transient `decorate()` body
+carries over unchanged onto whichever node ends up styled:
 
 ```ts
 // fui:blocks/light-leaf/LightLeafElement.ts (new — the reference contract)
 export default abstract class LightLeafElement extends HTMLElement {
-  /** The real native tag this leaf renders INSIDE the persistent host (e.g. 'span', 'article', 'div'). */
-  abstract resolveTag(): string;
-  /** Host's own box: 'contents' erases it (block/landmark leaves); 'inline' for bare inline leaves. */
-  protected get hostDisplay(): 'contents' | 'inline' { return 'contents'; }
-  /** Config attributes NOT copied literally onto the native child. */
+  /** (A) host-is-node: return null (style the host, no child). (B) wrap-child: return the native tag ('progress', 'hN'…). */
+  protected childTag(): string | null { return null; }
+  /** Attributes NOT copied literally onto a wrapped child (config attrs). Unused in (A). */
   get excludedAttributes(): string[] { return []; }
-  /** Map config -> native child (classes, role, aria) — same body the transient decorate(el) had. */
-  protected decorate(_el: HTMLElement): void {}
+  /** Apply class / role / aria to the styled node (host in (A), child in (B)) — the old transient decorate() body. */
+  protected decorate(_node: HTMLElement, _internals?: ElementInternals): void {}
 
   #built = false;
+  #internals?: ElementInternals;
   connectedCallback(): void {
-    if (this.#built) return;            // idempotent (custom elements can re-connect)
+    if (this.#built) return;                 // idempotent (custom elements can re-connect)
     this.#built = true;
-    this.style.display = this.hostDisplay;   // host stays; no replaceWith, no queueMicrotask
-    const el = document.createElement(this.resolveTag());
+    const tag = this.childTag();
+    if (tag === null) {                       // (A) host-is-the-node — zero sub-element
+      this.#internals ??= this.attachInternals();
+      this.decorate(this, this.#internals);   // class on host; role/aria via internals
+      return;
+    }
+    this.style.display = 'contents';          // (B) transparent host; real child lays out directly
+    const el = document.createElement(tag);
     const excluded = new Set(this.excludedAttributes);
     for (const { name, value } of this.attributes) {
       if (name === 'is' || excluded.has(name) || name === 'style') continue;
       el.setAttribute(name, value);
     }
-    el.append(...this.childNodes);      // move author children into the native child
-    this.decorate(el);                  // role/aria/classes land ON el (the native child)
-    this.replaceChildren(el);           // host now contains exactly the one native tag
+    el.append(...this.childNodes);
+    this.decorate(el);                        // class/role/aria on the real child
+    this.replaceChildren(el);
   }
 }
 ```
 
-Pilot — badge (`hostDisplay = 'inline'`, since a `<span>` badge never breaks flex/grid):
+Pilot — badge, the clearest (A) case:
 
 ```html
 <!-- authored -->
 <we-badge tone="success" status>Healthy</we-badge>
 
-<!-- transient TODAY (host vanishes, bare span) -->
+<!-- transient TODAY (host self-erases → bare span) -->
 <span class="fui-badge fui-badge--success" role="status" aria-label="success: Healthy">Healthy</span>
 
-<!-- default (b): persistent host, styled span inside; class + role stay on the span, unchanged -->
-<we-badge style="display:inline">
-  <span class="fui-badge fui-badge--success" role="status" aria-label="success: Healthy">Healthy</span>
-</we-badge>
+<!-- (A) host-is-node: the host IS the badge; class on host, role via ElementInternals; NO span -->
+<we-badge class="fui-badge fui-badge--success">Healthy</we-badge>
+<!-- ^ internals.role = 'status'; internals.ariaLabel = 'success: Healthy' -->
 ```
 
-The `.fui-badge` class, `role`, and `aria-label` sit on the **same span** as today, so CSS + `createBadge` parity +
-unit assertions on `el.className` all survive. The only DOM delta is the surviving `<we-badge>` host (node-count),
-which no selector in either repo targets. Contrast (a): identical except `style="display:contents"` on the host —
-functionally the same for badge, but on the pattern Safari mishandles for the neighbouring `role`/heading leaves,
-which is why (b) is the safer catalog-wide default.
+**Pilot verification scope (Q4):** confirm CSS still matches (`.fui-badge` now on the host — check the stylesheet
+selectors are element-agnostic, which they are: keyed to the class, no `span.fui-badge`), the computed a11y role is
+`status` via internals, and no `.fui-badge` descendant/`querySelector` consumer breaks (none exist). `createBadge`
+parity + `el.className` unit assertions may need repointing from the span to the host — that is the migration delta
+to validate on the pilot before the #1974 sweep.
 
-**Skeptic:** attack SURVIVED on the *original* framing (host-styles-itself was statute-barred by #1962 +
-Safari-a11y + moot blast-radius) and the item is re-scoped accordingly; the *residual* Fork 1 (uniform vs
-box-conditional `display:contents`) holds as the one genuine call, with (b) tracking #1962's literal text and the
-lower Safari exposure. Q2 confirmed derived (role/aria already on the child; CEM on the host either way); Q3
-confirmed grounding (zero `.fui-badge` consumers). No statute collision: #1962 codified the *policy*, this fixes
-the *base-class default* #1962 left explicitly conditional ("where a box would break flex/grid").
+**Skeptic:** the *original* host-styles-itself-is-barred verdict **fell** on re-examination — it rested on reading
+#1974's "native tag inside a host" as #1962 statute; #1962 only bars self-erasure and (for irreplaceable-native)
+mandates a real contained control. The budgeted-host-node spine actively prefers host-is-node, so (A) is the
+default *where the semantic is reproducible*; (B) is retained only where it must be (progress/meter) or earns its
+node (auto-heading's document-outline coupling). No statute collision: #1962 fixed the *policy* (no self-erasure;
+irreplaceable-native contains a real control); #2028 picks the *per-leaf node shape* #1962 left open for
+presentational leaves. Residual risk: AT that mishandles `ElementInternals` role vs a real element — low; internals
+role/aria is the WHATWG-endorsed host-ARIA surface FUI already ships.
 
 ## Relationships
 
@@ -203,3 +256,20 @@ the *base-class default* #1962 left explicitly conditional ("where a box would b
   once the base class ships + a pilot lands, the soft-7 conversion is the mechanical size·3 slice it was scoped as.
 - **Under** epic [#2015](2015-fui-migrate-transient-blocks-to-wrapper-first-1962-review-co.md) (FUI transient->
   wrapper migration); the retained `TransientElement` `isConnected` hardening stays with #2015, not here.
+
+## Follow-ups surfaced in discussion (file at closeout)
+
+1. **Role-aware heading tooling.** Repoint heading scrapers from tag (`h1–h6`) to `[role=heading]`/`aria-level` so
+   host-is-node auto-headings are seen. Concrete consumer: we:src/_layouts/base.njk:319
+   ([link](../src/_layouts/base.njk#L319)) (WE-website TOC); plus any plateau-app equivalent. Correct regardless of
+   #2028 (also catches ARIA headings). *(task)*
+2. **Visual page-hierarchy inspector.** A dev-browser/explorer tool that renders a page's heading + landmark tree
+   live, reading `[role=heading]`+`aria-level` and landmark roles (not tags) — surfaces structure/skipped-level
+   issues. Fits the dev-browser tooling family (epic #1522). *(story)*
+3. **Smart / dynamic heading level (opt-in).** `<we-auto-heading>` computes its `aria-level` from sectioning-ancestor
+   depth — the outline behaviour native HTML never shipped — trivial under host-is-node (set `internals.ariaLevel`,
+   no tag swap). Ships as an **option**, not the default. *(story)*
+4. **Native-element reproducibility taxonomy.** Classify all HTML tags into the three buckets above
+   (host-is-node / wrap-real-child / content-model-constrained) as the reference block-packaging decision rule, so
+   the catalog inherits one lookup instead of per-block judgment. Lives in the block-standard §7 / #1962 lineage.
+   *(story)*

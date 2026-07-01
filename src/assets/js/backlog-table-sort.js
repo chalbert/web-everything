@@ -61,6 +61,11 @@
   // single ON/OFF toggle (default OFF) that AND-composes with the other filters: when on, narrow to rows
   // carrying `data-splittable`. `splitSummary` is the big "N to split" pill — a one-click shortcut to it.
   function splitChip() { return document.querySelector('[data-psplit]'); }
+  // The "Hide low priority" chip — another ORTHOGONAL ON/OFF toggle (default OFF). When on, hide every
+  // row marked `priority: low` (#1620, `data-lowprio`) — across ALL readiness buckets (agent-ready,
+  // decision, epics…), not just Tier-A filler — and decrement each summary pill's count (see updateCounts
+  // in apply()). AND-composes with the facet chips.
+  function fillerChip() { return document.querySelector('[data-pfiller]'); }
   // Live accessor — the summary pills are <we-filter-chip> too, so they self-replace with a <button> on
   // upgrade; a cached reference goes stale (its listeners and our style writes hit a detached node).
   function splitSummaryEl() { return document.querySelector('[data-psplitfilter]'); }
@@ -87,6 +92,10 @@
     emptyRow.querySelector('[data-ptable-reset]').addEventListener('click', function () {
       clearSummary();
       resetAllChips();
+      // A full clear DOES drop the sticky view-level filler toggle too (resetAllChips leaves it alone) — the
+      // empty-state means every row is hidden, so the recovery must restore low-priority work as well.
+      var fc = fillerChip();
+      if (fc) fc.setAttribute('aria-pressed', 'false');
       apply();
     });
     tbodyEl.appendChild(emptyRow);
@@ -103,25 +112,30 @@
   var READY_KEY = 'we-backlog-priority-ready';
   var KIND_KEY = 'we-backlog-priority-kind';
   var SPLIT_KEY = 'we-backlog-priority-split';
+  var FILLER_KEY = 'we-backlog-priority-filler';
   var SEARCH_KEY = 'we-backlog-priority-search';
   function pressedVals(chips, attr) {
     return chips.filter(function (c) { return c.getAttribute('aria-pressed') !== 'false'; })
                 .map(function (c) { return c.getAttribute(attr); });
   }
   function splitOn() { var sc = splitChip(); return sc && sc.getAttribute('aria-pressed') === 'true'; }
+  function fillerOn() { var fc = fillerChip(); return fc && fc.getAttribute('aria-pressed') === 'true'; }
   function syncVisual() {
     readyChips().concat(kindChips()).forEach(function (c) {
       c.classList.toggle('fui-filter-chip--selected', c.getAttribute('aria-pressed') !== 'false');
     });
-    // The split toggle defaults OFF, so (unlike the groups above) fui-filter-chip--selected tracks pressed === 'true'.
+    // The split/filler toggles default OFF, so (unlike the groups above) fui-filter-chip--selected tracks pressed === 'true'.
     var sc = splitChip();
     if (sc) sc.classList.toggle('fui-filter-chip--selected', splitOn());
+    var fc = fillerChip();
+    if (fc) fc.classList.toggle('fui-filter-chip--selected', fillerOn());
   }
   function save() {
     try {
       localStorage.setItem(READY_KEY, JSON.stringify(pressedVals(readyChips(), 'data-pready')));
       localStorage.setItem(KIND_KEY, JSON.stringify(pressedVals(kindChips(), 'data-pkind')));
       localStorage.setItem(SPLIT_KEY, splitOn() ? '1' : '0');
+      localStorage.setItem(FILLER_KEY, fillerOn() ? '1' : '0');
       localStorage.setItem(SEARCH_KEY, (search && search.value) || '');
     } catch (e) { /* ignore */ }
   }
@@ -135,6 +149,8 @@
       if (Array.isArray(t)) kindChips().forEach(function (c) { c.setAttribute('aria-pressed', t.indexOf(c.getAttribute('data-pkind')) >= 0 ? 'true' : 'false'); });
       var sc = splitChip(), s = localStorage.getItem(SPLIT_KEY);
       if (sc && s != null) sc.setAttribute('aria-pressed', s === '1' ? 'true' : 'false');
+      var fc = fillerChip(), f = localStorage.getItem(FILLER_KEY);
+      if (fc && f != null) fc.setAttribute('aria-pressed', f === '1' ? 'true' : 'false');
       var q = localStorage.getItem(SEARCH_KEY);
       if (search && typeof q === 'string') search.value = q;
     } catch (e) { /* ignore */ }
@@ -163,11 +179,20 @@
       var ok = (!reads || reads[r.getAttribute('data-readiness')])
             && (!kinds || kinds[r.getAttribute('data-kind')])
             && (!splitOn() || r.getAttribute('data-splittable') === 'true')
+            && (!fillerOn() || r.getAttribute('data-lowprio') !== 'true')
             && (!q || (r.getAttribute('data-search') || '').indexOf(q) >= 0);
       r.style.display = ok ? '' : 'none';
       if (ok) shown++;
     });
     if (countEl) countEl.textContent = shown;
+    // "Hide low priority" applies to the whole tab, not just the rows: swap every summary/section count that
+    // carries a filler-adjusted variant (the section badge + the agent-ready pill's count & points) to its
+    // no-filler value while the toggle is on, and back to the full value when off. Server emits both.
+    var noFiller = fillerOn();
+    Array.prototype.forEach.call(document.querySelectorAll('[data-pcount-full]'), function (el) {
+      var v = noFiller ? el.getAttribute('data-pcount-nofiller') : el.getAttribute('data-pcount-full');
+      if (v != null) el.textContent = v;
+    });
     // Surface the empty-state when the filter hid everything (and keep it out of the way otherwise). The
     // row is appended after the snapshot in `rows`, so it's never iterated above or counted in `shown`.
     if (shown === 0) ensureEmptyRow().style.display = '';
@@ -193,6 +218,10 @@
     var sc = splitChip();
     if (sc) sc.setAttribute('aria-pressed', 'false');   // split defaults OFF (no constraint)
     if (search) search.value = '';
+    // NOTE: filler ("Hide low priority") is deliberately NOT reset here. It's a VIEW-LEVEL control (it lives
+    // by the section title and adjusts the summary pills, not just table rows), so it stays sticky across
+    // facet operations — clicking a readiness/summary shortcut must not silently un-hide low-priority work.
+    // Only an explicit full clear (the empty-state "Clear filters") resets it; see that handler.
   }
 
   // Delegate click to document so the handler survives the we-filter-chip transient upgrade:
@@ -200,7 +229,7 @@
   // listeners. A delegated handler on document catches clicks on both the original element and
   // the upgraded <button> (they share the same data-* attribute).
   document.addEventListener('click', function (e) {
-    var t = e.target.closest('[data-pready],[data-pkind],[data-psplit]');
+    var t = e.target.closest('[data-pready],[data-pkind],[data-psplit],[data-pfiller]');
     if (!t) return;
     t.setAttribute('aria-pressed', t.getAttribute('aria-pressed') === 'false' ? 'true' : 'false');
     clearSummary();
@@ -241,6 +270,8 @@
       kindChips().forEach(function (c) { c.setAttribute('aria-pressed', 'true'); });   // readiness-only shortcut
       var sc2 = splitChip();
       if (sc2) sc2.setAttribute('aria-pressed', 'false');   // a readiness shortcut is a fresh view — drop the split facet
+      // filler ("Hide low priority") is intentionally left untouched — a view-level control persists across
+      // readiness shortcuts, so "hide low priority + show me decisions" keeps the low-priority items hidden.
       if (search) search.value = '';
       readyChips().forEach(function (c) {
         c.setAttribute('aria-pressed', cats.indexOf(c.getAttribute('data-pready')) >= 0 ? 'true' : 'false');
@@ -261,7 +292,7 @@
   (new MutationObserver(function (mutations) {
     var hasChipChange = mutations.some(function (m) {
       return Array.prototype.some.call(m.addedNodes, function (n) {
-        return n.nodeType === 1 && (n.hasAttribute('data-pready') || n.hasAttribute('data-pkind') || n.hasAttribute('data-psplit'));
+        return n.nodeType === 1 && (n.hasAttribute('data-pready') || n.hasAttribute('data-pkind') || n.hasAttribute('data-psplit') || n.hasAttribute('data-pfiller'));
       });
     });
     if (hasChipChange) { restore(); apply(); }

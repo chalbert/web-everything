@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Interaction fixture · Items tab (home-display.js)</title>
+  <style>
+    /* Only what the filter mechanism needs to be observable. home-display.js hides cards by adding
+       `.is-filtered-out`, and switches density by toggling `.home-list-view` on the section. No FUI styles —
+       these specs assert BEHAVIOUR (which cards are filtered, chip pressed-state, persisted view), not looks. */
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    .is-filtered-out { display: none; }
+    .fui-filter-chip--selected { font-weight: 700; }
+    .project-card { border: 1px solid #ccc; padding: 0.5rem; margin: 0.25rem 0; }
+  </style>
+</head>
+<body>
+  <!-- Same mock <we-filter-chip> as backlog-priority.html: async self-replace to a <button class="fui-filter-chip">,
+       deferred to DOMContentLoaded so the label (and any nested spans) survive the upgrade. home-display.js
+       delegates clicks on the section, so it must keep working after the chips become <button>s. -->
+  <script>
+    class MockFilterChip extends HTMLElement {
+      connectedCallback() {
+        const upgrade = () => {
+          if (!this.isConnected) return;
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          for (const a of Array.from(this.attributes)) btn.setAttribute(a.name, a.value);
+          const selected = this.hasAttribute('selected');
+          btn.setAttribute('aria-pressed', selected ? 'true' : (this.getAttribute('aria-pressed') || 'false'));
+          btn.className = 'fui-filter-chip' + (selected ? ' fui-filter-chip--selected' : '');
+          btn.innerHTML = this.innerHTML;
+          this.replaceWith(btn);
+        };
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', upgrade, { once: true });
+        else Promise.resolve().then(upgrade);
+      }
+    }
+    customElements.define('we-filter-chip', MockFilterChip);
+  </script>
+
+  <!-- One backlog "Tracked work" section: title + count badge, the four chip groups, the display toolbar
+       (search + grid/list toggle), and a known set of project cards spanning every status/kind/size/tier. -->
+  <section>
+    <h2 class="section-title">Tracked work <span class="count-badge" data-count-target>7</span></h2>
+
+    <div class="backlog-filter-row">
+      <div class="filter-groups">
+        <div class="status-filter" role="group" aria-label="Filter by status">
+          <we-filter-chip data-status-chip="open" selected>Open</we-filter-chip>
+          <we-filter-chip data-status-chip="active" selected>Active</we-filter-chip>
+          <we-filter-chip data-status-chip="resolved" selected>Resolved</we-filter-chip>
+        </div>
+        <div class="status-filter" role="group" aria-label="Filter by kind">
+          <we-filter-chip data-kind-chip="story" selected>Story</we-filter-chip>
+          <we-filter-chip data-kind-chip="epic" selected>Epic</we-filter-chip>
+          <we-filter-chip data-kind-chip="task" selected>Task</we-filter-chip>
+          <we-filter-chip data-kind-chip="decision" selected>Decision</we-filter-chip>
+        </div>
+        <div class="status-filter" role="group" aria-label="Filter by size">
+          <we-filter-chip data-size-chip="2" selected>2 pts</we-filter-chip>
+          <we-filter-chip data-size-chip="3" selected>3 pts</we-filter-chip>
+          <we-filter-chip data-size-chip="5" selected>5 pts</we-filter-chip>
+        </div>
+        <div class="status-filter" role="group" aria-label="Filter by agent-readiness">
+          <we-filter-chip data-tier-chip="A" selected>A</we-filter-chip>
+          <we-filter-chip data-tier-chip="B" selected>B</we-filter-chip>
+          <we-filter-chip data-tier-chip="C" selected>C</we-filter-chip>
+        </div>
+      </div>
+      <!-- The display toolbar (display-toolbar.njk) — the [data-home-display] hook home-display.js binds to. -->
+      <div class="home-display-toolbar" data-home-display>
+        <div class="home-search">
+          <button type="button" class="home-search-btn" aria-label="Search backlog" aria-expanded="false">search</button>
+          <input type="search" class="home-filter" placeholder="Filter…" aria-label="Filter backlog by name or description">
+        </div>
+        <div class="view-toggle" role="group" aria-label="Display density">
+          <button type="button" class="view-toggle-btn is-active" data-view="grid" aria-pressed="true">grid</button>
+          <button type="button" class="view-toggle-btn" data-view="list" aria-pressed="false">list</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- data-status / data-kind / data-size / data-tier are the contract home-display.js reads. Resolved cards
+         (only #204) are hidden by DEFAULT (the status facet's defaultExclude). Unsized cards (epic/task/decision)
+         carry no data-size, so a size subset excludes them; a card with no data-tier passes the tier facet. -->
+    <div class="cards">
+      <div class="project-card" data-status="open"     data-kind="story"    data-size="3" data-tier="A"><span class="project-title">#201 Alpha open story</span><p>alpha desc</p></div>
+      <div class="project-card" data-status="open"     data-kind="task"                   data-tier="A"><span class="project-title">#202 Beta open task</span><p>beta desc</p></div>
+      <div class="project-card" data-status="active"   data-kind="story"    data-size="5" data-tier="A"><span class="project-title">#203 Gamma active story</span><p>gamma desc</p></div>
+      <div class="project-card" data-status="resolved" data-kind="story"    data-size="2"              ><span class="project-title">#204 Delta resolved story</span><p>delta desc</p></div>
+      <div class="project-card" data-status="open"     data-kind="epic"                   data-tier="B"><span class="project-title">#205 Epsilon open epic</span><p>epsilon desc</p></div>
+      <div class="project-card" data-status="open"     data-kind="decision"               data-tier="B"><span class="project-title">#206 Zeta open decision</span><p>zeta desc</p></div>
+      <div class="project-card" data-status="open"     data-kind="story"    data-size="3" data-tier="C"><span class="project-title">#207 Eta blocked story</span><p>eta desc</p></div>
+    </div>
+  </section>
+
+  <!-- The REAL shipped filter JS — served from the repo tree, so this test guards the actual file. -->
+  <script src="/src/assets/js/home-display.js"></script>
+</body>
+</html>

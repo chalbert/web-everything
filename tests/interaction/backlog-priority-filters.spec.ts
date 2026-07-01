@@ -91,10 +91,91 @@ test('a persisted filter is restored on reload but stays recoverable (the real "
   expect(await page.evaluate(() => localStorage.getItem('we-backlog-priority-search'))).toBe('');
 });
 
+test('the "Hide low priority" toggle hides low-prio rows and swaps EVERY affected count independently', async ({ page }) => {
+  // Two low-priority rows in DIFFERENT buckets: #107 (decision) and #104 (agent-ready). Default: both show,
+  // and every dual-value count reads its FULL variant.
+  expect(await visibleRowNums(page)).toEqual(expect.arrayContaining(['104', '107']));
+  await expect(page.locator('h1 [data-pcount-full]')).toHaveText('8');
+  await expect(page.locator('button[data-pfilter="decision"] [data-pcount-full]')).toHaveText('1');
+  await expect(page.locator('button[data-pfilter="agentready"] [data-pcount-full]')).toHaveText('1');
+
+  await page.click('button[data-pfiller]');
+
+  // Both rows hidden; the section badge AND each pill drop to their own no-filler variant (per-bucket exact).
+  expect(await visibleRowNums(page)).not.toContain('104');
+  expect(await visibleRowNums(page)).not.toContain('107');
+  expect(await shownCount(page)).toBe(6);
+  await expect(page.locator('h1 [data-pcount-full]')).toHaveText('6');
+  await expect(page.locator('button[data-pfilter="decision"] [data-pcount-full]')).toHaveText('0');
+  await expect(page.locator('button[data-pfilter="agentready"] [data-pcount-full]')).toHaveText('0');
+
+  // Toggling back off restores every row and count.
+  await page.click('button[data-pfiller]');
+  expect(await shownCount(page)).toBe(8);
+  await expect(page.locator('h1 [data-pcount-full]')).toHaveText('8');
+  await expect(page.locator('button[data-pfilter="decision"] [data-pcount-full]')).toHaveText('1');
+});
+
+test('the "Hide low priority" toggle survives a reload (localStorage persistence)', async ({ page }) => {
+  await page.click('button[data-pfiller]');
+  expect(await shownCount(page)).toBe(6);
+
+  await page.reload({ waitUntil: 'networkidle' });
+  await waitForChipUpgrade(page);
+
+  // The toggle comes back pressed, the low-prio rows stay hidden, and the counts stay swapped.
+  await expect(page.locator('button[data-pfiller]')).toHaveAttribute('aria-pressed', 'true');
+  expect(await visibleRowNums(page)).not.toContain('107');
+  expect(await shownCount(page)).toBe(6);
+  await expect(page.locator('h1 [data-pcount-full]')).toHaveText('6');
+});
+
+test('the "Hide low priority" toggle STAYS ON when a summary shortcut is clicked (regression: sticky view-level filter)', async ({ page }) => {
+  // Turn low-priority off, then switch to the Decision view via its summary pill. The toggle is a
+  // view-level control, so it must persist — the low-priority decision must NOT reappear.
+  await page.click('button[data-pfiller]');
+  expect(await visibleRowNums(page)).not.toContain('107');
+
+  await page.click('button[data-pfilter="decision"]');
+
+  // The bug: the shortcut used to force the toggle back off, un-hiding the low-priority item.
+  await expect(page.locator('button[data-pfiller]')).toHaveAttribute('aria-pressed', 'true');
+  expect(await visibleRowNums(page)).not.toContain('107');
+
+  // Same for a readiness chip click — filler stays on and #107 stays hidden.
+  await page.click('button[data-pready="decision"]');
+  await expect(page.locator('button[data-pfiller]')).toHaveAttribute('aria-pressed', 'true');
+  expect(await visibleRowNums(page)).not.toContain('107');
+});
+
+test('the empty-state "Clear filters" DOES release the sticky low-priority toggle', async ({ page }) => {
+  // A full clear is the one path that resets the view-level toggle — the empty-state means everything is
+  // hidden, so recovery must restore low-priority work too.
+  await page.click('button[data-pfiller]');
+  await page.fill('[data-ptable-search]', 'zzzz-no-such-row');   // force the empty-state
+  await page.getByRole('button', { name: /clear filters/i }).click();
+
+  await expect(page.locator('button[data-pfiller]')).toHaveAttribute('aria-pressed', 'false');
+  expect(await visibleRowNums(page)).toContain('107');
+  expect(await visibleRowNums(page)).toHaveLength(8);
+});
+
 test('the splittable toggle composes with readiness as an AND facet', async ({ page }) => {
   await page.click('button[data-psplit]');
   // Only the one story flagged data-splittable="true".
   expect(await visibleRowNums(page)).toEqual(['104']);
+});
+
+test('the splittable and hide-low-priority toggles AND-compose (both constraints apply)', async ({ page }) => {
+  // #104 is the only splittable row and is ALSO low-priority. Splittable ON isolates it; turning on
+  // hide-low-priority then removes it too — the two orthogonal toggles intersect, not override.
+  await page.click('button[data-psplit]');
+  expect(await visibleRowNums(page)).toEqual(['104']);
+
+  await page.click('button[data-pfiller]');
+  expect(await visibleRowNums(page)).toHaveLength(0);          // splittable ∧ not-low-priority = ∅
+  await expect(page.locator('button[data-psplit]')).toHaveAttribute('aria-pressed', 'true');   // split stays on
+  await expect(page.locator('button[data-pfiller]')).toHaveAttribute('aria-pressed', 'true');  // filler stays on
 });
 
 test('clicking a column header re-sorts the rows in place', async ({ page }) => {

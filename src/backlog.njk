@@ -300,14 +300,32 @@ title: Backlog
             <span class="aw-vital" style="background:#fef3c7; color:#92400e; border-color:#fde68a;"><span class="n">{{ v.deciding }}</span> deciding</span>
             <span class="aw-vital" style="background:#ecfeff; color:#155e75; border-color:#a5f3fc;"><span class="n">{{ v.slicing }}</span> slicing</span>
             <span class="aw-vital" style="background:#eef2ff; color:#3730a3; border-color:#c7d2fe;"><span class="n" id="aw-vital-batching-n">{{ v.batching }}</span> batching{% if v.batches %} <span style="opacity:0.7;">({{ v.batches }})</span>{% endif %}</span>
-            <span class="aw-vital" style="background:#dcfce7; color:#166534; border-color:#bbf7d0;"><span class="n">{{ v.building }}</span> building</span>
+            <span class="aw-vital" style="background:#ffedd5; color:#9a3412; border-color:#fed7aa;"><span class="n">{{ v.building }}</span> building</span>
             {% if v.programs %}<span class="aw-vital" style="background:#e0f2fe; color:#075985; border-color:#bae6fd;"><span class="n">{{ v.programs }}</span> programs</span>{% endif %}
             <span id="aw-vital-workflows" class="aw-vital" hidden style="background:#dbeafe; color:#1e40af; border-color:#bfdbfe;"><span class="aw-lane-dot" style="background:#1e40af; animation:active-pulse 1.4s infinite;"></span><span class="n" id="aw-vital-workflows-n"></span> workflows live</span>
         </div>
 
+        {# Lane colour legend — each colour is the OPERATION driving the work, not a status. Green is
+           deliberately absent from the active lanes: it's reserved for resolved/done, which leaves this
+           board (so building, an in-flight build, is rust — not green). #}
+        <details class="bk-collapse" data-persist="legend-active-lanes" open>
+        <summary>Lane colour legend</summary>
+        <div class="active-lane-legend" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem 1rem; margin:0.5rem 0 1.25rem; font-size:0.8em; color:var(--color-text-muted);">
+            <span style="display:inline-flex; align-items:center; gap:0.35rem;"><span style="width:14px; height:14px; border-radius:50%; background:#ede9fe; border:1.5px solid #6d28d9;"></span><strong style="color:#6d28d9;">Preparing</strong></span>
+            <span style="display:inline-flex; align-items:center; gap:0.35rem;"><span style="width:14px; height:14px; border-radius:50%; background:#fef3c7; border:1.5px solid #92400e;"></span><strong style="color:#92400e;">Deciding</strong></span>
+            <span style="display:inline-flex; align-items:center; gap:0.35rem;"><span style="width:14px; height:14px; border-radius:50%; background:#ecfeff; border:1.5px solid #155e75;"></span><strong style="color:#155e75;">Slicing</strong></span>
+            <span style="display:inline-flex; align-items:center; gap:0.35rem;"><span style="width:14px; height:14px; border-radius:50%; background:#eef2ff; border:1.5px solid #3730a3;"></span><strong style="color:#3730a3;">Batching</strong></span>
+            <span style="display:inline-flex; align-items:center; gap:0.35rem;"><span style="width:14px; height:14px; border-radius:50%; background:#ffedd5; border:1.5px solid #9a3412;"></span><strong style="color:#9a3412;">Building</strong></span>
+            <span style="display:inline-flex; align-items:center; gap:0.35rem;"><span style="width:14px; height:14px; border-radius:50%; background:#e0f2fe; border:1.5px solid #075985;"></span><strong style="color:#075985;">Programs</strong></span>
+            <span style="display:inline-flex; align-items:center; gap:0.35rem;"><span style="width:14px; height:14px; border-radius:50%; background:#dbeafe; border:1.5px solid #1e40af;"></span><strong style="color:#1e40af;">Workflows</strong></span>
+            <span style="opacity:0.5;">|</span>
+            <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Green is reserved for resolved/done work, which leaves this board — no active lane is green."><span style="width:14px; height:14px; border-radius:50%; background:#dcfce7; border:1.5px solid #16a34a;"></span><strong style="color:#166534;">Resolved</strong> <span style="font-weight:400;">— done, leaves this board</span></span>
+        </div>
+        </details>
+
         {# WORKFLOWS — live multi-agent runs (client-filled; hidden until the poller finds one). #}
         <div id="active-live" class="aw-lane" hidden>
-            <div class="aw-lane-head" style="color:#16a34a;"><span class="aw-lane-dot" style="background:#16a34a; animation:active-pulse 1.6s infinite;"></span>Workflows · live <span id="active-live-count" class="count-badge"></span><span id="active-live-stamp" style="font-weight:500; text-transform:none; letter-spacing:0; color:var(--color-text-muted); margin-left:0.25rem;"></span></div>
+            <div class="aw-lane-head" style="color:#1e40af;"><span class="aw-lane-dot" style="background:#1e40af; animation:active-pulse 1.6s infinite;"></span>Workflows · live <span id="active-live-count" class="count-badge"></span><span id="active-live-stamp" style="font-weight:500; text-transform:none; letter-spacing:0; color:var(--color-text-muted); margin-left:0.25rem;"></span></div>
             <div id="active-live-runs" style="display:flex; flex-direction:column; gap:0.85rem;"></div>
         </div>
 
@@ -343,7 +361,7 @@ title: Backlog
         </div>
         {% endif %}
 
-        {{ lane('Building', '#166534', aw.lanes.building, 'A single <code>/next</code> or ad-hoc session building a story/task.') }}
+        {{ lane('Building', '#9a3412', aw.lanes.building, 'A single <code>/next</code> or ad-hoc session building a story/task.') }}
 
         {% if not aw.count %}
         <p style="color:var(--color-text-muted); margin:0;">Nothing is claimed right now. When a <code>/prepare</code>, <code>/decision</code>, <code>/slice</code>, <code>/batch</code>, <code>/next</code>, or <code>/workflow</code> run claims work it appears here — with its live progress if the watcher is running.</p>
@@ -399,10 +417,31 @@ title: Backlog
 {% set pointsSlice = backlog.pointsSlice %}
 {% set readyBeyondBatch = countA - countBatch %}
 {% set readySplit = backlog.countSplittableReady %}
+{# Low-priority adjustment (#1620) — how much the "Hide low priority" toggle removes from each pill
+   (agent-ready / decision / epics / not-ready) and the section total, computed once so the JS swap
+   has both variants. Not Tier-A-only: a `priority: low` decision or epic is demoted just the same. #}
+{% set countLowAgentReady = backlog.countLowAgentReady %}
+{% set pointsLowAgentReady = backlog.pointsLowAgentReady %}
+{% set countLowDecision = backlog.countLowDecision %}
+{% set pointsLowDecision = backlog.pointsLowDecision %}
+{% set countLowPreparedDecision = backlog.countLowPreparedDecision %}
+{% set countLowSliceable = backlog.countLowSliceable %}
+{% set countLowNotReady = backlog.countLowNotReady %}
+{% set pointsLowNotReady = backlog.pointsLowNotReady %}
+{% set countLowOpen = backlog.countLowOpen %}
 {% set pointsB = backlog.pointsTierB %}
 {% set pointsC = backlog.pointsTierC %}
 <section class="mb-12">
-    <h2 class="section-title">Prioritisation <span class="count-badge">{{ leverageCount }}</span></h2>
+    {# The "Hide low priority" toggle is a VIEW-LEVEL control — it drops low-priority work from the summary
+       pills, the section count, AND the table below. So it sits at the TOP of the section (never lower in the
+       hierarchy than the counts it changes), right beside the count badge it updates. (The table-only
+       "Splittable only" toggle stays down in the table-filter row, above the rows it narrows.) #}
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem 1rem; flex-wrap:wrap; margin-bottom:0.5rem;">
+        <h2 class="section-title" style="margin:0;">Prioritisation <span class="count-badge" data-pcount-full="{{ leverageCount }}" data-pcount-nofiller="{{ leverageCount - countLowOpen }}">{{ leverageCount }}</span></h2>
+        {% if tableRows | where("priority", "low") | length %}<div class="status-filter" role="group" aria-label="Hide low priority" style="margin:0;">
+            <we-filter-chip data-pfiller aria-pressed="false" title="When on, hide low-priority work — any item marked `priority: low` (#1620): settled &amp; valid but demoted, not worth doing now. Applies across the WHOLE view — the summary pills, the count, and every readiness bucket in the table. Orthogonal to the facet chips (AND-composes). Off by default.">Hide low priority</we-filter-chip>
+        </div>{% endif %}
+    </div>
     <p class="section-desc">Every <strong>open</strong> item (plus any <strong>decision being actively made</strong>, pinned on top), sortable — ranked by default by <strong>how much work resolving it would unblock</strong> (the inverse of the <code>blockedBy</code> edges, computed deterministically from structured fields only, no LLM). <strong>Frees now</strong> counts the items this is the <em>last</em> open prerequisite for — resolving it flips them to agent-ready. <strong>Gates (chain)</strong> counts every open item it ultimately blocks, directly or transitively. The <strong>Readiness</strong> column is the agent-readiness tier; sort by it to surface the batchable work.</p>
     {# #1874: the six Prioritisation summary pills migrated to <we-filter-chip> (the rich-count + structured
        sub-count dogfood, completing #1825's plain-chip half). Each pill's semantic background is WE-domain
@@ -413,11 +452,11 @@ title: Backlog
        are unchanged. #}
     <div style="display:flex; gap:0.6rem; flex-wrap:wrap; align-items:center; margin:0 0 1rem; font-size:0.85em;">
         <we-filter-chip data-pfilter="batchable" aria-pressed="false" title="Click to filter the table to the batch pool. Batchable (deterministic) — the candidate set a points-budgeted batch may pack: a Tier-A task or a story of size ≤ 8. The budget packs smallest-first, reaching a single size·8 when the remaining points fit. Story ≥13 and any epic are never packed.">{{ countBatch }} batchable <span style="font-weight:600; opacity:0.85;">({{ pointsBatch }} pts{% if countActiveBatch %} · <span style="color:#bfdbfe; font-weight:700;">{{ countActiveBatch }} in flight</span>{% endif %})</span></we-filter-chip>
-        {% if readyBeyondBatch %}<we-filter-chip data-pfilter="agentready" aria-pressed="false" title="Click to filter to agent-ready work beyond the batch pool — an issue/idea with every prerequisite resolved, but outside the batch pool (see ‘batchable’). Most are oversized stories (size ≥ 13) that should be /split into ≤5-pt slices first (the ‘· N to split’ sub-tally; docs/agent → Splitting), but it also holds the few Tier-A items that build directly yet can't be batched — a stop-the-world migration, or an unsized story. Excludes container epics (see the epics pill). Note: a still-BLOCKED oversized story isn't agent-ready, so it sits under ‘not ready’ — isolate all split candidates (incl. blocked) via the ‘Splittable only’ chip.">{{ readyBeyondBatch }} agent-ready <span style="font-weight:600; opacity:0.8;">({{ pointsA - pointsBatch }} pts{% if readySplit %} · {{ readySplit }} to split{% endif %})</span></we-filter-chip>{% endif %}
-        {% if countSlice %}<we-filter-chip data-pfilter="sliceable" aria-pressed="false" title="Click to filter to the unblocked (Tier A) epics. An epic isn't directly buildable — its work lives in child slices. Most here are just tracking open children (no action); only the ones tagged ‘slice’ (unsliced) or ‘resolve’ (all children done) need attention.">{{ countSlice }} epic{{ "s" if countSlice != 1 }}{% if countEpicAction %} <span style="font-weight:600; opacity:0.8;">({% if countEpicUnsliced %}{{ countEpicUnsliced }} slice{% endif %}{% if countEpicUnsliced and countEpicDone %} · {% endif %}{% if countEpicDone %}{{ countEpicDone }} resolve{% endif %})</span>{% endif %}</we-filter-chip>{% endif %}
+        {% if readyBeyondBatch %}<we-filter-chip data-pfilter="agentready" aria-pressed="false" title="Click to filter to agent-ready work beyond the batch pool — an issue/idea with every prerequisite resolved, but outside the batch pool (see ‘batchable’). Most are oversized stories (size ≥ 13) that should be /split into ≤5-pt slices first (the ‘· N to split’ sub-tally; docs/agent → Splitting), but it also holds the few Tier-A items that build directly yet can't be batched — a stop-the-world migration, or an unsized story. Excludes container epics (see the epics pill). Note: a still-BLOCKED oversized story isn't agent-ready, so it sits under ‘not ready’ — isolate all split candidates (incl. blocked) via the ‘Splittable only’ chip."><span data-pcount-full="{{ readyBeyondBatch }}" data-pcount-nofiller="{{ readyBeyondBatch - countLowAgentReady }}">{{ readyBeyondBatch }}</span> agent-ready <span style="font-weight:600; opacity:0.8;">(<span data-pcount-full="{{ pointsA - pointsBatch }}" data-pcount-nofiller="{{ pointsA - pointsBatch - pointsLowAgentReady }}">{{ pointsA - pointsBatch }}</span> pts{% if readySplit %} · {{ readySplit }} to split{% endif %})</span></we-filter-chip>{% endif %}
+        {% if countSlice %}<we-filter-chip data-pfilter="sliceable" aria-pressed="false" title="Click to filter to the unblocked (Tier A) epics. An epic isn't directly buildable — its work lives in child slices. Most here are just tracking open children (no action); only the ones tagged ‘slice’ (unsliced) or ‘resolve’ (all children done) need attention."><span data-pcount-full="{{ countSlice }}" data-pcount-nofiller="{{ countSlice - countLowSliceable }}">{{ countSlice }}</span> epic{{ "s" if countSlice != 1 }}{% if countEpicAction %} <span style="font-weight:600; opacity:0.8;">({% if countEpicUnsliced %}{{ countEpicUnsliced }} slice{% endif %}{% if countEpicUnsliced and countEpicDone %} · {% endif %}{% if countEpicDone %}{{ countEpicDone }} resolve{% endif %})</span>{% endif %}</we-filter-chip>{% endif %}
         <we-filter-chip data-pfilter="program" aria-pressed="false" title="Click to filter to ongoing programs — perpetual umbrellas (e.g. the flagship exercise apps) marked ongoing:true. NOT a resolve to-do: they legitimately have every child resolved between slices and are continuously advanced.">{{ countEpicProgram }} program{{ "s" if countEpicProgram != 1 }}</we-filter-chip>
-        <we-filter-chip data-pfilter="decision" aria-pressed="false" title="Click to filter to decision-ready (Tier B) — a decision awaiting a nod; ratify it, then the build it gates becomes agent-ready. A ✓ prepared one has its forks researched + options stated (preparedDate) — ready to ratify, not research.">{{ countB }} decision <span style="font-weight:600; opacity:0.8;">({{ pointsB }} pts{% if countPrepared %} · <span style="color:#15803d;">{{ countPrepared }} ✓ prepared</span>{% endif %}{% if countActiveDecisions %} · <span style="color:#1e40af;">{{ countActiveDecisions }} in flight</span>{% endif %}{% if countPreparing %} · <span style="color:#6d28d9;">{{ countPreparing }} preparing</span>{% endif %})</span></we-filter-chip>
-        <we-filter-chip data-pfilter="notready" aria-pressed="false" title="Click to filter to not ready (Tier C) — an issue/idea that still has an open prerequisite; clear its blocker first.">{{ countC }} not ready <span style="font-weight:600; opacity:0.8;">({{ pointsC }} pts)</span></we-filter-chip>
+        <we-filter-chip data-pfilter="decision" aria-pressed="false" title="Click to filter to decision-ready (Tier B) — a decision awaiting a nod; ratify it, then the build it gates becomes agent-ready. A ✓ prepared one has its forks researched + options stated (preparedDate) — ready to ratify, not research."><span data-pcount-full="{{ countB }}" data-pcount-nofiller="{{ countB - countLowDecision }}">{{ countB }}</span> decision <span style="font-weight:600; opacity:0.8;">(<span data-pcount-full="{{ pointsB }}" data-pcount-nofiller="{{ pointsB - pointsLowDecision }}">{{ pointsB }}</span> pts{% if countPrepared %} · <span style="color:#15803d;"><span data-pcount-full="{{ countPrepared }}" data-pcount-nofiller="{{ countPrepared - countLowPreparedDecision }}">{{ countPrepared }}</span> ✓ prepared</span>{% endif %}{% if countActiveDecisions %} · <span style="color:#1e40af;">{{ countActiveDecisions }} in flight</span>{% endif %}{% if countPreparing %} · <span style="color:#6d28d9;">{{ countPreparing }} preparing</span>{% endif %})</span></we-filter-chip>
+        <we-filter-chip data-pfilter="notready" aria-pressed="false" title="Click to filter to not ready (Tier C) — an issue/idea that still has an open prerequisite; clear its blocker first."><span data-pcount-full="{{ countC }}" data-pcount-nofiller="{{ countC - countLowNotReady }}">{{ countC }}</span> not ready <span style="font-weight:600; opacity:0.8;">(<span data-pcount-full="{{ pointsC }}" data-pcount-nofiller="{{ pointsC - pointsLowNotReady }}">{{ pointsC }}</span> pts)</span></we-filter-chip>
     </div>
     {# Active batches (dev-only, advisory) — live soft-reservations from a running /batch, grouped by
        session (see backlog.js → items.activeBatches). Shows a concurrent batcher what's already in flight
@@ -475,9 +514,6 @@ title: Backlog
             <we-filter-chip data-pready="decision" selected title="Tier B — a decision to ratify">Decision</we-filter-chip>
             <we-filter-chip data-pready="notready" selected title="Tier C — has an open prerequisite">Not ready</we-filter-chip>
         </div>
-        {% if countSplit %}<div class="status-filter" role="group" aria-label="Filter to split candidates">
-            <we-filter-chip data-psplit title="When on, show only /split candidates — open stories of size &gt; 8 (the 13 band). Orthogonal to readiness: combines with the readiness/type chips (AND), so it isolates split candidates within whatever else is selected. Off by default.">Splittable only</we-filter-chip>
-        </div>{% endif %}
         <div class="status-filter" role="group" aria-label="Filter by kind">
             {# Build a chip per kind PRESENT IN THE TABLE — `tableRows`, not just open items — so a pinned
                in-flight decision/batch (status:active) still gets its kind chip. Otherwise its row carries a
@@ -486,6 +522,12 @@ title: Backlog
             <we-filter-chip data-pkind="{{ k }}" selected>{{ k | title }}</we-filter-chip>
             {% endif %}{% endfor %}
         </div>
+        {# Table-only refinement — "Splittable only" narrows the ROWS below it (it doesn't touch the summary
+           pills), so it correctly sits here, above the table, after the two facet groups. The view-level
+           "Hide low priority" toggle lives up by the section title instead (it changes the pills too). #}
+        {% if countSplit %}<div class="status-filter" role="group" aria-label="Filter to split candidates">
+            <we-filter-chip data-psplit title="When on, show only /split candidates — open stories of size &gt; 8 (the 13 band). Orthogonal to readiness: combines with the readiness/type chips (AND), so it isolates split candidates within whatever else is selected. Off by default.">Splittable only</we-filter-chip>
+        </div>{% endif %}
         <span style="font-size:0.82em; color:var(--color-text-muted);"><strong data-ptable-count>{{ leverageCount + countActiveDecisions + countPreparing + countActiveBatch }}</strong> shown</span>
     </div>
     <div style="overflow-x: auto;">
@@ -505,7 +547,7 @@ title: Backlog
             {% set isActiveDecision = item.status == 'active' and item.kind == 'decision' %}
             {% set isPreparing = item.status == 'preparing' %}
             {% set isActiveBatch = item.activeBatchable %}
-            <tr data-kind="{{ item.kind }}" data-readiness="{% if isActiveDecision or isPreparing %}decision{% elif isActiveBatch %}batchable{% elif item.batchable %}batchable{% elif item.epicState == 'program' %}program{% elif item.sliceable %}sliceable{% elif item.tier == 'A' %}agentready{% elif item.tier == 'B' %}decision{% else %}notready{% endif %}"{% if item.splittable %} data-splittable="true"{% endif %}{% if isActiveDecision or isPreparing or isActiveBatch %} data-pinned="true"{% endif %} data-search="{{ item.num }} {{ item.title | lower }}">
+            <tr data-kind="{{ item.kind }}" data-readiness="{% if isActiveDecision or isPreparing %}decision{% elif isActiveBatch %}batchable{% elif item.batchable %}batchable{% elif item.epicState == 'program' %}program{% elif item.sliceable %}sliceable{% elif item.tier == 'A' %}agentready{% elif item.tier == 'B' %}decision{% else %}notready{% endif %}"{% if item.splittable %} data-splittable="true"{% endif %}{% if item.priority == 'low' %} data-lowprio="true"{% endif %}{% if isActiveDecision or isPreparing or isActiveBatch %} data-pinned="true"{% endif %} data-search="{{ item.num }} {{ item.title | lower }}">
                 <td style="text-align:left;" data-sort-val="{{ item.num }}">
                     <a href="/backlog/{{ item.id }}/" style="color: var(--color-primary); text-decoration: none; font-weight: 600;"><span style="color: var(--color-text-muted, #94a3b8); font-variant-numeric: tabular-nums;">#{{ item.num }}</span> {{ item.title }}</a>{% if item.reservedBy %} <span title="Held by a running batch ({{ item.reservedBy }}). Soft reservation — a concurrent batch deprioritizes it; the real lock is the status:open→active flip at claim." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#eef2ff; color:#3730a3; border:1px solid #c7d2fe; white-space:nowrap;">⊘ in batch</span>{% endif %}
                 </td>

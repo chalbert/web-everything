@@ -1751,6 +1751,19 @@ we-filter-chip[data-pfilter="notready"],  .fui-filter-chip[data-pfilter="notread
 /* The pressed-state ring for a summary pill is set as an inline box-shadow by backlog-table-sort.js
    (`chip.style.boxShadow`, tag-agnostic) — cleared by clearSummary() — so no class-keyed rule is needed here. */
 
+/* The orthogonal ON/OFF toggles ("Splittable only" #psplit, "Hide low priority" #pfiller) default OFF, so
+   their pressed state is the meaningful one. Key it on `aria-pressed="true"` (set by backlog-table-sort.js)
+   over BOTH the pre-upgrade <we-filter-chip> (SSR / FUI offline) and the upgraded .fui-filter-chip <button>,
+   the same dual-selector pattern the summary pills use — so "on" reads legibly regardless of FUI load state
+   (unlike the class-only `fui-filter-chip--selected`, which only styles post-upgrade). Reuses the accent tint
+   from `we-filter-chip[selected]` for visual parity with a selected facet chip. */
+we-filter-chip[data-psplit][aria-pressed="true"],  .fui-filter-chip[data-psplit][aria-pressed="true"],
+we-filter-chip[data-pfiller][aria-pressed="true"], .fui-filter-chip[data-pfiller][aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent, #1d4ed8) 14%, #fff);
+  color: var(--accent, #1d4ed8);
+  border-color: color-mix(in srgb, var(--accent, #1d4ed8) 45%, #fff);
+}
+
 /* #1785 (family #1599): SSR baseline for the FUI transient `<we-code-view>` the docs server-render.
    Unlike the light-DOM self-replacing pills above, `CodeViewElement` upgrades to a SHADOW root (no slot),
    so the docs server-render the source in light DOM — `<we-code-view><pre><code>…</code></pre>` — and the

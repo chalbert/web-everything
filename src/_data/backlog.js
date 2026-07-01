@@ -600,6 +600,24 @@ module.exports = function backlog() {
   // Prioritisation chips so a container epic is shown as slice-work, not as a buildable Tier-A item.
   items.countAgentReady = items.filter((it) => it.tier === 'A' && !it.sliceable).length;
   items.countSliceable = items.filter((it) => it.sliceable === true).length;
+  // Low-priority (`priority: low`, #1620) tallies, one per Prioritisation readiness bucket — so the tab's
+  // "Hide low priority" toggle can decrement EACH summary pill's count/points (not just hide table rows).
+  // `priority: low` isn't Tier-A-only (`filler` is): a low-priority DECISION (Tier B) or EPIC (sliceable)
+  // is just as demoted, so the toggle must reach every bucket. Each predicate mirrors the pill it adjusts
+  // (agent-ready = Tier A minus epics; decision = Tier B; epics = sliceable; not-ready = Tier C) so the
+  // subtraction is exact. `countLowOpen` is the whole-view total (drives the section count badge).
+  const isLow = (it) => it.priority === 'low';
+  items.countLowAgentReady = items.filter((it) => isLow(it) && it.tier === 'A' && !it.sliceable).length;
+  items.pointsLowAgentReady = sumSize((it) => isLow(it) && it.tier === 'A' && !it.sliceable);
+  items.countLowDecision = items.filter((it) => isLow(it) && it.tier === 'B').length;
+  items.pointsLowDecision = sumSize((it) => isLow(it) && it.tier === 'B');
+  // …and the prepared subset of those, so the decision pill's "N ✓ prepared" sub-tally stays consistent
+  // with its headline count when the toggle hides low-priority decisions (else prepared could exceed total).
+  items.countLowPreparedDecision = items.filter((it) => isLow(it) && it.tier === 'B' && it.preparedDate).length;
+  items.countLowSliceable = items.filter((it) => isLow(it) && it.sliceable === true).length;
+  items.countLowNotReady = items.filter((it) => isLow(it) && it.tier === 'C').length;
+  items.pointsLowNotReady = sumSize((it) => isLow(it) && it.tier === 'C');
+  items.countLowOpen = items.filter((it) => it.status === 'open' && isLow(it)).length;
   // Oversized stories (story · size > 8) flagged as `/split` candidates. NOT a separate readiness bucket (an
   // oversized story is real buildable work; see the `splittable` note above). Includes Tier-C blocked
   // oversized stories too. `countSplittableReady` is the agent-ready (Tier A) subset — the "· N to split"

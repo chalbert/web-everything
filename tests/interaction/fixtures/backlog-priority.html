@@ -23,33 +23,46 @@
   <script>
     class MockFilterChip extends HTMLElement {
       connectedCallback() {
-        // Upgrade async, mirroring the real module's deferred load.
-        Promise.resolve().then(() => {
+        const upgrade = () => {
           if (!this.isConnected) return;
           const btn = document.createElement('button');
           btn.type = 'button';
-          // Copy every attribute across (data-pfilter / data-pready / data-pkind / data-psplit / title…).
+          // Copy every attribute across (data-pfilter / data-pready / data-pkind / data-psplit / data-pfiller / title…).
           for (const a of Array.from(this.attributes)) btn.setAttribute(a.name, a.value);
           const selected = this.hasAttribute('selected');
           btn.setAttribute('aria-pressed', selected ? 'true' : (this.getAttribute('aria-pressed') || 'false'));
           btn.className = 'fui-filter-chip' + (selected ? ' fui-filter-chip--selected' : '');
+          // Preserve the label content — the real FilterChipElement carries its inner markup through the
+          // upgrade (#1873 passthrough), incl. the nested `data-pcount-*` count spans the toggle swaps.
           btn.innerHTML = this.innerHTML;
           this.replaceWith(btn);
-        });
+        };
+        // Async upgrade, mirroring the real module's deferred cross-origin load (exercises the table JS's
+        // post-upgrade MutationObserver path). Wait for DOMContentLoaded when still parsing, so `innerHTML`
+        // is fully populated — a bare microtask fires mid-parse and would copy an EMPTY label.
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', upgrade, { once: true });
+        else Promise.resolve().then(upgrade);
       }
     }
     customElements.define('we-filter-chip', MockFilterChip);
   </script>
 
-  <h1>Prioritisation</h1>
+  <!-- Section title + the VIEW-LEVEL "Hide low priority" toggle beside the count badge it adjusts. The badge
+       and each affected pill carry BOTH values (data-pcount-full / -nofiller); the toggle swaps which shows.
+       The toggle is default-OFF (aria-pressed="false") and STICKY — it must survive a summary-pill click. -->
+  <h1>Prioritisation
+    <span data-pcount-full="8" data-pcount-nofiller="6">8</span>
+    <we-filter-chip data-pfiller aria-pressed="false">Hide low priority</we-filter-chip>
+  </h1>
 
-  <!-- Summary count pills (data-pfilter) — one-click readiness shortcuts. Start unpressed (no `selected`). -->
+  <!-- Summary count pills (data-pfilter) — one-click readiness shortcuts. Start unpressed (no `selected`).
+       The "decision" pill carries dual counts so the toggle's per-pill adjustment is observable. -->
   <div>
     <we-filter-chip data-pfilter="batchable" aria-pressed="false">3 batchable</we-filter-chip>
-    <we-filter-chip data-pfilter="agentready" aria-pressed="false">1 agent-ready</we-filter-chip>
+    <we-filter-chip data-pfilter="agentready" aria-pressed="false"><span data-pcount-full="1" data-pcount-nofiller="0">1</span> agent-ready</we-filter-chip>
     <we-filter-chip data-pfilter="sliceable" aria-pressed="false">1 epic</we-filter-chip>
     <we-filter-chip data-pfilter="program" aria-pressed="false">1 program</we-filter-chip>
-    <we-filter-chip data-pfilter="decision" aria-pressed="false">1 decision</we-filter-chip>
+    <we-filter-chip data-pfilter="decision" aria-pressed="false"><span data-pcount-full="1" data-pcount-nofiller="0">1</span> decision</we-filter-chip>
     <we-filter-chip data-pfilter="notready" aria-pressed="false">1 not ready</we-filter-chip>
   </div>
 
@@ -96,13 +109,13 @@
         <td data-sort-val="102">#102 Beta story</td><td data-sort-val="story">story</td><td data-sort-val="5">5</td><td data-sort-val="4">A</td><td data-sort-val="1">1</td><td data-sort-val="2">2</td><td data-sort-val="1">1</td><td></td></tr>
       <tr data-kind="task"     data-readiness="batchable"  data-search="103 gamma task">
         <td data-sort-val="103">#103 Gamma task</td><td data-sort-val="task">task</td><td data-sort-val="2">2</td><td data-sort-val="4">A</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td></td></tr>
-      <tr data-kind="story"    data-readiness="agentready" data-search="104 delta big story" data-splittable="true">
+      <tr data-kind="story"    data-readiness="agentready" data-search="104 delta big story" data-splittable="true" data-lowprio="true">
         <td data-sort-val="104">#104 Delta big story</td><td data-sort-val="story">story</td><td data-sort-val="13">13</td><td data-sort-val="3">A</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td></td></tr>
       <tr data-kind="epic"     data-readiness="sliceable"  data-search="105 epsilon epic">
         <td data-sort-val="105">#105 Epsilon epic</td><td data-sort-val="epic">epic</td><td data-sort-val="0">—</td><td data-sort-val="2.8">A</td><td data-sort-val="0">0</td><td data-sort-val="8">8</td><td data-sort-val="4">4</td><td></td></tr>
       <tr data-kind="epic"     data-readiness="program"    data-search="106 zeta program">
         <td data-sort-val="106">#106 Zeta program</td><td data-sort-val="epic">epic</td><td data-sort-val="0">—</td><td data-sort-val="2.6">A</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td></td></tr>
-      <tr data-kind="decision" data-readiness="decision"   data-search="107 eta decision">
+      <tr data-kind="decision" data-readiness="decision"   data-search="107 eta decision" data-lowprio="true">
         <td data-sort-val="107">#107 Eta decision</td><td data-sort-val="decision">decision</td><td data-sort-val="0">—</td><td data-sort-val="2">B</td><td data-sort-val="0">0</td><td data-sort-val="3">3</td><td data-sort-val="3">3</td><td></td></tr>
       <tr data-kind="story"    data-readiness="notready"   data-search="108 theta blocked story">
         <td data-sort-val="108">#108 Theta blocked story</td><td data-sort-val="story">story</td><td data-sort-val="5">5</td><td data-sort-val="1">C</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td data-sort-val="0">0</td><td></td></tr>

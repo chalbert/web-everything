@@ -268,9 +268,19 @@ per-block *mechanism pick* for the button (the worked example) is carved to
    [#1381](/backlog/1381-button-packaging-pick-runtime-shape-mechanism-transient-vs-p/) (2026-06-21); **#1962
    reversed the default from transient (A) to persistent-wrapper / light-DOM** — web components are the common
    case and self-erasure is spec-unsanctioned, so transient is avoided unless there is an absolute killer use case:
-   - **Behavior-free presentational leaf** (badge, tag, card, progress, meter, filter-chip) → **light-DOM** (a
-     `display:contents` wrapper where a box would break flex/grid). No self-erasure. Behaviors ride
-     `CustomAttribute`s on the element.
+   - **Behavior-free presentational leaf** (badge, tag, card, section-card, auto-heading, progress, meter,
+     filter-chip) → **light-DOM, shape by the reproducibility test** (amended by
+     [#2028](/backlog/2028-persistent-light-dom-base-element-contract-for-the-soft-7-pr/), 2026-07-01). No
+     self-erasure. Pick the leaf's node shape by what the native element *contributes*:
+     - *Host-reproducible* (semantics = role + ARIA only: `<span>`/`<div>`/headings/landmarks) → **host-is-the-node**:
+       the `<we-*>` custom element carries the `.fui-*` class and its role/aria via `ElementInternals`, **zero
+       sub-element** (the budgeted-host-node spine, below). Default for badge, tag, card, section-card, auto-heading.
+     - *Irreplaceable-native* (unique rendering/interaction: `<progress>`, `<meter>`) → **wrap a real native child**
+       inside a `display:contents` host (role/aria on the child). This is (B) applied to a presentational leaf.
+     - *Content-model-constrained* (parent accepts only the real tag) → the reserved transient (A) below.
+     Behaviors ride `CustomAttribute`s on the host. (#1962's earlier "`display:contents` wrapper where a box would
+     break flex/grid" phrasing is superseded: `display:contents` is now specific to the wrap-child leaves, not a
+     universal shell.)
    - **Single native control** (button, text-field, number-input, temporal/color/file pickers) → **(B) persistent
      wrapper containing a real native control** (the Shoelace `<sl-input>` shape). The inner real element delivers
      every native behaviour (focus/activation/form/IME/picker chrome/validation); the host persists as the styled,
