@@ -814,18 +814,17 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Content Sections as Cards.
-   NOTE (#1895 reverted 2026-06-29): the frame below was briefly retired on the theory that every
-   `.section-card` surface also carries `.fui-card` (from #1608's migration) and so gets its frame there.
-   That premise is FALSE — `.section-card` is used BARE (no `.fui-card`) across ~14 templates
-   (backlog-pages.njk, state-pages.njk, conformance.njk, plug-pages.njk, …), so removing the frame stripped
-   the white container from all of them (the /backlog/NNN/ detail-page regression). The bespoke frame is
-   therefore load-bearing and stays; the dedup can only happen once those surfaces actually emit `.fui-card`. */
+   #1895 (unblocked by #1982): every real `.section-card` surface now also emits `.fui-card` (#1982 migrated
+   the last bare consumers), and `.fui-card` (class-keyed SSR baseline, line ~1705) is globally present. So the
+   VISUAL FRAME — background / border / radius / box-shadow — is now supplied by `.fui-card` (giving the accepted
+   #1608 convergence: `--radius-md` 8px wins by source order; `display:flex`) and is dropped here to avoid a
+   duplicate last-wins frame. What is KEPT is the box-model `.fui-card` does NOT cover for an UNWRAPPED content
+   surface (the section-card content sits directly in the card, not in a `.fui-card__body`, which is where fui-card
+   puts its padding): `padding`, `margin-bottom`, `scroll-margin-top`. Verified before/after on :3000 — no frame or
+   spacing regression on `/backlog/NNN/` (was: earlier #1895 attempt removed padding too and floated content on the
+   bare page bg; that was the 2026-06-29 revert). */
 .section-card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
     padding: var(--spacing-lg);
-    box-shadow: var(--shadow-sm);
     margin-bottom: var(--spacing-lg);
     scroll-margin-top: 100px; /* Offset for sticky headers if any */
 }
@@ -1332,8 +1331,12 @@ a.plug-crumb:hover {
     margin-top: 1.5rem;
 }
 
-/* NOTE (#1895 reverted 2026-06-29): same false premise as `.section-card` above — `.standard-card` is used
-   bare (no `.fui-card`) on non-migrated surfaces, so its frame + hover lift are load-bearing and stay. */
+/* #1895 (unblocked by #1982): unlike `.section-card`, `.standard-card` still has bare consumers that do NOT
+   emit `.fui-card` — the `<a class="standard-card">` catalog/link tiles (kept bare `<a>` per #1871: a link
+   tile is not a card) AND bare `<div class="standard-card flex flex-col">` content cards (project-webrouting,
+   project-webcharts). #1982's migration was `.section-card`-only. So this frame + `:hover` lift is still
+   load-bearing for those surfaces and STAYS. The migrated `standard-card fui-card` surfaces (product-components
+   macro) get their frame from `.fui-card` and this rule is harmless last-wins there. */
 .standard-card {
     display: block;
     background-color: var(--color-surface);

@@ -2,10 +2,11 @@
 kind: story
 size: 5
 parent: "1601"
-status: active
+status: resolved
 dateOpened: "2026-06-27"
 dateStarted: "2026-07-01"
-blockedBy: ["1982"]
+dateResolved: "2026-07-01"
+graduatedTo: "we:src/css/style.css"
 tags: [we-card, fui-card, card-style, base-flavor, dogfooding, css-dedup]
 relatedProject: webdocs
 ---
@@ -73,3 +74,27 @@ a real, tracked item so it can't silently evaporate.)
 Project-include card surfaces render their frame from the single shared `.fui-card` look; `we:.section-card` /
 `we:.standard-card` retain only their documented non-look responsibilities; no visual regression on the
 `/project/*` docs pages and the deep-link `:target` anchors still scroll correctly.
+
+## Done (batch-2026-07-01-1965-2052) — a SCOPED dedup, not the full frame removal the "Done when" assumed
+
+Unblocked by #1982 (resolved: every real `.section-card` now co-emits `.fui-card`; only two escaped `<code>`
+doc-samples remain bare, unaffected by CSS deletion). Grounding corrected the item's premise on two points:
+
+1. **`.section-card` — dropped only the bits `.fui-card` genuinely re-supplies.** `.fui-card` (class-keyed SSR
+   baseline `we:src/css/style.css:1705`) supplies background / border / border-radius / box-shadow / `display:flex`
+   — so those were removed from `.section-card`. But `.fui-card` puts its padding on `.fui-card__body`, and the
+   migrated surfaces are UNWRAPPED (`<div class="section-card fui-card">` with content directly inside, no
+   `__body`). So `.fui-card` supplies **no** padding/margin/scroll-margin for them. **Kept** on `.section-card`:
+   `padding` (`--spacing-lg`), `margin-bottom`, `scroll-margin-top:100px`, plus the `h3`/`h4` heading rules and
+   `.section-card:target`. (The earlier 2026-06-29 revert was caused by ALSO removing padding — content floated on
+   the bare page bg. Verified before/after on `:3000`: `padding` stays 64px, frame intact, `:target` scrolls.)
+2. **`.standard-card` — LEFT AS-IS.** #1982 migrated `.section-card` only. `.standard-card` still has bare
+   consumers that do NOT emit `.fui-card`: the `<a class="standard-card">` catalog/link tiles (kept bare `<a>`
+   per #1871) AND bare `<div class="standard-card flex flex-col">` content cards
+   (`we:src/_includes/project-webrouting.njk`, `we:src/_includes/project-webcharts.njk`). Its frame + `:hover`
+   lift is still load-bearing for those, so it was NOT touched (verified identical before/after on
+   `/projects/webrouting/` and `/demos/`). The migrated `standard-card fui-card` product surfaces get their frame
+   from `.fui-card`; the retained rule is harmless last-wins there.
+
+Net: the `.section-card` frame duplication is gone (single source = `.fui-card`); `.standard-card` awaits a
+future `.fui-card` migration of its remaining bare consumers before its frame can be retired.
