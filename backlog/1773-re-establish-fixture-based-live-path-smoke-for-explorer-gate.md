@@ -8,10 +8,10 @@ locus: plateau-app
 blockedBy: [1577]
 dateStarted: "2026-06-24"
 dateResolved: "2026-06-24"
-graduatedTo: "plateau:tools/explorer/__tests__"
+graduatedTo: "plateau-app:tools/explorer/__tests__"
 tags: [explorer, exploratory-testing, plateau, test-coverage]
 ---
 
 # Re-establish fixture-based live-path smoke for explorer gate + component harnesses
 
-The #1577 FUI→plateau relocation dropped three browser smoke specs under plateau:tools/explorer/__tests__/ (the workbench, gate, and docs-sweep smoke lanes) because they hardcoded FUI-only surfaces (fui:demos/workbench.html, the FUI docs site) that don't exist in plateau-app. The surviving fixtures smoke lane in plateau:tools/explorer/__tests__/ covers the sweepSite live path generically against synthetic HTML fixtures, but the runGate (GATE profile) and stressTestComponent (live component stress) paths lost their end-to-end smoke coverage — only their unit lanes remain. Re-establish charter-pure coverage: author synthetic fixtures + smoke specs exercising runGate and stressTestComponent against plateau:tools/explorer/fixtures (no app-specific routes), wired into plateau:playwright.config.ts against the :4000 dev server. locus:plateau.
+The #1577 FUI→plateau relocation dropped three browser smoke specs under plateau-app:tools/explorer/__tests__/ (the workbench, gate, and docs-sweep smoke lanes) because they hardcoded FUI-only surfaces (fui:demos/workbench.html, the FUI docs site) that don't exist in plateau-app. The surviving fixtures smoke lane in plateau-app:tools/explorer/__tests__/ covers the sweepSite live path generically against synthetic HTML fixtures, but the runGate (GATE profile) and stressTestComponent (live component stress) paths lost their end-to-end smoke coverage — only their unit lanes remain. Re-establish charter-pure coverage: author synthetic fixtures + smoke specs exercising runGate and stressTestComponent against plateau-app:tools/explorer/fixtures (no app-specific routes), wired into plateau-app:playwright.config.ts against the :4000 dev server. locus:plateau-app.

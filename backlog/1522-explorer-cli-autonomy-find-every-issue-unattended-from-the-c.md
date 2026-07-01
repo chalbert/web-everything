@@ -2,7 +2,7 @@
 kind: epic
 status: open
 childlessReason: program
-locus: frontierui
+locus: plateau-app
 dateOpened: "2026-06-22"
 tags: [fui-devtool, exploratory-testing, autonomous-agent, a11y]
 relatedReport: reports/2026-07-01-program-explorer-cli-autonomy.md
@@ -10,11 +10,11 @@ relatedReport: reports/2026-07-01-program-explorer-cli-autonomy.md
 
 # Explorer CLI autonomy
 
-Find every issue unattended from the CLI. Drive `fui:tools/explorer/cli.ts` toward the north star: point it at a real app and have it find ALL the issues on its own, unattended, with no bespoke harness. Builds on the shipped engine (epic #1167 — `fui:tools/explorer/`), which delivered the walk + Layer-1 oracles as a library plus a thin CLI; this epic closes the gap between "the engine has the primitives" and "the CLI autonomously produces a full audit."
+Find every issue unattended from the CLI. Drive `plateau-app:tools/explorer/cli.ts` toward the north star: point it at a real app and have it find ALL the issues on its own, unattended, with no bespoke harness. Builds on the shipped engine (epic #1167 — `plateau-app:tools/explorer/`), which delivered the walk + Layer-1 oracles as a library plus a thin CLI; this epic closes the gap between "the engine has the primitives" and "the CLI autonomously produces a full audit."
 
 ## Grounding — the 2026-06-22 plateau-app audit ([we:reports/2026-06-22-plateau-app-explorer-a11y-audit.md](../reports/2026-06-22-plateau-app-explorer-a11y-audit.md))
 
-Auditing plateau-app surfaced a real gap between the CLI and "find everything." The CLI surface is just `<url> --site --gate --max-states --max-depth --json` — so to audit all 30 routes (10 public + 20 behind login) I had to write a bespoke harness (`fui:tools/explorer/plateau-audit.ts`) that the CLI couldn't replace. Each thing the harness had to do that the CLI can't is a child below. The harness is the proof-of-concept for these slices.
+Auditing plateau-app surfaced a real gap between the CLI and "find everything." The CLI surface is just `<url> --site --gate --max-states --max-depth --json` — so to audit all 30 routes (10 public + 20 behind login) I had to write a bespoke harness (`plateau-app:tools/explorer/plateau-audit.ts`) that the CLI couldn't replace. Each thing the harness had to do that the CLI can't is a child below. The harness is the proof-of-concept for these slices.
 
 ## Captured gaps (children)
 
@@ -49,14 +49,15 @@ covered**). The **reach front** is mature; the **issue-class front** was under-d
   zero-config discovery (#1550) · SPA nav (#1547) · multi-viewport (#1526) · artifact bundle (#1525) ·
   interaction depth (#1167) **[covered]**; href-less route discovery (#2045, reopened) **[residual]**.
 
-**Stale-reference finding:** the explorer code now lives in `plateau:tools/explorer/` (moved per
-#1577/#1597), but this item + its 11 pre-2026-07-01 children still carry `locus: frontierui` and `fui:`
-paths. A separate subtree-wide locus/ref cleanup is warranted (not done in this pass).
+**Stale-reference finding (corrected in #2047):** the explorer code lives in `plateau-app:tools/explorer/`
+(moved per #1577/#1597); this item + its 11 pre-2026-07-01 children had carried `locus: frontierui` and
+`fui:`/`plateau:` paths. Swept subtree-wide in #2047 — `locus` repointed to `plateau-app` and the
+code-path refs repointed to `plateau-app:tools/explorer/`.
 
 ## Review log
 
 - **2026-07-01 — first skill-run (front-A goal-completeness pass).** Decomposed the north star into the
-  30-element goal-set above and diffed it against the explorer code (grounded in `plateau:tools/explorer/`).
+  30-element goal-set above and diffed it against the explorer code (grounded in `plateau-app:tools/explorer/`).
   **Coverage 20/30.** The reach front is solid; the issue-class front was under-decomposed — a general
   tester's keyboard, form-validation, broken-link, perf/CLS, i18n/RTL, and hover classes were never filed,
   and `noStuckFocus` is a stub. Filed **8** children: **#2039–#2046** (7 stories + 1 perf `task`). Also
