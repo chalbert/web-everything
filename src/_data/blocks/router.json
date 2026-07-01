@@ -39,9 +39,9 @@
       "description": "On a child <template>: canActivate guard name, resolved from the @routeGuard context."
     },
     {
-      "name": "route:guard:leave",
+      "name": "route:guard-leave",
       "type": "string",
-      "description": "On a child <template>: canDeactivate guard name, resolved from the @routeGuard context."
+      "description": "On a child <template>: canDeactivate guard name, resolved from the @routeGuard context. Renamed from the double-colon route:guard:leave per #1991 (family-only colon: the route family carries the colon, the member name is a bare hyphen); the old spelling stays accepted as a back-compat alias."
     },
     {
       "name": "route:loader",
@@ -221,7 +221,7 @@
         "RoutePrefetchBehavior": "CustomAttribute on <a> (route:prefetch). Metadata paired with route:link."
       },
       "plainAttributes": {
-        "description": "route, route:guard, route:guard:leave, route:loader, route:error, route:outlet on <template> elements are plain HTML attributes read by <route-view> via querySelectorAll. No classes or registry entries needed.",
+        "description": "route, route:guard, route:guard-leave, route:loader, route:error, route:outlet on <template> elements are plain HTML attributes read by <route-view> via querySelectorAll. No classes or registry entries needed.",
         "rationale": "Eliminates RouteAttribute, RouteGuardAttribute, RouteLoaderAttribute, RouteErrorAttribute classes. The config component owns template parsing."
       },
       "rationale": "In-place rendering is the simplest model — the router renders where you define the routes. Named outlets exist only for auxiliary views (sidebar, header, footer). Links must stay as <a> elements for accessibility."
@@ -239,7 +239,7 @@
       "templateAttributes": [
         "route",
         "route:guard",
-        "route:guard:leave",
+        "route:guard-leave",
         "route:loader",
         "route:error",
         "route:outlet",
@@ -308,7 +308,7 @@
         "canActivate",
         "canDeactivate"
       ],
-      "description": "Plain functions (RouteGuardFn), not class instances. Provided via customContexts:routeGuard, resolved by name from route:guard and route:guard:leave attribute values.",
+      "description": "Plain functions (RouteGuardFn), not class instances. Provided via customContexts:routeGuard, resolved by name from route:guard and route:guard-leave attribute values.",
       "noAbstractClass": "The Navigation API's navigate event already provides the guard mechanism — event.intercept() to proceed, event.preventDefault() to cancel, event.signal to abort. An abstract RouteGuard class would duplicate platform-level control. Guard functions are stateless decision points; the injector/context system handles DI via closures.",
       "navigationApiMapping": {
         "event.preventDefault()": "Guard returns false (canDeactivate, before intercept)",

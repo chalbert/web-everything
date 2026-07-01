@@ -192,7 +192,7 @@ viewInjector.set('customContexts:route', {
 <p>When <code>navigation.addEventListener('navigate', ...)</code> fires, <code>&lt;route-view&gt;</code> executes this sequence:</p>
 <ol>
   <li><strong>Match route</strong> &mdash; URLPattern match against all child <code>&lt;template route="..."&gt;</code> definitions</li>
-  <li><strong>canDeactivate</strong> &mdash; Run current route's <code>route:guard:leave</code> function (looked up from <code>@routeGuard</code> context). If it returns <code>false</code>, call <code>event.preventDefault()</code>. If it returns a string, redirect.</li>
+  <li><strong>canDeactivate</strong> &mdash; Run current route's <code>route:guard-leave</code> function (looked up from <code>@routeGuard</code> context). If it returns <code>false</code>, call <code>event.preventDefault()</code>. If it returns a string, redirect.</li>
   <li><strong>event.intercept()</strong> &mdash; Commit to the navigation. URL updates. Inside the async handler:</li>
   <li><strong>canActivate</strong> &mdash; Run target route's <code>route:guard</code> function. If it fails, redirect away.</li>
   <li><strong>Loader</strong> &mdash; Run <code>route:loader</code> function with <code>{ params, query, signal: event.signal }</code>. The <code>signal</code> aborts automatically if a new navigation supersedes this one.</li>
@@ -301,7 +301,7 @@ type RouteGuardResult = boolean | string;
 
 /**
  * Guard function signature. Provided via customContexts:routeGuard.
- * Used for both canActivate (route:guard) and canDeactivate (route:guard:leave).
+ * Used for both canActivate (route:guard) and canDeactivate (route:guard-leave).
  *
  * @param to - The route being navigated to
  * @param from - The route being navigated from (null on initial load)
@@ -367,7 +367,7 @@ interface RouteDefinition {
   template: HTMLTemplateElement;
   /** canActivate guard name (from route:guard attr), resolved from @routeGuard context */
   guard?: string;
-  /** canDeactivate guard name (from route:guard:leave attr), resolved from @routeGuard context */
+  /** canDeactivate guard name (from route:guard-leave attr), resolved from @routeGuard context */
   guardLeave?: string;
   /** Loader function name (from route:loader attr), resolved from @routeLoader context */
   loader?: string;
@@ -403,7 +403,7 @@ interface MatchedRoute {
  * Child &lt;template&gt; attributes (plain HTML, no registry needed):
  *   route="pattern"        — URLPattern path
  *   route:guard="name"     — canActivate guard (from @routeGuard context)
- *   route:guard:leave="n"  — canDeactivate guard (from @routeGuard context)
+ *   route:guard-leave="n"  — canDeactivate guard (from @routeGuard context)
  *   route:loader="name"    — loader function (from @routeLoader context)
  *   route:error            — marks template as error boundary
  *   route:outlet="name"    — target outlet (default: primary)
@@ -609,7 +609,7 @@ interface NavigationResult {
   &lt;/template&gt;
 
   &lt;!-- canDeactivate: "confirmUnsaved" resolved from @routeGuard context --&gt;
-  &lt;template route="/editor" route:guard:leave="confirmUnsaved"&gt;
+  &lt;template route="/editor" route:guard-leave="confirmUnsaved"&gt;
     &lt;document-editor&gt;&lt;/document-editor&gt;
   &lt;/template&gt;
 &lt;/route-view&gt;</code></pre></we-code-view>
@@ -1191,7 +1191,7 @@ function registerRouter(attributes: CustomAttributeRegistry): void;</code></pre>
   <tr><th>Attribute</th><th>Value</th><th>Description</th></tr>
   <tr><td><code>route</code></td><td>URLPattern path</td><td>Route pattern to match (e.g., <code>/users/:id</code>)</td></tr>
   <tr><td><code>route:guard</code></td><td>Guard name</td><td>canActivate guard, resolved from <code>@routeGuard</code> context</td></tr>
-  <tr><td><code>route:guard:leave</code></td><td>Guard name</td><td>canDeactivate guard, resolved from <code>@routeGuard</code> context</td></tr>
+  <tr><td><code>route:guard-leave</code></td><td>Guard name</td><td>canDeactivate guard, resolved from <code>@routeGuard</code> context (the pre-#1991 <code>route:guard:leave</code> spelling is still accepted as a back-compat alias)</td></tr>
   <tr><td><code>route:loader</code></td><td>Loader name</td><td>Loader function, resolved from <code>@routeLoader</code> context</td></tr>
   <tr><td><code>route:error</code></td><td>(boolean)</td><td>Marks template as error boundary for its route</td></tr>
   <tr><td><code>route:outlet</code></td><td>Outlet name</td><td>Target outlet (omit for primary)</td></tr>

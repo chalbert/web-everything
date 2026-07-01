@@ -1,5 +1,5 @@
 {
   "term": "leave guard",
   "definition": "Logic that can interrupt a navigation away from the current view — proceeding freely, prompting for confirmation (e.g. unsaved changes), or blocking until a condition clears.",
-  "usage": "The <code>guard</code> dimension of the Navigation Intent (<code>free|confirm|blocked</code>). Grounded in the Navigation API <code>navigate</code> event (<code>preventDefault</code>/<code>intercept</code>) and <code>beforeunload</code>. Distinct from a route entry <code>guard</code> (canActivate); a leave guard is canDeactivate. The Router exposes it as <code>route:guard:leave</code>."
+  "usage": "The <code>guard</code> dimension of the Navigation Intent (<code>free|confirm|blocked</code>). Grounded in the Navigation API <code>navigate</code> event (<code>preventDefault</code>/<code>intercept</code>) and <code>beforeunload</code>. Distinct from a route entry <code>guard</code> (canActivate); a leave guard is canDeactivate. The Router exposes it as <code>route:guard-leave</code>."
 }
