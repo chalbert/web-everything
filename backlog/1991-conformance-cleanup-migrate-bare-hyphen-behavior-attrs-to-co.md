@@ -1,8 +1,9 @@
 ---
 kind: decision
-status: open
+status: active
 preparedDate: "2026-07-01"
 dateOpened: "2026-06-30"
+dateStarted: "2026-07-01"
 tags: [naming, colon-namespace, attribute-conformance, frontier-ui]
 ---
 
@@ -17,7 +18,7 @@ that pattern doesn't cleanly resolve**, then the rename becomes mechanical.
 
 ## The clean renames (no fork — settled by #1987's pattern, execute on ratification)
 
-First-hyphen → colon, member keeps any internal hyphen (like the ratified `grid:cell-edit`):
+First-hyphen → colon, member keeps any internal hyphen (like the ratified `grid:cell-navigation`):
 
 - `droplist-anchor` → `droplist:anchor`, `droplist-anchored` → `droplist:anchored`,
   `droplist-selection` → `droplist:selection`
@@ -33,7 +34,7 @@ First-hyphen → colon, member keeps any internal hyphen (like the ratified `gri
 namespace exists to avoid). Options:
 
 - **(a) `list:type-ahead` — RECOMMENDED.** Names the host surface (list / combobox) as the namespace and
-  keeps the compound member verbatim, exactly the `grid:cell-edit` precedent. Reads as "the type-ahead
+  keeps the compound member verbatim, exactly the `grid:cell-navigation` precedent. Reads as "the type-ahead
   behavior of a list," no collision with `type=`, and the `list:` namespace generalizes to future
   list behaviors.
 - (b) `nav:type-ahead` — same member-keeps-hyphen shape, but `nav:` mis-frames it (type-ahead is

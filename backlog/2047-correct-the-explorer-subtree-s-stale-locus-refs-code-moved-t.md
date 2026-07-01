@@ -1,8 +1,9 @@
 ---
 kind: task
 parent: "1522"
-status: open
+status: active
 dateOpened: "2026-07-01"
+dateStarted: "2026-07-01"
 tags: []
 ---
 

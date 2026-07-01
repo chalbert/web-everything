@@ -3,7 +3,6 @@ kind: decision
 parent: "1975"
 status: open
 dateOpened: "2026-06-29"
-dateStarted: "2026-06-30"
 preparedDate: "2026-06-30"
 relatedReport: reports/2026-06-29-directive-catalog-brainstorm.md
 tags: [webdirectives, composition, directive, async, suspense, validation-gate]
@@ -80,6 +79,17 @@ forks are both already disposed:
 - **Framework analog:** Svelte `{#await}/{:then}/{:catch}`, Lit `until()`, Solid `<Suspense>` + resource.
 - **Substrate / migration target:** DOM Parts `ChildNodePart`. The promise is injected; the directive owns the
   three-branch *shape* + the pending-timing knob, not the fetch.
+
+## Progress
+
+- **Status:** open — reopened (unclaimed); prepared, GO recommended, awaiting a ratify turn.
+- **Done:** claimed; grounded the spec refs (`async:boundary` stub @ :367, `resource:loader` @ :355 — both
+  confirmed); red-teamed the `resource:loader` statute-overlap default (attack fails — primitive vs. composed).
+- **Next:** on ratify go — resolve (record GO + the `async:boundary` disposition: alias vs. fold, the one open sub-point),
+  then scaffold the build item under #1975.
+- **Notes:** discussion branched into a general composition-governance finding — filed #2007 (feed-mechanism
+  corollary: own-the-shape ⇒ template/attr-expression, never live-DOM) + #2008 (`we-data-table` dual-feed defect,
+  gated on #2007). #1976 itself is a clean example of the compliant feed model.
 
 `Skeptic:` SURVIVES-WITH-AMENDMENT (refute-only sub-agent, four axes). Pass-0 (classification): genuine
 three-shape tree governance, not computation — holds. Pass-1 (merit): the bare injected promise gives the
