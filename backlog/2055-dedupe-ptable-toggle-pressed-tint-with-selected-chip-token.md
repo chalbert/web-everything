@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 1
-status: open
+status: active
 blockedBy: []
 dateOpened: "2026-07-01"
+dateStarted: "2026-07-01"
 tags: [backlog-ui, prioritisation, design-review, css, tokens]
 ---
 

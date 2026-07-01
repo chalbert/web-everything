@@ -2,8 +2,9 @@
 kind: story
 size: 5
 parent: "777"
-status: open
+status: active
 dateOpened: "2026-07-01"
+dateStarted: "2026-07-01"
 tags: [dogfood, fui, ssr, eleventy, keystone, di-mount]
 ---
 

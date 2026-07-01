@@ -1,8 +1,9 @@
 ---
 kind: story
 size: 5
-status: open
+status: active
 dateOpened: "2026-07-01"
+dateStarted: "2026-07-01"
 tags: [theme, design-tokens, fui, webtheme, keystone]
 ---
 
