@@ -36,12 +36,12 @@ function readinessOf(it: { batchable?: boolean; sliceable?: boolean; tier?: stri
   return 'notready';
 }
 
-// #1572 — deliberately skipped in the live dev-server e2e lane: this compares the loader (read from the
+// Deliberately skipped in the live dev-server e2e lane: this compares the loader (read from the
 // CURRENT files at spec-collection time) against the WATCHED 11ty render on :8080, which lags during active
 // backlog churn (a batch / concurrent session adding-resolving items) — the rendered row count drifts one or
 // more items behind the loader (the observed 83-vs-82). The assertion is sound only against a FROZEN tree:
-// re-home it to a build-then-test CI lane / the planned plateau-hosted rendered-site regression harness
-// (#800), where the render and the loader are taken from the same snapshot. Tracked by #1572.
+// re-home it to the build-then-test rendered-site regression harness (#800), where the render and the loader
+// are taken from the same snapshot. Tracked by #800 (the #1572 triage that first parked it is resolved).
 test.describe.skip('Rendered /backlog/ Prioritisation table matches the loader projection', () => {
   const all = loadBacklog();
   const openItems = all.filter((i) => i.status === 'open' && i.num);
