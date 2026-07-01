@@ -7,11 +7,22 @@ dateOpened: "2026-06-20"
 dateStarted: "2026-06-20"
 dateResolved: "2026-06-20"
 graduatedTo: "we:reproduction-parity/shadcn/reproduction.ts"
+supersededBy: "2022"
 relatedReport: reports/2026-06-20-1243-split-analysis.md
 tags: [reproduction, conformance, shadcn, parity, gap-list]
 ---
 
 # Reproduce shadcn/ui as theme+intents over WE/FUI — first parity target, gap list
+
+> **Reconciliation (#2032, 2026-07-01):** the RENDERED/MEASURED deliverable this story claimed was never
+> shipped — only a declarative WE-side scaffold (`we:reproduction-parity/shadcn/theme.ts` +
+> `we:reproduction-parity/shadcn/reproduction.ts`) with the co-evolving oracle ingesting **zero** readings
+> (see Progress below). Nothing rendered, nothing measured; the gap list is asserted, not proven. To stop
+> `resolved` masking that stub, this story is **formally superseded by #2022** ("Author a real shadcn/ui
+> flavor + produce the parity gap list"), which delivers the real DTCG flavor loaded through the #2017
+> manifest loader and diffed against rendered shadcn components. Status left `resolved` because the
+> *foundational scaffold slice* genuinely landed; the unfinished measured-parity work now lives under #2022,
+> not a reopen of this story.
 
 First per-target slice of the reproduction-conformance program (#1226). Reproduce shadcn/ui pixel- and behavior-perfect using ONLY WE intents + webtheme tokens over FUI primitives; the deliverable is the GAP LIST (what theme+intents can't yet express), not the copy. Every parity claim gates on a confirmed layered-oracle measurement (fuzzy-pixel + structural diff + advisory VLM) from the AI-Playwright validator chain (#1167/#1219/#1220/#1221) — a CO-EVOLVING dependency, not a hard blockedBy (per #1226 Fork 1). Feeds gap-sweep #315. Likely needs /split into per-component build slices once the harness is wired.
 

@@ -33,7 +33,11 @@ deliverable of the reproduction-conformance program #1226 / #1225).
 - shadcn flavor loads through the manifest loader and re-themes FUI button/input/card to shadcn's look, verified by
   Playwright screenshots vs a shadcn reference.
 - A written gap list exists (report) enumerating non-reproducible aspects with proposed intents/tokens.
-- #1243 is reconciled — either superseded by this item or updated to point at the real artifact.
+- ~~#1243 is reconciled — either superseded by this item or updated to point at the real artifact.~~
+  **Done (#2032, 2026-07-01):** #1243 now carries `supersededBy: "2022"` and a reconciliation note recording that
+  its "resolved" status covers only the declarative scaffold (zero readings ingested), and that the real
+  rendered/measured shadcn flavor + proven gap list is THIS story. This story is the single source of truth for the
+  measured-parity deliverable; complete it to discharge the reconciliation.
 
 ## Notes
 
