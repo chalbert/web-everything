@@ -1,0 +1,22 @@
+{
+  "id": "theme-projection-vocabulary-contract",
+  "title": "Theme-projection vocabulary contract — what custom-property names a runtime ThemeSource must paint so live FUI components re-theme",
+  "status": "open",
+  "summary": "Prep survey for decision #2026 (surfaced by #2017 pre-flight). A manifest→ThemeSource loader can be built, but its acceptance (loading a material-like theme visibly re-themes a live we-card + we-badge) is unmeetable: grep finds ZERO consumers of resolveTheme/getRootTheme/ThemeSource outside fui:plugs/webtheme/ itself. The runtime emit and the component read speak three different vocabularies. (1) FUI runtime emit paints family-PREFIXED props — tokenVarName = `--token-<family>-<name>`, e.g. `--token-color-border` (fui:plugs/webtheme/emitCss.ts:26-30; applyTokenVars el.style.setProperty at :79). (2) The FUI card reads UN-prefixed semantic props — `var(--color-border)`, `var(--color-surface-card)`, `var(--radius-md)`, `var(--shadow-sm)`, `var(--color-border-light)`, `var(--color-text-secondary)` (fui:blocks/card/Card.ts:90-100) — the exact spelling #1886 Fork 2 RATIFIED as the reskinnable base (platform-decisions.md#... 'CARD_CSS = var(--color-border,…), var(--radius-md,…), var(--color-surface-card,…)'). (3) The badge reads NO custom props at all — hardcoded hex per tone (fui:blocks/badge/Badge.ts:87-91). So injecting a ThemeSource paints `--token-color-*` that no component reads; the card keeps its literal fallbacks; the badge never moves. HEADLINE FINDING that dissolves most of the apparent fork: the alias-bridge already exists and is ratified — #1824 Fork 2a ships `we:scripts/lib/token-css.mjs` which emits BOTH the `--token-*` resolved block AND a `--<family>-*` alias block (`--color-border: var(--token-color-border)`) from `we:src/_data/weSiteTheme.js` LEGACY_ALIASES (lines 62-82), inlined pre-paint into the WE-site <head>. But that bridge runs at WE-SITE BUILD time only; FUI's runtime applyTokenVars paints just `--token-*`, so a runtime-injected ThemeSource can't re-theme a live component. The projection-vocabulary contract is therefore NOT a greenfield naming fork — the projected vocabulary is already ratified (semantic un-prefixed `--<family>-<name>`, #1886/#1824); the open work is to lift the build-only alias bridge into FUI's runtime emit so both spellings paint from one source (the no-drift #1683 guarantee), and to close the three untokened card props (`--color-surface-card`, `--color-border-light`, `--color-text-secondary` are absent from LEGACY_ALIASES — they only ever hit literal fallbacks). Prior art surveyed: W3C DTCG resolved-token names, Style Dictionary CSS output (`--color-border`, flat semantic), Material Web (`--md-sys-color-*` = family-prefixed system tokens + component tokens `--md-<comp>-*`), Shoelace (`--sl-color-*`), Adobe Spectrum (`--spectrum-*`) — every mature system ships a two-tier semantic-alias→component-token step (the #930-A DTCG→--wb-* precedent is the same alias step, but workbench-DEMO-scoped only, fui:workbench/manifestBridge.ts, and does NOT decide the real component seam). The badge is a separate concern: it reads zero props, so re-theming it is a component-CSS migration (tokenize its tones onto `--color-*`/`--tone-*`), not a vocabulary choice. Owning statute: #tokens-js-first (injector is SoT, `--token-*` is the one-way projection) + #1886 Fork 2 (semantic `--<family>-*` is the ratified reskinnable base) + #config-extends-platform-default (values→project). Full grounding in reports/2026-07-01-2026-theme-consumption-seam.md.",
+  "dateOpened": "2026-07-01",
+  "lastReviewed": "2026-07-01",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "theming",
+    "design-tokens",
+    "custom-properties",
+    "vocabulary-contract",
+    "constellation-placement",
+    "dtcg",
+    "webtheme",
+    "decision-prep"
+  ],
+  "relatedBlocks": ["card", "badge"],
+  "relatedPlugs": ["webtheme"],
+  "relatedProject": "webtraits"
+}

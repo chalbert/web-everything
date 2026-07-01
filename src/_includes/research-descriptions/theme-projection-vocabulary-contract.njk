@@ -1,0 +1,119 @@
+{% raw %}
+<h2>Question</h2>
+<p>
+  Prep survey for decision
+  <a href="/backlog/2026-component-theme-consumption-seam-how-a-loaded-themesource-re/">#2026</a>
+  (surfaced by the
+  <a href="/backlog/2017-manifest-themesource-loader/">#2017</a> loader pre-flight). A
+  manifest&rarr;<code>ThemeSource</code> loader can be built, but its acceptance &mdash; loading a
+  material-like theme <em>visibly re-themes a live <code>we-card</code> + <code>we-badge</code></em>
+  &mdash; is unmeetable: <code>grep</code> finds <strong>zero</strong> consumers of
+  <code>resolveTheme</code> / <code>getRootTheme</code> / <code>ThemeSource</code> outside
+  <code>fui:plugs/webtheme/</code> itself. What custom-property vocabulary must a runtime
+  <code>ThemeSource</code> paint so live FUI components actually re-theme?
+</p>
+
+<h2>Three vocabularies that don't meet</h2>
+<ul>
+  <li>
+    <strong>FUI runtime emit paints family-<em>prefixed</em> props.</strong>
+    <code>tokenVarName(family, name)</code> returns <code>--token-&lt;family&gt;-&lt;name&gt;</code>
+    &mdash; e.g. <code>--token-color-border</code> (<code>fui:plugs/webtheme/emitCss.ts:26-30</code>);
+    <code>applyTokenVars</code> sets exactly those on a live element
+    (<code>fui:plugs/webtheme/emitCss.ts:79</code>).
+  </li>
+  <li>
+    <strong>The FUI card reads un-prefixed <em>semantic</em> props.</strong>
+    <code>CARD_CSS</code> is <code>var(--color-border,&hellip;)</code>,
+    <code>var(--color-surface-card,&hellip;)</code>, <code>var(--radius-md,&hellip;)</code>,
+    <code>var(--shadow-sm,&hellip;)</code>, plus <code>--color-border-light</code> and
+    <code>--color-text-secondary</code> (<code>fui:blocks/card/Card.ts:90-100</code>) &mdash; the exact
+    spelling <strong>#1886 Fork&nbsp;2 ratified</strong> as the reskinnable base
+    (<code>we:docs/agent/platform-decisions.md</code>, <em>tokenized-base</em>).
+  </li>
+  <li>
+    <strong>The badge reads no custom properties at all.</strong> Each tone is hardcoded hex
+    (<code>.badge--info { background: #e7f0ff; color: #1d4ed8; &hellip; }</code>,
+    <code>fui:blocks/badge/Badge.ts:87-91</code>). Re-theming it is a component-CSS migration, not a
+    vocabulary choice.
+  </li>
+</ul>
+<p>
+  So injecting a <code>ThemeSource</code> paints <code>--token-color-*</code> that no component reads;
+  the card keeps its literal fallbacks; the badge never moves.
+</p>
+
+<h2>The headline finding &mdash; the projected vocabulary is already ratified, and a bridge already ships (build-only)</h2>
+<p>
+  This is <strong>not a greenfield naming fork.</strong> Two settled facts collapse most of it:
+</p>
+<ul>
+  <li>
+    <strong>The semantic <code>--&lt;family&gt;-&lt;name&gt;</code> spelling is the ratified projection
+    target.</strong> #1886 Fork&nbsp;2 blessed the card reading <code>var(--color-border)</code> /
+    <code>var(--radius-md)</code> / <code>var(--color-surface-card)</code>, and
+    <code>we:src/css/style.css</code>'s own header records that all
+    <code>--color-*</code>/<code>--radius-*</code>/<code>--shadow-*</code>/<code>--font-*</code> site
+    vars are now <strong>emitted JS-first from the injector</strong> (#1813, ruled #1824), not
+    hand-authored. The projected names are fixed.
+  </li>
+  <li>
+    <strong>The alias bridge already exists</strong> &mdash; #1824 Fork&nbsp;2a ships
+    <code>we:scripts/lib/token-css.mjs</code>, which emits <em>both</em> the canonical
+    <code>--token-*</code> resolved block <em>and</em> a <code>--&lt;family&gt;-*</code> alias block
+    (<code>--color-border: var(--token-color-border)</code>) generated from
+    <code>we:src/_data/weSiteTheme.js</code> <code>LEGACY_ALIASES</code> (lines 62-82), inlined
+    pre-paint into the WE-site <code>&lt;head&gt;</code>. But that bridge runs at <strong>WE-site build
+    time only</strong>; FUI's runtime <code>applyTokenVars</code> paints just <code>--token-*</code>, so
+    a runtime-injected <code>ThemeSource</code> cannot re-theme a live component.
+  </li>
+</ul>
+<p>
+  So the real open work is (1) lift the build-only alias projection into FUI's <em>runtime</em> emit so
+  both spellings paint from the one <code>ThemeSource</code> (the no-drift #1683 guarantee), and (2)
+  close the <strong>three untokened card props</strong> &mdash; <code>--color-surface-card</code>,
+  <code>--color-border-light</code>, <code>--color-text-secondary</code> are <em>absent</em> from
+  <code>LEGACY_ALIASES</code> and from <code>defaultTheme</code>, so they only ever hit their literal
+  fallbacks and no theme moves them.
+</p>
+
+<h2>Prior art &mdash; every mature token system ships a two-tier semantic&rarr;component alias step</h2>
+<ul>
+  <li>
+    <strong>W3C DTCG</strong> resolves to named tokens; the transform to CSS custom properties is a
+    downstream step, not part of the format &mdash; the naming is the <em>tool's</em> call.
+  </li>
+  <li>
+    <strong>Style Dictionary</strong> emits flat semantic custom properties
+    (<code>--color-border</code>, <code>--size-radius-medium</code>) &mdash; the un-prefixed shape the
+    FUI card already reads.
+  </li>
+  <li>
+    <strong>Material Web</strong> ships family-prefixed <em>system</em> tokens
+    (<code>--md-sys-color-*</code>) <em>and</em> per-component tokens (<code>--md-&lt;comp&gt;-*</code>)
+    &mdash; an explicit two-tier semantic&rarr;component alias.
+  </li>
+  <li>
+    <strong>Shoelace</strong> (<code>--sl-color-*</code>) and <strong>Adobe Spectrum</strong>
+    (<code>--spectrum-*</code>) both prefix, and both alias a semantic tier onto a primitive/global tier.
+  </li>
+</ul>
+<p>
+  The pattern is unanimous: a canonical resolved family (here <code>--token-*</code>) plus a semantic
+  alias tier the components actually read (here <code>--&lt;family&gt;-*</code>). The
+  <a href="/backlog/">#930-A</a> DTCG&rarr;<code>--wb-*</code> mapping
+  (<code>fui:workbench/manifestBridge.ts</code>) is <em>the same alias step</em> &mdash; but scoped to
+  the <strong>workbench demo stage</strong> only (its <code>--wb-*</code> names never cross the WE
+  boundary), so it does <em>not</em> decide the real component seam this topic owns.
+</p>
+
+<h2>Owning statute</h2>
+<p>
+  <code>#tokens-js-first</code> (injector is the source of truth; <code>--token-*</code> is the one-way
+  JS&rarr;CSS projection) &middot; <strong>#1886 Fork&nbsp;2</strong> (the semantic
+  <code>--&lt;family&gt;-*</code> is the ratified reskinnable base) &middot;
+  <code>#config-extends-platform-default</code> (token <em>values</em> are a project config extending the
+  platform default). Full grounding in
+  <code>we:reports/2026-07-01-2026-theme-consumption-seam.md</code>.
+</p>
+{% endraw %}
