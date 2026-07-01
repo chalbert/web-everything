@@ -2,24 +2,34 @@
 kind: story
 size: 5
 status: open
-blockedBy: ["1964"]
 dateOpened: "2026-07-01"
-tags: []
+tags: [data-table, composition, ssr, migration-1600]
 ---
 
-# Re-author #1600 doc tables off the authored-table wrap — data-fed or plain table (per ratified #1964)
+# Migrate #1600 doc-table wraps — complete the #1867 contract or revert to plain `<table>` (per ratified #1964)
 
-## Blocked — the premise is not yet ratified (#1964 / #2007 both active, 2026-07-01 batch pre-flight)
+Ratified #1964 (reconciled to the #2007 restructure-vs-enhance discriminator): a `<we-data-table>` wrapping a live
+`<table>` conforms **iff** the table carries the #1867 in-place-enhancer contract
+(`.data-table` + `<th data-sortable>` + `<td data-sort-value>`) and is only reordered/hidden. The #1600 wraps carry
+**none** of it, so each is an inert wrapper around a plain table — a **missing-contract defect**. Fix per surface
+across the wrap sites
+(we:src/capabilities.njk, we:src/capability-pages.njk, we:src/intent-pages.njk, we:src/block-pages.njk,
+we:src/presets.njk, we:src/validation-rules.njk, we:src/compat.njk):
 
-Surfaced as batchable in a serial batch, but the body's premise — *"per **ratified** #1964"* — is **false**:
-`#1964` (the *we-data-table in-place-wrap vs render-from-data* decision) is `status: active`, **not** resolved,
-and the feed-mechanism **direction** it turns on is governed by `#2007` (feed-mechanism governance), also
-`status: active`. `#2008` (the sibling, retired as a duplicate of #1964) is itself `blockedBy: [2007]` and states
-the dual-feed question *"does not pre-judge"* the direction — *"the #2007 ruling decides"*. So the exact target
-this story migrates 7 doc-table pages onto — *"we-data-table with a `rows` binding (build renders + enhancer
-sorts)"* and the `registerDataTable → registerDataTableEnhancer` swap — **is precisely what is still under
-contention**. Re-authoring now would build on ground that #1964/#2007 may move. Encoded `blockedBy: #1964` (the
-direct determinant; #1964 is in turn downstream of #2007) so the selector stops surfacing it as agent-ready. Once
-#1964 ratifies the feed identity, un-block and re-author to whatever it chose.
+- **Genuinely sortable doc table → complete the #1867 contract.** Add `.data-table` + `<th data-sortable>` +
+  `<td data-sort-value>` (stamped from the same data the Nunjucks loop already iterates); keep the `<we-data-table>`
+  wrapper. The enhancer reorders in place, reads `data-*`, never re-renders.
+- **Presentational grid → revert to a plain `<table class="data-table">`** (drop the `<we-data-table>`; it earns
+  nothing on a table nobody sorts). Keeps the styling class.
 
-#1964 ratified that we-data-table never ingests an author-written table element. Migrate the #1600 doc-table surfaces (we:src/capabilities.njk, we:src/capability-pages.njk, we:src/intent-pages.njk, we:src/block-pages.njk, we:src/presets.njk, we:src/validation-rules.njk, we:src/compat.njk) off the wrap: a real sortable data-table becomes we-data-table with a rows binding (build renders plus enhancer sorts; rich cells via inert template); a presentational grid becomes a plain table.data-table with no custom element. Also swap the docs embed (fui:embed/data-table-in-document.ts) from registerDataTable to registerDataTableEnhancer (client kernel is the enhancer over build output). Undoes shipped #1610-1613. Per-page before/after visual check. Zero authored-table wraps remain.
+Also swap the docs embed (fui:embed/data-table-in-document.ts) from `registerDataTable` to
+`registerDataTableEnhancer` so the client path refines in place and can never `replaceChildren` a config-less wrap
+(R3). No inert `<we-data-table>` wrapper remains. Per-page before/after visual check on the running dev server.
+
+## Acceptance
+
+- Every `<we-data-table>` on the 7 wrap-site pages either enhances a real `.data-table` (contract present) or is
+  removed.
+- Embed registers `registerDataTableEnhancer`; a config-less wrap provably never `replaceChildren`s (regression
+  test asserting a wrap keeps its rows).
+- Before/after visual parity on each touched page.
