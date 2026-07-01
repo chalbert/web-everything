@@ -5,7 +5,7 @@
       "name": "level",
       "type": "string",
       "fieldName": "level",
-      "description": "On <auto-heading>: explicit heading level (e.g. \"3\"); highest-priority source for the resolved <hN> tag, clamped to a maximum of 6."
+      "description": "On <auto-heading>: an explicit heading level (e.g. \"3\"), clamped to a maximum of 6, is the default source for the resolved <hN> tag. The opt-in value \"auto\" instead computes the level from sectioning-ancestor depth — the document-outline behaviour native HTML never shipped — and overrides any injector-provided level (#2058)."
     },
     {
       "name": "href",
@@ -60,7 +60,7 @@
     "headingElements": {
       "status": "Standard",
       "pattern": "<h1>–<h6> provide document heading hierarchy; WHATWG outline algorithm removed from spec",
-      "adoption": "AutoHeading replaces itself with the correct <hN> element based on nesting depth or injector-provided level",
+      "adoption": "AutoHeading replaces itself with the correct <hN> element based on an explicit level or injector-provided level; opt-in level=\"auto\" revives the removed WHATWG outline algorithm by computing the level from sectioning-ancestor depth (#2058)",
       "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/Heading_Elements"
     },
     "ariaHeadingRole": {
@@ -94,6 +94,10 @@
     "injectorHeadingLevel": {
       "description": "AutoHeading resolves heading level from InjectorRoot ('headingLevel' provider) first, falls back to DOM traversal (counting sectioning ancestors)",
       "rationale": "InjectorRoot mirrors React's HeadingLevelContext pattern — a section component increments the level in its injector scope. All descendants read the correct level without DOM traversal. Fallback to DOM traversal covers cases without explicit section contexts."
+    },
+    "smartLevelOptIn": {
+      "description": "level=\"auto\" is an opt-in mode that forces the heading level to be computed from sectioning-ancestor depth (the document-outline behaviour native HTML never shipped), overriding any injector context. The default remains an explicit numeric level.",
+      "rationale": "The dynamic outline level is powerful but surprising, so it is opt-in rather than the default (an explicit level stays predictable). When an author asks for it, it is a deliberate 'use the outline' signal that should win over an ambient injector level. Trivial to express under either the current tag-swap shape or the future #2028 host-is-node shape (set internals.ariaLevel, no tag swap)."
     },
     "ssrStrategy": {
       "description": "SSR must compute the correct element server-side (e.g., Eleventy shortcode). Client-side transient element upgrades the fallback.",

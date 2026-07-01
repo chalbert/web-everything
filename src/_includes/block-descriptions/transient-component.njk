@@ -143,6 +143,11 @@ class TransientElement extends HTMLElement {
 <table class="data-table">
   <tr><th>Source</th><th>Mechanism</th><th>Example</th></tr>
   <tr>
+    <td>0. Smart mode (opt-in)</td>
+    <td><code>level="auto"</code> — compute from sectioning-ancestor depth (the removed WHATWG outline), overriding any injector level</td>
+    <td><code>&lt;auto-heading level="auto"&gt;Title&lt;/auto-heading&gt;</code></td>
+  </tr>
+  <tr>
     <td>1. Explicit attribute</td>
     <td><code>level="3"</code> on the element</td>
     <td><code>&lt;auto-heading level="3"&gt;Title&lt;/auto-heading&gt;</code></td>
