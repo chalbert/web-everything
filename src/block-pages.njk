@@ -87,7 +87,7 @@ eleventyComputed:
 
                 {% if block.attributes %}
                 <h3>Attributes</h3>
-                <we-data-table><table>
+                <table class="data-table">
                     <thead><tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
                     <tbody>
                         {% for a in block.attributes %}
@@ -99,12 +99,12 @@ eleventyComputed:
                         </tr>
                         {% endfor %}
                     </tbody>
-                </table></we-data-table>
+                </table>
                 {% endif %}
 
                 {% if block.properties %}
                 <h3>Properties</h3>
-                <we-data-table><table>
+                <table class="data-table">
                     <thead><tr><th>Property</th><th>Type</th><th>Reflects</th><th>Description</th></tr></thead>
                     <tbody>
                         {% for p in block.properties %}
@@ -116,7 +116,7 @@ eleventyComputed:
                         </tr>
                         {% endfor %}
                     </tbody>
-                </table></we-data-table>
+                </table>
                 {% endif %}
 
                 {# events carry two on-disk shapes (an array of {name,…} or an object keyed by event name);
@@ -124,7 +124,7 @@ eleventyComputed:
                    same normalization gen-cem applies. #}
                 {% if block.events %}
                 <h3>Events</h3>
-                <we-data-table><table>
+                <table class="data-table">
                     <thead><tr><th>Event</th><th>Type</th><th>Description</th></tr></thead>
                     <tbody>
                         {% if block.events.length %}
@@ -137,24 +137,24 @@ eleventyComputed:
                         {% endfor %}
                         {% endif %}
                     </tbody>
-                </table></we-data-table>
+                </table>
                 {% endif %}
 
                 {% if block.slots %}
                 <h3>Slots</h3>
-                <we-data-table><table>
+                <table class="data-table">
                     <thead><tr><th>Slot</th><th>Description</th></tr></thead>
                     <tbody>
                         {% for s in block.slots %}
                         <tr><td><code>{{ s.name or '(default)' }}</code></td><td>{{ s.description }}</td></tr>
                         {% endfor %}
                     </tbody>
-                </table></we-data-table>
+                </table>
                 {% endif %}
 
                 {% if block.cssProperties %}
                 <h3>CSS custom properties</h3>
-                <we-data-table><table>
+                <table class="data-table">
                     <thead><tr><th>Property</th><th>Default</th><th>Description</th></tr></thead>
                     <tbody>
                         {% for c in block.cssProperties %}
@@ -165,19 +165,19 @@ eleventyComputed:
                         </tr>
                         {% endfor %}
                     </tbody>
-                </table></we-data-table>
+                </table>
                 {% endif %}
 
                 {% if block.cssParts %}
                 <h3>CSS parts</h3>
-                <we-data-table><table>
+                <table class="data-table">
                     <thead><tr><th>Part</th><th>Description</th></tr></thead>
                     <tbody>
                         {% for part in block.cssParts %}
                         <tr><td><code>{{ part.name }}</code></td><td>{{ part.description }}</td></tr>
                         {% endfor %}
                     </tbody>
-                </table></we-data-table>
+                </table>
                 {% endif %}
             </div>
             {% endif %}
@@ -240,7 +240,7 @@ eleventyComputed:
                 {% if block.implementsIntent or block.composesIntents %}
                 <h3>Intent&nbsp;→&nbsp;platform ARIA</h3>
                 <p class="mb-2 text-slate-600">The author declares a <strong>UX intent</strong> — no ARIA in the authored markup. WE resolves that intent to the web-platform accessibility mechanisms on the right: the standards bridge that proves the intent is realized, not asserted.</p>
-                <we-data-table><table>
+                <table class="data-table">
                     <thead><tr><th>Declared intent (UX)</th><th>Resolved platform ARIA / web standard</th></tr></thead>
                     <tbody>
                         <tr>
@@ -256,7 +256,7 @@ eleventyComputed:
                             </td>
                         </tr>
                     </tbody>
-                </table></we-data-table>
+                </table>
                 {% endif %}
 
                 {% if block.componentTokens %}
@@ -290,7 +290,7 @@ eleventyComputed:
                 <p class="mb-4">This block is a technical implementation of the <a href="/intents/{{ intent.id }}/">{{ intent.name }}</a> — {{ intent.summary | lower }}</p>
                     {% if block.intentDimensions and intent.dimensions %}
                 <p class="mb-2 text-slate-600">The values this block realizes for the intent's <a href="/intents/{{ intent.id }}/">configurable dimensions</a> (axes it does not declare defer to a composed block):</p>
-                <we-data-table><table>
+                <table class="data-table">
                     <thead>
                         <tr><th>Dimension</th><th>Realized value</th><th>Axis</th></tr>
                     </thead>
@@ -303,7 +303,7 @@ eleventyComputed:
                         </tr>
                         {% endfor %}
                     </tbody>
-                </table></we-data-table>
+                </table>
                     {% endif %}
                     {% endif %}
                 {% endfor %}
@@ -330,7 +330,7 @@ eleventyComputed:
             <div class="section-card fui-card mt-8">
                 <h2>Traits</h2>
                 <p class="mb-6 text-slate-600">Composable behaviors loaded on-demand based on the active intent profile. Only the traits matching the application's chosen configuration are bundled.</p>
-                <we-data-table><table>
+                <table class="data-table">
                     <thead>
                         <tr>
                             <th>Trait</th>
@@ -347,7 +347,7 @@ eleventyComputed:
                         </tr>
                         {% endfor %}
                     </tbody>
-                </table></we-data-table>
+                </table>
             </div>
             {% endif %}
 
@@ -364,7 +364,7 @@ eleventyComputed:
             <div class="section-card fui-card mt-8">
                 <h2>Accessibility &amp; Web Standards</h2>
                 <p class="mb-6 text-slate-600">The web-platform standards this block realizes — each concern names how the block satisfies it, with a link to the governing specification. Concerns are grouped by area and ordered for scanning.</p>
-                <we-data-table><table>
+                <table class="data-table">
                     <thead>
                         <tr>
                             <th>Concern</th>
@@ -384,7 +384,7 @@ eleventyComputed:
                         </tr>
                         {% endfor %}
                     </tbody>
-                </table></we-data-table>
+                </table>
             </div>
             {% endif %}
 
@@ -399,7 +399,7 @@ eleventyComputed:
             <div class="section-card fui-card mt-8">
                 <h2>Component tokens</h2>
                 <p class="mb-6 text-slate-600">The design tokens this component exposes — each overridable CSS custom property, the primitive it <strong>aliases</strong>, and the literal it currently <strong>resolves</strong> to. Every token aliases a primitive so it can never drift from the scale. Same source as the <a href="/protocols/">Custom Elements Manifest</a> <code>cssProperties</code> emit.</p>
-                <we-data-table><table>
+                <table class="data-table">
                     <thead><tr><th>Override</th><th>Alias</th><th>Resolved</th></tr></thead>
                     <tbody>
                         {% for group in tokenGroups %}
@@ -412,7 +412,7 @@ eleventyComputed:
                         {% endfor %}
                         {% endfor %}
                     </tbody>
-                </table></we-data-table>
+                </table>
             </div>
             {% endif %}
 

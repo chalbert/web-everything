@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 5
-status: active
+status: resolved
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
 tags: [data-table, composition, ssr, migration-1600]
 ---
 
@@ -34,3 +35,21 @@ Also swap the docs embed (fui:embed/data-table-in-document.ts) from `registerDat
 - Embed registers `registerDataTableEnhancer`; a config-less wrap provably never `replaceChildren`s (regression
   test asserting a wrap keeps its rows).
 - Before/after visual parity on each touched page.
+
+## Resolution
+
+Every wrap on the 7 pages was a **presentational grid** — description-heavy reference tables (block API
+reference: attributes/properties/events/slots/CSS props/parts; intent dimensions & design-system research;
+preset CEM attributes; validation-rule cross-tool matrix) or single-row / pivoted capability matrices. None
+is a data grid a reader sorts, so all took the **revert path**: the `<we-data-table>` wrapper is dropped and
+each table is now a plain `<table class="data-table">` (styling class kept; the enhancer's `data-sortable` /
+`data-sort-value` contract is intentionally absent). No inert wrapper remains
+(`grep we-data-table` over the 7 files is empty).
+
+The docs embed (`fui:embed/data-table-in-document.ts`) now registers `registerDataTableEnhancer` (the #1867
+slice-B in-place path) instead of `registerDataTable` — so a config-less wrap can never `replaceChildren` its
+own rows. The R3 invariant is pinned by a regression test in
+`fui:blocks/renderers/data-table/__tests__/data-table-enhancer.test.ts` ("config-less `<we-data-table>`
+wrapping a plain doc table keeps its rows"). Since the reverted WE tables are plain (unwrapped) `.data-table`s,
+no doc table is auto-enhanced — the embed only defines the element; the reverted markup carries no wrapper for
+it to upgrade.
