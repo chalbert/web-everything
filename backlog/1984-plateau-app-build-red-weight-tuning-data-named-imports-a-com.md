@@ -1,7 +1,9 @@
 ---
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-06-30"
+dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
 tags: []
 ---
 
