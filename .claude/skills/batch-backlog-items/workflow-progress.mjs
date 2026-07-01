@@ -107,7 +107,82 @@ function tailAgentActivity(runDir, runningIds) {
   return lines;
 }
 
-const target = resolveTarget(process.argv[2]);
+// ── Health scan (the point of the whole thing) ──────────────────────────────────────────────────────────
+// The orchestrator script is fully `await`-based: while it is suspended awaiting parallel(probes) or a lane
+// agent(), it CANNOT observe an in-flight agent going idle or erroring — it is blocked. So stall/error/thrash
+// detection can ONLY happen out-of-band, here, reading the transcripts' mtimes + tails. This is what closes the
+// "blind until the run ends 1h later" gap: every tick judges liveness instead of just echoing a count.
+const STALL_S = Number(process.env.WF_STALL_S || 180);   // an agent silent longer than this is a suspected stall
+const THRASH_N = 4;                                        // N identical consecutive tool calls = spinning
+const ERR_MARKERS = [
+  'overloaded', 'overloaded_error', 'rate_limit', 'rate limit', 'api error', 'too many requests',
+  'internal server error', 'econnreset', 'etimedout', 'service unavailable', 'invalidstate',
+];
+
+function agentLabel(runDir, id, labelById) {
+  // Prefer the label the journal recorded (probe:#NNNN / lane:#NNNN) — but real journals don't carry one, so
+  // scrape the transcript. The universally-present signal is the item # (every worker prompt names it); a role
+  // word (serial/integrate/probe/…) is present for SOME agent types, so prefix it only when found WITH a number.
+  if (labelById && labelById.get(id)) return labelById.get(id);
+  const head = readLines(path.join(runDir, `agent-${id}.jsonl`)).slice(0, 8).join(' ');
+  // The ITEM number is written distinctively as `#NNNN ("slug")` (most agents) or `item #NNNN` (integrate) —
+  // match those, NOT the framework refs (#1933/#1167/#1147) that pepper the prompt boilerplate first.
+  const num = (head.match(/#(\d{3,5})\s*\("/) || head.match(/\bitem #(\d{3,5})\b/i) || [])[1];
+  const role = (head.match(/\b(probe|lane|serial|replay|integrate|setup)\b/i) || [])[1];
+  if (num) return `${role ? role.toLowerCase() + ':' : ''}#${num}`;
+  if (role) return role.toLowerCase();
+  return id.slice(0, 8);
+}
+
+// Return { flags:[{id,label,kind,detail,ageS}], stalled, errored, thrash } for the running agents.
+function scanHealth(runDir, runningIds, labelById) {
+  const flags = [];
+  for (const id of runningIds) {
+    const file = path.join(runDir, `agent-${id}.jsonl`);
+    const evs = readLines(file);
+    const ageS = evs.length ? Math.round((Date.now() - mtime(file)) / 1000) : -1;
+    const label = agentLabel(runDir, id, labelById);
+
+    // (1) STALL — no transcript writes for a long time (or never started writing).
+    if (evs.length === 0 && ageS < 0) { flags.push({ id, label, kind: 'stall', detail: 'no transcript yet — may have failed to start', ageS: -1 }); continue; }
+    if (ageS > STALL_S) flags.push({ id, label, kind: 'stall', detail: `silent ${ageS}s (> ${STALL_S}s)`, ageS });
+
+    // (2) ERROR — an error-shaped event in the LAST few events. Kept narrow (transient overloads are common and
+    // agents retry through them — 18/56 transcripts hit one in the last run and recovered); a marker still in the
+    // final events is one the agent has NOT worked past, which is the signal worth a wake.
+    const tail = evs.slice(-5);
+    for (let i = tail.length - 1; i >= 0; i--) {
+      const low = tail[i].toLowerCase();
+      const isErr = low.includes('"is_error":true') || ERR_MARKERS.some((m) => low.includes(m));
+      if (isErr) {
+        const which = ERR_MARKERS.find((m) => low.includes(m)) || 'tool error (is_error)';
+        flags.push({ id, label, kind: 'error', detail: `recent error: ${which}`, ageS });
+        break;
+      }
+    }
+
+    // (3) THRASH — the last THRASH_N tool_use calls are byte-identical (same name+target) → spinning in place.
+    const sigs = [];
+    for (let i = evs.length - 1; i >= 0 && sigs.length < THRASH_N; i--) {
+      let o; try { o = JSON.parse(evs[i]); } catch { continue; }
+      const content = o?.message?.content;
+      if (!Array.isArray(content)) continue;
+      const t = content.find((c) => c.type === 'tool_use');
+      if (t) sigs.push(`${t.name}|${JSON.stringify(t.input?.command || t.input?.file_path || t.input?.description || '')}`);
+    }
+    if (sigs.length === THRASH_N && new Set(sigs).size === 1) {
+      flags.push({ id, label, kind: 'thrash', detail: `repeated ${THRASH_N}× — ${sigs[0].slice(0, 60)}`, ageS });
+    }
+  }
+  return {
+    flags,
+    stalled: flags.filter((f) => f.kind === 'stall').length,
+    errored: flags.filter((f) => f.kind === 'error').length,
+    thrash: flags.filter((f) => f.kind === 'thrash').length,
+  };
+}
+
+const target = resolveTarget(process.argv.slice(2).find((a) => !a.startsWith('--')));
 if (!target) {
   console.log('STATUS=unknown DONE=0 LAUNCHED=0 RUNNING=0 IDLE_S=-1');
   console.log('No workflow run found (no journal.jsonl under any session). Has a /workflow batch been launched?');
@@ -119,9 +194,10 @@ const journal = readLines(path.join(runDir, 'journal.jsonl'));
 const started = new Set();
 const resulted = new Set();
 const resultsByAgent = new Map();
+const labelById = new Map();  // agentId -> the label the orchestrator gave it (probe:#NNNN / lane:#NNNN), if the journal records one
 for (const line of journal) {
   let o; try { o = JSON.parse(line); } catch { continue; }
-  if (o.type === 'started' && o.agentId) started.add(o.agentId);
+  if (o.type === 'started' && o.agentId) { started.add(o.agentId); if (o.label) labelById.set(o.agentId, o.label); }
   if (o.type === 'result' && o.agentId) { resulted.add(o.agentId); resultsByAgent.set(o.agentId, o.result); }
 }
 const runningIds = [...started].filter((id) => !resulted.has(id));
@@ -147,8 +223,14 @@ if (summary) {
   if (Array.isArray(summary.logs)) recentLogs = summary.logs.slice(-3);
 }
 
-// ── machine-readable first line ──
+// ── health scan (out-of-band; the script itself can't see an in-flight stall) ──
+const wantHealth = process.argv.slice(2).includes('--health');
+const health = status === 'running' ? scanHealth(runDir, runningIds, labelById) : { flags: [], stalled: 0, errored: 0, thrash: 0 };
+const healthOk = health.flags.length === 0;
+
+// ── machine-readable lines ──
 console.log(`STATUS=${status} DONE=${resulted.size} LAUNCHED=${started.size} RUNNING=${runningIds.length} IDLE_S=${idleS}`);
+console.log(`HEALTH=${status !== 'running' ? 'done' : healthOk ? 'ok' : 'warn'} STALLED=${health.stalled} ERRORS=${health.errored} THRASH=${health.thrash}`);
 
 // ── human heartbeat block ──
 const stall = idleS >= 0 && idleS > 180 && status === 'running';
@@ -160,4 +242,12 @@ if (status === 'completed' || status === 'failed') {
   console.log(`⏳ workflow ${wfId} — ${resulted.size}/${started.size} agents done, ${runningIds.length} running · last activity ${idleS}s ago${flag}`);
   if (phaseLine) console.log(`   ${phaseLine}`);
   if (runningIds.length) console.log(tailAgentActivity(runDir, runningIds.slice(0, 6)).join('\n'));
+  // Health verdict: list every flagged agent so the wake is a review, not just a count. Silent when all-green
+  // unless --health forces the "✓ all N running agents healthy" confirmation.
+  if (!healthOk) {
+    console.log(`   ⚠ HEALTH WARN — ${health.stalled} stalled · ${health.errored} errored · ${health.thrash} thrashing (consider TaskStop → fall back to serial):`);
+    for (const f of health.flags.slice(0, 10)) console.log(`     ✗ ${f.label} [${f.kind}] ${f.detail}`);
+  } else if (wantHealth && runningIds.length) {
+    console.log(`   ✓ health: all ${runningIds.length} running agent(s) live (none stalled/errored/thrashing).`);
+  }
 }

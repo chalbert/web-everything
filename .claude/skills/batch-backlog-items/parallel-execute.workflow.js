@@ -471,6 +471,21 @@ const probes = await parallel(items.map((it) => () =>
 // item is concurrent ONLY if it conflicts with NO other candidate — so the concurrent set is pairwise-non-
 // conflicting by construction and its lanes merge clean (or self-correct via rebase-retry / serial-replay).
 const probed = probes.filter(Boolean);
+// CIRCUIT-BREAKER (watchdog, #2040): a probe that dies (API-overloaded etc.) is normally harmless — the item
+// just goes serial. But if a LARGE fraction die at once, that's a systemic API outage, not per-item noise:
+// pressing on would grind every item through the serial lane where the same outage makes them carry, wasting
+// ~an hour to discover it. Bail BEFORE the pre-claim (nothing is claimed/pushed yet) so trouble rides the
+// completion wake in seconds, not at natural run-end. The floor is unchanged: the user just re-runs when the
+// API recovers, or falls back to serial /batch.
+const probeFailures = probed.filter((e) => !e.probe).map((e) => String(e.num));
+const failFrac = probed.length ? probeFailures.length / probed.length : 0;
+if (probed.length >= 4 && failFrac >= 0.5) {
+  log(`⚠ CIRCUIT-BREAKER: ${probeFailures.length}/${probed.length} probes died (#${probeFailures.join(', #')}) — ` +
+      `that is a systemic API failure, not per-item noise. Aborting BEFORE any claim/push (nothing was mutated); ` +
+      `re-run when the API recovers, or use serial /batch.`);
+  return { ledger: [], concurrentItems: 0, serialItems: 0, crossRepoItems: 0, conflictsReplayed: 0, stranded: [], multiLaneFiles: [], partialCrossRepo: [], reposProvisioned: [], derivedRegenerated: false, pointsSpent: 0, budgetPoints, baseRef, probeFailures, aborted: 'probe-storm' };
+}
+if (probeFailures.length) log(`Note: ${probeFailures.length} probe(s) failed (#${probeFailures.join(', #')}) → forced serial (recoverable; not a storm).`);
 const serialFromProbe = probed.filter(mustSerialize);
 const candidates = probed.filter((e) => !mustSerialize(e));
 const concurrent = [];
@@ -966,6 +981,7 @@ return {
   partialCrossRepo,                      // slice 4: cross-repo items whose impl landed in some repos but whose WE resolve did NOT — re-attempt next run
   reposProvisioned,                      // which constellation repos got a lane pool this batch
   derivedRegenerated,
+  probeFailures,                         // #2040 watchdog: items whose probe died (→ forced serial); a mass die aborts earlier as aborted:'probe-storm'
   pointsSpent: spent,
   budgetPoints,
 };
