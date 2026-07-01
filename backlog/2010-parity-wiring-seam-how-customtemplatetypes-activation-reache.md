@@ -1,10 +1,13 @@
 ---
 kind: decision
 parent: "1994"
-status: active
+status: resolved
 preparedDate: "2026-07-01"
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
+graduatedTo: none
+codifiedIn: one-off
 relatedReport: reports/2026-07-01-2010-customtemplatetypes-parity-wiring.md
 tags: []
 ---
@@ -26,6 +29,15 @@ the item's *"~15 sites"* premise was wrong — the real surface is **4 eager sit
 cascade sites** (7 total), and the insertion cascades don't touch `attributes` at all. **One genuine
 sub-choice survives:** how to give the detached-fragment cascade coverage of the directive registry. That
 is the whole of Fork 1.
+
+## Ruling — ratified 2026-07-01
+
+Ratified as recommended. Registration is settled by in-code precedent (mirror `attributes`, eager
+`upgrade` at the 4 sites; unplugged one-line `register()`); old candidate (c) stays rejected (foreclosed by
+#1986 rule-1). **Fork 1 → (a)**: generalize the shared `resolveRegistry` into a `CASCADE_REGISTRIES` set and
+place `customTemplateTypes` on the injector chain — decided on **merit** (sibling-parity with the
+chain-resident `customTextNodes` + open/closed extensibility), not diff size. No new statute
+(`codified-to=one-off`). Unblocks #2012 (whose size drops 5 → 3 on the corrected 4+3-site surface) → #2013.
 
 ## Recommended path at a glance
 
@@ -80,8 +92,13 @@ Crux: `resolveRegistry(contextNode)` returns one hardcoded registry
 
 - **(a) Generalize the shared resolver.** Change `resolveRegistry` to resolve+upgrade **each eager-walk
   value-space registry visible on the chain** (or an explicit `['customTextNodes','customTemplateTypes']`
-  set), so all three branches cover both registries from one edit. Smallest diff, single seam, and it makes
-  the cascade extensible when the next directive registry lands.
+  set), so all three branches resolve both registries through one seam. **Merit basis (not diff size):**
+  (a) and (b) are behaviourally identical (see (b)), so the decider is a principle, and (a) satisfies two —
+  (i) **sibling-parity**: `customTextNodes` is already chain-resident and cascade-resolved
+  (`fui:plugs/bootstrap.ts:228`, `fui:plugs/bootstrapUnplugged.ts:165`), and its sibling directive registry
+  `customTemplateTypes` should be resolved the *same* way, not special-cased; (ii) **open/closed**: the next
+  directive registry is covered by extending the set (data), never by re-opening the three insertion
+  branches (code).
   ```ts
   // fui:plugs/webexpressions/ExplicitHTMLInsertion.patch.ts — generalize the single resolver
   const CASCADE_REGISTRIES = ['customTextNodes', 'customTemplateTypes'] as const;
@@ -95,15 +112,23 @@ Crux: `resolveRegistry(contextNode)` returns one hardcoded registry
   }
   // each branch: upgradeInsertedTree(this.startContainer ?? null, fragment as unknown as RootNode);
   ```
-  This presumes `customTemplateTypes` is placed on the injector chain (so `getProviderOf` finds it) — a
-  cheap `documentInjector.set('customTemplateTypes', templates)` in plugged bootstrap alongside the eager
-  `upgrade`; the chain membership costs nothing extra and is what makes the resolver generic.
+  This presumes `customTemplateTypes` is placed on the injector chain (so `getProviderOf` finds it) via
+  `documentInjector.set('customTemplateTypes', templates)` in plugged bootstrap alongside the eager
+  `upgrade`. That placement is not overhead to be weighed against a smaller diff — it is the **consistent
+  home**: it puts `customTemplateTypes` exactly where its sibling `customTextNodes` already lives
+  (`fui:plugs/bootstrap.ts:228`). Because `customTextNodes` already rides the chain *and* is cascade-resolved
+  with no double-upgrade issue, sibling-parity also **retires the only correctness worry** about (a) — any
+  chain-walk interaction would already manifest for `customTextNodes`.
 
 - **(b) Duplicate the resolve+upgrade per branch.** Add a second `resolveRegistry`-for-directives call and a
-  second `.upgrade` in each of the three branches, keyed directly off `window.customTemplateTypes`. No chain
-  membership needed, but it triples the edit and re-introduces the per-site duplication this registry family
-  was designed to avoid — and the next directive registry repeats it again. *Rejected* — more surface, less
-  extensible, same behavior.
+  second `.upgrade` in each of the three branches, keyed directly off `window.customTemplateTypes`, leaving
+  `customTemplateTypes` off the chain. (a) and (b) are **behaviourally identical** — both upgrade both
+  registries on detached-fragment insertion — so this is decided by *principle, not cost*. (b) loses on two:
+  it **breaks sibling-parity** (special-cases `customTemplateTypes` off `window.` while its sibling
+  `customTextNodes` rides the chain) and it **violates open/closed** (each new directive registry re-opens
+  all three branches instead of extending a set), re-introducing the per-site duplication the registry family
+  was architected to remove. *Rejected on merit* — not for being a larger diff, but because it makes the
+  cascade inconsistent with its sibling and closed to extension.
 
 - **(c) Couple `CustomAttributeRegistry.upgrade` to also drive the sibling registry.** *Rejected* — this is
   the original candidate (c); it is foreclosed in code by #1986 rule-1
@@ -120,7 +145,9 @@ merit fork; the "inherit the cascade for free" premise was false because `resolv
 `customTextNodes`; `codifiedIn` would mis-target; #1986 rule-1's scope is registration-home not activation).
 Folded in: the decision was **re-cast from a 3-way merit fork to settled-by-precedent wiring + this one
 cascade sub-choice**, and the cascade generalization was made an **explicit, mandatory** part of the wiring
-rather than an assumed freebie. The surviving default (a) beat (b) on diff size + extensibility.
+rather than an assumed freebie. The surviving default (a) beat (b) on **merit** — sibling-parity with the
+chain-resident `customTextNodes` and open/closed extensibility — the two being behaviourally identical, so
+cost was never the decider.
 
 ## Context
 
