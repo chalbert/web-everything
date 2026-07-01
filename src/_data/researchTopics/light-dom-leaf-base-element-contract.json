@@ -1,0 +1,27 @@
+{
+  "id": "light-dom-leaf-base-element-contract",
+  "title": "Persistent light-DOM base-element contract for behaviour-free presentational leaves",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #2028 (surfaced by #1974 pre-flight, under epic #2015). #1962 ratified the POLICY — the FUI 'soft-7' behaviour-free leaves (badge, tag, section-card, card, auto-heading, meter, progress) become persistent light-DOM elements (display:contents where a box breaks flex/grid), dropping the self-erasing TransientElement shape — but did NOT define the concrete base-element CONTRACT, and no reference implementation exists (all seven still extend fui:blocks/transient/TransientElement.ts). The core fork: does a persistent host STYLE ITSELF (host carries .fui-badge + role via ElementInternals.role, an inline element by default, display:contents only where flex/grid demands it) or WRAP a real native child (host is a display:contents shell over an inner <span>/<div>/<hN>/<progress>/<meter> that carries the classes + semantics)? Two findings reshape it. (1) The native-first mechanism for host-styles-itself ALREADY EXISTS in FUI: declarativeComponent lowers default-role/default-aria-*/attachInternals() onto a persistent custom element (fui:blocks/renderers/component/declarativeComponent.ts) — the WHATWG ElementInternals.role/aria* surface that gives a light-DOM custom element real default semantics without a wrapper. So host-styles-itself is not novel plumbing; it reuses a shipped mechanism. (2) The display:contents accessibility hazard is real but bounded: the semantics-stripping bug that removed display:contents elements from the a11y tree was an Interop-2024 focus and is fixed in Chrome (115, after a 113 regression) and Firefox, BUT Safari 17 (Sept 2023) — while claiming to fix it — STILL breaks buttons and headings under display:contents. That is decisive for the semantic-tag leaves: auto-heading (<hN>), progress (<progress>), meter (<meter>) carry irreplaceable native semantics/rendering that ElementInternals.role cannot reproduce (there is no role that gives you a real <progress> bar or a real heading Safari won't drop). Recommendation: a SPLIT default keyed by whether the leaf's native tag is behaviour/semantics-bearing — (a) host-styles-itself via ElementInternals.role for the class-only inline leaves (badge, tag, card, section-card: a real <span>/<article>/<section> carries no behaviour, only classes + a role a custom element can hold natively), and (b) FORCE wrap-native-child for auto-heading/progress/meter, whose native tag is irreplaceable and whose role a display:contents host would drop in Safari. Fork 2 (where role/aria/naming/CEM land) is largely DERIVED from Fork 1 — semantics live wherever the tag lives — not an independent fork; the one genuinely open sub-question is the naming/CEM registration surface (the CEM lands on the host either way, since the custom element is the documented API). The zero-wrapper-to-wrapper change is a regression-surface consequence, not a fork: host-styles-itself keeps .fui-badge ON the host so existing querySelector('.fui-badge') and .fui-badge> descendant selectors survive; wrap-native-child moves the class to the inner node and breaks them — the smaller blast radius favours host-styles-itself for exactly the class-only leaves it is recommended for. Report: reports/2026-07-01-2028-light-dom-base-element-contract.md.",
+  "dateOpened": "2026-07-01",
+  "tags": [
+    "webcomponents",
+    "light-dom",
+    "display-contents",
+    "element-internals",
+    "custom-elements",
+    "accessibility",
+    "transient-element",
+    "block-standard",
+    "candidate-standard"
+  ],
+  "relatedBlocks": [
+    "badge",
+    "tag",
+    "card",
+    "meter",
+    "progress"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

@@ -1,0 +1,157 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    <a href="/backlog/1962-transient-self-erasing-element-viability-as-a-concept-vs-the/">#1962</a> ratified the
+    <strong>policy</strong>: Frontier UI's seven behaviour-free presentational leaves — badge, tag, section-card,
+    card, auto-heading, meter and progress (the <em>soft-7</em>) — stop self-erasing and become
+    <strong>persistent light-DOM</strong> custom elements (a <code>display:contents</code> host where a box would
+    break flex/grid). It did <strong>not</strong> define the concrete <strong>base-element contract</strong>, and
+    no reference implementation exists — all seven still extend
+    <code>fui:blocks/transient/TransientElement.ts</code>. This survey grounds decision
+    <a href="/backlog/2028-persistent-light-dom-base-element-contract-for-the-soft-7-pr/">#2028</a> (surfaced by
+    the <a href="/backlog/1974-expose-transient-vs-light-dom-as-a-configurable-per-project-/">#1974</a> pre-flight,
+    under epic <a href="/backlog/2015-fui-migrate-transient-blocks-to-wrapper-first-1962-review-co/">#2015</a>).
+    The core fork: does the persistent host <strong>style itself</strong> (carry the <code>.fui-badge</code>
+    classes + a <code>role</code> via <code>ElementInternals</code>, and only apply <code>display:contents</code>
+    where flex/grid demands it) — or <strong>wrap a real native child</strong> (be a <code>display:contents</code>
+    shell over an inner <code>&lt;span&gt;</code>/<code>&lt;div&gt;</code>/<code>&lt;hN&gt;</code>/<code>&lt;progress&gt;</code>/<code>&lt;meter&gt;</code>
+    that carries the classes and semantics)?
+</p>
+
+<h3>Recommendation (to ratify in #2028)</h3>
+<ol>
+    <li><strong>Split the default by whether the leaf's native tag is behaviour/semantics-bearing</strong>
+        (Fork&nbsp;1). For the <strong>class-only inline leaves</strong> — badge, tag, card, section-card —
+        <strong>host-styles-itself</strong>: the custom element persists as a real inline element, carries the
+        <code>.fui-badge</code> / <code>.fui-tag</code> / <code>.fui-card</code> classes, and holds its
+        <code>role</code> through <code>ElementInternals.role</code>. For the <strong>irreplaceable-native
+        leaves</strong> — auto-heading (<code>&lt;hN&gt;</code>), progress (<code>&lt;progress&gt;</code>), meter
+        (<code>&lt;meter&gt;</code>) — <strong>force wrap-native-child</strong>: emit the real native tag as a
+        child of a <code>display:contents</code> host.</li>
+    <li><strong>Fork&nbsp;2 (where role/aria/naming/CEM land) is mostly derived, not independent</strong> —
+        semantics live wherever the tag lives. The Custom Elements Manifest always documents the
+        <em>host</em> (the custom element is the API), so the one genuinely open sub-question is the
+        <em>naming/registration</em> surface, folded into Fork&nbsp;2.</li>
+    <li><strong>The zero-wrapper→wrapper regression is a consequence, not a fork</strong> — host-styles-itself
+        keeps <code>.fui-badge</code> <em>on the host</em>, so existing
+        <code>querySelector('.fui-badge')</code> and <code>.fui-badge&nbsp;&gt;</code> selectors survive; that
+        smaller blast radius is itself an argument for the split default.</li>
+</ol>
+
+<h3>Finding 1 — the host-styles-itself mechanism already ships in Frontier UI</h3>
+<p>
+    Host-styles-itself is <strong>not novel plumbing</strong>. FUI's declarative <code>&lt;component&gt;</code>
+    renderer already lowers a persistent custom element's <em>default</em> semantics through
+    <code>ElementInternals</code>: <code>default-role="…"</code> →
+    <code>internals.role</code>, <code>default-aria-*="…"</code> → <code>internals.aria*</code>, and
+    <code>attachInternals()</code> is called whenever any of those are present
+    (<code>fui:blocks/renderers/component/declarativeComponent.ts</code>, the
+    <code>form-associated</code>/<code>default-role</code>/<code>default-aria-*</code>/<code>states</code>
+    surface). This is the <a href="https://developer.mozilla.org/en-US/docs/Web/API/ElementInternals">WHATWG
+    <code>ElementInternals</code></a> pattern the whole field uses to give a light-DOM custom element real,
+    author-overridable default semantics <em>without</em> a wrapper node: set <code>internals.role</code> /
+    <code>internals.ariaLabel</code> and the element participates in the accessibility tree exactly like a
+    native element would.
+</p>
+<we-data-table>
+<table class="data-table">
+    <thead><tr><th>Surface</th><th>Lowered to</th><th>Meaning</th></tr></thead>
+    <tbody>
+        <tr><td><code>default-role="status"</code></td><td><code>internals.role = 'status'</code></td><td>Default ARIA role; instance <code>role=</code> still overrides.</td></tr>
+        <tr><td><code>default-aria-label="…"</code></td><td><code>internals.ariaLabel = '…'</code></td><td>Default accessible name; <code>aria-label=</code> / IDL wins over it.</td></tr>
+        <tr><td><code>states="foo bar"</code></td><td><code>internals.states.add('foo')</code></td><td>Native custom states, styled via <code>:state(foo)</code>.</td></tr>
+    </tbody>
+</table>
+</we-data-table>
+<p>
+    <strong>Consequence:</strong> for a leaf whose native tag carries <em>no</em> behaviour — badge/tag are a
+    plain <code>&lt;span&gt;</code>, card/section-card a plain <code>&lt;article&gt;</code>/<code>&lt;section&gt;</code>
+    — the custom element can <em>be</em> that element and hold the role natively. There is nothing a wrapped
+    inner <code>&lt;span&gt;</code> gives you that <code>internals.role</code> on the host does not.
+</p>
+
+<h3>Finding 2 — <code>display:contents</code> a11y is fixed <em>except</em> for headings/buttons in Safari</h3>
+<p>
+    The historic bug — a <code>display:contents</code> element being dropped from the
+    <a href="https://developer.mozilla.org/en-US/docs/Glossary/Accessibility_tree">accessibility tree</a>,
+    stripping its role — was a
+    <a href="https://github.com/web-platform-tests/interop/issues/568">focus area of Interop&nbsp;2024</a> and is
+    now fixed in <a href="https://web.dev/blog/interop-2024-a11y">Chrome (115, after a 113 regression)</a> and
+    Firefox. But <strong>Safari&nbsp;17 (Sept&nbsp;2023), while claiming to fix its remaining
+    <code>display:contents</code> a11y issues, STILL breaks buttons and headings</strong> under
+    <code>display:contents</code>
+    (<a href="https://github.com/web-platform-tests/interop/issues/512">Interop tracker</a>;
+    <a href="https://adrianroselli.com/2022/07/its-mid-2022-and-browsers-mostly-safari-still-break-accessibility-via-display-properties.html">Roselli</a>).
+</p>
+<we-data-table>
+<table class="data-table">
+    <thead><tr><th>Leaf</th><th>Native tag</th><th>Safari&nbsp;17 under <code>display:contents</code></th><th>Verdict</th></tr></thead>
+    <tbody>
+        <tr><td>badge, tag</td><td><code>&lt;span&gt;</code> (inline, no box)</td><td>Inline → <em>never needs <code>display:contents</code></em>; role via <code>internals.role</code> is safe.</td><td>host-styles-itself</td></tr>
+        <tr><td>card, section-card</td><td><code>&lt;article&gt;</code>/<code>&lt;section&gt;</code></td><td>Landmark role held by the host; <code>display:contents</code> only if a flex/grid parent demands it (rare for a container).</td><td>host-styles-itself</td></tr>
+        <tr><td>auto-heading</td><td><code>&lt;hN&gt;</code></td><td><strong>Heading role dropped by Safari</strong> — and <code>role="heading" aria-level</code> on a <code>display:contents</code> host is exactly what breaks.</td><td><strong>wrap-native-child</strong></td></tr>
+        <tr><td>progress, meter</td><td><code>&lt;progress&gt;</code>/<code>&lt;meter&gt;</code></td><td>No ARIA role reproduces a real progress/meter bar's rendering + value semantics; nothing to hoist onto the host.</td><td><strong>wrap-native-child</strong></td></tr>
+    </tbody>
+</table>
+</we-data-table>
+<p>
+    So the split is not arbitrary: it falls out of <em>which leaves carry irreplaceable native
+    semantics</em>. The class-only leaves lose nothing by being the host; the semantic-tag leaves cannot be
+    the host safely, so they wrap.
+</p>
+
+<h3>Finding 3 — where the field attaches ARIA on light-DOM leaves</h3>
+<p>
+    <strong>Native precedent</strong> — <code>&lt;progress&gt;</code>, <code>&lt;meter&gt;</code> and
+    <code>&lt;output&gt;</code> are the platform's own behaviour-free leaves: their semantics are the tag,
+    not an ARIA overlay, which is exactly why the semantic-tag leaves must <em>keep the real tag</em>
+    (wrap-native-child) rather than fake it with a role.
+    <strong>Custom-element systems</strong> —
+    <a href="https://nordhealth.design/web-components/">Nord</a> ships some light-DOM components;
+    <a href="https://lit.dev/docs/components/shadow-dom/">Lit</a> renders into light DOM via
+    <code>createRenderRoot() { return this }</code>;
+    <a href="https://opensource.adobe.com/spectrum-web-components/tools/base/">Spectrum</a> assumes shadow DOM
+    and has no light-DOM leaf base. None self-erase, and where they need default semantics on the host they use
+    <code>ElementInternals</code>. The consistent field answer: <strong>put default ARIA on the custom element
+    via <code>ElementInternals</code>; let instance <code>role=</code>/<code>aria-*=</code> override</strong>
+    (<a href="https://developer.mozilla.org/en-US/docs/Web/API/ElementInternals/ariaLabel">MDN</a>).
+</p>
+
+<h3>Finding 4 — the CEM lands on the host regardless of the fork</h3>
+<p>
+    The Custom Elements Manifest documents the <em>authored</em> element — the custom element <em>is</em> the
+    public API, whether or not it wraps a native child. FUI already generates a CEM
+    (<code>fui:custom-elements.json</code>) and consumes it in its props-table renderer
+    (<code>fui:blocks/props-table/cemToRows.ts</code>). So Fork&nbsp;2's registration/naming surface is on the
+    host in both branches; only the <em>runtime</em> role/aria attachment point moves (host vs child), and that
+    is derived from Fork&nbsp;1. This is why #2028 carries <strong>one</strong> genuine fork plus a derived
+    sub-question, not two independent forks.
+</p>
+
+<h3>Per-fork classification (architecture)</h3>
+<ol>
+    <li><strong>Layer:</strong> Block implementation contract (a base class + emitted DOM), not a new
+        intent/standard — the standard side (#1962) is already ratified; #2028 fixes the reference shape.</li>
+    <li><strong>Genuine fork?</strong> Fork&nbsp;1 (style-self vs wrap-child) is a genuine fork <em>as a
+        catalog-wide default</em> — but the two branches coexist across the soft-7, so the ruling is a
+        <em>split rule keyed on tag-semantics</em>, not one branch for all seven.</li>
+    <li><strong>Config-dimension?</strong> No — the leaf's native tag fixes which branch applies; there is no
+        per-project toggle (that was #1974's withdrawn premise).</li>
+    <li><strong>Contract-derived non-fork?</strong> Fork&nbsp;2 (role/aria/naming/CEM location) is
+        <em>derived</em> from Fork&nbsp;1 for role/aria and <em>fixed</em> (host) for naming/CEM — not an
+        independent decision.</li>
+    <li><strong>Regression surface:</strong> a grounding consequence, not a fork — host-styles-itself minimises
+        it by keeping the class on the host.</li>
+    <li><strong>Default:</strong> the split — host-styles-itself for badge/tag/card/section-card,
+        wrap-native-child for auto-heading/progress/meter.</li>
+    <li><strong>Statute:</strong> #1962 codified the policy (light-DOM, no self-erasure); it did not fix
+        style-self vs wrap-child, so #2028 does not re-litigate it — it fills the gap #1962 left open.</li>
+</ol>
+
+<h3>Cross-references</h3>
+<ul>
+    <li><a href="/backlog/1962-transient-self-erasing-element-viability-as-a-concept-vs-the/">#1962</a> — ratified the wrapper-first / light-DOM policy this contract implements.</li>
+    <li><a href="/backlog/1974-expose-transient-vs-light-dom-as-a-configurable-per-project-/">#1974</a> — the soft-7 migration, <code>blockedBy: #2028</code> until this contract ratifies.</li>
+    <li><a href="/backlog/2015-fui-migrate-transient-blocks-to-wrapper-first-1962-review-co/">#2015</a> — parent epic (FUI transient→wrapper migration).</li>
+</ul>
+{% endraw %}
