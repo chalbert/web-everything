@@ -22,5 +22,5 @@ Nothing in the batch/lane/close flow ever pushes `main`, so `origin/main` silent
 
 ## Boundaries
 - Push is gated on green + ff-only; a red gate leaves `origin` untouched and is reported (the drift is recoverable — a later green close pushes it).
-- Respects the standing guards: pushing `main` is allowed (never-push lifted 2026-06-29, see [[never-push-guard-removed]]); branch-create / broad-stage guards stay.
-- Surfaced by [[parallel-orchestrator-first-real-multilane-run]]; sibling to the carried-item reopen fix #2072.
+- Respects the standing guards: pushing `main` is allowed (never-push lifted 2026-06-29, see the never-push-guard-removed memory note); branch-create / broad-stage guards stay.
+- Surfaced by the first multi-lane run (memory note: parallel-orchestrator-first-real-multilane-run); sibling to the carried-item reopen fix #2072.
