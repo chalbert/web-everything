@@ -1,6 +1,5 @@
 ---
-kind: story
-size: 5
+kind: decision
 parent: "142"
 status: open
 priority: low

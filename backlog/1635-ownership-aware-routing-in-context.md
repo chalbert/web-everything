@@ -1,11 +1,11 @@
 ---
-kind: story
-size: 5
+kind: decision
 parent: "142"
 status: open
 priority: low
 locus: plateau-app
 dateOpened: "2026-06-23"
+dateStarted: "2026-07-01"
 preparedDate: "2026-06-23"
 relatedTo: ["1637", "1639", "166", "564"]
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
