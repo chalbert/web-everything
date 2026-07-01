@@ -313,10 +313,22 @@ module.exports = function backlog() {
 
   items.forEach((item, idx) => {
     const edges = Array.isArray(item.blockedBy) ? item.blockedBy : [];
-    item.blockers = edges
-      .map((n) => byNum.get(String(n)))
-      .filter(Boolean)
-      .map(({ id, num, slug, title, status }) => ({ id, num, slug, title, status }));
+    // Resolve each `blockedBy` NNN to its target item. FAIL-SAFE (#2062): an edge that DOESN'T resolve
+    // (target file missing/renamed, a typo'd NNN) must NOT silently vanish — a dropped edge would leave
+    // `blockers` empty, so `deriveTier`'s `blockers.every(resolved)` reads TRUE and the still-blocked item
+    // false-surfaces as Tier A / batchable (the #2031-packed-despite-open-#2017 defect). So a dead edge is
+    // kept as a synthetic blocker with a non-resolved status — it GATES (Tier C) rather than disappears.
+    // The validator (check-standards.mjs) still flags the unresolvable edge for the human to fix.
+    item.blockers = edges.map((n) => {
+      const num = String(n);
+      const target = byNum.get(num);
+      if (target) {
+        const { id, slug, title, status } = target;
+        return { id, num, slug, title, status };
+      }
+      // Unresolvable edge — gate on it (status !== 'resolved') so it can't false-clear the tier.
+      return { id: undefined, num, slug: undefined, title: undefined, status: 'unresolved-edge' };
+    });
 
     // Derived agent-readiness tier — a DETERMINISTIC pure function of structured frontmatter only
     // (type + resolved prerequisites + projectPending), so it's identical across rebuilds, no LLM in

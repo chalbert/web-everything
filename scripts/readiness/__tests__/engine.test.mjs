@@ -275,6 +275,58 @@ describe('computeBatchPack — points budget, not a count cap', () => {
   });
 });
 
+// #2062 — a `blockedBy`-OPEN item must NEVER reach `batch.picked` (the packer's output the batch
+// pre-flight relies on). The original defect: #2031 (`blockedBy: ["2017"]`, #2017 still open) was
+// packed as Tier-A batchable, so a batch would have claimed a genuinely-blocked item — caught only by
+// a manual re-grep. The invariant is "only blockedBy-resolved items appear"; here we pin it end-to-end
+// through the SAME projection the CLI consumes: computeSelection → computeBatchPack. (#2014 fixed the
+// sibling priority-low inclusion; this pins the blockedBy-open one.)
+describe('#2062 — a blockedBy-open item never reaches batch.picked', () => {
+  // #20 is blocked by an OPEN prerequisite (#10); #30 is unblocked. Both are otherwise batch-shaped
+  // (story·≤8), so the ONLY thing that may keep #20 out is its open blocker.
+  const blockedFixture = (blockerStatus) => makeItems([
+    { num: 10, type: 'idea', status: blockerStatus },                                   // the prerequisite
+    { num: 20, type: 'idea', status: 'open', workItem: 'story', size: 3, blockedBy: [10], leverageScore: 5000 },
+    { num: 30, type: 'idea', status: 'open', workItem: 'story', size: 2, leverageScore: 4000 }, // always ready
+  ]);
+
+  it('excludes the blocked item from batchable AND batch.picked while its blocker is open', () => {
+    const sel = computeSelection(blockedFixture('open'));
+    // The loader-derived tier already demotes it: not batchable, so not in the batchable subset.
+    expect(sel.batchable.map((i) => i.num)).not.toContain('20');
+    expect(sel.batchable.map((i) => i.num)).toContain('30');
+    const { picked } = computeBatchPack(sel.tierA, 999);
+    expect(picked.map((i) => i.num)).not.toContain('20'); // the #2031-class regression
+    expect(picked.map((i) => i.num)).toContain('30');
+  });
+
+  it('the SAME item becomes eligible once its blocker resolves (the edge no longer gates)', () => {
+    const sel = computeSelection(blockedFixture('resolved'));
+    expect(sel.batchable.map((i) => i.num)).toContain('20');
+    const { picked } = computeBatchPack(sel.tierA, 999);
+    expect(picked.map((i) => i.num)).toContain('20');
+  });
+
+  it('an ACTIVE (in-flight, not resolved) blocker still keeps the item out of the pack', () => {
+    const sel = computeSelection(blockedFixture('active'));
+    expect(sel.batchable.map((i) => i.num)).not.toContain('20');
+    const { picked } = computeBatchPack(sel.tierA, 999);
+    expect(picked.map((i) => i.num)).not.toContain('20');
+  });
+});
+
+// #2062 — an UNRESOLVABLE blockedBy edge (target NNN missing/renamed/typo'd) must GATE, not vanish.
+// The loader's fail-safe: a dead edge is kept as a synthetic non-resolved blocker, so `deriveTier`'s
+// `blockers.every(resolved)` reads FALSE (Tier C) instead of silently clearing to Tier A. Exercised
+// directly over the loader's `deriveTier` to pin the fail-safe status contract.
+describe('#2062 — an unresolvable blockedBy edge gates (fail-safe, never silently clears)', () => {
+  it('a synthetic non-resolved blocker (dead edge) demotes an otherwise-ready story to Tier C', () => {
+    // The loader keeps a dropped edge as { status: 'unresolved-edge' } — any non-'resolved' status must
+    // gate. deriveTier is the pure rule; assert it treats the fail-safe status as still-blocking.
+    expect(deriveTier({ status: 'open', kind: 'story', blockers: [{ status: 'unresolved-edge' }] })).toBe('C');
+  });
+});
+
 describe('buildReadinessReport — the #431 report-model view (slice B of #435; #710)', () => {
   const fixture = () => {
     const sel = computeSelection(makeItems([
