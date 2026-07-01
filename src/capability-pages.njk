@@ -63,7 +63,7 @@ eleventyComputed:
                 <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#dc2626;margin-right:0.4em;"></span><strong>capability-hard</strong> — a UA-privileged wall no shim can reach</span>
             </div>
             <div style="overflow-x: auto;">
-                <we-data-table><table style="width: 100%; border-collapse: collapse; font-size: 0.9em; background: #fff;">
+                <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 0.9em; background: #fff;">
                     <thead>
                         <tr>
                             {% for impl in capabilityMatrix.impls %}
@@ -84,7 +84,7 @@ eleventyComputed:
                             {% endfor %}
                         </tr>
                     </tbody>
-                </table></we-data-table>
+                </table>
             </div>
         </div>
 
