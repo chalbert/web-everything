@@ -23,27 +23,33 @@
 <p>
   The cold item framed one fork ("an escalation ladder; which rung, in what order"). The standing test splits it,
   and that split <em>is</em> the decision — bundling them would smuggle a scope-reopen past the incident's
-  evidence:
+  evidence. <strong>Resolved 2026-06-30</strong> (#1985): Rung 1 ratified as a forced invariant; Rung 2's
+  <em>direction</em> ratified (adopt PR-flow / multi-session); Rung 3 folded into Rung 2's rollout mechanism,
+  prepared as <strong>#1996</strong>.
 </p>
 <ul>
   <li><strong>Rung 1 — non-destructive, changeset-scoped closeout = a forced invariant.</strong> The excluded
     branch (infer ownership from the dirty tree) is <em>broken</em> — it destroyed real work. Act only on your own
     recorded manifest; never revert/delete a file you didn't write; never read <code>git status</code> as
     ownership. Terraform's "state is a snapshot, not live truth" (plan&rarr;apply enacts only the recorded diff)
-    is the canonical prior art. <strong>Ratify.</strong></li>
-  <li><strong>Rung 2 — lane-isolate all automated writers = settled by #1933 (not a live fork).</strong> Once
-    Rung 1 holds, generalizing the clone model to serial <code>/batch</code> addresses <em>no residual incident
-    harm</em>; #1933's <em>Scope decision (solo dev)</em> already ruled serial batch the day-to-day model and full
-    isolation "not a prerequisite for normal batching." It carries a proven lane-push-flakiness tax (2 of 6 lanes
-    fell back to serial in the first green run) and strands work from the watched dev server. <strong>Don't
-    generalize</strong> — the proto-PR-seam value is a roadmap note under #1933, gated on a future PR-flow
-    decision.</li>
-  <li><strong>Rung 3 — observe-only main for visual work = a validation-gate, not-yet.</strong> Feasible
-    institutionally (GitHub "require PR" / GitLab "push: no one" <em>are</em> observe-only main), but genuine
-    per-lane <em>visual</em> rendering needs full clones with their own ports (worktrees give code isolation, not
-    runtime isolation) plus the cross-origin WE+FUI wiring. Un-gate trigger sharpened to a <strong>falsifiable
-    acceptance test</strong>: a lane reproduces the #1895 transparent-<code>.fui-card</code> regression and its
-    fixed pass headlessly from the CLI.</li>
+    is the canonical prior art. <strong>Ratified.</strong></li>
+  <li><strong>Rung 2 — operating model for the constellation's writers = a live operating-model fork; direction
+    ratified: adopt PR-flow.</strong> Do the constellation's writers (agent <em>and</em> human sessions, not just
+    <code>/workflow</code> batches) collaborate <em>through the remote</em> in a PR-flow (clone &rarr; push &rarr;
+    gate &rarr; review &rarr; merge), or keep writing the shared primary checkout? This is <em>not</em> "settled by
+    #1933": the incident alone doesn't justify it (Rung 1 removes the harm), so it stands on the stated
+    <strong>multi-session operating-model goal</strong>, which deliberately supersedes #1933's solo-dev scope. The
+    <code>lane/*</code> push transport already implements this and is the general primitive (reliable via #1995).
+    <strong>Direction ratified — adopt PR-flow</strong>; the rollout mechanism (clone scope, per-lane dev-server
+    ports, landing gate, branch protection) is prepared as its own decision, <strong>#1996</strong>.</li>
+  <li><strong>Rung 3 — observe-only main for visual work = folds into Rung 2's mechanism (#1996).</strong>
+    Observe-only main is the <em>end state</em> of PR-flow, so it is the visual-verification sub-question of the
+    rollout mechanism, not a standalone call. Feasible institutionally (GitHub "require PR" / GitLab "push: no one"
+    <em>are</em> observe-only main), but genuine per-lane <em>visual</em> rendering needs full clones with their
+    own ports (worktrees give code isolation, not runtime isolation) plus the cross-origin WE+FUI wiring. It
+    carries forward into #1996 as the per-lane visual harness (Gate 5), with its un-gate trigger intact: a
+    <strong>falsifiable acceptance test</strong> — a lane reproduces the #1895 transparent-<code>.fui-card</code>
+    regression and its fixed pass headlessly from the CLI.</li>
 </ul>
 
 <h2>Prior art (SE practice)</h2>
