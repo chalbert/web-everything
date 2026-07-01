@@ -4,6 +4,7 @@ ongoing: true
 status: open
 dateOpened: "2026-06-21"
 tags: []
+relatedReport: reports/2026-07-01-program-library-adapter-watch.md
 ---
 
 # Library-adapter watch
@@ -40,6 +41,26 @@ This mirrors #1258: the watch is WE-coordinated; the adapter children carry a FU
 
 A Library Adapter can only be built once its **target protocol exists / is ratified**. Several obvious TanStack-shaped adapters are therefore *blocked on open decisions*, not buildable: TanStack Query ⟂ [#1419 server-state query cache](/backlog/1419-server-state-query-cache-lifecycle-fetch-dedupe-cache-stalen/) (unresolved), TanStack Table ⟂ [#1411 treegrid / data-grid](/backlog/1411-treegrid-hierarchical-interactive-data-grid-standard-placeme/) (unresolved). The watch tracks these as *pending* — it files the adapter slice when the protocol ratifies. Only adapters whose protocol is already ratified are buildable today (see the first review-log run).
 
+## Goal-set — tracked adapter target-kinds (recorded 2026-07-01)
+
+The finite target-kind set this watch is measured against — **previously unlisted** (the completeness gap
+the 2026-07-01 goal-completeness pass surfaced; reconstructed from the first-run sweep + `we:src/_data/adapters.json#lib`).
+Each row is a lib→WE-protocol adapter that should exist; a re-run diffs against this list (idempotent).
+
+| Target-kind | WE target | Buildable | Adapter state | Slice |
+|---|---|---|---|---|
+| Floating UI | Anchor / positioning (#1262) | ✓ | concept | #2034 |
+| Mousetrap | Keyboard-Shortcuts block | ✓ | concept | #2035 |
+| focus-trap | Focus-Containment intent | ✓ | — | #2036 |
+| TanStack-Virtual | Windowed-Collection intent | ✓ | — | #2037 |
+| Zod / TanStack-Form | Validation intent | ✓ | — | #2038 |
+| TanStack-Query-persistence | Storage protocol (#011) | gated (`we:src/_data/protocols/storage.json` still `concept`) | — | held |
+| TanStack-Query server-state | #1419 (unresolved) | blocked | — | pending |
+| TanStack-Table | #1411 (unresolved) | blocked | — | pending |
+
+Coverage at record time: **1/7 owed elements live** (only the front-A compat table). New target-kinds are
+added here as libs emerge.
+
 ## Maturity & status — currently L0 / candidate
 
 Per the [Program Test](/backlog/1249-define-program-strictly-the-four-part-bar-for-a-perpetual-on/) this is a genuine two-front program at L0: the goal + discovery story exist; the metric, sweep, and cadence are not built. L0→L1 carve: (1) define the front-A metric (adapter-conformance ledger) and wire it into the gate; (2) build the front-B sweep (tracked-lib major-release scan) runnable by hand; (3) wire cadence; graduate to L2 (scheduled) only after a manual track record (the #315→#367 pattern). Build after the [platform-standards keystone](/backlog/1257-platform-standards-watch-keep-we-current-as-the-web-platform/) proves the pattern.
@@ -47,6 +68,7 @@ Per the [Program Test](/backlog/1249-define-program-strictly-the-four-part-bar-f
 ## Review log
 
 - **2026-06-21 — first run (L0).** Swept candidate library adapters against their target WE contracts to separate *buildable-today* (target protocol/intent/block codified) from *blocked* (target is an open decision). **Buildable today**, ranked: (1) **floating-ui-adapter** → Anchor intent + native anchor positioning ratified [#1262](/backlog/1262-anchor-positioning-native-baseline/) — Floating UI becomes the *fallback/polyfill* impl under native-first (already a `concept` in `we:src/_data/adapters.json#lib`); (2) **mousetrap-adapter** → Keyboard-Shortcuts module `active` (`we:src/_data/blocks/keyboard-shortcuts.json`, already a `concept`); (3) **focus-trap adapter** → Focus-Containment intent (`we:src/_data/intents/focus-containment.json`); (4) **TanStack-Query-persistence adapter** → `CustomStorageStrategy` from [#011](/backlog/011-gap-4-webpersistence-project/) (resolved) — but `we:src/_data/protocols/storage.json` is still `concept`, so confirm the registry is real before building; (5) **TanStack-Virtual adapter** → Windowed-Collection intent (`we:src/_data/intents/windowed-collection.json`); (6) **validation adapter (Zod / TanStack-Form)** → Validation intent (`we:src/_data/intents/validation.json`). **Blocked on an open decision** (file the adapter slice when the protocol ratifies): TanStack-Query server-state cache ⟂ [#1419](/backlog/1419-server-state-query-cache-lifecycle-fetch-dedupe-cache-stalen/); TanStack-Table ⟂ [#1411](/backlog/1411-treegrid-hierarchical-interactive-data-grid-standard-placeme/). **Next run:** re-sweep tracked-lib major releases; promote the floating-ui + mousetrap concepts to filed FUI-locus build slices first (lowest risk, already catalogued).
+- **2026-07-01 — second run (front-A goal-completeness pass).** Ran the new /review-program completeness pass. **Finding: the goal-set was never listed** — the program had 0 adapter-build children and had been running on whatever got filed; recorded the finite target-kind set as a new `## Goal-set` section. Coverage **1/7 owed elements live** (only the front-A compat table; both registered `lib` adapters are concept stubs). Filed the **5 buildable adapters** as FUI-locus build slices: **#2034** Floating UI · **#2035** Mousetrap · **#2036** focus-trap · **#2037** TanStack-Virtual · **#2038** Zod/TanStack-Form. **Held:** TanStack-Query-persistence (gated on `we:src/_data/protocols/storage.json` ratifying). Front B not run this round. Report: [we:reports/2026-07-01-program-library-adapter-watch.md](../reports/2026-07-01-program-library-adapter-watch.md). **Next run:** build the 5 filed adapters; then a front-B library-churn sweep.
 
 ## Front-A surface — the multi-impl compatibility table
 

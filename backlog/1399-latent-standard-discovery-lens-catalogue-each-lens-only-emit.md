@@ -5,6 +5,7 @@ status: open
 ongoing: true
 dateOpened: "2026-06-21"
 tags: [program, discovery, coverage, latent-standards, gap, book-candidate, method]
+relatedReport: reports/2026-07-01-program-latent-standard-discovery.md
 ---
 
 # Latent-standard discovery program
@@ -59,3 +60,22 @@ Six candidate-standard `decision` cards already filed:
 
 Ongoing — never finitely done. A round is complete when each child lens has been run against the current
 registry and every ❌ is either a filed card or a dismissed-with-reason entry.
+
+## Review log
+
+- **2026-07-01 — first review (external-source currency re-diff).** Front A: all 7 lens children +
+  founding harvest verified `resolved` = "lens ran once, emitted its cards" (discovery program, so
+  `resolved` ≠ code — checked against resolution notes). Goal-set coverage: **10/10 axes manned** — complete
+against the goal-set, 0 completeness residuals (the slow-corpus lenses #1402–#1405 are covered-but-stale,
+a front-B cadence matter). Front B: re-diffed the two fastest-moving
+  *owned* external axes against later data — **APG** index unchanged (30 patterns, identical to the
+  #1400 baseline → dry) and **OpenUI** still saturated (`focusgroup` already owned by the
+  `focus-delegation` intent → dismiss); delegated axes #1257 / `/gap-sweep` skipped. New signal came
+  from the WAI-ARIA **1.3** spec (editor's draft Feb 2026): roles `comment`/`suggestion`/`mark` — first
+  two covered by the `annotation` intent, `suggestion` exposed one unowned residual. Filed **1** child —
+  **#2029** (decision: where the suggestion accept/reject host-mutation lifecycle lives). 0 clean new
+  latent standards (healthy near-dry idempotent re-run, #315). Living report:
+  [we:reports/2026-07-01-program-latent-standard-discovery.md](../reports/2026-07-01-program-latent-standard-discovery.md).
+  **Next run:** re-diff APG/OpenUI only on an index-version / new-research-page change (idempotent-dry
+  today); re-run the internal-corpus lenses (#1402–#1405) on a slower cadence; watch WAI-ARIA 1.3 toward
+  Candidate Recommendation.

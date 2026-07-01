@@ -49,3 +49,41 @@ once #1267 exists.
 - [React 19 supports custom elements](https://aleks-elkin.github.io/posts/2024-12-06-react-19/) · [Custom Elements Everywhere](https://custom-elements-everywhere.com/)
 - [Form-Associated Custom Elements in practice — Frontend Masters](https://frontendmasters.com/blog/form-associated-custom-elements-in-practice/)
 - [Reactivity models compared — OpenReplay](https://blog.openreplay.com/reactivity-react-vue-angular-svelte/)
+
+---
+
+## Run 2 — 2026-07-01 (front-A goal-completeness pass)
+
+Focus: the **front-A goal-completeness** pass (the new /review-program step). Run 1 scoped front-A to
+*wrapper/adapter conformance* only; this run asks the feature-level completeness question the watch never
+had: **does every framework feature #1258 tracks have a WE-standard equivalent** (an intent/block/plug/
+protocol), or a deliberate dismissal?
+
+### Front A — goal-set coverage (completeness pass)
+
+**Finding: the feature goal-set was never enumerated** in the item or Run 1 (both scoped to the wrapper
+front). Reconstructed the reactivity/rendering feature axes the tracked frameworks (React/Vue/Svelte/
+Solid/Angular/Qwik) expose and diffed each against `we:src/_data/intents/` + `we:src/_data/blocks/` +
+`we:src/_data/plugs/` (subagent, 2026-07-01). The 13-feature matrix is now recorded in the #1258 body.
+
+**Coverage: 13/13 features covered.** Every tracked feature maps to a named WE standard or a filed
+decision — signals→`reaction`, resource-loading→`loader`/`resource-loader`, actions→`action`, suspense→
+`resource-loader`+#1976, error-boundary→`reliability`/`error-recovery`, control-flow→`view`/`for-each`,
+context→`customcontext`/`injectorroot`, view-transitions→render-strategy protocol, islands/resumability→
+loader-timing+#1977, transitions→`motion`, SSR/streaming→`transient-component`, routing→`router`/
+`navigation`, wrapper-conformance→#1271–#1273. The open directive proposals (#1976/#1977/#1978) are
+*declarative-shape* refinements of already-covered concerns, not missing equivalents.
+
+### Front B — currency
+
+Not re-run this round (Run 1 swept it 2026-06-20). No new vendor delta pulled.
+
+### Outcome
+
+- **0 standard-equivalent residuals** — the feature-parity front is complete; honest-0 completeness case.
+- **1 inline record:** folded the 13-feature coverage matrix into the #1258 body so front-A stays
+  auditable (the only genuine gap was that the goal-set was undocumented). No cards filed.
+
+**Next run:** re-run the front-B vendor sweep (esp. the deferred Qwik/Solid-2.0 deep-dive from Run 1) and
+re-diff any newly-shipped framework feature against the recorded 13-feature matrix.
+
