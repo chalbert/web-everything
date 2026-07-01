@@ -3,6 +3,7 @@ kind: story
 size: 5
 parent: "777"
 status: open
+blockedBy: ["2007"]
 dateOpened: "2026-07-01"
 tags: [dogfood, fui, ssr, eleventy, keystone, di-mount]
 ---
@@ -41,9 +42,33 @@ the page renders correctly with **JS disabled**, and the client CE upgrade becom
 - The render path is a build-time subprocess to the FUI CLI; no FUI runtime import into the 11ty build.
 - Documented as the reusable pattern A1–A4 build on.
 
+## Blocked — buried source-contract fork (grounded 2026-07-01, batch-2026-07-01-2016-2017)
+
+Grounding the FUI + WE sides revealed this item is **not no-decision**. The FUI render side is clean —
+`fui:blocks/badge/Badge.ts:44` `createBadge`, `fui:blocks/tag/Tag.ts:96` `createTag`,
+`fui:blocks/card/Card.ts:46` `createCard` are pure factories serialisable via `.outerHTML`, and
+`fui:tools/data-table-build/cli.ts` + `fui:blocks/renderers/data-table/buildHarness.ts` are a direct template
+for a sibling `component-render` build tool. **But the input contract forks.** Every catalog surface today uses
+card/badge/tag as **inline-slot wrappers** (`we:src/intents.njk:56-69` — `<we-card><h3>…</h3>…</we-card>`,
+`<we-badge>status</we-badge>`), **not** a `config="[[ ref ]]"` data binding like `we-data-table`. So build-time
+SSR must choose:
+
+- **(A) data-as-source** — rewrite templates to emit a JSON `config` spec the FUI tool renders; or
+- **(B) markup-as-source** — build-time *upgrade* the existing light-DOM element to canonical `fui-*` markup
+  (what the runtime `registerCardInDocument()` already does), extracting title/actions/body from inner HTML.
+
+This is the **same markup-vs-data-source fork as #1964**, whose revised resolution is the general
+**feed-appropriateness rule (#2007)**: static doc surfaces *unwrap*, interactive *enhance*, data-driven
+*render-from-data*. Card/badge/tag are blocks that own rendered shape, so **#2007 (with #1964) decides this
+item's source contract** — building the FUI render tool now risks being wasted if #2007 rules "static → unwrap"
+(a plain `fui-*` markup emit, no per-render subprocess). Hence `blockedBy: #2007`.
+
+NB the earlier "Sub-decision to avoid a fork" note addressed the *output-format* fork (plain HTML vs shadow DOM);
+the blocking fork is the *input-source* one, unaddressed until #2007 ratifies.
+
 ## Notes / boundary
 
-- **Sub-decision to avoid a fork:** render as **plain projected HTML** (the data-table hook's approach — no shadow
-  DOM), not declarative shadow DOM, to stay consistent with the shipped SSR mechanism. If DSD is later wanted that
-  is a separate decision; this item reuses the ratified plain-projection path to remain no-decision.
+- Once #2007 ratifies: if **unwrap** for static surfaces, this item shrinks to a build-time markup emit (maybe no
+  subprocess at all); if **render-from-data**, it becomes the data-table-shaped subprocess tool as originally
+  written. Re-scope on ratification.
 - WE holds zero impl — the actual render logic lives in FUI; WE only gains the Eleventy glue + subprocess call.
