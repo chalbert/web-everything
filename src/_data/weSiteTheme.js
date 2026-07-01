@@ -51,36 +51,10 @@ const weSiteTheme = {
   },
 };
 
-/**
- * The legacy → emitted alias map: each `--<family>-<name>` custom property the site's 629 existing
- * call sites reference, pointed at its emitted `--token-<family>-<name>`. Generated into a `:root{}`
- * block by `scripts/lib/token-css.mjs` (`--color-primary: var(--token-color-primary)`), so the call
- * sites keep working AND now derive from the injector. The legacy var name is NOT always
- * `--<family>-<name>` (the site uses `--color-text-main`, not `--text-main`), so the mapping is
- * explicit rather than mechanical.
- */
-const LEGACY_ALIASES = [
-  { legacy: '--color-bg', family: 'color', name: 'bg' },
-  { legacy: '--color-surface', family: 'color', name: 'surface' },
-  { legacy: '--color-text-main', family: 'color', name: 'text-main' },
-  { legacy: '--color-text-muted', family: 'color', name: 'text-muted' },
-  { legacy: '--color-primary', family: 'color', name: 'primary' },
-  { legacy: '--color-primary-hover', family: 'color', name: 'primary-hover' },
-  { legacy: '--color-border', family: 'color', name: 'border' },
-  { legacy: '--font-sans', family: 'font', name: 'sans' },
-  { legacy: '--spacing-xs', family: 'spacing', name: 'xs' },
-  { legacy: '--spacing-sm', family: 'spacing', name: 'sm' },
-  { legacy: '--spacing-md', family: 'spacing', name: 'md' },
-  { legacy: '--spacing-lg', family: 'spacing', name: 'lg' },
-  { legacy: '--spacing-xl', family: 'spacing', name: 'xl' },
-  { legacy: '--radius-md', family: 'radius', name: 'md' },
-  { legacy: '--radius-lg', family: 'radius', name: 'lg' },
-  { legacy: '--radius-full', family: 'radius', name: 'full' },
-  { legacy: '--shadow-sm', family: 'shadow', name: 'sm' },
-  { legacy: '--shadow-md', family: 'shadow', name: 'md' },
-  { legacy: '--shadow-lg', family: 'shadow', name: 'lg' },
-  { legacy: '--shadow-glass', family: 'shadow', name: 'glass' },
-];
+// The legacy → emitted semantic-alias map (`--color-primary: var(--token-color-primary)`, …) used to
+// live here, but #2026 Fork 1 relocated it into the FUI-owned single source (`fui:plugs/webtheme/
+// legacyAliases.ts`) so the FUI runtime emit and this website build share one source. The build
+// (`scripts/lib/token-css.mjs`) now imports `LEGACY_ALIASES` from the transpiled FUI bundle; this file
+// stays the WE-site *project theme values* only.
 
 module.exports = weSiteTheme;
-module.exports.LEGACY_ALIASES = LEGACY_ALIASES;
