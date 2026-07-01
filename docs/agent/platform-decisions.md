@@ -2155,6 +2155,68 @@ reliability = #1995. Mechanism to prepare = #1996. Sibling of
 
 ---
 
+### PR-flow rollout mechanism — automation isolates, human writes `main`, landing is fully automatic {#pr-flow-rollout-mechanism}
+
+The **mechanism** implementing [#1985 Rung 2](#non-destructive-closeout-prflow)'s adopt-PR-flow direction (that
+anchor is the governing direction; this one is the how). Five ratified calls (#1996, ratified 2026-06-30):
+
+- **Isolate-by-default for automation; the human writes `main` directly.** Every **automated** writing session
+  (agent / `/workflow`) works in a **clone** (branches are guard-blocked in the shared checkout, #1153, so
+  isolation = a clone), gates itself, pushes a `lane/*` ref, and converges via the integrator's auto-merge —
+  `main` is **convergence-only for automation**. The **human** is the single trusted writer and keeps direct
+  commit/push to `main`. Rationale: an ad-hoc agent `main` edit cannot be *proven* disjoint from a live lane
+  (the orchestrator's disjointness partition only covers items *it* dispatches), so isolation is the only
+  race-free posture for automation; a lone trusted human has no one to race.
+- **Per-lane dev-server ports = pure deterministic offset by lane index, `strictPort:true`, with per-repo
+  thousands-bands.** A squat surfaces as a loud boot failure, never a silent re-scan (no linear probe — a probe
+  is dynamic discovery and dissolves the determinism). Bands: **WE `3000+` / 11ty `8080+`, plateau-app
+  `4000+`, Frontier UI `6000+`** (`5000`/`7000` are macOS AirPlay/ControlCenter-reserved). Ports **and** the
+  11ty proxy `target` are env-driven (`WE_VITE_PORT` / `WE_ELEVENTY_PORT`, `changeOrigin:true`) via a generated
+  per-clone `.env.local`; FUI needs no port inside a coupled WE+FUI lane (relative path-alias resolves it).
+- **Landing is fully automatic: auto-merge on gate-green, no manual merge, no mandatory human review.** The
+  automated gate (`check:standards` + build + tests + the visual check below) is the sole landing authority;
+  per-item human review is opt-in but never required.
+- **Branch posture is asymmetric: `main` writable by the human, observe-only for AI/agents.** Agents PR-flow
+  only; enforcement is convention now (isolate-by-default + the commit/closeout guards) and a bot-principal
+  branch rule later. Full observe-only `main` stays a future flip for when a second human appears.
+- **Visual changes land safely by an automated render-check in the gate (not a human).** A visual-touching lane
+  (`*.njk`/`*.css`/template surfaces) auto-merges **only when** a headless Playwright render check passes on its
+  booted WE+FUI cross-origin pair; the harness is a v1 deliverable, bounded "done" by reproducing the #1895
+  transparent-`.fui-card` regression *and* its fix from the CLI. (Fallback if descoped: agents don't auto-land
+  visual changes and the human owns visual surfaces via the direct-`main` path.)
+
+**Enforcement ladder for the asymmetric posture (#1998 — spec of the "convention now, bot-principal later"
+bullet).** The isolate-by-default + human-writes-`main` posture tightens in three rungs; only Rung 1 is live:
+
+- **Rung 1 — convention (live now).** No server-side gate. Automated writers isolate by *practice* (the
+  `/workflow` orchestrator clones + converges via `lane/*`; the serial `/batch` still commits on the current
+  branch per Rule 104 as the interim), backed by the existing **commit/closeout guards** — the #1153 branch
+  guard (denies `git switch`/`checkout -b`/`worktree add` in the shared checkout, forcing clones), the
+  broad-stage `git add -A` denial, and the non-destructive-closeout invariant ([#1985](#non-destructive-closeout-prflow)).
+  The removed never-push default still authorizes the **human's** direct `git push origin main`. Interim risk:
+  nothing *prevents* an agent committing `main` directly — the floor is discipline, not a rule.
+- **Rung 2 — server-side bot-principal branch rule (the specced future flip).** Agents authenticate to the
+  remote as a **distinct GitHub principal** (a bot identity — a machine user or GitHub App installation token,
+  never the human's credentials). A branch-protection rule on `main` **requires a PR** (blocks direct pushes)
+  for that principal, while the human account is **exempt** (or holds a bypass allowance). Mechanically: the
+  integrator's converge-to-`main` merge either runs under the human/owner identity (so it lands) or the bot
+  principal is granted the narrow "merge own green PR" bypass; lane pushes to `lane/*` refs stay open for the
+  bot (they are not `main`). Net effect: an agent *cannot* write `main` directly even by mistake — the
+  convention becomes a server-enforced invariant — while the human's direct path is untouched. This rung needs
+  a real GitHub remote + org/app setup, so it is **not** agent-executable (a human `setup` gate).
+- **Rung 3 — symmetric observe-only `main` (deferred).** When a *second human* writer appears, the human's
+  direct-`main` path also closes and everyone PR-flows. By then agents are already off direct `main` (Rung 2),
+  so only the human's exemption is removed — nearly free. Deferred until the second-writer need is real (a lone
+  trusted writer has no one to race, so forcing them to PR buys friction with no safety).
+
+**Lineage:** #1996 (ratified 2026-06-30; report `we:reports/2026-06-30-pr-flow-rollout-mechanism.md`; research
+topic `pr-flow-rollout-mechanism`); enforcement ladder specced by #1998 (Forks 1+4). Implements
+[#1985 Rung 2](#non-destructive-closeout-prflow); builds on the #1933 clone model + #1995 push-retry; composes
+with the #1153 branch guard and the removed never-push default (both unchanged). Visual harness files under
+#1933 / #1167 / #1552.
+
+---
+
 ### Behaviour/event attribute *names* are colon-namespaced — a collision-safe internal authoring spelling, not the platform-shaped standard proposal {#attribute-name-colon-namespacing}
 
 Decided **per surface** (separators track what each namespace permits, not uniformity — [registry-name-guard](#registry-name-guard-namespace) `:672`). **(Fork 1)** Behaviour/event attribute **names** stay **colon-namespaced** (`view:if`, `on:click`, `nav:list`) — collision-safe by construction (a native HTML attribute name never contains a colon). The load-bearing **framing**: colon is WE's *current collision-safe **internal authoring** spelling* for namespaced directives, **not** WE's claimed *platform-shaped standard proposal*. A colon on an HTML attribute spec-*connotes* an XML namespace (`xml:lang`); WE's `:` is the ownership-colon idiom (`:672` + #1913), **not** an XML-namespace declaration. The closest *proposed* author-attribute standard is **hyphen** (`enh-*`, WICG#1029/whatwg#2271); WE **declines to chase it while unshipped** (don't-chase-a-draft), and the separator is intended to be **app-configurable** (the reconciliation bridge to the eventual ratified spelling — mechanism deferred to #1992). If a hyphen form is ever adopted it is **`enh-*`**, **never `we-*`** (a pure vendor prefix contradicts proposing-in-platform-shape). **(Fork 2)** Third-party `<template type=…>` **values** are **`owner-kind` hyphen** (`type="acme-card"`; bare `type="if"` reserved for **core**) — native `type` values are never colon-namespaced, hyphen matches the custom-element idiom and keeps RFC 6648 ownership-not-status without reopening #1983's no-native-analog defect. **Settled by precedent (not forks):** native-aligned attrs → **bare** (`multiple`); author data → **`data-*`**; comment-directive names → colon `ns:name` (grammar-locked, no native-attribute collision risk). Detail codified in `conventions.md#attributes`.
