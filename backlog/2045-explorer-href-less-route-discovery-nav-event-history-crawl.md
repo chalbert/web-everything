@@ -3,9 +3,11 @@ kind: story
 size: 5
 parent: "1522"
 locus: plateau-app
-status: active
+status: resolved
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
+graduatedTo: "plateau-app:tools/explorer/routeDiscovery.ts — third discovery source crawlRouterPaths clicks href-less ROUTER_CANDIDATE_SELECTOR (role=link/menuitem/tab/treeitem) affordances and records History-API path changes; DiscoveryResult.fromRouterNav; CLI --discover reports the per-source split"
 tags: []
 ---
 
