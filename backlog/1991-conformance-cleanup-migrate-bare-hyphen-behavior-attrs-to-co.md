@@ -1,20 +1,56 @@
 ---
-kind: story
-size: 5
+kind: decision
 status: open
-blockedBy: ["1987"]
+preparedDate: "2026-07-01"
 dateOpened: "2026-06-30"
-dateStarted: "2026-07-01"
-tags: []
+tags: [naming, colon-namespace, attribute-conformance, frontier-ui]
 ---
 
-# Conformance cleanup: migrate bare-hyphen behavior attrs to colon namespace + normalize route:guard:leave
+# Colon-namespace target for `type-ahead` (the one unpinned name in the bare-hyphen → colon behavior-attr rename)
 
-Triggered by #1987's Fork 1 ruling (colon is the collision-safe namespace; bare-hyphen behavior attrs are the actually-unsafe names). In Frontier UI, migrate the ~8 bare-hyphen behavior attribute names (type-ahead, droplist-anchor/anchored/selection, focus-delegation, navigation-guard) into the colon namespace (e.g. droplist:anchor), and normalize the double-colon outlier route:guard:leave (no precedent on any convention) to single-colon route:guard-leave. Mechanical rename + registration update; keep back-compat aliases if any author surface depends on the old names.
+Forked out of the former migration story (was `story·5`) because the mechanical rename cannot start until one
+name is ratified — an agent must not pick an attribute spelling unilaterally (naming-fork precedent
+discipline). #1987 Fork 1 already ratified the DIRECTION (colon is the collision-safe namespace; bare-hyphen
+behavior attrs are the actually-unsafe names) and the `namespace:member` pattern
+(`we:docs/agent/platform-decisions.md#attribute-name-colon-namespacing`). This decision pins the **one member
+that pattern doesn't cleanly resolve**, then the rename becomes mechanical.
 
-## Grounding — resized to story·5 + naming sub-fork (batch-2026-06-30, released not resolved)
+## The clean renames (no fork — settled by #1987's pattern, execute on ratification)
 
-Two findings on grounding, both blocking a clean batch:
+First-hyphen → colon, member keeps any internal hyphen (like the ratified `grid:cell-edit`):
 
-- **Not a mechanical `task` — it's a cross-repo story·5.** The touch-set is ~30 FUI code sites (`fui:blocks/type-ahead/registerTypeAhead.ts`, `fui:blocks/droplist/registerDroplistMenu.ts:52-55`, `getAttribute`/`matches` reads incl. `fui:blocks/router/types.ts:319` for `route:guard:leave`) **plus** 3 FUI demos under `fui:demos/` (data-grid, droplist-selection, autocomplete-unplugged) **plus** ~10 WE block-description docs under `we:src/_includes/block-descriptions/` that show these attrs (type-ahead, autocomplete, multi-select-dropdown, data-table, menu, …) **plus** back-compat aliases (author surfaces DO depend on the old names — the demos/docs above) **plus** all-engine tests. Retyped `task → story·5`.
-- **`type-ahead`'s colon target is an unpinned naming fork.** #1987 Fork 1 ratified the DIRECTION (bare-hyphen → colon) and the `namespace:member` pattern, but only `droplist:anchor` is a clean family. `droplist:anchored/selection`, `focus:delegation`, `navigation:guard` follow first-hyphen→colon sensibly; **`type-ahead` does not** — there is no `type:` behavior family, and `type:ahead` both reads wrong and visually rhymes with the `type=` attribute. Candidate targets: `type:ahead` (literal), `list:type-ahead` / `nav:type-ahead` (member keeps its internal hyphen like `grid:cell-edit`), or leave `type-ahead` as an accepted compound. **Pick this before the rename** — an agent must not choose the spelling unilaterally (naming-fork precedent discipline). Likely a one-line addendum to #1987's codified anchor rather than a new decision item.
+- `droplist-anchor` → `droplist:anchor`, `droplist-anchored` → `droplist:anchored`,
+  `droplist-selection` → `droplist:selection`
+- `focus-delegation` → `focus:delegation`
+- `navigation-guard` → `navigation:guard`
+- the double-colon outlier `route:guard:leave` (no precedent on any convention) → single-colon
+  `route:guard-leave`
+
+## The fork — `type-ahead`'s colon target
+
+`type-ahead` does **not** follow the first-hyphen→colon rule: there is no `type:` behavior family, and
+`type:ahead` both reads wrong and visually rhymes with the `type=` attribute (the exact collision the colon
+namespace exists to avoid). Options:
+
+- **(a) `list:type-ahead` — RECOMMENDED.** Names the host surface (list / combobox) as the namespace and
+  keeps the compound member verbatim, exactly the `grid:cell-edit` precedent. Reads as "the type-ahead
+  behavior of a list," no collision with `type=`, and the `list:` namespace generalizes to future
+  list behaviors.
+- (b) `nav:type-ahead` — same member-keeps-hyphen shape, but `nav:` mis-frames it (type-ahead is
+  incremental-search selection, not navigation) and overlaps `navigation:guard`'s intent.
+- (c) `type:ahead` — literal first-hyphen split; rejected above (reads wrong, rhymes with `type=`).
+- (d) leave `type-ahead` an accepted bare compound — but that re-opens the #1987 "bare-hyphen behavior attrs
+  are the unsafe names" ruling for this one attr, so it's the least consistent.
+
+Likely a **one-line addendum** to #1987's codified anchor (`we:docs/agent/platform-decisions.md#attribute-name-colon-namespacing`),
+not a standalone convention.
+
+## Graduates to (on ratification)
+
+The mechanical cross-repo rename, ~30 FUI code sites (`fui:blocks/type-ahead/registerTypeAhead.ts`,
+`fui:blocks/droplist/registerDroplistMenu.ts:52-55`, `getAttribute`/`matches` reads incl.
+`fui:blocks/router/types.ts:319` for `route:guard:leave`) **plus** 3 FUI demos under `fui:demos/`
+(data-grid, droplist-selection, autocomplete-unplugged) **plus** ~10 WE block-description docs under
+`we:src/_includes/block-descriptions/` **plus** back-compat aliases (author surfaces DO depend on the old
+names — those demos/docs) **plus** all-engine tests. Re-scaffold as a `story·5` (or execute inline) once the
+name is pinned.
