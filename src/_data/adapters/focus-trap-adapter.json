@@ -1,0 +1,7 @@
+{
+  "category": "lib",
+  "id": "focus-trap-adapter",
+  "name": "Focus Trap Adapter",
+  "status": "poc",
+  "summary": "Bridges the <strong>focus-trap</strong> library to the <a href=\"/intents/focus-containment/\">Focus Containment Intent</a> (#013), mapping the intent's <code>trap</code> / <code>background</code> / <code>initialFocus</code> / <code>restore</code> dimensions onto focus-trap's options and adapting a trap instance to the intent's <code>contain</code> / <code>release</code> contract. A dependency-free bridge (the library is injected, native <code>&lt;dialog&gt;</code> + <code>inert</code> stay the recommended default)."
+}
