@@ -226,6 +226,39 @@ display (its own site + demos, FUI branding).
 #705 · #732 (escape SDK) · #765 (mode-C relaxation) · #788 (seed transport) · #791 (reference-vs-impl
 partition) · #809 (workbench locus) · #932 (website≠standard; consumer may run WE runtimes in-document).
 
+### SSR external I/O is a language-agnostic WE standard; renderers conform behind the wire-format seam {#ssr-external-io-standard-renderers-conform}
+
+**A rendering surface's *externally-observable I/O* is a WE standard; the *renderer* that produces it is a
+conforming, swappable impl.** The instance of [WE #6](#constellation-placement) for server-render/SSR
+(#2030, under #1971/#2005). Split every rendering decision by one test — *can anything outside the render
+boundary observe the difference?*
+
+1. **Observable ⇒ WE standard.** The emitted wire format (marker grammar, `data-key`, state-token layout),
+   the zero-JS baseline, and the client hydration handshake are pinned in the WE standard
+   (`we:src/_includes/project-webdirectives.njk`) **precisely enough that a renderer in any language
+   produces conformant output the single client hydrates identically.** New observable I/O is codified into
+   WE, never settled per-impl.
+2. **The wire format is the swap seam.** One client hydrates *any* server's output because all servers
+   emit the identical standard. A Go/Rust/PHP/JS renderer is a drop-in behind the same client — there is no
+   per-language client.
+3. **Conformance vectors are WE-owned data, not impl** (the `#817/#899` protocol-plus-vectors pattern): a
+   fixture set `(input tree + data) → exact expected HTML bytes` (markers incl. space-padding, `data-key`,
+   state tokens). **Every** language's renderer passes the same vectors; that — not code reuse — is what
+   makes renderers interchangeable. A **reference renderer** (Node first) defines the vectors and is their
+   oracle; later languages validate against them.
+4. **Render internals are a per-impl black box.** How a given server builds the tree before emitting the
+   fixed wire format (DOM shim, string concat, template engine) has no external observer — each impl (and
+   each language) may choose differently and swap later behind the seam; only the emitted bytes are fixed.
+   A JS-only trick (e.g. reusing the client's DOM stamp logic via a server DOM shim) is a legitimate
+   *reference-impl* choice but confers no cross-language rule.
+5. **Per-impl ≠ standard change.** Escalating an internal encoding to something observable (e.g. moving
+   state from in-marker tokens to a `<script type="application/json">` side-channel) is a *standard*
+   amendment (+ vector update), not a silent per-impl move.
+
+**Lineage:** #2030 (foundational call — the five prepped "forks" collapse: four are conforming black-box
+impl, the external I/O is the standard) · #1971/#2005 (webdirectives SSR epic + foundational surface) ·
+#817/#899 (protocol-plus-vectors, data-not-impl) · #1282 ([WE holds zero implementation](#constellation-placement)).
+
 ### Catalog tiles adopt `<we-card>`/`<we-badge>`/`<we-tag>` by-intent; relocate the anchor outward {#catalog-tile-by-intent-mapping}
 
 **A docs catalog tile maps to FUI block vocabulary by-intent — never a bespoke palette wrapped in a
