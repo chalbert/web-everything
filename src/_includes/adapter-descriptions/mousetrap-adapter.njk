@@ -1,38 +1,53 @@
 <h2>Mousetrap Adapter</h2>
 <p>
-    The Mousetrap Adapter connects the <a href="https://craig.is/killing/mice">Mousetrap</a> library to Web Everything's <strong>Keyboard Shortcuts Module</strong>.
+    The Mousetrap Adapter connects the <a href="https://craig.is/killing/mice">Mousetrap</a> library to Web Everything's <strong>Keyboard Shortcuts Module</strong>. It lets an app keep Mousetrap's familiar binding syntax while its shortcuts flow through the standard's registry.
 </p>
 
 <section class="section-card fui-card">
     <h3 id="status">Status</h3>
     <p class="text-sm text-gray-600">
-        <strong>Concept Phase:</strong> This adapter is in early design.
+        <strong>Implemented.</strong> The bridge ships in the <a href="https://github.com/">Frontier UI</a> reference implementation
+        (<code>adapters/mousetrap-keyboard-shortcuts/mousetrapAdapter.ts</code>) with a full unit-test suite. Per the WE
+        zero-implementation rule the module <em>contract</em> is defined here; the bridge <em>code</em> is impl.
     </p>
 </section>
 
 <section class="section-card fui-card">
-    <h3 id="concept">Concept</h3>
+    <h3 id="concept">How it works</h3>
     <p>
-        Mousetrap is a popular library for handling keyboard shortcuts. This adapter allows using Mousetrap's binding syntax while integrating with Web Everything's keyboard module:
+        Mousetrap is a popular library for handling keyboard shortcuts. The adapter is <strong>dependency-free by
+        construction</strong>: it never pins or installs Mousetrap. Instead the caller passes a Mousetrap-shaped instance
+        (anything with <code>bind</code>/<code>unbind</code>/<code>reset</code>), and the adapter maps the module's neutral
+        <code>ShortcutBinding</code> shape onto it:
     </p>
 
     {% highlight "typescript" %}
-import { MousetrapAdapter } from '@web-adapters/mousetrap';
+import { bridgeMousetrap } from '@frontierui/adapters/mousetrap-keyboard-shortcuts';
+import Mousetrap from 'mousetrap'; // the caller owns the dependency
 
-// Register the adapter
-keyboardRegistry.define('mousetrap', MousetrapAdapter);
+// Register shortcuts through the Keyboard Shortcuts Module's neutral shape.
+const shortcuts = bridgeMousetrap(Mousetrap, [
+  { keys: 'mod+s',        handler: () => save() },
+  { keys: 'mod+shift+s',  handler: () => saveAs() },
+  { keys: ['esc'],        handler: () => closeDialog(), on: 'keyup' },
+]);
 
-// Use Mousetrap-style bindings
-<div keyboard-shortcuts="mousetrap">
-    <button shortcut="mod+s" on:shortcut="save">Save</button>
-    <button shortcut="mod+shift+s" on:shortcut="saveAs">Save As</button>
-</div>
+// The returned handle is live — add / remove / dispose re-drive Mousetrap.
+shortcuts.add({ keys: 'up up down down', handler: () => konami() });
+shortcuts.remove('mod+shift+s');
+shortcuts.dispose(); // unbinds everything this registration bound
     {% endhighlight %}
+
+    <p style="margin-bottom: 0;">
+        Chords are normalised to Mousetrap's spelling (<code>mod+s</code>, case-insensitive modifiers); space-separated
+        combos stay <strong>sequences</strong> (e.g. <code>up up down down</code>). All keyboard mechanics remain in
+        Mousetrap — the adapter is a thin, deterministic mapping.
+    </p>
 </section>
 
 <section class="section-card fui-card">
     <h3 id="related">Related</h3>
     <ul style="margin-bottom: 0;">
-        <li><a href="/blocks/keyboard-shortcuts/">Keyboard Shortcuts Block</a></li>
+        <li><a href="/blocks/keyboard-shortcuts/">Keyboard Shortcuts Block</a> — the module contract this adapter bridges to</li>
     </ul>
 </section>
