@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Interaction fixture · Backlog active-work live poller (backlog-active.js)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    [hidden] { display: none !important; }
+    .aw-agent { display: inline-flex; }
+  </style>
+</head>
+<body>
+  <!-- The Active-work LIVE board backlog-active.js drives (#1854). It polls /active-progress.json (mocked by
+       the spec via page.route — NEVER live data), digests the harness run-journal into workflow run cards and
+       batch cards, collapses each item's pipeline stages to ONE chip per #NNN coloured by its rolled-up
+       state, and overlays per-item live digests onto the lane rows below. This fixture supplies the DOM the
+       script reads; the spec feeds a deterministic poll payload and asserts the observable grouping/render. -->
+
+  <!-- Live workflow board -->
+  <div id="active-live" hidden>
+    <span id="active-live-count"></span>
+    <span id="active-live-stamp"></span>
+    <div id="active-live-runs"></div>
+  </div>
+
+  <!-- Live batching section -->
+  <div id="active-batches" hidden>
+    <span id="active-batches-count"></span>
+    <div id="active-batches-runs"></div>
+  </div>
+  <div id="aw-static-batching">static batching snapshot</div>
+
+  <!-- The live pill mirrored onto the Active tab button, and the vitals it drives. -->
+  <span id="active-tab-live" hidden>live <span id="active-tab-live-n"></span></span>
+  <span id="aw-vital-workflows" hidden>workflows <span id="aw-vital-workflows-n"></span></span>
+  <span id="aw-vital-batching-n" data-base="0">0</span>
+
+  <!-- Build-time lane rows that receive the per-item live digest overlay (matched by data-digest-for=num). -->
+  <div data-digest-for="500" hidden></div>
+  <div data-digest-for="501" hidden></div>
+
+  <!-- The REAL shipped poller. -->
+  <script src="/src/assets/js/backlog-active.js"></script>
+</body>
+</html>

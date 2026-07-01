@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Interaction fixture · Backlog dependency graph (backlog-graph.js)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    /* A fixed-width scroll container so svg.parentElement.clientWidth is deterministic (>0), and the
+       standalone grid can size against a real width without depending on the hidden-panel first-paint path. */
+    #graph-scroll { width: 900px; overflow: auto; }
+    [data-bg-filter].is-active { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <!-- The Graph tab surface backlog-graph.js drives (#255/#257). It reads the build-time model from
+       #backlog-graph-data, lays nodes out (layered by prerequisite depth, grouped into components) and draws
+       an SVG into #backlog-graph. The filter toggle switches "live" (open/active only) vs "all" (every
+       edge-participating item) over the SAME model, persisted in localStorage. This fixture embeds a small
+       deterministic model so the render + toggle are observable behaviour, not pixels.
+
+       Model: a 3-node chain 100→101→102 (all open), a resolved node 200 that only participates via an edge
+       (200→100, so it appears in "all" but not "live"), and a standalone open item 300 (open, no live edge →
+       renders in the "live" standalone grid). 101 is batchable (green ring); 300 has a humanGate (held ring). -->
+  <script type="application/json" id="backlog-graph-data">
+  {
+    "nodes": [
+      { "num": "100", "id": "100-root", "title": "Root task", "status": "open", "tier": "A", "chain": 2, "direct": 1, "inEdge": true, "batchable": false },
+      { "num": "101", "id": "101-mid", "title": "Middle task", "status": "open", "tier": "B", "chain": 1, "direct": 1, "inEdge": true, "batchable": true },
+      { "num": "102", "id": "102-leaf", "title": "Leaf task", "status": "active", "tier": "C", "chain": 0, "direct": 0, "inEdge": true, "batchable": false },
+      { "num": "200", "id": "200-done", "title": "Resolved prerequisite", "status": "resolved", "tier": null, "chain": 3, "direct": 1, "inEdge": true, "batchable": false },
+      { "num": "300", "id": "300-standalone", "title": "Standalone open item", "status": "open", "tier": "C", "chain": 0, "direct": 0, "inEdge": false, "batchable": false, "humanGate": { "kind": "review", "what": "needs a human review step" } }
+    ],
+    "edges": [
+      { "from": "200", "to": "100" },
+      { "from": "100", "to": "101" },
+      { "from": "101", "to": "102" }
+    ]
+  }
+  </script>
+
+  <div class="backlog-graph-filter">
+    <button type="button" data-bg-filter="live">Open &amp; blockers</button>
+    <button type="button" data-bg-filter="all">All</button>
+  </div>
+  <span id="bg-count"></span>
+
+  <div id="graph-scroll">
+    <svg id="backlog-graph" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+
+  <!-- The REAL shipped graph script. -->
+  <script src="/src/assets/js/backlog-graph.js"></script>
+</body>
+</html>
