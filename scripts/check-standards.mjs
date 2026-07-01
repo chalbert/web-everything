@@ -50,6 +50,7 @@ import {
   validateBlockExportShape,
   validatePlugWeFuiDrift, PLUG_SHARED_CORE_FILES,
   scanRepoLocusPrefixes, REPO_LOCUS_PREFIX_ENFORCED,
+  classifySurfacePaths,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -1356,6 +1357,27 @@ try {
   for (const w of aw) warn(w.message);
 } catch (e) {
   err(`Static template a11y lint failed: ${e.message}`);
+}
+
+// ── 12. Standard-vs-site surface classifier (#2052, interim per #2006 Fork 2(b)) ──
+// The WE repo intermingles WE-the-standard (zero-impl defs/gate/backlog) with the WE-website render (an
+// artifact-producing 11ty+Vite product, mis-homed — end-state extraction gated on #872). #2006 Fork 2(b)
+// ratified a directory boundary whose interim carrier is this fail-closed classifier: every path in the
+// render-tree zone (`src/**`, where the two surfaces interleave) must classify as EXACTLY ONE of
+// {standard, site}; a zone path matching neither is a HARD ERROR — so new site code can never masquerade
+// as standard, nor a new standard def hide among the loaders, ahead of the physical `site/**` lift. The
+// pure classifier (classifySurfacePaths) does the matching; the fs read (tracked paths) lives here.
+try {
+  const tracked = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' })
+    .split('\n').filter(Boolean);
+  const { unclassified } = classifySurfacePaths(tracked);
+  for (const p of unclassified)
+    err(
+      `Unclassified surface path "${p}" (#2052/#2006 Fork 2(b)): it lives under the render-tree zone (src/**) but matches neither the site-surface nor the standard-surface set, so the standard-vs-site boundary is ambiguous. Place it on the correct side of the seam — a render file (.njk/.js loader/layout/partial/asset/css) is SITE; a definition (.json registry/data file) is STANDARD — so new site code can't masquerade as standard. Extend the matchers in scripts/check-standards-rules.mjs only if a genuinely new surface class is introduced.`,
+      { kind: 'surface-unclassified', file: p, global: false },
+    );
+} catch (e) {
+  err(`Standard-vs-site surface classifier failed: ${e.message}`);
 }
 
 // ── Scope attribution (#952, ratified #949 Fork 3-A) ───────────────────────────

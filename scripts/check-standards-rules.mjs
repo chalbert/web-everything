@@ -1756,3 +1756,73 @@ export function validateTemplateA11y(layouts) {
   }
   return { errors, warnings };
 }
+
+// ── Standard-vs-site surface classifier (#2052, interim per #2006 Fork 2(b)) ───────
+// The WE repo intermingles two surfaces (#2006): WE-the-standard (the zero-impl authority — the
+// intent/block/plug/protocol/semantic defs, meta-schemas, conformance gate, backlog) and the WE-website
+// render (an artifact-producing 11ty+Vite product, mis-homed here, end-state extraction gated on #872).
+// #2006 Fork 2(b) ratified a *directory boundary* whose interim carrier is this fail-closed classifier:
+// every path in the RENDER-TREE ZONE (`src/**` — where the two surfaces interleave, plus the build
+// configs that only exist to render the site) must classify as EXACTLY ONE of {standard, site}. A path
+// in that zone matching NEITHER prefix set is a HARD ERROR, so new site code can never masquerade as
+// standard (nor a new standard def hide among the loaders).
+//
+// Scope is deliberately the render-tree zone, NOT literally every tracked path: node_modules/, backlog/,
+// tools/, tests/, the impl trees, etc. are neither standard nor site — classifying them would be noise
+// and would red-gate the whole repo. The zone is exactly the interleave surface #2006 names, where a new
+// file's classification is load-bearing for the eventual `site/**` lift (Fork 1a). Everything outside the
+// zone is `neutral` (unclassified-and-that-is-correct) and is not policed here.
+//
+// site-surface  = the render/product: page templates, layouts, render partials (incl *-descriptions/),
+//                 assets, css, render fixtures, AND the src/_data/*.{js,ts} Eleventy loaders.
+// standard-surface = the definitions the standard owns: the src/_data/*/  per-entity .json registries and
+//                 the src/_data/*.json top-level data files (the assembler-loader seam scripts/lib/*-loader.cjs
+//                 that BOTH the gate and the site loaders consume stays WE with the gate — it is standard).
+// A path under the zone that is neither (e.g. a new `src/foo.tsx` or a `src/_data/newLoader.mjs`) errors —
+// the author must place it on the correct side of the seam (a .njk/.js render file is site; a .json def is
+// standard) so the boundary stays machine-legible ahead of the physical `site/**` lift.
+
+// The render-tree zone: prefixes whose contents are all either standard or site (the #2006 interleave).
+export const SURFACE_ZONE_PREFIXES = ['src/'];
+
+// Within the zone, SITE wins if the path matches any of these (checked first — the loaders live under
+// src/_data/ alongside the standard .json, so the extension/glob discriminates them).
+export const SITE_SURFACE_MATCHERS = [
+  (p) => /^src\/[^/]+\.(njk|md|html)$/.test(p),          // top-level page templates
+  (p) => p.startsWith('src/_layouts/'),                  // page layouts (render chrome)
+  (p) => p.startsWith('src/_includes/'),                 // render partials incl *-descriptions/
+  (p) => p.startsWith('src/assets/'),                    // static assets served by the site
+  (p) => p.startsWith('src/css/'),                       // site styles
+  (p) => p.startsWith('src/patterns/'),                  // render pattern fixtures
+  (p) => p.startsWith('src/plateau/'),                   // legacy render fixtures
+  (p) => p.startsWith('src/cases/'),                     // render case fixtures
+  // Eleventy data loaders — src/_data/*.{js,ts,cjs,mjs} (the .json siblings are STANDARD, below).
+  (p) => /^src\/_data\/[^/]+\.(js|ts|cjs|mjs)$/.test(p),
+];
+
+// Within the zone, STANDARD wins for the definition data (checked after site, so a .js loader in
+// src/_data never mis-classifies as standard just because it sits beside the .json registries).
+export const STANDARD_SURFACE_MATCHERS = [
+  (p) => /^src\/_data\/[^/]+\.json$/.test(p),            // top-level standard data files
+  (p) => /^src\/_data\/[^/]+\/.*\.json$/.test(p),        // per-entity registries (blocks/, intents/, …)
+  (p) => p.startsWith('src/_data/__tests__/'),           // loader tests — standard-side tooling
+];
+
+/**
+ * Classify every render-tree-zone path as exactly one of {site, standard}; an in-zone path matching
+ * neither is `unclassified` (a hard error the caller emits). Pure — takes repo-relative tracked paths,
+ * returns { site, standard, unclassified } path arrays. Paths outside SURFACE_ZONE_PREFIXES are `neutral`
+ * and simply omitted (correctly unclassified — not the standard/site interleave).
+ */
+export function classifySurfacePaths(paths) {
+  const site = [];
+  const standard = [];
+  const unclassified = [];
+  for (const p of paths) {
+    if (!SURFACE_ZONE_PREFIXES.some((pre) => p.startsWith(pre))) continue; // neutral — outside the zone
+    if (SITE_SURFACE_MATCHERS.some((m) => m(p))) { site.push(p); continue; }
+    if (STANDARD_SURFACE_MATCHERS.some((m) => m(p))) { standard.push(p); continue; }
+    unclassified.push(p);
+  }
+  return { site, standard, unclassified };
+}

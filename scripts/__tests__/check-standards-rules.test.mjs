@@ -39,7 +39,9 @@ import {
   lintBacklogItemRendering,
   detectClassificationCollapse,
   computeNativeFirstConformance,
+  classifySurfacePaths,
 } from '../check-standards-rules.mjs';
+import { execFileSync } from 'node:child_process';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -1337,5 +1339,60 @@ describe('computeNativeFirstConformance — front-A watch metric (#1267)', () =>
   it('degrades on a missing/empty ledger', () => {
     expect(computeNativeFirstConformance(undefined)).toEqual({ total: 0, registered: 0, pending: 0, pendingList: [] });
     expect(computeNativeFirstConformance({ entries: [] }).pending).toBe(0);
+  });
+});
+
+// ── Standard-vs-site surface classifier (#2052, interim per #2006 Fork 2(b)) ──────
+describe('classifySurfacePaths (#2052 fail-closed standard-vs-site boundary)', () => {
+  it('classifies site render files as site', () => {
+    const { site, standard, unclassified } = classifySurfacePaths([
+      'src/index.njk', 'src/_layouts/base.njk', 'src/_includes/block-descriptions/foo.njk',
+      'src/assets/js/x.js', 'src/css/main.css', 'src/patterns/p.njk', 'src/plateau/q.njk',
+    ]);
+    expect(site).toHaveLength(7);
+    expect(standard).toHaveLength(0);
+    expect(unclassified).toHaveLength(0);
+  });
+
+  it('classifies standard definition data as standard', () => {
+    const { site, standard, unclassified } = classifySurfacePaths([
+      'src/_data/blocks/simple-store.json', 'src/_data/intents/x.json',
+      'src/_data/capabilityMatrix.json', 'src/_data/__tests__/loader.test.mjs',
+    ]);
+    expect(standard).toHaveLength(4);
+    expect(site).toHaveLength(0);
+    expect(unclassified).toHaveLength(0);
+  });
+
+  it('classifies src/_data loaders as SITE even though they sit beside the .json defs (the messy seam)', () => {
+    const { site, standard } = classifySurfacePaths([
+      'src/_data/backlog.js', 'src/_data/intents.data.ts', 'src/_data/blocks.js',
+    ]);
+    expect(site).toEqual(['src/_data/backlog.js', 'src/_data/intents.data.ts', 'src/_data/blocks.js']);
+    expect(standard).toHaveLength(0);
+  });
+
+  it('leaves out-of-zone paths NEUTRAL (not standard, not site, not an error)', () => {
+    const { site, standard, unclassified } = classifySurfacePaths([
+      'node_modules/x/index.js', 'backlog/1.md', 'scripts/check-standards.mjs',
+      'capability-manifest/check.ts', 'tools/x.ts',
+    ]);
+    expect(site).toHaveLength(0);
+    expect(standard).toHaveLength(0);
+    expect(unclassified).toHaveLength(0); // neutral — correctly not policed
+  });
+
+  it('FAIL-CLOSED: an in-zone path matching neither set is unclassified (a new site file masquerading)', () => {
+    const { unclassified } = classifySurfacePaths([
+      'src/foo.tsx', 'src/_data/newLoader.rb', 'src/widgets/thing.svelte',
+    ]);
+    expect(unclassified).toEqual(['src/foo.tsx', 'src/_data/newLoader.rb', 'src/widgets/thing.svelte']);
+  });
+
+  it('real tree stays clean — every tracked src/** path classifies (0 unclassified)', () => {
+    const tracked = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' })
+      .split('\n').filter(Boolean);
+    const { unclassified } = classifySurfacePaths(tracked);
+    expect(unclassified).toEqual([]);
   });
 });
