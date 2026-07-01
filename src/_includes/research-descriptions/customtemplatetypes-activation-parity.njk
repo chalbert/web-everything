@@ -1,0 +1,99 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/2010-parity-wiring-seam-how-customtemplatetypes-activation-reache/">#2010</a> —
+  <em>how does <code>customTemplateTypes</code> activation reach parity with the <code>window.attributes</code>
+  (CustomAttribute) upgrade path?</em> — the wiring seam under the
+  <a href="/backlog/1994-migrate-view-if-view-switch-for-each-directives-off-customat/">for-each migration
+  epic (#1994)</a>. Migrated for-each becomes a typed <code>&lt;template type="for-each"&gt;</code> on the
+  minted <code>CustomTemplateTypeRegistry</code>, but that registry is <strong>instantiated nowhere in the
+  app today</strong> (only unit tests). Dropping for-each's <code>CustomAttribute</code> define without
+  wiring the new activation silently breaks live for-each &mdash; and it is <strong>gate-invisible</strong>
+  (the suites drive their own local <code>registry.upgrade(root)</code> and stay green). The short answer the
+  grounding establishes: <strong>this is not a ratifiable merit fork &mdash; it is mechanical
+  follow-the-precedent wiring, with one genuine sub-choice (a cascade generalization) left.</strong>
+</p>
+
+<h2>The item's premise drifted &mdash; three corrections</h2>
+<p>
+  The card frames a three-way fork over <em>&ldquo;~15 plugged sites&rdquo;</em> where the insertion cascades
+  <em>&ldquo;drive <code>window.attributes.upgrade</code>&rdquo;</em>. Grounding the real
+  <code>frontierui</code> tree (2026-07-01) refuted both premises:
+</p>
+<ul>
+  <li>
+    <strong>The surface is 7, not ~15.</strong> Only <strong>4 eager app/demo</strong> sites call the
+    behavior registry's upgrade (loan <code>app.ts:660-661</code>, insurance <code>app.ts:739-740</code>,
+    <code>lazy-traits-plugged.ts:41</code>, <code>inert-dead-zone.ts:41</code>), plus <strong>3
+    detached-fragment cascade</strong> sites in one file (<code>ExplicitHTMLInsertion.patch.ts</code>).
+  </li>
+  <li>
+    <strong>The insertion cascade does NOT touch <code>attributes</code>.</strong>
+    <code>ExplicitHTMLInsertion.patch.ts</code> resolves <strong>only <code>customTextNodes</code></strong>
+    (hardcoded, <code>:52-54</code>); <code>InjectorRoot.upgrade</code> (<code>:247</code>) manages the
+    <em>injector chain</em>, not value-space registries. The nav blocks have <strong>zero</strong> upgrade
+    calls. The item's list of ~15 sites was over-counted from these unrelated calls.
+  </li>
+  <li>
+    <strong>Connected-tree inserts need no per-site wiring.</strong> Both
+    <code>CustomAttributeRegistry.upgrade</code> and <code>CustomTemplateTypeRegistry.upgrade</code> install
+    a <code>MutationObserver</code> (<code>childList:true, subtree:true</code>) that upgrades added nodes on
+    any later insert into the observed tree. So parity is <em>&ldquo;call
+    <code>customTemplateTypes.upgrade(root)</code> wherever <code>attributes.upgrade(root)</code> is
+    called&rdquo;</em> &mdash; the observer covers the rest. Only <strong>detached fragments</strong>
+    (<code>createContextualFragment</code> / <code>setHTMLUnsafe</code>, upgraded before connection) need the
+    explicit cascade.
+  </li>
+</ul>
+
+<h2>The registration home is settled by in-code precedent</h2>
+<p>
+  In plugged bootstrap, <code>window.attributes</code> is a <strong>bare global</strong>
+  (<code>bootstrap.ts:196</code>) &mdash; that is precisely why it needs per-site upgrade calls &mdash; while
+  six other value-space registries ride the injector chain via <code>documentInjector.set(...)</code>
+  (<code>:209-258</code>). <code>customTemplateTypes</code> belongs with the <strong>eager-walk</strong> class
+  (like <code>attributes</code>: it re-prototypes templates and self-observes), not the lazily-resolved chain
+  class. In unplugged, that same distinction is explicit: only the four eager-walk plugs
+  (<code>injectorRoot</code>, <code>attributes</code>, <code>contexts</code>, <code>stores</code>) are
+  <code>register()</code>'d (<code>bootstrapUnplugged.ts:216-219</code>); chain registries use
+  <code>docInjector.set</code>. So unplugged parity is a genuine <strong>one-line
+  <code>register(customTemplateTypes)</code></strong> (the registry is already <code>Plug</code>-shaped),
+  and plugged parity is <em>&ldquo;register it the way the eager-walk siblings are registered, and call its
+  <code>upgrade(document.body)</code> at the same 4 sites <code>attributes</code> uses.&rdquo;</em>
+</p>
+
+<h2>The one genuine sub-choice &mdash; the cascade generalization</h2>
+<p>
+  The tempting shortcut &mdash; <em>&ldquo;register on the injector chain and inherit the insertion cascade
+  for free&rdquo;</em> &mdash; is <strong>false</strong>: <code>resolveRegistry</code> in the cascade
+  <strong>hardcodes <code>'customTextNodes'</code></strong> (<code>ExplicitHTMLInsertion.patch.ts:54</code>),
+  so a chain registration earns nothing from it. Detached-fragment coverage for the directive registry has
+  to be added <em>explicitly</em>, and the only real decision left is <strong>how</strong>: generalize the
+  shared <code>resolveRegistry</code> helper to also resolve + upgrade the sibling directive registry (one
+  edit, both registries covered), or duplicate a second resolve + upgrade in each of the three branches.
+  This is the whole of the decision's surviving Fork.
+</p>
+
+<h2>Prior art &mdash; how frameworks batch registry upgrades</h2>
+<p>
+  Vue (<code>app.directive()</code>), Angular, and Alpine register-and-match directives by an element
+  discriminator at runtime, driving a single mount/hydration walk plus a <code>MutationObserver</code>-style
+  hook for dynamic inserts. WE's model is the same shape but <strong>per-registry</strong>: each registry
+  owns and observes its own tree rather than a global scheduler batching all upgrades. That is why the parity
+  answer is <em>&ldquo;call <code>upgrade(root)</code> once per activation site&rdquo;</em> and not
+  <em>&ldquo;hook a global upgrade bus&rdquo;</em> &mdash; there is no bus, by design.
+</p>
+
+<h2>Statute check</h2>
+<p>
+  This decision codifies <strong>no new rule</strong>. <code>#1986 rule&nbsp;1</code> (behavior vs directive
+  registration home) is a code-comment rule about <em>which registry keys <code>type=</code></em>, not
+  activation wiring &mdash; it forecloses the rejected coupling branch (c) in code but is not a fork-deciding
+  citation here. The nearest statute anchor
+  (<a href="/backlog/1983-directive-authoring-form-typed-inert-template-vs-live-commen/">#1983</a> /
+  <a href="/backlog/1987-directive-value-namespace-grammar-for-template-type-and-comm/">#1987</a>, the
+  <code>&lt;template type&gt;</code> value grammar) governs <em>values</em>, not the upgrade seam. So #2010
+  resolves as a one-off mechanical wiring call.
+</p>
+{% endraw %}
