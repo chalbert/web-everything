@@ -1,10 +1,12 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 priority: low
 locus: webeverything
 dateOpened: "2026-06-27"
+dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
 tags: [telemetry, metrics, prioritization, privacy]
 ---
 

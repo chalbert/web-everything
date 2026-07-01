@@ -12,6 +12,7 @@
   },
   "exports": {
     "./analytics": "./analytics.ts",
+    "./dev-metrics": "./dev-metrics.ts",
     "./charts": "./charts.ts",
     "./dockable": "./dockable.ts",
     "./graph": "./graph.ts",
