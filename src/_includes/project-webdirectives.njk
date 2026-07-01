@@ -338,10 +338,6 @@ declare const customComments: CustomCommentRegistry;
                     <br><span>Conditional rendering based on expression.</span>
                 </li>
                 <li>
-                    <code>lazy</code>
-                    <br><span>Defer instantiation until triggered.</span>
-                </li>
-                <li>
                     <code>portal</code>
                     <br><span>Render content at a different DOM location.</span>
                 </li>
@@ -368,6 +364,10 @@ declare const customComments: CustomCommentRegistry;
                 <li>
                     <code>async:boundary</code>
                     <br><span>Suspense-like with fallback template.</span>
+                </li>
+                <li>
+                    <code>defer</code>
+                    <br><span>Defer stamping of content until a trigger (<code>on = idle | visible | interaction | hover | media:(&hellip;) | timer:5s</code>); optional <code>prefetch</code>. Placeholder + content branch templates.</span>
                 </li>
             </ul>
         </div>
@@ -461,9 +461,13 @@ declare const customComments: CustomCommentRegistry;
                     <td>Server MUST evaluate the data state and emit the corresponding template (success, empty, or error). For streaming SSR, loading template MAY be emitted first.</td>
                 </tr>
                 <tr>
-                    <td><strong>lazy</strong></td>
-                    <td><em>Not emitted</em></td>
-                    <td>Lazy directives are client-only. Server emits nothing (the content loads on demand).</td>
+                    <td><strong>defer</strong></td>
+                    <td>
+<we-code-view><pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- defer on="visible" --&gt;
+&lt;div class="skeleton"&gt;&lt;/div&gt;
+&lt;!-- /defer --&gt;</code></pre></we-code-view>
+                    </td>
+                    <td>Server emits the <strong>placeholder</strong> branch (the pre-trigger state) plus boundary markers; the <strong>content</strong> branch is deferred and stamped client-side when the trigger fires. Supersedes the earlier <code>lazy</code> proposal.</td>
                 </tr>
             </tbody>
         </table></we-data-table>

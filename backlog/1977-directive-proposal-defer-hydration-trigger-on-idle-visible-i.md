@@ -1,15 +1,26 @@
 ---
 kind: decision
 parent: "1975"
-status: active
+status: resolved
 dateOpened: "2026-06-29"
 dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
+graduatedTo: none
+codifiedIn: one-off
 preparedDate: "2026-06-30"
 relatedReport: reports/2026-06-29-directive-catalog-brainstorm.md
 tags: [webdirectives, directive, composition, defer, hydration]
 ---
 
 # Directive proposal — defer / hydration-trigger (on idle, visible, interaction, media, timer; prefetch)
+
+**RATIFIED 2026-07-01 — name = `defer`.** Fork 1 resolved: the directive is minted as **`defer`**
+(superseding the proposed `lazy`, which may survive as a synonym for the `on="visible"` shorthand). Form =
+the **`<template type="defer">` wrapper** (pure multi-region inert, per #1976 parity); contract scope = the
+full converged trigger vocab + `prefetch`. Codified into the webdirectives spec
+([we:project-webdirectives.njk](../src/_includes/project-webdirectives.njk) — complex-directive list + SSR
+row); FUI build spun out as the agent-ready child (see Progress). Original prepared framing preserved
+below.
 
 **Prepared — one live fork: the name.** Net-new directive candidate from the #1975 catalog: defer a
 region's connection/hydration until a declared trigger (`on = idle | visible | interaction | hover |
@@ -175,14 +186,13 @@ Speculation Rules, the trigger substrate is a standards-watch. Naming-only rulin
 `codifiedIn: one-off` at resolve (or a short webdirectives naming note) — no broad new statute.
 
 ## Progress
-- **Status:** active — claimed for the ratify discussion; form re-aligned, Fork 1 (name) awaiting go
+- **Status:** resolved 2026-07-01 — Fork 1 ratified (`defer`); form aligned to #1976; codified + child spun out
 - **Done:** classified all three axes; **corrected the form axis (2026-07-01) — defer is pure multi-region
   *inert* (`<template type="defer">` wrapper + nested inert `<template slot>`s), NOT mixed/comment-boundary,
   per #1976 async parity** (placeholder is a stamped inert branch, not live-DOM) — user-directed align to
   #1976; grounded refs against the current tree; ran the prep skeptic on the `defer` default
   (SURVIVES-WITH-AMENDMENT)
-- **Next:** ratify Fork 1 (name = `defer`) on explicit go → codify `defer` in the template-wrapper form +
-  scaffold the FUI build child
+- **Next:** none — done. FUI build is child **#2076** (blocked-by #1977, now unblocked on resolve)
 - **Notes:** the prepared draft mis-classified defer as *mixed* (comment boundary + live placeholder); the
   #1976 sibling precedent treats the first-shown branch as a stamped inert slot, collapsing defer to one
   typed-template wrapper. #1983/#1986/#1987 landed the *form / registration / spelling* precedents; what
