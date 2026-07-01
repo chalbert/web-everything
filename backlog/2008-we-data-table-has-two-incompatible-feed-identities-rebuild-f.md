@@ -2,7 +2,6 @@
 kind: story
 size: 5
 status: resolved
-blockedBy: ["2007"]
 dateOpened: "2026-07-01"
 dateResolved: "2026-07-01"
 graduatedTo: none

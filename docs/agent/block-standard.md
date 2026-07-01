@@ -334,6 +334,40 @@ per-block *mechanism pick* for the button (the worked example) is carved to
      with native `click`). Consumers delegate on native `click` + read `aria-pressed`. Un-gate trigger (a named
      non-delegating consumer) is tracked on #1960.
 
+## Feed-mechanism governance (#2007) {#feed-mechanism}
+
+Ratified by [#2007](/backlog/2007-feed-mechanism-governance-a-block-owning-rendered-shape-must/) (2026-07-01)
+as a **consolidating authoring note** — it names one discriminator authors apply at authoring time and points
+at the statute cluster that already governs the ground. It writes no new substance; it relocates and names the
+existing #1818 / #1570 / #1867 rules where a block author actually looks (`codifiedIn: #1818, #1570`).
+
+**The discriminator — does the block *re-render/restructure*, or *enhance in place*?** How a block is fed its
+source of truth follows from that one test:
+
+- **A `we-` block that re-renders or restructures its output** (sort by rebuilding, mobile card view,
+  re-layout) **is fed inert data** — an inert `<template>` or an `[[ ref ]]` attr-expression (per
+  [#block-data-ingestion](platform-decisions.md#block-data-ingestion) #1818 /
+  [#persistent-b-data-source](platform-decisions.md#persistent-b-data-source) #1570) — **never live author
+  markup as its source.** Re-rendering clobbers consumer-owned DOM on the first `replaceChildren`/`innerHTML=''`
+  (the build↔client skew #1867 set out to kill), so a block that wants freedom over the rendered *shape* must
+  not be handed the finished shape.
+- **A structure-preserving in-place enhancer** (a light-DOM-scan kernel #1570; the #1867 data-table SSR
+  enhancer) **legitimately reads a live SSR subtree** — provided its *source of truth is `data-*` typed data on
+  the nodes*, and it only reorders/hides existing nodes, never reparsing rendered text and never restructuring.
+  **This is the ratified default, not a violation.**
+
+The canonical *compliant* live-DOM exemplar is the **#1867 SSR data-table enhancer**
+([#ssr-data-table-build-harness](platform-decisions.md#ssr-data-table-build-harness)): fed a live `<table>`
+whose cells carry `data-sort-value`, it reorders/hides existing rows off those keys — live DOM present, source
+of truth is data. The *violating* shape is a block that treats hand-authored markup as its data source and
+restructures it **without** the `data-*` contract.
+
+There is no third lane: a block cannot both be fed live already-rendered markup as source **and** restructure
+it (re-rendering destroys the fed markup) — so this is not a fork, it is the #1570/#1818 kernel-shape split
+named for authors. (The inert-`<template>` vs live-comment-boundary distinction in the directive-form standard,
+[#1983](#directive-form)/[#1986](#directive-registration-mechanism), is scoped by its own rule 4 to *directive
+bodies*, not block-feed; cite it here only as a supporting analogy, not authority.)
+
 ## Composition rubric (#1963) {#composition-rubric}
 
 Ratified by [#1963](/backlog/1963-composition-rubric-re-judged-to-framework-parity-strict-per-/) (2026-06-29). §7

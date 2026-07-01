@@ -3,7 +3,6 @@ kind: story
 size: 5
 parent: "777"
 status: open
-blockedBy: ["2007"]
 dateOpened: "2026-07-01"
 tags: [dogfood, fui, ssr, eleventy, keystone, di-mount]
 ---
@@ -57,14 +56,16 @@ SSR must choose:
 - **(B) markup-as-source** — build-time *upgrade* the existing light-DOM element to canonical `fui-*` markup
   (what the runtime `registerCardInDocument()` already does), extracting title/actions/body from inner HTML.
 
-This is the **same markup-vs-data-source fork as #1964**, whose revised resolution is the general
-**feed-appropriateness rule (#2007)**: static doc surfaces *unwrap*, interactive *enhance*, data-driven
-*render-from-data*. Card/badge/tag are blocks that own rendered shape, so **#2007 (with #1964) decides this
-item's source contract** — building the FUI render tool now risks being wasted if #2007 rules "static → unwrap"
-(a plain `fui-*` markup emit, no per-render subprocess). Hence `blockedBy: #2007`.
+This is the **same markup-vs-data-source split as #1964**, now settled by the general **feed-mechanism rule
+([#2007](2007-feed-mechanism-governance-a-block-owning-rendered-shape-must.md), ratified 2026-07-01 →
+[we:docs/agent/block-standard.md#feed-mechanism](../docs/agent/block-standard.md#feed-mechanism))**: a block
+that re-renders/restructures is fed inert `<template>`/`[[ ref ]]` data; a structure-preserving enhancer reads
+live DOM off `data-*`. Card/badge/tag own their rendered shape, so under #2007 they are **render-from-data /
+inert-markup** surfaces — the SSR tool emits their shape from data, it does not treat authored markup as source.
+That contract is now decided, so this item is unblocked.
 
 NB the earlier "Sub-decision to avoid a fork" note addressed the *output-format* fork (plain HTML vs shadow DOM);
-the blocking fork is the *input-source* one, unaddressed until #2007 ratifies.
+the *input-source* one is what #2007 settled.
 
 ## Notes / boundary
 

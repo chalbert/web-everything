@@ -1,9 +1,11 @@
 ---
 kind: decision
 parent: "1321"
-status: open
+status: resolved
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-01"
+dateResolved: "2026-07-01"
+codifiedIn: "docs/agent/block-standard.md#feed-mechanism"
 preparedDate: "2026-07-01"
 relatedReport: reports/2026-07-01-feed-mechanism-governance-reconciliation.md
 tags: [composition, block-standard, feed-mechanism, light-dom, governance]
@@ -14,21 +16,20 @@ tags: [composition, block-standard, feed-mechanism, light-dom, governance]
 **Archetype: validation-gate (go/no-go on a candidate rule), not a fork.** One-sided — the question is
 whether to admit a governance statement, not which of two coherent branches to pick.
 
-## Digest + verdict
+## Digest + verdict — RATIFIED 2026-07-01 (GO on the re-scoped consolidation)
+
+**Ratified GO.** The consolidating authoring note is codified at
+[we:docs/agent/block-standard.md#feed-mechanism](../docs/agent/block-standard.md#feed-mechanism) (`codifiedIn:
+#1818, #1570`; #1867 named the canonical *compliant* exemplar; #1983/#1986 kept as supporting analogy only).
 
 The candidate rule as first drafted — *"a block that owns its rendered shape must be fed inert `<template>`
-or attr-expression, never live already-rendered light-DOM it then mutates"* — **does not survive prep as a
+or attr-expression, never live already-rendered light-DOM it then mutates"* — **did not survive prep as a
 new corollary.** The prep skeptic (four axes, see the [prep reconciliation report](../reports/2026-07-01-feed-mechanism-governance-reconciliation.md))
 found it **collides with a ratified statute** (#1867), **duplicates** another (#1818), and **mis-cites** its
-claimed authority (#1983/#1986). What survives is a **re-scoped, re-cited** version: a *consolidating*
+claimed authority (#1983/#1986). What was ratified is the **re-scoped, re-cited** version: a *consolidating*
 authoring entry — not a new independent statute — that states one genuinely-useful discriminator and points
-at the cluster that already governs this ground.
-
-**Verdict (recommended default): GO on the re-scoped consolidation.** Admit into
-[we:docs/agent/block-standard.md](../docs/agent/block-standard.md) (alongside the #1321 packaging governance)
-a short authoring note whose operative content is the **restructure-vs-enhance discriminator**, with
-`codifiedIn: #1818, #1570` and #1983/#1986 demoted to a supporting analogy. *Not* the blanket
-"owns-rendered-shape → no live DOM" rule as drafted.
+at the cluster that already governs this ground. *Not* the blanket "owns-rendered-shape → no live DOM" rule
+as drafted.
 
 ## The rule that survives (re-scoped)
 
@@ -89,15 +90,14 @@ So this is a go/no-go on admitting a consolidating statement, not a choice betwe
   defect: an inert `<we-data-table>` wrap around a plain `<table>` with no `.data-table`/`data-sortable`/
   `data-sort-value` — decidable by #1867's contract **today**, no new rule required.
 
-## The call
+## The call — RATIFIED GO
 
-**Recommendation: GO — admit the re-scoped consolidating note** into
-[we:docs/agent/block-standard.md](../docs/agent/block-standard.md); `codifiedIn: #1818, #1570`; #1867 named
-as the canonical *compliant* exemplar; #1983/#1986 as supporting analogy only. **Concrete un-gate is
-automatic** — the note is authored at ratify time and #2008 is retargeted (below). The decider may instead
-pick the **NO-GO / close-as-redundant** branch (the skeptic's Axis-0 position: the substance is fully covered
-by #1818+#1570+#1867, so add nothing and just retarget #2008); prep's default is GO because the authoring doc
-is what authors actually read and the restructure-vs-enhance test is a useful one-liner not stated there.
+**GO — the re-scoped consolidating note is admitted** into
+[we:docs/agent/block-standard.md#feed-mechanism](../docs/agent/block-standard.md#feed-mechanism);
+`codifiedIn: #1818, #1570`; #1867 named as the canonical *compliant* exemplar; #1983/#1986 as supporting
+analogy only. GO was taken over the NO-GO / close-as-redundant branch (the skeptic's Axis-0 position: substance
+fully covered by #1818+#1570+#1867) because the authoring doc is what authors actually read and the
+restructure-vs-enhance test is a useful one-liner that was stated nowhere in it.
 
 **Skeptic:** SURVIVES-WITH-AMENDMENT (major). Four-axis prep attack: **Axis-0 classification REFUTED** — the
 drafted rule is already settled by #1818 + #1570, so the *new-corollary* framing is wrong; demoted to a
@@ -111,8 +111,9 @@ block-feed; downgraded from authority to supporting analogy, operative authority
 
 ## Downstream
 
-- **#2008** (the `we-data-table` dual-feed defect) is **no longer gated on a new rule** — the skeptic showed
-  the inert #1600 wrappers are a **missing-`.data-table`-contract** defect decidable by #1867 today. On ratify,
-  clear `blockedBy: ["2007"]` on #2008 and repoint it: *"complete the #1867 contract or revert the wrap."*
+- **#2008** (the `we-data-table` dual-feed defect) was **not gated on a new rule** — the skeptic showed
+  the inert #1600 wrappers are a **missing-`.data-table`-contract** defect decidable by #1867 today. #2008 was
+  already retired as a duplicate of the active #1964 (in-place-wrap vs render-from-data) before this ratify;
+  its vestigial `blockedBy: ["2007"]` is cleared. Work the live question in #1964.
 - This decision, if GO, writes `codifiedIn` cross-referencing the #1818/#1570/#1867 cluster into the block
   authoring standard — not a fresh platform-decisions anchor.
