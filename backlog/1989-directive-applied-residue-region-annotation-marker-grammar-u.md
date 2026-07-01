@@ -1,277 +1,139 @@
 ---
 kind: decision
 status: open
-blockedBy: []
+blockedBy: [2074]
 dateOpened: "2026-06-30"
-dateStarted: "2026-06-30"
+dateStarted: "2026-07-01"
 preparedDate: "2026-06-30"
 relatedReport: reports/2026-06-30-directive-residue-marker-grammar.md
 tags: [webdirectives, naming, directive-residue, region-annotation, marker-grammar, block-standard, decision]
 ---
 
-# Directive applied-residue / region-annotation marker grammar — unify the :start/:end vs /-close split into one reserved, matcher-excluded sigil
+# Directive applied-residue / region-annotation marker grammar — one reserved, matcher-excluded residue sigil
 
-**Prepared, ready to ratify.** Raised by #1986's ratified family invariant (rule 5): authored directive nodes and
-the region/residue annotations a directive *leaves when applied* must occupy **disjoint, matcher-excluded**
-grammars, so every registry's `upgrade` walk claims **only authored nodes** (residue never re-upgraded) and the two
-read apart in raw DOM/devtools. #1986 delegated the **exact reserved residue sigil** as a token-grammar question;
-this item makes that one call. Grounded in a read of the real FUI tree + a prior-art survey published as the
-[`directive-residue-marker-grammar`](/research/directive-residue-marker-grammar/) topic (report via
-`relatedReport`). Sibling to #1987 (authoring names/values) but a **distinct surface** — machine-emitted markers,
-not author-typed names.
+**BLOCKED pending #2074 (node-kind frame) — not ratifiable yet.** During the 2026-07-01 discussion the residue
+grammar was reframed as the **serialized wire-format of a would-be region node-kind** ([#2074](2074-customnoderegistry-node-kind-extensibility-standard.md)),
+so its shape is downstream of that decision: the leading discussion had moved from `[`/`]` to a React/Solid-style
+`$`/`/$` residue-comment form, but under #2074 it may instead be a reflected-delimiter form (e.g. `{$ … $}`). Parked
+until #2074 settles. The prepared analysis below (impl-neutral, residue example per fork) stands as input for when it
+unblocks. This item fills the reserved-residue-sigil slot that #1986's family invariant (rule 5) delegated: authored directive nodes and the region/residue annotations a
+directive *leaves when applied* must occupy **disjoint, matcher-excluded** grammars, so every registry's `upgrade`
+walk claims **only authored nodes** and the two read apart in raw DOM / devtools. #1986 ratified that requirement;
+#1989 chooses the grammar that satisfies it. Grounded in a read of the real FUI tree plus a prior-art survey
+published as the [`directive-residue-marker-grammar`](/research/directive-residue-marker-grammar/) topic.
 
-## Grounding digest
+## Proposed ruling (pending ratification)
 
-The directive family emits **two** boundary conventions today, and the inspector (#1973) understands both:
-**(1) machine residue** — paired `<!-- for-each:start (@users) -->` … `<!-- for-each:end -->`, written by the
-runtime when a template directive applies (`fui:blocks/for-each/ForEachBehavior.ts:105-106`,
-`fui:blocks/view/ViewIfDirective.ts:56-57`, `fui:blocks/view/ViewSwitchDirective.ts:62-63`); and **(2) authored** —
-open/close `<!-- control:if cond -->` … `<!-- /control:if -->`, hand-written
-(`fui:plugs/webdirectives/CustomCommentParser.ts:60-73`). The matcher-exclusion **seed** is leading-`/` *only*:
-`directiveNameOf` returns `null` for a `/`-prefixed token (`fui:plugs/webdirectives/CustomCommentRegistry.ts:39-43`),
-as do `DefaultCommentParser.parse` (`fui:plugs/webdirectives/CustomCommentParser.ts:71`) and
-`multiTemplate.openingDirectiveName` (`fui:plugs/webdirectives/multiTemplate.ts:30-34`). The inspector reads both
-conventions, reconstructs a nested region tree, and labels each region with its directive **name** + bound-state
-**expression** (`fui:plugs/webdirectives/directiveInspector.ts:88-150`, the `start-end` vs `open-close`
-`DirectiveBoundaryKind`).
+- **Fork 1 — reserved residue grammar → bracket-sigil pair.** A directive's applied residue is written as a paired
+  bracket marker, expression on the **open** only and a **bare close**:
 
-**The latent disjointness gap (this is not cosmetic).** `multiTemplate.openingDirectiveName` claims any comment
-whose leading token matches `/^[\w-]+:[\w-]+$/` (`fui:plugs/webdirectives/multiTemplate.ts:34`). A residue *open*
-token `for-each:start` matches that shape (`for-each` : `start`) — and so does `for-each:end`. Neither starts with
-`/`, so the leading-`/` seed does **not** exclude them. They are safe today only because **no registered directive
-happens to be named `for-each:start`** — disjointness by *luck (absence of collision)*, not by *grammar*. The
-invariant wants the guarantee structural: a residue marker must be un-claimable by construction, **both halves**, by
-a cheap test.
+  ```
+  <!--[for-each @users-->     region open  (sigil `[`, directive name, bound expression)
+     …region content…
+  <!--]for-each-->            region close (sigil `]`, directive name, no expression)
+  ```
 
-**Prior art.** Native HTML reserves no comment grammar, so the platform shape is the cross-framework de-facto
-convention (research topic, all source-confirmed): React `<!--$-->`/`<!--/$-->`, Vue 3 `<!--[-->`/`<!--]-->`,
-Svelte 5 `<!--[-->`/`<!--]-->` (+ `[!`/`[?` state), lit `<!--?lit$NONCE$-->`, Solid `<!--$-->`/`<!--/-->`
-(migrated `#`→`$` to dodge SSI collisions), Angular `<!--bindings={…}-->`. The pattern: a **non-alphanumeric
-leading sigil** (O(1) `data[0]` test), **bracket-paired** block boundaries (Vue + Svelte independently), a
-`/`-close that **echoes the HTML end-tag**, mostly **anonymous-positional** — *except* Angular, which carries a
-readable label, the precedent for FUI's name+expr payload.
+- **Fork 2 — unification scope → keep the authored `/name` close; brackets only for machine residue; unify behind
+  one exclusion predicate.** An *author-typed* closing marker keeps the native-end-tag-echoing form, and a single
+  rule excludes any marker whose first non-space character is `/`, `[`, or `]` from the `upgrade` keyspace:
 
-## Axis-framing
+  ```
+  <!--control:if cond-->      authored OPEN   (claimed by upgrade)
+  <!--/control:if-->          authored CLOSE  (excluded — leading `/`, mirrors </tag>)
+  <!--[control:if …-->        machine residue (excluded — leading `[`)
+  <!--]control:if-->          machine residue (excluded — leading `]`)
+  ```
 
-The forced invariant — disjoint + matcher-excluded + visually-distinct residue — is **already ratified** by #1986
-rule 5 (`we:docs/agent/block-standard.md:433-439`); it bounds the forks, not re-opened. What is open is purely the
-**token grammar** that realizes it. The current state is *two ad-hoc conventions plus a one-character seed*: residue
-uses a `:start`/`:end` **suffix** (`fui:blocks/for-each/ForEachBehavior.ts:105-106`), authored close uses a `/`
-**prefix** (`fui:plugs/webdirectives/CustomCommentRegistry.ts:41`), and the inspector carries a *two-branch*
-`classify()` to read both (`fui:plugs/webdirectives/directiveInspector.ts:92-150`). Two real calls fall out:
-**Fork 1** — the reserved **residue** grammar (bracket sigil vs keep the `:start`/`:end` suffix vs a single reserved
-prefix char); and **Fork 2** — the **unification scope**: does the new sigil *subsume* the authored `/name` close
-(one literal sigil), or does authored-close keep `/name` while the matcher unifies the two behind one exclusion
-*predicate*? The name+expression payload is **not** a fork — the #1973 non-invasive inspector (#606) requires it.
+Two grammar guarantees are **part of the ruling**, not implementation trivia — a later build that dropped them
+would silently reintroduce the hazard the grammar exists to remove:
 
-## Recommended path at a glance
+1. **Expression on the open only; close is bare.** A `]` (or `[`, paren, quote) appearing inside an expression can
+   never be mistaken for a close boundary.
+2. **Pairing is name-keyed, not bracket-balanced.** Open↔close pair by matching directive name in document order, so
+   embedded brackets inside an expression cannot desync region pairing.
 
-| Fork | Recommended default | Main alternative | Confidence |
-|---|---|---|---|
-| **Fork 1** — reserved residue grammar | **bracket-sigil pair** `<!--[name expr-->` / `<!--]name-->` (O(1)-after-trim leading-char exclusion; collision-free vs `ns:name`; closes the `multiTemplate` gap) | keep `:start`/`:end` suffix · single reserved prefix char (`%`/`~`) | high |
-| **Fork 2** — unification scope | **keep authored `/name` close; bracket only for residue; unify the matcher *predicate*** (one rule accepts `/`- and `[`/`]`-prefix) | fold `/name` into `]name` (one literal sigil) — *dominated, not broken* | med-high |
+## Fork 1 — the reserved residue grammar (merit weigh)
 
-*The forced invariant (disjoint + matcher-excluded + visually-distinct residue) sits above both — it is #1986's,
-already ratified, with no branch to pick, so it is not a glance-table row.*
+The catalog carries **one** canonical residue form. The default and the rejected branches, by the residue each
+emits:
 
-## Forced invariant (ratify — not a fork)
+- **(a) Bracket-sigil pair** *(ratified)* — `<!--[for-each @users-->` … `<!--]for-each-->`.
+  - **Leading-char exclusion.** A residue marker is recognised by its first non-space character (`[` or `]`) rather
+    than by tokenising and inspecting a suffix, and a leading `[`/`]` can never lead an authored `ns:name` opening
+    token — so the disjoint invariant holds by construction, both halves.
+  - **Paired + balanced in raw DOM.** `[` and `]` read as open/close and pair by document order, matching the
+    #1973 inspector's region reconstruction.
+  - **Platform shape, honestly bounded.** The *bracket* is the dominant shape for paired zero-node boundaries (Vue
+    3 and Svelte 5 independently chose `<!--[-->`/`<!--]-->`); a *named* payload is Angular's precedent
+    (`<!--bindings={…}-->`). Those precedents are **separate** — Vue/Svelte brackets are anonymous, Angular's
+    payload is bracketless. FUI's named-payload-in-a-bracket is a **best-fit synthesis it owns**, not convergent
+    prior art. The name+expression payload itself is a **capability requirement**, not a fork: the #1973 inspector
+    is non-invasive (#606) and reconstructs regions purely from comment text, so the name and expression must live
+    *in* the marker.
 
-**Authored opening directives are claimed by the `upgrade` matcher; every residue marker (both halves) and every
-authored *closing* marker is excluded *by grammar*; residue reads visibly apart from authored directives in raw
-DOM / devtools.**
+- **(b) Keep the `:start`/`:end` suffix** — `<!--for-each:start (@users)-->` … `<!--for-each:end-->`. *Rejected:* it
+  ships and works, but detection is suffix-based, the open token `for-each:start` is itself `ns:name`-shaped (so the
+  disjoint invariant is satisfied only *by luck* — no directive happens to be named `for-each:start`), and it does
+  not read visibly apart from an authored directive (`for-each:start` looks like a directive name; `[for-each` does
+  not).
 
-Fork-existence: case (a), a forced invariant — the excluded branch ("let the matcher distinguish authored vs
-residue by registry-lookup luck / absence of a name collision") is **broken**: the latent gap above shows a residue
-`for-each:start` token is already `ns:name`-shaped and survives only because no directive is named that. #1986 rule
-5 ratified the disjoint-by-grammar requirement (`we:docs/agent/block-standard.md:433-439`); this item only chooses
-the grammar that satisfies it. No branch to pick here.
-
-## Supported by default (not forks)
-
-- **Residue carries the directive name + bound expression** — a **capability requirement**, not a choice. The
-  #1973 inspector is **non-invasive** (#606): it patches nothing and reconstructs the region tree *purely from the
-  DOM comment text* (`fui:plugs/webdirectives/directiveInspector.ts:88-150`), so the name+expression must live *in*
-  the marker or the inspector loses its labels. Anonymous-positional markers (React/Vue/Svelte) presume a separate
-  vdom side-channel FUI deliberately does without — so going anonymous would regress a shipped, ratified consumer.
-  Mainstream precedent for a *named* payload: Angular's `<!--bindings={…}-->`. Required either way → not ratifiable.
-- **Start marker carries the expression; end marker is bare** (`[for-each @users` … `]for-each`) — mirrors the
-  inspector's existing read (`PAREN_TAIL` on the start, bare end, `fui:plugs/webdirectives/directiveInspector.ts:116-126`).
-- **Residue name equals the authored directive name** so the inspector can correlate region to directive — already
-  true today (`for-each:start` → name `for-each`).
-
-## Fork 1 — the reserved residue grammar
-
-**Fork-existence:** a genuine either/or — the catalog can carry **one** residue grammar (the inspector's
-`classify()` and every `upgrade` matcher must recognise a single canonical residue form; supporting three defeats
-the "one reserved sigil" goal and bloats the matcher). The excluded branches are *not broken* (the `:start`/`:end`
-suffix ships and works), so this is a **merit weigh**, not a reaffirmation.
-
-Crux: a residue marker must be **un-claimable by construction** and **cheaply paired**. The current `:start`/`:end`
-is a *suffix* — detection means tokenize-then-`endsWith`, and the token `for-each:start` is itself `ns:name`-shaped
-(the latent gap). A *leading* sigil flips both: O(1) `data[0]`, and collision-free against authored opens (which
-start with a word char).
-
-- **(a) Bracket-sigil pair** `<!--[name expr-->` / `<!--]name-->` *(recommended default, high)*:
-  - **cheap leading-char exclusion** — a residue marker is excluded by its **first non-space char** (`[` or `]`),
-    a single leading-char test, vs the current `:start`/`:end` *suffix* which needs tokenize-then-`endsWith`.
-    Bracket markers are emitted **unpadded** (`createComment('[for-each …')`, no leading space) so the sigil is
-    literally `data[0]`; the inspector's existing trim (`fui:plugs/webdirectives/directiveInspector.ts:99-103`)
-    still absorbs the legacy padded `:start` forms during migration. This closes the `multiTemplate` mis-claim gap:
-    the matcher's "is this an authored open to claim?" becomes "leading char is a word char," so `[for-each` can no
-    longer match `/^[\w-]+:[\w-]+$/` the way `for-each:start` does.
-  - **collision-free by construction** — `[`/`]` can never lead an authored `ns:name` opening token, so the
-    disjoint invariant holds *grammatically*, both halves, not by absence of a name clash.
-  - **paired + balanced** — `[`/`]` read as open/close in raw DOM and pair by document order, exactly the
-    `surfaceDirectiveRegions` stack-walk the inspector already runs
-    (`fui:plugs/webdirectives/directiveInspector.ts:152-210`).
-  - **platform shape, honestly bounded** — the *bracket* is the dominant shape for paired zero-node boundaries
-    (Vue + Svelte both chose `[`/`]`), and the *named-payload* is Angular's `<!--bindings={…}-->`. But those
-    precedents are **separate**: Vue/Svelte brackets are **anonymous** (positional, no name); Angular's payload
-    carrier is **bracketless**. FUI's `<!--[for-each @users-->` combines bracket shape + named payload — a
-    **novel combination it owns**, not convergent prior art. The combination is sound (see the embedded-expression
-    safety note below), but the claim is "best-fit synthesis," not "everyone already does this."
-- **(b) Keep `:start`/`:end` suffix** — *Rejected:* it ships and the inspector already reads it, but it is a
-  *suffix* (costlier detection), the token stays `ns:name`-shaped (the latent gap persists, so the invariant is
-  satisfied only by luck), and it does not visually separate residue from authored directives — `for-each:start`
-  reads like a directive name, `[for-each` does not.
-- **(c) Single reserved prefix char** (`%`/`~`/`!` before the name, e.g. `<!--%for-each:start-->`) — *Rejected:*
-  gets the O(1) leading-sigil win, but picks an arbitrary char with weaker precedent than brackets, still needs a
-  separate `start`/`end` token (not paired-by-construction), and Solid's `#`→`$` migration warns that an
-  arbitrary-looking char can collide with an upstream processor; `[`/`]` are claimed by none.
-
-```ts
-// (a) default — bracket sigil + FUI name/expr payload. Emit UNPADDED so data[0] is the sigil:
-this.#startMarker = document.createComment(`[for-each ${this.#expression}`); // <!--[for-each @users-->
-this.#endMarker   = document.createComment(`]for-each`);                     // <!--]for-each--> (bare close)
-
-// Matcher exclusion is a leading-char test (replaces the tokenize+regex in multiTemplate):
-const RESIDUE = (data: string) => { const c = data.trimStart()[0]; return c === '[' || c === ']'; };
-function openingDirectiveName(comment: Comment): string | null {
-  const text = comment.data.trim();
-  if (!text || text.startsWith('/') || RESIDUE(text)) return null; // authored close OR machine residue → skip
-  const token = text.split(/\s+/, 1)[0];
-  return /^[\w-]+:[\w-]+$/.test(token) ? token : null;             // `[for-each` no longer matches — gap closed
-}
-// vs (b): `for-each:start` — leading word char, matches /^[\w-]+:[\w-]+$/, excluded only because unregistered.
-
-// Embedded-expression safety: the expression rides ONLY the `[`-open; the close `]for-each` is BARE. So a `]`
-// (or `[`, parens, quotes) inside an expression never trips `]`-leading close-detection, and pairing is
-// name-keyed (surfaceDirectiveRegions pops nearest-open-of-same-name), NOT bracket-balanced — embedded brackets
-// can't desync the stack. (The pre-existing `--`/`-->`-in-expression non-serializability hazard is unchanged
-// from the `:start (expr)` form — neither added nor removed by brackets.)
-```
-
-**Inspector-side guard (amendment — a code-level gap the bracket grammar introduces):** the residue branch of
-`classify()` must require the leading `[` to be **immediately followed by a directive-name token** (`[for-each`,
-not `[ TODO`), and pair open↔close by name. Otherwise authored `[`-leading *prose* comments (`<!-- [TODO] -->`,
-markdown `<!-- [x] -->`, dead `<!--[if IE]>` relics) would surface as **phantom regions** in devtools. The
-*matcher* is already safe (it only ever **excludes** `[`-leading comments from upgrade, and no authored directive
-is `[`-leading, so none is mis-excluded) — this guard is purely to stop the #1973 inspector false-positiving on
-authored bracket-prose. No such comments exist in the FUI tree today (grepped), so it is a forward guard.
-
-**Migration is atomic, not a tweak (amendment):** switching the grammar is a coordinated changeset — the three
-emit sites (`ForEachBehavior`/`ViewIfDirective`/`ViewSwitchDirective`), `multiTemplate.openingDirectiveName`, **and**
-the inspector's `classify()` (which today keys on `START_SUFFIX`/`END_SUFFIX`,
-`fui:plugs/webdirectives/directiveInspector.ts:92-93,116-127`) must land **together**. A partial migration silently
-blinds the #1973 inspector (a `[for-each` token has no `:start` suffix → `classify()` returns `null` → regions stop
-surfacing). The build item that follows ratification owns this single-changeset constraint.
-
-`Skeptic: SURVIVES-WITH-AMENDMENT — the prep skeptic (refute-only) found no fatal flaw: no matcher collision and no
-pairing-stack break (the embedded-`]` attack fails because the close is bare and pairing is name-keyed, not
-bracket-balanced). Four amendments folded: (1) the "O(1) data[0]" oversell → markers emit **unpadded** so data[0]
-is the sigil, with the inspector trim absorbing legacy padded forms (leading-char test, not literal data[0] on the
-padded form); (2) the Vue/Svelte precedent is for **anonymous** brackets — FUI's named-payload-in-bracket is a
-**novel combination it owns** (Angular is the bracketless payload precedent), reworded from "convergent precedent";
-(3) inspector-side guard added so authored `[`-prose doesn't become phantom devtools regions; (4) migration
-flagged as one atomic changeset (emit sites + multiTemplate + classify()) or the inspector goes blind. The default
-— bracket sigil over the `:start`/`:end` suffix — held on the core merit (leading-sigil beats suffix-tokenize, and
-it closes the latent multiTemplate `ns:name`-shaped gap, both halves, by grammar).`
+- **(c) Single reserved prefix char** — e.g. `<!--%for-each:start-->`. *Rejected:* gets the leading-sigil win but
+  picks an arbitrary character with weaker precedent than brackets, still needs a separate `start`/`end` token
+  (not paired-by-construction), and prior art warns an arbitrary sigil can collide with an upstream processor —
+  where `[`/`]` are claimed by none.
 
 ## Fork 2 — unification scope: subsume the authored `/name` close, or keep two surface forms behind one predicate?
 
-**Fork-existence:** a genuine either/or — the authored comment-directive close is spelled *either* `/control:if`
-*or* `]control:if`; one catalog convention, both coherent, cannot coexist. Neither is broken, so it is a merit
-weigh. (The item title leans "one reserved sigil"; the open question is whether "one" means one literal char or one
-exclusion *predicate*.)
+A genuine either/or — the authored comment-directive close is spelled *either* `/control:if` *or* `]control:if`; one
+catalog convention, both coherent, cannot coexist. Neither is broken, so it is a merit weigh.
 
-Crux: the #1986 invariant requires authored-close and residue to be **disjoint from authored-opens and
-matcher-excluded** — it does **not** require them to share one literal character. So the decider chooses between
-*literal-sigil unity* and *predicate unity*.
+- **(a) Keep `/name` for the authored close; bracket only for residue; unify the matcher predicate** *(ratified)* —
+  the authored close is hand-typed, and `/name` mirrors the native HTML end-tag `</tag>` authors already know
+  (native-first: take the closest native shape); machine residue is never hand-typed, so it takes the system
+  bracket sigil. The matcher still unifies behind **one** exclusion rule (leading `/`, `[`, or `]`), so there is a
+  single mental model, not three conventions. Prior art backs the *split within a shared family*: frameworks that
+  use a `/`-style close (React/Svelte/Solid) keep it distinct from their open sigil.
 
-- **(a) Keep authored `/name` close; bracket sigil only for machine residue; unify the matcher behind one exclusion
-  *predicate*** *(recommended default, med-high)*:
-  - the authored close is **hand-typed**, and `/name` mirrors the native HTML end-tag `</tag>` authors already
-    know (`propose-standard-in-platform-shape` — take the closest native shape); machine residue is **never**
-    hand-typed, so it takes the system bracket sigil. Matching each surface to its closest precedent is *more*
-    native-first than forcing one char across two registers.
-  - **the matcher still unifies** — one predicate `isReservedBoundaryMarker(data)` returns true for a leading
-    `/` *or* `[`/`]`, so there is exactly one exclusion rule and one mental model; the inspector's two-branch
-    `classify()` collapses to authored-`/`-close + bracket-residue, not three conventions.
-  - prior art backs the *split with a shared family*: React/Svelte/Solid all use a `/`-style close echoing the
-    HTML end-tag, distinct from their open sigil — a close that reads as a close.
-- **(b) Fold `/name` into the bracket sigil** (authored close becomes `<!--]control:if-->`) — *Rejected:* gives one
-  literal sigil and the simplest possible `classify()`, but forces hand-authors off the familiar `/close` onto an
-  alien `]control:if` for **no extra guarantee** (predicate unity already delivers disjoint + O(1) exclusion), and
-  `]` reads less obviously as "close" than `/` to a human author. The cost is author ergonomics; the benefit is
-  cosmetic literal-uniformity.
+- **(b) Fold `/name` into the bracket sigil** (authored close becomes `<!--]control:if-->`) — *Rejected as
+  dominated, not broken:* predicate-unity already delivers disjoint + leading-char exclusion, so folding the
+  authored close into `]name` buys **zero** invariant value while forcing hand-authors off the familiar `/close`
+  onto an alien `]control:if` that reads less obviously as a close. Cost is author ergonomics; benefit is cosmetic
+  literal-uniformity.
 
-```ts
-// (a) default — ONE exclusion predicate over two surface forms (authored close keeps the native end-tag shape):
-const isReservedBoundaryMarker = (data: string): boolean => {
-  const c = data.trim()[0];
-  return c === '/' || c === '[' || c === ']'; // authored close `/name` · residue open `[name` · residue close `]name`
-};
-// directiveNameOf / DefaultCommentParser.parse / multiTemplate all gate on this one predicate, replacing
-// today's scattered `startsWith('/')` checks — predicate unified, `/`-close ergonomics preserved.
-```
+## Red-team (default survived)
 
-`Skeptic: SURVIVES — the pick (keep `/name`, predicate-unify) is right and beat both attacks: the
-"violates the one-sigil spirit" attack FAILS because #1986 rule 5 says "non-overlapping grammars … residue never
-re-upgraded," explicitly blessing the leading-`/` exclusion as precedent — it does **not** mandate one literal
-char (the "one sigil" pressure is the item title's framing, not rule 5's text); and the pairing-confusion attack
-(`/control:if` vs `]control:if` both name `control:if`) FAILS because a region is bounded by ONE convention, never
-mixed. **Honest demotion the skeptic flagged:** option (b) is **dominated, not broken** — predicate-unity already
-delivers disjoint + cheap exclusion, so folding `/name`→`]name` buys zero invariant value for an author-ergonomics
-cost. So this is a near-forced call (native-first + the invariant), not a hard weigh — kept as a Fork only because
-the item title explicitly asks the literal-vs-predicate-unity question and the decider should see it ruled.
-Citation amendment folded into the statute-overlap section: `:672` downgraded from authority to principle.`
+The strongest case for the status quo (`:start`/`:end`): the migration is an atomic, coordinated change across the
+emit sites, the opening-directive matcher, and the #1973 inspector — a real cost for a gap that has **never fired**
+(no directive is named `foo:start`). And the "platform shape" claim is weaker than it reads: the bracket+named-payload
+combination is a synthesis, not something any framework actually ships. The attack **bounds** the default (folded as
+amendments: markers are emitted so the sigil is the leading char; the prior-art claim is stated as "best-fit
+synthesis," not "convergence") but does **not** break it: the named payload is forced by the non-invasive inspector,
+leading-sigil exclusion genuinely beats suffix-tokenising, the latent `ns:name`-shaped gap is closed *by grammar*,
+and the atomic-migration cost is unavoidable under **any** grammar change and is owned by the follow-on build item —
+not this decision. Ratifying now is cheaper than re-encoding later because the active WebDirectives work (#2063 SSR
+wire-format, #2068 reconcile runtime markers) is encoding these markers this session.
 
-## Statute-overlap (reconciled here)
+## Codification (on ratification)
 
-This decision sets `codifiedIn: we:docs/agent/block-standard.md#directive-registration-mechanism` (sharpening rule
-5). Anchors on adjacent turf:
+On the ratify go, this codifies into `we:docs/agent/block-standard.md#directive-registration-mechanism` (rule 5) —
+the grammar contract and its two guarantees (bare close; name-keyed pairing) stated **implementation-neutrally**; the
+standard carries the shape, FUI carries the code. Two reconciliations to fold at codification:
 
-- **#1986 family invariant, rule 5** (`we:docs/agent/block-standard.md:433-439`) — the **ratifying authority** for
-  the forced invariant; #1989 *fills its delegated slot* (the "exact reserved residue sigil") with the bracket
-  grammar. Composes — this is the item rule 5 pointed forward to.
-- **Pointer correction (a real defect this item fixes):** rule 5 currently delegates the residue sigil to
-  **#1987** (`we:docs/agent/block-standard.md:437-439`), but #1987 (authoring names) explicitly punts it back —
-  *"Adjacent, not in scope here … Tracked separately as #1989"*
-  (`we:backlog/1987-attribute-naming-convention-review-colon-namespacing-view-if.md:84-88`). The residue sigil is
-  **#1989**. Ratifying this item must **correct rule 5's delegation pointer #1987 → #1989** — otherwise the statute
-  points at an item that disclaims the turf. No rule *conflict* (the two govern different surfaces), but an
-  unreconciled cross-reference; fixed at codification.
-- **The leading-`/` exclusion seed** (`fui:plugs/webdirectives/CustomCommentRegistry.ts:39-43`,
-  `fui:plugs/webdirectives/CustomCommentParser.ts:71`, `fui:plugs/webdirectives/multiTemplate.ts:30-34`) — Fork
-  2(a) *generalizes* this seed into the single `isReservedBoundaryMarker` predicate rather than overturning it; the
-  `/`-close it already excludes stays valid.
-- **#1987 separator discipline** (`we:docs/agent/platform-decisions.md:672`, *separators track per-namespace
-  permission, not uniformity*) — **supporting principle, not authority** (citation-scope correction from the
-  skeptic): `:672` governs **attribute-name** separators (`xml:lang`/`nav:list`), and `[`/`]` are paired
-  *delimiters*, not separators — so `:672` does **not** *authorize* the bracket residue grammar and must not be
-  cited as if it did. What composes is only the underlying **principle** — a *machine-only residue* namespace is
-  distinct from the *author-typed* attribute namespace, so the two legitimately carry different grammars. The
-  authority for the residue grammar is #1986 rule 5 (above), not `:672`; `:672` is house-idiom support that the
-  "different namespace, different grammar" move is in-grain, no more.
+- **Delegation-pointer correction.** Rule 5 previously delegated the reserved residue sigil to #1987, but #1987
+  (authoring names/values) explicitly punts it back — *"tracked separately as #1989."* The pointer is corrected
+  #1987 → #1989 in rule 5.
+- **Citation scope.** #1987's separator discipline (`we:docs/agent/platform-decisions.md:672`) governs
+  *attribute-name* separators, not paired *delimiters*, so it is supporting **principle** ("machine-only residue is
+  a distinct namespace from author-typed attributes, so the two may carry different grammars"), **not** the
+  authority for this grammar. The authority is #1986 rule 5.
 
 ## Relationships
 
 - **Realizes** #1986's family-invariant rule 5 (the delegated residue-sigil slot) and **corrects** its stale
   delegation pointer (#1987 → #1989).
-- **Sibling of** #1987 — same #1986-triggered token-grammar cluster, but a *distinct surface* (machine residue vs
-  authored names); cross-referenced so the reserved grammars stay consistent.
-- **Codifies into** `we:docs/agent/block-standard.md#directive-registration-mechanism` (rule 5); the inspector
-  (`fui:plugs/webdirectives/directiveInspector.ts`) collapses its two-branch `classify()`, and the three emit sites
-  (`ForEachBehavior` / `ViewIfDirective` / `ViewSwitchDirective`) switch to the bracket form.
+- **Sibling of** #1987 — same #1986-triggered token-grammar cluster, a *distinct surface* (machine residue vs
+  authored names).
+- **Enables** the follow-on FUI build item that migrates the residue emit + matcher + #1973 inspector to the bracket
+  grammar as a single atomic changeset (partial migration would blind the inspector).
 - Surfaced from the #1983/#1986 prep discussion (2026-06-30); see
   `we:reports/2026-06-30-directive-residue-marker-grammar.md`.
