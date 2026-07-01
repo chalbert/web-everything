@@ -58,7 +58,9 @@ eleventyComputed:
     tocbot.init({
         tocSelector: '.toc',
         contentSelector: '.project-body',
-        headingSelector: 'h3, h4:not(.no-toc)',
+        // Match real <hN> tags AND host-is-node ARIA headings (#2028
+        // auto-headings are role=heading custom elements, not <hN>).
+        headingSelector: 'h3, h4:not(.no-toc), [role="heading"][aria-level="3"], [role="heading"][aria-level="4"]:not(.no-toc)',
         hasInnerContainers: true,
         scrollSmooth: true,
         scrollSmoothDuration: 400,

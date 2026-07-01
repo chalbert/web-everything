@@ -294,6 +294,16 @@
         // Capture the text selection from the parent page BEFORE
         // the click clears it, then forward it to the iframe.
 
+        // A "heading" is any real <hN> tag OR an element that carries the
+        // heading role (host-is-node auto-headings, #2028, are role=heading
+        // custom elements — not <hN> — so a tag-only test would miss them).
+        function isHeadingEl(el) {
+            if (!el || el.nodeType !== 1) return false;
+            if (/^H[1-6]$/.test(el.tagName)) return true;
+            var role = el.getAttribute && el.getAttribute('role');
+            return role === 'heading';
+        }
+
         function getSelectionContext() {
             var sel = window.getSelection();
             var text = sel ? sel.toString().trim() : '';
@@ -306,7 +316,10 @@
                 if (node.nodeType === 1) {
                     var prev = node.previousElementSibling;
                     while (prev) {
-                        if (/^H[1-6]$/.test(prev.tagName)) {
+                        // Match real <hN> tags AND host-is-node ARIA headings
+                        // (#2028 auto-headings are role=heading custom elements,
+                        // not <hN>), so read the role, not just the tag name.
+                        if (isHeadingEl(prev)) {
                             heading = prev.textContent.trim();
                             break;
                         }
@@ -316,7 +329,7 @@
                     // Also check if current node IS a heading parent
                     var h = node.closest && node.closest('section, article, div');
                     if (h) {
-                        var hEl = h.querySelector('h1, h2, h3, h4, h5, h6');
+                        var hEl = h.querySelector('h1, h2, h3, h4, h5, h6, [role="heading"]');
                         if (hEl) {
                             heading = hEl.textContent.trim();
                             break;
