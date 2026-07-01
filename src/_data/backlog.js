@@ -365,7 +365,15 @@ module.exports = function backlog() {
     // "Batchable" filter that keys off it — only ever shows GENUINELY batchable work, not a migration that
     // merely looks shape-eligible. (Its run-precondition is quiescence, surfaced as a stop-the-world pill.)
     item.stopTheWorld = Array.isArray(item.tags) && item.tags.includes('stop-the-world');
-    item.batchable = item.tier === 'A' && batchShape && !item.stopTheWorld;
+    // FILLER (#1620) — a `priority: low` Tier-A item is settled & valid work that is just not worth doing
+    // now, so it is demoted OUT of the batch pool exactly as the readiness `--select` engine does
+    // (scripts/readiness/engine.mjs `isFiller`): it stops false-surfacing as batchable (no green "batch"
+    // pill, excluded from the `countBatch`/`pointsBatch` tally) but is NOT hidden — it stays a visible Tier-A
+    // card carrying the `low priority` reasonPill (backlogMeta.priorityMeta.low), hand-pickable when nothing
+    // better is open. Demote-not-hide; distinct from a park (which removes the item until a gate clears). This
+    // aligns the UI's Batchable filter with the CLI's auto-pack, which already excludes filler.
+    item.filler = item.tier === 'A' && item.priority === 'low';
+    item.batchable = item.tier === 'A' && batchShape && !item.stopTheWorld && !item.filler;
 
     // Why an OPEN item is not in the batch pool — the single reason a tab pill renders so a non-batchable
     // item never looks unexplained (the #1137/#487 rigor: every "looks ready but isn't" carries its reason
