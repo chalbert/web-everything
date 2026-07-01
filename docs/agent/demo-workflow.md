@@ -41,7 +41,7 @@ FUI block code; it embeds a FUI-*hosted* demo via a sandboxed iframe** (the #700
 ```
 
 It renders an `<iframe src="${FUI_DEMO_BASE}/demos/<demo-file>.html">` with FUI branding chrome. `FUI_DEMO_BASE`
-is the FUI dev server (`:6000`) by default, or the published demos host via `FUI_DEMO_BASE` in prod —
+is the FUI dev server (`:6002`) by default, or the published demos host via `FUI_DEMO_BASE` in prod —
 nothing is imported across repos.
 
 > **The WE↔FUI in-document exception (#765, ratified 2026-06-16).** The "never renders FUI in its own
