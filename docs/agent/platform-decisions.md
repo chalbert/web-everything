@@ -1117,7 +1117,11 @@ kernel's contract; the two kernel shapes never mix in one element.
 
 **Lineage:** #1818 (this decision — ratified) extends [persistent-b-data-source](#persistent-b-data-source) (#1570)
 with the resolution-locus + client-payload axes. Surfaced by #1787 / the #1600 table→data-table family (all
-deterministic, ship without #1827). Follow-on: #1827 (SSR injector-context hydration, app-facing). Open impl
+deterministic, ship without #1827). Follow-on: #1827 (SSR injector-context hydration, app-facing) — its
+production-consumer slice #1928 landed the runtime seed (`seedDeclarativeInjector`) wired to a real
+non-deterministic client-only surface (a live board whose polled `rows` resolve `[[ @rows ]]` at upgrade),
+plus the `@name → customContexts:name` key-derivation sugar so a consumer seeds under the exact key a live
+context-query reads. Open impl
 residuals (mechanism may flex, goal fixed): the determinism predicate, the build-time evaluation harness, the
 serialized-context format — **all three filled by #1867** ([#ssr-data-table-build-harness](#ssr-data-table-build-harness)),
 which refines the "JSON island" sketch above to a **`data-*`-on-cell + in-place enhancer** interactive format (the
