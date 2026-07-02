@@ -1,0 +1,26 @@
+{
+  "id": "spatial-manipulation-arrangeable-surfaces",
+  "title": "Spatial manipulation / arrangeable surfaces — resizable splitter, snap, draggable dashboard: placement & decomposition",
+  "status": "open",
+  "summary": "Grounds decision #1384 (under epic #099): WE has no standard for user-driven spatial manipulation — grabbing an edge to resize a pane, snapping to a grid/alignment points, or dragging widgets on a dashboard. Prior-art survey (Split.js/react-resizable-panels/allotment splitters; react-grid-layout/gridstack/Muuri 2-D grids; golden-layout/dockview/FlexLayout/rc-dock docking; moveable/interactjs magnetic alignment) + a native-substrate Baseline check (Pointer Events, ResizeObserver, CSS Grid, CSS resize, scroll-snap, Element.moveBefore, Anchor Positioning, HTML DnD, ARIA APG Window-Splitter & Grid patterns). Four decisive findings. (1) There is no single 'spatial manipulation' — there are THREE irreducible layout models, each with its own state shape and mechanics that do not unify: linear split (a divider position, resize-only, sibling-reflow), flat 2-D grid (a flat Array<{i,x,y,w,h}> list, drag+resize+collision/compaction), and recursive partition tree (a nested row/column/tab-stack tree, docking/popout). Inside each model drag+resize+collision+serialization cluster tightly. (2) 'Snap' is TWO different things: grid-snap is emergent (a property of the grid's cell coordinate system, no peer-awareness, no guides) while magnetic alignment (Figma smart guides — peer-relative reference, rendered guide lines, threshold) is a standalone capability that needs no grid; scroll-snap (Carousel's substrate) is a third, unrelated paging mechanism and a distractor. (3) Keyboard/ARIA is the web's most conspicuous unmet need — almost no incumbent ships it (lone exception react-resizable-panels' role=separator), exactly the parity reorder already mandates. (4) The gesture/observation/layout layers are native & Baseline (Pointer Events + setPointerCapture, ResizeObserver, CSS Grid+subgrid) but the interaction semantics — splitter resize, snap-to-cell dragging, dashboard arrangement, and their accessible keyboard equivalents — have NO native primitive and NO Open UI/CSSWG proposal in flight; CSS resize is Limited and structurally incapable of true splitter behavior, HTML DnD is disqualified (a11y/control dead-end), Element.moveBefore() and Anchor Positioning are progressive (not yet Baseline). Classification: intent(s) + composing block(s); no project, no protocol (project-protocol-bar rule — no provider seam/interchange schema; precedents #409 master-detail, #467 responsive-layout). The five sketched concerns collapse to two forced ratifies (placement layer; keyboard-a11y + Pointer-Events substrate as a fixed mechanic) + four genuine forks: resize home (standalone resizable intent vs extend layout's pane); 2-D arrangement & the reorder relationship (new arrangeable intent composing reorder's substrate vs extend reorder with a 2-D placement dimension); snap decomposition (one snap intent vs split grid-snap dimension + standalone alignment-guides intent); docking/tiling scope (fold in now vs carve to a separate decision). Like #022 (one decision -> reorder intent + reorderable-list block + traits), the expectation is a fan-out, not a pre-minted set. Full grounding in reports/2026-06-21-spatial-manipulation-arrangeable-surfaces.md.",
+  "dateOpened": "2026-06-21",
+  "lastReviewed": "2026-06-21",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "spatial-manipulation",
+    "resize",
+    "splitter",
+    "snap",
+    "dashboard",
+    "arrangeable",
+    "layout",
+    "reorder-intent",
+    "docking",
+    "decision-prep",
+    "book-candidate",
+    "gap"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

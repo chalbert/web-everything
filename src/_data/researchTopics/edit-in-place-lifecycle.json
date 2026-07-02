@@ -1,0 +1,24 @@
+{
+  "id": "edit-in-place-lifecycle",
+  "title": "Edit-in-place / inline-edit — placement of the display→edit→commit lifecycle",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #1397 (surfaced by the verb-axis lens #1390): turning a displayed value into an editor in place — click-to-edit field, editable table cell, rename-in-tree — with the display ⇄ edit mode swap, commit (blur/Enter) / cancel (Esc reverts to baseline), validation, and keyboard a11y. WE owns the editor (input), the gate (validation), flowed-content editing (rich-text) and a data-grid block, but none owns the display→edit→commit/cancel lifecycle as a reusable concern. Two findings reshape the forks. (1) The lifecycle is a NAMED cross-component primitive that recurs WITHOUT a grid: Atlassian @atlaskit/inline-edit (readView/editView/onConfirm), PrimeReact Inplace (InplaceDisplay/InplaceContent), Ant Typography editable (triggerType/onChange/onCancel), plus rename-in-tree — so 'data-grid feature only' is the broken branch (it forces a standalone field or tree rename onto a grid). (2) The keyboard + a11y model is already platform-standard: WAI-ARIA APG Grid editing specifies Enter/F2 to enter the editor, F2 again to restore navigation, Escape to restore navigation AND undo edits (revert-to-baseline), aria-readonly for disabled cells — so the intent adopts that vocabulary, it does not re-mint it (native-first). Decomposed against existing intents, the only UNOWNED residual is: the activation gesture + the display-renderer⇄editor-renderer swap for one atomic value + cancel-reverts-to-baseline; the editor (input/rich-text), the commit gate (validation: commitment full/deferred, execution change/blur/submit) and cell focus (focus-delegation) are already owned and only composed. data-grid.json defines NO edit lifecycle of its own (verified: contractsOnly names the movement engine + active-cell projection as its seams; editing is an external impl that registers against them) — so data-grid is the first CONSUMER of the intent, not its home. Seam vs rich-text: rich-text governs a flowed/formatted content surface (mode editable/read-only over a document model); edit-in-place governs an atomic scalar value swapping to one editor control — they compose (an edit-in-place field MAY pick a rich-text editor) rather than overlap; the seam is content shape. Recommendation: (Fork 1, ~80%) MINT a dedicated edit-in-place intent — the lifecycle recurs in 3+ loci without a grid, so separate-and-decouple; (Fork 2, ~85%) the intent OWNS only the thin residual (activation + dual-renderer mode-swap + commit/cancel-revert, adopting APG Enter/F2/Esc) and COMPOSES input/validation/focus-delegation/(optional rich-text), mirroring the #596 accessible-name precedent (own the thin recurring policy, defer the rest). Supported by default (not a fork): the WE intent (contract) and a FUI behavior block (realization) coexist at different layers — precedent data-transfer/reorder/selection each ship an intent + a realizing block. Report: reports/2026-06-21-edit-in-place-lifecycle-placement.md.",
+  "dateOpened": "2026-06-21",
+  "tags": [
+    "edit-in-place",
+    "inline-edit",
+    "click-to-edit",
+    "editable-cell",
+    "rename-in-tree",
+    "lifecycle",
+    "intent",
+    "verb-axis",
+    "candidate-standard",
+    "apg-grid"
+  ],
+  "relatedBlocks": [
+    "data-grid"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

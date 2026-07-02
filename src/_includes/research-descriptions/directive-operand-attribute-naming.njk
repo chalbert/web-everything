@@ -1,0 +1,86 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  #1983/#1986 moved the three structural directives onto typed templates —
+  <code>&lt;template type="if|switch|for-each"&gt;</code> — so <code>type=</code> now carries the directive
+  <strong>identity</strong>. But each directive's <strong>operand expression</strong> used to live in the
+  <em>attribute value</em> (<code>view:if="@cond"</code>, <code>for-each="@items as user"</code>), with the
+  directive name as the <em>key</em>. Now the key carries identity, so the operand has <strong>no specified
+  home</strong>. #1987 settled the <em>convention</em> — directive operand sub-attrs are <strong>bare</strong> —
+  but did not enumerate the per-directive role-words. #1993 names them: the <strong>if-condition</strong>, the
+  <strong>switch-discriminant</strong>, and reconciling for-each's <strong>iterable + item-alias + key</strong>.
+</p>
+
+<h2>The convention is already settled — only the role-words are open</h2>
+<p>
+  #1987 ruled directive operand sub-attrs are <strong>bare</strong> (its audit buckets
+  <code>items</code>/<code>key</code>/<code>as</code>/<code>case</code>/<code>default</code> as bare structural
+  sub-attrs; <code>we:docs/agent/platform-decisions.md:672</code>'s per-surface discipline). So #1993 is
+  <strong>not</strong> re-litigating bare-vs-colon — only <em>which</em> bare role-word names each operand.
+  Grounding in the real tree: <code>view:if</code> carries the condition as <code>this.value</code>
+  (<code>fui:blocks/view/ViewIfDirective.ts:81-84</code>); <code>view:switch</code> as <code>this.value</code>,
+  string-compared to inner <code>&lt;template case&gt;</code>/<code>&lt;template default&gt;</code>
+  (<code>fui:blocks/view/ViewSwitchDirective.ts:96-130</code>); <code>for-each</code> as an
+  <code>expression as alias</code> <strong>micro-syntax inside the value</strong> plus a separate bare
+  <code>key</code> attribute (<code>fui:blocks/for-each/ForEachBehavior.ts:35,100-103</code>).
+</p>
+
+<h2>Prior art — how native + frameworks name directive operands</h2>
+<ul>
+  <li><strong>Native HTML always role-names the operand, never echoes the element.</strong>
+    <code>&lt;label for&gt;</code>/<code>&lt;output for&gt;</code> (referent), <code>&lt;input list&gt;</code>
+    (source collection), <code>&lt;option value&gt;</code> (payload), <code>&lt;th scope&gt;</code> (domain),
+    <code>&lt;slot name&gt;</code> (match key). Uniform-naming (one word for every operand) has <strong>zero</strong>
+    precedent — native varies <code>for</code>/<code>list</code>/<code>value</code>/<code>scope</code> — so
+    <em>role-named-per-directive is settled, not a fork</em>.
+    (<a href="https://html.spec.whatwg.org/multipage/tables.html#attr-th-scope">th scope</a>,
+    <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Attributes/for">MDN <code>for</code></a>)</li>
+  <li><strong>No native conditional / switch / loop</strong> — so those operands borrow from frameworks.</li>
+  <li><strong>Conditional → <code>when</code>.</strong> Solid <code>&lt;Show when={cond}&gt;</code> is the only real
+    <em>bare-attribute</em> precedent; Lit <code>when(condition, …)</code> uses the literal word as a function
+    param; microsyntax frameworks (Vue <code>v-if</code>, Angular <code>@if</code>, Svelte <code>{#if}</code>,
+    Alpine <code>x-if</code>) leave it unnamed in the value.
+    (<a href="https://docs.solidjs.com/reference/components/show">Solid <code>&lt;Show&gt;</code></a>)</li>
+  <li><strong>Switch → discriminant <code>value</code>, case <code>case</code>.</strong> <code>value</code> (Lit
+    <code>choose(value, cases)</code>; native <code>&lt;option value&gt;</code> "match a value") is the strongest
+    discriminant word; Angular puts the expr in the block head (<code>@switch (expr)</code>); Solid has no central
+    discriminant (each <code>&lt;Match when&gt;</code> self-tests). Case: <code>case</code> (Angular + the JS
+    keyword) — WE already ships <code>case</code>/<code>default</code>. Vue and Svelte have <strong>no switch
+    primitive</strong>.
+    (<a href="https://angular.dev/guide/templates/control-flow">Angular control flow</a>,
+    <a href="https://lit.dev/docs/templates/directives/">Lit <code>choose</code></a>)</li>
+  <li><strong>List → iterable+alias are a fused microsyntax <em>everywhere</em>; the key is always separate.</strong>
+    Every framework fuses iterable+alias in one expression (<code>item of items</code> / <code>item in items</code>
+    / <code>items as item</code>) and names the key/track as a <strong>separate</strong> attr/clause
+    (<code>key</code> in Vue/Svelte/Alpine, <code>track</code> in Angular @for) — <strong>none</strong> gives the
+    item-alias its own bare attribute. So WE's bare <code>as</code> attribute is genuinely <strong>novel</strong>.
+    Iterable-as-bare-attr precedent exists only in Solid (<code>&lt;For each={items}&gt;</code>).
+    (<a href="https://vuejs.org/api/built-in-directives.html">Vue</a>,
+    <a href="https://svelte.dev/docs/svelte/each">Svelte each</a>,
+    <a href="https://docs.solidjs.com/reference/components/switch-and-match">Solid <code>&lt;For&gt;</code></a>)</li>
+</ul>
+
+<h2>Synthesis — the prepared defaults</h2>
+<ul>
+  <li><strong>Fork 1 — if-condition:</strong> <code>when</code> (default — only bare-attribute precedent; terse
+    native-shaped single role-word) vs <code>condition</code> (the clarity play, more verbose).</li>
+  <li><strong>Fork 2 — switch-discriminant:</strong> <code>value</code> (default — native <code>&lt;option
+    value&gt;</code> + Lit <code>choose(value)</code>, "match this value") vs <code>on</code> (collides with the
+    <code>on:*</code> event idiom).</li>
+  <li><strong>Fork 3 — for-each shape:</strong> <strong>split</strong> bare <code>items</code>/<code>as</code>/<code>key</code>
+    (default — native shape: HTML attribute values are single values, not mini-DSLs) vs the universal fused
+    microsyntax <code>items="@u as user"</code>. Cost of the default: the bare <code>as</code> attr has zero prior
+    art — a deliberate divergence, flagged.</li>
+  <li><strong>Settled (not forks):</strong> role-named-per-directive (native universal); switch
+    <code>case</code>/<code>default</code> (shipped); for-each <code>key</code> (majority spelling, shipped).</li>
+</ul>
+
+<h2>Statute-overlap</h2>
+<p>
+  #1993 codifies in <code>we:docs/agent/block-standard.md#directive-form</code>, sibling to #1987's
+  <code>we:docs/agent/platform-decisions.md#attribute-name-colon-namespacing</code>. Different tests — #1987
+  governs the <em>separator</em> (bare vs colon vs hyphen, per surface); #1993 governs <em>which bare role-word</em>
+  names each directive operand. They <strong>compose</strong> (no collision): #1987 rules directive operand
+  sub-attrs are bare; #1993 names them.
+</p>
+{% endraw %}

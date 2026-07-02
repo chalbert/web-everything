@@ -1,0 +1,21 @@
+{
+  "id": "dev-browser-role-scoped-lenses",
+  "title": "Dev-browser Role-Scoped Lenses",
+  "status": "open",
+  "summary": "Prior-art survey grounding backlog #1636 — the lone genuine merit fork carved from the #142 AI-DX pool. The question is a layer/shape either/or: is 'role/lens' a FIRST-CLASS dimension in the dev-browser's surface model — a primitive every feature (inspectors, panels, simulators) registers against and is filtered/scoped by — OR are role surfaces just independent per-role panels (designer/rule-owner/translator/dev) with no unifying abstraction? Multi-role tool prior art splits cleanly: Figma Dev Mode is a genuine mode-as-first-class-dimension (one canvas, role-parameterized, features declare their mode); Chrome DevTools has NO role primitive (independent panels); Storybook viewmodes/addons are a registry of independent surfaces; RBAC-driven UI gates by permission (the category error #166/#564 already ruled out — a lens is RACI not RBAC). The decisive in-repo prior art is the persona-preset primitive: #564 (resolved) already named 'persona = a named preset over composable concepts (preferences + surfaces-lit-up)' and identified the dev-browser 'feature toggle map' (#141:90) as its THIRD, not-yet-built projection — alongside the shipped governance charter (#166, plateau:schema.ts) and the agile-role concept (#563). #141's Profiles section already describes the lens as 'a feature toggle map over the introspection surfaces.' The composability probe shows independent panels are a degenerate config of the primitive (one panel = one lens scoping the whole feature menu), so the fork shrinks to 'build the lens primitive; per-role panels are its degenerate preset.' Recommended default: (a) lens-as-first-class-primitive — a thin toggle-map/scope dimension every dev-browser feature declares against, realized as the #564 persona-preset projected onto the running app (a lens === a persona charter's reviewAreas filtered onto introspection surfaces). Confidence Med-High. Full grounding in we:reports/2026-06-23-dev-browser-role-scoped-lenses.md.",
+  "dateOpened": "2026-06-23",
+  "lastReviewed": "2026-06-23",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "dev-browser",
+    "role-lens",
+    "persona",
+    "lens-primitive",
+    "surface-model",
+    "plateau",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}

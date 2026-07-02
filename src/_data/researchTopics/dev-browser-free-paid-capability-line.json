@@ -1,0 +1,22 @@
+{
+  "id": "dev-browser-free-paid-capability-line",
+  "title": "Dev-browser in-shell free/paid capability line",
+  "status": "open",
+  "summary": "Open-core tiering prior-art survey grounding #1655 — exactly which dev-browser shell capabilities light up FREE vs require the local license, under #1590's ratified licensed-local-browser ruling (the fixed-cost JetBrains/Sublime model; build decoupled from release timing). Surveyed how comparable developer/observability tools draw the line: browser/framework DevTools (React/Vue/Redux DevTools, Chrome DevTools — passive read-only introspection is free forever, the funnel that hooks you), and the observability/error-tooling vendors Sentry, Datadog, LogRocket, Replay.io, Honeycomb whose paid line is consistently NOT 'which signals you can read' but volume/retention/automation/team-scale — the workflow that pays the bills is gated, the introspection that hooks you is free. This mirrors the design-system-creator-open-core-tiering and web-docs-open-core-tiering rulings (#775/#428) where the line is the capability-cost line, not a category. The gating PRINCIPLE recommended: gate on a STRUCTURAL property — passive read-only introspection of a single app/session = FREE funnel; anything that WRITES back to source/runtime, AUTOMATES (AI fix-loop, queues), PERSISTS shared artifacts, or SCALES across many apps/sessions/teams = LICENSED. Of the 22 capability items #1631-#1652 + #141's named features: ~13 fall FREE (read-only inspectors — contract/data, render-cause/perf, semantic explain, ownership routing, role lenses, intent/a11y conformance, variant simulator, permission simulator, semantic search, jump-to-source, in-context test status, state/action explorer, business-rules-in-context) and ~9 LICENSED (write/automate/persist/scale — shareable repro bundles, annotation threads, handoff packets, capability-matched task queue, safe-edit-sandbox→PR, branch/run diff, scenario/fixture+seed loaders, failure injector, manager-mode cross-app rollups). One genuinely-contested boundary survives: bug-capture export — the analyst funnel artifact #141 leans on — sits on the WRITE/PERSIST/SHARE side by the structural rule yet is the single strongest top-of-funnel conversion hook. Confidence: high on the principle (composition of the cost-flat rule + the #775/#428 capability-cost precedent), medium on the one contested knob. Full grounding in we:reports/2026-06-22-1391-split-analysis.md.",
+  "dateOpened": "2026-06-22",
+  "lastReviewed": "2026-06-22",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "dev-browser",
+    "monetization",
+    "open-core",
+    "pricing",
+    "introspection",
+    "conformance",
+    "plateau",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}

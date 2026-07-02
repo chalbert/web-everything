@@ -1,0 +1,22 @@
+{
+  "id": "scoped-component-css-isolation",
+  "title": "Light-DOM scoped-component CSS isolation — native-compile proposal + transform/polyfill impls",
+  "status": "open",
+  "summary": "Grounds decision #1349 (surfaced by #1321 button-variant packaging; completes the STYLE half of the #854 scoped-component model whose IDENTITY half is built). #854 resolves the SAME tag to DIFFERENT impls per view (we:plugs/webregistries/declarativeRegistry.ts; attachShadow({customElementRegistry}) patched at we:plugs/webregistries/index.ts:88), but a grep of both repos found ZERO CSS-isolation runtime (no adoptedStyleSheets / constructable stylesheets / unique-class scope-keying); FUI blocks use ad-hoc global classes + var() tokens (fui:blocks/button/Button.ts:114, card/Card.ts:89, badge/Badge.ts:78). So per-view STYLE isolation in light DOM is implicit and unimplemented. The CONTRACT is fixed (self-referential rules [variant]/:host([variant]) + token DI, never ancestor-coupled — #1321 self-styling requirement, we:backlog/1321:97-103); this item specifies the missing mechanism as ONE Layer-1 native-compile proposal + TWO impl layers (L2 build-transform, L3 runtime polyfill). PRIOR ART (decisive): (1) NO shipping platform feature gives light-DOM in+out (shadow-grade) isolation WITHOUT a shadow root. CSS @scope (Baseline Dec 2025, csswg-drafts/css-cascade-6) is OUT-scoping only — an external button{} still matches inside a scope and inherited props leak through the donut — and it IS self-rootable (prelude-less `@scope{}` scopes to the parent of the <style>). (2) The single live standards effort matching the goal is csswg-drafts #11002 '@scope isolated' (Bramus, Oct 2024, css-cascade-6/7) — an `isolate` keyword blocking inbound cascade; OPEN, no spec text. Lineage: removed `<style scoped>` (Firefox-only, pulled ~2016, no vendor interest; revival #3547 superseded by @scope) + foundational #5809. The CSS `isolation` property is unrelated (stacking-context only — a name to AVOID). (3) Build-transform prior art is unanimous: vanilla-extract (zero-runtime), CSS Modules, styled-components/Emotion all hash a unique class per scope and rewrite self-referential selectors → static CSS, SSR-trivial; Vue SFC `<style scoped>` is the attribute-hash variant ([data-v-xxxx]); ALL scope OUTBOUND only (none block inbound — only shadow DOM does). (4) Runtime: constructable adoptedStyleSheets is Baseline (since Mar 2023), applies to BOTH Document (light DOM) and ShadowRoot → keys CSS to a runtime-generated unique class. Shadow-per-component (S2) is native in+out isolation today but costs native <button> form participation + label association (re-forward via ElementInternals) — the central S1-vs-S2 tension. (5) Scoped custom element registries graduated WICG→WHATWG HTML (Chrome 146 stable Mar 2026 + Safari 26, no Firefox; polyfill @webcomponents/scoped-custom-element-registry). FORKS (2 genuine, after pass-0 dissolved 3): Fork 1 — Layer-1 proposal form: TRACK csswg #11002 `@scope isolated` (native-first; default ~80%) vs mint a bespoke form. Fork 2 — placement: own plug (separate-and-decouple; default ~70%) vs fold into webregistries. SUPPORTED-BY-DEFAULT (dissolved on pass-0): both S1/S2 strategies are conformant impls (Configurator-selected per deployment, flavor default S1 native-first floor, soft/revisitable per the monetization-grade treatment); both impl layers ship (transform-primary default, polyfill fallback); token-DI composes with both (custom properties inherit across the shadow boundary — confirmed invariant, not a fork). Full grounding in we:reports/2026-06-20-scoped-component-css-isolation.md.",
+  "dateOpened": "2026-06-20",
+  "lastReviewed": "2026-06-20",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "scoped-components",
+    "css-isolation",
+    "native-first",
+    "polyfill",
+    "at-scope",
+    "shadow-dom",
+    "adopted-stylesheets",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": ["webregistries", "webtheme"],
+  "relatedProject": "webregistries"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "directive-operand-attribute-naming",
+  "title": "Directive operand-attribute naming — the bare role-words for if-condition / switch-discriminant / for-each iterable·alias·key on typed templates",
+  "status": "open",
+  "summary": "Prep research for decision #1993 (we:reports/2026-06-30-directive-operand-attribute-naming.md). #1983/#1986 moved the structural directives onto typed templates (<template type=\"if|switch|for-each\">), so type= now carries the directive IDENTITY — and the operand expression that used to live in the attribute VALUE (view:if=\"@cond\", for-each=\"@items as user\") has no specified home. #1987 settled the CONVENTION (directive operand sub-attrs are BARE — its audit buckets items/key/as/case/default as bare structural sub-attrs, we:docs/agent/platform-decisions.md:672 per-surface discipline) but did NOT enumerate the per-directive role-words. #1993 names them. GROUNDING (real tree): view:if carries the condition as this.value (fui:blocks/view/ViewIfDirective.ts:81-84); view:switch carries the discriminant as this.value, string-compared to inner <template case>/<template default> (fui:blocks/view/ViewSwitchDirective.ts:96-130); for-each carries 'expression as alias' as a MICRO-SYNTAX inside the value (AS_REGEX, default alias 'item') PLUS a separate bare key attr (fui:blocks/for-each/ForEachBehavior.ts:35,100-103). PRIOR ART: (1) Native HTML always ROLE-NAMES the operand and NEVER echoes the element — <label for>/<output for> (referent), <input list> (source), <option value> (payload), <th scope> (domain), <slot name> (match key); uniform-naming (one word for all operands) has ZERO precedent (native varies for/list/value/scope), so role-named-per-directive is SETTLED, not a fork. There is no native conditional/switch/loop, so those operands borrow from frameworks. (2) Conditional: when (Solid <Show when>) is the only real BARE-ATTRIBUTE precedent; condition (Lit param) is more literal/verbose; microsyntax frameworks (Vue v-if, Angular @if, Svelte {#if}, Alpine x-if) leave it unnamed. (3) Switch discriminant: value (Lit choose(value); native <option value> 'match a value') vs unnamed block-head (Angular @switch); Solid has no central discriminant. Case word: case (Angular @case/*ngSwitchCase + JS keyword) — WE already ships case/default (settled). Vue+Svelte have NO switch primitive. (4) List: iterable+alias are a FUSED MICROSYNTAX in EVERY framework (item of/in items, items as item) and the key is ALWAYS a separate attr/clause (key Vue/Svelte/Alpine, track Angular) — NONE gives the item-alias its own bare attribute, so WE's bare 'as' attr is genuinely NOVEL. Iterable-as-bare-attr precedent only in Solid (<For each>). SYNTHESIS / DEFAULTS: Fork 1 if-condition = `when` (DEFAULT, only bare-attr precedent + terse native-shaped single role-word) vs `condition` (clarity); Fork 2 switch-discriminant = `value` (DEFAULT, native <option value> + Lit choose) vs `on` (event-idiom collision); Fork 3 for-each shape = SPLIT bare items/as/key (DEFAULT — native shape, no micro-DSL in values; but bare 'as' is novel, flagged) vs fused microsyntax items=\"@u as user\". Settled (not forks): role-named-per-directive (native universal); switch case/default; for-each key. STATUTE-OVERLAP: #1993 codifies in we:docs/agent/block-standard.md#directive-form, sibling to #1987's we:docs/agent/platform-decisions.md#attribute-name-colon-namespacing — different tests (separator vs role-word), they compose, no collision. Blocks #1991/#1994 chunk-4 migration.",
+  "dateOpened": "2026-06-30",
+  "lastReviewed": "2026-06-30",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "naming",
+    "attribute-naming",
+    "webdirectives",
+    "directive-form",
+    "native-first",
+    "block-standard",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": ["webdirectives", "webbehaviors"],
+  "relatedProject": "webdirectives"
+}

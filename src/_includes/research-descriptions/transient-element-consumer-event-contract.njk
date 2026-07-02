@@ -1,0 +1,86 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  A FUI <code>&lt;we-filter-chip&gt;</code> is a <strong>transient</strong> custom element (family A of the
+  block-standard runtime-shape rule): on upgrade it <strong>replaces itself with a native
+  <code>&lt;button class="fui-filter-chip"&gt;</code></strong> via <code>replaceWith()</code>, so the
+  original node — and any listener bound <em>directly</em> to it — is detached and discarded. WE-side JS that
+  wired those chips loses the handler, and any cached element reference goes stale. This shipped <em>twice</em>
+  as a regression on the <code>/backlog/</code> Prioritisation table: the summary count pills
+  (<code>data-pfilter</code>) used a direct <code>addEventListener</code> and silently stopped filtering the
+  moment the FUI module upgraded them. The decision (<strong>#1960</strong>): where does the durable fix live,
+  and how is it enforced?
+</p>
+
+<h2>Finding 1 — only the host element's <em>own</em> listeners are lost</h2>
+<p>
+  The self-replacement (<code>fui:blocks/transient/TransientElement.ts</code>) <strong>moves</strong> child
+  nodes rather than cloning them, so listeners on <em>children</em> survive; and it <strong>copies every
+  attribute</strong> onto the native button, so <code>data-*</code> and a computed <code>aria-pressed</code>
+  <strong>survive the upgrade</strong>. What is lost is only the listeners bound to the transient host node
+  itself — and the DOM exposes <strong>no API to enumerate or transfer an element's own listeners</strong>, so
+  a "preserve the bound handlers" fix is <em>mechanically impossible</em>. This is distinct from a
+  <strong>standard custom-element upgrade</strong>, which keeps the <em>same</em> node and therefore keeps its
+  listeners — the footgun is specific to the explicit self-<em>replace</em> variant, not to progressive
+  enhancement in general.
+</p>
+
+<h2>Finding 2 — FUI already has a stable-event precedent, but only on <em>persistent</em> hosts</h2>
+<p>
+  A constellation-wide survey of FUI interactive elements splits cleanly: every <strong>persistent</strong>
+  (B-family) element — tabs, stepper, dockable — dispatches a bubbling CustomEvent on its stable host
+  (<code>tab-change</code>, <code>step-change</code>, <code>dock</code>; the convention is
+  <code>new CustomEvent(name, { detail, bubbles: true, cancelable })</code>). But <strong>every transient</strong>
+  (A-family) element — button, badge, meter, text-field, filter-chip — exposes state via <strong>native events
+  and attributes</strong>, never a CustomEvent. So a stable bubbling change-event is a real FUI pattern, but
+  it has <em>no precedent on a transient element</em>.
+</p>
+
+<h2>Finding 3 — an open <code>addEventListener</code> sniff is an already-rejected gate shape</h2>
+<p>
+  One way to enforce a "delegate, don't bind directly" rule is a lint flagging <code>addEventListener</code> on
+  a chip selector. The platform has <strong>already ruled on exactly this</strong>: the
+  <code>compose-dont-handroll</code> rule (#933) declares open-ended <code>addEventListener</code> sniffing a
+  <strong>"false-positive factory"</strong> and mandates a <strong>curated, selector-scoped deny-list</strong>
+  (warn-first → ERROR) instead — with a working precedent in <code>COMPOSE_DENY_LIST</code>. So a gate here is
+  feasible only as a curated list keyed to the <em>known</em> chip selectors; it cannot generalise to "a
+  listener bound to any self-replacing element" without becoming the rejected open sniff.
+</p>
+
+<h2>Finding 4 (decisive) — "which side owns the fix" is a false dichotomy</h2>
+<p>
+  The original framing — <em>does WE carry a consumer rule (Fork A) or does FUI guarantee a stable surface
+  (Fork B)</em> — collapses under the standing test. <strong>WE codifies a consumer rule either way</strong>
+  (WE holds zero implementation, so even under Fork B it "only consumes and codifies the consumer-facing
+  contract"), and a FUI event would be <strong>additive, not exclusive</strong> — native <code>click</code>
+  still bubbles to the same delegated ancestor, so an event <em>supplements</em> delegation rather than
+  replacing it. The decision therefore decomposes into:
+</p>
+<ul>
+  <li>
+    <strong>A forced invariant (codify, not a fork):</strong> the WE consumer contract — delegate on a stable
+    ancestor, never cache the transient node, read <code>data-*</code>/<code>aria-pressed</code> (which survive
+    the upgrade). The only alternative (bind directly to the chip) <em>is</em> the shipped regression. This fix
+    already shipped in <code>backlog-table-sort.js</code> and is netted by a deterministic mock-chip Playwright
+    lane.
+  </li>
+  <li>
+    <strong>Fork 1 — enforcement:</strong> default <em>interaction-test lane only</em> (no source gate), since
+    #933 bans the open sniff and the lane catches the real regression; the alternative is a #933-shaped curated
+    deny-list.
+  </li>
+  <li>
+    <strong>Fork 2 — should FUI additionally ship a stable <code>chip-change</code> event?</strong> default
+    <em>no, not now</em>: delegation works today, a <code>chip-change</code> event <strong>double-fires with
+    native <code>click</code></strong>, and it adds a permanent API to a control whose transient family was
+    chosen to lean on native events kept. Un-gate trigger: a consumer that genuinely cannot delegate (e.g. a
+    framework/non-DOM binding).
+  </li>
+</ul>
+<p>
+  Citation-scope correction surfaced by the skeptic pass: the transient-mechanism ruling (#1381) governs
+  <em>mechanism-selection</em> (transient vs persistent vs shadow), <strong>not</strong> event-API design — its
+  "native events are kept" clause argues <em>for</em> delegating on native <code>click</code>, the opposite of
+  what an early draft cited it for.
+</p>
+{% endraw %}

@@ -1,0 +1,23 @@
+{
+  "id": "declarative-custom-state-surface",
+  "title": "Declarative custom-state surface — how a <component> declares & toggles ElementInternals.states for :state() styling",
+  "status": "open",
+  "summary": "Prior-art survey grounding decision #1807 (surfaced by #1794). FUI's declarative <component> (fui:blocks/renderers/component/declarativeComponent.ts) already lowers two ElementInternals members declaratively — form-associated -> static formAssociated + attachInternals() (line 33,161,168) and the default-aria-* surface (#853), a parsed-validated-against-allow-list, sorted-for-determinism map-through (lines 56-65,95-96,111,171-178). The natural next member is custom states (internals.states / CustomStateSet) so a class-bodyless component exposes internal state that page CSS styles with the native :state(...) pseudo-class. internals.states is currently UNUSED in FUI (grep finds only the unrelated workflow-engine state MACHINE config and LifecycleProvider). The open call is the authoring SHAPE, split into two genuine forks. Fork 1 (declaration syntax): a single space-separated allow-list attribute states=\"open active loading\" declaring the custom-state vocabulary, parsed/validated/sorted exactly like default-aria-* (default, high confidence) vs a repeated state-* boolean family (bloats the surface for a flat list) vs no declaration / infer-from-CSS (loses author-time validation parity, accepts typo'd state names). Fork 2 (toggle mechanism): expose the attached internals as the imperative escape hatch (this.internals.states.add('open')) as the floor — custom states are NOT browser-managed, so toggling is inherently imperative (MDN) — and defer declarative reactivity to the ALREADY-SHIPPED webexpressions binding layer ({{ }}/[[ ]], fui:blocks/parsers/*), NOT a bespoke state-when predicate DSL (a parallel reactive engine; bias-to-reuse) (default, med-high). Key grounding: resize/shift on AutoComplete are public CONFIG not state (observedAttributes + public getters/setters, fui:blocks/droplist/AutoComplete.ts:54,409-423) so CustomStateSet must not replace them; open/expanded is delegated to Anchored via aria-expanded (line 7,40,118); the runtime twin defineFromDefinition (line 212-250) already lags the emitter on default-aria (impl gap to wire on adoption). No intent owns component-state vocabulary (disclosure.json's defaultState is an intent dimension, not the generic surface); :state()/CustomStateSet is an assumed Baseline-2024 primitive (we:docs/agent/platform-decisions.md#native-first-baseline, line 793). This is a block/impl ergonomics surface, not a new intent — no shared-registry mint needed. Full grounding in reports/2026-06-27-declarative-custom-state-surface.md.",
+  "dateOpened": "2026-06-27",
+  "lastReviewed": "2026-06-27",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "custom-state-set",
+    "states",
+    "element-internals",
+    "css-state-pseudo-class",
+    "declarative-component",
+    "native-first",
+    "candidate-standard"
+  ],
+  "relatedBlocks": [
+    "component"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

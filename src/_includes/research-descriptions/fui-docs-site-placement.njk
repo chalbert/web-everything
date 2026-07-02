@@ -1,0 +1,80 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/2053-does-the-fui-docs-website-surface-belong-split-from-the-fui-/">#2053</a>,
+  the Frontier UI parallel to
+  <a href="/backlog/2006-differentiate-we-the-standard-from-we-the-website-app-make-t/">#2006</a> (which split
+  the WE-standard from the WE-website product). Frontier UI intermingles a docs-site render with the
+  reference-implementation library it documents: <code>fui:.eleventy.js</code> (Eleventy, input
+  <code>fui:src/</code> &rarr; output <code>fui:_site/</code>), <code>fui:src/*.njk</code> pages
+  (index / blocks / plugs / adapters / traits / demos / about), <code>fui:src/_data/*.js</code> loaders, and
+  <code>fui:src/_layouts/base.njk</code>. <strong>Open question:</strong> is that docs-site a product surface
+  that should be extracted to its own product-tier home (mirroring #2006 Fork&nbsp;1a), or is it legitimately
+  co-located with the library it documents?
+</p>
+
+<h2>Why #2006 does not simply transfer</h2>
+<p>
+  #2006's driver was constellation rule&nbsp;1's <strong>zero-implementation</strong> invariant
+  (<a href="/governance/">platform-decisions.md</a> lines&nbsp;70&ndash;74: "WE holds zero implementation").
+  WE's 11ty&nbsp;+&nbsp;Vite render was therefore <em>mis-homed delivery runtime</em> in a repo forbidden to
+  host any. <strong>Frontier UI is the implementation tier and legitimately holds runtime</strong> &mdash; so
+  that driver does not reach it. The distinguishing test here is <strong>product-vs-render</strong>, not
+  impl-vs-contract: a render/showcase of the library is fine where the library lives; only an independent
+  <em>product</em> would need its own home.
+</p>
+
+<h2>What the FUI docs-site actually is (read from the tree)</h2>
+<p>
+  A <strong>dogfood reference-showcase of the library</strong>, not an independent client product. Its
+  <code>_data</code> loaders read the library's <em>own</em> catalog &mdash; <code>fui:src/_data/demos.js</code>
+  scans repo-root <code>fui:demos/*.html</code>; <code>fui:src/_data/blocks.json</code>,
+  <code>fui:src/_data/plugs.json</code> and <code>fui:src/_data/traits.json</code> mirror the
+  block / plug / adapter catalog &mdash; and it links runnable demos out to the library's own Vite origin
+  (<code>site.demosUrl</code>, dev port&nbsp;6002). <code>fui:index.njk</code> is a docs-home, not a product
+  surface. Contrast the WE website's genuine product client-features (backlog board, burndown, graph, the
+  #184 marketing landing). (Note: <code>fui:webdocs/</code> is a docs <em>toolchain</em> of Mintlify/Storybook
+  export adapters, and <code>fui:vite.config.mts</code> builds the <em>demos</em> bundle &mdash; neither is the
+  docs-site surface in question.)
+</p>
+
+<h2>What the prior-art survey found</h2>
+<p>
+  #2006's predictive discriminator was <strong>pure-render-of-the-thing (co-locate) vs
+  product-with-its-own-features (separate repo)</strong>. Re-run against the <em>right</em> peer set &mdash; UI
+  component / implementation libraries, not standards bodies or frameworks &mdash; the dominant pattern
+  <strong>inverts</strong> #2006's answer:
+</p>
+<ol>
+  <li>
+    <strong>Component libraries overwhelmingly co-locate their docs-site in the library's own repo/monorepo</strong>,
+    because the docs are a live dogfood showcase importing the components. The strongest precedent for FUI is
+    <strong>Shoelace / Web&nbsp;Awesome</strong> &mdash; a web-components library whose docs site is an
+    <strong>Eleventy</strong> site living in the same repo, rendering its own custom elements (an exact
+    structural match to FUI). Also Material&nbsp;Web, Adobe React&nbsp;Spectrum, MUI, Chakra, Mantine,
+    Ant&nbsp;Design, Carbon, Fluent.
+  </li>
+  <li>
+    <strong>The separate-repo camp</strong> (React, Vue, Tailwind, TypeScript, JSON&nbsp;Schema) &mdash; the
+    same camp #2006 leaned on &mdash; is <em>framework/standard-scale</em> docs that are large marketing +
+    reference <strong>products</strong>. That is the shape that argues for extraction, and the shape FUI's
+    docs-site is not. (A minority of component libraries, e.g. Radix's separate website repo, also split
+    &mdash; typically once the site grows a substantial marketing product.)
+  </li>
+</ol>
+<p>
+  The discriminator therefore predicts <strong>co-location for FUI</strong>: its docs-site is a pure
+  reference-showcase of the library (catalog&nbsp;+&nbsp;demos, no independent product features), matching the
+  component-library co-locate camp.
+</p>
+
+<h2>Classification &amp; forks at Definition of Ready</h2>
+<p>
+  Constellation/placement governance, not a new standard &mdash; and it <em>distinguishes</em> #2006 rather
+  than duplicating it. <strong>One fork &mdash; end-state home:</strong> default <strong>(a) co-locate in
+  FUI</strong> (legitimate per both constellation facts and the peer norm); <strong>(b) extract to a
+  product-tier surface</strong> is the coherent-but-not-recommended alternative, reserved for if/when the
+  docs-site grows genuine independent product features. <strong>No interim/classifier fork</strong> (unlike
+  #2006 Fork&nbsp;2): the fail-closed standard-vs-site classifier existed only to protect WE's zero-impl
+  invariant, which FUI lacks. Full grounding in
+  <code>reports/2026-07-01-fui-docs-site-placement.md</code>.
+</p>

@@ -1,0 +1,23 @@
+{
+  "id": "observable-state-registry",
+  "title": "Observable-state registry — the vocabulary and home of webcases' then.observe slot",
+  "status": "open",
+  "summary": "Prep research for decision #1160 (the fork the webcases requirement validator defers, carved from the Cases-Spec slice of #1038). The validator grounds every typed requirement slot HARD against a live registry — role→roster, given.{intent,dimension,value}→intents.json, when.event→semantics.json, then.protocol→protocols.json, then.tier→the fixed L1/L2/L3 vocab — EXCEPT then.observe, which falls through to an `info` finding because protocols.json models no observable states (we:webcases/requirementValidator.ts:115-125). FINDING — the web platform already ships a precise three-source vocabulary for 'an observable state/event of a component', and it draws the very state-vs-event distinction the slot's own doc-comment conflates: (1) WAI-ARIA STATES — aria-expanded, aria-invalid, aria-busy, aria-checked/selected/pressed/current — the accessibility-tree observable states (ARIA itself splits dynamic *states* from static *properties*); (2) CUSTOM STATES via ElementInternals.states / CustomStateSet → the CSS :state(ident) pseudo-class — the native, Baseline-2024 mechanism by which a custom element exposes its own internal states to outside observers; (3) DOM EVENTS — toggle/beforetoggle/change/input/invalid — the discrete-occurrence observables you await rather than read. The case→test bridge (compileRequirement.ts:65 emits `<!-- assert: protocol observe tier -->`) is the one consumer, and it cannot execute the assertion without knowing whether to READ a state or AWAIT an event — so the registry's entries must carry a `kind`. STRUCTURE — the `given` side already resolves nested (intent→dimension→value at requirementValidator.ts:91-101), never as a flat global values.json; the symmetric `then` side (protocol→observable) co-locates the observable vocabulary ON the protocol record by the same precedent, and the validation protocol summary ALREADY narrates 'Observable states/events per level' in prose (src/_data/protocols/validation.json) — the formalization just types what the protocol already claims. Three prepared forks, each with a bold default: Fork 1 HOME = co-locate on the protocol record (vs a standalone observables.json — the flawed branch: a second source of truth + a flat global namespace where 'expanded' collides across protocols); Fork 2 GRAMMAR = typed `{ id, kind: 'state'|'event', platform? }` (vs a flat string list that starves the bridge of the read-vs-await signal); Fork 3 ROLLOUT = progressive grounding, hard only where a protocol declares observables and info otherwise (vs a flag-day that breaks every currently-valid requirement until all 33 protocols are annotated). Full grounding in reports/2026-06-20-observable-state-registry.md.",
+  "dateOpened": "2026-06-20",
+  "lastReviewed": "2026-06-20",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webcases",
+    "conformance",
+    "observable-state",
+    "aria",
+    "custom-state",
+    "native-first",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [
+    "webcases"
+  ],
+  "relatedProject": "webcases"
+}

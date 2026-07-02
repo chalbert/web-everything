@@ -1,0 +1,24 @@
+{
+  "id": "button-packaging-runtime-shape",
+  "title": "Button packaging runtime shape — transient self-erasing element vs persistent custom element vs shadow, for a behavior-free native control",
+  "status": "open",
+  "summary": "Prep research for decision #1381 (a consumer refinement of #1321 general block-packaging + #1349 CSS-isolation + #841 tag-naming). #1321 ratified that every block is a uniform custom-element usage surface and deferred the BUTTON's concrete runtime-shape mechanism among three families: (A) TransientElement self-replace → native <button> (wrapper-less), (B) persistent light-DOM custom element owning a real <button>, (C) shadow. The standing test collapses the three concerns to ONE genuine fork: the we-button tag is SETTLED by #841's derive-<prefix>-<id> rule (→ we-button, prefix default we-, fui- excluded); the block-model conversion program (5/75 blocks are elements today) is PRIORITIZATION not a fork (#1321 already ruled the end-state) → carve a separately-prioritized epic carrying a per-block mechanism-selection guideline; and the S1(light-DOM)-vs-S2(shadow) axis is ALREADY support-both/default-S1 per #1349, so C is the #1349 S2 opt-in, not a fresh fork. The real residual is A-vs-B WITHIN the default S1 strategy. Grounding (code): fui:blocks/transient/TransientElement.ts is the real one-shot self-replace (connectedCallback creates the native tag, transfers attributes/children, queueMicrotask replaceWith, #replaced guard) — already shipping for auto-heading via registerTransient(tag='we-transient-component'); fui:blocks/button/Button.ts is today a factory hanging fui-button GLOBAL classes on a native button/<a> with ZERO custom element (the #1321-rejected no-element global-CSS shape, ships no tag pending #841). #1321's behavior inventory (we:backlog/1321:309-373) found NO single-button case needs an element: variant is CSS, busy/toggle/async/icon are CustomAttributes on the native button, command/commandfor+popovertarget made dialog/menu triggering native (Baseline Dec 2025), composites are separate blocks. So transient's post-render-reactivity limit only bites a framework-bound/property-set consumer (the polyglot-adapter #463 case = B's legitimate home); variant reactivity is CSS over the surviving button's [variant] and works fine. Isolation: A carries #1349 S1 (L2 transform keys a unique class on the emitted native button) but NOT S2 (no persistent host for a shadow) — so selecting S2 forces a persistent element (C). Clean mapping: A = S1/native-first floor; C = S2 opt-in; B = persistent-light middle for reactive consumers. Web survey (June 2026) adds the new angle the priors didn't survey: external consensus says 'web components are not recommended for small UI like buttons — that's design-system CSS; WC's strength is sharing behavior' (Ottaviani) and the native <button> is the clear winner for an interactive control (web.dev) — both vote transient(A) for a behavior-free button; shadcn ships the byte-identical native-<button>+computed-class shape; the light-DOM-only WC movement (Frontend Masters, Chromamine, Cloud Four) validates B as a coherent end-state; light-to-shadow swapping (Scott Jehl) mirrors the A-floor/C-opt-in layering. Recommendation: Fork 1 → A transient (~75%, residual = if the framework-binding consumer is primary, B becomes the better default); we-button confirmed; conversion carved as an epic. Full grounding in reports/2026-06-21-1381-button-packaging-mechanism.md.",
+  "dateOpened": "2026-06-21",
+  "lastReviewed": "2026-06-21",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "packaging",
+    "custom-elements",
+    "transient-element",
+    "light-dom",
+    "shadow-dom",
+    "native-first",
+    "button",
+    "web-components",
+    "frontierui",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

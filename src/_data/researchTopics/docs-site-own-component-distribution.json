@@ -1,0 +1,24 @@
+{
+  "id": "docs-site-own-component-distribution",
+  "title": "How a docs site loads + registers its OWN design-system custom elements in production — bundle vs cross-origin ESM vs defer",
+  "status": "open",
+  "summary": "Surveys how real design-system docs/marketing sites load and register their own web components (custom elements) in production when the components live in a separate package/repo, to ground #1748 (the WE Eleventy docs site loading FUI `<we-badge>`/`<we-filter-chip>` transient elements). Three candidate strategies: (a) BUNDLE a pinned component package into the site's own assets at build time; (b) CROSS-ORIGIN import the registration ESM from a served component origin/CDN at runtime; (c) DEFER with inline markup until a published package exists. Prior art (Material Web, Adobe Spectrum, Microsoft FAST/Fluent, Shoelace/Web Awesome, GitHub Catalyst, Salesforce LWC, several gov design systems) converges on (a) bundle-a-pinned-tree-shaken-package as the PRODUCTION norm, with `:not(:defined)` / SSR baseline to kill the upgrade flash (FOUCE); cross-origin/CDN ESM (b) is universally positioned as the prototyping/getting-started tier (version-pin + SRI + a second-origin runtime cost), with FAST/Fluent's 'pin-and-self-host the CDN bundle' the one production-leaning variant that collapses back toward (a); (c) defer has no real-world end-state precedent — only a transitional stand-in before a package exists. CRITICAL WE-specific wrinkle that inverts the generic norm: the WE↔FUI constellation boundary (`docs/agent/platform-decisions.md` we-fui-embed-boundary rule 6) names a build-time `import '@frontierui'` into WE's build as THE ONLY thing that violates the boundary (#700/#239), so option (a) bundle is boundary-ILLEGAL for WE; and rule 7 (#1621) already ratifies the cross-origin-import transient-CE model BY NAME for many-small server-rendered pills, with a served FUI origin already in production use (base.njk cross-origin-imports https://frontierui.dev/embed/in-document.ts for the #865 chrome shell). So for WE specifically the generic 'bundle wins' answer is overridden by the constellation rule: cross-origin import (b) from the existing FUI origin is the ratified + boundary-legal path, needing only a small FUI-served registration entry (mirroring embed/in-document.ts), not the #872/#907 npm publish.",
+  "dateOpened": "2026-06-24",
+  "lastReviewed": "2026-06-24",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "custom-elements",
+    "component-distribution",
+    "cross-origin",
+    "cdn-esm",
+    "bundling",
+    "fouce",
+    "docs-site",
+    "constellation-boundary",
+    "transient-element",
+    "we-fui-embed"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

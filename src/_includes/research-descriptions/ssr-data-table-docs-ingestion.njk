@@ -1,0 +1,157 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Surfaced building <a href="/backlog/1787-fui-data-table-transient-ce-embed-entry-we-data-table-ssr-ba/">#1787</a>
+  (the data-table transient-CE embed entry — foundation of the
+  <a href="/backlog/1600-migrate-static-table-surfaces-to-the-we-data-table-block/">#1600</a>
+  table&nbsp;&rarr;&nbsp;data-table migration family #1609–#1613). The transient-CE/SSR docs pattern
+  (badge <a href="/backlog/1758-fui-badge-transient-ce-embed-entry/">#1758</a>, code-view
+  <a href="/backlog/1785-fui-code-view-transient-ce-embed-entry/">#1785</a>) hydrates an element from its
+  <strong>light DOM</strong> with no per-element JS. But <code>&lt;we-data-table&gt;</code> ingests
+  <strong>only via JS properties</strong> <code>.rows</code> / <code>.config</code> — by design — and the
+  config is <strong>function-valued</strong>, so it serializes to neither an SSR <code>&lt;table&gt;</code>
+  nor a JSON attribute. <strong>How does a server-rendered docs table acquire its rows/columns, and what
+  declarative subset of the function-valued contract does the docs path expose?</strong>
+</p>
+
+<h2>What ships today — JS-property-only, function-valued, by deliberate design</h2>
+<ul>
+  <li><code>fui:blocks/renderers/data-table/DataTableBehavior.ts:78-80</code> states it verbatim:
+    <em>"Config carries call-site predicates/comparators, so it is a JS property, not an attribute."</em></li>
+  <li><code>DataTableModule</code> (<code>fui:blocks/renderers/data-table/DataTableBehavior.ts:82-100</code>)
+    exposes only <code>set rows</code> / <code>set config</code>
+    (<code>:87-90</code>) — <strong>no</strong> light-DOM read, <strong>no</strong>
+    <code>&lt;script&gt;</code> parse, <strong>no</strong> attribute-JSON, <strong>no</strong> table-parse
+    path exists (confirmed absent 2026-06-27).</li>
+  <li>The config is genuinely unserializable: <code>Column.format: (value,row)=&gt;string|Node</code>
+    (<code>fui:blocks/renderers/data-table/renderDataTable.ts:49</code>),
+    <code>FilterPredicate.test: (row)=&gt;boolean</code> (<code>:63-68</code>,
+    "the predicate itself is call-site data"), and <code>SortKey</code> mirrors
+    <code>Intl.Collator</code> option names and is materialized into a real <code>Intl.Collator</code>
+    (<code>:52-61</code>, <code>:106-114</code>). None of these cross a DOM/JSON boundary.</li>
+</ul>
+
+<h2>Prior art — SSR <code>&lt;table&gt;</code> + progressive enhancement is the dominant pattern; a JSON twin is the minority</h2>
+<we-data-table>
+<table class="data-table">
+  <thead>
+    <tr><th>System / standard</th><th>How it feeds declarative tabular data</th><th>Bearing on the call</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>WHATWG HTML §4.12.1 / MDN <code>&lt;script type="application/json"&gt;</code></td>
+      <td>A <code>&lt;script&gt;</code> with a non-JS <code>type</code> is an inert <strong>data block</strong> — not executed, content read via <code>.textContent</code> (same class as importmap / JSON-LD).</td>
+      <td>The spec-backed home for an inert structured payload is a typed <code>&lt;script&gt;</code> child, not a <code>data-*</code> attribute.</td>
+    </tr>
+    <tr>
+      <td>IBM Carbon <code>DataTable</code>, Adobe Spectrum <code>TableView</code> (SSR)</td>
+      <td>Render a real semantic <code>&lt;table&gt;</code> server-side; enhance it in place.</td>
+      <td>The accessible/crawlable table is the baseline universally — adopt it for every docs table.</td>
+    </tr>
+    <tr>
+      <td>Shoelace</td>
+      <td>Ships no native data-grid; defers tabular data to a plain <code>&lt;table&gt;</code>.</td>
+      <td>"Just the table" is a legitimate end-state for non-interactive content.</td>
+    </tr>
+    <tr>
+      <td>AG&nbsp;Grid (SSR) / TanStack&nbsp;Table</td>
+      <td>Hydrate from a server table or a <strong>serialized typed model</strong> passed at hydration; sort/filter run on typed source values, not on rendered cell text.</td>
+      <td>Interactivity needs a typed source — rendered <code>&lt;td&gt;</code> text is lossy for sort keys.</td>
+    </tr>
+    <tr>
+      <td>Lit&nbsp;SSR / Declarative Shadow DOM</td>
+      <td>Carry hydration state alongside the SSR markup, not re-derived from presentation DOM.</td>
+      <td>Re-deriving structured data from presentation DOM inverts the data&rarr;DOM direction.</td>
+    </tr>
+  </tbody>
+</table>
+</we-data-table>
+
+<h2>Why function-valued config can't serialize</h2>
+<p>
+  Attributes and DOM carry <em>strings</em> and <em>nodes</em>; <code>format</code> / comparators /
+  predicates are <em>closures</em> bound to call-site data. They cannot be expressed as an attribute, a
+  <code>data-*</code> value, or a JSON literal — JSON has no function type. So any declarative path must
+  <strong>drop</strong> the function-valued tier, not try to carry it: the docs subset is rows + plain
+  column defs (<code>field</code>/<code>label</code>/<code>sortable</code>/<code>type</code>), and
+  <code>format</code>/comparators/predicates stay on the programmatic <code>.config</code> path used by
+  apps. This is consistent with the renderer's own split — sorting/filtering already run on
+  <strong>raw typed</strong> <code>field</code> values, and <code>format</code> is presentation-only
+  (<code>fui:blocks/renderers/data-table/renderDataTable.ts:49</code>).
+</p>
+
+<h2>Recommendation — a two-tier, interactivity-gated ingestion path</h2>
+<ul>
+  <li><strong>Non-interactive docs table (the common case):</strong> server emits a plain semantic
+    <code>&lt;table&gt;</code> and the element <strong>does not upgrade at all</strong> — no JSON twin, no
+    JS. The accessible/crawlable table is the single source of truth.</li>
+  <li><strong>Interactive docs table (sort/filter):</strong> the element upgrades from a typed
+    <code>&lt;script type="application/json"&gt;</code> child (rows + plain column defs) layered over the
+    same <code>&lt;table&gt;</code> as the no-JS / no-FOUC baseline; function-valued options are absent
+    from the declarative subset.</li>
+</ul>
+<p>
+  <strong>Rejected — parse the SSR <code>&lt;table&gt;</code> light DOM (option B) as the default.</strong>
+  Single-source and zero-payload, genuinely attractive, but <em>merit-lossy in a correctness-affecting
+  way</em>: the renderer sorts/filters/groups on raw typed <code>field</code> values
+  (<code>Cell = string | number | null</code>;
+  <code>fui:blocks/renderers/data-table/renderDataTable.ts:33</code>), and <code>numeric</code> natural
+  order, date order, and per-column <code>sortable</code> flags <strong>cannot be recovered from rendered
+  <code>&lt;td&gt;</code> text</strong>. B would silently produce wrong sort order on any numeric/date
+  column and inverts the renderer's data&rarr;DOM direction.
+</p>
+<p>
+  <strong>Rejected — <code>data-*</code> attribute JSON (option C).</strong> Same payload as the
+  <code>&lt;script&gt;</code> island with worse escaping/size for large tables and no benefit; the
+  spec-backed home for an inert data block is a non-JS-typed <code>&lt;script&gt;</code> child.
+</p>
+
+<h2>Web-standards alignment</h2>
+<ul>
+  <li><strong>HTML data-block</strong> (<code>&lt;script type="application/json"&gt;</code>) — inert,
+    escape-safe with the one <code>&lt;\/script&gt;</code> footgun handled at emit time (same discipline
+    as JSON-LD).</li>
+  <li><strong>Progressive enhancement</strong> — the real <code>&lt;table&gt;</code> is the a11y / SEO /
+    no-JS / no-FOUC baseline; upgrade is additive and only where interactivity needs it.</li>
+  <li><strong>Native-first</strong> — for static content the native <code>&lt;table&gt;</code> alone is
+    the end-state; no custom element is mandated.</li>
+</ul>
+
+<h2>Classification (per-fork)</h2>
+<ul>
+  <li><strong>Layer:</strong> a <em>block</em> ingestion mechanism (runnable FUI code), not an intent
+    dimension or a protocol — no swappable-vendor interop story, so not a protocol.</li>
+  <li><strong>Fixed mechanic vs dimension:</strong> the <em>baseline</em> is a fixed mechanic (always ship
+    the <code>&lt;table&gt;</code>); the <em>upgrade</em> is gated on a single legitimate axis
+    (interactive vs not) — a dimension whose default is "do not upgrade" (most-permissive: the static page
+    works with zero JS).</li>
+  <li><strong>DI-injectable:</strong> n/a — ingestion is structural to the element, not a behavioral DI knob.</li>
+  <li><strong>Seam:</strong> sits at the WE-docs &rarr; FUI-block embed boundary (the #866/#777 dogfood
+    seam), consuming the FUI block contract via the transient-CE embed entry (#1787).</li>
+  <li><strong>Intent ownership:</strong> no WE intent owns "data table" vocabulary; the nearest semantic
+    owner is <code>collection-operations</code> (filter/sort/group/page, status concept) with
+    <code>selection</code> orthogonal. The renderer is FUI-owned; <strong>no shared-registry edit is
+    needed</strong> for this decision.</li>
+</ul>
+
+<h2>Skeptic pass</h2>
+<p>
+  A refute-only sub-agent attacked the original "always ship a JSON island + <code>&lt;table&gt;</code>"
+  default: shipping the rows twice (DOM + JSON) is unforced duplication, two sources of truth that drift,
+  and for static docs the JSON copy carries nothing the table doesn't. <strong>Verdict:
+  SURVIVES-WITH-AMENDMENT.</strong> The attack was correct for the static case and drove the "don't upgrade
+  non-interactive tables at all" amendment (so there is no twin); its call to flip wholesale to option&nbsp;B
+  was rejected because B cannot recover typed sort keys — a correctness loss the skeptic under-weighted by
+  assuming docs tables are strings-only (true for display, false for sort order).
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Decision: <a href="/backlog/1818-how-a-server-rendered-we-data-table-ingests-rows-columns-for/">#1818</a>
+    (this topic prepares it) — blocks
+    <a href="/backlog/1787-fui-data-table-transient-ce-embed-entry-we-data-table-ssr-ba/">#1787</a>.</li>
+  <li>Migration family: #1600 / #1609 / #1610 / #1611 / #1612 / #1613.</li>
+  <li>Pattern siblings: badge #1758, code-view #1785.</li>
+  <li>Full grounding in <code>reports/2026-06-27-ssr-data-table-docs-ingestion.md</code>.</li>
+</ul>
+{% endraw %}

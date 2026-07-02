@@ -1,0 +1,63 @@
+<h3>The Question</h3>
+<p>
+    Web Everything ships a handful of <a href="/projects/webdirectives/">webdirectives</a> — markup-level
+    constructs that operate on a <strong>region</strong> (a comment-anchor-bounded span,
+    <code>&lt;!-- ns:name --&gt;…&lt;!-- /ns:name --&gt;</code>) or on the <strong>tree-shape / position</strong>,
+    governing <em>whether · how-many · where · when · in-what-form</em> content exists. The frameworks ship far
+    more. This survey catalogues <strong>every</strong> composition capability the field offers (~90 deduped
+    across 16 categories) so the strongest net-new candidates can be admitted deliberately rather than coined
+    ad-hoc — each judged at the <a href="/backlog/1963-composition-rubric-re-judged-to-framework-parity-strict-per-/">#1963</a>
+    framework-parity bar and pinned to the web-platform substrate it must deprecate and migrate toward.
+</p>
+
+<h3>The directive test (the filter)</h3>
+<p>
+    A <em>directive</em> acts <strong>before / around</strong> element connection, or on <strong>structure</strong>,
+    where a behavior cannot. It is <strong>not</strong> a <em>behavior</em> (a <code>CustomAttribute</code> that
+    decorates a <em>connected</em> element — it attaches <em>after</em> its element connects, so it can't gate
+    <em>whether</em> an element connects or <em>how many times</em>) and <strong>not</strong> a
+    <em>component / block</em> (a styled, named, instantiable thing). Directives stay legitimate while they govern
+    <strong>tree-shape</strong> (existence, iteration, position, timing, projection) and drift into
+    <strong>app-logic-in-markup</strong> when they start <em>computing</em> (sort, filter, paginate, format,
+    arithmetic) — each catalogued capability is tagged 🟢 tree-shape · 🟡 borderline · 🔴 computation-leaning.
+</p>
+
+<h3>The form axis (the authoring vehicle)</h3>
+<p>
+    A directive's <em>form</em> follows from its relationship to its body, it is not free choice:
+</p>
+<ul>
+    <li><strong>Ⓒ Comment-anchor</strong> — the bounded content is <strong>live, renders as-is</strong>; the
+        directive controls its presence / count / position (<code>if</code>, <code>for-each</code>,
+        <code>switch</code>, an error boundary's <em>guarded</em> region).</li>
+    <li><strong>Ⓣ Template element</strong> (<code>&lt;template is="ns:name"&gt;</code>) — the content must be
+        <strong>inert until stamped</strong> (deferred, branch-selected, defined-for-reuse, projected, or
+        held-then-transformed); <code>&lt;template&gt;</code>'s native inertness <em>is</em> the mechanism
+        (<code>portal</code>, async branches, snippet:define, fallbacks, sanitize).</li>
+    <li><strong>Ⓐ Structural-annotation</strong> — <strong>no body of its own</strong>; it adds to the structure
+        without modifying the DOM (context, scope, feature-flag, metadata).</li>
+</ul>
+
+<h3>The strongest net-new candidates (child admission gates of #1975)</h3>
+<ol>
+    <li><strong>Async region</strong> (<a href="/backlog/1976-directive-proposal-async-region-await-then-catch-suspense-fa/">#1976</a>) —
+        await / then / catch + suspense fallback; substrate DOM Parts <code>ChildNodePart</code>. Ⓣ.</li>
+    <li><strong>Error boundary</strong> (<a href="/backlog/1978-directive-proposal-error-boundary-catch-render-error-in-a-re/">#1978</a>) —
+        catch render error in a region → fallback. <strong>No native analog</strong> — a plug. Ⓒ guarded + Ⓣ fallback.</li>
+    <li><strong>Virtualized iteration</strong> (<a href="/backlog/1979-directive-proposal-virtualized-iteration-windowed-list-conte/">#1979</a>) —
+        windowed list; substrate <code>content-visibility</code> + <code>IntersectionObserver</code>; extends
+        <code>ForEach</code> rather than minting a directive. Ⓒ.</li>
+    <li><strong>Snippet + render</strong> (<a href="/backlog/1980-directive-proposal-snippet-render-named-parameterized-reusab/">#1980</a>) —
+        named parameterized reusable markup block; maps onto the Template Instantiation proposal. Ⓣ.</li>
+    <li><strong>Content-security zones</strong> (<a href="/backlog/1981-directive-proposal-content-security-zones-trusted-html-sanit/">#1981</a>) —
+        <code>trusted:html</code> / <code>sanitize:content</code>; substrate the native Sanitizer API + Trusted Types. Ⓣ.</li>
+</ol>
+
+<h3>Where it grounds</h3>
+<p>
+    The full categorized catalogue (16 categories, framework prior-art per row, each tagged built/proposed/net-new
+    and placed on the tree-shape↔computation line) lives in the linked report. It feeds the
+    <a href="/backlog/1975-directive-catalog-net-new-directive-proposals-neither-behavi/">#1975</a> directive-catalog
+    epic and is the shared prior-art survey behind each child admission gate, so those gates ratify against a
+    surveyed field rather than re-researching cold.
+</p>

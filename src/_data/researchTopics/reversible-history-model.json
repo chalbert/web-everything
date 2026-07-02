@@ -1,0 +1,26 @@
+{
+  "id": "reversible-history-model",
+  "title": "Reversible Mutation History (Undo / Redo)",
+  "status": "open",
+  "summary": "Surveying the undo/redo model — a navigable past/present/future cursor over invertible operations, with transaction grouping/coalescing and scope — across the native platform (the editable-surface historyUndo/historyRedo InputEvent signal; the removed HTML5 UndoManager / DOM Transaction proposal and its no-traction Undo API successor, confirming no general native undo stack) and the incumbent editor + state libraries (ProseMirror/CodeMirror/Lexical/Quill history, Yjs Y.UndoManager, redux-undo, Immer/Mutative inverse patches). Key finding: the reversible-operation contract is NOT greenfield — Web States' Change Tracking Protocol already ships the Change Record / Change Patch (JSON Patch + inverse oldValue), the CustomChangeStrategy.applyInverse primitive, per-scope strategy registry, and a change-reverted event. Undo/redo is the navigable history cursor layered on that primitive, homed in Web States — not a new intent, command extension, or simple-store binding. Shares the inverse-op primitive (not the stack) with optimistic mutation (#1395).",
+  "dateOpened": "2026-06-21",
+  "tags": [
+    "undo",
+    "redo",
+    "history",
+    "command-pattern",
+    "reversibility",
+    "change-tracking",
+    "json-patch",
+    "input-events",
+    "webstates",
+    "verb-axis"
+  ],
+  "relatedBlocks": [
+    "simple-store",
+    "draft-persistence",
+    "audit-trail"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webstates"
+}
