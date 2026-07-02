@@ -1,0 +1,12 @@
+{
+  "id": "webtheme-conformance-demo",
+  "name": "Web Theme Conformance Demo",
+  "summary": "The runnable proof that the Web Theme token-resolution standard is conformant. The runtime (resolveTokens + compileToCss) is relocated to Frontier UI (#1907, WE holds zero executable); its conformance runs through the plateau-hosted conformance runner (#1788 (b)) driving the WE-owned webtheme vector suite (#1908: a DTCG document in, the resolved token map out) against the FUI binding. webtheme is non-verdict — the observable is the resolved token map, judged by deep-equal (#1816). The pass/fail panel is rendered at plateau-origin inside a cross-origin iframe.",
+  "kind": "playground",
+  "description": "<h2>Concept</h2><p>The runnable proof that the Web Theme token-resolution standard is <strong>conformant</strong>. The runtime — the <code>resolveTokens</code> DTCG walk and <code>compileToCss</code> projection — is <strong>relocated to Frontier UI</strong> (<a href=\"/backlog/1907-relocate-the-webtheme-resolution-compile-runtime-to-fui/\">#1907</a>; WE holds zero executable, #1282). Its conformance runs through the <strong>plateau-hosted conformance runner</strong> (<a href=\"/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/\">#1788</a> ratified (b)), driving the WE webtheme vector suite (<a href=\"/backlog/1908-webtheme-conformance-binding-deep-equal-on-resolvetokens-we-/\">#1908</a>) against the FUI binding.</p><h3>Verified contract</h3><p>webtheme is a <strong>non-verdict</strong> standard: the conformance subject is the <strong>resolved token map</strong> that <code>resolveTokens</code> projects a DTCG document onto, judged by the <code>deep-equal</code> matcher (<a href=\"/backlog/1816-conformance-model-for-non-facts-verdict-relocated-runtimes/\">#1816</a>) — never the compiled CSS string. WE owns only the build-agnostic vectors and the <code>@webeverything/contracts/webtheme</code> schema; the engine impl is FUI's, the runner is plateau's. The pass/fail panel is rendered <strong>at plateau-origin inside an iframe</strong> — the cross-origin boundary (#1788 ratified (b)) reaching the shared, neutral runner with no implementer&rarr;runner edge. A green result proves conformance independent of how resolution is built (#899).</p>",
+  "status": "draft",
+  "liveUrl": "http://localhost:3000/demos/webtheme-conformance-demo.html",
+  "projects": [
+    "webtheme"
+  ]
+}
