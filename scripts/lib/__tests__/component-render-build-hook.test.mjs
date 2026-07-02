@@ -183,6 +183,28 @@ describe('renderProjectGrid — home/index grid render-from-data (#2019)', () =>
     // The anti-pattern: an <a …> that itself carries the .project-card class (i.e. wraps the tile).
     expect(html).not.toMatch(/<a [^>]*class="project-card"/);
   });
+  it('splices the description verbatim — pre-escaped code examples survive, never decoded to a live tag (#2168)', () => {
+    // A runner that echoes the card body sentinel (mimicking the FUI shell) so the splice path is exercised.
+    // A description mixes render-me markup (<strong>) with a PRE-ESCAPED code example (&lt;template&gt;). The
+    // harness `html:` innerHTML round-trip would DECODE the entity into a live <template> that swallows the
+    // page (home rendered only 1 of 3 grids); the sentinel-splice injects it verbatim so the escaping holds.
+    const echoBody = (_c, _a, opts) => JSON.stringify({
+      producer: EXPECTED_PRODUCER,
+      results: JSON.parse(opts.input).map((e) => {
+        const desc = (e.config && e.config.bodyParts || []).find((p) => p.className === 'project-desc');
+        return { key: e.key, html: `<article class="fui-card"><p class="project-desc">${desc ? desc.html : ''}</p></article>` };
+      }),
+    });
+    const html = renderProjectGrid(
+      [{ id: 'r', name: 'R', status: 'concept', isSvg: false, icon: 'A',
+        description: 'authored: &lt;template route="/u"&gt; and <strong>bold</strong>' }],
+      { repoRoot: stubRoot, hrefFor: (p) => `/p/${p.id}/` }, echoBody,
+    );
+    expect(html).toContain('authored: &lt;template route="/u"&gt;'); // stays escaped — no page-swallowing tag
+    expect(html).not.toContain('<template');                        // never decoded to a live element
+    expect(html).toContain('<strong>bold</strong>');                // real markup still renders
+    expect(html).not.toContain('PROJECT_DESC_');                    // sentinel fully replaced
+  });
   it('dispatches a status badge per tile (render-from-data, no markup-as-source)', () => {
     const seen = [];
     const spyRunner = (_c, _a, opts) => {
