@@ -2,6 +2,7 @@
   "id": "webblocks",
   "name": "Web Blocks",
   "description": "Standard protocols for interoperable modules (components, behaviors) ensuring consistent UX and accessibility across libraries.",
+  "summary": "Interoperable module protocols for consistent UX and accessibility across libraries.",
   "status": "draft",
   "category": "utility",
   "tier": "core",

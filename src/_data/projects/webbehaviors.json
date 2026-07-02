@@ -2,6 +2,7 @@
   "id": "webbehaviors",
   "name": "Web Behaviors",
   "description": "Standard to allow custom attributes to add functionality to any HTML element.",
+  "summary": "Custom attributes that attach behavior to any HTML element.",
   "status": "poc",
   "category": "standard",
   "tier": "contextual",

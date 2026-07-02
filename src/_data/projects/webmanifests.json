@@ -2,6 +2,7 @@
   "id": "webmanifests",
   "name": "Web Manifests",
   "description": "Standard for defining project metadata, dependencies, and capabilities in a framework-agnostic way.",
+  "summary": "Framework-agnostic project metadata, dependencies, and capabilities.",
   "status": "concept",
   "category": "utility",
   "tier": "contextual",

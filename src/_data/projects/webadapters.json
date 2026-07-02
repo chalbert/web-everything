@@ -2,6 +2,7 @@
   "id": "webadapters",
   "name": "Web Adapters",
   "description": "Bridges and syntactic sugars connecting external libraries or languages to Web Everything protocols.",
+  "summary": "Bridges connecting external libraries and languages to Web Everything protocols.",
   "status": "draft",
   "category": "utility",
   "tier": "contextual",

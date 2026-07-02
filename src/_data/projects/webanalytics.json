@@ -2,6 +2,7 @@
   "id": "webanalytics",
   "name": "Web Analytics",
   "description": "Standard for vendor-neutral tracking (Identify, Track, Page) using the Segment Spec vocabulary.",
+  "summary": "Vendor-neutral tracking (Identify, Track, Page) built on the Segment Spec vocabulary.",
   "status": "draft",
   "category": "standard",
   "tier": "exploratory",
