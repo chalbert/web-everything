@@ -113,6 +113,13 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    — every tracked path classifies as exactly one of {standard-surface, site-surface}; an unclassified path
    is a hard error, so new site code can never masquerade as standard. The conformance gate/tooling
    (`we:capability-manifest/check.ts`) is **not** part of the website and stays WE regardless.
+   **#2053 bounds the #2006 website extension to the WE repo:** a reference-implementation library's
+   self-showcase docs-site (FUI's Eleventy render, `fui:src/` + `fui:.eleventy.js`) is render-not-product
+   and **co-locates in FUI** — artifact-producing code is what this rule routes *to* FUI, and the
+   [product-frontend](#identity-semantic-look-composable) "WE website" product example does not reach it (the site
+   composes no product) — provided the site surface stays cleanly separated from the library dirs;
+   extraction re-opens only if the site grows genuine independent product features (#2053's reserved
+   trigger, incl. a real abstract-framework/concrete-design-system repo split).
 2. **The file seam is the cut:** `contract.ts` (pure types, compile-erased) → WE; `provider.ts` +
    `registry.ts` (runtime) → FUI. Split mixed modules *mid-file* at this seam.
 3. **Distribution end-state:** FUI consumes WE contracts via a WE-published type-only package

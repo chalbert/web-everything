@@ -1,11 +1,14 @@
 ---
 kind: decision
-status: open
+status: resolved
 blockedBy: []
 dateOpened: "2026-07-01"
-dateStarted: "2026-07-01"
+dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
+graduatedTo: none
 preparedDate: "2026-07-01"
 relatedReport: reports/2026-07-01-fui-docs-site-placement.md
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 relatedProject: webcomponents
 tags: [constellation, placement, boundary, docs-site, reference-implementation, decision]
 ---
@@ -20,11 +23,16 @@ library it documents. **The render:** [fui:.eleventy.js](../../frontierui/.eleve
 ([fui:src/index.njk](../../frontierui/src/index.njk),
 [fui:src/blocks.njk](../../frontierui/src/blocks.njk), plugs / adapters / traits / demos / about),
 [fui:src/_data/*.js](../../frontierui/src/_data/) loaders, `fui:src/_layouts/base.njk`. Built by
-`npm run build:docs`; dev-served at port 6080. **What it renders:** a
-dogfood reference-showcase of the library — [fui:src/_data/demos.js](../../frontierui/src/_data/demos.js)
+`npm run build:docs`; dev-served at port 6080. **What it renders:** a *static catalog* of the library —
+[fui:src/_data/demos.js](../../frontierui/src/_data/demos.js)
 scans repo-root `fui:demos/*.html`; `fui:src/_data/blocks.json` / `fui:src/_data/plugs.json` /
 `fui:src/_data/traits.json` mirror the catalog; runnable demos link out to the library's own Vite origin
-(`site.demosUrl`, dev port 6002). **Not the docs-site:** [fui:webdocs/](../../frontierui/webdocs/) is a docs
+(`site.demosUrl`, dev port 6002). **Correction (2026-07-02 discussion):** the earlier "dogfood
+reference-showcase" phrasing overstated — the site renders **zero** FUI components (`fui:src/_layouts/base.njk`
+loads no `<script>` at all, only `fui:src/css/style.css`, a standalone 479-line teal palette disjoint from
+`fui:webtheme/`). It catalogs and links the library; it does not *render* it. The zero-seam argument
+(catalog read off the co-resident disk) survives; the Shoelace analogy is structural (Eleventy + one repo)
+but weaker on dogfooding (Shoelace's docs render its own components; FUI's don't yet). **Not the docs-site:** [fui:webdocs/](../../frontierui/webdocs/) is a docs
 *toolchain* (Mintlify/Storybook export adapters + coverage/generator), and
 [fui:vite.config.mts](../../frontierui/vite.config.mts) builds the *demos* bundle — neither is the website
 surface in question.
@@ -99,7 +107,10 @@ is a genuine either/or with a *heavily*-defaulted answer, and the recommended br
   grows **genuine independent product features** (its own marketing funnel, an app beyond showcasing the
   library) — the point at which it stops being a reference-showcase and becomes the #2006 product shape, and
   the extract-to-product-tier reasoning would begin to apply. Absent that, extraction pays a cross-repo
-  publish/consume cost for a site whose whole value is rendering the co-resident library.
+  publish/consume cost for a site whose whole value is rendering the co-resident library. *Sharpened by the
+  2026-07-02 discussion:* the trigger also fires if the abstract/concrete layering becomes real repo
+  structure (FUI-as-abstract-framework vs. concrete design-system repos carrying idiom + theme + blocks) —
+  the docs-site's *subject* moves with the concrete tier, and placement re-opens then as a new item.
 
 **Default rationale (red-teamed):** (a) because rule 1 *affirmatively routes* artifact-producing render to
 FUI (the docs-site's home is where the rule puts it, not merely where it is tolerated), and both constellation
@@ -147,6 +158,40 @@ frontend" case), or a reader will over-read :1579 as reaching FUI. Axis-3 **cita
 was mildly mis-scoped — :1579 authors a composition-substrate test, not a general render-vs-product placement
 test. *Folded:* rebased the authorizing citation onto **rule 1's artifact-producing→FUI routing** as primary,
 demoting :1579 to corroboration (mirrors #1948's prep re-basing rule 2 as primary).
+
+## Ruling (2026-07-02)
+
+**Fork 1 → (a) co-locate in FUI, conditioned on clean separation.** The docs-site stays in the FUI repo,
+with the abstract/concrete boundary the discussion surfaced kept explicit: the website-concrete surface
+lives entirely under `fui:src/` (+ `fui:.eleventy.js`); the library dirs (`blocks/`, `plugs/`, `adapters/`,
+`webtheme/`, …) carry no website-concrete content and never import from `fui:src/`. Authorizing citation:
+constellation rule 1's artifact-producing→FUI routing (primary); :1579/:1647 product-frontend statute as
+corroboration only — the site composes no product. #2006's zero-impl reasoning is a WE-repo predicate and
+was **not** applied. Reserved-(b) trigger stands (genuine product features, or a real
+abstract-framework/concrete-design-system repo split — the site's subject moves with the concrete tier).
+Codified as a bounding note under `we:platform-decisions.md#constellation-placement` (no new anchor).
+
+## Discussion findings (2026-07-02)
+
+The decision discussion raised the **abstract/concrete reframe**: FUI's essence is the abstract framework
+(renderers, plug machinery, adapter seams, the `webtheme/` theme *system*); a concrete design system adds
+idiom + concrete blocks + theme (intents originate concretely but graduate to WE — they are standard-tier
+property). The claim tested against the repo: *"some blocks, all the intents and themes are concrete to the
+website UX/UI, not general."* Grounded result:
+
+- **Themes — not website-concrete.** The site never loads `fui:webtheme/` (a general compile/tokens/schemes/
+  conformance system); its own idiom is 479 lines of standalone CSS already isolated in `fui:src/css/`.
+- **Intents — not website-concrete.** Intents live in WE; FUI implements them. None are site-scoped.
+- **Some blocks — partially right.** `props-table` + `code-view` are docs-domain, consumed only by
+  `fui:demos/webdocs-blocks-demo.html` — but docs-domain ≠ this-website-concrete (they are general catalog
+  items every design system's docs need, and the site itself consumes neither).
+
+Net: the library carries ~no website-concrete content, and the website-concrete content (njk + own CSS) is
+already cleanly isolated under `fui:src/` — the abstract/concrete boundary the split seeks **already exists
+in-repo**. Extraction would move that thin surface across a repo boundary and pay the catalog-read seam
+without improving abstract/concrete purity. The reframe instead sharpens the reserved-(b) trigger (below)
+and surfaces a follow-up candidate: make the site actually dogfood the library (render FUI blocks +
+`webtheme` for its own chrome), which would *strengthen* co-location.
 
 ## Downstream / unblocks
 
