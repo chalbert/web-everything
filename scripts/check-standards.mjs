@@ -708,11 +708,7 @@ for (const item of backlog) {
     err(`Backlog item "${item.id}" lists its own epic parent #${parentNum} in \`blockedBy\` — a deadlock: an epic resolves only after all its children, so the child can never start. The \`parent: ${parentNum}\` edge already expresses the rollup; drop #${parentNum} from blockedBy (re-point it at the real open prerequisite if one exists).`);
 }
 
-// Sliced-epic guard: an epic is either UNSLICED (no children → carries its own
-// `size`) or SLICED (≥1 child of ANY kind → no `size`, a pure umbrella). There is
-// no middle state — gaining the first child (story OR task) flips it to sliced, so
-// the `size` must be dropped in that same edit. A sized child additionally double-
-// counts (its points are already on the child), so we give that the sharper message.
+// Build the parent→children index once (reused by the epic↔child coherence block below).
 const childrenOf = new Map(); // parent num -> [child item, …]
 for (const item of backlog) {
   if (item.parent !== undefined) {
@@ -721,14 +717,19 @@ for (const item of backlog) {
     childrenOf.get(p).push(item);
   }
 }
-for (const item of backlog) {
-  if (item.kind !== 'epic' || typeof item.size !== 'number') continue;
-  const kids = childrenOf.get(item.num) || [];
-  const sized = kids.filter((k) => typeof k.size === 'number').length;
-  if (sized)
-    err(`Backlog item "${item.id}" is a sized epic but has ${sized} sized child item(s) — that double-counts. Make it storied (drop its size) or re-parent the children.`);
-  else if (kids.length)
-    err(`Backlog item "${item.id}" is a sized epic but has ${kids.length} child item(s) — an epic with any child is SLICED and must carry no \`size\` (its scope lives on the children). Drop the epic's size, or detach the child if the epic is genuinely an unsliced bucket.`);
+
+// Workflow-intent invariants (#2084) — the cross-item / clock-needing rules the per-item schema validator
+// cannot see: sliced-epic sizing (the double-count guard, formerly inline here) + born-active settlement
+// TTL (formerly only a check:health O1 candidate). Single tested source in scripts/lib/workflow-invariants
+// (standalone: `npm run check:backlog-workflow`).
+try {
+  const { validateWorkflowInvariants } = require('./lib/workflow-invariants.cjs');
+  const today = new Date().toISOString().slice(0, 10);
+  const { errors: we, warnings: ww } = validateWorkflowInvariants(backlog, { today });
+  for (const e of we) err(e.message, e.descriptor);
+  for (const w of ww) warn(w.message, w.descriptor);
+} catch (e) {
+  err(`Backlog workflow-intent invariants check failed: ${e.message}`);
 }
 
 // Epic ↔ child status coherence (docs/agent/backlog-workflow.md → "Closing out" step 4):
