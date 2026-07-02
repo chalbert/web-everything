@@ -99,3 +99,45 @@ test('an empty / missing feed leaves the board silent (static snapshot stands)',
   await expect(page.locator('#active-live')).toBeHidden();
   await expect(page.locator('#active-batches')).toBeHidden();
 });
+
+// #2150 — regression for the 77a66d18 fix: a TaskStop'd /workflow run carries status:'killed'. It must be
+// treated as TERMINAL — never driving the tab pulse / workflows-live vital — and must age out of the feed
+// once past the 10-min --recent window. `updatedAt` is computed relative to the REAL clock (the client uses
+// Date.now()), so "fresh" and "stale" are honest against the shipped TERMINAL_MAX_AGE_MS.
+function killedFeed(ageMs: number) {
+  return {
+    updatedAt: new Date(Date.now() - ageMs).toISOString(),
+    runs: [
+      {
+        id: 'wf-killed',
+        kind: 'workflow',
+        name: 'Killed parallel batch',
+        status: 'killed',
+        phase: 'work',
+        updatedAt: new Date(Date.now() - ageMs).toISOString(),
+        agents: [{ num: '900', label: 'slice:900', state: 'done', lastLine: 'stopped' }],
+      },
+    ],
+    digests: {},
+  };
+}
+
+test('a fresh killed run renders but does NOT drive the tab pulse or workflows vital', async ({ page }) => {
+  await routeFeed(page, killedFeed(60_000)); // 1 min old — still within the 10-min window
+  await page.goto(FIXTURE, { waitUntil: 'networkidle' });
+  // It's recent, so it still renders as a (terminal) card…
+  await expect(page.locator('#active-live')).toBeVisible();
+  await expect(page.locator('#active-live-count')).toHaveText('1');
+  // …but it is terminal, so liveN is 0: the tab live-pill and the workflows vital both stay hidden.
+  await expect(page.locator('#active-tab-live')).toBeHidden();
+  await expect(page.locator('#aw-vital-workflows')).toBeHidden();
+});
+
+test('a stale killed run is dropped from the feed (ages out past the 10-min window)', async ({ page }) => {
+  await routeFeed(page, killedFeed(20 * 60_000)); // 20 min old — past the window
+  await page.goto(FIXTURE, { waitUntil: 'networkidle' });
+  // The only run is a stale terminal one → dropped → board hidden, no live signal anywhere.
+  await expect(page.locator('#active-live')).toBeHidden();
+  await expect(page.locator('#active-tab-live')).toBeHidden();
+  await expect(page.locator('#aw-vital-workflows')).toBeHidden();
+});

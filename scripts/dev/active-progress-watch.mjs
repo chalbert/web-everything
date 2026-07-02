@@ -24,6 +24,7 @@
 import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 
 const ROOT = process.cwd();
 const argv = process.argv.slice(2);
@@ -42,7 +43,26 @@ const OUT = flag('out', join(ROOT, '_site', 'active-progress.json'));
 const PROJECT_SLUG = ROOT.replace(/[^a-zA-Z0-9]/g, '-');
 const PROJECTS_DIR = join(homedir(), '.claude', 'projects', PROJECT_SLUG);
 
-const TERMINAL = new Set(['completed', 'failed', 'aborted', 'cancelled', 'killed']);
+// The terminal run-status contract — a run in one of these states is finished and stops being "live".
+// MUST stay in lockstep with the harness's real run-status vocabulary AND the client mirror in
+// src/assets/js/backlog-active.js; a status the harness emits but this set omits sticks forever as a
+// phantom live card. `killed` is a TaskStop'd /workflow run (added by 77a66d18, regression-tested #2150).
+export const TERMINAL = new Set(['completed', 'failed', 'aborted', 'cancelled', 'killed']);
+
+/** Is `status` a terminal (finished) run state? The pure classify half of the terminal contract. */
+export function isTerminalStatus(status) {
+  return TERMINAL.has(status);
+}
+
+/**
+ * Has a terminal run aged past the `--recent` retention window (so it should drop from the feed)? A
+ * still-running or too-recent terminal run is kept. Pure — takes the clock + window so it's unit-testable
+ * without touching the filesystem or module-level flags.
+ */
+export function terminalRunAgedOut(status, mtimeMs, now = Date.now(), recentMs = RECENT_MS) {
+  return isTerminalStatus(status) && (now - mtimeMs) > recentMs;
+}
+
 const STEP_LIMIT = 10;       // live step-stream depth per session
 const AGENT_STEP_LIMIT = 6;  // per running subagent
 const AGENT_FRESH_MS = 90_000; // a subagent whose transcript changed this recently counts as running
@@ -116,7 +136,7 @@ function digestJournal(journalPath) {
   const mtimeMs = statSync(journalPath).mtimeMs;
   const status = j.status || 'running';
   // Keep in-flight runs always; keep terminal ones only briefly (so a finished run lingers, then drops).
-  if (TERMINAL.has(status) && (Date.now() - mtimeMs) > RECENT_MS) return null;
+  if (terminalRunAgedOut(status, mtimeMs)) return null;
 
   const sessionDir = dirname(dirname(journalPath)); // <session>/workflows/wf_x.json → <session>
   // A workflow agent's transcript lives at <session>/subagents/workflows/<runId>/agent-<agentId>.jsonl
@@ -371,13 +391,19 @@ function generate() {
   return payload;
 }
 
-if (ONCE) {
-  const p = generate();
-  const wf = p.runs.filter((r) => r.kind === 'workflow').length;
-  console.log(`active-progress: wrote ${OUT} — ${p.runs.length} run(s) (${wf} workflow), ${Object.keys(p.digests).length} live session digest(s), slug ${PROJECT_SLUG}`);
-} else {
-  console.log(`active-progress: watching ${PROJECTS_DIR}\n  → ${OUT} every ${INTERVAL_MS / 1000}s (Ctrl-C to stop)`);
-  const tick = () => { try { const p = generate(); process.stdout.write(`\r  ${new Date().toLocaleTimeString()} · ${p.runs.length} run(s)   `); } catch (e) { console.error('tick error:', e.message); } };
-  tick();
-  setInterval(tick, INTERVAL_MS);
+// Main-guard: only start the watch loop / write files when RUN as a script, not when IMPORTED (a unit test
+// imports this module for the pure TERMINAL contract + classifiers above, and must not spin up setInterval
+// or touch the filesystem). #2150.
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  if (ONCE) {
+    const p = generate();
+    const wf = p.runs.filter((r) => r.kind === 'workflow').length;
+    console.log(`active-progress: wrote ${OUT} — ${p.runs.length} run(s) (${wf} workflow), ${Object.keys(p.digests).length} live session digest(s), slug ${PROJECT_SLUG}`);
+  } else {
+    console.log(`active-progress: watching ${PROJECTS_DIR}\n  → ${OUT} every ${INTERVAL_MS / 1000}s (Ctrl-C to stop)`);
+    const tick = () => { try { const p = generate(); process.stdout.write(`\r  ${new Date().toLocaleTimeString()} · ${p.runs.length} run(s)   `); } catch (e) { console.error('tick error:', e.message); } };
+    tick();
+    setInterval(tick, INTERVAL_MS);
+  }
 }
