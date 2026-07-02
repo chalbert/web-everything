@@ -2370,6 +2370,21 @@ topic `pr-flow-rollout-mechanism`); enforcement ladder specced by #1998 (Forks 1
 with the #1153 branch guard and the removed never-push default (both unchanged). Visual harness files under
 #1933 / #1167 / #1552.
 
+**Rider — solo/interactive sessions lane uniformly (#2123, ratified 2026-07-02).** The "every automated
+writing session" scope above covers **solo** agent sessions too — a lone `/next` build, a `/prepare`, a
+`resolve` — not just `/workflow`: the writer in an agent session *is* the agent, so the human-writes-`main`
+carve-out does not rescue them. Ruling: **every edit-action session runs in a lane clone and lands via the
+flow, with no permanent content-session (`backlog/`/`reports/`/research) carve-out** — a "content" session
+that then codifies a doc or regenerates a derived artifact silently crosses the line mid-session, and the
+proven collision (`batch-2026-06-29e` clobbering a live `/prepare`) sat on that very file class, so
+misclassification-safety beats the carve-out's live-observability edge. **Phase-1 trigger (capability, not
+calendar):** code-only writing sessions lane **now**; interactive/content sessions stay on the shared primary
+until a lane can boot its own WE dev-pair on its band ports (the `.env.local` env-load link), then flip — a
+when-the-capability-lands trigger, not a permanent exemption. This **ends the Rung-1 interim for solo
+sessions**. The claim-locus and lane before-state-soundness *mechanics* are session-tooling carried in the
+#2138 merge-queue line — which also owns the self-approved-PR / GitHub-merge-queue landing substrate (#2138
+Fork 5 → #2151 CI-on-PR, #2152 branch protection, #2153 PR drain) — not part of this scope ruling.
+
 ---
 
 ### Behaviour/event attribute *names* are colon-namespaced — a collision-safe internal authoring spelling, not the platform-shaped standard proposal {#attribute-name-colon-namespacing}
