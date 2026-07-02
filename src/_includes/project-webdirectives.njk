@@ -362,8 +362,8 @@ declare const customComments: CustomCommentRegistry;
                     <br><span>Multi-branch with case templates.</span>
                 </li>
                 <li>
-                    <code>async:boundary</code>
-                    <br><span>Suspense-like with fallback template.</span>
+                    <code>&lt;template type="async"&gt;</code>
+                    <br><span>Three-branch async region: <code>pending</code>/<code>then</code>/<code>catch</code> slot templates stamped one-at-a-time by an injected promise's state. Resolved value/error surface via <code>data-bind</code>; <code>min-pending</code> sets a min-display floor for the pending branch.</span>
                 </li>
                 <li>
                     <code>defer</code>
