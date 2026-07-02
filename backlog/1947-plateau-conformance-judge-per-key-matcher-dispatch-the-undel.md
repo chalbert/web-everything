@@ -2,14 +2,29 @@
 kind: story
 size: 5
 parent: "1294"
-status: active
+status: resolved
 blockedBy: ["1965"]
 dateOpened: "2026-06-28"
 dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
 tags: []
 ---
 
 # Plateau conformance-judge per-key matcher dispatch (the undelivered #1847 half)
+
+## Delivered (batch-2026-07-01-wf — #1965 unblocked, re-attempt landed)
+
+`#1965` is now **resolved** (the deleted-SimpleStore import was repointed to frontierui, plateau build green),
+so the blocker is gone and the impl landed. `plateau-app:src/conformance-engine/conformanceVectors.ts`'s
+`judgeConformanceTrace` no longer hardcodes strict `!==` for every non-special `expect` key: it now reads
+`vector.expect.matchers` (the #1816 vocabulary WE owns) and dispatches per key —
+`exact` (default strict `===`, unchanged for existing verdict/scalar suites), `deep-equal` (structural),
+`resolved-options/parts-structure` (intl: compares `resolvedOptions` + the ordered `formatToParts` part-type
+sequence, collapsing separator/group/literal to one equivalence class — never the raw string), and `predicate`
+(analytics/Collator: `contains`/`subset`/`count`/`absent`/`sign-order`, failing closed on an unknown form).
+The reserved `matchers` key is treated as metadata (never judged). Covered by 11 new cases in
+`plateau-app:src/conformance-engine/conformanceVectors.test.ts` (all green). Unblocks the intl/analytics/
+reliability page-wirings (#1920/#1921/#1922), which are now clean mirrors of #1801.
 
 ## Carry (batch-2026-06-29d parallel /workflow — lane WORKED, blocked by pre-existing plateau build-red)
 
