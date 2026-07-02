@@ -1,0 +1,68 @@
+# Auto-deploy the gated WE site to its Cloudflare Worker on every push to main (#1137).
+#
+# CROSS-REPO build: WE's `build:docs` shells out to FUI's component-render tool
+# (../frontierui/dist/tools/component-render/cli.mjs, ratified ordering #1946/#2016), so CI must
+# check out BOTH repos as siblings and build FUI's tools first. Single-repo CI cannot build this site.
+#
+# Secrets (repo → Settings → Secrets and variables → Actions):
+#   FUI_READ_TOKEN        — fine-grained PAT, Contents:Read on chalbert/frontierui (checkout the sibling)
+#   CLOUDFLARE_API_TOKEN  — scoped token, Workers Scripts · Edit (deploy)
+#   CLOUDFLARE_ACCOUNT_ID — the account id
+name: Deploy WE site (Cloudflare Worker)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      # Sibling layout under $GITHUB_WORKSPACE so WE's hardcoded `../frontierui` resolves:
+      #   $GITHUB_WORKSPACE/web-everything  (this repo)
+      #   $GITHUB_WORKSPACE/frontierui      (the tool sibling)
+      - name: Checkout WE
+        uses: actions/checkout@v4
+        with:
+          path: web-everything
+      - name: Checkout FUI (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: chalbert/frontierui
+          token: ${{ secrets.FUI_READ_TOKEN }}
+          path: frontierui
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web-everything/.nvmrc
+          cache: npm
+          cache-dependency-path: |
+            web-everything/package-lock.json
+            frontierui/package-lock.json
+
+      # FUI tools first (ratified #1946/#2016 ordering) → produces dist/tools/component-render/cli.mjs
+      - name: Build FUI tools
+        working-directory: frontierui
+        run: |
+          npm ci
+          npm run build:tools
+
+      # WE site build (Eleventy calls the FUI CLI at ../frontierui/dist/tools/component-render/cli.mjs)
+      - name: Build WE site
+        working-directory: web-everything
+        run: |
+          npm ci
+          npm run build:docs
+
+      - name: Deploy Worker + assets
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: web-everything
+          command: deploy
