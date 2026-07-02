@@ -406,6 +406,135 @@ function renderBacklogGrid(tiles, repoRoot, runner = execFileSync) {
   return `<div class="project-grid">${wrappers.join('')}</div>`;
 }
 
+// ── Generic template-facing card/badge primitive (#2098) ─────────────────────────────────────────────
+//
+// The grid renderers above (`renderIntentGrid`/`renderProjectGrid`/…) are DATA-driven: a single shortcode
+// consumes a whole collection and emits the finished grid in one synchronous call. That covers the
+// catalog surfaces #2016 built, but leaves the one-off case the templates actually reach for uncovered:
+// an author who wants a SINGLE SSR card or badge inline in prose (e.g. the `section-card` in
+// `src/semantics.njk`). A naive per-card shortcode that shells to the FUI CLI on the spot would spawn one
+// subprocess PER card — ~800 per full build. So the generic primitive is split, mirroring the
+// `spliceDataTables` transform precedent (`data-table-build-hook.cjs`, wired at `.eleventy.js:275-278`):
+//
+//   1. The `weCard` / `weBadge` Nunjucks macros (`src/_includes/we-component.njk`) emit an INERT
+//      placeholder — `<we-card data-we-spec='{…}'>…SSR-fallback…</we-card>` — carrying the declarative
+//      spec as a JSON attribute (render-from-data per #2007: the macro feeds inert DATA, it does NOT
+//      author the card's internal markup). With JS off and no build transform the placeholder still paints
+//      via the `we-card{}` / `we-badge{}` SSR baseline in `style.css` (the same baseline the transient CE
+//      upgrades over), so the primitive degrades safely even mid-build.
+//   2. `spliceComponents` (this transform body, wired as the `weComponentSSR` Eleventy transform) scans
+//      ONE rendered page for every `data-we-spec` placeholder, resolves each to a `{component, config}`
+//      spec, batches ALL of the page's specs through `renderComponents` in a SINGLE subprocess call, and
+//      splices each returned SSR fragment in place of its placeholder element. One subprocess per PAGE, not
+//      per card.
+//   3. The client `<we-card>` / `<we-badge>` CE upgrade (`src/_layouts/base.njk`) is a pure enhancement
+//      over the spliced SSR: the emitted HTML is byte-identical to what the transient element upgrades to
+//      (same FUI factory feeds both paths), so there is nothing to re-upgrade — idempotent by construction,
+//      JS-off correct.
+//
+// A page with no `data-we-spec` placeholder pays a single substring check and returns unchanged.
+
+/** The generic component-placeholder scanner: a `<we-card|we-badge … data-we-spec='…'>…</…>` element (or
+ *  its self-closing form). Captures the tag name, the whole open-tag attribute string, and the body so the
+ *  element can be replaced wholesale by its SSR fragment. The attribute matcher is QUOTE-AWARE — the
+ *  `data-we-spec` JSON value legally carries literal `>`/`<` (nested markup inside its string values), so a
+ *  naive `[^>]*` would terminate the open tag early; instead each attribute chunk is either a quoted region
+ *  (which may contain `>`) or a run of non-`>`/non-quote characters. Only `we-card`/`we-badge` are batched
+ *  here — the richer `we-tag`/`we-data-table` elements have their own dedicated data-driven paths. */
+const ATTRS = `(?:"[^"]*"|'[^']*'|[^>"'])*?`;
+const COMPONENT_TAG = new RegExp(`<we-(card|badge)\\b(${ATTRS})>([\\s\\S]*?)<\\/we-\\1>`, 'gi');
+const COMPONENT_SELF_CLOSING = new RegExp(`<we-(card|badge)\\b(${ATTRS})\\/>`, 'gi');
+
+/** Read the `data-we-spec` attribute off an open-tag attribute string, tolerating single OR double quotes
+ *  (Nunjucks emits the JSON single-quoted so the double-quoted JSON string keys need no entity-escaping).
+ *  Returns the raw attribute value or undefined. */
+function readSpecAttr(attrs) {
+  const dq = /\bdata-we-spec\s*=\s*"([\s\S]*?)"/i.exec(attrs);
+  if (dq) return dq[1];
+  const sq = /\bdata-we-spec\s*=\s*'([\s\S]*?)'/i.exec(attrs);
+  return sq ? sq[1] : undefined;
+}
+
+/** Reverse the single escape the `weSpecAttr` macro applied so `JSON.parse` sees clean JSON. The spec is
+ *  carried in a SINGLE-quoted attribute, so its own `"` keys are already valid and a bare `&` is legal —
+ *  the macro escapes ONLY a literal `'` (which would otherwise close the attribute) as `&#39;`, so this
+ *  reverses exactly that (plus `&apos;` for a double-quoted authoring). Nothing else is touched, so an
+ *  `&amp;`/`&lt;` that is genuinely part of a spec string value survives verbatim (no double-decode). */
+function decodeSpecEntities(raw) {
+  return String(raw).replace(/&#39;/g, "'").replace(/&apos;/g, "'");
+}
+
+/**
+ * Detect every generic component placeholder in one page's HTML. Returns an array of
+ * `{ key, component, config, match }` — one per `<we-card|we-badge data-we-spec='…'>` whose spec parses to
+ * a `{component, config}` (or a bare `config` under the tag's component). A placeholder with no
+ * `data-we-spec`, or an unparseable spec, is SKIPPED (left intact for the client CE runtime path) — a
+ * malformed inline spec must never abort the page build.
+ */
+function findComponentPlaceholders(html) {
+  const found = [];
+  let key = 0;
+  const collect = (tag, attrs, match) => {
+    const raw = readSpecAttr(attrs);
+    if (raw == null) return; // no declarative spec — client CE path owns it
+    let spec;
+    try {
+      spec = JSON.parse(decodeSpecEntities(raw));
+    } catch {
+      return; // malformed spec — leave intact, never abort the build
+    }
+    if (!spec || typeof spec !== 'object') return;
+    // Accept either `{component, config}` or a bare config object (component inferred from the tag name).
+    const component = typeof spec.component === 'string' ? spec.component : tag;
+    if (component !== 'card' && component !== 'badge') return; // only the two generic primitives
+    const config = spec.config && typeof spec.config === 'object'
+      ? spec.config
+      : (spec.component ? {} : spec);
+    found.push({ key: `we-component-${key++}`, component, config, match });
+  };
+  let mm;
+  COMPONENT_TAG.lastIndex = 0;
+  while ((mm = COMPONENT_TAG.exec(html)) !== null) collect(mm[1], mm[2], mm[0]);
+  COMPONENT_SELF_CLOSING.lastIndex = 0;
+  while ((mm = COMPONENT_SELF_CLOSING.exec(html)) !== null) collect(mm[1], mm[2], mm[0]);
+  return found;
+}
+
+/**
+ * The `weComponentSSR` Eleventy transform body (#2098): batch every generic `<we-card|we-badge
+ * data-we-spec>` placeholder on one page through the pinned FUI CLI in ONE subprocess call and splice each
+ * returned SSR fragment in place of its placeholder. Returns `content` unchanged when the page carries no
+ * placeholder (a single substring check — the common case pays nothing). Per-entry errors are isolated:
+ * a failed spec leaves its original placeholder intact (the client CE + `style.css` SSR baseline still
+ * paint it) and is logged, never aborting the page (keyed-batch isolation).
+ *
+ * WHY this and not a per-card shortcode: a per-card shortcode that shelled the FUI CLI would spawn ~800
+ * subprocesses per full build; this batches a whole page's cards/badges into one — the same subprocess
+ * economy the `spliceDataTables` transform gives the data-table surface.
+ */
+function spliceComponents(content, repoRoot, runner = execFileSync) {
+  if (typeof content !== 'string' || content.indexOf('data-we-spec') === -1) return content;
+  const placeholders = findComponentPlaceholders(content);
+  if (placeholders.length === 0) return content;
+
+  const rendered = renderComponents(
+    placeholders.map((p) => ({ key: p.key, component: p.component, config: p.config })),
+    repoRoot,
+    runner,
+  );
+
+  let out = content;
+  for (const p of placeholders) {
+    const html = rendered.get(p.key);
+    if (!html) continue; // isolated failure already logged by renderComponents — keep the placeholder
+    // Splice the finished SSR fragment for the WHOLE placeholder element: the returned `<article
+    // class="fui-card">` / `<span class="fui-badge">` is byte-identical to the client CE upgrade, so the
+    // element it replaces need not survive — nothing left to re-upgrade (idempotent).
+    out = out.replace(p.match, html);
+  }
+  return out;
+}
+
 module.exports = {
   PINNED_CLI_RELATIVE,
   EXPECTED_PRODUCER,
@@ -418,4 +547,6 @@ module.exports = {
   projectIconHtml,
   statusTone,
   intentTileSpecs,
+  findComponentPlaceholders,
+  spliceComponents,
 };
