@@ -1,0 +1,99 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  A single-item session — a lone <code>/next</code>, a <code>/prepare</code>, a one-item resolve — mutates the
+  <strong>shared primary checkout</strong> in place: claim edits, resolve splices, doc codification all land on the
+  working tree the user's own dev server and any concurrent session also live on. The parallel
+  <code>/workflow</code> orchestrator (#1143 / #1933) already isolates every unit of work in its own lane. Should a
+  <strong>solo</strong> session also enter an isolated lane by default — and if so, how do the dev-server /
+  visual-verification loop, the claim semantics, and the landing path work for a single <em>interactive</em>
+  session? Prep research for decision <a href="/backlog/2123-should-a-solo-session-non-workflow-also-run-in-an-isolated-w/">#2123</a>.
+</p>
+
+<h2>Two premise corrections (the survey's first output)</h2>
+<ul>
+  <li><strong>The primitive is a lane <em>clone</em>, not a git worktree.</strong> The user-global branch guard
+    denies <code>git worktree add</code> / <code>checkout -b</code> in the shared checkout (proven live in the
+    first parallel run), and the ratified #1996 statute (<em>pr-flow-rollout-mechanism</em>) codified
+    "isolation&nbsp;=&nbsp;a clone." The pool machinery is built and proven: persistent
+    <code>--reference</code>-shared clones under <code>~/workspace/.lanes/&lt;repo&gt;/lane-&lt;n&gt;</code>,
+    refreshed by fetch + hard-reset, per-lane <code>npm ci</code> (<code>we:scripts/lane-pool.mjs</code>).
+    Worktree-vs-clone is therefore <em>settled by precedent</em>, not re-opened by #2123 — even though worktrees
+    plus per-instance ports are the industry norm elsewhere, the deviation is repo-local (the guard) and already
+    ruled.</li>
+  <li><strong>The go/no half is not a cold call.</strong> #1996 already ratified
+    <em>"isolate-by-default for automation: every automated writing session (agent / <code>/workflow</code>) works
+    in a clone … <code>main</code> is convergence-only for automation"</em> — and its #1998 enforcement ladder
+    names today's serial-on-main practice <em>"the interim."</em> So #2123 is the call that <strong>ends the
+    interim for solo sessions</strong>. One honest citation-scope caveat keeps it a real decision: #1996 weighed
+    <em>background automation</em> racing live lanes; the <em>interactive</em> session's live-observation loop (the
+    human watching <code>:3000</code>, conversational verify turns) was never weighed there, so that residual is
+    re-derived on merit rather than inherited as settled.</li>
+</ul>
+
+<h2>In-repo grounding</h2>
+<ul>
+  <li><strong>Per-lane dev-server ports are ratified and <em>generated</em> — with a skeptic-verified dead
+    link.</strong> #1996/#1997: deterministic per-lane ports (<code>band + 100 + 10·N</code>; WE
+    <code>3000</code>/<code>8080</code> bands), <code>strictPort</code>, generated <code>.env.local</code> per lane
+    (<code>we:scripts/lane-pool.mjs</code>, <code>we:vite.config.mts</code>). But <strong>nothing sources
+    <code>.env.local</code> into the shell/process environment</strong> — vite reads <code>process.env</code> at
+    config time and the npm dev scripts use shell expansion, so a lane <code>npm run dev</code> today boots on
+    3000/8080 and <code>strictPort</code> collides loudly with the user's live server. The env-load link is a named
+    missing build, and <em>no lane has ever booted its dev pair</em> for a Playwright before/after (the #1996
+    Gate-5 harness, bounded by the #1895 <code>.fui-card</code> repro, is unbuilt). That is the honest not-yet on
+    visual work.</li>
+  <li><strong>Claims are structurally centralized — a lane cannot claim.</strong> <code>backlog.mjs claim</code>
+    guards concurrency via the <code>open → active</code> transition on <em>visible shared state</em>, and the
+    claims ledger lives on the primary. The orchestrator pre-claims all items centrally and lanes never claim
+    (#1933 choice 2). A claim performed only inside a lane clone is invisible to every local-read consumer until
+    a fetch nobody has a reason to run — grounding the claim-locus default for solo lanes: claim on the primary
+    first (published to origin as <code>origin/main</code> + the splice), then work in the lane. (A remote-locus
+    claim is coherent post never-push-removal, so this is a ruled fork, not a forced invariant.)</li>
+  <li><strong>The landing path is already composed.</strong> Commit on the lane clone's own <code>main</code>
+    (Rule 104 composes — the lane has its own HEAD), push the durable <code>lane/*</code> ref (#1995 retry), merge
+    <code>origin/main</code>, run the <em>authoritative gate on the merged tree</em> (the
+    <em>gate-on-merged-tree</em> anchor), land. On red, the <code>lane/*</code> ref preserves the work.</li>
+  <li><strong>The merit case for isolation is an incident, not a theory.</strong> A closeout on the shared dirty
+    checkout destroyed a concurrent <code>/prepare</code>'s in-progress files (<code>batch-2026-06-29e</code> →
+    the #1985 forced invariant). Non-destructive closeout removes the destructive <em>reaction</em>; only
+    isolation removes the <em>collision class</em> (same-file last-write-wins).</li>
+  <li><strong>Scale proof + two solo-relevant lessons</strong> from the 2026-07-01 run (16/18 landed, cross-repo
+    couples green): an abandoned lane session strands a <code>status: active</code> claim on the primary unless
+    closeout releases it, and lane agents over-drop on stale-tree misjudgments — a solo lane must re-verify any
+    "absent from the tree" conclusion against lane freshness.</li>
+</ul>
+
+<h2>External prior art</h2>
+<ul>
+  <li><strong>Parallel-agent practice:</strong> git worktrees (shared object store, per-worktree HEAD/index) are
+    the dominant isolation primitive for parallel coding agents, with the caveat WE already codified — they
+    isolate <em>code, not runtime</em>, so each instance needs its own port range.</li>
+  <li><strong>VCS design:</strong> Jujutsu workspaces (and Sapling's lineage) make "N working copies over one
+    repo" a first-class default posture — the shared single checkout is the special case, not the norm.</li>
+  <li><strong>Hosted harnesses:</strong> Devin-class agents, Copilot Workspace, and Codex-style cloud tasks offer
+    <em>only</em> the isolated-workspace-converge-via-PR model; working directly in the user's live checkout is
+    the local-CLI anomaly, tolerated because the human co-supervises — the same human-direct / automation-isolated
+    asymmetry #1996 encoded.</li>
+</ul>
+
+<h2>Recommended shape (as prepared in the item, post two skeptic passes + the fresh-context screen)</h2>
+<p>
+  A <strong>confirm-and-sharpen ruling, not a fresh four-element ratification</strong>. Adoption:
+  <strong>accepted on merit — the go/no gate dissolved</strong> (the screen flagged it <em>prio</em>: the go is
+  ratified #1996/#1998 statute and every phase boundary is a mechanical capability edge, so nothing was left for a
+  ratify turn beyond a batch-confirm of the entry/landing mechanics) — code-only solo builds lane now; visual
+  <em>and</em> interactive-discussion sessions flip on the first green lane dev-pair probe (a lane boots its
+  band-port pair — which first requires the missing env-load link — and a CLI Playwright before/after reproduces a
+  real UI diff); cross-repo solo lanes flip when the entry/closeout helper lands. Fork 1 (claim locus — a genuine fork):
+  <strong>claim on the primary, published as <code>origin/main</code> + the splice only</strong> (never primary
+  HEAD, which would silently publish the human's unpushed commits); lanes never claim; the resolve splice rides
+  the lane's landing commit. Fork 2 (confirm-or-amend #1996's ratified "every" clause): <strong>confirm — uniform
+  in steady state</strong>, interactive/content sessions sequenced behind the trigger. Fork 3 (before-state
+  soundness — the verify-against-own-pair wiring is already #1996 statute): <strong>the <em>before</em> is
+  lane-local by default</strong>; the primary's <code>:3000</code> is a provably-clean shortcut only (per #1985's
+  "dirty primary is the normal baseline"). Recorded solo-lane costs: blindness to the user's uncommitted work
+  (semantic-conflict residual) and no integrator layer over lane over-drops (re-verify before dropping). Full
+  grounding: <code>we:reports/2026-07-02-solo-session-worktree-lane-prior-art.md</code>.
+</p>
+{% endraw %}
