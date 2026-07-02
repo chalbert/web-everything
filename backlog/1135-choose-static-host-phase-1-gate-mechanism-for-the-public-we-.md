@@ -30,6 +30,17 @@ The concern decomposes into two coupled axes the survey surfaced: **(1) substrat
 
 **Fork 1 → A. Cloudflare Pages. Fork 2 → A. Edge function (Pages Function).** Confidence **~80%**.
 
+> **Platform update (2026-07-02) — Pages ⇒ Workers Static Assets (ruling intent intact).** When the deploy
+> was actually stood up (#1137), Cloudflare had **retired the standalone Pages "Connect to Git" flow** for
+> new accounts and steers everything to **Workers Static Assets** (its go-forward unified platform). So the
+> concrete substrate is now a **Worker** serving the `_site/` build via the `ASSETS` binding, with the gate
+> as a Worker `fetch` handler (`we:worker.js`, `run_worker_first=true`) instead of a Pages Function. **This
+> does not reverse the ruling** — both forks' *principle* holds unchanged: Fork 1's "one free Cloudflare
+> substrate carrying every later phase (functions → KV → Access) with no re-platform" is *better* served by
+> Workers (the platform Pages is folding into); Fork 2's "edge function that owns the `code === SECRET`
+> seam" is exactly the Worker. Only Cloudflare's product label changed under us. Live+gated at
+> `web-everything.nicgilbert.workers.dev`. (`codifiedIn: one-off`, so no `we:docs/agent/platform-decisions.md` edit needed.)
+
 **Scope of the phase-1 gate (clarified at ratification):** Fork 2 ships a **single shared code**,
 not per-person access control. It keeps anonymous/casual traffic out — it cannot identify *who* is
 using the app, and blocking one person means rotating the one code (which boots everyone).
