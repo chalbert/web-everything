@@ -2,6 +2,7 @@
 kind: epic
 size: 13
 status: open
+blockedBy: ["2104"]
 dateOpened: "2026-07-02"
 tags: []
 ---
