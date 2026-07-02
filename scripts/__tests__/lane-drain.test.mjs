@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { planDrain, buildPrLandArgs, planWatch } from '../lane-drain.mjs';
+import { planDrain, buildPrLandArgs, planWatch, planPostDrain } from '../lane-drain.mjs';
 import { buildManifest } from '../readiness/lane-manifest.mjs';
 
 const queued = (...nums) => ({ queued: nums.map((n) => ({ num: String(n).padStart(3, '0'), at: null })) });
@@ -83,9 +83,14 @@ describe('lane-drain buildPrLandArgs (#2172)', () => {
 
 describe('lane-drain contract guard (source-level)', () => {
   const src = readFileSync(resolve(process.cwd(), 'scripts/lane-drain.mjs'), 'utf8');
-  it('re-uses pr-land as the transport — never re-implements the merge (no direct git merge/push of main)', () => {
-    expect(src).toMatch(/pr-land\.mjs/);
-    expect(src).not.toMatch(/'merge'|'--no-ff'|push.*main/);
+  it('re-uses the shared transports (pr-land to land, push-if-green to publish) — never a raw work-merge / raw main push', () => {
+    expect(src).toMatch(/pr-land\.mjs/);            // couples land via pr-land (the #2172 transport)
+    expect(src).toMatch(/push-if-green\.mjs/);      // post-land housekeeping publishes via the sanctioned gated helper (#2175/#2073)
+    // The forbidden RAW ops: a --no-ff work-merge (pr-land owns that) and a raw `git push origin main`.
+    expect(src).not.toMatch(/'--no-ff'/);
+    expect(src).not.toMatch(/\[\s*'push',\s*'origin',\s*'main'\s*\]/);
+    // The only `git merge` allowed is a local ff-only SYNC (via `pull --ff-only`) — never a work-merge of a lane ref.
+    expect(src).not.toMatch(/'merge',\s*'origin\/[^']*-/); // no `git merge origin/lane/<slug>-<n>` (a raw lane work-merge)
   });
   it('clears the queued marker only via backlog.mjs unqueue (the single clear point)', () => {
     expect(src).toMatch(/'unqueue'/);
@@ -158,5 +163,44 @@ describe('lane-drain watch/drain contract guard (source-level)', () => {
   it('exit status reflects whether the queue actually drained (not a stuck-queue exit-0)', () => {
     expect(src).toMatch(/fullyDrained/);
     expect(src).toMatch(/DRY_RUN \|\| fullyDrained \? 0 : 2/);
+  });
+});
+
+describe('lane-drain planPostDrain (#2175 reopen-on-fail / manifest cleanup)', () => {
+  it('a LANDED couple deletes its manifest, never reopens', () => {
+    expect(planPostDrain({ landed: true })).toEqual({ deleteManifest: true, reopen: false });
+  });
+  it('a merge-failed couple REOPENS (stranded active→open), no manifest delete', () => {
+    expect(planPostDrain({ landed: false, reason: 'merge-failed' })).toEqual({ deleteManifest: false, reopen: true });
+  });
+  it('a resolve-unreachable couple REOPENS too', () => {
+    expect(planPostDrain({ landed: false, reason: 'resolve-unreachable' })).toEqual({ deleteManifest: false, reopen: true });
+  });
+  it('a NOT-ready defer / dry-run / bad input reconciles nothing (never touched main)', () => {
+    expect(planPostDrain({ landed: false, reason: 'not-ready' })).toEqual({ deleteManifest: false, reopen: false });
+    expect(planPostDrain({ landed: false, reason: 'dry-run' })).toEqual({ deleteManifest: false, reopen: false });
+    expect(planPostDrain({ landed: false, reason: 'plan-invalid' })).toEqual({ deleteManifest: false, reopen: false });
+    expect(planPostDrain(null)).toEqual({ deleteManifest: false, reopen: false });
+  });
+});
+
+describe('lane-drain reopen-on-fail contract guard (source-level, #2175)', () => {
+  const src = readFileSync(resolve(process.cwd(), 'scripts/lane-drain.mjs'), 'utf8');
+  it('reopens a stranded item via release --force (preserving queue + refs), never deletes a ref on failure', () => {
+    expect(src).toMatch(/reopenStrandedItem/);
+    expect(src).toMatch(/'release', num, '--force'/);
+    // failure paths never delete a lane/* ref (refs are preserved for the next drain pass)
+    expect(src).not.toMatch(/push[^\n]*--delete/);
+  });
+  it('deletes the lane manifest from main on a successful land (post-land cleanup)', () => {
+    expect(src).toMatch(/finalizeLand/);
+    expect(src).toMatch(/'rm', '--quiet', MANIFEST_FILENAME/);
+  });
+  it('scopes every reconcile commit to an explicit -- <pathspec> (never a bare commit that sweeps foreign staged hunks)', () => {
+    expect(src).not.toMatch(/'add', '-A'/);
+    // both reconcile commits pass a '--' pathspec separator (the shared-index-race guard)
+    const commitCalls = src.match(/\['commit', '-m',[^\]]*\]/g) || [];
+    expect(commitCalls.length).toBeGreaterThan(0);
+    for (const c of commitCalls) expect(c).toMatch(/'--'/);
   });
 });
