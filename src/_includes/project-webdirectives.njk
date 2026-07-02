@@ -473,6 +473,62 @@ declare const customComments: CustomCommentRegistry;
         </table></we-data-table>
     </div>
 
+    <h4 id="ssr-wire-format">Wire Format (normative — byte-exact)</h4>
+    <p class="text-gray-600 text-sm">
+        The externally-observable SSR output is a <strong>language-agnostic wire format</strong>: a renderer in
+        any language (Node, Go, Rust, PHP, …) is conformant iff it emits these exact bytes, so the single JS
+        client hydrates every server's output identically (per
+        <a href="/backlog/2030-foundational-ssr-hydration-surface-for-comment-anchor-direct/">#2030</a>).
+        The wire format — not the render code — is the swap boundary.
+    </p>
+    <ol class="list-decimal ml-6 text-gray-600 text-sm">
+        <li>
+            <strong>Open/close marker grammar (space-padding is normative).</strong> A directive region is
+            delimited by a paired open and close comment. The open marker is
+            <code>&lt;!-- <var>namespace</var>:<var>name</var><var> options</var> --&gt;</code>; the close marker
+            is <code>&lt;!-- /<var>namespace</var>:<var>name</var> --&gt;</code>. There is <strong>exactly one
+            ASCII space</strong> immediately after the opening <code>&lt;!--</code> and <strong>exactly one ASCII
+            space</strong> immediately before the closing <code>--&gt;</code> of every marker. The close marker's
+            token begins with a single <code>/</code> and carries the namespace-qualified name only (never the
+            options). Renderers MUST NOT emit tabs, newlines, or additional spaces inside single-line markers, so
+            the delimiter is a stable byte sequence the client can string-match.
+        </li>
+        <li>
+            <strong><code>data-key</code> keyed diffing.</strong> Every item element emitted by a keyed
+            <code>for-each</code> MUST carry a <code>data-key="<var>key</var>"</code> attribute whose value is the
+            item's key projected to a string. The client reads <code>data-key</code> for keyed reconciliation; it
+            is the only key channel (keys are never serialized into comment text — see the state token below).
+        </li>
+        <li>
+            <strong>Zero-JS progressive baseline.</strong> All structural content between the markers is fully
+            expanded in the emitted bytes (lists enumerated, the live <code>if</code>/<code>switch</code> branch
+            present, resolved resource data inline). The document is complete and readable with no JavaScript;
+            markers are inert comments.
+        </li>
+        <li>
+            <strong>State-token layout (bounded, in the open marker).</strong> A directive that needs resume state
+            for hydration serializes it as <strong>bounded framework tokens inside its open marker's option
+            list</strong> (e.g. <code>value="…"</code> on <code>switch</code>, <code>condition="…"</code> on
+            <code>if</code>). Two constraints are normative for every language: (a) per-item keys travel on
+            <code>data-key</code>, never in comment text; (b) renderers MUST NOT serialize raw user data into
+            comment text — HTML comments cannot contain <code>--</code> or <code>--&gt;</code>, so doing so risks
+            parser breakout/injection. Large or shared state is a future, measured
+            <code>&lt;script type="application/json"&gt;</code> side-channel — and if adopted becomes a
+            <em>standard</em> addition, not a per-renderer one.
+        </li>
+    </ol>
+    <p class="text-gray-600 text-sm mt-2">
+        <strong>Conformance vectors.</strong> This wire format is pinned by a WE-owned, language-agnostic vector
+        set — <code>(input directive tree + data) → exact expected HTML bytes</code> — that every renderer passes
+        (the <a href="/backlog/817-constellation-placement-of-guard-validity-merge-validator-re/">#817</a>/<a href="/backlog/899-behavioral-conformance-vectors-in-browser-implementer-valida/">#899</a>
+        protocol-plus-vectors, data-not-impl pattern). The vectors live at
+        <code>we:conformance-vectors/webdirectives-ssr.vectors.ts</code>; WE ships the vectors + the structural
+        schema validator, never a renderer. The published grammar is <code>control:</code>/<code>/control:</code>
+        <code>open-close</code> — the FUI runtime's legacy <code>:start</code>/<code>:end</code> spelling is a
+        pre-existing conformance gap reconciled to this standard separately
+        (<a href="/backlog/2068-reconcile-fui-runtime-directive-markers-to-the-standard-open/">#2068</a>).
+    </p>
+
     <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
     <ul class="list-disc ml-6 text-gray-600 text-sm">
         <li><strong>Comment boundaries:</strong> Client uses <code>&lt;!-- control:... --&gt;</code> and <code>&lt;!-- /control:... --&gt;</code> as delimiters to identify directive-managed DOM regions.</li>

@@ -25,6 +25,16 @@ export { webthemeSuite } from './webtheme.vectors.js';
 // The Doc Spec suite (#1163) is a pure (manifest, cases) → DocsSite golden-vector suite, a different shape
 // from the interaction-script ConformanceVectorSuite — exported on its own, not in `conformanceSuites`.
 export { webdocsDocSpecSuite, assertDocSpecSuite, DocSpecSchemaError } from './webdocs.vectors.js';
+// The Web Directives SSR wire-format suite (#2063/#2030) is a pure (directive tree + data) → exact HTML bytes
+// golden-vector suite — like webdocs, a different shape from the interaction-script ConformanceVectorSuite, so
+// exported on its own, not in `conformanceSuites`. It pins the language-agnostic SSR wire format every renderer
+// conforms to (the FUI Node reference renderer #2064 is the oracle).
+export {
+  webdirectivesSsrSuite,
+  assertSsrWireSuite,
+  SsrWireSchemaError,
+} from './webdirectives-ssr.vectors.js';
+export type { SsrWireVector, SsrWireVectorSuite } from './webdirectives-ssr.vectors.js';
 
 import type { ConformanceVectorSuite } from './schema.js';
 import { validatorResolutionSuite } from './validator-resolution.vectors.js';
