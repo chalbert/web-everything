@@ -486,7 +486,11 @@ upstream model that bundles several concerns into one object (e.g. W3C Web Annot
 `target`+`selector`+`body`) is a **serialization-vocabulary** fact, *orthogonal to the runtime
 ownership seam*: adopt the wire format wholesale while still splitting which artifact owns the
 machinery. #1408 (annotation = UX intent composing a separate durable-range-anchor contract; the
-platform itself split quote-anchoring into `#:~:text=`).
+platform itself split quote-anchoring into `#:~:text=`). #2029 (the `suggestion` motivation's
+accept/reject mutation transaction = a composed `suggested-edit` contract — annotation supplies the
+proposal body, the Editor Engine protocol the apply, record-only over read-only hosts; "rich-text owns
+it" was a classification collapse, since the rich-text intent is itself UX-only and its engine is
+already a separate protocol).
 
 **Converse guard — "technical strategy → Configurator" does *not* license a Configurator domain that
 re-homes axes the config already carries.** When the technical axes already ride a `we:`-layer registry +
@@ -499,7 +503,8 @@ UX layer; technical creation axes stay on the #483 config, referenced not re-hom
 domain dissolved as redundant — re-judged on pure merit after a zero-consumer demand-gate "hold" was rejected).
 
 **Lineage:** #030 (intent-vs-trait channel split) · #063 (native vocabulary) · #129 (guard intent
-re-framed) · #499 (enrollment intent; converse-guard) · #634 · #1408 (durable-anchor contract split) · intents-open-design.
+re-framed) · #499 (enrollment intent; converse-guard) · #634 · #1408 (durable-anchor contract split) ·
+#2029 (suggested-edit contract split) · intents-open-design.
 
 ### Intent-conformance is compliance of a block against the intent contract — not a runtime gate {#intent-conformance-is-block-compliance}
 

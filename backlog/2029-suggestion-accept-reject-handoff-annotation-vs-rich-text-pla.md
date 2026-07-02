@@ -1,10 +1,13 @@
 ---
 kind: decision
 parent: "1399"
-status: open
+status: resolved
 preparedDate: "2026-07-01"
 dateOpened: "2026-07-01"
-dateStarted: "2026-07-01"
+dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#intents-ux-only"
 tags: [decision, annotation, rich-text, suggestion, collaborative-editing, aria-1.3, book-candidate, placement]
 relatedReport: reports/2026-07-01-2029-suggestion-accept-reject-placement.md
 ---
@@ -15,10 +18,13 @@ WAI-ARIA **1.3** (editor's draft Feb 2026) mints `role=suggestion` (alongside `c
 collaborative suggested-edit lifecycle native grounding. It lands on an open question the shipped
 [annotation intent](../src/_data/intents/annotation.json) already flagged and nobody tracks: the `suggestion`
 motivation is the only one whose accept/reject **mutates the host document**, so it can't sit in a UX-only
-annotation intent that "owns no host mutation." Where does it live? The one open fork below is grounded in a
-prior-art survey ([`/research/suggestion-accept-reject-ownership/`](/research/suggestion-accept-reject-ownership/)
-— who owns the mutation transaction; whether suggestions work over read-only hosts) with a recommended default
-in **bold**.
+annotation intent that "owns no host mutation." Where does it live? **Ruled 2026-07-02: (b) a standalone
+`suggested-edit` contract**, composed by both annotation (suggestion body) and the rich-text Editor Engine
+protocol (apply; record-only over read-only hosts). Build filed as
+[#2145](2145-author-the-suggested-edit-contract-propose-accept-reject-com.md); rule codified to
+[we:docs/agent/platform-decisions.md#intents-ux-only](../docs/agent/platform-decisions.md). The fork was
+grounded in a prior-art survey ([`/research/suggestion-accept-reject-ownership/`](/research/suggestion-accept-reject-ownership/)
+— who owns the mutation transaction; whether suggestions work over read-only hosts).
 
 The other two new roles are **covered** and file nothing here: `comment` -> annotation `commenting`
 motivation; `mark` -> annotation `highlight` disposition (Custom Highlight API). Only `suggestion` exposes an
@@ -53,9 +59,9 @@ A mutation transaction has exactly **one** owner, so the homes below genuinely c
 case (b) — #819). The prior-art survey pins the discriminator: **who owns the transaction, and does the pattern
 work over a read-only host** (the one case with no engine to delegate to).
 
-## Recommended path at a glance
+## Ruling at a glance — ratified 2026-07-02
 
-Ratify the row, or override to the alternative. **Confidence** says where judgment is actually needed.
+Ratified as recommended (the row below). **Confidence** says where judgment was actually needed.
 
 | Fork | Recommended default | Main alternative | Confidence |
 |---|---|---|---|
@@ -122,6 +128,16 @@ present when editable and **record-only** for read-only hosts. The citation-scop
 boundary *forbids* annotation ownership but does **not** authorize the rich-text home (the item over-read it) —
 corrected above.
 
+*Ratify skeptic (2026-07-02):* `CONFIRMED — no refutation; ratified as (b).` A fresh refute-only pass at
+ratification grounded every prep-era premise against the live tree: the UX-only summary, `suggestion`
+motivation value, `surface` dimension, and researchGaps handoff question on
+[we:src/_data/intents/annotation.json](../src/_data/intents/annotation.json); the engine-is-a-protocol
+disclaimer on [we:src/_data/intents/rich-text.json](../src/_data/intents/rich-text.json); the
+`#intents-ux-only` corollary + #1408 lineage in
+[we:docs/agent/platform-decisions.md](../docs/agent/platform-decisions.md); #1471 resolved and graduated to
+`we:range-anchor/contract.ts` (the composed `target` is real, not a phantom citation); no competing
+ownership claim anywhere in `we:src/_data/`; no post-2026-07-01 ruling reshapes the fork.
+
 ## Context
 
 ### Boundaries / lineage
@@ -136,8 +152,9 @@ corrected above.
   y-prosemirror/Yjs 14 track-changes (accept/reject dispatch **editor transactions**), CRDT-native BlockSuite
   (data/logic split, still an engine), and the read-only/PDF/Hypothesis case (**no engine -> proposal-record
   only**). No `preparedDate` set yet — pending the DoR gate.
-- On resolve, this decision **codifies a rule** (suggestion accept/reject = technical machinery -> its own
-  composed `suggested-edit` contract, a fresh application of `#intents-ux-only`) — supply `--codified-to`.
+- **Codified** (2026-07-02): suggestion accept/reject = technical machinery -> its own composed
+  `suggested-edit` contract, a fresh application of `#intents-ux-only` — recorded in that rule's precedent +
+  lineage. Successor build: [#2145](2145-author-the-suggested-edit-contract-propose-accept-reject-com.md).
 - Surfaced 2026-07-01 in the **first** [#1399](/backlog/1399-latent-standard-discovery-lens-catalogue-each-lens-only-emit/)
   watch run (front B — ARIA 1.3 spec-role delta since the 2026-06-21 APG / OpenUI lens run).
   Program report: [we:reports/2026-07-01-program-latent-standard-discovery.md](../reports/2026-07-01-program-latent-standard-discovery.md).
