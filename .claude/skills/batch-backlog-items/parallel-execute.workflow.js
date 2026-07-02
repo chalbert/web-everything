@@ -1032,12 +1032,20 @@ const reopened = [];
 if (baseReady) {
   // Un-resolved ledger entries whose num this run actually claimed. `dropped:"taken"` can't occur here (setup
   // skips already-active items), but scoping to claimedThisRun makes the boundary structural, not incidental.
-  const toReopen = [...new Set(
-    ledger
-      .filter((l) => l && l.status !== 'resolved')
-      .map((l) => String(l.num))
-      .filter((num) => claimedThisRun.size === 0 || claimedThisRun.has(num)),
-  )];
+  // MIRROR of we:scripts/readiness/carry-forward.mjs `computeReopenSet` (the sandbox can't import; that module
+  // + its test are the spec — keep in sync). #2086 extracted this decision so a wrong call (which cascades
+  // across 12+ items per batch, per the 2026-07-01 closeout) is unit-tested rather than inline-only.
+  const claimedKnown = claimedThisRun.size > 0;
+  const _seen = new Set();
+  const toReopen = [];
+  for (const l of ledger) {
+    if (!l || l.status === 'resolved') continue;
+    const num = String(l.num);
+    if (claimedKnown && !claimedThisRun.has(num)) continue; // foreign — another session owns it
+    if (_seen.has(num)) continue;
+    _seen.add(num);
+    toReopen.push(num);
+  }
   if (toReopen.length > 0) {
     log(`Reopening ${toReopen.length} unlanded item(s) left active-but-unclaimed by this run so they re-enter the next pack: #${toReopen.join(', #')}`);
     const reop = await agent(
