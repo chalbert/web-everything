@@ -6,7 +6,7 @@
   <title>Web Intl Conformance Demo - Web Everything</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/demos/playground.css">
-  <link rel="stylesheet" href="/demos/webintl-conformance-demo.css">
+  <link rel="stylesheet" href="/demos/conformance-demo.css">
 </head>
 <body>
   <div class="demo-header">
@@ -23,11 +23,28 @@
   <main class="play">
     <header class="play-intro">
       <h1>Web Intl Conformance Demo</h1>
-      <p>The runnable proof of the <code>CustomIntlProvider</code> contract (<a href="/backlog/1054-webintl-contract-intl-provider-types-in-webeverything/">#1054</a>): one provider hands back <code>Intl.Collator</code> / <code>DateTimeFormat</code> / <code>NumberFormat</code> / <code>RelativeTimeFormat</code> for a requested locale, so an app gets locale-aware collation, date, number, and relative-time formatting through one swappable seam.</p>
+      <p>
+        The runnable proof that the <code>CustomIntlProvider</code> contract
+        (<a href="/backlog/1054-webintl-contract-intl-provider-types-in-webeverything/">#1054</a>) is
+        <strong>conformant</strong>. The runtime — the native-first <code>Intl.*</code> provider and the
+        <code>customIntl</code> swap registry — is <strong>relocated to Frontier UI</strong>
+        (<a href="/backlog/1914-relocate-the-intl-provider-runtime-registry-to-fui/">#1914</a>,
+        WE holds zero executable, #1282). Its conformance runs through the
+        <strong>plateau-hosted conformance runner</strong>
+        (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a> /
+        <a href="/backlog/1790-plateau-origin-conformance-runner-docs-surface-end-to-end-smo/">#1790</a>),
+        which drives the WE-owned intl vector suite
+        (<a href="/backlog/1917-intl-conformance-binding-parts-structure-predicate-we-vector/">#1917</a>:
+        <code>formatToParts</code> part-type sequence + <code>Collator.compare</code> sign, #1816) against
+        the FUI binding and reports pass/fail.
+      </p>
       <p class="play-caveat">
-        The contract is type-only; the runtime provider/reader + swap registry are impl in Frontier UI. So
-        this demo supplies its <strong>own</strong> in-demo implementation — honest for a browser demo — to
-        prove the contract is realizable. The section below asserts each contract invariant live.
+        The pass/fail panel below is rendered <strong>at plateau-origin inside an iframe</strong> — the
+        cross-origin runtime boundary (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a>
+        ratified (b)) that reaches the shared, neutral runner with no implementer→runner edge. WE owns only
+        the build-agnostic vectors and the type-only <code>CustomIntlProvider</code> contract; the provider
+        impl is FUI's, the runner is plateau's. A green result proves conformance independent of how the
+        runtime is built (#899).
       </p>
     </header>
 
