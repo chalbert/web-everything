@@ -1,0 +1,37 @@
+{
+  "$description": "Ant Design (v5) flavor — a full DTCG override of the webtheme platform default capturing Ant's default seed/map token roles in oklch. Overrides only the roles Ant names; every other family inherits the platform default via `extends`. Values transcribe Ant Design 5's default light theme seed tokens (the `theme.defaultConfig` / algorithm output: colorPrimary #1677ff, borderRadius 6px, colorBorder #d9d9d9, colorBgLayout #f5f5f5 …) — see the paired gap list report for what these roles CAN and CANNOT reach in a rendered FUI component.",
+  "color": {
+    "$type": "color",
+    "$description": "Ant's core seed/map color roles. Ant ships a generated 10-step palette per hue plus flat semantic seed tokens (colorPrimary, colorBgContainer, colorText …); each is transcribed here onto the closest platform-default color role. Ant's alpha-on-black text roles (colorText = rgba(0,0,0,0.88), colorTextSecondary = 0.65) are pre-composited over white. The `*Bg`/on-color pairings and the filled color-scale steps Ant ships have no platform-default home — recorded in the gap list.",
+    "bg-light": { "$value": "oklch(1 0 0)", "$description": "Ant colorBgContainer #ffffff (light) — the container surface." },
+    "bg-dark": { "$value": "oklch(0.196 0.004 285.9)", "$description": "Ant dark-algorithm colorBgContainer (~#141414)." },
+    "text-light": { "$value": "oklch(0.239 0 89.9)", "$description": "Ant colorText rgba(0,0,0,0.88) composited over white." },
+    "text-dark": { "$value": "oklch(0.985 0 0)", "$description": "Ant dark colorText (~rgba(255,255,255,0.85))." },
+    "accent": { "$value": "oklch(0.599 0.219 259)", "$description": "Ant colorPrimary #1677ff — the daybreak-blue primary that distinguishes Ant from a near-black or indigo default." },
+    "primary-hover": { "$value": "oklch(0.673 0.176 255.3)", "$description": "Ant colorPrimaryHover #4096ff (palette step 5)." },
+    "surface": { "$value": "oklch(1 0 0)", "$description": "Ant colorBgContainer #ffffff (light) — the card/panel surface." },
+    "text-secondary": { "$value": "oklch(0.464 0 89.9)", "$description": "Ant colorTextSecondary rgba(0,0,0,0.65) composited over white." }
+  },
+  "radius": {
+    "$type": "dimension",
+    "$description": "Ant keys radius off a single `borderRadius: 6` seed; borderRadiusLG (8), borderRadiusSM (4), and borderRadiusOuter are derived from it by the algorithm.",
+    "base": { "$value": "6px", "$description": "Ant borderRadius (the single radius seed)." },
+    "md": { "$value": "6px", "$description": "Ant borderRadius (control default, 6px)." },
+    "lg": { "$value": "8px", "$description": "Ant borderRadiusLG (card/modal, 8px)." },
+    "full": { "$value": "9999px" }
+  },
+  "ring": {
+    "$description": "Ant's focus/active affordance. Ant draws a `controlOutline` box-shadow (rgba(5,145,255,0.1), controlOutlineWidth 2px) plus a colorPrimaryBorder edge on focus; the platform-default `ring` role (#1316) is the closest home.",
+    "color": { "$value": "oklch(0.819 0.096 247.3)", "$description": "Ant colorPrimaryBorder #91caff (the focused control edge)." },
+    "width": { "$value": "2px", "$description": "Ant controlOutlineWidth (2px)." },
+    "offset": { "$value": "0px" }
+  },
+  "surface": {
+    "$type": "color",
+    "$description": "Ant's neutral surface roles (colorBorder #d9d9d9, colorBorderSecondary, colorBgLayout #f5f5f5, colorTextTertiary). colorBgLayout is Ant's muted app background; colorTextTertiary is its muted foreground.",
+    "border": { "$value": "oklch(0.885 0 89.9)", "$description": "Ant colorBorder #d9d9d9." },
+    "input": { "$value": "oklch(0.885 0 89.9)", "$description": "Ant control border (colorBorder, shared with the field outline in the default theme)." },
+    "muted": { "$value": "oklch(0.97 0 89.9)", "$description": "Ant colorBgLayout #f5f5f5 (the muted app/panel background)." },
+    "muted-foreground": { "$value": "oklch(0.464 0 89.9)", "$description": "Ant colorTextTertiary/Secondary — the muted foreground." }
+  }
+}

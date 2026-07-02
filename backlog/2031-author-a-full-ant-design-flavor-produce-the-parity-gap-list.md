@@ -2,11 +2,13 @@
 kind: story
 size: 5
 parent: "1226"
-status: active
+status: resolved
 dateOpened: "2026-07-01"
-tags: []
-blockedBy: ["2017"]
+tags: [parity, flavor, ant, dtcg, gap-list]
 dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
+graduatedTo: "we:reports/2026-07-02-ant-parity-gap-list.md"
+relatedReport: reports/2026-07-02-ant-parity-gap-list.md
 ---
 
 # Author a full Ant Design flavor + produce the parity gap list

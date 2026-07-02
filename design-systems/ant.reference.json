@@ -1,0 +1,36 @@
+{
+  "$description": "Ant Design (v5) parity REFERENCE SET for the #2024 conformance harness — WE-owned data, not harness code. The canonical component set (button/input/card) and the Ant roles each is themed by, each naming the resolved DTCG path the flavor (we:design-systems/ant.tokens.json) authors that role onto. The harness (fui:plugs/webtheme/conformanceHarness.ts scoreFlavor) diffs each role against what the tokens+intents model can land on a rendered component and emits a per-component compliance score + gap list. Seeded from the #2031 gap taxonomy. This file carries ZERO harness logic — swapping it (or the shadcn/material one) is what proves the harness target-agnostic (#2024 acceptance 2).",
+  "target": "Ant Design 5",
+  "components": [
+    {
+      "component": "button",
+      "roles": [
+        { "role": "colorPrimary", "dtcgPath": "color.accent" },
+        { "role": "colorPrimaryHover", "dtcgPath": "color.primary-hover" },
+        { "role": "borderRadius (md)", "dtcgPath": "radius.md" },
+        { "role": "controlOutline (--ring)", "dtcgPath": "ring.color" },
+        { "role": "colorError (danger)", "dtcgPath": "color.error" }
+      ]
+    },
+    {
+      "component": "input",
+      "roles": [
+        { "role": "colorBorder", "dtcgPath": "surface.border" },
+        { "role": "colorBorder (input)", "dtcgPath": "surface.input" },
+        { "role": "colorTextPlaceholder", "dtcgPath": "surface.muted-foreground" },
+        { "role": "controlOutline (--ring)", "dtcgPath": "ring.color" }
+      ]
+    },
+    {
+      "component": "card",
+      "roles": [
+        { "role": "colorBgContainer (surface)", "dtcgPath": "color.surface" },
+        { "role": "borderRadiusLG (lg)", "dtcgPath": "radius.lg" },
+        { "role": "colorBorderSecondary", "dtcgPath": "surface.border" },
+        { "role": "colorTextSecondary", "dtcgPath": "surface.muted-foreground" },
+        { "role": "colorBgLayout (muted)", "dtcgPath": "surface.muted" },
+        { "role": "boxShadowTertiary (elevation)", "dtcgPath": "color.tonal-elevation" }
+      ]
+    }
+  ]
+}

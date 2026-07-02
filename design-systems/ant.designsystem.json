@@ -1,0 +1,6 @@
+{
+  "extends": "@webtheme/default",
+  "themeTokens": "./ant.tokens.json",
+  "intentDefaults": { "density": "comfortable", "motion": "natural", "surface": "solid" },
+  "traitDefaults": { "radius": "md" }
+}
