@@ -5,7 +5,11 @@ name: Publish @webeverything/contracts
 # cheap ("publication is not that complex with correct CI", #834). Lower priority / no hurry — this is
 # risk-mitigation for the #872 epic, not a release gate.
 #
-# Bump + release:
+# PRIMARY release path is now we:.github/workflows/release-please.yml (#2156): merging the release-please
+# Release PR bumps the version, tags contracts-v*, and publishes. This workflow is the MANUAL FALLBACK —
+# a hand-pushed tag or a workflow_dispatch dry-run — for when you need to publish outside that flow.
+#
+# Manual bump + release:
 #   cd contracts && npm version <patch|minor|major>   # writes contracts/package.json "version"
 #   git tag contracts-v$(node -p "require('./contracts/package.json').version")
 #   git push origin --tags
@@ -26,7 +30,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write # required for npm provenance (Sigstore OIDC)
+  id-token: write # required for npm provenance (Sigstore OIDC) — automatic in Actions, no dashboard setup
 
 jobs:
   publish:
@@ -56,6 +60,10 @@ jobs:
 
       - name: Publish
         working-directory: contracts
+        # Public type-only contract (#907): --access public + --provenance. Provenance needs a public package
+        # (it writes a public Sigstore transparency log) and the id-token permission above — no OIDC trusted-
+        # publisher registration required; the NPM_TOKEN auth is sufficient. Dropping the token for full OIDC
+        # trusted publishing is optional later hardening (#2154).
         run: npm publish --provenance --access public ${{ (github.event_name == 'workflow_dispatch' && inputs.dry-run) && '--dry-run' || '' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

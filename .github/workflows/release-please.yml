@@ -1,0 +1,62 @@
+name: release-please
+
+# CI-owned semantic versioning for @webeverything/contracts (#907, #2156).
+#
+# Flow: every push to main, release-please maintains a single "Release PR" that accumulates the pending
+# version bump + CHANGELOG from Conventional Commit messages (fix: -> patch, feat: -> minor). Merging that
+# Release PR is the release: release-please tags `contracts-v<version>`, cuts a GitHub Release, and the
+# publish job below fires (gated on releases_created) to `npm publish`.
+#
+# 0.x lock (per owner, 2026-07-02): bump-minor-pre-major + bump-patch-for-minor-pre-major (in
+# release-please-config.json) keep the package below 1.0.0 — a breaking change bumps the MINOR (0.x -> 0.(x+1))
+# and a feature bumps the PATCH. Nothing ever auto-crosses to 1.0.0. Graduating to 1.0 is a deliberate
+# config flip at go-public, never automatic.
+#
+# Note: release-please tags with the default GITHUB_TOKEN, which does NOT trigger the tag-triggered
+# we:.github/workflows/publish-contracts.yml (GitHub suppresses workflow-triggered-by-GITHUB_TOKEN to avoid
+# recursion) — so publishing is done inline here, not there. publish-contracts.yml stays as the manual
+# (workflow_dispatch / hand-pushed tag) fallback.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write # release-please pushes the Release PR branch, the tag, and the GitHub Release
+  pull-requests: write # release-please opens/updates the Release PR
+  id-token: write # npm provenance (Sigstore OIDC)
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish:
+    needs: release-please
+    # Single-package repo: releases_created is sufficient. When a second package lands, gate on the
+    # per-path output `contracts--release_created` instead.
+    if: needs.release-please.outputs.releases_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - name: Install
+        run: npm ci
+      - name: Repo health gate
+        run: npm run check:standards
+      - name: Publish
+        working-directory: contracts
+        # public + provenance (contracts/package.json publishConfig also pins these). prepublishOnly refuses 0.0.0.
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

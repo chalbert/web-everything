@@ -46,3 +46,15 @@ mode erases the private-package friction: provenance works (it needs a public pa
 auth suffices), publishing is free for this scope, and **consumers need no read token** — FUI/plateau/CI just
 `npm install`. Public/internal naming boundary and private-until-go for the rest is [[2155]] (Plateau scope
 naming). Dropping the long-lived token for full OIDC trusted publishing is optional later hardening (#2154).
+
+## Publishing is CI-owned (decided 2026-07-02): release-please, 0.x-locked ([[2156]])
+
+The version bump + publish are no longer a manual `npm version` + tag-push ceremony — that's owned by the
+merge-PR release flow. **release-please** (`we:.github/workflows/release-please.yml`, [[2156]]) maintains a
+Release PR off Conventional Commits; merging it bumps, tags `contracts-v*`, and publishes. Config locks the
+package to **0.x** (`bump-minor-pre-major` + `bump-patch-for-minor-pre-major`) so no change ever auto-crosses
+to 1.0 — the 1.0 graduation is a deliberate flip at go-public, never automatic (owner constraint). The
+`NPM_TOKEN` secret is already set. So this item's residual is just: cut the first release (merge the first
+Release PR — pin it to `0.1.0` via a `Release-As: 0.1.0` commit footer for a clean first version), then the
+agent-doable consumer-pinning half (deferred to go-public to avoid private read tokens — moot here since the
+package is public).
