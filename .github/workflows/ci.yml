@@ -32,8 +32,8 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Unit suite
-        run: npm run test:unit
+      - name: Unit suite + coverage (80% bar, #2082)
+        run: npm run test:coverage
 
       - name: Repo health gate
         run: npm run check:standards

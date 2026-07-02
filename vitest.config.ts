@@ -22,8 +22,42 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
+      // #2082: the 80% bar governs the unit-tested STANDARDS/IMPL planes, not just blocks/. This mirrors
+      // the tested standards planes in `test.include` below — every plane that ships real `*.ts` source
+      // behind a unit suite. Deliberately EXCLUDED (own gates, not this rule): demos/ (the exercise apps
+      // are forcing-functions, Playwright/conformance-gated), src/ (11ty templates), tools/ + scripts/
+      // (build tooling, mostly .mjs). Measured 85% across this set (blocks-only was 85.45%); folding in
+      // the UI/build planes craters it to ~68% and misrepresents the bar. Keep this list and the
+      // `test.include` standards planes in lockstep when a new plane lands.
       include: [
         'blocks/**/*.ts',
+        'capabilities/**/*.ts',
+        'validity-merge/**/*.ts',
+        'commitment-policy/**/*.ts',
+        'error-summary/**/*.ts',
+        'validator-resolution/**/*.ts',
+        'capability-manifest/**/*.ts',
+        'validation-generation/**/*.ts',
+        'module-resolution/**/*.ts',
+        'source-resolution/**/*.ts',
+        'conformance-evidence/**/*.ts',
+        'guard/**/*.ts',
+        'reliability/**/*.ts',
+        'intl/**/*.ts',
+        'manifests/**/*.ts',
+        'process/**/*.ts',
+        'wrapper-conformance/**/*.ts',
+        'conformance-vectors/**/*.ts',
+        'webtheme/**/*.ts',
+        'reproduction-parity/**/*.ts',
+        'repro-bundle/**/*.ts',
+        'explorer/**/*.ts',
+        'webtraits/**/*.ts',
+        'webcompliance/**/*.ts',
+        'webcases/**/*.ts',
+        'interaction-state/**/*.ts',
+        'config/**/*.ts',
+        'functions/**/*.ts',
       ],
       exclude: [
         'node_modules/**',
@@ -32,8 +66,9 @@ export default defineConfig({
         'coverage/**',
         '**/*.test.ts',
         '**/*.spec.ts',
-        'blocks/**/__tests__/**',
-        'blocks/**/index.ts', // Export files don't need coverage
+        '**/__tests__/**',
+        '**/__fixtures__/**',
+        '**/index.ts', // Export/barrel files don't need coverage
         '.eleventy.js',
         'playwright.config.ts',
         'vitest.config.ts',

@@ -24,7 +24,7 @@ const noE2e = process.argv.includes('--no-e2e');
 // them all regardless). The Playwright lane runs every project (a11y, content, smoke, visual, interaction,
 // block e2e) in one browser-launch — finer per-lane splits aren't worth the extra cold starts here.
 const LANES = [
-  { label: 'unit (vitest)', cmd: ['npx', ['vitest', 'run']] },
+  { label: 'unit + coverage (vitest)', cmd: ['npx', ['vitest', 'run', '--coverage']] }, // #2082: enforce the 80% bar
   { label: 'standards (check:standards)', cmd: ['node', ['scripts/check-standards.mjs']] },
   ...(noE2e ? [] : [{ label: 'rendered + interaction (playwright)', cmd: ['npx', ['playwright', 'test']] }]),
 ];
