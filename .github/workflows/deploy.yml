@@ -65,4 +65,7 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: web-everything
+          # Pin to the version verified to honor `run_worker_first = ["/*"]` (the boolean form leaked;
+          # a version mismatch here previously served content un-gated). Bump only after re-verifying the gate.
+          wranglerVersion: "4.106.0"
           command: deploy
