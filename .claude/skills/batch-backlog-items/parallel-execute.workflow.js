@@ -87,7 +87,11 @@ export const meta = {
 //
 // args (passed by the main loop after the conversational pack/plan/"go"):
 //   { batchSlug, budgetPoints, primaryRoot, items: [ { num, slug, file, locus, cost, declaredFiles, blockedBy } … ],
-//     laneModel? }  — laneModel (e.g. 'sonnet') downgrades ONLY the concurrent lane work agents; set it for
+//     laneModel?, deferredDrain? }  — deferredDrain:true (#2174, default false) makes the CONCURRENT lanes
+//   STOP at "pushed + .lane-manifest.json written + backlog.mjs queue" and RETURN early WITHOUT integrating —
+//   the deferred drain (scripts/lane-drain.mjs watch/drain, #2173) lands them in a later session; the inline
+//   integrate (4b–4h) stays the default OFF fallback until the drain is proven end-to-end. laneModel (e.g.
+//   'sonnet') downgrades ONLY the concurrent lane work agents; set it for
 //   a mechanically-clear, file-disjoint pack. Drops re-adjudicate + resolves re-gate on the default model, so
 //   the quality floor is unchanged (see the laneModel comment below). Omit → all agents inherit the session model.
 // Returns: { ledger, concurrentItems, serialItems, crossRepoItems, conflictsReplayed, stranded,
@@ -119,6 +123,14 @@ const budgetPoints = Number.isFinite(a.budgetPoints) ? a.budgetPoints : Infinity
 // lane (higher-judgment, un-provable-independence items whose drop is final), the integrate/replay/regen/
 // reconcile steps. Omit laneModel → every agent inherits the session model (unchanged behaviour).
 const laneModel = typeof a.laneModel === 'string' && a.laneModel ? a.laneModel : undefined;
+// DEFERRED-DRAIN producer mode (#2174, under #2162). Default OFF (false) — the inline integrate (Phase 4b–4h)
+// stays the proven fallback until the #2162 drain is proven end-to-end. When ON, the CONCURRENT lanes STOP at
+// "lane pushed + `.lane-manifest.json` written (in the WE lane commit) + `backlog.mjs queue`" and the
+// orchestrator does NOT integrate: the deferred drain (`scripts/lane-drain.mjs watch/drain`, #2173) owns ALL
+// landing in a later session. The SERIAL lane is out of scope (non-lane, in-place) — the item title is
+// "LANES stop at pushed"; a serial item still lands inline (logged when it happens under this flag). Flip via
+// args.deferredDrain from the main loop; keep it off for a normal /workflow batch.
+const DEFERRED_DRAIN = !!a.deferredDrain;
 // The throwaway base ref carrying the central post-claim state WE lanes reset to. Slashes keep it under the
 // lane/* namespace the #1934 carve-out allows (push + delete). One per batch (slug-scoped). WE-only: the
 // pre-claim (backlog + claims.json) lives only in WE, so only WE's origin gets a _base ref.
@@ -727,6 +739,16 @@ function laneItemPrompt(it, laneDirs) {
     `  go in \`dismissedFindings\` (finding + one-line reason [+ severity/location]); NEVER drop one silently —`,
     `  the integrator/drain records them in the PR body (\`lane-review body\` → \`pr-land --body-file\`) as the`,
     `  audit trail + the #2171 escalation input. A clean review → leave dismissedFindings empty and proceed.`,
+    ...(DEFERRED_DRAIN ? [
+      `• 3c. DEFERRED-DRAIN manifest (#2174 — this run is a STOP-AT-PUSH producer). In the WE clone, AFTER the`,
+      `  resolve commit and BEFORE the push, write this lane's \`.lane-manifest.json\` so the deferred drain`,
+      `  (#2173, a LATER session) can land the couple. Run EXACTLY, from the WE clone (${weDir}):`,
+      `    \`node scripts/lane-manifest-write.mjs --item=${it.num} --repos='${JSON.stringify(repos.map((r) => ({ repo: r, ref, carriesResolve: r === 'we' })))}'${it.blockedBy && it.blockedBy.length ? ` --blocked-by=${it.blockedBy.join(',')}` : ''}${reserved.length ? ` --merge-risk='${JSON.stringify(reserved)}'` : ''} --batch-slug=${batchSlug}\``,
+      `  Then \`git add .lane-manifest.json\` and AMEND it onto the resolve commit (\`git commit --amend --no-edit\`)`,
+      `  — ONE commit carries the work + resolve + manifest (a one-sided ADD keeps the #1869 conflict-free WE-lane`,
+      `  merge). The manifest names each repo's lane ref "${ref}", WE-carries-resolve, impl-first/WE-last. Do this`,
+      `  in EVERY repo? NO — only the WE clone (the manifest rides the WE lane commit the drain reads).`,
+    ] : []),
     ...(reserved.length ? [
       `• 3b. FENCE before pushing (#1936 insurance invariant — the broker fencing point). If you reserved any`,
       `  merge-risk path, FIRST confirm your lease was not reclaimed mid-flight (the Kleppmann race: you paused`,
@@ -831,6 +853,86 @@ if (serialItems.length > 0) {
     log(`  serial ${sIdx}/${serialItems.length}: #${it.num} — ${r ? r.status + ' (gate ' + r.gate + ')' : 'no result'}`);
     if (r) ledger.push({ num: r.num || String(it.num), status: r.status, cost: r.cost, drop: r.drop, lane: 'serial', repos, changedFiles: r.changedFiles, derivedArtifacts: r.derivedArtifacts, resolveCommit: r.resolveCommit });
   }
+}
+
+// ── Phase 4 (DEFERRED-DRAIN producer, #2174) — STOP AT PUSH: queue the pushed lanes, do NOT integrate ──────
+// The concurrent lanes have pushed their refs + written .lane-manifest.json into each WE lane commit (step 3c).
+// Instead of merging inline (4b–4h), mark each ready-to-merge (`backlog.mjs queue`) and hand ALL landing to the
+// deferred drain (#2173, a later `lane-drain.mjs watch/drain` session). A concurrent item that did NOT push a
+// landable lane (gate red / died / no WE ref) has nothing to queue → reopen it (active→open) so it re-enters
+// the next pack, exactly like the #2072 closeout does on the inline path. Lane refs are PRESERVED (the drain
+// merges them). The serial lane (4a) already ran in place — non-lane items don't defer (the item title is
+// "LANES stop at pushed"). This is an EARLY RETURN, so the inline integrate below stays byte-for-byte the OFF path.
+if (DEFERRED_DRAIN) {
+  const toQueue = [];  // { num, weRef } — pushed a WE lane ref with a green gate
+  const toReopen = []; // num — claimed this run but produced no landable lane
+  for (let i = 0; i < concurrentResults.length; i++) {
+    const cr = concurrentResults[i];
+    const it = concurrent[i];
+    const num = String((cr && cr.num) || it.num);
+    const refs = cr && Array.isArray(cr.pushedRefs) && cr.pushedRefs.length
+      ? cr.pushedRefs.filter((x) => x && x.repo && x.ref)
+      : (cr && cr.pushedRef ? [{ repo: 'we', ref: cr.pushedRef }] : []);
+    const weRef = (refs.find((x) => x.repo === 'we') || {}).ref || '';
+    if (cr && cr.gate === 'green' && weRef) { // parity with the inline path's canMerge gate (:977)
+      toQueue.push({ num, weRef });
+      ledger.push({ num, status: 'queued', cost: cr.cost, drop: cr.drop, lane: `#${it.num}`, repos: refs.map((x) => x.repo), changedFiles: cr.changedFiles, resolveCommit: cr.resolveCommit });
+    } else {
+      toReopen.push(num);
+      ledger.push({ num, status: 'carried', drop: cr ? 'lane-red-or-no-ref' : 'no-result', cost: cr && cr.cost, lane: `#${it.num}`, repos: refs.map((x) => x.repo) });
+    }
+  }
+  log(`DEFERRED-DRAIN producer: ${toQueue.length} lane(s) → queue (the drain lands them); ${toReopen.length} unpushed → reopen. NOT integrating inline.`);
+  if (serialItems.length) log(`⚠ ${serialItems.length} serial (non-lane) item(s) landed INLINE this run — serial items are out of deferred scope (#2174 covers lanes).`);
+
+  const queued = [];
+  const reopened = [];
+  if (toQueue.length || toReopen.length) {
+    const res = await agent(
+      [
+        RETURN_HYGIENE, ``,
+        `In the PRIMARY WE checkout on branch main, record this DEFERRED-DRAIN producer run's queue state (#2174),`,
+        `then commit + publish ONCE. Do EXACTLY:`,
+        toQueue.length ? `1. QUEUE each pushed lane as ready-to-merge (the deferred drain #2173 lands them later): for EACH below run \`node scripts/backlog.mjs queue <num> --lane=<weRef> --session=${batchSlug}\`. Items (JSON): ${JSON.stringify(toQueue)}.` : `1. (nothing to queue).`,
+        toReopen.length ? `2. REOPEN each item that produced no landable lane (active→open so it re-enters the pack): \`node scripts/backlog.mjs release <num>\` for EACH of ${JSON.stringify(toReopen)}. If release errors (item not active — another session took it), SKIP it; do NOT --force.` : `2. (nothing to reopen).`,
+        `3. Commit the queue token + any reopened backlog files in ONE commit, staging ONLY those paths:`,
+        `   \`git add .claude/skills/batch-backlog-items/queued.json${toReopen.length ? ' ' + toReopen.map((n) => `backlog/${n}-*.md`).join(' ') : ''} && git commit -m "batch ${batchSlug}: queue ${toQueue.length} lane(s) for deferred drain${toReopen.length ? `, reopen ${toReopen.length}` : ''} (#2174)"\` — NEVER \`git add -A\`; if nothing actually changed, skip the commit.`,
+        `4. PUBLISH main to origin so a later drain session sees the queue: \`node scripts/push-if-green.mjs --json\` (it re-gates, then ff-pushes ONLY if green; a non-ff / red gate aborts and is fine — recoverable). Do NOT delete ANY lane/* ref (the drain needs them). Do NOT regenerate derived artifacts (the drain does that at landing). NEVER force-push.`,
+        `Return { queued: [nums queued], reopened: [nums released], pushed: boolean, notes }.`,
+      ].join(' '),
+      {
+        label: 'defer:queue-lanes', phase: 'Integrate',
+        schema: { type: 'object', required: ['queued'], additionalProperties: true, properties: { queued: { type: 'array', items: { type: 'string' } }, reopened: { type: 'array', items: { type: 'string' } }, pushed: { type: 'boolean' }, notes: { type: 'string' } } },
+      },
+    ).catch(() => null);
+    if (res) { for (const n of (res.queued || [])) queued.push(String(n)); for (const n of (res.reopened || [])) reopened.push(String(n)); }
+    else log('⚠ deferred queue step produced no result — the lanes are pushed but may NOT be queued; a human must `backlog.mjs queue` them (and commit queued.json) before the drain runs.');
+  }
+
+  const resolvedInline = ledger.filter((l) => l && l.status === 'resolved'); // only serial items, if any
+  log(`DEFERRED producer done: ${queued.length} queued for the drain, ${reopened.length} reopened, ${resolvedInline.length} serial item(s) landed inline. Land the queued couples with \`node scripts/lane-drain.mjs drain\` (or \`watch\`).`);
+  return {
+    deferred: true,
+    baseRef,
+    ledger,
+    queued,
+    reopened,
+    concurrentItems: concurrent.length,
+    serialItems: serialItems.length,
+    crossRepoItems: crossRepoCount,
+    // Shape parity with the inline return (the closure consumer reads these) — all EMPTY in deferred mode: no
+    // inline merge ran, so nothing stranded / cross-repo-partial / multi-lane / derived-regenerated here (the
+    // drain owns those at landing).
+    stranded: [],
+    partialCrossRepo: [],
+    multiLaneFiles: [],
+    reposProvisioned: Object.keys(lanePools).filter((r) => (lanePools[r] || []).length > 0),
+    derivedRegenerated: false,
+    conflictsReplayed: 0,
+    pointsSpent: resolvedInline.reduce((s, l) => s + (Number(l.cost) || 0), 0),
+    budgetPoints,
+    note: 'STOP-AT-PUSH producer (#2174): concurrent lanes are pushed + queued + manifested; the deferred drain (#2173) owns landing. Lane refs PRESERVED; no inline integration ran.',
+  };
 }
 
 // 4b. Merge each concurrent item's repos in turn. Per ITEM: integrate its repos in INTEGRATION_ORDER (impl
