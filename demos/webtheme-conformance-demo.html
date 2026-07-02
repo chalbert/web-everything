@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Theme Conformance Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/conformance-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">Web Everything</div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Web Theme Conformance Demo</h1>
+      <p>
+        The runnable proof that the Web Theme token-resolution standard is <strong>conformant</strong>. The
+        runtime — the <code>resolveTokens</code> DTCG walk and <code>compileToCss</code> projection — is
+        <strong>relocated to Frontier UI</strong>
+        (<a href="/backlog/1907-relocate-the-webtheme-resolution-compile-runtime-to-fui/">#1907</a>; WE holds
+        zero executable, #1282). Its conformance runs through the <strong>plateau-hosted conformance
+        runner</strong>
+        (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a>
+        ratified (b)), which drives the WE-owned webtheme vector suite
+        (<a href="/backlog/1908-webtheme-conformance-binding-deep-equal-on-resolvetokens-we-/">#1908</a>: a
+        DTCG document in, the <strong>resolved token map</strong> out) against the FUI binding.
+      </p>
+      <p class="play-caveat">
+        The pass/fail panel below is rendered <strong>at plateau-origin inside an iframe</strong> — the
+        cross-origin runtime boundary (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a>
+        ratified (b)) that reaches the shared, neutral runner with no implementer&rarr;runner edge. webtheme
+        is a <strong>non-verdict</strong> standard: the observable is the resolved token map, judged by the
+        <code>deep-equal</code> matcher (<a href="/backlog/1816-conformance-model-for-non-facts-verdict-relocated-runtimes/">#1816</a>),
+        never the compiled CSS string. WE owns only the build-agnostic vectors and the
+        <code>@webeverything/contracts/webtheme</code> schema; the engine impl is FUI's, the runner is
+        plateau's. A green result proves conformance independent of how resolution is built (#899).
+      </p>
+    </header>
+    <div id="play-root">Loading demo&hellip;</div>
+  </main>
+
+  <script type="module" src="/demos/webtheme-conformance-demo.ts"></script>
+</body>
+</html>
