@@ -94,7 +94,16 @@ the per-item chat-rename — a batch labels the session **once**.
    never re-ask/block/guess) — then `node scripts/backlog.mjs calibrate --points=<cost resolved>
    --context-pct=<reading> --stop-reason=<which stop>`. Only a capacity stop (`budget`/`context`) trains the
    estimate; work-bound (`empty-pool`/`fork`/`gate`) is recorded but **excluded** (#553). No reading → **skip**
-   calibration (closing-session runs it for you otherwise).
+   calibration (closing-session runs it for you otherwise). **Then PUBLISH `main` to origin — the gated
+   `pushIfGreen` (#2073):** the serial `/batch` commits each item's files to its `commitTarget` repo locally
+   and (a leftover of the pre-2026-06-29 never-push stance, now lifted) never pushed, so `origin/main`
+   silently drifts. This close is the natural green checkpoint: run `node scripts/push-if-green.mjs` once here
+   per repo you committed to (WE = default cwd; `--repo=~/workspace/frontierui --gate="npm run check:standards"`
+   / `--repo=~/workspace/plateau-app --gate="npm run build"` for a cross-repo item's `commitTarget`). It
+   re-gates that repo, then **ff-pushes its `main` to origin ONLY if green** — never `--force`, never a branch;
+   a red gate or non-ff leaves origin **untouched** and is reported (recoverable by a later green push). This is
+   the SAME shared helper the parallel integrator calls (Phase 4h); the push is generalized, the lane is not
+   (#2073 out-of-scope: lanes stay parallel-only). Skip only when nothing was committed this batch.
 
 **The stop rule (solid by construction)** — the **points budget is the sole driver**; stop the batch at a
 seam if (and ONLY if) ANY of these **four** holds (full text in *Running a batch* → *The stop rule*):

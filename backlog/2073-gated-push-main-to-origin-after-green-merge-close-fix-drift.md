@@ -1,10 +1,11 @@
 ---
 kind: story
 size: 3
-status: active
+status: resolved
 blockedBy: []
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
 tags: [git, workflow, orchestrator, closeout, push, constellation]
 ---
 

@@ -1088,6 +1088,51 @@ if (baseReady) {
   }
 }
 
+// 4h. PUBLISH main to origin — the gated `pushIfGreen` (#2073). Nothing in the lane/merge flow pushed `main`,
+// so `origin/main` silently drifted (observed 185 commits behind local after one parallel batch). The
+// integrator lands every lane on each repo's LOCAL main (Phase 4b) and never pushed — a leftover of the
+// pre-2026-06-29 never-push stance, now lifted. This is the natural green checkpoint: every repo's tree was
+// full-gated at its per-merge (Phase 4b) and WE's final whole-repo gate ran at the derived-regen (Phase 4c),
+// so we push via the ONE shared `push-if-green.mjs` helper — the same helper the serial/close path calls.
+// Rules (#2073): push a repo's main ONLY when its gate is green, ff-only (never --force; one local main
+// serializes all merges so pushes are ff appends), per-repo across the constellation (#96), impl-first/WE-last
+// (INTEGRATION_ORDER — WE's resolve is already the last local write, so publishing WE last never fronts a
+// resolve whose impl isn't yet on origin). A red gate / non-ff leaves that repo's origin UNTOUCHED and is
+// reported (the drift is recoverable — a later green close pushes it). Cadence = push-once-at-close-if-green
+// (the default #2073 recommends): we publish here after the whole batch integrates, not per-merge.
+const pushed = [];
+if (baseReady) {
+  // Only publish repos that actually got a lane pool this batch (i.e. had merges land on their local main);
+  // a repo with no lane work has nothing new to push. WE is always in play (it carries every resolve).
+  const toPublish = INTEGRATION_ORDER.filter((r) => r === 'we' || (lanePools[r] || []).length > 0);
+  for (const repo of toPublish) {
+    const r = REPOS[repo];
+    // The integrator has just full-gated this repo's merged tree (Phase 4b per-merge gate; Phase 4c final WE
+    // gate). `--assume-green` is the documented integrator path — re-running the full gate would be wasteful.
+    // The push is ff-only and never --force: a non-ff (someone advanced origin) ABORTS and is reported, never
+    // forced. `--repo` targets the repo; WE's path is the primary checkout (the agent's cwd).
+    const repoArg = repo === 'we' ? '' : ` --repo=${r.path}`;
+    const res = await agent(
+      [
+        `In the ${r.name} checkout on branch main${repo === 'we' ? ' (the PRIMARY WE checkout — your cwd)' : ` (${r.path})`}, PUBLISH main to origin`,
+        `via the shared gated-push helper (#2073). Run EXACTLY, from the WE primary checkout:`,
+        `\`node scripts/push-if-green.mjs${repoArg} --assume-green --json\`.`,
+        `This ff-pushes ${repo}'s local main → origin/main ONLY if it is a genuine fast-forward; it NEVER uses`,
+        `--force and NEVER creates a branch. A non-ff / wrong-branch / push failure aborts and leaves origin`,
+        `UNTOUCHED (that is fine — the drift is recoverable by a later green push). Report the helper's JSON`,
+        `result verbatim. Return { repo:"${repo}", pushed: boolean, reason: string }.`,
+      ].join(' '),
+      {
+        label: `integrate:push:${repo}`, phase: 'Integrate',
+        schema: { type: 'object', required: ['pushed'], additionalProperties: true, properties: { repo: { type: 'string' }, pushed: { type: 'boolean' }, reason: { type: 'string' } } },
+      },
+    ).catch(() => null);
+    if (res && res.pushed) { pushed.push(repo); log(`  ✓ published ${repo} main → origin (${res.reason || 'ff-pushed'}).`); }
+    else log(`  · ${repo} main NOT pushed (${res ? (res.reason || 'not a fast-forward / gate red') : 'push step produced no result'}) — origin left untouched; recoverable by a later green push.`);
+  }
+  log(`Published ${pushed.length}/${toPublish.length} repo main(s) to origin: ${pushed.join(', ') || 'none'}.`);
+}
+
 const resolved = ledger.filter((l) => l.status === 'resolved');
 const spent = resolved.reduce((s, l) => s + (Number(l.cost) || 0), 0);
 const reposProvisioned = Object.keys(lanePools).filter((r) => (lanePools[r] || []).length > 0);
@@ -1107,6 +1152,7 @@ return {
   partialCrossRepo,                      // slice 4: cross-repo items whose impl landed in some repos but whose WE resolve did NOT — re-attempt next run
   reopened,                              // #2072: unlanded items this run flipped active→open at closeout (else they'd hide as active-but-unclaimed) — re-enter the next pack
   reposProvisioned,                      // which constellation repos got a lane pool this batch
+  pushed,                                // #2073: constellation repos whose main was ff-published to origin at close (gated pushIfGreen)
   derivedRegenerated,
   probeFailures,                         // #2040 watchdog: items whose probe died (→ forced serial); a mass die aborts earlier as aborted:'probe-storm'
   pointsSpent: spent,
