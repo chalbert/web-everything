@@ -441,6 +441,69 @@ export function findBuriedForkSections(body) {
   return findings;
 }
 
+// ── Polyglot-widening start-gate: an item that widens the forward-generation surface must cite ──────
+// external-adopter evidence (#2089 Fork 2(a), codified at
+// docs/agent/platform-decisions.md#forward-target-start-gate). The ratified rule: "every new
+// polyglot-widening item — an item that adds a new generation target or emit form — may not start
+// until it carries a `blockedBy` edge to the current pilot-evidence item (bootstrap #2129), or an
+// explicit carve-out." #2089 filed this rule as the enforcement follow-up (#2131) precisely because the
+// obligation to ADD the edge at scaffold time was statute-enforced judgment, not script-enforced — this
+// turns the last mile from reviewer recall into a deterministic gate, per the hookable-vs-judgment rule.
+//
+// Predicate is TAG-KEYED and DECLARED, not auto-derived (declared-over-auto-derived): the author opts an
+// item into the gate with the `polyglot-widening` tag. A blanket match on the broad `polyglot` tag would
+// false-positive on the ~38 polyglot-tagged decisions/maintenance/consume items — the whole point of the
+// predicate (#2089: "by predicate, not item list") is that it names *new target/form* work only, which
+// the author asserts by tagging.
+//
+// PILOT_EVIDENCE_NUMS is the set of items that satisfy the edge (the bootstrap + any later
+// pilot-evidence item; "later targets cite evidence current at their filing"). A `blockedBy` edge to any
+// of them clears the gate.
+export const PILOT_EVIDENCE_NUMS = new Set(['2129']);
+// Carve-outs by the same predicate (#2089 / #forward-target-start-gate): work that consumes existing
+// emit forms and adds no new target/form. `maintenance` = bugfix/upkeep of shipped artifacts;
+// `workbench-consume` = the workbench live-test family (serve/mount already-generated wrappers).
+export const POLYGLOT_WIDENING_TAG = 'polyglot-widening';
+export const POLYGLOT_CARVEOUT_TAGS = new Set(['maintenance', 'workbench-consume']);
+
+/**
+ * Gate a polyglot-widening item on the evidence edge. Pure, frontmatter-only (no body read):
+ *   • fires only on an item tagged `polyglot-widening` (the declared predicate);
+ *   • PROSPECTIVE — a `resolved` item is skipped (the gate governs the next widening, never retracts a
+ *     shipped increment: #2089 "prospective — never retracts shipped increments");
+ *   • cleared by a `blockedBy` edge to a pilot-evidence item (PILOT_EVIDENCE_NUMS), OR a carve-out tag
+ *     (POLYGLOT_CARVEOUT_TAGS), OR its own ratified empirical trigger — an item carrying a
+ *     `maturityTrigger` is governed by that trigger (the #1735 / #forward-emit-dedicated-ir exemption,
+ *     captured structurally by the field, not by a hardcoded item number).
+ * Returns `{ errors, warnings }` with plain-string messages (caller-formatted). ERROR: the statute makes
+ * the edge a hard `blockedBy`, and a missing edge is exactly the drift the gate exists to catch.
+ */
+export function validatePolyglotWideningGate(item) {
+  const errors = [];
+  const warnings = [];
+  const tags = Array.isArray(item.tags) ? item.tags : [];
+  if (!tags.includes(POLYGLOT_WIDENING_TAG)) return { errors, warnings };
+  if (item.status === 'resolved') return { errors, warnings }; // prospective gate
+  // Exempt: an item under its own ratified empirical trigger (#1735 / #forward-emit-dedicated-ir).
+  if (typeof item.maturityTrigger === 'string' && item.maturityTrigger.trim()) return { errors, warnings };
+  // Carve-out: consumes existing forms, adds no new target/form.
+  if (tags.some((t) => POLYGLOT_CARVEOUT_TAGS.has(t))) return { errors, warnings };
+  // Cleared: a blockedBy edge to a current pilot-evidence item.
+  const edges = Array.isArray(item.blockedBy) ? item.blockedBy.map(String) : [];
+  if (edges.some((e) => PILOT_EVIDENCE_NUMS.has(e))) return { errors, warnings };
+  errors.push(
+    `Backlog item "${item.id}" is tagged \`${POLYGLOT_WIDENING_TAG}\` (adds a new generation target / emit ` +
+    `form) but carries no external-adopter evidence edge. The ratified new-target start-gate ` +
+    `(docs/agent/platform-decisions.md#forward-target-start-gate, #2089 Fork 2(a)) requires it to either ` +
+    `\`blockedBy\` the current pilot-evidence item (bootstrap #${[...PILOT_EVIDENCE_NUMS].join('/#')}) or ` +
+    `carry an explicit carve-out — a \`${[...POLYGLOT_CARVEOUT_TAGS].join('\`/\`')}\` tag (it only consumes ` +
+    `existing emit forms), or its own ratified \`maturityTrigger\` (the #1735 / #forward-emit-dedicated-ir ` +
+    `exemption). Add \`blockedBy: ["${[...PILOT_EVIDENCE_NUMS][0]}"]\`, or the carve-out, or drop the tag ` +
+    `if it doesn't widen the forward-generation surface.`,
+  );
+  return { errors, warnings };
+}
+
 // ── Mis-flagged-batchable lint: a batchable item whose body asserts non-batchability ──────────────
 // The `--select` loader derives `batchable` from STRUCTURED fields only (Tier A + size ≤ 8 + all
 // `blockedBy` resolved). The disqualifier that actually makes an item un-workable often lives only in

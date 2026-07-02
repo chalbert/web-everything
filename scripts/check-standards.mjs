@@ -37,7 +37,7 @@ import { loadDataRegistry } from './lib/registry-loader.cjs';
 import { loadAdapters } from './lib/adapters-loader.cjs';
 import {
   BACKLOG_STATUSES, BACKLOG_KINDS, FIB, FILE, blockSpecFile,
-  dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated, detectClassificationCollapse, computeNativeFirstConformance, computeDesignKnowledgeConformance,
+  dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, validatePolyglotWideningGate, isCanonicalGraduated, detectClassificationCollapse, computeNativeFirstConformance, computeDesignKnowledgeConformance,
   checkStatus, validateProjectTier, validateProtocol, validatePreset, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock,
@@ -517,6 +517,11 @@ for (const item of backlog) {
   const { errors: itemErrors, warnings: itemWarnings } = validateBacklogItem(item, backlogCtx);
   for (const e of itemErrors) err(e.message, e.descriptor);
   for (const w of itemWarnings) warn(w.message, w.descriptor);
+  // Polyglot-widening start-gate (#2089 Fork 2(a) / #forward-target-start-gate, enforcement #2131):
+  // a `polyglot-widening`-tagged item must carry the evidence edge or a carve-out. Frontmatter-only.
+  const { errors: pgErrors, warnings: pgWarnings } = validatePolyglotWideningGate(item);
+  for (const m of pgErrors) err(m);
+  for (const m of pgWarnings) warn(m);
 }
 // #1247 — classification-axis loud-fail. If the merged `kind` axis is unpopulated for the whole
 // collection (the #487 near-miss: consumers ahead of the producer → `kind` undefined everywhere), all
