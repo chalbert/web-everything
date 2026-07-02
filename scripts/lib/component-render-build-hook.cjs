@@ -184,20 +184,26 @@ function renderIntentGrid(intents, repoRoot, runner = execFileSync) {
   });
   const cards = renderComponents(cardSpecs, repoRoot, runner);
 
-  // Assemble the grid: each card frame wrapped in its linking anchor + search/filter data-*.
-  const anchors = list.map((intent, i) => {
+  // Assemble the grid: each card frame is a `.project-card` BOX with a `.project-card-link` overlay anchor
+  // (not an <a> wrapping the card) + the search/filter `data-*` on the box. See renderProjectGrid for why the
+  // wrapping anchor is invalid — the card body carries authored inline `<a>` links, and nested anchors make
+  // the parser clone empty ghost tiles. The `data-status`/`data-haystack` facets stay on `.project-card` so
+  // the client filter (which queries `.project-card`) is unaffected.
+  const wrappers = list.map((intent, i) => {
     const cardHtml = cards.get(`intent-${i}-card`) || '';
     const dimKeys = dimensionKeys(intent);
     const haystack = `${intent.id} ${String(intent.name || '').toLowerCase()} `
       + `${String(intent.summary || '').toLowerCase()} ${dimKeys.join(' ').toLowerCase()}`;
     return (
-      `<a href="/intents/${escapeAttr(intent.id)}/" class="project-card intent-tile" `
-      + `data-status="${escapeAttr(intent.status)}" data-haystack="${escapeAttr(haystack)}" `
-      + `style="text-decoration: none; color: inherit; display: block;">${cardHtml}</a>`
+      `<div class="project-card intent-tile" `
+      + `data-status="${escapeAttr(intent.status)}" data-haystack="${escapeAttr(haystack)}">`
+      + `<a href="/intents/${escapeAttr(intent.id)}/" class="project-card-link" `
+      + `aria-label="View ${escapeAttr(intent.name)}"></a>`
+      + `${cardHtml}</div>`
     );
   });
 
-  return `<div class="project-grid" id="intent-grid">${anchors.join('')}</div>`;
+  return `<div class="project-grid" id="intent-grid">${wrappers.join('')}</div>`;
 }
 
 /**
@@ -267,18 +273,25 @@ function renderProjectGrid(projects, { repoRoot, hrefFor, gridClass = 'project-g
   });
   const cards = renderComponents(cardSpecs, repoRoot, runner);
 
-  // Assemble the grid: each card frame wrapped in its linking anchor.
-  const anchors = list.map((project, i) => {
+  // Assemble the grid: each card frame is a `.project-card` BOX with a `.project-card-link` overlay anchor
+  // (position:absolute; inset:0) for whole-tile click-through — NOT an <a> wrapping the card. The card body
+  // carries authored inline links (`<a>` in the description), and an <a> may not contain another <a>: an
+  // outer wrapping anchor makes that nesting, which the browser's adoption-agency parser "repairs" by
+  // splitting the tile and cloning an EMPTY `.project-card` after every inner link (47 tiles → 71 in the DOM,
+  // ~24 empty ghosts — invisible in source, only in the rendered DOM). Overlay-link is the valid, backlog-grid
+  // pattern; `.project-card:has(> .fui-card)` still matches (the fui-card stays a direct child).
+  const wrappers = list.map((project, i) => {
     const cardHtml = cards.get(`project-${i}-card`) || '';
     const rel = external ? ' target="_blank" rel="noopener"' : '';
     return (
-      `<a href="${escapeAttr(hrefFor(project))}" class="project-card" `
-      + `aria-label="View ${escapeAttr(project.name)}"${rel} `
-      + `style="text-decoration: none; color: inherit; display: block;">${cardHtml}</a>`
+      `<div class="project-card">`
+      + `<a href="${escapeAttr(hrefFor(project))}" class="project-card-link" `
+      + `aria-label="View ${escapeAttr(project.name)}"${rel}></a>`
+      + `${cardHtml}</div>`
     );
   });
 
-  return `<div class="${escapeAttr(gridClass)}">${anchors.join('')}</div>`;
+  return `<div class="${escapeAttr(gridClass)}">${wrappers.join('')}</div>`;
 }
 
 /**

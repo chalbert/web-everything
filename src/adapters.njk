@@ -27,9 +27,12 @@ title: Web Everything — Adapters
        `.project-card:has(> we-card)` in style.css so the card is the sole frame.
        Status vocab: implemented→success, draft→info, concept→warning, poc→neutral. #}
     {% set statusTone = 'success' if adapter.status == 'implemented' else ('info' if adapter.status == 'draft' else ('warning' if adapter.status == 'concept' else 'neutral')) %}
-    <a href="/adapters/{{ adapter.id }}/"
-       class="project-card"
-       style="text-decoration: none; color: inherit; display: block;">
+    {# Overlay-link, not a wrapping <a>: the summary carries authored inline links, and an <a> may not
+       contain another <a> — a wrapping anchor makes the browser clone empty ghost tiles (see
+       component-render-build-hook.cjs renderProjectGrid). `.project-card:has(> we-card)` still strips the
+       frame (we-card stays a direct child). #}
+    <div class="project-card">
+      <a href="/adapters/{{ adapter.id }}/" class="project-card-link" aria-label="View {{ adapter.name }}"></a>
       <we-card>
         <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
           <h3 class="project-title" style="margin: 0;">{{ adapter.name }}</h3>
@@ -37,7 +40,7 @@ title: Web Everything — Adapters
         </div>
         <p style="margin: 0; color: var(--color-text-muted); font-size: 0.9em;">{{ adapter.summary | safe }}</p>
       </we-card>
-    </a>
+    </div>
     {% endfor %}
   </div>
 </section>
