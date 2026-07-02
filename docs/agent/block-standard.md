@@ -333,6 +333,13 @@ per-block *mechanism pick* for the button (the worked example) is carved to
      transient-element reference across its upgrade; re-query live from a stable ancestor.** If a ref genuinely
      must be retained, gate on **`Node.isConnected`** — the platform's own liveness primitive — not a bespoke
      `isAlive` flag or `try/catch` (native-first, #75).
+   - **Consumer wiring rider (#1960, 2026-07-02): delegate on a stable ancestor — never bind to the transient
+     host.** `replaceWith()` discards the host's *own* listeners (the DOM exposes no API to enumerate/transfer
+     them, so no base-class fix is possible); child nodes are *moved*, so listeners on children survive. Wire
+     behaviour via a delegated listener on a stable ancestor (container or `document`), re-query live, and read
+     state from the attributes that survive the upgrade (`data-*`, the live a11y state key) on the resulting
+     native element. Binding directly to the transient host is the shipped-twice regression this rider exists
+     to prevent ([#1960](/backlog/1960-we-fui-filter-chip-upgrade-listener-contract/)).
    - **Identity is phase-stable — the survivor keeps the authored identity attribute *un-renamed*.** The base
      must **not** exclude the identity attribute (e.g. `value`), so it copies verbatim onto the survivor and a
      consumer reads the **same attribute name** pre- and post-upgrade. This *is* item 7's "attribute-shaped
@@ -341,8 +348,10 @@ per-block *mechanism pick* for the button (the worked example) is carved to
      button) is the single explicit carve-out to the keep-the-attribute rule above; read the live
      `aria-pressed` at interaction time. No *identity* rename is ever justified.
    - **No stable change `CustomEvent` by default** (deferred, not shipped — YAGNI; a custom event double-fires
-     with native `click`). Consumers delegate on native `click` + read `aria-pressed`. Un-gate trigger (a named
-     non-delegating consumer) is tracked on #1960.
+     with native `click`). Consumers delegate on native `click` + read `aria-pressed`. *(#1960, resolved
+     2026-07-02, dissolved the former standing un-gate trigger: post-migration (#2122) the chip is a
+     persistent B-family host where a change event is an ordinary convention-following feature — filed like
+     any other build if a consumer materializes, not tracked as a fork.)*
 
 ## Native-element reproducibility taxonomy (#2059) {#reproducibility-taxonomy}
 
@@ -613,13 +622,22 @@ The mechanism **completes one pattern across the three native inert containers**
    the same `MutationObserver` machinery `CustomAttributeRegistry` already owns — so retiring the `is=` customized
    built-in (which got `attributeChangedCallback` natively) loses no capability.
 
-5. **Family invariant — authored vs residue grammars are disjoint and matcher-excluded.** Authored directive
-   nodes and the region/residue annotations a directive *leaves when applied* must occupy non-overlapping
-   grammars, so every registry's `upgrade` walk claims **only authored nodes** (residue is never re-upgraded — cf.
-   the leading-`/` exclusion that already keeps closing markers out of the opening-directive keyspace) and the two
-   are visually distinguishable in raw DOM / devtools. The **exact reserved residue sigil** (unifying today's
-   `:start`/`:end` vs `/`-close split) is a token-grammar question delegated to
-   [#1987](/backlog/1987-attribute-naming-convention-review-colon-namespacing-view-if/).
+5. **Family invariant — one region grammar, safe re-claim** (amended by
+   [#1989](/backlog/1989-directive-applied-residue-region-annotation-marker-grammar-u/), 2026-07-02). An applied
+   directive's region boundaries keep the **authored** open-close grammar (`ns:name` open, leading-`/` close) for
+   their whole lifecycle — the same markers the #2063 normative SSR wire format serializes and the client
+   re-claims on hydration. There is **no separate reserved residue sigil**: a matcher-excluded grammar for applied
+   regions would break hydration, which *requires* applied output to be claimable. Re-upgrade safety is therefore
+   not a grammar property: within a document it is claim-state (a registry never re-claims a node it has claimed),
+   and across serialization boundaries directive application MUST be **idempotent under re-claim** (rows keyed via
+   `data-key`) — a conformance requirement, not implementation trivia. The matcher keeps the single exclusion rule
+   that closing markers (leading `/`) sit outside the opening-directive keyspace. Residual: if *anonymous*
+   fragment boundaries ever need a marker, the bracket sigil (`<!--[-->`/`<!--]-->`, Vue 3 / Svelte 5 precedent)
+   is the reserved slot — a [#2112](/backlog/2112-reserved-delimiter-family-policy-which-opens-are-platform-re/)
+   reservation question, not ratified here. (History: the reserved-residue-sigil slot this rule once delegated —
+   first to #1987, which punted it back to #1989 — was resolved by #1989 **dissolving** it after #2063/#2068
+   converged runtime and SSR output on one grammar; the legacy `:start`/`:end` runtime spelling migrates to the
+   standard grammar in #2068.)
 
 6. **Naming + namespace guard.** Base classes (`CustomComment` / `CustomTemplateType` / `CustomScriptType`) extend
    the native nodes; their registries carry the machine-checked `Custom[Name]Registry` suffix. Because
