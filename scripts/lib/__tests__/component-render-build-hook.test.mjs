@@ -15,6 +15,7 @@ import {
   renderComponents,
   renderIntentGrid,
   renderProjectGrid,
+  renderBacklogGrid,
   projectIconHtml,
   statusTone,
   EXPECTED_PRODUCER,
@@ -186,5 +187,67 @@ describe('renderProjectGrid — home/index grid render-from-data (#2019)', () =>
   it('is empty-safe (no projects → empty grid, no subprocess crash)', () => {
     expect(renderProjectGrid([], { repoRoot: stubRoot, hrefFor: () => '/' }, fakeRunner))
       .toBe('<div class="project-grid"></div>');
+  });
+});
+
+// A fake CLI that renders each card to the REAL card SHELL shape (title + a body-part div carrying the
+// spec's html — here the sentinel), so renderBacklogGrid's title-alias rewrite + sentinel splice are
+// exercised against production-shaped markup without a sibling FUI checkout.
+function cardShellRunner(_cmd, _args, opts) {
+  const entries = JSON.parse(opts.input);
+  return JSON.stringify({
+    producer: EXPECTED_PRODUCER,
+    results: entries.map((e) => {
+      const body = e.config?.bodyParts?.[0];
+      const bodyHtml = `<div class="${body?.className || ''}">${body?.html || ''}</div>`;
+      return {
+        key: e.key,
+        html: `<article class="fui-card ${e.config?.className || ''}">`
+          + `<header class="fui-card__header"><h3 class="fui-card__title">${e.config?.title || ''}</h3></header>`
+          + `<div class="fui-card__body">${bodyHtml}</div></article>`,
+      };
+    }),
+  });
+}
+
+const TILES = [
+  { id: '2016-x', num: '2016', title: 'SSR render path', status: 'resolved', kind: 'story', size: 5, tier: undefined,
+    innerHtml: '<div class="backlog-badges"><we-badge tone="success">Resolved</we-badge></div>'
+      + '<p class="backlog-summary">A summary.</p>' },
+  // The regression fixture: a summary the template already entity-escaped (`&lt;template&gt;`) must reach the
+  // output STILL escaped — proving the sentinel splice bypasses the happy-dom innerHTML round-trip that would
+  // otherwise decode it and leak a raw <template> that swallows the rest of the grid.
+  { id: '2110-x', num: '2110', title: 'region inert recipe', status: 'open', kind: 'story', size: 5, tier: 'C',
+    innerHtml: '<p class="backlog-summary">materialized onto &lt;template&gt; via the transform</p>' },
+];
+
+describe('renderBacklogGrid — backlog tile grid render-from-data (#2018)', () => {
+  it('wraps each SSR card in its .project-card filter/link chrome with the data-* facets', () => {
+    const html = renderBacklogGrid(TILES, stubRoot, cardShellRunner);
+    expect(html).toMatch(/^<div class="project-grid">/);
+    expect((html.match(/class="project-card"/g) || []).length).toBe(2);
+    expect(html).toContain('data-status="resolved" data-kind="story" data-size="5" data-tier=""');
+    expect(html).toContain('data-status="open" data-kind="story" data-size="5" data-tier="C"');
+    expect(html).toContain('href="/backlog/2016-x/"');
+    expect(html).toContain('class="project-card-link"');
+  });
+
+  it('folds #num into the title and aliases .fui-card__title with .project-title for the search filter', () => {
+    const html = renderBacklogGrid(TILES, stubRoot, cardShellRunner);
+    expect(html).toContain('class="fui-card__title project-title">#2016 SSR render path</h3>');
+    expect(html).not.toContain('class="fui-card__title"'); // every title got the alias
+  });
+
+  it('splices the trusted macro body verbatim — an already-escaped summary stays escaped (no raw <template>)', () => {
+    const html = renderBacklogGrid(TILES, stubRoot, cardShellRunner);
+    expect(html).toContain('materialized onto &lt;template&gt; via the transform');
+    expect(html).not.toContain('materialized onto <template>');
+    expect(html).not.toContain('BACKLOG_BODY_'); // no sentinel leaked into the output
+    // The badge markup passed through intact.
+    expect(html).toContain('<we-badge tone="success">Resolved</we-badge>');
+  });
+
+  it('is empty-safe (no tiles → empty grid, no subprocess crash)', () => {
+    expect(renderBacklogGrid([], stubRoot, cardShellRunner)).toBe('<div class="project-grid"></div>');
   });
 });

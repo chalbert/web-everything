@@ -2,10 +2,11 @@
 kind: story
 size: 5
 parent: "777"
-status: active
+status: resolved
 blockedBy: ["2016"]
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
 tags: [dogfood, fui, ssr, backlog-page]
 ---
 
@@ -40,3 +41,23 @@ path from #2016.
 
 - Depends on #2016 (SSR render path). Table-shaped sub-surfaces that would need `we-data-table` are **excluded**
   until #1964 (wrap vs render-from-data) is settled — this item is card/badge/tag only.
+
+## Resolution (2026-07-02)
+
+- The tracked-work tile grid (`we:src/backlog.njk`) is now SSR'd from `we-card` at build time via a new
+  `weBacklogGrid` filter (`we:.eleventy.js` → `we:scripts/lib/component-render-build-hook.cjs` `renderBacklogGrid`),
+  the #2016 render-from-data path generalized to the biggest hand-rolled surface on the site. Each item renders
+  as a real `<article class="fui-card">` (`#num Title` → card title); the badge/tag/blocker/summary/children/meta
+  body is still composed by the SHARED `we:src/_includes/backlog-badges.njk` macros (the anti-drift source of
+  truth) and **sentinel-spliced** into the SSR card verbatim — NOT fed through the harness `innerHTML` round-trip,
+  which would decode the template's entity-escaping and leak a raw `<template>` (an item summary carries one) that
+  swallows the rest of the grid. The outer `.project-card` chrome (the `data-status/kind/size/tier` filter facets
+  + the `.project-card-link` overlay) is kept, so the existing filters/search (`we:src/assets/js/home-display.js`)
+  work unchanged; a `.project-title` alias on the SSR title keeps the search hook.
+- Surfaced + fixed an SSR **card-title escaping defect** in FUI's build harness
+  (`frontierui:blocks/renderers/component-render/buildHarness.ts`): a title carrying literal markup (e.g.
+  `Deferred <component> opt-ins`) leaked a raw tag because happy-dom's `.outerHTML` doesn't re-encode a
+  `textContent`-set title. The title now serializes as a pre-escaped Text node. (Fixes the intent/project/stage
+  grids too.)
+- Verified: 2124 SSR tiles correct with JS disabled (0 raw-tag leak, view-source-visible), filters hide
+  (212→40 on status toggle) and search narrows (212→16), 0 console errors from the grid markup.

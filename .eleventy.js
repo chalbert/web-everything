@@ -3,7 +3,7 @@ const syntaxHighlight = require("@11ty/eleventy-plugin-syntaxhighlight");
 const { deriveResearchFreshness } = require("./scripts/lib/research-freshness.cjs");
 const { buildTechnicalConfiguratorUrl } = require("./scripts/lib/technical-configurator-url.cjs");
 const { spliceDataTables } = require("./scripts/lib/data-table-build-hook.cjs");
-const { renderIntentGrid, renderProjectGrid, renderStageGrid } = require("./scripts/lib/component-render-build-hook.cjs");
+const { renderIntentGrid, renderProjectGrid, renderStageGrid, renderBacklogGrid } = require("./scripts/lib/component-render-build-hook.cjs");
 
 module.exports = function (eleventyConfig) {
   eleventyConfig.addPlugin(syntaxHighlight);
@@ -317,6 +317,20 @@ ${fuiHostScript}`;
   // client `<we-card>`/`<we-badge>` CE upgrade (base.njk) is a pure enhancement over this JS-off baseline.
   eleventyConfig.addShortcode("weStageGrid", function (stages) {
     return renderStageGrid(stages, __dirname);
+  });
+
+  // Backlog tracked-work tile grid (#2018, keystone #2016) — the same SSR path applied to the biggest
+  // hand-rolled surface on the site (the /backlog/ item grid). Each tile renders as a `we-card` (its
+  // `#num Title` → card title; its whole badge/blocker/summary/children/meta body → one trusted body part)
+  // in ONE subprocess batch to the pinned FUI CLI (render-from-data per #2007). UNLIKE the intent/project/
+  // stage grids, the tile BODY arrives pre-rendered: it is composed in the template by the SHARED
+  // `backlog-badges.njk` macros (the anti-drift single source of truth — re-defining them is a
+  // `check:standards` error), so this filter only wraps the SSR card shell around that macro HTML. The
+  // outer `.project-card` filter/link chrome (the `data-status/kind/size/tier` facets the client filter
+  // reads) stays in the wrapper; the client `<we-card>` CE upgrade (base.njk) is a pure enhancement over
+  // the JS-off-correct baseline.
+  eleventyConfig.addFilter("weBacklogGrid", function (tiles) {
+    return renderBacklogGrid(tiles, __dirname);
   });
 
   // The backlog feeds off backlog/*.md (parsed by src/_data/backlog.js, which

@@ -333,6 +333,79 @@ function renderStageGrid(stages, repoRoot, runner = execFileSync) {
   return `<div class="gov-stages">${tiles.join('')}</div>`;
 }
 
+/**
+ * Render the backlog tracked-work tile grid to SSR HTML in ONE subprocess batch (#2018, generalizing the
+ * #2016 SSR path to the biggest hand-rolled surface on the site — the /backlog/ item grid). Each item
+ * becomes a `we-card` SSR tile: the `#num Title` line is the card title, and the whole tile body (the
+ * badge/tag row, blockers, summary, epic-children circles, and meta links) is fed as ONE trusted
+ * pre-serialized HTML part.
+ *
+ * WHY the body arrives pre-rendered (unlike the intent/project/stage grids, which compose their leaf
+ * badge/tag specs here): the backlog tile's badges come from the SHARED `src/_includes/backlog-badges.njk`
+ * macros (`kindBadge`/`statusBadge`/`sizeBadge`/`tierBadge`/`epicStatusBadge`/`reasonPill`/`blockerChip`/
+ * `childCircle`/`tagsRow`), the single anti-drift source of truth whose rich vocabulary (tones, tooltips,
+ * per-reason palettes) lives in Nunjucks + `backlogMeta.js` and MUST NOT be re-implemented here
+ * (`check:standards` forbids re-defining those macros). So the template captures each tile's inner HTML via
+ * those macros and hands it in; this hook only renders the SSR **card shell** around it (render-from-data
+ * per #2007 — the card owns its header/body/footer shape). The badge/tag children stay transient-CE and
+ * upgrade as a pure enhancement over the SSR-correct baseline.
+ *
+ * `tiles` is a list of `{ id, num, title, status, kind, size, tier, innerHtml }`. The outer click-through
+ * `.project-card` wrapper (grid layout + the `data-status/kind/size/tier` filter facets + the
+ * `.project-card-link` overlay anchor) stays page chrome — the same division of labour as the other grids;
+ * `style.css` `.project-card:has(> .fui-card)` strips the wrapper's own frame so the card is the sole box.
+ * A `.project-title` alias class on the SSR title keeps the client search filter (`home-display.js`, which
+ * reads `.project-title` + the first `<p>`) working unchanged over the new markup.
+ *
+ * WHY the body is SENTINEL-spliced, not fed as a `html:` body part: the macro-captured `innerHtml` is
+ * already correctly entity-escaped by Nunjucks (a summary like `materialized onto <template>` arrives as
+ * `&lt;template&gt;`). Feeding it through the harness's `html:` part sets it via `innerHTML=`, which DECODES
+ * those entities, and happy-dom's `.outerHTML` serializer then re-emits the raw `<template>` — a leaked tag
+ * that swallows the rest of the grid into a template fragment (the DOM-truncation bug). So the card SHELL is
+ * rendered with a unique sentinel body, and the trusted macro HTML is string-spliced into it verbatim —
+ * bypassing the happy-dom body round-trip entirely, so the escaping the template already did is preserved.
+ */
+function renderBacklogGrid(tiles, repoRoot, runner = execFileSync) {
+  const list = Array.isArray(tiles) ? tiles : [];
+
+  // ONE subprocess batch: every tile's card SHELL, with a unique sentinel standing in for its body. The
+  // trusted, already-escaped macro HTML is spliced over the sentinel below (never through happy-dom's
+  // innerHTML round-trip). `#num` is folded into the title text (plain) so search + view-source read it.
+  const sentinel = (i) => ` BACKLOG_BODY_${i} `;
+  const cardSpecs = list.map((t, i) => {
+    const num = t.num != null && t.num !== '' ? `#${t.num} ` : '';
+    return {
+      key: `backlog-${i}-card`,
+      component: 'card',
+      config: {
+        title: `${num}${t.title || ''}`,
+        bodyParts: [{ tag: 'div', className: 'backlog-tile-body', html: sentinel(i) }],
+        className: 'backlog-tile-card',
+      },
+    };
+  });
+  const cards = renderComponents(cardSpecs, repoRoot, runner);
+
+  // Assemble the grid: each SSR card frame wrapped in its `.project-card` filter/link chrome. The title
+  // carries a `.project-title` alias (added post-render) so the existing search filter still finds it, and
+  // the sentinel body is replaced by the verbatim trusted macro HTML.
+  const wrappers = list.map((t, i) => {
+    const cardHtml = (cards.get(`backlog-${i}-card`) || '')
+      .replace('class="fui-card__title"', 'class="fui-card__title project-title"')
+      .replace(sentinel(i), String(t.innerHtml || ''));
+    const data =
+      `data-status="${escapeAttr(t.status)}" data-kind="${escapeAttr(t.kind)}" `
+      + `data-size="${escapeAttr(t.size == null ? '' : t.size)}" data-tier="${escapeAttr(t.tier == null ? '' : t.tier)}"`;
+    return (
+      `<div class="project-card" ${data}>`
+      + `<a href="/backlog/${escapeAttr(t.id)}/" class="project-card-link" aria-label="View ${escapeAttr(t.title)}"></a>`
+      + `${cardHtml}</div>`
+    );
+  });
+
+  return `<div class="project-grid">${wrappers.join('')}</div>`;
+}
+
 module.exports = {
   PINNED_CLI_RELATIVE,
   EXPECTED_PRODUCER,
@@ -341,6 +414,7 @@ module.exports = {
   renderIntentGrid,
   renderProjectGrid,
   renderStageGrid,
+  renderBacklogGrid,
   projectIconHtml,
   statusTone,
   intentTileSpecs,
