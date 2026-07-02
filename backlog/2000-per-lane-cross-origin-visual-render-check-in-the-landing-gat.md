@@ -23,3 +23,29 @@ Prerequisite #1997 (per-lane env-driven ports) is now **resolved**, so `blockedB
 - **It wires the parallel integrator.** The render check joins the auto-merge landing gate in `we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js` (the #1933 integrator), a load-bearing surface that itself wants the live multi-lane validation (#1153) to exercise it.
 
 Recommend: build in a focused session that boots its own WE+FUI cross-origin pair on the #1999/6000 + #1997 lane ports, after #1982 settles the `.fui-card` fixture.
+
+## Update — both prerequisites cleared; a real fixture is in hand (batch-2026-07-01-1947-2071)
+
+Both stated blockers are now **resolved**: #1997 (per-lane ports) and #1982 (bare-surface `.fui-card`
+migration / fixture). So the only thing left gating this item is its own `humanGate: setup` (a server-owning
+focused session) — not any dependency. It should be **prioritised**: the exact regression class it exists to
+catch just **shipped to `main`** in this batch.
+
+- **Ready real fixture (decouples from the synthetic path).** The `/workflow` batch landed #2050 (defined
+  `surface-card`/`border-light`/`text-secondary` DARK in `fui:plugs/webtheme/defaultTheme.ts`) + #2019
+  (dogfooded the WE home grid onto `.fui-card` tiles). Together they rendered the WE home tiles near-black,
+  because the WE light theme (`we:src/_data/weSiteTheme.js`) had no override for those newly-live token
+  names. Known-bad = the two commits before the fix; known-good = the fix commit (light overrides in
+  `we:src/_data/weSiteTheme.js`). This is a cleaner cross-repo `.fui-card` fixture than the #1895 repro.
+- **Trigger refinement (folded in from #2078, graduated here).** The render check must fire not only on a
+  lane's own `*.njk`/`*.css` edits but on any lane touching a **cross-repo consumer surface** — specifically
+  FUI theme/token sources (`fui:plugs/webtheme/*`, `defaultTheme`, `LEGACY_ALIASES`), because WE consumes FUI
+  theming cross-origin (#96) and the FUI lane's own `check:standards` never renders. Repo-qualify the
+  visual-touch predicate: a FUI theme edit ⇒ render the **WE** consumer, not (only) FUI.
+- **Layering.** The unit-level guard added this session — `we:scripts/lib/__tests__/token-css.test.mjs`
+  (asserts no FUI dark surface leaks into the emitted WE token CSS) — is the cheap contract layer *below*
+  this render gate; it catches the token-leak class without booting a server, but only this item catches
+  emergent multi-item *visual* interactions (two lanes each green alone).
+- **Why the batch missed it.** #2050 gated only in the FUI lane (non-rendering); the WE-visual lane (#2070)
+  was packed in the **same** batch and **carried** — the fix was one lane away from existing. See #2077 (a
+  "gate/coverage" item shouldn't be allowed to silently carry).
