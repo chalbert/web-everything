@@ -8,12 +8,13 @@
 
 body {
     /* Pale→darker canvas gradient behind the content sheets (`.page-sheet` /
-       `.content-box`). Composed purely from existing theme tokens (Slate-50 →
-       Slate-200) — no hand-authored color, so the token doctrine holds — so the
-       white content container reads as an elevated surface against it.
-       `fixed` keeps the gradient viewport-relative (no per-scroll banding). */
+       `.content-box`). The two stops are THEME TOKENS (`weSiteTheme.js`
+       `bg-gradient-from`/`-to`), not hand-authored here — so the token doctrine
+       holds and the warm brand orange is tuned in one config place. The white
+       content container reads as an elevated surface against it. `fixed` keeps
+       the gradient viewport-relative (no per-scroll banding). */
     background-color: var(--color-bg);
-    background-image: linear-gradient(180deg, var(--color-bg) 0%, var(--color-border) 100%);
+    background-image: linear-gradient(180deg, var(--token-color-bg-gradient-from) 0%, var(--token-color-bg-gradient-to) 100%);
     background-attachment: fixed;
     color: var(--color-text-main);
     font-family: var(--font-sans);
