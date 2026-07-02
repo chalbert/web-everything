@@ -1,0 +1,107 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  How do comparable open standards and platform projects sequence <strong>external validation</strong>
+  (independent implementation experience, pilot users) against <strong>scope widening</strong> — and where does
+  the WE constellation actually stand on each stage of the review-recommended order
+  (dogfood &rarr; gated deploy &rarr; pilot adopter &rarr; polyglot widening)? Prep research for decision
+  #2089, filed by the 2026-07-01 external consultant review, which found the sequencing drifted: polyglot
+  generation (#463/#507) ratified <em>and built</em> while zero external users exist and the dogfooding claim
+  was not yet true.
+</p>
+
+<h2>Tree ground truth (2026-07-02)</h2>
+<p>
+  Two of the review's "not yet true" premises moved the <em>same day</em> it ran, so the decision must rule
+  over the current tree, not the review's snapshot:
+</p>
+<ul>
+  <li><strong>Dogfood is real-but-partial.</strong> The SSR keystone (#2016) shipped with live code (the
+    Eleventy build-time component&rarr;HTML hook + the FUI render harness); the site chrome is migrated to FUI
+    components (#865) and the home project grid renders SSR'd <code>we-card</code> tiles (#2019). Still open:
+    the backlog index, governance cards, the detail-page sweep, page-level UI, and the per-page ratchet
+    (#2018/#2020/#2021/#866/#867; epic #777 open). Truthful for <em>chrome + one SSR surface</em>; false as a
+    blanket claim.</li>
+  <li><strong>Parity keystone shipped, zero targets measured.</strong> The manifest&rarr;ThemeSource loader
+    (#2017) is real; but the shadcn reproduction was superseded-as-stub (#1243 &rarr; #2022) and all parity
+    targets (#2022&ndash;#2025) are open.</li>
+  <li><strong>The gated deploy is technology-ready and human-gated.</strong> The splash/entry-code middleware
+    is built; the residual on #1137 is a credentialed <code>wrangler</code> deploy (a <code>humanGate</code>,
+    not agent work).</li>
+  <li><strong>The polyglot mechanism is already built through its first increment.</strong> #507 resolved
+    2026-06-15: deterministic IR emit engine, a first generated .NET origin, the conformance gate, the
+    regression corpus. A gate can therefore only govern the <em>un-built widening</em> (new language targets,
+    un-parking the emit-purpose IR expansion); it cannot retroact on shipped artifacts.</li>
+  <li><strong>No pilot-adopter item exists</strong> anywhere in the backlog — the stage the review found
+    missing is genuinely unfiled.</li>
+</ul>
+
+<h2>Prior art — the evidence gate, everywhere</h2>
+<p>
+  The uniform pattern across every surveyed process: <strong>an internal test suite is necessary but never
+  sufficient; graduation or widening requires independent implementation or operational experience — and the
+  gate is structural, never advisory.</strong>
+</p>
+<ul>
+  <li><strong>TC39</strong> — Stage 3 sends a proposal to implementers; <strong>Stage 4 requires &ge;2
+    compatible shipped implementations + test262 tests + practical experience</strong>. WE shipped the test262
+    analogue (the #506 golden-vector conformance suite) with zero implementation-experience analogue — the
+    exact inversion Stage 4 exists to forbid.</li>
+  <li><strong>W3C Process / CSS WG</strong> — CR exit criteria: "adequate implementation experience",
+    customarily <strong>two independent interoperable implementations</strong> per feature. The FUI impl is
+    first-party; no independent second implementation or consumer exists.</li>
+  <li><strong>IETF</strong> — "rough consensus and running code"; RFC&nbsp;6410 requires significant
+    implementations with <strong>successful operational experience</strong> for Internet Standard. The
+    generated .NET origin is conformance-green but has never served an external operator.</li>
+  <li><strong>Baseline (WebDX)</strong> — a feature's status is an <strong>evidence state derived from shipped
+    availability</strong>, never a roadmap claim. The internal analogue is the first-party-dogfood statute:
+    claims must trail the tree.</li>
+  <li><strong>semver 0.x norms</strong> — production usage is the 1.0 graduation trigger; its absence is the
+    anti-claim. Polyglot enterprise reach is a post-1.0-shaped claim currently at 0.x evidence.</li>
+  <li><strong>Design-system pilot practice</strong> (EightShapes/Curtis; Polaris, Lightning) — pre-GA pilots
+    are <strong>few, real, and criteria-bound</strong>: 1&ndash;3 product teams, representative scope, a timed
+    window, defined adoption + feedback criteria, a written retro. Dogfood-before-external is the field norm —
+    but the dogfood gates the <em>public claim</em>, not all internal progress (Polaris was extracted from the
+    shipped Shopify admin; admin work never halted for it).</li>
+  <li><strong>Kubernetes feature gates</strong> — alpha&rarr;beta&rarr;GA graduation requires real-world usage
+    and feedback, not just green e2e; widening targets before any real-world usage is a beta&rarr;GA skip.</li>
+  <li><strong>Rust stabilization</strong> — features ride nightly until <strong>experience reports</strong>
+    justify stabilization: the un-gate trigger is a named evidence artifact, never a date.</li>
+</ul>
+
+<h2>Synthesis &rarr; the forks (post-skeptic form)</h2>
+<ul>
+  <li><strong>Order (Fork 1):</strong> a staged evidence ladder encoded as <code>blockedBy</code> edges —
+    the gated deploy's bar is <strong>claim-indexed, not inventory-indexed</strong> (met once a named
+    claims-truth audit passes, sweeping the site <em>and</em> the resolved adopter deck #1214/#1360 that
+    still carries the flagged claim); pilot recruitment is gated on the deploy being live; the
+    <em>ungated</em> public stage is gated on the full dogfood ratchet + an audit re-run. Strict-serial
+    full-dogfood-first is a stricter threshold on the same audience-indexed truthfulness axis, protecting an
+    audience the splash gate already restricts; pilot-first burns the one high-cost external asset on an
+    undeployed artifact.</li>
+  <li><strong>Polyglot gate (Fork 2):</strong> a <strong>hard, prospective, per-target</strong> gate — the
+    codified rule is "every new target's start cites <em>current</em> external-adopter evidence" (the
+    start-gate sibling of #463 fork (c)'s release-gate mechanic), <strong>bootstrapped</strong> by a
+    <code>blockedBy</code> edge to the pilot-evidence item, never permanently satisfied by the first retro.
+    Scope is a predicate (adds a new generation target/emit form), not an item list; shipped artifacts, the
+    workbench live-test family, and <strong>#1735 (already governed by the ratified
+    <code>forward-emit-dedicated-ir</code> empirical trigger)</strong> stay outside the edge.</li>
+  <li><strong>Pilot success criteria</strong> (the gate's concrete trigger): one external team, a
+    production-bound surface, &ge;3 FUI blocks + &ge;2 WE intents adopted <strong>plus &ge;1
+    forward-generated artifact consumed</strong> (without that leg the retro produces no evidence about the
+    forward-generation contract the polyglot gate turns on), a 6-week window, &ge;5 filed issues or a written
+    gap report, and a written retro with a continue/churn verdict — the retro artifact is the un-gate
+    trigger; a failed pilot re-opens the decision rather than silently un-gating.</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Decision #2089 (this topic's consumer) · external review report (run 1, 2026-07-01) via the decision's
+    <code>relatedReport</code> chain.</li>
+  <li>Statute anchors touched: <code>forward-generation-adapters</code> (the ratified polyglot mechanism — the
+    gate composes with it, never reverses it) · <code>first-party-dogfood</code> (the dogfood mandate is
+    standing law regardless of the order chosen here).</li>
+  <li>Sibling decision #2088 (portfolio tiering, preparing) — tier vocabulary is its turf; the evidence gate is
+    this item's. Compose, don't collide.</li>
+</ul>
+{% endraw %}

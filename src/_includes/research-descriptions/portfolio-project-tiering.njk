@@ -1,0 +1,100 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The Web Everything catalog holds <strong>45 projects</strong> and <strong>98 intents</strong> with no explicit
+  must-ship partition, so conformance investment, the adoption narrative, and a newcomer explanation lack a spine
+  (the 2026-07-01 external consultant review). Decision #2088 must pick: the <strong>tier vocabulary</strong>
+  (which tiers exist and what they are called), the <strong>assignment bar</strong> (what test puts a project in a
+  tier), the <strong>assignment mechanism</strong> (where the value lives, who stamps it), and the
+  <strong>site surfacing</strong> (where the tier renders).
+</p>
+
+<h2>Prior art &mdash; two axes, never one</h2>
+<p>
+  Every surveyed ecosystem keeps <strong>maturity</strong> (how far along a thing is) and
+  <strong>importance / availability</strong> (how much it matters, who can rely on it) as <em>separate axes</em>;
+  none overloads one label set for both:
+</p>
+<table>
+  <thead>
+    <tr><th>System</th><th>Maturity / stage axis</th><th>Importance / availability axis</th><th>How assigned</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>W3C Process</td><td>WD &rarr; CR &rarr; PR &rarr; REC</td><td>REC-track vs Note (a <em>track</em> choice)</td><td>WG judgment + process gates</td></tr>
+    <tr><td>TC39</td><td>Stages 0&ndash;4</td><td>&mdash; (single pipeline)</td><td>committee judgment per stage bar</td></tr>
+    <tr><td>WICG &rarr; standards track</td><td>incubation as a stage</td><td>the <em>venue</em> is the tier &mdash; incubation = exploratory</td><td>graduation on multi-implementer interest</td></tr>
+    <tr><td>Baseline (web-platform-dx)</td><td>&mdash;</td><td><strong>limited / newly / widely available</strong></td><td><strong>derived</strong> from browser-support data (widely = 30 months past newly-interoperable)</td></tr>
+    <tr><td>Interop (annual)</td><td>&mdash;</td><td>the year&rsquo;s <strong>focus areas</strong> &mdash; a chosen must-fix subset</td><td><strong>stamped</strong> on external demand evidence</td></tr>
+    <tr><td>Node.js docs</td><td>Stability 0 deprecated / 1 experimental / 2 stable / 3 legacy</td><td>&mdash;</td><td>stamped per module</td></tr>
+    <tr><td>USWDS / Polaris / Carbon</td><td>experimental&ndash;alpha &rarr; beta &rarr; stable &rarr; legacy / deprecated</td><td>&mdash;</td><td>stamped against published per-status requirements</td></tr>
+    <tr><td>npm ecosystems</td><td>&mdash;</td><td>core vs first-party vs community</td><td>ownership fact</td></tr>
+  </tbody>
+</table>
+<p>
+  The importance axis splits into <strong>derived</strong> partitions (Baseline &mdash; possible only because
+  browser support is one structured dataset) and <strong>judgment-stamped-against-a-stated-bar</strong> partitions
+  (Interop focus areas, WICG graduation &mdash; used when the evidence is heterogeneous). A &ldquo;core: a benchmark
+  design system or major framework depends on the domain&rdquo; bar is heterogeneous evidence, so the Interop shape
+  (stamped, evidence-cited) is the honest fit; the Baseline shape is the north star once a structured
+  domain&rarr;project evidence join exists.
+</p>
+
+<h2>Code ground truth</h2>
+<ul>
+  <li><strong>The maturity axis already exists:</strong> each project entry carries
+    <code>status</code> &mdash; live tally concept 17 &middot; poc 24 &middot; draft 4 &mdash; against a public
+    five-stage ladder (concept &rarr; poc &rarr; draft &rarr; candidate &rarr; stable,
+    <code>we:src/project-lifecycle.njk</code>). The tier is a <em>new orthogonal axis</em>, not a status refinement:
+    a <code>poc</code> project (e.g. webvalidation) can be core, and a polished project can be exploratory.</li>
+  <li><strong>A category axis already partitions the homepage</strong> (standard 37 / utility 7 / ecosystem 1,
+    <code>we:src/index.njk</code>) under the headings &ldquo;Core Standards&rdquo; / &ldquo;Application
+    Protocols&rdquo; &mdash; note &ldquo;Core&rdquo; is already (mis)used there for the <em>category</em>.</li>
+  <li><strong>The render seam is ready:</strong> the landing grid SSRs each project as a <code>we-card</code> with
+    <code>status</code> &rarr; a header <code>we-badge</code> (<code>weProjectGrid</code>,
+    <code>we:.eleventy.js</code>); a tier badge rides the same seam.</li>
+  <li><strong>No computable tier source:</strong> the benchmark gap-analysis data
+    (<code>we:src/_data/benchmarkCoverage.json</code>) is capability-keyed, not project-keyed &mdash; supporting
+    evidence, not a derivation source.</li>
+  <li><strong>Defect found en route:</strong> project <code>status</code> is never enum-validated
+    (<code>checkStatus</code> covers Block/Plug etc., not Project), and three status vocabularies coexist
+    (data <code>poc</code>, lifecycle page <code>candidate/stable</code>, shared <code>LIFECYCLE</code> enum
+    <code>experimental/active</code>) &mdash; a scoping the placement-test statute itself acknowledges
+    (&ldquo;<code>poc</code> is the convention&hellip; <code>LIFECYCLE</code> governs <em>descriptors</em>, not
+    projects&rdquo;), so closing the drift is a statute amendment, not a drift fix. A tier enum must be validated
+    from day one.</li>
+  <li><strong>&ldquo;Tier&rdquo; is overloaded in-repo</strong> (backlog readiness Tier A/B/C, capability
+    vision-tiers, open-core pricing tiers) &mdash; render the tier <em>words</em>, never &ldquo;Tier 1/2/3&rdquo;.</li>
+</ul>
+
+<h2>Synthesis &rarr; the forks (#2088)</h2>
+<ol>
+  <li><strong>Vocabulary</strong> &mdash; three-tier <strong>core / contextual / exploratory</strong> (an
+    evidence-class vocabulary; renames the stub&rsquo;s &ldquo;deferred&rdquo;, which is scheduling language and
+    reads as abandonment on a public site), vs core/contextual/deferred, vs two-tier, vs overloading
+    <code>status</code> (rejected: orthogonal axes).</li>
+  <li><strong>Assignment bar</strong> &mdash; a <strong>named-consumer evidence bar</strong>: core = a benchmark
+    design system or major framework demonstrably depends on the domain; contextual = a named constellation
+    consumer&rsquo;s build/runtime uses the surface, <em>shipped and functional</em> (Frontier UI, plateau-app, the
+    exercise apps, the WE site&rsquo;s own chrome &mdash; catalog listing and planned dogfooding never qualify);
+    exploratory = no named consumer yet. Vs unstated judgment (the vibe label the review flagged) and proxy metrics
+    such as intent count (measures internal attention, not external demand).</li>
+  <li><strong>Mechanism</strong> &mdash; an explicitly <strong>stamped, enum-validated <code>tier</code> field</strong>
+    plus a required one-line <code>tierEvidence</code> on each project entry; derived-owns-the-value is rejected on
+    merit (the core bar is judgment over heterogeneous evidence no dataset holds; no domain&rarr;project join exists
+    either), and the benchmark advisory cross-check is a join-blocked future enhancement, never the value&rsquo;s
+    owner.</li>
+  <li><strong>Surfacing</strong> &mdash; <strong>in place</strong>: a by-intent tier cue (a <code>we-tag</code>,
+    since a tier is classification, not status &mdash; the status pill keeps <code>we-badge</code>) + tier grouping
+    on the existing landing grids and project detail pages, exploratory grouped last but never hidden; vs
+    segregating exploratory off the catalog (misrepresents the honest state) or keeping the tier internal
+    (defeats the purpose).</li>
+</ol>
+<p>
+  Supported by default (not decisions): tier and status render side by side; a tier is re-assignable at review
+  time; a tier never gates what a consumer may use. Not forks at all: bulk-assigning the 45 projects is follow-on
+  execution of the ratified bar; conformance-investment ordering is prioritization, not a design branch.
+</p>
+<p>
+  See the prepared decision at <a href="/backlog/2088-portfolio-tiering-partition-the-45-projects-into-core-contex/">#2088</a>.
+</p>
+{% endraw %}
