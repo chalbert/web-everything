@@ -134,6 +134,36 @@ npm run test:integration            # E2E (Playwright)
 npx vitest run --coverage           # coverage report
 ```
 
+## Developing & manually testing in a lane
+
+Every edit — including an ad-hoc "just fix this one thing" — happens in an **isolated lane clone**, never the main checkout (#2123; the writer model in [platform-decisions.md#pr-flow-rollout-mechanism](platform-decisions.md#pr-flow-rollout-mechanism)). The lane trigger is *making an edit*, not *running a command*. The main checkout stays the human's — its dev server on `:3000`/`:8080` is theirs; don't build or serve into it.
+
+**1 — Pick or provision a lane** (persistent clone pool under `~/workspace/.lanes/<repo>/lane-N`, git objects shared via `--reference`, own HEAD):
+```bash
+node scripts/lane-pool.mjs status --json     # per-lane path / head / clean / deps
+node scripts/lane-pool.mjs provision --count=N   # create/refresh N lanes
+```
+Use a `clean` lane. `git -C <lane> reset --hard <sha>` to check out any local commit (shared objects — no fetch needed, works for un-pushed HEADs).
+
+**2 — Boot the lane's OWN dev pair.** The `.env.local` port pair is **not auto-loaded** — export it first, or the servers fall back to the main band (`:3000`/`:8080`) and collide:
+```bash
+cd ~/workspace/.lanes/web-everything/lane-N
+set -a; source .env.local; set +a        # sets WE_VITE_PORT / WE_ELEVENTY_PORT
+npm run dev
+```
+Verify Playwright/curl against **that** lane's `WE_ELEVENTY_PORT` (the 11ty docs site) — not `:8080`.
+
+**3 — Cross-repo lane gap (#1943) — the FUI sibling.** WE lanes have no `frontierui` sibling, so `build:docs` and the 11ty dev-serve hard-fail with *"pinned FUI artifact missing at …/.lanes/web-everything/frontierui/dist/tools/component-render/cli.mjs"*. Symlink the real (built) FUI next to the lanes once:
+```bash
+cd ~/workspace/frontierui && npm run build:tools   # ensure the artifact exists
+ln -sfn ~/workspace/frontierui ~/workspace/.lanes/web-everything/frontierui
+```
+
+**4 — Known lane limitations.**
+- The **vite DEMO** server can't start in a lane (`vite.config.mts` imports `../plateau-app/…`, which resolves outside the lane). That only breaks the demo shell — the **11ty DOCS** server (`WE_ELEVENTY_PORT`) renders the site fine.
+- For rendering/screenshots, a **static build is most reliable**: `npx @11ty/eleventy --output=/tmp/site-X --quiet`, then `python3 -m http.server` in that dir. (This is how you diff two commits: build each into its own dir, serve on two ports, screenshot.)
+- **Visual baselines** (`tests/visual/*.spec.ts`) hardcode `baseURL: http://localhost:8080`, so regenerating them from a lane needs the lane's docs server bound to `:8080` (collides with the main checkout). Until that port is env-ized, regen baselines from a checkout that owns `:8080`.
+
 ## Web Cases — protocol conformance fixtures
 "Web Cases" are the source of truth for protocol conformity: live documentation examples **and** input fixtures for E2E conformance testing.
 - **Directory**: `src/cases/<protocol-id>/`
