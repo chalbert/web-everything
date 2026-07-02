@@ -1,10 +1,11 @@
 ---
 kind: task
 parent: "2015"
-status: active
+status: resolved
 locus: frontierui
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
 tags: []
 ---
 

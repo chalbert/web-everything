@@ -1,0 +1,104 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  #1987 ratified colon as WE's internal authoring spelling for behaviour/event attribute names
+  (<code>on:click</code>, <code>nav:list</code>) and settled the <em>posture</em> that the separator is
+  app-configurable — the objector escape hatch ("colons are awful" is answered by deep config, not by
+  re-litigating the default) and the migration bridge to whatever spelling a WG eventually ratifies
+  (<code>enh-*</code>, never <code>we-*</code>). Decision
+  <a href="/backlog/1992-configurable-directive-separator-mechanism-the-objector-esca/">#1992</a> designs the
+  deferred <em>mechanism's contract</em>: what kind of config value, what identity the remap preserves,
+  whether the configured spelling is exclusive, and where the value may attach.
+</p>
+
+<h2>Finding — it's a naming-scheme dimension, not a separator char</h2>
+<p>
+  The only concretely named future target beyond colon is <code>enh-*</code>
+  (WICG/webcomponents#1029, whatwg/html#2271) — a <em>prefix + word-joining</em> scheme transform
+  (<code>nav:list</code> → <code>enh-nav-list</code>), structurally not a char swap. And after #1991
+  (family-only colon), the family-less names (<code>type-ahead</code>) have no separator at all, so a
+  separator-char knob is undefined over part of the very surface it governs. The knob is therefore a
+  <strong>naming-scheme flavor dimension</strong> (<code>attrNaming</code>) on the ratified
+  config-extends-platform-default surface — open-set flavor ids, platform default
+  <code>colon-namespace</code>, reserved bridge flavor <code>enh-prefix</code>.
+</p>
+
+<h2>Prior art — the knob across framework generations</h2>
+<table>
+  <thead>
+    <tr><th>System</th><th>Knob</th><th>Shape</th><th>Fate / lesson</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Vue 0.x</td>
+      <td><code>Vue.config.prefix</code> (directive prefix)</td>
+      <td>exclusive, app-global</td>
+      <td><strong>Removed in 1.0</strong> (vuejs/vue#2415): a configurable <em>published-code</em> spelling
+        forks the component ecosystem and docs per prefix. Lesson → canonical identity must never leak the
+        app spelling into published code (#1992 Fork 2).</td>
+    </tr>
+    <tr>
+      <td>Alpine.js</td>
+      <td><code>Alpine.prefix('data-x-')</code></td>
+      <td>exclusive, app-global, projection-shaped (plugins register bare names)</td>
+      <td>Survives — but the <code>@</code>/shorthand sugar breaks under a custom prefix: a non-total remap
+        leaves orphan spellings. Lesson → flavor totality is a normative validity rule (#1992 Fork 1).</td>
+    </tr>
+    <tr>
+      <td>AngularJS</td>
+      <td>directive-name normalization</td>
+      <td>additive — <code>ng-bind</code> ≡ <code>ng:bind</code> ≡ <code>ng_bind</code> ≡
+        <code>data-ng-bind</code> ≡ <code>x-ng-bind</code></td>
+      <td>Five live spellings per name; the surface did not survive the Angular 2 rewrite (context evidence).
+        Additive = per-author spelling variance inside one app.</td>
+    </tr>
+    <tr>
+      <td>htmx</td>
+      <td><code>hx-*</code> / <code>data-hx-*</code></td>
+      <td>additive, fixed dual (HTML-validity motivated)</td>
+      <td>A deliberate <em>standing</em> additive contract — the strongest case for additive; #1992 answers
+        it on per-author-variance grounds (what #1987 actually excludes), not by denying coherence.</td>
+    </tr>
+    <tr>
+      <td>Vue 2/3</td>
+      <td><code>delimiters</code></td>
+      <td>exclusive swap (interpolation delimiters)</td>
+      <td>The surviving exclusive-swap knob — exclusivity of a configured spelling is a shipped, stable
+        pattern.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>The mechanism's normative core — flavor-validity rules</h2>
+<p>
+  Two skeptic passes converged on the same point: the adjectives ("total by construction") are not the
+  contract — the resolver must <em>validate</em> each flavor over the registered name set. A conforming
+  flavor mapping is: <strong>(i) total</strong> (every family and family-less name has an image),
+  <strong>(ii) injective</strong> (no two canonical names share an image), <strong>(iii)
+  native-namespace-safe</strong> (every image passes the custom-attribute name guard extended over images —
+  a naive smash scheme would map <code>on:click</code> → <code>onclick</code>, an executable native inline
+  handler), and <strong>(iv) single-valued</strong> (exclusivity — closing the loophole where a
+  <code>colon+hyphen</code> dual flavor would satisfy the dimension while gutting the single-convention
+  posture).
+</p>
+
+<h2>Canonical identity and the escape hatch's honest limit</h2>
+<p>
+  The canonical colon name is the identity in <em>every API plane</em> — <code>define()</code>, callbacks,
+  <code>observedAttributes</code>, catalog, docs — with the spelled DOM name available via an explicit
+  accessor. Otherwise the Vue-removal defect just relocates from <code>define()</code> to the callback
+  (<code>if (name === 'nav:list')</code> silently missing under a scheme). Stated honestly: the hatch is
+  <strong>DOM-spelling-only</strong> — the objector still sees colon in comment directives (grammar-locked),
+  <code>define()</code> calls, and docs. It de-colons their markup, not their world.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Decision at DoR: <a href="/backlog/1992-configurable-directive-separator-mechanism-the-objector-esca/">#1992</a>
+    (four forks: value-space · remap identity · flavor exclusivity · value scope)</li>
+  <li>Parent posture: <a href="/backlog/1987-attribute-naming-convention-review-colon-namespacing-view-if/">#1987</a>
+    · family-only amendment <a href="/backlog/1991-conformance-cleanup-migrate-bare-hyphen-behavior-attrs-to-co/">#1991</a>
+    · residue grammar <a href="/backlog/1989-directive-applied-residue-region-annotation-marker-grammar-u/">#1989</a></li>
+  <li>Naming survey this extends: <a href="/research/we-attribute-naming-convention/">we-attribute-naming-convention</a></li>
+</ul>
+{% endraw %}

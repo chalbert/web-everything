@@ -6,7 +6,7 @@
   <title>Web Reliability Conformance Demo - Web Everything</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/demos/playground.css">
-  <link rel="stylesheet" href="/demos/webreliability-conformance-demo.css">
+  <link rel="stylesheet" href="/demos/conformance-demo.css">
 </head>
 <body>
   <div class="demo-header">
@@ -24,26 +24,34 @@
     <header class="play-intro">
       <h1>Web Reliability Conformance Demo</h1>
       <p>
-        The runnable proof of the <code>CustomRecoveryHandler</code> contract
-        (<a href="/backlog/1051-webreliability-contract-recovery-handler-registry-types-in-w/">#1051</a>):
-        a handler inspects an error + its <code>RecoveryContext</code> and either <strong>declines</strong>
-        (<code>null</code> — the next handler is tried) or <strong>owns the recovery</strong> with a
-        <code>RecoveryResult</code> (<code>retry</code> / <code>queued</code> / <code>fallback</code> /
-        <code>abort</code>).
+        The runnable proof that the reliability (error-recovery) runtime is <strong>conformant</strong>. The
+        runtime — the <code>customRecovery</code> registry walking <code>CustomRecoveryHandler</code>s
+        first-accept-wins (<a href="/backlog/1051-webreliability-contract-recovery-handler-registry-types-in-w/">#1051</a>) — is
+        <strong>relocated to Frontier UI</strong>
+        (<a href="/backlog/1916-relocate-the-reliability-runtime-provider-registry-to-fui/">#1916</a>,
+        WE holds zero executable, #1282). Its conformance runs through the
+        <strong>plateau-hosted conformance runner</strong>
+        (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a> /
+        <a href="/backlog/1790-fui-origin-conformance-runner-mode-c-bundle-end-to-end-smoke/">#1790</a>),
+        which drives the WE-owned reliability vector suite
+        (<a href="/backlog/1919-reliability-conformance-binding-deep-equal-on-recoveryresult/">#1919</a>:
+        deep-equal on the returned <code>RecoveryResult</code> / <code>null</code> — first-accept-wins,
+        priority order, queued/abort outcomes, empty-registry no-recovery) against the FUI binding and reports
+        pass/fail.
       </p>
       <p class="play-caveat">
-        The contract is type-only (<code>reliability/contract.ts</code>); the HTTP-retry / circuit-breaker /
-        offline-queue handlers and the <code>customRecovery</code> registry are impl in Frontier UI. So this
-        demo supplies its <strong>own</strong> in-demo offline-retry handler to prove the contract is
-        realizable. The section below asserts each contract invariant (decline, retry-with-backoff, offline
-        queueing, attempt-cap abort) live.
+        The pass/fail panel below is rendered <strong>at plateau-origin inside an iframe</strong> — the
+        cross-origin runtime boundary (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a>
+        ratified (b)) that reaches the shared, neutral runner with no implementer&rarr;runner edge. WE owns only
+        the build-agnostic vectors and the type-only <code>CustomRecoveryHandler</code> contract
+        (<code>@webeverything/contracts/reliability</code>); the handler-registry impl is FUI's, the runner is
+        plateau's. A green result proves conformance independent of how the runtime is built (#899).
       </p>
     </header>
 
     <div id="play-root">Loading demo&hellip;</div>
   </main>
 
-  <!-- Unplugged: the demo imports the reliability contract types only (no global patch, no FUI impl). -->
   <script type="module" src="/demos/webreliability-conformance-demo.ts"></script>
 </body>
 </html>

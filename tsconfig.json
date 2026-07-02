@@ -16,7 +16,12 @@
       // proven `@webeverything/*` → `../webeverything` sibling-alias). Deep-subpath form so block
       // runtime imports (e.g. `@frontierui/plugs/webbehaviors/CustomAttribute`) resolve directly.
       "@frontierui/plugs": ["../frontierui/plugs/index.ts"],
-      "@frontierui/plugs/*": ["../frontierui/plugs/*"]
+      "@frontierui/plugs/*": ["../frontierui/plugs/*"],
+      // #1910: the webtheme runtime relocated to fui:webtheme (#1907, per #1282). WE's remaining runtime
+      // consumer (the reproduction-parity harness) imports it via `@frontierui/webtheme`; WE keeps only the
+      // contract (`webtheme/contract.ts`) + vectors. Same dev-time sibling-source resolution as plugs.
+      "@frontierui/webtheme": ["../frontierui/webtheme/index.ts"],
+      "@frontierui/webtheme/*": ["../frontierui/webtheme/*"]
     }
   },
   "include": ["src/**/*"],

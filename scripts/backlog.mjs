@@ -21,6 +21,8 @@
  *   node scripts/backlog.mjs settle   <NNN>                         # born-active scaffold (--session) → open: publish it once digest+edges+body are authored (#670)
  *   node scripts/backlog.mjs reserve   <NNN...> --session=<slug>     # soft-hold planned items (#083 cross-session deprioritize)
  *   node scripts/backlog.mjs unreserve [--session=<slug>] [<NNN...>] # release soft holds (whole session, or specific items)
+ *   node scripts/backlog.mjs queue     <NNN...> [--lane=<ref>] [--session=<slug>]  # mark ready-to-merge (#2138 Fork 4) — claim/release refuse a queued item until the drain lands it
+ *   node scripts/backlog.mjs unqueue   <NNN...>                     # clear the ready-to-merge mark (the drain's single clear point at landing)
  *   add --json to any verb for machine-readable output.
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -31,6 +33,7 @@ import { applyTransition, readField } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize, sessionForNum } from './readiness/reservations.mjs';
 import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, recordTouch, mostRecentSession, porcelainFiles } from './readiness/claimScope.mjs';
+import { parseQueued, emptyQueuedState, isQueued, queuedNums, addQueued, removeQueued, serializeQueued } from './readiness/queued-state.mjs';
 import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
 import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
 
@@ -39,6 +42,7 @@ const DIR = join(ROOT, 'backlog');
 const CAPACITY_PATH = join(ROOT, '.claude/skills/batch-backlog-items/capacity.json');
 const RESERVATIONS_PATH = join(ROOT, '.claude/skills/batch-backlog-items/reservations.json');
 const CLAIMS_PATH = join(ROOT, '.claude/skills/batch-backlog-items/claims.json');
+const QUEUED_PATH = join(ROOT, '.claude/skills/batch-backlog-items/queued.json');
 const RED = '\x1b[31m', GRN = '\x1b[32m', YEL = '\x1b[33m', DIM = '\x1b[2m', BLD = '\x1b[1m', RST = '\x1b[0m';
 
 const argv = process.argv.slice(2);
@@ -137,6 +141,19 @@ function transition(v) {
   // EXCEPT the per-item cleanliness guard below, which inspects only the single file being claimed.
   const as = flag('as');
   if (v === 'claim' && as && as !== 'active' && as !== 'preparing') die(`--as="${as}" is not valid — use --as=preparing (a /prepare claim) or omit for a normal active claim`);
+  // Ready-to-merge (queued) guard (#2138 Fork 4): a queued item pushed a lane and is waiting for the
+  // drain. It is still `status: active` on main, so a naive read would re-offer it (claim) or reopen it
+  // as abandoned (release — the #2072 closeout reconcile's active→open flip). Read the LOCAL queued token
+  // OFFLINE (Rule #105 — no tree read, no ls-remote) and refuse both: a queued item is neither claimable
+  // nor abandoned. `--force` overrides for the rare deliberate case (e.g. abandoning a stuck queue entry).
+  if ((v === 'claim' || v === 'release') && !argv.includes('--force')) {
+    const num = file.match(/^\d+/)[0];
+    if (isQueued(loadQueued(), num)) {
+      die(v === 'claim'
+        ? `#${num} is queued (ready-to-merge, #2138 Fork 4) — a lane is pushed and waiting for the drain; it is not claimable. The drain unqueues it at landing; pass --force only to deliberately steal a stuck queue entry.`
+        : `#${num} is queued (ready-to-merge, #2138 Fork 4) — it is waiting to be drained, NOT abandoned; releasing it to open would drop its ready-to-merge state and re-offer it. Let the drain land + unqueue it; pass --force only to deliberately abandon the queued lane.`);
+    }
+  }
   // Claim-first guard: a claim must be the FIRST action on an item — grounding, editing, and presenting
   // its substance all come AFTER the flip (next turn). The status transition alone can't catch a session
   // that read + edited the body BEFORE claiming: claim would silently bundle those pre-claim edits into the
@@ -234,6 +251,44 @@ function loadClaims() {
 /** Write the claim registry, self-pruning expired session baselines on every write (TTL hygiene). */
 function saveClaims(state) {
   writeFileSync(CLAIMS_PATH, serializeClaims(pruneExpiredClaims(state, Date.now())));
+}
+
+/** Read the ready-to-merge (queued) registry (#2138 Fork 4); a missing/unreadable file degrades to
+ *  empty so the claim/release ownership path never wedges on a corrupt token. */
+function loadQueued() {
+  try { return parseQueued(readFileSync(QUEUED_PATH, 'utf8')); }
+  catch { return emptyQueuedState(); }
+}
+/** Write the queued registry. */
+function saveQueued(state) {
+  writeFileSync(QUEUED_PATH, serializeQueued(state));
+}
+
+/**
+ * queue <NNN...> [--lane=<ref>] [--session=<slug>] — mark items ready-to-merge (#2138 Fork 4). The
+ * lane-producing session calls this at lane-push so a queued item isn't read as re-claimable/abandoned
+ * while it waits for the drain. `unqueue <NNN...>` clears the mark (the drain's single clear point at
+ * landing). Idempotent. The lane-push/drain call-sites are wired by the drain command (#2162).
+ */
+function queue() {
+  const nums = positional.map((p) => (String(p).match(/^(\d+)/) || [])[1]).filter(Boolean);
+  if (!nums.length) die('queue needs one or more <NNN> to mark ready-to-merge');
+  for (const n of nums) resolveFile(n); // a typo must not queue a phantom item
+  const state = addQueued(loadQueued(), nums, new Date().toISOString(), { lane: flag('lane'), batchSlug: flag('session') });
+  saveQueued(state);
+  const padded = nums.map((n) => n.padStart(3, '0'));
+  ok({ verb: 'queue', queued: padded },
+    `${GRN}✓ queued${RST} #${padded.join(', #')} ${DIM}→ ready-to-merge (claim/release refuse it until the drain lands + unqueues it)${RST}`);
+}
+function unqueue() {
+  const nums = positional.map((p) => (String(p).match(/^(\d+)/) || [])[1]).filter(Boolean);
+  if (!nums.length) die('unqueue needs one or more <NNN> to clear');
+  const before = queuedNums(loadQueued()).length;
+  const state = removeQueued(loadQueued(), nums);
+  saveQueued(state);
+  const cleared = before - queuedNums(state).length;
+  ok({ verb: 'unqueue', nums: nums.map((n) => n.padStart(3, '0')), cleared },
+    `${GRN}✓ unqueued${RST} ${DIM}— cleared ${cleared} ready-to-merge mark(s); ${queuedNums(state).length} still queued${RST}`);
 }
 
 /**
@@ -430,6 +485,8 @@ switch (verb) {
   case 'calibrate': calibrate(); break;
   case 'reserve': reserve(); break;
   case 'unreserve': unreserve(); break;
+  case 'queue': queue(); break;
+  case 'unqueue': unqueue(); break;
   default:
     console.error(`${BLD}backlog.mjs${RST} — mechanical backlog-status CLI\n` +
       `  ${GRN}claim${RST} <NNN> [--as=preparing] [--force]   open → active (or preparing, /prepare) + dateStarted; refuses on a dirty item file (claim-first), --force overrides\n` +
@@ -440,6 +497,8 @@ switch (verb) {
       `  ${GRN}calibrate${RST} --points= --context-pct= [--stop-reason=budget|context|empty-pool|fork|gate|outgrew|manual|abort]   fold a session into the batch point-budget estimate\n` +
       `  ${GRN}reserve${RST} <NNN...> --session=<slug>    soft-hold planned items (deprioritize for other sessions)\n` +
       `  ${GRN}unreserve${RST} [--session=<slug>] [<NNN...>]  release soft holds (clear a session, or specific items)\n` +
+      `  ${GRN}queue${RST} <NNN...> [--lane=<ref>] [--session=<slug>]   mark ready-to-merge (#2138 Fork 4); claim/release refuse a queued item until the drain lands it\n` +
+      `  ${GRN}unqueue${RST} <NNN...>            clear the ready-to-merge mark (the drain's clear point at landing)\n` +
       `  (add --json for machine output)`);
     process.exit(verb ? 1 : 0);
 }

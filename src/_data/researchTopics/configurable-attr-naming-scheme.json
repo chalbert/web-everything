@@ -1,0 +1,23 @@
+{
+  "id": "configurable-attr-naming-scheme",
+  "title": "Configurable attribute-naming scheme — the objector escape hatch + migration bridge (#1992 mechanism survey)",
+  "status": "open",
+  "summary": "Grounds decision #1992 — the app-level mechanism (deferred from #1987) that remaps WE's behaviour/event attribute-name spelling (colon default) via the registry's name->behavior binding. The survey establishes: (1) every attribute-directive framework generation shipped this knob and the precedents split exactly along the item's forks — Vue 0.x had a configurable directive prefix (Vue.config.prefix) and REMOVED it in 1.0 (vuejs/vue#2415: a configurable published-code spelling forks the component ecosystem and docs); Alpine.js kept one (Alpine.prefix('data-x-')) that is exclusive, app-global, and projection-shaped (plugins register bare names; the prefix changes only the DOM spelling), with the lesson that its @-shorthand breaks under a custom prefix (a non-total remap leaves orphan spellings); AngularJS normalized additively (ng-bind = ng:bind = ng_bind = data-ng-bind = x-ng-bind, five live spellings per name), a surface Angular 2's rewrite dropped; htmx accepts a fixed hx-*/data-hx-* dual as a STANDING contract (HTML-validity motivated); Vue 2/3 delimiters is the surviving exclusive-swap knob. (2) The knob is a naming-SCHEME config dimension, not a separator-char swap: the only ratified future target (enh-*, WICG/webcomponents#1029) is a prefix+join scheme transform, and after #1991 the family-less names have no separator to swap — a char knob is undefined over part of its own surface. (3) The mechanism's normative core is flavor-validity rules enforced by the resolver: total (Alpine lesson), injective, native-namespace-safe (a smash scheme mapping on:click -> onclick would hand the browser an executable inline event handler), single-valued (exclusivity, closing the dual-flavor loophole). (4) Canonical identity must survive in every API plane (define(), callbacks, observedAttributes, docs) with the spelled DOM name via an explicit accessor — the Vue-removal defect otherwise relocates from define() to the callback. (5) Exclusive matching is grounded on per-author variance (what #1987 actually excludes), with production silent-inert + dev diagnostic ratified explicitly, and a transitional dual-match mode reserved for a real colon->enh-* migration event. Four forks at DoR: value-space (flavor dimension, forced invariant), remap identity (canonical-everywhere projection, forced invariant), flavor exclusivity (single-valued, med-high), value scope (app-pinned, an explicit amendment clause on config-extends-platform-default). Full grounding in reports/2026-07-02-configurable-attr-naming-scheme.md.",
+  "dateOpened": "2026-07-02",
+  "tags": [
+    "naming",
+    "colon-namespace",
+    "attribute-naming",
+    "config",
+    "config-dimension",
+    "webdirectives",
+    "webbehaviors",
+    "escape-hatch",
+    "migration-bridge",
+    "enh-prefix",
+    "prior-art"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": ["webbehaviors", "webdirectives"],
+  "relatedProject": ""
+}
