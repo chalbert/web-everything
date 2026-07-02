@@ -1,0 +1,73 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Decision <a href="/backlog/2149-blacklist-we-package-json-and-we-eleventy-js-as-merge-risk-f/">#2149</a>:
+  are <code>we:package.json</code> and <code>we:.eleventy.js</code> <strong>merge-risk (blacklist)
+  files</strong> — forcing same-lane packing (partition rule 2c), pre-lock reservation, and drain-time
+  serial-replay — or does #1952&rsquo;s codified principle (&ldquo;build config is line-structured &rarr;
+  optimistic merge&rdquo;) cover them? The item began life as a size-2 story (&ldquo;just add two
+  paths&rdquo;) and was retyped to a decision because the edit contradicts a rule codified in the target
+  file&rsquo;s own header.
+</p>
+
+<h2>In-repo grounding</h2>
+<p>
+  <code>RESERVED_MERGE_RISK_BY_REPO</code> lives canonically in
+  <code>scripts/readiness/lane-partition.mjs</code> (tested), inline-mirrored in
+  <code>.claude/skills/batch-backlog-items/parallel-execute.workflow.js</code>. Membership drives three
+  behaviors: rule&nbsp;2c same-lane packing, the <code>file-locks</code> pre-lock planner, and — since
+  #2138 Fork&nbsp;3 (ratified 2026-07-02) — drain-time denylist-overlap serial-replay. Two grounding
+  corrections surfaced in prep: <strong>neither path was ever actually in the list</strong> (#1952&rsquo;s
+  ratified removals were <code>tsconfig</code>/<code>vite.config</code>; the manifest is swept in only by a
+  generalized header parenthetical — so a GO narrows a codified generalization, not a ratified removal),
+  and the clean-but-wrong case is <strong>real but narrow</strong>: two lanes adding the <em>same</em> key
+  at different offsets git-merge clean into a duplicate-key object that npm/JSON resolve silently
+  last-wins — the one shape the optimistic floor structurally cannot catch.
+</p>
+
+<h2>Evidence &amp; sibling rulings</h2>
+<ul>
+  <li><strong>batch-2026-07-01-wf</strong> flagged 7 <code>multiLaneFiles</code>: #2018+#2020 both appended
+    to the 11ty config, #2024+#2087 both appended to the npm manifest — post-hoc notices, no wrong merge
+    observed. Churn since 2026-06-01: manifest 47 commits, 11ty config 22, vs tsconfig 2.</li>
+  <li><strong>#2138 (ratified)</strong> — its Fork-3 statute amendment whitelists exactly these files&rsquo;
+    additive regions, rules dependency adds <em>not</em> whitelisted &rarr; serial-replay, and composes with
+    &ldquo;#2149 declares the irreducible residual&rdquo;. The carve is conditional (&ldquo;iff on the
+    denylist&rdquo;) — for an unlisted file it goes dormant, not contradicted; the forward-note is not
+    authority. Under the deferred drain, landing is serial anyway, so an entry costs production-lane
+    concurrency only.</li>
+  <li><strong>#2123 (ratified)</strong> — every edit-action session runs in a lane clone, raising exposure.</li>
+  <li><strong>#2148 / #1938</strong> — the split-and-exit precedent (per-entry registration, &ldquo;strictly
+    better than co-serializing&rdquo;).</li>
+</ul>
+
+<h2>Prior art</h2>
+<ul>
+  <li><strong>CODEOWNERS / Zuul path serialization</strong> — serialize only the shared scope; the ratified
+    #1935 static&nbsp;&cup;&nbsp;dynamic hybrid already embodies it.</li>
+  <li><strong>npm-merge-driver</strong> — regenerate manifest/lockfile on conflict; supports treating the
+    lockfile as derived (no separate denylist entry).</li>
+  <li><strong>Duplicate-key linting</strong> (jsonc-style parsers) — a deterministic post-merge guard for the
+    silent last-wins case.</li>
+  <li><strong>ParallelChange</strong> — additive-lands-ahead only when judged additive (already folded into
+    #2138&rsquo;s whitelist).</li>
+</ul>
+
+<h2>Synthesis (post-skeptic — the two files are not symmetric)</h2>
+<p>
+  <strong>Fork&nbsp;1</strong> — the npm manifest: bare optimistic vs declare ③ vs <strong>optimistic + a
+  deterministic duplicate-key lint in the per-merge gate (default)</strong>. The skeptic refuted the draft
+  blacklist default: for a keyed manifest whose member order is semantically irrelevant, the <em>entire</em>
+  clean-but-wrong class is the duplicate key — script-decidable, so a gate rule converts silent-wrong into
+  gate-red &rarr; serial-replay with strictly broader coverage than lane-only serialization; the
+  blacklist&rsquo;s residual benefit is replay-speed (prioritization, #1961).
+  <strong>Fork&nbsp;2</strong> — the 11ty config: optimistic vs <strong>declare ③ now (default)</strong>;
+  its registration-monolith failure class (computed/wrapped names, ordering/side-effect sensitivity) is
+  <em>not</em> lintable, so the pre-emptive entry is the only closing mechanism. The draft&rsquo;s
+  &ldquo;pre-ratify the fragment split as end-state&rdquo; branch was struck (category ① already blesses
+  split-and-exit generically); delisting is conditional on a split proving order-insensitivity. The prep
+  also surfaced that the statute anchor&rsquo;s literal &ldquo;build config &rarr; locked&rdquo; ③ text
+  contradicts the ratified #1952 removals (codified only in the code header) — a reconciling anchor rewrite
+  owed under any ruling. Full detail in the session report and the decision item.
+</p>
+{% endraw %}

@@ -1,0 +1,117 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    <a href="/backlog/867-per-page-rollout-ratchet-for-the-we-docs-fui-dogfood/">#867</a> asks what is actually
+    left of the &ldquo;per-page rollout ratchet&rdquo; for the WE-docs&#8594;FUI dogfood, and in what shape. The
+    ratchet <em>infrastructure</em> is done: the rendered-site axe lane
+    (<a href="/backlog/770-rendered-site-a11y-gate-axe-lane-route-allowlist-we-docs/">#770</a>, ratified by
+    <a href="/backlog/763-gate-ui-best-practices-on-website-changes-rendered-site-a11y/">#763</a>) with a
+    warn&#8594;enforce posture, ten routes flipped to build-blocking
+    (<a href="/backlog/793-remediate-we-docs-a11y-violations-flip-the-rendered-site-gat/">#793</a>/<a href="/backlog/805-flip-backlog-rendered-site-a11y-route-to-enforce-once-backlo/">#805</a>),
+    and the route set auto-derived from <code>/sitemap.xml</code> at scope-C
+    (<a href="/backlog/774-auto-derive-the-a11y-gate-route-set-from-the-11ty-collection/">#774</a>,
+    <a href="/backlog/847-a11y-gate-derives-route-set-from-sitemap-scope-c-sampling/">#847</a>), mirrored per-repo
+    to the FUI site (#849). What was never designed is the ratchet <em>policy</em>: <strong>what does promotion
+    track</strong> (measurement alone, or dogfood-conversion + measurement), and <strong>what is the endgame
+    posture</strong> once the current route set is fully enforced?
+</p>
+
+<h2>Grounding — the gate as measured (2026-07-02)</h2>
+<p>
+    A full <code>npm run test:a11y</code> over the live derived set (39 scope-C routes) found:
+</p>
+<we-data-table>
+<table class="data-table">
+    <thead>
+        <tr><th>Segment</th><th>Count</th><th>State</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Enforced routes (<code>ENFORCED_ROUTES</code>)</td><td>10</td>
+            <td><strong>5 fail</strong> &mdash; <code>/</code>, <code>/adapters/</code>, <code>/blocks/</code>,
+            <code>/intents/</code>, <code>/protocols/</code>: all <em>serious</em> color-contrast (1&ndash;35 nodes)
+            + one nested-interactive on <code>/</code>. All five are exactly the index templates converted to SSR
+            <code>we-card</code> tiles (#2019 + siblings) &mdash; the dogfood conversions regressed the earned
+            enforce posture, unnoticed.</td></tr>
+        <tr><td>Warn-only routes</td><td>29</td>
+            <td><strong>26 already green</strong> (promotable as-is); 3 red: <code>/semantics/</code>
+            (button-name, select-name), <code>/web-contexts/</code> (document-title, html-has-lang),
+            <code>/rules/backlog-workflow/</code> (scrollable-region-focusable).</td></tr>
+        <tr><td>FUI mirror seed</td><td>0</td>
+            <td>The FUI site&rsquo;s gate exists (#849) but no route has ever been promoted &mdash; the enforced
+            seed is empty.</td></tr>
+    </tbody>
+</table>
+</we-data-table>
+<p>
+    Two facts are load-bearing for the forks: the regression happened <em>on enforced routes</em> during the
+    riskiest edit class (a conversion), and the warn-only violations were first <em>seen</em> by this prep&rsquo;s
+    measurement run &mdash; advisory output is ignored in practice, exactly the failure mode the baseline
+    literature warns about.
+</p>
+
+<h2>Prior art</h2>
+<we-data-table>
+<table class="data-table">
+    <thead>
+        <tr><th>Pattern</th><th>Incumbents</th><th>Strength</th><th>Documented weakness</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>Per-route warn&#8594;enforce ratchet</strong> (ours today)</td>
+            <td>pa11y-ci <code>threshold</code>/<code>--level</code>; Lighthouse CI assertion budgets</td>
+            <td>Deterministic, reviewable route-granular set; never blocks a surface that hasn&rsquo;t earned it</td>
+            <td>Fail-open for unpromoted/new routes; advisory output goes unread (measured here)</td></tr>
+        <tr><td><strong>Violation-level baseline snapshot</strong></td>
+            <td>trivago&rsquo;s baseline-driven axe reporting; microsoft/accessibility-insights-action baselining;
+                cfn-lint baseline feature request</td>
+            <td>Immediate fail-on-<em>new</em> everywhere, day one, without draining historical debt first</td>
+            <td>Churn-sensitive (accessibility-insights-action issue 949 &mdash; node fingerprints break on
+                unrelated DOM changes); snapshotted debt rots with no drain forcing-function</td></tr>
+        <tr><td><strong>Invert at the drained milestone</strong></td>
+            <td>TypeScript strict-flag migrations; ESLint suppression burn-downs (fail-closed default + explicit
+                exception list once clean)</td>
+            <td>Fail-closed for everything new; the exception list is explicit, visible, and temporary</td>
+            <td>Needs a concrete drain trigger, else it&rsquo;s a perpetual &ldquo;someday&rdquo;</td></tr>
+    </tbody>
+</table>
+</we-data-table>
+
+<h2>Recommendation (folded into #867&rsquo;s forks)</h2>
+<ol>
+    <li><strong>Fork 1 &mdash; decoupled promotion.</strong> Any measured-green scope-C route enters
+        <code>ENFORCED_ROUTES</code> immediately, regardless of whether its FUI conversion has landed. The gate
+        asserts WCAG on the rendered DOM whatever renders it; promoting early means each later conversion lands
+        <em>under enforcement</em> &mdash; the dogfood proof made structural. Holding promotion until conversion
+        leaves the riskiest edit unguarded; the measured 5-route regression is the smoking gun, and the
+        hold-branch&rsquo;s remaining defense (&ldquo;don&rsquo;t enforce markup about to be rewritten&rdquo;) is
+        churn/cost, not merit.</li>
+    <li><strong>Fork 2 &mdash; drain, then invert.</strong> Keep #774&rsquo;s warn-only entry while the current
+        set drains; once <code>ENFORCED_ROUTES</code> equals the derived set and the lane is green, flip to
+        enforce-by-default with an explicit <code>WARN_ROUTES</code> exception set (new/experimental surfaces opt
+        <em>out</em>, visibly and temporarily). This supersedes #774&rsquo;s warn-only-entry rider from that
+        milestone while preserving its real invariant (never silently un-earn enforcement; the set stays explicit
+        and reviewable &mdash; now as exceptions). The violation-baseline alternative is rejected on merit (churn
+        sensitivity + debt-rot + #774&rsquo;s route-granular explicit-set precedent).</li>
+    <li><strong>Not decisions:</strong> promotion mechanism (manual set edit vs a helper
+        <code>--list-promotable</code> report &mdash; coexist; optional tooling), remediation order (pure
+        prioritization), and FUI-drain slicing. The ruled policy applies per-repo, mirrored not shared
+        (#774/#849 precedent).</li>
+</ol>
+
+<h2>Classification &amp; boundary note</h2>
+<p>
+    Everything here concerns the WE <strong>website app</strong> (the 11ty docs site and its Playwright gate,
+    <code>we:tests/a11y/*</code>) and the FUI website&rsquo;s mirror gate &mdash; repo CI/devtools policy, kin to
+    <code>check:standards</code>. Nothing rules on the zero-impl WE standard layer; no protocol is minted (axe is
+    the WCAG engine, the sitemap is the sitemaps.org artifact &mdash; both consumed, not re-specified); no
+    vocab&#8594;component mapping is created (the conversions were ruled in #865/#866/#2018&ndash;#2021).
+</p>
+
+<h2>Sources</h2>
+<ul>
+    <li><a href="https://github.com/pa11y/pa11y-ci">pa11y-ci</a> &mdash; threshold / level CI posture</li>
+    <li><a href="https://tech.trivago.com/post/2026-03-13-from-a-long-list-to-a-clear-signal-baseline-driven-accessibility-reporting">trivago: baseline-driven accessibility reporting</a></li>
+    <li><a href="https://github.com/microsoft/accessibility-insights-action/issues/949">accessibility-insights-action #949</a> &mdash; baseline churn-sensitivity</li>
+    <li><a href="https://accessibility.civicactions.com/posts/automated-accessibility-testing-leveraging-github-actions-and-pa11y-ci-with-axe">CivicActions: pa11y-ci + axe in GitHub Actions</a></li>
+    <li><a href="/research/a11y-gate-route-auto-derivation/">Sibling topic: a11y-gate route auto-derivation (#774 prep)</a></li>
+</ul>
+{% endraw %}
