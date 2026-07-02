@@ -2,6 +2,7 @@
   "id": "webcomponents",
   "name": "Web Components",
   "description": "Enhanced implementation of Custom Elements supporting Scoped Registries and standard Dependency Injection.",
+  "summary": "Custom Elements with scoped registries and standard dependency injection.",
   "status": "poc",
   "category": "standard",
   "tier": "core",

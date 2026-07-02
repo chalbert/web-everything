@@ -7,7 +7,15 @@
  * emit — never a hand edit here. To change a brand VALUE, edit src/_data/weSiteTheme.js. */
 
 body {
+    /* Pale→darker canvas gradient behind the content sheets (`.page-sheet` /
+       `.content-box`). The two stops are THEME TOKENS (`weSiteTheme.js`
+       `bg-gradient-from`/`-to`), not hand-authored here — so the token doctrine
+       holds and the warm brand orange is tuned in one config place. The white
+       content container reads as an elevated surface against it. `fixed` keeps
+       the gradient viewport-relative (no per-scroll banding). */
     background-color: var(--color-bg);
+    background-image: linear-gradient(180deg, var(--token-color-bg-gradient-from) 0%, var(--token-color-bg-gradient-to) 100%);
+    background-attachment: fixed;
     color: var(--color-text-main);
     font-family: var(--font-sans);
     margin: 0;
@@ -1768,6 +1776,13 @@ table td, table th {
 .project-tile-card .project-desc {
   margin: 0; color: var(--color-text-muted); font-size: 0.95rem; line-height: 1.5; flex-grow: 1;
 }
+/* The project icon now leads the card header (moved out of the body). Push the status badge
+   (`.fui-card__actions`) to the far edge so the icon + title stay grouped on the left. */
+.project-tile-card .fui-card__actions { margin-left: auto; }
+.project-tile-card .project-icon--header {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+}
+.project-tile-card .project-icon--header img { display: block; width: 28px; height: 28px; }
 .project-tile-card .project-status-row .status-meter { margin-top: 0; padding-top: 0; }
 
 /* #1758 (ratified #1748): SSR baseline for the FUI transient pills the docs server-render in bulk.

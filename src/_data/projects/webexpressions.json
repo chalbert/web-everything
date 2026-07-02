@@ -2,6 +2,7 @@
   "id": "webexpressions",
   "name": "Web Expressions",
   "description": "Parser-agnostic infrastructure for dynamic content interpolation in HTML, supporting custom template syntax. <em>Watching: the TC39 Signals proposal is tracked as the future native substrate for this layer's reactivity model — if it reaches Stage 4 / ships, evaluate deferring webexpressions reactivity to native Signals per native-first (#1269).</em>",
+  "summary": "Parser-agnostic infrastructure for dynamic content interpolation in HTML.",
   "status": "poc",
   "category": "standard",
   "tier": "contextual",

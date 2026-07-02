@@ -2,6 +2,7 @@
   "id": "webtheme",
   "name": "Web Theme",
   "description": "Standard for the <strong>concrete-value layer</strong> of a design system &mdash; the primitive scales (spacing, radius, elevation, type ramp, color palette) and per-component overrides that the semantic <a href=\"/projects/webintents/\">Web Intents</a> (density, surface, typography, motion, theme-color) resolve into. Authored and interchanged as <strong>DTCG 2025.10</strong> (the stable W3C design-token format &mdash; the one legitimate Protocol here, adopted not coined) and compiled to the <strong>native CSS runtime</strong>: custom properties + <code>@property</code>, with <code>light-dark()</code>/<code>color-scheme</code> for schemes and relative-color/<code>color-mix()</code> for derived accent scales, validated against WCAG/APCA per step. Ships a <strong>complete default token set</strong>; a consuming project overrides via <code>extends</code> rather than authoring from scratch. A <strong>3-tier</strong> taxonomy (primitive &middot; semantic &middot; component) where the <em>semantic</em> tier stays owned by the intents &mdash; no parallel vocabulary. Distinct from Web Intents (the UX-&ldquo;what&rdquo;): Web Theme supplies the values that &ldquo;what&rdquo; points into.",
+  "summary": "The concrete-value layer of a design system — the token scales the semantic intents resolve into.",
   "status": "poc",
   "category": "standard",
   "tier": "core",

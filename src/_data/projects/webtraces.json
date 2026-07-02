@@ -2,6 +2,7 @@
   "id": "webtraces",
   "name": "Web Traces",
   "description": "Standard for execution flow monitoring and distributed tracing, aligning with W3C Trace Context and OpenTelemetry.",
+  "summary": "Execution-flow monitoring and distributed tracing, aligned with W3C Trace Context and OpenTelemetry.",
   "status": "poc",
   "category": "standard",
   "tier": "exploratory",

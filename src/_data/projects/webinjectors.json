@@ -2,6 +2,7 @@
   "id": "webinjectors",
   "name": "Web Injectors",
   "description": "Dependency injection system for the web. Supports <code>injector</code>, <code>provide</code>/<code>consume</code> syntax.",
+  "summary": "A dependency-injection system for the web, with provide/consume syntax.",
   "status": "poc",
   "category": "standard",
   "tier": "exploratory",

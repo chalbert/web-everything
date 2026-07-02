@@ -26,6 +26,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node scripts/guard-lane.mjs"
+          },
+          {
+            "type": "command",
             "command": "node scripts/lint-locus-prefix.mjs --pre"
           },
           {

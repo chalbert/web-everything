@@ -18,16 +18,24 @@ describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
     expect(mergeMethodFlag('bogus')).toBe('--merge');
   });
 
-  it('builds a self-approved PR create (NO reviewer; --fill unless title given)', () => {
+  it('builds a self-approved PR create (NO reviewer; body never dropped; --fill only when nothing given)', () => {
+    // Bare create (no title, no body): --fill autofills both from commits — the fallback branch.
     expect(buildCreateArgs({ base: 'main', head: 'lane/2153-x' }))
       .toEqual(['pr', 'create', '--base', 'main', '--head', 'lane/2153-x', '--fill']);
     // No --reviewer is ever added — self-approved (0 required approvals, #2152).
     expect(buildCreateArgs({ base: 'main', head: 'lane/2153-x' })).not.toContain('--reviewer');
-    // With an explicit title, uses --title/--body instead of --fill.
+    // With an explicit title+body: --title/--body, NO --fill (an explicit pair is complete on its own).
     const withTitle = buildCreateArgs({ base: 'main', head: 'lane/2153-x', title: 'land #2153', body: 'b' });
     expect(withTitle).toContain('--title');
     expect(withTitle).not.toContain('--fill');
     expect(withTitle[withTitle.indexOf('--body') + 1]).toBe('b');
+    // BODY WITHOUT TITLE (the #2170 dismissals path): the body is HONORED, not dropped — and no --fill (which
+    // is unusable for a remote-only lane/* head). The pr-land CLI derives a title from the commit subject so
+    // a real create is always complete; this pure builder faithfully keeps the body regardless.
+    const bodyOnly = buildCreateArgs({ base: 'main', head: 'lane/2170-x', body: '## Dismissed review findings\n- x' });
+    expect(bodyOnly).toContain('--body');                     // body is present…
+    expect(bodyOnly[bodyOnly.indexOf('--body') + 1]).toBe('## Dismissed review findings\n- x'); // …and unmangled
+    expect(bodyOnly).not.toContain('--fill');                 // never --fill when a body is supplied
   });
 
   it('builds a one-PR merge that deletes the lane ref (not --auto on a native queue)', () => {

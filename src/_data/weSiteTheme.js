@@ -33,6 +33,12 @@ const weSiteTheme = {
     'surface-card': '#ffffff',
     'border-light': '#f1f2f8',
     'text-secondary': '#50526a',
+    // Canvas gradient stops — the pale→darker `body` background the content sheets (`.page-sheet` /
+    // `.content-box`) sit on. Declared here as theme config (not hand-authored in style.css, per the
+    // token doctrine); style.css composes `linear-gradient(var(--token-color-bg-gradient-from) →
+    // …-to)`. Warm brand orange: pale peach at the top, vivid orange at the foot (the original site look).
+    'bg-gradient-from': '#ffd8af', // pale peach (top)
+    'bg-gradient-to': '#ff9500', // brand orange (bottom)
   },
   spacing: {
     xs: '0.5rem',

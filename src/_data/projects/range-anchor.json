@@ -2,6 +2,7 @@
   "id": "range-anchor",
   "name": "Durable Range Anchor",
   "description": "Standard for <strong>capturing a <code>Range</code> and re-resolving it later</strong> &mdash; the genuinely hard, recurring, <em>unowned</em> problem behind annotation, deep-linking, citations, <code>#:~:text=</code>-style scroll-to-text, and durable test selectors. Serialize a selection to a robust <strong>W3C Web Annotation selector bundle</strong> (<code>TextQuoteSelector</code> / <code>TextPositionSelector</code> / <code>RangeSelector</code>, <a href=\"https://www.w3.org/TR/annotation-model/#selectors\">adopted wholesale</a> at the wire layer), then re-resolve it against a possibly-changed document with a <strong>fuzzy fallback</strong> and a <strong>first-class orphan state</strong> (the Hypothesis / RecogitoJS precedent). The <code>anchorStrategy</code> dimension (<code>quote | position | bundle</code>, default <code>bundle</code>) is homed here. <strong>Target-agnostic</strong> &mdash; reusable far beyond annotation &mdash; which is why it is its own standard, not annotation-internal machinery. Ratified in <a href=\"/backlog/1408-decision-content-annotation-anchor-payload-placement/\">#1408</a> (Fork 2 split); the <code>annotation</code> intent composes it. The contract is the only lock; the serializer/resolver + fuzzy matcher are impl (Frontier UI).",
+  "summary": "Capture a text Range and re-resolve it later against a changed document — for annotations, deep links, and durable selectors.",
   "status": "concept",
   "category": "standard",
   "tier": "exploratory",

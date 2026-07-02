@@ -2,6 +2,7 @@
   "id": "webcompliance",
   "name": "Web Compliance",
   "description": "Standard for the <strong>enforcement</strong> layer &mdash; deliberately separated from <em>conformance</em>. <strong>Conformance</strong> is <em>how aligned</em> something is to a standard (a measure on a spectrum &mdash; it reports, it doesn't block); <strong>compliance</strong> is a conformance criterion <strong>promoted to an enforced hard rule</strong> &mdash; a gate, with severity, pass/fail, expiring waivers, and an audit trail. Web Compliance owns that promotion path and its machinery. The canonical artifact is the <strong>policy/rule model</strong>: which conformance criteria are enforced, at what severity, for which scope &mdash; policy-as-code, versioned, that <strong>extends a fully-defined platform-default policy</strong> (a project policy extends/overrides the baseline, per the WE config-layer convention). No compliance-specific protocol in v1: results ride <a href=\"/projects/webreporting/\">Web Reporting</a>'s report model (an audit result is just another report source). Distinct from <a href=\"/projects/webpolicy/\">Web Policy</a> (declarative <em>domain</em> rules &mdash; whether a business action is permitted): Web Compliance gates <em>standards conformance</em>, a different subject with its own home.",
+  "summary": "The enforcement layer — promoting conformance criteria to gated, severity-ranked hard rules with an audit trail.",
   "status": "poc",
   "category": "standard",
   "tier": "contextual",

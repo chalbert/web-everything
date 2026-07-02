@@ -2,6 +2,7 @@
   "id": "webplugs",
   "name": "Web Plugs",
   "description": "The missing browser standards (polyfilled). Runs 'plugged' (native patches) or 'unplugged' (safe libs) as the foundation for Web Blocks.",
+  "summary": "The missing browser standards, polyfilled — run 'plugged' (native) or 'unplugged' (safe libs).",
   "status": "concept",
   "category": "utility",
   "tier": "contextual",
