@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "1975"
-status: open
+status: resolved
 dateOpened: "2026-06-29"
-dateStarted: "2026-06-30"
+dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
+graduatedTo: "#2146 — content-security directive pair build child (form per #1983; native-policy-only fence + trusted-html thinness note per #1981 ruling)"
+codifiedIn: one-off
 preparedDate: "2026-06-30"
 relatedReport: reports/2026-06-29-directive-catalog-brainstorm.md
 tags: [webdirectives, composition, directive, content-security, sanitizer, validation-gate]
@@ -65,18 +68,44 @@ amendment, below).
   admission posture — a one-sided go/no-go with a scope amendment.
 - **Un-gate trigger:** none — the native Sanitizer API ships in current browsers; buildable now.
 
+## Ruling — ratified 2026-07-02
+
+- **Verdict: GO.** Admit the `trusted:html` + `sanitize:content` pair at the #1963 bar, authored toward the
+  **native Sanitizer API** (`Element.setHTML()`) and **Trusted Types**; DOMPurify demoted to fallback-only. Build
+  child: [#2146](2146-build-the-content-security-directive-pair-sanitize-content-t.md).
+- **Normative constraint (binding, folded from the prep skeptic):** the directive may only **invoke the native
+  policy** — declarative configs / policy names are fine; **author-supplied transform functions are barred**.
+  Admitting custom transforms would cross the tree-shape↔app-logic line and is a new decision, not an extension.
+- **Form (settled, #1983 — reconciled into this item 2026-07-02):** Ⓣ typed `<template>` — doubly forced (#1983
+  ratified the single-region form; independently, a comment boundary would admit live content before sanitizing).
+  `type=` values per #1987: `type="sanitize-content"` / `type="trusted-html"`; the colon spellings remain the
+  catalog/spec directive names.
+- **Red-team (ratify pass, held with a noted thinness):** *"`trusted:html` has no native per-region lever —
+  Trusted Types enforcement is page-scoped via CSP."* Held: the directive approximates region enforcement by
+  admitting only `TrustedHTML` values (rejecting strings) into the zone — enforceable, but a directive-invented
+  semantic rather than a native policy applied to a region. `trusted:html` is admitted as **the thinner of the
+  pair**; `sanitize:content` → `setHTML()` is the clean native mapping. Surfaced to the decider pre-ratify;
+  ratified as a pair regardless.
+
 ## Example (proposed authoring)
 
-```html
-<!-- run untrusted content through the native Sanitizer before it lands -->
-<!-- sanitize:content policy="strict" -->
-  ${commentBody}
-<!-- /sanitize:content -->
+*(Example reconciled 2026-07-02 to the ratified [#1983 directive-form standard](1983-directive-form-standard-comment-vs-template-form-reconcile-t.md)
+— the prep's original comment-boundary spellings predate that ruling and are struck. For this proposal the Ⓣ
+typed-template form is doubly forced: #1983 ratified it as the single-region form, and the security argument
+independently requires inert-hold (a comment boundary would admit live content before sanitizing). `type=` values
+follow #1983/#1987 (`type="sanitize-content"` / `type="trusted-html"` — hyphen in `type=`; the colon spellings
+remain the catalog/spec directive names).)*
 
-<!-- enforce Trusted Types on a content zone -->
-<!-- trusted:html -->
+```html
+<!-- run untrusted content through the native Sanitizer before it lands (catalog name `sanitize:content`) -->
+<template type="sanitize-content" policy="strict">
+  ${commentBody}
+</template>
+
+<!-- enforce Trusted Types on a content zone (catalog name `trusted:html`) -->
+<template type="trusted-html">
   ${policyApprovedMarkup}
-<!-- /trusted:html -->
+</template>
 ```
 
 - **Substrate:** the native **Sanitizer API** (`Element.setHTML()` / `setHTMLUnsafe()`) and **Trusted Types** —
