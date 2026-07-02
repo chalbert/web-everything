@@ -1,0 +1,28 @@
+{
+  "id": "component-compiler-deferred-optins-standing-test",
+  "title": "Deferred <component> compiler opt-ins — are the strategy-axis opt-ins support-all or a hidden fork?",
+  "status": "open",
+  "summary": "Prep research for #232 (the deferred <component> compiler strategy opt-ins umbrella, under #125): a standing-test re-run over its three deferred opt-ins — the .component SFC file surface (#1628, resolved), the Rust/WASM SWC plugin for Next/Turbopack (#1629, parked maturityGated), and the ts-patch/ttypescript tsc-only transformer (#1630, resolved) — plus the uncarved arbitrary-string-scanning residual #231 deferred here. The 2026-06-22 re-type (decision → epic, 'no merit fork here') was asserted without a prior-art survey; this survey supplies the grounding. VERDICT: composability probe PASS — all concerns are SUPPORT-ALL, additive opt-ins on orthogonal strategy axes (#127's configurable-axes ruling, the component-dc cluster); no fork exists. Four findings: (A) SFC dedicated-file surfaces are additive, never forced — Vue states SFCs are optional beside plain-JS/inline/render-function authoring, Astro renders .astro beside framework island components, Svelte's .svelte is a compiler input surface — a dedicated extension is a coexisting surface over one compile pipeline. (B) SWC WASM plugins run inside SWC's Rust pipeline on the SWC AST (Rust VisitMut; AST serialized host↔plugin), so the lowering CANNOT wrap the shared JS compile() kernel — it must be re-implemented in Rust, with a real swc_core ABI-pinning maintenance tax (eased post-@swc/core v1.15.0 via CBOR + Unknown enum arms, only for swc_core >= 47) and still-rough Turbopack integration (WASM fallback bindings don't support Turbopack). That is a COST finding, not a fork — enabling it excludes nothing — and it independently validates #1629's maturityGated parking (build-now-yields-worse with no heavy-SWC consumer to prove byte-identity against). (C) Vanilla tsc has NO official custom-transformer hook (tsconfig plugins feeds only the language service; microsoft/TypeScript#54276 unshipped), so the gap #1630 fills is real and only third-party-fillable; delta: ttypescript is DEPRECATED (TS<5 only), ts-patch is the maintained successor doing real emit-time lowering — and the shipped fui transformer re-wraps the same shared compile() core. (D) Orthogonality proven by a shipping ecosystem: Vue stacks all three analogous knobs simultaneously (.vue files + @vitejs/plugin-vue/unplugin toolchain integrations + vue-tsc) — source surface, toolchain depth, and tsc-only support are independent, composable axes, never exclusive. The only residue is cost/sequencing on the SWC path — prioritization input, never a fork branch. Item outcome: #232 stays kind: epic in support-all shape (zero ## Fork N, zero validation gates), the ts-patch deprecation delta and the arbitrary-string-scanning uncarved residual folded into its body, preparedDate stamped recording the pass. Full session grounding in reports/2026-07-01-component-compiler-deferred-optins-standing-test.md.",
+  "dateOpened": "2026-07-01",
+  "lastReviewed": "2026-07-01",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "component",
+    "compiler",
+    "build-tooling",
+    "strategy-axis",
+    "sfc",
+    "swc",
+    "ts-patch",
+    "tsc",
+    "vue",
+    "svelte",
+    "astro",
+    "standing-test",
+    "support-all",
+    "decision-prep"
+  ],
+  "relatedBlocks": ["component"],
+  "relatedPlugs": [],
+  "relatedProject": "webadapters"
+}

@@ -1,0 +1,101 @@
+<h2>The Question</h2>
+<p>
+  <a href="/backlog/232-component-compiler-deferred-strategy-optins/">#232</a> collects the
+  <code>&lt;component&gt;</code> compiler opt-ins deferred out of
+  <a href="/backlog/231-component-compiler-strategy-axes/">#231</a> (which shipped the top-2-per-axis
+  baseline of <a href="/backlog/127-component-compiler-toolchain-reach/">#127</a>'s
+  "configurable strategy axes, native-first defaults" ruling — the
+  <em>component-dc</em> decision cluster). It was re-typed <code>decision → epic</code> on 2026-06-22
+  with the claim "no merit fork here — support-all, not branches of a fork" — but that claim was
+  <strong>asserted, never grounded in a prior-art survey</strong>. This research supplies the missing
+  grounding: is any of the deferred opt-ins actually a fork (mutually exclusive with a sibling, or a
+  forced invariant with a broken alternative), or are they all additive, support-all opt-ins on
+  orthogonal axes?
+</p>
+<p>The concerns under test:</p>
+<we-data-table>
+<table class="data-table">
+  <thead><tr><th>Concern</th><th>Axis</th><th>Item</th><th>State</th></tr></thead>
+  <tbody>
+    <tr><td><code>.component</code> dedicated-file SFC surface</td><td>source-surface</td><td><a href="/backlog/1628-component-dedicated-file-surface-for-component-one-element-p/">#1628</a></td><td>resolved 2026-06-27</td></tr>
+    <tr><td>Rust/WASM SWC plugin (Next/Turbopack)</td><td>toolchain-depth</td><td><a href="/backlog/1629-per-bundler-native-component-integration-swc-plugin-for-next/">#1629</a></td><td>parked <code>maturityGated</code></td></tr>
+    <tr><td><code>ts-patch</code>/<code>ttypescript</code> transformer</td><td><code>tsc</code>-support</td><td><a href="/backlog/1630-ts-patch-ttypescript-custom-transformer-for-tsc-only-compone/">#1630</a></td><td>resolved 2026-06-27</td></tr>
+    <tr><td>Arbitrary-string scanning</td><td>source-surface</td><td>— (uncarved)</td><td>named in #231 as "deferred to #232"</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+
+<h2>What the survey found</h2>
+
+<h3>A · SFC dedicated-file surfaces are additive, never forced</h3>
+<p>
+  Every SFC ecosystem treats the dedicated extension as one coexisting compile surface, not a
+  replacement: <a href="https://vuejs.org/guide/scaling-up/sfc.html">Vue documents SFCs as
+  optional</a> beside plain-JS objects, inline templates, and render functions ("Vue can still be
+  used via plain JavaScript without a build step");
+  <a href="https://docs.astro.build/en/basics/astro-components/">Astro</a> renders
+  <code>.astro</code> files alongside React/Vue/Svelte island components; Svelte's
+  <code>.svelte</code> is a compiler input surface over the same component model. A dedicated file
+  extension is exactly the shape of an <em>additive</em> source-surface opt-in.
+</p>
+
+<h3>B · SWC WASM plugins cannot reuse a JS kernel — a cost, not a fork</h3>
+<p>
+  An <a href="https://swc.rs/docs/plugin/ecmascript/getting-started">SWC ecmascript plugin</a> runs
+  inside SWC's Rust pipeline as a Rust <code>VisitMut</code> over the SWC AST (the host serializes
+  the AST into the WASM runtime and back). So a <code>&lt;component&gt;</code> SWC plugin must
+  <strong>re-implement the lowering in Rust</strong> — it cannot wrap the shared JS
+  <code>compile()</code> kernel the bundler wrappers and the <code>tsc</code> transformer reuse. It
+  also carries a real ABI tax: plugins were historically pinned to <code>swc_core</code> versions
+  (<a href="https://swc.rs/docs/plugin/ecmascript/compatibility">compatibility table</a>), eased
+  post-<code>@swc/core</code> v1.15.0
+  (<a href="https://blog.swc.rs/2025-11-4-wasm-backward-compatibility">CBOR + <code>Unknown</code>
+  enum arms</a>) but only for plugins on <code>swc_core ≥ 47</code> — and
+  <a href="https://nextjs.org/docs/architecture/nextjs-compiler">Next/Turbopack</a> SWC-plugin
+  integration remains rough. <strong>None of this is mutual exclusion</strong> — enabling the SWC
+  path excludes nothing; it duplicates the kernel's behaviour at a deeper integration point. It is a
+  cost/maturity finding that independently validates #1629's <code>maturityGated</code> parking
+  (building it now, with no heavy-SWC consumer to prove byte-identity against, yields a worse
+  artifact).
+</p>
+
+<h3>C · Vanilla <code>tsc</code> has no transformer hook; <code>ts-patch</code> is the maintained filler</h3>
+<p>
+  TypeScript's transformer API is programmatic-only: the <code>tsconfig</code> <code>plugins</code>
+  array feeds only the language service, and the official transformer-plugin proposal
+  (<a href="https://github.com/microsoft/TypeScript/issues/54276">microsoft/TypeScript#54276</a>) is
+  unshipped. The gap #1630 fills is real and only third-party-fillable.
+  <strong>Delta:</strong> <a href="https://github.com/cevek/ttypescript">ttypescript is
+  deprecated</a> (TS &lt; 5 only); <a href="https://github.com/nonara/ts-patch">ts-patch</a> is the
+  maintained successor and performs real emit-time source lowering — and the shipped FUI transformer
+  re-wraps the same shared <code>compile()</code> core, no kernel re-implementation.
+</p>
+
+<h3>D · The three axes are independent, stacked knobs in shipping ecosystems</h3>
+<p>
+  Vue runs the analogous three simultaneously:
+  <code>.vue</code> files (source surface) +
+  <a href="https://www.npmjs.com/package/@vitejs/plugin-vue"><code>@vitejs/plugin-vue</code></a>/unplugin
+  integrations (toolchain depth) +
+  <a href="https://www.npmjs.com/package/vue-tsc"><code>vue-tsc</code></a>
+  (<code>tsc</code>-side support) — see the
+  <a href="https://vuejs.org/guide/scaling-up/tooling.html">Vue tooling guide</a>. "Which extension I
+  author in", "which toolchain depth I integrate at", and "do I support a bundler-less
+  <code>tsc</code>-only pipeline" are independent, composable knobs — never exclusive.
+</p>
+
+<h2>Verdict</h2>
+<p>
+  <strong>Composability probe: PASS. No fork exists among the three carved opt-ins.</strong> Each of
+  the three surveyed opt-ins is a support-all, additive opt-in on an orthogonal strategy axis of the
+  #127 contract; no pair is mutually exclusive and no alternative is broken. (The fourth,
+  <em>uncarved</em> arbitrary-string-scanning residual was <strong>not probed</strong> by this survey
+  — its child re-runs the standing test at carve time and may legitimately be a real decision on
+  match-rule correctness.) The only residue the survey surfaced is
+  <em>cost/sequencing</em> on the SWC path (Rust re-implementation + ABI upkeep) — a prioritization
+  input the <em>not-a-prioritization</em> rule keeps out of any fork, already correctly encoded as
+  #1629's <code>maturityGated</code> un-gate trigger. #232 therefore stays <code>kind: epic</code>
+  in support-all shape (zero <code>## Fork N</code>), with the ts-patch deprecation delta and the
+  uncarved arbitrary-string-scanning residual folded into its body. Full session grounding in the
+  linked report.
+</p>
