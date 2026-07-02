@@ -16,6 +16,8 @@ import {
   renderIntentGrid,
   renderProjectGrid,
   renderBacklogGrid,
+  findComponentPlaceholders,
+  spliceComponents,
   projectIconHtml,
   statusTone,
   EXPECTED_PRODUCER,
@@ -249,5 +251,100 @@ describe('renderBacklogGrid — backlog tile grid render-from-data (#2018)', () 
 
   it('is empty-safe (no tiles → empty grid, no subprocess crash)', () => {
     expect(renderBacklogGrid([], stubRoot, cardShellRunner)).toBe('<div class="project-grid"></div>');
+  });
+});
+
+// ── Generic template-facing card/badge primitive (#2098) ──────────────────────────────────────────────
+// A runner that renders each spec to a deterministic marker embedding its component + config so the batch,
+// the per-placeholder splice, and the one-subprocess-per-page economy are all assertable without a real
+// FUI checkout.
+function genericRunner(_cmd, _args, opts) {
+  const entries = JSON.parse(opts.input);
+  return JSON.stringify({
+    producer: EXPECTED_PRODUCER,
+    results: entries.map((e) => ({
+      key: e.key,
+      html: `<x data-c="${e.component}" data-title="${e.config?.title || ''}" data-label="${e.config?.label || ''}"></x>`,
+    })),
+  });
+}
+
+describe('findComponentPlaceholders — scan the generic card/badge placeholders (#2098)', () => {
+  it('parses a single-quoted data-we-spec into a {component, config} spec', () => {
+    const html = `<we-badge data-we-spec='{"component":"badge","config":{"label":"Draft","tone":"info"}}'>Draft</we-badge>`;
+    const found = findComponentPlaceholders(html);
+    expect(found).toHaveLength(1);
+    expect(found[0].component).toBe('badge');
+    expect(found[0].config).toEqual({ label: 'Draft', tone: 'info' });
+    expect(found[0].key).toBe('we-component-0');
+  });
+  it('infers the component from the tag name for a bare-config spec, and keys sequentially', () => {
+    const html =
+      `<we-card data-we-spec='{"title":"A"}'>a</we-card>`
+      + `<we-badge data-we-spec='{"label":"B"}'>b</we-badge>`;
+    const found = findComponentPlaceholders(html);
+    expect(found.map((f) => f.component)).toEqual(['card', 'badge']);
+    expect(found[0].config).toEqual({ title: 'A' });
+    expect(found[1].config).toEqual({ label: 'B' });
+    expect(found.map((f) => f.key)).toEqual(['we-component-0', 'we-component-1']);
+  });
+  it('skips a placeholder with a malformed spec (left for the client CE path, never aborts)', () => {
+    const html = `<we-card data-we-spec='{not json}'>x</we-card>`;
+    expect(findComponentPlaceholders(html)).toEqual([]);
+  });
+  it('ignores a we-card with no data-we-spec attribute', () => {
+    expect(findComponentPlaceholders('<we-card>plain</we-card>')).toEqual([]);
+  });
+  it('is quote-aware — a spec value carrying literal < / > does not terminate the open tag early', () => {
+    // The card body/actions JSON legally carries nested markup (`<p>…</p>`); a naive `[^>]*` open-tag
+    // matcher would stop at the first `>` inside the JSON and mis-parse. Assert the whole spec is captured.
+    const html =
+      `<we-card data-we-spec='{"component":"card","config":{"title":"T","bodyParts":[{"tag":"div","html":"<p>a &gt; b</p>"}]}}'>`
+      + `<p>a &gt; b</p></we-card>`;
+    const found = findComponentPlaceholders(html);
+    expect(found).toHaveLength(1);
+    expect(found[0].component).toBe('card');
+    expect(found[0].config.bodyParts[0].html).toBe('<p>a &gt; b</p>');
+  });
+});
+
+describe('spliceComponents — one subprocess per page, splice each placeholder (#2098)', () => {
+  it('batches all placeholders on a page in ONE subprocess and splices each fragment in place', () => {
+    let calls = 0;
+    const counting = (_c, _a, opts) => { calls++; return genericRunner(_c, _a, opts); };
+    const html =
+      `<main><we-card data-we-spec='{"component":"card","config":{"title":"Hello"}}'>fallback</we-card>`
+      + `<we-badge data-we-spec='{"component":"badge","config":{"label":"New"}}'>New</we-badge></main>`;
+    const out = spliceComponents(html, stubRoot, counting);
+    expect(calls).toBe(1); // one subprocess for the whole page, not one per card
+    expect(out).toContain('data-c="card" data-title="Hello"');
+    expect(out).toContain('data-c="badge"');
+    expect(out).toContain('data-label="New"');
+    expect(out).not.toContain('data-we-spec'); // every placeholder was replaced
+    expect(out).not.toContain('fallback'); // the JS-off fallback body was replaced by the SSR fragment
+  });
+  it('returns content unchanged when there is no placeholder (single substring check, no subprocess)', () => {
+    let calls = 0;
+    const counting = (_c, _a, opts) => { calls++; return genericRunner(_c, _a, opts); };
+    const html = '<main><p>no components here</p></main>';
+    expect(spliceComponents(html, stubRoot, counting)).toBe(html);
+    expect(calls).toBe(0);
+  });
+  it('isolates a failed spec — leaves that placeholder intact, splices the rest', () => {
+    const oneFails = (_c, _a, opts) => {
+      const entries = JSON.parse(opts.input);
+      return JSON.stringify({
+        producer: EXPECTED_PRODUCER,
+        results: entries.map((e, i) => (i === 0
+          ? { key: e.key, error: 'boom' }
+          : { key: e.key, html: `<ok data-k="${e.key}"></ok>` })),
+      });
+    };
+    const html =
+      `<we-card data-we-spec='{"component":"card","config":{"title":"Bad"}}'>keep-me</we-card>`
+      + `<we-badge data-we-spec='{"component":"badge","config":{"label":"Good"}}'>Good</we-badge>`;
+    const out = spliceComponents(html, stubRoot, oneFails);
+    expect(out).toContain('keep-me'); // failed placeholder stays intact for the client CE path
+    expect(out).toContain('<ok data-k="we-component-1">'); // the healthy one was spliced
   });
 });

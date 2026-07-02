@@ -3,6 +3,7 @@ kind: story
 size: 3
 parent: "1963"
 status: open
+blockedBy: ["2159"]
 dateOpened: "2026-06-29"
 dateStarted: "2026-07-01"
 tags: []
@@ -37,6 +38,11 @@ first requires **deciding the leaf shape** (filed as **#2028**):
 3. The **zero-wrapper → wrapper** change alters every consumer's DOM (transient shipped a *bare* native tag; a
    persistent host adds a node), so demos + `we:src` consumers are a real regression surface, not a free swap.
 
-This is unspecified platform design with a real blast radius, so it is `blockedBy: #2028`. Once #2028 ratifies the
-contract and a reference base is built (pilot on one leaf), the soft-7 conversion here is the mechanical size·3
-slice it was scoped as. Do **not** pick a shape ad-hoc to force batchability.
+**Update (2026-07-02, batch-2026-07-02):** #2028 is now **resolved** — the contract is ratified (host-is-node for
+badge/tag/card/section-card/auto-heading; wrap-child for progress/meter). But the reference base is still **unbuilt**:
+a grep of `fui:blocks/**` finds no persistent light-DOM base class. The residual blocker moved from "undecided
+contract" to "unbuilt reference base," now filed as the concrete prerequisite **#2159** (build `LightLeafElement` +
+pilot badge). The frontmatter previously carried **no** `blockedBy` edge (the block lived only in this prose, so the
+selector surfaced it as ready and a lane wasted a claim on it); it is now `blockedBy: #2159`. Once #2159 ships the
+base + pilot, the soft-7 conversion here is the mechanical size·3 slice it was scoped as. Do **not** pick a shape
+ad-hoc to force batchability.

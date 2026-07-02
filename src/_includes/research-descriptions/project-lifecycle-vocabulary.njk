@@ -1,0 +1,112 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The project <code>status</code> axis is named by <strong>three different vocabularies</strong>: the data
+  convention on the 45 <code>src/_data/projects/*.json</code> entries (<code>concept</code> 17 /
+  <code>poc</code> 24 / <code>draft</code> 4), the public five-stage ladder
+  <code>concept &rarr; poc &rarr; draft &rarr; candidate &rarr; stable</code> on
+  <a href="/project-lifecycle/">the Project Lifecycle page</a> (with consumer-facing semantics &mdash;
+  &ldquo;The API is frozen&rdquo;, &ldquo;Safe for mission-critical use&rdquo;), and the descriptor enum
+  <code>LIFECYCLE = {concept, draft, experimental, active}</code> in
+  <code>scripts/check-standards-rules.mjs</code> &mdash; whose synonym map even deprecates
+  <code>stable &rarr; active</code>, making the public ladder&rsquo;s terminal stage a <em>deprecated spelling</em>
+  on the descriptor axis. The statute (platform-decisions placement-test rule&nbsp;6) <em>deliberately</em> keeps
+  project status outside <code>LIFECYCLE</code> (&ldquo;<code>poc</code> is the convention &mdash; project
+  <code>status</code> is not enum-validated&rdquo;), so closing the drift is a <strong>statute amendment</strong>
+  &mdash; decision #2134: which vocabulary is canonical for the project axis, and does the gate enforce it?
+</p>
+
+<h2>Recommendation</h2>
+<p>
+  <strong>Amend the statute with a distinct, enum-validated
+  <code>PROJECT_LIFECYCLE = {concept, poc, draft, candidate, stable}</code> matching the public ladder</strong>
+  (Fork&nbsp;1), <strong>enforced in <code>check:standards</code> at error severity from day one, with no synonym
+  map</strong> (Fork&nbsp;2). The data already conforms 45/45, so the amendment is zero-migration; the
+  load-bearing <code>concept</code> literal (backlog D3-readiness demotion) and the statute&rsquo;s own
+  &ldquo;<code>poc</code> is the convention&rdquo; prose stay true; and the descriptor semantics genuinely do not
+  fit projects &mdash; descriptor <code>active</code> means <em>implemented</em> (an <code>active</code> block
+  without <code>implementedBy</code> warns), a meaning a zero-implementation WE project cannot take.
+</p>
+
+<h2>Code ground truth</h2>
+<table>
+  <thead>
+    <tr><th>Surface</th><th>Where</th><th>What it says</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Data convention</td><td><code>src/_data/projects/*.json</code> (45 entries)</td><td><code>concept</code> 17 / <code>poc</code> 24 / <code>draft</code> 4 &mdash; all inside the public ladder; the drift is definitional, not in the entries</td></tr>
+    <tr><td>Public ladder</td><td><code>src/project-lifecycle.njk:11-69</code></td><td>five stages with percentages (10/30/50/80/100%) and consumer-facing promises per stage</td></tr>
+    <tr><td>Descriptor enum</td><td><code>scripts/check-standards-rules.mjs:789-790</code></td><td><code>LIFECYCLE = {concept, draft, experimental, active}</code>; <code>STATUS_SYNONYMS</code> deprecates <code>stable/implemented/done &rarr; active</code>, <code>planned &rarr; concept</code>, <code>wip &rarr; draft</code></td></tr>
+    <tr><td>Statute</td><td><code>docs/agent/platform-decisions.md:136-143</code></td><td>rule 6: project <code>status</code> deliberately outside <code>LIFECYCLE</code>, not enum-validated; reaffirmed by the <code>#portfolio-project-tiering</code> lineage, which reserves the drift for &ldquo;a separate statute-amendment decision&rdquo; (= #2134)</td></tr>
+    <tr><td>Load-bearing literal</td><td><code>src/_data/backlog.js:114-120</code></td><td>D3-readiness demotes items whose <code>relatedProject</code> is <code>status: 'concept'</code> with no shipped surface &mdash; renaming <code>concept</code>/<code>poc</code> breaks the backlog engine, not just labels</td></tr>
+    <tr><td>Render seam</td><td><code>.eleventy.js:292-311</code>, <code>src/_includes/project-status.njk</code></td><td>axis-agnostic: the same <code>projectStatus</code> macro serves project pages <em>and</em> plug/state descriptor pages; <code>style.css:962-969</code> provisions meter fills for the union of both vocabularies, incl. <code>candidate</code>/<code>stable</code> &mdash; a distinct project enum needs zero render changes</td></tr>
+    <tr><td>Stray spelling</td><td><code>src/_data/webhandlers.json:5</code></td><td><code>"status": "speculative"</code> in an orphaned pre-#1157 root spec (no consuming template) &mdash; a fourth vocabulary, exactly what an unvalidated convention produces</td></tr>
+    <tr><td>Sibling precedent</td><td><code>scripts/check-standards-rules.mjs:860+</code></td><td>project <code>tier</code> (#2088 Fork 3) is enum-validated <em>from day one</em> &mdash; &ldquo;unlike <code>status</code>&rdquo; &mdash; via <code>PROJECT_TIERS</code> + <code>validateProjectTier</code></td></tr>
+  </tbody>
+</table>
+
+<h2>Prior art &mdash; how mature ecosystems keep a status vocabulary honest</h2>
+<table>
+  <thead>
+    <tr><th>System</th><th>Label set</th><th>Normative home</th><th>Validated?</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>W3C Process</td><td>WD &rarr; CR &rarr; PR &rarr; REC (+ Note track)</td><td>the Process Document, one closed definition</td><td>process gates per transition</td></tr>
+    <tr><td>TC39</td><td>Stages 0&ndash;4</td><td>process document</td><td>the proposals table is maintained against it</td></tr>
+    <tr><td>Node.js</td><td>Stability 0 deprecated / 1 experimental / 2 stable / 3 legacy</td><td>docs metadata (machine-readable index)</td><td>yes &mdash; tooling reads the index</td></tr>
+    <tr><td>USWDS / Polaris / Carbon</td><td>small closed component-lifecycle enums</td><td>design-system docs config</td><td>enforced by docs tooling</td></tr>
+    <tr><td>npm dist-tags</td><td><em>free-form publisher labels</em> (<code>latest</code>, <code>next</code>, &hellip;)</td><td>none &mdash; declared ad hoc</td><td><strong>no &mdash; the drift counter-model</strong>; only <code>latest</code> is special-cased</td></tr>
+  </tbody>
+</table>
+<p>
+  Two lessons transfer. <strong>(1) One closed normative home + mechanical validation:</strong> drift arises
+  exactly where a label set lives in prose, data, and tooling separately &mdash; WE&rsquo;s current shape; npm
+  dist-tags show the endpoint of the unvalidated path. <strong>(2) Distinct tracks keep distinct ladders:</strong>
+  W3C does not reuse TC39&rsquo;s stages and Node&rsquo;s stability index is not npm&rsquo;s tags &mdash; because
+  the processes being measured differ. WE descriptors mature toward <em>implementation</em>
+  (<code>active</code> &rArr; <code>implementedBy</code>); WE projects mature toward <em>spec stability</em>
+  (<code>candidate</code> = API frozen, <code>stable</code> = SemVer). Two ordered enums for two maturation
+  processes is the surveyed shape, which is why the recommendation is a <em>distinct</em>
+  <code>PROJECT_LIFECYCLE</code>, not a merge into the descriptor <code>LIFECYCLE</code>.
+</p>
+
+<h2>The forks (decision #2134)</h2>
+<ul>
+  <li><strong>Fork 1 &mdash; canonical vocabulary:</strong> <strong>(a) distinct
+    <code>PROJECT_LIFECYCLE</code> = the public ladder</strong> (zero migration; <code>concept</code> literal
+    untouched; per-track ladders) vs (b) merge into descriptor <code>LIFECYCLE</code> (rejected: 24-file
+    <code>poc &rarr; experimental</code> migration, public-page rewrite, and the imported
+    <code>stable &rarr; active</code> synonym would forbid the catalog from ever saying the word its own ladder
+    promises as terminal) vs (c) a fresh third label set (rejected broken: a fourth vocabulary). Word-reuse
+    caution: <code>stable</code> becomes canonical-for-Project while staying a deprecated descriptor synonym
+    &mdash; fine because the checks are kind-keyed, but the amendment must state the reuse explicitly.</li>
+  <li><strong>Fork 2 &mdash; enforcement:</strong> <strong>(a) enum-validate in <code>check:standards</code>,
+    error severity, day one, no synonym map</strong> (data already clean; the tier precedent is adjacent in the
+    same file; status rules &ldquo;never warn&rdquo; by house design) vs (b) convention-only (rejected: the exact
+    enforcement gap that produced three definitions plus a stray fourth spelling) vs (c) warn-only (rejected:
+    contradicts the never-warn shape).</li>
+</ul>
+
+<h2>Not forks</h2>
+<ul>
+  <li>Statute amendment mechanics (rewriting rule 6&rsquo;s parenthetical, adding the anchor) &mdash;
+    codification at ratification, never a prep-time edit.</li>
+  <li>Check placement / function naming &mdash; implementation detail below the observable gate contract.</li>
+  <li>Auto-deriving the ladder page from the enum &mdash; declared-over-auto-derived; the gate guaranteeing
+    data &sube; enum is the drift that matters.</li>
+  <li>Cleanup of the orphaned root specs (<code>webhandlers.json</code> with its stray
+    <code>speculative</code>, the stale duplicate <code>webportals.json</code>) &mdash; a follow-up build filed
+    on ratification.</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/research/portfolio-project-tiering/">Portfolio project tiering</a> &mdash; the sibling axis
+    (#2088) whose grounding digest surfaced this drift and whose day-one-validated <code>tier</code> field is the
+    in-repo precedent for Fork&nbsp;2.</li>
+  <li><a href="/project-lifecycle/">The public Project Lifecycle ladder</a> &mdash; the five-stage vocabulary the
+    recommendation canonizes.</li>
+  <li><a href="/backlog/2134-project-status-vocabulary-drift-amend-the-statute-with-a-dis/">Decision #2134</a>
+    &mdash; the prepared forks, skeptic verdicts, and the concrete <code>checkProjectStatus</code> shape.</li>
+</ul>
+{% endraw %}

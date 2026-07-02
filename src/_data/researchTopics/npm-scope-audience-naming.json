@@ -1,0 +1,19 @@
+{
+  "id": "npm-scope-audience-naming",
+  "title": "npm Scope Naming — One Scope per Audience",
+  "status": "open",
+  "summary": "Prior-art survey grounding backlog #2155: how comparable ecosystems map npm scopes to audiences and products before the constellation's first Plateau/FUI publish. Surveyed splits (@types, @angular vs @angular-devkit, @vue vs @vitejs, @lit vs @lit-labs, @web, @open-wc, @astrojs, the Shoelace → Web Awesome forced migration) show a scope earns existence via a distinct public product identity or a support-policy channel — never via privacy, since npm access is per-package, not per-scope. npm mechanics bound the call: a scope is an org (near-impossible to rename — republish-everything is the official path), restricted → public is a one-flag flip while public is effectively irreversible, and provenance requires public. Feeds three prepared forks: the canonical FUI scope spelling (@frontierui, matching all 14 in-tree package names), the Plateau scope count (one live customer scope, @plateaudev/@plateauapp as defensive holds with a named re-open trigger), and the access posture (restricted-until-an-explicit-go for impl/product scopes; public for the @webeverything standard surface per #907).",
+  "dateOpened": "2026-07-02",
+  "tags": [
+    "npm",
+    "publishing",
+    "naming",
+    "scopes",
+    "constellation",
+    "governance",
+    "lock-in",
+    "monetization"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

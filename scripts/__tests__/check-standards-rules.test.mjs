@@ -40,6 +40,7 @@ import {
   detectClassificationCollapse,
   computeNativeFirstConformance,
   classifySurfacePaths,
+  validatePolyglotWideningGate, POLYGLOT_WIDENING_TAG, PILOT_EVIDENCE_NUMS,
 } from '../check-standards-rules.mjs';
 import { execFileSync } from 'node:child_process';
 
@@ -1441,5 +1442,69 @@ describe('classifySurfacePaths (#2052 fail-closed standard-vs-site boundary)', (
       .split('\n').filter(Boolean);
     const { unclassified } = classifySurfacePaths(tracked);
     expect(unclassified).toEqual([]);
+  });
+});
+
+// ── Polyglot-widening start-gate (#2089 Fork 2(a) / #forward-target-start-gate, enforcement #2131) ──
+describe('validatePolyglotWideningGate — the new-target evidence edge', () => {
+  const bootstrap = [...PILOT_EVIDENCE_NUMS][0];
+
+  it('IGNORES an item without the polyglot-widening tag (the declared predicate; no false positives)', () => {
+    // A broad `polyglot`-tagged item that is NOT a widening (decision/maintenance) stays untouched.
+    const { errors } = validatePolyglotWideningGate({ id: '463', tags: ['polyglot', 'decision'], status: 'open' });
+    expect(errors).toEqual([]);
+  });
+
+  it('ERRORS on a polyglot-widening item with no evidence edge and no carve-out', () => {
+    const { errors } = validatePolyglotWideningGate({ id: '999', tags: [POLYGLOT_WIDENING_TAG], status: 'open' });
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/forward-target-start-gate/);
+    expect(errors[0]).toMatch(new RegExp(`#${bootstrap}`));
+  });
+
+  it('CLEARS when it blockedBy the bootstrap pilot-evidence item', () => {
+    const { errors } = validatePolyglotWideningGate({ id: '999', tags: [POLYGLOT_WIDENING_TAG], status: 'open', blockedBy: [bootstrap] });
+    expect(errors).toEqual([]);
+  });
+
+  it('CLEARS via a numeric (non-string) blockedBy edge to the pilot-evidence item', () => {
+    const { errors } = validatePolyglotWideningGate({ id: '999', tags: [POLYGLOT_WIDENING_TAG], status: 'open', blockedBy: [Number(bootstrap)] });
+    expect(errors).toEqual([]);
+  });
+
+  it('CLEARS via a `maintenance` carve-out tag (consumes existing forms, no new target)', () => {
+    const { errors } = validatePolyglotWideningGate({ id: '999', tags: [POLYGLOT_WIDENING_TAG, 'maintenance'], status: 'open' });
+    expect(errors).toEqual([]);
+  });
+
+  it('CLEARS via a `workbench-consume` carve-out tag (serves already-generated wrappers)', () => {
+    const { errors } = validatePolyglotWideningGate({ id: '999', tags: [POLYGLOT_WIDENING_TAG, 'workbench-consume'], status: 'open' });
+    expect(errors).toEqual([]);
+  });
+
+  it('EXEMPTS an item under its own ratified maturityTrigger (the #1735 / #forward-emit-dedicated-ir case)', () => {
+    const { errors } = validatePolyglotWideningGate({
+      id: '1735', tags: [POLYGLOT_WIDENING_TAG, 'polyglot'], status: 'parked',
+      maturityTrigger: 'adoptionSignal:idiomatic-vue-svelte-angular-emitters-shipped',
+    });
+    expect(errors).toEqual([]);
+  });
+
+  it('is PROSPECTIVE — a resolved widening item is skipped (never retracts a shipped increment)', () => {
+    const { errors } = validatePolyglotWideningGate({ id: '548', tags: [POLYGLOT_WIDENING_TAG], status: 'resolved' });
+    expect(errors).toEqual([]);
+  });
+
+  it('an unrelated blockedBy edge does NOT clear the gate (must cite the pilot-evidence item)', () => {
+    const { errors } = validatePolyglotWideningGate({ id: '999', tags: [POLYGLOT_WIDENING_TAG], status: 'open', blockedBy: ['1137'] });
+    expect(errors).toHaveLength(1);
+  });
+
+  it('real backlog stays clean — every live polyglot-widening item carries the edge or a carve-out', () => {
+    const loadBacklog = require(join(ROOT, 'src/_data/backlog.js'));
+    const backlog = typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog;
+    const violations = (Array.isArray(backlog) ? backlog : [])
+      .flatMap((item) => validatePolyglotWideningGate(item).errors);
+    expect(violations).toEqual([]);
   });
 });

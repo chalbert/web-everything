@@ -1,0 +1,26 @@
+{
+  "id": "a11y-ratchet-promotion-endgame",
+  "title": "Per-page a11y ratchet — promotion policy and the enforce-by-default endgame for the WE-docs/FUI dogfood gates",
+  "status": "open",
+  "summary": "Prep research for decision #867 (per-page rollout ratchet for the WE-docs FUI dogfood). The ratchet INFRASTRUCTURE is done (#763/#770/#793/#805 built + earned the enforce posture; #774/#846/#847 auto-derive scope-C routes from /sitemap.xml; FUI mirror #771/#849) — what was never designed is the ratchet POLICY: what promotion tracks, and what the endgame posture is. Grounding by live measurement (2026-07-02, npm run test:a11y over 39 scope-C routes): 10 enforced routes of which 5 FAIL — /, /adapters/, /blocks/, /intents/, /protocols/, all [serious] color-contrast (1-35 nodes) + one nested-interactive on / — and all five are exactly the index templates converted to SSR we-card tiles (#2019 + siblings), i.e. the dogfood conversions regressed the earned enforce posture unnoticed; 29 warn-only routes of which 26 are already green (promotable) and 3 red (/semantics/ button-name+select-name, /web-contexts/ document-title+html-has-lang, /rules/backlog-workflow/ scrollable-region-focusable); FUI's mirror seed is EMPTY (zero promoted routes). Prior art: (1) the warn->enforce per-route ratchet is standard practice (pa11y-ci threshold/--level flags; Lighthouse CI assertion budgets), but its documented failure mode is exactly what we measured — advisory output gets ignored (red warn-only routes discovered only by this prep's run); (2) the industry alternative is the violation-level BASELINE snapshot (trivago's baseline-driven axe reporting; microsoft/accessibility-insights-action baselining; cfn-lint baseline feature request) — fail on NEW violations anywhere while snapshotting existing debt — whose documented weakness is churn-sensitivity (accessibility-insights-action issue 949: node fingerprints break on unrelated DOM changes) and debt-rot (no forcing function ever drains the snapshot); (3) the ratchet endgame in strictness migrations (tsc strict flags, eslint suppression burn-down) is to INVERT at the drained milestone: default becomes fail-closed with an explicit exception list. Recommended defaults folded into #867: Fork 1 = decoupled promotion (any measured-green route enters ENFORCED_ROUTES now; holding promotion until FUI conversion leaves the riskiest edit unguarded — the 5-route regression is the smoking gun); Fork 2 = keep warn-entry while draining, then flip to enforce-by-default with an explicit WARN_ROUTES exception set at the drained-and-green milestone (supersedes #774's warn-only-entry rider from that milestone; preserves #774's explicit-set / never-un-earn invariant); violation-baseline rejected on merit (churn + rot + #774's route-granular explicit-set precedent). Policy applies per-repo, mirrored not shared (#774/#849 precedent). Full grounding in we:reports/2026-07-02-a11y-ratchet-promotion-endgame.md.",
+  "dateOpened": "2026-07-02",
+  "lastReviewed": "2026-07-02",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "accessibility",
+    "a11y",
+    "ci-gate",
+    "ratchet",
+    "baseline",
+    "axe-core",
+    "playwright",
+    "pa11y",
+    "dogfood",
+    "wcag",
+    "devtools",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}

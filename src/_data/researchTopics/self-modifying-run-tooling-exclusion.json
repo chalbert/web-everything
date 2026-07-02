@@ -1,0 +1,24 @@
+{
+  "id": "self-modifying-run-tooling-exclusion",
+  "title": "Self-modifying items vs the parallel run's own tooling — exclusion, detection seat, and the deferred-landing sunset",
+  "status": "open",
+  "summary": "Prep research for decision #2077 (standing rule for items whose touch-set includes the /workflow run's OWN executing tooling; report we:reports/2026-07-02-self-modifying-run-tooling-exclusion.md). IN-REPO GROUNDING: run batch-2026-07-01-1947-2071 TaskStop'd after #2073's lane wedged editing the live orchestrator file (sandbox-locked) — 5/17 landed, 12 reopened by hand (commit 34a26a39); #2071/#2072/#2073 all edit we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js, the file the Workflow tool executes by path (scriptPath, SKILL.md:238). The wedge is structural under the current substrate: the serial lane works items IN PLACE in the primary checkout (:793) and the integrator merges every lane ref into the primary mid-run (:820/:838), so both in-run routes write the executing file; the partition has no predicate for the class (conflicts() is pairwise-only, lane-partition.mjs:123-129; the RESERVED_MERGE_RISK denylist guards a DIFFERENT failure — clean-but-wrong merges between two items — so a lone self-modifying item runs concurrent unflagged). Recurrence is structural (20+ resolve commits on the orchestrator file; the #2086 canonical-module + inline-mirror pattern doubles the touch surface; live example #2149). PREMISE RESHAPED by later rulings: the #2138 rider (producers stop at lane-push, never touch main; human-drained queue lands) + #2123 (uniform lane clones) make the hazard SUBSTRATE-CONDITIONAL — structurally dissolved once the #2151/#2152/#2153 queue substrate is built. EXTERNAL PRIOR ART: GitHub Actions pins the run's workflow definition at run start (mid-run workflow-file pushes affect only future runs); Jenkins pins shared-library versions per run; bors-lineage merge bots run from a deployment outside the tree they land — uniform pattern: never mutate the executing pipeline definition mid-run; tooling changes ride the normal queue and take effect next run. SYNTHESIS — 2 forks prepared: Fork 1 detection seat (SURVIVES-WITH-AMENDMENT) = declared RUN_TOOLING pathspec in the canonical tested we:scripts/readiness/lane-partition.mjs + inline sandbox mirror, matched against the probe touch-set in Phase 1 BEFORE the Phase-2 pre-claim; skeptic amendments folded: a post-hoc seat over lane changedFiles at integrate time (probes under-report), a hard serial-lane prompt guard (the probe-failed-AND-undeclared residual still reaches the in-place serial lane via mustSerialize), and a COVERAGE-PARITY unit test that derives the workflow's shell-out script set from its source and asserts RUN_TOOLING covers it (the declared list is itself fails-open on drift and the post-hoc seat shares the pathspec — the test converts fails-open-at-runtime into fails-closed-at-test-time, honoring the merge-risk statute's derived-by-category discipline); frontmatter flag REJECTED (fails open on omission), loader/engine batchable:false REJECTED (seat mismatch — the same pack feeds serial /batch where the item is safe). Fork 2 routing (SURVIVES-WITH-AMENDMENT) = drop from the /workflow run at probe time (nothing claimed yet) and work it SOLO or as the LAST item of a serial /batch TODAY (mid-batch edits to shelled run-tooling create the same mixed-version condition — skeptic-surfaced internal tension, fixed by last-position/solo), with a concrete sunset to concurrent-lane-plus-drain-landing once the #2153 drain is live AND the in-run integrator/serial lane retire onto the queue (substrate-conditionality, not timing preference; (c) recast as an ENTAILMENT of the #2138 rider, cited not re-ruled; codifies as a rider under #pr-flow-rollout-mechanism, never a new anchor); the in-run serial lane is the REJECTED observed-broken branch; drain-era residual recorded for #2153: the drain is itself a live run shelling out to RUN_TOOLING (push-if-green.mjs, scripts/readiness/*), so it lands RUN_TOOLING-touching items LAST (or a dedicated final pass) and never lands one while a producing /workflow run is live. DISSOLVED: the card's 'move tooling to an editable locus' — the movable logic already moved (#2086); the executing file is executed by path, so relocation doesn't decouple; snapshot-execute (the GitHub-Actions pin) is the named fallback only if the #2138 substrate slips indefinitely. Layer: agent-workflow / session-tooling — nothing crosses the WE<->FUI standard boundary.",
+  "dateOpened": "2026-07-02",
+  "lastReviewed": "2026-07-02",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "parallel-batch",
+    "orchestrator",
+    "workflow",
+    "self-modification",
+    "run-tooling",
+    "lane-partition",
+    "merge-queue",
+    "session-tooling",
+    "agent-orchestration",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": null
+}
