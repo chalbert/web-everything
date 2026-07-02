@@ -1,8 +1,9 @@
 ---
 kind: story
 size: 5
-status: open
+status: active
 dateOpened: "2026-06-28"
+dateStarted: "2026-07-02"
 relatedReport: reports/2026-07-02-parked-low-priority-review.md
 tags: []
 ---

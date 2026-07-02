@@ -2,7 +2,7 @@
 kind: story
 size: 3
 parent: "1994"
-status: open
+status: active
 blockedBy: []
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-02"

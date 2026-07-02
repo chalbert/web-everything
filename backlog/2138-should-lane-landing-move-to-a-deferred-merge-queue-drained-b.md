@@ -1,6 +1,6 @@
 ---
 kind: decision
-status: open
+status: active
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-02"
 preparedDate: "2026-07-02"

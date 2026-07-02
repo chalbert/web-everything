@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 3
-status: open
+status: active
 locus: frontierui
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-02"
 tags: [dev-ports, lanes, infra]
 ---
 

@@ -35,3 +35,14 @@ consumer to a **pinned published** dependency. Verified the publish path is not 
 agent-doable follow-up (swap FUI's alias/path-map for a pinned `dependencies` entry). No agent-doable slice
 remains until then; bumping the version locally without a publish would only arm the workflow and mislead
 the tree (a `0.x` in-tree with nothing on the registry). Left at `0.0.0` deliberately.
+
+## Publish mode (decided 2026-07-02): PUBLIC + provenance
+
+`@webeverything/contracts` publishes **public** (`--access public --provenance`), even though FUI impl
+(`@frontierui/*`) and Plateau products (`@plateaujs/*`) stay private until go-public. Rationale: this is a
+**type-only** contract distribution — no logic, no secrets — so a public type surface is fine, and public
+mode erases the private-package friction: provenance works (it needs a public package + the Actions
+`id-token` permission, both already wired — no OIDC trusted-publisher registration needed, the `NPM_TOKEN`
+auth suffices), publishing is free for this scope, and **consumers need no read token** — FUI/plateau/CI just
+`npm install`. Public/internal naming boundary and private-until-go for the rest is [[2155]] (Plateau scope
+naming). Dropping the long-lived token for full OIDC trusted publishing is optional later hardening (#2154).

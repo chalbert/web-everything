@@ -2,8 +2,9 @@
 kind: story
 size: 3
 parent: "2021"
-status: open
+status: active
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-02"
 tags: []
 ---
 
