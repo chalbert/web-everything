@@ -16,3 +16,14 @@ test-results/
 # Build sourcemaps (emitted alongside compiled output, never committed)
 *.js.map
 *.d.ts.map
+
+# Publish-built compiled output emitted next to sources in package planes (#2085)
+# — these packages ship .ts sources directly (contracts/package.json files: ['*.ts'])
+contracts/**/*.js
+contracts/**/*.d.ts
+capability-manifest/**/*.js
+capability-manifest/**/*.d.ts
+error-summary/**/*.js
+error-summary/**/*.d.ts
+commitment-policy/**/*.js
+commitment-policy/**/*.d.ts
