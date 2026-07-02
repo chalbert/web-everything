@@ -1,0 +1,201 @@
+#!/usr/bin/env node
+/**
+ * pr-land.mjs — land a lane ref onto `main` via a SELF-APPROVED pull request (#2138 Fork 5, #2153).
+ *
+ * WHY: #2138 (ruled) moves lane landing onto PRs as the review/CI surface — each ready lane opens a
+ * self-approved PR (`gh pr create`, 0 required reviewers + a required CI check, #2151/#2152) and the
+ * custom drain merges it via `gh pr merge` in impl-first/WE-last couple-order. GitHub's NATIVE merge
+ * queue stays OFF (it is branch-level and would reorder couples). This is the transport substrate the
+ * drain command (#2162) calls; pure local `git merge` (push-if-green) is the retained fallback.
+ *
+ * This is the PR analogue of `push-if-green.mjs`: same flag / `emit` / exit-code conventions. Where
+ * push-if-green ff-pushes an already-merged `main`, pr-land merges a `lane/*` ref INTO `main` through a
+ * PR, so the merge rides GitHub's required-check gate (#2151 runs the SAME `check:standards`+suite on the
+ * PR — one gate environment). Proven live by PR #4 (head `lane/fix-2165-ci-fui-checkout`, merged green).
+ *
+ * RULES (#2138 Fork 5):
+ *  - Self-approved: `gh pr create` with NO reviewer; branch protection (#2152) requires 0 approvals + the
+ *    `test` check, so the author merges their own PR once CI is green. Never requests a human review.
+ *  - The DRAIN owns ordering, not GitHub: this merges ONE PR when called (`gh pr merge`, not `--auto` on a
+ *    native queue). The caller (#2162 drain) sequences impl-first/WE-last across a couple.
+ *  - Head is a `lane/*` ref (the #1934 guard carve-out) — never a local branch (guarded) and never a
+ *    force-push. The ref is pushed to origin, the PR opened against `--base` (default `main`).
+ *  - Wait for the required check before merging (default): poll `gh pr checks` until it passes; a failed
+ *    check ABORTS the merge (never merge a red PR). `--no-wait` leaves it for a later drain pass.
+ *  - Fallback: `--fallback-git` degrades to a local `git merge --no-ff` + push when `gh` is unavailable or
+ *    the PR is unmergeable-and-not-recoverable — the coherent retained fallback (#2138 Fork 5 (a)).
+ *  - Deletes the `lane/*` ref after a clean merge (`--delete-branch`), mirroring the integrator.
+ *
+ * Usage:
+ *   node scripts/pr-land.mjs --ref=lane/2153-pr-substrate                 # publish HEAD → lane ref, open self-approved PR, wait for `test`, merge, delete ref
+ *   node scripts/pr-land.mjs --ref=lane/2153-… --sha=<commit>            # publish an explicit commit (default: HEAD) — no local branch is created (guarded)
+ *   node scripts/pr-land.mjs --ref=lane/2153-… --base=main --method=merge # method ∈ merge|squash|rebase (default merge; the drain wants --no-ff history)
+ *   node scripts/pr-land.mjs --ref=lane/… --no-wait                       # open the PR but don't merge (a later drain pass merges)
+ *   node scripts/pr-land.mjs --ref=lane/… --dry-run                       # print the exact gh command sequence, execute nothing
+ *   node scripts/pr-land.mjs --ref=lane/… --fallback-git                  # on gh failure / unmergeable, local git-merge + push instead
+ *   node scripts/pr-land.mjs --ref=lane/… --json                          # machine-readable result
+ *
+ * Exit codes: 0 = merged (or opened with --no-wait / dry-run OK); 2 = required check RED (nothing merged);
+ * 3 = unmergeable / gh error / push failed (nothing merged; recoverable — rebase the ref and re-run, or
+ * pass --fallback-git). A non-zero exit means `main` was left UNTOUCHED.
+ */
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
+import { homedir } from 'node:os';
+
+// ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
+const argv = process.argv.slice(2);
+const flags = {};
+for (const a of argv) {
+  const m = a.match(/^--([^=]+)(?:=(.*))?$/);
+  if (m) flags[m[1]] = m[2] === undefined ? true : m[2];
+}
+const expandHome = (p) => (p && p.startsWith('~') ? p.replace(/^~/, homedir()) : p);
+
+const REPO = resolve(expandHome(flags.repo) || process.cwd());
+const REF = typeof flags.ref === 'string' ? flags.ref : null;
+const SRC = typeof flags.sha === 'string' ? flags.sha : 'HEAD'; // source commit to publish to the lane ref (the lane clone's HEAD)
+const BASE = typeof flags.base === 'string' ? flags.base : 'main';
+const REMOTE = typeof flags.remote === 'string' ? flags.remote : 'origin';
+const METHOD = typeof flags.method === 'string' ? flags.method : 'merge';
+const WAIT = !flags['no-wait'];
+const DRY_RUN = !!flags['dry-run'];
+const FALLBACK_GIT = !!flags['fallback-git'];
+const AS_JSON = !!flags.json;
+const TITLE = typeof flags.title === 'string' ? flags.title : null;
+const BODY = typeof flags.body === 'string' ? flags.body : null;
+
+// ── PURE helpers (unit-tested in scripts/__tests__/pr-land.test.mjs) ──────────────────────────────────
+
+/** The `gh pr merge` method flag for a merge method (default merge = --no-ff history the drain wants). */
+export function mergeMethodFlag(method) {
+  switch (method) {
+    case 'squash': return '--squash';
+    case 'rebase': return '--rebase';
+    case 'merge':
+    default: return '--merge';
+  }
+}
+
+/** Build the `gh pr create` args for a self-approved PR (NO reviewer). Uses --fill unless a title/body
+ *  is supplied. Pure — returns the argv array for `gh`. */
+export function buildCreateArgs({ base, head, title, body }) {
+  const args = ['pr', 'create', '--base', base, '--head', head];
+  if (title) { args.push('--title', title); args.push('--body', body ?? ''); }
+  else args.push('--fill');
+  return args;
+}
+
+/** Build the `gh pr merge` args — the drain merges ONE PR (not --auto on a native queue), deleting the
+ *  lane ref after. Pure. */
+export function buildMergeArgs({ pr, method }) {
+  return ['pr', 'merge', String(pr), mergeMethodFlag(method), '--delete-branch'];
+}
+
+/**
+ * Classify `gh pr checks --json state,bucket` output (array of check rows) into a merge decision. Pure.
+ *  - `pending` — at least one check still running/queued → wait.
+ *  - `failed`  — at least one check failed/cancelled/timed-out → ABORT (never merge a red PR).
+ *  - `passed`  — every check passed/skipped and none pending → mergeable.
+ * Buckets follow `gh`: pass | fail | pending | skipping | cancel.
+ */
+export function classifyChecks(rows) {
+  const checks = Array.isArray(rows) ? rows : [];
+  if (checks.length === 0) return { status: 'passed', reason: 'no required checks' };
+  const bucket = (c) => c.bucket || c.state || '';
+  const isFail = (b) => ['fail', 'cancel', 'timed_out', 'timeout'].includes(String(b).toLowerCase());
+  const isPending = (b) => ['pending', 'queued', 'in_progress', 'waiting'].includes(String(b).toLowerCase());
+  if (checks.some((c) => isFail(bucket(c)))) return { status: 'failed', reason: 'a required check failed' };
+  if (checks.some((c) => isPending(bucket(c)))) return { status: 'pending', reason: 'a required check is still running' };
+  return { status: 'passed', reason: 'all required checks passed' };
+}
+
+// Allow importing the pure helpers without running the CLI (the test file imports this module).
+const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
+if (IS_CLI) runCli();
+
+function runCli() {
+  const gitC = (args) => execFileSync('git', args, { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const tryGit = (args) => { try { return gitC(args); } catch { return null; } };
+  const ghC = (args) => execFileSync('gh', args, { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+
+  function emit(result, exitCode) {
+    if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
+    else {
+      const tag = result.merged ? '✓ merged' : result.reason === 'dry-run' ? '· dry-run' : result.reason === 'opened' ? '· opened (no-wait)' : '✗ not merged';
+      process.stderr.write(`pr-land [${result.repo}] ${tag}: ${result.detail}\n`);
+    }
+    process.exit(exitCode);
+  }
+
+  if (!REF) emit({ repo: REPO, merged: false, reason: 'no-ref', detail: 'pass --ref=lane/<name> (the head ref to land onto ' + BASE + ')' }, 3);
+  if (!/^lane\//.test(REF)) emit({ repo: REPO, merged: false, reason: 'bad-ref', detail: `--ref="${REF}" must be a lane/* ref (the #1934 guard carve-out) — never a local branch` }, 3);
+
+  // 1. Resolve the SOURCE commit to publish (the lane clone's HEAD, or an explicit --sha). No local
+  //    branch is created (that's guarded) — the lane model pushes `<source>:lane/<n>` straight to origin.
+  const refSha = tryGit(['rev-parse', SRC]);
+  if (!refSha) emit({ repo: REPO, merged: false, reason: 'no-such-src', detail: `source commit "${SRC}" not found — pass --sha=<commit> or run from a checkout whose HEAD carries the lane work` }, 3);
+
+  const createArgs = buildCreateArgs({ base: BASE, head: REF, title: TITLE, body: BODY });
+  const mergeArgsPreview = buildMergeArgs({ pr: '<pr>', method: METHOD });
+
+  if (DRY_RUN) {
+    emit({
+      repo: REPO, merged: false, reason: 'dry-run', ref: REF, base: BASE, method: METHOD,
+      plan: [
+        `git push ${REMOTE} ${SRC}:refs/heads/${REF}   # publish the lane clone's ${SRC} (${refSha.slice(0, 8)}) to the lane ref`,
+        `gh ${createArgs.join(' ')}`,
+        WAIT ? 'poll: gh pr checks <pr> --json state,bucket  (wait until passed; abort on fail)' : '(--no-wait: skip check-wait, leave for a later drain pass)',
+        WAIT ? `gh ${mergeArgsPreview.join(' ')}` : null,
+        FALLBACK_GIT ? `fallback on failure: git merge --no-ff ${REMOTE}/${REF} + push ${REMOTE} ${BASE}` : null,
+      ].filter(Boolean),
+      detail: `would land ${SRC} (${refSha.slice(0, 8)}) onto ${BASE} via a self-approved PR from ${REF}`,
+    }, 0);
+  }
+
+  // 2. Publish the source commit to the lane ref on origin (guard-safe: lane/*). Never force, no local branch.
+  try { gitC(['push', REMOTE, `${SRC}:refs/heads/${REF}`]); }
+  catch (e) { emit({ repo: REPO, merged: false, reason: 'push-failed', detail: `git push ${REMOTE} ${SRC}:refs/heads/${REF} failed (${String(e.message || e).split('\n')[0]})` }, 3); }
+
+  // 3. Find an existing open PR for this head, else create a self-approved one.
+  let prNum = null;
+  try { prNum = JSON.parse(ghC(['pr', 'list', '--head', REF, '--state', 'open', '--json', 'number']))?.[0]?.number ?? null; } catch { /* gh may be absent */ }
+  if (prNum == null) {
+    try { const out = ghC(createArgs); prNum = (out.match(/\/pull\/(\d+)/) || [])[1] ?? null; }
+    catch (e) { return ghFailed(`gh pr create failed (${String(e.message || e).split('\n')[0]})`); }
+  }
+  if (prNum == null) return ghFailed('could not determine the PR number after create');
+
+  if (!WAIT) emit({ repo: REPO, merged: false, reason: 'opened', pr: Number(prNum), ref: REF, detail: `opened self-approved PR #${prNum} for ${REF}; --no-wait, a later drain pass merges it` }, 0);
+
+  // 4. Wait for the required check(s), then merge.
+  const deadlineMs = Date.now() + (Number(flags['timeout-min'] || 15) * 60_000);
+  for (;;) {
+    let rows = [];
+    try { rows = JSON.parse(ghC(['pr', 'checks', String(prNum), '--json', 'state,bucket'])); } catch { rows = []; }
+    const verdict = classifyChecks(rows);
+    if (verdict.status === 'failed') emit({ repo: REPO, merged: false, reason: 'check-red', pr: Number(prNum), detail: `PR #${prNum} required check RED — ${verdict.reason}; ${BASE} left untouched (rebase/fix + re-run)` }, 2);
+    if (verdict.status === 'passed') break;
+    if (Date.now() > deadlineMs) emit({ repo: REPO, merged: false, reason: 'check-timeout', pr: Number(prNum), detail: `PR #${prNum} checks still pending past timeout; leaving for a later drain pass` }, 3);
+    execFileSync('sleep', ['20']);
+  }
+
+  try { ghC(buildMergeArgs({ pr: prNum, method: METHOD })); }
+  catch (e) { return ghFailed(`gh pr merge #${prNum} failed (${String(e.message || e).split('\n')[0]}) — likely not-mergeable (branch behind ${BASE}); rebase the ref + re-run`); }
+
+  emit({ repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD, detail: `merged PR #${prNum} (${REF}) into ${BASE} via self-approved PR (${METHOD}), deleted the ref` }, 0);
+
+  // Fallback path (#2138 Fork 5 (a)): local git merge + push when gh is the problem.
+  function ghFailed(detail) {
+    if (!FALLBACK_GIT) emit({ repo: REPO, merged: false, reason: 'gh-error', detail: `${detail} — pass --fallback-git for the local git-merge fallback` }, 3);
+    try {
+      tryGit(['fetch', REMOTE, `${REF}`, '--quiet']);
+      gitC(['checkout', BASE]);
+      gitC(['merge', '--no-ff', `${REMOTE}/${REF}`, '-m', `merge ${REF} (pr-land git fallback)`]);
+      gitC(['push', REMOTE, `${BASE}:${BASE}`]);
+      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback` }, 0);
+    } catch (e) {
+      emit({ repo: REPO, merged: false, reason: 'fallback-failed', detail: `${detail}; git-merge fallback ALSO failed (${String(e.message || e).split('\n')[0]}) — ${BASE} left untouched` }, 3);
+    }
+  }
+}
