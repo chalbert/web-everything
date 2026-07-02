@@ -3,7 +3,7 @@ const syntaxHighlight = require("@11ty/eleventy-plugin-syntaxhighlight");
 const { deriveResearchFreshness } = require("./scripts/lib/research-freshness.cjs");
 const { buildTechnicalConfiguratorUrl } = require("./scripts/lib/technical-configurator-url.cjs");
 const { spliceDataTables } = require("./scripts/lib/data-table-build-hook.cjs");
-const { renderIntentGrid, renderProjectGrid, renderStageGrid, renderBacklogGrid } = require("./scripts/lib/component-render-build-hook.cjs");
+const { renderIntentGrid, renderProjectGrid, renderStageGrid, renderBacklogGrid, spliceComponents } = require("./scripts/lib/component-render-build-hook.cjs");
 
 module.exports = function (eleventyConfig) {
   eleventyConfig.addPlugin(syntaxHighlight);
@@ -275,6 +275,21 @@ ${fuiHostScript}`;
   eleventyConfig.addTransform("weDataTableSSR", function (content) {
     if (!/\.html?$/.test(this.page && this.page.outputPath || "")) return content;
     return spliceDataTables(content, this.data || {}, __dirname);
+  });
+
+  // Generic template-facing card/badge SSR primitive (#2098, keystone #2016). The `weCard`/`weBadge`
+  // macros (src/_includes/we-component.njk) emit inert `<we-card|we-badge data-we-spec='{…}'>`
+  // placeholders for a ONE-OFF inline card/badge (the grid shortcodes above cover whole collections). This
+  // per-page transform collects EVERY placeholder on the page and batches them through the pinned FUI CLI
+  // in ONE subprocess call (`spliceComponents` → `renderComponents`), splicing each returned SSR fragment
+  // in place — one subprocess per PAGE, never per card (a naive per-card shortcode would spawn ~800 per
+  // build). Same subprocess boundary + pinned-artifact/missing-artifact hard error as the data-table hook
+  // above; the block factories live in FUI (a WE→FUI import is a banned backward DAG edge). The client
+  // `<we-card>`/`<we-badge>` CE upgrade (src/_layouts/base.njk) is a pure enhancement over the JS-off-
+  // correct SSR baseline. A page with no `data-we-spec` placeholder pays a single substring check.
+  eleventyConfig.addTransform("weComponentSSR", function (content) {
+    if (!/\.html?$/.test(this.page && this.page.outputPath || "")) return content;
+    return spliceComponents(content, __dirname);
   });
 
   // SSR component-render (#2016, keystone of the #777 WE-docs dogfood epic) — the general build-time
