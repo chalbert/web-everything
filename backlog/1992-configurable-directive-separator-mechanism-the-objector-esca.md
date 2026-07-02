@@ -1,8 +1,6 @@
 ---
-kind: story
-size: 5
+kind: decision
 status: open
-blockedBy: ["1987", "1991", "2048"]
 dateOpened: "2026-06-30"
 dateStarted: "2026-07-01"
 tags: []

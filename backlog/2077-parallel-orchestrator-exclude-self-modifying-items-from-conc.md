@@ -1,6 +1,5 @@
 ---
-kind: story
-size: 5
+kind: decision
 status: open
 dateOpened: "2026-07-01"
 tags: []
