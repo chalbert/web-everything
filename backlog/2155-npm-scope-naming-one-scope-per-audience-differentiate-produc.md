@@ -17,7 +17,7 @@ same publish policy → same scope, different package name.
 
 ## Settled inputs (not forks)
 
-- **`@webeverything`** → WE standard packages; `@webeverything/contracts` is **public + provenance** ([[907]]).
+- **`@webeverything`** → WE standard packages; `@webeverything/contracts` is **public + provenance** (#907).
 - **`@frontier-ui` vs `@frontierui`** → self-collision; code imports `@frontierui/*` (no hyphen). Select
   `@frontierui`, publish nothing to `@frontier-ui` (defensive hold only).
 
