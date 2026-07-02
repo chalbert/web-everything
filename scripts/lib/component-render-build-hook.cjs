@@ -245,10 +245,17 @@ function renderProjectGrid(projects, { repoRoot, hrefFor, gridClass = 'project-g
   }));
   const badges = renderComponents(badgeSpecs, repoRoot, runner);
 
-  // Pass 2 — batch every tile's card shell, fed the pass-1 badge as the header actions. The body is an
-  // escape-safe PARTS list: the icon row + status-meter row are TRUSTED HTML (our own template data), the
-  // description is likewise trusted HTML (it carries authored `<strong>`/`<code>`/`<a>` markup, spliced by
-  // `| safe` in the prior template). None of it is user input.
+  // Pass 2 — batch every tile's card shell, fed the pass-1 badge as the header actions. The icon row +
+  // status-meter row are our own generated markup (safe through the harness `html:` innerHTML round-trip).
+  //
+  // The DESCRIPTION is SENTINEL-spliced, NOT a `html:` body part (the same fix renderBacklogGrid uses, #2168):
+  // an authored description mixes render-me markup (`<strong>`/`<code>`/`<a>`) with PRE-ESCAPED code examples
+  // (e.g. `&lt;template route="…"&gt;`). Feeding it through the harness's `html:` part sets it via `innerHTML=`,
+  // which happy-dom DECODES, and the `.outerHTML` serializer re-emits a raw `<template>` — a live tag that
+  // absorbs the rest of the page into an inert fragment (home rendered only 1 of its 3 grids). So the card
+  // shell gets a unique sentinel, and the trusted, already-escaped description is string-spliced in verbatim
+  // (bypassing the innerHTML round-trip), exactly as the `| safe` template output did pre-#2019.
+  const descSentinel = (i) => ` PROJECT_DESC_${i} `;
   const cardSpecs = list.map((project, i) => {
     const badgeHtml = badges.get(`project-${i}-badge`) || '';
     const meterHtml =
@@ -257,7 +264,7 @@ function renderProjectGrid(projects, { repoRoot, hrefFor, gridClass = 'project-g
       + `<div class="meter-track"><div class="meter-fill"></div></div></div>`;
     const bodyParts = [
       { tag: 'div', className: 'project-icon', html: projectIconHtml(project) },
-      { tag: 'p', className: 'project-desc', html: String(project.description || '') },
+      { tag: 'p', className: 'project-desc', html: descSentinel(i) },
       { tag: 'div', className: 'project-status-row', html: meterHtml },
     ];
     return {
@@ -281,7 +288,9 @@ function renderProjectGrid(projects, { repoRoot, hrefFor, gridClass = 'project-g
   // ~24 empty ghosts — invisible in source, only in the rendered DOM). Overlay-link is the valid, backlog-grid
   // pattern; `.project-card:has(> .fui-card)` still matches (the fui-card stays a direct child).
   const wrappers = list.map((project, i) => {
-    const cardHtml = cards.get(`project-${i}-card`) || '';
+    // Splice the verbatim (already-escaped) description over its sentinel — never through the harness's
+    // innerHTML round-trip, which would decode pre-escaped `&lt;template&gt;`/`&lt;script&gt;` into live tags (#2168).
+    const cardHtml = (cards.get(`project-${i}-card`) || '').replace(descSentinel(i), String(project.description || ''));
     const rel = external ? ' target="_blank" rel="noopener"' : '';
     return (
       `<div class="project-card">`
