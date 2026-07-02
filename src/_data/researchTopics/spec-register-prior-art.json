@@ -1,0 +1,23 @@
+{
+  "id": "spec-register-prior-art",
+  "title": "Spec register prior art — home, house style, and scope policy for normative WE specs",
+  "status": "open",
+  "summary": "Prep research for decision #2096 (gating epic #2079: author W3C-spec-shaped normative standards for every WE standard). Surveys how real spec ecosystems publish normative documents — W3C/WHATWG (Bikeshed/ReSpec tool-enforced boilerplate, named conformance classes per SpecGL, RFC 2119/8174 keywords, WebIDL, typed DOMException/TypeError error model per the Infra conventions), TC39 (ecmarkup; spec text as a stage-entry requirement: initial at stage 2, complete at 2.7), IETF (fixed RFC skeleton; Obsoletes/Updates chains), and design-system component specs (WAI-ARIA APG, Open UI, per-component spec files) — and grounds the fork against WE's four existing prose surfaces: block description partials (83), intents' inline JSON description fields (statute-barred from carrying conformance content, platform-decisions #intents-ux-only), plug description partials (59 — the '10-line stub' premise was wrong), and protocol bodies inside owning project pages. Cross-ecosystem laws extracted: explainer and spec are always separate artifacts; the skeleton/boilerplate is enforced by construction, not convention; every requirement is addressed to a named conformance class; spec text is owed at a maturity stage, never at concept stage; the platform's error model is typed-and-named — exactly the #2074 conformance-table shape. Census for the scope ladder: 279 standards = 81 blocks / 98 intents / 59 plugs / 41 protocols; active = 76 (39/6/31/0), so tying the spec obligation to the active tier yields a 76-spec work-list and protocols owe zero until one matures. Synthesis → forks: home = a new one-file-per-standard spec collection (category-qualified ids — audit-trail collides across intents/protocols) gate-required per declared in-scope entries; register = house-adapted W3C skeleton with RFC 8174 boilerplate + implementation/document conformance classes + the #2074 typed-error spine + TypeScript (WebIDL-translatable) notation; scope = spec obligation rides the existing lifecycle ladder with concept exempt. Pilot CustomNodeRegistry (#2097) confirmed by enumeration — the only standard with a ratified conformance spine (needs its plug registry entry minted).",
+  "dateOpened": "2026-07-02",
+  "lastReviewed": "2026-07-02",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "spec-register",
+    "normative-specs",
+    "rfc-2119",
+    "conformance-classes",
+    "error-model",
+    "webidl",
+    "bikeshed",
+    "house-style",
+    "maturity-ladder",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

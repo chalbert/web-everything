@@ -1,0 +1,89 @@
+{% raw %}
+<h2>The question</h2>
+<p>Epic <a href="/backlog/2079-author-w3c-spec-shaped-normative-standards-for-every-we-stan/">#2079</a> wants a
+W3C-spec-shaped normative write-up — MUST/MUST-NOT conformance language, conformance classes, a typed error model,
+interface definitions — for every in-scope WE standard. No such surface exists today: zero RFC-2119 language in any
+of the 279 registry entries. Decision <a href="/backlog/2096-spec-register-home-skeleton-house-style-and-scope-policy-for/">#2096</a>
+must settle three things before any authoring wave runs: <strong>where the normative document lives</strong> (the home + form),
+<strong>what register it is written in</strong> (skeleton + house style), and <strong>which standards owe one, when</strong>
+(scope + maturity policy). This topic is the prior-art survey those forks stand on.</p>
+
+<h2>How the real spec ecosystems do it</h2>
+<table>
+  <tr><th>Ecosystem</th><th>Home / artifact</th><th>House style &amp; tooling</th><th>Maturity coupling</th></tr>
+  <tr>
+    <td>W3C / WICG</td>
+    <td>One spec document per standard, distinct from its <em>explainer</em></td>
+    <td>Bikeshed / ReSpec generate the conformance boilerplate, style RFC-2119 keywords, validate inline WebIDL, autolink <code>&lt;dfn&gt;</code> terms cross-spec; conformance classes named per SpecGL (user agent · author · authoring tool)</td>
+    <td>ED → WD → CR → PR → REC; CR requires complete normative text + implementation experience</td>
+  </tr>
+  <tr>
+    <td>WHATWG</td>
+    <td>One evergreen <em>living standard</em> per domain, edited in place</td>
+    <td>Numbered algorithms per the Infra standard's conventions; typed error model ("throw a <code>TypeError</code>", "throw a <code>NotFoundError</code> <code>DOMException</code>"); WebIDL blocks</td>
+    <td>Living document — no versioned snapshots; history is the commit trail</td>
+  </tr>
+  <tr>
+    <td>TC39</td>
+    <td>Per-proposal repo: README explainer + an ecmarkup normative document, merged into ECMA-262 at stage 4</td>
+    <td>ecmarkup (<code>emu-clause</code>/<code>emu-alg</code>/<code>emu-grammar</code>) — structured algorithm steps, its own notation (not WebIDL)</td>
+    <td>Spec text is a <em>stage-entry requirement</em>: initial text at stage 2, complete at 2.7, tests + implementations before 4</td>
+  </tr>
+  <tr>
+    <td>IETF</td>
+    <td>One RFC per document, immutable once published</td>
+    <td>xml2rfc / kramdown-rfc; fixed skeleton (Abstract · Requirements Language citing BCP&nbsp;14 = RFC&nbsp;2119 + 8174 · body · Security Considerations · IANA Considerations)</td>
+    <td>Versioning via Obsoletes/Updates chains — the model WE's research-topic supersession already copies</td>
+  </tr>
+  <tr>
+    <td>Design systems / component ecosystems</td>
+    <td>WAI-ARIA APG patterns (guidance, distinct from the normative ARIA spec); Open UI per-component research → proposal (anatomy · states · behaviors · keyboard); per-component spec markdown files in library repos</td>
+    <td>Prose + tables + TypeScript-ish signatures; <strong>no</strong> RFC-2119 register, <strong>no</strong> implementor error model</td>
+    <td>None — guidelines track releases, not conformance maturity</td>
+  </tr>
+</table>
+
+<h2>Cross-ecosystem laws (what the survey forces)</h2>
+<ul>
+  <li><strong>Explainer ≠ spec.</strong> Every mature ecosystem publishes the normative document as its own artifact with its own URL — never a section grafted into the introductory prose. WE's existing block/plug descriptions and intent <code>description</code> fields are explainers in this taxonomy.</li>
+  <li><strong>The register is enforced by construction.</strong> Bikeshed/ReSpec/ecmarkup/xml2rfc make the skeleton and boilerplate a template the author cannot vary. The WE analogue is a fixed spec-skeleton partial + a gate, not a style guide agents are asked to remember.</li>
+  <li><strong>Every requirement is addressed to a named conformance class.</strong> The WE mapping falls straight out of the constellation: <em>implementation</em> (FUI or any vendor building the contract) vs <em>document/author</em> (a page using the standard) — the WE↔FUI boundary made into spec vocabulary, which keeps every MUST on the observable side of the boundary.</li>
+  <li><strong>RFC 8174 over bare 2119</strong>: keywords are normative only in ALL CAPS — essential for prose-heavy pages that use lowercase "must" informally.</li>
+  <li><strong>The platform's error model is typed-and-named.</strong> "These cases are valid; these throw this named error" is exactly the ratified #2074 conformance-table shape — WE already has the house error-model template.</li>
+  <li><strong>Spec text is owed at a maturity stage, never at concept stage.</strong> TC39 and W3C both make normative text an entry requirement of a stage; nobody writes MUST prose for a stage-0 sketch. Direct precedent for exempting <code>concept</code> registry entries.</li>
+  <li><strong>A typed-error conformance register would genuinely differentiate WE</strong> — design systems and component libraries publish guidelines and API references, not implementor-conformance specs; only ARIA/Open UI come close and neither ships an error model.</li>
+</ul>
+
+<h2>In-repo ground truth — the four surfaces today</h2>
+<table>
+  <tr><th>Category</th><th>Entries</th><th>Prose surface today</th><th>Fit as a normative home</th></tr>
+  <tr><td>Blocks</td><td>81 (39 active / 30 draft / 12 concept)</td><td><code>block-descriptions/&lt;id&gt;.njk</code> partials (83) — real explainer prose + contract tables</td><td>Could host a section, but heterogeneous with the other three</td></tr>
+  <tr><td>Intents</td><td>98 (6 active / 57 draft / 35 concept)</td><td>Inline HTML <code>description</code> field in the JSON entry — JSON-only by rule</td><td><strong>Statute-barred</strong>: <code>#intents-ux-only</code> forbids conformance/technical content in the intent description</td></tr>
+  <tr><td>Plugs</td><td>59 (31 active / 26 concept / 2 experimental)</td><td>Registry entry <em>plus</em> a gate-required <code>plug-descriptions/&lt;id&gt;.njk</code> (59 exist — the "bare 10-line stub" premise was wrong); most already carry a TypeScript interface block</td><td>Could host a section</td></tr>
+  <tr><td>Protocols</td><td>41 (0 active / 14 draft / 27 concept)</td><td>No partial dir — normative body lives in the owning project page under a stable <code>protocol-&lt;id&gt;</code> anchor</td><td>Scattered across project pages; no per-standard document</td></tr>
+</table>
+<p>Two mechanical facts shape the home fork: <code>audit-trail</code> exists as both a block and a protocol (and
+<code>action</code>-family ids recur across categories), so a flat per-standard keyspace collides —
+any new collection must be <strong>category-qualified</strong>. And the wiring pattern for a gated one-file-per-entry
+collection already exists twice: the research topics (one JSON per topic + one description partial per topic +
+a size-1 pagination template, with the description partial required by <code>check:standards</code>) and the
+block/plug description gates. A new top-level route additionally needs its segment added to the Vite dev-proxy
+allowlist (gate-checked).</p>
+
+<h2>Statutes already on this turf</h2>
+<ul>
+  <li><strong>Constellation placement / zero-impl</strong> — WE holds definitions only; a normative spec is pure definition, so the register is WE-side by construction and its conformance classes bind implementations elsewhere.</li>
+  <li><strong>One authoring source-of-truth; serializable forms are derived projections</strong> — forbids a second normative home per standard; settles "structured JSON conformance field" as a possible <em>later derived projection</em> of the prose home, never a rival authoring home.</li>
+  <li><strong>Intents are UX-only</strong> — the intent's inline description cannot carry the normative register; an intent's spec must live elsewhere and confine itself to the UX contract (dimensions, values, observable states), with block compliance judged per <em>intent-conformance-is-block-compliance</em>.</li>
+  <li><strong>Mandate the surface contract, not the computation</strong> — a WE standard normatively pins the observable surface contract, never the computation behind it; the register's requirements section must encode this bound (no Infra-style internal processing models).</li>
+  <li><strong>Non-verdict conformance compares by a closed matcher vocabulary</strong> — the conformance-vector suite is already the machine-readable conformance surface; the spec's prose error table cross-references the vectors, never duplicates them.</li>
+  <li><strong>Refine in place</strong> (design-first) + the research-topic supersession model — together they already answer "living spec vs dated snapshots": specs are living; the dated audit trail lives in reports/research.</li>
+</ul>
+
+<h2>Synthesis → the #2096 forks</h2>
+<ul>
+  <li><strong>Fork 1 (home)</strong>: a new one-file-per-standard normative spec collection — category-qualified partials + size-1-paginated detail pages, gate-required per the lifecycle-derived scope rule (no new registry field). The spec partial becomes the standard's <em>single</em> normative home: existing surfaces keep explainer prose and transclude/link it (a migration clause deliberately superseding the protocol-body-in-project-page rule, with lineage). In-place authoring is rejected on register-uniformity merit (an intent's register would sit inside a statute-capped inline JSON HTML string; a protocol's inside another page's section); "structured JSON as the home" cannot carry conformance prose — the machine-readable half stays with the conformance-vector suite.</li>
+  <li><strong>Fork 2 (skeleton + house style)</strong>: a house-adapted W3C register — fixed section skeleton (status line · non-normative intro · Conformance with BCP-14 boilerplate + the two named classes · Terminology bound to the glossary · interface definitions · <em>observable</em> behavior requirements (surface contract only, never internal computation) · the conformance-case + typed-error table cross-referenced to the vectors · web-standards alignment · lineage), with <strong>TypeScript in a defined declaration subset</strong> (interfaces/type aliases, method + property signatures, union/literal types, readonly; throws live in the error table) as the single interface notation. Full WebIDL is an engine-binding notation whose distinguishing semantics WE's JS-level contracts don't exercise (a derived WebIDL translation is the artifact at an actual standards-body submission); a keyword-sprinkle with no fixed skeleton cannot be gated and has no conformance spine.</li>
+  <li><strong>Fork 3 (scope + maturity)</strong>: the spec obligation derives from the one lifecycle badge — <code>active</code> ⇒ required (an explicit, owned amendment of the promotion bar; the 76 current actives are the migration work-list), <code>draft</code>/<code>experimental</code> ⇒ permitted and required-for-promotion (encoded by authoring the partial early — no sub-states), <code>concept</code> ⇒ exempt (normative prose over unratified design fabricates requirements; universal stub specs are refuted as a redundant encoding that dilutes the register). Census: 76 specs owed at the active tier (39 blocks, 6 intents, 31 plugs, 0 protocols). Pilot <a href="/backlog/2097-pilot-normative-spec-customnoderegistry-2074-in-the-ratified/">#2097</a> = CustomNodeRegistry, settled by enumeration: the only standard whose conformance spine (#2074's typed-error table) is already ratified — noting it still needs its plug registry entry minted (at draft/experimental, so the pilot exercises the permitted arm; the required arm lands with wave 1).</li>
+</ul>
+{% endraw %}
