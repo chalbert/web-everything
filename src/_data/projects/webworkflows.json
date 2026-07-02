@@ -4,6 +4,7 @@
   "description": "Standard for a <strong>workflow</strong> &mdash; a set of smaller UX intents arranged in <strong>directed progression toward one goal</strong> (<code>checkout = collect-address &rarr; pay &rarr; confirm</code>), with threaded state, a single completion criterion, and one current position. The missing <strong>third composition mode</strong> (after simultaneous and cross-cutting): <em>directed/temporal</em> composition of step-intents. It defines the <strong>Workflow Protocol</strong> &mdash; the orchestration graph (steps + transitions + guards + parallel/fork-join + completion) as a portable, data-defined SCXML-style interchange, resolved by a swappable <strong>CustomWorkflowEngine</strong> registry (XState, SCION, a hand-rolled switch plug in behind it), emitting a step-transition event. The UX (current position, per-step status, register) is the <a href=\"/intents/flow-progress/\">Flow Progress intent</a>; the concrete wizard is a Block. Distinct sibling of <a href=\"/projects/weblifecycle/\">Web Lifecycle</a>: a workflow is the user's ephemeral traversal (process orchestration, may occupy many states), not a persisted entity's status (an FSM, one state). Graduated from <a href=\"/backlog/634-meta-intent-workflow-as-composable-intent/\">#634</a> (A / A ratified); subsumes <a href=\"/backlog/369-collection-operations-coordinator/\">#369</a>.",
   "status": "poc",
   "category": "standard",
+  "tier": "exploratory",
   "icon": "/assets/icons/webworkflows.svg",
   "isSvg": true
 }

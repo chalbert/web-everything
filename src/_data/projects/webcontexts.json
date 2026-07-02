@@ -4,6 +4,8 @@
   "description": "Protocol enabling hierarchical data flow and service provision across component trees, effectively solving prop-drilling natively.",
   "status": "poc",
   "category": "standard",
+  "tier": "contextual",
+  "tierEvidence": "Frontier UI blocks consume hierarchical context provision (blocks/tabs/TabsElement.ts, blocks/resource-cache/) via the provide/consume protocol — shipped constellation use.",
   "icon": "/assets/icons/webcontexts.svg",
   "isSvg": true
 }

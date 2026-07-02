@@ -4,6 +4,7 @@
   "description": "Dependency injection system for the web. Supports <code>injector</code>, <code>provide</code>/<code>consume</code> syntax.",
   "status": "poc",
   "category": "standard",
+  "tier": "exploratory",
   "icon": "/assets/icons/webinjectors.svg",
   "details": "The Web Injectors project aims to bring standard dependency injection to the web platform, solving the problem of loading dependencies without build tools or import maps limitations. It introduces <code>injector</code>, <code>provide</code>, and <code>consume</code> syntax to managing isolated contexts and explicit data flow.",
   "isSvg": true

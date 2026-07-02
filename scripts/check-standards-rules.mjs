@@ -784,6 +784,43 @@ export function checkStatus(kind, id, status) {
   return out;
 }
 
+// ── Portfolio project tier — the importance axis, orthogonal to `status` (#2088 → #2132) ──────
+// Ratified at docs/agent/platform-decisions.md#portfolio-project-tiering. Every project carries an
+// explicit, enum-validated `tier` (the named-consumer evidence bar); every non-exploratory project
+// (core | contextual) additionally carries a non-empty `tierEvidence` one-liner NAMING its consumer —
+// the falsifiability hook. Deliberately NOT derived from data (fork 3-b rejected on merit: a judgment
+// over heterogeneous evidence no dataset holds), so the stamp is validated, never computed.
+export const PROJECT_TIERS = new Set(['core', 'contextual', 'exploratory']);
+
+/**
+ * Validate a single project's tier stamp — returns `{ message, descriptor? }` error entries (never
+ * warns: the tier is a required, enum-validated field from day one, unlike the deliberately-loose
+ * project `status`). Pure, mirroring `checkStatus`: the caller pushes onto its own error list.
+ *   • missing/invalid `tier` (∉ {core, contextual, exploratory}) → model-fixable (intended tier is a
+ *     judgment, not derivable);
+ *   • tier ∈ {core, contextual} with an empty/whitespace `tierEvidence` → model-fixable (the one-liner
+ *     is the falsifiability hook — a non-exploratory stamp MUST name its consumer).
+ */
+export function validateProjectTier(id, tier, tierEvidence) {
+  const out = [];
+  const file = fileFor('Project', id); // src/_data/projects/<id>.json
+  if (!tier || !PROJECT_TIERS.has(tier)) {
+    out.push({
+      message: `Project "${id}" has missing/invalid tier "${tier ?? ''}" (expected ${[...PROJECT_TIERS].join(' / ')}) — the #portfolio-project-tiering enum is required from day one`,
+      descriptor: { kind: 'invalid-tier', fix: 'model', entity: 'Project', id, file, field: 'tier', from: tier, allowed: [...PROJECT_TIERS] },
+    });
+    return out; // no point checking evidence against an invalid tier
+  }
+  const needsEvidence = tier === 'core' || tier === 'contextual';
+  if (needsEvidence && !(typeof tierEvidence === 'string' && tierEvidence.trim())) {
+    out.push({
+      message: `Project "${id}" is tier "${tier}" but has no non-empty tierEvidence — every non-exploratory tier must NAME its consumer (the #portfolio-project-tiering falsifiability hook)`,
+      descriptor: { kind: 'missing-tier-evidence', fix: 'model', entity: 'Project', id, file, field: 'tierEvidence' },
+    });
+  }
+  return out;
+}
+
 /**
  * Validate a single protocol (§6b) — required fields, ownedByProject / realizesIntent resolution,
  * and the project-partial anchor probe.

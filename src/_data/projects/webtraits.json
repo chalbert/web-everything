@@ -4,6 +4,8 @@
   "description": "Standard for creating granular, auto-loadable features that bridge the gap between easy developer experience and optimal performance.",
   "status": "poc",
   "category": "utility",
+  "tier": "contextual",
+  "tierEvidence": "Frontier UI ships blocks/traits/ (Highlight, Polling, Revealable — granular auto-loadable features) — a shipped constellation consumer of the traits protocol.",
   "icon": "/assets/icons/webtraits.svg",
   "isSvg": true
 }

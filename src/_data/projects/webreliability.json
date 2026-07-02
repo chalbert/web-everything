@@ -4,6 +4,8 @@
   "description": "Standard for handling mechanism failures — retries, recovery strategies, and resilience patterns — across any operation (HTTP, database, computation, async tasks). A registry of recovery handlers tried in priority order; the first that accepts the error owns the recovery. Distinct from validation: reliability handles system failures, not input invalidity.",
   "status": "concept",
   "category": "standard",
+  "tier": "contextual",
+  "tierEvidence": "Frontier UI ships the recovery-handler registry at reliability/provider.ts + registry.ts + reliabilityConformance.ts — a shipped, functional constellation consumer of the reliability protocol.",
   "icon": "/assets/icons/webreliability.svg",
   "isSvg": true
 }

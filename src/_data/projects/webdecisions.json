@@ -4,6 +4,7 @@
   "description": "Standard for an <strong>explainable, reproducible decision record</strong> &mdash; <em>why</em> a rules/criteria evaluation reached its outcome. For each criterion: its input, operator, threshold, and the outcome it contributed, aggregated into a finding against a <strong>versioned ruleset</strong> the record carries so the explanation replays. A schema-only interchange contract: the <strong>DecisionRecord</strong> shape <em>is</em> the lock (no provider) &mdash; an underwriting engine, an eligibility engine, a pricing or moderation engine all emit the same record, so Web Reporting and Web Compliance consume any of them and audit-trail logs each as one event. Distinct from the rule <em>engine + proof</em> machinery (proof-of-compliance, #093), from Web Validation (form-field invalidity), and from Web Traces (execution spans): this is the <em>decision's explanation artifact</em>.",
   "status": "poc",
   "category": "standard",
+  "tier": "exploratory",
   "icon": "/assets/icons/webdecisions.svg",
   "isSvg": true
 }

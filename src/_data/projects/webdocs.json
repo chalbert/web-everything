@@ -4,6 +4,8 @@
   "description": "The meta-standard that orchestrates Web Manifests and Web Cases to generate comprehensive documentation sites.",
   "status": "poc",
   "category": "utility",
+  "tier": "contextual",
+  "tierEvidence": "Frontier UI ships webdocs/ and packages/webdocs-ui; plateau-app renders documentation through src/web-docs/served-site.ts — a shipped constellation consumer of the docs meta-standard.",
   "icon": "/assets/icons/webdocs.svg",
   "isSvg": true
 }

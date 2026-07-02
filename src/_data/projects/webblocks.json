@@ -4,6 +4,8 @@
   "description": "Standard protocols for interoperable modules (components, behaviors) ensuring consistent UX and accessibility across libraries.",
   "status": "draft",
   "category": "utility",
+  "tier": "core",
+  "tierEvidence": "The interoperable component/behavior domain benchmarked directly: benchmarkCoverage joins select/tabs/dialog/data-table/… rows to WE blocks, the exact surface shadcn/Radix/Ariakit and every benchmark design system ship (the named-framework clause for a utility-category project).",
   "icon": "/assets/icons/webblocks.svg",
   "isSvg": true
 }

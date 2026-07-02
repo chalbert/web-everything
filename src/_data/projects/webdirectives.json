@@ -4,6 +4,8 @@
   "description": "Structural directives (loops, conditionals), comment markers, and template extensions for powerful DOM logic.",
   "status": "poc",
   "category": "standard",
+  "tier": "contextual",
+  "tierEvidence": "Frontier UI ships blocks/for-each/ (structural loop directive) + the directive template-extension runtime — a shipped constellation consumer.",
   "icon": "/assets/icons/webdirectives.svg",
   "details": "Extends HTML with structural controls like loops and conditionals. Includes 'Comment Directives' for attaching logic without wrapper elements (formerly Web Figments) and 'Template Directives' for advanced content projection.",
   "isSvg": true

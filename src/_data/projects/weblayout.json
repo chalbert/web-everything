@@ -4,6 +4,8 @@
   "description": "A thin <strong>protocol-host</strong> standard (no impl, no orchestration) whose sole charter is to own the <a href=\"/projects/weblayout/#protocol-dockable-layout-tree\">dockable layout-tree interchange Protocol</a> &mdash; the portable serialized partition tree that <code>dockview</code> / FlexLayout / golden-layout all converge on. Minted by <a href=\"/backlog/1486-mint-the-dockable-layout-tree-interchange-protocol-core-sche/\">#1486</a>; the owning-project question was ratified in <a href=\"/backlog/1653-which-project-owns-the-dockable-layout-tree-protocol-1437-ru/\">#1653</a> (a) &mdash; a new thin <code>weblayout</code> host rather than attaching the Protocol to the project-less <a href=\"/intents/dockable/\">dockable</a> intent + realizing block (which stay project-less per <a href=\"/backlog/1437-decision-docking-tiling-dockable-window-management-placement-/\">#1437</a> Fork&nbsp;1). The schema is the only lock; the dock manager + popout impl are <a href=\"/projects/frontierui/\">Frontier UI</a> (#1511&ndash;#1514).",
   "status": "concept",
   "category": "standard",
+  "tier": "contextual",
+  "tierEvidence": "Frontier UI ships the dock manager / app-shell that consumes the dockable layout-tree Protocol (blocks/app-shell/AppShell.ts, blocks/dockable/) — a shipped constellation consumer.",
   "icon": "/assets/icons/weblayout.svg",
   "isSvg": true
 }

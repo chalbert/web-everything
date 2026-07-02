@@ -4,6 +4,8 @@
   "description": "A collection of isolated HTML test cases serving as the source of truth for protocol conformity and documentation examples.",
   "status": "poc",
   "category": "utility",
+  "tier": "contextual",
+  "tierEvidence": "plateau-app seeds its docs from Web Cases at src/web-docs/seed.ts — a shipped constellation consumer of the conformance-test-case source of truth.",
   "icon": "/assets/icons/webcases.svg",
   "isSvg": true
 }

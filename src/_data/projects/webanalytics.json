@@ -4,6 +4,7 @@
   "description": "Standard for vendor-neutral tracking (Identify, Track, Page) using the Segment Spec vocabulary.",
   "status": "draft",
   "category": "standard",
+  "tier": "exploratory",
   "icon": "/assets/icons/webanalytics.svg",
   "isSvg": true
 }

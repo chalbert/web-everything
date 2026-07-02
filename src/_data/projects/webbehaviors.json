@@ -4,6 +4,8 @@
   "description": "Standard to allow custom attributes to add functionality to any HTML element.",
   "status": "poc",
   "category": "standard",
+  "tier": "contextual",
+  "tierEvidence": "Frontier UI ships blocks/attributes/ + blocks/on-event/ (custom-attribute behaviors on any element) — a shipped constellation consumer of the behaviors protocol.",
   "icon": "/assets/icons/webbehaviors.svg",
   "isSvg": true
 }

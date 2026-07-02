@@ -21,7 +21,7 @@ import { loadResearch } from '../lib/research-loader.cjs';
 import { loadProtocols } from '../lib/protocols-loader.cjs';
 import { loadDataRegistry } from '../lib/registry-loader.cjs';
 import {
-  checkStatus, validateProtocol, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
+  checkStatus, validateProjectTier, PROJECT_TIERS, validateProtocol, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, isSegmentCovered, permalinkSegment,
   validateViteProxyCoverage, deDateReport,
   isExportsSafeTarget, validateModuleResolutionLock, findRawHtmlInMarkdown,
@@ -66,6 +66,53 @@ describe('checkStatus — lifecycle enum + fixable descriptors', () => {
     const [e] = checkStatus('Intent', 'i1', 'someday');
     expect(e.message).toContain('invalid status "someday"');
     expect(e.descriptor).toMatchObject({ kind: 'invalid-status', fix: 'model', field: 'status' });
+  });
+});
+
+// ── Portfolio project tier — the named-consumer evidence bar (#2088 → #2132) ────────────────────
+// Guards the enum-validated `tier` + required-`tierEvidence`-per-non-exploratory rule codified at
+// docs/agent/platform-decisions.md#portfolio-project-tiering. Exercises the pure validator over
+// SYNTHETIC projects so the rule is pinned independently of the live 45-project catalog.
+describe('validateProjectTier — enum + required tierEvidence for non-exploratory', () => {
+  it('the tier vocabulary is exactly core | contextual | exploratory', () => {
+    expect([...PROJECT_TIERS].sort()).toEqual(['contextual', 'core', 'exploratory']);
+  });
+  it('is silent for a valid non-exploratory tier WITH tierEvidence', () => {
+    expect(validateProjectTier('webvalidation', 'core', 'benchmarkCoverage covers form-validation-flow')).toEqual([]);
+    expect(validateProjectTier('webreliability', 'contextual', 'FUI ships reliability/provider.ts')).toEqual([]);
+  });
+  it('is silent for exploratory with NO tierEvidence (only non-exploratory must name a consumer)', () => {
+    expect(validateProjectTier('webprocess', 'exploratory', undefined)).toEqual([]);
+    expect(validateProjectTier('webprocess', 'exploratory', '')).toEqual([]);
+  });
+  it('flags a missing/invalid tier with a model-fixable descriptor (intended tier is a judgment)', () => {
+    for (const bad of [undefined, '', 'deferred', 'Core', 'tier1']) {
+      const [e] = validateProjectTier('webx', bad, undefined);
+      expect(e.message).toMatch(/missing\/invalid tier/);
+      expect(e.descriptor).toMatchObject({ kind: 'invalid-tier', fix: 'model', entity: 'Project', field: 'tier' });
+    }
+  });
+  it('does NOT also demand evidence once the tier is already invalid (single error)', () => {
+    expect(validateProjectTier('webx', 'bogus', undefined)).toHaveLength(1);
+  });
+  it('flags a non-exploratory tier with empty/whitespace tierEvidence — the falsifiability hook', () => {
+    for (const tier of ['core', 'contextual']) {
+      for (const ev of [undefined, '', '   ', 42, null]) {
+        const [e] = validateProjectTier('webx', tier, ev);
+        expect(e.message).toMatch(/no non-empty tierEvidence/);
+        expect(e.descriptor).toMatchObject({ kind: 'missing-tier-evidence', fix: 'model', field: 'tierEvidence' });
+      }
+    }
+  });
+  it('the live 45-project catalog is fully stamped and clean against this rule', () => {
+    const ids = readdirSync(join(DATA, 'projects')).filter((f) => f.endsWith('.json'));
+    expect(ids.length).toBe(45);
+    const problems = [];
+    for (const f of ids) {
+      const p = JSON.parse(readFileSync(join(DATA, 'projects', f), 'utf8'));
+      for (const e of validateProjectTier(p.id, p.tier, p.tierEvidence)) problems.push(e.message);
+    }
+    expect(problems).toEqual([]);
   });
 });
 

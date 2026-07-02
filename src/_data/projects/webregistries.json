@@ -4,6 +4,7 @@
   "description": "Allow creation of custom registries, similar to <code>customElementsRegistry</code>, for many purposes.",
   "status": "poc",
   "category": "standard",
+  "tier": "exploratory",
   "icon": "/assets/icons/webregistries.svg",
   "isSvg": true
 }

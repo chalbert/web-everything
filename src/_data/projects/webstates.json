@@ -4,6 +4,8 @@
   "description": "Standard primitives for observability and state management (signals, stores, and schemas).",
   "status": "poc",
   "category": "standard",
+  "tier": "core",
+  "tierEvidence": "Signals/stores/schemas is the reactivity substrate the named frameworks (TC39 Signals, Preact Signals, MobX, Zustand) ship and every design-system component consumes for observable state.",
   "icon": "/assets/icons/webstates.svg",
   "isSvg": true
 }

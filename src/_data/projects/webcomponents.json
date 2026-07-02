@@ -4,6 +4,8 @@
   "description": "Enhanced implementation of Custom Elements supporting Scoped Registries and standard Dependency Injection.",
   "status": "poc",
   "category": "standard",
+  "tier": "core",
+  "tierEvidence": "Custom Elements + Scoped Registries is the component substrate every benchmark design system and the named frameworks Lit/Stencil ship; FUI's component runtime (packages/jsx-runtime, packages/component-compiler) is built on it.",
   "icon": "/assets/icons/webcomponents.svg",
   "isSvg": true
 }

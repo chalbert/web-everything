@@ -38,7 +38,7 @@ import { loadAdapters } from './lib/adapters-loader.cjs';
 import {
   BACKLOG_STATUSES, BACKLOG_KINDS, FIB, FILE, blockSpecFile,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated, detectClassificationCollapse, computeNativeFirstConformance, computeDesignKnowledgeConformance,
-  checkStatus, validateProtocol, validatePreset, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
+  checkStatus, validateProjectTier, validateProtocol, validatePreset, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock,
   validateRenderersNotPublished, validateReferenceRuntimeForms,
@@ -179,6 +179,13 @@ for (const b of blocks) {
   if (b.type && !BLOCK_TYPES.has(b.type)) warn(`Block "${b.id}" has unusual type "${b.type}"`);
 }
 for (const p of plugs) checkStatusInto('Plug', p.id, p.status);
+
+// ── 3a. Portfolio project tier — the importance axis (#2088, codified #portfolio-project-tiering) ──
+// Orthogonal to project `status` (which stays deliberately outside LIFECYCLE). Every project carries an
+// enum-validated `tier` (core | contextual | exploratory) by the named-consumer evidence bar; every
+// non-exploratory project additionally names its consumer via a non-empty `tierEvidence` one-liner.
+for (const p of projects)
+  for (const e of validateProjectTier(p.id, p.tier, p.tierEvidence)) err(e.message, e.descriptor);
 
 // ── 3b. composesBehaviors resolution (#936, Fork 2 of #933) ───────────────────
 // A block's `traits[]` records the named behaviors it PROVIDES (`withSortableHeader`, …); the new

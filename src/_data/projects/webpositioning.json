@@ -4,6 +4,8 @@
   "description": "Standard for anchoring a floating element to another element (tooltips, popovers, menus): placement, collision handling, and tethering. A single positioning provider that any component delegates to — native-first (CSS Anchor Positioning) with pluggable adapters (Floating UI) — so components from different vendors share one engine instead of bundling ten.",
   "status": "poc",
   "category": "standard",
+  "tier": "core",
+  "tierEvidence": "benchmarkCoverage covers popover/tooltip anchor-positioning; the named framework Floating UI is the industry positioning engine (FUI ships blocks/droplist/positioning/floating-ui.ts as the adapter).",
   "icon": "/assets/icons/webpositioning.svg",
   "isSvg": true
 }

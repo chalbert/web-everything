@@ -4,6 +4,8 @@
   "description": "Standard for defining project metadata, dependencies, and capabilities in a framework-agnostic way.",
   "status": "concept",
   "category": "utility",
+  "tier": "contextual",
+  "tierEvidence": "plateau-app consumes project manifests at src/web-docs/served-site.ts to drive its served-site metadata — a shipped constellation consumer of the manifest meta-standard.",
   "icon": "/assets/icons/webmanifests.svg",
   "isSvg": true
 }

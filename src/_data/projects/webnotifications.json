@@ -4,6 +4,8 @@
   "description": "Standard for the <strong>notification domain</strong> &mdash; the orchestration concern (which surface a notification targets, grouping, dedup, badging) plus the <strong>closed-app push-delivery protocol</strong>. Ratified in <a href=\"/backlog/009-gap-13-webpermissions-project/\">#009</a> (domain home) and <a href=\"/backlog/455-server-to-client-delivery-transport-home-by-purpose-vs-by-me/\">#455</a> (transport home, <em>by-purpose</em>: push lives here, the open-app realtime family gets its own home). Push delivery is a <strong>protocol</strong>, not a UX intent: subscription + VAPID + provider orchestration is async, server-authoritative, and swappable &mdash; the native anchor is the <strong>Web Push API</strong> (service worker + push service, survives tab close), with a <code>CustomPushProvider</code> seam so a multi-channel hub (FCM, OneSignal, Novu) plugs in behind the same contract. It <em>coordinates</em> the render-intent family (<code>system-notification</code>, <code>notification-marker</code>) which publish standalone in <a href=\"/projects/webintents/\">Web Intents</a> &mdash; a consuming project sees the render intents, never the transport. Distinct from <code>feedback</code> (in-app toast render) and <code>background-task</code> (in-session persistence): this owns the OS-surfaced, server-deliverable notification.",
   "status": "concept",
   "category": "standard",
+  "tier": "contextual",
+  "tierEvidence": "Frontier UI ships blocks/notification/NotificationRegionElement.ts — a shipped constellation consumer of the notification orchestration protocol.",
   "icon": "/assets/icons/webnotifications.svg",
   "isSvg": true
 }

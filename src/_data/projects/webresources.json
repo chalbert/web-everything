@@ -4,6 +4,8 @@
   "description": "Standard protocols for data exchange, interceptors, and resource definition.",
   "status": "concept",
   "category": "standard",
+  "tier": "contextual",
+  "tierEvidence": "Frontier UI ships blocks/data-transfer/ + blocks/resource-cache/InMemoryResourceCache.ts — a shipped constellation consumer of the data-exchange/resource protocols.",
   "icon": "/assets/icons/webresources.svg",
   "isSvg": true
 }

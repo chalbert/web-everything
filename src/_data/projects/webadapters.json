@@ -4,6 +4,8 @@
   "description": "Bridges and syntactic sugars connecting external libraries or languages to Web Everything protocols.",
   "status": "draft",
   "category": "utility",
+  "tier": "contextual",
+  "tierEvidence": "Frontier UI ships adapters/ (focus-trap, mousetrap-keyboard-shortcuts, requirement-as-code) — shipped bridges connecting external libraries to WE protocols.",
   "icon": "/assets/icons/webadapters.svg",
   "isSvg": true
 }

@@ -1,10 +1,12 @@
 ---
 kind: story
 size: 5
-status: active
+status: resolved
 blockedBy: ["2088"]
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
+graduatedTo: "we:scripts/check-standards-rules.mjs"
 tags: []
 ---
 

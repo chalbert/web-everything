@@ -4,6 +4,7 @@
   "description": "Standard for execution flow monitoring and distributed tracing, aligning with W3C Trace Context and OpenTelemetry.",
   "status": "poc",
   "category": "standard",
+  "tier": "exploratory",
   "icon": "/assets/icons/webtraces.svg",
   "isSvg": true
 }

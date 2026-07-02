@@ -4,6 +4,8 @@
   "description": "Declarative profiles for application-wide UX/UI behavior (e.g., density, motion, interaction models) that components automatically adhere to.",
   "status": "draft",
   "category": "ecosystem",
+  "tier": "core",
+  "tierEvidence": "benchmarkCoverage covers motion-tokens (intent:motion), typography-scale (intent:typography), and responsive-adaptive (intent:density/breakpoint) — the application-wide UX-profile axes every benchmark design system exposes as theme/density/motion props.",
   "icon": "/assets/icons/webintents.svg",
   "isSvg": true
 }
