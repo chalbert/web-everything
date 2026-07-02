@@ -24,8 +24,16 @@
  *  - SINGLE CLEAR POINT: only after the WE (resolve-carrying) ref lands does the drain `unqueue` the item —
  *    the queued marker is cleared exactly once, at landing (#2161).
  *
- * The pure planner (`planDrain`, `buildPrLandArgs`) is unit-tested in scripts/__tests__/lane-drain.test.mjs;
- * the CLI owns git/pr-land/backlog at its boundary (mirrors pr-land.mjs / lane-review.mjs).
+ * POST-DRAIN RECONCILE (#2175): after each couple, `planPostDrain` decides the cleanup. On a LANDED couple the
+ * drain deletes the `.lane-manifest.json` it carried onto main (post-land cleanup). On a FAILED couple
+ * (merge red / resolve unreachable) it reconciles the stranded WE item `active→open` (`release --force`) so it
+ * honestly re-enters as not-being-worked — WHILE the queued marker + `lane/*` refs are PRESERVED for the next
+ * drain pass to retry (the drain-side of the #2072 closeout). Housekeeping publishes via the SANCTIONED
+ * `push-if-green.mjs` helper — never a raw main push (the #2172 transport contract).
+ *
+ * The pure planners (`planDrain`, `planWatch`, `planPostDrain`, `buildPrLandArgs`) are unit-tested in
+ * scripts/__tests__/lane-drain.test.mjs; the CLI owns git/pr-land/backlog at its boundary (mirrors
+ * pr-land.mjs / lane-review.mjs).
  *
  * Usage:
  *   node scripts/lane-drain.mjs drain-one 2153 --manifest=/path/to/.lane-manifest.json   # land the couple for #2153
@@ -164,6 +172,25 @@ export const DERIVED_REGEN = [
   ['npm', 'run', 'gen:reference-index'],
 ];
 
+/**
+ * Decide the post-drain reconcile for a couple, from a drain-one result (#2175 reopen-on-fail). Pure — the
+ * git/backlog actions are the CLI boundary. Returns `{ deleteManifest, reopen }`:
+ *  - `deleteManifest` — the couple LANDED: its `.lane-manifest.json` rode the WE lane commit onto main, so the
+ *    drain deletes it post-land (main carries no post-drain cruft; the manifest doc's "delete at landing").
+ *  - `reopen` — the couple FAILED to land (a repo merge red, or the WE resolve is unreachable): the WE item is
+ *    stranded `active` on main with no live session. Reconcile it `active→open` (the drain-side of the #2072
+ *    closeout) so it honestly re-enters as not-being-worked — WHILE the queued marker + `lane/*` refs are
+ *    PRESERVED (the drain never unqueues or deletes refs on failure), so the NEXT drain pass retries it.
+ * A not-ready / dry-run / bad-input result reconciles nothing.
+ */
+export function planPostDrain(result) {
+  const r = result || {};
+  if (r.landed === true) return { deleteManifest: true, reopen: false };
+  // Only a genuine land FAILURE reopens — not a defer (not-ready), a dry-run, or bad input (which never touched main).
+  const failed = r.reason === 'merge-failed' || r.reason === 'resolve-unreachable';
+  return { deleteManifest: false, reopen: failed };
+}
+
 // Allow importing the pure helpers without running the CLI (the test file imports this module).
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) runCli();
@@ -252,8 +279,10 @@ function runDrainOne() {
     }
     if (res && res.merged) { landed.push(step.repo); continue; }
     // A repo failed → stop the couple here. WE never lands (if it was later), so the resolve never lands →
-    // the item stays active/queued, never falsely resolved. The reopen-on-fail reconcile is #2175.
-    emit({ landed: false, reason: 'merge-failed', num, stoppedAt: step.repo, landedRepos: landed, prLand: res, detail: `#${num} stopped at ${step.repo}: ${res ? res.detail : 'no result'} — earlier repos landed [${landed.join(', ') || 'none'}]; item stays queued (re-drain after fix). WE resolve NOT landed.` }, 2);
+    // the item stays active/queued, never falsely resolved. REOPEN-ON-FAIL (#2175): reconcile the stranded WE
+    // item active→open (keeping its queue marker + lane/* refs) so it honestly re-enters as not-being-worked.
+    const reopen = reopenStrandedItem(CWD, num);
+    emit({ landed: false, reason: 'merge-failed', num, stoppedAt: step.repo, landedRepos: landed, prLand: res, reopened: reopen.reopened, reopenPushed: reopen.pushed, detail: `#${num} stopped at ${step.repo}: ${res ? res.detail : 'no result'} — earlier repos landed [${landed.join(', ') || 'none'}]; item stays queued (re-drain after fix)${reopen.reopened ? ', reopened active→open (#2175)' : ''}. WE resolve NOT landed.` }, 2);
   }
 
   // Every repo landed (WE last) → confirm the WE resolve is reachable on origin/main, then clear the queued
@@ -273,13 +302,17 @@ function runDrainOne() {
   // and exit 2 so the item re-drains / the #2175 reconcile handles it, never a false clear. A `null` (couldn't
   // determine — e.g. offline fetch) is advisory: proceed with the unqueue, since pr-land reported merged.
   if (resolveReachable === false) {
-    emit({ landed: false, reason: 'resolve-unreachable', num, landedRepos: landed, resolveReachable, detail: `#${num} merged all refs but its resolve is NOT reachable on origin/main — leaving it queued (re-drain / #2175 reconcile). Queued marker NOT cleared.` }, 2);
+    // REOPEN-ON-FAIL (#2175): all refs merged but the resolve isn't reachable — treat as a failed land, leave it
+    // queued (marker NOT cleared), and reconcile the stranded item active→open (queue + refs preserved).
+    const reopen = reopenStrandedItem(CWD, num);
+    emit({ landed: false, reason: 'resolve-unreachable', num, landedRepos: landed, resolveReachable, reopened: reopen.reopened, reopenPushed: reopen.pushed, detail: `#${num} merged all refs but its resolve is NOT reachable on origin/main — leaving it queued (re-drain)${reopen.reopened ? ', reopened active→open (#2175)' : ''}. Queued marker NOT cleared.` }, 2);
   }
 
-  let unqueued = false;
-  try { execFileSync('node', ['scripts/backlog.mjs', 'unqueue', num], { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); unqueued = true; } catch { unqueued = false; }
+  // SUCCESS reconcile (#2175): sync local main to the merged origin/main, then unqueue + delete the manifest it
+  // carried, in one commit, and publish (the single clear point + main-cleanup, all post-land).
+  const fin = finalizeLand(CWD, num);
 
-  emit({ landed: true, reason: 'landed', num, landedRepos: landed, unqueued, resolveReachable, detail: `landed #${num} across ${landed.join(' → ')} (impl-first/WE-last)${unqueued ? ', unqueued' : ' (unqueue failed — clear it manually)'}` }, 0);
+  emit({ landed: true, reason: 'landed', num, landedRepos: landed, unqueued: fin.unqueued, manifestDeleted: fin.manifestDeleted, mainPushed: fin.pushed, resolveReachable, detail: `landed #${num} across ${landed.join(' → ')} (impl-first/WE-last)${fin.unqueued ? ', unqueued' : ' (unqueue failed — clear it manually)'}${fin.manifestDeleted ? ', manifest cleaned' : ''}${fin.pushed ? ', main published' : ''}` }, 0);
 }
 
 // ── watch/drain — the outer monitor loop (#2173) ───────────────────────────────────────────────────────
@@ -336,6 +369,67 @@ function regenDerived(CWD) {
     catch (e) { failedGen.push({ cmd: cmd.join(' '), detail: String(e.message || e).split('\n')[0] }); }
   }
   return { done, failed: failedGen };
+}
+
+// A quiet, never-throwing git helper for the reconcile ops (best-effort — a failure is reported, never fatal:
+// the LAND already succeeded/failed, and reconcile is cleanup on top of it).
+function quietGit(CWD, a) {
+  try { return execFileSync('git', a, { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim(); }
+  catch { return null; }
+}
+
+const QUEUED_REL = '.claude/skills/batch-backlog-items/queued.json';
+
+// Sync local main to the merged origin/main via a LOCAL fast-forward (never a work-merge — the couple's work
+// is landed by pr-land, #2172 contract). `pull --ff-only` fetches + ff's the current branch; a non-ff / dirty
+// collision aborts and we degrade gracefully (best-effort). Never touches a lane/* ref.
+function syncMain(CWD) { quietGit(CWD, ['pull', '--ff-only']); }
+
+// Publish local main to origin via the SANCTIONED gated-push helper (#2073) — never a raw git write of the
+// branch (the #2172 contract: lane-drain re-uses the shared transports, never re-implements them). The
+// couple's tree was just gated by pr-land's required CI, so `--assume-green` skips the redundant re-gate (the
+// documented integrator path). ff-only inside the helper; a non-ff leaves origin untouched and is reported.
+function publishMain(CWD) {
+  try { const r = JSON.parse(execFileSync('node', ['scripts/push-if-green.mjs', '--assume-green', '--json'], { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()); return !!r.pushed; }
+  catch (e) { try { return !!JSON.parse(String(e.stdout || '').trim()).pushed; } catch { return false; } }
+}
+
+// SUCCESS reconcile (#2175): the couple landed via PR onto ORIGIN/main, so sync local main to it, then UNQUEUE
+// + DELETE the `.lane-manifest.json` it carried, in ONE commit, and publish. Best-effort at every step — a
+// leftover manifest / un-pushed unqueue is recoverable cruft, never a reason to unwind a successful landing.
+function finalizeLand(CWD, num) {
+  syncMain(CWD); // bring the merged origin/main (incl. the manifest the WE lane commit carried) local
+  // Clear the queued marker (the single clear point) + stage the manifest deletion if it's tracked on main.
+  let unqueued = false;
+  try { execFileSync('node', ['scripts/backlog.mjs', 'unqueue', num], { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); unqueued = true; } catch { unqueued = false; }
+  let manifestDeleted = false;
+  if (quietGit(CWD, ['ls-files', MANIFEST_FILENAME])) manifestDeleted = quietGit(CWD, ['rm', '--quiet', MANIFEST_FILENAME]) != null;
+  // Commit ONLY this couple's paths via an explicit `-- <pathspec>` — a bare `git commit` would sweep any
+  // foreign STAGED hunks (a concurrent session, a pre-staged tree) into the drain's commit and publish them
+  // (the shared-index commit race). The pathspec form commits exactly these paths' index+worktree state (the
+  // `git rm` deletion + the unqueue edit), ignoring the rest of the index — never `git add -A`.
+  const commitPaths = manifestDeleted ? [QUEUED_REL, MANIFEST_FILENAME] : [QUEUED_REL];
+  let pushed = false;
+  if (quietGit(CWD, ['commit', '-m', `drain: unqueue + cleanup #${num} lane manifest post-land (#2175)`, '--', ...commitPaths]) != null) pushed = publishMain(CWD);
+  return { unqueued, manifestDeleted, pushed };
+}
+
+// FAILURE reconcile (#2175 reopen-on-fail): a couple that failed to land leaves the WE item STRANDED `active`
+// on main with no live session. Flip it `active→open` (`release --force`) so it honestly re-enters as
+// not-being-worked — release touches NEITHER the queued marker NOR the `lane/*` refs, so the couple stays
+// queued with its durable refs for the NEXT drain pass to retry. Best-effort commit + publish of the flip.
+function reopenStrandedItem(CWD, num) {
+  syncMain(CWD); // reconcile against the merged state before reading/writing the item's status
+  try { execFileSync('node', ['scripts/backlog.mjs', 'release', num, '--force'], { cwd: CWD, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+  catch { return { reopened: false, pushed: false }; } // not `active` (already open/resolved, or another session owns it) → leave it
+  const path = (quietGit(CWD, ['ls-files', `backlog/${num}-*.md`]) || '').split('\n').filter(Boolean)[0];
+  let pushed = false;
+  if (path) {
+    // Scope the commit to ONLY this item's backlog file (explicit `-- <path>`) — never a bare commit that would
+    // absorb a foreign staged hunk (the shared-index commit race).
+    if (quietGit(CWD, ['commit', '-m', `drain: reopen stranded #${num} after failed land (#2175)`, '--', path]) != null) pushed = publishMain(CWD);
+  }
+  return { reopened: true, pushed };
 }
 
 function runWatch({ follow }) {
