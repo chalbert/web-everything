@@ -919,6 +919,57 @@ for (let i = 0; i < concurrentResults.length; i++) {
   }
 }
 
+// 4b-collision. HEAL new-item id collisions across the merged lanes (#2071). Parallel lanes partition
+// EDITS to existing files but NOT id ALLOCATION for newly-CREATED items: two lanes branching from the same
+// base each derive a new item's NNN as `max(existing)+1` and can't see the other's not-yet-existing file,
+// so when both land they collide on `#NNN`. The disjointness checker is blind to it (the new file's path is
+// in no lane's declared write-set at partition time), so it slips past every earlier guard and surfaces only
+// HERE — as `ids must be unique` at the standards gate + an 11ty output conflict (two files → one
+// `_site/backlog/NNN/index.html`). This runs AFTER every lane merged (4b) and BEFORE the derived-regen +
+// final gate (4c), so the tree is gate-green by close. It applies the sanctioned "newer yields" rule (NNN
+// is immutable): the LATER-landing colliding new item is RE-FILED to the next free id — a refile (fs write
+// + fs delete via the sanctioned script, NOT a `git mv`, which guard-bash blocks) — and EVERY inbound
+// reference to the yielded id is rewritten (`#NNN` short-refs, `/backlog/NNN[/-slug]` URLs, `parent:`/
+// `blockedBy:` edges) corpus-wide, so no link dangles. The base ref (`lane/_base-<slug>`) supplies the batch
+// base ids so a collision on an id BOTH lanes inherited (a real edit conflict git already flagged, not an
+// allocation race) is never renumbered. Idempotent: no collision ⇒ a no-op. Only meaningful for WE (backlog
+// lives there); run only when this batch merged lanes onto WE main.
+if (baseReady && concurrent.length > 0) {
+  const renum = await agent(
+    [
+      RETURN_HYGIENE,
+      ``,
+      `In the PRIMARY WE checkout on branch main, HEAL any NEW-ITEM backlog id collision left by the parallel`,
+      `lanes (#2071). Two lanes branching from the same base can each allocate the SAME next \`#NNN\` for a`,
+      `newly-created item (neither sees the other's not-yet-existing file) — an allocation race the partition`,
+      `checker can't catch. Run EXACTLY: \`node scripts/backlog-renumber-collisions.mjs --base-ref=${baseRef} --json\`.`,
+      `This detects two backlog/*.md files claiming one NNN, YIELDS the later-landing one to the next free id`,
+      `(a sanctioned refile — the raw \`git mv\`/\`rm\` are guarded), and rewrites every inbound reference`,
+      `(#NNN, /backlog/NNN[/-slug]/ URLs, parent:/blockedBy: edges) corpus-wide. The --base-ref supplies the`,
+      `batch base ids so an id BOTH lanes inherited (a real edit conflict) is left untouched. It is idempotent`,
+      `(no collision ⇒ no-op) and exits 0 either way. THEN run \`npm run check:standards\` to confirm the`,
+      `\`ids must be unique\` rule is green. If it renumbered anything, commit ONLY the affected backlog files`,
+      `in ONE commit: \`git add backlog/*.md && git commit -m "batch ${batchSlug}: renumber new-item id`,
+      `collision(s) (#2071)"\` (stage ONLY backlog/*.md; never \`git add -A\`; if it was a no-op, skip the`,
+      `commit). NEVER push. Return { renumbered: [{oldNum,newNum}], gate: 'green'|'red', notes }.`,
+    ].join(' '),
+    {
+      label: 'integrate:renumber-collisions', phase: 'Integrate',
+      schema: {
+        type: 'object', required: ['gate'], additionalProperties: true,
+        properties: {
+          renumbered: { type: 'array', items: { type: 'object', additionalProperties: true, properties: { oldNum: { type: 'string' }, newNum: { type: 'string' } } } },
+          gate: { type: 'string', enum: ['green', 'red'] },
+          notes: { type: 'string' },
+        },
+      },
+    },
+  ).catch(() => null);
+  if (!renum) log('⚠ id-collision renumber step produced no result — if the final gate flags `ids must be unique`, re-run scripts/backlog-renumber-collisions.mjs by hand.');
+  else if (Array.isArray(renum.renumbered) && renum.renumbered.length) log(`Healed ${renum.renumbered.length} new-item id collision(s): ${renum.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')} (gate ${renum.gate}).`);
+  else log(`No new-item id collision across the merged lanes (#2071 renumber was a no-op).`);
+}
+
 // 4c. Regenerate WE derived artifacts ONCE on the fully-merged WE main, then a final whole-repo gate. The
 // #1935 Fork-2 "regenerate-on-merge" set: the AGENTS.md inventory block, src/_data/referenceIndex.json, and
 // src/_data/capabilityWorkedExample.json — all reproduced by their deterministic generators. (Derived
