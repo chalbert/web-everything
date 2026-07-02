@@ -6,7 +6,7 @@
   <title>Analytics Conformance Demo - Web Everything</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/demos/playground.css">
-  <link rel="stylesheet" href="/demos/analytics-conformance-demo.css">
+  <link rel="stylesheet" href="/demos/conformance-demo.css">
 </head>
 <body>
   <div class="demo-header">
@@ -24,25 +24,35 @@
     <header class="play-intro">
       <h1>Analytics Conformance Demo</h1>
       <p>
-        The runnable proof of the webanalytics
+        The runnable proof that the webanalytics
         <a href="/plugs/customtrackerregistry/"><code>CustomTracker</code></a> contract+injector swap
-        mechanic (<a href="/backlog/1012-webanalytics-canonical-customtracker-contract-registry-di-no/">#1012</a>).
-        One call site issues the same <code>identify()/track()/page()/group()</code> calls while the
-        <strong>resolved backend is swapped underneath</strong> via the <code>CustomTrackerRegistry</code>
-        — so the application knows only the contract, never a vendor (Segment / Mixpanel / GA4).
+        mechanic (<a href="/backlog/1012-webanalytics-canonical-customtracker-contract-registry-di-no/">#1012</a>)
+        is <strong>conformant</strong>. The runtime — the <code>CustomTrackerRegistry</code> swap registry,
+        the native-first <code>NoopTracker</code> default, and the reference vendor adapters — is
+        <strong>relocated to Frontier UI</strong>
+        (<a href="/backlog/1918-analytics-conformance-binding-predicate-over-call-log-we-vec/">#1918</a>;
+        WE holds zero executable, #1282). Its conformance runs through the
+        <strong>plateau-hosted conformance runner</strong>
+        (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a> /
+        <a href="/backlog/1790-plateau-origin-conformance-runner-docs-surface-end-to-end-smo/">#1790</a>),
+        which drives the WE-owned analytics vector suite
+        (<a href="/backlog/1918-analytics-conformance-binding-predicate-over-call-log-we-vec/">#1918</a>:
+        predicate matchers over the recorded-call log — routing / swap-reroute / arg-order / absence / count,
+        #1816/#1847) against the FUI binding and reports pass/fail.
       </p>
       <p class="play-caveat">
-        Backends here are in-demo <strong>recording stubs</strong> — honest for a browser demo, since a real
-        GA4/Mixpanel/Segment backend needs network + credentials (the
-        <a href="/backlog/1013-webanalytics-reference-vendor-adapters-segment-mixpanel-ga4-/">#1013</a> vendor
-        adapters are the impl). The section below asserts each contract invariant against the live registry.
+        The pass/fail panel below is rendered <strong>at plateau-origin inside an iframe</strong> — the
+        cross-origin runtime boundary (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a>
+        ratified (b)) that reaches the shared, neutral runner with no implementer&rarr;runner edge. WE owns
+        only the build-agnostic vectors and the type-only <code>CustomTracker</code> contract; the registry +
+        adapter impl is FUI's, the runner is plateau's. A green result proves conformance independent of how
+        the runtime is built (#899).
       </p>
     </header>
 
     <div id="play-root">Loading demo&hellip;</div>
   </main>
 
-  <!-- Unplugged: the demo imports the CustomTrackerRegistry as a plain library (no global patch). -->
   <script type="module" src="/demos/analytics-conformance-demo.ts"></script>
 </body>
 </html>

@@ -26,6 +26,13 @@ GitHub Release, and publishes.
   manual fallback.
 - Fixed `we:contracts/package.json` `repository.url` → `chalbert/web-everything` (provenance rejects a
   repo-URL mismatch against the building repo).
+- **Repo setting (one-time, per repo):** enabled *Allow GitHub Actions to create and approve pull requests*
+  (`can_approve_pull_request_reviews: true` via `gh api -X PUT /repos/chalbert/web-everything/actions/permissions/workflow`).
+  Without it release-please fails with "GitHub Actions is not permitted to create or approve pull requests"
+  even though the workflow grants `pull-requests: write` — the repo-level toggle overrides. **FUI and Plateau
+  will need the same toggle** when they adopt release-please.
+- Verified end-to-end (2026-07-02): push → release-please opened Release PR #2 "release contracts 0.1.0"
+  (0.x lock honored). Merging that PR tags `contracts-v0.1.0` and fires the publish job.
 
 ## Residuals
 
@@ -37,6 +44,13 @@ GitHub Release, and publishes.
   `releases_created` to the per-path `contracts--release_created` output so only the changed package
   publishes.
 - **PR-flow coupling:** the end-to-end "merge Release PR → release" rides on the branch-protection / PR-merge
-  landing flow ([[2138]]/[[2152]]); release-please's tag/Release creation via `GITHUB_TOKEN` needs
+  landing flow (#2138/#2152); release-please's tag/Release creation via `GITHUB_TOKEN` needs
   `contents: write` (set) and does not push to protected `main`, so it composes.
-- **OIDC:** dropping `NPM_TOKEN` for trusted publishing is optional later hardening ([[2154]]).
+- **OIDC:** dropping `NPM_TOKEN` for trusted publishing is optional later hardening (#2154).
+
+## First release lagging — tracked in #2157
+
+0.1.0 was tagged (Release PR #2 merged) but **npm publish never ran**: the publish job's whole-repo
+`check:standards` was red from unrelated backlog debt on `main`. Owner kept the gate as-is (2026-07-02), so
+publishing is blocked until `main` is reliably green via the PR-lane merge flow (#2138/#2152). Full state +
+recovery steps (incl. the auto-lock-on-merge race) live in #2157.

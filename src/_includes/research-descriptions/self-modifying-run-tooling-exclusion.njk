@@ -1,0 +1,93 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/2077-parallel-orchestrator-exclude-self-modifying-items-from-conc/">#2077</a> —
+  what is the standing rule for <strong>self-modifying items</strong>: backlog items whose touch-set includes
+  the <code>/workflow</code> parallel run's <em>own</em> executing tooling (the orchestrator workflow script,
+  the batch skill, and the scripts the run shells out to mid-run)?
+</p>
+
+<h2>The incident (in-repo grounding)</h2>
+<p>
+  Run <code>batch-2026-07-01-1947-2071</code> TaskStop'd after #2073's lane wedged editing the live
+  orchestrator file (<code>parallel-execute.workflow.js</code>, sandbox-locked while the Workflow tool
+  executed it): 5 of 17 items landed; 12 pre-claimed items were reopened by hand (commit
+  <code>34a26a39</code>). #2071/#2072/#2073 all edited the executing file. The wedge is structural under the
+  current substrate: the serial lane works items <em>in place in the primary checkout</em>, and the
+  integrator merges every concurrent lane ref <em>into the primary</em> mid-run — so both in-run routes end
+  in a write to the file the run is executing.
+</p>
+<ul>
+  <li>The partition has no predicate for this hazard class: <code>conflicts()</code> is strictly pairwise,
+    and the <code>RESERVED_MERGE_RISK_BY_REPO</code> denylist guards a different failure (clean-but-wrong
+    merges between two items). A <em>lone</em> self-modifying item runs concurrent unflagged.</li>
+  <li>Recurrence is structural: the orchestrator file carries 20+ resolve commits (its feature history lands
+    as edits to itself), and the #2086 mirror pattern means orchestrator items touch both the canonical
+    module in <code>scripts/readiness/</code> and the inline sandbox mirror.</li>
+</ul>
+
+<h2>What later rulings changed</h2>
+<p>
+  The #2138 rider (<em>pr-flow-rollout-mechanism</em>) rules that every lane-producing session stops at
+  lane-push and never touches <code>main</code>, with a human-drained queue landing later; #2123 rules every
+  edit-action session runs in an isolated lane clone. In that ratified steady state no write hits the primary
+  checkout during a producing run — the hazard is <strong>substrate-conditional</strong>: real under today's
+  in-run integrator, structurally dissolved once the #2138 substrate (#2151/#2152/#2153) is built.
+</p>
+
+<h2>External prior art</h2>
+<ul>
+  <li><strong>GitHub Actions</strong> pins the run's workflow definition at run start (the triggering
+    commit's version); a mid-run push to the workflow file never re-configures a live run — the change takes
+    effect on the next run.</li>
+  <li><strong>Jenkins</strong> pins shared-pipeline-library versions per run; pipeline-as-code changes apply
+    to subsequent builds.</li>
+  <li><strong>Merge bots (bors lineage)</strong> manage a repository from a deployment <em>outside</em> the
+    tree they land — changes to the bot's own code ride the normal queue and take effect on redeploy, never
+    mid-batch.</li>
+</ul>
+<p>
+  The uniform pattern: <em>never mutate the executing pipeline definition mid-run; let the tooling change
+  land like any other change and take effect next run.</em>
+</p>
+
+<h2>Synthesis — the prepared forks</h2>
+<ul>
+  <li><strong>Fork 1 (detection):</strong> a declared <code>RUN_TOOLING</code> pathspec in the canonical,
+    tested <code>scripts/readiness/lane-partition.mjs</code> (+ inline sandbox mirror), matched against the
+    probe's predicted touch-set in Phase 1 <em>before</em> the Phase-2 pre-claim. Skeptic-amended guard
+    completeness: a post-hoc seat over each lane's reported <code>changedFiles</code> at integrate time
+    (probes under-report), a hard serial-lane prompt guard (the probe-failed-and-undeclared residual), and a
+    <em>coverage-parity unit test</em> that derives the workflow's shell-out set from its source and asserts
+    the declared list covers it (the list is itself fails-open on drift, and the post-hoc seat shares the
+    pathspec). A per-item frontmatter flag fails open on omission; a loader/engine
+    <code>batchable:false</code> over-excludes (the same pack feeds serial <code>/batch</code>, where the
+    item is safe).</li>
+  <li><strong>Fork 2 (routing):</strong> today a flagged item is dropped from the <code>/workflow</code> run
+    at probe time and worked <em>solo, or as the last item of a serial</em> <code>/batch</code> (mid-batch
+    edits to shelled run-tooling create the same mixed-version condition); the exclusion carries a concrete
+    sunset — once the #2153 drain is live and the in-run integrator/serial lane retire onto the queue, a
+    self-modifying item may run in a concurrent lane and land via the drain (an <em>entailment of the #2138
+    rider</em>, cited rather than re-ruled). Drain-era residual: the drain is itself a live run that shells
+    out to <code>RUN_TOOLING</code>, so it lands such items last (or as a dedicated final pass). The in-run
+    serial lane is the rejected, observed-broken branch. Codifies as a rider under
+    <em>pr-flow-rollout-mechanism</em>, never a new anchor.</li>
+  <li><strong>Dissolved:</strong> the card's "move the tooling to an editable locus" option — the movable
+    logic already moved (the #2086 canonical-module pattern); the executing file is executed by path, so
+    relocation does not stop it being the executing file. Snapshot-execute (the GitHub-Actions pin) is the
+    named fallback only if the #2138 substrate slips indefinitely.</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/backlog/2138-should-lane-landing-move-to-a-deferred-merge-queue-drained-b/">#2138</a> —
+    deferred merge queue (the sunset substrate; Forks 1–5 ruled 2026-07-02).</li>
+  <li><a href="/backlog/2123-should-a-solo-session-non-workflow-also-run-in-an-isolated-w/">#2123</a> —
+    every edit-action session lanes (the solo route a flagged item takes).</li>
+  <li><a href="/backlog/2149-blacklist-we-package-json-and-we-eleventy-js-as-merge-risk-f/">#2149</a> —
+    build-config merge-risk (the sibling surface, explicitly carved apart from this rule).</li>
+  <li><a href="/backlog/2014-prioritisation-tab-batchable-count-includes-priority-low-inc/">#2014</a> —
+    the loader/engine parity lesson behind the single-derivation-seat requirement.</li>
+</ul>
+{% endraw %}

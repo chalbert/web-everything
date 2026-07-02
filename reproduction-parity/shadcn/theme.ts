@@ -21,10 +21,10 @@
  *  - **No scheme-flipped accent.** webtheme's `color.accent` is a single seed; shadcn's `--primary` flips
  *    between light and dark. We seed the light value and record the flip as a gap.
  */
-import type { DtcgDocument } from '../../webtheme/tokens';
-import { extendTokens } from '../../webtheme/tokens';
-import { defaultTokens } from '../../webtheme/defaultTokens';
-import { deriveSchemeRuntime, type SchemeRuntime } from '../../webtheme/schemes';
+// #1910: the webtheme runtime relocated to fui:webtheme (impl→FUI, per #1282). The DTCG token-model
+// *type* stays WE-owned (the kept `webtheme/contract.ts`); the *runtime* ops come from `@frontierui/webtheme`.
+import type { DtcgDocument } from '../../webtheme/contract';
+import { extendTokens, defaultTokens, deriveSchemeRuntime, type SchemeRuntime } from '@frontierui/webtheme';
 
 /**
  * The upstream shadcn/ui (neutral base) token values, transcribed from its `:root` (light) and `.dark`

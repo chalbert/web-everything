@@ -3,8 +3,8 @@ kind: story
 size: 3
 parent: "1104"
 status: open
-blockedBy: ["2127"]
-humanGate: { kind: deploy, what: "DONE 2026-07-02 for the gated preview: `wrangler deploy` (Workers Static Assets) + secrets set; live at web-everything.nicgilbert.workers.dev. Remaining human step for PUBLIC go-live: point the Squarespace domain's nameservers to Cloudflare + set `workers_dev=false` — gated behind #2127." }
+blockedBy: []
+humanGate: { kind: deploy, what: "DONE 2026-07-02 for the gated preview: `wrangler deploy` (Workers Static Assets) + secrets set + full auto-deploy (cross-repo GitHub Actions); live at web-everything.nicgilbert.workers.dev. Remaining human step for PUBLIC go-live (now UNBLOCKED — #2127 resolved): point the Squarespace domain's nameservers to Cloudflare + set `workers_dev=false`." }
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
 tags: []
@@ -37,8 +37,7 @@ same #1135 one-Cloudflare-substrate intent (KV for phase-3, Access for phase-5 a
 pointing the Squarespace domain at the Worker + `workers_dev=false`. Item stays **open** until public
 go-live lands.
 
-**Go-live gate (ratified #2089 Fork 1(b), 2026-07-02):** `blockedBy: ["2127"]` — the claims-truth audit
-(every externally visible dogfood/maturity claim true of the deployed artifact, adopter deck included) must
-pass before the site goes **public** (domain pointed / URL advertised). The current gated `workers.dev`
-preview — accessible only to the founder, unadvertised — is safe ahead of it; the claim-indexed bar
-governs the public go-live, not this private preview.
+**Go-live gate (ratified #2089 Fork 1(b)) — CLEARED 2026-07-02:** the claims-truth audit **#2127 is now
+resolved**, so this item's `blockedBy` is empty and **public go-live is unblocked**. What remains is the
+human domain step (Squarespace nameservers → Cloudflare + `workers_dev=false`); the gated `workers.dev`
+preview + full auto-deploy are already live. Item stays **open** only until that public go-live lands.

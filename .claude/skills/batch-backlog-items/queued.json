@@ -1,0 +1,4 @@
+{
+  "_doc": "Ready-to-merge (queued) items for the #2138 deferred merge queue (Fork 4). A lane-producing session marks an item here at lane-push (`backlog.mjs queue <NNN>`); the drain clears it at landing (`backlog.mjs unqueue <NNN>`, after the resolve is confirmed reachable on main — a single clear point). `claim` and `release` read this OFFLINE (Rule #105) and refuse a queued item: it is neither re-claimable nor abandoned, just waiting to be drained. No TTL — a durable signal, cleared explicitly by the drain (or `--force`). The lane-push/drain call-sites are wired by the drain command (#2162); this file + the claim/release guards are #2161.",
+  "queued": []
+}

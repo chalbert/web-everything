@@ -2,6 +2,7 @@
 layout: base.njk
 title: Web Everything - Semantics
 ---
+{% from "we-component.njk" import weCard %}
 
 <div class="container">
     <div class="block-header">
@@ -23,7 +24,13 @@ title: Web Everything - Semantics
             {% endfor %}
         </div>
 
-        <div class="section-card fui-card p-0 overflow-hidden">
+        {#- Proof-of-life for the generic SSR card primitive (#2098): the glossary's single section-card is
+            authored via the `weCard` macro instead of a hand-rolled `.section-card fui-card`. The macro emits
+            an inert `<we-card data-we-spec>` placeholder that the `weComponentSSR` build transform batches
+            through the pinned FUI CLI (one subprocess for the page) and splices to the finished SSR
+            `<article class="fui-card">` — byte-identical to the client `<we-card>` CE upgrade, JS-off correct.
+            The `.p-0.overflow-hidden` chrome the prior frame carried moves onto the card via `className`. -#}
+        {%- set _semanticsBody %}
             {% for item in semantics %}
             <div id="term-{{ item.term | slugify }}" class="semantic-item p-6 border-b border-slate-200 scroll-mt-24 target:bg-indigo-50 transition-colors">
                 <div class="flex flex-wrap items-baseline gap-3 mb-2">
@@ -39,6 +46,7 @@ title: Web Everything - Semantics
                 {% endif %}
             </div>
             {% endfor %}
-        </div>
+        {% endset -%}
+        {{ weCard("", _semanticsBody, "", "section-card p-0 overflow-hidden") }}
     </div>
 </div>

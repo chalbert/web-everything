@@ -12,15 +12,19 @@ name = "web-everything"
 main = "worker.js"
 compatibility_date = "2026-06-19"
 
-[assets]
-directory = "./_site"
-binding = "ASSETS"
-# run_worker_first: the gate Worker MUST intercept every request (asset paths included) or content leaks.
-# With this true, worker.js runs first on all requests and calls env.ASSETS.fetch() only after the gate passes.
-run_worker_first = true
+# The gated *.workers.dev preview URL (interim, until the custom domain is pointed).
+# MUST be a TOP-LEVEL key (not under [assets]) or TOML folds it into the assets table and it's ignored.
+workers_dev = true
 
 # Secrets are NOT stored here — set them on the Worker (dashboard or `wrangler secret put`):
 #   GATE_CODE            — the shared phase-1 entry code the splash form checks.
 #   GATE_COOKIE_SECRET   — HMAC key signing the "remember me" cookie.
 #
 # Phase-3 (per-person codes) adds a [[kv_namespaces]] binding here; phase-5 (login) adds Cloudflare Access.
+
+[assets]
+directory = "./_site"
+binding = "ASSETS"
+# run_worker_first: the gate Worker MUST intercept every request (asset paths included) or content leaks.
+# Array form ["/*"] = route ALL paths to the Worker first (the boolean `true` did not intercept in 4.106).
+run_worker_first = ["/*"]

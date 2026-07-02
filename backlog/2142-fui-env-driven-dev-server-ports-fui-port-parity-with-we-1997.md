@@ -1,10 +1,11 @@
 ---
 kind: story
 size: 3
-status: active
+status: resolved
 locus: frontierui
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
 tags: [dev-ports, lanes, infra]
 ---
 

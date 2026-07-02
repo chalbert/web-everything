@@ -1,0 +1,40 @@
+{#-
+  we-component.njk — the generic template-facing card/badge SSR primitive (#2098).
+
+  Two placeholder macros the templates call inline for a ONE-OFF SSR card or badge (the grid shortcodes in
+  `.eleventy.js` cover whole collections; this covers the single inline case). Each macro emits an INERT
+  `<we-card|we-badge data-we-spec='{…}'>` placeholder carrying the declarative spec as a single-quoted JSON
+  attribute — render-from-data per #2007: the macro feeds inert DATA, it does NOT author the card's internal
+  markup. At build time the `weComponentSSR` transform (scripts/lib/component-render-build-hook.cjs →
+  `spliceComponents`) collects EVERY placeholder on the page and batches them through the pinned FUI CLI in
+  ONE subprocess call, splicing each returned SSR fragment in place. The client `<we-card>`/`<we-badge>` CE
+  upgrade (src/_layouts/base.njk) is a pure enhancement over that JS-off-correct SSR baseline.
+
+  The spec JSON is carried in a SINGLE-quoted attribute so its own `"` keys need no escaping; the ONLY
+  character that would break the attribute is a literal `'` (it would close the attr early), so `weSpecAttr`
+  escapes exactly that one (`'`→`&#39;`) — a bare `&` is legal in an attribute value, so it is left intact
+  and no double-escape can occur. The transform's `decodeSpecEntities` reverses `&#39;` before `JSON.parse`.
+  HTML markup passed as `bodyHtml`/`actionsHtml` is coerced to a plain string via `(x ~ "")` — a raw
+  macro-result SafeString (e.g. a nested `weBadge(...)`) would otherwise `| dump` to a `{val,length}` object
+  instead of its text. The body BETWEEN the tags is the JS-off / pre-transform fallback (painted by the
+  `we-card{}` / `we-badge{}` SSR baseline in style.css).
+-#}
+
+{#- Serialize a spec object to JSON and escape only the `'` that would close the single-quoted attribute. -#}
+{%- macro weSpecAttr(spec) -%}{{ spec | dump | replace("'", "&#39;") | safe }}{%- endmacro -%}
+
+{%- macro weBadge(label, tone="neutral") -%}
+{%- set _spec = { "component": "badge", "config": { "label": label ~ "", "tone": tone } } -%}
+<we-badge data-we-spec='{{ weSpecAttr(_spec) }}'>{{ label }}</we-badge>
+{%- endmacro -%}
+
+{#-
+  weCard — a single SSR card. `title` is the header title; `bodyHtml` is the (trusted, template-authored)
+  body markup, fed as one `html` body part; `actionsHtml` is optional trusted header-trailing markup (e.g. a
+  rendered badge); `className` is an optional extra class on the card frame. Only pass trusted markup as
+  `bodyHtml`/`actionsHtml` — it is spliced as HTML, not text.
+-#}
+{%- macro weCard(title, bodyHtml="", actionsHtml="", className="") -%}
+{%- set _spec = { "component": "card", "config": { "title": title ~ "", "actionsHtml": actionsHtml ~ "", "bodyParts": [ { "tag": "div", "html": bodyHtml ~ "" } ], "className": className } } -%}
+<we-card data-we-spec='{{ weSpecAttr(_spec) }}'>{{ bodyHtml | safe }}</we-card>
+{%- endmacro -%}

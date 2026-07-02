@@ -30,28 +30,60 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Sibling layout under $GITHUB_WORKSPACE so WE's `../frontierui` resolves — both the vitest/vite
+      # `@frontierui/*` alias (dev/test-time; `we:vitest.config.ts` → `../frontierui/plugs`) AND the pinned
+      # component-render CLI the gate/build call. #2165 (single-repo CI has neither the sibling nor a
+      # published `@frontierui/*` package), mirroring the #1137 deploy.yml workaround:
+      #   $GITHUB_WORKSPACE/web-everything  (this repo)
+      #   $GITHUB_WORKSPACE/frontierui      (the sibling)
+      - name: Checkout WE
+        uses: actions/checkout@v4
+        with:
+          path: web-everything
+      - name: Checkout FUI (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: chalbert/frontierui
+          token: ${{ secrets.FUI_READ_TOKEN }}
+          path: frontierui
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            web-everything/package-lock.json
+            frontierui/package-lock.json
+
+      # FUI first (ratified #1946/#2016 ordering): install its deps (the `@frontierui/*` alias resolves to
+      # sibling source that imports them) + build the pinned component-render CLI the gate/build call.
+      - name: Install + build FUI tools
+        working-directory: frontierui
+        run: |
+          npm ci
+          npm run build:tools
 
       - name: Install
+        working-directory: web-everything
         run: npm ci
 
       - name: Unit suite + coverage (80% bar, #2082)
+        working-directory: web-everything
         run: npm run test:coverage
 
       - name: Repo health gate
+        working-directory: web-everything
         run: npm run check:standards
 
       # Deterministic Playwright interaction lane (#2070): drives the client-side backlog-table behaviour
       # over a fixed fixture page served by tests/interaction/serve.mjs. WE_INTERACTION_ONLY skips the app
       # dev-server webServer entry (see playwright.config.ts) so no build/live-data is needed.
       - name: Install Playwright chromium
+        working-directory: web-everything
         run: npx playwright install --with-deps chromium
 
       - name: Interaction lane
+        working-directory: web-everything
         run: npm run test:interaction
         env:
           WE_INTERACTION_ONLY: "1"

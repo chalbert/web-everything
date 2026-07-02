@@ -1,0 +1,94 @@
+<h3>The Question</h3>
+<p>
+    Backlog <a href="/backlog/2155-npm-scope-naming-one-scope-per-audience-differentiate-produc/">#2155</a>:
+    six npm orgs are registered for the constellation (<code>@frontier-ui</code>, <code>@frontierui</code>,
+    <code>@plateauapp</code>, <code>@plateaudev</code>, <code>@plateaujs</code>, <code>@webeverything</code>).
+    Before the first Frontier UI / Plateau package publishes, how should scopes map to the constellation
+    (WE zero-implementation standard &rarr; Frontier UI implementation &rarr; Plateau product) so the naming
+    is a cite-able rule rather than an ad-hoc call per package? The pull is a new org per product; the
+    counter-principle is that an npm org is heavyweight while a package <em>name</em> already differentiates
+    products.
+</p>
+
+<h3>Recommendation (to ratify in #2155)</h3>
+<ol>
+    <li><strong>Canonical FUI scope = <code>@frontierui</code></strong> (no hyphen) — it is the spelling all
+        14 in-tree package names already use; <code>@frontier-ui</code> stays a defensive hold that publishes
+        nothing.</li>
+    <li><strong>One live Plateau scope, <code>@plateaujs</code></strong> — products differentiate by package
+        name (<code>@plateaujs/compliance-suite</code>, siblings); internal packages, if ever npm-published,
+        ride the same scope with <code>--access restricted</code>. <code>@plateaudev</code> and
+        <code>@plateauapp</code> are defensive holds; <code>@plateaudev</code> re-opens only for a genuine
+        <code>@lit-labs</code>-style distinct <em>publish-policy</em> channel, never for privacy.</li>
+    <li><strong>Restricted-until-an-explicit-go</strong> for impl/product scopes (<code>@frontierui/*</code>,
+        <code>@plateaujs/*</code>); <strong>public + provenance for the <code>@webeverything</code> standard
+        surface</strong> (already decided on #907). "Go" is a per-package-set event — the first external
+        consumer who cannot reasonably hold a read token — not one launch date.</li>
+</ol>
+
+<h3>Finding 1 — the ecosystems split scopes by public identity or support policy, never by privacy</h3>
+<table>
+    <thead><tr><th>Ecosystem</th><th>Scope shape</th><th>What the split encodes</th></tr></thead>
+    <tbody>
+        <tr><td><code>@types</code> (DefinitelyTyped)</td><td>one scope, thousands of packages</td>
+            <td>scope = audience/purpose, package name = product — the canonical shape</td></tr>
+        <tr><td><code>@angular</code> vs <code>@angular-devkit</code> / <code>@schematics</code></td>
+            <td>multi-scope, all public</td>
+            <td>product-line split (framework consumers vs build tooling); <code>-devkit</code> is
+                <em>public</em> — "dev" does not mean internal</td></tr>
+        <tr><td><code>@vue</code> vs <code>@vitejs</code></td><td>scope per project</td>
+            <td>a distinct public product identity earns a scope; Vue's own internals
+                (<code>@vue/compiler-sfc</code>) stay in the consumer scope</td></tr>
+        <tr><td><code>@lit</code> vs <code>@lit-labs</code></td><td>scope per support policy</td>
+            <td>stability channel; graduation = deliberate republish under <code>@lit</code></td></tr>
+        <tr><td><code>@web</code> (Modern Web), <code>@open-wc</code></td><td>one scope, many tools</td>
+            <td>one umbrella scope; products by name (<code>@web/dev-server</code>,
+                <code>@web/test-runner</code>)</td></tr>
+        <tr><td><code>@astrojs</code></td><td>unscoped flagship + one integrations scope</td>
+            <td>the scope is the project's extension namespace</td></tr>
+        <tr><td><code>@shoelace-style</code> &rarr; Web Awesome</td><td>forced scope migration</td>
+            <td>the lock-in evidence: a brand rename froze the old scope and forced a full republish +
+                prefix migration (<code>sl-</code> &rarr; <code>wa-</code>)</td></tr>
+    </tbody>
+</table>
+<p>
+    No surveyed ecosystem holds a separate scope for private/internal packages — companies keep restricted
+    packages inside the public org, because npm access control is <strong>per package, not per scope</strong>.
+    A second scope is earned by (i) a distinct public product identity, (ii) a support/stability policy
+    channel, or (iii) a public tooling product-line.
+</p>
+
+<h3>Finding 2 — npm mechanics: scopes are near-permanent, access posture is asymmetric</h3>
+<ul>
+    <li>A scope <em>is</em> an org (or user) name; holding the org is the only squatting defense. All six
+        constellation orgs were probed (registry org endpoint, 2026-07-02) and exist with zero packages;
+        confirming <em>ownership</em> authoritatively requires the human's npm account.</li>
+    <li><a href="https://docs.npmjs.com/renaming-an-organization">npm has no scope rename</a> — the official
+        path is "create a new org, republish every package, ask support to unpublish the old". A scope choice
+        is effectively permanent once anything depends on it.</li>
+    <li><code>--access restricted &rarr; public</code> is a one-flag flip; public &rarr; unpublished is fenced
+        by npm's unpublish policy. The reversible posture is the safe pre-launch default.</li>
+    <li>Provenance requires a public package; restricted packages need the org's paid plan and distribute
+        read tokens to every consumer/CI.</li>
+</ul>
+
+<h3>Finding 3 — in-repo reality: the names are already chosen by the code</h3>
+<p>
+    WE publishes four <code>@webeverything/*</code> standard artifacts (contracts, capability-manifest,
+    webcases, validation-generation) — types/data only, per the constellation-placement statute; the 11ty
+    website app (<code>web-everything</code> root package) is a deployed product surface that never publishes
+    to the standard scope. FUI holds 14 <code>@frontierui/*</code> packages and zero hyphenated
+    <code>@frontier-ui/*</code> names. Plateau holds <em>no</em> npm-publishable package today — the app
+    deploys, the IDE bridge ships to the VS Code marketplace — so the Plateau scope map is genuinely
+    greenfield and the "reserve structure for real families" bias applies to <code>@plateaudev</code>.
+</p>
+
+<h3>Cross-references</h3>
+<p>
+    Decision item <a href="/backlog/2155-npm-scope-naming-one-scope-per-audience-differentiate-produc/">#2155</a>;
+    first publish <a href="/backlog/907-first-real-publish-of-webeverything-contracts-migrate-a-cons/">#907</a>;
+    pilot consumption channel
+    <a href="/backlog/2128-pilot-consumption-channel-publish-the-pilot-scoped-artifact-/">#2128</a>;
+    OIDC trusted publishing
+    <a href="/backlog/2154-cut-webeverything-contracts-publishing-over-to-oidc-trusted/">#2154</a>.
+</p>

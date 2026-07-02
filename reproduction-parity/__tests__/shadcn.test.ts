@@ -6,7 +6,8 @@
  * parity claim.
  */
 import { describe, it, expect } from 'vitest';
-import { flattenTokens, resolveTokens } from '../../webtheme/tokens';
+// #1910: webtheme runtime relocated to fui:webtheme (impl→FUI, per #1282) — resolve via the alias.
+import { flattenTokens, resolveTokens } from '@frontierui/webtheme';
 import { SHADCN_TOKENS, shadcnTheme, shadcnTokens, buildShadcnScheme } from '../shadcn/theme';
 import {
   SHADCN_COMPONENTS,
