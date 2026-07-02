@@ -1,0 +1,39 @@
+name: CI
+
+# Runs the unit suite + repo health gate on every push to main (#2080). Closes the no-CI gap: the
+# 2000+ vitest tests and check:standards previously ran only when an agent remembered to run them
+# locally — origin now verifies every push (push-if-green publishes main, this re-checks it on GitHub).
+#
+# Scope: the fast deterministic lanes only (unit suite ~10s + gate ~3s). Playwright lanes
+# (visual/smoke/interaction) stay local/on-demand — tracked separately (#2070).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Unit suite
+        run: npm run test:unit
+
+      - name: Repo health gate
+        run: npm run check:standards
