@@ -40,6 +40,7 @@
     "check:statute": "node scripts/check-statute.mjs",
     "check:backlog-workflow": "node scripts/check-backlog-workflow.mjs",
     "check:memory": "node scripts/check-memory.mjs",
+    "check:memory-freshness": "node scripts/check-memory-freshness.mjs",
     "reflect": "node scripts/memory-reflect.mjs",
     "check:item": "node scripts/check-backlog-item.mjs",
     "check:app-conformance": "node scripts/check-app-conformance.mjs",

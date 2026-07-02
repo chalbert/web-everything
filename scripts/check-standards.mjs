@@ -1208,6 +1208,21 @@ try {
   err(`Statute-layer integrity check failed: ${e.message}`);
 }
 
+// ── 9a′. Agent-memory freshness (#2087) ──
+// The hand-curated leaves under .claude/agent-memory/ carry no freshness guarantee: a leaf can cite a
+// decision the project has since ruled the other way, or a statute anchor renamed out from under it, and
+// an agent applies the stale hook silently. This folds the freshness audit (dangling `#NNNN`, cite to an
+// unsettled `kind: decision`, orphaned `docs/agent/*.md#anchor`) into the everyday gate. WARNINGS only —
+// a curation nudge, never build-breaking (a leaf may deliberately cite an open decision). Standalone:
+// `npm run check:memory-freshness`.
+try {
+  const { runMemoryFreshnessCheck } = require('./lib/memory-freshness.cjs');
+  const { warnings: fw } = runMemoryFreshnessCheck();
+  for (const w of fw) warn(w.message, w.descriptor);
+} catch (e) {
+  warn(`Agent-memory freshness audit failed: ${e.message}`);
+}
+
 // ── 9b. Module-resolution exports-lock (#274/#271) ──
 // Gather every `@frontierui/*` (locked-scope) entry from the project's SHIPPED native resolution
 // manifests — vite `resolve.alias` + every `<script type="importmap">` in the served catalog pages
