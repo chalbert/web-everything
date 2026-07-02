@@ -3,6 +3,7 @@ kind: story
 size: 3
 parent: "1104"
 status: open
+blockedBy: ["2127"]
 humanGate: { kind: deploy, what: "Run the credentialed `wrangler pages deploy _site` + `wrangler pages secret put GATE_CODE / GATE_COOKIE_SECRET` from a Cloudflare-authenticated session (runbook: we:functions/README.md) — outside the automated commit-only lane (never-push)." }
 dateOpened: "2026-06-19"
 dateStarted: "2026-06-20"
@@ -22,3 +23,7 @@ The committed, **credential-free half** is built per the #1135 ratification (Clo
 - `we:functions/README.md` — the deploy runbook.
 
 **Residual (carried, NOT done in this lane):** the credentialed `wrangler pages deploy _site` + `wrangler pages secret put GATE_CODE / GATE_COOKIE_SECRET`. This needs a Cloudflare-authenticated session and is outside a commit-only automated branch (repo policy is never-push). Run the runbook in `we:functions/README.md` from a credentialed session to stand the gated site up live (the keystone state). Item stays **open** until that push lands.
+
+**Pre-deploy gate (ratified #2089 Fork 1(b), 2026-07-02):** `blockedBy: ["2127"]` — the claims-truth audit
+(every externally visible dogfood/maturity claim true of the deployed artifact, adopter deck included) must
+pass before the deploy goes live. The staged evidence ladder's bar is claim-indexed, not inventory-indexed.

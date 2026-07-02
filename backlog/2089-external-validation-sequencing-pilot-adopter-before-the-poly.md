@@ -1,22 +1,33 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
+graduatedTo: 2129
 tags: [sequencing, external-validation, pilot-adopter, polyglot, dogfood, gated-deploy, governance]
 relatedReport: reports/2026-07-02-external-validation-sequencing.md
 preparedDate: "2026-07-02"
+codifiedIn: "docs/agent/platform-decisions.md#forward-target-start-gate"
 ---
 
 # External-validation sequencing: pilot adopter before the polyglot widening
 
-Prepared: the 2026-07-01 external review's sequencing finding, decomposed against the **2026-07-02 tree** (two
-of the review's premises moved the same day it ran) and grounded in a prior-art survey of how standards bodies
-and platform projects gate scope widening on independent evidence — published as the
+**RATIFIED 2026-07-02 — all three defaults confirmed, with two ratify-turn amendments to Gate A's criteria**
+(consumption-channel prerequisite + generated-artifact leg pinned to existing targets; see the ratify-turn
+skeptic record under Gate A). **Ruling:** Gate A GO (pilot story #2129, channel #2128); Fork 1(b) staged
+evidence ladder (claims-truth audit #2127 gates #1137; ungated-public stage #2130 `blockedBy` #867); Fork 2(a)
+hard per-target evidence-citing start-gate, codified at
+[we:docs/agent/platform-decisions.md#forward-target-start-gate](docs/agent/platform-decisions.md) (#1735
+exempt; enforcement follow-up #2131).
+
+Originally prepared: the 2026-07-01 external review's sequencing finding, decomposed against the **2026-07-02
+tree** (two of the review's premises moved the same day it ran) and grounded in a prior-art survey of how
+standards bodies and platform projects gate scope widening on independent evidence — published as the
 [/research/external-validation-sequencing](/research/external-validation-sequencing/) topic (session report via
 `relatedReport`). The item decomposes into **one validation-gate (Gate A — commit to a pilot adopter, with
 concrete success criteria) and two forks (Fork 1 — the order's gate DAG; Fork 2 — hard vs advisory polyglot
-gate)**, each with a bold recommended default, each skeptic-attacked at prep.
+gate)**, each with a bold recommended default, each skeptic-attacked at prep and re-attacked at ratification.
 
 ## Grounding digest — what is true on disk (2026-07-02)
 
@@ -26,7 +37,8 @@ gate)**, each with a bold recommended default, each skeptic-attacked at prep.
 - **Dogfood is real-but-partial, not aspirational:** the SSR keystone #2016 resolved with live code
   (we:.eleventy.js:280 → we:scripts/lib/component-render-build-hook.cjs;
   fui:blocks/renderers/component-render/buildHarness.ts), chrome migrated (#865/#864 resolved), home grid SSR'd
-  (#2019 resolved). Open: #2018/#2020/#2021 (SSR surfaces), #866/#867 (page-UI sweep + ratchet); epic #777 open.
+  (#2019 resolved), page-UI sweep #866 resolved (2026-07-02). Open: #2018/#2020/#2021 (SSR surfaces), #867
+  (ratchet, now unblocked); epic #777 open.
 - **Parity keystone shipped, zero targets measured:** #2017 resolved (fui:plugs/webtheme/manifestLoader.ts);
   #1243 superseded-as-stub by open #2022; #2022–#2025 all open.
 - **Gated deploy is technology-ready, human-gated:** #1137 open with `humanGate: deploy`
@@ -105,11 +117,22 @@ that supplies the missing input.
 - **One** external team (not an open beta), building a **production-bound** JS/TS surface.
 - **Scope:** adopts ≥3 FUI blocks + ≥2 WE intents on that surface, consuming only published artifacts
   (docs site + packages), no constellation-insider support beyond what the docs provide (that *is* the test).
-- **Generated-artifact leg (required for the Fork 2 un-gate):** the pilot consumes **≥1 forward-generated
-  artifact** — a gen-wrapper framework wrapper (fui:tools/gen-wrapper) or a MaaS-served module — so the retro
-  produces evidence about the **forward-generation contract surface** (serve-path IR, generated idioms), the
-  exact thing Fork 2 claims needs an external check. A pilot that only touches blocks + intents un-gates
-  nothing on the polyglot axis.
+- **Consumption-channel prerequisite (ratify-turn skeptic find):** "published artifacts" is satisfiable
+  through **no filed path today** — `@frontierui/blocks` is `"private": true` (fui:blocks/package.json), the
+  first real npm publish (#907) covers `@webeverything/contracts` only and is itself human-gated, gen-wrapper
+  output is served only by the localhost workbench, and MaaS live-serve is parked (#1625). So the pilot story
+  is `blockedBy` a named **pilot consumption channel** story (spawned at ratification, itself `blockedBy` #907):
+  publish/deliver the pilot-scoped artifact set — the adopted FUI blocks/plugs plus ≥1 generated-wrapper
+  artifact — consumable by an external team without insider support.
+- **Generated-artifact leg (required for the Fork 2 un-gate), pinned to existing targets:** the pilot consumes
+  **≥1 forward-generated artifact** — a gen-wrapper framework wrapper (fui:tools/gen-wrapper) for an **existing
+  emit target (react or vue today)**, delivered as generated source through the consumption channel — so the
+  retro produces evidence about the **forward-generation contract surface** (generated idioms; serve-path IR if
+  MaaS matures first), the exact thing Fork 2 claims needs an external check. A pilot that only touches
+  blocks + intents un-gates nothing on the polyglot axis. **Recruiting a stack that would require a *new*
+  target (Svelte/Angular/etc.) is out of pilot scope** — a new target is exactly what Fork 2(a) gates on this
+  pilot, so leaving the leg unpinned would let the recruiter walk into a self-deadlock (pilot needs a target
+  the pilot itself gates).
 - **Window:** 6 weeks from first integration commit.
 - **Evidence thresholds:** ≥5 filed issues **or** one written gap report; plus a **written retro** with an
   explicit continue/churn verdict and reasons, including a section on the generated-artifact leg.
@@ -127,6 +150,15 @@ alternative* — that alternative is now explicitly refuted in-section rather th
 demoted: the "#1104 ruling" citation → an in-flight plan (an open epic is scope, not statute — the
 verify-ratified-citation rule). The criteria values (6 weeks, ≥5 issues) were attacked as arbitrary and
 survive as explicit ratifier-overridable defaults; what is structural is that a named retro artifact exists.
+
+**Ratify-turn skeptic (2026-07-02, second pass against the live tree):** REFUTED-THEN-AMENDED — two new
+attacks landed on this gate and are folded in above: (1) *supply-chain hole* — the generated-artifact leg was
+added at prep without re-checking its consumption channel; no filed path made "published artifacts"
+satisfiable (fixed: the consumption-channel story + `blockedBy` edge). (2) *latent self-deadlock* — an
+unpinned leg lets recruitment select a stack requiring a new emit target, which Fork 2(a) gates on this very
+pilot (fixed: leg pinned to existing targets, new-target stacks out of pilot scope). Re-attacked after
+amendment: the gate DAG is linear (audit → deploy #1137 → pilot; channel ← #907; polyglot ← pilot) — no cycle,
+both humanGates are real prerequisites honestly encoded. SURVIVES.
 
 ## Fork 1 — the validation order: which gate DAG
 
@@ -239,15 +271,15 @@ later cites *current* evidence, not a stale first retro).
 other item's frontmatter):
 
 ```yaml
-# 1) Gate-A pilot-evidence item (spawned at ratification), say #2xxx — a real, resolvable DAG node:
+# 1) Gate-A pilot-evidence item — spawned as #2129, a real, resolvable DAG node:
 kind: story
 status: open
-blockedBy: ["1137"]        # Fork 1(b): recruitment needs the live gated deploy
+blockedBy: ["1137", "2128"]  # Fork 1(b): recruitment needs the live gated deploy + the consumption channel
 # body: the Gate-A success criteria + the retro artifact as its acceptance
 
 # 2) every NEW polyglot-widening item (per the predicate), at scaffold time (e.g. the Java target):
 kind: story
-blockedBy: ["2xxx"]        # bootstrap: the first adopter evidence gates the next target's start
+blockedBy: ["2129"]        # bootstrap: the first adopter evidence gates the next target's start
 # later targets: the codified rule requires citing CURRENT adopter evidence, fork-(c)-style
 # 3) #1735 stays under its own ratified empirical trigger (#forward-emit-dedicated-ir) — NO extra edge
 ```
@@ -329,10 +361,13 @@ in (a) with the tag-keyed gate rule filed as a follow-up.
 
 - Lineage: filed by the external-consultant-review program run 1 (2026-07-01), finding 2. Siblings filed the
   same run: #2080 (CI), #2082–#2087 (enforcement gaps), #2088 (tiering).
-- At ratification this item graduates to: the Gate-A pilot story (`blockedBy: ["1137"]`, criteria incl. the
-  generated-artifact leg), the **claims-truth audit** pre-deploy node (site + adopter deck #1214/#1360), the
-  ungated-public stage edge under #1104 (`blockedBy` #867 + audit re-run), the Fork 2 edges on new
-  polyglot-widening items (per the predicate; #1735 exempt under `#forward-emit-dedicated-ir`), a follow-up
-  build for the tag-keyed `check:standards` edge-presence rule, and a `codifiedIn` anchor for the per-target
-  current-evidence start-gate rule (sibling of `#forward-generation-adapters`, citing
-  `#forward-emit-dedicated-ir`).
+- Graduated at ratification (2026-07-02) to: **#2129** the Gate-A pilot story (`blockedBy: ["1137","2128"]`,
+  criteria incl. the pinned generated-artifact leg), **#2128** the pilot consumption channel (`blockedBy:
+  ["907"]` — the ratify-turn skeptic's supply-chain fix), **#2127** the claims-truth audit pre-deploy node
+  (site + adopter deck #1214/#1360; #1137 now `blockedBy: ["2127"]`), **#2130** the ungated-public stage under
+  #1104 (`blockedBy: ["867"]` + audit re-run), **#2131** the tag-keyed `check:standards` edge-presence rule
+  (Fork 2's enforcement follow-up), and the codified statute anchor
+  [we:docs/agent/platform-decisions.md#forward-target-start-gate](docs/agent/platform-decisions.md) (sibling
+  of `#forward-generation-adapters`, citing `#forward-emit-dedicated-ir`; #1735 exempt). Future
+  polyglot-widening items take `blockedBy: ["2129"]` (bootstrap) then current-evidence citations per the
+  anchor.

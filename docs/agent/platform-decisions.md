@@ -1101,6 +1101,30 @@ guess"). Tracked as the parked residual.
 ([report](../../reports/2026-06-16-forward-component-emit-substrate.md)). Applies
 [bias-toward-separation](#bias-toward-separation) and synthesizes [forward-generation-adapters](#forward-generation-adapters).
 
+#### New-target start gate: every new generation target/form starts by citing current external-adopter evidence {#forward-target-start-gate}
+
+The **start-gate sibling** of the release condition above ("the conformance suite gates every target's
+*release*"): **every *new* polyglot-widening item — by predicate, not item list: an item that adds a new
+generation target or emit form (a further language target, a new wrapper form, any new forward-generation
+scope) — may not start until it cites *current* external-adopter evidence** about the forward-generation
+contract surface. Encoded as a hard `blockedBy` edge at scaffold time; the bootstrap instance is the Gate-A
+pilot retro (#2129 — one criteria-bound external pilot whose required generated-artifact leg touches an
+existing emit target), and later targets cite evidence *current at their filing*, never the stale first retro.
+Rationale: the serve-path IR and target idioms have never met a consumer who didn't write them — widening
+without external evidence risks standardizing the wrong contract; every surveyed graduation process (TC39
+Stage 4, W3C CR exit, IETF RFC 6410, Kubernetes GA, Rust stabilization) makes independent experience a hard
+input, encoded structurally, never as a memo. **Out of the gate by the same predicate:** maintenance of
+shipped artifacts, and work that consumes existing emit forms without adding a target/form (the workbench
+live-test family). **Exempt:** the emit-purpose IR widening (#1735) — it is governed by the ratified
+empirical trigger in [forward-emit-dedicated-ir](#forward-emit-dedicated-ir) ("not a backlog edge"); the two
+gates agree in kind (both adoption-evidence triggers) and compose by scope (this edge governs new
+targets/forms; that trigger governs the IR widening). The gate is **prospective** — it governs the next
+widening, never retracts shipped increments.
+
+**Lineage:** #2089 (ratified 2026-07-02 — external-validation sequencing, from the 2026-07-01 external-review
+finding 2). Composes with [forward-generation-adapters](#forward-generation-adapters) (start condition beside
+its release condition) and [forward-emit-dedicated-ir](#forward-emit-dedicated-ir) (exemption above).
+
 ### Standard consumability: author to the standard, ship removable agnostic adapters {#standard-consumability}
 
 **How a WE standard reaches consumers with zero lock-in.** A standard is a *guarantee*; making it work today
