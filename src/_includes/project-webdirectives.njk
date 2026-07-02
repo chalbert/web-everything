@@ -366,8 +366,8 @@ declare const customComments: CustomCommentRegistry;
                     <br><span>Three-branch async region: <code>pending</code>/<code>then</code>/<code>catch</code> slot templates stamped one-at-a-time by an injected promise's state. Resolved value/error surface via <code>data-bind</code>; <code>min-pending</code> sets a min-display floor for the pending branch.</span>
                 </li>
                 <li>
-                    <code>defer</code>
-                    <br><span>Defer stamping of content until a trigger (<code>on = idle | visible | interaction | hover | media:(&hellip;) | timer:5s</code>); optional <code>prefetch</code>. Placeholder + content branch templates.</span>
+                    <code>&lt;template type="defer"&gt;</code>
+                    <br><span>Trigger-gated two-branch region: <code>placeholder</code>/<code>content</code> slot templates stamped one-at-a-time — placeholder immediately, content when the <code>on</code> trigger fires (<code>on = idle | visible | interaction | hover | media:(&hellip;) | timer:5s</code>). Optional <code>prefetch</code> warms the content branch ahead of the trigger.</span>
                 </li>
             </ul>
         </div>
