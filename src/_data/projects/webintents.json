@@ -2,6 +2,7 @@
   "id": "webintents",
   "name": "Web Intents",
   "description": "Declarative profiles for application-wide UX/UI behavior (e.g., density, motion, interaction models) that components automatically adhere to.",
+  "summary": "Declarative profiles for app-wide UX behavior (density, motion) that components adhere to.",
   "status": "draft",
   "category": "ecosystem",
   "tier": "core",

@@ -2,6 +2,7 @@
   "id": "webcontexts",
   "name": "Web Contexts",
   "description": "Protocol enabling hierarchical data flow and service provision across component trees, effectively solving prop-drilling natively.",
+  "summary": "Hierarchical data flow across component trees — solving prop-drilling natively.",
   "status": "poc",
   "category": "standard",
   "tier": "contextual",

@@ -2,6 +2,7 @@
   "id": "webreporting",
   "name": "Web Reporting",
   "description": "Standard for a <strong>unified report substrate</strong> &mdash; one normalized model (sources, sections, findings, severities, scores, series) every producer targets so reports from <em>different sources</em> render through the <em>same</em> UI, with <strong>adapters</strong> that ingest (and emit) common report formats instead of bespoke viewers. Defines the <strong>report-model Protocol</strong>: multi-vendor report-format interop (SARIF, JUnit, coverage, SonarQube all exchange the same kind of artifact) is a genuine, escapable, impl-swappable contract &mdash; the normalized schema <em>is</em> the lock, and ingest/export adapters bridge each foreign format bottom-up into the pivot. A Project that owns one Protocol; an intent would be UX-only and wrong for a data-interchange contract. Distinct from a <em>catalog</em> page (which renders a registry): reporting renders <strong>findings/results over time</strong>. The output layer the conformance tooling, a future <a href=\"/projects/webcompliance/\">Web Compliance</a> project, and external sources all render through.",
+  "summary": "One normalized report model every producer targets, with adapters for common formats.",
   "status": "poc",
   "category": "standard",
   "tier": "exploratory",

@@ -2,6 +2,7 @@
   "id": "webtraits",
   "name": "Web Traits",
   "description": "Standard for creating granular, auto-loadable features that bridge the gap between easy developer experience and optimal performance.",
+  "summary": "Granular, auto-loadable features bridging developer experience and optimal performance.",
   "status": "poc",
   "category": "utility",
   "tier": "contextual",

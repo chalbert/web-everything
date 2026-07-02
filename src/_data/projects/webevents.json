@@ -2,6 +2,7 @@
   "id": "webevents",
   "name": "Web Events",
   "description": "Scoped event discrimination for cross-team DOM events. Extends <code>addEventListener</code> with provider-based <code>instanceof</code> validation.",
+  "summary": "Scoped event discrimination for cross-team DOM events, with provider-based validation.",
   "status": "poc",
   "category": "standard",
   "tier": "exploratory",

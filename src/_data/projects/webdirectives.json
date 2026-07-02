@@ -2,6 +2,7 @@
   "id": "webdirectives",
   "name": "Web Directives",
   "description": "Structural directives (loops, conditionals), comment markers, and template extensions for powerful DOM logic.",
+  "summary": "Structural directives (loops, conditionals) and template extensions for DOM logic.",
   "status": "poc",
   "category": "standard",
   "tier": "contextual",

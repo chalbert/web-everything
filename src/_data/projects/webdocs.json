@@ -2,6 +2,7 @@
   "id": "webdocs",
   "name": "Web Docs",
   "description": "The meta-standard that orchestrates Web Manifests and Web Cases to generate comprehensive documentation sites.",
+  "summary": "Orchestrates Web Manifests and Web Cases to generate documentation sites.",
   "status": "poc",
   "category": "utility",
   "tier": "contextual",

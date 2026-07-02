@@ -222,6 +222,18 @@ function projectIconHtml(project) {
 }
 
 /**
+ * The card-header variant of the project icon: decorative (the sibling title already names the project,
+ * so `alt=""` and the wrapping span is `aria-hidden`) and sized down for the header row.
+ */
+function projectHeaderIconHtml(project) {
+  if (project && project.isSvg) {
+    const src = escapeAttr(project.icon);
+    return `<img src="${src}" alt="" width="28" height="28">`;
+  }
+  return String(project && project.icon != null ? project.icon : '');
+}
+
+/**
  * Render the home/index project grid to SSR HTML in ONE subprocess batch (#2019, generalizing the
  * #2016 `renderIntentGrid` pattern from the intents catalog to the landing page). Each project becomes a
  * `we-card` SSR tile: the name is the card title, the status is a header-trailing `we-badge` (render-from-
@@ -255,6 +267,11 @@ function renderProjectGrid(projects, { repoRoot, hrefFor, gridClass = 'project-g
   // absorbs the rest of the page into an inert fragment (home rendered only 1 of its 3 grids). So the card
   // shell gets a unique sentinel, and the trusted, already-escaped description is string-spliced in verbatim
   // (bypassing the innerHTML round-trip), exactly as the `| safe` template output did pre-#2019.
+  // The card body shows a SHORT authored `summary` (one plain-text sentence per project, in the
+  // `src/_data/projects/<id>.json` entry), NOT the full `description` — the descriptions run 76→1700+
+  // chars, wildly uneven as tiles; the full prose lives on each project's own `/projects/{id}/` page.
+  // Summary is plain authored text, sentinel-spliced verbatim like the description was (bypassing the
+  // harness innerHTML round-trip); older entries with no summary fall back to the description.
   const descSentinel = (i) => ` PROJECT_DESC_${i} `;
   const cardSpecs = list.map((project, i) => {
     const badgeHtml = badges.get(`project-${i}-badge`) || '';
@@ -262,8 +279,8 @@ function renderProjectGrid(projects, { repoRoot, hrefFor, gridClass = 'project-g
       `<div class="status-meter status-${escapeAttr(project.status)}">`
       + `<span class="status-label">Status: ${escapeAttr(titleCase(project.status))}</span>`
       + `<div class="meter-track"><div class="meter-fill"></div></div></div>`;
+    // The icon moves into the card HEADER (spliced before the title below) instead of leading the body.
     const bodyParts = [
-      { tag: 'div', className: 'project-icon', html: projectIconHtml(project) },
       { tag: 'p', className: 'project-desc', html: descSentinel(i) },
       { tag: 'div', className: 'project-status-row', html: meterHtml },
     ];
@@ -288,9 +305,17 @@ function renderProjectGrid(projects, { repoRoot, hrefFor, gridClass = 'project-g
   // ~24 empty ghosts — invisible in source, only in the rendered DOM). Overlay-link is the valid, backlog-grid
   // pattern; `.project-card:has(> .fui-card)` still matches (the fui-card stays a direct child).
   const wrappers = list.map((project, i) => {
-    // Splice the verbatim (already-escaped) description over its sentinel — never through the harness's
+    // Splice the verbatim summary (fallback: description) over its sentinel — never through the harness's
     // innerHTML round-trip, which would decode pre-escaped `&lt;template&gt;`/`&lt;script&gt;` into live tags (#2168).
-    const cardHtml = (cards.get(`project-${i}-card`) || '').replace(descSentinel(i), String(project.description || ''));
+    const blurb = project.summary || project.description || '';
+    // Splice the icon into the card header, before the title. It's decorative here (the title names the
+    // project), so it carries no accessible name — added as a leading `.project-icon--header` span.
+    const cardHtml = (cards.get(`project-${i}-card`) || '')
+      .replace(descSentinel(i), String(blurb))
+      .replace(
+        '<h3 class="fui-card__title"',
+        `<span class="project-icon--header" aria-hidden="true">${projectHeaderIconHtml(project)}</span><h3 class="fui-card__title"`,
+      );
     const rel = external ? ' target="_blank" rel="noopener"' : '';
     return (
       `<div class="project-card">`
