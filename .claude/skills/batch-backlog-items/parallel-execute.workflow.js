@@ -306,9 +306,41 @@ const INTEGRATE_SCHEMA = {
     conflicted: { type: 'boolean', description: 'true if a real semantic conflict SURVIVED the rebase-retry. NOT set for a conflict the rebase resolved.' },
     gate: { type: 'string', enum: ['green', 'red'], description: 'full gate on the merged tree in THAT repo.' },
     refDeleted: { type: 'boolean', description: 'true if the remote lane/* ref was deleted after a clean land.' },
+    renderCheck: { type: 'string', enum: ['pass', 'fail', 'n/a'], description: '#2000: the cross-origin visual render check on the WE consumer — "pass"/"fail" for a visual-touching WE merge, "n/a" otherwise (non-visual lane, or an impl-repo merge).' },
     notes: { type: 'string' },
   },
 };
+
+// #2000 (#2078 folded in) — repo-qualified visual-touch predicate. A batch lane warrants the render
+// check on the WE consumer when it edits a WE presentation surface (*.njk / *.css / src/_includes/**)
+// OR a FUI theme/token source (frontierui plugs/webtheme/**) — because WE consumes FUI theming
+// cross-origin (#96) and the FUI lane's own gate never paints. This mirrors `isVisualTouch` in
+// scripts/lib/render-check.mjs (the unit-tested source of truth); the workflow sandbox can't import it,
+// so this inline copy must stay in sync (the lib test pins the intended behaviour). Input: the item's
+// repo-qualified changed files ("<repo>:<path>", the ITEM_RESULT_SCHEMA.changedFiles shape), falling
+// back to the probe's predicted touch-set when the lane reported none.
+function isVisualTouchQualified(files) {
+  if (!Array.isArray(files)) return false;
+  return files.some((qualified) => {
+    if (typeof qualified !== 'string') return false;
+    const idx = qualified.indexOf(':');
+    const repo = idx === -1 ? 'we' : qualified.slice(0, idx);
+    const path = idx === -1 ? qualified : qualified.slice(idx + 1);
+    if (repo === 'we') return /\.njk$/.test(path) || /\.css$/.test(path) || /^src\/_includes\//.test(path);
+    if (repo === 'frontierui' || repo === 'fui') return /(^|\/)plugs\/webtheme\//.test(path);
+    return false;
+  });
+}
+// The item's touch-set as repo-qualified paths, preferring what the lane actually changed, falling back
+// to the probe's prediction (predictedFiles are WE-relative → prefix "we:"; extraRepos are repo-relative).
+function qualifiedTouchSet(it, cr) {
+  if (cr && Array.isArray(cr.changedFiles) && cr.changedFiles.length) return cr.changedFiles;
+  const p = it && it.probe;
+  const out = [];
+  if (p && Array.isArray(p.predictedFiles)) for (const f of p.predictedFiles) out.push(`we:${f}`);
+  if (p && Array.isArray(p.extraRepos)) for (const er of p.extraRepos) if (er && Array.isArray(er.files)) for (const f of er.files) out.push(`${er.repo}:${f}`);
+  return out;
+}
 
 // ── Helpers (pure — exercised by the verification harness) ─────────────────────
 // Files are REPO-QUALIFIED ("<repo>:<path>") so disjointness holds across the constellation: the same path in
@@ -783,9 +815,23 @@ if (serialItems.length > 0) {
 // first, WE last). If an impl repo fails to land, STOP that item — do NOT merge WE → the resolve never lands
 // → the item is not falsely resolved (recorded in partialCrossRepo). The concurrent set is pairwise-disjoint
 // (repo-qualified), so within a repo these merge clean; residual conflict risk is only vs the serial lane.
-function integratePrompt(it, repo, ref) {
+function integratePrompt(it, repo, ref, visual) {
   const r = REPOS[repo];
   const where = r.primary ? `the PRIMARY WE checkout (your cwd) on branch main` : `the ${repo} primary checkout (\`cd ${r.path}\`) on branch main`;
+  // #2000: the WE consumer is where the cross-origin `.fui-card` regression paints, and WE merges LAST,
+  // so a landed FUI theme change is already on WE's sibling by now. Join the render check to the WE merge
+  // of a visual-touching item, between the gate and the ref-delete.
+  const renderStep = repo === 'we' && visual
+    ? [
+        `4b. VISUAL LANE (#2000): this item touches a WE presentation surface (*.njk/*.css/_includes) or a FUI`,
+        `   theme source (plugs/webtheme/**), so the WE consumer must render-verify. Run the cross-origin render`,
+        `   check: \`node scripts/dev/render-check.mjs --json\`. It boots its OWN WE docs server on :8130 (NEVER`,
+        `   touch the user's running server) and asserts the dogfooded \`.fui-card\` home tiles render a light`,
+        `   surface. If it exits non-zero (a dark/transparent tile ⇒ a FUI dark-token leak, the #2050/#2019`,
+        `   class), set renderCheck:"fail" AND treat it like a RED gate (set gate:"red"): the merge stands but do`,
+        `   NOT delete the ref, and flag the visual regression in notes. If it passes, set renderCheck:"pass".`,
+      ].join(' ')
+    : null;
   return [
     `In ${where}, integrate parallel batch item #${it.num} from its ${repo} lane ref "${ref}". Steps:`,
     `1. Fetch the ref into THIS checkout: \`git fetch origin --prune "+refs/heads/${ref}:refs/remotes/origin/${ref}"\`.`,
@@ -796,9 +842,10 @@ function integratePrompt(it, repo, ref) {
     `   \`git rebase --abort\`, leave main untouched, report conflicted:true, merged:false — do NOT force.`,
     `4. On a clean merge, run THIS repo's FULL gate \`${r.gate}\` on the merged tree → report gate green/red.`,
     `   If gate RED, the merge stands but flag it (a regression on the assembled tree).`,
-    `5. If merged clean AND gate green, DELETE the remote lane ref: \`git push origin --delete ${ref}\` (delete`,
-    `   of a lane/* ref → allowed by #1934). Set refDeleted:true. NEVER push main.`,
-    `Return { num:"${it.num}", repo:"${repo}", merged, rebased, conflicted, gate, refDeleted, notes }.`,
+    ...(renderStep ? [renderStep] : []),
+    `5. If merged clean AND gate green${renderStep ? ' AND renderCheck passed' : ''}, DELETE the remote lane ref:`,
+    `   \`git push origin --delete ${ref}\` (delete of a lane/* ref → allowed by #1934). Set refDeleted:true. NEVER push main.`,
+    `Return { num:"${it.num}", repo:"${repo}", merged, rebased, conflicted, gate, refDeleted, ${renderStep ? 'renderCheck, ' : ''}notes }.`,
   ].join(' ');
 }
 
@@ -821,9 +868,11 @@ for (let i = 0; i < concurrentResults.length; i++) {
   let stoppedAt = null;
   const landedRepos = [];
   if (canMerge) {
+    const visual = isVisualTouchQualified(qualifiedTouchSet(it, cr)); // #2000: gate the WE merge visually
+    if (visual) log(`  #${it.num} is VISUAL-touching (${refs.map((x) => x.repo).join('+')}) → render-check the WE consumer at its WE merge.`);
     log(`  integrating #${it.num} (${i + 1}/${concurrentResults.length}) across ${refs.map((x) => x.repo).join('+')}, impl-first/WE-last…`);
     for (const { repo, ref } of refs) {
-      const res = await agent(integratePrompt(it, repo, ref), { label: `integrate:#${it.num}:${repo}`, phase: 'Integrate', schema: INTEGRATE_SCHEMA }).catch(() => null);
+      const res = await agent(integratePrompt(it, repo, ref, visual), { label: `integrate:#${it.num}:${repo}`, phase: 'Integrate', schema: INTEGRATE_SCHEMA }).catch(() => null);
       const ok = res && res.merged && !res.conflicted && res.gate !== 'red';
       log(`    ${ok ? '✓' : '✗'} #${it.num} ${repo}: ${res ? (res.merged ? 'merged' : 'NOT merged') + (res.rebased ? ' (rebased)' : '') + ', gate ' + res.gate : 'no result'}`);
       if (ok) { landedRepos.push(repo); if (repo === 'we') weLanded = true; }
