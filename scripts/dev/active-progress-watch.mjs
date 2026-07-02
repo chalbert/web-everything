@@ -42,9 +42,10 @@ const OUT = flag('out', join(ROOT, '_site', 'active-progress.json'));
 const PROJECT_SLUG = ROOT.replace(/[^a-zA-Z0-9]/g, '-');
 const PROJECTS_DIR = join(homedir(), '.claude', 'projects', PROJECT_SLUG);
 
-const TERMINAL = new Set(['completed', 'failed', 'aborted', 'cancelled']);
+const TERMINAL = new Set(['completed', 'failed', 'aborted', 'cancelled', 'killed']);
 const STEP_LIMIT = 10;       // live step-stream depth per session
 const AGENT_STEP_LIMIT = 6;  // per running subagent
+const AGENT_FRESH_MS = 90_000; // a subagent whose transcript changed this recently counts as running
 
 // Short hint for a tool call — the arg that says WHAT it's doing (command / file / query / description).
 function toolHint(input) {
@@ -157,19 +158,101 @@ function digestJournal(journalPath) {
   };
 }
 
+// A backlog num from an agent's FIRST user message (the lane prompt) — the lane item is the first
+// `#NNN` in the task. Hash-anchored so a date/slug (`2026-06-28`) can't false-match. Cached by path
+// (the first message is immutable once written). The infra/worktree lane carries no item and stays
+// unlabelled. Returns null when unreadable / no item num.
+const AGENT_NUM_CACHE = new Map();
+function agentItemNum(p) {
+  if (AGENT_NUM_CACHE.has(p)) return AGENT_NUM_CACHE.get(p);
+  let num = null;
+  try {
+    const text = readFileSync(p, 'utf8');
+    const nl = text.indexOf('\n');
+    const ev = JSON.parse(nl === -1 ? text : text.slice(0, nl));
+    const c = ev && ev.message && ev.message.content;
+    const s = typeof c === 'string' ? c : JSON.stringify(c || '');
+    const m = s.match(/#(\d{2,4})\b/);
+    if (m) num = m[1];
+  } catch { /* unreadable / partial head — leave unlabelled */ }
+  AGENT_NUM_CACHE.set(p, num);
+  return num;
+}
+
+// In-flight workflow runs the harness has NOT journalled yet. The orchestrator writes
+// <session>/workflows/wf_<runId>.json only once it flushes progress (often not until the first agent
+// completes — minutes into a long run), but it streams each subagent's transcript into
+// <session>/subagents/workflows/<runId>/ from the start. So the journal-only scan is blind to a
+// running multi-agent /workflow for many minutes (#1854). Synthesize a PROVISIONAL run from those live
+// transcripts for any runId the journal scan didn't yield: labels/phase live only in the journal and
+// stay thin, but the agents, their backlog item, state, and live step streams are all recoverable.
+// `journalledIds` are the runIds already produced from journals — skip those to avoid double-counting.
+function liveSubagentRuns(journalledIds) {
+  if (!existsSync(PROJECTS_DIR)) return [];
+  const out = [];
+  for (const session of readdirSync(PROJECTS_DIR)) {
+    const base = join(PROJECTS_DIR, session, 'subagents', 'workflows');
+    if (!existsSync(base)) continue;
+    let runIds;
+    try { runIds = readdirSync(base); } catch { continue; }
+    for (const runId of runIds) {
+      if (!/^wf_/.test(runId) || journalledIds.has(runId)) continue;
+      const dir = join(base, runId);
+      let files;
+      try { files = readdirSync(dir).filter((f) => /^agent-.*\.jsonl$/.test(f)); } catch { continue; }
+      if (!files.length) continue;
+      let newest = 0;
+      const agents = files.map((f) => {
+        const p = join(dir, f);
+        let mtimeMs = 0; try { mtimeMs = statSync(p).mtimeMs; } catch { /* gone */ }
+        if (mtimeMs > newest) newest = mtimeMs;
+        const num = agentItemNum(p);
+        const a = {
+          agentId: f.replace(/^agent-/, '').replace(/\.jsonl$/, ''),
+          label: num ? `#${num}` : undefined,
+          state: (Date.now() - mtimeMs) < AGENT_FRESH_MS ? 'running' : 'done',
+          num,
+        };
+        const t = cachedAgentTail(p);
+        if (t.lastLine) a.lastLine = t.lastLine;
+        if (t.steps && t.steps.length) a.steps = t.steps;
+        return a;
+      });
+      // Drop a finished-but-never-journalled run once it goes stale — same window journalled terminal
+      // runs use — so an old completed run's lingering transcripts don't resurrect a phantom card.
+      if ((Date.now() - newest) > RECENT_MS) continue;
+      out.push({
+        kind: 'workflow',
+        id: runId,
+        name: runId,
+        status: agents.some((a) => a.state === 'running') ? 'running' : 'completed',
+        phase: undefined,
+        agentCount: agents.length,
+        agents,
+        updatedAt: new Date(newest).toISOString(),
+        provisional: true, // synthesized from live transcripts; upgrades to the rich card once journalled
+      });
+    }
+  }
+  return out;
+}
+
 // All workflow runs across the project's sessions, newest journal first.
 function workflowRuns() {
   if (!existsSync(PROJECTS_DIR)) return [];
   const out = [];
+  const journalledIds = new Set();
   for (const session of readdirSync(PROJECTS_DIR)) {
     const wfDir = join(PROJECTS_DIR, session, 'workflows');
     if (!existsSync(wfDir)) continue;
     for (const f of readdirSync(wfDir)) {
       if (!/^wf_.*\.json$/.test(f)) continue;
       const run = digestJournal(join(wfDir, f));
-      if (run) out.push(run);
+      if (run) { out.push(run); journalledIds.add(run.id); }
     }
   }
+  // Fallback: in-flight runs the harness hasn't written a journal for yet.
+  for (const r of liveSubagentRuns(journalledIds)) out.push(r);
   return out.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
 

@@ -121,7 +121,7 @@
     return items.concat(out);
   }
 
-  var TERMINAL = { completed: 1, failed: 1, aborted: 1, cancelled: 1 };
+  var TERMINAL = { completed: 1, failed: 1, aborted: 1, cancelled: 1, killed: 1 };
 
   var stateColor = { done: '#166534', running: '#1e40af', failed: '#991b1b', pending: '#475569' };
 
@@ -325,16 +325,21 @@
     lastData = data;
     applyDigests(data && data.digests);
     renderBatches(data);
+    var TERMINAL_MAX_AGE_MS = 10 * 60 * 1000; // mirror the watcher's --recent window: a terminal run lingers only briefly, then drops
+    var now = Date.now();
     var runs = (data && Array.isArray(data.runs) ? data.runs : [])
       .filter(function (r) { return r && r.kind === 'workflow'; })
+      .filter(function (r) {  // drop a stale terminal run even if the watcher kept emitting it (e.g. a 'killed' status its terminal set missed)
+        if (!TERMINAL[r.status]) return true;
+        var t = Date.parse(r.updatedAt || '');
+        return !t || (now - t) <= TERMINAL_MAX_AGE_MS;
+      })
       .sort(function (a, b) {  // running first, then most-recently-updated
         var at = TERMINAL[a.status] ? 1 : 0, bt = TERMINAL[b.status] ? 1 : 0;
         return at - bt || String(b.updatedAt).localeCompare(String(a.updatedAt));
       });
     // A run is "live" (drives the tab pulse + the workflows vital) while not yet terminal.
-    var liveN = runs.filter(function (r) {
-      return ['completed', 'failed', 'aborted', 'cancelled'].indexOf(r.status) === -1;
-    }).length;
+    var liveN = runs.filter(function (r) { return !TERMINAL[r.status]; }).length;
     setTabLive(liveN);
     if (vitalWf) { vitalWf.hidden = !liveN; if (vitalWfN) vitalWfN.textContent = liveN; }
     lastRuns = runs;
