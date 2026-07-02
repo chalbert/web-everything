@@ -1,0 +1,142 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  <a href="/backlog/2074-customnoderegistry-node-kind-extensibility-standard/">#2074</a> ratified
+  <code>customNodes</code> — delimiter-keyed node recipes with <code>static open</code> as the registration key, a
+  normative <code>DelimiterCollisionError</code>, and a mandatory raw/verbatim escape hatch — but deferred to
+  <a href="/backlog/2112-reserved-delimiter-family-policy-which-opens-are-platform-re/">#2112</a>:
+  <strong>which opens are platform-reserved vs userland-legal</strong> (the would-be Custom-Elements hyphen-rule
+  analogue for the delimiter keyspace), and <strong>the exact escape-hatch / override grammar</strong>.
+</p>
+
+<h2>Finding — three partition techniques, keyed to the namespace's nature</h2>
+<p>Platforms do not have one reservation pattern; they have three, and which one applies is decided by whether the
+namespace is <em>host-shared and registration-less</em> or <em>registry-mediated</em>:</p>
+<table>
+  <thead><tr><th>Technique</th><th>Exemplars</th><th>When it is used</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Marked subspace for userland</strong></td>
+      <td>Custom-elements hyphen rule; CSS <code>--*</code> custom properties; <code>data-*</code>; JS private
+        <code>#</code> fields</td>
+      <td>The namespace is <strong>globally shared, registration-less at classification time, and
+        forward-growing</strong> — a parser must classify a name lexically with no registry, and future platform
+        additions must never collide with deployed content</td>
+    </tr>
+    <tr>
+      <td><strong>Blocklist carve-out</strong></td>
+      <td>The custom-elements reserved-names list (<code>annotation-xml</code>, <code>color-profile</code>,
+        <code>font-face-*</code>, <code>missing-glyph</code>); XML's reserved <code>xml</code> prefix; WHATWG PR
+        #12118's ProcessingInstruction target blocklist (<code>xml</code>, <code>xml-stylesheet</code>)</td>
+      <td>A small named set must be excluded from an otherwise-free space — including the platform's freshest
+        delimiter&rarr;node opening (PI parsing, merged 2026-06-25), which chose <em>grammar + blocklist</em>, not a
+        marked subspace</td>
+    </tr>
+    <tr>
+      <td><strong>Registration-mediated first-come</strong></td>
+      <td>npm unscoped names; IANA provisional URI schemes; <code>customElements.define</code>'s
+        already-defined error</td>
+      <td>A <strong>registry arbitrates every claim</strong>, so no lexical partition is needed — first-come plus a
+        typed collision error <em>is</em> the policy</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Where the #2074 delimiter keyspace sits</h2>
+<ul>
+  <li><strong>Classification point:</strong> recipes scan <strong>Text-node content after HTML parsing</strong>
+    (<code>fui:plugs/webexpressions/CustomTextNodeParser.ts:84-116</code>). The tokenizer's tag-open state fires
+    only on <code>&lt;</code> + <code>!</code>/<code>/</code>/<code>?</code>/ASCII-letter — that exact slice is
+    host-shared at the authoring surface (typed raw it becomes markup; it reaches Text data only via entity
+    escaping or <code>textContent</code>), while any other <code>&lt;</code> (ERB's <code>&lt;%</code>) is emitted
+    as a literal character and stays freely claimable text. The reservation is <strong>cross-channel-incoherence
+    policy</strong> (the same author string is markup on one channel, recipe on another), not unreachability —
+    escaped occurrences are reachable.</li>
+  <li><strong>Registry mediation:</strong> every open enters through <code>customNodes.define()</code> per app;
+    collision is detectable at define time (<code>DelimiterCollisionError</code>, normative per #2074).</li>
+  <li><strong>Forward growth:</strong> the platform's likeliest future text-level claim (DOM Parts
+    <code>{{ }}</code> inside <code>&lt;template&gt;</code>) is <em>the most popular userland open</em> — a
+    hyphen-rule analogue ("userland must mark; unmarked is the platform's") would outlaw exactly the grammars the
+    <a href="/backlog/2094-framework-flavored-delimiter-bundles/">#2094</a> framework bundles reproduce
+    (<code>{{</code>, <code>{%</code>, <code>{#</code>, <code>{</code>, <code>@if</code>&hellip;) while protecting
+    nothing the tokenizer doesn't already protect.</li>
+  <li><strong>Machine-reserved space is a different surface:</strong> the authored-vs-residue disjointness is
+    ratified statute (#1986 rule 5) over the <em>comment-interior</em> walk; both the concrete sigils and the
+    comment-vs-text surface choice are #1989's open turf — if #1989 ratifies a text-keyspace residue family, that
+    ruling mints the reservation with its consumer attached.</li>
+  <li><strong>WE statute already encodes the discriminator:</strong> <em>registry-name-guard-namespace</em> — guard
+    the namespace you share with the host, never every <code>define()</code>. The delimiter keyspace is
+    <em>partially</em> host-shared (exactly the tokenizer tag-open slice), so the guard is a narrow blocklist —
+    note its rule 2 exempted text-node registry keys when those keys were <em>names</em>; grammar-keying changes
+    that, an amendment-grade reconciliation at codification.</li>
+</ul>
+<p>
+  <strong>Prefix overlap must be legal:</strong> the sanctioned bundles co-reside prefix-overlapping opens within
+  one flavor — Handlebars <code>{{</code>/<code>{{{</code>/<code>{{!</code>/<code>{{&gt;</code>, Svelte
+  <code>{</code>/<code>{#</code>/<code>{@</code>/<code>{:</code>, Blade <code>{{</code>/<code>{!!</code> — and
+  same-open regions split by name (<code>{{#if}}</code>/<code>{{#each}}</code>; #2074's own table has two
+  <code>{#</code> rows). So "collision" can only mean <strong>exact equality of the full dispatch key</strong>
+  (<code>open</code>; plus <code>regionName</code> for regions) <strong>among live recipes</strong>, with
+  <strong>longest-match-first tokenization</strong> as the normative disambiguator. Today FUI has neither: parsers
+  run in registration order, first match wins
+  (<code>fui:plugs/webexpressions/CustomTextNodeParserRegistry.ts:14-16</code>) — the gap #2104 fills.
+</p>
+
+<h2>Escape-hatch and override grammars across engines</h2>
+<table>
+  <thead><tr><th>Engine</th><th>Raw/verbatim region</th><th>Char-level escape</th><th>Delimiter override</th></tr></thead>
+  <tbody>
+    <tr><td>Mustache</td><td>—</td><td>—</td><td><strong>in-band</strong> set-delimiter <code>{{=&lt;% %&gt;=}}</code> (minority of one)</td></tr>
+    <tr><td>Handlebars</td><td><code>{{{{raw}}}}&hellip;{{{{/raw}}}}</code></td><td><code>\{{</code></td><td>—</td></tr>
+    <tr><td>Liquid</td><td><code>{% raw %}&hellip;{% endraw %}</code></td><td>—</td><td>—</td></tr>
+    <tr><td>Jinja2</td><td><code>{% raw %}</code></td><td><code>{{ '{{' }}</code></td><td>out-of-band <code>Environment(block_start_string=&hellip;)</code></td></tr>
+    <tr><td>Nunjucks</td><td><code>{% raw %}</code> / <code>{% verbatim %}</code></td><td>—</td><td>out-of-band <code>configure({ tags })</code></td></tr>
+    <tr><td>Vue</td><td><code>v-pre</code> (attribute-keyed skip)</td><td>—</td><td>out-of-band app option <code>delimiters</code></td></tr>
+    <tr><td>Angular</td><td><code>ngNonBindable</code> (attribute-keyed skip)</td><td>—</td><td>(historic per-component config, removed)</td></tr>
+    <tr><td>Svelte</td><td>—</td><td><code>{'{'}</code> / <code>&amp;lbrace;</code></td><td>—</td></tr>
+    <tr><td>Blade</td><td><code>@verbatim&hellip;@endverbatim</code></td><td><code>@{{ }}</code></td><td>—</td></tr>
+    <tr><td>ERB</td><td>—</td><td><code>&lt;%%</code></td><td>—</td></tr>
+    <tr><td>HTML itself</td><td>RAWTEXT (<code>&lt;script&gt;</code>, <code>&lt;style&gt;</code>), RCDATA, CDATA</td><td><code>&amp;lt;</code> character references</td><td>—</td></tr>
+  </tbody>
+</table>
+<p>Synthesis:</p>
+<ol>
+  <li><strong>The escape hatch is universal</strong> (#2074 already made it a conformance requirement); only its
+    grammar shape was open.</li>
+  <li><strong>Two coexisting shapes recur</strong> — a raw <em>region</em> and a char-level escape <em>prefix</em>;
+    engines with both (Handlebars, Blade) prove they are complementary, not rivals.</li>
+  <li><strong>No engine reserves a universal cross-flavor escape token</strong> — the raw construct is always
+    spelled in the flavor's own grammar. HTML agrees: raw-text scanning is a property of specific named regions
+    (<code>&lt;script&gt;</code>), never a universal token.</li>
+  <li><strong>Model shape:</strong> #2074's nature enum (<code>value</code> / <code>children:'inert'|'live'</code> /
+    marker) lacks "unscanned". A raw region is a region whose content is excluded from recipe scanning — content
+    stays as parsed (raw suppresses <em>recipe</em> processing, never HTML parsing: Blade's <code>@verbatim</code>
+    keeps its markup real elements) — a natural third <code>children</code> value (<code>'raw'</code>), echoing
+    HTML's named-region precedent (RAWTEXT), though RAWTEXT itself is tokenizer-level.</li>
+  <li><strong>Delimiter override is app configuration</strong>, the exact shape of #2074's declared
+    <code>static open</code>/<code>close</code> plus WE's <em>config-extends-platform-default</em> — a config
+    dimension, not a fork. Distinct turf from #1992 (the attribute-<em>name</em> separator mechanism).</li>
+</ol>
+
+<h2>Recommendation</h2>
+<ul>
+  <li><strong>Partition law:</strong> host-token blocklist only — the tokenizer tag-open slice
+    (<code>&lt;</code> + <code>!</code>/<code>/</code>/<code>?</code>/letter) reserved on
+    cross-channel-incoherence grounds; machine-reserved families are minted by the ruling that creates the machine
+    grammar (#1986 rule 5 / #1989); every other open userland-legal, first-registered per app, arbitrated by
+    <code>DelimiterCollisionError</code>. The hyphen-rule analogue is a false analogy for a
+    registration-mediated, app-scoped keyspace.</li>
+  <li><strong>Collision predicate:</strong> exact dispatch-key equality (<code>open</code>; plus
+    <code>regionName</code> for regions) + longest-match-first tokenization — a forced invariant
+    (prefix-overlap-as-collision outlaws every real bundle; bare-<code>open</code> equality outlaws #2074's own
+    same-<code>{#</code> examples).</li>
+  <li><strong>Escape grammar:</strong> <code>children:'raw'</code> nature + per-bundle-declared raw constructs; no
+    platform-reserved universal escape token. Char-escape prefixes routed to the #2113 scorecard gap-list evidence
+    (the #2094 evidence-not-guess discipline).</li>
+</ul>
+<p>
+  Full survey: <code>we:reports/2026-07-02-reserved-delimiter-policy-prior-art.md</code>. Sibling topics:
+  <a href="/research/custom-node-registry/">custom-node-registry</a>,
+  <a href="/research/directive-residue-marker-grammar/">directive-residue-marker-grammar</a>.
+</p>
+{% endraw %}

@@ -1,0 +1,23 @@
+{
+  "id": "reserved-delimiter-family-policy",
+  "title": "Reserved delimiter-family policy — which opens are platform-reserved vs userland-legal, and the raw/verbatim escape-hatch grammar",
+  "status": "open",
+  "summary": "Prep research for decision #2112 (the deferred child of #2074 customNodes). The question: does the delimiter keyspace need a Custom-Elements-hyphen-rule analogue — a lexical partition into platform-reserved vs userland-legal opens — and what is the exact raw/verbatim escape-hatch + delimiter-override grammar? SURVEY: platforms use THREE distinct partition techniques keyed to the namespace's nature — (1) marked-subspace-for-userland (the custom-elements hyphen rule, CSS `--*`, `data-*`, JS `#` fields) is used ONLY where the namespace is host-shared + registration-less + forward-growing (a parser must classify a name lexically, with no registry); (2) blocklist carve-outs (the custom-elements reserved-names list annotation-xml/color-profile/font-face-*, XML's `xml` prefix, WHATWG PR #12118's PI target blocklist xml/xml-stylesheet — the platform's freshest delimiter-to-node opening, merged 2026-06-25, uses grammar+blocklist, not a marked subspace); (3) registration-mediated first-come (npm unscoped, IANA provisional URI schemes) wherever a registry arbitrates every claim. The #2074 delimiter keyspace is REGISTRATION-MEDIATED and APP-SCOPED: recipes scan Text content after HTML parsing, and only the tokenizer's tag-open slice (`<` + `!`/`/`/`?`/ASCII-letter) is host-shared — at the AUTHORING surface (raw = markup; reachable in Text only via entity escaping or textContent — a cross-channel-incoherence POLICY ground, not unreachability; any other `<`, e.g. ERB's `<%`, is emitted as a literal char and freely claimable). Every open enters through customNodes.define() (DelimiterCollisionError normative), and the platform's likeliest future text-level claim (DOM Parts {{ }}) is exactly the most popular userland open — so a hyphen-rule analogue would outlaw the #2094 framework bundles ({{, {%, {#, {, @if…) while protecting nothing the tokenizer doesn't already protect. WE's own statute already encodes the discriminator: registry-name-guard-namespace ('guard the namespace you share with the host, not every define()'; its rule-2 text-node-key exemption was written for NAME keys — grammar-keying is an amendment-grade reconciliation at codification). Prefix-overlap must be LEGAL (Handlebars {{/{{{/{{!/{{>, Svelte {/{#/{@/{:, Blade {{/{!! all co-resident within one bundle) and same-open regions split by name ({{#if}}/{{#each}}; #2074's own table has two {# rows), so collision = exact DISPATCH-KEY equality (open; plus regionName for regions) among live recipes + longest-match-first tokenization; today FUI has NEITHER (registration-order first-match, CustomTextNodeParserRegistry) — the #2104 gap. ESCAPE GRAMMAR: universal + mandatory across engines; two coexisting shapes — a raw REGION always spelled in the flavor's own grammar ({% raw %}, @verbatim, {{{{raw}}}}, v-pre, ngNonBindable; HTML's own RAWTEXT <script>/<style> is the native analogue) and a char-level escape prefix (\\{{, @{{, <%%); NO engine reserves a universal cross-flavor escape token. Model shape: #2074's nature enum lacks 'unscanned' — a third children value 'raw' = scan-suppression over the region (content stays as parsed; raw suppresses RECIPE processing, never HTML parsing — Blade @verbatim keeps markup real elements), echoing HTML's named-region precedent. Delimiter override is app config everywhere (Vue delimiters option = declared open/close statics + config-extends-platform-default nearest-wins, so re-keying supersedes the flavor recipe before collision is judged), except Mustache's minority in-band set-delimiter tag (a recipe-model gap, routed to bundle evidence). Feeds #2112's forks: (1) partition law = host-token blocklist only (hyphen-analogue rejected; machine families mint-on-ratification via #1989); (2) collision predicate = dispatch-key equality + longest-match (forced invariant); (3) escape = children:'raw' scan-suppression nature + per-bundle-declared raw construct (default flavor's own hatch = flavor content, named at #2113 bundle zero), char-escape prefixes routed to #2113 scorecard evidence.",
+  "dateOpened": "2026-07-02",
+  "lastReviewed": "2026-07-02",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "custom-nodes",
+    "delimiter-grammar",
+    "reserved-names",
+    "keyspace-partition",
+    "escape-hatch",
+    "raw-verbatim",
+    "custom-elements",
+    "native-first",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": ["webexpressions", "webdirectives"],
+  "relatedProject": "webdirectives"
+}
