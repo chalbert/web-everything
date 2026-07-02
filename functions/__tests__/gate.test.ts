@@ -89,4 +89,43 @@ describe('phase-1 gate Pages Function (#1137)', () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('action="/__gate"');
   });
+
+  // Fail-closed on a mis-wired deploy: if the Pages secrets are unset, NOBODY gets in (the safe failure
+  // direction — a lockout, never a content leak). Covers the exact deploy-day worry of forgetting a secret.
+  it('fails closed when GATE_COOKIE_SECRET is unset: no session is minted and no request 500s', async () => {
+    const envNoSecret = { GATE_CODE: 'open-sesame' } as any; // GATE_COOKIE_SECRET missing
+    const ctxNoSecret = (request: Request, next = async () => new Response('SITE')) =>
+      ({ request, env: envNoSecret, next } as any);
+    // A plain GET must gracefully show the splash (not throw a 500 from signing a zero-length HMAC key).
+    const getRes = await onRequest(ctxNoSecret(new Request('https://we.example/')));
+    expect(getRes.status).toBe(200);
+    expect(await getRes.text()).toContain('action="/__gate"');
+    // Even the correct code cannot mint a passthrough cookie: the accept branch is guarded by `secret`.
+    const postRes = await onRequest(
+      ctxNoSecret(
+        new Request('https://we.example/__gate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'code=open-sesame',
+        }),
+      ),
+    );
+    expect(postRes.status).toBe(401);
+    expect(postRes.headers.get('Set-Cookie')).toBeNull();
+  });
+
+  it('fails closed when GATE_CODE is unset: no submitted code is ever accepted', async () => {
+    const envNoCode = { GATE_COOKIE_SECRET: 'test-hmac-key-1234567890' } as any; // GATE_CODE missing
+    const res = await onRequest({
+      request: new Request('https://we.example/__gate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'code=open-sesame',
+      }),
+      env: envNoCode,
+      next: async () => new Response('SITE'),
+    } as any);
+    expect(res.status).toBe(401);
+    expect(await res.text()).toContain('Incorrect code');
+  });
 });

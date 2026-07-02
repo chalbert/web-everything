@@ -117,7 +117,10 @@ export async function onRequest(context) {
   const { request, env, next } = context;
   const url = new URL(request.url);
   const secret = env.GATE_COOKIE_SECRET || '';
-  const expected = await sign(GRANT, secret);
+  // Fail closed *gracefully* on a mis-wired deploy: with no secret, never sign (a zero-length HMAC key
+  // throws in Web Crypto → a 500 that looks like a broken gate). expected='' can never match a cookie,
+  // so every request falls through to the splash — a lockout, never a content leak.
+  const expected = secret ? await sign(GRANT, secret) : '';
 
   // 1) Already gated? Let the request flow through to the static site.
   const cookies = parseCookies(request.headers.get('Cookie'));
@@ -125,10 +128,10 @@ export async function onRequest(context) {
     return next();
   }
 
-  // 2) Gate submission.
+  // 2) Gate submission. Require the secret too, so we never mint a cookie signed with an empty key.
   if (request.method === 'POST' && url.pathname === '/__gate') {
     const code = await readCodeField(request);
-    if (env.GATE_CODE && safeEqual(String(code ?? ''), env.GATE_CODE)) {
+    if (secret && env.GATE_CODE && safeEqual(String(code ?? ''), env.GATE_CODE)) {
       const headers = new Headers({ Location: '/' });
       headers.append(
         'Set-Cookie',

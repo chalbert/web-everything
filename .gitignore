@@ -8,6 +8,7 @@ test-results/
 .env
 .env.local
 .env.*.local
+.cloudflare.env
 .browser-selection.json
 
 # Parcel build cache (trait-enforcer #787 conformance harness)
