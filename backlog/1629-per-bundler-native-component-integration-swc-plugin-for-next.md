@@ -6,7 +6,6 @@ status: parked
 parkedReason: maturityGated
 maturityTrigger: "adoptionSignal: a real heavy-SWC/Next/Turbopack <component> consumer"
 dateOpened: "2026-06-23"
-dateStarted: "2026-06-27"
 tags: [component, adapters, compiler, build-tooling, strategy-axis, toolchain-depth, swc, maturity-gated]
 relatedReport: reports/2026-06-06-adapter-real-project-integration.md
 relatedProject: webadapters

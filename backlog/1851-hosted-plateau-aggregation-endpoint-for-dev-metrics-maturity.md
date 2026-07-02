@@ -5,7 +5,6 @@ status: parked
 parkedReason: maturityGated
 maturityTrigger: "externalConsumers>=1"
 locus: plateau-app
-blockedBy: ["1849"]
 dateOpened: "2026-06-27"
 tags: [telemetry, metrics, plateau, deferred]
 ---

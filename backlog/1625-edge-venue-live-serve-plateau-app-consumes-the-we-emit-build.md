@@ -3,7 +3,7 @@ kind: story
 size: 3
 status: parked
 parkedReason: maturityGated
-maturityTrigger: "adoptionSignal: MaaS-distribution need on epic #479 (#087/#088 distribution surface)"
+maturityTrigger: "adoptionSignal: a real MaaS-distribution surface (the #087/#088 design) goes live and forces live serving (#479 resolved 2026-06-23 deferring live-serve until exactly this)"
 locus: plateau-app
 dateOpened: "2026-06-22"
 tags: []

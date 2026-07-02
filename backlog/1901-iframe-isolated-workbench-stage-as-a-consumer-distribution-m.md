@@ -5,7 +5,6 @@ status: parked
 parkedReason: maturityGated
 maturityTrigger: "adoptionSignal: a real host needs to embed the workbench stage for UNTRUSTED/third-party blocks (today only the FUI-owned fui:demos/workbench-host.html demo harness embeds it, with no postMessage sandbox need)"
 parent: "1836"
-blockedBy: ["1900"]
 dateOpened: "2026-06-27"
 tags: [plugs, unplugged, workbench, dev-experience, iframe]
 ---

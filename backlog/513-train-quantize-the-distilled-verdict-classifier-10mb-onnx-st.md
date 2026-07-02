@@ -7,7 +7,6 @@ parkedReason: maturityGated
 maturityTrigger: "adoptionSignal: we:design-refs/training-manifest.json shows >=16 labeled captures in EACH quarantine class (marketing/error/blank/non-app) plus a non-empty labeled holdout (>=96 labeled total as a derived sanity check)"
 blockedBy: []
 dateOpened: "2026-06-14"
-dateStarted: "2026-06-23"
 preparedDate: "2026-06-22"
 relatedReport: reports/2026-06-22-verdict-classifier-training-readiness-gate.md
 tags: []
