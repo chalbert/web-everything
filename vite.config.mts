@@ -1,6 +1,10 @@
 import { defineConfig, Plugin } from 'vite';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
+// #2139: pure half of the lane page-proxy (registry parse + URL→lane resolution), unit-tested there.
+import { LANE_PORTS_REGISTRY, parseRegistry, resolveLaneTarget } from './scripts/dev/lane-page-proxy.mjs';
 // #1579 (per #1565 devtools-placement): the dev-panel / spec-explorer plugin is a Plateau-owned
 // developer tool — the single canonical copy lives in plateau-app. WE consumes it dev-time from the
 // sibling checkout (a build-time plugin can't go through `resolve.alias`, so this is a direct sibling
@@ -97,6 +101,47 @@ function routerDemoFallback(): Plugin {
   };
 }
 
+/**
+ * #2139 — lane page-proxy: keep `:3000` the single review URL while an item is worked in a lane.
+ *
+ * A backlog item claimed by a lane clone (#1933) renders its latest card only on that lane's
+ * offset-port server (#1997 bands) — painful to review, especially decisions. This middleware
+ * forwards `/backlog/<NNN>…/` requests to the owning lane per the `.claude/lane-ports.json`
+ * registry (maintained by `scripts/lane-pool.mjs map|unmap`; cleared on lane remove/refresh).
+ * The registry is re-read per request (lanes come and go — static `server.proxy` can't follow),
+ * and ANY failure — no registry, unmapped item, lane server down — falls through to the normal
+ * 11ty proxy, so the main render is the floor and a broken page is never served. Assets and
+ * live-reload still come from the main server (a lane edit may need a manual refresh).
+ */
+function lanePageProxy(): Plugin {
+  const registryFile = resolve(__dirname, LANE_PORTS_REGISTRY);
+  return {
+    name: 'we-lane-page-proxy',
+    configureServer(server) {
+      // Registered in configureServer so it runs before Vite's internal `server.proxy` middleware.
+      server.middlewares.use((req, res, next) => {
+        if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+        let target: ReturnType<typeof resolveLaneTarget> = null;
+        try {
+          target = resolveLaneTarget(req.url ?? '', parseRegistry(readFileSync(registryFile, 'utf8')));
+        } catch {
+          return next(); // no registry → nothing lane-claimed
+        }
+        if (!target) return next();
+        const proxied = httpRequest(
+          { host: '127.0.0.1', port: target.port, path: req.url, method: req.method, headers: req.headers },
+          (laneRes) => {
+            res.writeHead(laneRes.statusCode ?? 502, laneRes.headers);
+            laneRes.pipe(res);
+          },
+        );
+        proxied.on('error', () => next()); // lane server not up → serve the main checkout's render
+        proxied.end();
+      });
+    },
+  };
+}
+
 // #1997 (per #1996 Fork 2): per-lane dev-server ports are env-driven so a clone can boot on its own pair
 // without editing this file. Defaults are unchanged (WE's 3000/8080 band); a lane's generated `.env.local`
 // (written by scripts/lane-pool.mjs) sets these to its deterministic per-index offsets. Vite resolves this
@@ -109,6 +154,7 @@ const ELEVENTY_TARGET = `http://localhost:${WE_ELEVENTY_PORT}`;
 export default defineConfig({
   plugins: [
     devPanel(),
+    lanePageProxy(),
     routerDemoFallback(),
     webEverythingPatches(),
     // The Enforcer (the build-time trait-manifest generator) relocated to FUI with the rest of the

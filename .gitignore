@@ -27,3 +27,4 @@ error-summary/**/*.js
 error-summary/**/*.d.ts
 commitment-policy/**/*.js
 commitment-policy/**/*.d.ts
+.claude/lane-ports.json

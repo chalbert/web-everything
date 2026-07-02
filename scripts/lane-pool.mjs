@@ -27,6 +27,8 @@
  *   node scripts/lane-pool.mjs list    [--json]                     # existing lane paths (for the orchestrator to dispatch into)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
  *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s)
+ *   node scripts/lane-pool.mjs map     --lane=N --item=NNN[,NNN…]   # register item(s) → lane page-port (#2139 proxy)
+ *   node scripts/lane-pool.mjs unmap   (--item=NNN[,…] | --lane=N | --all)   # drop lane-ports registry entries
  *
  * Repo / pool overrides (apply to any command):
  *   --repo=<path>        a checkout to derive the lane repo from (default: the cwd's git toplevel)
@@ -123,6 +125,44 @@ function writeLaneEnv(repo, n) {
   writeFileSync(join(laneDir(repo, n), '.env.local'), contents);
 }
 
+// ── lane-ports registry (#2139) — item → lane page-port mapping for the main-checkout proxy ─────────
+// The primary checkout's Vite server (vite.config.mts `lanePageProxy`) keeps `:3000` the single review
+// URL by forwarding a lane-claimed item's `/backlog/<NNN>…/` page to the owning lane's dev server. The
+// mapping lives in `.claude/lane-ports.json` in the PRIMARY checkout (the pool's reference repo): the
+// dispatcher `map`s an item when it assigns it to a lane, and entries are cleared on `unmap`, lane
+// `remove`, and `refresh` (a reset lane no longer renders the item). Only pools with a PORT_BANDS entry
+// have page ports; `map` on a band-less pool fails loud.
+const registryPath = (repo) => join(repo.referencePath, '.claude', 'lane-ports.json');
+function lanePagePort(repo, n) {
+  const band = PORT_BANDS[repo.name];
+  if (!band) return null;
+  const [, base] = Object.entries(band)[0]; // first band key is the repo's front-door (Vite) port
+  return base + 100 + n * 10;
+}
+function readPortRegistry(repo) {
+  const file = registryPath(repo);
+  if (!existsSync(file)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+function writePortRegistry(repo, entries) {
+  const file = registryPath(repo);
+  mkdirSync(join(repo.referencePath, '.claude'), { recursive: true });
+  writeFileSync(file, JSON.stringify(entries, null, 2) + '\n');
+}
+function unmapLanes(repo, lanes) {
+  const entries = readPortRegistry(repo);
+  const dropped = Object.keys(entries).filter((num) => lanes.includes(entries[num].lane));
+  if (dropped.length === 0) return;
+  for (const num of dropped) delete entries[num];
+  writePortRegistry(repo, entries);
+  log(`  unmapped item(s) ${dropped.join(', ')} (lane ${lanes.join(', ')}) from ${registryPath(repo)}`);
+}
+
 // Lanes currently on disk, sorted by index.
 function existingLanes(repo) {
   if (!existsSync(repo.poolDir)) return [];
@@ -208,6 +248,7 @@ function cmdProvision(repo) {
   if (!Number.isInteger(count) || count < 1) fail('provision needs --count=<positive integer>');
   mkdirSync(repo.poolDir, { recursive: true });
   log(`provisioning ${count} lane(s) for "${repo.name}" under ${repo.poolDir} (branch ${repo.branch})`);
+  unmapLanes(repo, Array.from({ length: count }, (_, i) => i + 1)); // refreshed lanes lose stale mappings (#2139)
   for (let n = 1; n <= count; n++) {
     if (!existsSync(laneDir(repo, n))) cloneLane(repo, n);
     else log(`  lane-${n} exists`);
@@ -222,6 +263,7 @@ function cmdRefresh(repo) {
   const lanes = existingLanes(repo);
   if (lanes.length === 0) fail(`no lanes to refresh under ${repo.poolDir} (run provision first)`);
   log(`refreshing ${lanes.length} lane(s) for "${repo.name}" → origin/${repo.branch}`);
+  unmapLanes(repo, lanes); // a reset lane no longer renders its old item (#2139)
   for (const n of lanes) {
     refreshLane(repo, n);
     writeLaneEnv(repo, n);
@@ -268,6 +310,7 @@ function cmdRemove(repo) {
   if (flags.all) targets = existingLanes(repo);
   else if (flags.lane !== undefined) targets = [Number(flags.lane)];
   else return fail('remove needs --lane=N or --all');
+  unmapLanes(repo, targets); // a torn-down lane must stop receiving proxied page requests (#2139)
   for (const n of targets) {
     const dir = laneDir(repo, n);
     if (existsSync(dir)) {
@@ -275,6 +318,42 @@ function cmdRemove(repo) {
       log(`removed lane-${n} (${dir})`);
     }
   }
+}
+
+// ── map / unmap (#2139) — maintain the item → lane page-port registry ───────────────────────────────
+function cmdMap(repo) {
+  const n = Number(flags.lane);
+  if (!Number.isInteger(n) || n < 1) fail('map needs --lane=<positive integer>');
+  const items = String(flags.item ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => /^\d+$/.test(s));
+  if (items.length === 0) fail('map needs --item=NNN[,NNN…]');
+  const port = lanePagePort(repo, n);
+  if (port === null) fail(`pool "${repo.name}" has no PORT_BANDS entry — no page port to map`);
+  const entries = readPortRegistry(repo);
+  for (const num of items) entries[String(Number(num))] = { port, lane: n, repo: repo.name };
+  writePortRegistry(repo, entries);
+  log(`mapped ${items.join(', ')} → lane-${n} (port ${port}) in ${registryPath(repo)}`);
+}
+
+function cmdUnmap(repo) {
+  if (flags.all) {
+    writePortRegistry(repo, {});
+    log(`cleared ${registryPath(repo)}`);
+    return;
+  }
+  if (flags.lane !== undefined) return unmapLanes(repo, [Number(flags.lane)]);
+  const items = String(flags.item ?? '')
+    .split(',')
+    .map((s) => String(Number(s.trim())))
+    .filter((s) => s !== 'NaN');
+  if (items.length === 0) fail('unmap needs --item=NNN[,NNN…], --lane=N, or --all');
+  const entries = readPortRegistry(repo);
+  const dropped = items.filter((num) => num in entries);
+  for (const num of dropped) delete entries[num];
+  writePortRegistry(repo, entries);
+  log(dropped.length ? `unmapped ${dropped.join(', ')}` : '(nothing to unmap)');
 }
 
 // ── dispatch ──────────────────────────────────────────────────────────────────────────────────────
@@ -285,13 +364,15 @@ const COMMANDS = {
   list: cmdList,
   path: cmdPath,
   remove: cmdRemove,
+  map: cmdMap,
+  unmap: cmdUnmap,
 };
 
 if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   if (cmd && cmd !== 'help' && cmd !== '--help') process.stderr.write(`unknown command: ${cmd}\n`);
   process.stderr.write(
-    'usage: lane-pool.mjs <provision|refresh|status|list|path|remove> [--count=N] [--lane=N] [--all] ' +
-      '[--repo=<path>] [--origin=<url>] [--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--json]\n',
+    'usage: lane-pool.mjs <provision|refresh|status|list|path|remove|map|unmap> [--count=N] [--lane=N] [--all] ' +
+      '[--item=NNN[,NNN…]] [--repo=<path>] [--origin=<url>] [--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--json]\n',
   );
   process.exit(cmd && COMMANDS[cmd] === undefined && cmd !== 'help' ? 1 : 0);
 }
