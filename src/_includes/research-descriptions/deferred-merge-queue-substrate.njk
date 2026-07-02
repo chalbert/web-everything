@@ -1,0 +1,82 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Today lanes land on <code>main</code> <strong>live, inside the producing run</strong> — correct within one
+  run, but two concurrent runs race on the shared primary checkout and every session babysits a 20&ndash;70&nbsp;min
+  integration. #2138 asks whether landing should move to a <strong>deferred merge queue</strong>: every
+  lane-producing session stops at &ldquo;lane pushed + item ready-to-merge&rdquo;, and a <strong>unified drain
+  command</strong> the human launches merges the queue serially under the existing integrator contract (full
+  gate per merge, rebase-and-retry, impl-repos-first / WE-last). Producers never touch <code>main</code>, so the
+  multi-run race disappears structurally.
+</p>
+
+<h2>In-repo grounding</h2>
+<p>
+  The integrator half is <strong>already built and proven</strong> (16/18 items landed green 2026-07-01) &mdash;
+  it just lives <em>in-run</em>, in
+  <code>.claude/skills/batch-backlog-items/parallel-execute.workflow.js</code>: merge one lane at a time, full
+  gate per merge (#1937), rebase-retry, <code>INTEGRATION_ORDER = ['frontierui','plateau-app','we']</code>
+  (impl-first / WE-last so a failed impl never leaves a false &ldquo;resolved&rdquo;), delete the ref after
+  landing, regen derived once. The merge-risk lock layer is <code>scripts/readiness/file-locks.mjs</code> (a
+  15-min heartbeat-lease TTL) gating the <code>RESERVED_MERGE_RISK</code> denylist in
+  <code>scripts/readiness/lane-partition.mjs</code>. The <code>active&rarr;resolved</code> flip rides the WE lane
+  commit and lands only on merge. So the decision <strong>relocates</strong> a proven pipeline; it does not
+  design one.
+</p>
+
+<h2>Prior art (web-verified)</h2>
+<ul>
+  <li><strong>GitHub native merge queue is strictly per-repository</strong> &mdash; no cross-repo primitive
+    (<a href="https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue">docs</a>).
+    It groups PRs onto <code>gh-readonly-queue/{base}</code> temp branches and gates the merged tree on required
+    checks; <strong>author self-merge at 0 required reviewers is fully supported</strong> (the only block,
+    &ldquo;author can&rsquo;t approve own PR&rdquo;, is moot at 0).</li>
+  <li><strong>The speculative-merge invariant is the correctness floor</strong> &mdash; gate on the
+    <em>merged</em> tree, not the branch tip
+    (<a href="https://graydon2.dreamwidth.org/1597.html">Not-Rocket-Science-Rule</a>,
+    <a href="https://github.com/bors-ng/bors-ng">bors-ng</a>,
+    <a href="https://zuul-ci.org/docs/zuul/latest/gating.html">Zuul</a>). WE already codifies it
+    (<code>#gate-on-merged-tree-lane-fast-fail</code>); the drain keeps it via the full gate per merge.</li>
+  <li><strong>Cross-repo atomic landing IS solved off-the-shelf</strong> &mdash;
+    <a href="https://docs.aviator.co/mergequeue/concepts/changesets">Aviator ChangeSets</a> group PRs across
+    repos all-or-nothing; <a href="https://zuul-ci.org/docs/zuul/latest/gating.html">Zuul</a>
+    <code>Depends-On:</code> serializes a cross-repo DAG in fixed order &mdash; but only as external SaaS/CI,
+    <strong>not via <code>gh</code></strong>. So &ldquo;cross-repo needs custom sequencing&rdquo; holds
+    <em>only</em> under WE&rsquo;s GitHub-native constraint; adopting Aviator/Zuul is a real, lock-in-rejected
+    alternative.</li>
+  <li><strong>ParallelChange / expand-contract</strong>
+    (<a href="https://martinfowler.com/bliki/ParallelChange.html">Fowler</a>) &mdash; an
+    <em>additive</em> (backward-compatible) hunk can land <strong>ahead of its consumers</strong>; a
+    rename/signature change cannot. So extracting the additive part of a shared file as an early out-of-order
+    micro-merge that releases the lock early is a textbook expand-phase move (Fork&nbsp;3&nbsp;(c)).</li>
+  <li><strong>Decoupling &ldquo;ready&rdquo; from &ldquo;merged&rdquo;</strong> via a separately-drained
+    queue/train is established (<a href="https://docs.gitlab.com/ci/pipelines/merge_trains/">GitLab merge
+    trains</a>, bors batches). The novelty is only the manual drain command + cross-repo order &mdash; a variant,
+    not a correctness risk; a later scheduled drain restores the always-on form (Fork&nbsp;1).</li>
+</ul>
+
+<h2>Synthesis &mdash; five prepared forks</h2>
+<p>Layer: agent-workflow / session-tooling &mdash; nothing crosses the WE&harr;FUI standard boundary; codifies
+  as a rider under <code>docs/agent/platform-decisions.md#pr-flow-rollout-mechanism</code>.</p>
+<ul>
+  <li><strong>Fork 1 &mdash; relation to #1996 &ldquo;landing is fully automatic&rdquo;</strong>
+    (classification / statute-reconciliation). Default <strong>compatible refinement</strong>:
+    &ldquo;automatic&rdquo; governs the merge <em>decision</em> (gate is sole authority, no human review, no
+    manual merge), not the <em>cadence</em>; a human launching the drain is a trigger, not a review gate. Add a
+    reconciling rider.</li>
+  <li><strong>Fork 2 &mdash; durable lane metadata</strong> (code-shape). Default <strong>per-item manifest
+    committed in the WE lane commit</strong> &mdash; a ref-name convention can&rsquo;t carry structured
+    cross-repo order + <code>blockedBy</code> edges.</li>
+  <li><strong>Fork 3 &mdash; merge-risk lock lifetime under deferred landing</strong> (merit). Default
+    <strong>(c) expand/contract early additive micro-merge</strong>, with (a) serial-replay as the
+    non-additive fallback (composes with #2148 barrel-split + #2149 blacklist). Sub-forks: the <em>drain</em>
+    authors the split by detecting an additive denylist delta; the idempotent double-apply is proven clean by a
+    no-op re-add backstopped by the per-merge gate.</li>
+  <li><strong>Fork 4 &mdash; a real ready-to-merge state</strong> (representation). Default <strong>derive
+    queued-state from the live lane ref(s) + manifest</strong> &mdash; no new status landing during the queued
+    window; board-visibility is the tradeoff a <code>status:queued</code> would buy.</li>
+  <li><strong>Fork 5 &mdash; merge substrate</strong> (merit). Default <strong>(b) self-approved PR / GitHub
+    native merge queue for the single-repo WE case + custom drain for cross-repo couples</strong> (the hybrid;
+    user direction 2026-07-02; #2151/#2152/#2153 build this arm).</li>
+</ul>
+{% endraw %}
