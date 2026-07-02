@@ -1,9 +1,12 @@
 ---
 kind: decision
 parent: "1975"
-status: open
+status: resolved
 dateOpened: "2026-06-29"
-dateStarted: "2026-06-30"
+dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
+graduatedTo: "#2136 — error-boundary directive build child (scoped plug per #1978 ruling; migration watch #2137)"
+codifiedIn: one-off
 preparedDate: "2026-06-30"
 relatedReport: reports/2026-06-29-directive-catalog-brainstorm.md
 tags: [webdirectives, composition, directive, error-boundary, plug, validation-gate]
@@ -15,10 +18,10 @@ tags: [webdirectives, composition, directive, error-boundary, plug, validation-g
 [#1963 framework-parity bar](../docs/agent/block-standard.md#composition-rubric). Catch errors thrown while
 rendering/connecting a subtree and render a **fallback** region instead of propagating. Shipped by Solid, React,
 Vue, Svelte 5 and Angular (`@error`) — **but with no platform analog of any kind**, which makes this the one
-sibling whose admission is *contested*. **Recommendation: GO — admit as a deliberately-scoped plug
-([#95](../docs/agent/platform-decisions.md), "Plug = Proposed Missing Standard"), with NOT-YET on a named native
-migration target** (a standards-direction watch, not a blocker). The honest alternative verdict (not-yet) is
-named below.
+sibling whose admission is *contested*. **Ruled 2026-07-02: GO — admitted as a deliberately-scoped plug
+([#95](../docs/agent/platform-decisions.md), "Plug = Proposed Missing Standard"), with the missing native
+migration target recorded as a standing watch ([#2137](2137-watch-declarative-error-region-standards-direction-error-bou.md))**.
+The honest alternative verdict (not-yet) was weighed and declined — see the ruling.
 
 ## Grounding digest
 
@@ -62,6 +65,34 @@ papered over:
 | Tree-shape vs app-logic? | **Scope to existence-gating; forbid error-transform / retry logic in markup** | Skeptic pass-1 amendment — without the scope it drifts to runtime compute. |
 | Native migration target? | **NOT-YET / watch — none exists** | Skeptic pass-3: criterion 4 has no native direction; record a watch, don't claim a substrate. |
 | Honest alternative verdict | **not-yet** — defer until a declarative error-region direction is proposed (or WE files one) | For a decider who weights criterion 4 strictly; named so the gate isn't a one-sided "go." |
+
+## Ruling — ratified 2026-07-02
+
+- **Verdict: GO.** Admit `error:boundary` as a **scoped plug** (#95) at the #1963 bar. Build child:
+  [#2136](2136-build-the-error-boundary-directive-comment-boundary-live-reg.md).
+- **Scope fence (binding):** existence-gating only — the directive selects *which region exists*
+  (guarded vs `fallback`), the same primitive class as `if`. It must never grow error transformation,
+  retry logic, or any compute-in-markup; a future proposal to add those is a new decision, not an
+  extension.
+- **Criterion-4 rider:** no native migration target exists — recorded honestly as standing watch
+  [#2137](2137-watch-declarative-error-region-standards-direction-error-bou.md) (any declarative
+  error-region direction appearing in a standards venue triggers the deprecation/migration path).
+  Confidence downgraded accordingly; the not-yet alternative was weighed and declined.
+- **Why not-yet lost — the under-proposal principle (decider's rule, this ruling):** when a case is
+  universally shipped by the field (criterion-3 evidence) yet **no proposal has ever emerged in any
+  standards venue**, the absence signals *under-proposal, not rejection* — the need is *greater*, and
+  filing the direction is exactly what a plug is for (#95). Waiting for a direction the plug mechanism
+  exists to *be* makes criterion 4 unsatisfiable for any genuinely missing standard (circular). Scoped:
+  the rule requires the criterion-3 universality evidence; a gap the field doesn't solve either is not
+  this case. Red-team ("the gap means native rendering can't throw, so the platform rejected it") fails
+  on its own evidence: the platform *created* throwing render when it shipped custom elements
+  (`connectedCallback` runs author code mid-construction) and shipped no recovery region — the gap is
+  platform-created and recent.
+- **Form (settled, #1983):** the mixed form — live comment-bounded region + nested inert
+  `<template slot="fallback">`; #1983's rule 2 names error-boundary as the mixed-form exemplar.
+- **Mechanism rider (for the build, #2136):** register through the customNodes frame
+  ([#2074](../docs/agent/block-standard.md#custom-node-recipes)) — the comment boundary is a
+  `CustomNode` (`CustomComment` instance per #1986) on top of the comment syntax, not a bespoke walker.
 
 ## The gate
 
