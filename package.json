@@ -37,6 +37,7 @@
     "pin:references": "node scripts/pin-reference-snapshots.mjs",
     "gen:maas-openapi": "node scripts/gen-maas-openapi.mjs",
     "check:standards": "node scripts/check-standards.mjs",
+    "check:statute": "node scripts/check-statute.mjs",
     "check:memory": "node scripts/check-memory.mjs",
     "reflect": "node scripts/memory-reflect.mjs",
     "check:item": "node scripts/check-backlog-item.mjs",

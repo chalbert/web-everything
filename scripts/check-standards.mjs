@@ -1190,18 +1190,21 @@ try {
   err(`Vite proxy allowlist check failed: ${e.message}`);
 }
 
-// ── 9a-rules. Cross-doc codifiedIn anchor-resolution gate (#1828, #1792 Fork 1 → (c)) ──
+// ── 9a-rules. Statute-layer integrity gate (#1828 resolution + #2083 duplicates/orphans/substance) ──
 // The statute layer (docs/agent/platform-decisions.md + 3 siblings) renders at /rules/, and ~229
 // `codifiedIn:` frontmatter values across backlog/*.md cite anchors in it. platform-decisions.md is
-// edited every decision-resolve, so a renamed heading would silently 404 every inbound cite. Assert each
-// codifiedIn doc-cite resolves to a rendered anchor (re-using the loader's anchor extraction, so the gate
-// and the page can never disagree). Pure rule lives in scripts/lib/validate-rules-anchors.cjs.
+// edited every decision-resolve, so a renamed heading would silently 404 every inbound cite; a `{#id}`
+// defined twice renders a duplicate HTML id; an unreferenced named anchor is a dead cluster; a cited
+// anchor with no body is a rule in name only. All four rules live in scripts/lib/validate-rules-anchors.cjs
+// (standalone: `npm run check:statute`), re-using the loader's anchor extraction so the gate and the
+// rendered page can never disagree.
 try {
-  const { validateRulesAnchors, buildAnchorIndex, collectCodifiedCites } = require('./lib/validate-rules-anchors.cjs');
-  const { errors: re } = validateRulesAnchors(buildAnchorIndex(), collectCodifiedCites(join(ROOT, 'backlog')));
+  const { runStatuteCheck } = require('./lib/validate-rules-anchors.cjs');
+  const { errors: re, warnings: rw } = runStatuteCheck();
   for (const e of re) err(e.message, e.descriptor);
+  for (const w of rw) warn(w.message, w.descriptor);
 } catch (e) {
-  err(`Rules codifiedIn anchor-resolution check failed: ${e.message}`);
+  err(`Statute-layer integrity check failed: ${e.message}`);
 }
 
 // ── 9b. Module-resolution exports-lock (#274/#271) ──

@@ -167,7 +167,7 @@ vectors only; demos are a *website* concern that surfaces FUI) · #1771 (**sharp
 bound** — a generator that *runs* an impl over WE's own artifacts is impl → FUI, not tooling; resolves the
 MaaS serve-core seam as a forced mapping, reversing #954's "WE runs `serve()`", unblocking #1730) ·
 #1777 (**relocation granularity** — relocate deps-satisfiable-now, defer not-yet-FUI deps as `blockedBy`
-slices, never reach back into WE; see {#relocation-granularity}).
+slices, never reach back into WE; see [relocation granularity](#relocation-granularity)).
 
 ### WE ↔ Frontier UI rendering & embed boundary {#we-fui-embed-boundary}
 
