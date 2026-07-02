@@ -1,8 +1,11 @@
 ---
 kind: decision
-status: active
+status: resolved
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#pr-flow-rollout-mechanism"
 preparedDate: "2026-07-02"
 relatedTo: ["1143", "2123", "2148", "2149", "2151", "2152", "2153"]
 relatedReport: reports/2026-07-02-deferred-merge-queue-substrate.md
@@ -10,6 +13,20 @@ tags: [lane, merge-queue, integrator, pr-flow, session-hygiene, decision]
 ---
 
 # Should lane landing move to a deferred merge queue drained by a unified merge command?
+
+## Ruling — ratified 2026-07-02
+
+**All five fork defaults ratified as authored**, including the two skeptic-corrected forms that flip the raw user direction (Forks 3 and 5) — re-affirmed with the line-additive-but-breaking false-positive class and the branch-level-native-queue holes in full view. The top-level (defer landing to a human-drained unified merge queue) stands.
+
+- **Fork 1 — #1996 relation:** (a) compatible refinement + a rider that **quotes & neutralizes "on gate-green"** (binds merge *authority* + green *precondition*, not the trigger *instant*; drain cadence is a separate dimension, default deferred-batch).
+- **Fork 2 — lane metadata:** (a) standalone `we:.lane-manifest.json` in the WE lane commit (one-sided add, preserves the #1869 conflict-free WE-lane merge); the drain deletes it at landing.
+- **Fork 3 — merge-risk lock lifetime:** (a) serial-replay is **primary**; (c) expand/contract micro-slice is an **opt-in optimization over a whitelist of provably-safe additive regions only**, cherry-picked **verbatim** (byte-identical re-add). A `we:package.json` **dependency add / version bump**, an `"overrides"` block, or an ordering-sensitive registration is **NOT whitelisted** → serial-replay. Sub-fork A: the **drain** authors the split. Codified as an explicit amendment to [#merge-risk-optimistic-with-targeted-lock](../docs/agent/platform-decisions.md).
+- **Fork 4 — ready-to-merge state:** (a) a **local** queued token written at push (`we:claims.json`-adjacent, read offline — preserves Rule #105); `lane/*` refs deleted at a **single point** after the whole couple's WE resolve is confirmed reachable on `main`.
+- **Fork 5 — merge substrate:** (b) PRs as the review/CI surface (self-approved, 0 required reviewers + a required CI check); **GitHub native merge queue OFF**; the **custom drain owns every merge** in impl-first/WE-last couple-order. Pure local `git merge` (a) is the retained fallback if the `gh` dependency isn't worth it.
+
+**Codified in:** a rider under [#pr-flow-rollout-mechanism](../docs/agent/platform-decisions.md) (top-level + Forks 1/2/4/5) + an amendment to [#merge-risk-optimistic-with-targeted-lock](../docs/agent/platform-decisions.md) (Fork 3). Implementation arm: #2148, #2149, #2151, #2152, #2153.
+
+**Live concurrent example (2026-07-02):** a parallel session adding the `wrangler` devDependency to `we:package.json` (+ `we:package-lock.json` churn) is the canonical **non-whitelisted** Fork-3 case — a dependency add is line-additive but semantically load-bearing, so it lands by serial-replay, never micro-slice. It attaches to this ruling as an illustration; it is **not** folded into this decision's changeset.
 
 Today lanes land on main **live, inside the producing run** — correct within one run, but two concurrent runs race on the shared primary checkout, and every session babysits a 20–70 min integration. Proposal (**user direction, 2026-07-02**): **every lane-producing session stops at "lane pushed + item marked ready-to-merge"** — parallel `/workflow` and solo lanes (#2123) alike — and landing moves to a **unified merge command** the human launches as ready items accumulate, draining the queue serially under the existing integrator contract (full gate per merge, rebase-and-retry, impl-repos-first/WE-last).
 
