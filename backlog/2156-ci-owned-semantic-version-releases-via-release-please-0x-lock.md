@@ -47,3 +47,10 @@ GitHub Release, and publishes.
   landing flow (#2138/#2152); release-please's tag/Release creation via `GITHUB_TOKEN` needs
   `contents: write` (set) and does not push to protected `main`, so it composes.
 - **OIDC:** dropping `NPM_TOKEN` for trusted publishing is optional later hardening (#2154).
+
+## First release lagging — tracked in #2157
+
+0.1.0 was tagged (Release PR #2 merged) but **npm publish never ran**: the publish job's whole-repo
+`check:standards` was red from unrelated backlog debt on `main`. Owner kept the gate as-is (2026-07-02), so
+publishing is blocked until `main` is reliably green via the PR-lane merge flow (#2138/#2152). Full state +
+recovery steps (incl. the auto-lock-on-merge race) live in #2157.
