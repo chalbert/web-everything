@@ -2,8 +2,8 @@
 kind: story
 size: 5
 status: open
-blockedBy: ["2160"]
-relatedTo: ["2123", "2138", "2152"]
+blockedBy: ["2165"]
+relatedTo: ["2123", "2138", "2152", "2160"]
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-02"
 tags: [lane, pr-flow, integrator, session-tooling]
@@ -15,4 +15,4 @@ Implements the self-approved-PR substrate for the #2138 drain: instead of a loca
 
 ## Blocked / investigation (2026-07-02, batch-2026-07-02-2152-2153)
 
-#2152 is **done** (branch protection live: required check `test`, 0 approvals, `enforce_admins:false`). But this item is **re-blocked on #2160**, not startable yet: the required `test` check is **red on origin/main** (untracked `relatedReport` files — see #2160), so a self-approved PR could never satisfy the required check → `gh pr merge` cannot complete → the substrate is un-landable and un-verifiable end-to-end until origin CI is green. Verifying this item also needs a **live PR round-trip** (mutates `main`), so it wants its own focused session once #2160 clears, not a batch seam. Implementation note when unblocked: the substrate lives in the existing landing path — the inline integrator's `git merge --no-ff origin/lane/* → push-if-green` in `we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js` + `we:scripts/push-if-green.mjs` (the shared land helper) — swap `git merge + push origin main` for `gh pr create --fill` (self-approved) + `gh pr merge` in impl-first/WE-last order; keep `git merge` as the fallback.
+#2152 is **done** (branch protection live: required check `test`, 0 approvals, `enforce_admins:false`). This item is **blocked on #2165** (updated 2026-07-02, batch-2026-07-02-2160-2161-2163): the required `test` check is **red on origin/main**, so a self-approved PR can never satisfy it → `gh pr merge` cannot complete → the substrate is un-landable and un-verifiable end-to-end until origin CI is green. **#2160 (done) fixed one CI-red cause** (untracked `relatedReport` files) but origin CI stayed red on a **second, pre-existing cause**: ~15 vitest files fail to resolve `@frontierui/*` sibling-alias imports on single-repo CI — now filed as **#2165** (WE↔FUI single-repo coupling, #2158 family). Verifying this item also needs a **live PR round-trip** (mutates `main`), so it wants its own focused session once #2165 clears, not a batch seam. Implementation note when unblocked: the substrate lives in the existing landing path — the inline integrator's `git merge --no-ff origin/lane/* → push-if-green` in `we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js` + `we:scripts/push-if-green.mjs` (the shared land helper) — swap `git merge + push origin main` for `gh pr create --fill` (self-approved) + `gh pr merge` in impl-first/WE-last order; keep `git merge` as the fallback.
