@@ -2,10 +2,13 @@
 kind: story
 size: 8
 parent: "1226"
-status: active
+status: resolved
 blockedBy: ["2017"]
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
+graduatedTo: "we:reports/2026-07-02-shadcn-parity-gap-list.md"
+relatedReport: reports/2026-07-02-shadcn-parity-gap-list.md
 tags: [parity, flavor, shadcn, dtcg, gap-list]
 ---
 
@@ -39,6 +42,24 @@ deliverable of the reproduction-conformance program #1226 / #1225).
   its "resolved" status covers only the declarative scaffold (zero readings ingested), and that the real
   rendered/measured shadcn flavor + proven gap list is THIS story. This story is the single source of truth for the
   measured-parity deliverable; complete it to discharge the reconciliation.
+
+## Resolution (2026-07-02, #2022)
+
+Delivered:
+- **Real shadcn flavor** — `we:design-systems/shadcn.designsystem.json` + `we:design-systems/shadcn.tokens.json`:
+  a full DTCG override of shadcn's default (zinc) roles in oklch (near-black `--primary`, a `0.625rem`
+  `--radius` seed with calc-derived md/lg, neutral `--border`/`--input`/`--muted`/`--muted-foreground`, a 3px
+  `--ring`). Surfaced on `/design-systems/` via `we:src/_data/designSystems/shadcn.json`.
+- **Loaded through the #2017 manifest loader** and asserted against a rendered button/input/card in
+  `frontierui:plugs/webtheme/__tests__/unit/shadcnFlavor.test.ts` — the executable, machine-checkable half of
+  the gap list. It resolves the override, proves the reproducing roles reach the legacy slots FUI components
+  read (`--color-primary`, `--color-border`, `--color-text-muted`, `--radius-lg`/`--radius-md`), and asserts
+  the gap: shadcn roles with no bridge row and/or no alias slot (`--ring`, `--input`, muted surface, and the
+  `*-foreground`/`secondary`/`destructive`/hover-accent/popover role families).
+- **Gap list report** — `we:reports/2026-07-02-shadcn-parity-gap-list.md` (Tier A wiring gaps + Tier B
+  missing role families + the non-token variant/anatomy residual), the concrete next increment for #1226.
+
+This discharges #1243's reconciliation: the measured, rendered-and-diffed flavor + proven gap list now exist.
 
 ## Notes
 

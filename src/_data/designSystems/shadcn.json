@@ -1,0 +1,8 @@
+{
+  "id": "shadcn",
+  "name": "shadcn/ui",
+  "summary": "A real shadcn/ui flavor (#2022) — the default zinc theme transcribed as a full DTCG override (near-black primary, 0.625rem radius seed, neutral border/input/muted roles, a 3px focus ring). Loaded through the #2017 manifest loader; its paired gap list records what tokens+intents reproduce and what needs a new intent/trait/token role.",
+  "status": "concept",
+  "ownedByProject": "webtheme",
+  "manifest": "design-systems/shadcn.designsystem.json"
+}

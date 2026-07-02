@@ -1,0 +1,35 @@
+{
+  "$description": "shadcn/ui flavor — a full DTCG override of the webtheme platform default capturing shadcn's default (zinc) token roles in oklch. Overrides only the roles shadcn names; every other family inherits the platform default via `extends`. Values transcribe shadcn/ui's default light theme (globals.css :root) — see the paired gap list report for what these roles CAN and CANNOT reach in a rendered FUI component.",
+  "color": {
+    "$type": "color",
+    "$description": "shadcn's core color roles. shadcn ships flat semantic roles (--background, --primary, --border …), not a numeric scale; each is transcribed here onto the closest platform-default color role. The `*-foreground` pairings shadcn ships for every surface have no platform-default home — recorded in the gap list.",
+    "bg-light": { "$value": "oklch(1 0 0)", "$description": "shadcn --background (light)." },
+    "bg-dark": { "$value": "oklch(0.141 0.005 285.823)", "$description": "shadcn --background (dark / zinc-950)." },
+    "text-light": { "$value": "oklch(0.141 0.005 285.823)", "$description": "shadcn --foreground (light)." },
+    "text-dark": { "$value": "oklch(0.985 0 0)", "$description": "shadcn --foreground (dark)." },
+    "accent": { "$value": "oklch(0.21 0.006 285.885)", "$description": "shadcn --primary (zinc-900) — the near-black primary that distinguishes shadcn from a blue-accent default." },
+    "surface": { "$value": "oklch(1 0 0)", "$description": "shadcn --card (light) — the card surface." }
+  },
+  "radius": {
+    "$type": "dimension",
+    "$description": "shadcn keys every radius off a single `--radius: 0.625rem`; `--radius-md`/`--radius-lg`/`--radius-sm` are calc()-derived from it.",
+    "base": { "$value": "0.625rem", "$description": "shadcn --radius (the single radius seed)." },
+    "md": { "$value": "calc(0.625rem - 2px)", "$description": "shadcn --radius-md = --radius - 2px." },
+    "lg": { "$value": "0.625rem", "$description": "shadcn --radius-lg = --radius." },
+    "full": { "$value": "9999px" }
+  },
+  "ring": {
+    "$description": "shadcn's focus ring. shadcn draws a 3px ring at --ring with a --ring-offset; the platform-default `ring` role (#1316) is the closest home.",
+    "color": { "$value": "oklch(0.705 0.015 286.067)", "$description": "shadcn --ring (zinc-400-ish)." },
+    "width": { "$value": "3px", "$description": "shadcn ring width (ring-[3px])." },
+    "offset": { "$value": "2px" }
+  },
+  "surface": {
+    "$type": "color",
+    "$description": "shadcn's neutral surface roles (--border / --input / --muted / --muted-foreground) — the #1317 platform roles that were named for shadcn parity in the first place.",
+    "border": { "$value": "oklch(0.92 0.004 286.32)", "$description": "shadcn --border." },
+    "input": { "$value": "oklch(0.92 0.004 286.32)", "$description": "shadcn --input (equals --border in the default theme)." },
+    "muted": { "$value": "oklch(0.967 0.001 286.375)", "$description": "shadcn --muted (light neutral surface)." },
+    "muted-foreground": { "$value": "oklch(0.552 0.016 285.938)", "$description": "shadcn --muted-foreground." }
+  }
+}

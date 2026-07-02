@@ -1,0 +1,6 @@
+{
+  "extends": "@webtheme/default",
+  "themeTokens": "./shadcn.tokens.json",
+  "intentDefaults": { "density": "compact", "motion": "natural", "surface": "solid" },
+  "traitDefaults": { "radius": "md" }
+}
