@@ -1,8 +1,9 @@
 ---
 kind: story
 size: 3
-status: open
+status: active
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-02"
 tags: []
 ---
 

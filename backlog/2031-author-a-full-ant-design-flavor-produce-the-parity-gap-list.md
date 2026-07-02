@@ -2,10 +2,11 @@
 kind: story
 size: 5
 parent: "1226"
-status: open
+status: active
 dateOpened: "2026-07-01"
 tags: []
 blockedBy: ["2017"]
+dateStarted: "2026-07-02"
 ---
 
 # Author a full Ant Design flavor + produce the parity gap list

@@ -1,10 +1,10 @@
 ---
 kind: story
 size: 3
-status: open
+status: active
 blockedBy: []
 dateOpened: "2026-07-01"
-dateStarted: "2026-07-01"
+dateStarted: "2026-07-02"
 tags: [testing, ci, playwright, vitest, coverage, harness]
 parent: 2061
 ---

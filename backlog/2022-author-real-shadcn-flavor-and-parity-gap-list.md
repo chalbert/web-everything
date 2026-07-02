@@ -2,9 +2,10 @@
 kind: story
 size: 8
 parent: "1226"
-status: open
+status: active
 blockedBy: ["2017"]
 dateOpened: "2026-07-01"
+dateStarted: "2026-07-02"
 tags: [parity, flavor, shadcn, dtcg, gap-list]
 ---
 

@@ -2,10 +2,10 @@
 kind: story
 size: 5
 parent: "777"
-status: open
+status: active
 blockedBy: ["2016"]
 dateOpened: "2026-07-01"
-dateStarted: "2026-07-01"
+dateStarted: "2026-07-02"
 tags: [dogfood, fui, ssr, backlog-page]
 ---
 
