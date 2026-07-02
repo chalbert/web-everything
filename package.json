@@ -55,6 +55,8 @@
     "propose:readiness": "node scripts/propose-readiness.mjs",
     "normalize:graduated": "node scripts/normalize-graduated.mjs",
     "autofix": "node scripts/conformance-autofix.mjs",
+    "parity:score": "node scripts/parity-conformance.mjs",
+    "parity:check": "node scripts/parity-conformance.mjs --check",
     "design-refs": "node scripts/design-refs.mjs",
     "design-refs:frontier": "node scripts/design-refs/frontier.mjs",
 "gen:wrapper": "node scripts/gen-wrapper/cli.mjs",

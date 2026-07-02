@@ -1,0 +1,21 @@
+{
+  "$description": "Material 3 (seed) parity REFERENCE SET for the #2024 conformance harness — WE-owned data. Paired with the material-like flavor (we:design-systems/material-like.tokens.json), a partial M3 seed until #2023 authors the full flavor. Names the M3 system roles each canonical component is themed by and the resolved DTCG path the flavor authors them onto. Scoring THIS through the SAME fui:scoreFlavor as shadcn — with no shadcn-specific code — is the #2024 target-agnostic proof. The full M3 role set (state layers, tonal elevation, the complete shape scale) lands with #2023; the state-layer / tonal-elevation roles here already surface as gaps (no token home), which is the expected M3-vs-tokens residual.",
+  "target": "Material 3 (seed)",
+  "components": [
+    {
+      "component": "button",
+      "roles": [
+        { "role": "md.sys.color.primary", "dtcgPath": "color.accent" },
+        { "role": "md.sys.state.layer", "dtcgPath": "color.state-layer" }
+      ]
+    },
+    {
+      "component": "card",
+      "roles": [
+        { "role": "md.sys.color.surface", "dtcgPath": "color.surface" },
+        { "role": "md.sys.shape.corner-lg", "dtcgPath": "radius.lg" },
+        { "role": "md.sys.elevation.level1", "dtcgPath": "color.tonal-elevation" }
+      ]
+    }
+  ]
+}

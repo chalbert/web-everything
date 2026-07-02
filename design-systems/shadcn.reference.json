@@ -1,0 +1,34 @@
+{
+  "$description": "shadcn/ui parity REFERENCE SET for the #2024 conformance harness — WE-owned data, not harness code. The canonical component set (button/input/card) and the shadcn roles each is themed by, each naming the resolved DTCG path the flavor (we:design-systems/shadcn.tokens.json) authors that role onto. The harness (fui:plugs/webtheme/conformanceHarness.ts scoreFlavor) diffs each role against what the tokens+intents model can land on a rendered component and emits a per-component compliance score + gap list. Seeded from the #2022 gap taxonomy. This file carries ZERO harness logic — swapping it (or the material one) is what proves the harness target-agnostic (#2024 acceptance 2).",
+  "target": "shadcn/ui",
+  "components": [
+    {
+      "component": "button",
+      "roles": [
+        { "role": "--primary", "dtcgPath": "color.accent" },
+        { "role": "--radius (md)", "dtcgPath": "radius.md" },
+        { "role": "--ring", "dtcgPath": "ring.color" },
+        { "role": "--secondary", "dtcgPath": "color.secondary" },
+        { "role": "--destructive", "dtcgPath": "color.destructive" }
+      ]
+    },
+    {
+      "component": "input",
+      "roles": [
+        { "role": "--border", "dtcgPath": "surface.border" },
+        { "role": "--input", "dtcgPath": "surface.input" },
+        { "role": "--ring", "dtcgPath": "ring.color" }
+      ]
+    },
+    {
+      "component": "card",
+      "roles": [
+        { "role": "--card (surface)", "dtcgPath": "color.surface" },
+        { "role": "--radius (lg)", "dtcgPath": "radius.lg" },
+        { "role": "--border", "dtcgPath": "surface.border" },
+        { "role": "--muted-foreground", "dtcgPath": "surface.muted-foreground" },
+        { "role": "--muted", "dtcgPath": "surface.muted" }
+      ]
+    }
+  ]
+}
