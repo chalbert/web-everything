@@ -535,6 +535,7 @@ declare const customComments: CustomCommentRegistry;
         <li><strong>Keyed diffing:</strong> For <code>for-each</code> directives, the client reads <code>data-key</code> attributes to perform efficient keyed reconciliation when data changes.</li>
         <li><strong>Template absence:</strong> Client MUST NOT expect <code>&lt;template is="..."&gt;</code> elements in the DOM — these are authoring artifacts replaced by the server.</li>
         <li><strong>Directive re-attachment:</strong> Client attaches directive logic (event listeners, mutation tracking) to the comment boundary markers and their enclosed content.</li>
+        <li><strong>Idempotent under re-claim:</strong> Applied output MUST be claimable — on hydration the client <em>re-claims</em> the applied region's existing boundary markers rather than re-emitting them, and re-applying a directive over an already-applied region MUST produce no observable change (no duplicated rows, listeners, or markers). Keyed <code>for-each</code> rows are reconciled by their <code>data-key</code> so a re-claim matches existing item elements instead of appending. This idempotence is a normative conformance requirement, not implementation trivia.</li>
     </ul>
 
     <h4 id="ssr-progressive-baseline">Progressive Enhancement Baseline</h4>
