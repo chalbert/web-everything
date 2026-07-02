@@ -1,0 +1,24 @@
+{
+  "id": "optional-deselect-single-select",
+  "title": "Optional deselect / allow-no-selection for single-select — a named boolean axis, default-permissive, the complement of required",
+  "status": "open",
+  "summary": "Grounds decision #1470 — should the selection intent gain an optional deselect / 'allow no selection' axis for model:single (return a chosen single-select group to the empty state), and how is it modelled, named, and triggered? Greenfield axis: selection.json today exposes only model/immediacy/variant/grouping plus a constraints?{min,max} type in its interface block, with NO nullability dimension. Survey findings: (1) native radio CANNOT be user-unchecked (MDN radiogroup: once checked, cannot return to none) and ARIA codifies only the INVERSE axis, aria-required — the platform's empty-state idiom lives in the listbox/<select> family (placeholder/empty option), not radio. (2) The pattern is established but FAMILY-SPLIT: first-class and default-ON in the toggle/segmented/chip family (Radix ToggleGroup type='single' deselects on re-activate by default, with a boolean to disable and require a value; Mantine Select allowDeselect default true), opt-in via a clear button in the dropdown family (Ant allowClear), and absent from native radio (React Aria/Chakra reach 'none' only programmatically via value:null). (3) Dominant NAMING is a named boolean — allowDeselect (clearing via the control's own items) or allowClear (dropdown x-button) — NEVER a count-constraint; no surveyed library uses min:0 on single-select. (4) Dominant TRIGGER for the radio/segmented shape is re-activate the already-selected item (not Escape); the dropdown idiom is an x-button — both are renderer packaging, not intent vocabulary. (5) The axis is the permissive COMPLEMENT of required/aria-required, so model it default-permissive (deselect allowed) per most-flexible-default, opt-out to require a value, matching Radix's default-deselectable + disable-deselect model. Implications: argues Fork 1 (a) named boolean dimension over (b) constraints.min count, with default-permissive; confirms Fork 2 scope-out (trigger = renderer/keyboard fixed-mechanic, intents are UX-only). Full grounding in reports/2026-06-21-optional-deselect-single-select.md.",
+  "dateOpened": "2026-06-21",
+  "lastReviewed": "2026-06-21",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "research",
+    "selection",
+    "deselect",
+    "nullable",
+    "allow-deselect",
+    "required",
+    "intent",
+    "accessibility",
+    "radio",
+    "candidate-standard"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

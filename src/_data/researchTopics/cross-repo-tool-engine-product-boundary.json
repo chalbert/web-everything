@@ -1,0 +1,24 @@
+{
+  "id": "cross-repo-tool-engine-product-boundary",
+  "title": "Splitting a UI-testing engine from its product surface across repos — published public API vs keep-co-located vs duplicate-thin-chrome",
+  "status": "open",
+  "summary": "Surveys how real projects structure the boundary when a UI-testing/automation ENGINE (graph crawler, oracles, browser-driver harnesses) and a PRODUCT SURFACE that orchestrates it (CLI, route discovery, report bundling) want to live in different repos — to ground #1747 (the Plateau explorer product surface consuming the FUI explorer engine). Three candidates: (a) publish a curated PUBLIC-API package the consumer depends on (versioned `exports` entry); (b) keep the whole tool incl. CLI co-located with the engine, expose only a thin operated/hosted wrapper in the product repo; (c) duplicate the thin CLI chrome in the product repo over the smallest possible engine API. Prior art (Playwright `playwright-core`/`playwright`/`@playwright/test`; WebdriverIO `@wdio/cli` beside the engine after its v5 multi-repo→monorepo move; axe-core engine vs `@axe-core/cli` vs commercial axe DevTools; Testing Library engine-as-peerDependency; Storybook test-runner thin-over-borrowed-engine; Chromatic/Percy/SaaS-over-OSS) converges: essentially NOBODY duplicates the engine (c is weakest), and almost nobody hard-merges CLI into the engine bundle — the norm is a SEPARATE CLI/product package BESIDE the engine package, kept in ONE repo while the surface churns, with a thin operated wrapper in the product repo. The curated-public-API pattern (package.json `exports` maps, `./internal` entries, Microsoft API Extractor's `@alpha`/`@beta`/`@public` gating) carries a real semver-commitment + governance cost, so teams graduate to it only once the surface stabilizes. Monorepo-vs-multirepo guidance (Conway's law): co-locate things that change/version/deploy together; split on team/ownership boundaries, not technical ones — a multi-repo published boundary mid-churn imposes a publish→bump→integrate tax on every cross-cutting change. WE-specific wrinkle: the constellation has ALREADY ratified the two-repo split (explorer CLI chrome → Plateau, #1565 rule 3 / #1577), so the generic 'keep co-located while churning' advice cannot be taken literally — the move is mandated. Given the engine is still churning (epic #1522/#1167), the faithful interim is (c)/(a)-hybrid: move the CLI chrome to Plateau over the NARROWEST engine API and graduate that surface to a versioned public package (a) as it stabilizes, never duplicate (the project's own dev-panel-duplication footgun confirms duplication drifts).",
+  "dateOpened": "2026-06-24",
+  "lastReviewed": "2026-06-24",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "cross-repo",
+    "package-boundary",
+    "public-api",
+    "exports-map",
+    "monorepo-vs-multirepo",
+    "devtools-placement",
+    "explorer",
+    "constellation",
+    "api-extractor",
+    "conways-law"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

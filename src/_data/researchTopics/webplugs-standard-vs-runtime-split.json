@@ -1,0 +1,20 @@
+{
+  "id": "webplugs-standard-vs-runtime-split",
+  "title": "webplugs — the standard is WE, the runtime is FUI (disposition after #606)",
+  "status": "open",
+  "summary": "Prep research for decision #1248 (disposition of the WE `webplugs` project after #606 moved the plugs runtime to Frontier UI). A `⊗ project pending` readiness pill on the plugs-dedup epic #170 implied `webplugs` is an un-built concept — prompting the question of whether the WE project should be retired. FINDING — it should not: WE owns the plugs INTERFACE/CONTRACT standard, and #606 split only the RUNTIME. The webplugs spec page (we:src/_includes/project-webplugs.njk) defines the foundational plug layer — the plug TYPES (Global = new objects on window; Patch = modifies a native API) and the PLUGGED vs UNPLUGGED dual-mode contract (plugged monkey-patches native APIs so the DOM self-upgrades; unplugged is explicit safe-library usage) — a standard definition authored in WE. WE additionally ships 51 `status: active` plug interface defs in we:src/_data/plugs/ (CustomAttribute, CustomContext, the registries, …; e.g. we:src/_data/plugs/customattribute.json), homed under the domain projects they serve with webplugs as the foundational meta-project. This is the canonical WE-standard / FUI-impl seam: WE owns the contract (interfaces + plugged/unplugged + conformance), FUI owns the runtime (@frontierui/plugs); #606 moved the impl half only. The `project pending` hold is therefore a status-drift (#617) false positive: webplugs.json:5 still reads status:concept, but the drift-escape's shipped-surface proxy counts only resolved backlog items carrying relatedProject:webplugs in frontmatter (we:src/_data/backlog.js:77, consumed :84-87) — and zero match, because webplugs' surface shipped as a spec page + data defs rather than a tagged resolved item. So the disposition is a forced invariant, not a live fork: retire is ruled out (it would delete a shipped WE standard); keep + reconcile the drift (bump status concept→poc, the enum ceiling) is correct. A general loader-precision gap falls out: any project whose surface ships as spec/data rather than a relatedProject-tagged resolved item is mis-demoted. Full grounding in reports/2026-06-20-webplugs-standard-vs-runtime-disposition.md.",
+  "dateOpened": "2026-06-20",
+  "lastReviewed": "2026-06-20",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webplugs",
+    "constellation",
+    "contract-vs-impl",
+    "plugged-unplugged",
+    "status-drift",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webplugs"
+}

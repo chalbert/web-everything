@@ -1,0 +1,25 @@
+{
+  "id": "optimistic-mutation-lifecycle",
+  "title": "Optimistic Mutation Lifecycle (apply / reconcile / rollback)",
+  "status": "open",
+  "summary": "Surveys the apply-then-reconcile-then-rollback model every server-state library converged on — TanStack Query useMutation (onMutate / onError / onSettled + invalidateQueries), Apollo optimisticResponse + cache update, SWR useSWRMutation (optimisticData / rollbackOnError), RTK Query updateQueryData + patchResult.undo(), Relay optimisticUpdater — and grounds the placement decision #1395. Key finding: WE already ships this lifecycle as the resource-action block (withOptimisticMutation trait, resource-action-revert event, previousState snapshot), so the open question is contract placement, not a build. The mutation lifecycle has no owning intent (it squats on loader.strategy.optimistic, a read-side dimension), and its rollback half is the same reversibility primitive — the change-record semantic's oldValue, carried because RFC 6902 ops are not self-inverting — that undo/redo (#1394) needs. Recommends a first-class mutation intent (symmetric to loader for reads) and aligning the rollback contract on change-record / the Change Tracking protocol.",
+  "dateOpened": "2026-06-21",
+  "tags": [
+    "optimistic-mutation",
+    "data-lifecycle",
+    "server-state",
+    "rollback",
+    "reconcile",
+    "tanstack-query",
+    "apollo",
+    "swr",
+    "change-record",
+    "mutation-intent"
+  ],
+  "relatedBlocks": [
+    "resource-action",
+    "resource-loader"
+  ],
+  "relatedPlugs": [],
+  "relatedProject": "webresources"
+}

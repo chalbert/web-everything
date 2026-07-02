@@ -1,0 +1,110 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  A <strong>future</strong> reactive <code>consume()</code> handle — one that exposes the <em>current</em>
+  provided value <em>and</em> lets a consumer wait for / iterate <em>future</em> <code>provide()</code> calls —
+  must pick a shape <strong>before it is built</strong>. The prior survey
+  (<code>reports/2026-06-26-consumable-await-footgun.md</code>) found a footgun in the obvious shape: if the
+  handle is a <strong>thenable</strong> (has a <code>get then()</code>), then <code>await consumable</code>
+  <em>after</em> <code>consume()</code> already called <code>provide()</code> internally
+  <strong>hangs forever</strong> — <code>await</code> waits for the <em>next</em> provide, which may never
+  come. Worse, you cannot even <code>return</code> a thenable handle from an <code>async consume()</code>:
+  the Promise Resolution Procedure unwraps it and the returned promise <em>follows</em> its (pending) state.
+  So the question is the handle's shape: <strong>eliminate the thenable, keep the sync handle, or wrap it?</strong>
+</p>
+
+<h2>Finding 1 — the footgun is a FUTURE design call, not a buildable bug today</h2>
+<p>
+  Traced both repos. <code>webinjectors</code> <code>Injector.consume()</code> is <strong>already async and
+  returns the provider value directly</strong> — <code>async consume(): Promise&lt;ProviderTypeMap[Key]&gt;</code>
+  (<code>fui:plugs/webinjectors/Injector.ts:197</code>) — so <code>await injector.consume(...)</code> works and
+  there is no thenable to hang on. <code>webcontexts</code> <code>CustomContext</code> exposes
+  <code>get/set value</code> + <strong>callback subscriptions</strong>
+  (<code>fui:plugs/webcontexts/CustomContext.ts:99-129</code>), not <code>await</code>/<code>for await</code>.
+  The <code>get then()</code> thenable <code>Consumable</code> the report describes has <strong>zero
+  occurrences in non-test source</strong> in either repo. The only in-tree <code>Consumable</code> is the
+  <em>subscribe-based</em>, Apollo-Link interface (<code>we:resources/contract.ts:39</code> →
+  <code>subscribe(observer)</code>, <strong>not</strong> a thenable). So the footgun is real <em>only</em> for
+  a reactive-consume handle that does not yet exist — resolving it means picking that handle's shape ahead of
+  the build.
+</p>
+
+<h2>Finding 2 — every reactive prior-art handle is value-via-property + stream-via-iterator, never await-for-value</h2>
+<p>
+  The <a href="https://github.com/tc39/proposal-signals">TC39 Signals proposal</a> reads a value with
+  <code>.get()</code> (a synchronous pull, <strong>not</strong> a thenable); reactivity is an effect /
+  <code>Signal.subtle.Watcher</code> primitive layered on top, never an <code>await</code>. Async iterators
+  are the platform-native streaming primitive — <code>Symbol.asyncIterator</code> + <code>for await…of</code>,
+  driven by <code>next()</code>, <strong>not</strong> <code>then</code>. RxJS <code>BehaviorSubject</code>
+  exposes the latest value as <code>.value</code> (a property) and the stream via <code>.subscribe()</code>.
+  Preact / Solid signals read via <code>.value</code> / a getter. Web <code>EventTarget</code> /
+  <code>AbortSignal</code> read state synchronously (<code>signal.aborted</code>) and stream via events. The
+  convergent shape across all of them: <strong>current value is a property/pull, future values are an
+  iterator/effect/subscription</strong> — and <strong>none</strong> of them is await-able-for-the-current-value.
+  A thenable reactive handle is the odd one out, and it is exactly the
+  <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function">thenable
+  footgun class</a> MDN warns about: an async return value that is a thenable causes the returned promise to
+  <em>follow</em> it, hanging forever if its <code>then</code> never settles.
+</p>
+
+<h2>Finding 3 — fork-existence: a thenable handle and a non-thenable handle cannot coexist</h2>
+<p>
+  The two branches are <strong>mutually-exclusive shapes for the same return value</strong>: the handle either
+  has a <code>get then()</code> or it does not — a single object cannot be both at once, and the presence of
+  <code>then</code> is precisely what makes <code>await consumable</code> hang. This is a genuine fork (case a:
+  one branch is broken). The composability probe fails on purpose: you cannot build the thenable spelling as a
+  facade over a non-thenable kernel without re-introducing the <code>then</code> that hangs. Because there is
+  <strong>no live consumer</strong> of the thenable handle (it is unbuilt), there is nothing to migrate — the
+  choice is free of back-compat.
+</p>
+
+<h2>Recommendation</h2>
+<p>
+  <strong>(a) Eliminate the thenable.</strong> The handle is not thenable: current value is
+  <code>consumable.value</code>; waiting for the next provide is the <em>explicit</em>
+  <code>await consumable.next()</code>; <code>for await…of</code> keeps working via
+  <code>Symbol.asyncIterator</code>. The hang becomes <strong>impossible by construction</strong> (you cannot
+  accidentally <code>await</code> a non-thenable into a pending state), which is the project's
+  footgun-elimination-by-construction stance, and it aligns the handle with the value-pull + async-iterator
+  prior art (native-first). Rejected: <strong>(b) keep sync + document</strong> — leaves the footgun and only
+  warns in prose, violating eliminate-by-construction; <strong>(c) wrapper <code>{ consumable, value }</code></strong>
+  — adds a clunky destructure and a second concept at every call site with no offsetting merit over (a).
+</p>
+
+<h2>Comparison — handle shapes against the prior art</h2>
+<we-data-table>
+<table class="data-table">
+  <thead>
+    <tr><th>Shape</th><th>Read current value</th><th>Wait for next</th><th>Stream</th><th>Hang possible?</th><th>Prior-art match</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>(a) non-thenable</strong></td><td><code>.value</code></td><td><code>await .next()</code></td><td><code>for await…of</code></td><td><strong>No</strong> — by construction</td><td>Signals <code>.get()</code> · async iterator · BehaviorSubject <code>.value</code></td></tr>
+    <tr><td>(b) sync + docs</td><td><code>.value</code></td><td>(none — <code>await</code> hangs)</td><td><code>for await…of</code></td><td>Yes — prose warning only</td><td>partial</td></tr>
+    <tr><td>(c) wrapper</td><td><code>{ value }</code> destructure</td><td><code>await consumable.next()</code></td><td><code>for await…of</code></td><td>No</td><td>none (bespoke)</td></tr>
+    <tr><td>thenable (the trap)</td><td><code>.value</code></td><td><code>await consumable</code></td><td><code>for await…of</code></td><td><strong>Yes — hangs forever</strong></td><td>none — anti-pattern</td></tr>
+  </tbody>
+</table>
+</we-data-table>
+
+<h2>Classification</h2>
+<ul>
+  <li><strong>Layer.</strong> The handle ships <em>runnable code</em> → the impl is FUI
+    (<code>webinjectors</code>/<code>webcontexts</code> plugs); WE keeps only the consume/provide
+    <em>contract</em> shape. (Impl-is-not-a-standard / WE-holds-zero-impl.)</li>
+  <li><strong>Fixed mechanic, not a configurable dimension.</strong> "Footgun or not" is not a pair of
+    legitimate end-states to expose — only one branch is correct — so it is a fixed mechanic, ratified, not a
+    dimension authors choose.</li>
+  <li><strong>Most-permissive reading</strong> = the shape that makes the hang impossible (the restriction
+    here removes a trap, it does not constrain a coherent use).</li>
+  <li><strong>Native-first.</strong> The async iterator (<code>Symbol.asyncIterator</code>) is the
+    platform-native reactive streaming primitive; reading the current value as a property mirrors Signals'
+    <code>.get()</code>.</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/projects/webinjectors/">webinjectors</a> · <a href="/projects/webcontexts/">webcontexts</a> — the plug layer that owns consume/provide.</li>
+  <li>Backlog <a href="/backlog/1798-consumable-await-footgun/">#1798</a> — the decision this research prepares.</li>
+  <li><a href="https://github.com/tc39/proposal-signals">TC39 Signals proposal</a> · <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/async_function">MDN async function (thenable follow)</a> — prior art &amp; the footgun class.</li>
+</ul>
+{% endraw %}

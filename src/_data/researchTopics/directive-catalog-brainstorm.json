@@ -1,0 +1,23 @@
+{
+  "id": "directive-catalog-brainstorm",
+  "title": "Directive Catalog — Net-New Directive Candidates",
+  "status": "open",
+  "summary": "Prior-art survey grounding the #1975 directive-catalog epic and its child admission gates (#1976 async region, #1978 error boundary, #1979 virtualized iteration, #1980 snippet+render, #1981 content-security zones). Catalogues ~90 deduped composition capabilities across 16 categories against the framework field (Svelte/Solid/Vue/React/Lit/Marko/Qwik/Angular/Astro) and the web-platform substrates (DOM Parts, Template Instantiation, the Sanitizer API + Trusted Types, content-visibility + IntersectionObserver), tagging each built / proposed / net-new and placing it on the tree-shape↔computation line. Establishes the directive test (operates on a region or tree-shape; not a behavior, not a component) and the form axis (Ⓒ comment-anchor for live regions · Ⓣ template for inert-until-stamped · Ⓐ structural-annotation for body-less metadata). Each net-new candidate is judged for admission at the #1963 framework-parity bar and pinned to the standards-track substrate it must deprecate and migrate toward.",
+  "dateOpened": "2026-06-29",
+  "tags": [
+    "webdirectives",
+    "composition",
+    "directive",
+    "brainstorm",
+    "framework-parity",
+    "dom-parts",
+    "template-instantiation",
+    "sanitizer-api",
+    "tree-shape"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [
+    "webdirectives"
+  ],
+  "relatedProject": "webcomponents"
+}

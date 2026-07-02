@@ -1,0 +1,22 @@
+{
+  "id": "action-tone-semantic-axis",
+  "title": "Action Intent — is `destructive` a prominence tier, or one member of a semantic-tone axis separate from `level`?",
+  "summary": "Prep research for decision #1337 (carved out of #1324, the disposition axis). Action Intent (we:src/_data/intents/action.json:10-18) declares `level: primary | secondary | tertiary | destructive` as 'the semantic weight determining visual prominence' — but `destructive` (line 16) is not a prominence value. primary/secondary/tertiary form an ORDINAL scale (how loud); `destructive` is a NOMINAL semantic (what kind of consequence — danger/harm/irreversibility). Seating it in the same single-select enum makes prominence and danger MUTUALLY EXCLUSIVE, so 'primary destructive' (a loud red Delete) and 'tertiary destructive' (a quiet red Delete link) are both INEXPRESSIBLE — the exact orthogonality break #1318 found for `variant` and #1324 found for `disposition`, one axis over. FINDING 1 — no design system models danger as a prominence tier; every benchmark gives it a SEPARATE axis, and that axis carries SIBLINGS (success/warning/info), not just danger: Bootstrap contextual classes (primary/secondary/success/danger/warning/info/light/dark), Material 3 color roles + `error` role, Blueprint `intent={none|primary|success|warning|danger}`, Chakra `colorScheme`/`status`, Ant `status`/`danger`, Fluent `appearance`+severity, Radix `color`. The shared shape is a NOMINAL semantic-tone axis orthogonal to emphasis/prominence. FINDING 2 — SwiftUI is the apparent counter-example (`ButtonRole={cancel, destructive}` folds danger into a 'role') but that role drives confirmation-styling + ordering, NOT prominence, and `destructive` there is ALSO orthogonal to `cancel` (disposition) — confirming danger is its own axis, not a member of prominence OR disposition. A destructive action is usually the AFFIRMATIVE one (Delete = confirm the deletion), so danger ≠ disposition either; it is a third orthogonal axis. FINDING 3 — the web platform has NO native vocabulary for semantic tone (no `<button tone>`/`severity`; ARIA has no danger state; `aria-invalid` is validation, not action-tone) — like emphasis (#1318) it is a pure design-system convention; borrow the convergent DS vocabulary, standardize the meta-axis not a closed list. FINDING 4 — WE precedent is unanimous: #1318 added `variant` and #1324 added `disposition` as new orthogonal dimensions on Action Intent rather than overloading `level`; this is the third application of the same move. CLASSIFICATION: intent layer, dimension (not protocol/trait), expose whole axis, all values legitimate simultaneous end-states (a footer can hold neutral + danger actions), explicit per-action (NOT DI/ambient), most-permissive default = unspecified/neutral, open-numbered per #1318 contract, seam = intent→native/theme color wiring (danger → conventional red treatment + optional confirmation affordance, which stays native). RULING SHAPE: Fork 1 RELOCATE `destructive` off `level` (keep-on-level is broken — forces danger⊥prominence mutually exclusive); Fork 2 model a FULL open-numbered semantic-tone axis (`neutral|danger` core + `success|warning|info` recommended extended) vs a narrow `danger`-only flag (under-fits, forces a second relocation later); Fork 3 NAME the axis (`tone` recommended; `status`/`severity`/`intent` alternatives — `intent` collides with WE's Intent concept). SETTLED: primary/secondary/tertiary stay a clean ordinal `level`; behavioral confirmation stays native; migration (deprecated `level=destructive` alias → `tone=danger`) is a separately-prioritized build, not a merit fork. Full grounding in we:reports/2026-06-20-action-tone-semantic-axis.md.",
+  "status": "open",
+  "dateOpened": "2026-06-20",
+  "lastReviewed": "2026-06-20",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webintents",
+    "action-intent",
+    "tone",
+    "destructive",
+    "semantic-color",
+    "level-overload",
+    "native-first",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webintents"
+}

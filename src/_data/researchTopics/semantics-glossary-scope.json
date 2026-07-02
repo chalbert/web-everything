@@ -1,0 +1,20 @@
+{
+  "id": "semantics-glossary-scope",
+  "title": "What is the semantics glossary the vocabulary of? — concept categories vs every named standard",
+  "status": "open",
+  "summary": "Prep research for decision #1343 (scope fork de-buried from the #1327 glossary-comprehensiveness story via /split). Question: does the WE `/semantics/` glossary — and the stream-2 `check:standards` coverage gate that maintains it — track the CONCEPT categories (intents + protocols + capabilities) or EVERY named standard (+ blocks + plugs)? The answer sets both the #1327 backfill volume (~75 vs ~188) and the gate's fire-set. FINDING — concept categories (default, ~75%). Three grounds converge: (1) the artifact already declares its purpose — we:src/semantics.njk:10 reads 'Ubiquitous language … to remove ambiguity from the Web Everything protocols'; (2) DDD ubiquitous-language glossaries and design-system glossaries (Polaris/Carbon) are both CONCEPT/term collections for cross-team alignment, deliberately NOT exhaustive class/API registries — the catalogue (/plugs/, /blocks/) is a separate surface; (3) requiring glossary terms for 53 Custom* registry class names + 60 concrete block impls is the body's own predicted 'all-warn-noise'. Two sub-calls DISSOLVE on investigation (pass-0): derive-vs-hand-author (term definitions are hand-authored editorial prose — see we:src/_data/semantics/ambient-intent.json — so the gate enforces PRESENCE, not content) and the gate fire-set mechanism (term JSON carries no provenance field, so the gate must scope by SOURCE REGISTRY at category granularity — which falls straight out of the category-level line). Blocks/plugs are not REQUIRED but remain ALLOWED (a genuinely-conceptual abstract block family like droplist may carry a hand-authored term; the gate just doesn't force one). Capabilities are already 0-gap, folded into the required set at no cost. Full grounding in we:reports/2026-06-20-semantics-glossary-scope.md.",
+  "dateOpened": "2026-06-20",
+  "lastReviewed": "2026-06-20",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "semantics",
+    "glossary",
+    "ubiquitous-language",
+    "ddd",
+    "standards-hygiene",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webeverything"
+}

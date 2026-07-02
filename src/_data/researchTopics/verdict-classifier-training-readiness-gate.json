@@ -1,0 +1,23 @@
+{
+  "id": "verdict-classifier-training-readiness-gate",
+  "title": "Verdict-classifier training-readiness gate — how much labeled corpus before the ≤10MB ONNX student can distil",
+  "status": "open",
+  "summary": "Prep research for decision #513, a go/no-go TRAINING-READINESS gate (not a design fork — all five #488 forks are ratified in #490's codified spec; the student architecture + KD method are empirical model-selection the #512 benchmark auto-decides). The single forced question: is the design-ref corpus large + balanced enough to distil a ≤10MB student that clears the #512 floors (≥0.95 verdict-agreement, ≥0.98 quarantine-recall) on the 6-verdict taxonomy? Grounded count: design-refs/items/ holds 16 captures and design-refs/quarantine/ holds 0, but the training-manifest.json reports total:0 / unlabeled:16 — EVERY shot is ungated (no vision provider has run over the corpus yet), so there are ZERO labeled training examples and zero labeled holdout, i.e. the #512 floors are not even measurable today. The prior-art grounds the threshold: task-specific KD into lightweight students (the VL2Lite / VLM-KD / DHO methods named in #490's recipe) reports its low-data regime as K-shot × C-class, N = K×C, with 16-shot the empirical low-data sweet spot (DHO across 11 datasets; the 10–16-shot range is the cost-effective knee). For a 6-class taxonomy that floors a usable distillation set at N ≈ 16×6 ≈ 96 labeled captures, balanced ~16 per verdict — and because the ≥0.98 quarantine-recall floor rides on the four rarer quarantine classes (marketing/error/blank/non-app), the BINDING constraint is ≥~16 labeled examples in EACH quarantine class, not the common app class. Add a non-empty labeled holdout (holdoutFraction 0.15) just to score the gate. Forced-invariant ruling: WAIT — the proceed-now branch is broken below the corpus floor (distilling from 0 labeled captures cannot clear the floors; nothing to ratify yet). Un-block trigger (grounded, numeric): once `design-refs.mjs collect`/`harvest` has run a real vision provider so the manifest reports ≥~96 labeled captures with ≥16 per verdict — critically ≥16 in EACH of the four quarantine classes — plus a non-empty labeled holdout split, the proceed branch goes live; the mechanical #511 recipe then runs and the #512 benchmark decides the student. Skeptic-tested: a smaller corpus could plausibly proceed for the easy app/non-app split, but the 0.98 quarantine-recall floor on the rare tail is the real bar and a sub-16-per-quarantine-class corpus cannot reliably clear it — SURVIVES. Full grounding in we:reports/2026-06-22-verdict-classifier-training-readiness-gate.md.",
+  "dateOpened": "2026-06-22",
+  "lastReviewed": "2026-06-22",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "vision",
+    "on-device",
+    "distillation",
+    "onnx",
+    "knowledge-distillation",
+    "training-gate",
+    "corpus-volume",
+    "few-shot",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": ""
+}

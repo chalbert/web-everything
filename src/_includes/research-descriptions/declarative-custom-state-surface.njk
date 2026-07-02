@@ -1,0 +1,114 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    Frontier UI's declarative <code>&lt;component&gt;</code>
+    (<code>fui:blocks/renderers/component/declarativeComponent.ts</code>) already lowers two
+    <code>ElementInternals</code> members declaratively — <code>form-associated</code> →
+    <code>static formAssociated + attachInternals()</code>, and the <code>default-aria-*</code> surface
+    (<a href="/backlog/853-default-aria-surface-on-declarative-component/">#853</a>), a
+    parsed-and-validated-against-an-allow-list, sorted-for-determinism map-through. The natural next member
+    is <strong>custom states</strong> (<code>internals.states</code> / <code>CustomStateSet</code>) so a
+    component with <em>no author class body</em> can expose internal state that page CSS styles with the
+    native <code>:state(…)</code> pseudo-class. This survey grounds decision
+    <a href="/backlog/1807-declarative-custom-state-surface-how-a-component-declares-to/">#1807</a>
+    (surfaced by <a href="/backlog/1794-native-state-alignment/">#1794</a>): the open call is the authoring
+    <em>shape</em> — how the component (a) <strong>declares</strong> which custom states it has and (b)
+    <strong>toggles</strong> them at runtime — kept consistent with those sibling members. Per design-first
+    step 1, prior art is gathered first so the surface reuses platform vocabulary.
+</p>
+
+<h2>Recommendation (to ratify in #1807)</h2>
+<ol>
+    <li><strong>Fork 1 — declaration:</strong> ship a single space-separated allow-list attribute
+        <code>states="open active loading"</code> declaring the custom-state <em>vocabulary</em>, parsed
+        into a validated, sorted identifier list <em>exactly</em> like <code>default-aria-*</code>
+        (<strong>high</strong> confidence). Not a repeated <code>state-*</code> boolean family (bloats the
+        attribute surface for a flat list), not "no declaration / infer from CSS" (loses the author-time
+        validation parity with <code>default-role</code>/<code>default-aria-*</code> and silently accepts
+        typo'd state names).</li>
+    <li><strong>Fork 2 — toggle:</strong> expose the attached <code>internals</code> as the imperative
+        escape hatch (<code>this.internals.states.add('open')</code>) as the floor — custom states are
+        <em>not</em> browser-managed, so toggling is inherently imperative — and defer declarative
+        reactivity to the <strong>already-shipped webexpressions binding layer</strong>
+        (<code>{{ }}</code>/<code>[[ ]]</code>), <strong>not</strong> a bespoke <code>state-when</code>
+        predicate DSL (<strong>med-high</strong> confidence; a parallel reactive engine is the rejected
+        branch — bias-to-reuse).</li>
+    <li><strong>Both forks are pure pass-throughs</strong> to the native <code>CustomStateSet</code>
+        primitive that <code>we:docs/agent/platform-decisions.md#native-first-baseline</code> already
+        declares baseline-present. WE/FUI adds declaration ergonomics + a toggle seam, <em>never</em> a
+        state engine — that is the workflow-engine's job, orthogonal to this surface.
+        <strong>Not a protocol; not a new intent.</strong></li>
+</ol>
+
+<h2>Finding — custom states are NOT browser-managed; toggling is inherently imperative</h2>
+<p>
+    Unlike <code>:hover</code>/<code>:checked</code>, which the browser maintains, a custom element's
+    <code>:state(…)</code> matches are driven entirely by code:
+    <code>internals.states</code> is a Set-like <code>CustomStateSet</code> with
+    <code>.add(id)</code> / <code>.delete(id)</code> / <code>.has(id)</code> / <code>.clear()</code>, and
+    per MDN the state "must be explicitly defined and toggled via JavaScript using the element's internal
+    state map." Consequence: the toggle <em>floor</em> is necessarily the imperative <code>internals</code>
+    handle the component already attaches — the only open question is whether WE layers declarative
+    <em>sugar</em> on top, which Fork 2 answers by reusing webexpressions rather than minting a DSL. The
+    old dashed-ident <code>:--name</code> syntax is deprecated in favour of plain <code>:state(name)</code>,
+    so the declared identifiers are plain idents (matching the <code>default-role</code> token validation).
+</p>
+
+<h2>Framework comparison</h2>
+<we-data-table>
+<table class="data-table">
+    <thead><tr><th>System</th><th>Internal-state declaration</th><th>Toggle</th><th>CSS hook</th></tr></thead>
+    <tbody>
+        <tr><td><strong>Native CustomStateSet</strong></td><td>none (any string)</td><td><code>internals.states.add/delete</code> (imperative only)</td><td><code>:state(name)</code></td></tr>
+        <tr><td><strong>Lit</strong></td><td><code>@state()</code> = private reactive field (vs <code>@property</code> public input)</td><td>set the field → re-render; can mirror to <code>internals.states</code></td><td><code>:state()</code> when mirrored</td></tr>
+        <tr><td><strong>FAST / Stencil</strong></td><td>internal <code>@observable</code> / <code>@State()</code> fields</td><td>field assignment → reactive update</td><td>host class/attr or <code>:state()</code></td></tr>
+        <tr><td><strong>WE/FUI (recommended)</strong></td><td><code>states="…"</code> allow-list (validated, like <code>default-aria-*</code>)</td><td><code>internals</code> escape hatch + webexpressions binding</td><td><code>:state(name)</code> (native)</td></tr>
+    </tbody>
+</table>
+</we-data-table>
+<p>
+    The shared lesson across Lit/FAST/Stencil is the public-input vs internal-state split — confirmed in WE's
+    own tree: <code>AutoComplete</code>'s <code>resize</code>/<code>shift</code> are <em>public config</em>
+    (observed attributes with public getters/setters), so <code>CustomStateSet</code> must not replace them;
+    it is for the internal half.
+</p>
+
+<h2>Web-standards alignment</h2>
+<p>
+    <code>:state()</code> / <code>CustomStateSet</code> is an assumed Baseline-2024 platform primitive in
+    <code>we:docs/agent/platform-decisions.md#native-first-baseline</code> — so this surface is a thin
+    declaration-ergonomics layer over a native capability, never a re-implementation. The component already
+    calls <code>attachInternals()</code> for the sibling members; a <code>states="…"</code> attribute slots
+    into the identical <code>hasInternals</code> gate and constructor map-through. (Implementation note: the
+    runtime twin <code>defineFromDefinition</code> currently lags the byte-emitter on <code>default-aria</code>
+    and must be wired for <code>states</code> on adoption — a build detail for
+    <a href="/backlog/1794-native-state-alignment/">#1794</a>, not a fork.)
+</p>
+
+<h2>Per-fork classification</h2>
+<ol>
+    <li><strong>Which layer?</strong> Block / impl ergonomics on the declarative <code>&lt;component&gt;</code>
+        — runnable code that lowers an attribute to <code>internals.states</code>. Not an intent (no UX "what"
+        dimension; the disclosure intent's <code>defaultState</code> is a different, UX-level concern).</li>
+    <li><strong>Protocol or intent dimension?</strong> Neither — it is a pass-through to a single native API
+        with no swappable-vendor story; minting a protocol would be lock-in for zero interop gain.</li>
+    <li><strong>Fixed mechanic or dimension?</strong> The <em>declaration syntax</em> and the
+        <em>toggle mechanism</em> are both genuine either/ors (see the two forks); the underlying primitive
+        (<code>CustomStateSet</code>) is fixed.</li>
+    <li><strong>DI-injectable?</strong> No — the state vocabulary is local to the element's own definition,
+        not an ambient behavioral fallback.</li>
+    <li><strong>Default?</strong> Most-permissive: the imperative <code>internals</code> handle is always
+        available (escape hatch), and declarative binding reuses the existing webexpressions layer rather
+        than gating behind a new DSL.</li>
+    <li><strong>Seam between intents?</strong> No new seam — it is the component's own internal surface,
+        styled by page CSS via the native pseudo-class.</li>
+</ol>
+
+<h2>Cross-references</h2>
+<ul>
+    <li><a href="/backlog/1807-declarative-custom-state-surface-how-a-component-declares-to/">#1807</a> — the decision this survey grounds.</li>
+    <li><a href="/backlog/1794-native-state-alignment/">#1794</a> — native :state alignment; forked this out and is <code>blockedBy</code> it.</li>
+    <li><a href="/backlog/853-default-aria-surface-on-declarative-component/">#853</a> — the sibling <code>default-aria-*</code> declarative ElementInternals member this mirrors.</li>
+    <li><a href="/blocks/component/">Component block</a> — the declarative <code>&lt;component&gt;</code> this surface extends.</li>
+</ul>
+{% endraw %}

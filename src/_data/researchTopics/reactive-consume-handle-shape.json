@@ -1,0 +1,24 @@
+{
+  "id": "reactive-consume-handle-shape",
+  "title": "The reactive consume() handle shape — eliminate the thenable, or keep `await consumable`?",
+  "status": "open",
+  "summary": "Prep research for decision #1798. A FUTURE reactive consume() handle (not yet built) must expose the current provided value AND let a consumer wait for / iterate future provide() calls. The footgun the prior survey found: if that handle is a *thenable* (has a `get then()`), `await consumable` after consume() already called provide() internally HANGS forever — await waits for the NEXT provide — and you cannot even return a thenable handle from an `async consume()` because the Promise resolution procedure unwraps it and adopts its pending state. GROUNDING (real tree): webinjectors Injector.consume() is ALREADY async and returns the provider value DIRECTLY (fui:plugs/webinjectors/Injector.ts:197 — `async consume(): Promise<ProviderTypeMap[Key]>`), so there is no thenable to hang on today; webcontexts CustomContext exposes get/set value + callback subscriptions (fui:plugs/webcontexts/CustomContext.ts:99-129), not await/for-await. The thenable `get then()` Consumable described in the report has ZERO occurrences in non-test source in either repo — the only `Consumable` in-tree is the subscribe-based (Apollo-Link, NOT thenable) interface in we:resources/contract.ts:39 / fui:plugs/webresources. So the footgun is real only for a future reactive-consume handle that does not exist yet; resolving it means picking that handle's shape BEFORE it is built. PRIOR ART: TC39 Signals (tc39/proposal-signals) reads via `.get()` (NOT a thenable) and reactivity is an effect/Watcher primitive — value-pull, never await; async iterators are the platform-native streaming primitive (`Symbol.asyncIterator` + `for await…of`), used by `next()` not `then`; the thenable footgun class (MDN: an async return value that is a thenable causes the returned promise to FOLLOW it, hanging forever if its then never settles) is exactly the trap; RxJS BehaviorSubject exposes the current value as `.value` (a property, not an await). Every reactive prior-art handle is value-via-property + stream-via-iterator/effect; NONE is await-able-for-the-current-value. ONE fork: the handle shape — (a) eliminate the thenable [DEFAULT: not thenable, `.value` + `await consumable.next()` + `for await…of`, footgun impossible by construction, native-first], (b) keep consume() sync + document the pattern [leaves the footgun, warns in prose], (c) return a wrapper `{ consumable, value }` [destructure at every call site, second concept, no merit gain over a]. Fork-existence: a thenable handle and a non-thenable handle are mutually-exclusive shapes for the SAME return value — they cannot coexist. Classification: webinjectors/webcontexts plug layer (ships runnable code → FUI impl; the WE side is only the consume/provide contract shape), a FIXED mechanic not a configurable dimension (a footgun-or-not is not a legitimate end-state to expose), most-permissive reading = the shape that makes the hang impossible. Full grounding in reports/2026-06-26-consumable-await-footgun.md.",
+  "dateOpened": "2026-06-27",
+  "lastReviewed": "2026-06-27",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webinjectors",
+    "webcontexts",
+    "consumable",
+    "reactive-handle",
+    "thenable",
+    "async-iterator",
+    "tc39-signals",
+    "native-first",
+    "footgun-elimination",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webinjectors"
+}

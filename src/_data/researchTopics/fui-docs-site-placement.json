@@ -1,0 +1,22 @@
+{
+  "id": "fui-docs-site-placement",
+  "title": "Where a reference-implementation library homes its docs-site — co-located showcase vs extracted product, and why FUI differs from the WE-website (#2006)",
+  "status": "open",
+  "summary": "Grounds decision #2053 (parallel to #2006, the WE-standard vs WE-website split). Frontier UI intermingles a docs-site render with the reference-implementation library: fui:.eleventy.js (Eleventy, input fui:src/ -> output fui:_site/), fui:src/*.njk pages (index/blocks/plugs/adapters/traits/demos/about), fui:src/_data/*.js loaders, fui:src/_layouts/base.njk. Open question: is that docs-site a product surface to extract to its own product-tier home (mirroring #2006 Fork 1a), or is it legitimately co-located with the library it documents? The item flags the decisive disanalogy up front: #2006's driver was rule 1 zero-implementation (WE holds ZERO impl, so its artifact-producing 11ty+Vite render was mis-homed delivery runtime); FUI is the IMPLEMENTATION tier and legitimately holds runtime (we:docs/agent/platform-decisions.md:70-74), so that driver does not transfer. The distinguishing test is product-vs-render, not impl-vs-contract. Grounding read from the tree: FUI's docs-site is a dogfood reference-showcase -- its _data loaders read the library's OWN catalog (fui:src/_data/demos.js scans repo-root fui:demos/*.html; blocks/plugs/traits mirror the catalog) and link runnable demos out to the library's own Vite origin (:6002). fui:index.njk is a docs-home, not a product; there are no independent client product-features (contrast WE's website: backlog board, burndown, graph, #184 marketing landing). Prior-art survey re-run against the RIGHT peer set (UI component/implementation libraries, not standards bodies/frameworks) inverts #2006's answer: component libraries overwhelmingly CO-LOCATE their docs-site in the library's own repo/monorepo, because the docs are a live dogfood showcase importing the components. Strongest precedent -- Shoelace / Web Awesome: a web-components library whose docs site is an Eleventy site in the same repo rendering its own custom elements (exact structural match to FUI). Also Material Web, Adobe React Spectrum, MUI, Chakra, Mantine, Ant Design, Carbon, Fluent. The separate-repo camp (React, Vue, Tailwind, TypeScript, JSON Schema) is framework/standard-scale docs that are large marketing PRODUCTS -- the shape that argues for extraction, and the shape FUI's docs-site is not. Discriminator: pure-render-showcase-of-the-thing => co-locate; product-with-its-own-features => extract. FUI is the former. Classification: constellation/placement governance, not a new standard; distinguishes #2006 rather than duplicating it. One fork at DoR -- end-state home, default (a) co-locate in FUI, (b) extract to a product-tier surface as the coherent-but-not-recommended alternative reserved for if the docs-site grows genuine product features. No interim/classifier fork (unlike #2006 Fork 2): the fail-closed standard-vs-site classifier existed only to protect WE's zero-impl invariant, which FUI lacks. Full grounding in reports/2026-07-01-fui-docs-site-placement.md.",
+  "dateOpened": "2026-07-01",
+  "lastReviewed": "2026-07-01",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "constellation",
+    "placement",
+    "boundary",
+    "docs-site",
+    "reference-implementation",
+    "frontier-ui",
+    "product-vs-render",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

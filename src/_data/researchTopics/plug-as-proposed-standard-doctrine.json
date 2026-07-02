@@ -1,0 +1,23 @@
+{
+  "id": "plug-as-proposed-standard-doctrine",
+  "title": "Plug-as-proposed-standard — the polyfill / ponyfill / prollyfill posture for elemental-but-unspecced capabilities",
+  "status": "open",
+  "summary": "Grounds decision #1826: when a capability is elemental to web apps but absent from every platform spec (not merely below the Baseline-2024 floor — that's #native-first-baseline), what posture does WE take? The ecosystem already names the three-way split one-for-one. POLYFILL = adds a missing feature by monkey-patching globals (window, Array.prototype), invasive/side-effecting (MDN) -> WE's plugged-bootstrap mode (plugs/bootstrap.ts patches window/Node/Element), POC/demo only per #606. PONYFILL = same functionality, non-global and side-effect-free, explicit import, never mutates the environment (Sindre Sorhus) -> WE's UNPLUGGED mode (plugs/unplugged.ts, no window/prototype mutation), the real product surface (#606 invariant). PROLLYFILL = 'a polyfill for a not-yet-standardized API', implemented BEFORE standardization as a platform candidate (Alex Sexton 2012) -> WE's PLUGGED-as-proposed-standard, the candidate to take upstream. The Extensible Web Manifesto (W3C 2013) is the governing philosophy: expose low-level primitives, prototype high-level features in JS ('pave the cowpaths'), standardize what wins — innovation decoupled from browser release cycles; WICG is the incubation venue, and the W3C TAG 'Polyfills and the evolution of the Web' is the responsible-use guidance. WE's SEMANTIC DELTA over the triad (which treats the three as deployment styles of one body of code): (1) single-substrate contract is the invariant — plugged/unplugged is a delivery+enforcement axis over ONE contract, never two competing contracts (enforcement-on vs -off is one contract at two levels, the TS --strict analogy), which is what keeps the doctrine consistent with #native-first-baseline's 'spec stays single-substrate; polyfills are an opt-in enhancement, never part of the standard'; (2) constellation placement — WE owns only the CONTRACT, FUI owns BOTH impls (unplugged ponyfill + plugged polyfill/prollyfill) per #606, so 'plugged = the proposed standard' names the upstream-candidate role of the impl and never makes the polyfill a @webeverything artifact; (3) the PARTITION against the floor. The partition was refined by the prep skeptic: a naive 'does a spec exist upstream?' test is undecidable at the boundary (WICG draft? TAG explainer? one browser's flag?). The decidable form is PER-LAYER PRESENT-VS-ABSENT: decompose the capability into layers, then classify each layer by whether IT is present in the shipping platform today. #1807 is the worked example — the :state()/CustomStateSet primitive is Baseline-2024 (use it natively, #native-first-baseline governs it) while the declaration/validation layer is absent from every spec (#1826 governs that layer, plugged = the proposed standard); the boundary runs between layers of one capability. Below-baseline-but-specced stays with #native-first-baseline (consumer's opt-in polyfill, no proposed-standard ambition); elemental-but-entirely-absent gets #1826. Codification (skeptic-flipped): fold the statute as a named COROLLARY under #native-first-baseline (mirroring the Polyfill-surface-fidelity corollary) rather than a sibling anchor that drifts, plus a prep-lens paragraph in backlog-workflow.md. Two forks at DoR + a ratify-the-doctrine core, confidence high on doctrine+partition / med-high on codification structure. Full grounding in reports/2026-06-27-plug-as-proposed-standard-doctrine.md.",
+  "dateOpened": "2026-06-27",
+  "lastReviewed": "2026-06-27",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "plugs",
+    "polyfill",
+    "ponyfill",
+    "prollyfill",
+    "extensible-web",
+    "native-first",
+    "standard-vs-impl",
+    "doctrine",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webplugs"
+}

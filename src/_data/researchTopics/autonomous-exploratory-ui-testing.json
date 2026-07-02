@@ -1,0 +1,23 @@
+{
+  "id": "autonomous-exploratory-ui-testing",
+  "title": "Autonomous exploratory UI testing — an FUI-owned engine that drives a live UI on its own, finds bugs, and gates UI work",
+  "status": "open",
+  "summary": "Prep research for epic #1166. The idea: an agent that drives a live web UI on its own (clicks, types, navigates), discovers reachable states, and flags bugs/regressions/odd behaviors WITHOUT a pre-written script — classic autonomous exploratory (monkey / model-based) testing, LLM-steered. Three first consumers over ONE engine, in priority order: (1) stress-test FUI components in isolation [primary use]; (2) verify the WE docs website works-as-supposed — and because of the dogfood goal (#777) the WE site renders its chrome FROM FUI components, so this is the same engine pointed at components-in-assembly and doubles as the rendered-works proof; (3) an agent-invoked pre-close gate on UI work items, alongside check:standards and the #770 a11y gate. PLACEMENT (~85%): an implementation capability, not a contract — so NOT a @webeverything standard; it lands in FUI (same family as the #809 block-explorer workbench and the #855 generator-is-a-tool ruling). The one WE-facing seam is the oracle: semantic correctness can check a component against WE behavioral-conformance vectors (#899) — that contract crosses the seam, the engine never does. TWO SETTLED DESIGN DEFAULTS (recorded, not contested forks): (A) Oracle layering — generic invariants FIRST (no console errors / unhandled rejections / HTTP 5xx / axe-core a11y / broken layout / dead-end-stuck-focus / crash; works on a bare component AND a whole page; reuses the #770 axe lane), then a conformance/expectations layer (the #899 vectors), then an LLM-as-judge layer that stays ADVISORY only (WebVoyager pattern — probabilistic, never the sole gate). (B) Two invocation profiles — EXPLORE mode (seeded-broad, large budget, non-gating, findings→backlog) vs GATE mode (fixed seed, hard step/time budget, fails only on hard Layer-1 invariants, deterministic, blocking; records seed+trace on failure). PRIOR ART confirms the whole architecture: Crawljax state-flow graph (state = DOM signature, edge = event) is the explorer core and the source of the app-agnostic invariant-oracle approach; Android Monkey is the seeded-crash-only baseline; WebVoyager/Agent-E and commercial tools (Mabl, Octomind, QA Wolf, Momentic) ground the LLM-judge layer AND confirm every commercial tool still needs human-approved assertions for precise correctness (judge stays advisory); fast-check + Meticulous ground the seeded/explore-vs-deterministic/gate split exactly; Playwright + axe-core (@axe-core/playwright) are the de-facto substrate. Full grounding in reports/2026-06-19-autonomous-exploratory-ui-testing.md.",
+  "dateOpened": "2026-06-19",
+  "lastReviewed": "2026-06-19",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "fui-devtool",
+    "exploratory-testing",
+    "conformance",
+    "autonomous-agent",
+    "a11y",
+    "playwright",
+    "axe-core",
+    "close-out-gate",
+    "dogfood"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webdocs"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "transient-element-consumer-event-contract",
+  "title": "Transient (self-replacing) custom elements — how a consumer safely wires behaviour across the upgrade",
+  "status": "open",
+  "summary": "Prep research for decision #1960 (we:reports/2026-06-29-we-fui-chip-upgrade-listener-contract.md). A FUI <we-filter-chip> is a TRANSIENT custom element (family A, we:block-standard.md:243): on upgrade it replaces itself with a native <button> via replaceWith() (fui:blocks/transient/TransientElement.ts), so the original node — and any listener bound directly to it — is discarded. WE-side JS that wired those chips loses the handler; cached refs go stale. Shipped twice as a /backlog/ Prioritisation-table regression (data-pfilter pills silently stopped filtering). The question: where does the durable fix live, and how is it enforced. FINDING 1 — only the HOST element's own listeners are lost: TransientElement MOVES child nodes (listeners on children survive) and COPIES every attribute onto the native button, so data-* and a computed aria-pressed SURVIVE the upgrade; the DOM has NO API to enumerate/transfer an element's own listeners, so a 'preserve the bound handlers' fix is mechanically impossible. This is distinct from a standard custom-element UPGRADE (same node kept, listeners kept, web.dev/custom-elements-v1, html.spec.whatwg.org §4.13) — the footgun is specific to the explicit self-REPLACE variant. FINDING 2 — FUI already has a stable-event-API precedent, but ONLY on persistent (B-family) hosts: tabs/stepper/dockable dispatch bubbling CustomEvents (tab-change, step-change, dock; convention new CustomEvent(name,{detail,bubbles:true,cancelable}), fui:blocks/stepper/StepperBehavior.ts:20-21). EVERY transient (A-family) element (button/badge/meter/text-field/filter-chip) exposes state via native events + attributes, never a CustomEvent. FINDING 3 — an open addEventListener sniff is an already-REJECTED gate shape: compose-dont-handroll (#933, we:platform-decisions.md:728) rules it a 'false-positive factory' and mandates a curated, selector-scoped deny-list (working precedent COMPOSE_DENY_LIST, we:scripts/check-standards-rules.mjs:1624). FINDING 4 (decisive, post-skeptic) — the 'which side owns the fix' framing is a FALSE DICHOTOMY: WE codifies a consumer rule EITHER way (WE holds zero impl, #1282), and a FUI event would be ADDITIVE (native click still bubbles), not exclusive — and a chip-change event DOUBLE-FIRES with native click. So the decision decomposes into a FORCED consumer-contract (delegate on a stable ancestor, never cache the transient node, read data-*/aria-pressed which survive upgrade — already shipped in we:backlog-table-sort.js:198-235 and regression-netted by the deterministic mock-chip lane we:tests/interaction/backlog-priority-filters.spec.ts) plus two residual choices: Fork 1 enforcement (default = interaction-test lane only, no source gate; #933 bans the open sniff) and Fork 2 = should FUI additionally ship a stable chip-change event (default = no, not now; YAGNI + double-fire; un-gate trigger = a consumer that genuinely cannot delegate). Citation-scope correction: #1381 governs mechanism-selection (transient vs persistent vs shadow), NOT event-API design — its 'native events kept' clause (we:block-standard.md:271) argues FOR delegating on native click. Full grounding in we:reports/2026-06-29-we-fui-chip-upgrade-listener-contract.md.",
+  "dateOpened": "2026-06-29",
+  "lastReviewed": "2026-06-29",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "webcomponents",
+    "fui-boundary",
+    "transient-element",
+    "filter-chip",
+    "custom-events",
+    "progressive-enhancement",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcomponents"
+}

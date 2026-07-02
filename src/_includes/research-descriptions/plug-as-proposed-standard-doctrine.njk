@@ -1,0 +1,112 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    <a href="/backlog/1826-decision-prep-doctrine-a-plug-is-a-proposed-missing-standard/">#1826</a> asks: when a
+    decision concerns a capability that is <strong>elemental to web applications but absent from every platform
+    spec</strong> — not merely below the Baseline-2024 floor (that case is already settled by
+    <code>#native-first-baseline</code>) — what posture does Web&nbsp;Everything take? Does it pick a single
+    implementation, or does it ship something dual? This survey grounds the call in the ecosystem's existing
+    vocabulary for the exact same three-way split.
+</p>
+
+<h2>Prior art — the polyfill / ponyfill / prollyfill triad</h2>
+<p>
+    The ecosystem already names this three-way split precisely. WE's plug postures map onto it
+    <strong>one-for-one</strong> — the strongest evidence the doctrine is real prior art, not a bespoke
+    invention.
+</p>
+<we-data-table>
+<table class="data-table">
+    <thead>
+        <tr><th>Ecosystem term</th><th>Definition</th><th>WE posture</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Polyfill</strong></td>
+            <td>Adds a missing feature by <strong>monkey-patching globals</strong>
+                (<code>window</code>, <code>Array.prototype</code>) — invasive, side-effecting
+                (<a href="https://developer.mozilla.org/en-US/docs/Glossary/Polyfill">MDN</a>)</td>
+            <td><strong>plugged-bootstrap</strong> mode (<code>plugs/bootstrap.ts</code> patches
+                <code>window</code>/<code>Node</code>/<code>Element</code>) — POC/demo only per
+                <a href="/backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth/">#606</a></td>
+        </tr>
+        <tr>
+            <td><strong>Ponyfill</strong></td>
+            <td>Same functionality but <strong>non-global, side-effect-free</strong> — explicit import,
+                never mutates the environment
+                (<a href="https://github.com/sindresorhus/ponyfill">Sindre Sorhus</a>)</td>
+            <td><strong>unplugged</strong> mode (<code>plugs/unplugged.ts</code>, no
+                <code>window</code>/prototype mutation) — <strong>the real product surface</strong>
+                (#606 invariant)</td>
+        </tr>
+        <tr>
+            <td><strong>Prollyfill</strong></td>
+            <td>"A polyfill for a <strong>not-yet-standardized</strong> API" — implemented <em>before</em>
+                standardization, as a platform candidate
+                (<a href="https://twitter.com/SlexAxton/status/257543702124306432">Alex Sexton, 2012</a>)</td>
+            <td><strong>plugged-as-proposed-standard</strong> — the capability as runnable code, the
+                candidate to take upstream</td>
+        </tr>
+    </tbody>
+</table>
+</we-data-table>
+
+<h2>The governing philosophy — the Extensible Web</h2>
+<p>
+    The <a href="https://www.w3.org/community/nextweb/2013/06/11/the-extensible-web-manifesto/">Extensible Web
+    Manifesto</a> (W3C, 2013) is the doctrine behind the prollyfill: the platform should expose
+    <strong>low-level primitives</strong>, developers <strong>prototype high-level features in JS</strong>
+    ("pave the cowpaths"), and the patterns that win get <strong>standardized</strong> — innovation decoupled
+    from browser release cycles. That cycle <em>is</em> WE's plugged posture: prototype the missing standard in
+    code, prove it on the real product surface, take the winner upstream (WICG &rarr; WHATWG/W3C). The W3C TAG's
+    <a href="https://www.w3.org/2001/tag/doc/polyfills/"><em>Polyfills and the evolution of the Web</em></a> is
+    the canonical responsible-use guidance.
+</p>
+
+<h2>WE's semantic delta over the triad</h2>
+<p>
+    The ecosystem treats polyfill/ponyfill/prollyfill as <strong>deployment styles of one body of code</strong>.
+    WE adds three things the vocabulary does not:
+</p>
+<ol>
+    <li><strong>Single-substrate contract as the invariant.</strong> The contract is <em>one</em>;
+        plugged/unplugged is a <strong>delivery&nbsp;+&nbsp;enforcement axis</strong> over that one contract,
+        never two competing contracts. Enforcement-on vs enforcement-off is one contract at two
+        <em>levels</em> (the TypeScript <code>--strict</code> analogy) — which is exactly what keeps the
+        doctrine consistent with <code>#native-first-baseline</code>'s "a spec stays single-substrate;
+        polyfills are an opt-in enhancement, never part of the standard."</li>
+    <li><strong>Constellation placement.</strong> WE owns only the <strong>contract</strong>; Frontier&nbsp;UI
+        owns <strong>both</strong> impls (the unplugged ponyfill <em>and</em> the plugged polyfill/prollyfill)
+        per #606. "Plugged = the proposed standard" names the <em>upstream-candidate role of the impl</em>, and
+        never makes the polyfill a <code>@webeverything</code> artifact.</li>
+    <li><strong>The partition against the floor</strong> — present-vs-absent against the shipping platform,
+        applied <em>per decomposed capability-layer</em> (below).</li>
+</ol>
+
+<h2>The partition (refined by the prep skeptic)</h2>
+<p>
+    A naive "does a spec exist upstream?" test is <strong>undecidable</strong> at the boundary (WICG draft? TAG
+    explainer? one browser's experimental flag?). The skeptic refuted it and revealed the correct grain:
+    <strong>decompose the capability into layers, then classify each layer</strong> by whether <em>it</em> is
+    present in the shipping platform today.
+    <a href="/backlog/1807-declarative-custom-state-surface-how-a-component-declares-to/">#1807</a> is the worked
+    example: the <code>:state()</code>/<code>CustomStateSet</code> <strong>primitive</strong> is Baseline-2024
+    (use it natively — <code>#native-first-baseline</code> governs it), while the
+    <strong>declaration/validation layer</strong> is absent from every spec (#1826 governs that layer — plugged
+    = the proposed standard). The boundary runs <em>between layers of one capability</em>. The decidable test is
+    "is this specific layer present in the platform you can ship on today?" — upstream spec-maturity is
+    irrelevant to <em>which statute applies</em>; it only informs whether the plugged candidate is worth
+    <em>pursuing</em> upstream.
+</p>
+
+<h2>Recommendation</h2>
+<p>
+    Adopt the dual posture as a standing rule, codified as a <strong>corollary under
+    <code>#native-first-baseline</code></strong> (the skeptic flipped this from a sibling anchor, to avoid
+    fragmenting one "native-completeness" concern across two homes that drift) plus a prep-lens paragraph in
+    <code>backlog-workflow.md</code>, with the <strong>per-layer present-vs-absent</strong> partition.
+    Confidence: <strong>high</strong> on the doctrine and partition; <strong>med-high</strong> on the
+    codification structure. Full grounding in
+    <code>reports/2026-06-27-plug-as-proposed-standard-doctrine.md</code>.
+</p>
+{% endraw %}

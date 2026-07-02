@@ -1,0 +1,25 @@
+{
+  "id": "ssr-data-table-docs-ingestion",
+  "title": "How a server-rendered we-data-table ingests rows/columns for the docs transient-CE dogfood — the JS-property contract is function-valued",
+  "status": "open",
+  "summary": "Prep research for decision #1818 (blocks #1787 the data-table transient-CE embed entry, foundation of the #1600 table->data-table migration family #1609-#1613). The FUI data-table renderer ingests ONLY via JS properties .rows / .config by deliberate design: fui:blocks/renderers/data-table/DataTableBehavior.ts:78-80 states verbatim 'Config carries call-site predicates/comparators, so it is a JS property, not an attribute.' The element (DataTableModule, :82-100) exposes only set rows/set config (:87-90) with no light-DOM, no <script>, no attribute-JSON, no table-parse path (confirmed absent). Config is function-valued and unserializable: Column.format: (value,row)=>string|Node (fui:blocks/renderers/data-table/renderDataTable.ts:49), FilterPredicate.test: (row)=>boolean (:63-68 'the predicate itself is call-site data'), and SortKey mirrors Intl.Collator option names, materialized into a real Intl.Collator (:52-61, :106-114). So a statically server-rendered docs <table> cannot drive the current element. The transient-CE/SSR docs pattern already ships two ingestion shapes that data-table fits neither unchanged: badge self-replaces from attributes+text (fui:blocks/transient/TransientElement.ts:53-76) and code-view hydrates .code from light-DOM textContent on upgrade (fui:blocks/code-view/CodeViewElement.ts:75-78) — both scalars, whereas data-table needs structured typed rows, a third shape. RECOMMENDATION (one fork): a two-tier, interactivity-gated path. A NON-INTERACTIVE docs table (the common case across the ~219 migration targets) ships a plain semantic SSR <table> and does NOT upgrade at all (single source of truth, accessible/crawlable, zero JS, no JSON twin). An INTERACTIVE docs table upgrades from a typed <script type=application/json> child carrying rows + plain column defs (field/label/sortable/type) layered over that same <table> as the no-JS/no-FOUC baseline; function-valued options (format/comparators/predicates) are simply ABSENT from the declarative docs subset, available only via the programmatic .config path (apps). REJECTED: parse the SSR <table> light DOM (option B) as the default — single-source and zero-payload but merit-lossy in a CORRECTNESS-affecting way: the renderer sorts/filters/groups on RAW TYPED field values (Cell = string|number|null; renderDataTable.ts:33,:49) and numeric natural order, date order, and per-column sortable flags cannot be recovered from rendered <td> text, so B silently produces wrong sort order on any non-string column and inverts the renderer's data->DOM direction. REJECTED: data-* attribute JSON (option C) — same payload as the <script> island with worse escaping/size and no benefit; the spec-backed home for an inert data block is a non-JS-typed <script> (WHATWG HTML 4.12.1; MDN type=application/json data block), not an attribute. No WE intent owns 'data table' vocabulary: collection-operations (we:src/_data/intents/collection-operations.json, status concept) owns filter/sort/group/page operations and selection (we:src/_data/intents/selection.json) owns row selection orthogonally, but neither names data-table; the renderer is FUI-owned. No shared-registry edit is needed for this decision (a future declarative-ingestion subset could become a collection-operations dimension — a separate slice, noted not minted). Skeptic SURVIVES-WITH-AMENDMENT: the refute pass's duplication attack was correct for the static case and drove the 'don't upgrade non-interactive tables at all' amendment; its call to flip wholesale to B was rejected on the typed-sort-key correctness loss. Full grounding in reports/2026-06-27-ssr-data-table-docs-ingestion.md.",
+  "dateOpened": "2026-06-27",
+  "lastReviewed": "2026-06-27",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "data-table",
+    "fui",
+    "transient-element",
+    "transient-ce",
+    "ssr",
+    "progressive-enhancement",
+    "data-island",
+    "embed-boundary",
+    "webdocs",
+    "dogfood",
+    "decision-prep"
+  ],
+  "relatedBlocks": ["data-table"],
+  "relatedPlugs": [],
+  "relatedProject": "webblocks"
+}
