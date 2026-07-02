@@ -417,6 +417,50 @@ no `webdecks` project; novel surface is a *cross-media advanceable-sequence* fam
 shared with video/carousel; rule 2 + temporal rule 3 applied) · #1437 (temporal rule counts external convergent
 impls; `dockable` layout-tree minted core-schema-now + extension-slot).
 
+### Portfolio project tiering — the named-consumer evidence bar {#portfolio-project-tiering}
+
+**Every project carries a `tier` — an importance axis orthogonal to the `status` maturity axis —
+assigned by the named-consumer evidence bar, never by vibe or proxy metric.** Website-app /
+portfolio-governance turf (no standards-layer entity is shaped). The three tiers are **ordered
+evidence classes** (both-qualify → the higher wins):
+
+1. **`core`** — a benchmark design system or major framework demonstrably depends on the domain:
+   the capability appears in the gap-analysis corpus (`we:src/_data/benchmarkCoverage.json`) or a
+   named framework ships the equivalent surface. Stated asymmetry: the benchmark corpus is
+   component-shaped, so `utility`-category projects reach core only via the named-framework clause.
+2. **`contextual`** — a *named* constellation consumer's build/runtime uses the project's surface,
+   **shipped and functional today** (Frontier UI, plateau-app, an exercise app, the WE site's own
+   chrome). Catalog listing never qualifies (the site renders all 45 — it would empty tier 3);
+   planned/aspirational dogfooding never qualifies (#777).
+3. **`exploratory`** — no named consumer yet; a hypothesis about a missing standard. Deliberately
+   an evidence-state word (the W3C strategy-funnel stage name), **not** scheduling vocabulary like
+   "deferred" — a merit partition, not a prioritization.
+
+**Mechanism:** an explicit, enum-validated `tier` field on each `we:src/_data/projects/<id>.json`,
+plus a required non-empty `tierEvidence` one-liner *naming the consumer* on every non-exploratory
+project — the falsifiability hook (a challenge is "that consumer doesn't depend on this", never "I
+feel differently"). Deriving the tier from data is rejected on merit: the bar is a judgment over
+heterogeneous evidence no dataset holds (Baseline derives only because browser support is one
+homogeneous dataset).
+
+**Surfacing:** in-place — the tier renders as a `we-tag` cue per
+[#catalog-tile-by-intent-mapping](#catalog-tile-by-intent-mapping) (classification → Tag intent;
+`we-badge` stays the *status* pill), grids group core → contextual → exploratory (an SSR default,
+client re-sortable), and exploratory stays on the main catalog, never hidden or segregated.
+
+**Invariants:** tier and status render side by side (orthogonal — a `core`+`concept` project still
+demotes dependent builds via the D3-readiness rule, which keys off *status*); a tier is
+re-assignable only through a review turn against the same bar with a rewritten `tierEvidence`,
+never a silent free edit; a tier never gates what a consumer may use (mandate-nothing) — it directs
+investment and narrative only; intents carry no tier of their own (per-project stamping surface only).
+
+**Lineage:** #2088 (this ruling; forks + skeptic passes in the item) · filed by the 2026-07-01
+external consultant review (program #2090) · research topic `portfolio-project-tiering` ·
+[#project-protocol-bar](#project-protocol-bar) is upstream (what earns a Project at all) ·
+`we:docs/agent/platform-decisions.md` placement-test rule (project `status` outside `LIFECYCLE`)
+scopes the *status* axis and is untouched — the status-vocabulary drift is a separate
+statute-amendment decision.
+
 ### Intents are UX-only; technical strategy → Configurator {#intents-ux-only}
 
 Intents describe desired interaction (what/why) at project level — dimensions, states, events,

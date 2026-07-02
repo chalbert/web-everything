@@ -1,16 +1,19 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
+graduatedTo: none
 tags: [portfolio, tiering, projects-catalog, governance, adoption-narrative, decision]
 relatedReport: reports/2026-07-02-portfolio-tiering.md
 preparedDate: "2026-07-02"
+codifiedIn: "docs/agent/platform-decisions.md#portfolio-project-tiering"
 ---
 
 # Portfolio tiering: partition the 45 projects into core, contextual, and deferred
 
-Prepared. 45 projects (91% pre-draft: concept 17 / poc 24 / draft 4), 98 intents, no explicit must-ship partition — so conformance investment, the adoption narrative, and the newcomer explanation lack a spine (filed by the 2026-07-01 external review). No tier design exists yet; the four forks below are grounded in a catalog-partition prior-art survey published as the [`portfolio-project-tiering`](/research/portfolio-project-tiering/) topic (session report via `relatedReport`), each with a recommended default in **bold**. Bulk-assigning the 45 projects is follow-on execution, not part of this decision.
+**Ratified 2026-07-02 — all four defaults, in the 2 → 1 → 3 → 4 order.** The 45 projects (91% pre-draft: concept 17 / poc 24 / draft 4) get a second, importance axis orthogonal to `status`: **(Fork 2)** tier assignment is the **named-consumer evidence bar** (core = benchmark/framework demand; contextual = shipped constellation use; exploratory = no named consumer yet; both-qualify → higher); **(Fork 1)** three tiers named **`core` / `contextual` / `exploratory`** — the stub's "deferred" → `exploratory` rename explicitly confirmed at ratification; **(Fork 3)** an **explicit, enum-validated `tier` stamp** on each `we:src/_data/projects/<id>.json` with a required `tierEvidence` one-liner on every non-exploratory project; **(Fork 4)** **in-place surfacing** — a `we-tag` tier cue per the by-intent statute, grids grouped core → contextual → exploratory, exploratory never hidden, and the "Core Standards" heading reworded so "core" is unambiguous tier vocabulary. Codified as the `#portfolio-project-tiering` statute anchor. The forks below (with their skeptic passes, grounded in the [`portfolio-project-tiering`](/research/portfolio-project-tiering/) research topic) are the record of the decision; bold options are the ratified branches. Bulk-assigning the 45 projects is follow-on execution (spun off at close-out), not part of this decision.
 
 ## Grounding digest
 
@@ -25,9 +28,9 @@ Prepared. 45 projects (91% pre-draft: concept 17 / poc 24 / draft 4), 98 intents
 
 The concern decomposes into four orthogonal choices the research surfaced: **(1) vocabulary** — which tiers exist and what they're called (the label set rendered on `we:src/_data/projects/*.json` entries); **(2) assignment bar** — the test that puts a project in a tier (the spine the external review said is missing, `we:reports/2026-07-01-program-external-consultant-review.md:15`); **(3) mechanism** — where the tier value lives and who stamps it (schema on the per-project JSON + validation in [we:scripts/check-standards-rules.mjs](scripts/check-standards-rules.mjs):726-785); **(4) surfacing** — where the tier renders ([we:src/index.njk](src/index.njk):36-57 grids, project detail pages). Classification pass: this is **website-app / portfolio-governance** turf, not a standards-layer entity (no block/intent/protocol is being shaped; the "WE = standard AND website-app" disambiguation applies — this decision lives on the catalog-app side). No fork is a config dimension: the tier vocabulary and bar are a *fixed public partition* of one catalog, not a per-consumer knob, so the Q4 dimension route doesn't fire; Q6's spirit survives as "a tier never gates what a consumer may use" (supported by default).
 
-## Recommended path at a glance
+## Ratified path at a glance
 
-| Fork | Recommended default | Main alternative | Confidence |
+| Fork | Ratified branch | Main alternative (rejected) | Confidence |
 |---|---|---|---|
 | **Fork 2** — assignment bar (ratify first) | **named-consumer evidence bar** (core: a benchmark design system or major framework depends on the domain; contextual: a named constellation consumer's build/runtime uses the surface; exploratory: no named consumer yet) | proxy metrics (intent count, backlog activity) | high |
 | **Fork 1** — tier vocabulary (conditional on Fork 2 (a)) | **three tiers, named `core` / `contextual` / `exploratory`** (the evidence-class words; renames the stub's "deferred") | keep "deferred" · two-tier core/non-core | high |
