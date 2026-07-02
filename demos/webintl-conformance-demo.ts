@@ -1,125 +1,63 @@
 /**
- * Web Intl conformance demo (#1056, slice C of #1020) — the runnable proof of the `CustomIntlProvider`
- * contract (#1054) in a real browser.
+ * Web Intl conformance demo (#1056; slice 3 of the #1294 relocation cascade, #1920).
  *
- * The contract is type-only (`we:intl/contract.ts`); the Intl.* runtime provider + the `customIntl` swap
- * registry are impl and live in FUI. So this demo supplies its **own** in-demo provider — a thin wrapper
- * over the platform `Intl.*` constructors — to prove the contract is realizable: one provider hands back
- * `Intl.Collator` / `DateTimeFormat` / `NumberFormat` / `RelativeTimeFormat` for a requested locale. The
- * conformance section asserts each contract invariant live across locales; `setPlaygroundReady` reports the
- * pass count the e2e smoke reads.
+ * The intl runtime has been relocated to FUI (#1914: `NativeIntlProvider` resolved through the
+ * `customIntl` registry) and its conformance now runs through the **plateau-hosted conformance iframe**
+ * (#1788 (b) / #1790) — the plateau-origin runner driving the WE intl vector suite (#1917) against FUI's
+ * binding (`IntlConformanceBindingFactory`). This page no longer supplies an in-demo provider or hand-rolls
+ * in-page asserts (WE holds zero executable, #1282); it embeds the plateau iframe cross-origin and reflects
+ * the conformance result it posts back. The visible pass/fail is rendered at plateau-origin inside the
+ * iframe; the parent shows the summary and flips the `setPlaygroundReady` flag the e2e smoke reads.
  */
-import type { CustomIntlProvider, IntlLocales } from '/intl/contract.ts';
 import { setPlaygroundReady } from '/demos/playground-harness';
 
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  attrs: Record<string, string> = {},
-  ...children: (Node | string)[]
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
-  for (const c of children) node.append(c);
-  return node;
+/** The result the plateau conformance iframe posts back once the suite has run (mirror of its own type). */
+interface ConformanceEmbedResult {
+  source: 'plateau-conformance';
+  suite: string;
+  ok: boolean;
+  total: number;
+  passed: number;
+  failed: number;
+  results: ReadonlyArray<{ id: string; pass: boolean; detail: string }>;
+  error?: string;
 }
 
-/** An in-demo Intl provider: a thin pass-through to the platform `Intl.*` constructors per the contract. */
-class DemoIntlProvider implements CustomIntlProvider {
-  getCollator(locales?: IntlLocales, options?: Intl.CollatorOptions): Intl.Collator {
-    return new Intl.Collator(locales as string | string[] | undefined, options);
+// The conformance runner is the shared, multi-surface plateau tool (#1788 ratified (b)); the docs surface
+// reaches it cross-origin. Plateau dev serves on :4000; override via `window.__PLATEAU_ORIGIN__` if hosted
+// elsewhere.
+const PLATEAU_ORIGIN =
+  (window as unknown as { __PLATEAU_ORIGIN__?: string }).__PLATEAU_ORIGIN__ ?? 'http://localhost:4000';
+const SUITE = 'intl';
+
+const root = document.getElementById('play-root')!;
+root.innerHTML = '';
+
+const summary = document.createElement('p');
+summary.className = 'conformance-summary';
+summary.textContent = 'Running webintl conformance via the plateau runner…';
+
+const frame = document.createElement('iframe');
+frame.className = 'conformance-iframe';
+frame.title = 'webintl conformance (plateau-hosted runner)';
+frame.src = `${PLATEAU_ORIGIN}/conformance.html?suite=${SUITE}`;
+frame.setAttribute('loading', 'eager');
+
+root.append(summary, frame);
+
+window.addEventListener('message', (event: MessageEvent) => {
+  if (event.origin !== PLATEAU_ORIGIN) return; // only trust the plateau conformance origin
+  const data = event.data as ConformanceEmbedResult;
+  if (!data || data.source !== 'plateau-conformance' || data.suite !== SUITE) return;
+
+  if (data.error) {
+    summary.className = 'conformance-summary fail';
+    summary.textContent = `✗ ${data.error}`;
+    setPlaygroundReady(0);
+    return;
   }
-  getDateTimeFormat(locales?: IntlLocales, options?: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
-    return new Intl.DateTimeFormat(locales as string | string[] | undefined, options);
-  }
-  getNumberFormat(locales?: IntlLocales, options?: Intl.NumberFormatOptions): Intl.NumberFormat {
-    return new Intl.NumberFormat(locales as string | string[] | undefined, options);
-  }
-  getRelativeTimeFormat(
-    locales?: IntlLocales,
-    options?: Intl.RelativeTimeFormatOptions,
-  ): Intl.RelativeTimeFormat {
-    return new Intl.RelativeTimeFormat(locales as string | string[] | undefined, options);
-  }
-}
-
-const provider = new DemoIntlProvider();
-
-interface Check {
-  title: string;
-  run: () => boolean;
-}
-
-const CHECKS: Check[] = [
-  {
-    title: 'getCollator sorts locale-aware (German treats ä near a)',
-    run: () => {
-      const sorted = ['z', 'ä', 'a'].sort(provider.getCollator('de').compare);
-      return sorted[0] === 'a' && sorted[1] === 'ä' && sorted[2] === 'z';
-    },
-  },
-  {
-    title: 'getCollator with sensitivity:base makes a == á (accent-insensitive)',
-    run: () => provider.getCollator('en', { sensitivity: 'base' }).compare('a', 'á') === 0,
-  },
-  {
-    title: 'getDateTimeFormat formats a date for the requested locale',
-    run: () => {
-      const date = new Date(Date.UTC(2026, 0, 15));
-      const enUS = provider.getDateTimeFormat('en-US', { month: 'long', timeZone: 'UTC' }).format(date);
-      const deDE = provider.getDateTimeFormat('de-DE', { month: 'long', timeZone: 'UTC' }).format(date);
-      return enUS === 'January' && deDE === 'Januar';
-    },
-  },
-  {
-    title: 'getNumberFormat formats currency per locale',
-    run: () => {
-      const usd = provider.getNumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(1234.5);
-      return usd.includes('$') && usd.includes('1,234.50');
-    },
-  },
-  {
-    title: 'getRelativeTimeFormat formats a relative time',
-    run: () => provider.getRelativeTimeFormat('en', { numeric: 'auto' }).format(-1, 'day') === 'yesterday',
-  },
-  {
-    title: 'a fresh formatter is returned per call (no shared mutable state)',
-    run: () => provider.getNumberFormat('en') !== provider.getNumberFormat('en'),
-  },
-];
-
-function runConformance(host: HTMLElement): number {
-  const summary = el('div', { class: 'summary' });
-  host.append(summary);
-  let pass = 0;
-  for (const check of CHECKS) {
-    let ok = false;
-    try {
-      ok = check.run();
-    } catch {
-      ok = false;
-    }
-    if (ok) pass += 1;
-    const card = el('div', { class: 'play-card wi-check' });
-    const badge = el('span', { class: `badge ${ok ? 'pass' : 'fail'}` }, ok ? '✓ holds' : '✗ violated');
-    card.append(badge, el('span', { class: 'wi-check-title' }, check.title));
-    host.append(card);
-  }
-  summary.className = `summary ${pass === CHECKS.length ? 'pass' : 'fail'}`;
-  summary.textContent = `${pass}/${CHECKS.length} webintl contract invariants hold`;
-  return pass;
-}
-
-function main(): void {
-  const root = document.getElementById('play-root');
-  if (!root) return;
-  root.textContent = '';
-
-  const conformance = el('section', { class: 'wi-card' });
-  conformance.append(el('h2', {}, 'Runtime conformance — CustomIntlProvider contract'));
-  const passCount = runConformance(conformance);
-  root.append(conformance);
-
-  setPlaygroundReady(passCount);
-}
-
-main();
+  summary.className = `conformance-summary ${data.ok ? 'pass' : 'fail'}`;
+  summary.textContent = `${data.passed}/${data.total} webintl conformance vectors passed (plateau-hosted runner, FUI engine)`;
+  // The e2e smoke asserts the playground rendered green via the passing-vector count.
+  setPlaygroundReady(data.passed);
+});
