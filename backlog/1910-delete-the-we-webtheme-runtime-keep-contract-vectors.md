@@ -2,10 +2,12 @@
 kind: story
 size: 2
 parent: "1294"
-status: active
+status: resolved
 blockedBy: ["1909"]
 dateOpened: "2026-06-28"
 dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
+graduatedTo: "fui:webtheme/ (runtime, #1907) — WE keeps webtheme/contract.ts + conformance-vectors/webtheme.vectors.ts; consumers repointed to the @frontierui/webtheme dev-time alias"
 tags: []
 ---
 

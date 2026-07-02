@@ -6,6 +6,10 @@ import { dirname, resolve } from 'node:path';
 // resolved to the sibling Frontier UI source (mirrors vite.config.mts). The rewritten block tests
 // import `@frontierui/plugs/*`, so the vitest runner needs the same alias.
 const fuiPlugsRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../frontierui/plugs');
+// #1910: the webtheme runtime relocated to fui:webtheme (#1907, per #1282). WE's remaining runtime
+// consumer — the reproduction-parity harness — imports it via `@frontierui/webtheme`, dev-time resolved
+// to the sibling FUI source (mirrors the `@frontierui/plugs` alias). WE keeps only the contract + vectors.
+const fuiWebthemeRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../frontierui/webtheme');
 
 export default defineConfig({
   // Mirror vite.config.mts so .tsx files (the shared mapping fixtures + conformance suites)
@@ -103,7 +107,9 @@ export default defineConfig({
       'process/**/__tests__/**/*.test.{ts,tsx}', // self-driven artefact contract runtime — meta-schema registries + driving loop (#1026/#1071)
       'wrapper-conformance/**/__tests__/**/*.test.{ts,tsx}', // behavioral wrapper conformance vectors + runner (#891)
       'conformance-vectors/**/__tests__/**/*.test.{ts,tsx}', // behavioral conformance-vector schema + per-standard suites (#1016)
-      'webtheme/**/__tests__/**/*.test.{ts,tsx}', // webtheme token model + DTCG→CSS compile (#404)
+      // webtheme runtime + its token/scheme/palette tests were deleted with the runtime (#1910 — impl→
+      // fui:webtheme, WE keeps contract + vectors per #1282). The reproduction-parity harness now resolves
+      // the runtime via the `@frontierui/webtheme` alias below.
       'reproduction-parity/**/__tests__/**/*.test.{ts,tsx}', // reproduction-conformance harness + per-target gap lists (#1226/#1243)
       'repro-bundle/**/__tests__/**/*.test.{ts,tsx}', // repro-bundle contract — shape + validator/serializer/schema (#1664)
       'explorer/**/__tests__/**/*.test.{ts,tsx}', // explorer result interchange — SARIF-compatible shape + validator/projector (#1769)
@@ -124,6 +130,8 @@ export default defineConfig({
       // local-plugs sub-aliases (`@core`/`@webregistries`/… + `virtual:trait-manifest`) were dropped with
       // `we:plugs/` under #1047: every consumer lived inside that tree, which now resides in FUI.
       '@frontierui/plugs': fuiPlugsRoot,
+      // #1910: the reproduction-parity harness resolves the relocated webtheme runtime here (impl→fui).
+      '@frontierui/webtheme': fuiWebthemeRoot,
     },
   },
 });

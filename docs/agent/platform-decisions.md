@@ -99,8 +99,11 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
    #1799, binding + WE vector corpus #1800, plateau-hosted conformance docs surface #1801, WE runtime
    deleted #1802) — both gates that held the move are now cleared: a FUI home exists, and the WE-website
    conformance demo surfaces FUI *headless* logic through the **plateau-hosted conformance iframe** (the
-   #899 vector-runner, built #1790/#1801, drives the WE vectors against the FUI binding cross-origin). The
-   **remaining ~8 subsystems** stay put **as tracked relocation debt** under this rule (the non-engine ones
+   #899 vector-runner, built #1790/#1801, drives the WE vectors against the FUI binding cross-origin).
+   **webcompliance (#1815) and webtheme (#1294 T5 #1910: runtime → `fui:webtheme/`, WE-side consumers —
+   the reproduction-parity harness + the docs/CEM component-token resolver — repointed to the
+   `@frontierui/webtheme` dev-time alias) have since reached the same #1282 end-state.** The
+   **remaining subsystems** stay put **as tracked relocation debt** under this rule (the non-engine ones
    gated on the deferred conformance-model decision #1784), **not** a sanctioned standing tier — and
    crucially **no _new_ WE-resident delivery runtime may be added.** Relocation tracked by #1294; the rule
    is #1282. **#2006 extends this debt list to the WE *website*:** the 11ty+Vite render (`we:.eleventy.js`,

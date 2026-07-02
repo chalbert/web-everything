@@ -13,6 +13,12 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
+// #1910: the webtheme runtime relocated to fui:webtheme (impl→FUI, per #1282). WE keeps only the contract +
+// vectors, so the token resolution is transpiled from the sibling FUI source (the runtime SoT), not a local
+// copy — mirroring the `@frontierui/webtheme` alias the .ts consumers use. The FUI modules `import type` their
+// schema from `@webeverything/contracts/webtheme`; esbuild's TS loader erases those before bundling, so no
+// cross-package resolution is needed for the pure token-resolution surface below.
+const FUI_WEBTHEME = join(ROOT, '../frontierui/webtheme');
 
 let _webtheme;
 /** Transpile + import the real webtheme token modules once (cached per process). */
@@ -21,9 +27,9 @@ async function loadWebtheme() {
   const res = await build({
     stdin: {
       contents:
-        "export { defaultTokens } from './webtheme/defaultTokens.ts';" +
-        "export { flattenTokens, resolveTokens, cssVarName } from './webtheme/tokens.ts';",
-      resolveDir: ROOT,
+        "export { defaultTokens } from './defaultTokens.ts';" +
+        "export { flattenTokens, resolveTokens, cssVarName } from './tokens.ts';",
+      resolveDir: FUI_WEBTHEME,
       sourcefile: 'webtheme-entry.ts',
       loader: 'ts',
     },

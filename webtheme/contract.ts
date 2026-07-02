@@ -8,9 +8,12 @@
  * superseding byte-replication — exactly like `webcompliance/contract.ts` (#1808) and `webpolicy/contract.ts`
  * (#1077). The runtime half — the token operations (`flattenTokens`/`resolveTokens`/`extendTokens`), the
  * DTCG→CSS compile (`compileToCss`), the scheme/accent derivation (`deriveSchemeRuntime`/`compileSchemeCss`),
- * and the palette-source ingest registry — is impl and relocates to FUI (`fui:webtheme/`, #1294 T2, per
- * #1282 — WE holds zero executable). The runtime modules `import type` from here and re-export this surface
- * so importers reach types + runtime from one site (mirroring `webcompliance/gate.ts`).
+ * and the palette-source ingest registry — is impl and now lives **only** in FUI (`fui:webtheme/`, relocated
+ * in #1294 T2 #1907, the WE copy deleted in T5 #1910, per #1282 — WE holds zero executable). The FUI runtime
+ * modules `import type` from here (over the FUI→WE arrow); the remaining WE runtime consumers (the
+ * reproduction-parity harness, the docs/CEM component-token resolver) reach the runtime via the
+ * `@frontierui/webtheme` alias, never a WE-local copy. webtheme thus reaches the #1282 end-state:
+ * impl→FUI, contract + vectors→WE (mirroring webpolicy #1802 and webcompliance #1815).
  *
  * Web Theme fixes the **token meta-schema**: how a design system's concrete-value layer is authored +
  * interchanged (DTCG 2025.10 `{ $type, $value }` nodes with `{group.token}` aliasing — the one adopted-not-
