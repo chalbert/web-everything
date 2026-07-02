@@ -64,15 +64,17 @@ rule **either way**: even under a full Fork-B, WE "only consumes it and codifies
 contract" (WE holds zero implementation, #1282). And a FUI event would be **additive**, not exclusive —
 native `click` still bubbles to the same delegated ancestor, so an event *supplements* delegation, it does
 not replace it. So the decision is not one boundary fork; it decomposes into one **forced invariant** (codify
-the consumer rule — already shipped) plus **two genuine residual choices**: *how to enforce it*, and *whether
-FUI should additionally ship a stable event now*.
+the consumer rule — already shipped) plus **one genuine residual choice**: *whether FUI should additionally
+ship a stable event now* (Fork 2). The enforcement question, originally authored as Fork 1, was **dissolved
+by the 2026-07-01 two-confusion screen (#2091, counter-verified)** — see the settled section below; its
+numbering is kept for lineage.
 
 ## Recommended path at a glance
 
 | Element | Verdict | Why |
 |---|---|---|
 | **WE consumer contract** (delegate on a stable ancestor; never cache the transient node; read `data-*`/`aria-pressed`, which survive upgrade) | **Supported by default — codify, not a fork** | The alternative (bind directly to the chip) is the *shipped regression*; forced invariant. Anchors to [we:block-standard.md:271](../docs/agent/block-standard.md#L271) (transient ⇒ native events kept). |
-| **Fork 1 — enforcement** | **interaction-test lane only (no source gate)** | #933 bans open `addEventListener` sniffing; the deterministic lane already nets the real regression. |
+| **Enforcement** *(settled — not a fork; dissolved 2026-07-01)* | interaction-test lane now; a #933-shaped curated gate is an *optional additive tooling build* if chip-selector wiring recurs | WE-internal tooling, invisible across the boundary; lane-vs-gate differs only on cost — ordering, not a ratify. |
 | **Fork 2 — FUI ships a stable `chip-change` event?** | **No, not now** (advisory; revisit on trigger) | Delegation works today; a `chip-change` event **double-fires with native `click`**; YAGNI until a consumer genuinely can't delegate. |
 
 ## Supported by default — the WE consumer contract (forced invariant; codify)
@@ -102,30 +104,28 @@ chip.addEventListener('click', ...);   // listener bound to a node that replaceW
 `codifiedIn` target: `we:docs/agent/platform-decisions.md` (`we-fui-embed-boundary` cluster) + a cross-ref
 from the transient-family note in `we:docs/agent/block-standard.md`.
 
-## Fork 1 — how is the consumer rule enforced?
+## Settled (not a fork) — enforcement of the consumer rule (was "Fork 1")
 
-*Fork-existence:* a real either/or — both branches are coherent end-states (a runtime regression test vs a
-static source gate), and they genuinely trade off (the gate adds author-time coverage but carries
-maintenance + the #933 false-positive constraint). The excluded reading is "open `addEventListener` sniff,"
-which is *broken* per #933.
+*Screen: flagged(impl+prio) → dissolved, 2026-07-01 (#2091, counter-verified). Test-lane vs source-gate is
+WE-internal enforcement tooling no consumer can observe across the boundary, and both branches yield the
+identical consumer contract — the case against the additive gate was brittleness / maintenance /
+duplication, i.e. cost. That makes this a tooling/ordering choice, not a ratifiable fork. Numbering kept
+for lineage; nothing here needs a ratify turn.*
 
-- **(a) — interaction-test lane only; no new source gate.** *(default)* The deterministic mock-chip lane
-  ([we:tests/interaction/backlog-priority-filters.spec.ts](../tests/interaction/backlog-priority-filters.spec.ts))
-  already reproduces the self-replace and asserts post-upgrade filtering — it nets the **actual** regression
-  (a chip stops filtering), which a source sniff only approximates. Cheapest; no false-positive surface.
-- **(b) — add a #933-shaped curated deny-list gate.** A `check:standards` rule, warn-first → ERROR, keyed to
-  the *known* chip selectors (`[data-pfilter]`/`[data-pready]` + a stored `querySelector('we-filter-chip')`),
-  following `COMPOSE_DENY_LIST` ([we:scripts/check-standards-rules.mjs:1624](../scripts/check-standards-rules.mjs#L1624)).
-  Static author-time coverage — but brittle (only catches today's selectors, cannot generalise to "any
-  self-replacing element" without becoming the rejected open sniff), and duplicative of the lane.
+**Standing state:** the deterministic mock-chip lane
+([we:tests/interaction/backlog-priority-filters.spec.ts](../tests/interaction/backlog-priority-filters.spec.ts))
+is the enforcement — it reproduces the self-replace and asserts post-upgrade filtering, netting the
+**actual** regression a source sniff only approximates. A **#933-shaped curated deny-list gate** (keyed to
+the known chip selectors, following `COMPOSE_DENY_LIST`,
+[we:scripts/check-standards-rules.mjs:1624](../scripts/check-standards-rules.mjs#L1624)) remains an
+*optional additive tooling build*, filed and ordered like any other work **if chip-selector wiring recurs**
+— its shape is already settled by statute #933 (never an open `addEventListener` sniff), so nothing about
+it is a decision.
 
-**Default: Fork 1 (a) — interaction-test lane only.** The lane catches the real failure mode; a source gate
-is constrained by #933 to a brittle curated list that adds maintenance without catching the general class.
-
-`Skeptic:` SURVIVES-WITH-AMENDMENT — the skeptic confirmed Fork A's *rule* is fine but its originally-proposed
-heuristic gate is unconstitutional under #933 (open `addEventListener` sniffing rejected). Amendment folded
-in: the default is now *no source gate* (lane only); option (b) is constrained to the #933 curated-deny-list
-shape if ever added.
+`Skeptic:` SURVIVES-WITH-AMENDMENT *(pre-dissolution history)* — the skeptic confirmed the *rule* is fine but
+the originally-proposed heuristic gate is unconstitutional under #933 (open `addEventListener` sniffing
+rejected). Amendment folded in: lane only; any future gate is constrained to the #933 curated-deny-list
+shape.
 
 ## Fork 2 — should FUI *additionally* ship a stable `chip-change` event now?
 
@@ -167,6 +167,10 @@ way; the FUI event is a *separately-prioritized additive build*, not a boundary 
 *native-events-kept* clause for family A); (3) citation-scope (#1381 governs *mechanism-selection*, not
 event-API design — its native-events-kept clause argues *for* delegating on native `click`, the opposite of
 what the original prep cited it for). Default flipped (b)→(a) and folded into the shape above.
+
+`Screen:` clear — fresh-context two-confusion screen (#2091), 2026-07-01: the event is boundary-observable
+public API, and with cost stripped a merit difference remains (the native-`click` double-signal vs a
+framework consumer that cannot delegate) — a genuine additive go/no-go with a concrete un-gate trigger.
 
 ## Context
 

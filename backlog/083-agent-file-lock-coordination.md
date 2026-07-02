@@ -150,24 +150,24 @@ failure is not unfairness but a **stalled waiter** holding its slot forever and 
 - **(B) Unbounded FIFO.** Strict order, no waiter timeout. *Rejected*: a stalled head waiter wedges every
   agent behind it — reintroduces the crash-hang that fork 2 closes on the holder side.
 
-## Fork 6 — build it at all? (the meta-fork)
+## Settled (not a fork) — build it at all? (was "Fork 6", the meta-fork)
 
-The 2025–2026 multi-agent-coding consensus routes *around* file locks: **git worktrees + isolated
-working dirs** convert silent runtime corruption into visible merge-time conflicts; Claude Code's own
-pattern is "status flags that lock work claims + worktrees + dependency markers" — i.e. exactly this
-repo's item-level `status: active` claim + the batch skill's worktree lanes. CodeCRDT notes lock-based
-coordination introduces O(N×L) contention and argues re-read-shared-state often beats locking. The
-`/batch --parallel` static partition ([we:SKILL.md:136-143](../.claude/skills/batch-backlog-items/SKILL.md#L136-L143))
-already covers the predictable-overlap case by construction.
+*Screen: flagged(prio) → dissolved, 2026-07-01 (#2091, counter-verified). Both "branches" ratify the
+identical forks 1–5 mechanism; the only discriminator between build-now and build-on-trigger is
+evidence-gated timing — now-vs-defer ordering wearing a fork's clothes, which the 2026-06-13 ruling itself
+conceded ("a roadmap/scope bet, not a mechanism question"). The outcome is unchanged; only the framing is
+corrected: nothing here was ever a ratifiable design choice. Numbering kept for lineage.*
 
-- **(A — recommended) Keep parked; build the v1 lock only on an observed residual collision.** The JIT
-  lock earns its keep *only* for coincidental same-file overlap between fully independent sessions not
-  running under one `/batch` — a residual the static partition can't sidestep. Ship `we:lock.mjs` + the
-  hook once such a collision is actually observed (and worktree-partition + item-claim + single-writer
-  didn't catch it).
-- **(B) Build v1 now.** Author the lock proactively. *Rejected*: most of the value is already covered by
-  partition-by-Project + single-writer-hot-files + worktree lanes; building now is speculative machinery
-  for a residual not yet observed (the item's own *Honest scope note*).
+**Standing state:** the mechanism spec (forks 1–5) stands ratified as the ready-to-ship design. Shipping
+`we:lock.mjs` + the hook is an ordinary **trigger-gated build** — filed and ordered like any other work,
+un-gated by the first *observed* same-file collision between fully independent sessions that
+worktree-partition + item-claim + single-writer didn't catch. Context that keeps the trigger honest: the
+2025–2026 multi-agent-coding consensus routes *around* file locks (git worktrees convert silent runtime
+corruption into visible merge-time conflicts; Claude Code's own pattern is claim-flags + worktrees +
+dependency markers — exactly this repo's item-level `status: active` claim + the batch skill's worktree
+lanes), CodeCRDT notes lock coordination costs O(N×L) contention, and the `/batch --parallel` static
+partition ([we:SKILL.md:136-143](../.claude/skills/batch-backlog-items/SKILL.md#L136-L143)) already covers
+predictable overlap by construction — so the residual the lock targets is coincidental overlap only.
 
 ## Cross-session batch reservation — selection-tier soft hint (added 2026-06-12)
 

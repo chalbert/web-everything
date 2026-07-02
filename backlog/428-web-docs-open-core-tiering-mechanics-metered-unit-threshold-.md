@@ -35,7 +35,9 @@ Grounded in the [Web Docs open-core tiering prior-art survey](/research/web-docs
 hosting SaaS meter and tier (Chromatic, Mintlify, ReadMe, GitBook, Netlify, Vercel). [#091](/backlog/091-web-docs-as-a-service-plateau/)
 ratified the open-core *principle* (the [monetization](docs/agent/platform-decisions.md#monetization) rule — open-core by usage; cancel-and-self-host always holds); this item
 settles the *mechanics* it left open. **No design exists yet.** The three named axes reshape into **one
-genuine fork** (the metered unit), **one low-confidence principle** (the free/paid threshold), and **one
+genuine fork** (the metered unit), **one settled principle** (the free/paid threshold — dissolved from a
+fork by the 2026-07-01 two-confusion screen (#2091): its two invariants are already fixed rulings and the
+numbers are a #427-build calibration, so nothing remained to ratify), and **one
 ratify** (the billing surface — already chosen). Recommended unit: **meter the conformance-verified
 regeneration — the Chromatic-snapshot analog** (price the differentiator, not seats or bytes).
 
@@ -60,13 +62,13 @@ reopening it.
 
 ### Recommended path at a glance
 
-Ratify the unit (the one real call), nod the threshold principle, and confirm the billing ratify. The
-**confidence** column says where judgment is actually needed.
+Ratify the unit (the one real call) and confirm the billing ratify; the threshold is settled below, not a
+fork. The **confidence** column says where judgment is actually needed.
 
 | Fork | Recommended default | Main alternative | Confidence |
 |---|---|---|---|
 | **1 · metered unit** | meter the conformance-verified regeneration (Chromatic-snapshot analog); free tier = 1 site + N verified builds/mo, graceful pause; self-host always free | per-site/project flat fee (GitBook/ReadMe) | **Medium** — genuine business judgment |
-| **2 · threshold** | a *principle*: free clears the self-host floor + onboards a real OSS/solo project; paid begins at ongoing production value; **numbers deferred to the #427 build** | pick fixed launch numbers now | **Low** — derived from Fork 1; tune on real usage |
+| **threshold** *(settled — not a fork)* | the two invariants below stand as fixed rulings; **numbers = #427-build calibration**, ordinary ordering | — *(dissolved 2026-07-01, two-confusion screen)* | **High** — invariants pre-fixed elsewhere |
 | **billing surface** | *(ratify)* compose #183's Lemon Squeezy MoR + its metered-billing API; auth = plateau-app build detail | reopen for Stripe Billing *(rejected)* | **High** — already chosen + supports metering |
 
 ## Ratify (not a fork) — the billing surface
@@ -110,24 +112,29 @@ already exists as #089 idea-1's continuous verification and `we:cases.js` ingest
   manifest+cases change vs per scheduled re-verify). Default to the most legible to the customer — *one
   metered unit = one successful verify-and-publish of their site* — tuned at the #427 build.
 
-## Fork 2 — the free/paid threshold: where does free end?
+*Screen: clear — fresh-context two-confusion screen (#2091), 2026-07-01: the unit choice is
+customer-observable pricing identity and the branches differ on merit (what value is priced), not cost.*
 
-**Crux.** Once the unit is the verified build, the threshold is *how many free builds* (and what the free
-tier includes), pinned by two fixed constraints and otherwise a number to tune. Survey finding 2: the
-market converges on a "one site / one individual" free tier, and commercial-use permission is the
-dividing line (Netlify allows it; Vercel's Hobby bans it).
+## Settled (not a fork) — the free/paid threshold
 
-- **(A — recommended) A threshold *principle*, numbers deferred.** Two invariants are fixed *now*: (i)
-  **the self-host floor is unlimited and free** — the generator + standards stay self-hostable, so "cancel
-  and self-host always holds" ([#091:48](/backlog/091-web-docs-as-a-service-plateau/#L48)); the free *hosted*
-  tier need only be generous enough to onboard a real solo/OSS project (one site, a usable monthly build
-  allotment, commercial use permitted). (ii) **Paid begins at ongoing production value** — continuous
-  re-verification of a live, hosted site past the free allotment. The *specific* free-build count and any
-  feature gates (custom domain, SSO, AI) are tuned at the [#427](/backlog/427-plateau-app-served-web-docs-site-per-customer-conformance-re/)
-  build against real usage, the way Chromatic's 5K and Mintlify's Hobby limits were set empirically.
-- **(B) Pick fixed launch numbers now.** *Rejected (for now)* — choosing a free-build count and feature
-  gates before any usage data is a guess that would just be re-tuned; the principle is the durable part.
-  The numbers are a build-time calibration, not a standards decision.
+*Screen: flagged(prio) → dissolved, 2026-07-01 (#2091, counter-verified). This section was authored as
+"Fork 2", but its two branches shared all merit content: the recommended branch's two invariants are
+already fixed rulings elsewhere, and the alternative ("pick fixed launch numbers now") was rejected purely
+on timing — prioritization in fork costume per the not-a-prioritization rule. Nothing here needs a ratify
+turn; what follows is the standing state.*
+
+Once the unit is the verified build, the threshold is *how many free builds* (and what the free tier
+includes). Survey finding 2: the market converges on a "one site / one individual" free tier, and
+commercial-use permission is the dividing line (Netlify allows it; Vercel's Hobby bans it). Two invariants
+are **already fixed rulings**, not open choices: (i) **the self-host floor is unlimited and free** — the
+generator + standards stay self-hostable, so "cancel and self-host always holds"
+([#091:48](/backlog/091-web-docs-as-a-service-plateau/#L48)); the free *hosted* tier need only be generous
+enough to onboard a real solo/OSS project (one site, a usable monthly build allotment, commercial use
+permitted). (ii) **Paid begins at ongoing production value** — continuous re-verification of a live,
+hosted site past the free allotment. The *specific* free-build count and any feature gates (custom domain,
+SSO, AI) are a **build-time calibration at the [#427](/backlog/427-plateau-app-served-web-docs-site-per-customer-conformance-re/)
+build** against real usage — ordinary backlog ordering, the way Chromatic's 5K and Mintlify's Hobby limits
+were set empirically — never a standards decision.
 
 ---
 
