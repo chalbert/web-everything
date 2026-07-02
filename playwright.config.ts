@@ -4,6 +4,12 @@ import { defineConfig, devices } from '@playwright/test';
 // (Vite :3000, 11ty :8080) so its static fixture server never collides with the user's running dev server.
 const INTERACTION_PORT = Number(process.env.WE_INTERACTION_PORT) || 3137;
 
+// When set (the CI interaction lane, #2070), skip booting the app dev server (Vite :3000 + 11ty :8080):
+// the interaction project is self-contained against the static fixture server and never touches the live
+// app. The live-server projects (a11y/content/smoke/visual) are not run in this mode. This lets CI gate
+// the deterministic lane without a build-then-serve step (the live lanes CI-home under #800).
+const INTERACTION_ONLY = !!process.env.WE_INTERACTION_ONLY;
+
 export default defineConfig({
   testDir: './',
   testMatch: [
@@ -33,12 +39,18 @@ export default defineConfig({
   // `*.sw.spec.ts` specs and no `sw-fixtures/serve.mjs` remain, so its webServer + project are gone.)
   webServer: [
     // The app dev server (Vite :3000 + 11ty :8080) the live-server specs (a11y, content) hit.
-    {
-      command: 'npm run dev',
-      url: 'http://localhost:3000',
-      reuseExistingServer: !process.env.CI,
-      timeout: 120 * 1000,
-    },
+    // Skipped in the interaction-only CI mode (WE_INTERACTION_ONLY) — that lane needs only the fixture
+    // server below, so booting the app build would be dead weight (and not CI-safe without #800's build step).
+    ...(INTERACTION_ONLY
+      ? []
+      : [
+          {
+            command: 'npm run dev',
+            url: 'http://localhost:3000',
+            reuseExistingServer: !process.env.CI,
+            timeout: 120 * 1000,
+          },
+        ]),
     // The static fixture server for the deterministic interaction lane — serves the repo tree (so the
     // fixture loads the REAL shipped JS) on its own port. No app build, no live data.
     {
