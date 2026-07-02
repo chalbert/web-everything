@@ -118,6 +118,11 @@ describe('renderIntentGrid — full render-from-data arc on a fixture', () => {
     expect(html).toContain('data-k="intent-0-card"');
     expect(html).toContain('data-k="intent-1-card"');
   });
+  it('uses the .project-card-link overlay, not an <a> wrapping the card (no nested-anchor ghost clones)', () => {
+    const html = renderIntentGrid(INTENTS, stubRoot, fakeRunner);
+    expect((html.match(/class="project-card-link"/g) || []).length).toBe(INTENTS.length);
+    expect(html).not.toMatch(/<a [^>]*class="project-card intent-tile"/);
+  });
   it('renders a status badge + one tag per dimension key per tile', () => {
     // Assert the spec batch dispatched the right components: motion has 2 dims → 2 tags + 1 badge + 1 card.
     const seen = [];
@@ -157,7 +162,7 @@ describe('projectIconHtml — icon block per project', () => {
 });
 
 describe('renderProjectGrid — home/index grid render-from-data (#2019)', () => {
-  it('emits one linking anchor per project wrapping its SSR card, honoring gridClass', () => {
+  it('wraps each tile in a .project-card box with an overlay link, honoring gridClass', () => {
     const html = renderProjectGrid(PROJECTS, {
       repoRoot: stubRoot, hrefFor: (p) => `/projects/${p.id}/`, gridClass: 'project-grid project-grid--centered',
     }, fakeRunner);
@@ -166,6 +171,17 @@ describe('renderProjectGrid — home/index grid render-from-data (#2019)', () =>
     expect((html.match(/class="project-card"/g) || []).length).toBe(2);
     expect(html).toContain('data-k="project-0-card"');
     expect(html).toContain('data-k="project-1-card"');
+  });
+  it('uses the .project-card-link overlay — NOT an <a> wrapping the card (which would nest the description links and clone empty ghost tiles)', () => {
+    // A tile description carries inline `<a>` links; an `<a class="project-card">` wrapping the card makes
+    // invalid NESTED anchors, so the browser splits the tile and re-opens an EMPTY clone after every inner
+    // link (home: 47 tiles → 71 in the parsed DOM, ~24 empty ghosts — invisible in source, only in the
+    // rendered DOM). The overlay anchor (`.project-card-link`, position:absolute; inset:0) is the valid form.
+    const html = renderProjectGrid(PROJECTS, { repoRoot: stubRoot, hrefFor: (p) => `/projects/${p.id}/` }, fakeRunner);
+    expect(html).toContain('<div class="project-card">');
+    expect((html.match(/class="project-card-link"/g) || []).length).toBe(PROJECTS.length);
+    // The anti-pattern: an <a …> that itself carries the .project-card class (i.e. wraps the tile).
+    expect(html).not.toMatch(/<a [^>]*class="project-card"/);
   });
   it('dispatches a status badge per tile (render-from-data, no markup-as-source)', () => {
     const seen = [];
