@@ -1,8 +1,11 @@
 name: CI
 
-# Runs the unit suite + repo health gate on every push to main (#2080). Closes the no-CI gap: the
-# 2000+ vitest tests and check:standards previously ran only when an agent remembered to run them
-# locally — origin now verifies every push (push-if-green publishes main, this re-checks it on GitHub).
+# Runs the unit suite + repo health gate on every push to main and on every pull_request against main
+# (#2080, #2151). Closes the no-CI gap: the 2000+ vitest tests and check:standards previously ran only
+# when an agent remembered to run them locally — origin now verifies every push (push-if-green publishes
+# main, this re-checks it on GitHub). The pull_request trigger makes the same gate a PR status check so
+# main can require it before merge (the #2138 merge-queue / self-approved-PR direction); it does not
+# block today's direct-push landing.
 #
 # Scope: the fast deterministic lanes only. Unit suite (~10s) + gate (~3s) + the deterministic
 # Playwright interaction lane (#2070 — self-contained against a static fixture server, no app build).
@@ -11,6 +14,8 @@ name: CI
 
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
 
