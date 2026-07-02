@@ -137,6 +137,17 @@ output is the rewritten body, not a message:
    skeptic" marker — running it *is* prep's job. (The decision-turn red-team in *backlog-workflow.md* stays,
    but as a *confirmation* + a re-attack only if the discussion surfaced something new — no longer the first
    time a skeptic sees the fork.)
+5. **Two-confusion screen — fresh-context, every fork, before the stamp** (*backlog-workflow.md → The
+   prepared-fork shape → Two-confusion screen*, #2091). Distinct from the pass-4 skeptic (which attacks the
+   *default*): spawn a **separate throwaway agent that has not seen this session's authoring** and have it
+   answer exactly two questions per `## Fork N` (and per validation-gate verdict): (1) does the fork rule on
+   an **implementation detail** — invisible to a consumer across the WE↔FUI boundary — or put an impl
+   concern on the standard side? (2) with both branches imagined *free to build and instantly maintained*,
+   does a **merit** difference remain, or is this **prioritization** in fork costume? Record a **`Screen:`**
+   line beside each `Skeptic:` line (`Screen: clear` / `Screen: flagged(impl|prio) → <fix applied>`), and
+   **rewrite any flagged fork before stamping** (re-layer the impl detail, or dissolve to ruling + a
+   separately-prioritized build). The screen is mandatory on every fork — no leverage exception — because
+   these two framing flaws are what a same-session skeptic is structurally blind to.
 
 ## Close out — mark prepared, release back to open
 
@@ -158,8 +169,10 @@ A prepared decision is **still open** — the call hasn't been made. So `release
    own `## Fork N` (research it now), fold it into an existing fork's default, or drop it. Then walk every
    `## Fork N` and confirm each has its fork-existence
    justification line (#819), named options,
-   tradeoffs, a bold default, **and a `Skeptic:` verdict line** (the pass-4 attack was run and its findings
-   folded in — a fork with no `Skeptic:` note is un-attacked, so not at DoR; do not stamp it) — **plus a
+   tradeoffs, a bold default, **a `Skeptic:` verdict line** (the pass-4 attack was run and its findings
+   folded in — a fork with no `Skeptic:` note is un-attacked, so not at DoR; do not stamp it), **and a
+   `Screen:` verdict line** (the pass-5 fresh-context two-confusion screen ran and any flag was fixed — a
+   fork with no `Screen:` line is un-screened, so not at DoR; do not stamp it) — **plus a
    concrete code example for any fork that turns on a code-level shape** (API/wire-form/attr/schema/call-site;
    a code-shape fork with no snippet is not at DoR — pure naming/ownership/scope/timing forks are exempt). **If the
    item is a *validation-gate* decision** (third archetype — a go/no-go on a candidate, no `## Fork N`),
