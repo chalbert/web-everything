@@ -61,6 +61,7 @@
 | Adding or editing a Claude **skill** (`.claude/skills/*/SKILL.md`) — keep it a trigger+pointer, not a copy of the rubric | [docs/agent/skill-authoring.md](docs/agent/skill-authoring.md) |
 | Choosing a **vision capability** — tiny on-device classifier vs. small VLM vs. hosted, and where each runs (the cascade) | [docs/agent/vision-tiers.md](docs/agent/vision-tiers.md) |
 | **How an automated writer reaches `main`** — the writer operating model: automation **isolates by default** (clone → `lane/*` → integrator auto-merge), `main` is **convergence-only for automation**, the human is the single trusted writer with direct commit/push; near-term enforcement is **convention** (the serial `/batch` still commits on the current branch per Rule 104 as the interim) + the future server-side **bot-principal** branch rule | [platform-decisions.md#pr-flow-rollout-mechanism](docs/agent/platform-decisions.md#pr-flow-rollout-mechanism) |
+| **Manually developing / testing an edit in a lane** — pick a lane, boot its own dev pair (export `.env.local` ports), the FUI-sibling symlink (#1943), rendering via static build | [docs/agent/testing.md](docs/agent/testing.md) → "Developing & manually testing in a lane" |
 | Dev environment & scripts | `DEV_GUIDE.md` |
 | Canonical specs (per-entry) | `src/_data/{blocks,plugs,intents,protocols,semantics,references}.json`; backlog = `backlog/*.md` |
 
