@@ -3,7 +3,7 @@ const syntaxHighlight = require("@11ty/eleventy-plugin-syntaxhighlight");
 const { deriveResearchFreshness } = require("./scripts/lib/research-freshness.cjs");
 const { buildTechnicalConfiguratorUrl } = require("./scripts/lib/technical-configurator-url.cjs");
 const { spliceDataTables } = require("./scripts/lib/data-table-build-hook.cjs");
-const { renderIntentGrid, renderProjectGrid } = require("./scripts/lib/component-render-build-hook.cjs");
+const { renderIntentGrid, renderProjectGrid, renderStageGrid } = require("./scripts/lib/component-render-build-hook.cjs");
 
 module.exports = function (eleventyConfig) {
   eleventyConfig.addPlugin(syntaxHighlight);
@@ -308,6 +308,15 @@ ${fuiHostScript}`;
         return external ? project.url : `/projects/${project.id}/`;
       },
     });
+  });
+
+  // Governance lifecycle stage cards (#2020, keystone #2016) — the same SSR path applied to the governance
+  // page's four stage tiles. Each stage renders as a `we-card` (its `N · Name` line → title, its marker →
+  // a header `we-badge`, its role/description/gate copy → the body) in ONE subprocess batch to the pinned
+  // FUI CLI (render-from-data per #2007). No linking anchor — stage cards are not click-throughs. The
+  // client `<we-card>`/`<we-badge>` CE upgrade (base.njk) is a pure enhancement over this JS-off baseline.
+  eleventyConfig.addShortcode("weStageGrid", function (stages) {
+    return renderStageGrid(stages, __dirname);
   });
 
   // The backlog feeds off backlog/*.md (parsed by src/_data/backlog.js, which

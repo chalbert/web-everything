@@ -2,10 +2,12 @@
 kind: story
 size: 3
 parent: "777"
-status: active
+status: resolved
 blockedBy: ["2016"]
 dateOpened: "2026-07-01"
 dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
+graduatedTo: none
 tags: [dogfood, fui, ssr, governance]
 ---
 

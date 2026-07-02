@@ -281,6 +281,58 @@ function renderProjectGrid(projects, { repoRoot, hrefFor, gridClass = 'project-g
   return `<div class="${escapeAttr(gridClass)}">${anchors.join('')}</div>`;
 }
 
+/**
+ * Render the governance lifecycle stage grid to SSR HTML in ONE subprocess batch (#2020, generalizing the
+ * #2016 SSR path to the governance page). Each stage becomes a `we-card` SSR tile: the `N · Name` line is
+ * the card title, the stage marker (`We are here` / the future-gate label) is a header-trailing `we-badge`
+ * (render-from-data per #2007 — the current stage takes the `info` tone, the future stages `neutral`), and
+ * the body carries the role line + description + the "moves on when" gate. There is NO outer linking anchor
+ * (stage cards are not click-throughs — unlike the intent/project grids), so the `.fui-card` is spliced
+ * straight into the grid. The current stage's card gets a `.stage-tile-card--current` class so the accent
+ * border (`src/css/style.css`) can key off it, replacing the retired `.stage-card.is-current` rule.
+ *
+ * `stages` is the list of `{ n, name, tag, current, role, description, gate }` — `role`/`description`/`gate`
+ * carry trusted authored HTML (our own template data with `<strong>` emphasis), spliced via body `html`
+ * parts. The client `<we-card>`/`<we-badge>` CE upgrade (base.njk) is a pure enhancement over this
+ * JS-off-correct baseline.
+ */
+function renderStageGrid(stages, repoRoot, runner = execFileSync) {
+  const list = Array.isArray(stages) ? stages : [];
+
+  // Pass 1 — batch every stage's marker badge in one subprocess call.
+  const badgeSpecs = list.map((stage, i) => ({
+    key: `stage-${i}-badge`,
+    component: 'badge',
+    config: { label: String(stage.tag || ''), tone: stage.current ? 'info' : 'neutral' },
+  }));
+  const badges = renderComponents(badgeSpecs, repoRoot, runner);
+
+  // Pass 2 — batch every stage's card shell, fed the pass-1 badge as the header actions. The body parts are
+  // TRUSTED authored HTML (our own governance copy carrying `<strong>` emphasis), not user input.
+  const cardSpecs = list.map((stage, i) => {
+    const badgeHtml = badges.get(`stage-${i}-badge`) || '';
+    const bodyParts = [
+      { tag: 'p', className: 'stage-role', html: String(stage.role || '') },
+      { tag: 'p', className: 'stage-desc', html: String(stage.description || '') },
+      { tag: 'p', className: 'stage-gate', html: String(stage.gate || '') },
+    ];
+    return {
+      key: `stage-${i}-card`,
+      component: 'card',
+      config: {
+        title: `${stage.n} · ${stage.name}`,
+        actionsHtml: badgeHtml,
+        bodyParts,
+        className: stage.current ? 'stage-tile-card stage-tile-card--current' : 'stage-tile-card',
+      },
+    };
+  });
+  const cards = renderComponents(cardSpecs, repoRoot, runner);
+
+  const tiles = list.map((stage, i) => cards.get(`stage-${i}-card`) || '');
+  return `<div class="gov-stages">${tiles.join('')}</div>`;
+}
+
 module.exports = {
   PINNED_CLI_RELATIVE,
   EXPECTED_PRODUCER,
@@ -288,6 +340,7 @@ module.exports = {
   renderComponents,
   renderIntentGrid,
   renderProjectGrid,
+  renderStageGrid,
   projectIconHtml,
   statusTone,
   intentTileSpecs,

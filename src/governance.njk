@@ -60,64 +60,43 @@ permalink: /governance/
     that may never arrive</strong>. We are at the first stage, and honestly may stay there.
 </p>
 
-<div class="gov-stages">
-    <div class="stage-card is-current">
-        <div class="stage-header">
-            <h2>1 &middot; Steward</h2>
-            <span class="stage-tag">We are here</span>
-        </div>
-        <p class="stage-role"><strong>Who decides:</strong> the author, alone.</p>
-        <p>A single benevolent steward sets direction, resolves every design fork, and is
-            accountable for coherence. The guardrail is total transparency: decisions are recorded
-            in public and remain open to challenge and reversal.</p>
-        <p class="stage-gate"><strong>Moves on when:</strong> sustained, substantive contribution
-            arrives from people other than the author — enough that one person reviewing everything
-            becomes the bottleneck rather than the safeguard.</p>
-    </div>
-
-    <div class="stage-card">
-        <div class="stage-header">
-            <h2>2 &middot; Core contributors</h2>
-            <span class="stage-tag stage-tag-future">If adoption begins</span>
-        </div>
-        <p class="stage-role"><strong>Who decides:</strong> a small core, with the founder breaking ties.</p>
-        <p>Commit and review rights extend to a handful of trusted contributors. Decision-making is
-            written down as an explicit process rather than living in one person's head. The founder
-            delegates whole domains and steps back to tie-breaker, not author-of-everything.</p>
-        <p class="stage-gate"><strong>Moves on when:</strong> there are multiple independent
-            implementers or organizations depending on the specifications — parties whose interests
-            can legitimately differ and need a neutral table.</p>
-    </div>
-
-    <div class="stage-card">
-        <div class="stage-header">
-            <h2>3 &middot; Working group</h2>
-            <span class="stage-tag stage-tag-future">If interests diverge</span>
-        </div>
-        <p class="stage-role"><strong>Who decides:</strong> a chartered group, by documented process.</p>
-        <p>A formal proposal-and-review process governs changes, with the founder as one voice among
-            peers rather than the final word. Membership reflects the people and projects actually
-            building on the standard.</p>
-        <p class="stage-gate"><strong>Moves on when:</strong> adoption is broad enough that neutral,
-            independent stewardship of the trademark, the specification, and the process becomes
-            necessary in its own right.</p>
-    </div>
-
-    <div class="stage-card">
-        <div class="stage-header">
-            <h2>4 &middot; Independent body</h2>
-            <span class="stage-tag stage-tag-future">If it outgrows any individual</span>
-        </div>
-        <p class="stage-role"><strong>Who decides:</strong> a foundation or standards body, not the founder.</p>
-        <p>Stewardship moves to a neutral legal entity that holds the specification, trademark, and
-            governance in trust for its community. The founder relinquishes unilateral control
-            entirely. This is the end state for a standard that has genuinely outgrown any single
-            person.</p>
-        <p class="stage-gate"><strong>This is a destination, not a forecast.</strong> Most projects
-            never reach it, and reaching it would require an adoption this one has not earned and may
-            never earn.</p>
-    </div>
-</div>
+{#
+  #2020 (keystone #2016): the governance lifecycle stages are SSR'd from our `we-card` at BUILD TIME.
+  `weStageGrid` shells out to the pinned FUI build-CLI (render-from-data per #2007) and returns each stage
+  as real `<article class="fui-card">` markup — its `N · Name` line as the card title, its marker as a
+  header `<span class="fui-badge…">` (the "We are here" current stage gets the `info` tone, the future
+  gates `neutral`), and its role/description/gate copy as the card body. Correct with JS off,
+  view-source-visible; the client `<we-card>`/`<we-badge>` CE upgrade (base.njk) is a pure enhancement.
+  The stage copy lives here as data; the tone map + `.stage-tile-card--current` accent class live in the
+  build hook (`scripts/lib/component-render-build-hook.cjs`).
+#}
+{% set governanceStages = [
+  {
+    n: 1, name: "Steward", tag: "We are here", current: true,
+    role: "<strong>Who decides:</strong> the author, alone.",
+    description: "A single benevolent steward sets direction, resolves every design fork, and is accountable for coherence. The guardrail is total transparency: decisions are recorded in public and remain open to challenge and reversal.",
+    gate: "<strong>Moves on when:</strong> sustained, substantive contribution arrives from people other than the author — enough that one person reviewing everything becomes the bottleneck rather than the safeguard."
+  },
+  {
+    n: 2, name: "Core contributors", tag: "If adoption begins", current: false,
+    role: "<strong>Who decides:</strong> a small core, with the founder breaking ties.",
+    description: "Commit and review rights extend to a handful of trusted contributors. Decision-making is written down as an explicit process rather than living in one person's head. The founder delegates whole domains and steps back to tie-breaker, not author-of-everything.",
+    gate: "<strong>Moves on when:</strong> there are multiple independent implementers or organizations depending on the specifications — parties whose interests can legitimately differ and need a neutral table."
+  },
+  {
+    n: 3, name: "Working group", tag: "If interests diverge", current: false,
+    role: "<strong>Who decides:</strong> a chartered group, by documented process.",
+    description: "A formal proposal-and-review process governs changes, with the founder as one voice among peers rather than the final word. Membership reflects the people and projects actually building on the standard.",
+    gate: "<strong>Moves on when:</strong> adoption is broad enough that neutral, independent stewardship of the trademark, the specification, and the process becomes necessary in its own right."
+  },
+  {
+    n: 4, name: "Independent body", tag: "If it outgrows any individual", current: false,
+    role: "<strong>Who decides:</strong> a foundation or standards body, not the founder.",
+    description: "Stewardship moves to a neutral legal entity that holds the specification, trademark, and governance in trust for its community. The founder relinquishes unilateral control entirely. This is the end state for a standard that has genuinely outgrown any single person.",
+    gate: "<strong>This is a destination, not a forecast.</strong> Most projects never reach it, and reaching it would require an adoption this one has not earned and may never earn."
+  }
+] %}
+{% weStageGrid governanceStages %}
 
 <div class="content-box" style="margin-top: 3rem;">
     <h2>Governance documents</h2>
@@ -155,6 +134,11 @@ permalink: /governance/
 </div>
 
 <style>
+    /* #2020 (keystone #2016): the stage tiles are SSR `.fui-card`s now (`weStageGrid` → pinned FUI CLI).
+       `.gov-stages` stays the grid wrapper; the card owns its own frame/header/body (shared `.fui-card*`
+       rules in style.css), so these page rules only supply the 2×2 layout, the current-stage accent
+       border, and the body-copy composition — the hand-styled stage-card / stage-tag rules are retired
+       in favour of the component's token-driven styling. */
     .gov-stages {
         display: grid;
         gap: 1.5rem;
@@ -167,61 +151,32 @@ permalink: /governance/
         .gov-stages { grid-template-columns: 1fr; }
     }
 
-    .gov-stages .stage-card {
-        background: white;
-        padding: 1.75rem;
-        border-radius: 12px;
-        border: 1px solid var(--color-border);
-        box-shadow: var(--shadow-sm);
-        display: flex;
-        flex-direction: column;
-    }
-
-    .gov-stages .stage-card.is-current {
-        border-color: var(--color-primary);
-        box-shadow: 0 0 0 1px var(--color-primary), var(--shadow-sm);
-    }
-
-    .gov-stages .stage-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 0.75rem;
-        margin-bottom: 1rem;
-    }
-
-    .gov-stages .stage-header h2 {
-        margin: 0;
+    .gov-stages .stage-tile-card { height: 100%; }
+    .gov-stages .stage-tile-card .fui-card__title {
         font-size: 1.3rem;
         color: var(--color-text-main);
     }
 
-    .gov-stages .stage-tag {
-        flex-shrink: 0;
-        font-size: 0.75rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        padding: 0.25rem 0.6rem;
-        border-radius: 999px;
-        background: var(--color-primary);
-        color: white;
-        white-space: nowrap;
+    /* The current stage keeps its primary accent — now keyed off the card class the build hook stamps. */
+    .gov-stages .stage-tile-card--current {
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 1px var(--color-primary), var(--shadow-sm);
     }
 
-    .gov-stages .stage-tag-future {
-        background: transparent;
-        color: var(--color-text-muted);
-        border: 1px solid var(--color-border);
+    .gov-stages .stage-tile-card .fui-card__body {
+        display: flex;
+        flex-direction: column;
     }
 
     .gov-stages .stage-role {
         color: var(--color-text-main);
-        margin-bottom: 0.75rem;
+        margin: 0 0 0.75rem;
     }
 
+    .gov-stages .stage-desc { margin: 0 0 0.75rem; }
+
     .gov-stages .stage-gate {
-        margin-top: auto;
+        margin: auto 0 0;
         padding-top: 1rem;
         font-size: 0.95rem;
         color: var(--color-text-muted);
