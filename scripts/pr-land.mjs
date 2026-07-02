@@ -40,6 +40,7 @@
  * pass --fallback-git). A non-zero exit means `main` was left UNTOUCHED.
  */
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -51,6 +52,11 @@ for (const a of argv) {
   if (m) flags[m[1]] = m[2] === undefined ? true : m[2];
 }
 const expandHome = (p) => (p && p.startsWith('~') ? p.replace(/^~/, homedir()) : p);
+// Read a PR body from a file (the #2170 lane-review-composed body). Missing/unreadable → null (falls back
+// to gh's --fill), never a hard failure: a body-file problem must not block a green landing.
+function readBodyFile(p) {
+  try { return readFileSync(expandHome(p), 'utf8'); } catch { return null; }
+}
 
 const REPO = resolve(expandHome(flags.repo) || process.cwd());
 const REF = typeof flags.ref === 'string' ? flags.ref : null;
@@ -63,7 +69,11 @@ const DRY_RUN = !!flags['dry-run'];
 const FALLBACK_GIT = !!flags['fallback-git'];
 const AS_JSON = !!flags.json;
 const TITLE = typeof flags.title === 'string' ? flags.title : null;
-const BODY = typeof flags.body === 'string' ? flags.body : null;
+// Body precedence: --body-file (a path — robust for the multi-line body the #2170 lane review composes,
+// where the dismissed-findings block has newlines a CLI --body flag would mangle) wins over --body.
+const BODY = typeof flags['body-file'] === 'string'
+  ? readBodyFile(flags['body-file'])
+  : (typeof flags.body === 'string' ? flags.body : null);
 
 // ── PURE helpers (unit-tested in scripts/__tests__/pr-land.test.mjs) ──────────────────────────────────
 
@@ -77,12 +87,18 @@ export function mergeMethodFlag(method) {
   }
 }
 
-/** Build the `gh pr create` args for a self-approved PR (NO reviewer). Uses --fill unless a title/body
- *  is supplied. Pure — returns the argv array for `gh`. */
+/** Build the `gh pr create` args for a self-approved PR (NO reviewer). Emits `--title`/`--body` when supplied
+ *  and NEVER drops a body: a `--body` present with no title still ships (the #2170 dismissals audit trail).
+ *  `--fill` is used ONLY when NEITHER title nor body is given. Note `--fill` is unusable for the lane-ref
+ *  transport anyway (it autofills by diffing the head LOCALLY, but a lane/* head is remote-only — no local
+ *  branch to diff — so gh errors "ambiguous argument origin/main...lane/…"); the CLI therefore always
+ *  DERIVES a title from the source commit's subject, so the `--fill`-only branch is a bare-call fallback the
+ *  lane path never hits. Pure — returns the argv array for `gh`. */
 export function buildCreateArgs({ base, head, title, body }) {
   const args = ['pr', 'create', '--base', base, '--head', head];
-  if (title) { args.push('--title', title); args.push('--body', body ?? ''); }
-  else args.push('--fill');
+  if (title != null) args.push('--title', title);
+  if (body != null) args.push('--body', body);
+  if (title == null && body == null) args.push('--fill');
   return args;
 }
 
@@ -136,7 +152,12 @@ function runCli() {
   const refSha = tryGit(['rev-parse', SRC]);
   if (!refSha) emit({ repo: REPO, merged: false, reason: 'no-such-src', detail: `source commit "${SRC}" not found — pass --sha=<commit> or run from a checkout whose HEAD carries the lane work` }, 3);
 
-  const createArgs = buildCreateArgs({ base: BASE, head: REF, title: TITLE, body: BODY });
+  // Derive a title when none was passed: `--fill` can't autofill for a lane/* head (it's remote-only, so
+  // gh can't diff it locally). Use the source commit's subject — a meaningful, always-available title —
+  // so the create never needs `--fill` and a `--body-file` (the #2170 dismissals) always ships. When the
+  // source has multiple commits, its own HEAD subject is the natural PR title.
+  const derivedTitle = TITLE ?? (tryGit(['log', '-1', '--format=%s', SRC]) || `land ${REF}`);
+  const createArgs = buildCreateArgs({ base: BASE, head: REF, title: derivedTitle, body: BODY });
   const mergeArgsPreview = buildMergeArgs({ pr: '<pr>', method: METHOD });
 
   if (DRY_RUN) {

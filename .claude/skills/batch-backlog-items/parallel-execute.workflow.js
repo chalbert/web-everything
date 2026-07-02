@@ -290,6 +290,19 @@ const ITEM_RESULT_SCHEMA = {
       description: 'edits to still-monolithic shared registries the item is NOT committing — the integrator applies them serially.',
     },
     gate: { type: 'string', enum: ['green', 'red'], description: 'The WE lane fast-fail result (#1937 Fork C / #1939) — the scoped `check:standards --local --files` gate in the WE clone, the ONLY lane gate. green = clean (or not applicable); red = a real file-local error (it cannot false-red — global rules are demoted). red → push NOTHING. Impl repos are NOT gated in-lane; their authority is the central per-repo full gate after merge.' },
+    dismissedFindings: {
+      type: 'array',
+      items: {
+        type: 'object', required: ['finding', 'reason'], additionalProperties: true,
+        properties: {
+          finding: { type: 'string', description: 'the independent pre-PR review finding the lane chose NOT to fix' },
+          reason: { type: 'string', description: 'the one-line WHY it was dismissed' },
+          severity: { type: 'string', description: 'optional — low|med|high|info' },
+          location: { type: 'string', description: 'optional — file:line' },
+        },
+      },
+      description: 'The #2170 pre-PR independent-review findings this lane REVIEWED and DISMISSED (fixed the rest in-lane). Recorded here — never silently dropped — so the integrator/drain records them in the PR body (`lane-review body` → `pr-land --body-file`) as the audit trail + the input to the #2171 escalation rubric. Empty/omitted = a clean review (or all findings fixed).',
+    },
     notes: { type: 'string' },
   },
 };
@@ -706,6 +719,14 @@ function laneItemPrompt(it, laneDirs) {
     `  scripts/backlog.mjs resolve ${it.num} [--graduated-to=…]\`). Then COMMIT each repo's own files (git add`,
     `  <explicit paths>; NEVER -A; NEVER stage claims.json or derived). Commit message per repo: \`backlog:`,
     `  resolve #${it.num} — <slug>\`.`,
+    `• 3a. PRE-PR INDEPENDENT REVIEW (#2170) — do this in the WE clone AFTER the resolve commit, BEFORE the`,
+    `  push. Get your lane diff (\`node scripts/lane-review.mjs diff --base=origin/${baseRef}\`), then SPAWN AN`,
+    `  INDEPENDENT REVIEW SUBAGENT over it (the Task tool, the /code-review model) — hand it ONLY the diff, no`,
+    `  author framing. FIX every accepted finding IN THIS LANE now (re-run the scoped fast-fail, then \`git commit`,
+    `  --amend --no-edit\` the fixes onto the resolve commit — do not add a second commit). Findings you DISMISS`,
+    `  go in \`dismissedFindings\` (finding + one-line reason [+ severity/location]); NEVER drop one silently —`,
+    `  the integrator/drain records them in the PR body (\`lane-review body\` → \`pr-land --body-file\`) as the`,
+    `  audit trail + the #2171 escalation input. A clean review → leave dismissedFindings empty and proceed.`,
     ...(reserved.length ? [
       `• 3b. FENCE before pushing (#1936 insurance invariant — the broker fencing point). If you reserved any`,
       `  merge-risk path, FIRST confirm your lease was not reclaimed mid-flight (the Kleppmann race: you paused`,
@@ -735,8 +756,9 @@ function laneItemPrompt(it, laneDirs) {
     `Report: num, status, cost, pushedRefs (an array of {repo, ref:"${ref}"} — one entry PER repo you pushed),`,
     `resolveCommit (the full SHA — \`git rev-parse HEAD\` in the WE clone after your resolve commit), changedFiles`,
     `(REPO-QUALIFIED "<repo>:<path>" — git diff --name-only vs each repo's base, prefixed by repo), derivedArtifacts`,
-    `you deferred, any monolithEdits, and gate green/red (the WE lane fast-fail result — green when it was clean`,
-    `or not applicable; impl repos are NOT gated here). Return ONLY the structured object.`,
+    `you deferred, any monolithEdits, dismissedFindings (the #2170 pre-PR review findings you dismissed, with`,
+    `reasons — empty for a clean review), and gate green/red (the WE lane fast-fail result — green when it was`,
+    `clean or not applicable; impl repos are NOT gated here). Return ONLY the structured object.`,
   );
   return lines.join('\n');
 }
