@@ -551,7 +551,39 @@ directive — the markup vehicle carrying its name + options + body. The rule #1
    [#1987](/backlog/1987-attribute-naming-convention-review-colon-namespacing-view-if/). #1983 settles the
    **form + discriminator shape**; #1986 settles the **mechanism**; #1987 settles the **value spelling**.
 
+## CustomNode recipes — `customNodes` (#2074) {#custom-node-recipes}
+
+Ratified 2026-07-01 ([#2074](/backlog/2074-customnoderegistry-node-kind-extensibility-standard/)), the **general
+frame** the #1986 directive registries (below) are instances of. A reversible WE proposal (open mind — statute
+supersedes with lineage, never erases).
+
+`customNodes` is `customElements` one keying over: a registry for node kinds keyed by a **delimiter grammar**
+instead of a tag. The rules:
+
+1. **Declared like a custom element.** `customNodes.define(class X extends CustomNode { static <config>; <methods> })`
+   — **static fields** for config, **methods** (incl. the full lifecycle) for behavior. `CustomNode` is the single
+   base; the class is named and `instanceof CustomNode` / `instanceof X` both hold.
+2. **Firewall — the host is a polyfill outcome, never authored.** The standard declares the class + static config +
+   behavior. Which native node materializes it (`Text` · `Comment` · an element · `<template>`) is FUI's call and
+   **never a new `nodeType`**. Do not name a concrete host class or a walk in the standard.
+3. **Nature = which static field is set** (self-documenting): `static value = 'shown'|'hidden'` (an expression) ·
+   `static children = 'inert'|'live'` (a region — `'inert'` = the `<template>` concept, `'live'` = rendered in
+   place) · neither + `static rendered` (a marker; `false` = invisible directive). Plus `static open`/`close`
+   (+`regionName`/`regionClose` for regions) and `static observedAttributes` (exactly like a custom element).
+4. **`close` is author-declared, not auto-derived** — auto-derivation must guess base-delimiter vs sigil and breaks
+   on real grammars (`<%=`↔`%>`, `@{`↔`}`, `@if`↔`@endif`). **Reverse-mirror the base + name-echo the region** is a
+   *recommended convention*, adopted as the **WE authoring house style** for WE's own blocks — never enforced on
+   userland.
+5. **Scope = the delimiter-keyed surface only.** Tag-keyed is `customElements`; attribute-keyed is the webdirectives
+   *attribute* registry; the doctype is a native singleton — all **framed, not re-owned**. Invisibility is
+   `rendered:false`/`value:'hidden'`, never comment syntax (the comment grammar is only an optional pre-JS-invisible
+   authoring choice). Attribute-value interpolation (`class="{{x}}"`) is a **sibling** surface, out of scope.
+
 ## Directive registration mechanism (#1986) {#directive-registration-mechanism}
+
+**One instance of the general [CustomNode recipe model (#2074)](#custom-node-recipes) above** — the three registries
+below are the *polyfill* that materializes delimiter-keyed `CustomNode` kinds onto the native inert containers; the
+declarative frame is #2074, this is how FUI builds it.
 
 Ratified 2026-06-30 ([#1986](/backlog/1986-custom-type-registry-family-customtemplatetype-customscriptt/)),
 settling the slot rule 5 above left open. Given the #1983 *form*, this is **which registry implements `type=`**.
