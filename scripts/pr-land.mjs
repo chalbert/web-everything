@@ -168,15 +168,32 @@ function runCli() {
 
   if (!WAIT) emit({ repo: REPO, merged: false, reason: 'opened', pr: Number(prNum), ref: REF, detail: `opened self-approved PR #${prNum} for ${REF}; --no-wait, a later drain pass merges it` }, 0);
 
-  // 4. Wait for the required check(s), then merge.
+  // 4. Wait until GitHub itself says the PR is ready, then merge. We gate on the AUTHORITATIVE
+  //    `mergeStateStatus` (not a raw `gh pr checks` list) — a fresh PR's checks haven't registered yet, so
+  //    an empty check list must NOT read as "passed" (that races the merge to a BLOCKED state). We ALSO
+  //    read the REQUIRED checks so a genuinely-failed required check aborts fast instead of waiting out the
+  //    timeout. Non-required checks (e.g. `cla`) never block: only the branch-protection required set does.
+  //      CLEAN    → all required checks passed + up-to-date → merge.
+  //      UNSTABLE → mergeable, but a NON-required check failed/pending → merge iff required checks passed.
+  //      BLOCKED  → a required check is pending (wait) or failed (the required-check read aborts us).
+  //      BEHIND   → strict "up-to-date" needs the ref rebased onto BASE → abort (recoverable; rebase+re-run).
+  //      DIRTY    → real conflict → abort (the drain serial-replays / rebases).
   const deadlineMs = Date.now() + (Number(flags['timeout-min'] || 15) * 60_000);
   for (;;) {
-    let rows = [];
-    try { rows = JSON.parse(ghC(['pr', 'checks', String(prNum), '--json', 'state,bucket'])); } catch { rows = []; }
-    const verdict = classifyChecks(rows);
-    if (verdict.status === 'failed') emit({ repo: REPO, merged: false, reason: 'check-red', pr: Number(prNum), detail: `PR #${prNum} required check RED — ${verdict.reason}; ${BASE} left untouched (rebase/fix + re-run)` }, 2);
-    if (verdict.status === 'passed') break;
-    if (Date.now() > deadlineMs) emit({ repo: REPO, merged: false, reason: 'check-timeout', pr: Number(prNum), detail: `PR #${prNum} checks still pending past timeout; leaving for a later drain pass` }, 3);
+    let view = {};
+    try { view = JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'mergeable,mergeStateStatus'])); } catch { view = {}; }
+    let required = [];
+    try { required = JSON.parse(ghC(['pr', 'checks', String(prNum), '--required', '--json', 'state,bucket'])); } catch { required = []; }
+    const reqVerdict = classifyChecks(required);
+    const state = view.mergeStateStatus || 'UNKNOWN';
+
+    if (view.mergeable === 'CONFLICTING' || state === 'DIRTY') emit({ repo: REPO, merged: false, reason: 'conflict', pr: Number(prNum), detail: `PR #${prNum} has merge conflicts with ${BASE} — ${BASE} left untouched (rebase the ref + re-run, or --fallback-git)` }, 3);
+    if (reqVerdict.status === 'failed') emit({ repo: REPO, merged: false, reason: 'check-red', pr: Number(prNum), detail: `PR #${prNum} required check RED — ${reqVerdict.reason}; ${BASE} left untouched (fix + re-run)` }, 2);
+    if (state === 'BEHIND') emit({ repo: REPO, merged: false, reason: 'behind', pr: Number(prNum), detail: `PR #${prNum} is behind ${BASE} (strict up-to-date) — rebase the ref onto ${BASE} + re-run` }, 3);
+    // Ready: GitHub says mergeable AND every REQUIRED check has passed (empty required set only counts as
+    // passed once GitHub itself is no longer BLOCKED — i.e. state is CLEAN/UNSTABLE, closing the race).
+    if ((state === 'CLEAN' || state === 'UNSTABLE') && reqVerdict.status === 'passed') break;
+    if (Date.now() > deadlineMs) emit({ repo: REPO, merged: false, reason: 'check-timeout', pr: Number(prNum), detail: `PR #${prNum} not ready past timeout (mergeStateStatus=${state}); leaving for a later drain pass` }, 3);
     execFileSync('sleep', ['20']);
   }
 
