@@ -1,8 +1,10 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-07-02"
-dateStarted: "2026-07-02"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
+codifiedIn: "docs/agent/block-standard.md#custom-node-recipes"
 preparedDate: "2026-07-02"
 tags: [custom-nodes, delimiter-grammar, reserved-names, escape-hatch, standard-proposal, decision]
 relatedReport: reports/2026-07-02-reserved-delimiter-policy-prior-art.md
@@ -19,12 +21,26 @@ is the **wrong analogue** — it protects a *registration-less, globally-shared,
 #2074 delimiter keyspace is *registration-mediated and app-scoped* — so the honest policy is a **narrow host-token
 blocklist + dispatch-key collision + per-bundle-declared escape grammars**, not a marked userland subspace.
 
+**Refined 2026-07-03 (DI-grounding).** The keyspace is not merely app-scoped but **injector-scoped**: FUI's
+`fui:plugs/webinjectors` hierarchical DI (`InjectorRoot.getProviderOf(node, key)` walks the ancestor chain,
+nearest-provider-wins — the WC-CG context protocol) already resolves the text-node registry per subtree, and the
+registry is already dual-exposed on the injector (`bootstrap` calls `documentInjector.set('customTextNodeParsers', …)`);
+only the parse path still reads flat `window.customTextNodeParsers`, a **~one-line swap** from tree-scoped. That
+collapses the *userland-vs-userland* collision question into ordinary nearest-provider resolution — a project or an
+imported component provides whatever open/close grammar it wants for its own subtree, and sibling scopes never collide —
+and leaves the **host-token slice as the sole irreducible reservation**: the one grammar shared with the *pre-tree*
+HTML tokenizer, which runs before any injector context exists and which no provider can reach. DI is thus an
+independent proof of the headline finding's *minimality* — even granting maximal per-subtree sovereignty, the reserved
+set is exactly Fork 1's host slice and nothing more.
+
 **Standing test.** Not a validation gate: the original "do we reserve a family now, on what trigger" framing
 dissolves — Forks 1 and 2 are **forced-invariant ratifies** (each names a positively broken alternative) and Fork 3
 is the one genuine weigh; the "low urgency until a collision / #2094 forces it" clause is ordering, never a gate
-verdict (#1961/#2092 — timing is backlog priority, recorded under Context). The one genuine cross-sibling
-dependency — #1989's open residue-form choice — is absorbed *inside* Fork 1 (a)'s machine-family clause, not a
-blocker on ruling the law.
+verdict (#1961/#2092 — timing is backlog priority, recorded under Context). The one-time cross-sibling
+dependency — #1989's residue-form choice — **resolved 2026-07-02** (no reserved text family; applied output re-claims
+its authored grammar), so it is settled, not pending; its only live remainder, an *anonymous-fragment* bracket sigil,
+is a comment-interior candidate absorbed *inside* Fork 1 (a)(ii)'s machine-family clause — never a blocker on ruling
+the law.
 
 **Axes.** (1) The **keyspace-partition law** — which `static open` values `customNodes.define()` may accept
 (conformance spine: [we:docs/agent/block-standard.md](docs/agent/block-standard.md#custom-node-recipes); the
@@ -33,7 +49,7 @@ predicate** — what "colliding" means, given prefix-overlapping opens co-reside
 (`fui:plugs/webexpressions/CustomTextNodeParserRegistry.ts:14-16` is today registration-order first-match-wins, no
 collision detection — the #2104 gap). (3) The **raw/verbatim escape-hatch grammar** — #2074 ratified the hatch as a
 mandatory conformance requirement; the open half is its exact shape (the nature enum at
-[we:docs/agent/block-standard.md](docs/agent/block-standard.md#custom-node-recipes) rule 3 has no "unscanned"
+[we:docs/agent/block-standard.md](docs/agent/block-standard.md#custom-node-recipes) nature enum has no "unscanned"
 value today). Delimiter *override* is settled by enumeration — see "Not decisions" below.
 
 ## Recommended path at a glance
@@ -41,7 +57,7 @@ value today). Delimiter *override* is settled by enumeration — see "Not decisi
 | Fork | Recommended default | Main alternative | Confidence |
 |---|---|---|---|
 | **Fork 1** — keyspace-partition law | **host-token blocklist only (`<` + `!`/`/`/`?`/letter roots); every other open userland-legal, registry-arbitrated** (forced invariant) | hyphen-rule analogue (marked userland subspace) · WE-reserved future family | high |
-| **Fork 2** — collision predicate | **collision = exact dispatch-key equality (`open`; + `regionName` for regions) among live recipes in one registry scope; tokenization longest-match-first** (forced invariant) | prefix-overlap or bare-`open` collision (*both broken*) | high |
+| **Fork 2** — collision predicate | **collision = exact dispatch-key equality (`open`; + `regionName` for regions) among live recipes in one *injector* scope (nearest-provider-wins between scopes); tokenization longest-match-first** (forced invariant) | prefix-overlap or bare-`open` collision (*both broken*) | high |
 | **Fork 3** — raw/verbatim escape grammar | **`children: 'raw'` scan-suppression nature; each bundle declares its flavor's raw construct as an ordinary recipe; no reserved universal token** | normative universal raw construct (MUST) | med-high |
 
 ## Fork 1 — the keyspace-partition law: host-token blocklist, not a marked userland subspace
@@ -71,6 +87,15 @@ host-shared, so guard exactly the shared slice and nothing else. (Its rule 2 lef
 recipes by the delimiter grammar itself, whose tokenizer slice *is* host-shared — so codifying this fork
 **instantiates rule 2 with an amendment**, with lineage; see Statute-overlap.)
 
+**Why DI cannot substitute for the blocklist (2026-07-03).** Fork 2's injector-scoped resolution — a subtree
+resolves whatever delimiter grammar its nearest provider supplies — handles the *entire* userland keyspace, so one
+might ask whether any reservation is needed at all. It is, and this slice is exactly why: injector resolution runs
+*inside* the already-parsed DOM tree, while the host slice is claimed *before* the tree exists — the HTML tokenizer
+eats `<!foo>` into a comment/bogus-tag before any provider can look at it, and no injector can un-eat what the
+tokenizer consumed. The blocklist is precisely the residue DI cannot reach: the one grammar shared with a pre-tree
+layer that has no injector. That makes DI an independent proof of the law's *minimality* — under maximal per-subtree
+sovereignty the reserved set collapses to this slice and nothing else.
+
 - **(a) Host-token blocklist only** *(default)* — reserved (define()-time `ReservedDelimiterError`): opens rooted at
   **`<` + `!`/`/`/`?`/ASCII-letter** (the exact tokenizer tag-open set — the host-shared slice, matchable only with
   cross-channel incoherence). **Every other open is userland-legal**, first-registered within an app, arbitrated by
@@ -80,20 +105,26 @@ recipes by the delimiter grammar itself, whose tokenizer slice *is* host-shared 
   through app-level re-keying (a migration story; no lexical partition could *prevent* the overlap, since the
   platform's likeliest claim is the most popular userland open). **(ii)** **Machine-reserved families are minted by
   the ruling that creates the machine grammar, never pre-reserved here:** #1986 rule 5 (ratified) requires authored
-  and residue grammars to be disjoint and matcher-excluded; *where* the residue grammar lives is
-  [#1989](/backlog/1989-directive-applied-residue-region-annotation-marker-grammar-u/)'s open choice (its current
-  proposal is comment-interior brackets — a different scan surface, no text-open reservation; its earlier
-  reflected-delimiter branch, e.g. `{$…$}`, would claim a text family). If #1989 ratifies a text-keyspace residue
-  form, *that ruling* adds the family to the reserved set with its consumer attached — this law just defines the
-  extension mechanism.
+  and residue grammars to be disjoint and matcher-excluded; *where* the residue grammar lives was
+  [#1989](/backlog/1989-directive-applied-residue-region-annotation-marker-grammar-u/)'s choice, now **resolved
+  2026-07-02** — it *dissolved* the reserved-residue-sigil slot: applied directive output re-claims its **authored**
+  `<!-- ns:name -->` grammar (the #2063 wire format), so a matcher-excluded residue grammar would break hydration.
+  The earlier reflected-delimiter branch (`{$…$}`, a text family) is therefore **dead — no text-keyspace family was
+  minted**, which is why (c) below is now moot rather than merely rejected. #1989 clause 5 does route **one**
+  still-inactive residual here: if *anonymous-fragment* boundaries ever need a marker, the bracket sigil
+  `<!--[-->`/`<!--]-->` (Vue 3 / Svelte 5 precedent) is the reserved slot — but that is a **comment-interior carrier
+  grammar on a different scan surface, not a text-node open**, so it never enters this law's text-open blocklist; it
+  would mint on its own ratification if that residual ever activates. The mint-on-ratification mechanism stands as
+  the general extension path for any future machine family.
 - **(b) Hyphen-rule analogue — userland opens must carry a mark; unmarked space reserved for the platform** —
   *Rejected (broken):* outlaws every grammar the #2094 bundles exist to reproduce (no framework open carries a
   distinguishing mark), and the technique's precondition — registration-less lexical classification of a shared,
   forward-growing namespace — does not hold in a registry-mediated, app-scoped keyspace.
-- **(c) WE pre-reserves a named future family (e.g. `{$`)** — *Rejected as written, absorbed as the (a)(ii)
-  mechanism:* a reservation ahead of a ratified consumer is speculative squatting (mandate-nothing); the one named
-  candidate consumer (#1989's reflected-delimiter residue branch) mints its own reservation *through its own
-  ratification* per (a)(ii), so nothing is foreclosed and nothing is squatted.
+- **(c) WE pre-reserves a named future family (e.g. `{$`)** — *Rejected, now moot:* a reservation ahead of a
+  ratified consumer is speculative squatting (mandate-nothing); the one named candidate consumer (#1989's
+  reflected-delimiter residue branch) **resolved 2026-07-02 reserving *no* text family** (applied output re-claims
+  its authored grammar), so (c)'s sole hypothetical consumer is settled negative — nothing was foreclosed and
+  nothing was squatted. Any *future* machine family still mints through its own ratification per (a)(ii).
 
 ```ts
 // (a) in practice — define()-time legality:
@@ -107,6 +138,33 @@ customNodes.define(class Z extends CustomNode { static open = '{{' })  // legal;
                                                                        // so re-keying the platform-default '{{' via
                                                                        // the extends chain supersedes, never throws
 ```
+
+**What is forbidden, and why (worked example).** The full forbidden set is every open rooted in the HTML tokenizer's
+tag-open slice — `<` followed by `!`, `/`, `?`, or an ASCII letter:
+
+```ts
+customNodes.define(class extends CustomNode { static open = '<!' })  // ReservedDelimiterError — parsed as a bogus comment
+customNodes.define(class extends CustomNode { static open = '</' })  // ReservedDelimiterError — parsed as an end-tag token
+customNodes.define(class extends CustomNode { static open = '<?' })  // ReservedDelimiterError — bogus comment (HTML has no PI)
+customNodes.define(class extends CustomNode { static open = '<x' })  // ReservedDelimiterError — `<`+letter → a start-tag
+// LEGAL — `<` NOT in that slice (stays literal text in every channel), or no `<`:
+customNodes.define(class extends CustomNode { static open = '<%' })  // ok — `<`+`%`
+customNodes.define(class extends CustomNode { static open = '{{' })  // ok
+```
+
+*Why* — the same `<!foo>` open is **incoherent across authoring channels**, which is the defect the error names:
+
+```html
+<p><!foo></p>          <!-- typed RAW: the HTML tokenizer consumes `<!foo>` as a bogus comment BEFORE
+                            text-node scanning runs — the recipe never sees it -->
+<p>&lt;!foo&gt;</p>    <!-- ESCAPED (or el.textContent = '<!foo>'): now literal Text — the recipe's
+                            scanner matches and fires -->
+```
+
+Identical string, fires on one channel and is silently swallowed as markup on the other → a **name-legality defect**
+(the `customElements.define` invalid-name `SyntaxError` analogue), so `define()` throws at registration, never a
+silent no-op or a runtime warn. Contrast `<%`: the tokenizer never enters tag-open on `<%`, so `<%foo%>` is literal
+Text in *every* channel — coherent, hence legal and left to Fork 2.
 
 Skeptic: LANDS → amended, default retained in narrowed form — the attack disproved the original blocklist content
 ("all `<`-rooted opens", "reserved by fact/unreachable": `<%` survives tokenization, and `&lt;!`/`textContent` make
@@ -132,23 +190,35 @@ bare-`open` equality falsely collides #2074's own ratified examples (`{#each}` v
 every bundle with two block constructs on one sigil (`{{#if}}`/`{{#each}}`, `{% if %}`/`{% for %}`/`{% raw %}`).
 This is a **ratify**, not a weigh.
 
-- **(a) Collision = exact equality of the full dispatch key among live recipes in one registry scope; tokenization
+- **(a) Collision = exact equality of the full dispatch key among live recipes in one *injector* scope; tokenization
   is longest-match-first** *(default)* — the dispatch key is `open` alone for value/marker recipes and
   **(`open`, `regionName`)** for region recipes: the region name is part of the key exactly as `</section>`'s
   name-echo is part of native close matching, so `{#each}` and `{#ctx}` (and `{% raw %}` beside `{% for %}`)
   co-exist by construction. Longest-match-first orders scanning: `{{{` wins over `{{` wins over `{` (how Mustache
   already distinguishes triple from double mustache); `DelimiterCollisionError` fires only on an *identical*
-  dispatch key. **Quantifier (normative, not an impl note):** "live" ranges over the recipes of **one registry
-  scope, after config resolution** — the app-level `customNodes` registry today (#2074 Fork 2: one registry over
-  the delimiter surface), with the
+  dispatch key. **Quantifier (normative, injector-scoped — reshaped 2026-07-03):** "live" ranges over the recipes
+  of **one injector scope, after config resolution**, resolved through FUI's existing `fui:plugs/webinjectors` chain
+  (`InjectorRoot.getProviderOf(node, 'customTextNodeParsers')` — nearest ancestor provider wins). Two granularities
+  compose: **between scopes**, nearest-provider-wins — a subtree under a component that provides `{{` and an app that
+  provides `{` never collide, because each text node resolves its *nearest* ancestor registry, deterministic by tree
+  position (this is the general form of delimiter-override: a project or imported component supplies whatever
+  open/close grammar it wants for its own subtree); **within one scope**, dispatch-key equality + longest-match
+  governs, and `DelimiterCollisionError` fires only on an identical dispatch key among that scope's live recipes. The
   [config-extends-platform-default](docs/agent/platform-decisions.md#config-extends-platform-default) nearest-wins
-  chain resolved first, so an app that re-keys a platform-flavor recipe *supersedes* it (the flavor entry is no
-  longer live) rather than colliding with it; a future scoped registry judges per scope, following the
-  scoped-`customElements` trajectory. Observable contract: `{{{x}}}` parses as the `{{{` recipe, never as `{` +
-  `{{x}}` + junk. One honesty note: exact dispatch-key equality deliberately does **not** detect semantic prefix
-  capture across co-resident flavors (Svelte's `{` beside Handlebars' `{{`: `{{x}}` routes to `{{` by longest
-  match, no error) — the same mechanism the within-flavor grammars require, so any predicate that flagged it would
-  outlaw the sanctioned bundles.
+  chain resolves before liveness, so an app that re-keys a platform-flavor recipe *supersedes* it (the flavor entry
+  is no longer live) rather than colliding. **This is not a "future" registry:** the mechanism is built and the
+  registry is already dual-exposed on the injector (`bootstrap` calls `documentInjector.set('customTextNodeParsers', …)`,
+  and CustomTextNodes already resolve via `getProviderOf`); only the parse path still reads flat
+  `window.customTextNodeParsers`, a **~one-line swap** to `getProviderOf` (a migration target, cost not part of this
+  predicate). #2074 Fork 2's "one registry over the delimiter surface" is preserved — this is one registry *type*
+  resolved per scope, not competing registries. Observable contract: `{{{x}}}` parses as the `{{{` recipe, never as
+  `{` + `{{x}}` + junk. **Honesty note (now bounded):** the earlier flat-registry pass admitted a silent cross-flavor
+  capture (Svelte's `{` beside Handlebars' `{{` in one registry: `{{x}}` routes to `{{` by longest match, no error).
+  Injector-scoping **dissolves this by construction** when the flavors live in different subtrees (nearest-provider
+  resolution, no cross-flavor longest-match). The residual survives only if two flavors are registered in the *same*
+  scope — where it is the same mechanism each within-flavor grammar requires, so it stays a non-error (an optional
+  dev-warn candidate on the collision-error build, never a throw, since a throw would outlaw the sanctioned
+  within-flavor bundles).
 - **(b) Prefix overlap is a collision · bare-`open` equality** — *Rejected (broken):* see the fork-existence line;
   both are disproven by the bundles' own grammars and #2074's ratified examples, not asserted.
 - **(c) Bundle-scoped tokenizers (collision judged flavor-vs-flavor, one tokenizer per bundle)** — *Rejected:*
@@ -166,9 +236,11 @@ Today none of this exists: parsers run in registration order, first match wins
 (`fui:plugs/webexpressions/CustomTextNodeParserRegistry.ts:14-16`); the shipped opens `{{`/`[[`
 (`fui:blocks/parsers/text-node/double-curly/DoubleCurlyBracketParser.ts`,
 `fui:blocks/parsers/text-node/double-square/DoubleSquareBracketParser.ts`) are disjoint so it has never mattered.
-#2104 builds the error; this fork supplies its predicate (impl note: longest-match needs a single-pass
-multi-recipe scanner — a rewrite of the per-parser `indexOf` loop, not a patch; that cost lives on #2104's `size`,
-not here).
+#2104 **resolved 2026-07-02** — it minted the `CustomNode` base + `customNodes` registry and migrated
+`value:'shown'` interpolation, but **did not build the `DelimiterCollisionError`**: the typed error #2074 ratified is
+still **unbuilt and unowned**, and this fork supplies its predicate for whoever does. That build's cost — a
+single-pass multi-recipe scanner (a rewrite of the per-parser `indexOf` loop, not a patch) plus the ~one-line
+`window`→`getProviderOf` scope swap — lives on the follow-up build task, not on this ruling.
 
 Skeptic: LANDS → amended, tokenization half retained — the attack decisively refuted bare-`open` exact-equality
 (it fires on `{{#if}}` + `{{#each}}`, i.e. on every real bundle, by #2074's own region shape); fixed by keying
@@ -183,6 +255,13 @@ reproduces each engine's own disambiguation).
 Screen: clear — fresh-context agent (2026-07-02): fully observable (which registrations throw, what a page parses
 to, supersede-vs-throw on re-key), with the one impl concern (scanner rewrite) correctly quarantined onto #2104;
 branches diverge cost-free (silent shadowing = data loss; order-dependence = same page parsing differently).
+Amended 2026-07-03 (DI-grounding, not a re-skeptic): grounding FUI's `fui:plugs/webinjectors` (`InjectorRoot.getProviderOf`
+ancestor-walk; the registry already dual-exposed on the injector; CustomTextNodes already injector-resolved) reshaped
+the "live" quantifier from the flat app-level registry to the **injector scope** — nearest-provider-wins between
+scopes, dispatch-key predicate within — which **dissolves** the cross-flavor prefix-capture blind spot the 2026-07-02
+pass recorded as an accepted limitation (it now survives only for two flavors in one scope). Predicate unchanged;
+scope quantifier sharpened; the `window`→`getProviderOf` swap is a ~one-line migration, not a #2074 re-open (one
+registry *type* per scope, not competing registries).
 
 ## Fork 3 — the raw/verbatim escape-hatch grammar: a scan-suppression nature, per-bundle-declared
 
@@ -259,7 +338,7 @@ region's existing content**, never re-materialization to text.
 `@{{`, `<%%`, Svelte `{'{'}`) is an anticipated recipe-model gap — a prefix that suppresses the following open is
 not expressible as a recipe today. Exactly like the `{{else}}`/`{:else}` mid-region-marker gap, it gets its decision
 card **from the first confirming #2113 scorecard gap list** (#2114 Handlebars and #2116 Blade will surface it), not
-from a guess here. This is a named out-of-scope with a filing mechanism, not an open residue.
+from a guess here. This is a named out-of-scope with a filing mechanism, not an unresolved fork left here.
 
 Skeptic: LANDS → amended, per-bundle half retained — the attack refuted "materializes as literal Text" (unfaithful
 to every engine — raw suppresses expression scanning, not element construction — and a #2074-rule-2 firewall breach:
@@ -292,7 +371,10 @@ under Context as ordering).
   platform-default flavor to the shipped `{{`/`[[` grammars; a custom grammar is the app's opt-in). The
   override↔collision interaction is that anchor's own mechanism, not a new rule: `extends` is an ordered
   **nearest-wins** chain, so the app's value **supersedes** the flavor's recipe *before* Fork 2's predicate
-  quantifies "live" — re-keying never throws (encoded in Fork 2 (a)'s quantifier). The only in-band alternative in
+  quantifies "live" — re-keying never throws (encoded in Fork 2 (a)'s quantifier). Injector-scoped resolution
+  (Fork 2 (a), 2026-07-03) generalizes this override from app-level to *per-subtree* via the same `getProviderOf`
+  chain, but it stays config/out-of-band — a registration-time provider, not an in-markup token — so it remains a
+  supported default, not a decision. The only in-band alternative in
   the field, Mustache's set-delimiter tag `{{=<% %>=}}`, is **not expressible in the recipe model** (it mutates
   the scanner's live token set mid-stream; a recipe has static grammar + an `upgrade()`) — a model gap of the same
   species as the escape prefix, routed the same way (the #2114 Mustache gap list is where it surfaces, if ever),
@@ -305,26 +387,30 @@ under Context as ordering).
 ## Context
 
 - **Timing (ordering, not a gate):** nothing is blocked on this ruling today — `DelimiterCollisionError` is
-  normative and buildable without it (#2104 encodes the error; Fork 2 sharpens its predicate). Urgency arrives with
-  the first cross-bundle co-residence or the #2113 scorecard's first collision evidence. That is backlog priority,
-  handled at selection time.
+  normative and buildable without it. **#2104 resolved 2026-07-02 without building the error** (it shipped the base +
+  registry + `value:'shown'` migration), so the error is currently unbuilt/unowned; Fork 2 sharpens the predicate it
+  will consume. Urgency arrives with the first cross-bundle co-residence or the #2113 scorecard's first collision
+  evidence. That is backlog priority, handled at selection time.
 - **Sibling reconciliation (2026-07-02):** the #2094 slice-out (#2113–#2119) *reshaped* this item — the bundles'
   sanctioned grammars are hard evidence for Fork 1 (a) and Fork 2 (a) (any law that outlaws `{{`, prefix overlap,
   or shared-sigil regions contradicts already-filed work), and #2115/#2116 name the raw constructs Fork 3 (a) must
-  carry. #1989 remains open (proposed ruling awaiting ratification post-#2074); this item takes #1986 rule 5
-  (ratified) as the disjointness authority and leaves both the sigil choice *and* the comment-vs-text surface
-  choice with #1989 — Fork 1 (a)(ii)'s mint-on-ratification clause is how either outcome composes with this law.
-- **Statute-overlap (reconcile at codification):** one anchor needs an **amendment-grade** reconciliation, not a
-  friction-free compose —
-  [registry-name-guard-namespace](docs/agent/platform-decisions.md#registry-name-guard-namespace) rule 2 exempts
-  "parser / text-node registry keys" from guarding, written when those keys were *names* (`mustache`, `polymer`)
-  that never touch a host surface; #2074 re-keyed recipes by the delimiter grammar itself, whose tokenizer tag-open
-  slice **is** host-shared, so Fork 1 (a) *instantiates the anchor's own test* (guard the shared namespace) while
-  **amending rule 2's exemption** for grammar-keyed registries — cite the lineage, don't silently override. Also
-  extends the [custom-node-recipes](docs/agent/block-standard.md#custom-node-recipes) spine (Fork 3 (a) adds a
-  `children` value — an enum extension, reversible with lineage; Fork 2 supplies the `DelimiterCollisionError`
-  predicate the spine deferred here — reconciling the spine's two same-`{#` example rows via the dispatch key).
+  carry. **#1989 resolved 2026-07-02** — it dissolved the reserved-residue-sigil slot (applied directive output
+  re-claims its authored `<!-- ns:name -->` grammar; no reserved text family), settling both the sigil choice and the
+  comment-vs-text surface *negative* for the text keyspace; its only live remainder is the anonymous-fragment bracket
+  sigil (comment-interior, clause 5), routed here as a still-inactive candidate. This item takes #1986 rule 5
+  (ratified, since amended by #1989) as the disjointness authority; Fork 1 (a)(ii)'s mint-on-ratification clause is
+  how that remainder — or any future machine family — composes with this law.
+- **Statute-overlap (reconciled at codification, 2026-07-03):** the one amendment-grade reconciliation is **done** —
+  [registry-name-guard-namespace](docs/agent/platform-decisions.md#registry-name-guard-namespace) rule 2 (which
+  exempted "parser / text-node registry keys", written when those keys were *names* like `mustache`/`polymer` that
+  never touch a host surface) is **amended** for grammar-keyed registries: #2074 re-keyed recipes by the delimiter
+  grammar itself, whose tokenizer tag-open slice **is** host-shared, so Fork 1 guards exactly that slice — codified
+  with lineage (rule 2 and its Lineage now cite #2112). The
+  [custom-node-recipes](docs/agent/block-standard.md#custom-node-recipes) spine is **extended**: Fork 3 added the
+  `children:'raw'` nature (rule 3), Fork 1 the host-token blocklist (rule 6), and Fork 2 the injector-scoped
+  `DelimiterCollisionError` predicate (rule 7 — reconciling the spine's two same-`{#` example rows via the dispatch
+  key). All reversible with lineage.
 - Lineage: #2074 (parent frame, ratified 2026-07-01) → this; siblings #2094/#2113–#2119 (bundles), #2104 (error
-  build), #1989 (residue sigils), #1992 (separator mechanism, disjoint turf). Research:
+  build), #1989 (residue sigils, resolved 2026-07-02 — no reserved text family), #1992 (separator mechanism, disjoint turf). Research:
   [`reserved-delimiter-family-policy`](/research/reserved-delimiter-family-policy/);
   report `we:reports/2026-07-02-reserved-delimiter-policy-prior-art.md`.
