@@ -27,6 +27,16 @@
  *  - Non-admin merge only: `gh pr merge <n> --merge --delete-branch`. If branch protection blocks it, that
  *    is surfaced, never overridden.
  *
+ * REBASE-DROP MANIFEST (#2198 — kills the "manifest lands then conflicts every other PR" wall). Every lane
+ * writes `.lane-manifest.json` to the SAME repo-root path, so the first PR lands it and every OTHER open lane PR
+ * then goes CONFLICTING on that one shared path (observed 2026-07-03: 1 landed, ~24 walled on the manifest
+ * alone while real code merged clean). Before merging, a certified + green PR that is only CONFLICTING/BEHIND is
+ * rebuilt onto main with the manifest dropped, via pure plumbing (merge-tree → temp-index write-tree →
+ * commit-tree with main as FIRST parent → push to the `lane/*` ref, NO checkout — guard-safe). A real
+ * (non-manifest) conflict is left as a skip for a human. The rebuilt tip re-runs `test`, so it lands on a later
+ * watch pass; that is expected progress, not a merge failure. Disable with `--no-rebase-drop`. (Shared helper:
+ * `scripts/lib/rebase-drop-manifest.mjs`, reused by `scripts/lane-resume.mjs land`.)
+ *
  * WATCH (#2194 — /drain converges onto THIS lander). Bare, this is ONE cascade pass (`/drain`). With `--watch`
  * it becomes the long-lived monitor (`/drain watch`): it re-sweeps the labelled PRs on a fixed `--interval=N`
  * (default 30s), landing each the instant it becomes eligible (green + mergeable), in the same blockedBy
@@ -51,6 +61,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
+import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 
 const argv = process.argv.slice(2);
 const flags = {};
@@ -147,6 +158,24 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
 }
 
 /**
+ * Is this SKIPPED verdict a rebase-drop-manifest candidate (#2198)? Pure. A PR that is producer-certified and
+ * required-check-green but not landable ONLY because it is BEHIND/DIRTY/CONFLICTING is (almost always) blocked
+ * by the shared `.lane-manifest.json` on that one repo-root path — the classic "manifest lands then conflicts
+ * every other PR" wall. Such a PR is worth a `merge-tree` probe: if the only conflict is the manifest, the tip
+ * is rebuilt onto main (manifest dropped) and it becomes landable. A real code conflict is left as the skip.
+ * NOT a candidate: an un-certified PR (never auto-resolve someone's un-blessed branch), a red `test` (a real
+ * bug, not a manifest artefact), or a non-rebasable state (BLOCKED/DRAFT — a human/branch-protection concern).
+ */
+export function isRebaseDropCandidate(v) {
+  if (!v || v.decision !== 'skip') return false;
+  const certified = !!(v.certifyLabel || v.aiGenerated);
+  if (!certified || !v.testGreen) return false;
+  const state = String(v.state || '').toUpperCase();
+  const mergeable = String(v.mergeable || '').toUpperCase();
+  return mergeable === 'CONFLICTING' || state === 'BEHIND' || state === 'DIRTY';
+}
+
+/**
  * Order a set of merge candidates for ONE cascade pass, honouring cross-item `blockedBy` (#2188). Pure.
  * This is the drain↔/merge convergence: the `ready-to-merge` label bounds the set, and each PR's
  * `.lane-manifest.json` (read off its head ref) supplies its backlog `item` + `blockedBy` items. A PR is
@@ -208,6 +237,8 @@ function runCli() {
   // #2194 — /drain converges onto this lander: `--watch` turns the one-shot sweep into the long-lived monitor
   // (`/drain watch`), re-sweeping on `--interval=N`s and landing each PR the instant it goes green.
   const { watch: WATCH, intervalSec: INTERVAL, maxIdle: MAX_IDLE } = parseWatchOpts({ watch: flags.watch, interval: flags.interval, maxIdle: flags['max-idle'] });
+  // #2198 — rebase-drop the shared `.lane-manifest.json` on land (ON by default; `--no-rebase-drop` disables).
+  const REBASE_DROP = flags['no-rebase-drop'] ? false : true;
 
   const fail = (reason, detail, code) => {
     if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, reason, detail }) + '\n');
@@ -259,6 +290,35 @@ function runCli() {
     v.item = m && m.item != null ? Number(m.item) : null;
     v.blockedBy = m && Array.isArray(m.blockedBy) ? m.blockedBy.map(Number) : [];
   }
+  // #2198 — rebase-drop the transient manifest so a certified+green PR that is only CONFLICTING/BEHIND on the
+  // shared `.lane-manifest.json` path lands instead of walling the whole queue. Per candidate: merge-tree
+  // main×lane; if the ONLY conflict is the manifest, rebuild its tip onto main (manifest dropped) via pure
+  // plumbing (no checkout) and push to the lane/* ref — then it is CLEAN and the cascade merges it. A real code
+  // conflict stays a skip. Dry-run only ANNOTATES (no push). Disable with `--no-rebase-drop`.
+  const rebased = [];
+  if (REBASE_DROP) {
+    for (const v of verdicts) {
+      if (!isRebaseDropCandidate(v)) continue;
+      const laneRef = refByNum.get(String(v.num));
+      if (!laneRef) continue;
+      if (DRY_RUN) {
+        v.rebaseDrop = 'would-attempt';
+        if (!AS_JSON) process.stderr.write(`  ↻ #${v.num} would rebase-drop manifest (state ${v.state}/${v.mergeable}) then merge\n`);
+        continue;
+      }
+      const r = rebaseDropManifest({ laneRef, base: 'origin/main', run: gitRunner });
+      v.rebaseDrop = r.action;
+      if (r.action === 'rebased') {
+        v.decision = 'merge';
+        v.reason = `rebased onto main${r.dropped ? ' (dropped manifest)' : ''}, required check green — landable`;
+        rebased.push(v.num);
+        if (!AS_JSON) process.stderr.write(`  ↻ #${v.num} rebased onto main${r.dropped ? ' (manifest dropped)' : ''} → ${r.newCommit.slice(0, 9)}\n`);
+      } else if (!AS_JSON) {
+        process.stderr.write(`  ↻ #${v.num} left skipped: ${r.reason}\n`);
+      }
+    }
+  }
+
   const toMerge = verdicts.filter((v) => v.decision === 'merge');
   const skipped = verdicts.filter((v) => v.decision === 'skip');
 
@@ -269,6 +329,7 @@ function runCli() {
 
   const merged = [];
   const failedMerges = [];
+  const pendingRebased = []; // #2198 — PRs rebuilt onto main this pass; CI re-running, land on a later pass
   let deferred = [];
   if (DRY_RUN) {
     // Report the planned first-pass order (blockedBy-honoured) without merging.
@@ -295,9 +356,18 @@ function runCli() {
           remaining = remaining.filter((x) => x.num !== c.num); // merged → item leaves the open set (frees dependents)
           if (!AS_JSON) process.stderr.write(`  ✓ merged #${c.num}${c.item ? ` (#${c.item})` : ''}\n`);
         } catch (e) {
-          failedMerges.push({ num: c.num, detail: String(e.message || e).split('\n')[0] });
-          const cc = remaining.find((x) => x.num === c.num); if (cc) cc.decision = 'skip'; // stays blocking its dependents; not retried
-          if (!AS_JSON) process.stderr.write(`  ✗ #${c.num} merge failed: ${String(e.message || e).split('\n')[0]}\n`);
+          const detail = String(e.message || e).split('\n')[0];
+          const cc = remaining.find((x) => x.num === c.num); if (cc) cc.decision = 'skip'; // stays blocking its dependents; not retried this pass
+          // #2198 — a PR we JUST rebuilt (rebase-drop) has a new head, so CI (`test`) is re-running; an immediate
+          // merge is EXPECTED to bounce on pending checks. That is not a hard failure — the watch re-sweeps and
+          // lands it the next pass once green. Only a merge failure on a PR we did NOT just touch is a real fault.
+          if (c.rebaseDrop === 'rebased') {
+            pendingRebased.push(c.num);
+            if (!AS_JSON) process.stderr.write(`  ↻ #${c.num} rebuilt onto main — awaiting re-run of checks; will land on a later pass\n`);
+          } else {
+            failedMerges.push({ num: c.num, detail });
+            if (!AS_JSON) process.stderr.write(`  ✗ #${c.num} merge failed: ${detail}\n`);
+          }
         }
       }
       if (!progressed) break; // every ready candidate failed → stop (dependents stay deferred)
@@ -321,8 +391,8 @@ function runCli() {
     if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ local main fast-forwarded to origin (autostash preserved local edits)\n` : `  · local main NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`);
   }
 
-  const result = { ok: true, dryRun: DRY_RUN, label, considered: verdicts.length, toMerge: toMerge.map((v) => v.num), merged, failed: failedMerges, deferred, localSynced, skipped: skipped.map((v) => ({ num: v.num, reason: v.reason })) };
-  return { result, merged, failedMerges, deferred };
+  const result = { ok: true, dryRun: DRY_RUN, label, considered: verdicts.length, toMerge: toMerge.map((v) => v.num), merged, failed: failedMerges, rebased, pendingRebased, deferred, localSynced, skipped: skipped.map((v) => ({ num: v.num, reason: v.reason })) };
+  return { result, merged, failedMerges, pendingRebased, deferred };
   }; // end sweepOnce
 
   // ── Driver — one sweep (the /drain one-shot + /merge bare), or the `--watch` monitor (`/drain watch`) ──────
@@ -341,11 +411,12 @@ function runCli() {
   let lastFailed = [];
   for (let pass = 1; ; pass++) {
     if (!AS_JSON) process.stderr.write(`── pass ${pass} ──\n`);
-    const { result, merged, failedMerges, deferred } = sweepOnce();
+    const { result, merged, failedMerges, pendingRebased, deferred } = sweepOnce();
     passes.push(result);
     allMerged.push(...merged);
     lastFailed = failedMerges;
-    const idlePass = merged.length === 0 && deferred.length === 0;
+    // A pass that rebuilt a tip (pendingRebased) made progress — keep polling so it lands once CI re-runs.
+    const idlePass = merged.length === 0 && deferred.length === 0 && pendingRebased.length === 0;
     idle = idlePass ? idle + 1 : 0;
     if (MAX_IDLE != null && idle >= MAX_IDLE) break;
     if (!AS_JSON) process.stderr.write(`  … pass ${pass}: merged ${merged.length}, deferred ${deferred.length}${idlePass ? ` (idle ${idle}${MAX_IDLE != null ? `/${MAX_IDLE}` : ''})` : ''} — next poll in ${INTERVAL}s\n`);
