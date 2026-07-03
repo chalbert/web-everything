@@ -383,11 +383,11 @@ declare const customComments: CustomCommentRegistry;
             <ul style="font-size: 0.95rem; padding-left: 1.25rem; color: var(--color-text-muted);">
                 <li>
                     <code>trusted:html</code>
-                    <br><span>Enforce Trusted Types on content zones.</span>
+                    <br><span>Admit only <code>TrustedHTML</code> values into a content zone — declarative approximation of Trusted Types region enforcement (<code>type="trusted-html"</code>).</span>
                 </li>
                 <li>
                     <code>sanitize:content</code>
-                    <br><span>Apply DOMPurify to user content.</span>
+                    <br><span>Run the native Sanitizer API (<code>Element.setHTML()</code>) over user content before stamping; DOMPurify as fallback only (<code>type="sanitize-content"</code>). Ratified #1981.</span>
                 </li>
             </ul>
         </div>
