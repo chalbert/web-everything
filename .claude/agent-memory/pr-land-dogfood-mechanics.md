@@ -1,0 +1,21 @@
+---
+name: pr-land-dogfood-mechanics
+description: "Gotchas when landing via scripts/pr-land.mjs (the dogfooded PR transport) — body-file, behind-main race, gh-pr-create 401, self-heals id collisions (#2181)"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: 111a2e9b-7df8-4c3b-9173-d072a5c7aac6
+---
+
+Landing WE work via `scripts/pr-land.mjs` (self-approved PR + `test` CI gate) — the non-obvious bits, learned dogfooding the #2162 drain slices (2026-07-02):
+
+- **`--body-file` is effectively required.** A bodyless `gh pr create --title …` on a remote-only `lane/*` head drops into an interactive body prompt that **fails headless** (there is no `--fill` for a lane ref) → pr-land reports `gh-error` "gh pr create failed". Compose a body (change summary + the #2170 review dismissals via `lane-review body`) and pass `--body-file`. First #2173 attempt failed on exactly this.
+- **`test` is the only required check.** `cla` and `Workers Builds: web-everything` are non-blocking (fail freely). pr-land / `gh pr merge` (non-admin) wait for `test` then merge.
+- **Concurrent lands cause "BEHIND main / strict up-to-date" races.** Branch protection requires up-to-date, and other sessions land PRs continuously, so a lane ref goes stale mid-flight → pr-land reports `reason:"behind"`. Fix: **re-parent the changeset onto the latest `origin/main` and merge fast** (`git rebase` is blocked by the routinely-dirty tree, so use plumbing). Two plumbing forms:
+  - **Preferred — temp-index (build exactly origin/main + only your files):** `export GIT_INDEX_FILE=$(mktemp -u); git read-tree origin/main; for f in <your files>; do B=$(git hash-object -w "$f"); git update-index --add --cacheinfo 100644,"$B","$f"; done; TREE=$(git write-tree); C=$(git commit-tree $TREE -p origin/main -m "$MSG"); unset GIT_INDEX_FILE; git push --force origin "$C:refs/heads/lane/<slug>"`. Clean and contamination-proof.
+  - **Avoid `git merge-tree --write-tree origin/main HEAD` for a *focused* PR** — it merges ALL of your diverged local `HEAD`, so if local main carries superseded/stale commits it sweeps their diffs (e.g. a stale `backlog/NNN.md`) into the PR. It bit me: a skill PR silently reverted a concurrent `backlog/2162` edit. Only safe when local `HEAD` is exactly origin/main + your one change.
+  - Then `gh pr merge <n> --merge --delete-branch` (non-admin) once `test` is green + up-to-date. **Don't re-push after the last rebase** — a force-push restarts CI (~2.5min) and you fall behind again; if only the check is pending (state BLOCKED, not BEHIND), just wait for `test` then merge.
+- **`gh pr merge --admin` is denied** by the auto-mode classifier (bypasses review on your own PR). Don't reach for it — win the up-to-date race instead.
+- **Local `main` ends up diverged** (your pre-rebase commit is superseded by the merged one) while the tree stays dirty with others' work. `git reset --hard` is (correctly) blocked — it'd discard others' uncommitted baseline. Leave local main as-is; the work is on origin. See [[shared-index-commit-race]].
+- **`gh pr create` can 401 on GraphQL while everything else works** (2026-07-02, landing #2181). `gh pr create` is a GraphQL *mutation* and intermittently returns `HTTP 401 Requires authentication` even though `gh api user` (REST), `gh api graphql {viewer}` (GraphQL read), and `gh pr merge` (GraphQL mutation) all succeed with the same keyring token (`repo` scope, `push:true`). Not an env-token override. **Workaround: create the PR via REST** — `gh api -X POST repos/<o>/<r>/pulls -f title=… -f head=lane/<slug> -f base=main -f body=…` — then re-run pr-land: it finds the now-open PR (`gh pr list --head`, REST) and skips straight to wait→merge→heal. pr-land itself has no REST-create fallback yet (only `--fallback-git`, which bypasses the CI gate); the REST-create-then-rerun is the clean path.
+- **pr-land now self-heals new-item id collisions (#2181, 2026-07-02).** After a clean merge it runs `scripts/backlog-renumber-collisions.mjs` (NO `--base-ref`) on post-merge main; a duplicate NNN → the just-merged (newest) file yields to next-free, gated + committed + pushed (never force). So a manual/`/pr`/`/drain` land no longer needs a hand-renumber like PR #12 did. `--no-heal` opts out. A heal problem is surfaced but never fails the land. Was workflow-only before (the #2071 batch integrator).

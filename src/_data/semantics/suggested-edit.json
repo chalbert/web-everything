@@ -1,0 +1,5 @@
+{
+  "term": "Suggested Edit",
+  "definition": "A collaborative propose→accept/reject lifecycle for a text mutation, grounded in WAI-ARIA 1.3 role=suggestion. The SuggestedEdit contract (the only lock) is composed by two parties: the annotation intent (as the suggestion motivation's body — the state record) and the Editor Engine protocol (as the transaction to apply — present when the host is editable, record-only when read-only). The target composes the #1471 Durable Range Anchor contract (the durable location); the proposed payload models the ARIA insertion+deletion wrap. Apply dispatch, CRDT integration, and optimistic-revert are impl (Frontier UI). Ratified #2029; authored #2145.",
+  "usage": "Standardized by the Suggested Edit protocol."
+}

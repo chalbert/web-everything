@@ -1,7 +1,9 @@
 ---
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
 relatedTo: ["2181", "2160", "2138"]
 tags: [pr-flow, land, self-heal, derived-artifacts, dx]
 ---

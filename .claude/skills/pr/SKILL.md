@@ -41,6 +41,10 @@ author merges their own PR once CI is green. GitHub's native merge queue stays O
    ```
    - `--no-wait` opens the self-approved PR but leaves the merge for a later pass (use when CI is slow
      and the user only wants the PR raised now).
+   - **The opened PR is labelled `ready-to-merge` automatically (#2196)** — `pr-land` applies it as a single
+     deliberate transport step, so the label lander (`/drain`, `merge-ai-prs.mjs --label=ready-to-merge`)
+     collects this PR like any other producer output. Pass `--no-label` to opt a PR out (it must then be
+     merged by hand / left for human review); `--label=<name>` overrides the label name.
    - `--fallback-git` degrades to a local `git merge --no-ff` + push when `gh` is unavailable.
    - If `pr-land` still fails on create, the manual equivalent is `gh pr create --base main
      --head lane/<slug> --title "…" --body-file <path>` then `gh pr merge <n> --merge --delete-branch`
