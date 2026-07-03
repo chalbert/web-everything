@@ -1,9 +1,12 @@
-# Resume stuck lanes — finish the producer's half-done work, then land (#2200)
+# Finish stuck lanes — take over the producer's half-done work, then land (#2200)
+
+> **Invoked as `/finish`.** (Was `/resume`, renamed 2026-07-03 — `/resume` is a Claude Code built-in that
+> shadowed the skill so it never dispatched. The mechanism + `lane-resume.mjs` keep the "resume" mnemonic.)
 
 `/drain` lands couples that are **already ready**. But a producer (`/workflow`, `/batch`) routinely leaves
 lanes that *aren't* ready — a **conflict** with a peer that landed first, a red required **`test`** (the lane
 shipped a real bug), or (rarely) a **`blockedBy`** item that isn't landed yet. `/drain` skips those forever.
-`/resume` is the consumer that **takes them over**: it seeds a finisher subagent with the **existing lane ref**
+`/finish` is the consumer that **takes them over**: it seeds a finisher subagent with the **existing lane ref**
 (reuse the ~done work — never rebuild from scratch), repairs only the broken part, and hands the now-ready
 couple to the normal drain transport.
 
