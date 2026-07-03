@@ -27,7 +27,7 @@
  * (`we:design-systems/grammars/*.grammar.json`) and the emitted *report* (`we:reports/…`).
  *
  * Usage:
- *   node scripts/grammar-scorecard.mjs                 # score bundle zero vs. fui-native + handlebars
+ *   node scripts/grammar-scorecard.mjs                 # score bundle zero vs. fui-native + handlebars; Svelte bundle vs. svelte
  *   node scripts/grammar-scorecard.mjs --check         # re-emit and fail if the on-disk report drifts
  *
  * @module grammar-scorecard
@@ -48,7 +48,7 @@ function today() {
 }
 
 /**
- * Transpile + import the FUI scorer AND bundle-zero recipes once, into one ESM. Returns null when
+ * Transpile + import the FUI scorer AND all bundle recipes once, into one ESM. Returns null when
  * `../frontierui` is absent (detect-or-skip), so the caller skips rather than failing.
  */
 async function loadScorer() {
@@ -57,7 +57,8 @@ async function loadScorer() {
     stdin: {
       contents:
         "export { scoreGrammar, renderGrammarReport, formatFidelity } from './grammarScorecard.ts';" +
-        "export { MustacheInterpolationNode, PolymerInterpolationNode } from './recipes/interpolationRecipes.ts';",
+        "export { MustacheInterpolationNode, PolymerInterpolationNode } from './recipes/interpolationRecipes.ts';" +
+        "export { SvelteExpressionNode, SvelteIfRegionNode, SvelteEachRegionNode, SvelteHtmlMarkerNode, SvelteConstMarkerNode } from './recipes/svelteBundleRecipes.ts';",
       resolveDir: FUI_WEBNODES,
       sourcefile: 'fui-grammar-entry.ts',
       loader: 'ts',
@@ -66,11 +67,14 @@ async function loadScorer() {
     format: 'esm',
     platform: 'node',
     write: false,
-    // The bundle-zero recipes extend `Text` (the value:'shown' polyfill host, evaluated at class
-    // definition). The scorer only reads their *static* config — never instantiates — so a minimal
-    // `Text` global is enough for the class bodies to load in plain Node (no DOM needed).
+    // The bundle recipes extend `Text` / `HTMLTemplateElement` / `Comment` (the polyfill hosts,
+    // evaluated at class definition). The scorer only reads their *static* config — never instantiates
+    // — so minimal globals are enough for the class bodies to load in plain Node (no DOM needed).
     banner: {
-      js: 'if (typeof globalThis.Text === "undefined") { globalThis.Text = class Text {}; }',
+      js:
+        'if (typeof globalThis.Text === "undefined") { globalThis.Text = class Text {}; }\n' +
+        'if (typeof globalThis.HTMLTemplateElement === "undefined") { globalThis.HTMLTemplateElement = class HTMLTemplateElement {}; }\n' +
+        'if (typeof globalThis.Comment === "undefined") { globalThis.Comment = class Comment {}; }',
     },
   });
   const code = res.outputFiles[0].text;
@@ -132,11 +136,40 @@ function combinedReport(scored) {
   return header + summary + '\n' + sections + '\n';
 }
 
+/**
+ * Map: grammar checklist name → the bundle recipes to score it against. Bundle zero (FUI native +
+ * Handlebars) scores against the two native interpolation recipes. Each per-flavor bundle story
+ * (#2114–#2119) adds its own entry here when it ships.
+ *
+ * The scorer is framework-agnostic — the bundle is the only variable. Scoring the Svelte checklist
+ * against bundle zero would (correctly) yield 0% and expose the model-gap list; scoring it against
+ * the Svelte bundle yields the fidelity proof + the confirmed gap list (mid-marker / {:else}).
+ */
+function bundleForChecklist(name, scorer) {
+  // Bundle zero: FUI's native grammar — the two shipped interpolation recipes.
+  const bundleZero = [scorer.MustacheInterpolationNode, scorer.PolymerInterpolationNode];
+  // Svelte bundle (#2118)
+  const svelteBundle = [
+    scorer.SvelteExpressionNode,
+    scorer.SvelteIfRegionNode,
+    scorer.SvelteEachRegionNode,
+    scorer.SvelteHtmlMarkerNode,
+    scorer.SvelteConstMarkerNode,
+  ];
+
+  const MAP = {
+    'fui-native': bundleZero,
+    'handlebars': bundleZero,
+    'svelte': svelteBundle,
+  };
+  return MAP[name] ?? bundleZero;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const check = args.includes('--check');
   const names = args.filter((a) => !a.startsWith('--'));
-  const checklists = names.length ? names : ['fui-native', 'handlebars'];
+  const checklists = names.length ? names : ['fui-native', 'handlebars', 'svelte'];
 
   const scorer = await loadScorer();
   if (!scorer) {
@@ -144,12 +177,10 @@ async function main() {
     return;
   }
 
-  // Bundle zero: FUI's native grammar — the two shipped interpolation recipes.
-  const bundleZero = [scorer.MustacheInterpolationNode, scorer.PolymerInterpolationNode];
-
   const scored = checklists.map((name) => {
     const reference = readGrammar(name);
-    const result = scorer.scoreGrammar(bundleZero, reference);
+    const bundle = bundleForChecklist(name, scorer);
+    const result = scorer.scoreGrammar(bundle, reference);
     return {
       name,
       result,
