@@ -60,6 +60,11 @@ const FLAVOR_BUNDLE_FILES = [
     exports:
       'export { LiquidJinjaInterpolationNode, LiquidJinjaForRegionNode, LiquidJinjaIfRegionNode, LiquidJinjaBlockRegionNode, LiquidJinjaRawRegionNode, LiquidJinjaCommentRegionNode, JinjaInlineCommentNode }',
   },
+  {
+    file: 'recipes/bladeRecipes.ts',
+    exports:
+      'export { BladeEscapedInterpolationNode, BladeRawInterpolationNode, BladeHiddenCommentNode, BladeIfRegionNode, BladeForeachRegionNode, BladeVerbatimRegionNode }',
+  },
 ];
 
 /**
@@ -84,6 +89,7 @@ async function loadScorer() {
     stdin: {
       contents:
         "export { scoreGrammar, renderGrammarReport, formatFidelity } from './grammarScorecard.ts';" +
+        // Bundle zero (FUI native grammar — consumer-at-birth #2113)
         "export { MustacheInterpolationNode, PolymerInterpolationNode } from './recipes/interpolationRecipes.ts';" +
         // Per-flavor bundles — conditionally appended (only if the file exists in FUI).
         bundleExports,
@@ -140,7 +146,7 @@ function combinedReport(scored) {
     '**Re-derivable:** `we:scripts/grammar-scorecard.mjs` re-emits this report; `--check` fails the gate on drift.',
     '',
     '> Bundle zero scores **100%** against its own native checklist (self-consistency — nothing to gap), and',
-    '> exposes its real gaps only when scored against a *framework* checklist (Handlebars, Vue, etc. below):',
+    '> exposes its real gaps only when scored against a *framework* checklist (Handlebars, Blade, Vue, etc. below):',
     '> regions, raw/unescaped output, partials, comments — the concrete increments the per-flavor bundle',
     '> stories (#2114–#2119) grow, and the mid-region-marker gap (`{{else}}`) whose decision card the first',
     '> confirming gap list earns (not a guess). Vue is the firewall proof (#2119): its delimiter surface is',
@@ -195,14 +201,30 @@ function builtBundles(scorer) {
           scorer.JinjaInlineCommentNode,
         ]
       : null;
-  return { 'liquid-jinja': liquidJinja };
+  const blade =
+    scorer.BladeEscapedInterpolationNode &&
+    scorer.BladeRawInterpolationNode &&
+    scorer.BladeHiddenCommentNode &&
+    scorer.BladeIfRegionNode &&
+    scorer.BladeForeachRegionNode &&
+    scorer.BladeVerbatimRegionNode
+      ? [
+          scorer.BladeEscapedInterpolationNode,
+          scorer.BladeRawInterpolationNode,
+          scorer.BladeHiddenCommentNode,
+          scorer.BladeIfRegionNode,
+          scorer.BladeForeachRegionNode,
+          scorer.BladeVerbatimRegionNode,
+        ]
+      : null;
+  return { 'liquid-jinja': liquidJinja, blade };
 }
 
 async function main() {
   const args = process.argv.slice(2);
   const check = args.includes('--check');
   const names = args.filter((a) => !a.startsWith('--'));
-  const checklists = names.length ? names : ['fui-native', 'handlebars', 'liquid-jinja', 'vue', 'angular'];
+  const checklists = names.length ? names : ['fui-native', 'handlebars', 'blade', 'liquid-jinja', 'vue', 'angular'];
 
   const scorer = await loadScorer();
   if (!scorer) {
@@ -213,6 +235,9 @@ async function main() {
   // Bundle zero: FUI's native grammar — the two shipped interpolation recipes.
   const bundleZero = [scorer.MustacheInterpolationNode, scorer.PolymerInterpolationNode];
   // Per-flavor bundles that have been built: scored against their own checklist (fidelity proof).
+  // When a dedicated FUI bundle is shipped for a framework (#2114+), score that bundle instead of
+  // bundle zero. Bundle zero is the consumer-at-birth (#2113) and also the correct bundle for
+  // checklists that describe what the native grammar covers.
   const built = builtBundles(scorer);
 
   const scored = checklists.map((name) => {
