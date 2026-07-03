@@ -1362,6 +1362,24 @@ a.plug-crumb:hover {
     transform: translateY(-2px);
 }
 
+/* #2103 (#2098 primitive, mirrors the .project-card:has(> we-card) rule above): a demos catalog tile whose
+   body is a <we-card> (SSR splices it to <article class="fui-card">) delegates the visual frame to the card.
+   Keep .standard-card for grid layout + the hover lift, but strip its own border/background/padding so the
+   card is the SOLE frame — no nested double box. Covers both the pre-upgrade <we-card> and the SSR/upgraded
+   .fui-card. */
+.standard-card:has(> we-card),
+.standard-card:has(> .fui-card) {
+    background: none;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+}
+.standard-card:has(> we-card):hover,
+.standard-card:has(> .fui-card):hover {
+    box-shadow: none;
+    border-color: transparent;
+}
+
 .standard-card h4 {
     margin-top: 0;
     margin-bottom: 0.5rem;
@@ -1741,7 +1759,7 @@ table td, table th {
 .fui-badge--neutral { background: #eef1f4; color: #3a4252; border-color: #dfe3e8; }
 .fui-badge--info    { background: #e7f0ff; color: #1d4ed8; border-color: #c7dbff; }
 .fui-badge--success { background: #e7f8ef; color: #047a45; border-color: #c2ecd4; }
-.fui-badge--warning { background: #fdf4e3; color: #9a6700; border-color: #f4e2b8; }
+.fui-badge--warning { background: #fdf4e3; color: #8a5d00; border-color: #f4e2b8; } /* #2103: #9a6700→#8a5d00 (WCAG-AA ≥4.5:1); post-upgrade mirror of the we-badge baseline below */
 .fui-badge--error   { background: #fdecec; color: #b42318; border-color: #f6cecb; }
 
 .fui-tag {
@@ -1756,7 +1774,7 @@ table td, table th {
 .fui-tag--subtle.fui-tag--neutral  { background: #eef1f4; color: #3a4252; border-color: #dfe3e8; }
 .fui-tag--subtle.fui-tag--info     { background: #e7f0ff; color: #1d4ed8; border-color: #c7dbff; }
 .fui-tag--subtle.fui-tag--success  { background: #e7f8ef; color: #047a45; border-color: #c2ecd4; }
-.fui-tag--subtle.fui-tag--warning  { background: #fdf4e3; color: #9a6700; border-color: #f4e2b8; }
+.fui-tag--subtle.fui-tag--warning  { background: #fdf4e3; color: #8a5d00; border-color: #f4e2b8; } /* #2103: #9a6700→#8a5d00 (WCAG-AA ≥4.5:1), kept in lock-step with the warning badge */
 .fui-tag--subtle.fui-tag--critical { background: #fdecec; color: #b42318; border-color: #f6cecb; }
 
 /* Intent-tile body composition (the summary + dimension-chip row inside the card body). Reproduces the
@@ -1809,7 +1827,9 @@ we-filter-chip {
 we-badge { font-weight: 600; background: #eef1f4; color: #3a4252; border-color: #dfe3e8; }
 we-badge[tone="info"]    { background: #e7f0ff; color: #1d4ed8; border-color: #c7dbff; }
 we-badge[tone="success"] { background: #e7f8ef; color: #047a45; border-color: #c2ecd4; }
-we-badge[tone="warning"] { background: #fdf4e3; color: #9a6700; border-color: #f4e2b8; }
+/* #2103: darkened from #9a6700 (WCAG-AA 4.45:1 on #fdf4e3 — just under the 4.5 floor, which the /research/
+   a11y gate caught once the topic-status pills became `<we-badge tone="warning">`) to #8a5d00 (≈5.4:1). */
+we-badge[tone="warning"] { background: #fdf4e3; color: #8a5d00; border-color: #f4e2b8; }
 we-badge[tone="error"]   { background: #fdecec; color: #b42318; border-color: #f6cecb; }
 we-filter-chip {
   font-size: 0.85em;

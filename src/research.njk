@@ -10,12 +10,25 @@ title: Research & References
 
 {% if designRefs.length %}
 <section style="margin-bottom: 3rem;">
-    <a href="/research/design-references/" class="project-card" style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; text-decoration: none; color: inherit;">
-        <div>
-            <h3 class="project-title" style="margin: 0 0 0.35rem 0;">Design Reference Library →</h3>
-            <p style="margin: 0; color: var(--color-text-muted); font-size: 0.9em;">A growing, deduplicated corpus of real web-<strong>app</strong> screenshots, captured with rich metadata for later analysis and codification.</p>
-        </div>
-        <span style="padding: 0.1rem 0.6rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.8em; font-weight: 600; white-space: nowrap;">{{ designRefs.length }} shots</span>
+    {#- Dogfood (#2103, #1607/#1820 Fork 1a): the design-references banner is a `<we-card>` frame with the
+        shot-count as a `<we-badge>` — the same raw card+badge composition the sibling catalog tiles use
+        (resources.njk, blocks.njk), correct with JS off via the `we-card{}`/`we-badge{}` SSR baseline in
+        style.css and upgraded in place by the client CE (base.njk). (The #2098 `weCard` MACRO can't carry a
+        nested `weBadge` — it would serialize the badge's own placeholder into the card's spec attribute, and
+        the single-pass `weComponentSSR` transform never re-renders that inner placeholder; so a badge-bearing
+        tile uses the raw-tag pattern, and the no-badge tiles below use the macro.) The whole-tile click stays
+        on the OUTER `<a class="project-card">`; `.project-card:has(> we-card|.fui-card)` strips the anchor's
+        own frame so the card is the sole box. -#}
+    <a href="/research/design-references/" class="project-card" style="text-decoration: none; color: inherit; display: block;">
+        <we-card>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;">
+                <div>
+                    <h3 class="project-title" style="margin: 0 0 0.35rem 0;">Design Reference Library &rarr;</h3>
+                    <p style="margin: 0; color: var(--color-text-muted); font-size: 0.9em;">A growing, deduplicated corpus of real web-<strong>app</strong> screenshots, captured with rich metadata for later analysis and codification.</p>
+                </div>
+                <we-badge tone="neutral">{{ designRefs.length }} shots</we-badge>
+            </div>
+        </we-card>
     </a>
 </section>
 {% endif %}
@@ -30,22 +43,32 @@ title: Research & References
            a new registry entry that supersedes the old one (which flips to status: superseded). The
            grid surfaces the *latest as canonical* — superseded revisions are demoted from here, still
            reachable via their own permalink and the canonical topic's revision-history chain. #}
+        {#- Dogfood (#2103, #1607/#1820 Fork 1a): each topic tile is a `<we-card>` frame + status `<we-badge>`,
+            the same raw card+badge composition as the sibling catalog tiles (blocks.njk, resources.njk). The
+            status vocab maps to a shared tone — open→warning (amber), resolved→success (green), else→neutral —
+            matching the prior hand-rolled swatch. Summary + freshness badge + tag chips stay in the body. Raw
+            tags (not the #2098 macro) because the macro can't carry a nested badge; JS-off correct via the
+            `we-card{}`/`we-badge{}` style.css baseline, upgraded in place by the client CE. The whole-tile
+            click stays on the OUTER anchor; `.project-card:has(> we-card|.fui-card)` strips its own frame. -#}
         {% for topic in researchTopics %}
         {% if topic.status != 'superseded' %}
-        <a href="/research/{{ topic.id }}/" class="project-card" style="text-decoration: none; color: inherit;">
-            <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
-                <h3 class="project-title" style="margin: 0;">{{ topic.title }}</h3>
-                <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if topic.status == 'open' %}#fef3c7{% elif topic.status == 'resolved' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if topic.status == 'open' %}#92400e{% elif topic.status == 'resolved' %}#166534{% else %}#475569{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ topic.status | title }}</span>
-            </div>
-            <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ topic.summary }}</p>
-            <div style="margin-bottom: 0.75rem;">{{ freshnessBadge(topic) }}</div>
-            {% if topic.tags %}
-            <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
-                {% for tag in topic.tags %}
-                <span style="display: inline-block; padding: 0.1rem 0.5rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.75em;">{{ tag }}</span>
-                {% endfor %}
-            </div>
-            {% endif %}
+        {% set _topicTone = 'warning' if topic.status == 'open' else ('success' if topic.status == 'resolved' else 'neutral') %}
+        <a href="/research/{{ topic.id }}/" class="project-card" style="text-decoration: none; color: inherit; display: block;">
+            <we-card>
+                <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+                    <h3 class="project-title" style="margin: 0;">{{ topic.title }}</h3>
+                    <we-badge tone="{{ _topicTone }}">{{ topic.status | title }}</we-badge>
+                </div>
+                <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ topic.summary }}</p>
+                <div style="margin-bottom: 0.75rem;">{{ freshnessBadge(topic) }}</div>
+                {% if topic.tags %}
+                <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+                    {% for tag in topic.tags %}
+                    <span style="display: inline-block; padding: 0.1rem 0.5rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.75em;">{{ tag }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </we-card>
         </a>
         {% endif %}
         {% endfor %}
@@ -55,26 +78,34 @@ title: Research & References
 
 <h2 style="margin-bottom: 1rem;">External References</h2>
 <div class="project-grid">
+    {#- Dogfood (#2103, #1607/#1820 Fork 1a): each External-References category is a `<we-card>` content tile
+        (not an anchor — the link list lives inside the body). Raw tag (not the #2098 macro) kept consistent
+        with the tiles above and round-trip-safe (a `link.title`/`context` carrying encoded markup would leak
+        through the macro's `innerHTML` body path). `category` → the card heading; description + the `<ul>` of
+        external links stay in the body. `.project-card:has(> we-card|.fui-card)` strips the wrapper frame so
+        the card is the sole box; the client CE upgrades it in place (JS-off correct via the style.css
+        baseline). -#}
     {% for section in references %}
     <div class="project-card" style="display: block; height: auto;">
-        <div class="project-header" style="margin-bottom: 1rem; border-bottom: 1px solid var(--color-border); padding-bottom: 0.5rem;">
-            <h2 class="project-title">{{ section.category }}</h2>
-        </div>
-        <p style="margin-bottom: 1.5rem; color: var(--color-text-muted); font-size: 0.9em;">{{ section.description }}</p>
-        
-        <ul style="list-style: none; padding: 0; margin: 0;">
-            {% for link in section.links %}
-            <li style="margin-bottom: 1rem;">
-                <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" style="font-weight: 600; text-decoration: none; color: var(--color-primary); display: flex; align-items: center; gap: 0.5rem;">
-                    {{ link.title }}
-                    <svg style="width: 14px; height: 14px; opacity: 0.5;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
-                </a>
-                {% if link.context %}
-                <p style="margin: 0.25rem 0 0 0; font-size: 0.85em; color: var(--color-text-muted);">{{ link.context }}</p>
-                {% endif %}
-            </li>
-            {% endfor %}
-        </ul>
+        <we-card>
+            <div class="project-header" style="margin-bottom: 1rem; border-bottom: 1px solid var(--color-border); padding-bottom: 0.5rem;">
+                <h2 class="project-title" style="margin: 0;">{{ section.category }}</h2>
+            </div>
+            <p style="margin-bottom: 1.5rem; color: var(--color-text-muted); font-size: 0.9em;">{{ section.description }}</p>
+            <ul style="list-style: none; padding: 0; margin: 0;">
+                {% for link in section.links %}
+                <li style="margin-bottom: 1rem;">
+                    <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" style="font-weight: 600; text-decoration: none; color: var(--color-primary); display: flex; align-items: center; gap: 0.5rem;">
+                        {{ link.title }}
+                        <svg style="width: 14px; height: 14px; opacity: 0.5;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                    </a>
+                    {% if link.context %}
+                    <p style="margin: 0.25rem 0 0 0; font-size: 0.85em; color: var(--color-text-muted);">{{ link.context }}</p>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </we-card>
     </div>
     {% endfor %}
 </div>
