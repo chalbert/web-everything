@@ -2,10 +2,11 @@
 kind: story
 size: 3
 parent: "2093"
-status: active
+status: resolved
 blockedBy: ["2104"]
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
 tags: []
 ---
 
