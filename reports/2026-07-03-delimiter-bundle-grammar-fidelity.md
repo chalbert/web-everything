@@ -30,6 +30,7 @@ interpolation recipes (`frontierui:plugs/webnodes/recipes/interpolationRecipes.t
 | Liquid/Jinja | 14% | 1 / 7 | 3 |
 | Vue | 100% | 1 / 1 | 7 |
 | Angular | 10% | 1 / 10 | 3 |
+| Svelte | 83% | 5 / 6 | 3 |
 
 > Checklist data: `we:design-systems/grammars/fui-native.grammar.json`.
 
@@ -200,4 +201,31 @@ None — every in-scope construct reproduces. (Expected only for a trivial gramm
 | `@case (val) { … }` | children | unclaimed | no bundle recipe declares static open "@case" |
 | `@default { … }` | children | unclaimed | no bundle recipe declares static open "@default" |
 | `@defer { … }` | children | unclaimed | no bundle recipe declares static open "@defer" |
+
+
+---
+
+> Checklist data: `we:design-systems/grammars/svelte.grammar.json`.
+
+## Grammar fidelity — Svelte
+
+**Fidelity: 83%** (5/6 in-scope constructs reproduce through the #2074 recipe model; 3 out-of-scope-per-statute).
+
+| construct | nature | verdict | recipe |
+| --- | --- | --- | --- |
+| `{x}` | value | ✓ reproduced | SvelteExpressionNode |
+| `{#if cond}…{/if}` | children | ✓ reproduced | SvelteIfRegionNode |
+| `{#each items}…{/each}` | children | ✓ reproduced | SvelteEachRegionNode |
+| `{@html expr}` | marker | ✓ reproduced | SvelteHtmlMarkerNode |
+| `{@const x = val}` | marker | ✓ reproduced | SvelteConstMarkerNode |
+| `{:else} / {:else if cond} mid-region marker` | children | ✗ gap | — |
+| `bind:value attribute directive` | marker | — out-of-scope | — |
+| `on:click event directive` | marker | — out-of-scope | — |
+| `use:action directive` | marker | — out-of-scope | — |
+
+### Gap list — constructs the recipe model cannot express (the standard increment)
+
+| construct | nature | reason | note |
+| --- | --- | --- | --- |
+| `{:else} / {:else if cond} mid-region marker` | children | unclaimed | no bundle recipe declares static open "{:" |
 
