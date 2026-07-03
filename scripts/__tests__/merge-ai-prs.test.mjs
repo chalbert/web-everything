@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, classifyPr, planLabelDrain } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, classifyPr, planLabelDrain, parseWatchOpts } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -101,5 +101,26 @@ describe('merge-ai-prs — planLabelDrain blockedBy ordering (#2188)', () => {
   it('orders ready by item then PR number (deterministic cascade)', () => {
     const { ready } = planLabelDrain([cand(8, 2205), cand(4, 2201), cand(6, 2201)]);
     expect(ready.map((c) => c.num)).toEqual([4, 6, 8]); // item 2201 (PRs 4,6) before 2205 (PR 8)
+  });
+});
+
+describe('merge-ai-prs — parseWatchOpts (#2194 /drain watch)', () => {
+  it('defaults: watch off, 30s interval, unbounded (no max-idle)', () => {
+    expect(parseWatchOpts()).toEqual({ watch: false, intervalSec: 30, maxIdle: null });
+  });
+
+  it('--watch on with a custom interval + max-idle', () => {
+    expect(parseWatchOpts({ watch: true, interval: '10', maxIdle: '3' })).toEqual({ watch: true, intervalSec: 10, maxIdle: 3 });
+  });
+
+  it('a non-positive / non-numeric interval falls back to the 30s default', () => {
+    expect(parseWatchOpts({ watch: true, interval: '0' }).intervalSec).toBe(30);
+    expect(parseWatchOpts({ watch: true, interval: 'x' }).intervalSec).toBe(30);
+    expect(parseWatchOpts({ watch: true, interval: '-5' }).intervalSec).toBe(30);
+  });
+
+  it('max-idle=0 is honoured (exit on the first idle pass), a bad value → unbounded', () => {
+    expect(parseWatchOpts({ watch: true, maxIdle: '0' }).maxIdle).toBe(0);
+    expect(parseWatchOpts({ watch: true, maxIdle: 'x' }).maxIdle).toBe(null);
   });
 });
