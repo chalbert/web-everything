@@ -25,7 +25,7 @@ interpolation recipes (`frontierui:plugs/webnodes/recipes/interpolationRecipes.t
 | checklist | fidelity | reproduced / scorable | out-of-scope |
 | --- | --- | --- | --- |
 | FUI native | 100% | 2 / 2 | 0 |
-| Handlebars | 17% | 1 / 6 | 2 |
+| Handlebars | 17% | 1 / 6 | 4 |
 | Blade | 17% | 1 / 6 | 1 |
 | Liquid/Jinja | 14% | 1 / 7 | 3 |
 | Vue | 100% | 1 / 1 | 7 |
@@ -54,7 +54,7 @@ None — every in-scope construct reproduces. (Expected only for a trivial gramm
 
 ## Grammar fidelity — Handlebars
 
-**Fidelity: 17%** (1/6 in-scope constructs reproduce through the #2074 recipe model; 2 out-of-scope-per-statute).
+**Fidelity: 17%** (1/6 in-scope constructs reproduce through the #2074 recipe model; 4 out-of-scope-per-statute).
 
 | construct | nature | verdict | recipe |
 | --- | --- | --- | --- |
@@ -62,8 +62,10 @@ None — every in-scope construct reproduces. (Expected only for a trivial gramm
 | `{{{ raw }}}` | value | ✗ gap | — |
 | `{{#each}}…{{/each}}` | children | ✗ gap | — |
 | `{{#if}}…{{/if}}` | children | ✗ gap | — |
-| `{{> partial }}` | marker | ✗ gap | — |
 | `{{! comment }}` | marker | ✗ gap | — |
+| `{{!-- block comment --}}` | marker | ✗ gap | — |
+| `{{> partial }}` | marker | — out-of-scope | — |
+| `{{else}} mid-region-marker` | marker | — out-of-scope | — |
 | `helper as element attribute` | marker | — out-of-scope | — |
 | `class="{{ x }}" attribute interpolation` | value | — out-of-scope | — |
 
@@ -74,8 +76,8 @@ None — every in-scope construct reproduces. (Expected only for a trivial gramm
 | `{{{ raw }}}` | value | unclaimed | no bundle recipe declares static open "{{{" |
 | `{{#each}}…{{/each}}` | children | unclaimed | no bundle recipe declares static open "{{#each" |
 | `{{#if}}…{{/if}}` | children | unclaimed | no bundle recipe declares static open "{{#if" |
-| `{{> partial }}` | marker | unclaimed | no bundle recipe declares static open "{{>" |
 | `{{! comment }}` | marker | unclaimed | no bundle recipe declares static open "{{!" |
+| `{{!-- block comment --}}` | marker | unclaimed | no bundle recipe declares static open "{{!--" |
 
 
 ---
