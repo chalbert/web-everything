@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -160,5 +160,36 @@ describe('merge-ai-prs — parseWatchOpts (#2194 /drain watch)', () => {
   it('max-idle=0 is honoured (exit on the first idle pass), a bad value → unbounded', () => {
     expect(parseWatchOpts({ watch: true, maxIdle: '0' }).maxIdle).toBe(0);
     expect(parseWatchOpts({ watch: true, maxIdle: 'x' }).maxIdle).toBe(null);
+  });
+});
+
+describe('isRebaseDropCandidate (#2198 — the manifest-wall rescue gate)', () => {
+  // classifyPr on a certified+green PR that is CONFLICTING (the classic shared-manifest wall) → skip.
+  const walled = classifyPr(aiPr({ number: 7, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }), {});
+  it('a certified + green PR walled by the manifest (CONFLICTING/DIRTY) IS a candidate', () => {
+    expect(walled.decision).toBe('skip');
+    expect(isRebaseDropCandidate(walled)).toBe(true);
+  });
+  it('a BEHIND (needs-rebase) certified+green PR is a candidate', () => {
+    const behind = classifyPr(aiPr({ number: 8, mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND' }), {});
+    expect(isRebaseDropCandidate(behind)).toBe(true);
+  });
+  it('a cleanly-mergeable PR is NOT a candidate (decision is merge, nothing to rebuild)', () => {
+    const clean = classifyPr(aiPr({ number: 9 }), {});
+    expect(clean.decision).toBe('merge');
+    expect(isRebaseDropCandidate(clean)).toBe(false);
+  });
+  it('a red `test` is NOT a candidate (a real bug, not a manifest artefact)', () => {
+    const red = classifyPr(aiPr({ number: 10, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }] }), {});
+    expect(isRebaseDropCandidate(red)).toBe(false);
+  });
+  it('an un-certified (mixed-authorship, no label) PR is NOT a candidate — never auto-resolve an un-blessed branch', () => {
+    const uncertified = classifyPr({ number: 11, title: 't', commits: [claudeCommit(), humanCommit], statusCheckRollup: greenRollup, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', labels: [] }, {});
+    expect(uncertified.decision).toBe('skip');
+    expect(isRebaseDropCandidate(uncertified)).toBe(false);
+  });
+  it('a BLOCKED/DRAFT state is NOT a candidate (branch-protection / human concern, not a manifest wall)', () => {
+    const blocked = classifyPr(aiPr({ number: 12, mergeable: 'MERGEABLE', mergeStateStatus: 'BLOCKED' }), {});
+    expect(isRebaseDropCandidate(blocked)).toBe(false);
   });
 });

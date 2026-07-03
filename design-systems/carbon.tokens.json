@@ -1,0 +1,30 @@
+{
+  "$description": "IBM Carbon Design System flavor — a full DTCG override of the webtheme platform default capturing Carbon's core token roles: #0f62fe interactive blue, 0 radius, compact density, and IBM Plex type scale. Transcribed from Carbon v11's light theme (White theme) token set. Values are authored in oklch where the source hex has a known perceptual equivalent; the IBM blue accent is authored as hex because #0f62fe is the carbon-exact value the workbench spec names. See the paired gap list report for what these roles CAN and CANNOT reach in a rendered FUI component. Note: traitDefaults radius=none plus the zero-radius override together express Carbon's signature no-radius shape.",
+  "color": {
+    "$type": "color",
+    "$description": "Carbon v11 light theme (White) color roles — the interactive, layer, and text tokens a component reads. Carbon ships a layered model ($layer-01 through $layer-04, $layer-accent-*) with no named accent that cleanly maps to a single hue-seed; $interactive maps here as the closest accent role.",
+    "bg-light": { "$value": "oklch(1 0 0)", "$description": "Carbon $background (White theme) — the page surface." },
+    "bg-dark": { "$value": "oklch(0.13 0.01 256)", "$description": "Carbon $background (Gray-100 / dark) approximate." },
+    "text-light": { "$value": "oklch(0.13 0 0)", "$description": "Carbon $text-primary (Gray-100 near-black)." },
+    "text-dark": { "$value": "oklch(0.93 0 0)", "$description": "Carbon $text-primary (Gray-10 / dark)." },
+    "accent": { "$value": "#0f62fe", "$description": "Carbon $interactive — IBM Blue 60, the primary interactive colour. Authored as hex to preserve the carbon-exact value the workbench spec names." },
+    "surface": { "$value": "oklch(0.96 0 0)", "$description": "Carbon $layer-01 — the first layer surface (Gray-10)." }
+  },
+  "radius": {
+    "$type": "dimension",
+    "$description": "Carbon's no-radius shape — every interactive element is sharp-cornered (radius 0). base=0 cascades to every derived step; md and lg are explicit zeroes so the DTCG bridge rows for radius.md and radius.lg each resolve to 0 and visibly override the platform default (0.5rem / 1rem).",
+    "none": { "$value": "0" },
+    "base": { "$value": "0", "$description": "Carbon radius seed — 0 (sharp)." },
+    "sm": { "$value": "0", "$description": "Carbon --radius-sm = 0." },
+    "md": { "$value": "0", "$description": "Carbon --radius-md = 0." },
+    "lg": { "$value": "0", "$description": "Carbon --radius-lg = 0." },
+    "full": { "$value": "9999px" }
+  },
+  "surface": {
+    "$type": "color",
+    "$description": "Carbon neutral surface roles — border and muted-surface anchors from the Gray scale.",
+    "border": { "$value": "oklch(0.81 0 0)", "$description": "Carbon $border-subtle-01 — a light Gray-20 border." },
+    "muted": { "$value": "oklch(0.96 0 0)", "$description": "Carbon $layer-02 — second layer surface (Gray-10 approx)." },
+    "muted-foreground": { "$value": "oklch(0.46 0 0)", "$description": "Carbon $text-secondary — Gray-70." }
+  }
+}

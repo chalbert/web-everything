@@ -79,6 +79,29 @@ export function setFrontmatterField(content, key, rendered, { after = [] } = {})
 export const quoteDate = (ymd) => `"${ymd}"`;
 
 /**
+ * Fold a session's usage-equivalent dollar cost into a card's cumulative `costUsd` + `costSessions`
+ * frontmatter — the close-time cost-on-card accounting. PURE (caller reads the file, supplies the amount).
+ * Accumulates: a decision worked across /prepare then /decide sums into one running total, and a
+ * workflow's even-split share lands on each item it touched. Rounds to whole cents to keep the field
+ * diff-quiet. `sessions` defaults to 1 (one contributing session-share). Returns the new content, or
+ * `null` if there's no frontmatter to edit.
+ * @param {string} content
+ * @param {number} usd  a non-negative dollar amount to ADD to the running total
+ * @param {{ sessions?: number }} [opts]
+ * @returns {string|null}
+ */
+export function accrueCost(content, usd, { sessions = 1 } = {}) {
+  const prevUsd = Number(readField(content, 'costUsd')) || 0;
+  const prevN = Number(readField(content, 'costSessions')) || 0;
+  const nextUsd = Math.round((prevUsd + Number(usd)) * 100) / 100;
+  const AFTER = ['costUsd', 'dateResolved', 'dateStarted', 'dateOpened', 'preparedDate', 'status', 'size', 'kind'];
+  let next = setFrontmatterField(content, 'costUsd', String(nextUsd), { after: AFTER });
+  if (next == null) return null;
+  next = setFrontmatterField(next, 'costSessions', String(prevN + sessions), { after: ['costUsd', ...AFTER] });
+  return next;
+}
+
+/**
  * Render a free-text scalar as a safe frontmatter value, double-quoting it **iff** it carries a
  * YAML-significant character that would make an unquoted (plain) scalar misparse — a colon (the
  * `key: value` separator), a `#` (comment intro), a leading YAML indicator char

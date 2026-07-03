@@ -31,7 +31,7 @@ import { readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyTransition, readField, setFrontmatterField } from './backlog/frontmatter.mjs';
+import { applyTransition, readField, setFrontmatterField, accrueCost } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize, sessionForNum } from './readiness/reservations.mjs';
 import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, recordTouch, mostRecentSession, porcelainFiles } from './readiness/claimScope.mjs';
@@ -547,6 +547,29 @@ function yieldNum() {
     `${GRN}✓ yielded${RST} ${DIM}${file} →${RST} ${BLD}#${newNum}${RST} ${DIM}backlog/${newName}${RST}`);
 }
 
+// `cost <NNN> --usd=<n>` — fold a session's usage-equivalent $ cost into a card's cumulative accounting
+// (#close cost-on-card). A pure frontmatter splice via `accrueCost`: adds to `costUsd`, bumps
+// `costSessions`. The close skill decides WHICH card(s) and how much (a single dominant decision/prepare
+// session → full cost on one card; a workflow → its cost even-split across the N items it worked;
+// slice/resolve sessions attribute nothing). This verb is the mechanical writer — no judgment, just the
+// accumulate — so the same command serves both paths. `--sessions=<n>` overrides the +1 session-share.
+function cost() {
+  const file = resolveFile(positional[0]);
+  const usd = Number(flag('usd'));
+  if (!Number.isFinite(usd) || usd < 0) die('cost needs --usd=<non-negative number> (the session\'s usage-equivalent $)');
+  const sessions = Number(flag('sessions'));
+  const rel = `backlog/${file}`;
+  const abs = join(DIR, file);
+  const before = readFileSync(abs, 'utf8');
+  const after = accrueCost(before, usd, Number.isFinite(sessions) ? { sessions } : {});
+  if (after == null) die(`#${file.match(/^\d+/)[0]} — could not splice frontmatter (no frontmatter block?)`);
+  writeBacklogMd(abs, rel, after);
+  const total = readField(after, 'costUsd');
+  const n = readField(after, 'costSessions');
+  ok({ verb: 'cost', num: file.match(/^\d+/)[0], added: usd, costUsd: Number(total), costSessions: Number(n) },
+    `${GRN}✓ cost${RST} ${DIM}— +$${usd.toFixed(2)} → $${total} over ${n} session(s) on #${file.match(/^\d+/)[0]}${RST}`);
+}
+
 switch (verb) {
   case 'claim': case 'resolve': case 'release': transition(verb); break;
   case 'retype': retype(); break;
@@ -554,6 +577,7 @@ switch (verb) {
   case 'scaffold': scaffold(); break;
   case 'settle': settle(); break;
   case 'calibrate': calibrate(); break;
+  case 'cost': cost(); break;
   case 'reserve': reserve(); break;
   case 'unreserve': unreserve(); break;
   case 'queue': queue(); break;
@@ -568,6 +592,7 @@ switch (verb) {
       `  ${GRN}scaffold${RST} --kind=story|epic|task|decision --size= --title= [--digest=] [--blocked-by=] [--parent=] [--session=<slug>]   --session ⇒ born active+owned (#670), publish with settle\n` +
       `  ${GRN}settle${RST} <NNN>               born-active scaffold (--session) → open (publish once authored)\n` +
       `  ${GRN}calibrate${RST} --points= --context-pct= [--stop-reason=budget|context|empty-pool|fork|gate|outgrew|manual|abort]   fold a session into the batch point-budget estimate\n` +
+      `  ${GRN}cost${RST} <NNN> --usd=<n> [--sessions=<n>]   accrue a session's usage-equivalent $ into the card's cumulative costUsd/costSessions (close cost-on-card)\n` +
       `  ${GRN}reserve${RST} <NNN...> --session=<slug>    soft-hold planned items (deprioritize for other sessions)\n` +
       `  ${GRN}unreserve${RST} [--session=<slug>] [<NNN...>]  release soft holds (clear a session, or specific items)\n` +
       `  ${GRN}queue${RST} <NNN...> [--lane=<ref>] [--session=<slug>]   mark ready-to-merge (#2138 Fork 4); claim/release refuse a queued item until the drain lands it\n` +

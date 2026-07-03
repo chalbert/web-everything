@@ -27,7 +27,7 @@
  * (`we:design-systems/grammars/*.grammar.json`) and the emitted *report* (`we:reports/…`).
  *
  * Usage:
- *   node scripts/grammar-scorecard.mjs                 # score bundle zero vs. fui-native + handlebars
+ *   node scripts/grammar-scorecard.mjs                 # score bundle zero vs. fui-native + handlebars; Svelte bundle vs. svelte
  *   node scripts/grammar-scorecard.mjs --check         # re-emit and fail if the on-disk report drifts
  *
  * @module grammar-scorecard
@@ -56,9 +56,24 @@ function today() {
  */
 const FLAVOR_BUNDLE_FILES = [
   {
+    file: 'recipes/handlebarsBundle.ts',
+    exports:
+      'export { HandlebarsInterpolationNode, HandlebarsRawInterpolationNode, HandlebarsEachRegionNode, HandlebarsIfRegionNode, HandlebarsCommentNode, HandlebarsBlockCommentNode }',
+  },
+  {
     file: 'recipes/liquidJinjaBundle.ts',
     exports:
       'export { LiquidJinjaInterpolationNode, LiquidJinjaForRegionNode, LiquidJinjaIfRegionNode, LiquidJinjaBlockRegionNode, LiquidJinjaRawRegionNode, LiquidJinjaCommentRegionNode, JinjaInlineCommentNode }',
+  },
+  {
+    file: 'recipes/bladeRecipes.ts',
+    exports:
+      'export { BladeEscapedInterpolationNode, BladeRawInterpolationNode, BladeHiddenCommentNode, BladeIfRegionNode, BladeForeachRegionNode, BladeVerbatimRegionNode }',
+  },
+  {
+    file: 'recipes/svelteBundleRecipes.ts',
+    exports:
+      'export { SvelteExpressionNode, SvelteIfRegionNode, SvelteEachRegionNode, SvelteHtmlMarkerNode, SvelteConstMarkerNode }',
   },
 ];
 
@@ -84,6 +99,7 @@ async function loadScorer() {
     stdin: {
       contents:
         "export { scoreGrammar, renderGrammarReport, formatFidelity } from './grammarScorecard.ts';" +
+        // Bundle zero (FUI native grammar — consumer-at-birth #2113)
         "export { MustacheInterpolationNode, PolymerInterpolationNode } from './recipes/interpolationRecipes.ts';" +
         // Per-flavor bundles — conditionally appended (only if the file exists in FUI).
         bundleExports,
@@ -101,6 +117,8 @@ async function loadScorer() {
     banner: {
       js: [
         'if (typeof globalThis.Text === "undefined") { globalThis.Text = class Text {}; }',
+        'if (typeof globalThis.HTMLTemplateElement === "undefined") { globalThis.HTMLTemplateElement = class HTMLTemplateElement {}; }',
+        'if (typeof globalThis.Comment === "undefined") { globalThis.Comment = class Comment {}; }',
         'if (typeof globalThis.MutationObserver === "undefined") { globalThis.MutationObserver = class MutationObserver { constructor(cb){} observe(){} disconnect(){} }; }',
       ].join('\n'),
     },
@@ -140,7 +158,7 @@ function combinedReport(scored) {
     '**Re-derivable:** `we:scripts/grammar-scorecard.mjs` re-emits this report; `--check` fails the gate on drift.',
     '',
     '> Bundle zero scores **100%** against its own native checklist (self-consistency — nothing to gap), and',
-    '> exposes its real gaps only when scored against a *framework* checklist (Handlebars, Vue, etc. below):',
+    '> exposes its real gaps only when scored against a *framework* checklist (Handlebars, Blade, Vue, etc. below):',
     '> regions, raw/unescaped output, partials, comments — the concrete increments the per-flavor bundle',
     '> stories (#2114–#2119) grow, and the mid-region-marker gap (`{{else}}`) whose decision card the first',
     '> confirming gap list earns (not a guess). Vue is the firewall proof (#2119): its delimiter surface is',
@@ -177,6 +195,27 @@ function builtBundles(scorer) {
   // Guard: only include a bundle entry when ALL its exports are present in the scorer module.
   // If the bundle file was absent from FUI (detect-or-skip per-bundle in loadScorer), the
   // named exports are undefined — treat that as "not yet built" and fall back to bundle zero.
+  // Handlebars/Mustache bundle (#2114) — its interpolation/raw/region/comment recipes
+  // (`{{ }}`/`{{{ }}}`/`{{#each}}`/`{{#if}}`/`{{! }}`/`{{!-- --}}`). Absent from FUI → exports
+  // undefined → falls back to bundle-zero (gap-list mode); present → scored against the handlebars
+  // checklist (fidelity proof). Mustache shares the same `{{ }}` interpolation surface (no separate
+  // checklist), so it is covered by this bundle / bundle zero — no distinct entry.
+  const handlebars =
+    scorer.HandlebarsInterpolationNode &&
+    scorer.HandlebarsRawInterpolationNode &&
+    scorer.HandlebarsEachRegionNode &&
+    scorer.HandlebarsIfRegionNode &&
+    scorer.HandlebarsCommentNode &&
+    scorer.HandlebarsBlockCommentNode
+      ? [
+          scorer.HandlebarsInterpolationNode,
+          scorer.HandlebarsRawInterpolationNode,
+          scorer.HandlebarsEachRegionNode,
+          scorer.HandlebarsIfRegionNode,
+          scorer.HandlebarsCommentNode,
+          scorer.HandlebarsBlockCommentNode,
+        ]
+      : null;
   const liquidJinja =
     scorer.LiquidJinjaInterpolationNode &&
     scorer.LiquidJinjaForRegionNode &&
@@ -195,14 +234,47 @@ function builtBundles(scorer) {
           scorer.JinjaInlineCommentNode,
         ]
       : null;
-  return { 'liquid-jinja': liquidJinja };
+  const blade =
+    scorer.BladeEscapedInterpolationNode &&
+    scorer.BladeRawInterpolationNode &&
+    scorer.BladeHiddenCommentNode &&
+    scorer.BladeIfRegionNode &&
+    scorer.BladeForeachRegionNode &&
+    scorer.BladeVerbatimRegionNode
+      ? [
+          scorer.BladeEscapedInterpolationNode,
+          scorer.BladeRawInterpolationNode,
+          scorer.BladeHiddenCommentNode,
+          scorer.BladeIfRegionNode,
+          scorer.BladeForeachRegionNode,
+          scorer.BladeVerbatimRegionNode,
+        ]
+      : null;
+  // Svelte bundle (#2118) — its region/marker recipes (`{#if}`/`{#each}`/`{@html}`/`{@const}`)
+  // plus the expression interpolation. Absent from FUI → exports undefined → falls back to
+  // bundle-zero (gap-list mode); present → scored against the svelte checklist (fidelity proof).
+  const svelte =
+    scorer.SvelteExpressionNode &&
+    scorer.SvelteIfRegionNode &&
+    scorer.SvelteEachRegionNode &&
+    scorer.SvelteHtmlMarkerNode &&
+    scorer.SvelteConstMarkerNode
+      ? [
+          scorer.SvelteExpressionNode,
+          scorer.SvelteIfRegionNode,
+          scorer.SvelteEachRegionNode,
+          scorer.SvelteHtmlMarkerNode,
+          scorer.SvelteConstMarkerNode,
+        ]
+      : null;
+  return { handlebars, 'liquid-jinja': liquidJinja, blade, svelte };
 }
 
 async function main() {
   const args = process.argv.slice(2);
   const check = args.includes('--check');
   const names = args.filter((a) => !a.startsWith('--'));
-  const checklists = names.length ? names : ['fui-native', 'handlebars', 'liquid-jinja', 'vue'];
+  const checklists = names.length ? names : ['fui-native', 'handlebars', 'blade', 'liquid-jinja', 'vue', 'angular', 'svelte'];
 
   const scorer = await loadScorer();
   if (!scorer) {
@@ -213,6 +285,9 @@ async function main() {
   // Bundle zero: FUI's native grammar — the two shipped interpolation recipes.
   const bundleZero = [scorer.MustacheInterpolationNode, scorer.PolymerInterpolationNode];
   // Per-flavor bundles that have been built: scored against their own checklist (fidelity proof).
+  // When a dedicated FUI bundle is shipped for a framework (#2114+), score that bundle instead of
+  // bundle zero. Bundle zero is the consumer-at-birth (#2113) and also the correct bundle for
+  // checklists that describe what the native grammar covers.
   const built = builtBundles(scorer);
 
   const scored = checklists.map((name) => {

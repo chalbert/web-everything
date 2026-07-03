@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildAddLabelArgs, classifyChecks } from '../pr-land.mjs';
+import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand } from '../pr-land.mjs';
 
 describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
   it('maps merge methods to gh flags (default = --merge, the no-ff history the drain wants)', () => {
@@ -60,6 +60,21 @@ describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
     expect(buildRenumberHealArgs()).not.toContain('--force');
   });
 
+  it('returns the derived-artifact regen command set in lock-step with the drain (gen:inventory + gen:reference-index, #2182)', () => {
+    const cmds = buildRegenArgs();
+    // Must be an array of [cmd, ...args] tuples (same shape as lane-drain.mjs DERIVED_REGEN).
+    expect(Array.isArray(cmds)).toBe(true);
+    expect(cmds.length).toBeGreaterThan(0);
+    // Every entry is itself an array (the [cmd, ...args] tuple shape).
+    for (const entry of cmds) expect(Array.isArray(entry)).toBe(true);
+    // The two drain-equivalent generators must be present.
+    const flat = cmds.map((c) => c.join(' '));
+    expect(flat).toContain('npm run gen:inventory');
+    expect(flat).toContain('npm run gen:reference-index');
+    // No generator that writes OUTSIDE the WE repo (no impl-repo commands).
+    for (const f of flat) expect(f).not.toMatch(/frontierui|plateau-app/);
+  });
+
   it('builds the ready-to-merge label-apply args, and skips when disabled (#2196)', () => {
     // Default: apply the producer-certified label so the label lander (/drain) collects the PR.
     expect(buildAddLabelArgs({ pr: 60, label: 'ready-to-merge' }))
@@ -85,8 +100,45 @@ describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
   });
 });
 
+describe('planPrLand — label only after CI green (#2199)', () => {
+  it('default (land): wait for checks → label when green → merge here', () => {
+    expect(planPrLand({ wait: true, labelOnGreen: false })).toEqual({ waitForChecks: true, labelWhenGreen: true, mergeWhenGreen: true, mode: 'land' });
+  });
+  it('--label-on-green (producer): wait → label when green → STOP (drain merges), never merges here', () => {
+    const p = planPrLand({ wait: true, labelOnGreen: true });
+    expect(p.mode).toBe('label-on-green');
+    expect(p.waitForChecks).toBe(true);
+    expect(p.labelWhenGreen).toBe(true);
+    expect(p.mergeWhenGreen).toBe(false);
+  });
+  it('bare --no-wait (open-only): NEVER labels (CI unconfirmed) and never waits/merges', () => {
+    const p = planPrLand({ wait: false, labelOnGreen: false });
+    expect(p.mode).toBe('open-only');
+    expect(p.waitForChecks).toBe(false);
+    expect(p.labelWhenGreen).toBe(false); // the #2199 fix: no label before green
+    expect(p.mergeWhenGreen).toBe(false);
+  });
+  it('--label-on-green forces the wait even alongside --no-wait (the label REQUIRES a green confirmation)', () => {
+    expect(planPrLand({ wait: false, labelOnGreen: true }).mode).toBe('label-on-green');
+  });
+  it('no mode ever labels without waiting for checks first', () => {
+    for (const w of [true, false]) for (const g of [true, false]) {
+      const p = planPrLand({ wait: w, labelOnGreen: g });
+      if (p.labelWhenGreen) expect(p.waitForChecks).toBe(true); // labelWhenGreen ⇒ waitForChecks
+    }
+  });
+});
+
 describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', () => {
   const src = readFileSync(resolve(process.cwd(), 'scripts/pr-land.mjs'), 'utf8');
+  it('#2199: the label is applied only after the green-wait — never eagerly at PR open', () => {
+    // applyLabel() must be invoked AFTER the check-wait loop (`labelWhenGreen`), not in the open/3b block.
+    expect(src).toMatch(/if \(PLAN\.labelWhenGreen\) applyLabel\(\)/);
+    // the open-only (--no-wait) path emits UNLABELLED
+    expect(src).toMatch(/opened UNLABELLED|UNLABELLED — CI not confirmed/);
+    // the eager pre-CI add-label call is gone from the open path (applyLabel is a deferred closure)
+    expect(src).toMatch(/const applyLabel = \(\) =>/);
+  });
   it('only ever pushes a lane/* head (guard carve-out) and never force-pushes', () => {
     expect(src).toMatch(/\/\^lane\\\//);        // enforces --ref starts with lane/
     expect(src).not.toMatch(/--force/);          // never force
@@ -112,5 +164,20 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     expect(src).toMatch(/check:standards/);
     // The heal runs only after a successful merge (its call sites sit after the gh/ git-fallback merges).
     expect(src.indexOf('function runHeal')).toBeGreaterThan(src.indexOf('buildMergeArgs({ pr: prNum'));
+  });
+  it('regenerates derived artifacts AFTER the merge (and after heal), without ever failing the land (#2182)', () => {
+    expect(src).toMatch(/function runRegen/);                       // the regen step exists
+    expect(src).toMatch(/const REGEN = !flags\['no-regen'\]/);     // on by default, --no-regen opts out
+    // runRegen must be defined/called AFTER runHeal — heal wins ordering over regen (#2071 before #2182).
+    expect(src.indexOf('function runRegen')).toBeGreaterThan(src.indexOf('function runHeal'));
+    // Non-destructive: detached checkout (reuses runHeal's pattern), NEVER reset --hard on a branch.
+    expect(src.indexOf('function runRegen')).toBeGreaterThan(src.indexOf('checkout', '--detach'.length));
+    expect(src).not.toMatch(/reset', '--hard'/);
+    // Skips a dirty tree (can't regen against uncommitted inputs).
+    expect(src).toMatch(/skipped derived-artifact regen/);
+    // A regen failure is surfaced but never fails the land.
+    expect(src).toMatch(/regen failed \(non-fatal\)/);
+    // Never force-pushes the regen commit.
+    expect(src).not.toMatch(/--force/);
   });
 });

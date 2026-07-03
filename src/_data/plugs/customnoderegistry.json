@@ -1,0 +1,12 @@
+{
+  "id": "customnoderegistry",
+  "name": "CustomNodeRegistry",
+  "status": "draft",
+  "type": "Global",
+  "summary": "Proposed registry for delimiter-keyed node kinds — customNodes.define(class X extends CustomNode { … }), the delimiter-grammar analogue of customElements for tag-keyed extension.",
+  "projects": [
+    "webexpressions",
+    "webdirectives",
+    "webregistries"
+  ]
+}

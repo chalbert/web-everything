@@ -1,0 +1,31 @@
+{
+  "$description": "Svelte grammar REFERENCE CHECKLIST for the #2113 grammar-fidelity scorecard — WE-owned data, not scorer code. Scored against the Svelte delimiter bundle (frontierui:plugs/webnodes/recipes/svelteBundleRecipes.ts) it grades which Svelte constructs the #2074 recipe model can express and which are gaps. Constructs: single-brace {x} value expression (literal-brace collision stress for DelimiterCollisionError + escaping), {#if}/{/if} region (children:'inert'), {#each}/{/each} region, {@html}/{@const} marker sigils (@-sigil family). Mid-region marker {:else}/{:else if} is a KNOWN MODEL GAP — the recipe model has no mid-marker concept; the decision card is filed when confirmed by this gap list (per #2118 scope). Attribute-keyed directives (bind:, on:, use:) are out-of-scope-per-statute (#1986 registry). The scorer (frontierui:plugs/webnodes/grammarScorecard.ts scoreGrammar) grades each construct reproduced/partial/out-of-scope/gap. This checklist carries ZERO scorer logic.",
+  "framework": "Svelte",
+  "constructs": [
+    { "construct": "{x}", "open": "{", "nature": "value" },
+    { "construct": "{#if cond}…{/if}", "open": "{#if", "nature": "children" },
+    { "construct": "{#each items}…{/each}", "open": "{#each", "nature": "children" },
+    { "construct": "{@html expr}", "open": "{@html", "nature": "marker" },
+    { "construct": "{@const x = val}", "open": "{@const", "nature": "marker" },
+    {
+      "construct": "{:else} / {:else if cond} mid-region marker",
+      "open": "{:",
+      "nature": "children"
+    },
+    {
+      "construct": "bind:value attribute directive",
+      "nature": "marker",
+      "outOfScope": "attribute-keyed → #1986 registry"
+    },
+    {
+      "construct": "on:click event directive",
+      "nature": "marker",
+      "outOfScope": "attribute-keyed → #1986 registry"
+    },
+    {
+      "construct": "use:action directive",
+      "nature": "marker",
+      "outOfScope": "attribute-keyed → #1986 registry"
+    }
+  ]
+}

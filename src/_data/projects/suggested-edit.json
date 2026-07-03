@@ -1,0 +1,11 @@
+{
+  "id": "suggested-edit",
+  "name": "Suggested Edit",
+  "description": "Standard for the <strong>propose&rarr;accept/reject lifecycle</strong> of a collaborative suggested edit &mdash; the genuinely hard, recurring, <em>unowned</em> mutation that rides on a <code>suggestion</code>-motivation annotation until a viewer accepts or rejects it. Grounded in <a href=\"https://www.w3.org/TR/wai-aria-1.3/\">WAI-ARIA 1.3</a> <code>role=suggestion</code> (editor&rsquo;s draft Feb 2026), which mints the role, scopes it to editable documents, and wraps one insertion and one deletion inside the suggestion element. The <strong><code>SuggestedEdit</code></strong> interface is the state machine both consumers compose: <a href=\"/intents/annotation/\">annotation</a> as the <code>suggestion</code> motivation&rsquo;s body; the Editor Engine protocol as the transaction to apply (present when the host is editable; <strong>record-only</strong> over read-only hosts &mdash; PDF / foreign HTML / no engine). The <code>target</code> field composes the <a href=\"/projects/range-anchor/\">Durable Range Anchor</a> contract (#1471) &mdash; this contract owns the <em>what</em> (lifecycle state + payload); range-anchor owns the <em>where</em> (re-resolvable durable location). Carve-out by <a href=\"/backlog/2029-suggestion-accept-reject-handoff-annotation-vs-rich-text-pla/\">#2029</a> (ratified 2026-07-02, the <a href=\"/decisions/#intents-ux-only\"><code>#intents-ux-only</code></a> corollary applied again); authored in <a href=\"/backlog/2145-author-the-suggested-edit-contract-propose-accept-reject-com/\">#2145</a>. The contract is the only lock; apply dispatch, CRDT integration, and optimistic-revert are impl (Frontier UI).",
+  "summary": "The propose→accept/reject lifecycle for a collaborative suggested edit — composed by annotation (suggestion body) and the Editor Engine protocol (apply transaction).",
+  "status": "concept",
+  "category": "standard",
+  "tier": "exploratory",
+  "icon": "/assets/icons/suggested-edit.svg",
+  "isSvg": true
+}

@@ -1,6 +1,6 @@
 export const meta = {
   name: 'batch-parallel-execute',
-  description: 'Execute a /workflow (parallel) batch on the #2183 PR-fan-out model: a light probe detects the constellation repos each item spans → provision a lane pool per affected repo (+ create the ready-to-merge label once) → work each item as its OWN agent in its coupled lane CLONE (claim-in-lane, work, resolve, write .lane-manifest.json, commit, push lane/<n> per repo), then OPEN A READY-TO-MERGE PR per pushed ref (pr-land --no-wait + label). The producer makes ZERO commits to main, never integrates inline, and never launches or waits on the drain — it completes when every item is an open ready-to-merge PR. A separate, optional drain lands them later in blockedBy order. Per-item progress. Returns a ledger.',
+  description: 'Execute a /workflow (parallel) batch on the #2183 PR-fan-out model: a light probe detects the constellation repos each item spans → provision a lane pool per affected repo (+ create the ready-to-merge label once) → work each item as its OWN agent in its coupled lane CLONE (claim-in-lane, work, resolve, write .lane-manifest.json, commit, push lane/<n> per repo), then OPEN A READY-TO-MERGE PR per pushed ref (pr-land --label-on-green: wait for required checks, label only when green — #2199). The producer makes ZERO commits to main, never integrates inline, and never launches or waits on the drain — it completes when every item is an open ready-to-merge PR. A separate, optional drain lands them later in blockedBy order. Per-item progress. Returns a ledger.',
   whenToUse: 'Invoked by the batch-backlog-items skill ONLY for /workflow (or --parallel), after the main loop has done the conversational pack/plan/one-"go". Not for the default serial /batch.',
   phases: [
     { title: 'Probe', detail: 'light: detect the non-WE constellation repos each item spans (for pool provisioning + per-repo PRs)' },
@@ -155,7 +155,7 @@ const ITEM_RESULT_SCHEMA = {
       type: 'array', items: { type: 'string' },
       description: 'EVERY file this item changed, REPO-QUALIFIED as "<repo>:<repo-relative-path>" (e.g. "we:backlog/2189.md", "frontierui:src/foo.ts").',
     },
-    gate: { type: 'string', enum: ['green', 'red'], description: 'the WE lane scoped fast-fail result (check:standards --local --files). green = clean (or n/a); red = a real file-local error → NO PR opened.' },
+    gate: { type: 'string', enum: ['green', 'red'], description: 'the WE lane FULL-suite result (#2199: check:standards whole-repo + npm test, run before push — not the file-scoped fast-fail). green = clean (or n/a); red = a real error the lane could not fix → NO PR opened.' },
     dismissedFindings: {
       type: 'array',
       items: {
@@ -362,11 +362,12 @@ function laneItemPrompt(it, laneDirs) {
     `   files (src/_data/<reg>/<id>.json) are your own; do NOT splice a monolithic shared registry — if the item`,
     `   genuinely needs that, STOP, report status:"dropped" drop:"outgrew".`,
     ``,
-    `4. LANE FAST-FAIL — scoped, WE-only (#1937 Fork C / #1939). In the WE clone run`,
-    `   \`npm run check:standards -- --local --files=<your WE changed files>\` (the #1159 partition) BEFORE the`,
-    `   resolve. It blocks ONLY on file-local truth (global-consistency rules are demoted to notes), so a red`,
-    `   here is a REAL file-local error YOU authored → fast-fail: set gate:"red", status:"carried", open NO PR.`,
-    `   Impl repos are NOT lane-gated — their authority is the PR's own required \`test\` check on GitHub.`,
+    `4. LANE FULL-SUITE GATE (#2199 — run every check the PR runs, BEFORE pushing). In the WE clone run the FULL`,
+    `   locally-runnable suite — \`npm run check:standards\` (whole-repo, NOT the \`--local --files\` fast-fail) AND`,
+    `   \`npm test\` (the unit suite the PR's required \`test\` check runs) — BEFORE the resolve/push. A red result`,
+    `   is a bug YOU authored: FIX it in THIS lane now (cheapest — full context in hand); NEVER push known-broken`,
+    `   work. Only if it is genuinely un-fixable here → gate:"red", status:"carried", open NO PR. Impl repos run`,
+    `   their own repo's gate in their clone; their final authority is the PR's own required \`test\` check on GitHub.`,
     ``,
     `5. RESOLVE (only after the WE fast-fail is green). In the WE clone: \`node scripts/backlog.mjs resolve`,
     `   ${it.num} [--graduated-to=…] [--codified-to=…]\` (a kind:decision resolve REQUIRES --codified-to, #911).`,
@@ -385,21 +386,25 @@ function laneItemPrompt(it, laneDirs) {
     `   resolve commit). Findings you DISMISS go in dismissedFindings (finding + one-line reason [+ severity/`,
     `   location]); NEVER drop one silently — they become the PR body audit trail.`,
     ``,
-    `8. OPEN A READY-TO-MERGE PR PER REPO (the finish line). For EACH repo in ${JSON.stringify(repos)} (impl`,
-    `   first, WE last), open a self-approved PR WITHOUT merging via we:scripts/pr-land.mjs --no-wait, then label`,
-    `   it. Compose the PR body from your dismissed findings first: \`node scripts/lane-review.mjs body`,
+    `8. OPEN A READY-TO-MERGE PR PER REPO (#2199 — labelled ONLY when green). For EACH repo in ${JSON.stringify(repos)}`,
+    `   (impl first, WE last), run pr-land in \`--label-on-green\` mode: it opens a self-approved PR, WAITS for the`,
+    `   required checks, and applies the ready-to-merge label ONLY once they pass — it does NOT merge (the drain`,
+    `   lands it). This makes ready-to-merge mean "every required check is green", not "a local lint passed"; a`,
+    `   PR whose CI ends up red is thus never labelled (the lane already fixed it in step 4, so this is a backstop).`,
+    `   Compose the PR body from your dismissed findings first: \`node scripts/lane-review.mjs body`,
     `   --base=origin/main > /tmp/pr-body-${it.num}.md\` (best-effort; if it fails, skip --body-file).`,
-    `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --no-wait --body-file=/tmp/pr-body-${it.num}.md --json\``,
-    `     (pr-land publishes your HEAD → the lane ref AND opens the PR; --no-wait means it does NOT merge). Parse`,
-    `     the PR number from its JSON (\`pr\`).`,
+    `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --label-on-green --body-file=/tmp/pr-body-${it.num}.md --json\``,
+    `     (publishes your HEAD → the lane ref, opens the PR, waits for required checks, labels when green — no merge).`,
+    `     Parse the PR number (\`pr\`) and \`labelApplied\` from its JSON. reason:"labelled-on-green" = labelled OK;`,
+    `     reason:"check-red"/"check-timeout" = PR open but UNLABELLED (carried for labelling — the lane's CI wasn't green).`,
   );
   for (const r of implRepos) {
-    lines.push(`   • ${r} PR (from ${laneDirs[r]}): \`node scripts/pr-land.mjs --repo=${laneDirs[r]} --ref=${ref} --no-wait --json\` (from the WE clone, or cd into ${laneDirs[r]}). Parse its PR number.`);
+    lines.push(`   • ${r} PR (from ${laneDirs[r]}): \`node scripts/pr-land.mjs --repo=${laneDirs[r]} --ref=${ref} --label-on-green --json\` (from the WE clone, or cd into ${laneDirs[r]}). Parse \`pr\` + \`labelApplied\`.`);
   }
   lines.push(
     labelReady
-      ? `   • LABEL each opened PR ready-to-merge: \`gh pr edit <pr> --add-label ${READY_LABEL}\` (for a non-WE PR add \`--repo <owner/repo>\` or run from that clone). Set labelled:true per PR.`
-      : `   • (the ${READY_LABEL} label was not created — skip labelling; report labelled:false.)`,
+      ? `   • pr-land applies the ${READY_LABEL} label itself once required checks are green — set labelled = its JSON \`labelApplied\`. Do NOT label by hand before green.`
+      : `   • (the ${READY_LABEL} label was not created — pr-land's apply is best-effort; report labelled:false if it could not.)`,
     `   If a repo's pr-land FAILS (push/gh error), report that repo WITHOUT a pr number (the item is carried for`,
     `   that repo; the others may still have opened). A WE PR that fails to open ⇒ status:"carried".`,
     ``,

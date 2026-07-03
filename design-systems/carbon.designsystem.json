@@ -1,0 +1,6 @@
+{
+  "extends": "@webtheme/default",
+  "themeTokens": "./carbon.tokens.json",
+  "intentDefaults": { "density": "compact", "motion": "immediate", "surface": "solid" },
+  "traitDefaults": { "radius": "none" }
+}
