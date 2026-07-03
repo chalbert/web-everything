@@ -1,8 +1,25 @@
-{% macro projectStatus(status) %}
+{% from "we-component.njk" import weBadge %}
+
+{#-
+  projectStatus — the shared detail-header status indicator (#2099). Converted to the ratified #2019 SSR
+  shape: the status itself is now an SSR `we-badge` rendered through the #2098 `weBadge` primitive (an inert
+  `<we-badge data-we-spec='{…}'>` placeholder the `weComponentSSR` build transform batches through the FUI
+  CLI and splices in place; the client CE upgrade in base.njk is a pure enhancement over the JS-off-correct
+  baseline). The status-METER row (`.meter-track` / `.meter-fill`) is kept beside it as trusted, generated
+  HTML — the same division of labour as `renderProjectGrid` (scripts/lib/component-render-build-hook.cjs),
+  where the badge is a rendered component and the meter is our own markup. The `.status-{{status}}` class on
+  the wrapper still drives the per-status `.meter-fill` widths in style.css, so no meter CSS changes.
+
+  Tone maps status→the badge's closed 5-tone enum, matching `statusTone` in component-render-build-hook.cjs
+  (active/stable→success, draft/poc→info, concept/experimental→warning, else neutral), so the SSR badge here
+  and the grid tiles' badges read identically.
+-#}
+{%- macro projectStatus(status) -%}
+{%- set tone = "success" if (status == "active" or status == "stable") else ("info" if (status == "draft" or status == "poc") else ("warning" if (status == "concept" or status == "experimental") else "neutral")) -%}
 <div class="status-meter status-{{ status }}">
-    <span class="status-label">Status: {{ status | title }}</span>
+    <span class="status-label">Status: {{ weBadge(status | title, tone) }}</span>
     <div class="meter-track">
         <div class="meter-fill"></div>
     </div>
 </div>
-{% endmacro %}
+{%- endmacro -%}
