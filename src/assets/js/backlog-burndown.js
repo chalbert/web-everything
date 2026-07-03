@@ -38,7 +38,13 @@
     var h = (location.hash || '').replace(/^#/, '');
     return panels[h] ? h : null;
   }
-  tabs.forEach(function (t) { t.addEventListener('click', function () { activate(t.dataset.bdTab); }); });
+  tabs.forEach(function (t) { t.addEventListener('click', function (e) {
+    // Let ⌘/Ctrl/Shift-click (and middle-click, which fires no plain click) open the tab's hash URL
+    // in a new browser tab/window natively — only a plain left-click switches in place.
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button) return;
+    e.preventDefault();
+    activate(t.dataset.bdTab);
+  }); });
   // Keyboard: Left/Right move (and activate) between tabs; Home/End jump to ends.
   var tablist = tabs[0] && tabs[0].parentNode;
   if (tablist) tablist.addEventListener('keydown', function (e) {
