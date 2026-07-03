@@ -1,10 +1,12 @@
 ---
 kind: epic
 parent: "1226"
-status: open
+status: resolved
 blockedBy: ["2017", "2024"]
 relatedReport: reports/2026-07-02-backlog-split-analysis.md
 dateOpened: "2026-07-01"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
 tags: [parity, flavor, fluent, carbon, dtcg, epic]
 ---
 
@@ -36,6 +38,13 @@ one per system, mutually independent, each reusing the harness + method proven b
 - Both child slices resolved; each flavor re-themes the canonical FUI component set to its target look and yields a
   parity score + gap list via #2024.
 - The `fluent-like` / `carbon-like` workbench stubs are reconciled (superseded or repointed).
+
+## Resolution (2026-07-03)
+
+Both child slices delivered: **#2140** (Fluent 2) and **#2141** (Carbon) are resolved. Each authored a full DTCG
+override (`we:design-systems/{fluent,carbon}.*`), loaded via the #2017 manifest loader, scored via `npm run
+parity:score` (#2024), with a published gap-list report. The `fluent-like` / `carbon-like` workbench stubs are
+superseded. Epic acceptance met — resolving. Ant remains deferred to a later slice per the #1226 sequence.
 
 ## Notes
 

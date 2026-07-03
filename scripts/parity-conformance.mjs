@@ -142,7 +142,7 @@ async function main() {
   const args = process.argv.slice(2);
   const check = args.includes('--check');
   const flavors = args.filter((a) => !a.startsWith('--'));
-  const targets = flavors.length ? flavors : ['shadcn', 'material-like'];
+  const targets = flavors.length ? flavors : ['shadcn', 'material-like', 'carbon'];
 
   const harness = await loadHarness();
   if (!harness) {
