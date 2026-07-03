@@ -1,9 +1,10 @@
 ---
 kind: task
-status: active
+status: resolved
 relatedTo: ["1943", "2123", "1933"]
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
 tags: [lanes, cross-repo, build, frontierui, dx]
 ---
 
@@ -30,3 +31,14 @@ in a solo WE lane until FUI is present next to it.
 primary's `frontierui`, or provision + build a FUI reference clone) so a solo WE lane builds without hand-wiring.
 The render dependency is **unconditional** — every grid page SSRs via the FUI component-render CLI, independent
 of whether the *edited* item's impl spans FUI — so it can't be gated behind orchestrator affected-repo detection.
+
+**Resolved (2026-07-03):** `we:scripts/lane-pool.mjs` now auto-provisions the render-sibling. `provision`
+and `refresh` call a new `ensureFuiSibling(repo)` step that, for the WE pool (identified by its `PORT_BANDS`
+entry), symlinks the primary checkout's real `frontierui` (`~/workspace/frontierui`, the sibling of the WE
+repo root) into the pool root (`~/workspace/.lanes/web-everything/frontierui`). One symlink at the pool root
+serves every `lane-N` — each lane's `../frontierui` resolves to it — so the FIXED relative artifact path in
+`we:scripts/lib/component-render-build-hook.cjs` resolves without hand-wiring. Idempotent: a correct existing
+link is left untouched, a stale/wrong symlink is repointed, a non-symlink squatting the path is left alone
+with a warning, and a missing FUI source warns (build FUI first) rather than failing (the pool stays usable
+for non-render work). The manual `ln -sfn …` workaround in `we:docs/agent/testing.md` is now a fallback only;
+you still need FUI *built* (`cd ~/workspace/frontierui && npm run build:tools`) — the symlink is automatic.

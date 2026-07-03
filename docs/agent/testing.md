@@ -153,11 +153,11 @@ npm run dev
 ```
 Verify Playwright/curl against **that** lane's `WE_ELEVENTY_PORT` (the 11ty docs site) — not `:8080`.
 
-**3 — Cross-repo lane gap (#1943) — the FUI sibling.** WE lanes have no `frontierui` sibling, so `build:docs` and the 11ty dev-serve hard-fail with *"pinned FUI artifact missing at …/.lanes/web-everything/frontierui/dist/tools/component-render/cli.mjs"*. Symlink the real (built) FUI next to the lanes once:
+**3 — The FUI render-sibling (#2166, was #1943).** Every WE grid page SSRs through the pinned FUI build-artifact, resolved as a `frontierui` checkout *sibling* of the WE repo root — which a lane clone (`<pool>/lane-N`) has no sibling for, so `build:docs` and the 11ty dev-serve would hard-fail with *"pinned FUI artifact missing at …/.lanes/web-everything/frontierui/dist/tools/component-render/cli.mjs"*. `lane-pool.mjs provision`/`refresh` now **auto-links** the sibling: it symlinks the primary checkout's real `~/workspace/frontierui` into the pool root (`~/workspace/.lanes/web-everything/frontierui`), one link serving every lane. You only need FUI **built**:
 ```bash
-cd ~/workspace/frontierui && npm run build:tools   # ensure the artifact exists
-ln -sfn ~/workspace/frontierui ~/workspace/.lanes/web-everything/frontierui
+cd ~/workspace/frontierui && npm run build:tools   # ensure the artifact exists (build once; the lane symlink is automatic)
 ```
+If FUI is missing entirely, provision warns and skips the link (the pool is still usable for non-render work). To re-link by hand: `ln -sfn ~/workspace/frontierui ~/workspace/.lanes/web-everything/frontierui`.
 
 **4 — Known lane limitations.**
 - The **vite DEMO** server can't start in a lane (`vite.config.mts` imports `../plateau-app/…`, which resolves outside the lane). That only breaks the demo shell — the **11ty DOCS** server (`WE_ELEVENTY_PORT`) renders the site fine.
