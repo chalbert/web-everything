@@ -1,8 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-07-02"
-dateStarted: "2026-07-02"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#npm-scope-audience-layer"
 preparedDate: "2026-07-02"
 relatedTo: ["907", "2128", "2154", "2157"]
 tags: [npm, publishing, naming, constellation, plateau]
@@ -36,6 +39,25 @@ npm-scope-mirrors-layer family), not WE-standard forks — no block/intent/proto
 The scope map is a **fixed convention**, not a config dimension (there is one npm registry reality; it
 cannot vary per consumer). The most-permissive-default bias inverts here: on an irreversible shared
 namespace, the *reversible* posture is the default (Fork 3).
+
+## Ruling (ratified 2026-07-03)
+
+Codified as a cite-able statute: [npm-scope-audience-layer](docs/agent/platform-decisions.md#npm-scope-audience-layer)
+(one scope per audience/layer; product = package name; restricted-until-an-explicit-go). All three
+recommended defaults ratified as-is:
+
+- **Fork 1 → (a) `@frontierui`** canonical; `@frontier-ui` = permanent defensive hold. Skeptic SURVIVES vs
+  the hyphenate-norm attack (norm is mixed; constellation's own shipped spelling governs).
+- **Fork 2 → (b) one live scope `@plateaujs`**; `@plateauapp` + `@plateaudev` = holds. *Flips the item's
+  original two-scope bold* — the second-scope rationale rested on per-scope access npm lacks (access is
+  per-package); the lock-in asymmetry + `@angular-devkit` misclassification trap carry the reversal.
+  `@plateaudev` re-opens only on a policy-channel or brand-on-distinctness structural earn.
+- **Fork 3 → (a) restricted-until-an-explicit-go** for `@frontierui/*` + `@plateaujs/*`; public + provenance
+  for `@webeverything/*` (#907). "Go" = per-package-set event; provenance-gap rule applies.
+
+Ratify-turn re-check passed: #907's decision text (PUBLIC + provenance, decided 2026-07-02, delegates the
+rest here) confirmed still live despite its publish being unexecuted (#2157). Unblocks naming the #2128
+pilot set's packages.
 
 ## Recommended path at a glance
 
@@ -256,4 +278,5 @@ whose decision is recorded in its body but whose publish is still unexecuted (#2
 tagged, npm E404) — per the verify-ratified-citation rule, confirm at the ratify turn that #907's decision
 text is still live before leaning on it.
 
-_Not prepared — no `preparedDate`. Bold options are researched defaults awaiting ratification, not rulings._
+_Ratified 2026-07-03 — bold defaults are now rulings; see the Ruling block above and the codified statute
+[npm-scope-audience-layer](docs/agent/platform-decisions.md#npm-scope-audience-layer)._

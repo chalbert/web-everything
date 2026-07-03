@@ -585,6 +585,80 @@ decoupled from release). *Confidence: principle firm; specific knobs provisional
 **Lineage:** #606 (code home + brand deferral) · #775 (soft/revisitable monetization) · #642 (this
 ruling). *Confidence: high — structural test + un-park trigger firm.*
 
+### npm scope = one per audience/layer; product = package name; restricted-until-an-explicit-go {#npm-scope-audience-layer}
+
+The constellation's npm scopes map to the **layer/audience**, and products within a layer are differentiated
+by **package name**, never by minting a second scope. Six orgs are held (`@webeverything`, `@frontierui`,
+`@frontier-ui`, `@plateaujs`, `@plateaudev`, `@plateauapp`); this rule fixes which go live and how they
+publish. It extends the #855 npm-scope-mirrors-layer family under
+[constellation-placement](#constellation-placement) (WE↔FUI half already there — this adds the Plateau half
+and the access posture) and **composes** the [monetization statute](#monetization) (rule 5 #1590) and
+[brand-on-distinctness](#brand-on-distinctness) rather than colliding with them. npm has **no scope rename**,
+so every live scope is a permanent identity — the lock-in axis dominates and the *reversible* posture is the
+default.
+
+1. **Canonical FUI scope = `@frontierui`** (no hyphen); **`@frontier-ui` is a permanent defensive hold that
+   publishes nothing**. The code already names 13 `@frontierui/*` packages and every statute citation uses
+   the no-hyphen spelling — the published name equals what the ecosystem reads in code and docs. The
+   "multiword scopes hyphenate" ecosystem norm is genuinely mixed (`@webcomponents`/`@vitejs` smash), so
+   there is no platform norm to align to; the governing precedent is the constellation's own shipped
+   spelling. (#1991's smash-not-hyphenate rule is HTML-attribute-scoped and is **not** the authority here.)
+2. **One live Plateau scope = `@plateaujs`**; **`@plateauapp` and `@plateaudev` are defensive holds.** All
+   Plateau npm packages ride `@plateaujs`, customer-facing products differentiated by **package name**; a
+   never-npm-published internal package, if one ever is, rides the same scope as `--access restricted`. A
+   second scope buys a *label*, not an enforcement boundary — npm access is **per-package**
+   (`--access restricted`), not per-scope, and org-level separation (2FA, teams, granular/OIDC tokens) is
+   achievable within one org. An audience-boundary scope split (`@plateaudev` = internal) is **rejected**:
+   its name-level signal is hypothetical while its misclassification surface is structural (the
+   `@angular-devkit` "dev ≠ internal" trap), and the lock-in asymmetry favors one scope (a wrong single
+   scope moves a *restricted, dependent-less* package cheaply; a wrong second scope republishes a public
+   package with external dependents). The `@plateaujs`-over-`@plateauapp` spelling is **ruled**: the
+   project-scope precedent (`@vitejs`/`@vuejs` — a "js" scope names the *project* whose packages consumers
+   install) fits a scope that distributes installables, while `@plateauapp` names the SaaS app, which is
+   **deployed, never npm-published**. `@plateaudev` re-opens **only** on one of two named triggers: (i) a
+   genuine publish-policy channel emerges (a `@lit-labs`-style experimental tier); or (ii) a
+   [brand-on-distinctness](#brand-on-distinctness) structural earn — a sub-component gains ≥1 consumer that
+   depends on it *without* the parent product. Never merely to hide internal packages — privacy is
+   per-package access, not a scope.
+3. **Access posture = restricted-until-an-explicit-go for impl/product scopes; public + provenance for the
+   WE standard surface.** `@frontierui/*` and `@plateaujs/*` publish `--access restricted` (no provenance)
+   until an explicit go; `@webeverything/*` publishes public + provenance (settled by #907 — a standard's
+   adoption requires tokenless, provenance-attested install). Disclosure is a **one-way door** (npm's
+   unpublish fencing protects dependents; re-restricting un-discloses nothing) while restricted → public is a
+   one-flag flip, so the reversible value is the honest default. "**Go**" is a **per-package-set event, not
+   one launch date** — the first external consumer who cannot reasonably hold a read token flips that set
+   public (#2128's pilot channel is exactly such an event for the pilot-scoped FUI blocks/plugs). The rule
+   is **total**: restricted is the standing default for every non-`@webeverything` package; a flip to public
+   is always an explicit decision (a paid `@plateaujs` product simply never gets flipped without its own
+   ruling). For `@plateaujs/*`, restricted **implements** the ruled monetization line (#1590 licensed local
+   flagship — public npm code would contradict it); for `@frontierui/*` (open-core-committed end-state), the
+   merit is reversibility + not freezing pre-1.0 surfaces into public dependents. **Provenance-gap rule:**
+   restricted versions never gain provenance retroactively and `npm access public` exposes the *entire*
+   restricted history at once — so each go event ships a fresh provenance-attested version and treats pre-go
+   versions as unattested.
+
+**Settled inputs (not part of the fork):** `@webeverything` carries **WE standard artifacts only**
+(type-only distribution, never imports FUI — [constellation-placement](#constellation-placement) rule 3 +
+#907's public+provenance mode); the WE **website** app never publishes to `@webeverything` (if ever
+packaged, it takes a product-tier name — #2006). Defensive holds publish nothing, ever — the first package
+into a hold converts it to a live scope, which only a ratified amendment here can do.
+
+**Human-action contingency:** all defaults assume the same npm account owns all six orgs (anonymous probe
+proves existence, not ownership). If a scope turns out not to be held by the owner, its slot falls back to
+the nearest held spelling and this rule re-opens for that scope only.
+
+**Lineage:** #2155 (ratified 2026-07-03 — Fork 1 (a) `@frontierui` canonical [skeptic SURVIVES vs the
+hyphenate-norm attack]; Fork 2 (b) one scope `@plateaujs` [SURVIVES-WITH-AMENDMENT — **flips the item's
+original two-scope bold**: the second-scope rationale rested on per-scope access npm lacks]; Fork 3 (a)
+restricted-until-go [SURVIVES-WITH-AMENDMENT vs the config-dimension and launch-timing re-routes]; prep
+`/research/npm-scope-audience-naming/`, session report `reports/2026-07-02-npm-scope-audience-naming.md`).
+Extends #855 npm-scope-mirrors-layer under [constellation-placement](#constellation-placement); composes
+[monetization](#monetization) (#1590 — Fork 3 restricted *implements* it) and
+[brand-on-distinctness](#brand-on-distinctness) (Fork 2's second re-open trigger *is* the structural earn).
+Edges: #907 (WE public+provenance, delegates the rest here) · #2128 (first Fork 3 "go" event) · #2157
+(publish lag) · #2154 (OIDC trusted publishing). Unblocks naming the #2128 pilot set's packages.
+*Confidence: high (Fork 1/3) / med-high (Fork 2 — the reversal); lock-in asymmetry carries the close call.*
+
 ### Plug distribution unit = one `@frontierui/plugs`, subpath exports — never per-plug packages {#plug-distribution-unit}
 
 The plug **distribution unit is one `@frontierui/plugs` package** with per-domain subpath exports
