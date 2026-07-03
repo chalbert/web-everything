@@ -3,6 +3,7 @@ kind: story
 size: 8
 status: open
 locus: webeverything
+parent: "2193"
 relatedTo: ["2191", "1034", "1552", "1167"]
 dateOpened: "2026-07-03"
 tags: [design-review, ai-judge, branding, training, review-design]
@@ -53,6 +54,16 @@ Every user brand judgment in-session is a training label; log them with the prin
   score against the rubric → user picks. Each round yields (candidate, self-score, reviewer-score,
   user-pick) tuples — the training-data generator for this card. Keep the round artifacts in
   `plateau:branding-proposals/` so the fixture grows.
+- **2026-07-03 · label (user):** WE brief redirected to "all-encompassing — the Theory of Everything,
+  but for the web" → principle: the mark should transmit *unification/containment of everything*, not
+  just letterforms; W = E (Web equals Everything) is available brand language. Round-3 candidates
+  WE-06..WE-11 explore it (unification + containment lenses).
+- **2026-07-03 · corpus (user):** reference library commissioned at `plateau:branding-refs/` — "a big
+  library of very good logos, their meaning and the branding they represent", grounded in published
+  design writing ("not just your take" — entries carry `sources` URLs), INCLUDING failures ("a list
+  of bad logos would also be very valuable") with **no size cap** ("there is no number too large").
+  Wings: exemplars, failures, failure patterns, brand systems, reading list. Rendered as a plateau
+  page (private to the user — NOT the public WE site); growth owned by program #2193.
 - **2026-07-03 · method (user):** "getting to a design is following branching decisions into a maze,
   each time getting closer to the goal" → represent each mark's exploration as a **design-journey
   tree** (`plateau:branding-proposals/journey.json`, rendered on the branding page): nodes =
