@@ -30,10 +30,14 @@ describe('isMergeRiskFile — only WE-qualified blacklist paths', () => {
     expect(isMergeRiskFile('we:src/_data/adapters/foo.json')).toBe(false);
     expect(isMergeRiskFile('we:src/foo.ts')).toBe(false);
   });
-  it('does NOT match BUILD CONFIG (#1952 — line-structured, merges optimistically)', () => {
+  it('does NOT match FLAT BUILD CONFIG (#1952/#2149 Fork 1 — line-/key-structured, merges optimistically)', () => {
     expect(isMergeRiskFile('we:tsconfig.json')).toBe(false);
     expect(isMergeRiskFile('we:vite.config.mts')).toBe(false);
-    expect(isMergeRiskFile('we:package.json')).toBe(false);
+    expect(isMergeRiskFile('we:package.json')).toBe(false); // keyed manifest — its dup-key class is a merge-gate lint, not this list
+  });
+  it('(#2149 Fork 2) DOES match .eleventy.js — a registration monolith, un-lintable clean-but-wrong class', () => {
+    expect(isMergeRiskFile('we:.eleventy.js')).toBe(true);
+    expect(isMergeRiskFile('frontierui:.eleventy.js')).toBe(false); // WE-only entry, not cross-repo
   });
   it('(#1951) matches a CROSS-REPO monolith against its OWN repo set', () => {
     expect(isMergeRiskFile('frontierui:src/_data/blocks.json')).toBe(true);

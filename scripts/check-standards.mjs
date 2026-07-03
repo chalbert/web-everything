@@ -42,6 +42,7 @@ import {
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock,
   validateRenderersNotPublished, validateReferenceRuntimeForms,
+  validateNoDuplicateManifestKeys,
   findUnquotedColonScalars, lintBacklogItemRendering,
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
   validateCapabilityPresence, validateRetirementShape,
@@ -1286,9 +1287,13 @@ try {
       const p = join(dir, ent.name);
       if (ent.isDirectory()) walkPkgs(p);
       else if (ent.name === 'package.json') {
+        const rel = relative(ROOT, p);
         try {
-          const pkg = JSON.parse(readFileSync(p, 'utf8'));
-          manifests.push({ name: pkg.name, exports: pkg.exports, source: relative(ROOT, p) });
+          const raw = readFileSync(p, 'utf8');
+          // #2149 Fork 1: duplicate-key merge gate — JSON.parse can't see a dup key, so lint the raw text.
+          for (const e of validateNoDuplicateManifestKeys(raw, rel)) err(e.message, e.descriptor);
+          const pkg = JSON.parse(raw);
+          manifests.push({ name: pkg.name, exports: pkg.exports, source: rel });
         } catch { /* unparseable package.json — skip */ }
       }
     }

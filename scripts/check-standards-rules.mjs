@@ -598,6 +598,56 @@ export function findBadBodyLinks(body) {
   return findings;
 }
 
+// ── Duplicate-key merge gate for keyed JSON manifests (#2149 Fork 1) ───────────
+// we:package.json rides the OPTIMISTIC merge floor (it is NOT a merge-risk/blacklist file): order is
+// irrelevant to npm and distinct-key adds merge clean AND correct, so its ONLY clean-but-wrong class is
+// two lanes adding the SAME key at different offsets — which git line-merges CLEAN into a duplicate-key
+// object that JSON.parse silently last-wins. That class is fully enumerable and machine-checkable, so per
+// the hookable-vs-judgment rule it gets a HOOK (this gate → gate-red → serial-replay), not a serialization
+// entry. JSON.parse cannot see a duplicate key, so scan the RAW text: a tiny tokenizer tracking key names
+// per object scope (one Set per `{}` frame; a string is a KEY only when it sits in the key position of its
+// object — right after `{` or a `,`). Nested objects/arrays each get their own scope, so `{"a":{"a":1}}`
+// is NOT a duplicate. Runs per merge via check:standards on the merged tree ([gate-on-merged-tree]).
+export function findDuplicateKeysPerScope(raw) {
+  const dupes = [];
+  if (typeof raw !== 'string') return dupes;
+  const frames = []; // one per open object/array; objects carry {seen:Set, expectKey:bool}
+  let i = 0;
+  const n = raw.length;
+  while (i < n) {
+    const c = raw[i];
+    if (c === '"') {
+      // read a JSON string, honoring backslash escapes; s is the decoded-enough key/value text
+      let j = i + 1, s = '';
+      while (j < n) {
+        if (raw[j] === '\\') { s += raw[j + 1] ?? ''; j += 2; continue; }
+        if (raw[j] === '"') break;
+        s += raw[j]; j++;
+      }
+      i = j + 1;
+      const top = frames[frames.length - 1];
+      if (top && top.isObject && top.expectKey) {
+        if (top.seen.has(s)) dupes.push(s); else top.seen.add(s);
+        top.expectKey = false; // consumed the key; the value follows
+      }
+      continue;
+    }
+    if (c === '{') { frames.push({ isObject: true, seen: new Set(), expectKey: true }); i++; continue; }
+    if (c === '[') { frames.push({ isObject: false }); i++; continue; }
+    if (c === '}' || c === ']') { frames.pop(); i++; continue; }
+    if (c === ',') { const top = frames[frames.length - 1]; if (top && top.isObject) top.expectKey = true; i++; continue; }
+    i++; // ':' , whitespace, and value literals are irrelevant to key tracking
+  }
+  return dupes;
+}
+
+// One finding per duplicate key. `source` labels the offending manifest (e.g. its repo-relative path).
+export function validateNoDuplicateManifestKeys(raw, source = 'package.json') {
+  return findDuplicateKeysPerScope(raw).map((k) => ({
+    message: `${source}: duplicate key "${k}" — two merged additions collided (JSON parse is last-wins-silent); rebase one side onto the other.`,
+  }));
+}
+
 // ── Unquoted-colon scalar lint for backlog frontmatter (#453) ──────────────────
 // The loader (#430) skips a malformed-YAML item and only warns, so a frontmatter typo slips past the
 // gate unseen. The recurring trigger is an UNQUOTED plain scalar whose value embeds a `: ` (colon +

@@ -27,6 +27,7 @@ import {
   isExportsSafeTarget, validateModuleResolutionLock, findRawHtmlInMarkdown,
   flattenExportsTargets, validateRenderersNotPublished, validateReferenceRuntimeForms, REFERENCE_RUNTIME_FORMS,
   findBuriedForkSections, findUnquotedColonScalars, findBadBodyLinks, findNonBatchableMarkers,
+  findDuplicateKeysPerScope, validateNoDuplicateManifestKeys,
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
@@ -721,6 +722,39 @@ describe('findBadBodyLinks — leaked authoring syntax in a backlog body', () =>
   it('returns [] for an empty or non-string body', () => {
     expect(findBadBodyLinks('')).toEqual([]);
     expect(findBadBodyLinks(undefined)).toEqual([]);
+  });
+});
+
+describe('findDuplicateKeysPerScope — the #2149 Fork 1 dup-key merge gate for keyed manifests', () => {
+  it('flags two same-name keys in one object scope (the clean-but-wrong merge class)', () => {
+    // Two lanes both add a "wrangler" dep at different offsets → git line-merges CLEAN into this:
+    const raw = '{ "dependencies": { "wrangler": "^3.1.0", "vite": "^5.0.0", "wrangler": "^3.2.0" } }';
+    expect(findDuplicateKeysPerScope(raw)).toEqual(['wrangler']);
+  });
+  it('does NOT flag the SAME key name in DIFFERENT object scopes', () => {
+    // "name" appears once per object — legitimate, distinct scopes.
+    const raw = '{ "name": "root", "nested": { "name": "child" }, "list": [ { "name": "a" }, { "name": "b" } ] }';
+    expect(findDuplicateKeysPerScope(raw)).toEqual([]);
+  });
+  it('does NOT treat a repeated STRING VALUE as a duplicate key', () => {
+    // "^5.0.0" is a value twice, not a key — must not flag.
+    const raw = '{ "vite": "^5.0.0", "vitest": "^5.0.0" }';
+    expect(findDuplicateKeysPerScope(raw)).toEqual([]);
+  });
+  it('is not fooled by braces/colons inside string values', () => {
+    const raw = '{ "a": "has {a} and : colon", "a": "again" }';
+    expect(findDuplicateKeysPerScope(raw)).toEqual(['a']);
+  });
+  it('returns [] for a clean manifest or a non-string input', () => {
+    expect(findDuplicateKeysPerScope('{ "a": 1, "b": 2 }')).toEqual([]);
+    expect(findDuplicateKeysPerScope(undefined)).toEqual([]);
+  });
+  it('validateNoDuplicateManifestKeys yields one labelled finding per dup, [] when clean', () => {
+    const findings = validateNoDuplicateManifestKeys('{ "a": 1, "a": 2 }', 'package.json');
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('package.json');
+    expect(findings[0].message).toContain('"a"');
+    expect(validateNoDuplicateManifestKeys('{ "a": 1 }', 'package.json')).toEqual([]);
   });
 });
 

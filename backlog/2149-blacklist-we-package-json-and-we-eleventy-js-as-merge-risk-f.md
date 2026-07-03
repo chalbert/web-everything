@@ -1,15 +1,27 @@
 ---
 kind: decision
-status: open
+status: resolved
 relatedTo: ["1952", "2148", "2077", "1935", "1938", "2138", "2123"]
 dateOpened: "2026-07-02"
-dateStarted: "2026-07-02"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#merge-risk-optimistic-with-targeted-lock"
 preparedDate: "2026-07-02"
 tags: [lane, merge-risk, parallel-batch, session-tooling, decision]
 relatedReport: reports/2026-07-02-merge-risk-blacklist-package-json-eleventy.md
 ---
 
 # Decision: are we:package.json and we:.eleventy.js merge-risk (blacklist) files, or does the #1952 line-structured-optimistic principle cover them?
+
+## Ruling (ratified 2026-07-03) — both defaults adopted; the two files split asymmetrically
+
+- **Fork 1 — `we:package.json` → (c):** stays optimistic (NOT blacklisted). A keyed manifest's only clean-but-wrong class is duplicate keys, which is deterministically lintable → shipped a duplicate-key **merge-gate lint** (`validateNoDuplicateManifestKeys` in `we:scripts/check-standards-rules.mjs`, run per merge by check:standards on every in-repo `we:package.json`). Declaring it ③ was rejected on merit (its only edge is replay-speed, #1961; the lint has broader coverage).
+- **Fork 2 — `we:.eleventy.js` → (b):** declared ③ **merge-risk now** — a registration monolith whose same-name/order-sensitive registrations clean-merge silently and are un-lintable. Added to both mirror homes (`we:scripts/readiness/lane-partition.mjs` + `we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js`), header rationale narrowed, probe-guidance/touchesMonolith taught it, tests pinned (positive `we:.eleventy.js`, negative `we:package.json`). Off-ramp = the standing category-① split-and-exit (delist iff a fragment split proves order-insensitivity — an ordinary story, not pre-blessed).
+- **Statute reconciled:** the ③ "build config → locked" line at [merge-risk-optimistic-with-targeted-lock](../docs/agent/platform-decisions.md#merge-risk-optimistic-with-targeted-lock) now reads flat/keyed config → optimistic, registration monolith → ③ (+ a #2149 amendment paragraph). `we:tsconfig.json`/`we:vite.config.mts` unchanged (stay optimistic).
+- **Spin-off filed:** the optional `we:.eleventy.js` fragment-split story (its off-ramp) — see closeout.
+
+---
 
 Prepared decision — two forks, each with a **bold** default grounded in the `/research/merge-risk-blacklist-package-json-eleventy/` topic and the linked report. The prep skeptic split the two files: they are **not symmetric**. `we:package.json`'s only clean-but-wrong class (duplicate keys) is deterministically lintable, so it stays optimistic with a new merge-gate lint instead of a blacklist entry; `we:.eleventy.js`'s clean-but-wrong class (same-name / ordering-sensitive JS registrations) is not lintable, so it is declared ③ merge-risk now, with the statute's standing category-① split-and-exit path as its future off-ramp.
 
