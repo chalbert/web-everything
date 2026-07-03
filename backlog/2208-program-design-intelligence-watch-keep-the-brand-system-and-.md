@@ -4,7 +4,7 @@ ongoing: true
 status: open
 locus: plateau-app
 relatedReport: reports/2026-07-03-constellation-branding-system.md
-relatedTo: ["2191", "2192", "1034", "1552"]
+relatedTo: ["2206", "2207", "1034", "1552"]
 dateOpened: "2026-07-03"
 tags: [program, branding, design-review, ai-judge, training, watch]
 ---
@@ -21,16 +21,16 @@ if better"; no existing program owns brand/design intelligence — #1257 owns pl
 ## The two fronts
 
 - **Front A — conformance (internal):** the constellation's own brand assets conform to the ratified
-  system (#2191: rubric, naming canon, mark rules, icon-template floor). Surfaces: the
+  system (#2206: rubric, naming canon, mark rules, icon-template floor). Surfaces: the
   `plateau:branding.html` gallery + journey trees (regenerated on any asset change), the
   `check:branding` gate story, and drift checks (spelling variants, palette drift, template
-  violations — all measured first in the #2191 prep). Metric (to build): count of live brand-rule
+  violations — all measured first in the #2206 prep). Metric (to build): count of live brand-rule
   violations across the three repos.
 - **Front B — currency (external):** the design world moves — rebrands ship, critiques publish,
   methods evolve — and user labels accumulate. Discovery: sweep design press/blogs (Brand
   New/UnderConsideration, Logo Design Love, Design Observer, etc.), file new
   `plateau:branding-refs/` case studies (exemplars AND failures — no size cap, per the user), append
-  new in-session user judgments to #2192's learning log, and re-run the reviewer-agreement eval
+  new in-session user judgments to #2207's learning log, and re-run the reviewer-agreement eval
   against the grown fixture. Each sweep hit is triaged: new library entry · new rubric lesson ·
   reviewer re-eval.
 
@@ -41,7 +41,7 @@ if better"; no existing program owns brand/design intelligence — #1257 owns pl
   URLs (not model-recall alone — user rule). Rendered as a plateau page (private to the user; NOT
   the public WE site — user scoping 2026-07-03).
 - `plateau:branding-proposals/` + `plateau:branding-proposals/journey.json` — the labeled fixture:
-  every candidate, every verdict edge, every user pick (#2192's ground truth).
+  every candidate, every verdict edge, every user pick (#2207's ground truth).
 - `we:src/_data/researchTopics/constellation-branding-system.json` — the methodology knowledge base
   (public /research/ page).
 
@@ -51,17 +51,17 @@ The corpus exists and is growing (founding sweep 2026-07-03: ~85 entries — 44 
 web-grounded expansion + 10 brand systems, 14 rebrand failures, 10 failure patterns, 15 readings);
 the metric, cadence, and eval harness are not built. L0→L1 carve:
 
-1. `check:branding` gate (front-A metric) — child story, filed on #2191 ratify.
+1. `check:branding` gate (front-A metric) — child story, filed on #2206 ratify.
 2. Library render page in plateau + growth loop runnable by hand (front-B sweep, re-runnable
    idempotently via `/review-program`).
-3. #2192 eval harness (agreement metric vs the journey labels) — graduate to scheduled cadence only
+3. #2207 eval harness (agreement metric vs the journey labels) — graduate to scheduled cadence only
    after a manual track record.
 
 ## Review log
 
-- **2026-07-03 — founding run (during the #2191 prep session).** Corpus seeded: brand review +
-  proposals + journey trees on `plateau:branding.html`; 6-fork decision #2191 prepared (✓ ready to
-  ratify); #2192 training card filed with learning log (6 labels/corpus notes, 2 method notes);
+- **2026-07-03 — founding run (during the #2206 prep session).** Corpus seeded: brand review +
+  proposals + journey trees on `plateau:branding.html`; 6-fork decision #2206 prepared (✓ ready to
+  ratify); #2207 training card filed with learning log (6 labels/corpus notes, 2 method notes);
   reference library seeded with ~85 web-grounded, cited entries across five wings by 8 parallel
   research agents. Next run: render the library page, build the front-A metric, first
   reviewer-agreement baseline.

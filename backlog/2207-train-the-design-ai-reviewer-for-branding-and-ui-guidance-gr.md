@@ -3,8 +3,8 @@ kind: story
 size: 8
 status: open
 locus: webeverything
-parent: "2193"
-relatedTo: ["2191", "1034", "1552", "1167"]
+parent: "2208"
+relatedTo: ["2206", "1034", "1552", "1167"]
 dateOpened: "2026-07-03"
 tags: [design-review, ai-judge, branding, training, review-design]
 ---
@@ -18,19 +18,19 @@ ratified system, not generic design opinions.
 
 ## Direction
 
-- **Knowledge base = the codified layer, not prompt vibes:** the #2191 brand rubric (Fork 6 attribute
+- **Knowledge base = the codified layer, not prompt vibes:** the #2206 brand rubric (Fork 6 attribute
   sets + landscape narrative), the branding-methodology research topic
   ([/research/](/research/#constellation-branding-system)), the design principles behind #1034's
   scoring, and the platform statutes. The reviewer cites the owning attribute set / rule in every
   verdict, the same way decisions cite statutes.
 - **First labeled ground truth = this branding review (the testing ground):** the
-  `plateau:branding.html` gallery + `#proposals` section, with the user's ratified picks from #2191 as
+  `plateau:branding.html` gallery + `#proposals` section, with the user's ratified picks from #2206 as
   labels. Re-running the reviewer over the proposals page and scoring agreement with the ratified picks
   is the regression fixture — a candidate judge that prefers the excluded branches regresses.
 - **Eval loop before feature work:** define the agreement metric first (per-fork pick agreement +
   rationale-cites-rubric), baseline stock-AI behaviour, then iterate prompt/context/fine-tuning against
   the fixture. New brand decisions append to the label set over time.
-- **Methodology choice is #2191 Fork 6** — if (a) ratifies, the rubric is checklist-scoreable by
+- **Methodology choice is #2206 Fork 6** — if (a) ratifies, the rubric is checklist-scoreable by
   design; this card consumes it, it does not re-decide it.
 
 ## Learning log — labels & method notes accumulated so far (append here as they land)
@@ -44,7 +44,7 @@ Every user brand judgment in-session is a training label; log them with the prin
   operational test the reviewer must run: *"could this be another brand's logo?"* (W is crowded
   territory: Wikipedia/WordPress/Wix). Color/container carry recognition at 16px but do not excuse a
   generic glyph. This also exposed a rubric gap (no distinctiveness attribute in any set) — fixed in
-  #2191 Fork 6 as the shared baseline attribute.
+  #2206 Fork 6 as the shared baseline attribute.
 - **2026-07-03 · label:** FUI horizon candidate (static sunrise) challenged — "not very kinetic" →
   principle: candidates must serve the *full* owning attribute set, not most of it; a static
   composition fails a `kinetic` attribute regardless of other virtues. The reviewer should score
@@ -63,7 +63,7 @@ Every user brand judgment in-session is a training label; log them with the prin
   design writing ("not just your take" — entries carry `sources` URLs), INCLUDING failures ("a list
   of bad logos would also be very valuable") with **no size cap** ("there is no number too large").
   Wings: exemplars, failures, failure patterns, brand systems, reading list. Rendered as a plateau
-  page (private to the user — NOT the public WE site); growth owned by program #2193.
+  page (private to the user — NOT the public WE site); growth owned by program #2208.
 - **2026-07-03 · method (user):** "getting to a design is following branching decisions into a maze,
   each time getting closer to the goal" → represent each mark's exploration as a **design-journey
   tree** (`plateau:branding-proposals/journey.json`, rendered on the branding page): nodes =

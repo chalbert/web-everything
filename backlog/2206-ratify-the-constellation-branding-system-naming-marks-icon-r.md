@@ -5,7 +5,7 @@ status: open
 locus: webeverything
 preparedDate: "2026-07-03"
 relatedReport: reports/2026-07-03-constellation-branding-system.md
-relatedTo: ["1034", "2192", "1283", "1587"]
+relatedTo: ["1034", "2207", "1283", "1587"]
 dateOpened: "2026-07-03"
 dateStarted: "2026-07-03"
 tags: [branding, design, naming, favicon, logo, iconography, brand-philosophy, decision]
@@ -22,7 +22,7 @@ one hue per project — but six live choices sit unratified, plus a tier of mech
 **Visual candidates for every mark fork are rendered side by side (64/32/16 px) at
 `plateau:branding.html#proposals`** (on the plateau dev server, port 4000; candidate sources:
 `plateau:branding-proposals/` SVGs + manifest). Survey, inventory, and the branding-methodology
-write-up that grounds Fork 6 (kept durable for the #2192 design-AI reviewer training):
+write-up that grounds Fork 6 (kept durable for the #2207 design-AI reviewer training):
 [report](../reports/2026-07-03-constellation-branding-system.md) ·
 [/research/](/research/#constellation-branding-system).
 
@@ -171,7 +171,7 @@ front/back overlap is heavy at 16px).
 - **(a) keep the current dual mesa — [bold default].** It's the review's quality bar and the
   user-validated favorite; both critiques are mild and neither refinement clearly beats it side by side
   (see proposals page, Fork 5 row). Ratifying the incumbent is a real decision: it locks the mark and
-  becomes a Fork 6 ground-truth label (#2192).
+  becomes a Fork 6 ground-truth label (#2207).
 - **(b) grounded dual mesa** — adds a horizon baseline; anchors the composition but adds a third
   element at 16px and (with Fork 3 b1) makes the horizon line do double duty across two marks.
 - **(c) stacked strata mesa** — restates the mesa as tiers, echoing WE's `we:src/assets/icons/plateau.svg`
@@ -219,7 +219,7 @@ v3 version bump. One owner of brand judging must be named.
     had no distinctiveness attribute, so the rubric could not even represent that verdict.)
   Every brand verdict names the owning attribute set and the attribute served/violated — the same
   cite-the-statute discipline decisions follow. Trainability, stated precisely: what makes this
-  trainable is the **labeled fixture + agreement metric + per-attribute exemplars** (#2192 — the
+  trainable is the **labeled fixture + agreement metric + per-attribute exemplars** (#2207 — the
   ratified picks of this very item are the first labels), not the bare checklist shape.
 - **(b) fold brand attributes into #1034 as v3 axes.** Excluded on axis-scope mismatch: brand-mark
   judging fires on marks and lockups, not rendered pages — bolting brand axes onto every page critique
@@ -229,7 +229,7 @@ v3 version bump. One owner of brand judging must be named.
   Foreclosed as the *house method* by the #1034 precedent (the house judges by closed, versioned,
   provenance-carrying rubrics); the archetype mapping is kept as narrative color in the research
   topic. Uncodified taste is additionally the status quo that produced this item's drift tier and
-  leaves #2192 nothing to train against.
+  leaves #2207 nothing to train against.
 
 **Statute reconciliation:** (1) `we:docs/agent/vision-tiers.md` design-critique rubric — no collision
 under (a): different artifact class (brand assets vs rendered pages), cross-referenced, both follow
@@ -284,7 +284,7 @@ merit, not prioritization.
   full-logo lockup story (mesa + wordmark; Plateau has no logo asset today — favicon only) —
   prioritized at scheduling like the rest.
 - **Testing-ground link:** the ratified picks (all six forks) become the first labeled ground truth for
-  the design-AI reviewer training card (#2192) — the branding gallery + proposals page is its
+  the design-AI reviewer training card (#2207) — the branding gallery + proposals page is its
   regression fixture, and the Fork 6 rubric + methodology research topic is its knowledge base.
 - **Review surface:** any brand-asset change regenerates `plateau:branding.html`
   (`npm run gen:branding`) — the standing before/after visual-check surface for branding edits.
