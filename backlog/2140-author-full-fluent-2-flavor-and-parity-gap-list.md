@@ -6,6 +6,7 @@ status: resolved
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-03"
 dateResolved: "2026-07-03"
+relatedReport: reports/2026-07-03-fluent-2-parity-gap-list.md
 tags: [parity, flavor, fluent, dtcg]
 ---
 
