@@ -42,6 +42,7 @@ import {
   computeNativeFirstConformance,
   classifySurfacePaths,
   validatePolyglotWideningGate, POLYGLOT_WIDENING_TAG, PILOT_EVIDENCE_NUMS,
+  validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
 } from '../check-standards-rules.mjs';
 import { execFileSync } from 'node:child_process';
 
@@ -74,7 +75,7 @@ describe('checkStatus — lifecycle enum + fixable descriptors', () => {
 // ── Portfolio project tier — the named-consumer evidence bar (#2088 → #2132) ────────────────────
 // Guards the enum-validated `tier` + required-`tierEvidence`-per-non-exploratory rule codified at
 // docs/agent/platform-decisions.md#portfolio-project-tiering. Exercises the pure validator over
-// SYNTHETIC projects so the rule is pinned independently of the live 45-project catalog.
+// SYNTHETIC projects so the rule is pinned independently of the live 46-project catalog.
 describe('validateProjectTier — enum + required tierEvidence for non-exploratory', () => {
   it('the tier vocabulary is exactly core | contextual | exploratory', () => {
     expect([...PROJECT_TIERS].sort()).toEqual(['contextual', 'core', 'exploratory']);
@@ -106,9 +107,9 @@ describe('validateProjectTier — enum + required tierEvidence for non-explorato
       }
     }
   });
-  it('the live 45-project catalog is fully stamped and clean against this rule', () => {
+  it('the live 46-project catalog is fully stamped and clean against this rule', () => {
     const ids = readdirSync(join(DATA, 'projects')).filter((f) => f.endsWith('.json'));
-    expect(ids.length).toBe(45);
+    expect(ids.length).toBe(46);
     const problems = [];
     for (const f of ids) {
       const p = JSON.parse(readFileSync(join(DATA, 'projects', f), 'utf8'));
@@ -1592,5 +1593,104 @@ describe('validatePolyglotWideningGate — the new-target evidence edge', () => 
     const violations = (Array.isArray(backlog) ? backlog : [])
       .flatMap((item) => validatePolyglotWideningGate(item).errors);
     expect(violations).toEqual([]);
+  });
+});
+
+// ── validateUntrackedDerivedArtifacts (#2180) ──────────────────────────────────────────────────────
+describe('validateUntrackedDerivedArtifacts — local-vs-CI divergence guard (#2180)', () => {
+  it('PASSES when no untracked paths are provided (clean tree / CI)', () => {
+    const { errors } = validateUntrackedDerivedArtifacts([]);
+    expect(errors).toEqual([]);
+  });
+
+  it('PASSES when untracked paths are outside the derived dirs', () => {
+    const { errors } = validateUntrackedDerivedArtifacts([
+      'backlog/9999-some-draft.md',
+      'src/_data/blocks/my-block.json',
+      'scripts/scratch.mjs',
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  it('FAILS when there is an untracked file in reports/', () => {
+    const { errors } = validateUntrackedDerivedArtifacts(['reports/2026-01-01-orphan.md']);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toMatch(/untracked/i);
+    expect(errors[0].message).toMatch(/reports\//);
+    expect(errors[0].message).toMatch(/#2180/);
+    expect(errors[0].descriptor.kind).toBe('untracked-derived');
+  });
+
+  it('FAILS when there is an untracked file in src/_data/researchTopics/', () => {
+    const { errors } = validateUntrackedDerivedArtifacts(['src/_data/researchTopics/my-topic.json']);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toMatch(/researchTopics/);
+    expect(errors[0].descriptor.kind).toBe('untracked-derived');
+  });
+
+  it('FAILS when there is an untracked file in src/_includes/research-descriptions/', () => {
+    const { errors } = validateUntrackedDerivedArtifacts(['src/_includes/research-descriptions/my-topic.njk']);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toMatch(/research-descriptions/);
+  });
+
+  it('groups multiple untracked files in the same dir into ONE error', () => {
+    const { errors } = validateUntrackedDerivedArtifacts([
+      'reports/2026-01-01-a.md',
+      'reports/2026-01-02-b.md',
+      'reports/2026-01-03-c.md',
+    ]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toMatch(/3 untracked/);
+  });
+
+  it('emits ONE error per affected dir when multiple dirs have untracked files', () => {
+    const { errors } = validateUntrackedDerivedArtifacts([
+      'reports/2026-01-01-a.md',
+      'src/_data/researchTopics/foo.json',
+    ]);
+    expect(errors).toHaveLength(2);
+    const dirs = errors.map((e) => e.descriptor.file);
+    expect(dirs).toContain('reports');
+    expect(dirs).toContain('src/_data/researchTopics');
+  });
+
+  it('includes a sample of affected file names in the error message', () => {
+    const { errors } = validateUntrackedDerivedArtifacts([
+      'reports/2026-01-01-a.md',
+      'reports/2026-01-02-b.md',
+    ]);
+    expect(errors[0].message).toMatch(/2026-01-01-a\.md/);
+  });
+
+  it('truncates the sample list when more than 3 files are untracked', () => {
+    const paths = Array.from({ length: 5 }, (_, i) => `reports/2026-01-0${i + 1}-r.md`);
+    const { errors } = validateUntrackedDerivedArtifacts(paths);
+    expect(errors[0].message).toMatch(/\+2 more/);
+  });
+
+  it('descriptor.global is false — this is a local-tree concern, not a cross-lane invariant', () => {
+    const { errors } = validateUntrackedDerivedArtifacts(['reports/2026-01-01-a.md']);
+    expect(errors[0].descriptor.global).toBe(false);
+  });
+
+  it('DERIVED_ARTIFACT_DIRS covers the three known divergence sources', () => {
+    expect(DERIVED_ARTIFACT_DIRS).toContain('reports/');
+    expect(DERIVED_ARTIFACT_DIRS).toContain('src/_data/researchTopics/');
+    expect(DERIVED_ARTIFACT_DIRS).toContain('src/_includes/research-descriptions/');
+  });
+
+  it('live tree is clean — no untracked files in derived dirs on this checkout', () => {
+    // This guard verifies the lane itself has no untracked derived artifacts that would
+    // make the check pass here but fail on CI (the exact divergence #2180 closes).
+    const raw = execFileSync(
+      'git',
+      ['ls-files', '--others', '--exclude-standard', '--',
+        'reports/', 'src/_data/researchTopics/', 'src/_includes/research-descriptions/'],
+      { cwd: ROOT, encoding: 'utf8' },
+    );
+    const untracked = raw.split('\n').filter(Boolean);
+    const { errors } = validateUntrackedDerivedArtifacts(untracked);
+    expect(errors).toEqual([]);
   });
 });

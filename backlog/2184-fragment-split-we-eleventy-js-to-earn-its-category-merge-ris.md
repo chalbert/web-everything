@@ -1,8 +1,10 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
 relatedTo: ["2149", "2148"]
 tags: [merge-risk, lane, eleventy]
 ---

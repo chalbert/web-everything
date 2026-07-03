@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, classifyPr } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -68,5 +68,128 @@ describe('merge-ai-prs — classifyPr verdict', () => {
   it('SKIPS a not-mergeable PR (conflicts)', () => {
     const v = classifyPr(aiPr({ mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }));
     expect(v.decision).toBe('skip'); expect(v.reason).toMatch(/not mergeable/);
+  });
+});
+
+describe('merge-ai-prs — label-conditional AI gate (#2195, blockedBy #2196)', () => {
+  const rtm = [{ name: 'ready-to-merge' }];
+  const mixedCommits = { commits: [claudeCommit(), humanCommit] }; // one hand-authored commit ⇒ NOT every-commit-AI
+
+  it('MERGES a labelled MIXED-authorship PR (the label certifies it — #40/#42 no longer skipped)', () => {
+    const v = classifyPr(aiPr({ ...mixedCommits, labels: rtm }));
+    expect(v.decision).toBe('merge');
+    expect(v.aiGenerated).toBe(false);   // truthfully NOT every-commit-AI…
+    expect(v.certifyLabel).toBe(true);   // …but the producer label certifies it
+    expect(v.reason).toMatch(/producer-certified/);
+  });
+
+  it('SKIPS an UNLABELLED mixed-authorship PR (orphan sweep keeps the strict gate)', () => {
+    const v = classifyPr(aiPr({ ...mixedCommits, labels: [] }));
+    expect(v.decision).toBe('skip');
+    expect(v.reason).toMatch(/not AI-generated/);
+    expect(v.reason).toMatch(/no "ready-to-merge" label/);
+  });
+
+  it('a labelled PR still SKIPS on a red required check or a conflict (label is not a rubber stamp)', () => {
+    expect(classifyPr(aiPr({ ...mixedCommits, labels: rtm, statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }] })).decision).toBe('skip');
+    expect(classifyPr(aiPr({ ...mixedCommits, labels: rtm, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' })).decision).toBe('skip');
+  });
+
+  it('trustLabel:null forces the strict every-commit gate even when labelled', () => {
+    const v = classifyPr(aiPr({ ...mixedCommits, labels: rtm }), { trustLabel: null });
+    expect(v.decision).toBe('skip'); expect(v.certifyLabel).toBe(false);
+  });
+
+  it('hasLabel tolerates string labels, {name} labels, and a missing field', () => {
+    expect(hasLabel({ labels: [{ name: 'ready-to-merge' }] }, 'ready-to-merge')).toBe(true);
+    expect(hasLabel({ labels: ['ready-to-merge'] }, 'ready-to-merge')).toBe(true);
+    expect(hasLabel({ labels: [{ name: 'other' }] }, 'ready-to-merge')).toBe(false);
+    expect(hasLabel({}, 'ready-to-merge')).toBe(false);
+    expect(hasLabel({ labels: [{ name: 'ready-to-merge' }] }, null)).toBe(false);
+  });
+});
+
+describe('merge-ai-prs — planLabelDrain blockedBy ordering (#2188)', () => {
+  const cand = (num, item, blockedBy = [], decision = 'merge') => ({ num, item, blockedBy, decision });
+
+  it('orphan PRs (no manifest) are all ready, ordered by PR number', () => {
+    const { ready, deferred } = planLabelDrain([cand(9, null), cand(3, null), cand(7, null)]);
+    expect(ready.map((c) => c.num)).toEqual([3, 7, 9]);
+    expect(deferred).toEqual([]);
+  });
+
+  it('DEFERS a PR whose blockedBy item is still an open candidate', () => {
+    // #2200 depends on #2199; both open → only the blocker is ready this pass.
+    const { ready, deferred } = planLabelDrain([cand(2, 2200, [2199]), cand(1, 2199, [])]);
+    expect(ready.map((c) => c.num)).toEqual([1]);
+    expect(deferred).toEqual([{ num: 2, item: 2200, waitOn: [2199] }]);
+  });
+
+  it('a blockedBy item NOT in the candidate set is treated as already landed (ready)', () => {
+    const { ready } = planLabelDrain([cand(5, 2200, [1234])]); // #1234 not among candidates → landed
+    expect(ready.map((c) => c.num)).toEqual([5]);
+  });
+
+  it('a red/skip blocker still defers its dependents (never land past a broken blocker)', () => {
+    const { ready, deferred } = planLabelDrain([cand(2, 2200, [2199]), cand(1, 2199, [], 'skip')]);
+    expect(ready).toEqual([]); // the blocker is skip (unlanded) so it stays in the open set
+    expect(deferred.map((d) => d.num)).toEqual([2]);
+  });
+
+  it('orders ready by item then PR number (deterministic cascade)', () => {
+    const { ready } = planLabelDrain([cand(8, 2205), cand(4, 2201), cand(6, 2201)]);
+    expect(ready.map((c) => c.num)).toEqual([4, 6, 8]); // item 2201 (PRs 4,6) before 2205 (PR 8)
+  });
+});
+
+describe('merge-ai-prs — parseWatchOpts (#2194 /drain watch)', () => {
+  it('defaults: watch off, 30s interval, unbounded (no max-idle)', () => {
+    expect(parseWatchOpts()).toEqual({ watch: false, intervalSec: 30, maxIdle: null });
+  });
+
+  it('--watch on with a custom interval + max-idle', () => {
+    expect(parseWatchOpts({ watch: true, interval: '10', maxIdle: '3' })).toEqual({ watch: true, intervalSec: 10, maxIdle: 3 });
+  });
+
+  it('a non-positive / non-numeric interval falls back to the 30s default', () => {
+    expect(parseWatchOpts({ watch: true, interval: '0' }).intervalSec).toBe(30);
+    expect(parseWatchOpts({ watch: true, interval: 'x' }).intervalSec).toBe(30);
+    expect(parseWatchOpts({ watch: true, interval: '-5' }).intervalSec).toBe(30);
+  });
+
+  it('max-idle=0 is honoured (exit on the first idle pass), a bad value → unbounded', () => {
+    expect(parseWatchOpts({ watch: true, maxIdle: '0' }).maxIdle).toBe(0);
+    expect(parseWatchOpts({ watch: true, maxIdle: 'x' }).maxIdle).toBe(null);
+  });
+});
+
+describe('isRebaseDropCandidate (#2198 — the manifest-wall rescue gate)', () => {
+  // classifyPr on a certified+green PR that is CONFLICTING (the classic shared-manifest wall) → skip.
+  const walled = classifyPr(aiPr({ number: 7, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }), {});
+  it('a certified + green PR walled by the manifest (CONFLICTING/DIRTY) IS a candidate', () => {
+    expect(walled.decision).toBe('skip');
+    expect(isRebaseDropCandidate(walled)).toBe(true);
+  });
+  it('a BEHIND (needs-rebase) certified+green PR is a candidate', () => {
+    const behind = classifyPr(aiPr({ number: 8, mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND' }), {});
+    expect(isRebaseDropCandidate(behind)).toBe(true);
+  });
+  it('a cleanly-mergeable PR is NOT a candidate (decision is merge, nothing to rebuild)', () => {
+    const clean = classifyPr(aiPr({ number: 9 }), {});
+    expect(clean.decision).toBe('merge');
+    expect(isRebaseDropCandidate(clean)).toBe(false);
+  });
+  it('a red `test` is NOT a candidate (a real bug, not a manifest artefact)', () => {
+    const red = classifyPr(aiPr({ number: 10, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }] }), {});
+    expect(isRebaseDropCandidate(red)).toBe(false);
+  });
+  it('an un-certified (mixed-authorship, no label) PR is NOT a candidate — never auto-resolve an un-blessed branch', () => {
+    const uncertified = classifyPr({ number: 11, title: 't', commits: [claudeCommit(), humanCommit], statusCheckRollup: greenRollup, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', labels: [] }, {});
+    expect(uncertified.decision).toBe('skip');
+    expect(isRebaseDropCandidate(uncertified)).toBe(false);
+  });
+  it('a BLOCKED/DRAFT state is NOT a candidate (branch-protection / human concern, not a manifest wall)', () => {
+    const blocked = classifyPr(aiPr({ number: 12, mergeable: 'MERGEABLE', mergeStateStatus: 'BLOCKED' }), {});
+    expect(isRebaseDropCandidate(blocked)).toBe(false);
   });
 });

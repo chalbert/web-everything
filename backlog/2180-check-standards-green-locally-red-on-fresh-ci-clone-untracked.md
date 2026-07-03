@@ -1,8 +1,10 @@
 ---
 kind: task
-status: open
+status: resolved
 relatedTo: ["2080", "2160", "2165", "2070"]
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
 tags: [ci, gate, dx, check-standards, derived-artifacts, pr-flow]
 ---
 

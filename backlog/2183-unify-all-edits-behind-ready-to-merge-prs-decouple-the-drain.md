@@ -1,9 +1,12 @@
 ---
 kind: decision
 size: 13
-status: open
+status: resolved
 relatedTo: ["2138", "2162", "2173", "2174", "2175", "1933", "104", "2178"]
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
+codifiedIn: "docs/agent/platform-decisions.md#pr-flow-rollout-mechanism"
 tags: [lanes, drain, workflow, pr-flow, live-preview, architecture, epic-candidate]
 ---
 
@@ -15,6 +18,23 @@ ready-to-merge PR, and the drain is a fully independent, optional lander the pro
 or waits on.** The system must be correct with **zero drains running** — completed work simply sits
 as an open PR marked ready-to-merge until *some* drain (manual `/drain`, a standing watcher, or CI
 auto-merge) lands it; after any merge, local `main` pulls.
+
+## Delivered (2026-07-03) — RESOLVED
+
+All four slices landed, each itself produced as a ready-to-merge PR and merged by the automated `/merge`
+sweep (the model dogfooding itself, zero hand-merges):
+
+- **#2189** — `/workflow` reshaped to a **PR fan-out**; the disjoint-partition / serial-lane / write-time-lock
+  machinery (#1933) retired (F2). (PR #29)
+- **#2190** — `/next`, serial `/batch`, `/slice` routed through **lane-clone → ready-to-merge PR**; reshapes
+  #104 (commit-on-current-branch → lane-clone-HEAD). (PR #31)
+- **#2188** — `/merge` and the drain **converged on the `ready-to-merge` label** (F1) — one lander merges in
+  cross-item `blockedBy` order. (PR #32)
+- **#2187** — decision-authoring reconciled with #2123: **preview lane** (claim-time auto-launch), no guard
+  exemption, #2123 stays uniform. (PRs #33/#34 prep, #36 ratify)
+
+Codified as a rider under [we:docs/agent/platform-decisions.md#pr-flow-rollout-mechanism](../docs/agent/platform-decisions.md).
+The forks below ratified as their defaults (F1 label, F2 drop-partition, F3 `/workflow`-first).
 
 ## Ratified direction (2026-07-03)
 
@@ -99,7 +119,7 @@ Spin-offs filed: #2189 (drop-partition — the /workflow slice, implemented with
 - **Must reconcile** with #2123 (lane guard) for the decision author-in-main carve-out.
 - Builds on the resolved drain machinery (#2162/#2172/#2173/#2175) and the `/drain` + `/merge` launchers.
 
-## Interim (until this lands)
+## Interim (superseded — this landed 2026-07-03)
 
-`/workflow` keeps landing inline (the current proven path); serial `/batch`/`/next` keep committing to
-main. This item is the migration off that.
+~~`/workflow` keeps landing inline; serial `/batch`/`/next` keep committing to main.~~ The migration is
+complete: no edit path commits to `main` anymore — all land via ready-to-merge PRs (see *Delivered*).

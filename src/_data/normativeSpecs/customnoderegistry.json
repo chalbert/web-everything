@@ -1,0 +1,12 @@
+{
+  "id": "customnoderegistry",
+  "category": "plugs",
+  "name": "CustomNodeRegistry",
+  "status": "draft",
+  "summary": "Normative spec for the CustomNodeRegistry (customNodes) standard — delimiter-keyed node-kind registration, the delimiter-grammar analogue of customElements.",
+  "dateAuthored": "2026-07-03",
+  "ratifyingDecision": "2074",
+  "pilotItem": "2097",
+  "skeletonDecision": "2096",
+  "relatedPlug": "customnoderegistry"
+}

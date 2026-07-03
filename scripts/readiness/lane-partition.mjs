@@ -36,12 +36,16 @@
 // rebase-retry/serial-replay catches. So they belong in the optimistic-merge bucket. The blacklist is reserved
 // for files where a conflict-FREE merge can still be wrong (a collection registry: append/edit-by-id,
 // structure/order matters).
-//   Two sub-cases the bare "build config" wording used to over-sweep (#2149): (1) `package.json` is a KEYED
-//   manifest — order is irrelevant to npm and distinct-key adds merge clean AND correct, so its ONLY clean-but-wrong
-//   class (two lanes adding the SAME key) is deterministically lintable; it stays optimistic + a duplicate-key merge
-//   gate (check-standards-rules.mjs `validateNoDuplicateManifestKeys`), NOT a blacklist entry. (2) a REGISTRATION
-//   MONOLITH (`.eleventy.js`: 380+ lines of addFilter/addShortcode/... whose same-name/order-sensitive registrations
-//   clean-merge silently and are NOT lintable) is genuinely ③ merge-risk and IS listed above.
+//   Three sub-cases the bare "build config" wording used to over-sweep (#2149):
+//   (1) `package.json` is a KEYED manifest — order is irrelevant to npm and distinct-key adds merge clean AND
+//   correct, so its ONLY clean-but-wrong class (two lanes adding the SAME key) is deterministically lintable;
+//   it stays optimistic + a duplicate-key merge gate (check-standards-rules.mjs `validateNoDuplicateManifestKeys`),
+//   NOT a blacklist entry.
+//   (2) `.eleventy.js` WAS a REGISTRATION MONOLITH (380+ lines) and WAS listed here (#2149 Fork 2). After the
+//   #2184 fragment split it is now a thin loader over eleventy/*.cjs fragments; each fragment owns one
+//   CATEGORY of registrations (filters/shortcodes/collections/transforms/passthroughs). All Eleventy
+//   registration calls are NAME-KEYED and order-insensitive for DISTINCT names — concurrent edits to different
+//   fragments are provably disjoint (different files). DELISTED (#2184).
 //
 // frontierui: its monolithic single-document registries (blocks/plugs/traits arrays, the adapters/demos maps).
 // plateau-app: none — its shared surfaces are CODE (.ts), where a real conflict surfaces and replays; add an
@@ -52,11 +56,8 @@ export const RESERVED_MERGE_RISK_BY_REPO = {
     'src/_data/webhandlers.json', 'src/_data/webportals.json',
     'src/_data/benchmarkCorpus.json', 'src/_data/workbenchTools.json', 'src/_data/workbenchFeatures.json',
     'AGENTS.md', // its hand-authored PROSE body is a monolith edit; the AUTO-GENERATED inventory sub-block is derived (regen-on-merge), not a merge-risk lane edit
-    '.eleventy.js', // #2149 Fork 2: registration monolith — same-name/ordering-sensitive addFilter/addShortcode/...
-                    // registrations clean-merge into a silent last-wins and are NOT deterministically lintable
-                    // (unlike we:package.json, #2149 Fork 1 — a name-duplicate lint over imperative JS is fragile:
-                    // names can be computed/wrapped/re-exported, and some registrations are order/side-effect-sensitive).
-                    // Delist via category ① iff a fragment split proves order-insensitivity (see backlog #2149).
+    // .eleventy.js delisted (#2184): split into eleventy/*.cjs fragments, registrations are name-keyed
+    // and order-insensitive for distinct names — concurrent fragment edits are provably disjoint.
   ],
   frontierui: [
     'src/_data/blocks.json', 'src/_data/plugs.json', 'src/_data/traits.json',

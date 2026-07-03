@@ -2,9 +2,12 @@
 kind: story
 size: 3
 parent: "2005"
-status: open
+status: resolved
 blockedBy: ["2064"]
 dateOpened: "2026-07-01"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
+graduatedTo: "we:conformance-vectors/webdirectives-ssr.vectors.ts"
 tags: []
 ---
 

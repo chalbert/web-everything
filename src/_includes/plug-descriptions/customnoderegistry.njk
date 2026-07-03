@@ -1,0 +1,113 @@
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
+<p>
+  Proposed global registry for <strong>delimiter-keyed node kinds</strong> — the structural analogue of
+  <code>customElements</code> for the delimiter-grammar surface. You register a class extending
+  <code>CustomNode</code> with a declared <code>static open</code> grammar; the polyfill materialises it
+  onto the nearest native node kind (<code>Text</code>, <code>Comment</code>, element, or
+  <code>&lt;template&gt;</code>). No new <code>nodeType</code> is introduced.
+</p>
+<p>
+  Ratified by <a href="/backlog/2074-customnoderegistry-node-kind-extensibility-standard/">#2074</a>.
+  The normative interface, conformance cases, and error model live in the
+  <a href="/specs/plugs/customnoderegistry/">normative spec</a>.
+</p>
+
+<h3 id="nature-table">Node natures (non-normative summary)</h3>
+<table>
+  <thead>
+    <tr>
+      <th>Static field set</th>
+      <th>Nature</th>
+      <th>Values</th>
+      <th>Example</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>static value</code></td>
+      <td>Expression (leaf)</td>
+      <td><code>'shown'</code> (emit) · <code>'hidden'</code> (compute-only)</td>
+      <td><code>{% raw %}{{ price }}{% endraw %}</code> / <code>{= track(x) }</code></td>
+    </tr>
+    <tr>
+      <td><code>static children</code></td>
+      <td>Region (subtree)</td>
+      <td><code>'inert'</code> (template) · <code>'live'</code> (rendered) · <code>'raw'</code> (scan-suppressed)</td>
+      <td><code>{#each}…{/each}</code></td>
+    </tr>
+    <tr>
+      <td>Neither + <code>static rendered</code></td>
+      <td>Marker (point)</td>
+      <td><code>true</code> (include/outlet) · <code>false</code> (invisible directive)</td>
+      <td><code>{&gt; sidebar }</code> / <code>{@portal …}</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="interface">Interface (non-normative excerpt)</h3>
+<p>
+  See the <a href="/specs/plugs/customnoderegistry/">normative spec</a> for the full declaration
+  with requirement addressing. The excerpt below is for orientation only.
+</p>
+{% highlight "typescript" %}
+interface CustomNodeRegistry {
+  define(node: typeof CustomNode): void;
+  whenDefined(name: string): Promise<typeof CustomNode>;
+  get(open: string): typeof CustomNode | undefined;
+}
+declare var customNodes: CustomNodeRegistry;
+{% endhighlight %}
+
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("customnoderegistry-example", code=true) }}
+{% highlight "javascript" %}
+// Define a custom expression node: {{ price }}
+customNodes.define(class PriceExpression extends CustomNode {
+  static open  = '{{'
+  static close = '}}'
+  static value = 'shown'
+  static observedAttributes = ['format']
+
+  connectedCallback() { this.render() }
+  attributeChangedCallback() { this.render() }
+  render() { /* emit formatted price into host Text node */ }
+})
+
+// Define a custom region: {#each items}…{/each}
+customNodes.define(class EachDirective extends CustomNode {
+  static open        = '{#each'
+  static regionName  = 'each'
+  static close       = '{/'
+  static regionClose = '{/each}'
+  static children    = 'inert'
+})
+
+// Await registration
+await customNodes.whenDefined('PriceExpression')
+{% endhighlight %}
+
+{{ unpluggedContent("customnoderegistry-example", code=true) }}
+{% highlight "javascript" %}
+// CustomNodeRegistry is a proposed standard (draft) with no native implementation.
+// FUI polyfills it via the webexpressions / webdirectives plug families.
+// Consume the FUI polyfill through the webinjectors chain:
+consume { customNodes } of '@web-expressions'
+
+customNodes.define(class PriceExpression extends CustomNode {
+  static open  = '{{'
+  static close = '}}'
+  static value = 'shown'
+})
+{% endhighlight %}
+
+{{ endContent() }}
+
+<h3 id="normative-spec">Normative specification</h3>
+<p>
+  The conformance requirements, error model, and TypeScript interface declarations for
+  <code>CustomNodeRegistry</code> are authored in the normative spec partial:
+</p>
+{% include "spec-descriptions/plugs/customnoderegistry.njk" %}

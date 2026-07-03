@@ -37,13 +37,26 @@
  *   node scripts/pr-land.mjs --ref=lane/2153-pr-substrate                 # publish HEAD → lane ref, open self-approved PR, wait for `test`, merge, delete ref
  *   node scripts/pr-land.mjs --ref=lane/2153-… --sha=<commit>            # publish an explicit commit (default: HEAD) — no local branch is created (guarded)
  *   node scripts/pr-land.mjs --ref=lane/2153-… --base=main --method=merge # method ∈ merge|squash|rebase (default merge; the drain wants --no-ff history)
- *   node scripts/pr-land.mjs --ref=lane/… --no-wait                       # open the PR but don't merge (a later drain pass merges)
+ *   node scripts/pr-land.mjs --ref=lane/… --label-on-green                 # PRODUCER mode (#2199): open, WAIT for required checks, label ready-to-merge ONLY when green, hand merge to the drain
+ *   node scripts/pr-land.mjs --ref=lane/… --no-wait                       # open the PR UNLABELLED, don't wait/merge (CI unconfirmed — the drain won't collect it until labelled)
  *   node scripts/pr-land.mjs --ref=lane/… --dry-run                       # print the exact gh command sequence, execute nothing
  *   node scripts/pr-land.mjs --ref=lane/… --fallback-git                  # on gh failure / unmergeable, local git-merge + push instead
  *   node scripts/pr-land.mjs --ref=lane/… --no-heal                       # skip the post-land id-collision self-heal (#2071)
+ *   node scripts/pr-land.mjs --ref=lane/… --no-regen                      # skip the post-land derived-artifact regen (#2182)
+ *   node scripts/pr-land.mjs --ref=lane/… --no-label                      # do NOT apply the ready-to-merge label (#2196) — e.g. a PR that must stay human-reviewed
+ *   node scripts/pr-land.mjs --ref=lane/… --label=<name>                  # apply a different label than the default `ready-to-merge`
  *   node scripts/pr-land.mjs --ref=lane/… --json                          # machine-readable result
  *
- * Exit codes: 0 = merged (or opened with --no-wait / dry-run OK); 2 = required check RED (nothing merged);
+ * READY-TO-MERGE LABEL (#2196/#2199). Every AI-edit path that opens a PR routes through THIS transport, so
+ * pr-land is the single deliberate step that marks a couple "a producer certified this" (never applied by hand
+ * casually). #2199: the label now means "required checks are GREEN", so it is applied ONLY after the green-wait
+ * — NEVER eagerly at open. In the default (land) path and the `--label-on-green` producer path the label goes
+ * on once the required checks pass; a bare `--no-wait` opens the PR UNLABELLED (CI unconfirmed). That label is
+ * the universal signal the label lander (`/drain`, `scripts/merge-ai-prs.mjs --label=ready-to-merge`) collects,
+ * whatever session shape (`/pr`, solo `#2123` lane, batch closeout, `/workflow`) produced the PR. `--no-label`
+ * opts a PR out; label-apply is best-effort and never fails the land.
+ *
+ * Exit codes: 0 = merged (or opened --no-wait / labelled-on-green / dry-run OK); 2 = required check RED (nothing merged);
  * 3 = unmergeable / gh error / push failed (nothing merged; recoverable — rebase the ref and re-run, or
  * pass --fallback-git). A non-zero exit means `main` was left UNTOUCHED.
  */
@@ -88,8 +101,40 @@ const BODY = typeof flags['body-file'] === 'string'
 // manual land all self-heal, not only the batch workflow. ON by default for a real land; `--no-heal` opts
 // out. Never runs on --dry-run / --no-wait (nothing merged) by construction.
 const HEAL = !flags['no-heal'];
+// Post-land derived-artifact regen (#2182). After a clean merge, regenerate the WE derived artifacts once
+// (the AGENTS.md inventory block via gen:inventory; src/_data/referenceIndex.json via gen:reference-index)
+// — the same generators the drain's Phase 4c runs, now folded into every land route so a `/pr`- or
+// manually-landed change whose inputs feed a derived artifact never leaves `main` with stale output.
+// Gate behind `--no-regen` to allow opt-out (mirrors `--no-heal`). Never runs on --dry-run / --no-wait.
+const REGEN = !flags['no-regen'];
+// The producer-certified `ready-to-merge` label (#2196) — applied to every opened PR so the label lander
+// (/drain) can collect ALL AI-generated work, whatever session opened it. `--no-label` opts out; `--label=<n>`
+// overrides the name. Default on.
+const LABEL = flags['no-label'] ? null : (typeof flags.label === 'string' ? flags.label : 'ready-to-merge');
+// #2199 — the `ready-to-merge` label must mean "every required check is GREEN, the drain may land", never
+// just "a local lint passed". `--label-on-green` is the producer mode: open the PR, WAIT for the required
+// checks, apply the label ONLY once they pass, and STOP (hand the merge to the drain — do not merge here). It
+// replaces the old fire-and-forget `--no-wait` (which labelled at open, before ANY CI — so red PRs entered the
+// queue, observed 2026-07-03: #55/#57/#59/#67 labelled with a red `test`). In every mode the label is now
+// applied only after the green-wait, never eagerly at open.
+const LABEL_ON_GREEN = !!flags['label-on-green'];
 
 // ── PURE helpers (unit-tested in scripts/__tests__/pr-land.test.mjs) ──────────────────────────────────
+
+/**
+ * Resolve the producer's land plan from the wait/label flags (#2199). Pure. The label is NEVER applied before
+ * the required checks are green — so the three modes are:
+ *   - `label-on-green` (`--label-on-green`): wait for required checks → label when green → STOP (drain merges).
+ *   - `open-only`      (`--no-wait`, no label-on-green): open, do NOT wait, do NOT label → left for a drain
+ *     that re-checks (an UNLABELLED PR — the label lander won't collect it until something labels it).
+ *   - `land`           (default): wait for required checks → label when green → merge here.
+ * @returns {{waitForChecks:boolean, labelWhenGreen:boolean, mergeWhenGreen:boolean, mode:string}}
+ */
+export function planPrLand({ wait, labelOnGreen } = {}) {
+  if (labelOnGreen) return { waitForChecks: true, labelWhenGreen: true, mergeWhenGreen: false, mode: 'label-on-green' };
+  if (!wait) return { waitForChecks: false, labelWhenGreen: false, mergeWhenGreen: false, mode: 'open-only' };
+  return { waitForChecks: true, labelWhenGreen: true, mergeWhenGreen: true, mode: 'land' };
+}
 
 /** The `gh pr merge` method flag for a merge method (default merge = --no-ff history the drain wants). */
 export function mergeMethodFlag(method) {
@@ -129,6 +174,14 @@ export function buildMergeArgs({ pr, method }) {
   return ['pr', 'merge', String(pr), mergeMethodFlag(method), '--delete-branch'];
 }
 
+/** Build the `gh pr edit --add-label` args that apply the producer-certified `ready-to-merge` label (#2196).
+ *  Returns null when labelling is disabled (`--no-label`) or no PR number is known, so the caller can skip.
+ *  Pure — returns the `gh` argv array (or null). */
+export function buildAddLabelArgs({ pr, label }) {
+  if (!label || pr == null) return null;
+  return ['pr', 'edit', String(pr), '--add-label', label];
+}
+
 /** Build the argv for the post-land id-collision heal (#2071). Deliberately passes NO `--base-ref`: the
  *  batch integrator supplies one to shield ids inherited from a shared pre-claim base (a base id appearing
  *  twice there is a real edit conflict, not an allocation race). A SINGLE land runs the heal on POST-MERGE
@@ -137,6 +190,17 @@ export function buildMergeArgs({ pr, method }) {
  *  a real collision. Pure — returns the `node` script argv. */
 export function buildRenumberHealArgs() {
   return ['scripts/backlog-renumber-collisions.mjs', '--json'];
+}
+
+/** The set of derived-artifact regen commands to run after a clean merge (#2182). Mirrors the drain's
+ *  `DERIVED_REGEN` exactly — kept in lock-step so every land route (this CLI, `/pr`, `/drain` which reuses
+ *  this) regenerates the same artifact set that the drain's Phase-4c step has always regenerated. Pure —
+ *  returns an array of `[cmd, ...args]` tuples (same shape as `lane-drain.mjs`'s DERIVED_REGEN). */
+export function buildRegenArgs() {
+  return [
+    ['npm', 'run', 'gen:inventory'],
+    ['npm', 'run', 'gen:reference-index'],
+  ];
 }
 
 /**
@@ -178,6 +242,9 @@ function runCli() {
   if (!REF) emit({ repo: REPO, merged: false, reason: 'no-ref', detail: 'pass --ref=lane/<name> (the head ref to land onto ' + BASE + ')' }, 3);
   if (!/^lane\//.test(REF)) emit({ repo: REPO, merged: false, reason: 'bad-ref', detail: `--ref="${REF}" must be a lane/* ref (the #1934 guard carve-out) — never a local branch` }, 3);
 
+  // #2199 — resolve the land plan up front (wait/label/merge sequencing) so the dry-run plan reflects it too.
+  const PLAN = planPrLand({ wait: WAIT, labelOnGreen: LABEL_ON_GREEN });
+
   // 1. Resolve the SOURCE commit to publish (the lane clone's HEAD, or an explicit --sha). No local
   //    branch is created (that's guarded) — the lane model pushes `<source>:lane/<n>` straight to origin.
   const refSha = tryGit(['rev-parse', SRC]);
@@ -197,8 +264,12 @@ function runCli() {
       plan: [
         `git push ${REMOTE} ${SRC}:refs/heads/${REF}   # publish the lane clone's ${SRC} (${refSha.slice(0, 8)}) to the lane ref`,
         `gh ${createArgs.join(' ')}`,
-        WAIT ? 'poll: gh pr checks <pr> --json state,bucket  (wait until passed; abort on fail)' : '(--no-wait: skip check-wait, leave for a later drain pass)',
-        WAIT ? `gh ${mergeArgsPreview.join(' ')}` : null,
+        PLAN.waitForChecks ? 'poll: gh pr view <pr> mergeStateStatus + gh pr checks <pr> --required  (wait until green; abort on red)' : '(--no-wait: skip check-wait, leave for a later drain pass)',
+        // #2199 — the label is applied ONLY after the required checks are green, never eagerly at open.
+        LABEL && PLAN.labelWhenGreen ? `gh pr edit <pr> --add-label ${LABEL}   # #2196 label — applied ONLY once required checks pass (#2199)` : (PLAN.mode === 'open-only' ? '(--no-wait: PR opened UNLABELLED — CI not confirmed green; use --label-on-green)' : '(--no-label)'),
+        PLAN.mergeWhenGreen ? `gh ${mergeArgsPreview.join(' ')}` : '(label-on-green: STOP after labelling — the drain lands it)',
+        HEAL ? 'post-land: id-collision heal (backlog-renumber-collisions.mjs --json)' : '(--no-heal: skip id-collision heal)',
+        REGEN ? `post-land: derived-artifact regen (${buildRegenArgs().map((c) => c.join(' ')).join(', ')})` : '(--no-regen: skip derived-artifact regen)',
         FALLBACK_GIT ? `fallback on failure: git merge --no-ff ${REMOTE}/${REF} + push ${REMOTE} ${BASE}` : null,
       ].filter(Boolean),
       detail: `would land ${SRC} (${refSha.slice(0, 8)}) onto ${BASE} via a self-approved PR from ${REF}`,
@@ -218,7 +289,26 @@ function runCli() {
   }
   if (prNum == null) return ghFailed('could not determine the PR number after create');
 
-  if (!WAIT) emit({ repo: REPO, merged: false, reason: 'opened', pr: Number(prNum), ref: REF, detail: `opened self-approved PR #${prNum} for ${REF}; --no-wait, a later drain pass merges it` }, 0);
+  // 3b. The producer-certified `ready-to-merge` label (#2196) is the universal signal the label lander (/drain)
+  //     collects. #2199: it must mean "required checks GREEN", so it is applied ONLY after the green-wait below
+  //     — NEVER eagerly at open. `applyLabel()` is the deferred, best-effort apply (ensure the label exists,
+  //     then add it; a failure is recorded but never aborts — the PR is already open).
+  let labelApplied = false;
+  const applyLabel = () => {
+    const addLabelArgs = buildAddLabelArgs({ pr: prNum, label: LABEL });
+    if (!addLabelArgs) return;
+    try { ghC(['label', 'create', LABEL, '--color', '0E8A16', '--description', 'Producer-certified: required checks green, safe for the label lander (/drain) to merge']); } catch { /* already exists — fine */ }
+    try { ghC(addLabelArgs); labelApplied = true; }
+    catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply label "${LABEL}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — land continues\n`); }
+  };
+
+  // open-only (`--no-wait`, no `--label-on-green`): open WITHOUT the label (nothing has confirmed it green) and
+  // leave it. It stays UNLABELLED until CI is confirmed green — the label lander won't collect a red PR. A
+  // producer that wants the drain to land it must use `--label-on-green` (wait → label when green → hand off).
+  if (PLAN.mode === 'open-only') {
+    if (!AS_JSON && LABEL) process.stderr.write(`pr-land [${REPO}] · #${prNum} opened UNLABELLED (--no-wait): use --label-on-green so the ${LABEL} label is applied only when required checks pass\n`);
+    emit({ repo: REPO, merged: false, reason: 'opened', pr: Number(prNum), ref: REF, label: null, labelApplied: false, detail: `opened self-approved PR #${prNum} for ${REF} (--no-wait, UNLABELLED — CI not confirmed green)` }, 0);
+  }
 
   // 4. Wait until GitHub itself says the PR is ready, then merge. We gate on the AUTHORITATIVE
   //    `mergeStateStatus` (not a raw `gh pr checks` list) — a fresh PR's checks haven't registered yet, so
@@ -249,18 +339,49 @@ function runCli() {
     execFileSync('sleep', ['20']);
   }
 
+  // Required checks are GREEN — NOW apply the producer-certified label (#2199: never before this point).
+  if (PLAN.labelWhenGreen) applyLabel();
+
+  // label-on-green: the producer's job ends here — the PR is green + labelled; the drain lands it. No merge.
+  if (!PLAN.mergeWhenGreen) {
+    emit({ repo: REPO, merged: false, reason: 'labelled-on-green', pr: Number(prNum), ref: REF, label: LABEL, labelApplied, detail: `PR #${prNum} (${REF}) required checks green${labelApplied ? ` — labelled ${LABEL}` : ''}; left for the drain to land` }, 0);
+  }
+
   try { ghC(buildMergeArgs({ pr: prNum, method: METHOD })); }
   catch (e) { return ghFailed(`gh pr merge #${prNum} failed (${String(e.message || e).split('\n')[0]}) — likely not-mergeable (branch behind ${BASE}); rebase the ref + re-run`); }
 
+  // #2205 — the merge advanced origin/main but NOT this local checkout, so ff-sync local main to it (parity with
+  // the drain's post-merge sync in merge-ai-prs.mjs). `--autostash` keeps it reliable: it sets any dirty edits
+  // aside, fast-forwards, then reapplies them — so main advances AND local edits survive. Still ff-only (a
+  // genuine divergence aborts and is reported, never force/rebase). Best-effort: a failure degrades to a note
+  // and NEVER fails the land (the merge already succeeded).
+  const localSynced = syncLocalMain();
+
   const heal = HEAL ? runHeal() : null;
   if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
+  const regen = REGEN ? runRegen() : null;
+  if (regen && regen.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${regen.warning}\n`);
   emit({
-    repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD,
+    repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD, label: LABEL, labelApplied, localSynced,
     healed: heal && heal.healed ? heal.renumbered : [],
     ...(heal && heal.warning ? { healWarning: heal.warning } : {}),
+    regenDone: regen ? regen.done : [],
+    regenFailed: regen ? regen.failed : [],
+    ...(regen && regen.warning ? { regenWarning: regen.warning } : {}),
     detail: `merged PR #${prNum} (${REF}) into ${BASE} via self-approved PR (${METHOD}), deleted the ref`
-      + (heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : ''),
+      + (heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : '')
+      + (regen && regen.done.length > 0 ? `; regenerated: ${regen.done.join(', ')}` : '')
+      + (regen && regen.failed.length > 0 ? `; regen failed (non-fatal): ${regen.failed.map((f) => f.cmd).join(', ')}` : ''),
   }, 0);
+
+  // #2205 — ff-sync local `main` to the just-advanced `origin/main` after a merge (parity with the drain,
+  // merge-ai-prs.mjs). ff-only + --autostash (advance main, preserve dirty edits, never force/rebase).
+  // Best-effort: returns true on a clean ff, false (with a note) on a diverged/conflicting reapply — NEVER
+  // throws, so it can never fail a land whose merge already succeeded.
+  function syncLocalMain() {
+    try { gitC(['pull', '--ff-only', '--autostash']); return true; }
+    catch { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · local ${BASE} NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`); return false; }
+  }
 
   // Fallback path (#2138 Fork 5 (a)): local git merge + push when gh is the problem.
   function ghFailed(detail) {
@@ -272,7 +393,9 @@ function runCli() {
       gitC(['push', REMOTE, `${BASE}:${BASE}`]);
       const heal = HEAL ? runHeal() : null;
       if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
-      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : ''}` }, 0);
+      const regen = REGEN ? runRegen() : null;
+      if (regen && regen.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${regen.warning}\n`);
+      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), regenDone: regen ? regen.done : [], regenFailed: regen ? regen.failed : [], ...(regen && regen.warning ? { regenWarning: regen.warning } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : ''}${regen && regen.done.length > 0 ? `; regenerated: ${regen.done.join(', ')}` : ''}${regen && regen.failed.length > 0 ? `; regen failed (non-fatal): ${regen.failed.map((f) => f.cmd).join(', ')}` : ''}` }, 0);
     } catch (e) {
       emit({ repo: REPO, merged: false, reason: 'fallback-failed', detail: `${detail}; git-merge fallback ALSO failed (${String(e.message || e).split('\n')[0]}) — ${BASE} left untouched` }, 3);
     }
@@ -312,5 +435,37 @@ function runCli() {
       gitC(['push', REMOTE, `HEAD:${BASE}`]);
     } catch (e) { return { healed: false, renumbered, warning: `id collision healed + committed but push to ${BASE} failed (${firstLine(e)}) — re-run pr-land or push by hand (no force-push)` }; }
     return { healed: true, renumbered };
+  }
+
+  // Post-land derived-artifact regen (#2182). After a clean merge, run the same deterministic generators
+  // the drain's Phase 4c runs — once per land so every land route (this CLI, `/pr`, `/drain`) keeps `main`
+  // free of stale derived output. Mirrors the drain's `regenDerived()`: best-effort, never fatal. If
+  // anything changed, commit + push (the generators are deterministic — a diff means the inputs changed).
+  // A regen problem is REPORTED but NEVER fails the land (the merge already succeeded).
+  function runRegen() {
+    const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
+    // Sync to post-merge main so we regenerate against the LANDED tree (same tree the drain regen targets).
+    // Skip if dirty — a dirty tree means we'd be generating against uncommitted input, which is wrong.
+    const dirty = tryGit(['status', '--porcelain']);
+    if (dirty && dirty.trim()) return { warning: `skipped derived-artifact regen — the checkout at ${REPO} has local changes; run npm run gen:inventory && npm run gen:reference-index on ${BASE} by hand` };
+    try {
+      gitC(['fetch', REMOTE, BASE, '--quiet']);
+      gitC(['checkout', '--detach', `${REMOTE}/${BASE}`]);
+    } catch (e) { return { warning: `skipped derived-artifact regen — could not sync to ${REMOTE}/${BASE} (${firstLine(e)})` }; }
+    const done = [];
+    const failed = [];
+    for (const [cmd, ...args] of buildRegenArgs()) {
+      try { execFileSync(cmd, args, { cwd: REPO, stdio: ['ignore', 'ignore', 'pipe'] }); done.push([cmd, ...args].join(' ')); }
+      catch (e) { failed.push({ cmd: [cmd, ...args].join(' '), detail: firstLine(e) }); }
+    }
+    if (done.length === 0) return { done, failed, warning: failed.length > 0 ? `derived-artifact regen failed (non-fatal): ${failed.map((f) => f.cmd).join(', ')}` : undefined };
+    const changed = (tryGit(['diff', '--name-only']) || '').split('\n').filter(Boolean);
+    if (changed.length === 0) return { done, failed }; // regen was a no-op (inputs didn't change)
+    try {
+      gitC(['add', ...changed]);
+      gitC(['commit', '-m', `chore: regen derived artifacts post-land (#2182) [${done.map((c) => c.replace('npm run ', '')).join(', ')}]`]);
+      gitC(['push', REMOTE, `HEAD:${BASE}`]);
+    } catch (e) { return { done, failed, warning: `derived-artifact regen committed but push to ${BASE} failed (${firstLine(e)}) — re-run gen:inventory + gen:reference-index on ${BASE} by hand` }; }
+    return { done, failed };
   }
 }

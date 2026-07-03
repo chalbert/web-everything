@@ -1,5 +1,22 @@
 {
   "_doc": "Per-session claim-time git baselines (backlog #952, ratified #949). `backlog.mjs claim <NNN> --session=<slug>` records the files already dirty at claim time (everyone else's in-flight + pre-existing); `check:standards --scope=<slug>` blocks only on findings whose file is dirty now but NOT in that baseline. Advisory devtools state — the default no-flag gate stays strict.",
   "ttlMinutes": 120,
-  "sessions": []
+  "sessions": [
+    {
+      "session": "batch-2026-07-03-1974-2184-x24",
+      "ids": [
+        "2119-vue-delimiter-bundle-out-of-scope-firewall-proof",
+        "2115-liquid-jinja-delimiter-bundle"
+      ],
+      "baseline": [
+        ".claude/skills/batch-backlog-items/claims.json",
+        "backlog/2119-vue-delimiter-bundle-out-of-scope-firewall-proof.md"
+      ],
+      "touched": [
+        "backlog/2119-vue-delimiter-bundle-out-of-scope-firewall-proof.md",
+        "backlog/2115-liquid-jinja-delimiter-bundle.md"
+      ],
+      "at": "2026-07-03T14:19:02.531Z"
+    }
+  ]
 }

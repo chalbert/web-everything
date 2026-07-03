@@ -19,3 +19,11 @@ Testing · Gates · Build Infra cluster — open a leaf with `node scripts/memor
 - 124. check:standards Skips 11ty Build — gate skips docs build; `npm run verify` when touching templates/_includes/_data
 - 125. Blocks/ Has No Typecheck Gate — WE never tsc-checks `blocks/`; type errors ride to FUI's stricter build; #658
 - 126. FrontierUI happy-dom Test Quirks — happy-dom: instanceof lies, setters don't reflect; branch on a bool; #870
+- [UI change → 3 musts](ui-change-needs-before-after-visual-check.md) — ANY UI/CSS edit: /review-design (#1034) + Playwright before/after + committed test in tests/; not throwaway
+- [AI runs regression after each change](ai-runs-regression-after-each-change.md) — agent runs the MATCHING lane (visual/unit/smoke/standards) after edits; git hook is the wrong fit
+- [SSR-card dogfood regressed the a11y ratchet](ssr-card-dogfood-regressed-a11y-ratchet.md) — test:a11y NOT in check:standards; #2019 broke 5 enforced routes; fix #2164
+- [Local gate green, CI red = untracked artifacts](local-gate-green-ci-red-untracked-artifacts.md) — CI-red/local-green usually = untracked reports/researchTopics; commit them, don't regen; #2160
+- [jsdom query cache stale after move](jsdom-query-cache-stale-after-move.md) — querySelectorAll/children lie after in-place insertBefore; assert via childNodes; minimum-move reorders; #2002
+- [Dogfood & parity keystones missing](dogfood-and-parity-keystones-missing.md) — both "resolved" themes actually blocked; do #2016 + #2017 first; #1243 shadcn is a stub
+- [UI loader ↔ CLI engine field parity](ui-loader-cli-engine-field-parity.md) — backlog.js & engine.mjs derive batchable/tier/filler independently; a rule live in one isn't live in the other; #2014
+- [Cloudflare deploy state](cloudflare-deploy-state.md) — WE site LIVE+gated on Cloudflare Workers (pivoted off #1135 Pages); auto-deploy unwired; domain held for #2127

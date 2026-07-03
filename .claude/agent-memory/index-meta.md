@@ -1,6 +1,6 @@
 ---
 name: index-meta
-description: "How the agent itself operates: memory-management policy + this index tree, propose-memory-on-reframe, context-meter (ask don’t estimate), hand-back-early in interactive loops, state-representing edits need no permission, persist-ratifiable-wording-live-in-decision-discussion, model routing (Opus orchestrates, Sonnet executes), model recurring cost, forward background progress, plain-language + review checklists, self-contained plans, POC-mode + demo-first pragmatism. Recall for working style, memory upkeep, or model/agent orchestration."
+description: "How the agent itself operates: memory-management policy + this index tree, propose-memory-on-reframe, context-meter (ask don’t estimate), hand-back-early in interactive loops, state-representing edits need no permission, persist-ratifiable-wording-live-in-decision-discussion, model routing (Opus orchestrates, Sonnet executes), model recurring cost, session cost-on-card accrual (close attributes session $ to the item worked), forward background progress, plain-language + review checklists, self-contained plans, POC-mode + demo-first pragmatism. Recall for working style, memory upkeep, or model/agent orchestration."
 metadata: 
   node_type: memory
   type: reference
@@ -22,3 +22,5 @@ Agent Meta · Memory · Model Routing cluster — open a leaf with `node scripts
 - 128. Forward Background Progress Into Chat — VS Code ext has NO /workflows TUI; forward via file-watcher re-invoke
 - 134. Opus Orchestrates, Sonnet Executes — exec→Sonnet subagent; judgment stays Opus
 - 135. Model Recurring Cost, Don't Gate It — recurring overhead MODELED (affine fit); every sample counts; #1505
+- 144. Session Cost-On-Card Accrual — close accrues session $ to the card(s) worked; decision/prepare accumulate, workflow even-splits, slice/resolve skip
+- [Parallel /workflow lane model](workflow-lane-model-policy.md) — Sonnet default, Opus for rare complex items, NEVER Fable for execution; orchestrator decides per-item

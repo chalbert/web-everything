@@ -52,6 +52,7 @@ import {
   validatePlugWeFuiDrift, PLUG_SHARED_CORE_FILES,
   scanRepoLocusPrefixes, REPO_LOCUS_PREFIX_ENFORCED,
   classifySurfacePaths,
+  validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -884,6 +885,25 @@ const backlogReportRefs = new Set(
   for (const e of re) err(e.message, e.descriptor);
 }
 
+// ── 6e-ii. Untracked derived artifacts — local-vs-CI divergence guard (#2180) ──────────────────────
+// `check:standards` reads the working tree. On a dev machine, authored-but-never-committed files in
+// `reports/`, `src/_data/researchTopics/`, or `src/_includes/research-descriptions/` make existence and
+// inventory checks pass locally while a fresh CI clone (no untracked files) fails. This sub-check
+// surfaces that gap BEFORE push, so the developer can commit the paired artifacts. The git invocation
+// lives here (an fs concern); the pure classifier lives in validateUntrackedDerivedArtifacts (#2180).
+// Skipped when `git ls-files` is unavailable (e.g. non-git environments).
+try {
+  const untrackedRaw = execFileSync(
+    'git', ['ls-files', '--others', '--exclude-standard', '--', ...DERIVED_ARTIFACT_DIRS],
+    { cwd: ROOT, encoding: 'utf8' },
+  );
+  const untrackedPaths = untrackedRaw.split('\n').filter(Boolean);
+  const { errors: ue } = validateUntrackedDerivedArtifacts(untrackedPaths);
+  for (const e of ue) err(e.message, e.descriptor);
+} catch (e) {
+  // `git` unavailable or not a git repo — skip gracefully (not a gate failure).
+}
+
 // ── 6f. Repo-locus prefix on code-path references (#884, enforces #883; #880 slice B) ─
 // Every code-path reference in backlog/*.md + reports/*.md must carry a `<repo>:` locus marker so its
 // constellation repo is unambiguous in chat / raw markdown. The fs reads stay here; the carve-out scan
@@ -1244,6 +1264,30 @@ try {
   for (const w of fw) warn(w.message, w.descriptor);
 } catch (e) {
   warn(`Agent-memory freshness audit failed: ${e.message}`);
+}
+
+// ── 9a″. Agent-memory index-tree shape (#2192) ──
+// The always-loaded MEMORY.md is injected into every session; the harness silently truncates it above
+// its budget, dropping load-bearing rules with no warning. This check enforces: (1) size ≤ budget,
+// (2) per-line ≤ 200 chars, (3) MEMORY.md links ONLY index-*.md sub-indexes (not raw leaves), and
+// (4) every leaf file is reachable from some index. Errors here are REAL file-local violations authored
+// in .claude/agent-memory/ — they block the lane fast-fail. Standalone: `npm run check:memory`.
+try {
+  const { spawnSync } = require('node:child_process');
+  const r = spawnSync(process.execPath, [join(ROOT, 'scripts/check-memory.mjs')], { encoding: 'utf8' });
+  if (r.status !== 0) {
+    const msg = (r.stderr || r.stdout || '').trim();
+    // extract individual violation lines; fall back to the raw output as one error
+    const lines = msg.split('\n').filter((l) => l.startsWith('  - ') || l.startsWith('✗'));
+    if (lines.length) {
+      for (const l of lines.filter((l) => l.startsWith('  - ')))
+        err(`memory-index: ${l.replace(/^\s*-\s*/, '')}`, { kind: 'memory-index', file: '.claude/agent-memory/MEMORY.md' });
+    } else {
+      err(`memory-index: ${msg || 'check:memory failed'}`, { kind: 'memory-index', file: '.claude/agent-memory/MEMORY.md' });
+    }
+  }
+} catch (e) {
+  warn(`Agent-memory index-tree check failed: ${e.message}`);
 }
 
 // ── 9b. Module-resolution exports-lock (#274/#271) ──

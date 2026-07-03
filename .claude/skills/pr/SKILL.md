@@ -39,16 +39,25 @@ author merges their own PR once CI is green. GitHub's native merge queue stays O
    ```
    node scripts/pr-land.mjs --ref=lane/<slug> --sha=HEAD --base=main --body-file=<path>
    ```
-   - `--no-wait` opens the self-approved PR but leaves the merge for a later pass (use when CI is slow
-     and the user only wants the PR raised now).
+   - `--label-on-green` is the **producer hand-off** mode (#2199): open the PR, **wait for the required
+     checks, apply `ready-to-merge` only once they are green**, then STOP — the drain lands it. Use this
+     (not `--no-wait`) when you want the drain to merge; the label then truly means "fully checked".
+   - `--no-wait` opens the self-approved PR **UNLABELLED** and leaves it (CI unconfirmed — the label lander
+     won't collect it until something labels it). Use only when the user just wants the PR raised now and
+     will land it themselves.
+   - **The `ready-to-merge` label is applied ONLY after the required checks are green (#2196/#2199)** — never
+     eagerly at open, so a red PR never enters the drain's queue. In the default land path (above) and the
+     `--label-on-green` path `pr-land` applies it once CI passes. Pass `--no-label` to opt out; `--label=<name>`
+     overrides the name.
    - `--fallback-git` degrades to a local `git merge --no-ff` + push when `gh` is unavailable.
    - If `pr-land` still fails on create, the manual equivalent is `gh pr create --base main
      --head lane/<slug> --title "…" --body-file <path>` then `gh pr merge <n> --merge --delete-branch`
      once the required `test` check is green (only `test` is required on `main`; a failing `cla` check
      is non-blocking).
-5. **Sync the primary** — after a clean merge origin/`main` has advanced (a `--no-ff` merge commit); if
-   you landed from the primary checkout, `git pull --ff-only` so local `main` matches origin. If you
-   landed from a lane clone, reset that lane back to `origin/main` so the pool stays reusable.
+5. **Sync the local checkout** — after a clean merge `pr-land` **auto ff-syncs local `main`** to the
+   advanced `origin/main` (`git pull --ff-only --autostash`, best-effort, #2205) — the same post-merge sync
+   the drain runs, so no land route leaves the checkout it ran in behind. If you landed from a lane clone,
+   also reset that lane back to `origin/main` so the pool stays reusable.
 
 ## Exit codes (surface these, never merge a red PR)
 
