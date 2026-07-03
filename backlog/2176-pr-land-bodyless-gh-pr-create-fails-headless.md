@@ -16,4 +16,19 @@ tags: []
 
 When a title is present but no body is given, pass a non-interactive body so create never prompts — e.g. `--body ""`, or derive a one-line body from the commit subject. Add a headless regression to `we:scripts/__tests__/pr-land.test.mjs`: `buildCreateArgs({ title, body: null })` must always include a body (or `--fill`), never a title-only argv.
 
+## Second failure mode — `gh pr create` GraphQL 401 (2026-07-02, landing #2181)
+
+A distinct `gh pr create` failure with the same blast radius: it intermittently returns `HTTP 401 Requires
+authentication` on the GraphQL mutation **while the same keyring token succeeds at everything else** —
+`gh api user` (REST), `gh api graphql {viewer}` (GraphQL read), and `gh pr merge` (GraphQL mutation). Not an
+env-token override; scope is `repo` + `push:true`. It blocked landing #2181 until the PR was created out-of-band
+via REST (`gh api -X POST repos/<o>/<r>/pulls -f title=… -f head=lane/<slug> -f base=main -f body=…`), after
+which re-running pr-land found the open PR and merged normally. pr-land has no REST-create fallback today (only
+`--fallback-git`, which bypasses the CI gate entirely — the wrong tool when only *create* is failing).
+
+**Broader fix (covers both modes):** give pr-land a **REST create path** — try `gh pr create`, and on any
+create failure fall back to `POST /repos/{o}/{r}/pulls` (which needs neither `--fill` nor a body prompt and
+doesn't hit the GraphQL 401), then continue to wait→merge→heal. This subsumes the bodyless-headless fix above
+(REST create always supplies a body) and makes an ad-hoc/solo `/pr` land robust to `gh`'s create flakiness.
+
 Relates to the #2153 PR transport (#2138 Fork 5); surfaced while authoring the `/pr` skill.
