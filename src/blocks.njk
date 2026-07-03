@@ -65,15 +65,17 @@ title: Web Everything — Blocks
 <div class="project-grid" id="block-grid">
   {% for block in blocks %}
     {# #1607 (#1820 Fork 1a): <we-card> frame + status → <we-badge>, type/intent chips → <we-tag>; the
-       click-through + filter data-* stay on the OUTER <a> (.block-card is the filter JS hook). The anchor's
-       own frame is stripped by `.project-card:has(> we-card)` in style.css so the card is the sole frame. #}
+       filter data-* stay on the OUTER .project-card (.block-card is the filter JS hook). Its own frame is
+       stripped by `.project-card:has(> we-card)` in style.css so the card is the sole frame. #}
     {% set statusTone = 'success' if block.status == 'active' else ('info' if block.status == 'draft' else ('warning' if block.status == 'concept' else 'neutral')) %}
-    <a href="/blocks/{{ block.id }}/"
-       class="project-card block-card"
-       data-type="{{ block.type }}"
-       data-status="{{ block.status }}"
-       data-search="{{ (block.name + ' ' + block.summary + ' ' + (block.implementsIntent or '') + ' ' + (block.composesIntents | join(' ') if block.composesIntents else '')) | lower }}"
-       style="text-decoration: none; color: inherit; display: block;">
+    {# #2169: overlay-link, not a wrapping <a>. A summary may carry authored inline links, and an <a> may not
+       contain another <a> — a wrapping anchor makes the browser clone empty ghost tiles (see adapters.njk /
+       component-render-build-hook.cjs renderProjectGrid). `.project-card:has(> we-card)` still strips the frame. #}
+    <div class="project-card block-card"
+         data-type="{{ block.type }}"
+         data-status="{{ block.status }}"
+         data-search="{{ (block.name + ' ' + block.summary + ' ' + (block.implementsIntent or '') + ' ' + (block.composesIntents | join(' ') if block.composesIntents else '')) | lower }}">
+      <a href="/blocks/{{ block.id }}/" class="project-card-link" aria-label="View {{ block.name }}"></a>
       <we-card>
         <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
           <h3 class="project-title" style="margin: 0;">{{ block.name }}</h3>
@@ -89,7 +91,7 @@ title: Web Everything — Blocks
           {% endif %}
         </div>
       </we-card>
-    </a>
+    </div>
   {% endfor %}
 </div>
 

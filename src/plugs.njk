@@ -42,15 +42,17 @@ title: Web Everything — Plugs
 
 <div class="project-grid" id="plug-grid">
   {% for plug in plugs %}
-  {# #1870 (#1820 Fork 1a): <we-card> frame + status → <we-badge>, type chip → <we-tag>; click-through +
-     data-haystack stay on the OUTER <a> (.plug-tile is the filter JS hook). The anchor's own frame is
+  {# #1870 (#1820 Fork 1a): <we-card> frame + status → <we-badge>, type chip → <we-tag>; the filter
+     data-haystack stays on the OUTER .project-card (.plug-tile is the filter JS hook). Its own frame is
      stripped by `.project-card:has(> we-card)` in style.css so the card is the sole frame.
      Status vocab: active→success, concept→warning, experimental→warning, else→neutral. #}
   {% set statusTone = 'success' if plug.status == 'active' else ('warning' if (plug.status == 'concept' or plug.status == 'experimental') else 'neutral') %}
-  <a href="/plugs/{{ plug.id }}/"
-     class="project-card plug-tile"
-     data-haystack="{{ plug.id }} {{ plug.name | lower }} {{ plug.summary | lower }} {{ plug.type | lower }}"
-     style="text-decoration: none; color: inherit; display: block;">
+  {# #2169: overlay-link, not a wrapping <a>. A summary may carry authored inline links, and an <a> may not
+     contain another <a> — a wrapping anchor makes the browser clone empty ghost tiles (see adapters.njk /
+     component-render-build-hook.cjs renderProjectGrid). `.project-card:has(> we-card)` still strips the frame. #}
+  <div class="project-card plug-tile"
+     data-haystack="{{ plug.id }} {{ plug.name | lower }} {{ plug.summary | lower }} {{ plug.type | lower }}">
+    <a href="/plugs/{{ plug.id }}/" class="project-card-link" aria-label="View {{ plug.name }}"></a>
     <we-card>
       <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
         <h3 class="project-title" style="margin: 0;">{{ plug.name }}</h3>
@@ -63,7 +65,7 @@ title: Web Everything — Plugs
       </div>
       {% endif %}
     </we-card>
-  </a>
+  </div>
   {% endfor %}
 </div>
 
