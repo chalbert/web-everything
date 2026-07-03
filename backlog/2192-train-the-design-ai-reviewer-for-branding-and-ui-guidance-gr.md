@@ -98,6 +98,7 @@ Every user brand judgment in-session is a training label; log them with the prin
   ("rendered-and-looked-at or it didn't happen"; state the ceiling and escalate to a human designer
   with the brief-as-spec when the loop stalls). Proven on WE-11: rendered large, it does NOT read as a
   W and the white-panel-on-gradient is a generic app-icon cliché — invisible at grid-glance size.
+- **2026-07-03 · worked example (loop on WE-11, v1->v4):** running the sighted loop for real produced two non-obvious, reusable findings. (1) **Family coherence = shared GRAMMAR, not shared MOTIF.** Copying the mesa's landform (v2) made WE read as generic mountains, lose its 'W/Web' meaning, AND collide with Plateau (which owns the landform). The fix (v3/v4) applied the mesa's *grammar* — solid form + ~0.5 offset echo + gradient discipline — to WE's OWN glyph. Lufthansa/IBM: family is shared discipline, not similar shapes. (2) **Letter identities have a lower ceiling than symbols.** The loop drove WE illegible->competent, then plateaued at 'a clean W with an echo' — still crowded (WordPress-adjacent), because 'Web Everything' has no natural shape the way 'Plateau' does. When the concept is a crowded letter, the honest loop outcome is 'competent, not distinctive-great' -> escalate (human designer, or invent a non-letter symbol appropriate to the meaning). The reviewer should FLAG letter identities as ceiling-limited up front.
 
 ## Training hooks for the explorer (#1167) & vision tools (#1552, /review-design, /vision-review)
 
