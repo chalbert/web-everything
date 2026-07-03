@@ -1,0 +1,8 @@
+{
+  "id": "fluent",
+  "name": "Fluent 2",
+  "summary": "A real Fluent 2 flavor (#2140) — Microsoft's default light-mode tokens transcribed as a full DTCG override: cornflower-blue #0f6cbd brand accent, a 4px/6px/8px named radius scale, colorNeutralStroke1 #d1d1d1 border/input, colorNeutralBackground3 #f5f5f5 muted surface, and a Segoe UI/Variable typeface. Loaded through the #2017 manifest loader; its paired gap list records what tokens+intents reproduce and what needs a new intent/trait/token role (brand-foreground, hover states, elevation).",
+  "status": "concept",
+  "ownedByProject": "webtheme",
+  "manifest": "design-systems/fluent.designsystem.json"
+}

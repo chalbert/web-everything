@@ -1,0 +1,6 @@
+{
+  "extends": "@webtheme/default",
+  "themeTokens": "./fluent.tokens.json",
+  "intentDefaults": { "density": "comfortable", "motion": "natural", "surface": "solid" },
+  "traitDefaults": { "radius": "sm" }
+}
