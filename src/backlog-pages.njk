@@ -11,6 +11,12 @@ eleventyComputed:
 ---
 
 {% import "backlog-badges.njk" as bk with context %}
+{% from "we-component.njk" import weCard %}
+{# The 4 section-card panels below are authored via the generic SSR `weCard` primitive (#2098) — the same
+   render-from-data macro semantics.njk uses. Each emits an inert `<we-card data-we-spec>` placeholder the
+   `weComponentSSR` build transform batches through the pinned FUI CLI (one subprocess/page) and splices to
+   the finished `<article class="fui-card">`, byte-identical to the client `<we-card>` CE upgrade, JS-off
+   correct. This is the panel half of the tile-subset-of-detail parity (#2018 converted the tile grid). #}
 {# Badge macros + vocabulary are shared with the /backlog/ tile via src/_includes/backlog-badges.njk
    + src/_data/backlogMeta.js — ONE source so the two surfaces cannot drift. Detail uses scale "md".
    check:standards forbids re-defining these locally. #}
@@ -61,7 +67,7 @@ eleventyComputed:
 
 <div class="container block-detail-page">
     <div class="block-body content">
-        <div class="section-card">
+        {%- set _bodyPanel %}
             {% if item.details %}
             <div class="content" style="line-height: 1.7;">{{ item.details | safe }}</div>
             {% else %}
@@ -71,10 +77,11 @@ eleventyComputed:
             {{ bk.tagsRow(item.tags, 'md') }}
 
             <p style="font-size: 0.85em; color: var(--color-text-muted, #94a3b8);">Opened: {{ item.dateOpened }}</p>
-        </div>
+        {% endset -%}
+        {{ weCard("", _bodyPanel, "", "section-card") }}
 
         {% if item.children and item.children.length %}
-        <div class="section-card mt-8">
+        {%- set _containsPanel %}
             <h2>Contains</h2>
             <p style="color: var(--color-text-muted); margin-top: -0.25rem;">Child slices of this epic{% if item.openChildCount %} — <strong>{{ item.openChildCount }}</strong> still open{% else %} — all resolved{% endif %}. Each is coloured by agent-readiness.</p>
             <ul style="list-style: none; padding: 0; margin: 0.75rem 0 0; display: flex; flex-direction: column; gap: 0.6rem;">
@@ -87,11 +94,12 @@ eleventyComputed:
                 </li>
                 {% endfor %}
             </ul>
-        </div>
+        {% endset -%}
+        {{ weCard("", _containsPanel, "", "section-card mt-8") }}
         {% endif %}
 
         {% if item.blockers and item.blockers.length %}
-        <div class="section-card mt-8">
+        {%- set _blockedByPanel %}
             <h2>Blocked by</h2>
             <p style="color: var(--color-text-muted); margin-top: -0.25rem;">This item can't start until each prerequisite is resolved.</p>
             <ul style="list-style: none; padding: 0; margin: 0.75rem 0 0; display: flex; flex-direction: column; gap: 0.6rem;">
@@ -102,11 +110,12 @@ eleventyComputed:
                 </li>
                 {% endfor %}
             </ul>
-        </div>
+        {% endset -%}
+        {{ weCard("", _blockedByPanel, "", "section-card mt-8") }}
         {% endif %}
 
         {% if item.crossRef or item.relatedProject or item.relatedReport or item.graduatedTo %}
-        <div class="section-card mt-8">
+        {%- set _referencesPanel %}
             <h2>References</h2>
             <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem;">
                 {% if item.crossRef %}
@@ -124,7 +133,8 @@ eleventyComputed:
                 <li style="color: #166534; font-weight: 600;">Graduated into: {{ item.graduatedTo }}</li>
                 {% endif %}
             </ul>
-        </div>
+        {% endset -%}
+        {{ weCard("", _referencesPanel, "", "section-card mt-8") }}
         {% endif %}
     </div>
 </div>
