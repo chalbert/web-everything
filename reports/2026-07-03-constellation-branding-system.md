@@ -87,7 +87,28 @@ gate; DTCG token layer as color source of truth (#1283) → Fork 4.
 `plateau:branding-proposals/proposals.json` manifest; rendered side-by-side at 64/32/16px with
 recommended defaults outlined.
 
-## 6. Verification
+## 6. Skeptic-pass corrections (folded into #2191 before stamping)
+
+- **Fork 1 grounding corrected:** "FrontierUI" IS a shipped brand surface — `fui:src/_layouts/base.njk`
+  renders it as default title, header wordmark lockup, and footer; `fui:src/index.njk` as `<h1>`;
+  `fui:src/_data/site.js` as `name`. Corrected counts ≈174 "Frontier UI" vs 36 "FrontierUI" (the
+  compound confined to the older rendered templates; FUI's newer prose already uses the spaced form).
+- **Fork 2:** GitHub-favicon precedent dropped (it argues for the *same-symbol* policy); Firefox 2019 +
+  per-size optical grades retained. Favicon-variant geometry sync is unhooked judgment, not gate-bounded.
+- **Fork 3:** quality bar renamed **concept-bearing** (WE's own kept mark is letterform-based, so
+  "symbol-first" was imprecise); candidates scored inline against the proposed FUI attribute set.
+- **Fork 4:** authority re-cited to `plateau:src/styles/tokens.json`'s own `gradient.brand` token
+  (`linear-gradient(120deg, #6453f4 0%, #16d3e6 100%)`) — the favicon gradient is a drifted hand-copy
+  of it; #1283 is a resolved story (convention), not ratified statute, and the favicon is not generated.
+- **Fork 6 statute collision (the big one):** the house already ratified rubric-as-method — #1034
+  design-critique rubric v2 (`we:docs/agent/vision-tiers.md`, #1587 provenance). Fork re-scoped to
+  attribute content + integration shape (parallel brand rubric [default] vs #1034 v3 axis bump);
+  archetypes/uncodified foreclosed by precedent.
+- **Icon-gate rule tightened to script-decidable form:** template's "min 6 for outlines" carries a
+  judgment word; the ratifiable rule is the absolute floor (viewBox 128, all stroke-widths ≥ 6,
+  template-palette gradients). Measured stroke range corrected to 1.75–12.
+
+## 7. Verification
 
 - Gallery + proposals rendered and visually checked via Playwright screenshots (16px legibility
   confirmed for all recommended candidates).
