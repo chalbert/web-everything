@@ -1810,6 +1810,18 @@ table td, table th {
 .project-tile-card .project-icon--header img { display: block; width: 28px; height: 28px; }
 .project-tile-card .project-status-row .status-meter { margin-top: 0; padding-top: 0; }
 
+/* #2101: implementing/composing-blocks tiles on the intent detail page. Dogfooded onto `we-card` (#2098):
+   the block name is the card title, the block type is a header-trailing plain pill (a `<span>`, NOT a nested
+   `we-badge` — the splice is single-pass, so a nested placeholder would not render; pushed to the far edge),
+   and the body carries the summary + status meter. Full-height so the meter stays bottom-aligned across a
+   row (same layout contract as `.project-tile-card`). The tile's own frame is delegated to the card — the
+   wrapping `.project-card` box is frame-stripped by `.project-card:has(> .fui-card)` above. */
+.block-tile-card { height: 100%; }
+.block-tile-card .fui-card__body { display: flex; flex-direction: column; gap: 0.85rem; }
+.block-tile-card .fui-card__body > p { flex-grow: 1; }
+.block-tile-card .fui-card__actions { margin-left: auto; }
+.block-tile-card .status-meter { margin-top: 0; padding-top: 0; }
+
 /* #1758 (ratified #1748): SSR baseline for the FUI transient pills the docs server-render in bulk.
    `<we-badge>` / `<we-filter-chip>` upgrade in place to light-DOM `<span class="fui-badge…">` /
    `<button class="fui-filter-chip…">` once the cross-origin FUI registration ESM loads (base.njk),

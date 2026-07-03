@@ -11,6 +11,7 @@ eleventyComputed:
 ---
 
 {% from "project-status.njk" import projectStatus %}
+{% from "we-component.njk" import weCard %}
 
 <div class="plug-detail-header">
     <div class="plug-detail-header-inner">
@@ -28,14 +29,21 @@ eleventyComputed:
     </div>
 </div>
 
+{#- Dogfood (#2101): 5 of the 6 section-card panels are authored via the `weCard` macro (#2098) — each emits
+    an inert `<we-card data-we-spec>` placeholder that the `weComponentSSR` build transform batches through the
+    pinned FUI CLI in ONE subprocess for the page and splices to the finished SSR `<article class="fui-card">`,
+    byte-identical to the client `<we-card>` CE upgrade, JS-off correct. The panel HEADINGS + intro copy stay
+    inside the card body; the dimension/design-system/UX/gaps tables + lists stay PLAIN markup per #1964 (only
+    the panel FRAME is a card). The implementing/composing-blocks grid becomes `weCard` tiles following the
+    `intentTileSpecs` shape (we:scripts/lib/component-render-build-hook.cjs): card title = block name, body =
+    summary + status meter, block type = a header-trailing pill. Its wrapping PANEL frame (and the type pill)
+    stay plain, NOT nested `weCard`/`weBadge` — the splice is single-pass; see the inline notes below. -#}
 <div class="container block-detail-page">
     <div class="block-body content">
-        <div class="section-card fui-card">
-            {{ intent.description | safe }}
-        </div>
+        {{ weCard("", intent.description, "", "section-card") }}
 
         {% if intent.dimensions %}
-        <div class="section-card fui-card mt-8">
+        {%- set _dimensionsBody %}
             <h2>Dimensions</h2>
             <p class="mb-6 text-slate-600">Configurable axes for this intent. Applications declare their chosen value per dimension.</p>
             <table class="data-table">
@@ -56,7 +64,8 @@ eleventyComputed:
                     {% endfor %}
                 </tbody>
             </table>
-        </div>
+        {% endset -%}
+        {{ weCard("", _dimensionsBody, "", "section-card mt-8") }}
         {% endif %}
 
         {% set implementingBlocks = [] %}
@@ -66,30 +75,43 @@ eleventyComputed:
             {% endif %}
         {% endfor %}
         {% if implementingBlocks.length %}
+        {#- This panel's FRAME stays a plain `.section-card fui-card` (NOT a `weCard`) on purpose: its body
+            hosts the block-tile `weCard`s, and the `weComponentSSR` splice is SINGLE-PASS over a page's
+            placeholders — a `<we-card>` panel whose `data-we-spec` JSON embeds child `<we-card>` tiles
+            double-escapes those children, so they never splice. Nesting `weCard`-in-`weCard` is unsupported
+            by this primitive; the substantive dogfood here is the TILE grid (below), so the wrapper is left
+            plain and the tiles are the cards. -#}
         <div class="section-card fui-card mt-8">
             <h2>Implementing &amp; Composing Blocks</h2>
             <p class="mb-6 text-slate-600">Blocks that fulfill this intent directly, or compose it as part of a larger component.</p>
             <div class="standards-grid">
                 {% for block in implementingBlocks %}
-                <a href="/blocks/{{ block.id }}/" class="standard-card">
-                    <div class="flex justify-between items-start mb-3" style="gap: 12px; display: flex; justify-content: space-between;">
-                        <h4 class="text-lg font-bold m-0 text-gray-900">{{ block.name }}</h4>
-                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800" style="white-space: nowrap;">
-                            {{ block.type }}
-                        </span>
-                    </div>
+                {#- Header-trailing type pill. NOTE: this stays the original PLAIN `<span>` pill, NOT a nested
+                    `weBadge` — the splice is single-pass, so a `<we-badge>` embedded inside this card's
+                    `data-we-spec` JSON is NOT independently rendered (it would leak a raw placeholder into
+                    the card's `actionsHtml`). The block TYPE was never a badge component in the source
+                    markup either, so a plain pill is faithful. -#}
+                {%- set _blockTypePill -%}<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800" style="white-space: nowrap;">{{ block.type }}</span>{%- endset -%}
+                {%- set _blockTileBody %}
                     <p class="text-gray-600 text-sm leading-relaxed mb-4">{{ block.summary }}</p>
-                    <div style="margin-bottom: 1rem;">
-                        {{ projectStatus(block.status) }}
-                    </div>
-                </a>
+                    {{ projectStatus(block.status) }}
+                {% endset -%}
+                {#- Click-through tile: a `.project-card` box (grid hover-lift + its own frame stripped by
+                    `.project-card:has(> .fui-card)`) with an overlay `.project-card-link` anchor, NOT an
+                    `<a>` wrapping the card — the proven renderProjectGrid/renderBacklogGrid pattern that
+                    avoids the nested-anchor parser clone (block summaries carry no links today, but the
+                    overlay pattern is the invariant). The card itself is the sole visual frame. -#}
+                <div class="project-card">
+                    <a href="/blocks/{{ block.id }}/" class="project-card-link" aria-label="View {{ block.name }}"></a>
+                    {{ weCard(block.name, _blockTileBody, _blockTypePill, "block-tile-card") }}
+                </div>
                 {% endfor %}
             </div>
         </div>
         {% endif %}
 
         {% if intent.designSystemResearch %}
-        <div class="section-card fui-card mt-8">
+        {%- set _designResearchBody %}
             <h2>Design System Research</h2>
             <p class="mb-6 text-slate-600">How established design systems approach this UX concern.</p>
             <table class="data-table">
@@ -110,11 +132,12 @@ eleventyComputed:
                     {% endfor %}
                 </tbody>
             </table>
-        </div>
+        {% endset -%}
+        {{ weCard("", _designResearchBody, "", "section-card mt-8") }}
         {% endif %}
 
         {% if intent.uxResearch %}
-        <div class="section-card fui-card mt-8">
+        {%- set _uxResearchBody %}
             <h2>UX Research</h2>
             <p class="mb-6 text-slate-600">Evidence-based findings on user perception and behavior.</p>
 
@@ -135,11 +158,12 @@ eleventyComputed:
                 {% endif %}
             </div>
             {% endfor %}
-        </div>
+        {% endset -%}
+        {{ weCard("", _uxResearchBody, "", "section-card mt-8") }}
         {% endif %}
 
         {% if intent.researchGaps %}
-        <div class="section-card fui-card mt-8">
+        {%- set _researchGapsBody %}
             <h2>Research Gaps</h2>
             <p class="mb-4 text-slate-600">Areas where the current spec needs evolution based on research findings.</p>
             <ul class="list-disc pl-5 text-sm text-gray-600">
@@ -147,7 +171,8 @@ eleventyComputed:
                 <li class="mb-2">{{ gap }}</li>
                 {% endfor %}
             </ul>
-        </div>
+        {% endset -%}
+        {{ weCard("", _researchGapsBody, "", "section-card mt-8") }}
         {% endif %}
     </div>
 </div>

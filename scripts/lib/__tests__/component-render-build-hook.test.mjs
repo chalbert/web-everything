@@ -415,6 +415,25 @@ describe('findComponentPlaceholders — scan the generic card/badge placeholders
     expect(found[0].component).toBe('card');
     expect(found[0].config.bodyParts[0].html).toBe('<p>a &gt; b</p>');
   });
+
+  it('does NOT independently render a we-card/we-badge NESTED inside another card spec (single-pass; #2101)', () => {
+    // The scan is single-pass: a `we-card` whose `data-we-spec` JSON body embeds a CHILD `we-card`
+    // placeholder is found as ONE outer card — the child lives inside the parent's `bodyParts[0].html`
+    // STRING, so it is never scanned as its own placeholder and never gets its own SSR fragment. This is
+    // the exact invariant `src/intent-pages.njk` (#2101) relies on to keep the implementing-blocks panel a
+    // PLAIN `.section-card` wrapper around the block-tile `weCard`s (nesting `weCard`-in-`weCard` would
+    // double-escape the child spec and leak a raw placeholder into the rendered parent).
+    const child = `<we-card data-we-spec=\\"{&#39;child&#39;:1}\\">c</we-card>`;
+    const html =
+      `<we-card data-we-spec='{"component":"card","config":{"title":"Panel","bodyParts":[{"tag":"div","html":"${child}"}]}}'>`
+      + `${child}</we-card>`;
+    const found = findComponentPlaceholders(html);
+    // Only the OUTER card is a real placeholder; the child string inside the JSON is not one.
+    expect(found).toHaveLength(1);
+    expect(found[0].config.title).toBe('Panel');
+    // The child markup survives verbatim inside the parent body — proving it was NOT treated as its own spec.
+    expect(found[0].config.bodyParts[0].html).toContain('<we-card');
+  });
 });
 
 describe('spliceComponents — one subprocess per page, splice each placeholder (#2098)', () => {
