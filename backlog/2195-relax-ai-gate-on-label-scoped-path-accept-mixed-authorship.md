@@ -2,9 +2,11 @@
 kind: story
 size: 2
 parent: "2193"
-status: open
+status: resolved
 dateOpened: "2026-07-03"
 blockedBy: ["2196", "2194"]
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
 tags: [lane, pr-flow, merge-queue, session-tooling, drain]
 ---
 
