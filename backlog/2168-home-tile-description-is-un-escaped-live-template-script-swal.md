@@ -1,8 +1,11 @@
 ---
 kind: task
-status: open
+status: resolved
 relatedTo: ["2016", "2018", "777"]
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-02"
+dateResolved: "2026-07-02"
+graduatedTo: none
 tags: [bug, ssr, component-render, home, rendering, escaping]
 ---
 
@@ -34,3 +37,16 @@ never entity-decode it**. Locate the decode (WE splice in `we:scripts/lib/compon
 **Note:** distinct from the nested-anchor ghost-card bug (fixed in `lane/home-card-nested-anchor-fix`) — that was
 tile *duplication*; this is tile *swallowing*. Both were masked from curl/DOM-count checks and only visible in the
 rendered browser DOM / screenshot.
+
+## Resolution (2026-07-02, PR #11 → `a0a28711`)
+
+Root cause confirmed WE-side: `renderProjectGrid` fed the description as a harness `html:` body part, set via
+`innerHTML=`, which happy-dom **decodes** — its `.outerHTML` serializer then re-emits the raw `<template>`
+(`fui:blocks/renderers/component-render/buildHarness.ts` documents this exact hazard). Fixed by applying the
+**sentinel-splice** `renderBacklogGrid` already used for the same reason: render the card shell with a unique
+`PROJECT_DESC_<i>` sentinel body, then string-splice the trusted, already-escaped description in verbatim —
+bypassing the innerHTML round-trip, exactly as the pre-#2019 `| safe` template output did. Verified against the
+real FUI CLI: built home has **0** live `<template>`/`<script>` in `.project-desc` (was 1); browser (JS off)
+parses **3 grids / 47 cards / 0 empty** (was 1 grid / 32). Deterministic unit regression added in
+`we:scripts/lib/__tests__/component-render-build-hook.test.mjs` (splice preserves `&lt;template&gt;`, keeps real
+`<strong>`, replaces the sentinel).
