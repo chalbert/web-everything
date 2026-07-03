@@ -71,6 +71,19 @@ Every user brand judgment in-session is a training label; log them with the prin
   rounds; multiple candidates may carry `refine` edges forward (tournament, not single-elimination).
   The tree is simultaneously the review UI and the training corpus — an AI reviewer can be evaluated
   on whether it predicts each edge's verdict before seeing the next round.
+- **2026-07-03 · label (user):** FUI-11 (sheared strata) REJECTED — "very busy [and] has no meaning" →
+  principle: **a distinctive silhouette is not an owned meaning** (the Vercel-triangle trap in the
+  library). The reviewer (and I) over-weighted ownable-silhouette and under-weighted concept-bearing;
+  when the two conflict, meaning wins. My own earlier "strongest on the board" call was wrong on its
+  own rubric — a self-miss worth training against.
+- **2026-07-03 · label (user):** FUI-07 (ridge surge) — "not bad" but reads as a **sailboat** →
+  principle: run the adversarial second-read on EVERY finalist, not just the ones that look risky
+  (London 2012 / OGC). A peak-over-line silhouette is a latent sail; the reviewer should surface
+  plausible second readings unprompted.
+- **2026-07-03 · label (user):** WE-11 (negative-space inner set) FRONT-RUNNER, WE-10 (W-arms embrace)
+  runner-up — "I like WE-10 and WE-11, maybe WE-11 more" → principle: the winning WE direction is
+  concept-in-form that *means* "encompasses everything," not a bare letter. Confirms the ownable +
+  concept-bearing pair over pure-letterform W marks. WE-11 still owes a 16px-on-gradient validation.
 
 ## Scope notes
 
