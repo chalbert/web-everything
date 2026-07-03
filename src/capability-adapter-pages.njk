@@ -10,6 +10,8 @@ eleventyComputed:
     title: "Web Everything — Capability Adapter — {{ impl.label }}"
 ---
 
+{% from "we-component.njk" import weCard %}
+
 {% set tierBg = { 'native-ok': '#dcfce7', 'polyfill-ok': '#fef3c7', 'capability-hard': '#fee2e2' } %}
 {% set tierFg = { 'native-ok': '#166534', 'polyfill-ok': '#92400e', 'capability-hard': '#991b1b' } %}
 {% set tierLabel = { 'native-ok': 'native-ok — the platform serves it directly', 'polyfill-ok': 'polyfill-ok — a shim recovers the behavior', 'capability-hard': 'capability-hard — a UA-privileged wall no shim can reach' } %}
@@ -36,17 +38,19 @@ eleventyComputed:
 
 <div class="container block-detail-page">
     <div class="block-body content">
-        <div class="section-card fui-card">
+        {#- Card 1: Adapter description (no title — include + meta note) -#}
+        {%- set _adapterDescBody %}
             {% include "capability-adapter-descriptions/" + impl.id + ".njk" %}
             <p style="font-size:0.85em; color:var(--color-text-muted); margin-top:1rem;">
                 Registered row in the <a href="/capabilities/#:~:text=registered%20capability%20adapter%20table">capability adapter table</a>
                 (<code>src/_data/capabilityMatrix.json</code> → <code>impls[]</code>). The tier breakdown below is read
                 straight from that single source — it cannot disagree with the matrix.
             </p>
-        </div>
+        {% endset -%}
+        {{ weCard("", _adapterDescBody, "", "section-card") }}
 
-        <div class="section-card fui-card mt-8">
-            <h2>Tier breakdown</h2>
+        {#- Card 2: Tier breakdown — presentational tier chips, no data-table -#}
+        {%- set _adapterTierBody %}
             <p class="mb-6 text-slate-600">
                 How this adapter serves every capability in the grid, grouped by tier. The
                 <span style="color:#92400e;">polyfill-ok</span> and <span style="color:#991b1b;">capability-hard</span>
@@ -71,10 +75,11 @@ eleventyComputed:
             </div>
             {% endif %}
             {% endfor %}
-        </div>
+        {% endset -%}
+        {{ weCard("Tier breakdown", _adapterTierBody, "", "section-card mt-8") }}
 
-        <div class="section-card fui-card mt-8">
-            <h2>The other registered adapters</h2>
+        {#- Card 3: The other registered adapters (grid of cards) -#}
+        {%- set _adapterOthersBody %}
             <p class="mb-6 text-slate-600">Every impl the <a href="/capabilities/">capability provider</a> can enumerate when it resolves native-first.</p>
             <div class="standards-grid">
                 {% for other in capabilityMatrix.impls %}
@@ -86,6 +91,7 @@ eleventyComputed:
                 {% endif %}
                 {% endfor %}
             </div>
-        </div>
+        {% endset -%}
+        {{ weCard("The other registered adapters", _adapterOthersBody, "", "section-card mt-8") }}
     </div>
 </div>
