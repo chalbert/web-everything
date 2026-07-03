@@ -1266,6 +1266,30 @@ try {
   warn(`Agent-memory freshness audit failed: ${e.message}`);
 }
 
+// ── 9a″. Agent-memory index-tree shape (#2192) ──
+// The always-loaded MEMORY.md is injected into every session; the harness silently truncates it above
+// its budget, dropping load-bearing rules with no warning. This check enforces: (1) size ≤ budget,
+// (2) per-line ≤ 200 chars, (3) MEMORY.md links ONLY index-*.md sub-indexes (not raw leaves), and
+// (4) every leaf file is reachable from some index. Errors here are REAL file-local violations authored
+// in .claude/agent-memory/ — they block the lane fast-fail. Standalone: `npm run check:memory`.
+try {
+  const { spawnSync } = require('node:child_process');
+  const r = spawnSync(process.execPath, [join(ROOT, 'scripts/check-memory.mjs')], { encoding: 'utf8' });
+  if (r.status !== 0) {
+    const msg = (r.stderr || r.stdout || '').trim();
+    // extract individual violation lines; fall back to the raw output as one error
+    const lines = msg.split('\n').filter((l) => l.startsWith('  - ') || l.startsWith('✗'));
+    if (lines.length) {
+      for (const l of lines.filter((l) => l.startsWith('  - ')))
+        err(`memory-index: ${l.replace(/^\s*-\s*/, '')}`, { kind: 'memory-index', file: '.claude/agent-memory/MEMORY.md' });
+    } else {
+      err(`memory-index: ${msg || 'check:memory failed'}`, { kind: 'memory-index', file: '.claude/agent-memory/MEMORY.md' });
+    }
+  }
+} catch (e) {
+  warn(`Agent-memory index-tree check failed: ${e.message}`);
+}
+
 // ── 9b. Module-resolution exports-lock (#274/#271) ──
 // Gather every `@frontierui/*` (locked-scope) entry from the project's SHIPPED native resolution
 // manifests — vite `resolve.alias` + every `<script type="importmap">` in the served catalog pages

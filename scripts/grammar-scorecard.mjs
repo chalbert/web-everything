@@ -48,16 +48,45 @@ function today() {
 }
 
 /**
- * Transpile + import the FUI scorer AND bundle-zero recipes once, into one ESM. Returns null when
- * `../frontierui` is absent (detect-or-skip), so the caller skips rather than failing.
+ * Per-flavor bundle files to try importing alongside bundle-zero. Each entry is a
+ * `{ file, exports }` pair: `file` is relative to `FUI_WEBNODES/recipes/`; `exports` is the
+ * named-export string for the esbuild entry. A bundle file is OPTIONAL — if the FUI PR hasn't
+ * landed yet, the file is simply absent and the grammar falls back to bundle-zero scoring (gap-list
+ * mode). This makes the scorecard detect-or-skip per-bundle, not just per-FUI.
+ */
+const FLAVOR_BUNDLE_FILES = [
+  {
+    file: 'recipes/liquidJinjaBundle.ts',
+    exports:
+      'export { LiquidJinjaInterpolationNode, LiquidJinjaForRegionNode, LiquidJinjaIfRegionNode, LiquidJinjaBlockRegionNode, LiquidJinjaRawRegionNode, LiquidJinjaCommentRegionNode, JinjaInlineCommentNode }',
+  },
+];
+
+/**
+ * Transpile + import the FUI scorer, bundle-zero recipes, AND any present per-flavor bundles (#2114+),
+ * all in one ESM. Returns null when `../frontierui` is absent (detect-or-skip), so the caller skips
+ * rather than failing. Per-flavor bundle files are conditionally included — if a bundle file doesn't
+ * exist yet in FUI (the FUI PR is still pending), it is simply skipped (detect-or-skip per-bundle).
  */
 async function loadScorer() {
   if (!existsSync(FUI_WEBNODES)) return null;
+
+  // Conditionally include per-flavor bundle exports — only if the bundle file exists in FUI.
+  // This makes the scorecard resilient to partial FUI trees (WE PR landed before FUI PR).
+  const presentBundles = FLAVOR_BUNDLE_FILES.filter((b) =>
+    existsSync(join(FUI_WEBNODES, b.file)),
+  );
+  const bundleExports = presentBundles
+    .map((b) => `${b.exports} from './${b.file}';`)
+    .join('');
+
   const res = await build({
     stdin: {
       contents:
         "export { scoreGrammar, renderGrammarReport, formatFidelity } from './grammarScorecard.ts';" +
-        "export { MustacheInterpolationNode, PolymerInterpolationNode } from './recipes/interpolationRecipes.ts';",
+        "export { MustacheInterpolationNode, PolymerInterpolationNode } from './recipes/interpolationRecipes.ts';" +
+        // Per-flavor bundles — conditionally appended (only if the file exists in FUI).
+        bundleExports,
       resolveDir: FUI_WEBNODES,
       sourcefile: 'fui-grammar-entry.ts',
       loader: 'ts',
@@ -66,11 +95,14 @@ async function loadScorer() {
     format: 'esm',
     platform: 'node',
     write: false,
-    // The bundle-zero recipes extend `Text` (the value:'shown' polyfill host, evaluated at class
-    // definition). The scorer only reads their *static* config — never instantiates — so a minimal
-    // `Text` global is enough for the class bodies to load in plain Node (no DOM needed).
+    // The bundle recipes extend `Text`/`RegionNode`/`MarkerNode` (polyfill hosts evaluated at class
+    // definition). The scorer only reads their *static* config — never instantiates — so minimal
+    // DOM globals are enough for the class bodies to load in plain Node (no real DOM needed).
     banner: {
-      js: 'if (typeof globalThis.Text === "undefined") { globalThis.Text = class Text {}; }',
+      js: [
+        'if (typeof globalThis.Text === "undefined") { globalThis.Text = class Text {}; }',
+        'if (typeof globalThis.MutationObserver === "undefined") { globalThis.MutationObserver = class MutationObserver { constructor(cb){} observe(){} disconnect(){} }; }',
+      ].join('\n'),
     },
   });
   const code = res.outputFiles[0].text;
@@ -108,10 +140,11 @@ function combinedReport(scored) {
     '**Re-derivable:** `we:scripts/grammar-scorecard.mjs` re-emits this report; `--check` fails the gate on drift.',
     '',
     '> Bundle zero scores **100%** against its own native checklist (self-consistency — nothing to gap), and',
-    '> exposes its real gaps only when scored against a *framework* checklist (Handlebars below): regions,',
-    '> raw/unescaped output, partials, comments — the concrete increments the per-flavor bundle stories',
-    '> (#2114–#2119) grow, and the mid-region-marker gap (`{{else}}`) whose decision card the first',
-    '> confirming gap list earns (not a guess).',
+    '> exposes its real gaps only when scored against a *framework* checklist (Handlebars, Vue, etc. below):',
+    '> regions, raw/unescaped output, partials, comments — the concrete increments the per-flavor bundle',
+    '> stories (#2114–#2119) grow, and the mid-region-marker gap (`{{else}}`) whose decision card the first',
+    '> confirming gap list earns (not a guess). Vue is the firewall proof (#2119): its delimiter surface is',
+    '> only `{{ }}` text interpolation — every other construct is attribute-keyed, out-of-scope per #2074.',
     '',
     '',
   ].join('\n');
@@ -132,11 +165,44 @@ function combinedReport(scored) {
   return header + summary + '\n' + sections + '\n';
 }
 
+/**
+ * The per-flavor bundles that have been built (#2115+). Each entry maps a grammar checklist name to
+ * its FUI bundle (the recipe classes). When a bundle is not yet built (its file is absent from FUI —
+ * e.g., the FUI PR is still pending), the bundle entry is `null` and the grammar falls back to
+ * bundle-zero scoring (gap-list mode). When the bundle is present it is scored against its own
+ * checklist (fidelity-proof mode). The two passes serve different purposes — the gap list is the
+ * real deliverable; the fidelity proof is the acceptance gate.
+ */
+function builtBundles(scorer) {
+  // Guard: only include a bundle entry when ALL its exports are present in the scorer module.
+  // If the bundle file was absent from FUI (detect-or-skip per-bundle in loadScorer), the
+  // named exports are undefined — treat that as "not yet built" and fall back to bundle zero.
+  const liquidJinja =
+    scorer.LiquidJinjaInterpolationNode &&
+    scorer.LiquidJinjaForRegionNode &&
+    scorer.LiquidJinjaIfRegionNode &&
+    scorer.LiquidJinjaBlockRegionNode &&
+    scorer.LiquidJinjaRawRegionNode &&
+    scorer.LiquidJinjaCommentRegionNode &&
+    scorer.JinjaInlineCommentNode
+      ? [
+          scorer.LiquidJinjaInterpolationNode,
+          scorer.LiquidJinjaForRegionNode,
+          scorer.LiquidJinjaIfRegionNode,
+          scorer.LiquidJinjaBlockRegionNode,
+          scorer.LiquidJinjaRawRegionNode,
+          scorer.LiquidJinjaCommentRegionNode,
+          scorer.JinjaInlineCommentNode,
+        ]
+      : null;
+  return { 'liquid-jinja': liquidJinja };
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const check = args.includes('--check');
   const names = args.filter((a) => !a.startsWith('--'));
-  const checklists = names.length ? names : ['fui-native', 'handlebars'];
+  const checklists = names.length ? names : ['fui-native', 'handlebars', 'liquid-jinja', 'vue', 'angular'];
 
   const scorer = await loadScorer();
   if (!scorer) {
@@ -146,10 +212,16 @@ async function main() {
 
   // Bundle zero: FUI's native grammar — the two shipped interpolation recipes.
   const bundleZero = [scorer.MustacheInterpolationNode, scorer.PolymerInterpolationNode];
+  // Per-flavor bundles that have been built: scored against their own checklist (fidelity proof).
+  const built = builtBundles(scorer);
 
   const scored = checklists.map((name) => {
     const reference = readGrammar(name);
-    const result = scorer.scoreGrammar(bundleZero, reference);
+    // If a per-flavor bundle exists for this grammar (non-null), score it (fidelity proof);
+    // otherwise score bundle zero against the checklist (gap-list mode — seeds the bundle story).
+    // `null` means the bundle file is absent from FUI (FUI PR not yet landed): fall back gracefully.
+    const bundle = built[name] ?? bundleZero;
+    const result = scorer.scoreGrammar(bundle, reference);
     return {
       name,
       result,

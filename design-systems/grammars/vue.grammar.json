@@ -1,0 +1,47 @@
+{
+  "$description": "Vue grammar REFERENCE CHECKLIST for the #2113 grammar-fidelity scorecard — WE-owned data, not scorer code. The firewall proof (#2119): Vue's delimiter surface is the smallest of the #2094 suite — only `{{ }}` text interpolation owns a delimiter at all. All structural control (v-if, v-for, v-else-if, v-else), data-binding (:prop / v-bind), event-binding (@event / v-on), raw output (v-html), and two-way binding (v-model) are attribute-keyed directives — out-of-scope per #2074 rule 5 (→ #1986 registry). Attr-value interpolation (`class=\"{{ x }}\"`) is also out-of-scope (sibling surface). The configurable `delimiters` app option is parity with the recipe open/close statics already in scope: the framework lets you swap `{{ }}` for any pair; that open/close pair maps 1-to-1 onto the recipe's `static open / static close` shape and scores as in-scope. No regions, no mid-markers, no sigil grammar — Vue has nothing here that the #2074 recipe model cannot express. Each construct names its opening delimiter + expected #2074 nature; outOfScope marks concerns the #2074 statute does NOT own (per we:docs/agent/block-standard.md#custom-node-recipes rule 5). The scorer (frontierui:plugs/webnodes/grammarScorecard.ts scoreGrammar) grades each construct reproduced/partial/out-of-scope/gap. This checklist carries ZERO scorer logic.",
+  "framework": "Vue",
+  "constructs": [
+    {
+      "construct": "{{ expr }}",
+      "open": "{{",
+      "nature": "value",
+      "note": "Default text interpolation delimiter; configurable via the `delimiters` app option — any substituted pair maps onto the same recipe open/close statics and scores identically"
+    },
+    {
+      "construct": "v-if / v-else-if / v-else structural directives",
+      "nature": "children",
+      "outOfScope": "attribute-keyed → #1986 registry"
+    },
+    {
+      "construct": "v-for iteration directive",
+      "nature": "children",
+      "outOfScope": "attribute-keyed → #1986 registry"
+    },
+    {
+      "construct": ":prop / v-bind data-binding",
+      "nature": "value",
+      "outOfScope": "attribute-keyed → #1986 registry"
+    },
+    {
+      "construct": "@event / v-on event-binding",
+      "nature": "marker",
+      "outOfScope": "attribute-keyed → #1986 registry"
+    },
+    {
+      "construct": "v-model two-way binding",
+      "nature": "value",
+      "outOfScope": "attribute-keyed → #1986 registry"
+    },
+    {
+      "construct": "v-html raw output directive",
+      "nature": "value",
+      "outOfScope": "attribute-keyed → #1986 registry"
+    },
+    {
+      "construct": "class=\"{{ x }}\" attribute interpolation",
+      "nature": "value",
+      "outOfScope": "attribute-value interpolation → sibling surface (#2074 rule 5)"
+    }
+  ]
+}

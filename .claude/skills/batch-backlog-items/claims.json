@@ -5,16 +5,18 @@
     {
       "session": "batch-2026-07-03-1974-2184-x24",
       "ids": [
-        "2180-check-standards-green-locally-red-on-fresh-ci-clone-untracked"
+        "2119-vue-delimiter-bundle-out-of-scope-firewall-proof",
+        "2115-liquid-jinja-delimiter-bundle"
       ],
       "baseline": [
         ".claude/skills/batch-backlog-items/claims.json",
-        "backlog/2180-check-standards-green-locally-red-on-fresh-ci-clone-untracked.md"
+        "backlog/2119-vue-delimiter-bundle-out-of-scope-firewall-proof.md"
       ],
       "touched": [
-        "backlog/2180-check-standards-green-locally-red-on-fresh-ci-clone-untracked.md"
+        "backlog/2119-vue-delimiter-bundle-out-of-scope-firewall-proof.md",
+        "backlog/2115-liquid-jinja-delimiter-bundle.md"
       ],
-      "at": "2026-07-03T14:19:02.475Z"
+      "at": "2026-07-03T14:19:02.531Z"
     }
   ]
 }

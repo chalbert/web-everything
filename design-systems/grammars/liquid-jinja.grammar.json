@@ -1,0 +1,28 @@
+{
+  "$description": "Liquid/Jinja grammar REFERENCE CHECKLIST for the #2113 grammar-fidelity scorecard — WE-owned data, not scorer code. One shared bundle for both flavours: Liquid and Jinja share the same delimiter skeleton ({{ }} + {% %} + {# #}); their divergence is expression vocabulary (filters/tags), not grammar, so the delimiter surface is identical — one checklist covers both. Fork 3 stress: the end-prefix name-echo close ({% for %}…{% endfor %}, {% if %}…{% endif %}) is the SECOND declared-close shape in the corpus alongside the {/each} form. {% raw %}…{% endraw %} is the mandatory verbatim escape hatch. {# #} (Jinja) / {% comment %}…{% endcomment %} (Liquid) are the dual hidden-comment paths. Scored against BUNDLE ZERO (FUI's native mustache+polymer recipes, frontierui:plugs/webnodes/recipes/interpolationRecipes.ts) the gap list seeds the Liquid/Jinja bundle story (#2115). Each construct names its opening delimiter + expected #2074 nature; outOfScope marks delimiter-grammar concerns #2074 does NOT own. The scorer (frontierui:plugs/webnodes/grammarScorecard.ts scoreGrammar) grades each construct reproduced/partial/out-of-scope/gap. Zero scorer logic here — swapping this for another framework's checklist is what proves the scorer framework-agnostic (#2113).",
+  "framework": "Liquid/Jinja",
+  "constructs": [
+    { "construct": "{{ expr }}", "open": "{{", "nature": "value" },
+    { "construct": "{% for … %}…{% endfor %}", "open": "{% for", "nature": "children" },
+    { "construct": "{% if … %}…{% endif %}", "open": "{% if", "nature": "children" },
+    { "construct": "{% block … %}…{% endblock %}", "open": "{% block", "nature": "children" },
+    { "construct": "{% raw %}…{% endraw %}", "open": "{% raw", "nature": "children" },
+    { "construct": "{% comment %}…{% endcomment %}", "open": "{% comment", "nature": "children" },
+    { "construct": "{# comment #}", "open": "{#", "nature": "marker" },
+    {
+      "construct": "{{ x | filter }} expression filter/pipe",
+      "nature": "value",
+      "outOfScope": "expression vocabulary (filter/pipe syntax) — not a delimiter-grammar concern #2074 owns"
+    },
+    {
+      "construct": "{% include %} / {% extends %}",
+      "nature": "marker",
+      "outOfScope": "expression vocabulary (template inclusion tags) — not a delimiter-grammar construct; the delimiter {%...%} is shared, the include semantics are tag-specific"
+    },
+    {
+      "construct": "class=\"{{ x }}\" attribute interpolation",
+      "nature": "value",
+      "outOfScope": "attribute-value interpolation → sibling surface (#2074 rule 5)"
+    }
+  ]
+}
