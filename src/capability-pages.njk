@@ -10,6 +10,8 @@ eleventyComputed:
     title: "Web Everything — Capability — {{ cap.label }}"
 ---
 
+{% from "we-component.njk" import weCard %}
+
 {% set tierBg = { 'native-ok': '#dcfce7', 'polyfill-ok': '#fef3c7', 'capability-hard': '#fee2e2' } %}
 {% set tierFg = { 'native-ok': '#166534', 'polyfill-ok': '#92400e', 'capability-hard': '#991b1b' } %}
 {% set polyfillLabel = { 'polyfillable': 'Polyfillable — a shim fully recovers the behavior', 'partial': 'Partial — only partial mitigation; a genuine residual gap remains', 'capability': 'Capability — not polyfillable, only replaceable (a UA-privileged action)' } %}
@@ -36,7 +38,8 @@ eleventyComputed:
 
 <div class="container block-detail-page">
     <div class="block-body content">
-        <div class="section-card fui-card">
+        {#- Card 1: Capability overview (no title — summary + definition list) -#}
+        {%- set _capOverviewBody %}
             <p style="font-size:1.05em;">{{ cap.summary | safe }}</p>
             <dl style="display:grid; grid-template-columns:max-content 1fr; gap:0.5rem 1.25rem; margin:1rem 0 0; font-size:0.92em;">
                 <dt style="font-weight:600;">Capability id</dt>
@@ -48,10 +51,11 @@ eleventyComputed:
                 <dt style="font-weight:600;">Polyfillability</dt>
                 <dd style="margin:0;">{{ polyfillLabel[cap.polyfill] or cap.polyfill }}</dd>
             </dl>
-        </div>
+        {% endset -%}
+        {{ weCard("", _capOverviewBody, "", "section-card") }}
 
-        <div class="section-card fui-card mt-8">
-            <h2>Build-matrix row</h2>
+        {#- Card 2: Build-matrix row — presentational table stays plain per #1964 -#}
+        {%- set _capMatrixBody %}
             <p class="mb-6 text-slate-600">
                 The tier this capability is served at on every registered
                 <a href="/capabilities/#:~:text=registered%20capability%20adapter%20table">capability adapter</a> — one column per impl, read straight from the
@@ -86,7 +90,8 @@ eleventyComputed:
                     </tbody>
                 </table>
             </div>
-        </div>
+        {% endset -%}
+        {{ weCard("Build-matrix row", _capMatrixBody, "", "section-card mt-8") }}
 
         {% set requiringIntents = [] %}
         {% for intent in intents %}
@@ -95,8 +100,8 @@ eleventyComputed:
             {% endif %}
         {% endfor %}
         {% if requiringIntents.length %}
-        <div class="section-card fui-card mt-8">
-            <h2>Intents that require this capability</h2>
+        {#- Card 3: Intents that require this capability (conditional) -#}
+        {%- set _capIntentsBody %}
             <p class="mb-6 text-slate-600">The reverse of the <code>requiresCapabilities</code> mapping — intents that expand to this capability id.</p>
             <div class="standards-grid">
                 {% for intent in requiringIntents %}
@@ -106,16 +111,18 @@ eleventyComputed:
                 </a>
                 {% endfor %}
             </div>
-        </div>
+        {% endset -%}
+        {{ weCard("Intents that require this capability", _capIntentsBody, "", "section-card mt-8") }}
         {% endif %}
 
-        <div class="section-card fui-card mt-8">
-            <h2>Underlying platform feature</h2>
+        {#- Card 4: Underlying platform feature -#}
+        {%- set _capPlatformBody %}
             <p class="mb-6 text-slate-600">Each capability borrows a <code>web-features</code> id. Follow it to the live Baseline / browser-support data.</p>
             <ul class="list-disc pl-5 text-sm text-gray-600">
                 <li><a href="https://webstatus.dev/features/{{ cap.webFeaturesKey }}">webstatus.dev — Baseline status &amp; browser support</a> (<code>{{ cap.webFeaturesKey }}</code>)</li>
                 <li><a href="https://caniuse.com/?search={{ cap.webFeaturesKey }}">caniuse.com — version-level support tables</a></li>
             </ul>
-        </div>
+        {% endset -%}
+        {{ weCard("Underlying platform feature", _capPlatformBody, "", "section-card mt-8") }}
     </div>
 </div>
