@@ -2,9 +2,10 @@
 kind: story
 size: 3
 parent: "2094"
-status: open
+status: active
 blockedBy: ["2104"]
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-03"
 tags: [custom-nodes, delimiter-grammar, bundle, scorecard, keystone]
 ---
 

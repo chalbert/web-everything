@@ -3,6 +3,7 @@ kind: task
 status: open
 blockedBy: ["2138", "2152"]
 relatedTo: ["907", "2156"]
+humanGate: { kind: credential, what: "Publishing the tagged 0.1.0 requires a credentialed npm publish (workflow_dispatch of we:.github/workflows/publish-contracts.yml with NPM_TOKEN) AND main reliably green via the operating PR-lane merge flow — neither agent-executable. The auto-lock-on-merge reassessment can follow once the publish itself is unblocked." }
 dateOpened: "2026-07-02"
 tags: [npm, publishing, ci, release-please, pr-flow]
 ---

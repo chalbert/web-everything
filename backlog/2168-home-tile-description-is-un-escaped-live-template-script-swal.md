@@ -1,8 +1,9 @@
 ---
 kind: task
-status: open
+status: active
 relatedTo: ["2016", "2018", "777"]
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-03"
 tags: [bug, ssr, component-render, home, rendering, escaping]
 ---
 

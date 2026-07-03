@@ -1,8 +1,9 @@
 ---
 kind: story
 size: 3
-status: open
+status: active
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-03"
 locus: frontierui
 relatedTo: ["2019", "867", "2130"]
 relatedReport: reports/2026-07-02-a11y-ratchet-promotion-endgame.md

@@ -1,5 +1,5 @@
 ---
-kind: story
+kind: decision
 size: 5
 status: open
 dateOpened: "2026-07-02"

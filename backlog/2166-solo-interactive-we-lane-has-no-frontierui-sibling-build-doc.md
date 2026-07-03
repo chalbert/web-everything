@@ -1,8 +1,9 @@
 ---
 kind: task
-status: open
+status: active
 relatedTo: ["1943", "2123", "1933"]
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-03"
 tags: [lanes, cross-repo, build, frontierui, dx]
 ---
 

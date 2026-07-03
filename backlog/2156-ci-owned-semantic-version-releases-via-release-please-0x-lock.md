@@ -2,6 +2,7 @@
 kind: task
 status: open
 relatedTo: ["877", "907", "2138", "2152", "2154"]
+humanGate: { kind: deploy, what: "release-please wiring is complete + verified end-to-end (Release PR #2 honored the 0.x lock). All remaining residuals are owner-gated, not agent-executable: pin/merge the first Release PR for a clean 0.1.0, the 1.0 graduation owner-go (flip the pre-major flags), and the credentialed npm publish of 0.1.0 (tracked in #2157)." }
 dateOpened: "2026-07-02"
 tags: [npm, publishing, ci, release-please, versioning, pr-flow]
 ---
