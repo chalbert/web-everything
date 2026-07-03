@@ -68,10 +68,13 @@ the per-item chat-rename — a batch labels the session **once**.
    --scope=<batch-slug>` (id-keyed, #957) both demote *concurrent* sessions' findings to non-failing notes
    and surface only your changeset, so the gate-red diagnosis below is deterministic, not a manual `grep
    errors + git status` triage. → capture leftovers via `scaffold …` (set their `blockedBy`
-   + a digest) → `resolve <NNN> [--graduated-to=…]` → **commit that item's files to its `commitTarget` repo**
-   (`git add <explicit paths>` then `git commit` — stage only this piece, never `git add -A`, never
-   `git push`; one commit per item; if your own file is dirty from a concurrent session, `git stash push --
-   <file>` → edit → commit → pop). Update the ledger (header tracks `cost <spent>/<budget>`). The `--select`
+   + a digest) → `resolve <NNN> [--graduated-to=…]` → **commit the item's files in its lane clone and open a
+   ready-to-merge PR** (#2183/#2190): each item is worked in an isolated lane clone (`node scripts/lane-pool.mjs`,
+   #2123), so commit only this piece there (`git add <explicit paths>`, never `git add -A`; one commit per
+   item), then `node scripts/pr-land.mjs --ref=lane/<batch-slug>-<NNN> --no-wait` and label it `ready-to-merge`.
+   **No commit to `main`, no `git push`, no inline merge** — a separate drain (`/merge`/`/drain`) lands the PRs
+   (see *backlog-workflow.md → the lane→PR close-out rule*). Update the ledger (header tracks `cost
+   <spent>/<budget>`). The `--select`
    pack prints a per-locus gate legend (`⌂ <locus> → <gateCommand> in <repoPath>`). See *backlog-workflow.md
    → Reporting / Keep the blocker DAG honest / The digest*.
 4. **At each seam, evaluate the stop rule** (below). On continue, re-read the next item fresh (drop only if
@@ -94,16 +97,11 @@ the per-item chat-rename — a batch labels the session **once**.
    never re-ask/block/guess) — then `node scripts/backlog.mjs calibrate --points=<cost resolved>
    --context-pct=<reading> --stop-reason=<which stop>`. Only a capacity stop (`budget`/`context`) trains the
    estimate; work-bound (`empty-pool`/`fork`/`gate`) is recorded but **excluded** (#553). No reading → **skip**
-   calibration (closing-session runs it for you otherwise). **Then PUBLISH `main` to origin — the gated
-   `pushIfGreen` (#2073):** the serial `/batch` commits each item's files to its `commitTarget` repo locally
-   and (a leftover of the pre-2026-06-29 never-push stance, now lifted) never pushed, so `origin/main`
-   silently drifts. This close is the natural green checkpoint: run `node scripts/push-if-green.mjs` once here
-   per repo you committed to (WE = default cwd; `--repo=~/workspace/frontierui --gate="npm run check:standards"`
-   / `--repo=~/workspace/plateau-app --gate="npm run build"` for a cross-repo item's `commitTarget`). It
-   re-gates that repo, then **ff-pushes its `main` to origin ONLY if green** — never `--force`, never a branch;
-   a red gate or non-ff leaves origin **untouched** and is reported (recoverable by a later green push). This is
-   the SAME shared helper the parallel integrator calls (Phase 4h); the push is generalized, the lane is not
-   (#2073 out-of-scope: lanes stay parallel-only). Skip only when nothing was committed this batch.
+   calibration (closing-session runs it for you otherwise). **Nothing to publish to `main` (#2190).**
+   Serial `/batch` no longer commits to `main`: each item landed as an **open ready-to-merge PR** from its lane
+   clone (step 3). So the close-out just reports those PRs — land them anytime with `/merge` (or `/drain`); the
+   batch neither pushes `main` nor waits on a drain. (Superseded: the old close-out `push-if-green` main-publish
+   — under #2183 the producer is no longer a publish site; the drain is the sole one.)
 
 **The stop rule (solid by construction)** — the **points budget is the sole driver**; stop the batch at a
 seam if (and ONLY if) ANY of these **four** holds (full text in *Running a batch* → *The stop rule*):
