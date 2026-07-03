@@ -84,6 +84,14 @@ export function isAiGeneratedPr(pr) {
   return substantive.length > 0 && substantive.every(isAiCommit);
 }
 
+/** Does this PR carry the given label? (#2196 producer-certification signal, e.g. `ready-to-merge`.) The gh
+ *  list surfaces labels as `[{ name }]`; tolerant of a missing/odd shape. Pure. */
+export function hasLabel(pr, label) {
+  if (!label) return false;
+  const labels = Array.isArray(pr?.labels) ? pr.labels : [];
+  return labels.some((l) => (typeof l === 'string' ? l : l?.name) === label);
+}
+
 /** Is the required `test` check green on this PR's rollup? (Other checks — cla, Workers Builds — are ignored.) */
 export function isRequiredCheckGreen(pr, requiredCheck = 'test') {
   const roll = Array.isArray(pr?.statusCheckRollup) ? pr.statusCheckRollup : [];
@@ -95,25 +103,38 @@ export function isRequiredCheckGreen(pr, requiredCheck = 'test') {
 
 /**
  * Classify one PR into a merge/skip verdict. Pure — no gh calls. Returns
- *   { num, title, decision: 'merge'|'skip', reason, aiGenerated, testGreen, state, mergeable }.
- * `decision === 'merge'` requires ALL of: AI-generated, required check green, mergeable, and a landable
+ *   { num, title, decision: 'merge'|'skip', reason, aiGenerated, certifyLabel, testGreen, state, mergeable }.
+ * `decision === 'merge'` requires ALL of: producer-certified, required check green, mergeable, and a landable
  * mergeStateStatus (CLEAN or UNSTABLE). Anything else is a `skip` with the first failing reason.
+ *
+ * PRODUCER CERTIFICATION (#2195, blockedBy #2196). "Certified" is EITHER of two independent signals:
+ *   - the `trustLabel` (`ready-to-merge`) is present — the producer step (#2196: every AI-edit path applies it
+ *     via the shared transport) certified the couple. This is the SOLE authorization the label lander scopes
+ *     to, so a labelled PR is collected on green+mergeable ALONE — MIXED human+AI authorship is allowed (the
+ *     over-strict every-commit-AI check wrongly skipped genuinely-AI PRs carrying one hand-authored commit,
+ *     observed: #40/#42). Safe only because the label is exclusively producer-applied (#2196).
+ *   - OR every substantive commit carries the `Co-Authored-By: Claude` trailer (`isAiGeneratedPr`) — the
+ *     signal the bare `/merge` orphan sweep relies on, where NO label is present. This branch is UNCHANGED:
+ *     an unlabelled mixed-authorship PR still SKIPS (strict gate preserved for the orphan sweep).
+ * Pass `trustLabel: null` to force the strict every-commit gate regardless of labels.
  */
-export function classifyPr(pr, { requiredCheck = 'test' } = {}) {
+export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-merge' } = {}) {
   const num = pr?.number;
   const title = pr?.title || '';
   const aiGenerated = isAiGeneratedPr(pr);
+  const certifyLabel = hasLabel(pr, trustLabel);
+  const certified = certifyLabel || aiGenerated; // #2195: the label OR the every-commit-AI trailer certifies
   const testGreen = isRequiredCheckGreen(pr, requiredCheck);
   const state = String(pr?.mergeStateStatus || '').toUpperCase();
   const mergeable = String(pr?.mergeable || '').toUpperCase();
   const landableState = state === 'CLEAN' || state === 'UNSTABLE'; // UNSTABLE = mergeable, only non-required checks red
   let decision = 'merge';
-  let reason = 'AI-generated, required check green, cleanly mergeable';
-  if (!aiGenerated) { decision = 'skip'; reason = 'not AI-generated (a commit lacks the Co-Authored-By: Claude trailer)'; }
+  let reason = certifyLabel ? `producer-certified (label "${trustLabel}"), required check green, cleanly mergeable` : 'AI-generated, required check green, cleanly mergeable';
+  if (!certified) { decision = 'skip'; reason = `not AI-generated (a commit lacks the Co-Authored-By: Claude trailer) and no "${trustLabel}" label`; }
   else if (!testGreen) { decision = 'skip'; reason = `required check "${requiredCheck}" is not green`; }
   else if (mergeable !== 'MERGEABLE') { decision = 'skip'; reason = `not mergeable (mergeable=${mergeable || 'UNKNOWN'})`; }
   else if (!landableState) { decision = 'skip'; reason = `merge state ${state || 'UNKNOWN'} (BEHIND⇒needs rebase, DIRTY/BLOCKED/DRAFT⇒not landable) — left for its author`; }
-  return { num, title, decision, reason, aiGenerated, testGreen, state, mergeable };
+  return { num, title, decision, reason, aiGenerated, certifyLabel, testGreen, state, mergeable };
 }
 
 /**
@@ -186,7 +207,7 @@ function runCli() {
   // List open PRs WITHOUT commits (commits×authors×limit overflows GitHub's GraphQL node cap), then fetch each
   // candidate's commits per-PR — the rollup + mergeable come from the list; commits (the AI gate) come per PR.
   const listArgs = ['pr', 'list', '--state', 'open', '--limit', '100',
-    '--json', 'number,title,headRefName,baseRefName,mergeable,mergeStateStatus,statusCheckRollup'];
+    '--json', 'number,title,headRefName,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels'];
   if (base) listArgs.push('--base', base);
   if (label) listArgs.push('--label', label);
   let prs;
