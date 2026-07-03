@@ -1,9 +1,10 @@
 ---
 kind: story
 size: 3
-status: active
+status: resolved
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
 locus: frontierui
 relatedTo: ["2019", "867", "2130"]
 relatedReport: reports/2026-07-02-a11y-ratchet-promotion-endgame.md
@@ -39,3 +40,32 @@ Full measurement + route inventory: `we:reports/2026-07-02-a11y-ratchet-promotio
 agent-memory leaf `we:.claude/agent-memory/ssr-card-dogfood-regressed-a11y-ratchet.md`. Discovered
 during #867 prep; #867's promotion of the 26 green warn-only routes does not depend on this fix, but
 the ratchet's "each conversion proven clean" claim does.
+
+## Resolution (2026-07-03)
+
+On current source only ONE of the two defects was still live; the other was already
+closed by intervening work, and the "5 red routes" reading was a **stale dev-server**
+artifact (the running `:8080` served pre-fix HTML), not the source state.
+
+1. **Badge `--tone-warning` contrast — FIXED (impl-first in FUI).** Darkened the
+   `frontierui:blocks/badge/Badge.ts` fallback `#9a6700`→`#8a5d00` (4.17:1 → 4.89:1
+   on the 12% color-mix tint). The WE mirror (`we:src/css/style.css`
+   `.fui-badge--warning`) was **already** `#8a5d00` from #2103, so the two are now in
+   lockstep — no WE-side style fork (acceptance met). NOTE: on the WE docs site the
+   SSR `.fui-badge--warning` is painted by WE's own `we:src/css/style.css` rule (a
+   plain `color:` declaration, not the `--_tone` var chain), so the FUI JS fallback
+   never governed the docs routes — this fix is the standalone/unthemed-FUI
+   correctness fix + the source-of-truth the WE mirror tracks. (Other `#9a6700` uses
+   in `frontierui:blocks/tag/Tag.ts` / `frontierui:blocks/meter/Meter.ts` / workbench
+   are out of this item's scope.)
+2. **Nested `<button>` on `/` — already fixed (no change needed).** The home grid was
+   reworked (#2168) to sentinel-splice the SHORT authored `summary` (fallback:
+   `description`), not the full HTML `description`;
+   `we:src/_data/projects/webisolation.json`'s `summary` carries no `&lt;button&gt;`,
+   so no live nested `<button>` is materialized. Verified by a direct
+   `renderProjectGrid` render (no `<button>`) and a fresh `build:docs`.
+
+Verification: full `npm run build:docs`, then axe (`wcag2a/2aa/21a/21aa`) against the
+freshly-built site for **all 10 ENFORCED_ROUTES** — every one GREEN. (`test:a11y`
+still lives outside `check:standards`; closing that gate gap is separate, tracked by
+the ratchet epic.)
