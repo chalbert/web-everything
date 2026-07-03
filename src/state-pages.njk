@@ -11,6 +11,7 @@ eleventyComputed:
 ---
 
 {% from "project-status.njk" import projectStatus %}
+{% from "we-component.njk" import weCard %}
 
 <div class="plug-detail-header">
     <div class="plug-detail-header-inner">
@@ -30,8 +31,7 @@ eleventyComputed:
 
 <div class="container block-detail-page">
     <div class="block-body content">
-        <div class="section-card fui-card">
-            {{ state.description | safe }}
-        </div>
+        {#- #2106: convert the section-card to the #2098 weCard SSR primitive. -#}
+        {{ weCard("", state.description, "", "section-card") }}
     </div>
 </div>

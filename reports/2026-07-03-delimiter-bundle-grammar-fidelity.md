@@ -14,10 +14,11 @@ interpolation recipes (`frontierui:plugs/webnodes/recipes/interpolationRecipes.t
 **Re-derivable:** `we:scripts/grammar-scorecard.mjs` re-emits this report; `--check` fails the gate on drift.
 
 > Bundle zero scores **100%** against its own native checklist (self-consistency — nothing to gap), and
-> exposes its real gaps only when scored against a *framework* checklist (Handlebars below): regions,
-> raw/unescaped output, partials, comments — the concrete increments the per-flavor bundle stories
-> (#2114–#2119) grow, and the mid-region-marker gap (`{{else}}`) whose decision card the first
-> confirming gap list earns (not a guess).
+> exposes its real gaps only when scored against a *framework* checklist (Handlebars, Vue, etc. below):
+> regions, raw/unescaped output, partials, comments — the concrete increments the per-flavor bundle
+> stories (#2114–#2119) grow, and the mid-region-marker gap (`{{else}}`) whose decision card the first
+> confirming gap list earns (not a guess). Vue is the firewall proof (#2119): its delimiter surface is
+> only `{{ }}` text interpolation — every other construct is attribute-keyed, out-of-scope per #2074.
 
 ## Summary
 
@@ -25,7 +26,8 @@ interpolation recipes (`frontierui:plugs/webnodes/recipes/interpolationRecipes.t
 | --- | --- | --- | --- |
 | FUI native | 100% | 2 / 2 | 0 |
 | Handlebars | 17% | 1 / 6 | 2 |
-| Angular | 10% | 1 / 10 | 3 |
+| Liquid/Jinja | 100% | 7 / 7 | 3 |
+| Vue | 100% | 1 / 1 | 7 |
 
 > Checklist data: `we:design-systems/grammars/fui-native.grammar.json`.
 
@@ -75,39 +77,50 @@ None — every in-scope construct reproduces. (Expected only for a trivial gramm
 
 ---
 
-> Checklist data: `we:design-systems/grammars/angular.grammar.json`.
+> Checklist data: `we:design-systems/grammars/liquid-jinja.grammar.json`.
 
-## Grammar fidelity — Angular
+## Grammar fidelity — Liquid/Jinja
 
-**Fidelity: 10%** (1/10 in-scope constructs reproduce through the #2074 recipe model; 3 out-of-scope-per-statute).
+**Fidelity: 100%** (7/7 in-scope constructs reproduce through the #2074 recipe model; 3 out-of-scope-per-statute).
+
+| construct | nature | verdict | recipe |
+| --- | --- | --- | --- |
+| `{{ expr }}` | value | ✓ reproduced | LiquidJinjaInterpolationNode |
+| `{% for … %}…{% endfor %}` | children | ✓ reproduced | LiquidJinjaForRegionNode |
+| `{% if … %}…{% endif %}` | children | ✓ reproduced | LiquidJinjaIfRegionNode |
+| `{% block … %}…{% endblock %}` | children | ✓ reproduced | LiquidJinjaBlockRegionNode |
+| `{% raw %}…{% endraw %}` | children | ✓ reproduced | LiquidJinjaRawRegionNode |
+| `{% comment %}…{% endcomment %}` | children | ✓ reproduced | LiquidJinjaCommentRegionNode |
+| `{# comment #}` | marker | ✓ reproduced | JinjaInlineCommentNode |
+| `{{ x | filter }} expression filter/pipe` | value | — out-of-scope | — |
+| `{% include %} / {% extends %}` | marker | — out-of-scope | — |
+| `class="{{ x }}" attribute interpolation` | value | — out-of-scope | — |
+
+### Gap list
+
+None — every in-scope construct reproduces. (Expected only for a trivial grammar like bundle zero.)
+
+
+---
+
+> Checklist data: `we:design-systems/grammars/vue.grammar.json`.
+
+## Grammar fidelity — Vue
+
+**Fidelity: 100%** (1/1 in-scope constructs reproduce through the #2074 recipe model; 7 out-of-scope-per-statute).
 
 | construct | nature | verdict | recipe |
 | --- | --- | --- | --- |
 | `{{ expr }}` | value | ✓ reproduced | MustacheInterpolationNode |
-| `@if (cond) { … }` | children | ✗ gap | — |
-| `@else { … }` | children | ✗ gap | — |
-| `@else if (cond) { … }` | children | ✗ gap | — |
-| `@for (item of items) track item { … }` | children | ✗ gap | — |
-| `@empty { … }` | children | ✗ gap | — |
-| `@switch (expr) { … }` | children | ✗ gap | — |
-| `@case (val) { … }` | children | ✗ gap | — |
-| `@default { … }` | children | ✗ gap | — |
-| `@defer { … }` | children | ✗ gap | — |
-| `[prop] property binding` | marker | — out-of-scope | — |
-| `(event) event binding` | marker | — out-of-scope | — |
-| `*ngIf structural directive` | children | — out-of-scope | — |
+| `v-if / v-else-if / v-else structural directives` | children | — out-of-scope | — |
+| `v-for iteration directive` | children | — out-of-scope | — |
+| `:prop / v-bind data-binding` | value | — out-of-scope | — |
+| `@event / v-on event-binding` | marker | — out-of-scope | — |
+| `v-model two-way binding` | value | — out-of-scope | — |
+| `v-html raw output directive` | value | — out-of-scope | — |
+| `class="{{ x }}" attribute interpolation` | value | — out-of-scope | — |
 
-### Gap list — constructs the recipe model cannot express (the standard increment)
+### Gap list
 
-| construct | nature | reason | note |
-| --- | --- | --- | --- |
-| `@if (cond) { … }` | children | unclaimed | no bundle recipe declares static open "@if" |
-| `@else { … }` | children | unclaimed | no bundle recipe declares static open "@else" |
-| `@else if (cond) { … }` | children | unclaimed | no bundle recipe declares static open "@else if" |
-| `@for (item of items) track item { … }` | children | unclaimed | no bundle recipe declares static open "@for" |
-| `@empty { … }` | children | unclaimed | no bundle recipe declares static open "@empty" |
-| `@switch (expr) { … }` | children | unclaimed | no bundle recipe declares static open "@switch" |
-| `@case (val) { … }` | children | unclaimed | no bundle recipe declares static open "@case" |
-| `@default { … }` | children | unclaimed | no bundle recipe declares static open "@default" |
-| `@defer { … }` | children | unclaimed | no bundle recipe declares static open "@defer" |
+None — every in-scope construct reproduces. (Expected only for a trivial grammar like bundle zero.)
 

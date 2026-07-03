@@ -30,3 +30,5 @@ Constellation & Placement cluster — open a leaf with `node scripts/memory-reso
 - 96. Repo Constellation — WE (standard+plugs)→Frontier UI (impl)→plateau-app (product); legacy `plateau` ABANDONED
 - 97. Reusable Home Rule — reusable→plateau; impl-specific→its impl; #1788
 - 139. Component Substrate Boundary — per-component Q = a placement: WE contract / FUI primitive / product component; deliver a composed web component NEVER a classname; title/footer=product; #1886
+- ["WE" = standard AND website-app](we-standard-vs-website-app-confusion.md) — name conflates the zero-impl standard with the 11ty app that renders it; disambiguate which WE per fork; #2006
+- [Impl details are not forks](impl-details-are-not-forks.md) — a fork is only what's observable across the impl boundary; how it's built is a black-box default; wire format = swap seam; #2030
