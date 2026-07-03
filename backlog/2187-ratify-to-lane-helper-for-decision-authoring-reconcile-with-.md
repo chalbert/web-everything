@@ -22,15 +22,18 @@ The now-active #2123 guard (`we:scripts/guard-lane.mjs`) DENIES `Edit`/`Write` o
 is exactly what "author a decision directly in `main`" requires. (Note: the guard hooks only the `Edit`/`Write`
 tools, not script/`git` writes via `Bash`, so this bites the *authoring* keystrokes specifically.) Two options:
 
-- **Default — a guard exemption for decision-authoring.** Teach `we:scripts/guard-lane.mjs` to allow primary-
-  tree edits when the target is a decision item + its codified docs (or under an explicit
-  `DECISION_AUTHORING=1` the skill sets), so the live-preview-in-main loop is kept and only the *ratify*
-  moves to a lane. Cost: a real hole in the uniform #2123 rule — must be scoped tightly (decision files +
-  `we:docs/agent/platform-decisions.md` only) so it can't become a general escape hatch.
-- **Alternative — decisions author in a dedicated preview lane.** No exemption; a decision is authored in a
-  reserved "preview" lane whose dev server is the review URL, and ratify just opens its PR. Cost: loses the
-  "edit the primary tree the user is looking at" immediacy that motivated the carve-out; needs the lane's
-  render proxied to the primary review port.
+- **Default — decisions author in a dedicated preview lane.** No exemption to #2123: a decision is authored in
+  a reserved "preview" lane, and **at claim the lane's dev server is auto-launched and its rendered
+  `/backlog/<NNN>/` page auto-opened** (the manual flow demoed 2026-07-03, which "worked well enough"). Ratify
+  just opens the lane's PR. The one-time cost that made this look clunky — "you'd review a lane URL, not the
+  primary tree" — is a *tooling* problem now solved two ways (see below), so #2123 stays **uniform, no
+  carve-out** — the exact stance #2123 ratified.
+- **Alternative — a guard exemption for decision-authoring.** Teach `we:scripts/guard-lane.mjs` to allow
+  primary-tree edits when the target is a decision item + its codified docs (gated behind an explicit
+  `DECISION_AUTHORING=1` the skill sets), keeping the live-preview-*in-main* loop with zero extra process.
+  Cost: a **standing hole in #2123** — it literally re-opens the content-session carve-out #2123 ruled
+  *against*; even scoped to decision files + `we:docs/agent/platform-decisions.md`, an allowlist is a
+  permanent exception to maintain.
 
 ## The helper (either way)
 
@@ -51,20 +54,31 @@ ergonomics + how big a hole in #2123 is acceptable, not about new infrastructure
   loud. This is strictly narrower + safer than the existing `LANE_GUARD_OFF` blunt bypass it would largely
   replace for this use. **Risk to weigh:** any allowlist is a standing hole; the mitigation is the tight path
   scope + the explicit env gate + a log line on each exempted write.
-- **Preview-lane (the alternative) reuses the #2139 lane-port proxy.** The pool already forwards a
+- **Preview-lane (the default) reuses the #2139 lane-port proxy + `we:scripts/lane-pool.mjs`.** The pool already
+  provisions a persistent lane (+ the #2166 FUI sibling for SSR), and the #2139 proxy already forwards a
   lane-claimed item's `/backlog/<NNN>/` page to the owning lane's dev server (`we:.claude/lane-ports.json` +
-  `we:vite.config.mts` `lanePageProxy`, #2139) so `:3000` stays the single review URL, and `we:scripts/lane-pool.mjs`
-  already provisions a persistent lane (+ the #2166 FUI sibling for SSR). So a reserved "decision-preview" lane
-  is mostly wiring the skill to author there and `map` its page-port — no new render infra. **Cost to weigh:**
-  the author edits a lane clone, not the exact primary tree the human is looking at, reintroducing the
-  one-hop indirection direction-point 4 explicitly wanted to remove; and it needs a durable preview-lane
-  reservation lifecycle.
+  `we:vite.config.mts` `lanePageProxy`) so **`:3000` stays the single review URL**. So a "decision-preview"
+  lane is mostly wiring the decision claim to author there + `map` its page-port — no new render infra. The
+  indirection worry is gone: at claim the skill provisions/reuses the preview lane, **launches its dev server,
+  and opens the decision's rendered page** — either at `:3000` (via the #2139 proxy) or a lane port. Live HMR
+  on `.md`/`.njk` edits reloads it exactly as the primary tree would. **Residual cost:** a dev server per
+  active decision (cheap, and auto-managed) + the claim-time launch/open tooling (small, and broadly useful —
+  ANY item claim could auto-open its rendered page).
 
-**Recommended default — guard-exemption (scoped + env-gated).** It preserves the live-preview-*in-main*
-authoring loop that motivated direction-point 4 verbatim, is the smaller change (the guard already has the
-path-test + escape-hatch machinery), and replaces the *blunter* `LANE_GUARD_OFF` bypass for this path with a
-*narrower* one — a net tightening, not just a new hole. Pick the preview-lane only if any standing
-primary-tree write exemption is deemed unacceptable under the #2123 "uniform, no carve-out" ruling.
+### The claim-time mechanism (spec for the default)
+
+On a **decision claim** (`claim <NNN>` for a `kind:decision`, or `--as=preparing`): (1) provision/reuse the
+reserved preview lane (`we:scripts/lane-pool.mjs`), `reset --hard origin/main`; (2) `map` the item → the lane's
+page-port (#2139) so `:3000/backlog/<NNN>/` proxies to it; (3) launch the lane's dev server if not already up;
+(4) **open the rendered `/backlog/<NNN>/` page** in the browser. Authoring edits land in the lane (HMR live);
+**ratify** runs the `ratify → lane` helper (below) to open the lane's ready-to-merge PR and clear the preview.
+The auto-open is generalisable — a nice DX default for any claim — but for decisions it IS the review loop.
+
+**Recommended default — preview-lane (with claim-time auto-launch + auto-open).** It keeps #2123 **truly
+uniform** (no decision-authoring carve-out — the stance #2123 ratified), reuses machinery that already exists
+(the pool + the #2139 proxy), and the ergonomic gap that once favoured the exemption is closed by the
+claim-time tooling (validated live 2026-07-03). Pick the guard-exemption only if the extra dev-server /
+claim-tooling is judged not worth avoiding a *tightly-scoped, env-gated* standing exception.
 
 **Definition-of-ready:** the two options are stated with tradeoffs + a bold default, each grounded in the
 exact existing mechanism it reuses; the residual is a single owner call (accept a tightly-scoped exemption vs.
