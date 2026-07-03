@@ -21,7 +21,7 @@
  * frontierui / plateau-app — the constellation) reuses this unchanged via `--repo=<checkout-path>`.
  *
  * Usage:
- *   node scripts/lane-pool.mjs provision --count=N [--no-install]   # ensure N lanes exist (clone missing) + refresh all + ensure deps
+ *   node scripts/lane-pool.mjs provision --count=N [--no-install]   # ensure N lanes exist (clone missing) + refresh all + ensure deps + ensure the WE pool's FUI render-sibling (#2166)
  *   node scripts/lane-pool.mjs refresh           [--no-install]     # fetch + hard-reset existing lanes to origin/main (no creation)
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps
  *   node scripts/lane-pool.mjs list    [--json]                     # existing lane paths (for the orchestrator to dispatch into)
@@ -38,11 +38,11 @@
  *   --branch=<ref>       integration branch (default: detected origin/HEAD, else `main`)
  *   env LANE_POOL_ROOT   pool root (default: ~/workspace/.lanes)
  */
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync, readlinkSync, symlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { join, basename, resolve } from 'node:path';
+import { join, basename, resolve, dirname } from 'node:path';
 
 // ── tiny arg parsing ──────────────────────────────────────────────────────────────────────────────
 const [, , cmd, ...rest] = process.argv;
@@ -123,6 +123,70 @@ function writeLaneEnv(repo, n) {
   const contents = laneEnvLocal(repo, n);
   if (contents === null) return;
   writeFileSync(join(laneDir(repo, n), '.env.local'), contents);
+}
+
+// ── FUI sibling for the WE pool (#2166) — the unconditional SSR component-render dependency ─────────
+// Every WE grid page SSRs through the pinned FUI build-artifact, resolved by
+// `scripts/lib/component-render-build-hook.cjs` at the FIXED relative path `../frontierui/dist/tools/
+// component-render/cli.mjs` — i.e. a `frontierui` checkout SIBLING of the WE repo root. In the primary
+// checkout that sibling is `~/workspace/frontierui`; but a lane clone lives at `<poolDir>/lane-N`, whose
+// parent (`<poolDir>`) has no `frontierui` — so `build:docs` / `eleventy --serve` / any rendered
+// verification HARD-FAILS in a solo/interactive WE lane ("pinned FUI artifact missing"). The #1943
+// orchestrator only provisions per-repo pools for items whose *impl* spans FUI; this render dependency is
+// UNCONDITIONAL (independent of whether the edited item touches FUI), so it can't be gated behind that
+// affected-repo detection — the pool itself must carry the sibling.
+//
+// Fix (#2166): on provision/refresh of the WE pool, ensure `<poolDir>/frontierui` is a symlink to the
+// primary checkout's real `frontierui` sibling (built via its `npm run build:tools`). One symlink at the
+// pool root serves EVERY lane (each `lane-N`'s `../frontierui` resolves to it), replacing the hand-run
+// `ln -sfn ~/workspace/frontierui ~/workspace/.lanes/web-everything/frontierui` documented in
+// docs/agent/testing.md. Idempotent: a correct existing link is left untouched; a stale/wrong link is
+// repointed. Only the WE pool (identified by a PORT_BANDS entry — the same signal that marks the
+// env-driven dev band) provisions a sibling; other pools no-op.
+//
+// The sibling is a SYMLINK, not a clone: the artifact is a locked build output the human keeps built in
+// their primary FUI checkout, and pointing every lane at that one real tree avoids N stale FUI clones and
+// N `build:tools` runs. If the primary sibling is absent we WARN (not fail) — the pool is still usable for
+// non-render work, and the warning tells the human to build FUI.
+function primaryFuiSibling(repo) {
+  // FUI is the sibling of the PRIMARY WE checkout (the pool's reference repo), e.g.
+  // ~/workspace/webeverything → ~/workspace/frontierui.
+  return join(dirname(repo.referencePath), 'frontierui');
+}
+function ensureFuiSibling(repo) {
+  if (!PORT_BANDS[repo.name]) return; // not the WE pool → no unconditional render dependency
+  const source = primaryFuiSibling(repo);
+  const link = join(repo.poolDir, 'frontierui');
+  if (!existsSync(source)) {
+    log(
+      `  ⚠ FUI sibling source ${source} not found — WE lane build:docs/dev-serve will fail until FUI is ` +
+        `present & built (\`cd ${source} && npm run build:tools\`). Skipping symlink.`,
+    );
+    return;
+  }
+  // Already a symlink? Repoint only if it targets the wrong place (idempotent).
+  let existing = null;
+  try {
+    existing = lstatSync(link);
+  } catch {
+    existing = null;
+  }
+  if (existing && existing.isSymbolicLink()) {
+    let target = null;
+    try {
+      target = readlinkSync(link);
+    } catch {
+      target = null;
+    }
+    if (target && resolve(dirname(link), target) === resolve(source)) return; // correct link → leave it
+    rmSync(link, { force: true });
+  } else if (existing) {
+    // A real dir/file squats the sibling path — don't clobber a non-symlink; warn and bail.
+    log(`  ⚠ ${link} exists and is not a symlink — leaving it; FUI sibling not (re)linked.`);
+    return;
+  }
+  symlinkSync(source, link);
+  log(`  linked FUI sibling ${link} → ${source} (#2166)`);
 }
 
 // ── lane-ports registry (#2139) — item → lane page-port mapping for the main-checkout proxy ─────────
@@ -256,6 +320,7 @@ function cmdProvision(repo) {
     writeLaneEnv(repo, n);
     if (!flags['no-install']) ensureDeps(laneDir(repo, n));
   }
+  ensureFuiSibling(repo); // one FUI sibling at the pool root serves every WE lane (#2166)
   printStatus(repo);
 }
 
@@ -269,6 +334,7 @@ function cmdRefresh(repo) {
     writeLaneEnv(repo, n);
     if (!flags['no-install']) ensureDeps(laneDir(repo, n));
   }
+  ensureFuiSibling(repo); // keep the WE pool's FUI sibling current on refresh too (#2166)
   printStatus(repo);
 }
 
