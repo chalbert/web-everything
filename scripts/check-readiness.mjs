@@ -24,6 +24,7 @@ import { dirname, join } from 'node:path';
 import { computeReadiness, computeSelection, computeBatchPack, buildReadinessReport, spliceStaleEdges } from './readiness/engine.mjs';
 import { parseReservations, emptyState, foreignHolds, deprioritizeReserved } from './readiness/reservations.mjs';
 import { LOCI } from './check-standards-rules.mjs';
+import { checkMainStaleness } from './lib/main-staleness.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -73,6 +74,16 @@ const BUDGET_OVERRIDE = (() => {
 })();
 
 const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', DIM = '\x1b[2m', CYA = '\x1b[36m', BLD = '\x1b[1m', RST = '\x1b[0m';
+
+// #2204 — fetch-first staleness guard: the ranker picks/orders against local backlog files, so a local `main`
+// behind `origin/main` ranks against WRONG item state (missing/resolved-looking/clobbered-looking ids). Fetch
+// first and either fast-forward a clean checkout (so the load below reads fresh) or warn loudly. Fail-soft:
+// offline → silent skip; a dirty/diverged tree is warned about, never touched. `--no-fetch` opts out (CI/tests).
+if (!process.argv.includes('--no-fetch')) {
+  const st = checkMainStaleness({ autoFf: true });
+  if (st.warning) console.error(`${YEL}${BLD}⚠ ${st.warning}${RST}`);
+  else if (st.synced) console.error(`${DIM}· fetched — local main fast-forwarded ${st.behind} commit(s) to origin/main before ranking${RST}`);
+}
 
 const items = typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog;
 const report = computeReadiness(items);
