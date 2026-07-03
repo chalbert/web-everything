@@ -52,6 +52,7 @@ import {
   validatePlugWeFuiDrift, PLUG_SHARED_CORE_FILES,
   scanRepoLocusPrefixes, REPO_LOCUS_PREFIX_ENFORCED,
   classifySurfacePaths,
+  validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -882,6 +883,25 @@ const backlogReportRefs = new Set(
 {
   const { errors: re } = validateReportsNotHidden(reportFiles, { researchIds, backlogReportRefs });
   for (const e of re) err(e.message, e.descriptor);
+}
+
+// ── 6e-ii. Untracked derived artifacts — local-vs-CI divergence guard (#2180) ──────────────────────
+// `check:standards` reads the working tree. On a dev machine, authored-but-never-committed files in
+// `reports/`, `src/_data/researchTopics/`, or `src/_includes/research-descriptions/` make existence and
+// inventory checks pass locally while a fresh CI clone (no untracked files) fails. This sub-check
+// surfaces that gap BEFORE push, so the developer can commit the paired artifacts. The git invocation
+// lives here (an fs concern); the pure classifier lives in validateUntrackedDerivedArtifacts (#2180).
+// Skipped when `git ls-files` is unavailable (e.g. non-git environments).
+try {
+  const untrackedRaw = execFileSync(
+    'git', ['ls-files', '--others', '--exclude-standard', '--', ...DERIVED_ARTIFACT_DIRS],
+    { cwd: ROOT, encoding: 'utf8' },
+  );
+  const untrackedPaths = untrackedRaw.split('\n').filter(Boolean);
+  const { errors: ue } = validateUntrackedDerivedArtifacts(untrackedPaths);
+  for (const e of ue) err(e.message, e.descriptor);
+} catch (e) {
+  // `git` unavailable or not a git repo — skip gracefully (not a gate failure).
 }
 
 // ── 6f. Repo-locus prefix on code-path references (#884, enforces #883; #880 slice B) ─
