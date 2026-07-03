@@ -2512,6 +2512,23 @@ escalation/sampling layer. Wired at the workflow-lane seam (`laneItemPrompt` ste
 
 **Rider — deferred merge queue: producers stop at lane-push, a human-drained unified command lands (#2138, ratified 2026-07-02).** The "auto-merge on gate-green" landing above binds the merge **authority** (the gate is the sole landing decision — no per-item human review, no hand-resolved merge) and its green **precondition** — **not the trigger *instant*.** Drain *cadence* (inline / deferred-batch / later-scheduled) is a separate dimension the #1996 clause never addressed; **default deferred-batch**: every lane-producing session — parallel `/workflow` and solo #2123 lanes alike — stops at "lane pushed + marked ready-to-merge" and **never touches `main`**, and a **human-launched unified drain** lands the accumulated queue serially under the existing integrator contract (full gate on the merged tree per merge, impl-first/WE-last, rebase-and-retry). This removes the two-concurrent-run race on the shared primary checkout and decouples a session's end from the 20–70-min integration. A future reader citing the "auto-merge **on gate-green**" bullet must read it as authority + precondition, **not** a timing binding. Sub-mechanics: **(Fork 2)** each item's cross-repo shape lives in a standalone `we:.lane-manifest.json` committed in the WE lane commit (a one-sided add that preserves the #1869 conflict-free WE-lane merge; the drain deletes it at landing); **(Fork 4)** "ready-to-merge" is a **local** queued token written at push (`we:claims.json`-adjacent, read offline — preserves Rule #105 "claim ignores git state"), with `lane/*` refs deleted at a **single point** after the whole couple's WE resolve is confirmed reachable on `main` (no `ls-remote` on the ownership hot path, no `status:queued` main-write during the queued window); **(Fork 5)** ready lanes open **self-approved PRs** (0 required reviewers + a required CI check) purely as the review/CI surface, but the **GitHub native merge queue stays OFF** — it is a *branch-level* setting that would grab a couple's WE-half PR out of impl-first/WE-last order and split the gate into two non-identical environments — and the **custom drain owns every merge** in couple-order; pure local `git merge` is the retained fallback. **Fork 3** (merge-risk lock lifetime under deferred landing) is codified as an amendment against [#merge-risk-optimistic-with-targeted-lock](#merge-risk-optimistic-with-targeted-lock). Successor to #2123's carried claim-locus + lane before-state mechanics and owner of the #2138 Fork-5 substrate arm (#2151 CI-on-PR, #2152 branch protection, #2153 PR drain). Report `we:reports/2026-07-02-deferred-merge-queue-substrate.md`.
 
+**Rider — all edits behind ready-to-merge PRs; the drain is fully decoupled (#2183, ratified 2026-07-03).**
+Generalizes the deferred-queue rider to its endpoint. **Every** edit path — `/workflow`, `/next`, serial
+`/batch`, `/slice`, `/pr` — routes edit work through a lane clone → **ready-to-merge PR**; the producer
+**never** integrates inline, **never** commits to `main`, and **never** launches or waits on the drain. A run
+completes when every item is an open ready-to-merge PR, and the system is **correct with zero drains running**
+— the PRs sit until *some* drain (`/merge`, `/drain`, or CI auto-merge) lands them, after which local `main`
+pulls. This gives a **stable live-preview `main`** that changes only on merge (never churned mid-edit — the
+core simplification). **Supersedes** #2138's / #2174's default-OFF-until-proven *inline-fallback* stance
+(there is no inline integrate to fall back to once edits are PR-only) and **retires the disjoint-partition
+producer machinery** (#1933) — with PR-per-item + a serial drain that rebase-retries, git-at-drain-time is the
+sole arbiter. The ready-to-merge **signal is a PR label** (F1), so `/merge` and the drain converge on one
+label-scoped lander that merges in cross-item `blockedBy` order (#2188). **Decision-authoring** is the one
+special case — see the #2187 rider (preview lane; #2123 stays uniform). Delivered by **#2189** (/workflow PR
+fan-out, drop partition), **#2190** (per-path routing for `/next` / serial `/batch` / `/slice`), **#2188**
+(/merge↔drain label-lander convergence), **#2187** (decision preview lane). Reshapes #104
+(commit-on-current-branch → lane-clone-HEAD; `main` advances only via PR merge).
+
 ---
 
 ### Behaviour/event attribute *names* are colon-namespaced — a collision-safe internal authoring spelling, not the platform-shaped standard proposal {#attribute-name-colon-namespacing}
