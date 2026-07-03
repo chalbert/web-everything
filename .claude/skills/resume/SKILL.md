@@ -14,7 +14,10 @@ couple to the normal drain transport.
 ## Preconditions
 
 - Run the mechanical parts from an **isolated clean clone on `main`** — never the shared primary checkout
-  (#2197: a dirty primary makes the housekeeping `git pull` conflict). Provision one outside `.lanes/`.
+  (#2197: a dirty primary makes the housekeeping `git pull` conflict and strands the tree mid-merge).
+  Provision one outside `.lanes/` and **never `git pull` in the primary** — all fetch/rebase/sync happens in
+  the clone. (Env setup for the finisher — symlink `node_modules` + a sibling `../frontierui` — is in the
+  finisher playbook below.)
 - `gh` authenticated (`gh auth status`). Landing goes through the same self-approved transport as `/drain`
   (`scripts/merge-ai-prs.mjs` / `scripts/pr-land.mjs`).
 - The single-branch guard forbids `git checkout <branch>` / `git switch` / worktrees in shared checkouts. A
