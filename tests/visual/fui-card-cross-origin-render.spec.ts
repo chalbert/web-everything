@@ -16,6 +16,14 @@
 // The CLI harness `scripts/dev/render-check.mjs` is the landing-gate form (boots its own server); this
 // spec reuses the already-running docs server (playwright.config.ts REUSES, never kills it) on :8080,
 // like the a11y/smoke/visual-snapshot lanes. Shares the classifier with the harness + the unit test.
+//
+// This spec covers the BUILD-TIME coupled-pair fixture (a WE-own home tile whose token VALUES are derived
+// from FUI cross-repo at build). The RUNTIME cross-origin iframe path — a `.fui-card` painted INSIDE a
+// live cross-origin FUI demo frame (#1895 proper, #2081) — is exercised by the harness's `--fui-iframe`
+// mode (`node scripts/dev/render-check.mjs --fui-iframe [--simulate-regression]`), which boots a WE+FUI
+// pair on env-driven lane ports (#2142) and asserts the same classifier over the cross-origin frame's
+// shadow-rooted card. It stays a CLI-harness check (not a spec) because it boots a FUI vite server, which
+// this "reuse a running server, never boot" suite intentionally does not do.
 
 import { test, expect } from '@playwright/test';
 import { classifyCardSurface, FUI_DARK_CARD } from '../../scripts/lib/render-check.mjs';
