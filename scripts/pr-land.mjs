@@ -41,6 +41,7 @@
  *   node scripts/pr-land.mjs --ref=lane/… --dry-run                       # print the exact gh command sequence, execute nothing
  *   node scripts/pr-land.mjs --ref=lane/… --fallback-git                  # on gh failure / unmergeable, local git-merge + push instead
  *   node scripts/pr-land.mjs --ref=lane/… --no-heal                       # skip the post-land id-collision self-heal (#2071)
+ *   node scripts/pr-land.mjs --ref=lane/… --no-regen                      # skip the post-land derived-artifact regen (#2182)
  *   node scripts/pr-land.mjs --ref=lane/… --no-label                      # do NOT apply the ready-to-merge label (#2196) — e.g. a PR that must stay human-reviewed
  *   node scripts/pr-land.mjs --ref=lane/… --label=<name>                  # apply a different label than the default `ready-to-merge`
  *   node scripts/pr-land.mjs --ref=lane/… --json                          # machine-readable result
@@ -98,6 +99,12 @@ const BODY = typeof flags['body-file'] === 'string'
 // manual land all self-heal, not only the batch workflow. ON by default for a real land; `--no-heal` opts
 // out. Never runs on --dry-run / --no-wait (nothing merged) by construction.
 const HEAL = !flags['no-heal'];
+// Post-land derived-artifact regen (#2182). After a clean merge, regenerate the WE derived artifacts once
+// (the AGENTS.md inventory block via gen:inventory; src/_data/referenceIndex.json via gen:reference-index)
+// — the same generators the drain's Phase 4c runs, now folded into every land route so a `/pr`- or
+// manually-landed change whose inputs feed a derived artifact never leaves `main` with stale output.
+// Gate behind `--no-regen` to allow opt-out (mirrors `--no-heal`). Never runs on --dry-run / --no-wait.
+const REGEN = !flags['no-regen'];
 // The producer-certified `ready-to-merge` label (#2196) — applied to every opened PR so the label lander
 // (/drain) can collect ALL AI-generated work, whatever session opened it. `--no-label` opts out; `--label=<n>`
 // overrides the name. Default on.
@@ -161,6 +168,17 @@ export function buildRenumberHealArgs() {
   return ['scripts/backlog-renumber-collisions.mjs', '--json'];
 }
 
+/** The set of derived-artifact regen commands to run after a clean merge (#2182). Mirrors the drain's
+ *  `DERIVED_REGEN` exactly — kept in lock-step so every land route (this CLI, `/pr`, `/drain` which reuses
+ *  this) regenerates the same artifact set that the drain's Phase-4c step has always regenerated. Pure —
+ *  returns an array of `[cmd, ...args]` tuples (same shape as `lane-drain.mjs`'s DERIVED_REGEN). */
+export function buildRegenArgs() {
+  return [
+    ['npm', 'run', 'gen:inventory'],
+    ['npm', 'run', 'gen:reference-index'],
+  ];
+}
+
 /**
  * Classify `gh pr checks --json state,bucket` output (array of check rows) into a merge decision. Pure.
  *  - `pending` — at least one check still running/queued → wait.
@@ -222,6 +240,8 @@ function runCli() {
         LABEL ? `gh pr edit <pr> --add-label ${LABEL}   # #2196 producer-certified ready-to-merge label` : '(--no-label: PR opened UNlabelled — not collected by the label lander)',
         WAIT ? 'poll: gh pr checks <pr> --json state,bucket  (wait until passed; abort on fail)' : '(--no-wait: skip check-wait, leave for a later drain pass)',
         WAIT ? `gh ${mergeArgsPreview.join(' ')}` : null,
+        HEAL ? 'post-land: id-collision heal (backlog-renumber-collisions.mjs --json)' : '(--no-heal: skip id-collision heal)',
+        REGEN ? `post-land: derived-artifact regen (${buildRegenArgs().map((c) => c.join(' ')).join(', ')})` : '(--no-regen: skip derived-artifact regen)',
         FALLBACK_GIT ? `fallback on failure: git merge --no-ff ${REMOTE}/${REF} + push ${REMOTE} ${BASE}` : null,
       ].filter(Boolean),
       detail: `would land ${SRC} (${refSha.slice(0, 8)}) onto ${BASE} via a self-approved PR from ${REF}`,
@@ -289,12 +309,19 @@ function runCli() {
 
   const heal = HEAL ? runHeal() : null;
   if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
+  const regen = REGEN ? runRegen() : null;
+  if (regen && regen.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${regen.warning}\n`);
   emit({
     repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD, label: LABEL, labelApplied,
     healed: heal && heal.healed ? heal.renumbered : [],
     ...(heal && heal.warning ? { healWarning: heal.warning } : {}),
+    regenDone: regen ? regen.done : [],
+    regenFailed: regen ? regen.failed : [],
+    ...(regen && regen.warning ? { regenWarning: regen.warning } : {}),
     detail: `merged PR #${prNum} (${REF}) into ${BASE} via self-approved PR (${METHOD}), deleted the ref`
-      + (heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : ''),
+      + (heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : '')
+      + (regen && regen.done.length > 0 ? `; regenerated: ${regen.done.join(', ')}` : '')
+      + (regen && regen.failed.length > 0 ? `; regen failed (non-fatal): ${regen.failed.map((f) => f.cmd).join(', ')}` : ''),
   }, 0);
 
   // Fallback path (#2138 Fork 5 (a)): local git merge + push when gh is the problem.
@@ -307,7 +334,9 @@ function runCli() {
       gitC(['push', REMOTE, `${BASE}:${BASE}`]);
       const heal = HEAL ? runHeal() : null;
       if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
-      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : ''}` }, 0);
+      const regen = REGEN ? runRegen() : null;
+      if (regen && regen.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${regen.warning}\n`);
+      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), regenDone: regen ? regen.done : [], regenFailed: regen ? regen.failed : [], ...(regen && regen.warning ? { regenWarning: regen.warning } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : ''}${regen && regen.done.length > 0 ? `; regenerated: ${regen.done.join(', ')}` : ''}${regen && regen.failed.length > 0 ? `; regen failed (non-fatal): ${regen.failed.map((f) => f.cmd).join(', ')}` : ''}` }, 0);
     } catch (e) {
       emit({ repo: REPO, merged: false, reason: 'fallback-failed', detail: `${detail}; git-merge fallback ALSO failed (${String(e.message || e).split('\n')[0]}) — ${BASE} left untouched` }, 3);
     }
@@ -347,5 +376,37 @@ function runCli() {
       gitC(['push', REMOTE, `HEAD:${BASE}`]);
     } catch (e) { return { healed: false, renumbered, warning: `id collision healed + committed but push to ${BASE} failed (${firstLine(e)}) — re-run pr-land or push by hand (no force-push)` }; }
     return { healed: true, renumbered };
+  }
+
+  // Post-land derived-artifact regen (#2182). After a clean merge, run the same deterministic generators
+  // the drain's Phase 4c runs — once per land so every land route (this CLI, `/pr`, `/drain`) keeps `main`
+  // free of stale derived output. Mirrors the drain's `regenDerived()`: best-effort, never fatal. If
+  // anything changed, commit + push (the generators are deterministic — a diff means the inputs changed).
+  // A regen problem is REPORTED but NEVER fails the land (the merge already succeeded).
+  function runRegen() {
+    const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
+    // Sync to post-merge main so we regenerate against the LANDED tree (same tree the drain regen targets).
+    // Skip if dirty — a dirty tree means we'd be generating against uncommitted input, which is wrong.
+    const dirty = tryGit(['status', '--porcelain']);
+    if (dirty && dirty.trim()) return { warning: `skipped derived-artifact regen — the checkout at ${REPO} has local changes; run npm run gen:inventory && npm run gen:reference-index on ${BASE} by hand` };
+    try {
+      gitC(['fetch', REMOTE, BASE, '--quiet']);
+      gitC(['checkout', '--detach', `${REMOTE}/${BASE}`]);
+    } catch (e) { return { warning: `skipped derived-artifact regen — could not sync to ${REMOTE}/${BASE} (${firstLine(e)})` }; }
+    const done = [];
+    const failed = [];
+    for (const [cmd, ...args] of buildRegenArgs()) {
+      try { execFileSync(cmd, args, { cwd: REPO, stdio: ['ignore', 'ignore', 'pipe'] }); done.push([cmd, ...args].join(' ')); }
+      catch (e) { failed.push({ cmd: [cmd, ...args].join(' '), detail: firstLine(e) }); }
+    }
+    if (done.length === 0) return { done, failed, warning: failed.length > 0 ? `derived-artifact regen failed (non-fatal): ${failed.map((f) => f.cmd).join(', ')}` : undefined };
+    const changed = (tryGit(['diff', '--name-only']) || '').split('\n').filter(Boolean);
+    if (changed.length === 0) return { done, failed }; // regen was a no-op (inputs didn't change)
+    try {
+      gitC(['add', ...changed]);
+      gitC(['commit', '-m', `chore: regen derived artifacts post-land (#2182) [${done.map((c) => c.replace('npm run ', '')).join(', ')}]`]);
+      gitC(['push', REMOTE, `HEAD:${BASE}`]);
+    } catch (e) { return { done, failed, warning: `derived-artifact regen committed but push to ${BASE} failed (${firstLine(e)}) — re-run gen:inventory + gen:reference-index on ${BASE} by hand` }; }
+    return { done, failed };
   }
 }
