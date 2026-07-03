@@ -50,6 +50,26 @@ auto-merge) lands it; after any merge, local `main` pulls.
 - **F3 -- rollout order.** **Default:** `/workflow` first (already lane-native), then serial `/batch` and
   `/next`, then `/slice`; `/pr` already PR-shaped. Decision path (lane-at-ratify helper) as its own slice.
 
+## Forks ratified (2026-07-03)
+
+All three sub-forks ratified as their defaults:
+
+- **F1 = PR label.** The ready-to-merge signal is a **PR label** (`ready-to-merge`), NOT a new backlog
+  status — so the drain and the existing `/merge` (`we:scripts/merge-ai-prs.mjs`) converge on ONE lander
+  (slice (d), #2188). The producer applies the label when it opens each PR.
+- **F2 = DROP the disjoint-partition machinery.** A real reversal of #1933's disjoint-lane premise, ratified
+  explicitly: with PR-per-item + a serial drain that rebase-retries, "git is the arbiter" is complete, so the
+  probe/partition/serial-lane/write-time-lock machinery in
+  `we:.claude/skills/batch-backlog-items/parallel-execute.workflow.js` is retired. The workflow becomes a pure
+  fan-out of ready-to-merge PRs; the drain serialises. Cost accepted: more rebase churn at land time when two
+  PRs touch one file (the drain handles it), traded for the simplification.
+- **F3 = rollout order.** `/workflow` first (this slice = spin-off (b), #2189), then serial `/batch` + `/next`
+  (spin-off (c), #2190), then `/slice`; `/pr` already PR-shaped; the decision lane-at-ratify helper (spin-off
+  (a), #2187) is its own slice and carries the #2123 reconcile.
+
+Spin-offs filed: #2189 (drop-partition — the /workflow slice, implemented with this ratification), #2190
+(per-path routing), #2187 (ratify→lane helper), #2188 (/merge↔drain label convergence).
+
 ## Spin-off items to file on ratify
 
 - **Ratify->lane helper** -- take an uncommitted decision diff in `main` -> apply in a lane clone -> open

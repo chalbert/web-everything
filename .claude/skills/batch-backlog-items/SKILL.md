@@ -171,157 +171,99 @@ unattended in one session instead of as one-item handoffs. Full method: *backlog
 **`/workflow` (or `--parallel`) runs the parallel execute model; `/batch` runs the inline serial loop (the
 default).** Parallel was once the default (#1147) but has been **re-split into its own command** so the choice
 is explicit per invocation — `/batch` for linear, `/workflow` for parallel (this is the documented "flip back
-to opt-in" path the *Reversible default* note below always reserved). It stays **reversible** — the close-skill
-audit is the watch. The guarantee is unchanged: parallel can only ever *speed up a clean batch or fall back to
-serial* — it must never trade correctness for throughput. **Every uncertainty still resolves toward serial:** a
-wrong "these don't collide" call risks a merge; a wrong "these collide" call just costs some speed. So the
-probe forces any low-confidence item into the serial lane, and when no provably-disjoint pair exists the whole
-batch **degenerates to serial** (correct, not a failure). Use `/batch` (or `--serial`) to skip the orchestrator
-entirely (e.g. a tiny pack, or while debugging the batch itself).
+to opt-in" path the *Reversible default* note below always reserved). Under **#2183 (slice #2189)** the parallel model is now a **PR fan-out**: every packed item runs in its own
+lane clone and finishes as an **open ready-to-merge PR** — there is no partition, no serial lane, and no inline
+integrate. Correctness comes from *git as the arbiter*: each item is its own PR, and a separate optional drain
+lands them one at a time with rebase-retry, so two items touching one file cost a rebase, never a silent bad
+merge. The producer makes **zero commits to `main`** and **never launches or waits on the drain** — it is
+correct with no drain running. Use `/batch` (or `--serial`) to skip the orchestrator entirely (e.g. a tiny
+pack, or while debugging the batch itself); `/batch`/`/next` still commit inline **until #2190 routes them
+through the same lane→PR path**.
 
 **Progress feedback (per item).** The orchestrator runs in the background (the `Workflow` tool), so its
 progress streams to **`/workflows`**, not the main chat — the script emits a `log` line at every seam: each
-**probe** as it lands (with its concurrent/serial verdict), the **partition roster**, **each item the instant
-its agent resolves** (✓/~ + gate + status), and every **merge / replay / derived-regen** step. Granularity is
-**per-item**: every item is its own `agent()` call (concurrent items each in their own worktree; serial-lane
-items one-at-a-time on the branch), so you get a line per item, not per multi-item lane. Watch `/workflows`
-for live progress; the main chat shows the final ledger on completion.
+**probe** as it lands (WE-only vs which repos it spans), the **provision** summary, **each item the instant its
+PR opens** (✓/~ + gate + PR count), and the **finalize** step. Granularity is **per-item**: every item is its
+own `agent()` call in its own lane clone, so you get a line per item. Watch `/workflows` for live progress; the
+main chat shows the final ledger (open PRs) on completion.
 
-The non-negotiables (in priority order). *(A "lane" below is now **per item**: each concurrent item runs alone
-in its own persistent **clone** (#1933 clone model — own HEAD, guard-immune; pushes to a `lane/*` ref), and
-the serial lane is worked one item at a time on main — so "lane of N" reads as "N independent items." The
-guarantees are unchanged; only the granularity got finer and isolation moved from worktrees to clones.)*
+The non-negotiables (in priority order). *(A "lane" below is **per item**: each item runs alone in its own
+persistent **clone** — own HEAD, guard-immune — claims itself there, and pushes to a `lane/*` ref that becomes
+a PR head. There is no shared serial lane and no central pre-claim.)*
 
-1. **Serial is the safe baseline, always reachable.** Any item that can't be *proven* independent runs
-   in the serial chain, and `/batch` (or `--serial`) forces the whole batch onto it. Parallelism (`/workflow`)
-   is a layer *on top of* that baseline — it never replaces it: the serial lane is always where uncertainty
-   lands, so even an all-`/workflow` run can only speed up a provably-clean partition, never weaken the floor.
-2. **Partition optimistic-first (#1950).** Items run **concurrently by default**; an item is pulled into
-   the serial lane ONLY when it actually needs to be — (a) its probe failed (unknown touch-set), (b) it
-   sits on another item's `blockedBy` edge (a DAG edge forces same-lane-after, never concurrent), (c) it
-   shares a **merge-risk (blacklist) file** with another item — the single case a clean git merge can be
-   silently wrong (a structured monolith registry), or (d) it is **low-confidence** *and* overlaps another
-   item on any file. A confident item whose only overlaps are **ordinary** (build config, barrels, its own
-   code spilling onto a shared source file) stays concurrent and leans on the optimistic floor — git merges
-   it, a real conflict rebase-retries, and a surviving one serial-replays (rule 4). This **supersedes** the
-   former "any declared-file overlap → serial" gate, which collapsed provably-disjoint items to one serial
-   chain. Declared/probed files are a *lower bound*, not the truth — so git, not the metadata, is the final
-   arbiter (rule 4); the partition just avoids the few overlaps git can't safely resolve. The pure predicate
-   lives in `we:scripts/readiness/lane-partition.mjs` (tested), mirrored inline in the orchestrator.
-3. **Each lane keeps the full serial arc.** Within a lane, items still run one-after-another through
-   work → close-out **gate at every seam**, and the **stop rule** applies per lane (the *claim* is
-   pre-assigned centrally, #1933 choice 2 — lanes never claim). Lanes run in **isolated clones** (own
-   HEAD) so concurrent edits can't corrupt each other. A red gate in one lane contains to that lane —
-   nothing merges until it's individually green.
-4. **Git is the conflict detector, not the file declaration.** Merge each lane's `lane/*` ref into main
-   **one at a time**. A merge conflict triggers **rebase-and-retry** (#1933) — never force; a real
-   semantic conflict that survives the rebase is the proof the partition was wrong, so **replay that
-   item serially** on top of the merged result. A **full gate runs per merge** (#1937: the central gate
-   is the authority), so the merged tree is verified before the next lane lands.
-5. **No silent speculation.** Report the partition up front (which items in which lane, and *why* each
-   pair is independent), and `log` any lane that conflicted and was replayed serially — so a
-   fallback reads as a fallback, never as "ran in parallel" when it didn't.
+1. **Every edit lands via a ready-to-merge PR; `main` only moves on merge.** The producer never commits to
+   `main`, never integrates inline, and never launches or waits on the drain. A `/workflow` run **completes
+   when every item is an open ready-to-merge PR** — full stop. It is correct with **no drain running**.
+2. **No partition — every item is its own lane (F2 = drop, reverses #1933).** There is no concurrent-vs-serial
+   split and no write-time file-lock layer. With PR-per-item + a drain that serialises with rebase-retry, two
+   PRs touching one file just cost the drain a rebase, never a silent bad merge. A light probe survives only to
+   detect the non-WE repos an item spans (for pool provisioning + per-repo PRs).
+3. **Claim-in-lane; the claim rides the PR.** Each lane resets its clone to `origin/main`, runs
+   `backlog.mjs claim` there, works, resolves, writes its `.lane-manifest.json`, commits, pushes `lane/*`, and
+   opens the PR. Because the claim + resolve ride the PR, an item that fails in-lane is **never left `active`
+   on `main`** — so there is no closeout "reopen unlanded" step here. A lane whose scoped fast-fail is red
+   opens **no PR** (it is carried, recoverable).
+4. **Git is the conflict detector — but at *drain* time, not here.** The producer just fans out PRs. The
+   separate `/drain` (`we:scripts/lane-drain.mjs`) merges them one at a time with rebase-retry, impl-first/
+   WE-last per couple, and does the id-collision heal + derived regen + reopen-on-fail at landing.
+5. **No silent speculation.** Every probe verdict, every opened/failed PR, and the local ready-to-merge signal
+   are `log`ged per item — so a carried item reads as carried, never as "landed."
 
-When the ready pool has no provably-disjoint pair (everything touches the same subsystem),
-`/workflow` **degenerates to the serial batch** — that's correct, not a failure. The speed win only
-materializes when the batchable list genuinely spans independent subsystems; reliability is identical
-either way. Full design + rationale: backlog **#083 agent-file-lock-coordination**.
+The speed win is the fan-out; the safety is git-at-drain-time. Full design + rationale: backlog **#2183** and
+its slices **#2189/#2190/#2187/#2188**.
 
-### Execute phase runs on the Workflow tool — the #1933 CLONE model (#1147 → #1942)
+### Execute phase runs on the Workflow tool — the #2183 PR-fan-out model (#2189)
 
 The **main loop still does the conversational part unchanged** — pack, plan, the single "go", the reserve,
 and the close-out/calibration. Under `/workflow` (or `--parallel`) it then hands the **execute phase**
-to the `Workflow` tool, which enforces the five non-negotiables above deterministically:
+to the `Workflow` tool, which enforces the non-negotiables above deterministically:
 
 ```
 const r = Workflow({
   scriptPath: ".claude/skills/batch-backlog-items/parallel-execute.workflow.js",
-  args: { batchSlug, budgetPoints, items: [ { num, slug, file, locus, cost, declaredFiles, blockedBy } … ] },
+  args: { batchSlug, budgetPoints, primaryRoot, items: [ { num, slug, file, locus, cost, declaredFiles, blockedBy } … ] },
 })
 ```
 
-**Why clones, not worktrees (#1153 4th-run finding).** The earlier orchestrator isolated lanes with `git
-worktree add` + a throwaway `batch-parallel/*` branch — but the user-global git-branch guard denies *both*
-worktree-add and branch creation in the shared checkout, so that model is **structurally blocked**. The
-#1933 clone model sidesteps the guard entirely: **each lane is its own persistent CLONE with its own HEAD**
-(`we:scripts/lane-pool.mjs`, slice 2), and convergence happens **through the remote** — a lane pushes its
-commit to a throwaway `lane/*` ref (the #1934 guard carve-out) and the central integrator merges those into
-main.
+**Why clones (#1153 4th-run finding).** The user-global git-branch guard denies both `worktree add` and branch
+creation in the shared checkout, so **each lane is its own persistent CLONE with its own HEAD**
+(`we:scripts/lane-pool.mjs`), and convergence happens **through the remote** — a lane pushes to a `lane/*` ref
+(the #1934 guard carve-out) that becomes a PR head.
 
-The script (read its header for the full contract): per-item **effect-probe** (frontmatter files are a lower
-bound, so an agent predicts the real touch-set; low-confidence → forced serial) → pure-JS **partition** into
-a **serial lane** (probe-uncertain, monolith-touching, or anything sharing files / a `blockedBy` edge) + a
-**concurrent set of provably-independent items** → **central pre-claim** (claims ALL items up front in the
-primary checkout — the only place `claims.json` is written, #1933 choice 2 — and pushes the post-claim state
-to a throwaway `lane/_base-<slug>` ref) → `parallel()` **one agent per concurrent item in its own lane clone**
-(`cd <lane>` → `reset --hard origin/lane/_base` so the item is already `active`; lanes never run claim, never
-stage `claims.json`) that works its own files, gates locally with `check:standards --local --files=…`
-(#1937 best-effort fast-fail), resolves, commits explicit paths, and **pushes `HEAD:lane/<slug>-<n>`** → a
-serial **integrate** loop on main that works the serial lane first, then merges each `lane/*` ref one at a
-time with the **full** gate per merge (#1937: the central gate is the authority), **rebase-and-retry on
-conflict** (never force; a real semantic conflict that survives the rebase is replayed serially — the JS
-loop's single thread is the merge mutex), **deletes the remote ref after a clean land**, then regenerates
-**derived artifacts once** (the #1935 Fork-2 regen-on-merge set), and finally **reopens unlanded items** at
-closeout (#2072 — see below). It returns `{ ledger, concurrentItems, serialItems, crossRepoItems,
-multiLaneFiles, partialCrossRepo, reposProvisioned, conflictsReplayed, stranded, reopened, baseRef, … }`.
+The script (read its header for the full contract): a **light probe** (which non-WE repos each item spans —
+no touch-set/partition) → **provision** a lane pool per affected repo + create the `ready-to-merge` label once
+(**no pre-claim, no base ref, no commit to `main`**) → `parallel()` **one agent per item in its own lane clone**
+(`cd <lane>` → `reset --hard origin/main` → `backlog.mjs claim` there) that works its own files, gates locally
+with `check:standards --local --files=…` (#1937 best-effort fast-fail), resolves, writes its
+`.lane-manifest.json`, commits explicit paths, pushes `HEAD:lane/<slug>-<n>` per repo, and **opens a
+ready-to-merge PR per ref** via `pr-land --no-wait` + the label → **finalize** writes a local (uncommitted)
+`queued.json` signal per PR'd item (so the same checkout won't re-offer them, and the existing `/drain` can
+land them today). It returns `{ ledger, itemsWorked, prsOpened, prUrls, queued, crossRepoItems,
+reposProvisioned, probeFailures, … }` — **no landed state**; the result is a set of **open ready-to-merge
+PRs** a separate drain lands.
 
-**Cross-repo lanes — the constellation (slice 4, #1943).** A single item's impl often spans the constellation
-(#96: WE → frontierui → plateau-app). The backlog item + `claims.json` **always live in WE** (so WE is
-implicit for every item); the probe additionally reports any **non-WE repos** it touches (`extraRepos`). The
-orchestrator then **repo-qualifies every predicted file** (`"<repo>:<path>"`) so partition disjointness holds
-*across* repos (an `index.ts` in WE and one in frontierui no longer collide spuriously), **provisions a lane
-pool per affected repo** (`lane-pool.mjs` is repo-parameterized — slice 2), dispatches each concurrent item
-across its **coupled clones** (one per repo it touches), and pushes `lane/<slug>-<n>` to **each repo's own
-origin**. **Cross-repo atomicity** is handled by *ordering*, not a distributed transaction: the integrator
-merges **impl repos first, WE last** — WE carries the `active→resolved` flip, so it lands only after every impl
-repo lands clean. A failed impl merge therefore **never leaves a false `resolved`** (worst case is
-impl-landed-but-item-still-`active`, a recoverable partial recorded in `r.partialCrossRepo`); a WE-only item
-that fails still serial-replays on main (the slice-3 floor). The integrator runs each repo's **own** gate
-(`check:standards` for WE/frontierui, `build` for plateau-app) per merge.
+**Cross-repo lanes — the constellation (#96: WE → frontierui → plateau-app).** A single item's impl can span
+repos. The backlog item + its resolve **always live in WE**; the light probe reports any **non-WE repos** it
+touches (`extraRepos`), and the orchestrator **provisions a lane pool per affected repo** (`lane-pool.mjs` is
+repo-parameterized), dispatches the item across its **coupled clones**, pushes `lane/<slug>-<n>` to **each
+repo's own origin**, and **opens one PR per repo**. **Cross-repo atomicity is the drain's job**, by *ordering*:
+the WE PR carries the item's `.lane-manifest.json` naming the repos **impl-first/WE-last**, and the drain lands
+them in that order so a failed impl merge never leaves a false `resolved` (WE carries the `active→resolved`
+flip and lands last).
 
-**The integrator lands directly on the primary checkout's main — the main agent does NOT do a landing
-merge.** This is the deliberate, decision-mandated safety-model shift from the worktree model: instead of
-"the workflow never writes the live branch; the main agent lands a throwaway integration branch," the clone
-model makes **all lane work durable on `origin` (`lane/*` refs) before any merge**, so a mid-integration
-failure loses nothing (refs persist; each is deleted only *after* its merge lands). The central integrator
-(the primary checkout = the tree the human watches, #1936) does the N merges itself. So after a green return
-the main agent has **no git landing op** — it just folds `r.ledger` into the standard closure block and
-**surfaces `r.multiLaneFiles`** (files touched by >1 item — the residual silent clean-but-wrong-merge risk,
-the #1935 Option-D optimistic floor's post-hoc detector) + `r.stranded` (resolves that didn't land, #1869) +
-`r.partialCrossRepo` (cross-repo items whose impl landed in some repos but whose WE resolve did not — re-attempt
-next run) for a human glance; the close-skill audit re-checks them. If `r` reports `aborted` or a red final gate,
-**don't trust the run** — surface it and fall back to a serial `/batch`.
+**The producer opens PRs — it does NOT land anything.** After a green return the main agent has **no git
+landing op**: it folds `r.ledger` into the standard closure block, surfaces `r.prUrls` (the open ready-to-merge
+PRs) + any `carried` items, and stops. Landing is a **separate, optional** `/drain` (or `/merge`) run — the
+producer is correct with none running. If `r` reports `aborted`, **don't trust the run** — surface it and fall
+back to a serial `/batch`.
 
-**Closeout reopens unlanded items (#2072).** Every item is flipped `open→active` at the central pre-claim, but
-only items whose lane **lands** get flipped to `resolved`. An item that fails to integrate — a serial-lane
-carry/drop, a WE-only replay that still didn't land, a **cross-repo-partial** (`partialCrossRepo`), or a
-reconcile-reclassified **`stranded`** — is otherwise left `status: active` on WE main with **no claim in
-`claims.json`**: a false-ownership signal that makes `readiness --select` exclude it as "active" (owned), so it
-silently vanishes from the pool though nobody is working it. The integrator's final step therefore **reconciles
-each un-resolved ledger entry back to `open`** (via `backlog.mjs release`, the canonical `active→open`
-transition — `dateStarted` stays as an attempt record) and reports them in **`r.reopened`**, so unlanded items
-honestly re-enter the next pack. Scoped to items **this run** flipped (never touches an item another session
-owns), and a cross-repo-partial's durable `lane/*` refs are **preserved** so the next run resumes rather than
-redoes. Distinct from the `stranded` *reclassify* (which only re-labels the ledger) and the concurrent-id merge
-self-healing (which heals colliding *new* items) — this fixes the on-disk backlog status of items that never
-merged at all.
-
-> **Pre-lock layer is a follow-up, not in this orchestrator.** Slices 3–4 ship the **optimistic git-merge
-> floor** (#1935 Option D) with post-hoc `multiLaneFiles` detection, now constellation-wide (cross-repo, #1943).
-> The mandatory pre-lock reservation layer (#1935 Fork 2 / the #1936 lock primitive / the #1938 `adapters.json`
-> split) lands as a later slice (#1945).
-
-**What the registry split (#1145/#1146) changed:** shared registries are now per-entry files
+**What the registry split (#1145/#1146) changed:** shared registries are per-entry files
 (`src/_data/<reg>/<id>.json`), so a lane that adds/edits a registry entry just writes its OWN file — disjoint,
-merges clean, **no integrator-applied manifest** (and `multiLaneFiles` is usually empty). The lane
-**effects-manifest** is therefore narrow: it only covers what a lane must *not* commit itself — **derived
-artifacts** (`AGENTS.md`, `referenceIndex.json`, regenerated once by the integrator) and rare edits to a
-still-**monolithic** low-churn registry (projects/capabilities/adapters/capabilityMatrix/designSystems).
+merges clean. Genuinely-monolithic shared docs (`AGENTS.md`, single-doc registries) are still merge-risk, but
+that risk is now handled at **drain** time (rebase-retry) rather than by a producer-side partition/lock.
 
 > **Opt-in, reversible.** Parallel is reached via `/workflow` (or `--parallel`); `/batch` stays linear. The
-> machinery has **not** yet been proven by a real multi-lane run (#1153) — the first real parallel batches are
-> the live validation, and the **closing-session skill audits each one** (lanes, conflicts replayed,
-> `multiLaneFiles`, derived regen, final gate). The command split *is* the agreed opt-in stance: linear is the
-> safe default you reach for, parallel is the explicit `/workflow` choice. (Earlier this was a `--parallel`-off
-> default flipped to default-on under #1147; it has now been re-split into `/workflow` so the choice is
-> explicit rather than a flag — superseding that default-on stance, same reversible machinery underneath.)
+> **closing-session skill audits each run** (open ready-to-merge PRs, carried items, gate). The command split
+> *is* the agreed opt-in stance: linear is the safe default you reach for, parallel is the explicit `/workflow`
+> choice. (Earlier this was a `--parallel`-off default flipped to default-on under #1147, then re-split into
+> `/workflow`; #2183 further makes the parallel path a PR fan-out — same reversible opt-in underneath.)

@@ -2,11 +2,14 @@
  * @file scripts/__tests__/gated-push-wiring.test.mjs
  * @description Pins the gated-`pushIfGreen` wiring contract (#2073). Nothing in the lane/merge/close flow
  * pushed `main`, so `origin/main` silently drifted (185 commits behind local after one parallel batch). The
- * fix is ONE shared helper (`scripts/push-if-green.mjs`) called from BOTH the parallel integrator (Phase 4h)
- * AND the serial/close commit path (the batch SKILL close-out). These are source-string contract checks — a
- * workflow sandbox script + a skill markdown have no runtime we can exercise, so we pin the wiring the way the
- * repo pins other sandbox contracts (mirror-of-a-module pattern): assert the shared helper exists with its
- * ratified rules, and that both call sites reference it. If either call site drops the push, drift returns —
+ * fix is ONE shared helper (`scripts/push-if-green.mjs`) that every publish site calls. Under #2183/#2185 the
+ * publish sites are: the DRAIN (`scripts/lane-drain.mjs`, which advances main when it lands a couple) AND the
+ * serial/close commit path (the batch SKILL close-out, until #2186 routes it through a lane→PR too). The
+ * parallel `/workflow` producer is NO LONGER a publish site — it makes ZERO commits to main and opens
+ * ready-to-merge PRs instead (the drain publishes). These are source-string contract checks — a workflow
+ * sandbox script + a skill markdown have no runtime we can exercise, so we pin the wiring the way the repo
+ * pins other sandbox contracts (mirror-of-a-module pattern): assert the shared helper exists with its ratified
+ * rules, and that the live publish sites reference it. If a publish site drops the gated push, drift returns —
  * this test fails loudly rather than letting GitHub silently freeze again.
  */
 import { describe, it, expect } from 'vitest';
@@ -48,15 +51,19 @@ describe('gated pushIfGreen helper (#2073) — the shared publish primitive', ()
   });
 });
 
-describe('gated pushIfGreen wiring (#2073) — both call sites publish through the shared helper', () => {
-  it('the parallel integrator calls push-if-green at close-out (Phase 4h), gated + ff-only', () => {
+describe('gated pushIfGreen wiring (#2073) — every publish site publishes through the shared helper', () => {
+  it('the parallel /workflow producer does NOT publish main (#2183/#2185) — it opens ready-to-merge PRs; the drain publishes via push-if-green', () => {
+    // #2183 F2/direction-1: the producer makes ZERO commits to main and never integrates inline, so it must
+    // NOT reference the main-publish helper at all. Its "publish" is opening a ready-to-merge PR via pr-land.
     const wf = read('.claude/skills/batch-backlog-items/parallel-execute.workflow.js');
-    expect(wf).toContain('push-if-green.mjs');
-    expect(wf).toContain('#2073');
-    // impl-first/WE-last publish order reuses INTEGRATION_ORDER (WE carries the resolve → published last).
-    expect(wf).toMatch(/INTEGRATION_ORDER\.filter/);
-    // the integrator already gated each merged tree → the documented --assume-green path.
-    expect(wf).toContain('--assume-green');
+    expect(wf).not.toContain('push-if-green.mjs');
+    expect(wf).toContain('pr-land.mjs');
+    expect(wf).toContain('ready-to-merge');
+    // The publish site MOVED to the drain: main advances only when the drain lands a couple — gated + ff-only
+    // through the SAME shared helper, so the #2073 anti-drift guarantee still holds at the (new) publish site.
+    const drain = read('scripts/lane-drain.mjs');
+    expect(drain).toContain('push-if-green.mjs');
+    expect(drain).toContain('--assume-green');
   });
 
   it('the serial /batch close-out publishes main through the same helper (not a bespoke push)', () => {
