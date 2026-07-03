@@ -18,6 +18,7 @@ import {
   renderBacklogGrid,
   findComponentPlaceholders,
   spliceComponents,
+  spliceComponentsBatch,
   projectIconHtml,
   statusTone,
   tierTagConfig,
@@ -474,5 +475,76 @@ describe('spliceComponents — one subprocess per page, splice each placeholder 
     const out = spliceComponents(html, stubRoot, oneFails);
     expect(out).toContain('keep-me'); // failed placeholder stays intact for the client CE path
     expect(out).toContain('<ok data-k="we-component-1">'); // the healthy one was spliced
+  });
+});
+
+describe('spliceComponentsBatch — one subprocess for the WHOLE build (#2185)', () => {
+  // Capture what the (injected) writeFile would persist, keyed by outputPath.
+  function makeWriter() {
+    const written = new Map();
+    return { writeFile: (p, c) => written.set(p, c), written };
+  }
+
+  it('collects placeholders across MANY pages and renders them in ONE subprocess, writing each page back', () => {
+    let calls = 0;
+    const counting = (_c, _a, opts) => { calls++; return genericRunner(_c, _a, opts); };
+    const { writeFile, written } = makeWriter();
+    const results = [
+      { outputPath: '/site/a/index.html', content:
+        `<we-card data-we-spec='{"component":"card","config":{"title":"A"}}'>fa</we-card>` },
+      { outputPath: '/site/b/index.html', content:
+        `<we-badge data-we-spec='{"component":"badge","config":{"label":"B"}}'>fb</we-badge>`
+        + `<we-card data-we-spec='{"component":"card","config":{"title":"B2"}}'>fb2</we-card>` },
+      { outputPath: '/site/plain/index.html', content: '<p>no components</p>' }, // substring-skip
+    ];
+    const stat = spliceComponentsBatch(results, stubRoot, counting, writeFile);
+    expect(calls).toBe(1); // ONE subprocess for all pages, not one per page
+    expect(stat).toEqual({ pages: 2, components: 3 });
+    expect(written.get('/site/a/index.html')).toContain('data-title="A"');
+    expect(written.get('/site/a/index.html')).not.toContain('data-we-spec');
+    expect(written.get('/site/a/index.html')).not.toContain('fa'); // JS-off fallback replaced
+    expect(written.get('/site/b/index.html')).toContain('data-label="B"');
+    expect(written.get('/site/b/index.html')).toContain('data-title="B2"');
+    expect(written.has('/site/plain/index.html')).toBe(false); // untouched, never rewritten
+  });
+
+  it('no HTML results / no placeholders → no subprocess, no writes', () => {
+    let calls = 0;
+    const counting = (_c, _a, opts) => { calls++; return genericRunner(_c, _a, opts); };
+    const { writeFile, written } = makeWriter();
+    expect(spliceComponentsBatch([], stubRoot, counting, writeFile)).toEqual({ pages: 0, components: 0 });
+    expect(spliceComponentsBatch(
+      [{ outputPath: '/site/x/index.html', content: '<p>plain</p>' },
+       { outputPath: '/site/data.json', content: 'data-we-spec but not html' }],
+      stubRoot, counting, writeFile,
+    )).toEqual({ pages: 0, components: 0 });
+    expect(calls).toBe(0);
+    expect(written.size).toBe(0);
+  });
+
+  it('isolates a failed spec across pages — leaves that placeholder intact, splices the rest', () => {
+    const firstFails = (_c, _a, opts) => {
+      const entries = JSON.parse(opts.input);
+      return JSON.stringify({
+        producer: EXPECTED_PRODUCER,
+        results: entries.map((e, i) => (i === 0
+          ? { key: e.key, error: 'boom' }
+          : { key: e.key, html: `<ok data-k="${e.key}"></ok>` })),
+      });
+    };
+    const { writeFile, written } = makeWriter();
+    // Page has a failing (key we-c-0) AND a healthy (key we-c-1) placeholder, so it IS rewritten: the
+    // failed one stays intact for the client CE path, the healthy one is spliced.
+    const results = [
+      { outputPath: '/site/mixed/index.html', content:
+        `<we-card data-we-spec='{"component":"card","config":{"title":"Bad"}}'>keep-me</we-card>`
+        + `<we-badge data-we-spec='{"component":"badge","config":{"label":"Good"}}'>g</we-badge>` },
+    ];
+    const stat = spliceComponentsBatch(results, stubRoot, firstFails, writeFile);
+    expect(stat.components).toBe(2);
+    const out = written.get('/site/mixed/index.html');
+    expect(out).toContain('keep-me'); // failed placeholder intact for client CE path
+    expect(out).toContain('data-we-spec'); // ...its placeholder element survives
+    expect(out).toContain('<ok data-k="we-c-1">'); // the healthy one was spliced
   });
 });

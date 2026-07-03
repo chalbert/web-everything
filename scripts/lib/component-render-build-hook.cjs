@@ -626,6 +626,76 @@ function spliceComponents(content, repoRoot, runner = execFileSync) {
   return out;
 }
 
+/**
+ * Build-level generalization of {@link spliceComponents} (#2185) — splice EVERY generic `<we-card|we-badge|
+ * we-tag data-we-spec>` placeholder across the WHOLE written site in ONE subprocess call, instead of one
+ * cold `node` spawn per page.
+ *
+ * WHY: the former `weComponentSSR` per-page transform paid a full `node`+happy-dom cold start (~0.2–0.4s)
+ * on every page carrying a placeholder. The backlog dogfood (#2102) put 4 `weCard` placeholders on all
+ * ~2167 backlog item pages, so a cold `build:docs` serially spawned ~2167 subprocesses (~16 min) — long
+ * enough that the 11ty dev server never bound its port in a usable time and the Vite `/backlog/…` proxy
+ * ECONNREFUSED'd the whole window. Batching every page's placeholders into a single keyed subprocess pays
+ * the cold start ONCE; output is byte-identical (the placeholder's `data-we-spec` is self-describing, so
+ * re-extracting + splicing post-write yields the same SSR fragment the per-page transform produced).
+ *
+ * Driven off the `eleventy.after` event's `results` (each `{ outputPath, content }` — the final written
+ * page). In `--serve` incremental rebuilds `results` is just the changed pages, so a dev edit re-splices
+ * only what it touched. Pages/passthrough with no `data-we-spec` pay a single substring check. The spliced
+ * content is written back over the already-written file (files are on disk before the after event fires,
+ * and the dev-server reload is triggered only after the build — incl. this event — completes).
+ *
+ * Same subprocess boundary + pinned-artifact/missing-artifact hard error + keyed-batch per-entry isolation
+ * as the per-page path. Returns `{ pages, components }` for the caller to log.
+ */
+function spliceComponentsBatch(results, repoRoot, runner = execFileSync, writeFile = fs.writeFileSync) {
+  if (!Array.isArray(results) || results.length === 0) return { pages: 0, components: 0 };
+
+  // Pass 1 — collect every placeholder across every written HTML page into ONE globally-keyed batch.
+  const perPage = []; // { outputPath, content, spliced: [{ globalKey, match }] }
+  const specs = [];
+  let gk = 0;
+  for (const r of results) {
+    const outputPath = r && r.outputPath;
+    const content = r && r.content;
+    if (typeof outputPath !== 'string' || !/\.html?$/.test(outputPath)) continue;
+    if (typeof content !== 'string' || content.indexOf('data-we-spec') === -1) continue;
+    const placeholders = findComponentPlaceholders(content);
+    if (placeholders.length === 0) continue;
+    const spliced = placeholders.map((p) => {
+      const globalKey = `we-c-${gk++}`;
+      specs.push({ key: globalKey, component: p.component, config: p.config });
+      return { globalKey, match: p.match };
+    });
+    perPage.push({ outputPath, content, spliced });
+  }
+  if (specs.length === 0) return { pages: 0, components: 0 };
+
+  // ONE subprocess for the entire site (keyed-batch in / keyed-batch out).
+  const rendered = renderComponents(specs, repoRoot, runner);
+
+  // Pass 2 — splice each page's placeholders and write the finished page back over itself. A per-entry
+  // failure (no rendered HTML for its key) leaves that placeholder intact for the client CE path.
+  let pages = 0;
+  for (const page of perPage) {
+    let out = page.content;
+    let changed = false;
+    for (const p of page.spliced) {
+      const html = rendered.get(p.globalKey);
+      if (!html) continue; // isolated failure already logged by renderComponents — keep the placeholder
+      // Match `spliceComponents` exactly: replace the whole placeholder element with its SSR fragment.
+      // A function replacer avoids `$`-pattern interpretation in the rendered HTML.
+      out = out.replace(p.match, () => html);
+      changed = true;
+    }
+    if (changed) {
+      writeFile(page.outputPath, out);
+      pages++;
+    }
+  }
+  return { pages, components: specs.length };
+}
+
 module.exports = {
   PINNED_CLI_RELATIVE,
   EXPECTED_PRODUCER,
@@ -643,4 +713,5 @@ module.exports = {
   intentTileSpecs,
   findComponentPlaceholders,
   spliceComponents,
+  spliceComponentsBatch,
 };
