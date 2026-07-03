@@ -84,6 +84,8 @@ Every user brand judgment in-session is a training label; log them with the prin
   runner-up — "I like WE-10 and WE-11, maybe WE-11 more" → principle: the winning WE direction is
   concept-in-form that *means* "encompasses everything," not a bare letter. Confirms the ownable +
   concept-bearing pair over pure-letterform W marks. WE-11 still owes a 16px-on-gradient validation.
+- **2026-07-03 · label (user):** FUI-05 (sun with lift echo) — "underlying principle has something, execution is clunky" → principle: **separate the mechanic from its rendering.** A good device (motion-by-positional-echo / afterimage) can be buried under a clunky skin; the reviewer should EXTRACT and name the reusable principle even while rejecting the artifact, and carry it forward. Rejecting a candidate ≠ rejecting its idea.
+- **2026-07-03 · label (user) — META:** after all rounds, the **Plateau mesa favicon is STILL the best mark, and the WE/FUI candidates "don't feel in the same family."** → principle: **family coherence is a first-class axis, scored ACROSS marks, not per-mark.** The mesa is the family ANCHOR (a solid geometric landform in a solid + reduced-opacity echo grammar); a candidate must visually rhyme with it, not merely score well alone. This surfaces a real tension the reviewer must weigh: the per-mark winners (WE-11/WE-10 are letterforms — a different visual system) vs the landscape-lens marks (bedrock-strata / ridge / terrace) that share the mesa's grammar but scored lower individually. A pile of individually-good marks that don't cohere is a failed system — the Lufthansa/IBM lesson (family = shared geometric discipline).
 
 ## Scope notes
 
