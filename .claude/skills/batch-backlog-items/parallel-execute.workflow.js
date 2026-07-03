@@ -62,10 +62,14 @@ const a = (typeof args === 'string' ? (() => { try { return JSON.parse(args); } 
 const items = Array.isArray(a.items) ? a.items : [];
 const batchSlug = a.batchSlug || 'batch-parallel';
 const budgetPoints = Number.isFinite(a.budgetPoints) ? a.budgetPoints : Infinity;
-// OPTIONAL per-batch model downgrade for the per-item lane work agents only (e.g. laneModel: 'sonnet'). Quality
-// stays protected: a downgraded lane that produces a bad PR is caught by the PR's required `test` check (the
-// drain never merges a red PR) — the cheap model never has the final say. Omit → inherit the session model.
-const laneModel = typeof a.laneModel === 'string' && a.laneModel ? a.laneModel : undefined;
+// LANE EXECUTION MODEL POLICY (user directive 2026-07-03): lane work is NEVER on Fable. Default Sonnet — it
+// handles the vast majority of batchable items; the orchestrator escalates a lane to Opus ONLY when the probe
+// flagged that item `complex` (rare). An explicit laneModel arg overrides the DEFAULT tier (Sonnet) but is
+// force-floored off Fable; per-item Opus escalation still applies. Quality stays protected regardless: a bad PR
+// is caught by the required `test` check (the drain never merges red) — the cheap model never has the final
+// say. A model is ALWAYS passed, so a lane never inherits a Fable session model.
+const laneModelOverride = (typeof a.laneModel === 'string' && a.laneModel && !/fable/i.test(a.laneModel)) ? a.laneModel : undefined;
+const laneModelFor = (it) => (it && it.complex) ? 'opus' : (laneModelOverride || 'sonnet');
 // The PRIMARY WE checkout's absolute path (the sandbox has no `process`; the main loop passes its cwd). The
 // Finalize step's don't-re-offer `queued.json` write runs here. Fallback to '.' keeps a degenerate run alive.
 const PRIMARY_ROOT = a.primaryRoot || '.';
@@ -112,6 +116,10 @@ const PROBE_SCHEMA = {
       type: 'array',
       items: { type: 'string', enum: ['frontierui', 'plateau-app'] },
       description: 'the NON-WE constellation repos this item\'s impl spans (#96). The backlog item always lives in WE, so WE is implicit — list here only the non-WE repos the body clearly reaches into. Empty for a WE-only item (the common case).',
+    },
+    complex: {
+      type: 'boolean',
+      description: 'the lane-model escalation verdict. DEFAULT false — the lane runs on Sonnet, which handles the vast majority of batchable items. Return true ONLY for a genuinely hard item (subtle cross-cutting design, dense algorithmic/protocol reasoning, or a large multi-file refactor where a cheaper model would plausibly ship a wrong-but-plausible edit) → that lane escalates to Opus. RARE; when in doubt, false. Never selects Fable — lane execution is Sonnet-or-Opus only.',
     },
     notes: { type: 'string' },
   },
@@ -217,21 +225,24 @@ const probedRaw = await parallel(items.map((it) => () =>
       `frontierui and/or plateau-app. The backlog item + its resolve ALWAYS live in WE, so WE is implicit and`,
       `you do NOT list it. Most items are WE-only → return an empty extraRepos. List a non-WE repo ONLY when the`,
       `body clearly reaches into it (e.g. a standard authored in WE but implemented in frontierui, or surfaced`,
-      `in plateau-app). You do NOT need to predict files — the lane computes its own touch-set. Return ONLY the`,
-      `structured object { num, extraRepos }.`,
+      `in plateau-app). You do NOT need to predict files — the lane computes its own touch-set.`,
+      `ALSO set \`complex\`: default false (the lane runs on Sonnet). Return true ONLY for a genuinely hard item`,
+      `(subtle cross-cutting design, dense algorithmic/protocol reasoning, or a large multi-file refactor where a`,
+      `cheaper model would plausibly ship a wrong-but-plausible edit) → that lane escalates to Opus. Rare; when in`,
+      `doubt, false. Return ONLY the structured object { num, extraRepos, complex }.`,
     ].join(' '),
     { label: `probe:${it.num}`, phase: 'Probe', schema: PROBE_SCHEMA, effort: 'low' },
   ).then((p) => {
     probedCount++;
     const xr = p && Array.isArray(p.extraRepos) ? p.extraRepos.filter((r) => REPOS[r]) : [];
     log(`  probe ${probedCount}/${items.length}: #${it.num} — ${xr.length ? 'spans ' + xr.join('+') : 'WE-only'}`);
-    return { ...it, extraRepos: xr, probeOk: true };
+    return { ...it, extraRepos: xr, complex: !!(p && p.complex), probeOk: true };
   }).catch(() => {
     probedCount++;
     // A failed probe defaults to WE-only (the safe common case) — the item still runs; a genuinely cross-repo
     // item that mis-probes WE-only just fails its impl push and is carried (recoverable), never a bad merge.
     log(`  probe ${probedCount}/${items.length}: #${it.num} — probe FAILED → treat as WE-only`);
-    return { ...it, extraRepos: [], probeOk: false };
+    return { ...it, extraRepos: [], complex: false, probeOk: false };
   }),
 ));
 
@@ -406,7 +417,10 @@ function laneItemPrompt(it, laneDirs) {
 }
 
 log(`Working ${workItems.length} item(s) concurrently — each opens its own ready-to-merge PR the instant it lands…`);
-if (laneModel) log(`  lane work runs on '${laneModel}' (per-batch downgrade); the PR's required \`test\` check is the quality floor — the drain never merges a red PR.`);
+{
+  const esc = workItems.filter((it) => it.complex).map((it) => `#${it.num}`);
+  log(`  lane execution: Sonnet default${laneModelOverride ? ` (override '${laneModelOverride}')` : ''}, Opus for ${esc.length ? esc.length + ' complex item(s): ' + esc.join(', ') : 'none flagged complex'}; NEVER Fable. The PR's required \`test\` check is the quality floor — the drain never merges a red PR.`);
+}
 
 let itemsDone = 0;
 const results = await parallel(workItems.map((it) => () => {
@@ -416,7 +430,7 @@ const results = await parallel(workItems.map((it) => () => {
     log(`  ✗ #${it.num} (${itemsDone}/${workItems.length}): no WE lane clone available → skipped [${it.slug}]`);
     return Promise.resolve(null);
   }
-  return agent(laneItemPrompt(it, laneDirs), { label: `lane:#${it.num}`, phase: 'Lanes', schema: ITEM_RESULT_SCHEMA, ...(laneModel ? { model: laneModel } : {}) })
+  return agent(laneItemPrompt(it, laneDirs), { label: `lane:#${it.num}`, phase: 'Lanes', schema: ITEM_RESULT_SCHEMA, model: laneModelFor(it) })
     .then((r) => {
       itemsDone++;
       const prN = r && Array.isArray(r.prs) ? r.prs.filter((p) => p && p.pr).length : 0;

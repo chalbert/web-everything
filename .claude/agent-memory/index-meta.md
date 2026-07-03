@@ -23,4 +23,5 @@ Agent Meta · Memory · Model Routing cluster — open a leaf with `node scripts
 - 134. Opus Orchestrates, Sonnet Executes — exec→Sonnet subagent; judgment stays Opus
 - 135. Model Recurring Cost, Don't Gate It — recurring overhead MODELED (affine fit); every sample counts; #1505
 - 144. Session Cost-On-Card Accrual — close accrues session $ to the card(s) worked; decision/prepare accumulate, workflow even-splits, slice/resolve skip
+- 145. Lane Model: Sonnet Default, Never Fable — /workflow lane exec runs Sonnet by default, Opus for rare complex (probe decides per-item), NEVER Fable; explicit model always passed so no Fable inherit; #2189/session
 - [Parallel /workflow lane model](workflow-lane-model-policy.md) — Sonnet default, Opus for rare complex items, NEVER Fable for execution; orchestrator decides per-item

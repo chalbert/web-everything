@@ -17,6 +17,8 @@
  *   node scripts/backlog.mjs claim   <NNN> [--as=preparing] [--force]  # open    → active (or preparing, for /prepare) + dateStarted=today; prints rename slug. Refuses if the item's own file is dirty (claim-first guard); --force overrides
  *   node scripts/backlog.mjs resolve <NNN> [--graduated-to=X] [--codified-to=Y] [--force]  # active → resolved + dateResolved=today (+ graduatedTo); a kind:decision REQUIRES --codified-to=<doc#anchor|one-off> (#911 gate); an epic with open children is refused unless --force (#658 no-open-slice guard)
  *   node scripts/backlog.mjs release <NNN>                       # active|preparing → open (abandon/redirect; stamps untouched)
+ *   node scripts/backlog.mjs retype  <NNN> [--to=<kind>] [--size=N] [--status=parked]  # SANCTIONED pack-phase flag-fix — retype a mis-flagged item / bump size / park it through the CLI instead of a raw primary-tree Edit (no LANE_GUARD_OFF). Frontmatter-only (#2123)
+ *   node scripts/backlog.mjs yield    <NNN-slug>                 # move a LOCAL-ONLY NNN collision to the next free number (the guard's "a new item takes the next free number; yield this one"). Refuses a git-tracked file — NNN is immutable
  *   node scripts/backlog.mjs scaffold --kind=story --size=3 --title="..." [--digest="..."] [--blocked-by=NNN,NNN] [--parent=NNN] [--session=<slug>]   # --kind ∈ story|epic|task|decision (#466/#487). --session ⇒ born `active`+`scaffoldedBy` (owned until settle, #670); without it, born `open` (default)
  *   node scripts/backlog.mjs settle   <NNN>                         # born-active scaffold (--session) → open: publish it once digest+edges+body are authored (#670)
  *   node scripts/backlog.mjs reserve   <NNN...> --session=<slug>     # soft-hold planned items (#083 cross-session deprioritize)
@@ -25,11 +27,11 @@
  *   node scripts/backlog.mjs unqueue   <NNN...>                     # clear the ready-to-merge mark (the drain's single clear point at landing)
  *   add --json to any verb for machine-readable output.
  */
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { applyTransition, readField, accrueCost } from './backlog/frontmatter.mjs';
+import { applyTransition, readField, setFrontmatterField, accrueCost } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize, sessionForNum } from './readiness/reservations.mjs';
 import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, recordTouch, mostRecentSession, porcelainFiles } from './readiness/claimScope.mjs';
@@ -478,6 +480,73 @@ function calibrate() {
     `${GRN}✓ calibrated${RST} ${DIM}— ${points} pts at ${ctxPct}% → ${note}; next batch budget ≈ ${RST}${BLD}${nextBudget ?? '?'} pts${RST}`);
 }
 
+/**
+ * retype <NNN> [--to=<kind>] [--size=N] [--status=<s>] — the SANCTIONED pack-phase flag-fix (#2123 escape
+ * that isn't `LANE_GUARD_OFF`). The batch skill tells the packer to "fix a mis-flagged item in place" — retype
+ * a `story` the pre-flight found is really a `decision`, bump a `size` to 13 to drop it from the pool, park it
+ * — but the lane guard blocks a raw primary-tree Edit of the item's `.md`, which pushed agents to override the
+ * guard by hand. This does the SAME frontmatter splice through the sanctioned CLI (guard-clean, auditable, and
+ * the locus-prefix scan still runs), so no `LANE_GUARD_OFF` is needed. Frontmatter-only; the body is untouched.
+ */
+function retype() {
+  const file = resolveFile(positional[0]);
+  const rel = `backlog/${file}`;
+  const abs = join(DIR, file);
+  let src = readFileSync(abs, 'utf8');
+  const toKind = flag('to');
+  const toSize = flag('size');
+  const toStatus = flag('status');
+  if (!toKind && toSize === undefined && !toStatus) die('retype needs at least one of --to=<kind> / --size=N / --status=<s>');
+  if (toKind && !['story', 'epic', 'task', 'decision'].includes(toKind)) die(`--to must be story|epic|task|decision (got "${toKind}")`);
+  const curStatus = readField(src, 'status') || 'open';
+  if (curStatus === 'resolved' && !argv.includes('--force')) die(`#${file.match(/^\d+/)[0]} is resolved — retyping a closed item is almost certainly a mistake; pass --force if deliberate`);
+  const changes = [];
+  if (toKind) { src = setFrontmatterField(src, 'kind', toKind, { after: [] }); changes.push(`kind→${toKind}`); }
+  if (toSize !== undefined) {
+    const n = Number(toSize);
+    if (!Number.isFinite(n) || n < 0) die(`--size must be a non-negative number (got "${toSize}")`);
+    src = setFrontmatterField(src, 'size', String(n), { after: ['kind'] }); changes.push(`size→${n}`);
+  }
+  if (toStatus) { src = setFrontmatterField(src, 'status', toStatus, { after: ['kind', 'size'] }); changes.push(`status→${toStatus}`); }
+  writeBacklogMd(abs, rel, src);
+  const id = file.replace(/\.md$/, '');
+  ok({ verb: 'retype', id, file: rel, changes },
+    `${GRN}✓ retyped${RST} ${BLD}#${file.match(/^\d+/)[0]}${RST} ${DIM}${changes.join(', ')}${RST}`);
+}
+
+/**
+ * yield <NNN-slug> — resolve an NNN COLLISION by moving a LOCAL-ONLY item to the next free number (the guard's
+ * own prescription: "a new item takes the next free number; yield this one"). Renumbering a *committed* item is
+ * forbidden — NNN is immutable — so this REFUSES a git-tracked file and only ever moves an untracked/local one.
+ * Takes the full `NNN-slug` (or a unique prefix) so it targets the right file when two share a number. Writes
+ * the new `<freeNum>-<slug>.md`, deletes the old, and reports the new number — the sanctioned counterpart to a
+ * hand `git mv` (which the renumber guard blocks).
+ */
+function yieldNum() {
+  const ref = positional[0];
+  if (!ref) die('yield needs <NNN-slug> — the local-only colliding item to move to a free number');
+  const matches = files().filter((f) => f === ref || f === `${ref}.md` || f.startsWith(`${ref}`));
+  if (matches.length === 0) die(`no backlog file matching "${ref}"`);
+  if (matches.length > 1) die(`"${ref}" is ambiguous: ${matches.join(', ')} — pass the full NNN-slug`);
+  const file = matches[0];
+  const rel = `backlog/${file}`;
+  // Immutability guard: only a LOCAL-ONLY (untracked) item may yield; a committed NNN never moves.
+  let tracked = true;
+  try { execFileSync('git', ['ls-files', '--error-unmatch', rel], { cwd: ROOT, stdio: 'pipe' }); }
+  catch { tracked = false; }
+  if (tracked && !argv.includes('--force')) die(`${rel} is git-tracked — NNN is immutable, a committed item never renumbers. yield only moves a LOCAL-ONLY (untracked) collision. (If this really is a dup to reconcile, that's a manual call.)`);
+  const slug = file.replace(/^\d+-/, '').replace(/\.md$/, '');
+  const existing = files().map((f) => (f.match(/^(\d+)/) || [])[1]).filter(Boolean);
+  const newNum = nextNum(existing);
+  const newName = `${newNum}-${slug}.md`;
+  if (files().some((f) => f.startsWith(`${newNum}-`))) die(`race: #${newNum} just got taken — re-run yield`);
+  const content = readFileSync(join(DIR, file), 'utf8');
+  writeBacklogMd(join(DIR, newName), `backlog/${newName}`, content);
+  unlinkSync(join(DIR, file));
+  ok({ verb: 'yield', from: file.replace(/\.md$/, ''), to: newName.replace(/\.md$/, ''), num: newNum, file: `backlog/${newName}` },
+    `${GRN}✓ yielded${RST} ${DIM}${file} →${RST} ${BLD}#${newNum}${RST} ${DIM}backlog/${newName}${RST}`);
+}
+
 // `cost <NNN> --usd=<n>` — fold a session's usage-equivalent $ cost into a card's cumulative accounting
 // (#close cost-on-card). A pure frontmatter splice via `accrueCost`: adds to `costUsd`, bumps
 // `costSessions`. The close skill decides WHICH card(s) and how much (a single dominant decision/prepare
@@ -503,6 +572,8 @@ function cost() {
 
 switch (verb) {
   case 'claim': case 'resolve': case 'release': transition(verb); break;
+  case 'retype': retype(); break;
+  case 'yield': yieldNum(); break;
   case 'scaffold': scaffold(); break;
   case 'settle': settle(); break;
   case 'calibrate': calibrate(); break;
@@ -516,6 +587,8 @@ switch (verb) {
       `  ${GRN}claim${RST} <NNN> [--as=preparing] [--force]   open → active (or preparing, /prepare) + dateStarted; refuses on a dirty item file (claim-first), --force overrides\n` +
       `  ${GRN}resolve${RST} <NNN> [--graduated-to=X] [--codified-to=Y] [--force]   active → resolved + dateResolved (decision REQUIRES --codified-to=<doc#anchor|one-off>; an epic with open children is refused unless --force)\n` +
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
+      `  ${GRN}retype${RST} <NNN> [--to=story|epic|task|decision] [--size=N] [--status=parked]   sanctioned pack-phase flag-fix (no LANE_GUARD_OFF); frontmatter-only\n` +
+      `  ${GRN}yield${RST} <NNN-slug>            move a LOCAL-ONLY NNN collision to the next free number (refuses a git-tracked item; NNN is immutable)\n` +
       `  ${GRN}scaffold${RST} --kind=story|epic|task|decision --size= --title= [--digest=] [--blocked-by=] [--parent=] [--session=<slug>]   --session ⇒ born active+owned (#670), publish with settle\n` +
       `  ${GRN}settle${RST} <NNN>               born-active scaffold (--session) → open (publish once authored)\n` +
       `  ${GRN}calibrate${RST} --points= --context-pct= [--stop-reason=budget|context|empty-pool|fork|gate|outgrew|manual|abort]   fold a session into the batch point-budget estimate\n` +

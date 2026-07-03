@@ -33,8 +33,14 @@ the per-item chat-rename — a batch labels the session **once**.
      projection (only `blockedBy`-resolved items appear — don't re-grep blockers; never read `git status`
      for eligibility, a dirty tree is the baseline and `claim` ignores it). Clean pack → go; look one cluster
      deeper only if the skim surfaces a fork.
-   - **Mis-flagged item → fix the flag in place, don't skip it** — retype `type: decision` (→ Tier B), set
-     `status: parked`, bump `size` to `13` (drops it from the pool), or — when the only residual is a
+   - **Mis-flagged item → fix the flag via the sanctioned CLI, don't skip it** — run
+     `node scripts/backlog.mjs retype <NNN> [--to=decision] [--size=13] [--status=parked]` to retype it
+     (→ Tier B), bump its `size` to `13` (drops it from the pool), or park it. This is the sanctioned pack-phase
+     splice — do **not** raw-Edit the item's `.md` in the primary tree (the lane guard blocks it) and do **not**
+     reach for `LANE_GUARD_OFF`; the CLI does the same frontmatter-only change, guard-clean and locus-scanned. A
+     local-only **NNN collision** (two files share a number) is fixed with `node scripts/backlog.mjs yield
+     <NNN-slug>`, which moves the untracked one to the next free number (it refuses a git-tracked item — NNN is
+     immutable). Or — when the only residual is a
      **human-only action** an agent can't do (credentialed deploy/secret, agent-training feedback, external
      setup, a human review) — add a `humanGate: { kind, what }` (`kind ∈ deploy|credential|feedback|review|setup`;
      *backlog-workflow.md → Human gate*), which demotes it out of Tier A exactly like a pending project. Then
@@ -227,6 +233,14 @@ const r = Workflow({
   args: { batchSlug, budgetPoints, primaryRoot, items: [ { num, slug, file, locus, cost, declaredFiles, blockedBy } … ] },
 })
 ```
+
+**Lane execution model (the orchestrator decides — you don't pass one).** Lane work runs on **Sonnet by
+default**; the probe emits a per-item `complex` flag and the orchestrator escalates only that lane to **Opus**
+(rare — genuinely hard items). It is **never Fable** — a lane always gets an explicit model, so it can't inherit
+a Fable session model. This is why the first #1974–2184 run died: lanes inherited the Fable session and hit its
+credit wall; all-Sonnet re-run was clean. An explicit `laneModel` arg still overrides the default tier but is
+force-floored off Fable. Quality is protected regardless — the PR's required `test` check is the floor, the
+drain never merges red. See `parallel-execute.workflow.js` (`laneModelFor`) and [[workflow-lane-model-policy]].
 
 **Why clones (#1153 4th-run finding).** The user-global git-branch guard denies both `worktree add` and branch
 creation in the shared checkout, so **each lane is its own persistent CLONE with its own HEAD**
