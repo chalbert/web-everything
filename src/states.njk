@@ -13,13 +13,15 @@ title: Web Everything — States
 
 <div class="project-grid">
   {% for state in states %}
-  {# #1870 (#1820 Fork 1a): <we-card> frame + status → <we-badge>; the anchor's own frame is stripped by
+  {# #1870 (#1820 Fork 1a): <we-card> frame + status → <we-badge>; the .project-card frame is stripped by
      `.project-card:has(> we-card)` in style.css so the card is the sole frame.
      Status vocab: active→success, draft→info, concept→warning, else→neutral. #}
   {% set statusTone = 'success' if state.status == 'active' else ('info' if state.status == 'draft' else ('warning' if state.status == 'concept' else 'neutral')) %}
-  <a href="/states/{{ state.id }}/"
-     class="project-card"
-     style="text-decoration: none; color: inherit; display: block;">
+  {# #2169: overlay-link, not a wrapping <a>. A summary may carry authored inline links, and an <a> may not
+     contain another <a> — a wrapping anchor makes the browser clone empty ghost tiles (see adapters.njk /
+     component-render-build-hook.cjs renderProjectGrid). `.project-card:has(> we-card)` still strips the frame. #}
+  <div class="project-card">
+    <a href="/states/{{ state.id }}/" class="project-card-link" aria-label="View {{ state.name }}"></a>
     <we-card>
       <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
         <h3 class="project-title" style="margin: 0;">{{ state.name }}</h3>
@@ -27,6 +29,6 @@ title: Web Everything — States
       </div>
       <p style="margin: 0; color: var(--color-text-muted); font-size: 0.9em;">{{ state.summary | safe }}</p>
     </we-card>
-  </a>
+  </div>
   {% endfor %}
 </div>

@@ -50,17 +50,19 @@ title: Web Everything — Protocols
 <div class="project-grid" id="protocol-grid">
   {% for proto in protocols %}
     {# #1870 (#1820 Fork 1a): <we-card> frame + status → <we-badge>, project/intent chips → <we-tag>; the
-       click-through + filter data-* stay on the OUTER <a> (.project-card is the filter JS hook). The anchor's
-       own frame is stripped by `.project-card:has(> we-card)` in style.css so the card is the sole frame.
+       filter data-* stay on the OUTER .project-card (the filter JS hook). Its own frame is stripped by
+       `.project-card:has(> we-card)` in style.css so the card is the sole frame.
        Status vocab: active→success, draft→info, concept→warning, experimental→warning, else→neutral. #}
     {% set proj = None %}
     {% for p in projects %}{% if p.id == proto.ownedByProject %}{% set proj = p %}{% endif %}{% endfor %}
     {% set statusTone = 'success' if proto.status == 'active' else ('info' if proto.status == 'draft' else ('warning' if (proto.status == 'concept' or proto.status == 'experimental') else 'neutral')) %}
-    <a href="/projects/{{ proto.ownedByProject }}/#{{ proto.anchor }}"
-       class="project-card"
-       data-project="{{ proto.ownedByProject }}"
-       data-status="{{ proto.status }}"
-       style="text-decoration: none; color: inherit; display: block;">
+    {# #2169: overlay-link, not a wrapping <a>. A summary may carry authored inline links, and an <a> may not
+       contain another <a> — a wrapping anchor makes the browser clone empty ghost tiles (see adapters.njk /
+       component-render-build-hook.cjs renderProjectGrid). `.project-card:has(> we-card)` still strips the frame. #}
+    <div class="project-card"
+         data-project="{{ proto.ownedByProject }}"
+         data-status="{{ proto.status }}">
+      <a href="/projects/{{ proto.ownedByProject }}/#{{ proto.anchor }}" class="project-card-link" aria-label="View {{ proto.name }}"></a>
       <we-card>
         <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
           <h3 class="project-title" style="margin: 0;">{{ proto.name }}</h3>
@@ -77,7 +79,7 @@ title: Web Everything — Protocols
           {% endif %}
         </div>
       </we-card>
-    </a>
+    </div>
   {% endfor %}
 </div>
 
