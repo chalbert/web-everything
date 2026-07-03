@@ -934,6 +934,63 @@ export function validateProjectTier(id, tier, tierEvidence) {
   return out;
 }
 
+// ── Derived advisory tier cross-check — the domain→project evidence join (#2135, #2088 Fork 3) ──
+// A WARN-ONLY cross-check demoted from #2088 Fork 3 (c): flag an `exploratory` project whose DOMAIN
+// shows benchmark demand — a signal its tier may be understated. It is *advisory only*: it NEVER owns
+// or computes the `tier` value (that stays the stamped, named-consumer judgment of Fork 3 (a),
+// validateProjectTier above) — a divergence is a nudge to a human, not a gate failure.
+//
+// Why a DECLARED join, not a derived one: #2088 Fork 3 rejected deriving the tier because "no domain→
+// project join exists at all — projects carry no intents/blocks lists, intents/blocks carry no project
+// field, only protocols have ownedByProject; the association is prose-only." The one structured edge
+// (protocol.ownedByProject → protocol.realizesIntent → intent.requiresCapabilities) does NOT reach the
+// benchmark-demand signal: requiresCapabilities is keyed by web-platform PRIMITIVE ids (`popover`,
+// `contenteditable`), while benchmark demand is keyed by component-CAPABILITY ids (`combobox`, `tabs`)
+// — a different namespace. So the domain→demand edge is genuinely absent from the data and cannot be
+// auto-derived soundly. This builds it as an EXPLICIT DECLARED mapping instead (declared > fragile
+// auto-derivation): `benchmarkCoverage.projectDomainDemand[]` — each row NAMES the project, the benchmark
+// capability whose demand its domain covers, and a one-line evidence cite. The check joins that declared
+// edge to the live `tier` stamp and warns only on the (project=exploratory ∧ declared-demand) cross.
+//
+// On today's real data this warns ZERO: benchmark demand is all component-level UI surface, while every
+// `exploratory` project is an infra/protocol domain (webinjectors, webregistries, webrealtime, …) with
+// no benchmark-capability demand to declare — so `projectDomainDemand` is legitimately empty of firing
+// rows. The mechanism (the join + the advisory) exists and is unit-exercised with synthetic rows; it
+// stays quiet until a future sweep declares a real domain→demand edge for an exploratory project.
+
+/**
+ * Derived advisory tier cross-check (#2135). Pure: takes the declared domain→demand join rows plus the
+ * live project tier index, returns WARNINGS only (never errors — advisory, never owns the value).
+ *
+ *   • a `projectDomainDemand` row whose `project` doesn't resolve → a warning (the declared join drifted);
+ *   • a resolving row for an `exploratory` project → the advisory nudge (domain shows benchmark demand,
+ *     consider whether the tier is understated) — surfaced with the row's `evidence` cite;
+ *   • a row for a `core`/`contextual` project → silent (the demand is already reflected in the tier).
+ *
+ * @param rows  Array<{ project, capability, evidence }> — benchmarkCoverage.projectDomainDemand (declared)
+ * @param projectTierById  Map<projectId, tier>  — the live stamped tier per project
+ * @returns { errors: [], warnings: Array<{message, descriptor?}> }
+ */
+export function advisoryTierCrossCheck(rows, projectTierById) {
+  const warnings = [];
+  const warn = (m, descriptor) => warnings.push({ message: m, descriptor });
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const { project, capability, evidence } = row || {};
+    if (!project) continue;
+    if (!projectTierById.has(project)) {
+      warn(`benchmarkCoverage.projectDomainDemand names project "${project}" which does not resolve in projects.json — the declared domain→project evidence join has drifted (#2135)`,
+        dUnresolvedRef('Project', project, fileFor('Project', project), 'projectDomainDemand', project, 'projects.json'));
+      continue;
+    }
+    const tier = projectTierById.get(project);
+    if (tier === 'exploratory') {
+      warn(`Advisory (#2135): project "${project}" is tier "exploratory" but its domain shows benchmark demand for "${capability}" — consider whether the tier is understated. ADVISORY ONLY: the stamped tier still owns the value (#2088 Fork 3). Evidence: ${evidence || '(none cited)'}`,
+        { kind: 'advisory-tier-cross-check', fix: 'model', entity: 'Project', id: project, field: 'tier', capability });
+    }
+  }
+  return { errors: [], warnings };
+}
+
 /**
  * Validate a single protocol (§6b) — required fields, ownedByProject / realizesIntent resolution,
  * and the project-partial anchor probe.

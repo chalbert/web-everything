@@ -38,7 +38,7 @@ import { loadAdapters } from './lib/adapters-loader.cjs';
 import {
   BACKLOG_STATUSES, BACKLOG_KINDS, FIB, FILE, blockSpecFile,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, validatePolyglotWideningGate, isCanonicalGraduated, detectClassificationCollapse, computeNativeFirstConformance, computeDesignKnowledgeConformance,
-  checkStatus, validateProjectTier, validateProtocol, validatePreset, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
+  checkStatus, validateProjectTier, advisoryTierCrossCheck, validateProtocol, validatePreset, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock,
   validateRenderersNotPublished, validateReferenceRuntimeForms,
@@ -187,6 +187,16 @@ for (const p of plugs) checkStatusInto('Plug', p.id, p.status);
 // non-exploratory project additionally names its consumer via a non-empty `tierEvidence` one-liner.
 for (const p of projects)
   for (const e of validateProjectTier(p.id, p.tier, p.tierEvidence)) err(e.message, e.descriptor);
+
+// Derived advisory tier cross-check (#2135, demoted from #2088 Fork 3 (c)) — WARN-ONLY. Joins the
+// DECLARED benchmarkCoverage.projectDomainDemand[] domain→project edge to the live stamped tier and
+// nudges when an `exploratory` project's domain shows benchmark demand. Never owns the tier value.
+{
+  const projectTierById = new Map(projects.map((p) => [p.id, p.tier]));
+  const coverage = readJson('benchmarkCoverage.json') || {};
+  const { warnings: advWarnings } = advisoryTierCrossCheck(coverage.projectDomainDemand, projectTierById);
+  for (const w of advWarnings) warn(w.message, w.descriptor);
+}
 
 // ── 3b. composesBehaviors resolution (#936, Fork 2 of #933) ───────────────────
 // A block's `traits[]` records the named behaviors it PROVIDES (`withSortableHeader`, …); the new

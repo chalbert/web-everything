@@ -21,7 +21,7 @@ import { loadResearch } from '../lib/research-loader.cjs';
 import { loadProtocols } from '../lib/protocols-loader.cjs';
 import { loadDataRegistry } from '../lib/registry-loader.cjs';
 import {
-  checkStatus, validateProjectTier, PROJECT_TIERS, validateProtocol, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
+  checkStatus, validateProjectTier, PROJECT_TIERS, advisoryTierCrossCheck, validateProtocol, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, isSegmentCovered, permalinkSegment,
   validateViteProxyCoverage, deDateReport,
   isExportsSafeTarget, validateModuleResolutionLock, findRawHtmlInMarkdown,
@@ -115,6 +115,58 @@ describe('validateProjectTier — enum + required tierEvidence for non-explorato
       for (const e of validateProjectTier(p.id, p.tier, p.tierEvidence)) problems.push(e.message);
     }
     expect(problems).toEqual([]);
+  });
+});
+
+// ── Derived advisory tier cross-check (#2135) — the declared domain→project evidence join ──
+describe('advisoryTierCrossCheck — warn-only domain→project demand join (#2135)', () => {
+  const tiers = new Map([
+    ['webinjectors', 'exploratory'],
+    ['webvalidation', 'core'],
+    ['webaudit', 'contextual'],
+  ]);
+  it('returns NO errors — it is advisory only, never a gate (never owns the tier)', () => {
+    const { errors } = advisoryTierCrossCheck(
+      [{ project: 'webinjectors', capability: 'combobox', evidence: 'x' }], tiers);
+    expect(errors).toEqual([]);
+  });
+  it('warns when an EXPLORATORY project has declared benchmark demand — the tier-understated nudge', () => {
+    const { warnings } = advisoryTierCrossCheck(
+      [{ project: 'webinjectors', capability: 'combobox', evidence: 'benchmark demand cite' }], tiers);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toMatch(/exploratory.*benchmark demand for "combobox"/);
+    expect(warnings[0].message).toMatch(/ADVISORY ONLY/);
+    expect(warnings[0].message).toMatch(/benchmark demand cite/);
+    expect(warnings[0].descriptor).toMatchObject({ kind: 'advisory-tier-cross-check', entity: 'Project', id: 'webinjectors' });
+  });
+  it('is SILENT for core/contextual projects — the demand is already reflected in the stamped tier', () => {
+    const { warnings } = advisoryTierCrossCheck([
+      { project: 'webvalidation', capability: 'form-validation-flow', evidence: 'x' },
+      { project: 'webaudit', capability: 'audit-timeline', evidence: 'x' },
+    ], tiers);
+    expect(warnings).toEqual([]);
+  });
+  it('warns (unresolved-ref) when the declared join names a project that no longer exists — drift guard', () => {
+    const { warnings } = advisoryTierCrossCheck(
+      [{ project: 'webgone', capability: 'tabs', evidence: 'x' }], tiers);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].message).toMatch(/does not resolve in projects\.json/);
+    expect(warnings[0].descriptor).toMatchObject({ entity: 'Project', id: 'webgone', field: 'projectDomainDemand' });
+  });
+  it('tolerates a missing/empty declared join (the real-data state today) — no warnings', () => {
+    expect(advisoryTierCrossCheck(undefined, tiers).warnings).toEqual([]);
+    expect(advisoryTierCrossCheck([], tiers).warnings).toEqual([]);
+  });
+  it('the live declared join in benchmarkCoverage.json is clean against real tiers (warns zero today)', () => {
+    const coverage = JSON.parse(readFileSync(join(DATA, 'benchmarkCoverage.json'), 'utf8'));
+    const projectTierById = new Map(
+      readdirSync(join(DATA, 'projects'))
+        .filter((f) => f.endsWith('.json'))
+        .map((f) => JSON.parse(readFileSync(join(DATA, 'projects', f), 'utf8')))
+        .map((p) => [p.id, p.tier]));
+    const { errors, warnings } = advisoryTierCrossCheck(coverage.projectDomainDemand, projectTierById);
+    expect(errors).toEqual([]);
+    expect(warnings).toEqual([]);
   });
 });
 
