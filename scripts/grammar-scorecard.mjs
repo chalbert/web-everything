@@ -27,7 +27,7 @@
  * (`we:design-systems/grammars/*.grammar.json`) and the emitted *report* (`we:reports/…`).
  *
  * Usage:
- *   node scripts/grammar-scorecard.mjs                 # score bundle zero vs. fui-native + handlebars
+ *   node scripts/grammar-scorecard.mjs                 # score bundle zero vs. fui-native + handlebars; Svelte bundle vs. svelte
  *   node scripts/grammar-scorecard.mjs --check         # re-emit and fail if the on-disk report drifts
  *
  * @module grammar-scorecard
@@ -64,6 +64,11 @@ const FLAVOR_BUNDLE_FILES = [
     file: 'recipes/bladeRecipes.ts',
     exports:
       'export { BladeEscapedInterpolationNode, BladeRawInterpolationNode, BladeHiddenCommentNode, BladeIfRegionNode, BladeForeachRegionNode, BladeVerbatimRegionNode }',
+  },
+  {
+    file: 'recipes/svelteBundleRecipes.ts',
+    exports:
+      'export { SvelteExpressionNode, SvelteIfRegionNode, SvelteEachRegionNode, SvelteHtmlMarkerNode, SvelteConstMarkerNode }',
   },
 ];
 
@@ -107,6 +112,8 @@ async function loadScorer() {
     banner: {
       js: [
         'if (typeof globalThis.Text === "undefined") { globalThis.Text = class Text {}; }',
+        'if (typeof globalThis.HTMLTemplateElement === "undefined") { globalThis.HTMLTemplateElement = class HTMLTemplateElement {}; }',
+        'if (typeof globalThis.Comment === "undefined") { globalThis.Comment = class Comment {}; }',
         'if (typeof globalThis.MutationObserver === "undefined") { globalThis.MutationObserver = class MutationObserver { constructor(cb){} observe(){} disconnect(){} }; }',
       ].join('\n'),
     },
@@ -217,14 +224,31 @@ function builtBundles(scorer) {
           scorer.BladeVerbatimRegionNode,
         ]
       : null;
-  return { 'liquid-jinja': liquidJinja, blade };
+  // Svelte bundle (#2118) — its region/marker recipes (`{#if}`/`{#each}`/`{@html}`/`{@const}`)
+  // plus the expression interpolation. Absent from FUI → exports undefined → falls back to
+  // bundle-zero (gap-list mode); present → scored against the svelte checklist (fidelity proof).
+  const svelte =
+    scorer.SvelteExpressionNode &&
+    scorer.SvelteIfRegionNode &&
+    scorer.SvelteEachRegionNode &&
+    scorer.SvelteHtmlMarkerNode &&
+    scorer.SvelteConstMarkerNode
+      ? [
+          scorer.SvelteExpressionNode,
+          scorer.SvelteIfRegionNode,
+          scorer.SvelteEachRegionNode,
+          scorer.SvelteHtmlMarkerNode,
+          scorer.SvelteConstMarkerNode,
+        ]
+      : null;
+  return { 'liquid-jinja': liquidJinja, blade, svelte };
 }
 
 async function main() {
   const args = process.argv.slice(2);
   const check = args.includes('--check');
   const names = args.filter((a) => !a.startsWith('--'));
-  const checklists = names.length ? names : ['fui-native', 'handlebars', 'blade', 'liquid-jinja', 'vue', 'angular'];
+  const checklists = names.length ? names : ['fui-native', 'handlebars', 'blade', 'liquid-jinja', 'vue', 'angular', 'svelte'];
 
   const scorer = await loadScorer();
   if (!scorer) {

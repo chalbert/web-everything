@@ -2,9 +2,11 @@
 kind: story
 size: 3
 parent: "2094"
-status: open
+status: resolved
 blockedBy: ["2113", "2110"]
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
 tags: [custom-nodes, delimiter-grammar, bundle, svelte]
 ---
 
