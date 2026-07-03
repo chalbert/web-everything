@@ -28,6 +28,13 @@ import { dirname, resolve } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = readFileSync(resolve(here, '../../backlog.mjs'), 'utf8');
 
+// The invariant is about the CLAIM path specifically, so scope the git-read counts to the `transition`
+// function body — other verbs (e.g. `yield`'s `git ls-files` immutability guard) legitimately read git
+// and must not inflate the claim-path count.
+const txStart = SRC.indexOf('function transition(');
+const txEnd = SRC.indexOf('\nfunction ', txStart + 1);
+const CLAIM_SRC = SRC.slice(txStart, txEnd === -1 ? undefined : txEnd);
+
 describe('backlog.mjs claim never refuses on the whole working tree (#510, reconciled #952/#1256)', () => {
   it('contains no whole-tree dirty/untracked refusal guard', () => {
     expect(SRC).not.toMatch(/\bisDirty\b/);
@@ -40,7 +47,7 @@ describe('backlog.mjs claim never refuses on the whole working tree (#510, recon
   });
 
   it('makes exactly two git reads: a path-scoped claim-first guard + the opt-in attribution snapshot (#952/#1256)', () => {
-    const gitCalls = SRC.match(/execFileSync\('git'/g) || [];
+    const gitCalls = CLAIM_SRC.match(/execFileSync\('git'/g) || [];
     expect(gitCalls.length).toBe(2);
     // (1) the claim-first guard reads ONLY the single item file being claimed (path-scoped via `-- rel`)…
     expect(SRC).toMatch(/execFileSync\('git', \['status', '--porcelain', '--', rel\]/);
@@ -54,13 +61,13 @@ describe('backlog.mjs claim never refuses on the whole working tree (#510, recon
 
   it('wraps each git read in a try/catch so a git/IO hiccup can never block a claim', () => {
     // both reads are best-effort: a failure is swallowed, never propagated into a refusal.
-    const tryCatches = SRC.match(/try \{[\s\S]*?execFileSync\('git'[\s\S]*?\}\s*catch/g) || [];
+    const tryCatches = CLAIM_SRC.match(/try \{[\s\S]*?execFileSync\('git'[\s\S]*?\}\s*catch/g) || [];
     expect(tryCatches.length).toBe(2);
   });
 
   it('snapshots AFTER the status write, so the whole-tree read is attribution, not a pre-claim gate', () => {
     // the attribution snapshot is the LAST git read, and it must come after applyTransition (by then the
     // claim has already succeeded). The earlier (first) git read is the path-scoped claim-first guard.
-    expect(SRC.lastIndexOf("execFileSync('git'")).toBeGreaterThan(SRC.indexOf('applyTransition(before, v'));
+    expect(CLAIM_SRC.lastIndexOf("execFileSync('git'")).toBeGreaterThan(CLAIM_SRC.indexOf('applyTransition(before, v'));
   });
 });

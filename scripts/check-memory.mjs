@@ -69,8 +69,21 @@ if (process.argv.includes('--pre')) {
     proposed = ti.content ?? ti.new_string ?? onDisk;
   }
   const { v } = checkBudget(proposed);
+  // Tree-shape gate (write-time): deny NEWLY-introduced leaf links into the always-loaded MEMORY.md map.
+  // The default sweep flags absolute presence; here we block only leaf links not already on disk, so
+  // pre-existing drift doesn't lock the file and a cleanup edit (which REMOVES leaf links) still passes.
+  // This is the write-time twin of the sweep's tree-shape rule — the map links only index-*.md sub-indexes.
+  const leafLinks = (s) => {
+    const out = new Set(); const re = /\]\(([^)]+\.md)\)/g; let m;
+    for (const ln of s.split('\n')) { while ((m = re.exec(ln))) if (!/^index-.*\.md$/.test(m[1])) out.add(m[1]); }
+    return out;
+  };
+  const before = leafLinks(onDisk);
+  for (const f of leafLinks(proposed)) {
+    if (!before.has(f)) v.push(`would add a leaf link (${f}) to the always-loaded MEMORY.md map — the map links only index-*.md sub-indexes; add this rule as a "- N. Title — hook" line in its category sub-index instead (docs/agent/memory-management.md)`);
+  }
   if (!v.length) process.exit(0);
-  console.error(`memory-budget: this edit would breach the MEMORY.md budget (#1517; docs/agent/memory-management.md):\n  - ${v.join('\n  - ')}\nFix before saving — merge/prune an entry or move detail to the topic file.`);
+  console.error(`check:memory (--pre): this edit would violate the MEMORY.md index policy (#1517; docs/agent/memory-management.md):\n  - ${v.join('\n  - ')}\nFix before saving — prune/merge an entry, move detail to the topic file, or home the rule in a sub-index.`);
   process.exit(2);
 }
 

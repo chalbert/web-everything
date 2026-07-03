@@ -10,7 +10,7 @@
  *
  * DECISION: deny the Edit/Write when the target file resolves under a constellation PRIMARY checkout and
  * NOT under a `.lanes/` clone. Everything else is allowed — lane clones, other repos, the scratchpad,
- * `~/.claude` agent memory, untracked scratch.
+ * `~/.claude` agent memory (incl. the repo `.claude/agent-memory/` it symlinks to), untracked scratch.
  *
  * ESCAPE HATCH: set `LANE_GUARD_OFF=1` for the rare sanctioned primary-tree edit (e.g. bootstrapping this
  * very guard, or an emergency hotfix the user directs). The escape is loud by being explicit.
@@ -50,9 +50,13 @@ try {
   // A lane clone lives under `<workspace>/.lanes/…` — never under a primary root — so a primary-root
   // prefix test alone cleanly separates the two.
   const inLane = real.includes(`${path.sep}.lanes${path.sep}`);
+  // Agent-memory tree is exempt (restores the guard's stated intent that ~/.claude memory is free to edit —
+  // the per-project memory dir is symlinked INTO <repo>/.claude/agent-memory, which would otherwise classify
+  // as primary). Memory is low-collision, frequently-updated, and not lane-isolated work (user directive 2026-07-03).
+  const inAgentMemory = real.includes(`${path.sep}.claude${path.sep}agent-memory${path.sep}`);
   const inPrimary = primaries.some((p) => (real + path.sep).startsWith(p));
 
-  if (inPrimary && !inLane) {
+  if (inPrimary && !inLane && !inAgentMemory) {
     deny(
       `edit BLOCKED — "${path.relative(workspace, real)}" is in the shared PRIMARY checkout. Per #2123 every ` +
       `edit runs in an isolated lane CLONE, not the primary tree (a concurrent session or the user's dev ` +
