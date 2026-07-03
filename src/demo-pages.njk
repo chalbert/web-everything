@@ -11,6 +11,7 @@ eleventyComputed:
 ---
 
 {% from "project-status.njk" import projectStatus %}
+{% from "we-component.njk" import weCard %}
 
 <div class="plug-detail-header">
     <div class="plug-detail-header-inner">
@@ -30,8 +31,9 @@ eleventyComputed:
 
 <div class="container block-detail-page">
     <div class="block-body content">
+        {#- Card 1: Hero card — gradient background, conditional on liveUrl or fuiDemoFile (#2105) -#}
         {% if demo.liveUrl or demo.fuiDemoFile %}
-        <div class="section-card fui-card" style="padding: 2rem; margin-bottom: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+        {%- set _demoHeroBody %}
             <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 2rem;">
                 <div style="flex: 1;">
                     {% if demo.projects %}
@@ -73,21 +75,23 @@ eleventyComputed:
                 </a>
                 {% endif %}
             </div>
-        </div>
+        {% endset -%}
+        {{ weCard("", _demoHeroBody, "", "section-card demo-hero-card") }}
         {% endif %}
 
+        {#- Card 2: Live demo embed (conditional on fuiDemoFile) -#}
         {% if demo.fuiDemoFile %}
-        <div class="section-card fui-card">
-            <h2>Live demo</h2>
-            <p style="opacity:0.8;">Hosted by <strong>Frontier&nbsp;UI</strong> (the implementation repo) and embedded here in a sandboxed iframe — Web Everything never imports the app's component code (the #700/#701 boundary; FUI keeps provenance). Open it standalone from the frame's “Open in Frontier&nbsp;UI ↗” link.</p>
+        {%- set _demoEmbedBody %}
+            <p style="opacity:0.8;">Hosted by <strong>Frontier&nbsp;UI</strong> (the implementation repo) and embedded here in a sandboxed iframe — Web Everything never imports the app's component code (the #700/#701 boundary; FUI keeps provenance). Open it standalone from the frame's "Open in Frontier&nbsp;UI ↗" link.</p>
             {% fuiDemo demo.fuiDemoFile, demo.name, (demo.fuiDemoHeight or 640) %}
-        </div>
+        {% endset -%}
+        {{ weCard("Live demo", _demoEmbedBody, "", "section-card") }}
         {% endif %}
 
+        {#- Card 3: Standards required (conditional on demoBlockers) -#}
         {% set deps = demoBlockers[demo.id] %}
         {% if deps and deps.requires.length > 0 %}
-        <div class="section-card fui-card">
-            <h2>Standards required{% if deps.blockers.length %} · <span style="color:#b1271b;">{{ deps.blockers.length }} blocking</span>{% else %} · <span style="color:#1a7f43;">all shipping</span>{% endif %}</h2>
+        {%- set _demoReqsBody %}
             <p style="opacity:0.8;">Web Everything surfaces this demo consumes (from its <code>conformance.json</code>). A surface that is not yet shipping — a block not <code>active</code>, or an intent with no active implementer — blocks full conformance.</p>
             <ul style="list-style:none; padding:0;">
                 {% for r in deps.requires %}
@@ -109,23 +113,29 @@ eleventyComputed:
                 {% endfor %}
             </ul>
             {% endif %}
-        </div>
+        {% endset -%}
+        {#- actionsHtml carries the color-coded blocking/all-shipping pill — preserves the original h2 visual cue
+            (#2170 review finding: plain text title drops the red/green color signal the original <span> carried). -#}
+        {%- set _demoReqsActions %}{% if deps.blockers.length %}<span style="color:#b1271b;">{{ deps.blockers.length }} blocking</span>{% else %}<span style="color:#1a7f43;">all shipping</span>{% endif %}{% endset -%}
+        {{ weCard("Standards required", _demoReqsBody, _demoReqsActions, "section-card") }}
         {% endif %}
 
-        <div class="section-card fui-card">
-            <h2>Overview</h2>
+        {#- Card 4: Overview -#}
+        {%- set _demoOverviewBody %}
             {{ demo.description | safe }}
-        </div>
+        {% endset -%}
+        {{ weCard("Overview", _demoOverviewBody, "", "section-card") }}
 
+        {#- Card 5: Source Code (conditional on codeUrl) -#}
         {% if demo.codeUrl %}
-        <div class="section-card fui-card">
-            <h2>Source Code</h2>
+        {%- set _demoCodeBody %}
             <p>View the complete source code for this demo on GitHub:</p>
             <a href="{{ demo.codeUrl }}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; background: #24292e; color: white; border-radius: 0.5rem; font-weight: 600; text-decoration: none; transition: background 0.2s;">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
                 View on GitHub
             </a>
-        </div>
+        {% endset -%}
+        {{ weCard("Source Code", _demoCodeBody, "", "section-card") }}
         {% endif %}
     </div>
 </div>

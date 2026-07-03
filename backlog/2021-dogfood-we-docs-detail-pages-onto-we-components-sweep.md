@@ -1,9 +1,10 @@
 ---
 kind: epic
 parent: "777"
-status: open
-blockedBy: ["2016"]
+status: resolved
+blockedBy: []
 dateOpened: "2026-07-01"
+dateResolved: "2026-07-03"
 tags: [dogfood, fui, ssr, detail-pages, epic]
 ---
 

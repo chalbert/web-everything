@@ -1939,6 +1939,25 @@ we-card {
   overflow: hidden;
 }
 
+/* #2105: demo detail-page hero card — gradient background + white text. Applied via `className` on the
+   `weCard` call so it works on both the pre-upgrade `<we-card>` and the SSR-spliced `<article class="fui-card">`. */
+.demo-hero-card,
+we-card.demo-hero-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 2rem;
+  margin-bottom: 1rem;
+}
+
+/* #2105: research-topic superseded-revision warning card — amber left-border accent. Applied via `className`
+   on the `weCard` call, works on both pre-upgrade `<we-card>` and SSR-spliced `<article class="fui-card">`. */
+.research-superseded-card,
+we-card.research-superseded-card {
+  border-left: 3px solid #b45309;
+  background: #fef3c7;
+  color: #b45309;
+}
+
 /* #1953 (slice of #1608): box-model baseline for the WE-website PRODUCT components `standard-section`
    / `standard-card` (src/_includes/product-components.njk), which compose the FUI `we-section-card` /
    `we-card` primitives. Custom-element tags default to `display:inline`, so an un-upgraded product tag
