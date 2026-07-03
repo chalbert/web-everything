@@ -93,11 +93,18 @@ export function mergeMethodFlag(method) {
  *  transport anyway (it autofills by diffing the head LOCALLY, but a lane/* head is remote-only — no local
  *  branch to diff — so gh errors "ambiguous argument origin/main...lane/…"); the CLI therefore always
  *  DERIVES a title from the source commit's subject, so the `--fill`-only branch is a bare-call fallback the
- *  lane path never hits. Pure — returns the argv array for `gh`. */
+ *  lane path never hits. Pure — returns the argv array for `gh`.
+ *
+ *  HEADLESS-SAFE (#2176): the argv must NEVER be title-only. A bare `gh pr create --title …` (no `--body`,
+ *  no `--fill`) drops into an interactive body prompt and, run headless, errors "Command failed". So when a
+ *  title is present but no body is given, we pass an explicit empty `--body ""` — never `--fill` (unusable
+ *  for a remote-only lane/* head). Result: the create is always non-interactive. */
 export function buildCreateArgs({ base, head, title, body }) {
   const args = ['pr', 'create', '--base', base, '--head', head];
   if (title != null) args.push('--title', title);
+  // A title with no body must still carry a body — otherwise gh prompts interactively (fails headless, #2176).
   if (body != null) args.push('--body', body);
+  else if (title != null) args.push('--body', '');
   if (title == null && body == null) args.push('--fill');
   return args;
 }
