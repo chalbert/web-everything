@@ -87,6 +87,37 @@ Every user brand judgment in-session is a training label; log them with the prin
 - **2026-07-03 · label (user):** FUI-05 (sun with lift echo) — "underlying principle has something, execution is clunky" → principle: **separate the mechanic from its rendering.** A good device (motion-by-positional-echo / afterimage) can be buried under a clunky skin; the reviewer should EXTRACT and name the reusable principle even while rejecting the artifact, and carry it forward. Rejecting a candidate ≠ rejecting its idea.
 - **2026-07-03 · label (user) — META:** after all rounds, the **Plateau mesa favicon is STILL the best mark, and the WE/FUI candidates "don't feel in the same family."** → principle: **family coherence is a first-class axis, scored ACROSS marks, not per-mark.** The mesa is the family ANCHOR (a solid geometric landform in a solid + reduced-opacity echo grammar); a candidate must visually rhyme with it, not merely score well alone. This surfaces a real tension the reviewer must weigh: the per-mark winners (WE-11/WE-10 are letterforms — a different visual system) vs the landscape-lens marks (bedrock-strata / ridge / terrace) that share the mesa's grammar but scored lower individually. A pile of individually-good marks that don't cohere is a failed system — the Lufthansa/IBM lesson (family = shared geometric discipline).
 
+- **2026-07-03 · label (user) — METHOD:** "are you reviewing with screenshots + visual analysis after
+  creating, and red-teaming until refined? most marks aren't good design-wise." → the decisive process
+  finding. **Blind one-shot fan-out generation produces mediocrity.** Root causes: (1) SVG-emitting
+  sub-agents have no rasterizer — they score geometry, not appearance, so they cannot see that a "W"
+  reads as a pause icon; (2) review was grid-glance, never per-mark render→critique→edit→re-render to
+  convergence. Fix, codified as the **`brand-mark-loop` skill**: a SIGHTED loop the main loop drives
+  itself (render at 220/64/32/16 on light+dark via `plateau:scripts/render-mark.mjs` → critique against
+  rubric+corpus → red-team to refute → edit SVG → re-render → repeat), plus an honesty clause
+  ("rendered-and-looked-at or it didn't happen"; state the ceiling and escalate to a human designer
+  with the brief-as-spec when the loop stalls). Proven on WE-11: rendered large, it does NOT read as a
+  W and the white-panel-on-gradient is a generic app-icon cliché — invisible at grid-glance size.
+
+## Training hooks for the explorer (#1167) & vision tools (#1552, /review-design, /vision-review)
+
+The design-AI reviewer is not just a branding judge — the same sighted-loop discipline upgrades the
+autonomous explorer and the vision/design-review tools:
+
+- **Give the judge eyes, not just the DOM.** The explorer (#1167) and vision judge (#1552) must score
+  from a RENDERED screenshot at the real display size, never from geometry/markup alone — the exact
+  blind-generation failure above. `plateau:scripts/render-mark.mjs` is the minimal pattern (render →
+  look) to generalize into the judge's evaluation step.
+- **Adversarial-read + swap-test as standing checks.** Fold the corpus's failure lenses (generic-cliché,
+  unintended double-read, small-size-death, monogram-crowding) into the vision reviewer's checklist so
+  it surfaces "reads as a sailboat / could be any brand / dies at 16px" unprompted.
+- **Refine-to-convergence, not one-shot.** `/review-design` and `/vision-review` should support an
+  iterate loop (critique → apply → re-render → re-score) rather than a single verdict — the loop is
+  where quality comes from.
+- **The journey + labels are the shared fixture.** `plateau:branding-proposals/journey.json` (every
+  candidate, verdict, user pick) trains and regresses ALL of these judges — a candidate reviewer that
+  disagrees with the logged user verdicts regresses.
+
 ## Scope notes
 
 - Applies to branding assets (marks, icons, palettes, lockups) *and* UI design review guidance — the
