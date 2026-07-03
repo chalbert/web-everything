@@ -1,0 +1,31 @@
+{
+  "$description": "IBM Carbon Design System parity REFERENCE SET for the #2024 conformance harness — WE-owned data, not harness code. The canonical component set (button/input/card) and the Carbon v11 roles each is themed by, each naming the resolved DTCG path the flavor (we:design-systems/carbon.tokens.json) authors that role onto. The harness (fui:plugs/webtheme/conformanceHarness.ts scoreFlavor) diffs each role against what the tokens+intents model can land on a rendered component and emits a per-component compliance score + gap list. Seeded from the Carbon v11 White-theme token set. Scoring THIS through the SAME fui:scoreFlavor as shadcn + material (no Carbon-specific code) is the #2024 target-agnostic proof over a third flavor. The IBM Plex Sans font-family role ($font-family-sans-serif) is listed on the button component as a gap: there is no bridge row from a DTCG type.font-family path to the legacy font.sans slot — a concrete gap the standard must grow (#2024 gap taxonomy).",
+  "target": "IBM Carbon v11",
+  "components": [
+    {
+      "component": "button",
+      "roles": [
+        { "role": "$interactive", "dtcgPath": "color.accent" },
+        { "role": "$layer-01 (surface)", "dtcgPath": "color.surface" },
+        { "role": "$font-family-sans-serif", "dtcgPath": "type.font-family" }
+      ]
+    },
+    {
+      "component": "input",
+      "roles": [
+        { "role": "$border-subtle-01", "dtcgPath": "surface.border" },
+        { "role": "$text-primary", "dtcgPath": "color.text-light" },
+        { "role": "$layer-01", "dtcgPath": "color.surface" }
+      ]
+    },
+    {
+      "component": "card",
+      "roles": [
+        { "role": "$layer-01 (card surface)", "dtcgPath": "color.surface" },
+        { "role": "$border-subtle-01", "dtcgPath": "surface.border" },
+        { "role": "$radius (none)", "dtcgPath": "radius.md" },
+        { "role": "$text-secondary", "dtcgPath": "surface.muted-foreground" }
+      ]
+    }
+  ]
+}
