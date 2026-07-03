@@ -1,8 +1,11 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
+graduatedTo: "we:suggested-edit/contract.ts"
 tags: [annotation, rich-text, suggestion, collaborative-editing, aria-1.3, contract]
 ---
 

@@ -1,6 +1,6 @@
 /**
  * Web Directives **SSR wire-format** golden conformance-vector suite (ratified #2030, on the #899/#1016
- * kit; the load-bearing first slice of the SSR surface, #2063).
+ * kit; the load-bearing first slice of the SSR surface, #2063; state-serialization slice, #2065).
  *
  * The SSR output of a comment-anchor directive region is a *language-agnostic wire format*: given an input
  * directive tree + its resolved data, a conformant renderer — in ANY language (Node, Go, Rust, PHP, …) —
@@ -19,6 +19,16 @@
  *   2. `data-key` keyed diffing on `for-each` items;
  *   3. the zero-JS progressive baseline (structural content fully expanded, live branch only);
  *   4. the bounded in-marker **state-token layout** (resume tokens as options; NEVER raw data in comment text).
+ *
+ * **State-serialization (this slice, #2065) — the bounded in-marker framework tokens:**
+ *   - `for-each` markers carry `count="N"` (item count, so the client knows the region size without scanning)
+ *     and `key-hash="<hex8>"` for non-empty keyed lists (DJB2 of the comma-joined projected key strings, so
+ *     the client can detect key-set changes with a single comparison — the raw key values stay on `data-key`
+ *     attributes, NEVER in comment text, per the raw-data-in-comment guard).
+ *   - `if` markers carry `condition="<attr>"` (chosen branch, already in the open marker per #2063).
+ *   - `switch` markers carry `value="<attr>"` (chosen branch, already in the open marker per #2063).
+ *   These tokens are bounded: they are framework-owned attribute names with non-user-data values (attr names,
+ *   counts, compact hashes). Renderers MUST NOT emit unbounded user-data strings into comment text.
  *
  * The published grammar is `control:`/`/control:` `open-close`; the FUI runtime's legacy `:start`/`:end`
  * spelling is a pre-existing conformance gap reconciled to this standard separately (#2068).
@@ -67,14 +77,17 @@ export const webdirectivesSsrSuite: SsrWireVectorSuite = {
       id: 'webdirectives-ssr/for-each/keyed-items-expanded',
       description:
         'A keyed `for-each` expands every item between paired markers; each item carries `data-key` (the ' +
-        'only key channel). Marker space-padding is byte-exact.',
+        'only key channel). The open marker carries `count` (item count) and `key-hash` (DJB2 of the ' +
+        'comma-joined projected key strings) as bounded resume tokens — raw key values stay on `data-key`, ' +
+        'never in comment text. Marker space-padding is byte-exact.',
       input:
         '<template is="for-each" items="users" key="id">' +
         '<div class="user-row">{{name}}</div>' +
         '</template>',
       data: { users: [{ id: 1, name: 'Alice' }, { id: 2, name: 'Bob' }] },
+      // key-hash: DJB2 of "1,2" = 0b866f0a
       expectedHtml:
-        '<!-- control:for-each items="users" key="id" -->\n' +
+        '<!-- control:for-each items="users" key="id" count="2" key-hash="0b866f0a" -->\n' +
         '<div class="user-row" data-key="1">Alice</div>\n' +
         '<div class="user-row" data-key="2">Bob</div>\n' +
         '<!-- /control:for-each -->',
@@ -82,15 +95,16 @@ export const webdirectivesSsrSuite: SsrWireVectorSuite = {
     {
       id: 'webdirectives-ssr/for-each/empty-list-markers-only',
       description:
-        'A keyed `for-each` over an empty list emits the paired markers with no item content between them ' +
-        '(the region is still delimited so the client can hydrate an empty keyed region).',
+        'A keyed `for-each` over an empty list emits the paired markers with `count="0"` and no item ' +
+        'content (the region is still delimited so the client can hydrate an empty keyed region; no ' +
+        '`key-hash` is emitted when the list is empty — nothing to hash).',
       input:
         '<template is="for-each" items="users" key="id">' +
         '<div class="user-row">{{name}}</div>' +
         '</template>',
       data: { users: [] },
       expectedHtml:
-        '<!-- control:for-each items="users" key="id" -->\n' +
+        '<!-- control:for-each items="users" key="id" count="0" -->\n' +
         '<!-- /control:for-each -->',
     },
     {
@@ -169,6 +183,65 @@ export const webdirectivesSsrSuite: SsrWireVectorSuite = {
         '<div class="skeleton"></div>\n' +
         '<!-- /defer -->',
     },
+    // #2065 — directive-state serialization: vectors whose focus is the bounded resume-token layout
+    {
+      id: 'webdirectives-ssr/for-each/state-tokens-three-items',
+      description:
+        'A keyed `for-each` over three items carries `count="3"` and the DJB2 `key-hash` of the ' +
+        'comma-joined projected keys as bounded resume tokens in the open marker. This is the canonical ' +
+        'state-serialization test for `for-each` (independent of the existing two-item keyed vector).',
+      input:
+        '<template is="for-each" items="products" key="sku">' +
+        '<li class="product">{{name}}</li>' +
+        '</template>',
+      data: {
+        products: [
+          { sku: 'A1', name: 'Alpha' },
+          { sku: 'B2', name: 'Beta' },
+          { sku: 'C3', name: 'Gamma' },
+        ],
+      },
+      // key-hash: DJB2 of "A1,B2,C3" = d792ea35
+      expectedHtml:
+        '<!-- control:for-each items="products" key="sku" count="3" key-hash="d792ea35" -->\n' +
+        '<li class="product" data-key="A1">Alpha</li>\n' +
+        '<li class="product" data-key="B2">Beta</li>\n' +
+        '<li class="product" data-key="C3">Gamma</li>\n' +
+        '<!-- /control:for-each -->',
+    },
+    {
+      id: 'webdirectives-ssr/state-tokens/if-condition-resume-token',
+      description:
+        '`if` open marker carries `condition="<attr-name>"` as the bounded resume token (so the client ' +
+        'resolves the same branch on hydration without re-evaluating the data). The token is the attribute ' +
+        'name, not the resolved value — a non-user-data string, safe in comment text.',
+      input:
+        '<template is="if" condition="showBanner">' +
+        '<div class="banner">Welcome</div>' +
+        '</template>',
+      data: { showBanner: true },
+      expectedHtml:
+        '<!-- control:if condition="showBanner" -->\n' +
+        '<div class="banner">Welcome</div>\n' +
+        '<!-- /control:if -->',
+    },
+    {
+      id: 'webdirectives-ssr/state-tokens/switch-value-resume-token',
+      description:
+        '`switch` open marker carries `value="<attr-name>"` as the bounded resume token (so the client ' +
+        'resolves the same case on hydration without re-evaluating the data). The token is the attribute ' +
+        'name, not the resolved user-data value.',
+      input:
+        '<template is="switch" value="theme">' +
+        '<case when="dark"><body class="dark"></body></case>' +
+        '<case when="light"><body class="light"></body></case>' +
+        '</template>',
+      data: { theme: 'dark' },
+      expectedHtml:
+        '<!-- control:switch value="theme" -->\n' +
+        '<body class="dark"></body>\n' +
+        '<!-- /control:switch -->',
+    },
   ],
 };
 
@@ -184,6 +257,21 @@ export class SsrWireSchemaError extends Error {
 const COMMENT_UNSAFE = /--/;
 
 /**
+ * DJB2 hash of a string (unsigned 32-bit, hex-padded to 8 chars). Used by the state-token validator to
+ * assert that `key-hash` values in `for-each` golden markers match the expected hash of their key sequence.
+ * This is the canonical hash function for `key-hash`; renderers MUST use the same algorithm (#2065).
+ *
+ * The hash input is the comma-joined list of projected key strings (e.g. `"1,2"` for keys [1, 2]).
+ */
+export function djb2KeyHash(keySequence: string): string {
+  let h = 5381;
+  for (let i = 0; i < keySequence.length; i++) {
+    h = (((h << 5) + h) ^ keySequence.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+/**
  * Dependency-free structural validator — the WE half of the kit's "schema + verifier" for the SSR wire
  * format. Asserts the suite is well-formed AND that each golden's `expectedHtml` obeys the normative marker
  * grammar (so a conforming renderer's oracle can trust the corpus without defensive parsing):
@@ -194,7 +282,10 @@ const COMMENT_UNSAFE = /--/;
  *     space-padded `<!-- /ns:name -->` marker (the open/close grammar, byte-exact padding);
  *   - no HTML-comment carries a `--` breakout sequence in its body (raw-data-in-comment guard);
  *   - the source `input` is NOT itself already-expanded output (must contain a `<template is=` authoring form),
- *     so a vector can't accidentally pin output-as-input.
+ *     so a vector can't accidentally pin output-as-input;
+ *   - **state-token layout (#2065):** a `control:for-each` open marker MUST carry a `count="N"` token (item
+ *     count), and when the list is non-empty MUST carry a `key-hash="<hex8>"` token (DJB2 of the
+ *     comma-joined `data-key` values extracted from the golden's `expectedHtml`).
  *
  * Validates *shape + grammar*, never renders — grading a renderer's emitted bytes against `expectedHtml` is
  * the renderer/oracle's job (#2064).
@@ -240,6 +331,27 @@ export function assertSsrWireSuite(suite: SsrWireVectorSuite): SsrWireVectorSuit
     for (const body of v.expectedHtml.matchAll(/<!--([\s\S]*?)-->/g)) {
       if (COMMENT_UNSAFE.test(body[1]))
         throw new SsrWireSchemaError(label, `vector "${v.id}" has a \`--\` breakout sequence inside a comment marker`);
+    }
+
+    // #2065 state-token validation: `control:for-each` open markers must carry `count` and (when non-empty)
+    // `key-hash`, so the golden suite itself enforces the bounded-resume-token contract.
+    if (open[1] === 'control:for-each') {
+      const openLine = v.expectedHtml.split('\n')[0];
+      const countMatch = /\bcount="(\d+)"/.exec(openLine);
+      if (!countMatch)
+        throw new SsrWireSchemaError(label, `vector "${v.id}" \`control:for-each\` open marker missing \`count\` state token`);
+      const count = Number(countMatch[1]);
+      const dataKeys = [...v.expectedHtml.matchAll(/\bdata-key="([^"]*)"/g)].map((m) => m[1]);
+      if (count !== dataKeys.length)
+        throw new SsrWireSchemaError(label, `vector "${v.id}" \`count\` state token (${count}) does not match data-key count (${dataKeys.length})`);
+      if (count > 0) {
+        const keyHashMatch = /\bkey-hash="([0-9a-f]{8})"/.exec(openLine);
+        if (!keyHashMatch)
+          throw new SsrWireSchemaError(label, `vector "${v.id}" non-empty \`control:for-each\` open marker missing \`key-hash\` state token`);
+        const expected = djb2KeyHash(dataKeys.join(','));
+        if (keyHashMatch[1] !== expected)
+          throw new SsrWireSchemaError(label, `vector "${v.id}" \`key-hash\` "${keyHashMatch[1]}" does not match DJB2("${dataKeys.join(',')}") = "${expected}"`);
+      }
     }
   }
   return suite;
