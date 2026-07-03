@@ -1,0 +1,31 @@
+{
+  "$description": "Angular v17+ block-syntax grammar REFERENCE CHECKLIST for the #2113 grammar-fidelity scorecard — WE-owned data, not scorer code. Covers the double-curly interpolation ({{ }}) plus the v17+ control-flow block grammar (@if/@else/@for/@empty/@switch/@case/@default) — the bare-brace close '}' is the third declared-close shape named in #2074's Fork 3 scope enumeration. Attribute-keyed constructs ([prop], (event), *ngIf) are out-of-scope per statute → the #1986 attribute registry (declared as scorecard rows per #2117's scope enumeration). Each construct names its opening delimiter + expected #2074 nature; outOfScope marks concerns the #2074 statute does not own. The scorer (frontierui:plugs/webnodes/grammarScorecard.ts scoreGrammar) grades each construct reproduced/partial/out-of-scope/gap. This checklist carries ZERO scorer logic.",
+  "framework": "Angular",
+  "constructs": [
+    { "construct": "{{ expr }}", "open": "{{", "nature": "value" },
+    { "construct": "@if (cond) { … }", "open": "@if", "nature": "children" },
+    { "construct": "@else { … }", "open": "@else", "nature": "children" },
+    { "construct": "@else if (cond) { … }", "open": "@else if", "nature": "children" },
+    { "construct": "@for (item of items) track item { … }", "open": "@for", "nature": "children" },
+    { "construct": "@empty { … }", "open": "@empty", "nature": "children" },
+    { "construct": "@switch (expr) { … }", "open": "@switch", "nature": "children" },
+    { "construct": "@case (val) { … }", "open": "@case", "nature": "children" },
+    { "construct": "@default { … }", "open": "@default", "nature": "children" },
+    { "construct": "@defer { … }", "open": "@defer", "nature": "children" },
+    {
+      "construct": "[prop] property binding",
+      "nature": "marker",
+      "outOfScope": "attribute-keyed → #1986 registry (per #2117 scope enumeration)"
+    },
+    {
+      "construct": "(event) event binding",
+      "nature": "marker",
+      "outOfScope": "attribute-keyed → #1986 registry (per #2117 scope enumeration)"
+    },
+    {
+      "construct": "*ngIf structural directive",
+      "nature": "children",
+      "outOfScope": "attribute-keyed → #1986 registry (per #2117 scope enumeration)"
+    }
+  ]
+}
