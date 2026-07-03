@@ -26,6 +26,7 @@ import {
   TIER_ORDER,
   EXPECTED_PRODUCER,
   PINNED_CLI_RELATIVE,
+  resolveFuiRoot,
 } from '../component-render-build-hook.cjs';
 
 // A throwaway "repo root" whose sibling ../frontierui/dist/tools/component-render/cli.mjs exists, so the
@@ -77,6 +78,34 @@ describe('runBuildBatch — producer pin + missing-artifact hard error', () => {
     const wrong = () => JSON.stringify({ producer: 'someone-else/9', results: [] });
     expect(() => runBuildBatch([{ key: 'k', component: 'badge', config: {} }], stubRoot, wrong))
       .toThrow(/producer pin mismatch/);
+  });
+});
+
+describe('resolveFuiRoot — WE_FUI_ROOT env-var override (#2178)', () => {
+  const saved = process.env.WE_FUI_ROOT;
+  afterAll(() => {
+    if (saved === undefined) delete process.env.WE_FUI_ROOT;
+    else process.env.WE_FUI_ROOT = saved;
+  });
+
+  it('defaults to ../frontierui relative to repoRoot when WE_FUI_ROOT is unset', () => {
+    delete process.env.WE_FUI_ROOT;
+    expect(resolveFuiRoot('/home/user/webeverything')).toBe(path.resolve('/home/user/frontierui'));
+  });
+
+  it('returns the absolute WE_FUI_ROOT path when the env-var is set (lane clone override)', () => {
+    process.env.WE_FUI_ROOT = '/home/user/workspace/frontierui';
+    expect(resolveFuiRoot('/home/user/.lanes/web-everything/lane-15')).toBe(
+      path.resolve('/home/user/workspace/frontierui'),
+    );
+    delete process.env.WE_FUI_ROOT;
+  });
+
+  it('resolves a relative WE_FUI_ROOT against cwd (path.resolve semantics)', () => {
+    process.env.WE_FUI_ROOT = '../frontierui';
+    const result = resolveFuiRoot('/some/lane');
+    expect(path.isAbsolute(result)).toBe(true);
+    delete process.env.WE_FUI_ROOT;
   });
 });
 
