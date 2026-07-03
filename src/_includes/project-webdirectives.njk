@@ -369,6 +369,10 @@ declare const customComments: CustomCommentRegistry;
                     <code>&lt;template type="defer"&gt;</code>
                     <br><span>Trigger-gated two-branch region: <code>placeholder</code>/<code>content</code> slot templates stamped one-at-a-time — placeholder immediately, content when the <code>on</code> trigger fires (<code>on = idle | visible | interaction | hover | media:(&hellip;) | timer:5s</code>). Optional <code>prefetch</code> warms the content branch ahead of the trigger.</span>
                 </li>
+                <li>
+                    <code>&lt;template type="snippet-define"&gt;</code> + <code>&lt;template type="snippet-render"&gt;</code>
+                    <br><span>Named, parameterized markup reuse without a component — define once, render by reference with value args (<a href="/backlog/1980-directive-proposal-snippet-render-named-parameterized-reusab/">#1980</a> GO, #2144). <code>snippet-define</code> is an inert typed <code>&lt;template&gt;</code> carrying a named body (<code>name</code>, <code>params</code>); <code>snippet-render</code> is a no-body structural annotation that stamps the named body with caller-supplied args. Args are <strong>values, not expressions</strong> (the #1980 normative constraint). Authored toward <a href="https://github.com/WICG/webcomponents/blob/gh-pages/proposals/Template-Instantiation.md" rel="noopener noreferrer">Template Instantiation</a> (<code>createInstance</code> + a typed processor).</span>
+                </li>
             </ul>
         </div>
 
