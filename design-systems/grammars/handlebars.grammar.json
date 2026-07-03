@@ -1,5 +1,5 @@
 {
-  "$description": "Handlebars grammar REFERENCE CHECKLIST for the #2113 grammar-fidelity scorecard — WE-owned data, not scorer code. Updated by #2114 to include {{!-- --}} block comment (a distinct open from {{! }}). Scored against the #2114 Handlebars bundle (frontierui:plugs/webnodes/handlebarsBundle.ts createHandlebarsBundle) it measures the bundle's reproduction of the Handlebars grammar over the #2074 recipe model. Each construct names its opening delimiter + expected #2074 nature; outOfScope marks the delimiter-grammar concerns the #2074 statute does NOT own (attribute-keyed → #1986 registry; attribute-value interpolation → sibling surface, per we:docs/agent/block-standard.md#custom-node-recipes rule 5). The scorer (frontierui:plugs/webnodes/grammarScorecard.ts scoreGrammar) grades each construct reproduced/partial/out-of-scope/gap. This checklist carries ZERO scorer logic — swapping it for another framework's is what proves the scorer framework-agnostic (#2113). Pending scorecard row: {{> partial }} (include/outlet → #1980). Model gap confirmed: {{else}} mid-region-marker → decision card #2192.",
+  "$description": "Handlebars grammar REFERENCE CHECKLIST for the #2113 grammar-fidelity scorecard — WE-owned data, not scorer code. Updated by #2114 to include {{!-- --}} block comment (a distinct open from {{! }}). Scored against the #2114 Handlebars bundle (frontierui:plugs/webnodes/handlebarsBundle.ts createHandlebarsBundle) it measures the bundle's reproduction of the Handlebars grammar over the #2074 recipe model. Each construct names its opening delimiter + expected #2074 nature; outOfScope marks the delimiter-grammar concerns the #2074 statute does NOT own (attribute-keyed → #1986 registry; attribute-value interpolation → sibling surface, per we:docs/agent/block-standard.md#custom-node-recipes rule 5). The scorer (frontierui:plugs/webnodes/grammarScorecard.ts scoreGrammar) grades each construct reproduced/partial/out-of-scope/gap. This checklist carries ZERO scorer logic — swapping it for another framework's is what proves the scorer framework-agnostic (#2113). Pending scorecard row: {{> partial }} (include/outlet → #1980). Model gap confirmed: {{else}} mid-region-marker → decision card #2201.",
   "framework": "Handlebars",
   "constructs": [
     { "construct": "{{ expr }}", "open": "{{", "nature": "value" },
@@ -17,7 +17,7 @@
     {
       "construct": "{{else}} mid-region-marker",
       "nature": "marker",
-      "outOfScope": "mid-region-marker — model gap confirmed; decision card #2192"
+      "outOfScope": "mid-region-marker — model gap confirmed; decision card #2201"
     },
     {
       "construct": "helper as element attribute",
