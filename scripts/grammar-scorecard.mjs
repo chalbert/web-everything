@@ -56,6 +56,11 @@ function today() {
  */
 const FLAVOR_BUNDLE_FILES = [
   {
+    file: 'recipes/handlebarsBundle.ts',
+    exports:
+      'export { HandlebarsInterpolationNode, HandlebarsRawInterpolationNode, HandlebarsEachRegionNode, HandlebarsIfRegionNode, HandlebarsCommentNode, HandlebarsBlockCommentNode }',
+  },
+  {
     file: 'recipes/liquidJinjaBundle.ts',
     exports:
       'export { LiquidJinjaInterpolationNode, LiquidJinjaForRegionNode, LiquidJinjaIfRegionNode, LiquidJinjaBlockRegionNode, LiquidJinjaRawRegionNode, LiquidJinjaCommentRegionNode, JinjaInlineCommentNode }',
@@ -190,6 +195,27 @@ function builtBundles(scorer) {
   // Guard: only include a bundle entry when ALL its exports are present in the scorer module.
   // If the bundle file was absent from FUI (detect-or-skip per-bundle in loadScorer), the
   // named exports are undefined — treat that as "not yet built" and fall back to bundle zero.
+  // Handlebars/Mustache bundle (#2114) — its interpolation/raw/region/comment recipes
+  // (`{{ }}`/`{{{ }}}`/`{{#each}}`/`{{#if}}`/`{{! }}`/`{{!-- --}}`). Absent from FUI → exports
+  // undefined → falls back to bundle-zero (gap-list mode); present → scored against the handlebars
+  // checklist (fidelity proof). Mustache shares the same `{{ }}` interpolation surface (no separate
+  // checklist), so it is covered by this bundle / bundle zero — no distinct entry.
+  const handlebars =
+    scorer.HandlebarsInterpolationNode &&
+    scorer.HandlebarsRawInterpolationNode &&
+    scorer.HandlebarsEachRegionNode &&
+    scorer.HandlebarsIfRegionNode &&
+    scorer.HandlebarsCommentNode &&
+    scorer.HandlebarsBlockCommentNode
+      ? [
+          scorer.HandlebarsInterpolationNode,
+          scorer.HandlebarsRawInterpolationNode,
+          scorer.HandlebarsEachRegionNode,
+          scorer.HandlebarsIfRegionNode,
+          scorer.HandlebarsCommentNode,
+          scorer.HandlebarsBlockCommentNode,
+        ]
+      : null;
   const liquidJinja =
     scorer.LiquidJinjaInterpolationNode &&
     scorer.LiquidJinjaForRegionNode &&
@@ -241,7 +267,7 @@ function builtBundles(scorer) {
           scorer.SvelteConstMarkerNode,
         ]
       : null;
-  return { 'liquid-jinja': liquidJinja, blade, svelte };
+  return { handlebars, 'liquid-jinja': liquidJinja, blade, svelte };
 }
 
 async function main() {
