@@ -1,0 +1,8 @@
+{
+  "id": "carbon",
+  "name": "IBM Carbon v11",
+  "summary": "A full IBM Carbon v11 flavor (#2141) — the White theme transcribed as a full DTCG override: #0f62fe IBM Interactive Blue, zero-radius sharp corners, compact density + immediate motion, IBM Plex type scale. Loaded through the #2017 manifest loader; its paired gap list records what tokens+intents reproduce and what needs a new bridge row or role (font-family, the layered surface model, state/focus tokens).",
+  "status": "concept",
+  "ownedByProject": "webtheme",
+  "manifest": "design-systems/carbon.designsystem.json"
+}
