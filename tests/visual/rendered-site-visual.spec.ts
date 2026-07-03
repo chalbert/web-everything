@@ -27,7 +27,9 @@ const config = JSON.parse(readFileSync(join(process.cwd(), 'tests/visual/pages.j
 };
 
 // :8080 is the real docs origin (the a11y/smoke/content lanes pin the same), not Vite's :3000 demo shell.
-test.use({ baseURL: 'http://localhost:8080' });
+// #2167: env-ize the port off WE_ELEVENTY_PORT (as vite.config.mts reads, #1997) so a lane renders +
+// regenerates its OWN baselines against its OWN 11ty server, not main's :8080. Default unchanged.
+test.use({ baseURL: `http://localhost:${process.env.WE_ELEVENTY_PORT ?? '8080'}` });
 
 for (const { name, path, mask = [] } of config.pages) {
   test(`WE-docs visual · ${name} (${path})`, async ({ page }) => {

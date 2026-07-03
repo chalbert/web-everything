@@ -16,7 +16,9 @@ import { test, expect } from '@playwright/test';
 import { gatedRoutes } from '../a11y/sitemap-routes';
 
 // Same origin pin as the a11y/content specs — :8080 is the real docs home (Vite :3000 serves the demo shell).
-test.use({ baseURL: 'http://localhost:8080' });
+// #2167: env-ize the port off WE_ELEVENTY_PORT (as vite.config.mts reads, #1997) so a lane hits its OWN
+// 11ty server, not main's :8080. Default unchanged.
+test.use({ baseURL: `http://localhost:${process.env.WE_ELEVENTY_PORT ?? '8080'}` });
 
 // Flip to hard-fail on console.error too (default: warn-only, like A11Y_ENFORCE).
 const ENFORCE_CONSOLE = process.env.SMOKE_ENFORCE_CONSOLE === '1';

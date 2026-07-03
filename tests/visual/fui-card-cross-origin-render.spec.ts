@@ -21,7 +21,9 @@ import { test, expect } from '@playwright/test';
 import { classifyCardSurface, FUI_DARK_CARD } from '../../scripts/lib/render-check.mjs';
 
 // :8080 is the real docs origin (the SSR home with inline token CSS + passthrough /css), not Vite's :3000.
-test.use({ baseURL: 'http://localhost:8080' });
+// #2167: env-ize the port off WE_ELEVENTY_PORT (as vite.config.mts reads, #1997) so a lane hits its OWN
+// 11ty server, not main's :8080. Default unchanged.
+test.use({ baseURL: `http://localhost:${process.env.WE_ELEVENTY_PORT ?? '8080'}` });
 
 const SELECTOR = '.fui-card';
 

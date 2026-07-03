@@ -4,6 +4,12 @@ import { defineConfig, devices } from '@playwright/test';
 // (Vite :3000, 11ty :8080) so its static fixture server never collides with the user's running dev server.
 const INTERACTION_PORT = Number(process.env.WE_INTERACTION_PORT) || 3137;
 
+// #2167 (per #1997): the app dev-server ports are env-driven so a lane clone boots + probes its OWN pair,
+// not main's 3000/8080. Defaults unchanged (WE's band); a lane's `.env.local` (scripts/lane-pool.mjs) sets
+// these. The live-server specs read WE_ELEVENTY_PORT for their baseURL; the webServer health-check below
+// probes the Vite port the same way, so `reuseExistingServer` matches the lane's own running pair.
+const VITE_PORT = Number(process.env.WE_VITE_PORT) || 3000;
+
 // When set (the CI interaction lane, #2070), skip booting the app dev server (Vite :3000 + 11ty :8080):
 // the interaction project is self-contained against the static fixture server and never touches the live
 // app. The live-server projects (a11y/content/smoke/visual) are not run in this mode. This lets CI gate
@@ -46,7 +52,7 @@ export default defineConfig({
       : [
           {
             command: 'npm run dev',
-            url: 'http://localhost:3000',
+            url: `http://localhost:${VITE_PORT}`,
             reuseExistingServer: !process.env.CI,
             timeout: 120 * 1000,
           },

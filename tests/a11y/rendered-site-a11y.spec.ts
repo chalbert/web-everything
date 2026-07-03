@@ -21,7 +21,9 @@ import { gatedRoutes, ENFORCED_ROUTES, WCAG_TAGS } from './sitemap-routes';
 // Hit the WE-docs origin directly (11ty :8080), not the Vite dev server (:3000) whose root serves the demo
 // launcher shell rather than the docs home. The catalog routes proxy identically either way; pinning :8080
 // keeps `/` the real docs home (#763: "WE-docs URLs (:8080 here, proxied via :3000)").
-test.use({ baseURL: 'http://localhost:8080' });
+// #2167: env-ize the port off WE_ELEVENTY_PORT (as vite.config.mts reads, #1997) so a lane hits its OWN
+// 11ty server, not main's :8080. Default unchanged.
+test.use({ baseURL: `http://localhost:${process.env.WE_ELEVENTY_PORT ?? '8080'}` });
 
 const ENFORCE_ALL = process.env.A11Y_ENFORCE === '1';
 

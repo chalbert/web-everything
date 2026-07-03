@@ -11,7 +11,9 @@
 import { test, expect } from '@playwright/test';
 
 // Hit the WE-docs origin directly (11ty :8080), mirroring the a11y spec — /backlog/ is the real docs page.
-test.use({ baseURL: 'http://localhost:8080' });
+// #2167: env-ize the port off WE_ELEVENTY_PORT (as vite.config.mts reads, #1997) so a lane hits its OWN
+// 11ty server, not main's :8080. Default unchanged.
+test.use({ baseURL: `http://localhost:${process.env.WE_ELEVENTY_PORT ?? '8080'}` });
 
 // The SAME loader the 11ty build consumes (src/_data/backlog.js). Calling it here yields the exact
 // projection the page was rendered from — the stable, extractable contract the assertions compare against.

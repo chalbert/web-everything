@@ -1,9 +1,10 @@
 ---
 kind: task
-status: active
+status: resolved
 relatedTo: ["1966", "2123", "2070"]
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
 tags: [testing, visual-regression, lanes, dx]
 ---
 
