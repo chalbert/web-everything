@@ -1,0 +1,17 @@
+{
+  "$description": "Blade grammar REFERENCE CHECKLIST for the #2113 grammar-fidelity scorecard — WE-owned data, not scorer code. Scored against the Blade bundle (`frontierui:plugs/webnodes/recipes/bladeRecipes.ts`) it verifies faithful reproduction of Laravel Blade's sigil-keyword template grammar over the #2074 CustomNode recipe model. Each construct names its opening delimiter and expected #2074 nature. The scorer (frontierui:plugs/webnodes/grammarScorecard.ts scoreGrammar) grades each construct reproduced/partial/out-of-scope/gap. outOfScope marks the delimiter-grammar concerns the #2074 statute does NOT own (@include/outlet are pending #1980; attribute interpolation → sibling surface). Key edge cases: {!! !!} is a distinct open from {{ }} (Fork-2 longest-match — no collision); {{-- --}} opens alongside {{ and {!! in one bundle (distinct dispatch keys); @if close=')' is the declared paren-terminate (Fork-3 declared-not-derived); @verbatim close='' is the no-bracket form; children:'raw' is the scan-suppression nature ratified in #2112 Fork 3.",
+  "framework": "Blade",
+  "constructs": [
+    { "construct": "{{ $x }}", "open": "{{", "nature": "value" },
+    { "construct": "{!! $x !!}", "open": "{!!", "nature": "value" },
+    { "construct": "{{-- comment --}}", "open": "{{--", "nature": "value" },
+    { "construct": "@if (cond) … @endif", "open": "@if", "nature": "children" },
+    { "construct": "@foreach ($x as $y) … @endforeach", "open": "@foreach", "nature": "children" },
+    { "construct": "@verbatim … @endverbatim", "open": "@verbatim", "nature": "children" },
+    {
+      "construct": "@include(\"view\")",
+      "nature": "marker",
+      "outOfScope": "include/outlet → pending #1980 scorecard row"
+    }
+  ]
+}

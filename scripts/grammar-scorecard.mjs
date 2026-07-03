@@ -48,8 +48,8 @@ function today() {
 }
 
 /**
- * Transpile + import the FUI scorer AND bundle-zero recipes once, into one ESM. Returns null when
- * `../frontierui` is absent (detect-or-skip), so the caller skips rather than failing.
+ * Transpile + import the FUI scorer AND all scored bundle recipes once, into one ESM. Returns null
+ * when `../frontierui` is absent (detect-or-skip), so the caller skips rather than failing.
  */
 async function loadScorer() {
   if (!existsSync(FUI_WEBNODES)) return null;
@@ -57,7 +57,10 @@ async function loadScorer() {
     stdin: {
       contents:
         "export { scoreGrammar, renderGrammarReport, formatFidelity } from './grammarScorecard.ts';" +
-        "export { MustacheInterpolationNode, PolymerInterpolationNode } from './recipes/interpolationRecipes.ts';",
+        // Bundle zero (FUI native grammar — consumer-at-birth #2113)
+        "export { MustacheInterpolationNode, PolymerInterpolationNode } from './recipes/interpolationRecipes.ts';" +
+        // Blade bundle (#2116)
+        "export { BladeEscapedInterpolationNode, BladeRawInterpolationNode, BladeHiddenCommentNode, BladeIfRegionNode, BladeForeachRegionNode, BladeVerbatimRegionNode } from './recipes/bladeRecipes.ts';",
       resolveDir: FUI_WEBNODES,
       sourcefile: 'fui-grammar-entry.ts',
       loader: 'ts',
@@ -66,7 +69,7 @@ async function loadScorer() {
     format: 'esm',
     platform: 'node',
     write: false,
-    // The bundle-zero recipes extend `Text` (the value:'shown' polyfill host, evaluated at class
+    // The bundle recipes extend `Text` (the value:'shown' polyfill host, evaluated at class
     // definition). The scorer only reads their *static* config — never instantiates — so a minimal
     // `Text` global is enough for the class bodies to load in plain Node (no DOM needed).
     banner: {
@@ -108,10 +111,10 @@ function combinedReport(scored) {
     '**Re-derivable:** `we:scripts/grammar-scorecard.mjs` re-emits this report; `--check` fails the gate on drift.',
     '',
     '> Bundle zero scores **100%** against its own native checklist (self-consistency — nothing to gap), and',
-    '> exposes its real gaps only when scored against a *framework* checklist (Handlebars below): regions,',
-    '> raw/unescaped output, partials, comments — the concrete increments the per-flavor bundle stories',
-    '> (#2114–#2119) grow, and the mid-region-marker gap (`{{else}}`) whose decision card the first',
-    '> confirming gap list earns (not a guess).',
+    '> exposes its real gaps when scored against a *framework* checklist without a dedicated bundle (Handlebars',
+    '> below, pending #2114): regions, raw/unescaped output, partials, comments — the concrete increments the',
+    '> per-flavor bundle stories (#2114–#2119) grow. The Blade bundle (#2116) is shipped and scores 100%.',
+    '> The first confirming gap list earns the mid-region-marker decision card (`{{else}}/{:else}/@else`) — not a guess.',
     '',
     '',
   ].join('\n');
@@ -136,7 +139,7 @@ async function main() {
   const args = process.argv.slice(2);
   const check = args.includes('--check');
   const names = args.filter((a) => !a.startsWith('--'));
-  const checklists = names.length ? names : ['fui-native', 'handlebars'];
+  const checklists = names.length ? names : ['fui-native', 'handlebars', 'blade'];
 
   const scorer = await loadScorer();
   if (!scorer) {
@@ -147,9 +150,27 @@ async function main() {
   // Bundle zero: FUI's native grammar — the two shipped interpolation recipes.
   const bundleZero = [scorer.MustacheInterpolationNode, scorer.PolymerInterpolationNode];
 
+  // Per-checklist bundle overrides: when a dedicated FUI bundle is shipped for a framework,
+  // score that bundle instead of bundle zero. Bundle zero is the consumer-at-birth (#2113) and
+  // also the correct bundle for checklists that describe what the native grammar covers.
+  const bladeBundle = [
+    scorer.BladeEscapedInterpolationNode,
+    scorer.BladeRawInterpolationNode,
+    scorer.BladeHiddenCommentNode,
+    scorer.BladeIfRegionNode,
+    scorer.BladeForeachRegionNode,
+    scorer.BladeVerbatimRegionNode,
+  ];
+  const bundleByChecklist = {
+    'fui-native': bundleZero,
+    'handlebars': bundleZero, // #2114 not yet shipped — scored against bundle zero (gap list is the deliverable)
+    'blade': bladeBundle,     // #2116 Blade bundle — scored against the Blade bundle
+  };
+
   const scored = checklists.map((name) => {
     const reference = readGrammar(name);
-    const result = scorer.scoreGrammar(bundleZero, reference);
+    const bundle = bundleByChecklist[name] ?? bundleZero;
+    const result = scorer.scoreGrammar(bundle, reference);
     return {
       name,
       result,

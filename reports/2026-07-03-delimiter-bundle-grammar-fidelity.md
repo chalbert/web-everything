@@ -14,10 +14,10 @@ interpolation recipes (`frontierui:plugs/webnodes/recipes/interpolationRecipes.t
 **Re-derivable:** `we:scripts/grammar-scorecard.mjs` re-emits this report; `--check` fails the gate on drift.
 
 > Bundle zero scores **100%** against its own native checklist (self-consistency — nothing to gap), and
-> exposes its real gaps only when scored against a *framework* checklist (Handlebars below): regions,
-> raw/unescaped output, partials, comments — the concrete increments the per-flavor bundle stories
-> (#2114–#2119) grow, and the mid-region-marker gap (`{{else}}`) whose decision card the first
-> confirming gap list earns (not a guess).
+> exposes its real gaps when scored against a *framework* checklist without a dedicated bundle (Handlebars
+> below, pending #2114): regions, raw/unescaped output, partials, comments — the concrete increments the
+> per-flavor bundle stories (#2114–#2119) grow. The Blade bundle (#2116) is shipped and scores 100%.
+> The first confirming gap list earns the mid-region-marker decision card (`{{else}}/{:else}/@else`) — not a guess.
 
 ## Summary
 
@@ -25,6 +25,7 @@ interpolation recipes (`frontierui:plugs/webnodes/recipes/interpolationRecipes.t
 | --- | --- | --- | --- |
 | FUI native | 100% | 2 / 2 | 0 |
 | Handlebars | 17% | 1 / 6 | 2 |
+| Blade | 100% | 6 / 6 | 1 |
 
 > Checklist data: `we:design-systems/grammars/fui-native.grammar.json`.
 
@@ -70,4 +71,27 @@ None — every in-scope construct reproduces. (Expected only for a trivial gramm
 | `{{#if}}…{{/if}}` | children | unclaimed | no bundle recipe declares static open "{{#if" |
 | `{{> partial }}` | marker | unclaimed | no bundle recipe declares static open "{{>" |
 | `{{! comment }}` | marker | unclaimed | no bundle recipe declares static open "{{!" |
+
+
+---
+
+> Checklist data: `we:design-systems/grammars/blade.grammar.json`.
+
+## Grammar fidelity — Blade
+
+**Fidelity: 100%** (6/6 in-scope constructs reproduce through the #2074 recipe model; 1 out-of-scope-per-statute).
+
+| construct | nature | verdict | recipe |
+| --- | --- | --- | --- |
+| `{{ $x }}` | value | ✓ reproduced | BladeEscapedInterpolationNode |
+| `{!! $x !!}` | value | ✓ reproduced | BladeRawInterpolationNode |
+| `{{-- comment --}}` | value | ✓ reproduced | BladeHiddenCommentNode |
+| `@if (cond) … @endif` | children | ✓ reproduced | BladeIfRegionNode |
+| `@foreach ($x as $y) … @endforeach` | children | ✓ reproduced | BladeForeachRegionNode |
+| `@verbatim … @endverbatim` | children | ✓ reproduced | BladeVerbatimRegionNode |
+| `@include("view")` | marker | — out-of-scope | — |
+
+### Gap list
+
+None — every in-scope construct reproduces. (Expected only for a trivial grammar like bundle zero.)
 
