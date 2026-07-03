@@ -71,9 +71,12 @@ the per-item chat-rename — a batch labels the session **once**.
    + a digest) → `resolve <NNN> [--graduated-to=…]` → **commit the item's files in its lane clone and open a
    ready-to-merge PR** (#2183/#2190): each item is worked in an isolated lane clone (`node scripts/lane-pool.mjs`,
    #2123), so commit only this piece there (`git add <explicit paths>`, never `git add -A`; one commit per
-   item), then `node scripts/pr-land.mjs --ref=lane/<batch-slug>-<NNN> --no-wait` — which **applies the
-   `ready-to-merge` label automatically** (#2196: the shared transport labels every opened PR; no separate
-   `gh pr edit` step).
+   item), then `node scripts/pr-land.mjs --ref=lane/<batch-slug>-<NNN> --label-on-green` — which opens the PR,
+   **waits for the required checks, and applies the `ready-to-merge` label ONLY once they are green** (#2199:
+   the label means "fully checked, the drain may land", never "a local lint passed"; #2196: the shared transport
+   is the single labelling step — no separate `gh pr edit`). The item's own gate above already ran the FULL
+   suite in-locus, so this is the CI backstop; a PR whose CI ends up red is left unlabelled for you to fix, never
+   handed to the drain.
    **No commit to `main`, no `git push`, no inline merge** — a separate drain (`/merge`/`/drain`) lands the PRs
    (see *backlog-workflow.md → the lane→PR close-out rule*). Update the ledger (header tracks `cost
    <spent>/<budget>`). The `--select`
@@ -236,7 +239,8 @@ no touch-set/partition) → **provision** a lane pool per affected repo + create
 (`cd <lane>` → `reset --hard origin/main` → `backlog.mjs claim` there) that works its own files, gates locally
 with `check:standards --local --files=…` (#1937 best-effort fast-fail), resolves, writes its
 `.lane-manifest.json`, commits explicit paths, pushes `HEAD:lane/<slug>-<n>` per repo, and **opens a
-ready-to-merge PR per ref** via `pr-land --no-wait` + the label → **finalize** writes a local (uncommitted)
+ready-to-merge PR per ref** via `pr-land --label-on-green` (waits for required checks, labels only when green —
+#2199) → **finalize** writes a local (uncommitted)
 `queued.json` signal per PR'd item (so the same checkout won't re-offer them, and the existing `/drain` can
 land them today). It returns `{ ledger, itemsWorked, prsOpened, prUrls, queued, crossRepoItems,
 reposProvisioned, probeFailures, … }` — **no landed state**; the result is a set of **open ready-to-merge
