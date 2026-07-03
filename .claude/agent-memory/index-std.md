@@ -30,3 +30,10 @@ Standards · Intents · Protocols · Authoring cluster — open a leaf with `nod
 - 100. Harvest Cross-Cutting Paradigms — researching a component: extract reusable paradigms as candidate intents
 - 111. Droplist Traits Model — droplist=abstract family, dropdown=member; HTML-first; traits=component/behavior/provider
 - 123. Conventions Fold Into Compliance — WE never mandates conventions; ships a default vocabulary via webcompliance
+- [Composition DX adoption gap](composition-dx-adoption-gap.md) — framework-parity composition is adoption-critical; per-case rubric = #1963; gap = stacked zero-DOM composition
+- [Propose standards in platform shape](propose-standard-in-platform-shape.md) — WE proposals take the SHAPE of the closest native standard (`type=` is-a, not colon/top-level attrs); #1983
+- [Internal spelling ≠ proposed standard](internal-spelling-not-the-proposed-standard.md) — ship collision-safe internal spelling, mark NOT-the-proposal, config as bridge; never `we-*`; #1987
+- [Host-is-the-node default](host-is-the-node-default.md) — presentational custom element IS the node (ElementInternals, no sub-element); wrap only for irreplaceable-native; #2028
+- [Comment-directive example is non-rendering](comment-directive-example-is-nonrendering.md) — use context-provider (zero render effect), NOT if/for-each (those are template directives); #1989
+- [Declared over auto-derived format](declared-over-auto-derived-format.md) — prefer declared over clever auto-derivation (fragile); keep it a convention/house style, not a mandate; #2074
+- [Reserve structure for real families](reserve-structure-for-real-families.md) — grep native's convention before a collision rule; native smashes multi-word attrs; family-less → single-hyphen; #1991

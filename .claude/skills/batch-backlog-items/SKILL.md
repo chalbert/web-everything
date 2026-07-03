@@ -71,7 +71,9 @@ the per-item chat-rename — a batch labels the session **once**.
    + a digest) → `resolve <NNN> [--graduated-to=…]` → **commit the item's files in its lane clone and open a
    ready-to-merge PR** (#2183/#2190): each item is worked in an isolated lane clone (`node scripts/lane-pool.mjs`,
    #2123), so commit only this piece there (`git add <explicit paths>`, never `git add -A`; one commit per
-   item), then `node scripts/pr-land.mjs --ref=lane/<batch-slug>-<NNN> --no-wait` and label it `ready-to-merge`.
+   item), then `node scripts/pr-land.mjs --ref=lane/<batch-slug>-<NNN> --no-wait` — which **applies the
+   `ready-to-merge` label automatically** (#2196: the shared transport labels every opened PR; no separate
+   `gh pr edit` step).
    **No commit to `main`, no `git push`, no inline merge** — a separate drain (`/merge`/`/drain`) lands the PRs
    (see *backlog-workflow.md → the lane→PR close-out rule*). Update the ledger (header tracks `cost
    <spent>/<budget>`). The `--select`

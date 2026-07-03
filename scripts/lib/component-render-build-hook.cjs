@@ -36,8 +36,31 @@ const { execFileSync } = require('node:child_process');
  * The pinned FUI build-artifact — a FIXED relative path resolved from the WE repo root against the
  * sibling `../frontierui` checkout, no PATH lookup. FUI's `npm run build:tools` esbuild-bundles the CLI
  * to exactly this self-contained ESM file.
+ *
+ * In a lane clone the sibling `../frontierui` does not exist. Set `WE_FUI_ROOT` to the absolute path of
+ * the primary FUI checkout (read-only artifact reference) to override the default sibling resolution
+ * (#2178 lane isolation fix). The primary checkout still works with no env-var set.
  */
-const PINNED_CLI_RELATIVE = path.join('..', 'frontierui', 'dist', 'tools', 'component-render', 'cli.mjs');
+/** Path to the pinned CLI artifact WITHIN the FUI root — single source of truth for the suffix.
+ *  `runBuildBatch` joins it onto `resolveFuiRoot(repoRoot)`; tests use it via `PINNED_CLI_RELATIVE`. */
+const FUI_CLI_RELATIVE = path.join('dist', 'tools', 'component-render', 'cli.mjs');
+
+/** Full path relative to the WE repo root (the classic sibling layout) — EXPORTED for tests that
+ *  construct a stub artifact at this location. Derived from `FUI_CLI_RELATIVE` so both stay in sync. */
+const PINNED_CLI_RELATIVE = path.join('..', 'frontierui', FUI_CLI_RELATIVE);
+
+/**
+ * Resolve the FUI root directory: `WE_FUI_ROOT` env-var (absolute, for lane clones, #2178) takes
+ * precedence; otherwise the default sibling `../frontierui` relative to `repoRoot` is used (primary
+ * checkout). This is the ONLY place the FUI root path is resolved — keeping the knob in one spot.
+ * @param {string} repoRoot - WE repo root (absolute path, typically `__dirname` from .eleventy.js)
+ * @returns {string} absolute path to the FUI root directory
+ */
+function resolveFuiRoot(repoRoot) {
+  const override = process.env.WE_FUI_ROOT;
+  if (override) return path.resolve(override);
+  return path.resolve(repoRoot, '..', 'frontierui');
+}
 
 /** Producer pin the FUI harness stamps onto its batch envelope — surfaced so a stale artifact is visible.
  *  Kept in sync with `frontierui/blocks/renderers/component-render/buildHarness.ts:BUILD_HARNESS_PRODUCER`. */
@@ -50,7 +73,7 @@ const EXPECTED_PRODUCER = 'frontierui/component-render-build-harness/1';
  * fails — a missing/mis-emitted artifact must NOT silently skip (non-reproducible build).
  */
 function runBuildBatch(entries, repoRoot, runner = execFileSync) {
-  const cliPath = path.resolve(repoRoot, PINNED_CLI_RELATIVE);
+  const cliPath = path.join(resolveFuiRoot(repoRoot), FUI_CLI_RELATIVE);
   if (!fs.existsSync(cliPath)) {
     throw new Error(
       `[component-render build] pinned FUI artifact missing at ${cliPath} — run FUI \`npm run build:tools\` `
@@ -697,7 +720,9 @@ function spliceComponentsBatch(results, repoRoot, runner = execFileSync, writeFi
 }
 
 module.exports = {
+  FUI_CLI_RELATIVE,
   PINNED_CLI_RELATIVE,
+  resolveFuiRoot,
   EXPECTED_PRODUCER,
   runBuildBatch,
   renderComponents,
