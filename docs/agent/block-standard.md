@@ -576,8 +576,11 @@ instead of a tag. The rules:
    behavior. Which native node materializes it (`Text` · `Comment` · an element · `<template>`) is FUI's call and
    **never a new `nodeType`**. Do not name a concrete host class or a walk in the standard.
 3. **Nature = which static field is set** (self-documenting): `static value = 'shown'|'hidden'` (an expression) ·
-   `static children = 'inert'|'live'` (a region — `'inert'` = the `<template>` concept, `'live'` = rendered in
-   place) · neither + `static rendered` (a marker; `false` = invisible directive). Plus `static open`/`close`
+   `static children = 'inert'|'live'|'raw'` (a region — `'inert'` = the `<template>` concept, `'live'` = rendered in
+   place, `'raw'` = **scan-suppression**: the region's content is excluded from *all* recipe scanning, delimiters
+   inside are inert literal content and the polyfill leaves existing nodes untouched (text stays text, markup stays
+   markup) — how a flavor's own raw construct (`{% raw %}`, `@verbatim`) is declared, #2112 Fork 3) · neither +
+   `static rendered` (a marker; `false` = invisible directive). Plus `static open`/`close`
    (+`regionName`/`regionClose` for regions) and `static observedAttributes` (exactly like a custom element).
 4. **`close` is author-declared, not auto-derived** — auto-derivation must guess base-delimiter vs sigil and breaks
    on real grammars (`<%=`↔`%>`, `@{`↔`}`, `@if`↔`@endif`). **Reverse-mirror the base + name-echo the region** is a
@@ -587,6 +590,38 @@ instead of a tag. The rules:
    *attribute* registry; the doctype is a native singleton — all **framed, not re-owned**. Invisibility is
    `rendered:false`/`value:'hidden'`, never comment syntax (the comment grammar is only an optional pre-JS-invisible
    authoring choice). Attribute-value interpolation (`class="{{x}}"`) is a **sibling** surface, out of scope.
+
+6. **Legal `static open` values — a host-token blocklist, not a marked userland subspace** (#2112 Fork 1, ratified
+   2026-07-03). `customNodes.define()` throws **`ReservedDelimiterError`** at registration iff `open` is rooted in the
+   HTML tokenizer's **tag-open slice** — `<` followed by `!`, `/`, `?`, or an ASCII letter (`<!`, `</`, `<?`, `<div`).
+   Rationale: such an open is *cross-channel incoherent* — typed raw in markup the tokenizer consumes it as markup (a
+   tag / bogus comment) before text-node scanning runs, while the identical string arriving as escaped / `textContent`
+   Text is matchable — so the recipe fires on some authoring channels and not others. That is a name-legality defect
+   (the `customElements.define` invalid-name `SyntaxError` analogue), a define()-time **error**, not a warn. **Every
+   other open is userland-legal** (`<%`, `{{`, `[[`, `{#`, …), arbitrated by the rule 7 collision predicate. The
+   blocklist tracks the host tokenizer, so it is **closed per platform version**: if the platform later claims a
+   text-level token (DOM Parts' `{{ }}`), the blocklist grows and already-registered recipes re-key via config — no
+   lexical partition could prevent the overlap. Guarding *only* this slice instantiates
+   [registry-name-guard-namespace](platform-decisions.md#registry-name-guard-namespace) (guard the namespace you share
+   with the host) and **amends its rule 2** text-node-key exemption for grammar-keyed registries (with lineage).
+   Machine-reserved families mint on the ruling that creates their grammar, never pre-reserved here.
+
+7. **Collision predicate — dispatch-key equality + longest-match, injector-scoped** (#2112 Fork 2, ratified
+   2026-07-03). Two recipes *collide* (→ **`DelimiterCollisionError`**, built by the #2112 follow-up task) iff they
+   share an identical **dispatch key** among the live recipes of **one injector scope**: the key is `open` alone for
+   value/marker recipes, **(`open`, `regionName`)** for region recipes (so `{#each}` and `{#ctx}` co-exist). Scanning
+   is **longest-match-first** (`{{{` over `{{` over `{`). Scope is resolved hierarchically through the FUI
+   `webinjectors` chain (`InjectorRoot.getProviderOf(node, 'customTextNodeParsers')`): **nearest-provider-wins between
+   scopes** (a subtree and its app each resolve their nearest registry, deterministic by tree position — sibling
+   scopes never collide; this is the general form of delimiter-override, a project / imported component supplying its
+   own grammar for its own subtree), **dispatch-key equality within a scope**. This is one registry *type* resolved
+   per scope (#2074 Fork 2 "one registry over the surface" preserved), not competing registries. The
+   [config-extends-platform-default](platform-decisions.md#config-extends-platform-default) nearest-wins chain
+   resolves before liveness, so re-keying a platform-flavor recipe *supersedes* rather than throws.
+
+*Rules 3 (`children:'raw'`), 6, and 7 were added 2026-07-03 by
+[#2112](/backlog/2112-reserved-delimiter-family-policy-which-opens-are-platform-re/) (reserved delimiter-family
+policy) — reversible extensions of the #2074 spine, with lineage.*
 
 ## Directive registration mechanism (#1986) {#directive-registration-mechanism}
 
