@@ -1,0 +1,22 @@
+{
+  "id": "constellation-branding-system",
+  "title": "Constellation branding system — marks, naming, icon rules, and a brand-review methodology",
+  "status": "open",
+  "summary": "Grounds decision #2209 (six forks) and the #2207 design-AI reviewer training card. The 2026-07-03 cross-repo branding review (rendered gallery plateau:branding.html, generated from live assets) inventoried every mark, favicon, icon, theme token, and name spelling across web-everything, frontierui, and plateau-app. Findings: the mark construction system is already coherent (40x40 squircle rx12, 45-degree gradient, white glyph, one hue per project) but six live choices are unratified — canonical prose spelling (Frontier UI ~174 vs FrontierUI 36, the compound confined to FUI's older rendered site templates), WE favicon legibility at 16px (the 60%-opacity ghost-E), FUI mark strategy (weakest mark; letterforms vs three symbol-first candidates), Plateau violet drift (favicon #6d5efc vs DTCG token #6453f4), Plateau mark geometry (dual mesa vs two refinements), and the brand-review methodology itself. The methodology survey covers the practitioner frameworks — attribute/personality-driven rubrics (the design-system voice-and-tone pattern; Aaker's brand-personality dimensions as ancestry), Jungian brand archetypes, and uncodified taste — and lands on attribute-driven as the default: 3-4 attributes + one target feeling per project (WE: universal/principled/inevitable, calm trust; FUI: pioneering/pragmatic/kinetic, capable momentum; Plateau: elevated/steady/commanding, assured overview) unified by a landscape narrative (bedrock -> horizon -> plateau), integrated as a PARALLEL brand rubric beside the ratified #1034 design-critique rubric v2 (vision-tiers.md; the prep skeptic's statute check found the house method is already rubric-shaped, foreclosing archetypes/uncodified-taste and re-scoping the fork to attribute content + integration shape), with trainability grounded in the #2207 labeled fixture + agreement metric rather than the bare checklist shape. Icon-set prior art (Lucide/Feather stroke+grid lint, Material Symbols keylines) grounds the check:branding gate. Full inventory + stats in reports/2026-07-03-constellation-branding-system.md; visual candidates at plateau:branding.html#proposals.",
+  "dateOpened": "2026-07-03",
+  "lastReviewed": "2026-07-03",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "branding",
+    "design",
+    "brand-philosophy",
+    "naming",
+    "favicon",
+    "iconography",
+    "design-review",
+    "ai-judge",
+    "methodology"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}

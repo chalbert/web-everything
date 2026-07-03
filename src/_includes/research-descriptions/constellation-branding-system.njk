@@ -1,0 +1,104 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision
+  <a href="/backlog/2209-ratify-the-constellation-branding-system-naming-marks-icon-r/">#2209</a>
+  (the constellation branding system — six forks) and serves as the durable <strong>knowledge base for
+  the design-AI reviewer training</strong>
+  (<a href="/backlog/2207-train-the-design-ai-reviewer-for-branding-and-ui-guidance-gr/">#2207</a>):
+  an AI brand reviewer is only better than a stock model if it can cite a codified rubric, and this
+  topic is where that rubric and its methodology live. The full asset inventory and statistics are in
+  the session report (<code>reports/2026-07-03-constellation-branding-system.md</code>); the visual
+  candidates render at <code>plateau:branding.html#proposals</code>.
+</p>
+
+<h2>What the review found</h2>
+<p>
+  All three primary marks already share one construction — a 40&times;40 squircle (<code>rx="12"</code>),
+  a 45&deg; two-stop gradient, a white glyph — with one hue per project: Web&nbsp;Everything
+  indigo&rarr;purple, Frontier&nbsp;UI teal&rarr;cyan, Plateau violet&rarr;cyan. The <em>system</em> is
+  sound; the drift is in the particulars: three spellings of two product names, two different brand
+  violets inside Plateau alone, a WE category-icon set whose stroke widths span 2&ndash;12 against a
+  template mandating a minimum of 6, one off-template 24&times;24 outline icon, and cross-repo icons
+  (<code>plateau.svg</code> amber, <code>frontierui.svg</code> "FU") that contradict the products' own
+  marks.
+</p>
+
+<h2>Brand-review methodologies surveyed (Fork 6)</h2>
+<ul>
+  <li>
+    <strong>Attribute-driven rubric</strong> — the working method of practitioner design-system brand
+    guides (voice-and-tone and brand-expression docs): distill the brand to 3&ndash;4 attributes plus a
+    target feeling, then score every candidate against the owning attribute set. Ancestry: Aaker's
+    brand-personality dimensions; the modern form is the design-system guideline checklist.
+    <em>Checklist-scoreable &rarr; trainable and regression-testable for an AI judge</em> — the
+    deciding property for this constellation.
+  </li>
+  <li>
+    <strong>Archetype frameworks</strong> — assign each brand a Jungian archetype (here WE&nbsp;&asymp;&nbsp;Sage,
+    FUI&nbsp;&asymp;&nbsp;Explorer, Plateau&nbsp;&asymp;&nbsp;Ruler) and judge by archetype fit. Richer
+    narrative vocabulary, weaker scoring: "is this mark Sage-like?" is fuzzier than an attribute
+    checklist, and the framework's persuasion-marketing framing overshoots developer-facing repos.
+  </li>
+  <li>
+    <strong>Uncodified taste</strong> — no rubric; judge per decision. This is the status quo that
+    produced the drift tier above, and it leaves an AI reviewer nothing to be grounded in — it can only
+    reproduce generic-AI design opinion, the failure #2207 exists to avoid.
+  </li>
+</ul>
+
+<h2>Integration with the ratified critique rubric (#1034)</h2>
+<p>
+  The prep skeptic's statute check found the house judging method is <em>already rubric-shaped</em>:
+  the #1034 design-critique rubric v2 (<code>we:docs/agent/vision-tiers.md</code>) is closed-axis,
+  versioned, and provenance-carrying (#1587). Fork&nbsp;6 was therefore re-scoped: archetypes and
+  uncodified taste are foreclosed as house methods by that precedent, and the live question is the
+  attribute-set <em>content</em> plus the <em>integration shape</em> — the recommended default is a
+  <strong>parallel brand rubric</strong> (brand artifacts: marks, lockups, palettes, names) beside the
+  page-critique rubric, not a #1034 v3 axis bump (axis-scope mismatch: brand judging fires on marks,
+  not rendered pages). Trainability comes from the #2207 labeled fixture + agreement metric +
+  per-attribute exemplars, not the checklist shape itself.
+</p>
+
+<h2>The proposed rubric (Fork 6 default)</h2>
+<ul>
+  <li><strong>Web Everything</strong> — <em>universal &middot; principled &middot; inevitable</em>;
+    target feeling: <strong>calm trust</strong>. The standard should feel like bedrock ("The web is the
+    platform").</li>
+  <li><strong>Frontier UI</strong> — <em>pioneering &middot; pragmatic &middot; kinetic</em>; target
+    feeling: <strong>capable momentum</strong>. The working edge where the standard meets real
+    ground.</li>
+  <li><strong>Plateau</strong> — <em>elevated &middot; steady &middot; commanding</em>; target feeling:
+    <strong>assured overview</strong>. High flat ground: see everything, stable footing.</li>
+  <li><strong>Shared baseline (all sets): ownable</strong> — distinctive at 16px; operational test:
+    <em>"could this be another brand's logo?"</em>. Added 2026-07-03 after the W-only favicon critique
+    ("could be a logo of anything") exposed that no set could represent a genericity verdict.</li>
+</ul>
+<p>
+  <strong>Shared narrative — the landscape story:</strong> bedrock &rarr; horizon &rarr; plateau. One
+  geological metaphor spans the constellation: WE is the ground everything stands on, FUI is the
+  horizon where new ground is claimed, Plateau is the high ground you operate from. The narrative
+  retro-explains the user-validated mesa mark, motivates the Fork&nbsp;3 horizon candidate, and gives
+  future mark/icon work a generative rule rather than a style cop. Review discipline for
+  <em>using</em> the rubric: every brand verdict names the owning attribute set and says which
+  attribute the candidate serves or violates — the same cite-the-statute discipline decisions already
+  follow.
+</p>
+
+<h2>Mark &amp; icon prior art applied</h2>
+<ul>
+  <li><strong>Size-tuned mark simplification</strong> (Fork 2): mark-only favicons with the full lockup
+    reserved for larger surfaces is standard practice (GitHub's invertocat-only favicon; Firefox's 2019
+    simplified-mark system; per-size optical grades in icon fonts).</li>
+  <li><strong>Symbol-first marks</strong> (Fork 3): symbols out-perform crammed letterforms at small
+    sizes and carry a transferable metaphor; the constellation's own best mark (the mesa) is the
+    in-house proof.</li>
+  <li><strong>Icon-set uniformity via tooling</strong> (gate story): Lucide/Feather enforce a fixed
+    grid and stroke width mechanically; Material Symbols publish keyline grids. The WE set's
+    <code>_template.svg</code> already states the rules — enforcement belongs in
+    <code>check:standards</code> (hookable, not judgment).</li>
+  <li><strong>Token layer as color source of truth</strong> (Fork 4): a generated theme
+    (<code>plateau:src/styles/tokens.json</code>, DTCG, #1283) outranks a hand-authored asset; drift
+    resolves toward the token.</li>
+</ul>
+{% endraw %}
