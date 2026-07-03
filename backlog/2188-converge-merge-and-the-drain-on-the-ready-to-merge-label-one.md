@@ -1,10 +1,12 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 blockedBy: ["2183", "2189"]
 relatedTo: ["2162", "2173", "2138", "2161"]
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
 tags: [drain, merge, pr-flow, label, convergence]
 ---
 

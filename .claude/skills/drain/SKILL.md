@@ -12,6 +12,14 @@ consumer side of the #2138 deferred merge queue: producing sessions (parallel `/
 written + `backlog.mjs queue`d*; this drain lands them serially, in a later session, under the same
 integrator contract the inline `/workflow` integrator uses.
 
+> **Converged label lander (#2188).** Under #2183 the producer now **opens a ready-to-merge PR per item** (not
+> a `queued.json`-only couple). Those PRs — including orphans opened directly by `/pr` — are landed by the ONE
+> label-scoped lander `scripts/merge-ai-prs.mjs --label=ready-to-merge`, which merges the labelled PRs in
+> cross-item `blockedBy` order (each PR's `.lane-manifest.json`, read off its head ref, supplies the edges) and
+> whose PR-merge IS the single clear point (no `queued.json` unqueue). `/merge` (bare) is the same lander
+> without the label scope. This queued-`lane-drain.mjs` path remains for legacy `queued.json` couples; new
+> producer output lands via the label lander.
+
 ## Preconditions
 
 - Run from the **WE checkout on `main`** (the drain reads WE's `queued.json` + drives WE's `backlog.mjs`; it
