@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, classifyChecks } from '../pr-land.mjs';
+import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, classifyChecks } from '../pr-land.mjs';
 
 describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
   it('maps merge methods to gh flags (default = --merge, the no-ff history the drain wants)', () => {
@@ -60,6 +60,21 @@ describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
     expect(buildRenumberHealArgs()).not.toContain('--force');
   });
 
+  it('returns the derived-artifact regen command set in lock-step with the drain (gen:inventory + gen:reference-index, #2182)', () => {
+    const cmds = buildRegenArgs();
+    // Must be an array of [cmd, ...args] tuples (same shape as lane-drain.mjs DERIVED_REGEN).
+    expect(Array.isArray(cmds)).toBe(true);
+    expect(cmds.length).toBeGreaterThan(0);
+    // Every entry is itself an array (the [cmd, ...args] tuple shape).
+    for (const entry of cmds) expect(Array.isArray(entry)).toBe(true);
+    // The two drain-equivalent generators must be present.
+    const flat = cmds.map((c) => c.join(' '));
+    expect(flat).toContain('npm run gen:inventory');
+    expect(flat).toContain('npm run gen:reference-index');
+    // No generator that writes OUTSIDE the WE repo (no impl-repo commands).
+    for (const f of flat) expect(f).not.toMatch(/frontierui|plateau-app/);
+  });
+
   it('classifies checks: pass → merge, any fail → abort, any pending → wait', () => {
     expect(classifyChecks([]).status).toBe('passed');                                  // no required checks
     expect(classifyChecks([{ bucket: 'pass' }, { bucket: 'skipping' }]).status).toBe('passed');
@@ -99,5 +114,20 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     expect(src).toMatch(/check:standards/);
     // The heal runs only after a successful merge (its call sites sit after the gh/ git-fallback merges).
     expect(src.indexOf('function runHeal')).toBeGreaterThan(src.indexOf('buildMergeArgs({ pr: prNum'));
+  });
+  it('regenerates derived artifacts AFTER the merge (and after heal), without ever failing the land (#2182)', () => {
+    expect(src).toMatch(/function runRegen/);                       // the regen step exists
+    expect(src).toMatch(/const REGEN = !flags\['no-regen'\]/);     // on by default, --no-regen opts out
+    // runRegen must be defined/called AFTER runHeal — heal wins ordering over regen (#2071 before #2182).
+    expect(src.indexOf('function runRegen')).toBeGreaterThan(src.indexOf('function runHeal'));
+    // Non-destructive: detached checkout (reuses runHeal's pattern), NEVER reset --hard on a branch.
+    expect(src.indexOf('function runRegen')).toBeGreaterThan(src.indexOf('checkout', '--detach'.length));
+    expect(src).not.toMatch(/reset', '--hard'/);
+    // Skips a dirty tree (can't regen against uncommitted inputs).
+    expect(src).toMatch(/skipped derived-artifact regen/);
+    // A regen failure is surfaced but never fails the land.
+    expect(src).toMatch(/regen failed \(non-fatal\)/);
+    // Never force-pushes the regen commit.
+    expect(src).not.toMatch(/--force/);
   });
 });
