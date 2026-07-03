@@ -1,0 +1,22 @@
+{
+  "$description": "Handlebars grammar REFERENCE CHECKLIST for the #2113 grammar-fidelity scorecard — WE-owned data, not scorer code. Scored against BUNDLE ZERO (FUI's native mustache+polymer recipes, frontierui:plugs/webnodes/recipes/interpolationRecipes.ts) it reveals what FUI's native grammar cannot yet express — the gap list that seeds the Handlebars/Mustache bundle story (#2114). Each construct names its opening delimiter + expected #2074 nature; outOfScope marks the delimiter-grammar concerns the #2074 statute does NOT own (attribute-keyed → #1986 registry; attribute-value interpolation → sibling surface, per we:docs/agent/block-standard.md#custom-node-recipes rule 5). The scorer (frontierui:plugs/webnodes/grammarScorecard.ts scoreGrammar) grades each construct reproduced/partial/out-of-scope/gap. This checklist carries ZERO scorer logic — swapping it for another framework's is what proves the scorer framework-agnostic (#2113).",
+  "framework": "Handlebars",
+  "constructs": [
+    { "construct": "{{ expr }}", "open": "{{", "nature": "value" },
+    { "construct": "{{{ raw }}}", "open": "{{{", "nature": "value" },
+    { "construct": "{{#each}}…{{/each}}", "open": "{{#each", "nature": "children" },
+    { "construct": "{{#if}}…{{/if}}", "open": "{{#if", "nature": "children" },
+    { "construct": "{{> partial }}", "open": "{{>", "nature": "marker" },
+    { "construct": "{{! comment }}", "open": "{{!", "nature": "marker" },
+    {
+      "construct": "helper as element attribute",
+      "nature": "marker",
+      "outOfScope": "attribute-keyed → #1986 registry"
+    },
+    {
+      "construct": "class=\"{{ x }}\" attribute interpolation",
+      "nature": "value",
+      "outOfScope": "attribute-value interpolation → sibling surface (#2074 rule 5)"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "$description": "FUI-native grammar REFERENCE CHECKLIST for the #2113 grammar-fidelity scorecard — WE-owned data, not scorer code. Bundle zero: FUI's own delimiter grammar, the mustache {{ }} + polymer [[ ]] interpolation recipes (frontierui:plugs/webnodes/recipes/interpolationRecipes.ts). Each construct names the opening delimiter and the #2074 nature the recipe must declare. The scorer (frontierui:plugs/webnodes/grammarScorecard.ts scoreGrammar) grades each construct reproduced/partial/out-of-scope/gap against the bundle-zero recipes. This is the self-consistency check: FUI's native bundle scores 100% against its own checklist (nothing to gap). Swapping this file for a framework checklist (e.g. handlebars) is what proves the scorer framework-agnostic (#2113, the #2024 analogue).",
+  "framework": "FUI native",
+  "constructs": [
+    { "construct": "{{ expr }}", "open": "{{", "nature": "value" },
+    { "construct": "[[ expr ]]", "open": "[[", "nature": "value" }
+  ]
+}

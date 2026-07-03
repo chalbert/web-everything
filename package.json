@@ -58,6 +58,8 @@
     "autofix": "node scripts/conformance-autofix.mjs",
     "parity:score": "node scripts/parity-conformance.mjs",
     "parity:check": "node scripts/parity-conformance.mjs --check",
+    "grammar:score": "node scripts/grammar-scorecard.mjs",
+    "grammar:check": "node scripts/grammar-scorecard.mjs --check",
     "design-refs": "node scripts/design-refs.mjs",
     "design-refs:frontier": "node scripts/design-refs/frontier.mjs",
 "gen:wrapper": "node scripts/gen-wrapper/cli.mjs",
