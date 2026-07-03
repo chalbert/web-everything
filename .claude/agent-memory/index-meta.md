@@ -22,4 +22,4 @@ Agent Meta · Memory · Model Routing cluster — open a leaf with `node scripts
 - 128. Forward Background Progress Into Chat — VS Code ext has NO /workflows TUI; forward via file-watcher re-invoke
 - 134. Opus Orchestrates, Sonnet Executes — exec→Sonnet subagent; judgment stays Opus
 - 135. Model Recurring Cost, Don't Gate It — recurring overhead MODELED (affine fit); every sample counts; #1505
-- [Parallel /workflow lane model](workflow-lane-model-policy.md) — Sonnet default, Opus for rare complex items, NEVER Fable for execution; orchestrator decides per-item
+- 144. Lane Model: Sonnet Default, Never Fable — /workflow lane exec runs Sonnet by default, Opus for rare complex (probe decides per-item), NEVER Fable; explicit model always passed so no Fable inherit; #2189/session
