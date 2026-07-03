@@ -26,6 +26,7 @@ interpolation recipes (`frontierui:plugs/webnodes/recipes/interpolationRecipes.t
 | --- | --- | --- | --- |
 | FUI native | 100% | 2 / 2 | 0 |
 | Handlebars | 17% | 1 / 6 | 2 |
+| Liquid/Jinja | 100% | 7 / 7 | 3 |
 | Vue | 100% | 1 / 1 | 7 |
 
 > Checklist data: `we:design-systems/grammars/fui-native.grammar.json`.
@@ -72,6 +73,32 @@ None — every in-scope construct reproduces. (Expected only for a trivial gramm
 | `{{#if}}…{{/if}}` | children | unclaimed | no bundle recipe declares static open "{{#if" |
 | `{{> partial }}` | marker | unclaimed | no bundle recipe declares static open "{{>" |
 | `{{! comment }}` | marker | unclaimed | no bundle recipe declares static open "{{!" |
+
+
+---
+
+> Checklist data: `we:design-systems/grammars/liquid-jinja.grammar.json`.
+
+## Grammar fidelity — Liquid/Jinja
+
+**Fidelity: 100%** (7/7 in-scope constructs reproduce through the #2074 recipe model; 3 out-of-scope-per-statute).
+
+| construct | nature | verdict | recipe |
+| --- | --- | --- | --- |
+| `{{ expr }}` | value | ✓ reproduced | LiquidJinjaInterpolationNode |
+| `{% for … %}…{% endfor %}` | children | ✓ reproduced | LiquidJinjaForRegionNode |
+| `{% if … %}…{% endif %}` | children | ✓ reproduced | LiquidJinjaIfRegionNode |
+| `{% block … %}…{% endblock %}` | children | ✓ reproduced | LiquidJinjaBlockRegionNode |
+| `{% raw %}…{% endraw %}` | children | ✓ reproduced | LiquidJinjaRawRegionNode |
+| `{% comment %}…{% endcomment %}` | children | ✓ reproduced | LiquidJinjaCommentRegionNode |
+| `{# comment #}` | marker | ✓ reproduced | JinjaInlineCommentNode |
+| `{{ x | filter }} expression filter/pipe` | value | — out-of-scope | — |
+| `{% include %} / {% extends %}` | marker | — out-of-scope | — |
+| `class="{{ x }}" attribute interpolation` | value | — out-of-scope | — |
+
+### Gap list
+
+None — every in-scope construct reproduces. (Expected only for a trivial grammar like bundle zero.)
 
 
 ---
