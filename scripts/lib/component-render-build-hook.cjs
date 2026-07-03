@@ -96,6 +96,29 @@ function renderComponents(specs, repoRoot, runner = execFileSync) {
   return byKey;
 }
 
+/**
+ * Portfolio-tier vocabulary (#2088 Fork 4 / #2133) — the importance axis orthogonal to `status`. The tier
+ * renders as a categorical `<we-tag>` cue (`set="project-tier"`) per the by-intent statute; `we-badge`
+ * stays the status pill. The ORDER here is the SSR grouping order the grids sort by (core → contextual →
+ * exploratory, statute #portfolio-project-tiering) and the palette is homed in `src/css/style.css`.
+ * `TIER_RANK` sorts unknown/absent tiers last (they never precede a stamped one).
+ */
+const TIER_ORDER = ['core', 'contextual', 'exploratory'];
+const TIER_LABEL = { core: 'Core', contextual: 'Contextual', exploratory: 'Exploratory' };
+function tierRank(tier) {
+  const i = TIER_ORDER.indexOf(tier);
+  return i === -1 ? TIER_ORDER.length : i;
+}
+/** A tier's `<we-tag>` spec (categorical `(set,value)` mode — the docs palette paints it, #1670/#1682).
+ *  Returns null for an absent/unknown tier so a not-yet-stamped project simply carries no cue. */
+function tierTagConfig(tier) {
+  if (!tier || !TIER_LABEL[tier]) return null;
+  return {
+    label: TIER_LABEL[tier], set: 'project-tier', value: tier,
+    shape: 'pill', className: 'project-tier-tag',
+  };
+}
+
 /** Map an intent status to its badge tone (mirrors the prior template ternary in `src/intents.njk`). */
 function statusTone(status) {
   if (status === 'active' || status === 'stable') return 'success';
@@ -247,15 +270,30 @@ function projectHeaderIconHtml(project) {
  * supplies it). `gridClass` is the wrapping grid's class list (e.g. `project-grid project-grid--centered`).
  */
 function renderProjectGrid(projects, { repoRoot, hrefFor, gridClass = 'project-grid', external = false }, runner = execFileSync) {
-  const list = Array.isArray(projects) ? projects : [];
+  const input = Array.isArray(projects) ? projects : [];
+  // SSR default grouping (#2088 Fork 4 / #2133): stable-sort the tiles core → contextual → exploratory so
+  // the grid GROUPS by importance out of the box (client re-sortable via the `data-tier` facet below). A
+  // stable sort keeps the authored within-tier order; projects with no/unknown tier sort last (tierRank).
+  const list = input
+    .map((project, order) => ({ project, order }))
+    .sort((a, b) => (tierRank(a.project.tier) - tierRank(b.project.tier)) || (a.order - b.order))
+    .map((e) => e.project);
 
-  // Pass 1 — batch every tile's status badge in one subprocess call.
+  // Pass 1 — batch every tile's status badge AND its portfolio-tier tag in one subprocess call. The badge is
+  // the STATUS pill (maturity axis); the tag is the TIER cue (importance axis) — orthogonal, they render
+  // side by side in the card header per the by-intent statute (`we-badge` status, `we-tag` classification).
   const badgeSpecs = list.map((project, i) => ({
     key: `project-${i}-badge`,
     component: 'badge',
     config: { label: titleCase(project.status), tone: statusTone(project.status) },
   }));
-  const badges = renderComponents(badgeSpecs, repoRoot, runner);
+  const tierSpecs = list.flatMap((project, i) => {
+    const cfg = tierTagConfig(project.tier);
+    return cfg ? [{ key: `project-${i}-tier`, component: 'tag', config: cfg }] : [];
+  });
+  const rendered = renderComponents([...badgeSpecs, ...tierSpecs], repoRoot, runner);
+  const badges = rendered;
+  const tierTags = rendered;
 
   // Pass 2 — batch every tile's card shell, fed the pass-1 badge as the header actions. The icon row +
   // status-meter row are our own generated markup (safe through the harness `html:` innerHTML round-trip).
@@ -274,7 +312,9 @@ function renderProjectGrid(projects, { repoRoot, hrefFor, gridClass = 'project-g
   // harness innerHTML round-trip); older entries with no summary fall back to the description.
   const descSentinel = (i) => ` PROJECT_DESC_${i} `;
   const cardSpecs = list.map((project, i) => {
-    const badgeHtml = badges.get(`project-${i}-badge`) || '';
+    // Header actions carry the status badge, then the tier tag (when the project is stamped) — orthogonal
+    // axes side by side. Both are already-serialized `.fui-badge`/`.fui-tag` spans, safe as header HTML.
+    const badgeHtml = (badges.get(`project-${i}-badge`) || '') + (tierTags.get(`project-${i}-tier`) || '');
     const meterHtml =
       `<div class="status-meter status-${escapeAttr(project.status)}">`
       + `<span class="status-label">Status: ${escapeAttr(titleCase(project.status))}</span>`
@@ -317,8 +357,11 @@ function renderProjectGrid(projects, { repoRoot, hrefFor, gridClass = 'project-g
         `<span class="project-icon--header" aria-hidden="true">${projectHeaderIconHtml(project)}</span><h3 class="fui-card__title"`,
       );
     const rel = external ? ' target="_blank" rel="noopener"' : '';
+    // `data-tier` is the client re-sort/filter facet (home-display.js reads it) — the SSR default is the
+    // grouped order above; the tier is also what the client would key a re-sort off. Omitted when absent.
+    const tierAttr = project.tier ? ` data-tier="${escapeAttr(project.tier)}"` : '';
     return (
-      `<div class="project-card">`
+      `<div class="project-card"${tierAttr}>`
       + `<a href="${escapeAttr(hrefFor(project))}" class="project-card-link" `
       + `aria-label="View ${escapeAttr(project.name)}"${rel}></a>`
       + `${cardHtml}</div>`
@@ -486,11 +529,12 @@ function renderBacklogGrid(tiles, repoRoot, runner = execFileSync) {
  *  element can be replaced wholesale by its SSR fragment. The attribute matcher is QUOTE-AWARE — the
  *  `data-we-spec` JSON value legally carries literal `>`/`<` (nested markup inside its string values), so a
  *  naive `[^>]*` would terminate the open tag early; instead each attribute chunk is either a quoted region
- *  (which may contain `>`) or a run of non-`>`/non-quote characters. Only `we-card`/`we-badge` are batched
- *  here — the richer `we-tag`/`we-data-table` elements have their own dedicated data-driven paths. */
+ *  (which may contain `>`) or a run of non-`>`/non-quote characters. `we-card`/`we-badge`/`we-tag` carrying
+ *  a `data-we-spec` are batched here; a bare `<we-tag set value>` (the backlog taxonomy pills, no
+ *  `data-we-spec`) is left to its runtime CE path, and `we-data-table` keeps its own data-driven path. */
 const ATTRS = `(?:"[^"]*"|'[^']*'|[^>"'])*?`;
-const COMPONENT_TAG = new RegExp(`<we-(card|badge)\\b(${ATTRS})>([\\s\\S]*?)<\\/we-\\1>`, 'gi');
-const COMPONENT_SELF_CLOSING = new RegExp(`<we-(card|badge)\\b(${ATTRS})\\/>`, 'gi');
+const COMPONENT_TAG = new RegExp(`<we-(card|badge|tag)\\b(${ATTRS})>([\\s\\S]*?)<\\/we-\\1>`, 'gi');
+const COMPONENT_SELF_CLOSING = new RegExp(`<we-(card|badge|tag)\\b(${ATTRS})\\/>`, 'gi');
 
 /** Read the `data-we-spec` attribute off an open-tag attribute string, tolerating single OR double quotes
  *  (Nunjucks emits the JSON single-quoted so the double-quoted JSON string keys need no entity-escaping).
@@ -533,7 +577,7 @@ function findComponentPlaceholders(html) {
     if (!spec || typeof spec !== 'object') return;
     // Accept either `{component, config}` or a bare config object (component inferred from the tag name).
     const component = typeof spec.component === 'string' ? spec.component : tag;
-    if (component !== 'card' && component !== 'badge') return; // only the two generic primitives
+    if (component !== 'card' && component !== 'badge' && component !== 'tag') return; // the generic primitives
     const config = spec.config && typeof spec.config === 'object'
       ? spec.config
       : (spec.component ? {} : spec);
@@ -593,6 +637,9 @@ module.exports = {
   renderBacklogGrid,
   projectIconHtml,
   statusTone,
+  tierTagConfig,
+  tierRank,
+  TIER_ORDER,
   intentTileSpecs,
   findComponentPlaceholders,
   spliceComponents,

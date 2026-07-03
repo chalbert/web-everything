@@ -12,6 +12,13 @@ eleventyComputed:
 ---
 
 {% from "project-status.njk" import projectStatus %}
+{% from "we-component.njk" import weTag %}
+
+{# #2088 Fork 4 / #2133: the portfolio TIER cue (importance axis) renders side by side with the STATUS
+   pill (maturity axis) — orthogonal per the #portfolio-project-tiering statute. `we-badge` stays status;
+   the tier is a categorical `we-tag` (`set="project-tier"`, palette in style.css), SSR'd through the same
+   render-from-data seam. Rendered only for a stamped project; label-cased for the visible cue. #}
+{% set tierLabels = { "core": "Core", "contextual": "Contextual", "exploratory": "Exploratory" } %}
 
 <div class="project-detail-header">
     <div class="project-detail-icon">
@@ -29,6 +36,9 @@ eleventyComputed:
         <a href="/project-lifecycle/" class="status-lifecycle-link" aria-label="Learn about the project lifestyle stages">
             {{ projectStatus(project.status) }}
         </a>
+        {% if project.tier and tierLabels[project.tier] %}
+        <span class="project-detail-tier">{{ weTag(tierLabels[project.tier], "project-tier", project.tier) }}</span>
+        {% endif %}
     </div>
 </div>
 

@@ -1794,9 +1794,16 @@ table td, table th {
 .project-tile-card .project-desc {
   margin: 0; color: var(--color-text-muted); font-size: 0.95rem; line-height: 1.5; flex-grow: 1;
 }
-/* The project icon now leads the card header (moved out of the body). Push the status badge
-   (`.fui-card__actions`) to the far edge so the icon + title stay grouped on the left. */
-.project-tile-card .fui-card__actions { margin-left: auto; }
+/* The project icon now leads the card header (moved out of the body). Push the status badge + the tier
+   `we-tag` (#2133) to the far edge so the icon + title stay grouped on the left; the two axis pills sit in
+   a wrapping row with a small gap (status pill, then the tier cue). */
+.project-tile-card .fui-card__actions {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.project-tier-tag { text-transform: uppercase; letter-spacing: 0.03em; font-weight: 700; }
+/* Detail-page tier cue sits next to the status pill under the title. */
+.project-detail-tier { display: inline-flex; margin-left: 0.6rem; vertical-align: middle; }
 .project-tile-card .project-icon--header {
   display: inline-flex; align-items: center; justify-content: center; flex: none;
 }
@@ -1984,6 +1991,21 @@ we-tag[set="tier"][value="B"],
 .fui-tag[data-cat-set="tier"][data-cat-value="B"]           { background:#fef3c7; color:#92400e; --cat-bg:#fef3c7; --cat-color:#92400e; --cat-shape:9999px; }
 we-tag[set="tier"][value="C"],
 .fui-tag[data-cat-set="tier"][data-cat-value="C"]           { background:#f1f5f9; color:#475569; --cat-bg:#f1f5f9; --cat-color:#475569; --cat-shape:9999px; }
+
+/* project-tier vocabulary (#2088 Fork 4 / #2133) — the portfolio IMPORTANCE axis (orthogonal to status):
+   core (green, a benchmark design system / major framework depends on the domain) · contextual (blue, a
+   named constellation consumer ships against it today) · exploratory (slate, no named consumer yet — an
+   evidence-state word, NOT scheduling vocabulary). Rendered as a categorical `we-tag` (`set="project-tier"`)
+   on every project card + detail page. Keyed to BOTH the pre-upgrade `we-tag[set][value]` and the
+   post-upgrade `.fui-tag[data-cat-*]` so the colour is identical across the CE swap, no flash. */
+we-tag[set="project-tier"],
+.fui-tag[data-cat-set="project-tier"] { text-transform: uppercase; letter-spacing: 0.03em; font-weight: 700; }
+we-tag[set="project-tier"][value="core"],
+.fui-tag[data-cat-set="project-tier"][data-cat-value="core"]               { background:#dcfce7; color:#166534; --cat-bg:#dcfce7; --cat-color:#166534; --cat-shape:9999px; }
+we-tag[set="project-tier"][value="contextual"],
+.fui-tag[data-cat-set="project-tier"][data-cat-value="contextual"]         { background:#dbeafe; color:#1e40af; --cat-bg:#dbeafe; --cat-color:#1e40af; --cat-shape:9999px; }
+we-tag[set="project-tier"][value="exploratory"],
+.fui-tag[data-cat-set="project-tier"][data-cat-value="exploratory"]        { background:#f1f5f9; color:#475569; --cat-bg:#f1f5f9; --cat-color:#475569; --cat-shape:9999px; }
 
 /* unsliced·reason carries a per-reason palette from backlogMeta (childlessReasonMeta), injected as inline
    `--cat-*` + background/color custom props on the element, so this set needs only the pill `--cat-shape`. */

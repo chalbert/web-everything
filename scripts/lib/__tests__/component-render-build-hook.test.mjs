@@ -20,6 +20,9 @@ import {
   spliceComponents,
   projectIconHtml,
   statusTone,
+  tierTagConfig,
+  tierRank,
+  TIER_ORDER,
   EXPECTED_PRODUCER,
   PINNED_CLI_RELATIVE,
 } from '../component-render-build-hook.cjs';
@@ -230,6 +233,64 @@ describe('renderProjectGrid — home/index grid render-from-data (#2019)', () =>
   });
 });
 
+describe('portfolio tier surfacing — the #2088 Fork 4 / #2133 tier cue + grouping', () => {
+  const TIERED = [
+    { id: 'x', name: 'X', status: 'poc', tier: 'exploratory', isSvg: false, icon: 'x', description: 'x' },
+    { id: 'c', name: 'C', status: 'poc', tier: 'core', isSvg: false, icon: 'c', description: 'c' },
+    { id: 'n', name: 'N', status: 'poc', tier: 'contextual', isSvg: false, icon: 'n', description: 'n' },
+    { id: 'u', name: 'U', status: 'poc', isSvg: false, icon: 'u', description: 'u' }, // untiered → sorts last
+  ];
+
+  it('tierRank orders core < contextual < exploratory < unknown/absent', () => {
+    expect(tierRank('core')).toBeLessThan(tierRank('contextual'));
+    expect(tierRank('contextual')).toBeLessThan(tierRank('exploratory'));
+    expect(tierRank('exploratory')).toBeLessThan(tierRank('nonsense'));
+    expect(tierRank(undefined)).toBe(TIER_ORDER.length);
+  });
+
+  it('tierTagConfig emits a categorical (set,value) tag spec; null for absent/unknown', () => {
+    expect(tierTagConfig('core')).toMatchObject({ set: 'project-tier', value: 'core', label: 'Core' });
+    expect(tierTagConfig('exploratory')).toMatchObject({ set: 'project-tier', value: 'exploratory' });
+    expect(tierTagConfig(undefined)).toBeNull();
+    expect(tierTagConfig('bogus')).toBeNull();
+  });
+
+  it('groups the grid core → contextual → exploratory (SSR default), untiered last', () => {
+    // The fake runner marks each card by key: card key i tracks the SORTED position, so the DOM order of
+    // the card markers reflects the grouping. Assert the sorted order by the project the card spec carried.
+    const seenTitles = [];
+    const orderRunner = (_c, _a, opts) => {
+      JSON.parse(opts.input).forEach((e) => {
+        if (e.component === 'card') seenTitles.push(e.config.title);
+      });
+      return fakeRunner(_c, _a, opts);
+    };
+    renderProjectGrid(TIERED, { repoRoot: stubRoot, hrefFor: (p) => `/projects/${p.id}/` }, orderRunner);
+    expect(seenTitles).toEqual(['C', 'N', 'X', 'U']); // core, contextual, exploratory, untiered
+  });
+
+  it('dispatches a project-tier tag per STAMPED tile (none for an untiered tile)', () => {
+    const seen = [];
+    const spyRunner = (_c, _a, opts) => {
+      JSON.parse(opts.input).forEach((e) => seen.push(`${e.component}:${e.key}`));
+      return fakeRunner(_c, _a, opts);
+    };
+    renderProjectGrid(TIERED, { repoRoot: stubRoot, hrefFor: (p) => `/projects/${p.id}/` }, spyRunner);
+    // three stamped tiles → three tier tags; the tier tag key is index-in-sorted-order.
+    const tierKeys = seen.filter((s) => s.startsWith('tag:project-') && s.endsWith('-tier'));
+    expect(tierKeys.length).toBe(3);
+  });
+
+  it('puts data-tier on each stamped .project-card wrapper (client re-sort facet); absent when untiered', () => {
+    const html = renderProjectGrid(TIERED, { repoRoot: stubRoot, hrefFor: (p) => `/projects/${p.id}/` }, fakeRunner);
+    expect(html).toContain('data-tier="core"');
+    expect(html).toContain('data-tier="contextual"');
+    expect(html).toContain('data-tier="exploratory"');
+    // exactly three data-tier attrs (the untiered tile carries none).
+    expect((html.match(/data-tier="/g) || []).length).toBe(3);
+  });
+});
+
 // A fake CLI that renders each card to the REAL card SHELL shape (title + a body-part div carrying the
 // spec's html — here the sentinel), so renderBacklogGrid's title-alias rewrite + sentinel splice are
 // exercised against production-shaped markup without a sibling FUI checkout.
@@ -325,6 +386,16 @@ describe('findComponentPlaceholders — scan the generic card/badge placeholders
     expect(found[0].config).toEqual({ title: 'A' });
     expect(found[1].config).toEqual({ label: 'B' });
     expect(found.map((f) => f.key)).toEqual(['we-component-0', 'we-component-1']);
+  });
+  it('parses a we-tag placeholder (#2133 tier cue) — categorical (set,value) config', () => {
+    const html = `<we-tag data-we-spec='{"component":"tag","config":{"label":"Core","set":"project-tier","value":"core","shape":"pill"}}' set="project-tier" value="core">Core</we-tag>`;
+    const found = findComponentPlaceholders(html);
+    expect(found).toHaveLength(1);
+    expect(found[0].component).toBe('tag');
+    expect(found[0].config).toMatchObject({ set: 'project-tier', value: 'core', label: 'Core' });
+  });
+  it('ignores a bare <we-tag set value> taxonomy pill (no data-we-spec — client CE owns it)', () => {
+    expect(findComponentPlaceholders('<we-tag set="tier" value="A">Agent-ready</we-tag>')).toEqual([]);
   });
   it('skips a placeholder with a malformed spec (left for the client CE path, never aborts)', () => {
     const html = `<we-card data-we-spec='{not json}'>x</we-card>`;

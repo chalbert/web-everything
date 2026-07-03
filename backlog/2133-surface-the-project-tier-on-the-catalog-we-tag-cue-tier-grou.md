@@ -1,10 +1,12 @@
 ---
 kind: story
 size: 3
-status: active
+status: resolved
 blockedBy: ["2132"]
 dateOpened: "2026-07-02"
 dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
+graduatedTo: "we:scripts/lib/component-render-build-hook.cjs"
 tags: []
 ---
 

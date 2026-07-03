@@ -29,6 +29,24 @@
 {%- endmacro -%}
 
 {#-
+  weTag — a single SSR tag (the #1669 Tag intent, the decorative-label sibling of the status badge). Two
+  colour modes: a plain semantic `tone`, OR the CATEGORICAL `(set, value)` mode (#1670/#1682) that paints
+  from the docs' `--cat-<set>-<value>-*` palette (e.g. the `project-tier` vocabulary in style.css). Pass
+  `set`+`value` for categorical; leave them empty for a plain toned tag. `shape` is the visual metaphor
+  (`badge`/`pill`/`tag`). Emits the same inert placeholder the grids do — `spliceComponents` batches it to
+  the pinned FUI CLI at build time; the client `<we-tag>` CE upgrade is a pure enhancement.
+-#}
+{%- macro weTag(label, set="", value="", shape="pill", className="") -%}
+{%- if set and value -%}
+{%- set _cfg = { "label": label ~ "", "set": set, "value": value, "shape": shape, "className": className } -%}
+{%- else -%}
+{%- set _cfg = { "label": label ~ "", "shape": shape, "className": className } -%}
+{%- endif -%}
+{%- set _spec = { "component": "tag", "config": _cfg } -%}
+<we-tag data-we-spec='{{ weSpecAttr(_spec) }}'{% if set and value %} set="{{ set }}" value="{{ value }}"{% endif %}>{{ label }}</we-tag>
+{%- endmacro -%}
+
+{#-
   weCard — a single SSR card. `title` is the header title; `bodyHtml` is the (trusted, template-authored)
   body markup, fed as one `html` body part; `actionsHtml` is optional trusted header-trailing markup (e.g. a
   rendered badge); `className` is an optional extra class on the card frame. Only pass trusted markup as
