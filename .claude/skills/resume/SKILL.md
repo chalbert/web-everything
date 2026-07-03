@@ -29,6 +29,8 @@ couple to the normal drain transport.
 ```
 node scripts/lane-resume.mjs discover            # classify every stuck ready-to-merge lane + why, blockedBy-ordered
 node scripts/lane-resume.mjs discover --json     # same, machine-readable (the plan the skill iterates)
+node scripts/lane-resume.mjs land <pr> --dry-run # plan the land of ONE repaired lane PR (merge vs rebase-drop vs skip)
+node scripts/lane-resume.mjs land <pr>           # land it: rebase-drop the manifest if only it conflicts, then gh pr merge
 ```
 
 **Always `discover` first.** It buckets the labelled PRs into `ready` (not stuck — `/drain` takes them),
@@ -51,9 +53,10 @@ lanes so none precedes one it is `blockedBy`.
    - Run the **full** scoped gate/tests (not the file-scoped fast-fail) — the lane owns a CI-green PR (#2199).
    - **drop the transient `.lane-manifest.json`**, commit, `git push origin HEAD:refs/heads/<laneRef>`, and
      confirm the required `test` check goes green.
-4. **Land** the repaired couple with the existing transport — `node scripts/merge-ai-prs.mjs
-   --label=ready-to-merge` (= `/drain`) — impl-first/WE-last, `blockedBy` order. Resume does **not**
-   re-implement landing.
+4. **Land** the repaired couple. Either hand the now-clean PR to `/drain` (`node scripts/merge-ai-prs.mjs
+   --label=ready-to-merge`), or land ONE PR directly with `node scripts/lane-resume.mjs land <pr>` (#2202) —
+   both share the ONE #2198 rebase-drop-manifest helper, so a lane that only conflicts on the manifest lands
+   without a human. Impl-first/WE-last, `blockedBy` order.
 
 ### The one knob — how autonomous on a red test
 
@@ -61,6 +64,45 @@ lanes so none precedes one it is `blockedBy`.
   those. A genuinely-red `test` is reported back, not code-patched.
 - **`--fix` (opt-in):** the finisher also debugs and fixes the failing code, then lands. Powerful, but an agent
   "making tests pass" can paper over a real bug — only with explicit go.
+
+## Finisher playbook (#2202 — learned on the 2026-07-03 run)
+
+**Env setup (do this first in every finisher clone).** Generators and gates need real deps and the sibling
+impl repo: **symlink `node_modules` from the primary** (`ln -s <primary>/node_modules node_modules`) and make
+the clone a **sibling of a `../frontierui`** checkout (cross-repo artifact builds resolve `../frontierui`). A
+missing either → the gate fails with a spurious "cannot find module" that looks like a code bug but is an env
+gap.
+
+**Conflict resolution table — resolve each conflicted path by its CLASS, never a blind hand-merge:**
+
+| Conflicted path | Resolution |
+|---|---|
+| `.lane-manifest.json` (the transient manifest) | **drop it** — it is per-lane bookkeeping, not content (the `land`/drain helper does this automatically). |
+| coordination JSON — `claims`/`reservations`/`capacity`/`queued` — and the `.claude/agent-memory/` tree | **take-main** — a peer session owns the newer state; your lane's copy is stale. |
+| generated artifacts — grammar-scorecard report, `we:AGENTS.md`, parity report | **REGENERATE, don't hand-merge** — re-run the generator (`gen:inventory`, `grammar-scorecard.mjs`, the parity report) so the output matches the merged inputs. |
+| code | **union additive by intent** (keep both sides' additions when they're independent). A genuine **same-line overlap** → **STOP and report** — never guess which side wins. |
+
+**Recurring test-red root causes (fix MINIMALLY — never weaken or delete a test):**
+
+- **epic-closeout** — resolving the last child of an epic ⇒ the umbrella epic must be resolved too (the
+  all-slices-done gate). Resolve the parent.
+- **living-catalog count-pins** — a new deliverable moves a `toBe(N)` count assertion. Bump the pinned N to the
+  new true count (the test is a catalog census, not a regression).
+- **reports-not-hidden** — a new `reports/*.md` the item produced trips the "report not referenced" gate. Add a
+  `relatedReport:` field to the backlog item pointing at it.
+- **stale generated inventory** — `we:AGENTS.md`'s generated block drifted. Regenerate it (`npm run
+  gen:inventory`); never hand-edit the generated region.
+- **backlog id-collision** — two files claim one NNN. The **newcomer yields** to the next free NNN
+  (`scripts/backlog-renumber-collisions.mjs`, or rename by hand to the next free id).
+
+**Landing nuances:**
+
+- `UNSTABLE` + `test=pass` **IS mergeable** — only the `test` check is required; `cla` / Workers-Builds are
+  non-required and their red never blocks a land (`landDecision` encodes this).
+- **Land shared-file lanes SERIALLY and re-rebase between them** — two lanes touching one file each need the
+  later one rebased onto the just-landed main; don't fan them out concurrently.
+- **`discover` should warm-recompute mergeability** (`gh pr view` each) so no lane shows `UNKNOWN` — an
+  `unknown` disposition means the recompute hasn't run yet, not that the lane is unlandable.
 
 ## Guardrails
 
