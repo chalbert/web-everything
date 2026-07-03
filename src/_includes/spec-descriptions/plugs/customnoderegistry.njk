@@ -1,0 +1,346 @@
+{#
+  Normative spec — CustomNodeRegistry (#2097, piloting the #2096 skeleton)
+  Authoring home: we:src/_includes/spec-descriptions/plugs/customnoderegistry.njk
+  Rendered at: /specs/plugs/customnoderegistry/
+  Explainer: /plugs/customnoderegistry/
+  Status: draft (zero-impl; the polyfill-readiness evidence is in #2074 — this spec exercises the
+          #2096 "permitted" arm: a draft standard may author its spec early, before active promotion)
+#}
+
+<p class="spec-status">
+  <strong>Status:</strong> Draft — normative spec (pilot, #2097) ·
+  <a href="/plugs/customnoderegistry/">Explainer</a> ·
+  <a href="/backlog/2074-customnoderegistry-node-kind-extensibility-standard/">Ratifying decision #2074</a>
+</p>
+
+<h2 id="spec-intro">Introduction <span class="spec-nonnorm">(non-normative)</span></h2>
+<p>
+  <code>CustomNodeRegistry</code> (<code>customNodes</code>) is a proposed global registry for
+  <em>delimiter-keyed node kinds</em> — the structural analogue of <code>customElements</code> for the
+  delimiter-grammar surface. You register a class extending <code>CustomNode</code> with a declared
+  <code>static open</code> grammar; the polyfill materialises it onto the nearest native node kind
+  (<code>Text</code>, <code>Comment</code>, element, or <code>&lt;template&gt;</code>). No new
+  <code>nodeType</code> is introduced — the host is a polyfill outcome, never part of the standard.
+  Ratified by <a href="/backlog/2074-customnoderegistry-node-kind-extensibility-standard/">#2074</a>
+  (2026-07-01) and extended by
+  <a href="/backlog/2112-reserved-delimiter-family-policy-which-opens-are-platform-re/">#2112</a>
+  (2026-07-03).
+</p>
+
+<h2 id="conformance">Conformance</h2>
+<p>
+  The key words <strong>MUST</strong>, <strong>MUST NOT</strong>, <strong>SHOULD</strong>, and
+  <strong>MAY</strong> are to be interpreted as described in BCP&nbsp;14
+  (<a href="https://www.rfc-editor.org/rfc/rfc2119">RFC&nbsp;2119</a>,
+  <a href="https://www.rfc-editor.org/rfc/rfc8174">RFC&nbsp;8174</a>) when, and only when, they appear
+  in <span style="font-variant:all-small-caps">all capitals</span> as shown here.
+</p>
+<p>Two conformance classes are defined:</p>
+<dl>
+  <dt><dfn id="dfn-implementation">implementation</dfn></dt>
+  <dd>Any software that builds the <code>CustomNodeRegistry</code> contract — today Frontier UI
+  (<code>customNodes</code> global + upgrade walk); any vendor building the same contract. Requirements
+  addressed to an <a href="#dfn-implementation">implementation</a> use
+  <strong>MUST</strong>/<strong>MUST NOT</strong>.</dd>
+  <dt><dfn id="dfn-document">document</dfn></dt>
+  <dd>A page or component that authors node-kind classes against this registry. Requirements addressed
+  to a <a href="#dfn-document">document</a> use <strong>SHOULD</strong>/<strong>MAY</strong>.</dd>
+</dl>
+
+<h2 id="terminology">Terminology</h2>
+<p>
+  Terms used normatively here are registered in the WE glossary
+  (<a href="/semantics/"><code>src/_data/semantics.json</code></a>); this section links them — it never
+  redefines them locally.
+</p>
+<dl>
+  <dt><dfn id="term-custom-node">custom node</dfn></dt>
+  <dd>A class extending <code>CustomNode</code>, registered on <code>customNodes</code>, keyed by a
+  delimiter grammar (its <code>static open</code> value).</dd>
+  <dt><dfn id="term-delimiter-grammar">delimiter grammar</dfn></dt>
+  <dd>The pair (<code>static open</code>, <code>static close</code>) that bounds a custom node's syntax
+  in a text stream. Both values are declared — never auto-derived.</dd>
+  <dt><dfn id="term-nature">nature</dfn></dt>
+  <dd>The observable classification of a custom node, determined solely by which static field is set:
+  <code>static value</code> (expression), <code>static children</code> (region), or neither
+  (marker).</dd>
+  <dt><dfn id="term-dispatch-key">dispatch key</dfn></dt>
+  <dd><code>static open</code> alone for expression and marker nodes;
+  (<code>static open</code>, <code>static regionName</code>) for region nodes.</dd>
+</dl>
+
+<h2 id="interface">Interface definitions</h2>
+<p>
+  The following TypeScript declarations are normative. Only the declaration-subset notation is used:
+  interface and type-alias declarations, method and property signatures, union and literal types, and
+  <code>readonly</code>. Generics-variance, conditional, and mapped types do not appear in normative
+  signatures. Throw behaviour is normative in the
+  <a href="#conformance-cases">error table</a>, not the type.
+</p>
+
+{% highlight "typescript" %}
+/** The single base every custom node extends — analogous to HTMLElement for custom elements. */
+abstract class CustomNode {
+  /** Declared opening delimiter. Normative: see §§ 3, 5. */
+  static open: string;
+  /** Declared closing delimiter. Normative: must be explicitly set for regions. */
+  static close: string;
+  /** Expression nature: 'shown' (emit to DOM) | 'hidden' (compute only). */
+  static value?: 'shown' | 'hidden';
+  /** Region nature: 'inert' (<template> concept) | 'live' (rendered in place) | 'raw' (scan-suppressed). */
+  static children?: 'inert' | 'live' | 'raw';
+  /** Marker nature: true = include/outlet; false = invisible directive. Set only when neither value nor children is set. */
+  static rendered?: boolean;
+  /** Region name for dispatch-key tuple; required when static children is set. */
+  static regionName?: string;
+  /** Region close grammar; required when static children is set (never auto-derived). */
+  static regionClose?: string;
+  /** Observed attribute names — exactly like customElements.define observedAttributes. */
+  static observedAttributes?: readonly string[];
+
+  /** Lifecycle — called after the host node is upgraded and connected. */
+  connectedCallback?(): void;
+  /** Lifecycle — called when the host node is removed from the document. */
+  disconnectedCallback?(): void;
+  /** Lifecycle — called when an observed attribute changes. */
+  attributeChangedCallback?(name: string, oldValue: string | null, newValue: string | null): void;
+  /** Lifecycle — called after the upgrade walk instantiates the class. */
+  upgrade?(): void;
+}
+
+interface CustomNodeRegistry {
+  /**
+   * Register a custom node kind.
+   * @throws {AmbiguousPayloadError}    if both static value and static children are set.
+   * @throws {MissingRegionCloseError}  if static children is set but static regionClose is not.
+   * @throws {ReservedDelimiterError}   if static open is rooted in the HTML tag-open slice.
+   * @throws {DelimiterCollisionError}  if the dispatch key collides with a live recipe in this scope.
+   */
+  define(node: typeof CustomNode): void;
+
+  /**
+   * Returns a Promise that resolves once the named class is registered.
+   * The name is the class's .name property.
+   */
+  whenDefined(name: string): Promise<typeof CustomNode>;
+
+  /** Returns the registered class for a given open delimiter, or undefined. */
+  get(open: string): typeof CustomNode | undefined;
+}
+
+declare var customNodes: CustomNodeRegistry;
+{% endhighlight %}
+
+<h2 id="observable-behavior">Observable behavior requirements</h2>
+<p>
+  All requirements in this section target the observable surface contract only —
+  states, errors, and dispatch outcomes. Computation internals (walk implementation,
+  upgrade order, parse-result caching) are not pinned
+  (<a href="/platform-decisions/#surface-contract-not-computation"><code>#surface-contract-not-computation</code></a>).
+</p>
+
+<h3 id="ob-define">§&nbsp;1 — <code>define()</code> validation</h3>
+<ol>
+  <li>
+    An <a href="#dfn-implementation">implementation</a> <strong>MUST</strong> throw
+    <code>AmbiguousPayloadError</code> when <code>define()</code> is called with a class that sets both
+    <code>static value</code> and <code>static children</code>. A <a href="#term-custom-node">custom node</a>
+    is an expression <em>or</em> a region — never both; a marker sets neither.
+  </li>
+  <li>
+    An <a href="#dfn-implementation">implementation</a> <strong>MUST</strong> throw
+    <code>MissingRegionCloseError</code> when <code>define()</code> is called with a class that sets
+    <code>static children</code> but does not set <code>static regionClose</code>. A region
+    <strong>MUST</strong> declare its closing delimiter; auto-derivation is not permitted.
+  </li>
+  <li>
+    An <a href="#dfn-implementation">implementation</a> <strong>MUST</strong> throw
+    <code>ReservedDelimiterError</code> when <code>define()</code> is called with a <code>static open</code>
+    that is rooted in the HTML tokenizer's tag-open slice: any string beginning with <code>&lt;!</code>,
+    <code>&lt;/</code>, <code>&lt;?</code>, or <code>&lt;</code> followed by an ASCII letter. Such an
+    opener is cross-channel incoherent — the tokenizer consumes it as markup before text-node scanning runs
+    (#2112 Fork 1).
+  </li>
+  <li>
+    An <a href="#dfn-implementation">implementation</a> <strong>MUST</strong> throw
+    <code>DelimiterCollisionError</code> when <code>define()</code> is called with a
+    <a href="#term-dispatch-key">dispatch key</a> that is identical to a live recipe in the same injector
+    scope. Two region recipes with the same <code>static open</code> but different <code>static regionName</code>
+    values do <em>not</em> collide (#2112 Fork 2).
+  </li>
+</ol>
+
+<h3 id="ob-authoring">§&nbsp;2 — Authoring warnings</h3>
+<ol start="5">
+  <li>
+    An <a href="#dfn-implementation">implementation</a> <strong>MUST</strong> warn (and ignore the attribute)
+    when a <a href="#dfn-document">document</a> authors an attribute not listed in
+    <code>static observedAttributes</code> — exactly as custom elements handle unobserved attributes.
+    This is a warn, not a throw.
+  </li>
+  <li>
+    An <a href="#dfn-implementation">implementation</a> <strong>SHOULD</strong> warn when a
+    <a href="#dfn-document">document</a> authors a node with a grammar that is natively invisible
+    (e.g., the comment grammar <code>&lt;!--</code>) but the class declares a visible nature
+    (<code>static value = 'shown'</code> or <code>static rendered = true</code>). This is a
+    contradictory authoring choice: the config — not the syntax — is authoritative.
+  </li>
+</ol>
+
+<h3 id="ob-dispatch">§&nbsp;3 — Dispatch and longest-match scanning</h3>
+<ol start="7">
+  <li>
+    An <a href="#dfn-implementation">implementation</a> <strong>MUST</strong> resolve recipe lookup by
+    <a href="#term-dispatch-key">dispatch key</a> within the <em>nearest</em> injector scope in the
+    <code>webinjectors</code> chain. A subtree's scope shadows its ancestor's scope; sibling scopes
+    never interfere.
+  </li>
+  <li>
+    When multiple recipes share a common prefix in their <code>static open</code>,
+    an <a href="#dfn-implementation">implementation</a> <strong>MUST</strong> apply
+    <em>longest-match-first</em> scanning (<code>{{{</code> before <code>{{</code> before <code>{</code>).
+  </li>
+</ol>
+
+<h2 id="conformance-cases">Conformance cases &amp; error model</h2>
+<p>
+  Each row is an enumerated case for <code>define()</code>; the verdict and typed error are
+  normative (#2074 spine). Cross-reference:
+  <a href="/conformance/">conformance vectors</a> (no <code>customnoderegistry</code> suite yet —
+  the pilot exercises the permitted arm; vectors are authored by the authoring wave that makes the
+  standard active, per #2097 scope).
+</p>
+
+<table class="conformance-table">
+  <thead>
+    <tr>
+      <th>Case</th>
+      <th>Verdict</th>
+      <th>Error type</th>
+      <th>Requirement</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Both <code>static value</code> and <code>static children</code> set</td>
+      <td>Reject</td>
+      <td><code>AmbiguousPayloadError</code></td>
+      <td><a href="#ob-define">§1 rule 1</a></td>
+    </tr>
+    <tr>
+      <td><code>static children</code> set, <code>static regionClose</code> absent</td>
+      <td>Reject</td>
+      <td><code>MissingRegionCloseError</code></td>
+      <td><a href="#ob-define">§1 rule 2</a></td>
+    </tr>
+    <tr>
+      <td><code>static open</code> rooted in HTML tag-open slice (<code>&lt;!</code>, <code>&lt;/</code>, <code>&lt;?</code>, or <code>&lt;</code>+letter)</td>
+      <td>Reject</td>
+      <td><code>ReservedDelimiterError</code></td>
+      <td><a href="#ob-define">§1 rule 3</a></td>
+    </tr>
+    <tr>
+      <td>Dispatch key collides with a live recipe in the same injector scope</td>
+      <td>Reject</td>
+      <td><code>DelimiterCollisionError</code></td>
+      <td><a href="#ob-define">§1 rule 4</a></td>
+    </tr>
+    <tr>
+      <td>Authored attribute not in <code>static observedAttributes</code></td>
+      <td>Warn + ignore</td>
+      <td>—</td>
+      <td><a href="#ob-authoring">§2 rule 5</a></td>
+    </tr>
+    <tr>
+      <td>Invisible grammar with visible nature declaration</td>
+      <td>Warn</td>
+      <td>—</td>
+      <td><a href="#ob-authoring">§2 rule 6</a></td>
+    </tr>
+    <tr>
+      <td>Well-formed class (one nature, declared close/regionClose where required, legal open, no collision)</td>
+      <td>Accept</td>
+      <td>—</td>
+      <td>All §1–§3 rules pass</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="web-standards-alignment">Web standards alignment</h2>
+<table class="conformance-table">
+  <thead>
+    <tr>
+      <th>Aspect</th>
+      <th>Native precedent</th>
+      <th>WE shape</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Registry API</td>
+      <td><code>customElements.define()</code> / <code>whenDefined()</code></td>
+      <td><code>customNodes.define()</code> / <code>whenDefined()</code> — same verbs, delimiter-keyed surface</td>
+    </tr>
+    <tr>
+      <td>Class declaration</td>
+      <td><code>class X extends HTMLElement { … }</code> with static <code>observedAttributes</code></td>
+      <td><code>class X extends CustomNode { … }</code> with static fields for nature + grammar</td>
+    </tr>
+    <tr>
+      <td>Registration key</td>
+      <td>Tag name (hyphen-required)</td>
+      <td>Delimiter grammar (<code>static open</code>); tag-open slice is reserved</td>
+    </tr>
+    <tr>
+      <td>Host node</td>
+      <td>Custom elements extend Element — the host <em>is</em> the subclass</td>
+      <td>Host is a polyfill outcome (Text / Comment / element / <code>&lt;template&gt;</code>); no new <code>nodeType</code></td>
+    </tr>
+    <tr>
+      <td>Lifecycle callbacks</td>
+      <td><code>connectedCallback</code>, <code>disconnectedCallback</code>, <code>attributeChangedCallback</code></td>
+      <td>Identical callback names; <code>upgrade()</code> added for post-materialisation init</td>
+    </tr>
+    <tr>
+      <td>Scoped registries</td>
+      <td>Scoped Custom Element Registries (WHATWG #10854)</td>
+      <td>Injector-scoped dispatch — nearest provider wins in the <code>webinjectors</code> chain</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="lineage">Lineage</h2>
+<ul>
+  <li>
+    <strong>Ratifying decision:</strong>
+    <a href="/backlog/2074-customnoderegistry-node-kind-extensibility-standard/">#2074</a> —
+    CustomNodeRegistry — declare node kinds like custom elements (ratified 2026-07-01).
+    Codified at <a href="/agent/block-standard/#custom-node-recipes"><code>docs/agent/block-standard.md#custom-node-recipes</code></a>.
+  </li>
+  <li>
+    <strong>Extension:</strong>
+    <a href="/backlog/2112-reserved-delimiter-family-policy-which-opens-are-platform-re/">#2112</a> —
+    Reserved delimiter-family policy + collision predicate (ratified 2026-07-03).
+    Added rules 3, 4, 6, 7 (ReservedDelimiterError, DelimiterCollisionError, <code>children:'raw'</code>).
+  </li>
+  <li>
+    <strong>Spec home &amp; skeleton:</strong>
+    <a href="/backlog/2096-spec-register-home-skeleton-house-style-and-scope-policy-for/">#2096</a> —
+    Spec register — home, skeleton house style, and scope policy (ratified with this pilot).
+    This partial IS the worked example (Fork 2 (a) skeleton) and exercises the Fork 3 (a) permitted arm
+    (draft ⇒ spec authored early, before active promotion).
+  </li>
+  <li>
+    <strong>Pilot item:</strong>
+    <a href="/backlog/2097-pilot-normative-spec-customnoderegistry-2074-in-the-ratified/">#2097</a> —
+    this spec. The calibration point for per-category authoring waves of epic
+    <a href="/backlog/2079-author-w3c-spec-shaped-normative-standards-for-every-we-stan/">#2079</a>.
+  </li>
+  <li>
+    <strong>Statute anchors:</strong>
+    <a href="/platform-decisions/#surface-contract-not-computation"><code>#surface-contract-not-computation</code></a>
+    (observable surface only) ·
+    <a href="/platform-decisions/#non-verdict-conformance-matcher"><code>#non-verdict-conformance-matcher</code></a>
+    (vector suite stays machine-readable; this spec cross-references, never duplicates).
+  </li>
+</ul>
