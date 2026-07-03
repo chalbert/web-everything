@@ -2478,6 +2478,23 @@ sessions**. The claim-locus and lane before-state-soundness *mechanics* are sess
 #2138 merge-queue line — which also owns the self-approved-PR / GitHub-merge-queue landing substrate (#2138
 Fork 5 → #2151 CI-on-PR, #2152 branch protection, #2153 PR drain) — not part of this scope ruling.
 
+**Rider — decision-authoring uses a preview lane; #2123 stays uniform (#2187, ratified 2026-07-03).** #2183
+direction-point 4 carved decisions as *author-in-`main`, then lane-at-ratify* so a decision's rendered effect
+stays live-previewable while it is authored — but the now-active #2123 guard blocks primary-tree `Edit`/`Write`,
+so that carve-out needed reconciling. Ruling: **decisions author in a dedicated PREVIEW LANE — no guard
+exemption; #2123 stays uniform (no decision-authoring carve-out).** The ergonomic case for an exemption
+(edit/review the exact primary tree the human watches) is a **solved tooling problem**: at a decision **claim**
+the skill provisions/reuses the preview lane, `map`s it to the #2139 page-port proxy (so `:3000` stays the
+single review URL), launches its dev server, and **opens the rendered `/backlog/<NNN>/` page** — the
+live-authoring loop, in a lane (validated by hand 2026-07-03). This realizes the #2123 rider's
+"flip interactive/content sessions to a lane once it can boot its own WE dev-pair" trigger for the decision
+case. **Rejected:** a scoped `DECISION_AUTHORING=1` guard exemption — even tightly scoped to decision
+`backlog/*.md` + this file, it re-opens the exact content-session carve-out #2123 ruled *against*; the preview
+lane holds the rule uniform at the cost of one auto-managed dev server. The **ratify → lane** helper (apply the
+decision diff in a lane clone → `resolve --codified-to` → ready-to-merge PR; mirrors `we:scripts/pr-land.mjs`)
+is the landing transport. Spin-off (a) of #2183; siblings #2189 (/workflow PR fan-out), #2190 (per-path
+routing), #2188 (/merge↔drain label convergence) delivered the rest.
+
 **Rider — pre-PR independent review at the landing seam (#2170, first layer of the lane review design).**
 Before **any** lane opens its self-approved PR (`we:scripts/pr-land.mjs`) — a parallel `/workflow` lane **or**
 a solo `#2123` lane — the lane session spawns an **independent subagent review over its diff** (the
