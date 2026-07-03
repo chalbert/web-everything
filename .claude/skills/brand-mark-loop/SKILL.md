@@ -52,6 +52,11 @@ is in the sighted refinement loop the main loop drives itself.**
 7. **Re-render, re-look.** Repeat 3–6 until the mark holds (no surviving critique) or you hit a real wall.
    **Stop honestly** — if 3–4 iterations don't converge, say so; the raw concept may be unsalvageable
    (kill it) or the ceiling is the model (escalate to a human designer with the brief as spec).
+8. **Self-improve across rounds & sessions — the loop-log.** After each iteration/batch, append the
+   finding to `plateau-app/branding-proposals/loop/LOOP-LOG.md` (standing findings + per-brand log +
+   a next-round queue). **Read that log FIRST when starting any loop** so a new round — even a new
+   session — starts ahead of where the last one ended, never cold. Promote recurring findings to its
+   "Standing findings" list; they are the loop's accumulated craft.
 
 ## Record every step in the journey (training data)
 
