@@ -3,7 +3,7 @@ const syntaxHighlight = require("@11ty/eleventy-plugin-syntaxhighlight");
 const { deriveResearchFreshness } = require("./scripts/lib/research-freshness.cjs");
 const { buildTechnicalConfiguratorUrl } = require("./scripts/lib/technical-configurator-url.cjs");
 const { spliceDataTables } = require("./scripts/lib/data-table-build-hook.cjs");
-const { renderIntentGrid, renderProjectGrid, renderStageGrid, renderBacklogGrid, spliceComponents } = require("./scripts/lib/component-render-build-hook.cjs");
+const { renderIntentGrid, renderProjectGrid, renderStageGrid, renderBacklogGrid, spliceComponentsBatch } = require("./scripts/lib/component-render-build-hook.cjs");
 
 module.exports = function (eleventyConfig) {
   eleventyConfig.addPlugin(syntaxHighlight);
@@ -279,17 +279,27 @@ ${fuiHostScript}`;
 
   // Generic template-facing card/badge SSR primitive (#2098, keystone #2016). The `weCard`/`weBadge`
   // macros (src/_includes/we-component.njk) emit inert `<we-card|we-badge data-we-spec='{…}'>`
-  // placeholders for a ONE-OFF inline card/badge (the grid shortcodes above cover whole collections). This
-  // per-page transform collects EVERY placeholder on the page and batches them through the pinned FUI CLI
-  // in ONE subprocess call (`spliceComponents` → `renderComponents`), splicing each returned SSR fragment
-  // in place — one subprocess per PAGE, never per card (a naive per-card shortcode would spawn ~800 per
-  // build). Same subprocess boundary + pinned-artifact/missing-artifact hard error as the data-table hook
-  // above; the block factories live in FUI (a WE→FUI import is a banned backward DAG edge). The client
-  // `<we-card>`/`<we-badge>` CE upgrade (src/_layouts/base.njk) is a pure enhancement over the JS-off-
-  // correct SSR baseline. A page with no `data-we-spec` placeholder pays a single substring check.
-  eleventyConfig.addTransform("weComponentSSR", function (content) {
-    if (!/\.html?$/.test(this.page && this.page.outputPath || "")) return content;
-    return spliceComponents(content, __dirname);
+  // placeholders for a ONE-OFF inline card/badge (the grid shortcodes above cover whole collections).
+  //
+  // #2185 — batch the SSR splice across the WHOLE build, not per page. The former per-page `addTransform`
+  // paid a full `node`+happy-dom cold start on every page carrying a placeholder; the #2102 backlog dogfood
+  // put 4 `weCard`s on all ~2167 backlog item pages, so a cold `build:docs` serially spawned ~2167
+  // subprocesses (~16 min) — long enough that the 11ty dev server never bound its port in a usable time and
+  // the Vite `/backlog/…` proxy ECONNREFUSED'd the whole window. Instead the placeholders survive into the
+  // written page and `eleventy.after` splices EVERY page's placeholders through the pinned FUI CLI in ONE
+  // subprocess (`spliceComponentsBatch` → `renderComponents`), paying the cold start once. Output is
+  // byte-identical (the placeholder's `data-we-spec` is self-describing). In `--serve`, `results` is only
+  // the changed pages, so a dev edit re-splices just what it touched. Same subprocess boundary +
+  // pinned-artifact/missing-artifact hard error as the data-table hook above; the block factories live in
+  // FUI (a WE→FUI import is a banned backward DAG edge). The client `<we-card>`/`<we-badge>` CE upgrade
+  // (src/_layouts/base.njk) is a pure enhancement over the JS-off-correct SSR baseline. A page with no
+  // `data-we-spec` placeholder pays a single substring check.
+  eleventyConfig.on("eleventy.after", function ({ results }) {
+    const { pages, components } = spliceComponentsBatch(results, __dirname);
+    if (components > 0) {
+      // eslint-disable-next-line no-console
+      console.log(`[component-render build] SSR-spliced ${components} component(s) across ${pages} page(s) in one subprocess.`);
+    }
   });
 
   // SSR component-render (#2016, keystone of the #777 WE-docs dogfood epic) — the general build-time

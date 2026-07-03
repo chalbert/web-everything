@@ -836,10 +836,17 @@ same way" rule.
    a namespace where a bare name collides with a host built-in. Today that is the **HTML-attribute**
    namespace (`CustomAttributeRegistry` → DOM attributes, where `title`/`value`/`type` are taken).
    Element tags are the other host-shared namespace, but the platform **already** hyphen-forces them.
-2. **Framework-internal keys are not guarded.** Parser / expression / text-node / store / context
-   registry keys never reach the DOM, so their bare grammar tokens (`value`, `pipe`, `call`,
-   `mustache`, `polymer`) stay bare — no guard, no rename. The base `CustomRegistry` stays guard-less;
-   the throw is a deliberate per-registry override, not a base invariant.
+2. **Framework-internal keys are not guarded** — *with one amendment for grammar-keyed registries (#2112,
+   2026-07-03).* Parser / expression / text-node / store / context registry keys never reach the DOM, so their bare
+   grammar tokens (`value`, `pipe`, `call`, `mustache`, `polymer`) stay bare — no guard, no rename. The base
+   `CustomRegistry` stays guard-less; the throw is a deliberate per-registry override, not a base invariant.
+   **Amendment:** when the registry key *is a delimiter grammar* (the #2074 `customNodes` recipes, keyed by
+   `static open` rather than by a name), a **narrow slice of that keyspace is host-shared** — an `open` rooted in the
+   HTML tokenizer's tag-open set (`<` + `!`/`/`/`?`/letter) is claimed by the parser before text scanning, so it
+   *does* touch a host surface. That slice — and only that slice — is guarded (a `ReservedDelimiterError` at
+   `define()`), per [#2112](/backlog/2112-reserved-delimiter-family-policy-which-opens-are-platform-re/) Fork 1
+   ([custom-node-recipes](block-standard.md#custom-node-recipes) rule 6). The exemption still holds for name-keyed
+   internal registries; it is *narrowed, not removed*.
 3. **This is the web platform's own rule.** Native `customElements.define` guards *only* element tags
    (the one host-shared namespace) and imposes nothing on internal JS registries — so scoping the
    guard generalizes the platform; a flat uniformity rule would be **stricter than the platform's
@@ -852,8 +859,9 @@ same way" rule.
    baseline](#native-first-baseline).
 
 **Lineage:** #1347 (scope of #1120's guard → `CustomAttributeRegistry` only; sets #1348 rename
-scope) · #1120 (the `CustomAttributeRegistry` `#assertValidName` guard) · derived from [native-first
-baseline](#native-first-baseline).
+scope) · #1120 (the `CustomAttributeRegistry` `#assertValidName` guard) · #2112 (rule-2 amendment:
+grammar-keyed registries guard the host tag-open slice of their delimiter keyspace) · derived from
+[native-first baseline](#native-first-baseline).
 
 ### Guard / Gate vocabulary {#guard-gate}
 
