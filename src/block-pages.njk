@@ -11,6 +11,13 @@ eleventyComputed:
 ---
 
 {% from "project-status.njk" import projectStatus %}
+{# Dogfood the #2098 generic SSR card primitive: every section-card below is authored via the `weCard`
+   macro (an inert `<we-card data-we-spec>` placeholder the `weComponentSSR` build transform batches through
+   the pinned FUI CLI in one subprocess per page and splices to the finished `fui-card` frame — byte-identical
+   to the client `<we-card>` CE upgrade, JS-off correct). Each card keeps its own in-body `<h2>` headings and
+   `data-table` surfaces exactly as before (title="" so the frame adds no header); the presentational
+   `table.data-table` surfaces are handled by the sibling `weDataTableSSR` transform and are untouched here. #}
+{% from "we-component.njk" import weCard %}
 
 <div class="plug-detail-header">
     <div class="plug-detail-header-inner">
@@ -46,28 +53,31 @@ eleventyComputed:
         <section class="block-tier block-tier-user" style="border-top: 4px solid var(--color-primary, #6366f1); padding-top: 0.5rem;">
             <p class="block-tier-label" style="margin: 0; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--color-primary, #6366f1);">Using this block</p>
 
-            <div class="section-card fui-card mt-4">
+            {%- set _cardOverview %}
                 <h2>Overview</h2>
                 <p class="text-slate-600">{{ block.summary | safe }}</p>
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardOverview, "", "section-card mt-4") }}
 
             {% if block.fuiDemo %}
-            <div class="section-card fui-card mt-8">
+            {%- set _cardLiveExample %}
                 <h2>Live example</h2>
                 {% fuiDemo block.fuiDemo.file, block.fuiDemo.title, block.fuiDemo.height %}
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardLiveExample, "", "section-card mt-8") }}
             {% endif %}
 
             {# Quick start — the first Web Case is the copy-paste HTML a user starts from; remaining cases
                become "Common patterns" below. Derived from the conformance suite, never hand-authored. #}
             {% if blockCases and blockCases.length %}
-            <div class="section-card fui-card mt-8">
+            {%- set _cardQuickStart %}
                 <h2>Quick start</h2>
                 <p class="mb-3 text-slate-600">{{ blockCases[0].title }} — copy, paste, and adapt.</p>
                 <div class="case-code">
                     {% highlight "html" %}{{ blockCases[0].code | safe }}{% endhighlight %}
                 </div>
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardQuickStart, "", "section-card mt-8") }}
             {% endif %}
 
             {# Public API — the props-table surface (#838, ratified by #801 Fork-1=B → the *public-API* line).
@@ -81,7 +91,7 @@ eleventyComputed:
                omitted when the block authors no member of that kind (most blocks carry events but no slots
                yet — the projection shows whatever the contract declares). #}
             {% if block.attributes or block.properties or block.events or block.slots or block.cssProperties or block.cssParts %}
-            <div class="section-card fui-card mt-8">
+            {%- set _cardApiReference %}
                 <h2>API reference</h2>
                 <p class="mb-6 text-slate-600">The block's <strong>public contract</strong> — the surface a consumer programs against. This is the same data the <a href="/protocols/">Custom Elements Manifest</a> projects (<code>npm run gen:cem</code>), rendered here from the block's own <code>blocks.json</code> declaration.</p>
 
@@ -179,14 +189,15 @@ eleventyComputed:
                     </tbody>
                 </table>
                 {% endif %}
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardApiReference, "", "section-card mt-8") }}
             {% endif %}
 
             {# Common patterns — the remaining Web Cases (the first is the Quick start above). Sourced from
                the conformance suite, so they double as runnable scenarios. Graceful absence: a block with
                ≤1 case shows no patterns panel. #}
             {% if blockCases and blockCases.length > 1 %}
-            <div class="section-card fui-card mt-8">
+            {%- set _cardCommonPatterns %}
                 <h2>Common patterns</h2>
                 <p class="mb-6 text-slate-600">Worked scenarios beyond the quick start — sourced from the conformance suite, so they double as runnable tests.</p>
 
@@ -206,7 +217,8 @@ eleventyComputed:
                     {% endif %}
                     {% endfor %}
                 </div>
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardCommonPatterns, "", "section-card mt-8") }}
             {% endif %}
         </section>
 
@@ -215,9 +227,10 @@ eleventyComputed:
             <p class="block-tier-label" style="margin: 0; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; color: var(--color-text-muted, #64748b);">Implementer reference</p>
             <p class="mt-1 mb-0 text-slate-600">Standards alignment, framework research, design decisions, and composition internals — for contributors building or extending this block.</p>
 
-            <div class="section-card fui-card mt-8">
+            {%- set _cardDescription %}
                 {% include "block-descriptions/" + block.id + ".njk" %}
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardDescription, "", "section-card mt-8") }}
 
             {# WE Standards overlay (#832, the WE-locus half of the #755 split / #809) — rendered AROUND the
                FUI-hosted embed above, from WE's OWN standard data, never inside the iframe (the demo runs in
@@ -233,7 +246,7 @@ eleventyComputed:
             {% set providerCount = block.dependsOn | length %}
             {% set consumerBlocks = [] %}
             {% for other in blocks %}{% if block.id in (other.dependsOn or []) %}{% set consumerBlocks = (consumerBlocks.push(other), consumerBlocks) %}{% endif %}{% endfor %}
-            <div class="section-card fui-card mt-8">
+            {%- set _cardStandardsOverlay %}
                 <h2>WE Standards overlay</h2>
                 <p class="mb-6 text-slate-600">WE-owned conformance proofs for the component embedded above, rendered from WE's <strong>own standard data</strong> — the demo runs in FrontierUI; these panels are Web&nbsp;Docs chrome and never travel into the iframe or to a third-party embedder (the <a href="/backlog/755/">#755</a>/<a href="/backlog/809/">#809</a> boundary split).</p>
 
@@ -271,19 +284,21 @@ eleventyComputed:
                 <h3 class="mt-6">Provider&nbsp;↔&nbsp;consumer graph</h3>
                 <p class="mb-2 text-slate-600">The composition edges this block sits on (<a href="/backlog/092/">#092</a>): it composes <strong>{{ providerCount }}</strong> provider{{ 's' if providerCount != 1 }}{% if consumerBlocks | length %} and is used by <strong>{{ consumerBlocks | length }}</strong> consumer{{ 's' if (consumerBlocks | length) != 1 }}{% endif %} — disable any provider and the block degrades to what remains (the minimize-lock-in surface). Full bidirectional graph in <strong>Anatomy</strong> below.</p>
                 {% endif %}
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardStandardsOverlay, "", "section-card mt-8") }}
             {% endif %}
 
             {% if block.technicalConfig %}
-            <div class="section-card fui-card mt-8">
+            {%- set _cardTechnicalConfig %}
                 <h2>Configure technical aspects</h2>
                 <p class="mb-4">These are <strong>technical</strong> delivery settings (render strategy, transport, trait lazy-loading, chunk splitting) — never UX dimensions on the block, and never a Web Everything mandate. Explore the tradeoffs for this block in the embedded <a href="/intents/">Plateau</a> configurator; the cost preview (chunk graph + bytes/requests/hydration) updates as you change a setting. Use <em>Open full configurator&nbsp;↗</em> for the project-wide decision.</p>
                 {% technicalConfigurator block.technicalConfig, block.technicalConfig.height %}
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardTechnicalConfig, "", "section-card mt-8") }}
             {% endif %}
 
             {% if block.implementsIntent %}
-            <div class="section-card fui-card mt-8">
+            {%- set _cardImplementsIntent %}
                 <h2>Implements Intent</h2>
                 {% for intent in intents %}
                     {% if intent.id == block.implementsIntent %}
@@ -307,11 +322,12 @@ eleventyComputed:
                     {% endif %}
                     {% endif %}
                 {% endfor %}
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardImplementsIntent, "", "section-card mt-8") }}
             {% endif %}
 
             {% if block.composesIntents %}
-            <div class="section-card fui-card mt-8">
+            {%- set _cardComposesIntents %}
                 <h2>Composes Intents</h2>
                 <p class="mb-4 text-slate-600">This block is a <strong>composition manifest</strong> — it defers each behavior to the intent that owns it, rather than re-specifying them. It composes:</p>
                 <ul class="list-disc pl-5">
@@ -323,11 +339,12 @@ eleventyComputed:
                     {% endfor %}
                 {% endfor %}
                 </ul>
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardComposesIntents, "", "section-card mt-8") }}
             {% endif %}
 
             {% if block.traits %}
-            <div class="section-card fui-card mt-8">
+            {%- set _cardTraits %}
                 <h2>Traits</h2>
                 <p class="mb-6 text-slate-600">Composable behaviors loaded on-demand based on the active intent profile. Only the traits matching the application's chosen configuration are bundled.</p>
                 <table class="data-table">
@@ -348,7 +365,8 @@ eleventyComputed:
                         {% endfor %}
                     </tbody>
                 </table>
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardTraits, "", "section-card mt-8") }}
             {% endif %}
 
             {# Accessibility & Web Standards — the per-component realization SoT (#803/#826): one row per
@@ -361,7 +379,7 @@ eleventyComputed:
                field shape is untouched; the raw key is preserved as a hover title for traceability. #}
             {% if block.webStandards %}
             {% set wsRows = block.webStandards | webStandardsRows %}
-            <div class="section-card fui-card mt-8">
+            {%- set _cardWebStandards %}
                 <h2>Accessibility &amp; Web Standards</h2>
                 <p class="mb-6 text-slate-600">The web-platform standards this block realizes — each concern names how the block satisfies it, with a link to the governing specification. Concerns are grouped by area and ordered for scanning.</p>
                 <table class="data-table">
@@ -385,7 +403,8 @@ eleventyComputed:
                         {% endfor %}
                     </tbody>
                 </table>
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardWebStandards, "", "section-card mt-8") }}
             {% endif %}
 
             {# Component tokens — the per-component design-token table (#829, ratified by #802). The block names
@@ -396,7 +415,7 @@ eleventyComputed:
                the literal it resolves to. Graceful absence — no field → no panel (the `fuiDemo` precedent). #}
             {% if block.componentTokens %}
             {% set tokenGroups = block.componentTokens if (block.componentTokens | string) != block.componentTokens else [block.componentTokens] %}
-            <div class="section-card fui-card mt-8">
+            {%- set _cardComponentTokens %}
                 <h2>Component tokens</h2>
                 <p class="mb-6 text-slate-600">The design tokens this component exposes — each overridable CSS custom property, the primitive it <strong>aliases</strong>, and the literal it currently <strong>resolves</strong> to. Every token aliases a primitive so it can never drift from the scale. Same source as the <a href="/protocols/">Custom Elements Manifest</a> <code>cssProperties</code> emit.</p>
                 <table class="data-table">
@@ -413,7 +432,8 @@ eleventyComputed:
                         {% endfor %}
                     </tbody>
                 </table>
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardComponentTokens, "", "section-card mt-8") }}
             {% endif %}
 
             {# Anatomy — the composition graph straight from the registries (#748): the dependency edges this
@@ -424,7 +444,7 @@ eleventyComputed:
             {% set usedByBlocks = [] %}
             {% for other in blocks %}{% if block.id in (other.dependsOn or []) %}{% set usedByBlocks = (usedByBlocks.push(other), usedByBlocks) %}{% endif %}{% endfor %}
             {% if (block.dependsOn | length) or (usedByBlocks | length) %}
-            <div class="section-card fui-card mt-8">
+            {%- set _cardAnatomy %}
                 <h2>Anatomy</h2>
                 <p class="mb-6 text-slate-600">Every piece this block composes, each linking to its own page. Together with the <strong>Implements / Composes Intents</strong> and <strong>Traits</strong> sections above, this is the block's full composition graph — the minimize-lock-in / graceful-degradation surface. A live <em>toggle-a-piece-off</em> exploded view layers on once in-document render lands (<a href="/backlog/786-mode-c-fui-embed-sdk-gains-a-shadow-dom-in-document-render-m/">#786</a>).</p>
                 {% if block.dependsOn | length %}
@@ -449,7 +469,8 @@ eleventyComputed:
                     {% endfor %}
                 </ul>
                 {% endif %}
-            </div>
+            {% endset -%}
+            {{ weCard("", _cardAnatomy, "", "section-card mt-8") }}
             {% endif %}
         </section>
     </div>
