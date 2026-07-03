@@ -42,7 +42,17 @@
  *   node scripts/pr-land.mjs --ref=lane/… --fallback-git                  # on gh failure / unmergeable, local git-merge + push instead
  *   node scripts/pr-land.mjs --ref=lane/… --no-heal                       # skip the post-land id-collision self-heal (#2071)
  *   node scripts/pr-land.mjs --ref=lane/… --no-regen                      # skip the post-land derived-artifact regen (#2182)
+ *   node scripts/pr-land.mjs --ref=lane/… --no-label                      # do NOT apply the ready-to-merge label (#2196) — e.g. a PR that must stay human-reviewed
+ *   node scripts/pr-land.mjs --ref=lane/… --label=<name>                  # apply a different label than the default `ready-to-merge`
  *   node scripts/pr-land.mjs --ref=lane/… --json                          # machine-readable result
+ *
+ * READY-TO-MERGE LABEL (#2196). Every AI-edit path that opens a PR routes through THIS transport, so pr-land
+ * applies the `ready-to-merge` label to the opened PR by default — making it the single deliberate step that
+ * marks a couple "a producer certified this" (never applied by hand casually). That label is the universal
+ * signal the label lander (`/drain`, `scripts/merge-ai-prs.mjs --label=ready-to-merge`) collects, whatever
+ * session shape (`/pr`, solo `#2123` lane, batch closeout, `/workflow`) produced the PR. `--no-label` opts a
+ * PR out (it must then be merged by hand / a human-review flow); label-apply is best-effort and never fails
+ * the land.
  *
  * Exit codes: 0 = merged (or opened with --no-wait / dry-run OK); 2 = required check RED (nothing merged);
  * 3 = unmergeable / gh error / push failed (nothing merged; recoverable — rebase the ref and re-run, or
@@ -95,6 +105,10 @@ const HEAL = !flags['no-heal'];
 // manually-landed change whose inputs feed a derived artifact never leaves `main` with stale output.
 // Gate behind `--no-regen` to allow opt-out (mirrors `--no-heal`). Never runs on --dry-run / --no-wait.
 const REGEN = !flags['no-regen'];
+// The producer-certified `ready-to-merge` label (#2196) — applied to every opened PR so the label lander
+// (/drain) can collect ALL AI-generated work, whatever session opened it. `--no-label` opts out; `--label=<n>`
+// overrides the name. Default on.
+const LABEL = flags['no-label'] ? null : (typeof flags.label === 'string' ? flags.label : 'ready-to-merge');
 
 // ── PURE helpers (unit-tested in scripts/__tests__/pr-land.test.mjs) ──────────────────────────────────
 
@@ -134,6 +148,14 @@ export function buildCreateArgs({ base, head, title, body }) {
  *  lane ref after. Pure. */
 export function buildMergeArgs({ pr, method }) {
   return ['pr', 'merge', String(pr), mergeMethodFlag(method), '--delete-branch'];
+}
+
+/** Build the `gh pr edit --add-label` args that apply the producer-certified `ready-to-merge` label (#2196).
+ *  Returns null when labelling is disabled (`--no-label`) or no PR number is known, so the caller can skip.
+ *  Pure — returns the `gh` argv array (or null). */
+export function buildAddLabelArgs({ pr, label }) {
+  if (!label || pr == null) return null;
+  return ['pr', 'edit', String(pr), '--add-label', label];
 }
 
 /** Build the argv for the post-land id-collision heal (#2071). Deliberately passes NO `--base-ref`: the
@@ -215,6 +237,7 @@ function runCli() {
       plan: [
         `git push ${REMOTE} ${SRC}:refs/heads/${REF}   # publish the lane clone's ${SRC} (${refSha.slice(0, 8)}) to the lane ref`,
         `gh ${createArgs.join(' ')}`,
+        LABEL ? `gh pr edit <pr> --add-label ${LABEL}   # #2196 producer-certified ready-to-merge label` : '(--no-label: PR opened UNlabelled — not collected by the label lander)',
         WAIT ? 'poll: gh pr checks <pr> --json state,bucket  (wait until passed; abort on fail)' : '(--no-wait: skip check-wait, leave for a later drain pass)',
         WAIT ? `gh ${mergeArgsPreview.join(' ')}` : null,
         HEAL ? 'post-land: id-collision heal (backlog-renumber-collisions.mjs --json)' : '(--no-heal: skip id-collision heal)',
@@ -238,7 +261,19 @@ function runCli() {
   }
   if (prNum == null) return ghFailed('could not determine the PR number after create');
 
-  if (!WAIT) emit({ repo: REPO, merged: false, reason: 'opened', pr: Number(prNum), ref: REF, detail: `opened self-approved PR #${prNum} for ${REF}; --no-wait, a later drain pass merges it` }, 0);
+  // 3b. Apply the producer-certified `ready-to-merge` label (#2196) — the universal signal the label lander
+  //     (/drain) collects. Applied here (the shared transport) so EVERY AI-edit path that opens a PR carries
+  //     it, not only /workflow. Best-effort: ensure the label exists (idempotent), then add it — a failure is
+  //     recorded but NEVER aborts the land (the PR is already open; a missing label is a soft miss).
+  let labelApplied = false;
+  const addLabelArgs = buildAddLabelArgs({ pr: prNum, label: LABEL });
+  if (addLabelArgs) {
+    try { ghC(['label', 'create', LABEL, '--color', '0E8A16', '--description', 'Producer-certified: safe for the label lander (/drain) to merge']); } catch { /* already exists — fine */ }
+    try { ghC(addLabelArgs); labelApplied = true; }
+    catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply label "${LABEL}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — land continues\n`); }
+  }
+
+  if (!WAIT) emit({ repo: REPO, merged: false, reason: 'opened', pr: Number(prNum), ref: REF, label: LABEL, labelApplied, detail: `opened self-approved PR #${prNum} for ${REF}${labelApplied ? ` (labelled ${LABEL})` : ''}; --no-wait, a later drain pass merges it` }, 0);
 
   // 4. Wait until GitHub itself says the PR is ready, then merge. We gate on the AUTHORITATIVE
   //    `mergeStateStatus` (not a raw `gh pr checks` list) — a fresh PR's checks haven't registered yet, so
@@ -277,7 +312,7 @@ function runCli() {
   const regen = REGEN ? runRegen() : null;
   if (regen && regen.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${regen.warning}\n`);
   emit({
-    repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD,
+    repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD, label: LABEL, labelApplied,
     healed: heal && heal.healed ? heal.renumbered : [],
     ...(heal && heal.warning ? { healWarning: heal.warning } : {}),
     regenDone: regen ? regen.done : [],

@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, classifyChecks } from '../pr-land.mjs';
+import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks } from '../pr-land.mjs';
 
 describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
   it('maps merge methods to gh flags (default = --merge, the no-ff history the drain wants)', () => {
@@ -73,6 +73,19 @@ describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
     expect(flat).toContain('npm run gen:reference-index');
     // No generator that writes OUTSIDE the WE repo (no impl-repo commands).
     for (const f of flat) expect(f).not.toMatch(/frontierui|plateau-app/);
+  });
+
+  it('builds the ready-to-merge label-apply args, and skips when disabled (#2196)', () => {
+    // Default: apply the producer-certified label so the label lander (/drain) collects the PR.
+    expect(buildAddLabelArgs({ pr: 60, label: 'ready-to-merge' }))
+      .toEqual(['pr', 'edit', '60', '--add-label', 'ready-to-merge']);
+    // --label=<name> overrides the label name.
+    expect(buildAddLabelArgs({ pr: 5, label: 'draft-ok' }))
+      .toEqual(['pr', 'edit', '5', '--add-label', 'draft-ok']);
+    // --no-label (label null) → no args (PR opened UNlabelled, not auto-collected).
+    expect(buildAddLabelArgs({ pr: 60, label: null })).toBe(null);
+    // No PR number known → nothing to label.
+    expect(buildAddLabelArgs({ pr: null, label: 'ready-to-merge' })).toBe(null);
   });
 
   it('classifies checks: pass → merge, any fail → abort, any pending → wait', () => {
