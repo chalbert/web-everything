@@ -108,10 +108,11 @@ function combinedReport(scored) {
     '**Re-derivable:** `we:scripts/grammar-scorecard.mjs` re-emits this report; `--check` fails the gate on drift.',
     '',
     '> Bundle zero scores **100%** against its own native checklist (self-consistency — nothing to gap), and',
-    '> exposes its real gaps only when scored against a *framework* checklist (Handlebars below): regions,',
-    '> raw/unescaped output, partials, comments — the concrete increments the per-flavor bundle stories',
-    '> (#2114–#2119) grow, and the mid-region-marker gap (`{{else}}`) whose decision card the first',
-    '> confirming gap list earns (not a guess).',
+    '> exposes its real gaps only when scored against a *framework* checklist (Handlebars, Vue, etc. below):',
+    '> regions, raw/unescaped output, partials, comments — the concrete increments the per-flavor bundle',
+    '> stories (#2114–#2119) grow, and the mid-region-marker gap (`{{else}}`) whose decision card the first',
+    '> confirming gap list earns (not a guess). Vue is the firewall proof (#2119): its delimiter surface is',
+    '> only `{{ }}` text interpolation — every other construct is attribute-keyed, out-of-scope per #2074.',
     '',
     '',
   ].join('\n');
@@ -136,7 +137,7 @@ async function main() {
   const args = process.argv.slice(2);
   const check = args.includes('--check');
   const names = args.filter((a) => !a.startsWith('--'));
-  const checklists = names.length ? names : ['fui-native', 'handlebars'];
+  const checklists = names.length ? names : ['fui-native', 'handlebars', 'vue'];
 
   const scorer = await loadScorer();
   if (!scorer) {
