@@ -30,7 +30,12 @@ const MAX_LINE = 200;          // per index line: title + one short hook
 
 const HOME = process.env.HOME || process.env.USERPROFILE || '';
 const PROJECT_KEY = ROOT.replace(/\//g, '-');
-const MEM_DIR = join(HOME, '.claude', 'projects', PROJECT_KEY, 'memory');
+const USER_MEM_DIR = join(HOME, '.claude', 'projects', PROJECT_KEY, 'memory');
+// Repo-local memory dir (committed to git, always present in lane clones): fall back when the
+// user-level project memory dir does not exist for this clone path (e.g. lane clones have a
+// different PROJECT_KEY that has no harness-written memory dir).
+const REPO_MEM_DIR = join(ROOT, '.claude', 'agent-memory');
+const MEM_DIR = existsSync(USER_MEM_DIR) ? USER_MEM_DIR : (existsSync(REPO_MEM_DIR) ? REPO_MEM_DIR : USER_MEM_DIR);
 const INDEX = join(MEM_DIR, 'MEMORY.md');
 
 /** Size + per-line checks on a MEMORY.md string. Returns an array of violation strings. */
@@ -71,7 +76,7 @@ if (process.argv.includes('--pre')) {
 
 // ── default: full sweep ─────────────────────────────────────────────────────────────────────
 if (!existsSync(MEM_DIR) || !existsSync(INDEX)) {
-  console.log(`check:memory — no memory dir at ${MEM_DIR} (n/a); skipping.`);
+  console.log(`check:memory — no memory index at ${INDEX} (n/a); skipping.`);
   process.exit(0);
 }
 

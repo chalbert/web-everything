@@ -26,7 +26,9 @@ interpolation recipes (`frontierui:plugs/webnodes/recipes/interpolationRecipes.t
 | --- | --- | --- | --- |
 | FUI native | 100% | 2 / 2 | 0 |
 | Handlebars | 17% | 1 / 6 | 2 |
+| Liquid/Jinja | 14% | 1 / 7 | 3 |
 | Vue | 100% | 1 / 1 | 7 |
+| Angular | 10% | 1 / 10 | 3 |
 
 > Checklist data: `we:design-systems/grammars/fui-native.grammar.json`.
 
@@ -76,6 +78,39 @@ None — every in-scope construct reproduces. (Expected only for a trivial gramm
 
 ---
 
+> Checklist data: `we:design-systems/grammars/liquid-jinja.grammar.json`.
+
+## Grammar fidelity — Liquid/Jinja
+
+**Fidelity: 14%** (1/7 in-scope constructs reproduce through the #2074 recipe model; 3 out-of-scope-per-statute).
+
+| construct | nature | verdict | recipe |
+| --- | --- | --- | --- |
+| `{{ expr }}` | value | ✓ reproduced | MustacheInterpolationNode |
+| `{% for … %}…{% endfor %}` | children | ✗ gap | — |
+| `{% if … %}…{% endif %}` | children | ✗ gap | — |
+| `{% block … %}…{% endblock %}` | children | ✗ gap | — |
+| `{% raw %}…{% endraw %}` | children | ✗ gap | — |
+| `{% comment %}…{% endcomment %}` | children | ✗ gap | — |
+| `{# comment #}` | marker | ✗ gap | — |
+| `{{ x | filter }} expression filter/pipe` | value | — out-of-scope | — |
+| `{% include %} / {% extends %}` | marker | — out-of-scope | — |
+| `class="{{ x }}" attribute interpolation` | value | — out-of-scope | — |
+
+### Gap list — constructs the recipe model cannot express (the standard increment)
+
+| construct | nature | reason | note |
+| --- | --- | --- | --- |
+| `{% for … %}…{% endfor %}` | children | unclaimed | no bundle recipe declares static open "{% for" |
+| `{% if … %}…{% endif %}` | children | unclaimed | no bundle recipe declares static open "{% if" |
+| `{% block … %}…{% endblock %}` | children | unclaimed | no bundle recipe declares static open "{% block" |
+| `{% raw %}…{% endraw %}` | children | unclaimed | no bundle recipe declares static open "{% raw" |
+| `{% comment %}…{% endcomment %}` | children | unclaimed | no bundle recipe declares static open "{% comment" |
+| `{# comment #}` | marker | unclaimed | no bundle recipe declares static open "{#" |
+
+
+---
+
 > Checklist data: `we:design-systems/grammars/vue.grammar.json`.
 
 ## Grammar fidelity — Vue
@@ -96,4 +131,43 @@ None — every in-scope construct reproduces. (Expected only for a trivial gramm
 ### Gap list
 
 None — every in-scope construct reproduces. (Expected only for a trivial grammar like bundle zero.)
+
+
+---
+
+> Checklist data: `we:design-systems/grammars/angular.grammar.json`.
+
+## Grammar fidelity — Angular
+
+**Fidelity: 10%** (1/10 in-scope constructs reproduce through the #2074 recipe model; 3 out-of-scope-per-statute).
+
+| construct | nature | verdict | recipe |
+| --- | --- | --- | --- |
+| `{{ expr }}` | value | ✓ reproduced | MustacheInterpolationNode |
+| `@if (cond) { … }` | children | ✗ gap | — |
+| `@else { … }` | children | ✗ gap | — |
+| `@else if (cond) { … }` | children | ✗ gap | — |
+| `@for (item of items) track item { … }` | children | ✗ gap | — |
+| `@empty { … }` | children | ✗ gap | — |
+| `@switch (expr) { … }` | children | ✗ gap | — |
+| `@case (val) { … }` | children | ✗ gap | — |
+| `@default { … }` | children | ✗ gap | — |
+| `@defer { … }` | children | ✗ gap | — |
+| `[prop] property binding` | marker | — out-of-scope | — |
+| `(event) event binding` | marker | — out-of-scope | — |
+| `*ngIf structural directive` | children | — out-of-scope | — |
+
+### Gap list — constructs the recipe model cannot express (the standard increment)
+
+| construct | nature | reason | note |
+| --- | --- | --- | --- |
+| `@if (cond) { … }` | children | unclaimed | no bundle recipe declares static open "@if" |
+| `@else { … }` | children | unclaimed | no bundle recipe declares static open "@else" |
+| `@else if (cond) { … }` | children | unclaimed | no bundle recipe declares static open "@else if" |
+| `@for (item of items) track item { … }` | children | unclaimed | no bundle recipe declares static open "@for" |
+| `@empty { … }` | children | unclaimed | no bundle recipe declares static open "@empty" |
+| `@switch (expr) { … }` | children | unclaimed | no bundle recipe declares static open "@switch" |
+| `@case (val) { … }` | children | unclaimed | no bundle recipe declares static open "@case" |
+| `@default { … }` | children | unclaimed | no bundle recipe declares static open "@default" |
+| `@defer { … }` | children | unclaimed | no bundle recipe declares static open "@defer" |
 
