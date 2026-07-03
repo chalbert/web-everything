@@ -2033,3 +2033,57 @@ export function classifySurfacePaths(paths) {
   }
   return { site, standard, unclassified };
 }
+
+/**
+ * Untracked derived-artifact guard (#2180) — surfaces local-vs-CI divergence BEFORE push.
+ *
+ * `check:standards` reads the working tree, so local untracked files (reports, research-topic specs,
+ * research-description partials) inflate existence/inventory checks to green locally while a fresh CI
+ * clone (which only has tracked files) sees fewer artifacts and goes red. This check detects that gap
+ * early: if ANY untracked file lands in a derived-artifact directory, the developer needs to commit it
+ * (or delete it) before pushing.
+ *
+ * Pure: takes the output of `git ls-files -o --exclude-standard` (one repo-relative path per element)
+ * and returns one error per directory that has untracked files in it. The fs walk / git invocation
+ * stays in check-standards.mjs (the orchestrator).
+ *
+ * Derived dirs (the set that inflated the gate on 2026-07-02, see #2160 and #2180):
+ *   reports/                          — research reports referenced by relatedReport
+ *   src/_data/researchTopics/         — per-topic spec files loaded by loadResearch()
+ *   src/_includes/research-descriptions/ — per-topic partials paired 1:1 with research topic specs
+ *
+ * Each error is keyed to the directory (not the individual file) so `--scope` / `--local` can
+ * attribute it: the check is local to the developer who left files untracked, not a cross-lane concern.
+ */
+export const DERIVED_ARTIFACT_DIRS = [
+  'reports/',
+  'src/_data/researchTopics/',
+  'src/_includes/research-descriptions/',
+];
+
+export function validateUntrackedDerivedArtifacts(untrackedPaths, { derivedDirs = DERIVED_ARTIFACT_DIRS } = {}) {
+  // Group untracked paths by which derived dir they belong to.
+  const byDir = new Map();
+  for (const p of untrackedPaths) {
+    for (const dir of derivedDirs) {
+      if (p.startsWith(dir)) {
+        if (!byDir.has(dir)) byDir.set(dir, []);
+        byDir.get(dir).push(p);
+        break;
+      }
+    }
+  }
+  const errors = [];
+  for (const [dir, files] of byDir) {
+    const sample = files.slice(0, 3).join(', ') + (files.length > 3 ? `, … (+${files.length - 3} more)` : '');
+    errors.push({
+      message:
+        `${files.length} untracked file(s) in "${dir}" will cause check:standards to pass locally ` +
+        `but fail on CI (fresh clone has no untracked files) — commit or delete them before pushing. ` +
+        `Sample: ${sample}. ` +
+        `See #2180 and the [[local-gate-green-ci-red-untracked-artifacts]] memory note.`,
+      descriptor: { kind: 'untracked-derived', file: dir.replace(/\/$/, ''), global: false },
+    });
+  }
+  return { errors, warnings: [] };
+}

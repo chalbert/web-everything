@@ -33,6 +33,7 @@ export {
   webdirectivesSsrSuite,
   assertSsrWireSuite,
   SsrWireSchemaError,
+  djb2KeyHash,
 } from './webdirectives-ssr.vectors.js';
 export type { SsrWireVector, SsrWireVectorSuite } from './webdirectives-ssr.vectors.js';
 

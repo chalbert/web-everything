@@ -1,0 +1,38 @@
+{
+  "$description": "Fluent 2 parity REFERENCE SET for the #2024 conformance harness — WE-owned data, not harness code. The canonical component set (button/input/card) and the Fluent 2 roles each is themed by, each naming the resolved DTCG path the flavor (we:design-systems/fluent.tokens.json) authors that role onto. The harness (fui:plugs/webtheme/conformanceHarness.ts scoreFlavor) diffs each role against what the tokens+intents model can land on a rendered component and emits a per-component compliance score + gap list. Seeded from the #2140 gap taxonomy. This file carries ZERO harness logic — swapping it (or the shadcn/ant/material one) is what proves the harness target-agnostic (#2024 acceptance 2).",
+  "target": "Fluent 2",
+  "components": [
+    {
+      "component": "button",
+      "roles": [
+        { "role": "colorBrandBackground", "dtcgPath": "color.accent" },
+        { "role": "colorBrandBackgroundHovered", "dtcgPath": "color.accent-hover" },
+        { "role": "borderRadiusSmall (sm)", "dtcgPath": "radius.sm" },
+        { "role": "colorStrokeFocus2 (--ring)", "dtcgPath": "ring.color" },
+        { "role": "colorNeutralForegroundOnBrand (fg-on-brand)", "dtcgPath": "color.brand-foreground" },
+        { "role": "colorNeutralBackground1Hover (muted-hover)", "dtcgPath": "surface.muted" }
+      ]
+    },
+    {
+      "component": "input",
+      "roles": [
+        { "role": "colorNeutralStroke1 (border)", "dtcgPath": "surface.border" },
+        { "role": "colorNeutralStroke1 (input)", "dtcgPath": "surface.input" },
+        { "role": "colorNeutralForeground3 (placeholder)", "dtcgPath": "surface.muted-foreground" },
+        { "role": "colorStrokeFocus2 (--ring)", "dtcgPath": "ring.color" },
+        { "role": "borderRadiusMedium (md)", "dtcgPath": "radius.md" }
+      ]
+    },
+    {
+      "component": "card",
+      "roles": [
+        { "role": "colorNeutralBackground1 (surface)", "dtcgPath": "color.surface" },
+        { "role": "borderRadiusLarge (lg)", "dtcgPath": "radius.lg" },
+        { "role": "colorNeutralStroke1 (border)", "dtcgPath": "surface.border" },
+        { "role": "colorNeutralForeground3 (muted-fg)", "dtcgPath": "surface.muted-foreground" },
+        { "role": "colorNeutralBackground3 (muted)", "dtcgPath": "surface.muted" },
+        { "role": "shadow4 (elevation)", "dtcgPath": "color.tonal-elevation" }
+      ]
+    }
+  ]
+}

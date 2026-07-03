@@ -1,0 +1,52 @@
+---
+pagination:
+    data: normativeSpecs
+    size: 1
+    addAllPagesToCollections: true
+    alias: spec
+permalink: "specs/{{ spec.category }}/{{ spec.id }}/"
+layout: base.njk
+eleventyComputed:
+    title: "WE Spec — {{ spec.name }}"
+---
+
+{#
+  Normative spec pages (#2096 Fork 1-a, piloted by #2097).
+  Renders at /specs/<category>/<id>/ using the spec partial at
+  src/_includes/spec-descriptions/<category>/<id>.njk.
+  The partial IS the single normative authoring home for the standard's contract;
+  the standard's own plug/block page keeps explainer prose and links here.
+#}
+
+{% from "project-status.njk" import projectStatus %}
+
+<div class="plug-detail-header">
+    <div class="plug-detail-header-inner">
+        <nav class="plug-breadcrumb">
+            <a href="/specs/" class="plug-crumb">Specs</a>
+            <svg class="plug-crumb-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="plug-crumb">{{ spec.category | title }}</span>
+            <svg class="plug-crumb-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="plug-crumb plug-crumb-current">{{ spec.name }}</span>
+        </nav>
+        <div class="plug-title-row">
+            <h1 class="plug-title">{{ spec.name }} — Normative Spec</h1>
+            <div class="plug-status">
+                {{ projectStatus(spec.status) }}
+            </div>
+        </div>
+        {% if spec.relatedPlug %}
+        <p style="margin: 0.5rem 0 0; font-size: 0.9em; color: var(--color-text-muted, #475569);">
+            <a href="/plugs/{{ spec.relatedPlug }}/">Explainer &amp; usage →</a>
+        </p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="container block-detail-page">
+    <div class="block-body content">
+        <div class="section-card fui-card">
+            {% include "spec-descriptions/" + spec.category + "/" + spec.id + ".njk" %}
+        </div>
+    </div>
+</div>
