@@ -202,7 +202,7 @@ async function main() {
   const args = process.argv.slice(2);
   const check = args.includes('--check');
   const names = args.filter((a) => !a.startsWith('--'));
-  const checklists = names.length ? names : ['fui-native', 'handlebars', 'liquid-jinja', 'vue'];
+  const checklists = names.length ? names : ['fui-native', 'handlebars', 'liquid-jinja', 'vue', 'angular'];
 
   const scorer = await loadScorer();
   if (!scorer) {
