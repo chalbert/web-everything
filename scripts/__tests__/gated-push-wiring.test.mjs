@@ -66,11 +66,15 @@ describe('gated pushIfGreen wiring (#2073) — every publish site publishes thro
     expect(drain).toContain('--assume-green');
   });
 
-  it('the serial /batch close-out publishes main through the same helper (not a bespoke push)', () => {
+  it('the serial /batch close-out opens ready-to-merge PRs and does NOT publish main (#2190) — the drain publishes', () => {
+    // #2190: serial /batch lands each item as a ready-to-merge PR from its lane clone (via pr-land + label),
+    // so it is NO LONGER a publish site — the close-out must not push main through push-if-green.
     const skill = read('.claude/skills/batch-backlog-items/SKILL.md');
-    expect(skill).toContain('push-if-green.mjs');
-    expect(skill).toContain('#2073');
-    // the pre-2026-06-29 "never git push" line is generalized into a gated push, not left as-is.
-    expect(skill.toLowerCase()).toContain('pushifgreen');
+    expect(skill).toContain('ready-to-merge');
+    expect(skill).toContain('pr-land');
+    // The SOLE publish site is the drain — gated + ff-only through the shared helper (the #2073 guarantee).
+    const drain = read('scripts/lane-drain.mjs');
+    expect(drain).toContain('push-if-green.mjs');
+    expect(drain).toContain('#2073');
   });
 });

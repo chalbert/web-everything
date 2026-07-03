@@ -1,10 +1,12 @@
 ---
 kind: story
 size: 8
-status: open
+status: resolved
 blockedBy: ["2183", "2189"]
 relatedTo: ["104", "2123", "2138", "2178"]
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
 tags: [pr-flow, lanes, batch, next, slice, close-out]
 ---
 
