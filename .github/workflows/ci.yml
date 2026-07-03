@@ -7,10 +7,15 @@ name: CI
 # main can require it before merge (the #2138 merge-queue / self-approved-PR direction); it does not
 # block today's direct-push landing.
 #
-# Scope: the fast deterministic lanes only. Unit suite (~10s) + gate (~3s) + the deterministic
-# Playwright interaction lane (#2070 — self-contained against a static fixture server, no app build).
-# The live-server Playwright lanes (a11y/content/smoke/visual) still need a build-then-serve step and
-# platform-tagged baselines — those CI-home under #800, not here.
+# Scope: the fast deterministic lanes + the visual-regression guard (#2177).
+# Unit suite (~10s) + gate (~3s) + the deterministic Playwright interaction lane (#2070 — self-contained
+# against a static fixture server, no app build) + visual regression against committed linux baselines.
+# The live-server a11y/content/smoke lanes still need a build-then-serve step — those CI-home under #800.
+#
+# Visual lane (job: visual): builds the docs site (requires FUI sibling, same as deploy.yml), serves the
+# built _site statically on :8080, and runs `check:visual` against committed -chromium-linux baselines.
+# Linux baselines live alongside the darwin ones in tests/visual/rendered-site-visual.spec.ts-snapshots/.
+# Refresh them by running the `update-visual-baselines` workflow (.github/workflows/update-visual-baselines.yml).
 
 on:
   push:
@@ -87,3 +92,88 @@ jobs:
         run: npm run test:interaction
         env:
           WE_INTERACTION_ONLY: "1"
+
+  # Visual-regression guard (#2177 / #1966). Builds the docs site (same sibling layout as deploy.yml)
+  # and runs `check:visual` against committed -chromium-linux baselines. Separate job so its ~2–3 min
+  # build cost doesn't slow the fast `test` job. Runs on the same events (push/PR/dispatch).
+  #
+  # Baseline hygiene: committed PNGs under tests/visual/rendered-site-visual.spec.ts-snapshots/
+  # are platform-tagged. The darwin originals (local dev) stay alongside the linux ones (CI). Refresh
+  # linux baselines via `workflow_dispatch` on `.github/workflows/update-visual-baselines.yml` after
+  # an intentional look change (same discipline as `npm run check:visual:update` locally).
+  visual:
+    runs-on: ubuntu-latest
+    steps:
+      # Same sibling layout as deploy.yml — WE's build shells out to FUI's component-render CLI.
+      #   $GITHUB_WORKSPACE/web-everything  (this repo)
+      #   $GITHUB_WORKSPACE/frontierui      (the tool sibling)
+      - name: Checkout WE
+        uses: actions/checkout@v4
+        with:
+          path: web-everything
+      - name: Checkout FUI (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: chalbert/frontierui
+          token: ${{ secrets.FUI_READ_TOKEN }}
+          path: frontierui
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web-everything/package-lock.json
+            frontierui/package-lock.json
+
+      # FUI tools first (ratified #1946/#2016 ordering) — produces the component-render CLI.
+      - name: Install + build FUI tools
+        working-directory: frontierui
+        run: |
+          npm ci
+          npm run build:tools
+
+      - name: Install WE
+        working-directory: web-everything
+        run: npm ci
+
+      # Build the docs site so the visual spec has real rendered pages to screenshot.
+      - name: Build WE docs
+        working-directory: web-everything
+        run: npm run build:docs
+
+      - name: Install Playwright chromium
+        working-directory: web-everything
+        run: npx playwright install --with-deps chromium
+
+      # Serve the pre-built _site statically on :8080 (the visual spec's default port).
+      # `npx serve` ships with Node and needs no extra install; `--single` avoids 404 on clean-URL routes.
+      - name: Serve built site
+        working-directory: web-everything
+        run: npx serve _site --listen 8080 --single &
+        shell: bash
+
+      # Wait for the static server to be ready before running the visual tests.
+      - name: Wait for site
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8080/ && break
+            sleep 1
+          done
+
+      # Visual regression — compares screenshots against the committed -chromium-linux baselines.
+      # Fails if a baseline is missing (run update-visual-baselines.yml to generate linux baselines).
+      # Upload the Playwright HTML report as an artifact on failure so regressions are inspectable.
+      - name: Visual regression
+        working-directory: web-everything
+        run: npm run check:visual
+        env:
+          WE_ELEVENTY_PORT: "8080"
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-report
+          path: web-everything/playwright-report/
+          retention-days: 7

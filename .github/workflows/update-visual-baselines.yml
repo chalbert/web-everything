@@ -1,0 +1,103 @@
+name: Update visual baselines (linux)
+
+# Regenerates the -chromium-linux Playwright snapshot baselines for the visual-regression guard
+# (#2177 / #1966). Run this after any intentional look change, or to seed linux baselines for the
+# first time. The updated PNGs are committed directly to the target branch so `check:visual` in CI
+# stays green going forward.
+#
+# Usage:
+#   GitHub UI → Actions → "Update visual baselines (linux)" → Run workflow → choose branch.
+#   The workflow commits the refreshed -linux PNGs to the same branch via a bot commit.
+#
+# This is the CI-linux equivalent of `npm run check:visual:update` (local darwin refresh).
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to update baselines on (defaults to main)"
+        required: false
+        default: "main"
+
+permissions:
+  contents: write
+
+jobs:
+  update-baselines:
+    runs-on: ubuntu-latest
+    steps:
+      # Check out the target branch so the committed PNGs land there.
+      - name: Checkout WE
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || 'main' }}
+          path: web-everything
+          # Need write permission for the commit-back step.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout FUI (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: chalbert/frontierui
+          token: ${{ secrets.FUI_READ_TOKEN }}
+          path: frontierui
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web-everything/package-lock.json
+            frontierui/package-lock.json
+
+      # FUI tools first (ratified #1946/#2016 ordering).
+      - name: Install + build FUI tools
+        working-directory: frontierui
+        run: |
+          npm ci
+          npm run build:tools
+
+      - name: Install WE
+        working-directory: web-everything
+        run: npm ci
+
+      - name: Build WE docs
+        working-directory: web-everything
+        run: npm run build:docs
+
+      - name: Install Playwright chromium
+        working-directory: web-everything
+        run: npx playwright install --with-deps chromium
+
+      - name: Serve built site
+        working-directory: web-everything
+        run: npx serve _site --listen 8080 --single &
+        shell: bash
+
+      - name: Wait for site
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8080/ && break
+            sleep 1
+          done
+
+      # --update-snapshots regenerates (or creates for the first time) the -chromium-linux PNGs.
+      - name: Regenerate linux baselines
+        working-directory: web-everything
+        run: npm run check:visual:update
+        env:
+          WE_ELEVENTY_PORT: "8080"
+
+      # Commit the updated -linux baselines back to the branch.
+      - name: Commit updated baselines
+        working-directory: web-everything
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tests/visual/rendered-site-visual.spec.ts-snapshots/
+          if git diff --cached --quiet; then
+            echo "No baseline changes — snapshots are already up to date."
+          else
+            git commit -m "chore(visual): refresh linux baselines [update-visual-baselines workflow]"
+            git push origin HEAD:${{ github.event.inputs.branch || 'main' }}
+          fi
