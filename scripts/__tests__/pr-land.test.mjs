@@ -36,6 +36,13 @@ describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
     expect(bodyOnly).toContain('--body');                     // body is present…
     expect(bodyOnly[bodyOnly.indexOf('--body') + 1]).toBe('## Dismissed review findings\n- x'); // …and unmangled
     expect(bodyOnly).not.toContain('--fill');                 // never --fill when a body is supplied
+    // TITLE WITHOUT BODY (#2176): a title-only argv drops gh into an interactive body prompt and fails
+    // headless — so the builder must ALWAYS carry a body when a title is present (an empty `--body ""`),
+    // and never fall back to --fill (unusable for a remote-only lane/* head).
+    const titleOnly = buildCreateArgs({ base: 'main', head: 'lane/2176-x', title: 'land #2176', body: null });
+    expect(titleOnly).toContain('--body');                    // a body is always present…
+    expect(titleOnly[titleOnly.indexOf('--body') + 1]).toBe(''); // …an explicit empty body (non-interactive)
+    expect(titleOnly).not.toContain('--fill');                // never --fill for a lane/* head
   });
 
   it('builds a one-PR merge that deletes the lane ref (not --auto on a native queue)', () => {
