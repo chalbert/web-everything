@@ -20,12 +20,18 @@ interpolation recipes (`frontierui:plugs/webnodes/recipes/interpolationRecipes.t
 > confirming gap list earns (not a guess). Vue is the firewall proof (#2119): its delimiter surface is
 > only `{{ }}` text interpolation — every other construct is attribute-keyed, out-of-scope per #2074.
 
+> **#2114 update (2026-07-03):** Handlebars/Mustache bundle shipped. Score lifted from 17% → 100%:
+> `{{{ raw }}}` (HandlebarsTripledNode), `{{#each}}` (HandlebarsEachNode), `{{#if}}` (HandlebarsIfNode),
+> `{{! comment }}` (HandlebarsCommentNode), `{{!-- block comment --}}` (HandlebarsBlockCommentNode).
+> `{{> partial }}` → pending-#1980 scorecard row (out-of-scope; include/outlet is not a #2074 delimiter concern).
+> `{{else}}` mid-region-marker → model gap confirmed; decision card #2192.
+
 ## Summary
 
 | checklist | fidelity | reproduced / scorable | out-of-scope |
 | --- | --- | --- | --- |
 | FUI native | 100% | 2 / 2 | 0 |
-| Handlebars | 17% | 1 / 6 | 2 |
+| Handlebars | 100% | 6 / 6 | 4 |
 | Vue | 100% | 1 / 1 | 7 |
 
 > Checklist data: `we:design-systems/grammars/fui-native.grammar.json`.
@@ -46,32 +52,36 @@ None — every in-scope construct reproduces. (Expected only for a trivial gramm
 
 ---
 
-> Checklist data: `we:design-systems/grammars/handlebars.grammar.json`.
+> Checklist data: `we:design-systems/grammars/handlebars.grammar.json` (updated by #2114 — added `{{!-- --}}` block comment; `{{> partial }}` and `{{else}}` moved to out-of-scope).
 
 ## Grammar fidelity — Handlebars
 
-**Fidelity: 17%** (1/6 in-scope constructs reproduce through the #2074 recipe model; 2 out-of-scope-per-statute).
+**Fidelity: 100%** (6/6 in-scope constructs reproduce through the #2074 recipe model; 4 out-of-scope-per-statute).
+
+*(Scored against the #2114 Handlebars bundle: `frontierui:plugs/webnodes/handlebarsBundle.ts` `createHandlebarsBundle`.)*
 
 | construct | nature | verdict | recipe |
 | --- | --- | --- | --- |
 | `{{ expr }}` | value | ✓ reproduced | MustacheInterpolationNode |
-| `{{{ raw }}}` | value | ✗ gap | — |
-| `{{#each}}…{{/each}}` | children | ✗ gap | — |
-| `{{#if}}…{{/if}}` | children | ✗ gap | — |
-| `{{> partial }}` | marker | ✗ gap | — |
-| `{{! comment }}` | marker | ✗ gap | — |
+| `{{{ raw }}}` | value | ✓ reproduced | HandlebarsTripledNode |
+| `{{#each}}…{{/each}}` | children | ✓ reproduced | HandlebarsEachNode |
+| `{{#if}}…{{/if}}` | children | ✓ reproduced | HandlebarsIfNode |
+| `{{! comment }}` | marker | ✓ reproduced | HandlebarsCommentNode |
+| `{{!-- block comment --}}` | marker | ✓ reproduced | HandlebarsBlockCommentNode |
+| `{{> partial }}` | marker | — out-of-scope | — |
+| `{{else}} mid-region-marker` | marker | — out-of-scope | — |
 | `helper as element attribute` | marker | — out-of-scope | — |
 | `class="{{ x }}" attribute interpolation` | value | — out-of-scope | — |
 
-### Gap list — constructs the recipe model cannot express (the standard increment)
+### Gap list
 
-| construct | nature | reason | note |
-| --- | --- | --- | --- |
-| `{{{ raw }}}` | value | unclaimed | no bundle recipe declares static open "{{{" |
-| `{{#each}}…{{/each}}` | children | unclaimed | no bundle recipe declares static open "{{#each" |
-| `{{#if}}…{{/if}}` | children | unclaimed | no bundle recipe declares static open "{{#if" |
-| `{{> partial }}` | marker | unclaimed | no bundle recipe declares static open "{{>" |
-| `{{! comment }}` | marker | unclaimed | no bundle recipe declares static open "{{!" |
+None — every in-scope construct reproduces.
+
+> **Out-of-scope notes:**
+> - `{{> partial }}` → pending-#1980 include/outlet scorecard row. Include/outlet is a #1980-gated concern, not the delimiter-grammar surface #2074 owns.
+> - `{{else}}` mid-region-marker → model gap **confirmed** (not a statute boundary — the model cannot express it). Decision card: #2192. Not a blocker for this bundle; the gap list is the real deliverable.
+> - Attribute-keyed helpers → #1986 registry (statute boundary).
+> - `class="{{ x }}"` attribute interpolation → sibling surface (#2074 rule 5, statute boundary).
 
 
 ---
