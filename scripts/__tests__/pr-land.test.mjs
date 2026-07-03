@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, classifyChecks } from '../pr-land.mjs';
+import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, classifyChecks } from '../pr-land.mjs';
 
 describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
   it('maps merge methods to gh flags (default = --merge, the no-ff history the drain wants)', () => {
@@ -44,6 +44,15 @@ describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
     expect(buildMergeArgs({ pr: 7, method: 'squash' })).not.toContain('--auto'); // drain owns ordering
   });
 
+  it('builds the post-land id-collision heal with NO --base-ref (the single-land case, #2071)', () => {
+    // The batch integrator passes --base-ref to shield ids inherited from a shared pre-claim base; a single
+    // land runs on post-merge main where every duplicate NNN is a real allocation collision, so the base
+    // guard is deliberately OMITTED (with it, a genuine collision would be wrongly skipped).
+    expect(buildRenumberHealArgs()).toEqual(['scripts/backlog-renumber-collisions.mjs', '--json']);
+    expect(buildRenumberHealArgs().some((a) => a.startsWith('--base-ref'))).toBe(false);
+    expect(buildRenumberHealArgs()).not.toContain('--force');
+  });
+
   it('classifies checks: pass → merge, any fail → abort, any pending → wait', () => {
     expect(classifyChecks([]).status).toBe('passed');                                  // no required checks
     expect(classifyChecks([{ bucket: 'pass' }, { bucket: 'skipping' }]).status).toBe('passed');
@@ -70,5 +79,18 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
   it('retains a git-merge fallback (#2138 Fork 5 (a))', () => {
     expect(src).toMatch(/fallback-git/);
     expect(src).toMatch(/merge', '--no-ff'/);
+  });
+  it('self-heals id collisions AFTER the merge, non-destructively, without ever failing the land (#2071)', () => {
+    expect(src).toMatch(/function runHeal/);                      // the heal step exists
+    expect(src).toMatch(/const HEAL = !flags\['no-heal'\]/);      // on by default, --no-heal opts out
+    // Non-destructive sync: detached checkout of the post-merge base, NEVER `git reset --hard` on a branch
+    // (so an accidental --repo=<primary-with-work> can't be reset out from under the user).
+    expect(src).toMatch(/checkout', '--detach'/);
+    expect(src).not.toMatch(/reset', '--hard'/);
+    // Skips a dirty tree, and gates the healed tree before the (non-force) push.
+    expect(src).toMatch(/skipped id-collision heal/);
+    expect(src).toMatch(/check:standards/);
+    // The heal runs only after a successful merge (its call sites sit after the gh/ git-fallback merges).
+    expect(src.indexOf('function runHeal')).toBeGreaterThan(src.indexOf('buildMergeArgs({ pr: prNum'));
   });
 });

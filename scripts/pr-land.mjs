@@ -25,6 +25,13 @@
  *  - Fallback: `--fallback-git` degrades to a local `git merge --no-ff` + push when `gh` is unavailable or
  *    the PR is unmergeable-and-not-recoverable — the coherent retained fallback (#2138 Fork 5 (a)).
  *  - Deletes the `lane/*` ref after a clean merge (`--delete-branch`), mirroring the integrator.
+ *  - Self-heals NEW-item backlog id collisions after a clean merge (#2071), the SAME heal the parallel
+ *    integrator runs — so every land route (this CLI, `/pr`, `/drain` which reuses this, a manual land)
+ *    heals, not only the batch workflow. On post-merge `main` any two files claiming one NNN is an
+ *    allocation collision; the just-merged (newest) file yields to the next free id via the sanctioned
+ *    renumber-collisions script (NO `--base-ref` — see buildRenumberHealArgs), then the fix is gated +
+ *    committed + pushed (never force-pushed). A heal problem is surfaced but NEVER fails the land (the merge
+ *    already succeeded). `--no-heal` opts out.
  *
  * Usage:
  *   node scripts/pr-land.mjs --ref=lane/2153-pr-substrate                 # publish HEAD → lane ref, open self-approved PR, wait for `test`, merge, delete ref
@@ -33,6 +40,7 @@
  *   node scripts/pr-land.mjs --ref=lane/… --no-wait                       # open the PR but don't merge (a later drain pass merges)
  *   node scripts/pr-land.mjs --ref=lane/… --dry-run                       # print the exact gh command sequence, execute nothing
  *   node scripts/pr-land.mjs --ref=lane/… --fallback-git                  # on gh failure / unmergeable, local git-merge + push instead
+ *   node scripts/pr-land.mjs --ref=lane/… --no-heal                       # skip the post-land id-collision self-heal (#2071)
  *   node scripts/pr-land.mjs --ref=lane/… --json                          # machine-readable result
  *
  * Exit codes: 0 = merged (or opened with --no-wait / dry-run OK); 2 = required check RED (nothing merged);
@@ -74,6 +82,12 @@ const TITLE = typeof flags.title === 'string' ? flags.title : null;
 const BODY = typeof flags['body-file'] === 'string'
   ? readBodyFile(flags['body-file'])
   : (typeof flags.body === 'string' ? flags.body : null);
+// Post-land id-collision self-heal (#2071, generalized to EVERY land route). After a clean merge, heal any
+// NEW-item backlog id collision the land created against `main` (two files claiming one NNN) — the exact
+// heal the parallel integrator runs at Phase 4b, now shared so `/pr`, `/drain` (which reuses this) AND a
+// manual land all self-heal, not only the batch workflow. ON by default for a real land; `--no-heal` opts
+// out. Never runs on --dry-run / --no-wait (nothing merged) by construction.
+const HEAL = !flags['no-heal'];
 
 // ── PURE helpers (unit-tested in scripts/__tests__/pr-land.test.mjs) ──────────────────────────────────
 
@@ -106,6 +120,16 @@ export function buildCreateArgs({ base, head, title, body }) {
  *  lane ref after. Pure. */
 export function buildMergeArgs({ pr, method }) {
   return ['pr', 'merge', String(pr), mergeMethodFlag(method), '--delete-branch'];
+}
+
+/** Build the argv for the post-land id-collision heal (#2071). Deliberately passes NO `--base-ref`: the
+ *  batch integrator supplies one to shield ids inherited from a shared pre-claim base (a base id appearing
+ *  twice there is a real edit conflict, not an allocation race). A SINGLE land runs the heal on POST-MERGE
+ *  `main`, where any two files claiming one NNN is a genuine allocation collision and the just-merged file
+ *  (highest git landing-ordinal) must yield — so a base guard is not merely unneeded but would wrongly SKIP
+ *  a real collision. Pure — returns the `node` script argv. */
+export function buildRenumberHealArgs() {
+  return ['scripts/backlog-renumber-collisions.mjs', '--json'];
 }
 
 /**
@@ -221,7 +245,15 @@ function runCli() {
   try { ghC(buildMergeArgs({ pr: prNum, method: METHOD })); }
   catch (e) { return ghFailed(`gh pr merge #${prNum} failed (${String(e.message || e).split('\n')[0]}) — likely not-mergeable (branch behind ${BASE}); rebase the ref + re-run`); }
 
-  emit({ repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD, detail: `merged PR #${prNum} (${REF}) into ${BASE} via self-approved PR (${METHOD}), deleted the ref` }, 0);
+  const heal = HEAL ? runHeal() : null;
+  if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
+  emit({
+    repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD,
+    healed: heal && heal.healed ? heal.renumbered : [],
+    ...(heal && heal.warning ? { healWarning: heal.warning } : {}),
+    detail: `merged PR #${prNum} (${REF}) into ${BASE} via self-approved PR (${METHOD}), deleted the ref`
+      + (heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : ''),
+  }, 0);
 
   // Fallback path (#2138 Fork 5 (a)): local git merge + push when gh is the problem.
   function ghFailed(detail) {
@@ -231,9 +263,47 @@ function runCli() {
       gitC(['checkout', BASE]);
       gitC(['merge', '--no-ff', `${REMOTE}/${REF}`, '-m', `merge ${REF} (pr-land git fallback)`]);
       gitC(['push', REMOTE, `${BASE}:${BASE}`]);
-      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback` }, 0);
+      const heal = HEAL ? runHeal() : null;
+      if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
+      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : ''}` }, 0);
     } catch (e) {
       emit({ repo: REPO, merged: false, reason: 'fallback-failed', detail: `${detail}; git-merge fallback ALSO failed (${String(e.message || e).split('\n')[0]}) — ${BASE} left untouched` }, 3);
     }
+  }
+
+  // Post-land id-collision heal (#2071, generalized). After a clean merge, sync to POST-MERGE ${BASE}
+  // (detached — never rewriting a local branch, so an accidental --repo=<primary-with-work> can't be reset
+  // out from under the user) and run the sanctioned renumber-collisions script with NO --base-ref: on
+  // post-merge main any duplicate NNN is a real allocation collision and the newest (just-merged) file
+  // yields. If it renumbered, gate the healed tree, then commit + push the fix (never force-pushed). A heal
+  // problem is REPORTED but NEVER fails the land — the merge already succeeded; the worst case is a loudly-
+  // surfaced residual a human resolves, exactly as the batch integrator's heal step behaves.
+  function runHeal() {
+    const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
+    const dirty = tryGit(['status', '--porcelain']);
+    if (dirty && dirty.trim()) return { warning: `skipped id-collision heal — the checkout at ${REPO} has local changes (won't reset a dirty working tree); if the gate flags "ids must be unique", run scripts/backlog-renumber-collisions.mjs on ${BASE} by hand` };
+    try {
+      gitC(['fetch', REMOTE, BASE, '--quiet']);
+      gitC(['checkout', '--detach', `${REMOTE}/${BASE}`]);
+    } catch (e) { return { warning: `skipped id-collision heal — could not sync to ${REMOTE}/${BASE} (${firstLine(e)})` }; }
+    let plan;
+    try {
+      const out = execFileSync('node', buildRenumberHealArgs(), { cwd: REPO, encoding: 'utf8' });
+      plan = JSON.parse((out.trim().split('\n').filter(Boolean).pop()) || '{}');
+    } catch (e) { return { warning: `id-collision heal could not run renumber-collisions (${firstLine(e)}) — if the gate flags "ids must be unique", run it by hand on ${BASE}` }; }
+    const renumbered = Array.isArray(plan.renumbered) ? plan.renumbered : [];
+    if (renumbered.length === 0) return { healed: false, renumbered: [] };
+    const tag = renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ');
+    // A collision was healed on disk — full-gate the healed tree before committing (never push a red heal).
+    try { execFileSync('npm', ['run', 'check:standards'], { cwd: REPO, stdio: 'ignore' }); }
+    catch { return { healed: false, renumbered, warning: `id collision healed (${tag}) but check:standards is RED on the healed tree — NOT pushed; fix on ${BASE} by hand` }; }
+    const changed = (tryGit(['diff', '--name-only']) || '').split('\n').filter(Boolean);
+    if (changed.length === 0) return { healed: false, renumbered };
+    try {
+      gitC(['add', ...changed]);
+      gitC(['commit', '-m', `backlog: heal new-item id collision(s) on land (${tag}) (#2071)`]);
+      gitC(['push', REMOTE, `HEAD:${BASE}`]);
+    } catch (e) { return { healed: false, renumbered, warning: `id collision healed + committed but push to ${BASE} failed (${firstLine(e)}) — re-run pr-land or push by hand (no force-push)` }; }
+    return { healed: true, renumbered };
   }
 }
