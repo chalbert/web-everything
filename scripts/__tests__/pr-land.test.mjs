@@ -180,4 +180,14 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     // Never force-pushes the regen commit.
     expect(src).not.toMatch(/--force/);
   });
+  it('ff-syncs local main AFTER a merge, best-effort, never failing the land (#2205)', () => {
+    expect(src).toMatch(/function syncLocalMain/);                 // the sync step exists
+    // ff-only + autostash (parity with merge-ai-prs) — never a plain reset/force.
+    expect(src).toMatch(/'pull', '--ff-only', '--autostash'/);
+    // called on the gh-merge success path, AFTER the merge (before/around the emit).
+    expect(src).toMatch(/const localSynced = syncLocalMain\(\)/);
+    expect(src.indexOf('syncLocalMain()')).toBeGreaterThan(src.indexOf('buildMergeArgs({ pr: prNum'));
+    // best-effort: it catches and degrades to a note, so a failed sync can't fail a completed land.
+    expect(src).toMatch(/NOT fast-forwarded/);
+  });
 });

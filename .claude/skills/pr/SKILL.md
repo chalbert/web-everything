@@ -54,9 +54,10 @@ author merges their own PR once CI is green. GitHub's native merge queue stays O
      --head lane/<slug> --title "…" --body-file <path>` then `gh pr merge <n> --merge --delete-branch`
      once the required `test` check is green (only `test` is required on `main`; a failing `cla` check
      is non-blocking).
-5. **Sync the primary** — after a clean merge origin/`main` has advanced (a `--no-ff` merge commit); if
-   you landed from the primary checkout, `git pull --ff-only` so local `main` matches origin. If you
-   landed from a lane clone, reset that lane back to `origin/main` so the pool stays reusable.
+5. **Sync the local checkout** — after a clean merge `pr-land` **auto ff-syncs local `main`** to the
+   advanced `origin/main` (`git pull --ff-only --autostash`, best-effort, #2205) — the same post-merge sync
+   the drain runs, so no land route leaves the checkout it ran in behind. If you landed from a lane clone,
+   also reset that lane back to `origin/main` so the pool stays reusable.
 
 ## Exit codes (surface these, never merge a red PR)
 

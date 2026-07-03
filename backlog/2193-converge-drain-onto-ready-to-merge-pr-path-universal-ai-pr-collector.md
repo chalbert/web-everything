@@ -1,7 +1,8 @@
 ---
 kind: epic
-status: open
+status: resolved
 dateOpened: "2026-07-03"
+dateResolved: "2026-07-03"
 tags: [lane, pr-flow, merge-queue, session-tooling, drain]
 relatedTo: ["2162", "2188", "2153", "2138"]
 ---

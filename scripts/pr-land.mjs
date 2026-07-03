@@ -350,12 +350,19 @@ function runCli() {
   try { ghC(buildMergeArgs({ pr: prNum, method: METHOD })); }
   catch (e) { return ghFailed(`gh pr merge #${prNum} failed (${String(e.message || e).split('\n')[0]}) — likely not-mergeable (branch behind ${BASE}); rebase the ref + re-run`); }
 
+  // #2205 — the merge advanced origin/main but NOT this local checkout, so ff-sync local main to it (parity with
+  // the drain's post-merge sync in merge-ai-prs.mjs). `--autostash` keeps it reliable: it sets any dirty edits
+  // aside, fast-forwards, then reapplies them — so main advances AND local edits survive. Still ff-only (a
+  // genuine divergence aborts and is reported, never force/rebase). Best-effort: a failure degrades to a note
+  // and NEVER fails the land (the merge already succeeded).
+  const localSynced = syncLocalMain();
+
   const heal = HEAL ? runHeal() : null;
   if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
   const regen = REGEN ? runRegen() : null;
   if (regen && regen.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${regen.warning}\n`);
   emit({
-    repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD, label: LABEL, labelApplied,
+    repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD, label: LABEL, labelApplied, localSynced,
     healed: heal && heal.healed ? heal.renumbered : [],
     ...(heal && heal.warning ? { healWarning: heal.warning } : {}),
     regenDone: regen ? regen.done : [],
@@ -366,6 +373,15 @@ function runCli() {
       + (regen && regen.done.length > 0 ? `; regenerated: ${regen.done.join(', ')}` : '')
       + (regen && regen.failed.length > 0 ? `; regen failed (non-fatal): ${regen.failed.map((f) => f.cmd).join(', ')}` : ''),
   }, 0);
+
+  // #2205 — ff-sync local `main` to the just-advanced `origin/main` after a merge (parity with the drain,
+  // merge-ai-prs.mjs). ff-only + --autostash (advance main, preserve dirty edits, never force/rebase).
+  // Best-effort: returns true on a clean ff, false (with a note) on a diverged/conflicting reapply — NEVER
+  // throws, so it can never fail a land whose merge already succeeded.
+  function syncLocalMain() {
+    try { gitC(['pull', '--ff-only', '--autostash']); return true; }
+    catch { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · local ${BASE} NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`); return false; }
+  }
 
   // Fallback path (#2138 Fork 5 (a)): local git merge + push when gh is the problem.
   function ghFailed(detail) {
