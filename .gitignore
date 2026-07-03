@@ -29,3 +29,4 @@ error-summary/**/*.d.ts
 commitment-policy/**/*.js
 commitment-policy/**/*.d.ts
 .claude/lane-ports.json
+tests/visual/review/
