@@ -32,6 +32,35 @@ ratified system, not generic design opinions.
 - **Methodology choice is #2191 Fork 6** — if (a) ratifies, the rubric is checklist-scoreable by
   design; this card consumes it, it does not re-decide it.
 
+## Learning log — labels & method notes accumulated so far (append here as they land)
+
+Every user brand judgment in-session is a training label; log them with the principle they encode:
+
+- **2026-07-03 · label:** Plateau dual-mesa mark = user favorite of all constellation marks →
+  principle: concept-bearing symbol beats idea-less letterforms; 16px legibility is load-bearing.
+- **2026-07-03 · label:** W-only favicon candidate rejected-in-discussion — "could be a logo of
+  anything" → principle: **ownable/distinctive is a mandatory baseline attribute** for every mark;
+  operational test the reviewer must run: *"could this be another brand's logo?"* (W is crowded
+  territory: Wikipedia/WordPress/Wix). Color/container carry recognition at 16px but do not excuse a
+  generic glyph. This also exposed a rubric gap (no distinctiveness attribute in any set) — fixed in
+  #2191 Fork 6 as the shared baseline attribute.
+- **2026-07-03 · label:** FUI horizon candidate (static sunrise) challenged — "not very kinetic" →
+  principle: candidates must serve the *full* owning attribute set, not most of it; a static
+  composition fails a `kinetic` attribute regardless of other virtues. The reviewer should score
+  every attribute explicitly and treat any ✗ on the owning set as a flag, exactly as the user did.
+- **2026-07-03 · method:** parallel multi-lens exploration (kinetic-first / landscape-family /
+  concept-bearing-letterform / distinctiveness-maximalist agents) → render side-by-side at 64/32/16 →
+  score against the rubric → user picks. Each round yields (candidate, self-score, reviewer-score,
+  user-pick) tuples — the training-data generator for this card. Keep the round artifacts in
+  `plateau:branding-proposals/` so the fixture grows.
+- **2026-07-03 · method (user):** "getting to a design is following branching decisions into a maze,
+  each time getting closer to the goal" → represent each mark's exploration as a **design-journey
+  tree** (`plateau:branding-proposals/journey.json`, rendered on the branding page): nodes =
+  candidates, edges = labeled verdicts (`picked` / `rejected: <attribute>` / `refine →`), columns =
+  rounds; multiple candidates may carry `refine` edges forward (tournament, not single-elimination).
+  The tree is simultaneously the review UI and the training corpus — an AI reviewer can be evaluated
+  on whether it predicts each edge's verdict before seeing the next round.
+
 ## Scope notes
 
 - Applies to branding assets (marks, icons, palettes, lockups) *and* UI design review guidance — the

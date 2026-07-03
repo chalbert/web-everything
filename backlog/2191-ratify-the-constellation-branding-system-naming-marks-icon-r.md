@@ -213,6 +213,10 @@ v3 version bump. One owner of brand judging must be named.
   - **Shared narrative (the landscape story):** bedrock → horizon → plateau — WE is the ground
     everything stands on, FUI is the horizon where new ground is claimed, Plateau is the high ground
     you operate from. Generative rule for future mark/icon work, not just a style cop.
+  - **Shared baseline attribute (all three sets): ownable** — the mark must be distinctive at 16px;
+    operational test: *"could this be another brand's logo?"* (Prep amendment 2026-07-03, from the
+    user's critique of a W-only favicon candidate — "could be a logo of anything"; the original sets
+    had no distinctiveness attribute, so the rubric could not even represent that verdict.)
   Every brand verdict names the owning attribute set and the attribute served/violated — the same
   cite-the-statute discipline decisions follow. Trainability, stated precisely: what makes this
   trainable is the **labeled fixture + agreement metric + per-attribute exemplars** (#2192 — the
