@@ -2,12 +2,19 @@
 /**
  * merge-ai-prs.mjs — sweep OPEN pull requests and merge the AI-generated ones that are safe to land.
  *
- * WHY: the deferred drain (`lane-drain.mjs`) is queue-scoped — it only lands couples in `queued.json`, never
- * an ORPHAN open PR (one opened directly by `/pr`, or by a peer session, with no queued work item). Those
- * accumulate. This sweep clears them: it lists open PRs, keeps only the ones that are UNAMBIGUOUSLY
- * AI-generated (EVERY commit co-authored by Claude), and merges the ones whose required `test` check is green
- * and that GitHub reports cleanly mergeable — via the SAME self-approved, non-admin `gh pr merge` the `/pr`
- * flow uses. It NEVER uses `--admin`, never force-merges, and refuses any PR with a human-authored commit.
+ * WHY: under #2183 every producer completes by opening a ready-to-merge PR; a lander merges them. This is that
+ * lander. It lists open PRs, keeps only the ones that are UNAMBIGUOUSLY AI-generated (EVERY commit co-authored
+ * by Claude), and merges the ones whose required `test` check is green and that GitHub reports cleanly
+ * mergeable — via the SAME self-approved, non-admin `gh pr merge` the `/pr` flow uses. It NEVER uses `--admin`,
+ * never force-merges, and refuses any PR with a human-authored commit.
+ *
+ * CONVERGENCE (#2188 — /merge ↔ drain become ONE label-scoped lander). Bare, it sweeps EVERY qualifying AI PR
+ * (the `/merge` orphan sweep). With `--label ready-to-merge` it scopes to producer-completed PRs (the F1
+ * signal) — the `/drain` role. Either way it now honours cross-item `blockedBy`: each PR's `.lane-manifest.json`
+ * (read off its head ref) supplies its backlog `item` + `blockedBy`, and PRs merge in a **cascade** — a PR whose
+ * blocker is still an open (unlanded) PR DEFERS until that blocker merges (mirrors the lane-drain `planWatch`
+ * cascade). The PR merge IS the single clear point (the label leaves with the closed PR — no `queued.json`
+ * unqueue). Orphan PRs (no manifest) have no `blockedBy` → always ready, so the bare sweep is unchanged.
  *
  * SAFETY (why this is not a rubber-stamp):
  *  - AI-generated gate: a PR qualifies ONLY if every commit carries the `Co-Authored-By: Claude …` trailer
@@ -26,6 +33,8 @@
  *   node scripts/merge-ai-prs.mjs                       # merge every qualifying AI PR (green + cleanly mergeable)
  *   node scripts/merge-ai-prs.mjs --pr=12               # consider ONLY PR #12 (still subject to every gate)
  *   node scripts/merge-ai-prs.mjs --base=main           # restrict to PRs targeting <base> (default: any)
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge # the /drain role: scope to producer-completed PRs, merge in blockedBy order
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run # print the blockedBy-ordered merge plan, merge NOTHING
  *
  * Exit codes: 0 = swept (merged 0+ qualifying PRs, none failed); 2 = at least one merge attempt FAILED
  * (surfaced); 3 = bad input / `gh` unavailable.
@@ -107,6 +116,36 @@ export function classifyPr(pr, { requiredCheck = 'test' } = {}) {
   return { num, title, decision, reason, aiGenerated, testGreen, state, mergeable };
 }
 
+/**
+ * Order a set of merge candidates for ONE cascade pass, honouring cross-item `blockedBy` (#2188). Pure.
+ * This is the drain↔/merge convergence: the `ready-to-merge` label bounds the set, and each PR's
+ * `.lane-manifest.json` (read off its head ref) supplies its backlog `item` + `blockedBy` items. A PR is
+ * READY this pass only if none of its `blockedBy` items is still OPEN in the candidate set (an unlanded
+ * blocker — whether a not-yet-merged sibling or a red/skip PR — defers its dependents, exactly like the
+ * lane-drain `planWatch` cascade). Orphan PRs (no manifest → item null, blockedBy []) are always ready, so
+ * this degrades to the legacy unordered sweep when nothing carries a manifest.
+ *
+ * @param {Array<{num:number, item:(number|null), blockedBy:number[], decision:'merge'|'skip'}>} candidates
+ * @returns {{ready:Array, deferred:Array<{num,item,waitOn:number[]}>}}  ready is ordered (item asc, then PR#).
+ */
+export function planLabelDrain(candidates) {
+  const list = Array.isArray(candidates) ? candidates : [];
+  // Every candidate still in play keeps its item "open" — a red/skip blocker must still defer its dependents,
+  // so the open set is ALL candidate items, not just the mergeable ones. (A merged item is removed by the
+  // caller between passes, which is what frees the dependent.)
+  const openItems = new Set(list.map((c) => c.item).filter((x) => x != null).map(Number));
+  const ready = [];
+  const deferred = [];
+  for (const c of list) {
+    if (c.decision !== 'merge') continue;
+    const waitOn = (Array.isArray(c.blockedBy) ? c.blockedBy : []).map(Number).filter((b) => openItems.has(b));
+    if (waitOn.length === 0) ready.push(c);
+    else deferred.push({ num: c.num, item: c.item, waitOn });
+  }
+  ready.sort((a, b) => (Number(a.item ?? Infinity) - Number(b.item ?? Infinity)) || (a.num - b.num));
+  return { ready, deferred };
+}
+
 // ── CLI boundary ───────────────────────────────────────────────────────────────────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) runCli();
@@ -117,6 +156,10 @@ function runCli() {
   const REQUIRED = typeof flags.check === 'string' ? flags.check : 'test';
   const onlyPr = flags.pr != null ? String(flags.pr) : null;
   const base = typeof flags.base === 'string' ? flags.base : null;
+  // #2188 — the drain↔/merge convergence: `--label ready-to-merge` scopes the sweep to producer-completed PRs
+  // (the F1 signal), so this ONE lander serves both `/merge` (bare = every AI PR) and `/drain` (label-scoped +
+  // manifest-ordered). Omit → the legacy sweep-all behaviour, unchanged.
+  const label = typeof flags.label === 'string' ? flags.label : null;
 
   const fail = (reason, detail, code) => {
     if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, reason, detail }) + '\n');
@@ -124,11 +167,28 @@ function runCli() {
     process.exit(code);
   };
 
+  // Read a PR's `.lane-manifest.json` off its head ref (#2188). Only a WE PR carries one (the producer writes
+  // it into the WE lane commit); an orphan/impl PR has none → { item:null, blockedBy:[] } → always ready (the
+  // legacy unordered behaviour). Best-effort: a fetch/parse miss degrades to no-manifest, never throws.
+  const readPrManifest = (headRef) => {
+    if (!headRef) return null;
+    try { execFileSync('git', ['fetch', 'origin', headRef, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* ref may be local */ }
+    for (const rev of ['FETCH_HEAD', `origin/${headRef}`, headRef]) {
+      try {
+        const txt = execFileSync('git', ['show', `${rev}:.lane-manifest.json`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+        const m = JSON.parse(txt);
+        if (m && m.item != null) return m;
+      } catch { /* try next rev */ }
+    }
+    return null;
+  };
+
   // List open PRs WITHOUT commits (commits×authors×limit overflows GitHub's GraphQL node cap), then fetch each
   // candidate's commits per-PR — the rollup + mergeable come from the list; commits (the AI gate) come per PR.
   const listArgs = ['pr', 'list', '--state', 'open', '--limit', '100',
     '--json', 'number,title,headRefName,baseRefName,mergeable,mergeStateStatus,statusCheckRollup'];
   if (base) listArgs.push('--base', base);
+  if (label) listArgs.push('--label', label);
   let prs;
   try { prs = JSON.parse(execFileSync('gh', listArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '[]'); }
   catch (e) { fail('gh-error', `gh pr list failed (${String(e.message || e).split('\n')[0]}) — is gh authenticated?`, 3); }
@@ -140,27 +200,58 @@ function runCli() {
     catch { p.commits = []; } // no commits ⇒ isAiGeneratedPr → false → skipped (never merged on missing data)
   }
   const verdicts = prs.map((p) => classifyPr(p, { requiredCheck: REQUIRED }));
+  // #2188: attach each PR's manifest (backlog `item` + cross-item `blockedBy`) so the merge order honours
+  // dependencies. Only WE PRs carry one; the rest degrade to no-manifest → always ready (legacy order).
+  const refByNum = new Map(prs.map((p) => [String(p.number), p.headRefName]));
+  for (const v of verdicts) {
+    const m = readPrManifest(refByNum.get(String(v.num)));
+    v.item = m && m.item != null ? Number(m.item) : null;
+    v.blockedBy = m && Array.isArray(m.blockedBy) ? m.blockedBy.map(Number) : [];
+  }
   const toMerge = verdicts.filter((v) => v.decision === 'merge');
   const skipped = verdicts.filter((v) => v.decision === 'skip');
 
   if (!AS_JSON) {
-    for (const v of verdicts) process.stderr.write(`  ${v.decision === 'merge' ? '→ merge' : '· skip '} #${v.num} ${v.decision === 'skip' ? `(${v.reason})` : ''} — ${v.title}\n`);
-    process.stderr.write(`${DRY_RUN ? 'DRY-RUN: ' : ''}${toMerge.length} AI PR(s) to merge, ${skipped.length} skipped.\n`);
+    for (const v of verdicts) process.stderr.write(`  ${v.decision === 'merge' ? '→ merge' : '· skip '} #${v.num} ${v.item ? `(#${v.item}${v.blockedBy.length ? ` ⤳ ${v.blockedBy.join(',')}` : ''}) ` : ''}${v.decision === 'skip' ? `(${v.reason})` : ''} — ${v.title}\n`);
+    process.stderr.write(`${DRY_RUN ? 'DRY-RUN: ' : ''}${toMerge.length} AI PR(s) to merge${label ? ` (label "${label}")` : ''}, ${skipped.length} skipped.\n`);
   }
 
   const merged = [];
   const failedMerges = [];
-  if (!DRY_RUN) {
-    for (const v of toMerge) {
-      try {
-        execFileSync('gh', ['pr', 'merge', String(v.num), '--merge', '--delete-branch'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-        merged.push(v.num);
-        if (!AS_JSON) process.stderr.write(`  ✓ merged #${v.num}\n`);
-      } catch (e) {
-        failedMerges.push({ num: v.num, detail: String(e.message || e).split('\n')[0] });
-        if (!AS_JSON) process.stderr.write(`  ✗ #${v.num} merge failed: ${String(e.message || e).split('\n')[0]}\n`);
-      }
+  let deferred = [];
+  if (DRY_RUN) {
+    // Report the planned first-pass order (blockedBy-honoured) without merging.
+    const plan = planLabelDrain(verdicts);
+    deferred = plan.deferred;
+    if (!AS_JSON) {
+      process.stderr.write(`  merge order: ${plan.ready.map((c) => '#' + c.num + (c.item ? `→${c.item}` : '')).join(' → ') || '(none ready)'}\n`);
+      if (deferred.length) process.stderr.write(`  deferred (blockedBy unlanded): ${deferred.map((d) => `#${d.num}→[${d.waitOn.join(',')}]`).join(', ')}\n`);
     }
+  } else {
+    // Cascade: merge every READY candidate in blockedBy order; a merged item leaves the open set, freeing its
+    // dependents next pass (mirrors the lane-drain cascade). A merge FAILURE (red/behind) marks the PR `skip`
+    // so it keeps blocking its dependents — never land past a broken blocker.
+    let remaining = verdicts.map((v) => ({ ...v }));
+    for (;;) {
+      const plan = planLabelDrain(remaining);
+      deferred = plan.deferred;
+      if (!plan.ready.length) break;
+      let progressed = false;
+      for (const c of plan.ready) {
+        try {
+          execFileSync('gh', ['pr', 'merge', String(c.num), '--merge', '--delete-branch'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+          merged.push(c.num); progressed = true;
+          remaining = remaining.filter((x) => x.num !== c.num); // merged → item leaves the open set (frees dependents)
+          if (!AS_JSON) process.stderr.write(`  ✓ merged #${c.num}${c.item ? ` (#${c.item})` : ''}\n`);
+        } catch (e) {
+          failedMerges.push({ num: c.num, detail: String(e.message || e).split('\n')[0] });
+          const cc = remaining.find((x) => x.num === c.num); if (cc) cc.decision = 'skip'; // stays blocking its dependents; not retried
+          if (!AS_JSON) process.stderr.write(`  ✗ #${c.num} merge failed: ${String(e.message || e).split('\n')[0]}\n`);
+        }
+      }
+      if (!progressed) break; // every ready candidate failed → stop (dependents stay deferred)
+    }
+    if (deferred.length && !AS_JSON) process.stderr.write(`  · ${deferred.length} deferred (blockedBy an unlanded PR): ${deferred.map((d) => `#${d.num}→[${d.waitOn.join(',')}]`).join(', ')}\n`);
   }
 
   // Sync the LOCAL main checkout to the just-advanced origin/main (a merged PR moved origin, not local). Best-
@@ -173,7 +264,7 @@ function runCli() {
     if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ pulled local main to origin\n` : `  · local main NOT fast-forwarded (diverged / dirty tree) — pull it by hand\n`);
   }
 
-  const result = { ok: true, dryRun: DRY_RUN, considered: verdicts.length, toMerge: toMerge.map((v) => v.num), merged, failed: failedMerges, localSynced, skipped: skipped.map((v) => ({ num: v.num, reason: v.reason })) };
+  const result = { ok: true, dryRun: DRY_RUN, label, considered: verdicts.length, toMerge: toMerge.map((v) => v.num), merged, failed: failedMerges, deferred, localSynced, skipped: skipped.map((v) => ({ num: v.num, reason: v.reason })) };
   if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
   process.exit(failedMerges.length ? 2 : 0);
 }

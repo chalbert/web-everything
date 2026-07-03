@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, classifyPr } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, classifyPr, planLabelDrain } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -68,5 +68,38 @@ describe('merge-ai-prs — classifyPr verdict', () => {
   it('SKIPS a not-mergeable PR (conflicts)', () => {
     const v = classifyPr(aiPr({ mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }));
     expect(v.decision).toBe('skip'); expect(v.reason).toMatch(/not mergeable/);
+  });
+});
+
+describe('merge-ai-prs — planLabelDrain blockedBy ordering (#2188)', () => {
+  const cand = (num, item, blockedBy = [], decision = 'merge') => ({ num, item, blockedBy, decision });
+
+  it('orphan PRs (no manifest) are all ready, ordered by PR number', () => {
+    const { ready, deferred } = planLabelDrain([cand(9, null), cand(3, null), cand(7, null)]);
+    expect(ready.map((c) => c.num)).toEqual([3, 7, 9]);
+    expect(deferred).toEqual([]);
+  });
+
+  it('DEFERS a PR whose blockedBy item is still an open candidate', () => {
+    // #2200 depends on #2199; both open → only the blocker is ready this pass.
+    const { ready, deferred } = planLabelDrain([cand(2, 2200, [2199]), cand(1, 2199, [])]);
+    expect(ready.map((c) => c.num)).toEqual([1]);
+    expect(deferred).toEqual([{ num: 2, item: 2200, waitOn: [2199] }]);
+  });
+
+  it('a blockedBy item NOT in the candidate set is treated as already landed (ready)', () => {
+    const { ready } = planLabelDrain([cand(5, 2200, [1234])]); // #1234 not among candidates → landed
+    expect(ready.map((c) => c.num)).toEqual([5]);
+  });
+
+  it('a red/skip blocker still defers its dependents (never land past a broken blocker)', () => {
+    const { ready, deferred } = planLabelDrain([cand(2, 2200, [2199]), cand(1, 2199, [], 'skip')]);
+    expect(ready).toEqual([]); // the blocker is skip (unlanded) so it stays in the open set
+    expect(deferred.map((d) => d.num)).toEqual([2]);
+  });
+
+  it('orders ready by item then PR number (deterministic cascade)', () => {
+    const { ready } = planLabelDrain([cand(8, 2205), cand(4, 2201), cand(6, 2201)]);
+    expect(ready.map((c) => c.num)).toEqual([4, 6, 8]); // item 2201 (PRs 4,6) before 2205 (PR 8)
   });
 });
