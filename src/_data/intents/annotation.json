@@ -10,7 +10,7 @@
     "rich-text",
     "anchor"
   ],
-  "summary": "Select content then attach a motivation payload (highlighting, commenting, tagging, suggestion) with an overlay disposition. UX-only: the durable target is delegated to the range-anchor contract — this intent owns no anchor machinery. Orphaned annotations (the anchored text is gone) are a first-class outcome; comment-thread product UI stays app-level.",
+  "summary": "Select content then attach a motivation payload (highlighting, commenting, tagging, suggestion) with an overlay disposition. UX-only: the durable target is delegated to the range-anchor contract; the suggestion motivation's body is delegated to the suggested-edit contract — this intent owns no anchor machinery and no host mutation. Orphaned annotations (the anchored text is gone) are a first-class outcome; comment-thread product UI stays app-level.",
   "dimensions": {
     "motivation": {
       "description": "Why the content was annotated — the W3C Web Annotation motivation vocabulary, the payload's discriminant",
@@ -88,9 +88,12 @@
       "reference": "https://support.google.com/docs/answer/6033474"
     }
   ],
+  "composesContracts": [
+    "range-anchor",
+    "suggested-edit"
+  ],
   "researchGaps": [
     "Multi-range / discontinuous selections — does a single annotation payload attach to one range bundle or a set? The range-anchor contract anchors one range; confirm whether annotation composes N anchors or defers multi-range to the app.",
-    "Suggestion-motivation acceptance flow — is accept/reject of a suggestion an annotation-intent concern (it mutates the host) or strictly the rich-text model's? Define the handoff.",
     "Orphan re-anchoring UX — when a fuzzy re-resolve offers a candidate, is the confirm/reject affordance part of this intent or app-level?"
   ]
 }

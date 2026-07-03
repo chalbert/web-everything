@@ -1,0 +1,114 @@
+{% import "product-components.njk" as pc %}
+
+<section class="intro-section mb-12">
+    <h3 id="mission">Mission</h3>
+    <p>
+        <strong>Suggested Edit</strong> standardizes the genuinely hard, recurring, <em>unowned</em>
+        mutation at the heart of collaborative editing: a <code>suggestion</code>-motivation annotation
+        proposes an insertion and/or deletion, and a viewer must be able to <strong>accept or reject</strong>
+        it &mdash; a transaction that the
+        <a href="/intents/annotation/">annotation</a> intent (UX-only, owns no host mutation) cannot own.
+        Grounded in <a href="https://www.w3.org/TR/wai-aria-1.3/">WAI-ARIA 1.3</a>
+        <code>role=suggestion</code> (editor&rsquo;s draft Feb&nbsp;2026), which mints the role and wraps
+        one insertion and one deletion inside the suggestion element; adopted by Google Docs, Notion, and
+        ProseMirror suggestion-mode. Carved out by
+        <a href="/backlog/2029-suggestion-accept-reject-handoff-annotation-vs-rich-text-pla/">#2029</a>
+        (ratified 2026-07-02) as a fresh application of the
+        <a href="/decisions/#intents-ux-only"><code>#intents-ux-only</code></a> corollary.
+    </p>
+</section>
+
+{{ pc.standardSection('id="scope"') }}
+    <h3 id="scope-heading">Scope</h3>
+    <p>
+        The standard owns the <strong>lifecycle seam only</strong>: the propose&rarr;accept/reject state
+        machine and its payload shape.  The durable location of the suggestion in the host document is
+        delegated to the <a href="/projects/range-anchor/">Durable Range Anchor</a> contract (#1471);
+        accept/reject UI (buttons, keyboard shortcuts, review panels) is app-level.
+    </p>
+    <div class="standards-grid">
+        {{ pc.standardCard('', 'flex flex-col') }}
+            <h4 id="scope-state-machine" class="text-lg font-bold m-0 text-gray-900">propose&rarr;accept/reject state machine</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                <code>state: 'proposed' | 'accepted' | 'rejected'</code> &mdash; the closed lifecycle set.
+                A suggestion starts in <code>proposed</code>.  The apply step transitions it to
+                <code>accepted</code> (engine dispatched the transaction) or it stays as a
+                <code>rejected</code> record.  The state machine has exactly <strong>one</strong> owner
+                per mutation, preventing annotation and the Editor Engine protocol from racing.
+            </p>
+        {{ pc.endStandardCard() }}
+        {{ pc.standardCard('', 'flex flex-col') }}
+            <h4 id="scope-aria" class="text-lg font-bold m-0 text-gray-900">WAI-ARIA 1.3 payload shape</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                The <code>proposed</code> field models the <a href="https://www.w3.org/TR/wai-aria-1.3/">ARIA 1.3</a>
+                <code>role=suggestion</code> insertion+deletion wrap:
+                <code>insert?&nbsp;string</code> (the insertion element&rsquo;s text content) and
+                <code>deleteRange?&nbsp;true</code> (the deletion element scoping the anchored range).
+                At least one must be present — pure insertion, pure deletion, or replacement.
+            </p>
+        {{ pc.endStandardCard() }}
+        {{ pc.standardCard('', 'flex flex-col') }}
+            <h4 id="scope-readonly" class="text-lg font-bold m-0 text-gray-900">Record-only over read-only hosts</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                When the host is read-only (PDF, foreign HTML, no engine present), <code>ApplyEdit</code>
+                returns <code>'record-only'</code> and no mutation occurs — the proposal is preserved as a
+                viewable record.  This is the key differentiator from attaching the lifecycle to the
+                Editor Engine protocol directly (which has no referent over read-only hosts).
+            </p>
+        {{ pc.endStandardCard() }}
+    </div>
+{{ pc.endStandardSection() }}
+
+{{ pc.standardSection('id="composition"') }}
+    <h3 id="composition-heading">Composition</h3>
+    <p>
+        Two parties compose this contract without owning it:
+    </p>
+    <ul>
+        <li>
+            <strong><a href="/intents/annotation/">annotation</a></strong> &mdash; references
+            <code>SuggestedEdit</code> as the <code>suggestion</code> motivation&rsquo;s <em>body</em>.
+            At annotation time, <code>state</code> is always <code>'proposed'</code>; the intent records
+            the proposal but applies no host mutation (UX-only invariant preserved).
+        </li>
+        <li>
+            <strong>Editor Engine protocol</strong> &mdash; references <code>SuggestedEdit</code> as the
+            <em>transaction to apply</em> when the host is editable.  The engine dispatches its existing
+            &ldquo;applies operations&rdquo; op and returns <code>'applied'</code>; over a read-only host
+            it returns <code>'record-only'</code> without touching the document.
+        </li>
+    </ul>
+    <p>
+        The <code>target</code> field in turn composes the
+        <a href="/projects/range-anchor/">Durable Range Anchor</a> contract (#1471): this contract owns
+        the <em>what</em> (lifecycle state + ARIA payload); range-anchor owns the <em>where</em>
+        (the W3C selector bundle that survives document re-fetches and light edits, with fuzzy fallback
+        and first-class orphan).
+    </p>
+{{ pc.endStandardSection() }}
+
+{{ pc.standardSection('id="contract"') }}
+    <h3 id="contract-heading">Contract &amp; placement</h3>
+    <p>
+        The <code>SuggestedEdit</code> / <code>ApplyEdit</code> interfaces are the <strong>only
+        lock</strong>; apply dispatch, CRDT integration, and optimistic-revert are impl and live in
+        <a href="/projects/frontierui/">Frontier UI</a>, never the WE repo (constellation-placement
+        rule&nbsp;1).  The contract ships as its own foundational slice
+        (<code>@webeverything/contracts/suggested-edit</code>) so that annotation and the Editor Engine
+        protocol can import it before the runtime lands.
+    </p>
+{{ pc.endStandardSection() }}
+
+{{ pc.standardSection('id="protocol-suggested-edit"') }}
+    <h3 id="protocol-heading">Protocol &mdash; <code>SuggestedEdit</code></h3>
+    <p>
+        The conformance reference fixes the <code>SuggestedEdit</code> interface
+        (<code>state: 'proposed'|'accepted'|'rejected'</code>; <code>target: SuggestedEditTarget</code>
+        composing the range-anchor <code>SelectorBundle</code>; <code>proposed: SuggestedPayload</code>
+        modeling the ARIA insertion+deletion wrap), the <code>ApplyEdit</code> type
+        (<code>ApplyResult: 'applied'|'record-only'</code>), and the
+        <code>SUGGESTED_EDIT_INITIAL_STATE</code> constant.  The apply step is the Editor Engine
+        protocol&rsquo;s existing operation &mdash; present when editable, absent (record-only) when
+        the host is read-only.
+    </p>
+{{ pc.endStandardSection() }}

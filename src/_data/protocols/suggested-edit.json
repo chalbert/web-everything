@@ -1,0 +1,8 @@
+{
+  "id": "suggested-edit",
+  "name": "Suggested Edit",
+  "summary": "Conformance reference for the Suggested-Edit seam — the propose→accept/reject state machine for a collaborative suggested edit, composed by the annotation intent (suggestion motivation body) and the Editor Engine protocol (apply transaction). The protocol fixes the SuggestedEdit interface (state: proposed|accepted|rejected; target: SuggestedEditTarget composing the #1471 RangeAnchor bundle; proposed: SuggestedPayload modeling the ARIA insertion+deletion wrap), the ApplyEdit type (ApplyResult: applied|record-only — record-only over read-only hosts when no engine is present), and the SUGGESTED_EDIT_INITIAL_STATE constant. Grounded in WAI-ARIA 1.3 role=suggestion (editor's draft Feb 2026); the target field composes the Durable Range Anchor contract (@webeverything/contracts/range-anchor) — this contract owns the lifecycle, range-anchor owns the durable location. A technical interchange contract, not a UX preference — a Protocol, not an Intent. Ratified #2029 Fork 1; authored #2145.",
+  "status": "concept",
+  "ownedByProject": "suggested-edit",
+  "anchor": "protocol-suggested-edit"
+}
