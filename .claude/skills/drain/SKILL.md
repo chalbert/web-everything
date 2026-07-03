@@ -21,11 +21,27 @@ serially, in a later session, under the same self-approved PR transport the prod
 
 ## Preconditions
 
-- Run from the **WE checkout on `main`** (the manifest reads + the post-merge `main` fast-forward assume it).
+- **Run from an isolated clean clone on `main` — NEVER the shared primary checkout (#2197 / ratified #2123).**
+  The drain is an edit-action session (it advances `main` and, per #2198, rebuilds lane tips), so #2123's
+  "every edit-action session runs in an isolated clone" applies. The primary tree almost always carries a peer
+  session's uncommitted work, and the drain's own post-merge `git pull --ff-only --autostash` then hits an
+  autostash-pop conflict and strands the tree mid-merge (observed 2026-07-03: an autostash-pop conflict on
+  `claims.json` left the primary half-merged; recovery was manual). Provision a fresh clone instead:
+
+  ```
+  git clone --local <primary> ../we-drain-clean && cd ../we-drain-clean
+  git remote set-url origin <origin-url>           # push PRs to the real remote
+  git reset --hard <origin/main sha>               # land on the true main (the local clone may be stale)
+  ln -s <primary>/node_modules node_modules        # generators/gates need deps (+ a sibling ../frontierui)
+  ```
+
+  A clone sibling of `webeverything` keeps `../frontierui` resolvable (cross-repo artifact builds need it). The
+  branch guard blocks `checkout -B`/`worktree add` even in a clone, so move `main` with `git reset --hard`, not
+  a checkout. **Never `git pull` in the primary** — the sync below runs in the clone only.
 - `gh` is authenticated (`gh auth status`) — landing is the same self-approved `gh pr merge` (0 required
   reviewers + the required `test` check) `/pr` uses. See [`/pr`](../pr/SKILL.md) for the transport.
-- The tree is clean-*ish* on `main`: the post-merge local sync is `git pull --ff-only --autostash`, which is
-  best-effort (it stashes/reapplies dirty edits) and degrades (reported) under a conflicting local change.
+- The clone's tree is clean: the post-merge sync (`git pull --ff-only --autostash`, in the clone) is a pure
+  fast-forward there, so it never conflicts with a peer session's edits the way the primary would.
 
 ## Run it (the label lander — #2194)
 
@@ -51,13 +67,18 @@ one-shot unless the user wants a long-lived monitor waiting for producers still 
 2. For each candidate, reads its `.lane-manifest.json` off its head ref and orders by cross-item `blockedBy` —
    a PR whose blocker is still an open (unlanded) PR **defers** to a later pass (the cascade). Orphan PRs (no
    manifest) are always ready.
-3. Merges each ready PR via the SAME self-approved, non-admin `gh pr merge --merge --delete-branch` the `/pr`
+3. **Rebase-drops the shared manifest (#2198)** — a certified + green PR that is only CONFLICTING/BEHIND on the
+   one shared `.lane-manifest.json` path is rebuilt onto `main` (manifest dropped) via pure plumbing (no
+   checkout) before merging, so the "manifest lands then conflicts every other PR" wall no longer stalls the
+   queue. A real (non-manifest) code conflict is left as a skip for a human. On by default; `--no-rebase-drop`
+   disables. A rebuilt tip re-runs `test`, so it lands on a later `--watch` pass (expected, not a failure).
+4. Merges each ready PR via the SAME self-approved, non-admin `gh pr merge --merge --delete-branch` the `/pr`
    flow uses — only when its required `test` check is green and GitHub reports it cleanly mergeable. A merge
    **frees its dependents** the next inner pass; a failed/behind PR stays blocking its dependents (never land
    past a broken blocker). The closed PR carries the label away — that PR-merge IS the single clear point (no
    `queued.json` unqueue).
-4. After anything merged, fast-forwards the local `main` checkout to the advanced `origin/main`
-   (`git pull --ff-only --autostash`, best-effort).
+5. After anything merged, fast-forwards **the clone's** local `main` to the advanced `origin/main`
+   (`git pull --ff-only --autostash`, best-effort) — in the isolated clone, never the primary checkout.
 
 ## Exit codes (surface these)
 

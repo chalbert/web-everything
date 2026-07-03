@@ -11,17 +11,23 @@
  * normal drain transport.
  *
  * Subcommands:
- *   node scripts/lane-resume.mjs discover [--json]   # classify + blockedBy-order every stuck lane
+ *   node scripts/lane-resume.mjs discover [--json]     # classify + blockedBy-order every stuck lane
+ *   node scripts/lane-resume.mjs land <pr> [--dry-run] [--json]   # land ONE stuck lane PR (#2202)
  *
- * Landing is NOT re-implemented here: once a finisher agent rebases its lane onto main, resolves the
- * conflict / fixes the test, drops the transient `.lane-manifest.json`, and confirms CI green, the PR
- * is CLEAN and `/drain` (`scripts/merge-ai-prs.mjs --label=ready-to-merge`) lands it under the same
- * self-approved transport. So `/resume` = repair-then-hand-to-drain; this file is the discover brain.
+ * LAND (#2202) — the durable, tested version of the 2026-07-03 scratchpad plumbing. Reuses the ONE #2198
+ * rebase-drop-manifest helper (`scripts/lib/rebase-drop-manifest.mjs`, shared with the label lander): for a PR
+ * whose required `test` is green but which is only CONFLICTING/BEHIND, it rebuilds the tip onto main (manifest
+ * dropped) via pure plumbing — no branch checkout — then `gh pr merge`s it. A red `test` (a real bug) or a real
+ * (non-manifest) conflict is NOT landed — the finisher repairs code first. `UNSTABLE` + `test=pass` IS mergeable
+ * (only `test` is required; `cla`/Workers-Builds are non-required). So `/resume` = discover-then-repair-then-
+ * `land` (or hand a now-clean PR to `/drain`, which shares the same helper).
  *
- * Guard-safe: read-only (git show / gh list). Fails soft — a PR whose manifest can't be read is
+ * Guard-safe: read-only `discover` (git show / gh list); `land` only pushes to a `lane/*` ref (the #1934
+ * carve-out) + `gh pr merge` — never a branch checkout. Fails soft — a PR whose manifest can't be read is
  * reported as `unknown`, never crashes the plan.
  */
 import { execFileSync } from 'node:child_process';
+import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 
 const READY_LABEL = 'ready-to-merge';
 
@@ -79,6 +85,63 @@ export function orderByBlockedBy(lanes) {
   for (const l of lanes) visit(l, new Set());
   // stable partition: attemptable (ready/conflict/test-red/unknown) before blocked
   return [...out.filter((l) => l.disposition !== 'blocked'), ...out.filter((l) => l.disposition === 'blocked')];
+}
+
+/**
+ * Decide how to land ONE lane PR from its GitHub signals (#2202). Pure. Only the required `test` check gates —
+ * `UNSTABLE` (a non-required check like `cla`/Workers-Builds red) is still mergeable.
+ *   'red'       — required `test` failed → NEVER land (a real bug; the finisher fixes code first).
+ *   'not-green' — required `test` not reported / still pending → wait (no land yet).
+ *   'clean'     — test green + mergeable → `gh pr merge` directly.
+ *   'rebuild'   — test green but CONFLICTING/DIRTY/BEHIND → rebase-drop the manifest, then merge.
+ * @param {{mergeable:string, mergeState:string, testConclusion:string|null}} sig
+ */
+export function landDecision({ mergeable, mergeState, testConclusion } = {}) {
+  const test = String(testConclusion || '').toUpperCase();
+  const FAIL = ['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ERROR', 'ACTION_REQUIRED', 'STARTUP_FAILURE'];
+  if (FAIL.includes(test)) return { action: 'red', reason: `required \`test\` check is ${test.toLowerCase()}` };
+  if (test !== 'SUCCESS') return { action: 'not-green', reason: `required \`test\` check not green (${test.toLowerCase() || 'none'})` };
+  const m = String(mergeable || '').toUpperCase();
+  const s = String(mergeState || '').toUpperCase();
+  if (m === 'CONFLICTING' || s === 'DIRTY' || s === 'BEHIND') return { action: 'rebuild', reason: `test green but not up-to-date (mergeable=${m || '?'} state=${s || '?'}) — rebase-drop the manifest` };
+  return { action: 'clean', reason: 'required check green + mergeable' };
+}
+
+/**
+ * Land ONE stuck lane PR (#2202): the durable version of the 2026-07-03 scratchpad plumbing. Reuses the #2198
+ * `rebaseDropManifest` helper. `run(cmd,args,opts)->{status,stdout,stderr}` and `prInfo` are injectable so this
+ * is unit-testable without a live repo/GitHub. Returns a verdict object (never throws on a git/gh non-zero).
+ * @returns {{action:string, pr:(number|string), merged:boolean, reason:string, rebased?:boolean}}
+ */
+export function land({ prNum, run = gitRunner, prInfo = null, base = 'origin/main', dryRun = false } = {}) {
+  if (prNum == null) return { action: 'error', merged: false, reason: 'no PR number (usage: lane-resume.mjs land <pr>)' };
+  if (!prInfo) {
+    const v = run('gh', ['pr', 'view', String(prNum), '--json', 'number,headRefName,mergeable,mergeStateStatus,statusCheckRollup']);
+    try { prInfo = JSON.parse(v.stdout || '{}'); } catch { prInfo = {}; }
+  }
+  const laneRef = prInfo.headRefName;
+  const testCheck = (prInfo.statusCheckRollup || []).find((c) => (c.name || c.context) === 'test');
+  const decision = landDecision({ mergeable: prInfo.mergeable, mergeState: prInfo.mergeStateStatus, testConclusion: testCheck ? (testCheck.conclusion || testCheck.state || null) : null });
+
+  if (decision.action === 'red') return { action: 'red', pr: prNum, merged: false, reason: decision.reason };
+  if (decision.action === 'not-green') return { action: 'not-green', pr: prNum, merged: false, reason: decision.reason };
+  if (!laneRef) return { action: 'error', pr: prNum, merged: false, reason: 'the PR has no head ref (gh pr view returned none)' };
+  if (dryRun) return { action: decision.action, pr: prNum, merged: false, laneRef, reason: `dry-run: would ${decision.action === 'rebuild' ? 'rebase-drop the manifest then merge' : 'merge'} #${prNum} (${laneRef})` };
+
+  let rebased = false;
+  if (decision.action === 'rebuild') {
+    const r = rebaseDropManifest({ laneRef, base, run });
+    if (r.action === 'skip') return { action: 'skip', pr: prNum, merged: false, reason: r.reason, conflictPaths: r.conflictPaths };
+    if (r.action === 'error') return { action: 'error', pr: prNum, merged: false, reason: r.reason };
+    rebased = true;
+  }
+  const mv = run('gh', ['pr', 'merge', String(prNum), '--merge', '--delete-branch']);
+  if (mv.status !== 0) {
+    // After a rebuild the tip changed and `test` is re-running, so an immediate merge bounce is EXPECTED —
+    // land on a later `/drain` pass (the shared helper's watch behaviour), not a hard failure.
+    return { action: rebased ? 'rebuilt-awaiting-ci' : 'merge-failed', pr: prNum, merged: false, rebased, reason: (String(mv.stderr || '').split('\n')[0] || 'gh pr merge failed') };
+  }
+  return { action: 'merged', pr: prNum, merged: true, rebased, reason: rebased ? 'rebased onto main (manifest dropped) + merged' : 'merged (clean)' };
 }
 
 // ─────────────────────────────────── IO helpers ───────────────────────────────────
@@ -145,7 +208,20 @@ function discover(asJson) {
 const IS_CLI = process.argv[1] && process.argv[1].endsWith('lane-resume.mjs');
 if (IS_CLI) {
   const argv = process.argv.slice(2);
-  const cmd = argv.find((a) => !a.startsWith('--')) || 'discover';
-  if (cmd === 'discover') discover(argv.includes('--json'));
-  else { process.stderr.write(`unknown subcommand: ${cmd}\nusage: lane-resume.mjs discover [--json]\n`); process.exit(2); }
+  const positional = argv.filter((a) => !a.startsWith('--'));
+  const cmd = positional[0] || 'discover';
+  const asJson = argv.includes('--json');
+  if (cmd === 'discover') discover(asJson);
+  else if (cmd === 'land') {
+    const prNum = positional[1];
+    if (prNum == null) { process.stderr.write('usage: lane-resume.mjs land <pr> [--dry-run] [--json]\n'); process.exit(2); }
+    execFileSync('git', ['fetch', 'origin', '--quiet'], { stdio: 'ignore' });
+    const verdict = land({ prNum, dryRun: argv.includes('--dry-run') });
+    if (asJson) process.stdout.write(JSON.stringify(verdict, null, 2) + '\n');
+    else process.stderr.write(`lane-resume land #${verdict.pr}: ${verdict.merged ? '✓ merged' : verdict.action} — ${verdict.reason}\n`);
+    // 0 = merged / dry-run / clean; rebuilt-awaiting-ci is soft (land later); red/skip/error/merge-failed = 2.
+    const soft = ['merged', 'clean', 'rebuild', 'rebuilt-awaiting-ci', 'not-green'];
+    process.exit(verdict.merged || soft.includes(verdict.action) ? 0 : 2);
+  }
+  else { process.stderr.write(`unknown subcommand: ${cmd}\nusage: lane-resume.mjs discover [--json] | land <pr> [--dry-run] [--json]\n`); process.exit(2); }
 }

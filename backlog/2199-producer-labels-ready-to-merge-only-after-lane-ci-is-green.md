@@ -2,8 +2,10 @@
 kind: story
 size: 5
 parent: "2193"
-status: open
+status: resolved
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
 tags: [lane, pr-flow, merge-queue, session-tooling, drain]
 ---
 
