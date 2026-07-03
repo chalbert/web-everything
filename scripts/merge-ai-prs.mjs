@@ -27,6 +27,14 @@
  *  - Non-admin merge only: `gh pr merge <n> --merge --delete-branch`. If branch protection blocks it, that
  *    is surfaced, never overridden.
  *
+ * WATCH (#2194 — /drain converges onto THIS lander). Bare, this is ONE cascade pass (`/drain`). With `--watch`
+ * it becomes the long-lived monitor (`/drain watch`): it re-sweeps the labelled PRs on a fixed `--interval=N`
+ * (default 30s), landing each the instant it becomes eligible (green + mergeable), in the same blockedBy
+ * cascade order — so a producer that opens a ready-to-merge PR while the watch runs gets it landed on the next
+ * poll. `--max-idle=N` bounds the follow: after N consecutive passes that merge nothing AND have nothing left
+ * deferred, the watch exits 0 (an unbounded `--watch` runs until Ctrl-C). This retires the `queued.json` poll —
+ * the label lander is now the single collection point for ALL producer output (`/workflow`, `/pr`, solo lanes).
+ *
  * Usage:
  *   node scripts/merge-ai-prs.mjs --dry-run            # list every open PR + the merge/skip verdict, merge NOTHING
  *   node scripts/merge-ai-prs.mjs --dry-run --json     # machine-readable verdicts
@@ -35,6 +43,7 @@
  *   node scripts/merge-ai-prs.mjs --base=main           # restrict to PRs targeting <base> (default: any)
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge # the /drain role: scope to producer-completed PRs, merge in blockedBy order
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run # print the blockedBy-ordered merge plan, merge NOTHING
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --interval=30 # the /drain-watch monitor: poll + land as PRs go green (--max-idle=N bounds it)
  *
  * Exit codes: 0 = swept (merged 0+ qualifying PRs, none failed); 2 = at least one merge attempt FAILED
  * (surfaced); 3 = bad input / `gh` unavailable.
@@ -146,6 +155,21 @@ export function planLabelDrain(candidates) {
   return { ready, deferred };
 }
 
+/** Bound a `--watch --interval=N` poll count. `--max-idle=N` (optional) exits after N consecutive idle passes
+ *  (a pass that merged nothing AND has nothing deferred waiting); omitted → unbounded (until Ctrl-C). Pure. */
+export function parseWatchOpts({ watch, interval, maxIdle } = {}) {
+  const on = !!watch;
+  const iv = Number.isFinite(Number(interval)) && Number(interval) > 0 ? Number(interval) : 30;
+  const mi = Number.isFinite(Number(maxIdle)) && Number(maxIdle) >= 0 ? Number(maxIdle) : null;
+  return { watch: on, intervalSec: iv, maxIdle: mi };
+}
+
+/** Synchronous sleep (the CLI is fully synchronous — execFileSync throughout — so the watch loop blocks here
+ *  between polls without an event loop). Uses Atomics.wait so it spawns nothing. */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, Math.trunc(ms)));
+}
+
 // ── CLI boundary ───────────────────────────────────────────────────────────────────────────────────────
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (IS_CLI) runCli();
@@ -160,6 +184,9 @@ function runCli() {
   // (the F1 signal), so this ONE lander serves both `/merge` (bare = every AI PR) and `/drain` (label-scoped +
   // manifest-ordered). Omit → the legacy sweep-all behaviour, unchanged.
   const label = typeof flags.label === 'string' ? flags.label : null;
+  // #2194 — /drain converges onto this lander: `--watch` turns the one-shot sweep into the long-lived monitor
+  // (`/drain watch`), re-sweeping on `--interval=N`s and landing each PR the instant it goes green.
+  const { watch: WATCH, intervalSec: INTERVAL, maxIdle: MAX_IDLE } = parseWatchOpts({ watch: flags.watch, interval: flags.interval, maxIdle: flags['max-idle'] });
 
   const fail = (reason, detail, code) => {
     if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, reason, detail }) + '\n');
@@ -183,6 +210,9 @@ function runCli() {
     return null;
   };
 
+  // ── ONE sweep pass — list → classify → cascade-merge → sync. Returns the pass result (no emit/exit), so the
+  // watch loop can call it repeatedly. A gh-list failure still hard-fails (bad env, not a transient PR state).
+  const sweepOnce = () => {
   // List open PRs WITHOUT commits (commits×authors×limit overflows GitHub's GraphQL node cap), then fetch each
   // candidate's commits per-PR — the rollup + mergeable come from the list; commits (the AI gate) come per PR.
   const listArgs = ['pr', 'list', '--state', 'open', '--limit', '100',
@@ -271,6 +301,36 @@ function runCli() {
   }
 
   const result = { ok: true, dryRun: DRY_RUN, label, considered: verdicts.length, toMerge: toMerge.map((v) => v.num), merged, failed: failedMerges, deferred, localSynced, skipped: skipped.map((v) => ({ num: v.num, reason: v.reason })) };
-  if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
-  process.exit(failedMerges.length ? 2 : 0);
+  return { result, merged, failedMerges, deferred };
+  }; // end sweepOnce
+
+  // ── Driver — one sweep (the /drain one-shot + /merge bare), or the `--watch` monitor (`/drain watch`) ──────
+  if (!WATCH) {
+    const { result, failedMerges } = sweepOnce();
+    if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
+    process.exit(failedMerges.length ? 2 : 0);
+  }
+
+  // WATCH: re-sweep on a fixed interval, landing PRs as they become eligible, until `--max-idle` consecutive
+  // idle passes (merged nothing AND nothing deferred waiting) — or forever if `--max-idle` is unset (Ctrl-C).
+  if (!AS_JSON) process.stderr.write(`watch: polling ${label ? `label "${label}" ` : ''}every ${INTERVAL}s${MAX_IDLE != null ? ` (exit after ${MAX_IDLE} idle pass${MAX_IDLE === 1 ? '' : 'es'})` : ' (Ctrl-C to stop)'}…\n`);
+  const passes = [];
+  const allMerged = [];
+  let idle = 0;
+  let lastFailed = [];
+  for (let pass = 1; ; pass++) {
+    if (!AS_JSON) process.stderr.write(`── pass ${pass} ──\n`);
+    const { result, merged, failedMerges, deferred } = sweepOnce();
+    passes.push(result);
+    allMerged.push(...merged);
+    lastFailed = failedMerges;
+    const idlePass = merged.length === 0 && deferred.length === 0;
+    idle = idlePass ? idle + 1 : 0;
+    if (MAX_IDLE != null && idle >= MAX_IDLE) break;
+    if (!AS_JSON) process.stderr.write(`  … pass ${pass}: merged ${merged.length}, deferred ${deferred.length}${idlePass ? ` (idle ${idle}${MAX_IDLE != null ? `/${MAX_IDLE}` : ''})` : ''} — next poll in ${INTERVAL}s\n`);
+    sleepSync(INTERVAL * 1000);
+  }
+  if (!AS_JSON) process.stderr.write(`watch: stopped after ${passes.length} pass(es); merged ${allMerged.length} PR(s) total.\n`);
+  if (AS_JSON) process.stdout.write(JSON.stringify({ ok: true, watch: true, label, interval: INTERVAL, maxIdle: MAX_IDLE, passes: passes.length, merged: allMerged, lastFailed }) + '\n');
+  process.exit(lastFailed.length ? 2 : 0);
 }
