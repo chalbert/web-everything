@@ -1,8 +1,10 @@
 ---
-name: workflow-lane-model-policy
-description: Parallel /workflow lane execution model — Sonnet default, Opus for rare complex items, never Fable
+name: feedback_lane_model_sonnet_default_never_fable
+description: Parallel /workflow lane execution model — Sonnet default, Opus for rare complex items, never Fable; the orchestrator decides per-item
 metadata:
+  node_type: memory
   type: feedback
+  originSessionId: 7fd4b4be-aa9a-43b4-a45a-300be9fb9680
 ---
 
 Lane (per-item execution agent) model in the parallel /workflow orchestrator: **Sonnet by default, Opus only for rare genuinely-complex items, and NEVER Fable for execution.** The orchestrator itself decides per item — the main loop should not have to pass a model each run.
