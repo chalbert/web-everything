@@ -4,7 +4,7 @@ ongoing: true
 status: open
 locus: plateau-app
 relatedReport: reports/2026-07-03-constellation-branding-system.md
-relatedTo: ["2206", "2207", "1034", "1552"]
+relatedTo: ["2209", "2207", "1034", "1552"]
 dateOpened: "2026-07-03"
 tags: [program, branding, design-review, ai-judge, training, watch]
 ---
@@ -21,10 +21,10 @@ if better"; no existing program owns brand/design intelligence — #1257 owns pl
 ## The two fronts
 
 - **Front A — conformance (internal):** the constellation's own brand assets conform to the ratified
-  system (#2206: rubric, naming canon, mark rules, icon-template floor). Surfaces: the
+  system (#2209: rubric, naming canon, mark rules, icon-template floor). Surfaces: the
   `plateau:branding.html` gallery + journey trees (regenerated on any asset change), the
   `check:branding` gate story, and drift checks (spelling variants, palette drift, template
-  violations — all measured first in the #2206 prep). Metric (to build): count of live brand-rule
+  violations — all measured first in the #2209 prep). Metric (to build): count of live brand-rule
   violations across the three repos.
 - **Front B — currency (external):** the design world moves — rebrands ship, critiques publish,
   methods evolve — and user labels accumulate. Discovery: sweep design press/blogs (Brand
@@ -51,7 +51,7 @@ The corpus exists and is growing (founding sweep 2026-07-03: ~85 entries — 44 
 web-grounded expansion + 10 brand systems, 14 rebrand failures, 10 failure patterns, 15 readings);
 the metric, cadence, and eval harness are not built. L0→L1 carve:
 
-1. `check:branding` gate (front-A metric) — child story, filed on #2206 ratify.
+1. `check:branding` gate (front-A metric) — child story, filed on #2209 ratify.
 2. Library render page in plateau + growth loop runnable by hand (front-B sweep, re-runnable
    idempotently via `/review-program`).
 3. #2207 eval harness (agreement metric vs the journey labels) — graduate to scheduled cadence only
@@ -59,8 +59,8 @@ the metric, cadence, and eval harness are not built. L0→L1 carve:
 
 ## Review log
 
-- **2026-07-03 — founding run (during the #2206 prep session).** Corpus seeded: brand review +
-  proposals + journey trees on `plateau:branding.html`; 6-fork decision #2206 prepared (✓ ready to
+- **2026-07-03 — founding run (during the #2209 prep session).** Corpus seeded: brand review +
+  proposals + journey trees on `plateau:branding.html`; 6-fork decision #2209 prepared (✓ ready to
   ratify); #2207 training card filed with learning log (6 labels/corpus notes, 2 method notes);
   reference library seeded with ~85 web-grounded, cited entries across five wings by 8 parallel
   research agents. Next run: render the library page, build the front-A metric, first

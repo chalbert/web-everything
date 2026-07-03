@@ -8,7 +8,7 @@ description: Design or refine a brand mark / logo / icon the RIGHT way — a sig
 The method for producing brand marks that are actually good — codified after a 2026-07-03 session found
 that **blind, one-shot, fan-out generation produces mediocre marks**. The fix is a *sighted* loop with
 the eye in it and adversarial review to convergence. This skill is the durable how-to; the living
-artifacts it drives are in `plateau-app` (branding pipeline) and the decision/rubric in WE #2206/#2207/#2208.
+artifacts it drives are in `plateau-app` (branding pipeline) and the decision/rubric in WE #2209/#2207/#2208.
 
 ## The one rule that matters
 
@@ -19,7 +19,7 @@ is in the sighted refinement loop the main loop drives itself.**
 
 ## Inputs (read these first — do not design cold)
 
-1. **Rubric** — WE #2206 Fork 6 brand attribute sets + the shared baseline attribute **ownable**
+1. **Rubric** — WE #2209 Fork 6 brand attribute sets + the shared baseline attribute **ownable**
    ("could this be another brand's logo?" — Neumeier's swap test). Each project's attributes:
    WE = universal · principled · inevitable (calm trust); FUI = pioneering · pragmatic · kinetic
    (capable momentum); Plateau = elevated · steady · commanding (assured overview). Shared narrative:
@@ -76,6 +76,6 @@ against.
 
 ## Related
 
-- WE #2206 (brand rubric, ratify), #2207 (design-AI reviewer training + learning log), #2208
+- WE #2209 (brand rubric, ratify), #2207 (design-AI reviewer training + learning log), #2208
   (design-intelligence-watch program). Pipeline & pages: `plateau-app/scripts/gen-branding*.mjs`,
   `branding.html`, `branding-refs.html`.

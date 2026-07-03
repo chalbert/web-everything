@@ -5,7 +5,7 @@ metadata:
   type: feedback
 ---
 
-User directive (2026-07-03): "all the learning should be added to our training plan for AI." Whenever the user renders a brand/design verdict in-session (a favorite, a rejection, a critique like "not very kinetic" or "could be a logo of anything"), append it to the **Learning log** section of `backlog/2207-train-the-design-ai-reviewer-*.md` as a (label → principle) pair, and fix any rubric gap it exposes in the brand rubric (#2206 Fork 6).
+User directive (2026-07-03): "all the learning should be added to our training plan for AI." Whenever the user renders a brand/design verdict in-session (a favorite, a rejection, a critique like "not very kinetic" or "could be a logo of anything"), append it to the **Learning log** section of `backlog/2207-train-the-design-ai-reviewer-*.md` as a (label → principle) pair, and fix any rubric gap it exposes in the brand rubric (#2209 Fork 6).
 
 **Why:** these judgments are the ground-truth labels the design-AI reviewer (#2207) trains and regression-tests against; unlogged, they evaporate.
 
