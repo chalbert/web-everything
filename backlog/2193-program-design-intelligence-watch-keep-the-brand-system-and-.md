@@ -9,9 +9,9 @@ dateOpened: "2026-07-03"
 tags: [program, branding, design-review, ai-judge, training, watch]
 ---
 
-# Design-intelligence watch — keep the brand system and its AI reviewer living
+# Design-intelligence watch
 
-A two-front program (per the [Program Test](/backlog/1249-define-program-strictly-the-four-part-bar-for-a-perpetual-on/))
+Keeps the brand system and its AI reviewer living. A two-front program (per the [Program Test](/backlog/1249-define-program-strictly-the-four-part-bar-for-a-perpetual-on/))
 that folds the 2026-07-03 branding research into a perpetual loop: the constellation's brand system
 stays conformant, and the design-AI reviewer stays better-informed than a stock model. Filed at the
 user's direction ("the research you are doing can be folded into one of our programs — or a new one
