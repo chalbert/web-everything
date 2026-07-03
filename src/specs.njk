@@ -1,0 +1,41 @@
+---
+layout: base.njk
+title: Web Everything — Specs
+permalink: "specs/"
+---
+
+{# Normative-spec catalog (#2096 skeleton, piloted by #2097). One card per spec entry in
+   src/_data/normativeSpecs/<id>.json, grouped by the standard category it specs. Each card links
+   to the rendered spec at /specs/<category>/<id>/ (src/spec-pages.njk). #}
+
+<section class="intro">
+  <h1>Specs</h1>
+  <p>
+    Normative specs are the <strong>single authoring home for a standard's contract</strong> — the
+    enumerated well-formed shapes and typed errors that conformance is measured against. Each spec
+    below links to its full write-up; the standard's own plug/block page keeps explainer prose and
+    links here.
+  </p>
+</section>
+
+{% set categories = normativeSpecs | groupby("category") %}
+{% for category, specs in categories %}
+<section style="margin: 2rem 0;">
+  <h2 id="{{ category }}" style="font-size: 1.1em;">{{ category | title }}</h2>
+  <div class="project-grid">
+    {% for spec in specs %}
+    {% set statusTone = 'success' if spec.status == 'active' else ('info' if spec.status == 'draft' else ('warning' if spec.status == 'experimental' else 'neutral')) %}
+    <div class="project-card">
+      <a href="/specs/{{ spec.category }}/{{ spec.id }}/" class="project-card-link" aria-label="View {{ spec.name }} spec"></a>
+      <we-card>
+        <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+          <h3 class="project-title" style="margin: 0;">{{ spec.name }}</h3>
+          <we-badge tone="{{ statusTone }}">{{ spec.status | title }}</we-badge>
+        </div>
+        <p style="margin: 0; color: var(--color-text-muted); font-size: 0.9em;">{{ spec.summary | safe }}</p>
+      </we-card>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}

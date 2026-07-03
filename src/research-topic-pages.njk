@@ -12,6 +12,7 @@ eleventyComputed:
 
 {% from "project-status.njk" import projectStatus %}
 {% from "research-freshness.njk" import freshnessBadge, revisionHistory %}
+{% from "we-component.njk" import weCard %}
 
 <div class="plug-detail-header">
     <div class="plug-detail-header-inner">
@@ -36,14 +37,17 @@ eleventyComputed:
            the per-page signal. The full chain renders in the revision-history card below. #}
         {% if topic.status == 'superseded' %}
         {% set _newer = topic.supersededBy if topic.supersededBy and topic.supersededBy is iterable and topic.supersededBy is not string else ([topic.supersededBy] if topic.supersededBy else []) %}
-        <div class="section-card fui-card" style="border-left: 3px solid var(--color-warning-text, #b45309); background: var(--color-warning-surface, #fef3c7); color: var(--color-warning-text, #b45309);">
+        {%- set _supersededBody %}
             <strong>Superseded revision.</strong> A newer dated report has replaced this one.
             {% if _newer.length %}See the current version:
                 {% for id in _newer %}{% for t in researchTopics %}{% if t.id == id %}<a href="/research/{{ t.id }}/">{{ t.title }}</a>{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}{% endfor %}.
             {% endif %}
-        </div>
+        {% endset -%}
+        {{ weCard("", _supersededBody, "", "section-card research-superseded-card") }}
         {% endif %}
-        <div class="section-card fui-card">
+
+        {#- Card 2: Meta info (summary, tags, dates, freshness badge) -#}
+        {%- set _topicMetaBody %}
             <p class="mb-4 text-slate-600" style="font-size: 1.1em; line-height: 1.6;">{{ topic.summary }}</p>
 
             {% if topic.tags %}
@@ -60,22 +64,27 @@ eleventyComputed:
                 <span>Review horizon: {{ topic.reviewHorizon or 'P6M' }}</span>
                 {{ freshnessBadge(topic) }}
             </div>
-        </div>
+        {% endset -%}
+        {{ weCard("", _topicMetaBody, "", "section-card") }}
 
-        <div class="section-card fui-card mt-8">
+        {#- Card 3: Research description (include) -#}
+        {%- set _topicDescBody %}
             {% include "research-descriptions/" + topic.id + ".njk" %}
-        </div>
+        {% endset -%}
+        {{ weCard("", _topicDescBody, "", "section-card mt-8") }}
 
+        {#- Card 4: Revision history (conditional) -#}
         {% set _rev = revisionHistory(topic, researchTopics) %}
         {% if _rev | trim %}
-        <div class="section-card fui-card mt-8">
+        {%- set _topicRevBody %}
             {{ _rev | safe }}
-        </div>
+        {% endset -%}
+        {{ weCard("", _topicRevBody, "", "section-card mt-8") }}
         {% endif %}
 
+        {#- Card 5: Related Blocks (conditional) -#}
         {% if topic.relatedBlocks %}
-        <div class="section-card fui-card mt-8">
-            <h2>Related Blocks</h2>
+        {%- set _topicBlocksBody %}
             <div class="standards-grid">
                 {% for blockId in topic.relatedBlocks %}
                     {% for block in blocks %}
@@ -91,7 +100,8 @@ eleventyComputed:
                     {% endfor %}
                 {% endfor %}
             </div>
-        </div>
+        {% endset -%}
+        {{ weCard("Related Blocks", _topicBlocksBody, "", "section-card mt-8") }}
         {% endif %}
     </div>
 </div>
