@@ -31,3 +31,5 @@
 - **[Agent Meta · Memory · Model Routing](index-meta.md)** — memory · agent · model routing · working style · context · orchestration (12 rules)
 - **[Exercise Apps · Configurator · Governance](index-app.md)** — exercise app · conformance loop · configurator · governance · personas (4 rules)
 - [Composition DX adoption gap](composition-dx-adoption-gap.md) — framework-parity composition is adoption-critical; per-case rubric = #1963; gap = stacked zero-DOM composition
+- [Shared pool lane unsafe for manual work](shared-pool-lane-unsafe-for-manual-work.md) — a peer /workflow refresh does reset --hard + clean -fd; use a dedicated clone outside .lanes/ + commit-push early
+- [Keep local main current after merge](keep-local-main-current-after-merge.md) — post-merge sync must be `git pull --ff-only --autostash`; dirty tree must never leave main behind (#2183)
