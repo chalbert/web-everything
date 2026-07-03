@@ -254,14 +254,20 @@ function runCli() {
     if (deferred.length && !AS_JSON) process.stderr.write(`  · ${deferred.length} deferred (blockedBy an unlanded PR): ${deferred.map((d) => `#${d.num}→[${d.waitOn.join(',')}]`).join(', ')}\n`);
   }
 
-  // Sync the LOCAL main checkout to the just-advanced origin/main (a merged PR moved origin, not local). Best-
-  // effort ff-only — a non-ff / dirty-tree collision aborts and is reported, never forced (never discards local
-  // work). Only when something actually merged.
+  // Sync the LOCAL main checkout to the just-advanced origin/main (a merged PR moved origin, not local) — local
+  // main is KEPT UP TO DATE after each merge (user request 2026-07-03). `--autostash` is what makes this
+  // reliable: under #2183 local main never diverges (edits land via PR, not direct commits), so the sync is a
+  // pure fast-forward — but the working tree is almost always dirty (session-state like `claims.json`, mid-edit
+  // docs), and a bare `pull --ff-only` aborts the ff the moment ANY incoming file is also locally-modified.
+  // `--autostash` sets the dirty edits aside, fast-forwards, then reapplies them — so main advances AND local
+  // edits are preserved. Still ff-only (never rebases/force — a genuine divergence aborts and is reported). The
+  // rare case where a reapplied edit overlaps an incoming change surfaces a normal stash-pop conflict for the
+  // human, rather than silently leaving main behind. Only when something actually merged.
   let localSynced = false;
   if (!DRY_RUN && merged.length) {
-    try { execFileSync('git', ['pull', '--ff-only'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); localSynced = true; }
+    try { execFileSync('git', ['pull', '--ff-only', '--autostash'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); localSynced = true; }
     catch { localSynced = false; }
-    if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ pulled local main to origin\n` : `  · local main NOT fast-forwarded (diverged / dirty tree) — pull it by hand\n`);
+    if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ local main fast-forwarded to origin (autostash preserved local edits)\n` : `  · local main NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`);
   }
 
   const result = { ok: true, dryRun: DRY_RUN, label, considered: verdicts.length, toMerge: toMerge.map((v) => v.num), merged, failed: failedMerges, deferred, localSynced, skipped: skipped.map((v) => ({ num: v.num, reason: v.reason })) };
