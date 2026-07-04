@@ -30,3 +30,5 @@ commitment-policy/**/*.js
 commitment-policy/**/*.d.ts
 .claude/lane-ports.json
 tests/visual/review/
+# Per-session runtime claim state (TTL'd, machine-local) — tooling recreates on demand (#952)
+.claude/skills/batch-backlog-items/claims.json
