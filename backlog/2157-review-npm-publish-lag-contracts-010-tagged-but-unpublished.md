@@ -1,8 +1,7 @@
 ---
 kind: task
 status: open
-blockedBy: ["2138", "2152"]
-relatedTo: ["907", "2156"]
+relatedTo: ["907", "2156", "2138", "2152"]
 humanGate: { kind: credential, what: "Publishing the tagged 0.1.0 requires a credentialed npm publish (workflow_dispatch of we:.github/workflows/publish-contracts.yml with NPM_TOKEN) AND main reliably green via the operating PR-lane merge flow — neither agent-executable. The auto-lock-on-merge reassessment can follow once the publish itself is unblocked." }
 dateOpened: "2026-07-02"
 tags: [npm, publishing, ci, release-please, pr-flow]
@@ -29,6 +28,14 @@ does not have the package. Review and clear this once the blocker lifts.
 shared, concurrently-edited `main`. **Blocked by the PR-lane merge flow fully delivering** (#2138 / #2152):
 once landing goes through PRs with required green CI + a merge queue, `main` can no longer sit red, and the
 gate stops blocking releases. Owner decided (2026-07-02) NOT to decouple the publish gate for now.
+
+**Review 2026-07-04 — the code blocker has LIFTED (stale `blockedBy` cleared).** #2138/#2152 are resolved and
+the PR-lane merge flow is the operating reality: `main` moves only through CI-gated PRs (reinforced by the
+#2203 strict lock + #2217 pre-push hook + #2216 green-reconcile drain landed this session), so `main` no longer
+sits red from unrelated debt and the whole-repo gate stops holding releases hostage. **The one remaining gate
+is the humanGate** — a credentialed `npm publish` of the already-tagged `0.1.0` (`workflow_dispatch` of
+`we:.github/workflows/publish-contracts.yml`, `dry-run=false`, with `NPM_TOKEN`), which is **not
+agent-executable**. So this stays `open` on the credential gate only, not on a backlog dependency.
 
 ## To do when unblocked
 
