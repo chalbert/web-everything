@@ -1,7 +1,11 @@
 ---
 kind: decision
-status: open
+status: resolved
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-04"
+dateResolved: "2026-07-04"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#pr-flow-rollout-mechanism"
 relatedTo: ["2123", "2138", "2187", "2191", "2200"]
 relatedReport: reports/2026-07-02-deferred-merge-queue-substrate.md
 preparedDate: "2026-07-04"
@@ -9,6 +13,32 @@ tags: [lane, isolation, prepare, claim, release, session-tooling, pr-flow, decis
 ---
 
 # Reconcile the claim / release / preparedDate lifecycle with lane isolation (solo `/prepare`, `/next`, `resolve`)
+
+## Ruling (ratified 2026-07-04)
+
+**Fork 1 (direction): (b) — every item-file frontmatter transition (`status` *and* `preparedDate`) is
+authored in the lane and lands in the one PR; nothing splices to the primary item file.** *Contract-forced:*
+the item-file `status` is git-tracked backlog content, which [#2191](../docs/agent/platform-decisions.md#pr-flow-rollout-mechanism)
+rules onto the lane→PR path — Option (a) (keep a primary status splice) is **REFUTED** (the CLI's guard-lane
+exemption is a property of the enforcement hook, not a licence in the rule; (a) reintroduces the
+[#primary-read-only-lanes-only](../docs/agent/platform-decisions.md#primary-read-only-lanes-only) divergence).
+
+**Sub-fork (concurrency): (b-strong / c) — re-home the dropped `open→preparing` guarantee into a strengthened
+*local* prepare-hold token that HARD-excludes** (the #2138-Fork-4 queued-token shape: selection skips it +
+`claim` refuses it, offline per Rule #105, lease longer than a real prepare; owned by a small lane-run CLI
+verb). The bare `reserve` soft-hold (b-plain) is the **named fallback / interim** only — its thin-pool,
+TTL-expiry, and cross-clone double-prepare gaps are real, not hand-waved.
+
+**Skeptic (fresh-context, ratification pass): SURVIVES.** Could reconstruct no Option (a) that survives #2191;
+verified the guarantee swap is real (`open→preparing` is a **hard selection-exclusion** at
+[we:scripts/readiness/engine.mjs:65](../scripts/readiness/engine.mjs#L65)/`:176`, whereas `reserve` only
+*deprioritizes* and `claim` *clears* the reservation) — all four code citations confirmed correct; the three
+`prepare-*` verbs correctly do not exist yet (the build arm).
+
+**Codified:** rider in [we:platform-decisions.md#pr-flow-rollout-mechanism](../docs/agent/platform-decisions.md#pr-flow-rollout-mechanism)
+(anchored on #2123's defer-clause + #2138 Fork 4). **Build arm:** [#2264](2264-implement-the-b-strong-prepare-hold-local-token-lane-run-pre.md)
+(the `prepare-hold`/`prepare-stamp`/`prepare-release` verbs + guard-lane carve + the three skills' close-out
+prose rewrite). Until #2264 ships, `/prepare` runs the weaker (b-plain) `reserve` hold as the interim.
 
 **Residual of [#2123](/backlog/2123-should-a-solo-session-non-workflow-also-run-in-an-isolated-w/)** (ratified
 2026-07-02: *every* edit-action session — solo `/prepare`, `/next`, `resolve`, `/workflow` alike — runs in an

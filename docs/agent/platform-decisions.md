@@ -2562,6 +2562,35 @@ fan-out, drop partition), **#2190** (per-path routing for `/next` / serial `/bat
 (/merge↔drain label-lander convergence), **#2187** (decision preview lane). Reshapes #104
 (commit-on-current-branch → lane-clone-HEAD; `main` advances only via PR merge).
 
+**Rider — the solo frontmatter lifecycle rides the lane→PR; the prepare-window lock re-homes to a
+hard-excluding local token (#2219, ratified 2026-07-04).** Residual of #2123: that ruling laned the solo
+skills' *work* but left their **frontmatter lifecycle** straddling two trees — `/prepare`'s `claim`/`release`
+status splice ran on the **primary** tree via the guard-exempt CLI, while the body + `preparedDate` could only
+land via the **lane PR**. **Ruling (Fork 1, direction): every item-file frontmatter transition — `status` *and*
+`preparedDate` — is authored in the lane and lands in the one PR; nothing splices to the primary item file.**
+The item stays `open` on `main` through the prepare window and flips to `open + preparedDate` (= "✓ ready to
+ratify") atomically when the PR lands — the same net-state shape #2138 Fork 4 ratified for the batch
+`active→resolved` case, lifted to the solo `open→preparing→open` / `preparedDate` case. **Option (a) — keep a
+primary-tree status splice — is REFUTED:** the item-file `status` is git-tracked backlog content, which #2191
+rules onto the lane→PR path ("never widens to … backlog edits"); the CLI's `guard-lane` exemption is a property
+of the enforcement hook, **not** a licence in the rule, and (a) reintroduces the primary↔`main` divergence
+[#primary-read-only-lanes-only](#primary-read-only-lanes-only) forbids. **Ruling (sub-fork, concurrency):**
+dropping the `open→preparing` splice removes a **hard selection-exclusion** (`we:scripts/readiness/engine.mjs`
+filters selection to `status==='open'`), not a cosmetic board-state — and no existing local signal replaces it
+(`claim` *clears* the reservation; a `reserve` hold only *deprioritizes*, TTL 120 min, local-only). So the
+guarantee is **re-homed into a strengthened *local* prepare-hold token that HARD-excludes** — the
+#2138-Fork-4 queued-token shape (selection skips it + `claim` refuses it, read offline per Rule #105) with a
+lease longer than a real prepare, owned by a small **lane-run CLI verb** (`prepare-hold`/`prepare-stamp`/
+`prepare-release`). The bare `reserve` soft-hold is the **named fallback / interim** only (its thin-pool,
+TTL-expiry, and cross-clone double-prepare gaps are real, not hand-waved). **Downstream (forced):** the
+`/prepare`, `/next-backlog-item`, `/resolve` close-out prose is rewritten to the (b) flow — *hard local
+prepare-hold → provision/enter lane → author body + research + `status`/`preparedDate` in-lane → land the one
+PR → release the hold*; the item-file `status` splice drops. Anchored on **#2123's defer-clause** (which hands
+the claim-locus mechanics to this line) + **#2138 Fork 4** (the queued-token precedent); #2191's carve-out is
+the general backlog-edit-scope authority. **Build arm:** #2264 (the three verbs + the `guard-lane` carve + the
+close-out rewrites) — the (b-plain) fallback runs as the interim until it ships. Same lifecycle applies,
+weaker-form, to solo `/next` (`resolve`). Report `we:reports/2026-07-02-deferred-merge-queue-substrate.md`.
+
 ---
 
 ### Behaviour/event attribute *names* are colon-namespaced — a collision-safe internal authoring spelling, not the platform-shaped standard proposal {#attribute-name-colon-namespacing}
