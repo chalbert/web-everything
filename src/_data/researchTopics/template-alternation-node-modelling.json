@@ -1,0 +1,25 @@
+{
+  "id": "template-alternation-node-modelling",
+  "title": "Template alternation node modelling — how mainstream engines represent the mid-region marker (else / elif / :else / @else): named body programs, not a mid scalar or a nested region",
+  "status": "open",
+  "summary": "Prep research for decision #2201 (the mid-region-marker gap confirmed by the #2094 delimiter-bundle program — Handlebars {{else}} #2114, Liquid/Jinja {% else %}/{% elsif %} #2115, Svelte {:else}/{:else if} #2118). The question: how should the #2074 customNodes recipe model express the MID-region marker that divides a {{#if}}…{{else}}…{{/if}} region into an if-body and an else-body — an axis the model has today for open ({{#if}}) and close ({{/if}}) but NOT for the mid-marker. CODE GROUND TRUTH: a region recipe materializes onto a SINGLE <template> host whose .content holds the whole region body (fui:plugs/webnodes/recipes/RegionNode.ts:66), carved by a BINARY open<->name-echo-close match-stack (fui:plugs/webnodes/CustomNodeRegistry.ts:670,714) — there is no third in-region token and no way to split .content into labelled sub-fragments, so a {{else}} in the body lands as inert literal text. The IDL axes are static open/close/value/children/regionName/regionClose (we:src/_includes/spec-descriptions/plugs/customnoderegistry.njk:85-97; we:docs/agent/block-standard.md:578-584) — children is a scalar enum of body-scan modes, not a segment map. SURVEY of primary AST sources: the mainstream is overwhelmingly ONE model — the block node carries MULTIPLE NAMED BODY PROGRAMS, and the mid-marker is a parse-time delimiter that partitions statements into them, never itself a node or a field. Handlebars BlockStatement = program (if-body) + inverse (else-body); {{else}} populates inverse, {{else if}} nests a BlockStatement inside inverse (handlebars docs/compiler-api.md). Svelte 5 IfBlock = consequent + alternate (Fragment|null) + elseif flag (svelte compiler/types/template.d.ts). Jinja2 class If = fields (test, body, elif_, else_) with elif_ a list of If (jinja2/nodes.py). Nunjucks If = fields [cond, body, else_] (nunjucks/src/nodes.js). estree IfStatement = consequent + alternate (estree/es5.md). Even HTML named slots (<slot name>) are the same one-host-many-labelled-regions shape. The ONLY divergences: Liquid flattens if/elsif/else into a homogeneous @blocks list of Condition objects (else = an ElseCondition sibling); Mustache has NO else (its negative branch is a physically separate inverted section {{^}}…{{/}}). CRUCIAL NEGATIVE RESULT: NO surveyed engine models the mid-marker as (a) a scalar 'mid' field on the block node, or (b) a degenerate nested {{#else}}…{{/else}} region — both have ZERO prior art, which are exactly #2201's original Fork 1 and Fork 2. FEEDS #2201: the canonical named-body-programs model is a FOURTH option the card's original three miss — the region exposes programs:{main,inverse} (or {body,else}) rather than a single .content, and {{else if}} chains recursively (trailing program holds a nested block of the same kind), exactly as Handlebars inverse / Svelte alternate / Jinja else_ / estree alternate all do. Grounds the recommendation that PARKING is no longer justified: the Handlebars program/inverse model is THE canonical answer, and the parking precondition ('two more bundles confirm the gap') is already met — #2115 and #2118 are both RESOLVED (2026-07-03) and both scored the same gap across three grammars.",
+  "dateOpened": "2026-07-04",
+  "lastReviewed": "2026-07-04",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "custom-nodes",
+    "delimiter-grammar",
+    "mid-region-marker",
+    "alternation",
+    "region",
+    "handlebars",
+    "svelte",
+    "jinja",
+    "webexpressions",
+    "webdirectives",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": ["webexpressions", "webdirectives"],
+  "relatedProject": "webdirectives"
+}
