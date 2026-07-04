@@ -31,11 +31,12 @@ describe('close-out carve-out rider (#2191) in pr-flow-rollout-mechanism', () =>
     expect(section).toMatch(/lane→PR/);
   });
 
-  it('names the session-meta carve-out (agent-memory + claims.json-class local signals) and scopes it tightly', () => {
-    expect(section).toMatch(/agent-memory/i);
-    expect(section).toMatch(/claims\.json/);
-    expect(section).toMatch(/carve-out/i);
-    // the carve-out must NOT widen to source/content/backlog edits
-    expect(section).toMatch(/never widens to source\/content\/backlog edits|memory \+ local\s*signals only/i);
+  it('scopes the sanctioned-direct carve-out to local signals ONLY; memory content rides a lane→PR', () => {
+    // agent-memory content is NOT the carve-out — it lands via lane→PR (matches the closing-session skill).
+    expect(section).toMatch(/agent-memory[\s\S]{0,80}lane→PR/i);
+    expect(section).toMatch(/carve-out is\s+`claims\.json`-class \*local signals\* ONLY/i);
+    // the carve-out must NOT widen beyond local signals
+    expect(section).toMatch(/local signals only/i);
+    expect(section).toMatch(/never widens to memory content,\s+source,\s+content,\s+or backlog/i);
   });
 });
