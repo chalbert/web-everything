@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -160,6 +160,29 @@ describe('merge-ai-prs — parseWatchOpts (#2194 /drain watch)', () => {
   it('max-idle=0 is honoured (exit on the first idle pass), a bad value → unbounded', () => {
     expect(parseWatchOpts({ watch: true, maxIdle: '0' }).maxIdle).toBe(0);
     expect(parseWatchOpts({ watch: true, maxIdle: 'x' }).maxIdle).toBe(null);
+  });
+});
+
+describe('shouldLabelOnGreen (#2216 — post-CI reconcile labels a stranded green PR)', () => {
+  const labelled = (extra = {}) => aiPr({ labels: [{ name: 'ready-to-merge' }], ...extra });
+  it('green + AI-generated + UNLABELLED → label it (the label-on-green timeout stranded it)', () => {
+    expect(shouldLabelOnGreen(aiPr(), {})).toBe(true);
+  });
+  it('already carries the label → do NOT re-label', () => {
+    expect(shouldLabelOnGreen(labelled(), {})).toBe(false);
+  });
+  it('a human orphan (a commit lacks the Claude trailer) → never labelled', () => {
+    expect(shouldLabelOnGreen(aiPr({ commits: [claudeCommit(), humanCommit] }), {})).toBe(false);
+  });
+  it('required check not green (still pending/red) → not yet', () => {
+    expect(shouldLabelOnGreen(aiPr({ statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }] }), {})).toBe(false);
+    expect(shouldLabelOnGreen(aiPr({ statusCheckRollup: [] }), {})).toBe(false);
+  });
+  it('no label configured → no-op', () => {
+    expect(shouldLabelOnGreen(aiPr(), { label: null })).toBe(false);
+  });
+  it('BEHIND-but-green is still labelled (mergeability is the drain\'s rebase-drop job, not the label gate)', () => {
+    expect(shouldLabelOnGreen(aiPr({ mergeStateStatus: 'BEHIND', mergeable: 'UNKNOWN' }), {})).toBe(true);
   });
 });
 

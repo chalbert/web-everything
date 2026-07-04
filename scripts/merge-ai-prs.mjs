@@ -228,6 +228,17 @@ export function parseWatchOpts({ watch, interval, maxIdle } = {}) {
   return { watch: on, intervalSec: iv, maxIdle: mi };
 }
 
+/** #2216 — should this OPEN PR be labelled now because its required check went green? Pure. Closes the lane-
+ *  closure liveness gap: `pr-land --label-on-green` labels only if CI beats its `--timeout-min` wait; on a
+ *  timeout the PR is left green-eventually-but-UNLABELLED and stranded. A post-CI reconcile pass labels it the
+ *  moment the required check is green — no human step. Only the PRODUCER'S OWN work (AI-generated) is labelled,
+ *  never a human orphan, and never a PR that already carries the label. */
+export function shouldLabelOnGreen(pr, { requiredCheck = 'test', label = 'ready-to-merge' } = {}) {
+  if (!label || hasLabel(pr, label)) return false;    // already labelled (or no label configured) → nothing to do
+  if (!isAiGeneratedPr(pr)) return false;             // only the producer's own AI PRs — never a human orphan
+  return isRequiredCheckGreen(pr, requiredCheck);     // label the instant the required check is green
+}
+
 /** #2230 — should a `--label`-scoped ONE-SHOT drain re-poll once before concluding the queue is empty? GitHub's
  *  `gh pr list --label` index lags the `gh pr edit --add-label` write by a few seconds, so a drain fired
  *  immediately after a producer labels can read the just-labelled PR as ABSENT ("0 to merge") and strand it.
@@ -270,6 +281,11 @@ function runCli() {
   // #2230 — re-poll the label-scoped one-shot once to absorb the `ready-to-merge` index-propagation lag.
   const EXPECT = flags.expect != null && Number.isFinite(Number(flags.expect)) ? Number(flags.expect) : null;
   const REPOLL_SEC = Number.isFinite(Number(flags['repoll-delay'])) && Number(flags['repoll-delay']) >= 0 ? Number(flags['repoll-delay']) : 4;
+  // #2216 — before a label-scoped sweep, LABEL any green-but-unlabelled producer PR (a `pr-land --label-on-green`
+  // that timed out left it stranded). ON by default for the label-scoped drain (it IS the reconcile point);
+  // `--no-reconcile-labels` disables. Under `--watch` this re-labels each interval — the label applies the
+  // moment CI goes green, with no human step.
+  const RECONCILE = label && !flags['no-reconcile-labels'];
 
   const fail = (reason, detail, code) => {
     if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, reason, detail }) + '\n');
@@ -293,9 +309,32 @@ function runCli() {
     return null;
   };
 
-  // ── ONE sweep pass — list → classify → cascade-merge → sync. Returns the pass result (no emit/exit), so the
-  // watch loop can call it repeatedly. A gh-list failure still hard-fails (bad env, not a transient PR state).
+  // #2216 — POST-CI LABEL RECONCILE. Before the labelled sweep, label any green-but-unlabelled producer PR that
+  // a `pr-land --label-on-green` timeout left stranded. Lists open PRs unfiltered by label, filters to the cheap
+  // signals (unlabelled + required check green), confirms producer authorship per-candidate (commits), then adds
+  // the label. Best-effort — a gh miss never fails the drain. Returns the labelled PR numbers.
+  const reconcileGreenLabels = () => {
+    if (!RECONCILE) return [];
+    let open;
+    try { open = JSON.parse(execFileSync('gh', ['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,title,labels,statusCheckRollup'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '[]'); }
+    catch { return []; } // reconcile is best-effort; the real sweep below still hard-fails on a bad env
+    const cheap = open.filter((p) => !hasLabel(p, label) && isRequiredCheckGreen(p, REQUIRED)); // green + unlabelled
+    const labelled = [];
+    for (const p of cheap) {
+      let commits = [];
+      try { commits = JSON.parse(execFileSync('gh', ['pr', 'view', String(p.number), '--json', 'commits'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').commits || []; } catch { continue; }
+      if (!shouldLabelOnGreen({ ...p, commits }, { requiredCheck: REQUIRED, label })) continue;
+      if (DRY_RUN) { labelled.push(p.number); if (!AS_JSON) process.stderr.write(`  🏷 #${p.number} would label "${label}" (required check green, was unlabelled)\n`); continue; }
+      try { execFileSync('gh', ['pr', 'edit', String(p.number), '--add-label', label], { stdio: ['ignore', 'ignore', 'pipe'] }); labelled.push(p.number); if (!AS_JSON) process.stderr.write(`  🏷 #${p.number} labelled "${label}" (post-CI reconcile — required check went green after a label-on-green timeout)\n`); }
+      catch { /* a label race/permission miss is non-fatal — the next pass retries */ }
+    }
+    return labelled;
+  };
+
+  // ── ONE sweep pass — reconcile labels → list → classify → cascade-merge → sync. Returns the pass result (no
+  // emit/exit), so the watch loop can call it repeatedly. A gh-list failure still hard-fails (bad env).
   const sweepOnce = () => {
+  const reconciledLabels = reconcileGreenLabels(); // #2216 — label green-but-unlabelled producer PRs first
   // List open PRs WITHOUT commits (commits×authors×limit overflows GitHub's GraphQL node cap), then fetch each
   // candidate's commits per-PR — the rollup + mergeable come from the list; commits (the AI gate) come per PR.
   const listArgs = ['pr', 'list', '--state', 'open', '--limit', '100',
@@ -426,7 +465,7 @@ function runCli() {
     if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ local main fast-forwarded to origin (autostash preserved local edits)\n` : `  · local main NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`);
   }
 
-  const result = { ok: true, dryRun: DRY_RUN, label, considered: verdicts.length, toMerge: toMerge.map((v) => v.num), merged, failed: failedMerges, rebased, pendingRebased, deferred, localSynced, skipped: skipped.map((v) => ({ num: v.num, reason: v.reason })) };
+  const result = { ok: true, dryRun: DRY_RUN, label, considered: verdicts.length, toMerge: toMerge.map((v) => v.num), merged, failed: failedMerges, rebased, pendingRebased, deferred, localSynced, reconciledLabels, skipped: skipped.map((v) => ({ num: v.num, reason: v.reason })) };
   return { result, merged, failedMerges, pendingRebased, deferred };
   }; // end sweepOnce
 
