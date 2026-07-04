@@ -10,6 +10,11 @@ in *[exercise-app-workflow.md](../../../docs/agent/exercise-app-workflow.md) →
 acting. North star: WE is the deliverable, the app is a forcing function — when app progress and platform
 progress conflict, platform wins.
 
+> **Runs in a lane — set it up FIRST (#2123).** Driving the app edits the tree (WE + app code), so work in
+> an **isolated lane clone**, never the shared primary checkout (`we:scripts/guard-lane.mjs` blocks a
+> primary `Edit` otherwise): `node we:scripts/lane-pool.mjs status --json` → pick a clean lane → work there
+> → land via PR. Full rule: *backlog-workflow.md → Working an item*.
+
 ## Step 0 — first turn on an app: scaffold the epic (the #317 shape)
 
 If the target app is still a child story of #314 (not yet `workItem: epic`), scaffold it first per

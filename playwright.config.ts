@@ -16,6 +16,13 @@ const VITE_PORT = Number(process.env.WE_VITE_PORT) || 3000;
 // the deterministic lane without a build-then-serve step (the live lanes CI-home under #800).
 const INTERACTION_ONLY = !!process.env.WE_INTERACTION_ONLY;
 
+// When set (the CI `visual` job, #2221), the docs site is ALREADY built and served externally on
+// WE_ELEVENTY_PORT (:8080) — so skip booting the Vite :3000 dev server below. The visual specs pin their
+// baseURL to :8080 (tests/visual/*.spec.ts) and never touch :3000, so `npm run dev` is dead weight; worse,
+// in CI it never binds :3000 within the 120s timeout and fails the whole job. Same webServer[0] skip as
+// INTERACTION_ONLY, named for the prebuilt-and-externally-served case.
+const PREBUILT_SITE = !!process.env.WE_PREBUILT_SITE;
+
 export default defineConfig({
   testDir: './',
   testMatch: [
@@ -47,7 +54,7 @@ export default defineConfig({
     // The app dev server (Vite :3000 + 11ty :8080) the live-server specs (a11y, content) hit.
     // Skipped in the interaction-only CI mode (WE_INTERACTION_ONLY) — that lane needs only the fixture
     // server below, so booting the app build would be dead weight (and not CI-safe without #800's build step).
-    ...(INTERACTION_ONLY
+    ...(INTERACTION_ONLY || PREBUILT_SITE
       ? []
       : [
           {

@@ -447,11 +447,11 @@ function runCli() {
     // Sync to post-merge main so we regenerate against the LANDED tree (same tree the drain regen targets).
     // Skip if dirty — a dirty tree means we'd be generating against uncommitted input, which is wrong.
     const dirty = tryGit(['status', '--porcelain']);
-    if (dirty && dirty.trim()) return { warning: `skipped derived-artifact regen — the checkout at ${REPO} has local changes; run npm run gen:inventory && npm run gen:reference-index on ${BASE} by hand` };
+    if (dirty && dirty.trim()) return { done: [], failed: [], warning: `skipped derived-artifact regen — the checkout at ${REPO} has local changes; run npm run gen:inventory && npm run gen:reference-index on ${BASE} by hand` };
     try {
       gitC(['fetch', REMOTE, BASE, '--quiet']);
       gitC(['checkout', '--detach', `${REMOTE}/${BASE}`]);
-    } catch (e) { return { warning: `skipped derived-artifact regen — could not sync to ${REMOTE}/${BASE} (${firstLine(e)})` }; }
+    } catch (e) { return { done: [], failed: [], warning: `skipped derived-artifact regen — could not sync to ${REMOTE}/${BASE} (${firstLine(e)})` }; }
     const done = [];
     const failed = [];
     for (const [cmd, ...args] of buildRegenArgs()) {
