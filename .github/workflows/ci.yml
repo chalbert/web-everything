@@ -112,6 +112,14 @@ jobs:
   # linux baselines via `workflow_dispatch` on `.github/workflows/update-visual-baselines.yml` after
   # an intentional look change (same discipline as `npm run check:visual:update` locally).
   visual:
+    # DISABLED (#2232) pending the visual-regression rebuild epic. The gate has no committed
+    # -chromium-linux baselines to compare against (they could never be seeded — the refresh workflow
+    # hit the same :3000 timeout, and the #2179 verdict gate blocks a first-time seed), so it is
+    # permanently red. A permanently-red *unrequired* job is pure noise that trains everyone to ignore CI
+    # (it masked the #2184 breakage for ~6h). Turned off until the rebuild lands; the final slice #2240
+    # re-enables it (and promotes it to a required, watched check). Do NOT flip this back on ad hoc —
+    # re-enabling is gated on #2240's readiness (container-pinned baselines + PR-based refresh).
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       # Same sibling layout as deploy.yml — WE's build shells out to FUI's component-render CLI.
