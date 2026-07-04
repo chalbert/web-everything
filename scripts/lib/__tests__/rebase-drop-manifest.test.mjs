@@ -86,9 +86,10 @@ describe('rebaseDropManifest', () => {
     expect(r.action).toBe('rebased');
     expect(r.dropped).toBe(true);
     expect(r.newCommit).toBe('newCommitSha'.padEnd(40, '0'));
-    // commit-tree makes base the FIRST parent (so GitHub sees the branch up-to-date).
+    // commit-tree makes base the FIRST parent (so GitHub sees the branch up-to-date); the second parent is the
+    // RESOLVED remote-tracking ref (#2231 — the bare `lane/x-2198` does not resolve in a fresh clone).
     const ct = calls.find((c) => c.args[0] === 'commit-tree');
-    expect(ct.args).toEqual(['commit-tree', 'resolvedTree'.padEnd(40, '0'), '-p', 'origin/main', '-p', 'lane/x-2198', '-m', expect.any(String)]);
+    expect(ct.args).toEqual(['commit-tree', 'resolvedTree'.padEnd(40, '0'), '-p', 'origin/main', '-p', 'origin/lane/x-2198', '-m', expect.any(String)]);
     // the manifest is dropped from a TEMP index (GIT_INDEX_FILE set), never the working tree.
     const rm = calls.find((c) => c.args[0] === 'rm');
     expect(rm.args).toEqual(['rm', '--cached', '--ignore-unmatch', LANE_MANIFEST]);
@@ -132,5 +133,47 @@ describe('rebaseDropManifest', () => {
 
   it('no laneRef → error', () => {
     expect(rebaseDropManifest({ run: () => ({ status: 0, stdout: '' }) }).action).toBe('error');
+  });
+
+  // #2231 — in a fresh clone the lane branch is only the remote-tracking ref `origin/<laneRef>`; the bare name
+  // does not resolve. The merge INPUTS (merge-tree, commit-tree) must read the resolved ref; the PUSH stays bare.
+  it('feeds the RESOLVED remote-tracking ref to merge-tree/commit-tree, pushes to the BARE lane ref', () => {
+    const { run, calls } = scriptedRun({ ...MERGE_TREE_CLEAN, ...RESOLVED_PLUMBING });
+    const r = rebaseDropManifest({ laneRef: 'lane/x-2231', run });
+    expect(r.action).toBe('rebased');
+    // merge-tree reads origin/lane/x-2231, NOT the bare lane/x-2231.
+    const mt = calls.find((c) => c.args[0] === 'merge-tree');
+    expect(mt.args).toEqual(['merge-tree', '--write-tree', 'origin/main', 'origin/lane/x-2231']);
+    // commit-tree's second parent is likewise the resolved ref.
+    const ct = calls.find((c) => c.args[0] === 'commit-tree');
+    expect(ct.args[5]).toBe('origin/lane/x-2231');
+    // but the push target is the BARE ref (that half was always correct).
+    const push = calls.find((c) => c.args[0] === 'push');
+    expect(push.args[2]).toMatch(/:refs\/heads\/lane\/x-2231$/);
+  });
+
+  it('fetches the lane ref before reading it (so the remote-tracking ref is current in a fresh clone)', () => {
+    const { run, calls } = scriptedRun({ ...MERGE_TREE_CLEAN, ...RESOLVED_PLUMBING });
+    rebaseDropManifest({ laneRef: 'lane/x-2231', run });
+    const fetch = calls.find((c) => c.args[0] === 'fetch');
+    expect(fetch.args).toEqual(['fetch', 'origin', 'lane/x-2231']);
+    // fetch happens BEFORE the merge-tree read.
+    expect(calls.findIndex((c) => c.args[0] === 'fetch')).toBeLessThan(calls.findIndex((c) => c.args[0] === 'merge-tree'));
+  });
+
+  it('a failed fetch → error, no merge-tree/push (the lane ref never resolved)', () => {
+    const { run, calls } = scriptedRun({ fetch: { status: 1, stderr: 'fatal: couldn’t find remote ref' }, ...MERGE_TREE_CLEAN, ...RESOLVED_PLUMBING });
+    const r = rebaseDropManifest({ laneRef: 'lane/x-gone', run });
+    expect(r.action).toBe('error');
+    expect(r.reason).toMatch(/fetch/);
+    expect(calls.some((c) => c.args[0] === 'merge-tree')).toBe(false);
+    expect(calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+
+  it('fetch:false skips the fetch (caller already fetched) but still reads the resolved ref', () => {
+    const { run, calls } = scriptedRun({ ...MERGE_TREE_CLEAN, ...RESOLVED_PLUMBING });
+    rebaseDropManifest({ laneRef: 'lane/x-2231', fetch: false, run });
+    expect(calls.some((c) => c.args[0] === 'fetch')).toBe(false);
+    expect(calls.find((c) => c.args[0] === 'merge-tree').args[3]).toBe('origin/lane/x-2231');
   });
 });
