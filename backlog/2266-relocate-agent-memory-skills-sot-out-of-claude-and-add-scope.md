@@ -1,17 +1,23 @@
 ---
 kind: story
 size: 8
-status: open
+status: active
 locus: webeverything
 blockedBy: ["2265"]
 relatedReport: reports/2026-07-04-memory-skills-sot-relocation.md
 dateOpened: "2026-07-04"
+dateStarted: "2026-07-04"
 tags: [permissions, agent-ergonomics, memory, skills, tooling]
 ---
 
 # Relocate agent-memory + skills SoT out of .claude and add scoped redirect hook
 
 Implements the #2265 GO ruling (strong form): physically move agent-memory and skills SoT out of .claude to out-of-.claude dirs with back-compat symlinks, add the precisely-scoped personal home redirect hook that rewrites only those two path prefixes, widen we:scripts/guard-lane.mjs:56 to recognise the new memory path (self-deny fix), fix the ~4 realpath/string-test scripts + ~14 skill-state-dir refs, and re-anchor the statute (we:docs/agent/platform-decisions.md:2488/:2396/:56) as a physical-path-move-only change. Net effect: memory/skills edits auto-approve past the .claude permission gate while every other write stays gated — the scoped-safety posture self-improving loops need instead of a global permission bypass flag.
+
+## Progress
+- **Status:** memory slice done in-lane (lane-3), landing as PR #1; skills slice + machine-local hook pending.
+- **Done (memory, this PR):** `git mv .claude/agent-memory → agent-memory-src` (209 files, history preserved) + back-compat symlink at the old path; widened `we:scripts/guard-lane.mjs:56` to exempt `agent-memory-src` (self-deny fix); re-anchored the statute `we:docs/agent/platform-decisions.md:2488` (+ `:2396` rule-file citation) to `agent-memory-src/**` with the #2265 physical-move-only clause (lane→PR + never-widens unchanged; permission auto-approve ≠ new carve-out). Reads resolve through the symlink — no other script needed changing (the ~4-script "blast radius" #2265 projected was reads-through-symlink, not realpath tests; only guard-lane:56 was a realpath test). `check:standards` 0 errors, `check:memory` green.
+- **Next:** (1) add the scoped `~/.claude` redirect hook (machine-local, with backup) rewriting the memory prefix; (2) skills slice as a second PR — relocate `.claude/skills → skills-src` + symlink, fix any realpath-then-string-test refs, extend the hook with the skills prefix; then resolve the story.
 
 ## Tasks
 1. **Relocate the real files** — move `we:.claude/agent-memory/**` → `we:agent-memory-src/**` and

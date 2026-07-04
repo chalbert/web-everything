@@ -53,7 +53,12 @@ try {
   // Agent-memory tree is exempt (restores the guard's stated intent that ~/.claude memory is free to edit —
   // the per-project memory dir is symlinked INTO <repo>/.claude/agent-memory, which would otherwise classify
   // as primary). Memory is low-collision, frequently-updated, and not lane-isolated work (user directive 2026-07-03).
-  const inAgentMemory = real.includes(`${path.sep}.claude${path.sep}agent-memory${path.sep}`);
+  // #2266 relocated the SoT out of `.claude` to `<repo>/agent-memory-src/` (a back-compat symlink stays at the
+  // old `.claude/agent-memory` path). The gate keys on REALPATH, so a memory edit now resolves to
+  // `agent-memory-src/…` — match BOTH the new real path and the legacy `.claude/agent-memory` (still valid via
+  // the symlink) so the exemption doesn't self-deny the very interactive memory edit it exists to permit.
+  const inAgentMemory = real.includes(`${path.sep}.claude${path.sep}agent-memory${path.sep}`)
+                     || real.includes(`${path.sep}agent-memory-src${path.sep}`);
   const inPrimary = primaries.some((p) => (real + path.sep).startsWith(p));
 
   if (inPrimary && !inLane && !inAgentMemory) {

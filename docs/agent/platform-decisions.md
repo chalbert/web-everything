@@ -2393,7 +2393,8 @@ files). It is a **forced** invariant, not one option: the alternatives (a sessio
 commit-before-closeout discipline) both require cooperation the colliding **stranger** session cannot be made
 to give, so "act only on your own manifest" is the only no-bad-actor-needed mechanism. Practised by the scoped
 close-out gate in [backlog-workflow.md](backlog-workflow.md) (*Closing out a completed item* / pre-flight) and
-the durable rule `we:.claude/agent-memory/closeout-never-infers-ownership-from-dirty-tree.md`.
+the durable rule `we:agent-memory-src/closeout-never-infers-ownership-from-dirty-tree.md` (SoT relocated out of
+`.claude/` by #2266; a back-compat symlink at `we:.claude/agent-memory/` still resolves the old spelling).
 
 **(Rung 2 — operating-model direction) Writers collaborate through the remote in a PR-flow.** The
 constellation's writers — **agent *and* human sessions, not just `/workflow` parallel batches** — target
@@ -2485,13 +2486,21 @@ lane→PR during the session**, so a session's close-out must not re-open a dire
   the **lane→PR** helper (`we:scripts/pr-land.mjs`), never a `git commit` on `main`. The serial `/batch` and
   `/workflow` producers already close this way (they land as open ready-to-merge PRs and touch no `main`).
 - **Agent-memory *content* rides a lane→PR — it is not the carve-out.** Substantive **agent-memory** writes
-  (`we:.claude/agent-memory/**`) are durable content, so under the lane machinery they **land via a lane→PR**
+  (`we:agent-memory-src/**` — the SoT #2266 physically relocated out of `.claude/`; a back-compat symlink
+  remains at `we:.claude/agent-memory/`, so either spelling names the same durable content) are durable content,
+  so under the lane machinery they **land via a lane→PR**
   (each candidate red-teamed first; the survivors ride the one PR the close opens) — never an agent
   direct-`main` commit. **The sanctioned-direct carve-out is `claims.json`-class *local signals* ONLY**
   (`claims.json`/`queued.json`/`reservations.json`): these are session bookkeeping the #2138-Fork-4 rider
   already treats as a direct *local* signal (read offline, Rule #105), written to disk for the local checkout
   and never pushed. The carve-out is **local signals only**; it never widens to memory content, source, content,
   or backlog edits (all of which take the lane→PR path).
+  **(#2266 re-anchor.)** Relocating this SoT out of `.claude/` is a **physical path move only**: the
+  lane→PR-only landing rule and the "never widens" carve-out above are **unchanged** and now attach to
+  `we:agent-memory-src/**` (they do **not** grow a back-door direct-`main` path for the new spelling).
+  Auto-approving the VS Code `.claude` permission prompt (via the personal redirect hook #2266 adds) is a
+  **permission-gate event, not a landing-path change** — the write still lands in the working tree and lane→PR
+  still governs how it reaches `main`, so it creates **no** new sanctioned-direct carve-out.
 - **No other close-out path direct-commits edit work.** `/batch` close, `calibrate`, and the cost-on-card splice
   either fold into an already-PR'd lane commit or are session-meta under this carve-out. The `check:health` /
   closeout audit reports any residual uncommitted edit work for awareness — it does not auto-commit it to `main`.
