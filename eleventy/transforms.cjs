@@ -2,7 +2,8 @@
 // Fragment of .eleventy.js (#2184). Transforms and lifecycle hooks; order within this file
 // is immaterial — each is registered by a unique name or event type.
 
-const { spliceDataTables, spliceComponentsBatch } = require("../scripts/lib/component-render-build-hook.cjs");
+const { spliceDataTables } = require("../scripts/lib/data-table-build-hook.cjs");
+const { spliceComponentsBatch } = require("../scripts/lib/component-render-build-hook.cjs");
 
 /**
  * Register all transforms and lifecycle hooks on the given eleventyConfig.
