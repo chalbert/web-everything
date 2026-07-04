@@ -1217,10 +1217,11 @@ const allCompileFiles = COMPILE_ROOTS.flatMap((r) => walk(r));
 try {
   const SRC = join(ROOT, 'src');
   const viteCfg = readFileSync(join(ROOT, 'vite.config.mts'), 'utf8');
-  // Proxy keys are the only quoted, path-like object keys followed by `: {` (resolve aliases map to
-  // string values, not blocks; plugins are calls) — collect them as the authoritative set of routes
-  // Vite forwards to 8080.
-  const proxyKeys = [...viteCfg.matchAll(/^\s*(['"])(\^?\/[^'"]*)\1\s*:\s*\{/gm)].map((m) => m[2]).join(' ');
+  // Proxy keys are the only quoted, path-like object keys whose value is a proxy entry — either an
+  // inline `: {` block or the shared `: proxyToEleventy(` helper that DRYs the Eleventy-forwarded
+  // entries. (resolve aliases map to string values, not entries; other plugins aren't quoted path
+  // keys.) Collect them as the authoritative set of routes Vite forwards to 8080.
+  const proxyKeys = [...viteCfg.matchAll(/^\s*(['"])(\^?\/[^'"]*)\1\s*:\s*(?:\{|proxyToEleventy\()/gm)].map((m) => m[2]).join(' ');
   const needed = new Map(); // top-level segment → example njk file that produces it
   for (const f of readdirSync(SRC).filter((n) => n.endsWith('.njk'))) {
     if (f === 'index.njk') continue; // root, served by the `^/(index\.html)?$` rule
