@@ -144,6 +144,31 @@ describe('planRenumber', () => {
     expect(plan.deletes).toEqual([]);
   });
 
+  it('RESUME-LAND (#2213): the incoming lane file yields even when it is OLDER than the published main file', () => {
+    // The lane authored #2191 FIRST (lower ordinal) but lands LAST; the epic closeout already published a
+    // DIFFERENT #2191 on main (higher ordinal). The ordinal heuristic alone would wrongly yield the published
+    // (higher-ordinal) file. With --onto-ref naming the published file, the INCOMING (older) lane file yields.
+    const files = [
+      mk('2191', 'branding-prep', 'published on main', 200), // higher ordinal (landed later) — the KEEPER
+      mk('2191', 'lane-authored-first', 'authored 09:03 in the lane', 100), // lower ordinal — must YIELD
+    ];
+    const plan = planRenumber(files, { ontoNames: ['2191-branding-prep.md'] });
+    expect(plan.collisions).toHaveLength(1);
+    const mv = plan.collisions[0];
+    expect(mv.oldNum).toBe('2191');
+    expect(mv.oldName).toBe('2191-lane-authored-first.md'); // the LANE file yields, never the published one
+    expect(mv.newNum).toBe('2192');
+    expect(plan.deletes).toEqual(['2191-lane-authored-first.md']);
+    expect(plan.deletes).not.toContain('2191-branding-prep.md'); // the published main item is untouched
+  });
+
+  it('RESUME-LAND (#2213): a same-batch collision where NEITHER file is published still uses the ordinal heuristic', () => {
+    // ontoNames present but empty of this group → falls through to "higher ordinal yields" (unchanged).
+    const files = [mk('2068', 'a', '', 100), mk('2068', 'b', '', 200)];
+    const plan = planRenumber(files, { ontoNames: ['1999-unrelated.md'] });
+    expect(plan.collisions[0].oldName).toBe('2068-b.md'); // later-landing yields, as before
+  });
+
   it('two independent collisions in one run get distinct fresh ids (no re-collision)', () => {
     const files = [
       mk('2068', 'a', '', 10), mk('2068', 'b', '', 20),

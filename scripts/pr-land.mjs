@@ -182,14 +182,16 @@ export function buildAddLabelArgs({ pr, label }) {
   return ['pr', 'edit', String(pr), '--add-label', label];
 }
 
-/** Build the argv for the post-land id-collision heal (#2071). Deliberately passes NO `--base-ref`: the
- *  batch integrator supplies one to shield ids inherited from a shared pre-claim base (a base id appearing
- *  twice there is a real edit conflict, not an allocation race). A SINGLE land runs the heal on POST-MERGE
- *  `main`, where any two files claiming one NNN is a genuine allocation collision and the just-merged file
- *  (highest git landing-ordinal) must yield — so a base guard is not merely unneeded but would wrongly SKIP
- *  a real collision. Pure — returns the `node` script argv. */
-export function buildRenumberHealArgs() {
-  return ['scripts/backlog-renumber-collisions.mjs', '--json'];
+/** Build the argv for the post-land id-collision heal (#2071). Passes `--onto-ref=<pre-merge-main sha>` when
+ *  known (#2213): the files already published on the branch being landed ONTO are immutable keepers, so the
+ *  INCOMING lane's newly-created file is the only legitimate yielder. WITHOUT it the heal yields the highest
+ *  git-ordinal file — correct for a same-batch parallel land (neither file is on main yet) but WRONG for a
+ *  resume land where a lagging `lane/*` authored FIRST lands LAST: the already-published main item then has the
+ *  higher ordinal and would be renumbered out from under everything that cites it. Pure — returns the argv. */
+export function buildRenumberHealArgs({ ontoRef } = {}) {
+  const args = ['scripts/backlog-renumber-collisions.mjs', '--json'];
+  if (ontoRef) args.push(`--onto-ref=${ontoRef}`);
+  return args;
 }
 
 /** The set of derived-artifact regen commands to run after a clean merge (#2182). Mirrors the drain's
@@ -370,6 +372,12 @@ function runCli() {
     emit({ repo: REPO, merged: false, reason: 'labelled-on-green', pr: Number(prNum), ref: REF, label: LABEL, labelApplied, detail: `PR #${prNum} (${REF}) required checks green${labelApplied ? ` — labelled ${LABEL}` : ''}; left for the drain to land` }, 0);
   }
 
+  // #2213 — capture PRE-merge `${BASE}` sha before the merge advances origin: every id already published there
+  // is an immutable heal base, so the post-land collision heal yields only the INCOMING lane's new file, never
+  // a landed item (the resume-land direction bug). Resolved to a raw sha so it still resolves after runHeal
+  // re-fetches origin/main to its post-merge tip. Best-effort — a miss just falls back to the ordinal heuristic.
+  const preMergeBaseSha = tryGit(['rev-parse', `${REMOTE}/${BASE}`]) || null;
+
   try { ghC(buildMergeArgs({ pr: prNum, method: METHOD })); }
   catch (e) { return ghFailed(`gh pr merge #${prNum} failed (${String(e.message || e).split('\n')[0]}) — likely not-mergeable (branch behind ${BASE}); rebase the ref + re-run`); }
 
@@ -447,7 +455,7 @@ function runCli() {
     } catch (e) { return { warning: `skipped id-collision heal — could not sync to ${REMOTE}/${BASE} (${firstLine(e)})` }; }
     let plan;
     try {
-      const out = execFileSync('node', buildRenumberHealArgs(), { cwd: REPO, encoding: 'utf8' });
+      const out = execFileSync('node', buildRenumberHealArgs({ ontoRef: preMergeBaseSha }), { cwd: REPO, encoding: 'utf8' });
       plan = JSON.parse((out.trim().split('\n').filter(Boolean).pop()) || '{}');
     } catch (e) { return { warning: `id-collision heal could not run renumber-collisions (${firstLine(e)}) — if the gate flags "ids must be unique", run it by hand on ${BASE}` }; }
     const renumbered = Array.isArray(plan.renumbered) ? plan.renumbered : [];

@@ -169,7 +169,13 @@ function escapeRe(s) {
  * no collision → the CLI is a no-op (idempotent).
  *
  * @param {{ name: string, text: string, ordinal?: number }[]} files
- * @param {{ baseNums?: string[] }} [opts]  ids present at the batch base — never yielded, never reused.
+ * @param {{ baseNums?: string[], ontoNames?: string[] }} [opts]
+ *   baseNums   — ids present at the batch base (`--base-ref` for the parallel integrator): never yielded /
+ *                reused, and a base id appearing twice is skipped (a real edit conflict, not an allocation race).
+ *   ontoNames  — basenames of the backlog files PUBLISHED on the branch being landed onto (`--onto-ref` for a
+ *                single/resume land, #2213). Those files are immutable KEEPERS; a colliding file NOT among them
+ *                is the incoming lane's new file and yields — regardless of git ordinal (which, for a lane that
+ *                authored first but lands last, wrongly points at the already-published item).
  * @returns {{
  *   collisions: { oldNum: string, newNum: string, oldName: string, newName: string, slug: string }[],
  *   writes: { name: string, text: string }[],
@@ -177,8 +183,9 @@ function escapeRe(s) {
  *   summary: string,
  * }}
  */
-export function planRenumber(files, { baseNums = [] } = {}) {
+export function planRenumber(files, { baseNums = [], ontoNames = [] } = {}) {
   const baseSet = new Set(baseNums.map(String));
+  const ontoSet = new Set(ontoNames.map(String));
   const collisions = findCollisions(files);
   const usedNums = new Set();
   for (const f of files) {
@@ -188,6 +195,19 @@ export function planRenumber(files, { baseNums = [] } = {}) {
   const allocated = new Set();
   const moves = []; // { oldNum, newNum, oldName, newName, slug }
   for (const group of collisions) {
+    // #2213 — RESUME/single land: some colliding file(s) are already PUBLISHED on the branch being landed onto.
+    // Those are immutable keepers; only the incoming (non-published) file yields — never the live main item,
+    // even though its git ordinal is higher (it landed later). This precedes the ordinal heuristic below.
+    const published = group.files.filter((f) => ontoSet.has(f.name));
+    if (published.length > 0) {
+      const incoming = group.files.filter((f) => !ontoSet.has(f.name));
+      if (incoming.length === 0) continue; // every colliding file is already published — a genuine edit conflict, skip
+      const { yielder } = pickYielder(incoming);
+      const newNum = allocateFreeNum(usedNums, allocated, baseSet);
+      allocated.add(newNum);
+      moves.push({ oldNum: group.num, newNum, oldName: yielder.name, newName: `${newNum}-${yielder.slug}.md`, slug: yielder.slug });
+      continue;
+    }
     // BOUNDARY (#2071): never renumber an id that predates the batch base — a base id present twice is a
     // real edit conflict git already flagged, not an allocation race. Skip the whole group in that case.
     if (baseSet.has(group.num)) continue;
