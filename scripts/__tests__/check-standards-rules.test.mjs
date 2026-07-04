@@ -572,7 +572,7 @@ describe('real data stays clean (per family)', () => {
   });
   it('vite proxy coverage', () => {
     const viteCfg = readFileSync(join(ROOT, 'vite.config.mts'), 'utf8');
-    const proxyKeys = [...viteCfg.matchAll(/^\s*(['"])(\^?\/[^'"]*)\1\s*:\s*\{/gm)].map((m) => m[2]).join(' ');
+    const proxyKeys = [...viteCfg.matchAll(/^\s*(['"])(\^?\/[^'"]*)\1\s*:\s*(?:\{|proxyToEleventy\()/gm)].map((m) => m[2]).join(' ');
     const needed = new Map();
     for (const f of readdirSync(SRC).filter((n) => n.endsWith('.njk'))) {
       if (f === 'index.njk') continue;
