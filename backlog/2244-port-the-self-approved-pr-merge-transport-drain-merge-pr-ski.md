@@ -1,13 +1,13 @@
 ---
 kind: story
-size: 5
+size: 3
 parent: "2241"
 status: open
-blockedBy: ["2242"]
+blockedBy: ["2242", "2257"]
 dateOpened: "2026-07-04"
 tags: []
 ---
 
-# Port the self-approved PR-merge transport + drain/merge/pr skills to frontierui
+# Producer transport (pr-land + /pr) for frontierui — landing/drain now central via #2257
 
-Copy the transport scripts (we:scripts/merge-ai-prs.mjs, we:scripts/pr-land.mjs and their lib deps) and the .claude/skills for drain, merge and pr into frontierui, adapting the gate to FUI's test check and repo. Today FUI has none of this — no skills dir, no scripts — so producers cannot land through a gated self-approved transport and PRs accumulate. Blocked by the FUI CI test check (that check is the merge gate). Validate by opening one FUI ready-to-merge PR and landing it via the ported /drain.
+Re-scoped by #2257 (user directive "1 skill"): the drain/merge LANDER is no longer copied per repo — the single WE lander (we:scripts/merge-ai-prs.mjs) is now repo-aware (`--all-repos`) and sweeps frontierui's `ready-to-merge` PRs in one global `blockedBy` cascade, so `/drain` and `/merge` are NOT ported into FUI. The residual is the PRODUCER side only: a session working a frontierui lane needs a way to open a gated self-approved PR. Decide + build ONE of: (a) centralize too — invoke we:scripts/pr-land.mjs with `--repo=chalbert/frontierui` from wherever the producer runs (no copy), or (b) copy pr-land + `/pr` into FUI. Prefer (a) for symmetry with the central lander. Still blocked by the FUI CI `test` check (#2242 — the merge gate) and by #2257 (the central lander). Validate by opening one FUI ready-to-merge PR and landing it via the central `/drain --all-repos`.
