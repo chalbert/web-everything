@@ -25,3 +25,4 @@
 - **[Testing · Gates · Build Infra](index-infra.md)** — gate · check:standards · vitest · build · vite · hook · dev-port · footgun (12 rules)
 - **[Agent Meta · Memory · Model Routing](index-meta.md)** — memory · agent · model routing · working style · context · orchestration (12 rules)
 - **[Exercise Apps · Configurator · Governance](index-app.md)** — exercise app · conformance loop · configurator · governance · personas (4 rules)
+- [Parallel /workflow touches primary](parallel-workflow-touches-primary.md) — new-item batches need items on origin/main before lanes claim → direct main push + queued.json write violate lanes-only-via-PRs; green-gate is on the label not lane-closure
