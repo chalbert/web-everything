@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -191,5 +191,29 @@ describe('isRebaseDropCandidate (#2198 — the manifest-wall rescue gate)', () =
   it('a BLOCKED/DRAFT state is NOT a candidate (branch-protection / human concern, not a manifest wall)', () => {
     const blocked = classifyPr(aiPr({ number: 12, mergeable: 'MERGEABLE', mergeStateStatus: 'BLOCKED' }), {});
     expect(isRebaseDropCandidate(blocked)).toBe(false);
+  });
+});
+
+describe('needsManifestStripBeforeMerge (#2183 — first-lander manifest-leak fix)', () => {
+  // The gap: isRebaseDropCandidate only fires on a CONFLICTING/BEHIND PR, so the FIRST cleanly-mergeable lane
+  // PR of a batch carried its `.lane-manifest.json` onto main (observed: #79). A clean PR that still carries
+  // the manifest must be rebuilt-to-drop it BEFORE merge, conflict or not.
+  it('a cleanly-mergeable PR that STILL carries the manifest needs stripping (the leak case)', () => {
+    const clean = classifyPr(aiPr({ number: 20 }), {});
+    expect(clean.decision).toBe('merge');
+    expect(needsManifestStripBeforeMerge({ ...clean, hasManifest: true })).toBe(true);
+  });
+  it('a cleanly-mergeable PR with NO manifest (orphan /pr PR) merges directly — no rebuild', () => {
+    const clean = classifyPr(aiPr({ number: 21 }), {});
+    expect(needsManifestStripBeforeMerge({ ...clean, hasManifest: false })).toBe(false);
+  });
+  it('a SKIPPED (conflicting) manifest-carrier is left to isRebaseDropCandidate, not this predicate', () => {
+    const walled = classifyPr(aiPr({ number: 22, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }), {});
+    expect(walled.decision).toBe('skip');
+    expect(needsManifestStripBeforeMerge({ ...walled, hasManifest: true })).toBe(false);
+  });
+  it('null / missing is not a candidate', () => {
+    expect(needsManifestStripBeforeMerge(null)).toBe(false);
+    expect(needsManifestStripBeforeMerge({ decision: 'merge' })).toBe(false);
   });
 });
