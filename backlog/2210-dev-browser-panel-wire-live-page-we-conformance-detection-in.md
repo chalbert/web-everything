@@ -3,8 +3,11 @@ kind: story
 size: 3
 parent: "1656"
 locus: plateau-app
-status: open
+status: resolved
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
+graduatedTo: "plateau:src/dev-browser/chrome-extension/panel.js,plateau:src/dev-browser/chrome-extension/panel-detect.js,plateau:src/dev-browser/chrome-extension/panel.html"
 tags: []
 ---
 
