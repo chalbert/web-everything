@@ -3,8 +3,11 @@ kind: story
 size: 3
 parent: "1755"
 locus: plateau-app
-status: open
+status: resolved
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-03"
+dateResolved: "2026-07-03"
+graduatedTo: none
 tags: []
 ---
 
