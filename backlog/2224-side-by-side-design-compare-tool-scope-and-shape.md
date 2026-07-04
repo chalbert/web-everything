@@ -3,7 +3,10 @@ kind: decision
 status: open
 locus: plateau-app
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-04"
+preparedDate: "2026-07-04"
 relatedTo: ["1649", "1033", "2192", "2193"]
+relatedReport: reports/2026-07-04-side-by-side-compare-prior-art.md
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
 tags: [design-tool, compare, brand, dev-browser, decision]
 ---
@@ -12,51 +15,77 @@ tags: [design-tool, compare, brand, dev-browser, decision]
 
 ## Digest
 
-Surfaced 2026-07-03 during the Plateau brand-alignment work: judging a design change *against its
-prior/alternative, side by side and sighted* is a recurring manual step — a hand-composited screenshot
-board rebuilt each time (logo-vs-site, before-vs-after hero, mark a/b). The app already has three ad-hoc
-expressions of the same move: the **Brand Studio a/b proposal cards** (`/brand`), the **Design Review**
-single-page critique ([#1033](/backlog/1033-interactive-design-review-loop-analyse-a-page-get-a-critique/)),
-and `gen-branding`s static before/after. The idea: a **reusable side-by-side design-compare tool** so
-every design change is reviewed against its baseline in one view instead of a throwaway board. This card
-is a **go / not-yet / no** validation gate **plus** a genuine shape fork — not a winner-picking fork.
+A reusable **design-compare** surface: view two rendered states (before/after, a/b,
+current-vs-proposed) together, sighted, instead of hand-building a throwaway screenshot board each time.
+Surfaced 2026-07-03 in the Plateau brand-alignment work — logo-vs-site, hero before/after, and mark a/b
+were each hand-composited in scratch this session (the proven pain). A Brand Studio a/b card pattern and
+`gen-branding`s before/after exist as skill/generator output, not as a reusable in-app tool.
 
-**Recommended lean: go on a thin static compare view; not-yet on live dual-run.** Confidence Medium —
-the manual pain is proven (this session), but the heavy end overlaps #1649s dual-run substrate, so ship
-the light `iframe`/screenshot compare now and converge later.
+This is a **validation-gate** decision (go / not-yet / no on a candidate), NOT a shape fork. The standing
+test dissolves every apparent fork: **component-vs-tool** is composable (build a component, mount it in a
+tool); **modality** is a set of coexisting view modes (the call is only the default); and **static-vs-live
+is a timing deferral, not a design fork** — under a free-to-build screen a live dual-run strictly dominates
+static, so the only thing making static "v1" is that live costs the #142 capture substrate we are not
+paying for yet. That is a roadmap call, correctly recorded here as a deferral, not laundered as a fork.
+
+**Recommended verdict: GO on a thin static compare whose keystone is a pixel-aligned reveal-slider
+overlay; NOT-YET on a live dual-run (defer to #1649/#142).** Confidence: Medium. (Amended from an earlier
+draft after a skeptic pass — see Skeptic, below.)
 
 ## What you are deciding
 
-1. **Earn a slot?** go (build now) / not-yet (gate on a trigger) / no (keep bespoke per-surface boards).
-2. **Shape**, along three axes (the real tension):
-   - **Dedicated tool vs extracted component** — (a) a first-class "Design Compare" surface in the Tools
-     nav that any page embeds; vs (b) just extract the Brand Studio a/b card into a shared component and
-     keep comparisons per-surface.
-   - **Modality** — side-by-side panes / overlay **slider** (swipe reveal) / **toggle**/onion-skin /
-     diff-highlight. (Likely offer more than one; the fork is the *default*.)
-   - **Input & liveness** — live routes (two `iframe`s) / captured screenshots (as `gen-branding` does) /
-     SVG/mark variants / component states; and **static capture vs live dual-render**.
+Does a reusable design-compare surface earn a slot now (**go**), gate on a trigger (**not-yet**), or stay
+as per-surface bespoke boards (**no**)? There is no `## Fork N` — the shape questions are settled by the
+standing test (below), and static-vs-live is a timing deferral, not a fork.
 
-## Relation to prior art (do not duplicate #1649)
+## Prior-art delta
 
-- **#1649 branch-and-run diff** = a *semantic* branch-vs-branch diff (declared **state / render / rules**)
-  for **change-safety/regression**, gated on the #142 capture substrate + live dual-run.
-- **This card** = a *design/aesthetic* comparison of variations (before/after, a/b, current-vs-proposed)
-  for **brand + design judgment**, feeding design critique (#1033) and the design-AI reviewer (#2192) /
-  brand program (#2193).
-- **Convergence question:** the *live dual-run* end of this tool **is** #1649s substrate. Default:
-  keep this one **static/light** (screenshots + `iframe`, no capture backend) so it ships independent of
-  #142; converge onto the shared dual-run only when #1649 un-gates. Sibling tools now, one substrate later.
+Side-by-side/diff review is mature (Chromatic, Percy, reg-suit, Juxtapose, an img-comparison slider,
+Playwright trace viewer). The delta: an **in-app, self-describing, design-judgment** compare wired to the
+apps own routes/variants and feeding critique (#1033) + the design-AI reviewer (#2192) — not a hosted CI
+pixel-diff service. Full table in the relatedReport.
+
+## Supported by default (settled by the standing test — no ruling needed)
+
+- **Component surfaced as a tool** — a reusable compare *view* (candidate **FUI component**, impl in
+  FrontierUI per #96) mounted behind one "Design Compare" Tools entry in plateau-app. Composable → not a fork.
+- **Modality: the pixel-aligned reveal-slider OVERLAY is the keystone default** (swipe / onion-skin
+  registration of the two renders — the thing two browser tabs cannot do, and the whole reason a tool
+  earns its slot). Side-by-side panes are the trivial fallback mode, NOT the default; diff-highlight is a
+  later mode. (Corrected after the skeptic pass: defaulting to bare panes defaulted to the worthless mode.)
+- **Input: two `iframe`s (live routes) or two captured images**, local-first / zero-server (#141).
+
+## Scope boundary (timing deferral, not a fork): static now, live later
+
+- **Ship now — static/light**: the reveal-slider overlay + panes over two `iframe`s or two images. Zero
+  backend, no dependency on #142. Covers the proven need.
+- **Deferred — live dual-run** (both branches running, input fan-routed to both, live divergence
+  highlighters). This is #1649s substrate, not a rival modality.
+- **Convergence = a firewall, not a promise.** There is no named shared interface between this and #1649
+  today, so "converge later" would be a hand-wave. The real guarantee is: **build nothing here that
+  presumes a live substrate** — the zero-backend static design already enforces that. All live-run work is
+  deferred wholesale to #1649/#142; this card asserts *no live work here*.
 
 ## Home
 
 `locus: plateau-app` — a dev/design tool ([#141](/backlog/141-dev-browser-vision/)), local-first /
-zero-server (both sides render locally; no diff backend to host). The reusable split/compare *view* is a
-candidate **FUI component** (impl lives in FrontierUI per the constellation) — a placement sub-question to
-settle at build, not now.
+zero-server. The compare *view* is a candidate FUI component (impl in FrontierUI per #96); the Tools
+surface + route live in plateau-app.
 
-## Next
+## Recommendation
 
-Unprepared. Run `/prepare` to survey prior art (Chromatic/Percy side-by-side, Storybook, Figma compare,
-Juxtapose-style reveal-sliders), set each axiss **bold default**, and ready it for a fast ratification —
-rather than deciding cold.
+- **Verdict: GO on the static reveal-slider-first compare; NOT-YET on live dual-run.** Confidence Medium.
+- **Un-gate trigger for live**: promote when the #142/#1649 capture substrate ships AND a real review needs
+  synchronized live divergence static pairing cannot show — filed *under #1649*, not here.
+- `Skeptic: SURVIVES-WITH-AMENDMENT.` A refute-only pass landed three fixes, all folded above: (1) the go
+  survives, but static-vs-live was prioritization in fork costume → demoted from `## Fork N` to a timing
+  deferral; (2) default modality flipped from side-by-side panes (= two browser tabs, fails the "why a
+  tool" bar) to the **reveal-slider overlay** (the load-bearing value); (3) "converge with #1649" downgraded
+  from a promise to a no-live-work firewall (no shared interface exists to converge on yet). No
+  `codifiedIn` collision — this sets no platform statute (a product-tool go/no-go); statute-overlap with
+  #1649 reconciled (that is the *semantic change-safety* diff, this is *design/aesthetic* compare; shared
+  substrate only, which is why live is deferred there).
+- `Screen: flagged(prio) → fixed.` The two-confusion screen refuted the merit-vs-prioritization test on
+  static-vs-live (live strictly dominates free-to-build; only cost defers it); fixed by dissolving that
+  fork into an explicit timing deferral. Implementation-detail screen: clear (the compare view is a
+  consumer-visible FUI component; the FUI-vs-plateau placement is a build-time sub-question).
