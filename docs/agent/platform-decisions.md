@@ -64,6 +64,19 @@ govern *how* the constellation is built, promoted out of the ratified decisions 
 
 ## The standing rules
 
+### The primary checkout is read-only; every change lands via a lane→PR {#primary-read-only-lanes-only}
+
+The shared PRIMARY checkout of a constellation repo (web-everything / frontierui / plateau-app) is **read-only**:
+no source, no content, no backlog-item creation, and **no direct push to `main`**. Every change — including new
+backlog items — reaches `main` through a `lane/*` ref → PR → CI-gated merge, so *nothing lands on `main`
+ungated* holds by construction. Coordination writes that need immediacy (claims/reservations) happen **in-lane**
+(claim-in-lane, #2123/#2183), not in the primary. Enforced in depth: `guard-lane.mjs` (PreToolUse Edit/Write on
+the primary tree), `guard-bash.mjs` (PreToolUse Bash — an agent-typed direct `git push` to `main`; `lane/*`
+allowed; `MAIN_PUSH_OK=1` overrides), and a git `pre-push` hook for script-internal pushes (#2217). Ruled #2203
+after a `/workflow` scaffolded items + direct-pushed them to `main`, landing an ungated `check:standards` error
+that stalled the queue. (The one structural need — publishing scaffolded items so lanes can claim them — routes
+through a gated lane→PR, #2215, never a direct push.)
+
 ### Constellation placement {#constellation-placement}
 
 **The test — where does a thing live (WE / Frontier UI / Plateau)?**
