@@ -9,6 +9,11 @@ This skill is a **trigger and pointer** — the method lives in
 [docs/agent/design-first.md](../../../docs/agent/design-first.md) so every agent (Claude, Copilot, Cursor)
 follows the same process; don't duplicate it here — if the process changes, edit that doc.
 
+> **Runs in a lane — set it up FIRST (#2123).** Authoring a standard edits the tree, so work in an
+> **isolated lane clone**, never the shared primary checkout (`we:scripts/guard-lane.mjs` blocks a primary
+> `Edit` otherwise): `node we:scripts/lane-pool.mjs status --json` → pick a clean lane → author there →
+> land via PR. Full rule: *backlog-workflow.md → Working an item*.
+
 When invoked:
 
 1. Read *design-first.md → The method (every standard)* (research prior art → verify overlap & relationship →
