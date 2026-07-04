@@ -151,6 +151,38 @@ const WE_VITE_PORT = Number(process.env.WE_VITE_PORT ?? 3000);
 const WE_ELEVENTY_PORT = process.env.WE_ELEVENTY_PORT ?? '8080';
 const ELEVENTY_TARGET = `http://localhost:${WE_ELEVENTY_PORT}`;
 
+/**
+ * A proxy entry that forwards to the 11ty (`DOCS`) server, quietly.
+ *
+ * 11ty's `--serve` port isn't bound until its first build finishes, and `npm run dev`'s
+ * `concurrently --restart-after` bounces each process on its own schedule — so there's always a
+ * cold-start/restart window where `:8080` is briefly down. During it, the client's *continuous*
+ * pollers (`/build-id.json` for staleness, `/active-progress.json` for the live board) keep hitting
+ * this proxy, and http-proxy's default handler dumps a full `AggregateError [ECONNREFUSED]` stack
+ * per poll — pages of noise for an expected, transient, self-healing state. Both pollers already
+ * degrade gracefully on a failed fetch, so swallow the connection-refused stack and answer with a
+ * terse 503 instead. Genuine (non-connection) proxy errors still log a one-line message.
+ */
+function proxyToEleventy(): import('vite').ProxyOptions {
+  return {
+    target: ELEVENTY_TARGET,
+    changeOrigin: true,
+    configure(proxy) {
+      proxy.on('error', (err: NodeJS.ErrnoException, _req, res) => {
+        const connDown = err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET';
+        if (!connDown) console.error('[proxy] eleventy upstream:', err.message);
+        // `res` is a ServerResponse for normal requests (a Socket for ws upgrades — just drop those).
+        if (res && 'writeHead' in res) {
+          if (!res.headersSent) res.writeHead(503, { 'content-type': 'application/json' });
+          res.end('{}');
+        } else if (res && 'destroy' in res) {
+          (res as { destroy: () => void }).destroy();
+        }
+      });
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     devPanel(),
@@ -172,41 +204,21 @@ export default defineConfig({
     },
     proxy: {
       // Proxy Eleventy's live reload script
-      '^/\\.11ty/': {
-        target: ELEVENTY_TARGET,
-        changeOrigin: true,
-      },
+      '^/\\.11ty/': proxyToEleventy(),
       // Proxy doc pages and assets to 11ty server (but not demos/*.html, TypeScript plugs, or blocks)
       // Note: /blocks/*.ts are served by Vite, /blocks/ doc pages are proxied
-      '^/(projects|adapters|intents|capabilities|compat|protocols|design-systems|presets|plugs/(?!.*\\.ts)|cases|mission|semantics|states|resources|author|governance|rules|research|backlog|validation-rules|conformance|project-lifecycle|specs|assets|css|js|sitemap.xml|build-id.json|active-progress.json)': {
-        target: ELEVENTY_TARGET,
-        changeOrigin: true,
-      },
+      '^/(projects|adapters|intents|capabilities|compat|protocols|design-systems|presets|plugs/(?!.*\\.ts)|cases|mission|semantics|states|resources|author|governance|rules|research|backlog|validation-rules|conformance|project-lifecycle|specs|assets|css|js|sitemap.xml|build-id.json|active-progress.json)':
+        proxyToEleventy(),
       // Proxy /blocks/ doc pages but not /blocks/*.ts files
-      '^/blocks/(?!.*\\.ts)': {
-        target: ELEVENTY_TARGET,
-        changeOrigin: true,
-      },
+      '^/blocks/(?!.*\\.ts)': proxyToEleventy(),
       // Proxy demos directory and detail pages to 11ty (not individual .html demo files)
       // Demo HTML files are served directly by Vite for HMR and bootstrap injection
-      '^/demos/?$': {
-        target: ELEVENTY_TARGET,
-        changeOrigin: true,
-      },
-      '^/demos/index\\.html$': {
-        target: ELEVENTY_TARGET,
-        changeOrigin: true,
-      },
+      '^/demos/?$': proxyToEleventy(),
+      '^/demos/index\\.html$': proxyToEleventy(),
       // Proxy demo detail pages (e.g., /demos/declarative-spa/) to 11ty
-      '^/demos/[\\w-]+/$': {
-        target: ELEVENTY_TARGET,
-        changeOrigin: true,
-      },
+      '^/demos/[\\w-]+/$': proxyToEleventy(),
       // Proxy root and other doc pages
-      '^/(index\\.html)?$': {
-        target: ELEVENTY_TARGET,
-        changeOrigin: true,
-      },
+      '^/(index\\.html)?$': proxyToEleventy(),
     },
   },
   esbuild: {
