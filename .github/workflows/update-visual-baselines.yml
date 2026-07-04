@@ -87,6 +87,10 @@ jobs:
         run: npm run check:visual:update
         env:
           WE_ELEVENTY_PORT: "8080"
+          # Site is pre-built + served on :8080 above, so skip Playwright's :3000 dev-server boot — it's
+          # unused and times out in CI (same fix as the ci.yml visual job, #2221). Without this the
+          # baseline refresh hangs on webServer, which is why the -linux baselines were never seeded.
+          WE_PREBUILT_SITE: "1"
 
       # Commit the updated -linux baselines back to the branch.
       - name: Commit updated baselines
