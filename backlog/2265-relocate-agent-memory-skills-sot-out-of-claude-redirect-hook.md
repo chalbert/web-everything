@@ -9,6 +9,8 @@ dateStarted: "2026-07-04"
 dateResolved: "2026-07-04"
 codifiedIn: one-off
 preparedDate: "2026-07-04"
+costUsd: 54.82
+costSessions: 1
 tags: [permissions, agent-ergonomics, memory, skills, tooling, decision]
 ---
 
