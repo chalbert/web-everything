@@ -1,0 +1,117 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  Decision <a href="/backlog/2265-relocate-agent-memory-skills-sot-out-of-claude-redirect-hook/">#2265</a>
+  asks whether to relocate the <code>we:.claude/agent-memory/**</code> and <code>we:.claude/skills/**</code>
+  source-of-truth <em>out</em> of <code>.claude/</code> (symlinked back, plus a personal
+  <code>PreToolUse</code> redirect hook) so the Claude Code <code>.claude</code>-path permission gate
+  auto-approves memory/skills edits — or keep <code>.claude</code> and defeat the unattended-workflow stall
+  with <code>--dangerously-skip-permissions</code>. This is an <strong>agent-tooling / repo-layout</strong>
+  call over the WE harness, not greenfield standard design, so there is no web-platform survey — the
+  research is a consuming-tree read of the governed surfaces plus a statute-overlap check.
+</p>
+
+<h2>The verified mechanism</h2>
+<p>
+  The Claude Code VS Code extension hard-prompts on every edit whose literal path <strong>or realpath</strong>
+  contains <code>/.claude/</code>, and nothing in config-land overrides it — the item's provenance verified
+  <code>Edit()</code> allow rules (every path form), <code>additionalDirectories</code>, workspace
+  membership, <code>acceptEdits</code>, project <code>bypassPermissions</code>, symlinks <em>into</em>
+  <code>.claude</code>, and a <code>permissionDecision: "allow"</code> hook <em>all</em> fail to suppress it.
+  Two levers do work (both verified 2026-07-04):
+</p>
+<ul>
+  <li>
+    <strong>Path-rewrite hook.</strong> A <code>PreToolUse</code> hook that rewrites a
+    <code>.claude/(agent-memory|skills)/…</code> path to a real non-<code>.claude</code> path via
+    <code>hookSpecificOutput.updatedInput.file_path</code> makes the gate classify the edit as
+    non-<code>.claude</code> and auto-approve; the write lands on the real file.
+  </li>
+  <li>
+    <strong>Symlinked discovery.</strong> Claude Code follows a symlinked skill dir, so
+    <code>we:.claude/skills</code> and <code>we:.claude/agent-memory</code> can be symlinks to an
+    out-of-<code>.claude</code> SoT with discovery/loading intact.
+  </li>
+</ul>
+<p>
+  The gate checks <strong>realpath</strong>, so a symlink <em>pointing into</em> <code>.claude</code> still
+  prompts — the real files must physically leave <code>.claude</code>. This is a genuine SoT relocation, not
+  just a hook.
+</p>
+
+<h2>Finding — the guard-lane exemption is realpath-keyed and breaks on relocation</h2>
+<p>
+  <code>we:scripts/guard-lane.mjs:56</code> exempts agent-memory from the "edits must run in a lane" block
+  via a <code>real.includes()</code> test for the literal <code>.claude/agent-memory</code> segment — a
+  <strong>realpath</strong> test. After a <code>git mv</code> to <code>we:agent-memory-src/</code> the
+  realpath no longer contains that segment, so the exemption silently stops matching and primary-checkout
+  memory edits would be blocked again. The memory slice <strong>must</strong> widen this exemption to also
+  match <code>we:agent-memory-src</code> — the one non-mechanical code change on the memory side.
+</p>
+
+<h2>Finding (statute-overlap) — path citations must be reconciled, not just followed</h2>
+<p>
+  <code>we:docs/agent/platform-decisions.md:2488</code> cites <code>we:.claude/agent-memory/**</code> as the
+  durable-content path that rides a <strong>lane→PR</strong> (with the
+  <code>we:.claude/skills/batch-backlog-items/claims.json</code>-class <em>local signals</em> as the only
+  sanctioned-direct carve-out, which "never widens to memory content"), and <code>:2379</code> lists a
+  skills batch path as a ③ merge-risk mirror-home. These are <strong>transport / merge-risk</strong> rules
+  keyed to a path <em>string</em>. Relocation makes the SoT path indirect (symlinked), but the rules are
+  orthogonal to <em>where the file sits</em> and to <em>permission auto-approval</em> — auto-approving a
+  local Edit is not a direct-<code>main</code> commit, so the lane→PR transport rule is
+  <strong>unchanged</strong>. The ratifying change must amend the literal path citations (<code>:2488</code>,
+  and <code>:2379</code> for the skills slice) to the new SoT path so the anchors don't read stale; the
+  reconciliation is flagged now so ratification inherits no unreconciled statute conflict.
+</p>
+
+<h2>Finding — skills coupling is materially heavier than memory (the scope fork)</h2>
+<p>
+  A grep for the <code>we:.claude/skills/batch-backlog-items</code> state dir across <code>we:scripts/</code>
+  returns <strong>14</strong> scripts that read+write its stateful queued / claims / capacity state files
+  through a <code>join(ROOT, …)</code> on that dir (<code>we:scripts/check-standards.mjs:1484</code> is a
+  representative read of <code>we:.claude/skills/batch-backlog-items/claims.json</code>). They resolve
+  through a symlink in principle, but the state-file semantics (the local-signal carve-out that "never
+  pushes") plus the count make skills a genuinely riskier, separately-gated migration than memory.
+</p>
+
+<h2>Verdict — a validation gate, not a fork</h2>
+<p>
+  The 2026-07-04 skeptic pass reclassified this. <strong>"Adopt vs keep <code>.claude</code>" is not a
+  two-branch fork</strong>: keeping <code>.claude</code> + <code>--dangerously-skip-permissions</code> is the
+  null/do-nothing baseline (and the flag is <em>always</em> the no-hook fallback), so it does not mutually
+  exclude adopting — the real question is one-sided (<em>is the relocation+hook candidate worth building at
+  all?</em>). The scope question (memory-only vs skills-later) collapses to a deferred config dimension
+  (cost/frequency, not merit). So this carries a single verdict, not forks.
+</p>
+<table>
+  <thead>
+    <tr><th>Verdict</th><th>Default now</th><th>Un-gate when</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>NOT-YET</strong></td>
+      <td>Keep <code>.claude</code>; launch unattended runs with <code>--dangerously-skip-permissions</code>
+        (interactive edits keep the one-click gate)</td>
+      <td>(1) the per-click / all-or-nothing-bypass cost is <em>measured</em>; (2) the hook is scoped to
+        design out the guard-lane self-deny + mis-fire + clobber hazards; (3) the <code>:2488</code> statute
+        re-anchoring is specced into the adopting change</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  <strong>Decisive hazard.</strong> The redirect hook and <code>we:scripts/guard-lane.mjs</code> are
+  <em>both</em> <code>PreToolUse</code> hooks, so the rewrite to <code>we:agent-memory-src</code> self-denies
+  the interactive memory edit in the primary tree (<code>inPrimary &amp;&amp; !inLane &amp;&amp;
+  !inAgentMemory</code> → exit 2) unless <code>guard-lane.mjs:56</code> is widened first — the migration is
+  an order-sensitive coupling, not "just add a hook."
+</p>
+
+<h2>Classification</h2>
+<p>
+  This decision governs the WE repo's own agent-tooling layout, not a standard, impl, or product surface, so
+  it is <strong>off the standard·impl·product axis</strong> and the 7-question classification sequence
+  (layer / dimension / DI / default) does not map. The relevant frame is cost-vs-benefit plus statute-path
+  reconciliation. Full grounding:
+  <code>we:reports/2026-07-04-memory-skills-sot-relocation.md</code>.
+</p>
+{% endraw %}

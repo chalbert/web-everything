@@ -1,0 +1,22 @@
+{
+  "id": "memory-skills-sot-relocation",
+  "title": "Relocating the agent-memory/skills SoT out of .claude/ — beating the Claude Code permission gate",
+  "status": "open",
+  "summary": "Prep research for decision #2265 — an agent-tooling / repo-layout call (not greenfield standard design, so no web-platform survey; the research is a consuming-tree read of the governed surfaces + a statute-overlap check). The Claude Code VS Code extension hard-prompts on every edit whose literal path OR realpath contains /.claude/, and nothing in config-land overrides it (allow rules, additionalDirectories, acceptEdits, project bypassPermissions, symlinks-into-.claude, and a permissionDecision:allow hook all verified failing). Two levers DO work (both verified 2026-07-04): (1) a PreToolUse hook that REWRITES a .claude/(agent-memory|skills)/… path to a real non-.claude path via hookSpecificOutput.updatedInput.file_path makes the gate classify the edit as non-.claude and auto-approve, the write landing on the real file; (2) Claude Code follows a symlinked skill dir, so .claude/skills and .claude/agent-memory can be symlinks to an out-of-.claude SoT with discovery intact. The gate checks realpath, so the real files MUST physically leave .claude — a genuine SoT relocation, not just a hook. FINDINGS: F3 — we:scripts/guard-lane.mjs:56 exempts agent-memory via a realpath .includes() test for the literal '.claude/agent-memory' segment, so a git mv to we:agent-memory-src/ silently BREAKS the exemption (primary memory edits would be blocked again) unless the exemption is widened — the one non-mechanical memory-side change. F4 (statute-overlap) — we:docs/agent/platform-decisions.md:2488 cites we:.claude/agent-memory/** as the durable-content lane→PR path (claims.json-class local signals the only sanctioned-direct carve-out, 'never widens to memory content'), and :2379 lists a skills batch path as a ③ merge-risk mirror-home; these are transport/merge-risk rules keyed to a path STRING and are orthogonal to where the file sits and to permission auto-approval (auto-approving a local Edit is not a direct-main commit), so the lane→PR transport rule is UNCHANGED — but the ratifying change must amend the literal path citations to the new SoT path so the anchors don't read stale. F5 — ~14 scripts read+write the batch-backlog-items state files (queued/claims/capacity) through join(ROOT, .claude/skills/…); they resolve through a symlink in principle, but the state-file semantics + count make skills a riskier, separately-gated migration than memory (the scope fork). Recommendation (after the 2026-07-04 skeptic pass): NOT-YET — a VALIDATION GATE, not a fork. 'Adopt vs keep-.claude' is not a two-branch fork: keeping .claude + --dangerously-skip-permissions is the null/do-nothing baseline (and the flag is always the no-hook fallback), so it does not mutually exclude adopting; the real question is one-sided (is the relocation+hook candidate worth building at all?). Verdict NOT-YET — the migration's blast radius (statute-anchored path + realpath-keyed guard-lane logic + ~18 scripts + a personal path-rewrite hook with mis-fire and symlink-clobber surfaces) outweighs its marginal benefit, and the only run-blocking case (unattended stall) is already covered by the launch flag. DECISIVE HAZARD (F7): the redirect hook and guard-lane are both PreToolUse hooks, so the rewrite to agent-memory-src self-DENIES the interactive memory edit in the primary tree (inPrimary && !inLane && !inAgentMemory → exit 2) unless guard-lane:56 is widened first. The scope question (memory-only vs skills-later) collapses to a deferred config dimension (cost/frequency, not merit). Default now: keep .claude, use --dangerously-skip-permissions for unattended runs. Un-gate when: the per-click / all-or-nothing-bypass cost is MEASURED; the hook is scoped to design out the F7 hazards; and the :2488 statute re-anchoring is specced into the adopting change. Full grounding in we:reports/2026-07-04-memory-skills-sot-relocation.md.",
+  "dateOpened": "2026-07-04",
+  "lastReviewed": "2026-07-04",
+  "reviewHorizon": "P3M",
+  "tags": [
+    "decision-prep",
+    "agent-tooling",
+    "permissions",
+    "memory",
+    "skills",
+    "repo-layout",
+    "claude-code"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedReport": "reports/2026-07-04-memory-skills-sot-relocation.md",
+  "relatedProject": "webcomponents"
+}
