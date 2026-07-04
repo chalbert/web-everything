@@ -16,6 +16,14 @@ call, with no human judgment yet. It does *not* make the call; that's `/next dec
 the item carries `preparedDate`, so `check:readiness --select` ranks it prepared-first within Tier B and
 tags it `✓ ready to ratify` (vs `○ needs prep`).
 
+> **Runs in a lane — set it up FIRST (#2123).** Prepare *edits the tree* (the item body + a `/research/`
+> topic), so like every edit-action session it runs in an **isolated lane clone**, never the shared primary
+> checkout — `we:scripts/guard-lane.mjs` will hard-block a primary `Edit` mid-flow otherwise, forcing a
+> re-home after you've already spent the research budget. So provision/enter a lane **before** step 3's
+> authoring: `node we:scripts/lane-pool.mjs status --json` → pick a clean lane → do all authoring there →
+> land via PR. (The primary-checkout claim/release/`preparedDate` lifecycle in *Close out* below still
+> assumes one tree; how it composes under isolation is being reconciled — **#2219**.)
+
 ## Quick path — the loop in commands
 
 1. **Build the candidate set — un-prepared open decisions.** `npm run check:readiness -- --select

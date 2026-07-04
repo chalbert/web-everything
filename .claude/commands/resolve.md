@@ -8,6 +8,14 @@ operate in **discovery mode** (step 0). This is the mechanical close-out — a s
 `backlog.mjs`, then the gate. For an **epic** it additionally enforces the *no open slice* invariant so
 you never create the `resolved-epic-with-open-child` contradiction the gate would later flag.
 
+> **Lane note (#2123).** `resolve`'s status change is a **sanctioned frontmatter splice via
+> `we:scripts/backlog.mjs`** — exempt from `we:scripts/guard-lane.mjs`, so this specific splice is *not*
+> what forces a lane. But if you reached `resolve` as the tail of *building* an item, that build's edits
+> already had to happen in a lane clone, and the commit/land here belongs to the same lane→PR flow (direct
+> `main` writes are blocked by `we:scripts/guard-bash.mjs`, #2203) — do not run the build in the primary
+> checkout and then resolve on top of it. How the splice/commit lifecycle composes with lane isolation is
+> being reconciled — **#2219**.
+
 Do exactly this, in order:
 
 0. **Discovery mode (only when no explicit `NNN` given).** Run `npm run check:standards` and collect the
