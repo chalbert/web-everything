@@ -106,6 +106,20 @@ function baseNums() {
   }
 }
 
+/** #2213 — backlog basenames PUBLISHED on the branch being landed onto (`--onto-ref`). Those files are
+ *  immutable keepers, so a colliding NEW file (not among them) yields — never a live main item. */
+function ontoNames() {
+  const ref = flag('onto-ref');
+  if (!ref) return [];
+  try {
+    const out = execFileSync('git', ['ls-tree', '-r', '--name-only', ref, '--', 'backlog/'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    return out.split('\n').map((l) => l.match(/^backlog\/(\d+-.+\.md)$/)?.[1]).filter(Boolean);
+  } catch {
+    process.stderr.write(`${YEL}⚠ could not read published ids from onto-ref "${ref}" (${DIM}not found?${RST}${YEL}) — proceeding with the ordinal heuristic.${RST}\n`);
+    return [];
+  }
+}
+
 function main() {
   const names = backlogFilenames();
   const ordinals = gitOrdinals();
@@ -115,7 +129,8 @@ function main() {
     ordinal: ordinals.get(name) ?? 0,
   }));
   const base = baseNums();
-  const plan = planRenumber(files, { baseNums: base });
+  const onto = ontoNames();
+  const plan = planRenumber(files, { baseNums: base, ontoNames: onto });
 
   if (plan.collisions.length === 0) {
     if (JSON_MODE) process.stdout.write(JSON.stringify({ renumbered: [], writes: 0, deletes: 0, noop: true }) + '\n');

@@ -2,8 +2,10 @@
 kind: story
 size: 3
 relatedTo: ["2199", "2200", "2213"]
-status: open
+status: resolved
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-04"
+dateResolved: "2026-07-04"
 tags: [lane, pr-flow, drain, ci]
 ---
 

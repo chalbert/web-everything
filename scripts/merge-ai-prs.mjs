@@ -62,6 +62,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
+import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from './lib/review-escalation.mjs';
 
 const argv = process.argv.slice(2);
 const flags = {};
@@ -228,6 +229,31 @@ export function parseWatchOpts({ watch, interval, maxIdle } = {}) {
   return { watch: on, intervalSec: iv, maxIdle: mi };
 }
 
+/** #2216 — should this OPEN PR be labelled now because its required check went green? Pure. Closes the lane-
+ *  closure liveness gap: `pr-land --label-on-green` labels only if CI beats its `--timeout-min` wait; on a
+ *  timeout the PR is left green-eventually-but-UNLABELLED and stranded. A post-CI reconcile pass labels it the
+ *  moment the required check is green — no human step. Only the PRODUCER'S OWN work (AI-generated) is labelled,
+ *  never a human orphan, and never a PR that already carries the label. */
+export function shouldLabelOnGreen(pr, { requiredCheck = 'test', label = 'ready-to-merge' } = {}) {
+  if (!label || hasLabel(pr, label)) return false;    // already labelled (or no label configured) → nothing to do
+  if (!isAiGeneratedPr(pr)) return false;             // only the producer's own AI PRs — never a human orphan
+  return isRequiredCheckGreen(pr, requiredCheck);     // label the instant the required check is green
+}
+
+/** #2230 — should a `--label`-scoped ONE-SHOT drain re-poll once before concluding the queue is empty? GitHub's
+ *  `gh pr list --label` index lags the `gh pr edit --add-label` write by a few seconds, so a drain fired
+ *  immediately after a producer labels can read the just-labelled PR as ABSENT ("0 to merge") and strand it.
+ *  Re-poll ONCE when the labelled set found is smaller than expected — default threshold 1 (any at all), or
+ *  `--expect=N`. Only for a label-scoped sweep (the race bites the bare one-shot; `--watch` self-heals on its
+ *  next interval) and only once (never a busy-loop). Pure. `found` = the count of labelled PRs the sweep saw.
+ *  @param {{label:string|null, found:number, expect?:number|null, retried:boolean}} o
+ */
+export function shouldRepollForLabelLag({ label, found, expect, retried } = {}) {
+  if (!label || retried) return false;
+  const threshold = Number.isFinite(Number(expect)) && Number(expect) > 0 ? Number(expect) : 1;
+  return Number(found) < threshold;
+}
+
 /** Synchronous sleep (the CLI is fully synchronous — execFileSync throughout — so the watch loop blocks here
  *  between polls without an event loop). Uses Atomics.wait so it spawns nothing. */
 function sleepSync(ms) {
@@ -253,6 +279,20 @@ function runCli() {
   const { watch: WATCH, intervalSec: INTERVAL, maxIdle: MAX_IDLE } = parseWatchOpts({ watch: flags.watch, interval: flags.interval, maxIdle: flags['max-idle'] });
   // #2198 — rebase-drop the shared `.lane-manifest.json` on land (ON by default; `--no-rebase-drop` disables).
   const REBASE_DROP = flags['no-rebase-drop'] ? false : true;
+  // #2230 — re-poll the label-scoped one-shot once to absorb the `ready-to-merge` index-propagation lag.
+  const EXPECT = flags.expect != null && Number.isFinite(Number(flags.expect)) ? Number(flags.expect) : null;
+  const REPOLL_SEC = Number.isFinite(Number(flags['repoll-delay'])) && Number(flags['repoll-delay']) >= 0 ? Number(flags['repoll-delay']) : 4;
+  // #2216 — before a label-scoped sweep, LABEL any green-but-unlabelled producer PR (a `pr-land --label-on-green`
+  // that timed out left it stranded). ON by default for the label-scoped drain (it IS the reconcile point);
+  // `--no-reconcile-labels` disables. Under `--watch` this re-labels each interval — the label applies the
+  // moment CI goes green, with no human step.
+  const RECONCILE = label && !flags['no-reconcile-labels'];
+  // #2171 — DETERMINISTIC review-escalation rubric: before merging a ready PR, score it (blast radius, size,
+  // dismissed pre-PR findings, cross-repo couple, 1-in-N sampling); an escalated PR PARKS ALIVE (labelled
+  // review:pending, SKIPPED — non-blocking, the queue keeps flowing) until a reviewer applies review:accepted.
+  // ON by default for a label-scoped drain; `--no-review-escalation` disables. `--sample-nth=N` tunes the floor.
+  const REVIEW_ESCALATION = label && !flags['no-review-escalation'];
+  const SAMPLE_NTH = Number.isFinite(Number(flags['sample-nth'])) && Number(flags['sample-nth']) > 0 ? Number(flags['sample-nth']) : undefined;
 
   const fail = (reason, detail, code) => {
     if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, reason, detail }) + '\n');
@@ -276,9 +316,32 @@ function runCli() {
     return null;
   };
 
-  // ── ONE sweep pass — list → classify → cascade-merge → sync. Returns the pass result (no emit/exit), so the
-  // watch loop can call it repeatedly. A gh-list failure still hard-fails (bad env, not a transient PR state).
+  // #2216 — POST-CI LABEL RECONCILE. Before the labelled sweep, label any green-but-unlabelled producer PR that
+  // a `pr-land --label-on-green` timeout left stranded. Lists open PRs unfiltered by label, filters to the cheap
+  // signals (unlabelled + required check green), confirms producer authorship per-candidate (commits), then adds
+  // the label. Best-effort — a gh miss never fails the drain. Returns the labelled PR numbers.
+  const reconcileGreenLabels = () => {
+    if (!RECONCILE) return [];
+    let open;
+    try { open = JSON.parse(execFileSync('gh', ['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,title,labels,statusCheckRollup'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '[]'); }
+    catch { return []; } // reconcile is best-effort; the real sweep below still hard-fails on a bad env
+    const cheap = open.filter((p) => !hasLabel(p, label) && isRequiredCheckGreen(p, REQUIRED)); // green + unlabelled
+    const labelled = [];
+    for (const p of cheap) {
+      let commits = [];
+      try { commits = JSON.parse(execFileSync('gh', ['pr', 'view', String(p.number), '--json', 'commits'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').commits || []; } catch { continue; }
+      if (!shouldLabelOnGreen({ ...p, commits }, { requiredCheck: REQUIRED, label })) continue;
+      if (DRY_RUN) { labelled.push(p.number); if (!AS_JSON) process.stderr.write(`  🏷 #${p.number} would label "${label}" (required check green, was unlabelled)\n`); continue; }
+      try { execFileSync('gh', ['pr', 'edit', String(p.number), '--add-label', label], { stdio: ['ignore', 'ignore', 'pipe'] }); labelled.push(p.number); if (!AS_JSON) process.stderr.write(`  🏷 #${p.number} labelled "${label}" (post-CI reconcile — required check went green after a label-on-green timeout)\n`); }
+      catch { /* a label race/permission miss is non-fatal — the next pass retries */ }
+    }
+    return labelled;
+  };
+
+  // ── ONE sweep pass — reconcile labels → list → classify → cascade-merge → sync. Returns the pass result (no
+  // emit/exit), so the watch loop can call it repeatedly. A gh-list failure still hard-fails (bad env).
   const sweepOnce = () => {
+  const reconciledLabels = reconcileGreenLabels(); // #2216 — label green-but-unlabelled producer PRs first
   // List open PRs WITHOUT commits (commits×authors×limit overflows GitHub's GraphQL node cap), then fetch each
   // candidate's commits per-PR — the rollup + mergeable come from the list; commits (the AI gate) come per PR.
   const listArgs = ['pr', 'list', '--state', 'open', '--limit', '100',
@@ -299,11 +362,17 @@ function runCli() {
   // #2188: attach each PR's manifest (backlog `item` + cross-item `blockedBy`) so the merge order honours
   // dependencies. Only WE PRs carry one; the rest degrade to no-manifest → always ready (legacy order).
   const refByNum = new Map(prs.map((p) => [String(p.number), p.headRefName]));
+  const prByNum = new Map(prs.map((p) => [String(p.number), p]));
   for (const v of verdicts) {
     const m = readPrManifest(refByNum.get(String(v.num)));
     v.item = m && m.item != null ? Number(m.item) : null;
     v.blockedBy = m && Array.isArray(m.blockedBy) ? m.blockedBy.map(Number) : [];
     v.hasManifest = m != null; // #2183 — carries the transient manifest on its head → must be stripped before merge
+    // #2171 review-escalation signals off the manifest: a cross-repo couple (>1 repo) and the count of pre-PR
+    // review findings the lane dismissed (the strongest signal). Absent manifest → both benign defaults.
+    v.crossRepo = m && Array.isArray(m.repos) ? m.repos.length > 1 : false;
+    v.dismissedFindings = m && Number.isFinite(Number(m.dismissedFindings)) ? Number(m.dismissedFindings) : 0;
+    v.prLabels = prByNum.get(String(v.num))?.labels || [];
   }
   // #2198 — rebase-drop the transient manifest so a certified+green PR that is only CONFLICTING/BEHIND on the
   // shared `.lane-manifest.json` path lands instead of walling the whole queue. Per candidate: merge-tree
@@ -333,6 +402,40 @@ function runCli() {
         if (!AS_JSON) process.stderr.write(`  ↻ #${v.num} rebased onto main${r.dropped ? ' (manifest dropped)' : ''} → ${r.newCommit.slice(0, 9)}\n`);
       } else if (!AS_JSON) {
         process.stderr.write(`  ↻ #${v.num} left skipped: ${r.reason}\n`);
+      }
+    }
+  }
+
+  // #2171 — REVIEW-ESCALATION PASS. Before merging, score each ready candidate against the deterministic rubric.
+  // An escalated PR PARKS ALIVE — labelled review:pending and SKIPPED (non-blocking: the cascade keeps landing
+  // the rest) — until a reviewer applies review:accepted. review:changes → the author lane fixes + re-pushes.
+  // Every candidate is STAMPED with the rule outcome (escalated yes/no + reasons). Couples: any WE-PR carrying
+  // the manifest already fails-strict via crossRepo, so an escalated impl half keeps its WE half from landing
+  // through the existing blockedBy ordering. Signals: blast radius (diff files), size, dismissed findings +
+  // cross-repo (manifest), 1-in-N sampling. Best-effort per candidate; a signal-fetch miss defaults to no-escalate.
+  const parked = [];
+  if (REVIEW_ESCALATION) {
+    for (const v of verdicts) {
+      if (v.decision !== 'merge') continue;
+      let changedFiles = [];
+      let diffLines = 0;
+      try {
+        const files = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), '--json', 'files'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').files || [];
+        changedFiles = files.map((f) => f.path).filter(Boolean);
+        diffLines = files.reduce((s, f) => s + (Number(f.additions) || 0) + (Number(f.deletions) || 0), 0);
+      } catch { /* signal-fetch miss → score on the manifest signals alone */ }
+      const score = scoreEscalation({ changedFiles, diffLines, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, prNum: Number(v.num), thresholds: SAMPLE_NTH ? { sampleNth: SAMPLE_NTH } : {} });
+      const gate = decideReviewGate({ escalate: score.escalate, labels: v.prLabels, parkedSinceMs: null });
+      v.escalated = score.escalate ? 'yes' : 'no';
+      v.escalateReasons = score.reasons;
+      if (gate.action === 'park' || gate.action === 'wait-author') {
+        v.decision = 'skip';
+        v.reason = gate.reason + (score.reasons.length ? ` [${score.reasons.join('; ')}]` : '');
+        if (gate.applyLabel && !DRY_RUN) { try { execFileSync('gh', ['pr', 'edit', String(v.num), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ } }
+        parked.push(v.num);
+        if (!AS_JSON) process.stderr.write(`  ⏸ #${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}): ${score.reasons.join('; ')}\n`);
+      } else if (score.escalate && !AS_JSON) {
+        process.stderr.write(`  ✓ #${v.num} escalation cleared (${gate.reason})\n`);
       }
     }
   }
@@ -409,13 +512,21 @@ function runCli() {
     if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ local main fast-forwarded to origin (autostash preserved local edits)\n` : `  · local main NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`);
   }
 
-  const result = { ok: true, dryRun: DRY_RUN, label, considered: verdicts.length, toMerge: toMerge.map((v) => v.num), merged, failed: failedMerges, rebased, pendingRebased, deferred, localSynced, skipped: skipped.map((v) => ({ num: v.num, reason: v.reason })) };
+  const result = { ok: true, dryRun: DRY_RUN, label, considered: verdicts.length, toMerge: toMerge.map((v) => v.num), merged, failed: failedMerges, rebased, pendingRebased, deferred, localSynced, reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}) })) };
   return { result, merged, failedMerges, pendingRebased, deferred };
   }; // end sweepOnce
 
   // ── Driver — one sweep (the /drain one-shot + /merge bare), or the `--watch` monitor (`/drain watch`) ──────
   if (!WATCH) {
-    const { result, failedMerges } = sweepOnce();
+    let { result, failedMerges } = sweepOnce();
+    // #2230 — the label index lags the producer's label write, so a one-shot fired right after labelling can see
+    // the just-labelled PR as absent. Re-poll ONCE after a short delay before concluding the queue is empty.
+    // Fail-soft: a still-empty re-poll is a legitimate empty queue, not an error.
+    if (shouldRepollForLabelLag({ label, found: result.considered, expect: EXPECT, retried: false })) {
+      if (!AS_JSON) process.stderr.write(`  · ${result.considered} labelled candidate(s)${EXPECT ? ` (< expected ${EXPECT})` : ''} — re-polling once in ${REPOLL_SEC}s (label index may lag the producer's label write)…\n`);
+      sleepSync(REPOLL_SEC * 1000);
+      ({ result, failedMerges } = sweepOnce());
+    }
     if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
     process.exit(failedMerges.length ? 2 : 0);
   }

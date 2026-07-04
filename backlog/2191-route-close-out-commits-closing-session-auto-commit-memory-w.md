@@ -1,10 +1,11 @@
 ---
 kind: story
 size: 3
-status: open
-blockedBy: ["2190"]
-relatedTo: ["2183", "2123"]
+status: resolved
+relatedTo: ["2183", "2123", "2190"]
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-04"
+dateResolved: "2026-07-04"
 tags: [pr-flow, close-out, closing-session, memory, tech-debt]
 ---
 

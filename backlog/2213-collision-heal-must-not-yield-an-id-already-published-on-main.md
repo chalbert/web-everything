@@ -1,7 +1,9 @@
 ---
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-04"
+dateResolved: "2026-07-04"
 relatedTo: ["2181", "2071", "2202", "2200"]
 tags: [pr-flow, land, self-heal, backlog-ids, merge-queue, resume, footgun]
 ---

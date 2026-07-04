@@ -37,6 +37,12 @@ describe('lane-manifest primitive (#2138 Fork 2)', () => {
     expect(crossRepo.mergeRiskFiles).toEqual(['we:package.json']);
   });
 
+  it('#2171 — carries dismissedFindings (the drain escalation rubric signal); defaults to 0, clamps ≥0', () => {
+    expect(buildManifest({ item: 1, repos: [{ repo: 'we', ref: 'lane/1-a' }] }).dismissedFindings).toBe(0);
+    expect(buildManifest({ item: 1, repos: [{ repo: 'we', ref: 'lane/1-a' }], dismissedFindings: 3 }).dismissedFindings).toBe(3);
+    expect(buildManifest({ item: 1, repos: [{ repo: 'we', ref: 'lane/1-a' }], dismissedFindings: -2 }).dismissedFindings).toBe(0);
+  });
+
   it('validates a well-formed cross-repo and WE-only manifest', () => {
     expect(validateManifest(crossRepo)).toEqual({ ok: true, errors: [] });
     const weOnly = buildManifest({ item: 2161, repos: [{ repo: 'we', ref: 'lane/2161-we-o1' }] });

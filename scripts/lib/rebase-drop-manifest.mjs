@@ -91,6 +91,9 @@ export function gitRunner(cmd, args, { env } = {}) {
  * @param {string} o.laneRef            the lane ref name (e.g. `lane/batch-…-2198`) — pushed back to `refs/heads/<laneRef>`.
  * @param {string} [o.base='origin/main']
  * @param {string} [o.remote='origin']
+ * @param {string} [o.readRef]          the ref to FEED the merge inputs (defaults to `<remote>/<laneRef>`);
+ *                                       in a fresh clone (#2197) the bare `<laneRef>` does not resolve.
+ * @param {boolean} [o.fetch=true]      fetch `<laneRef>` from `<remote>` first so `<remote>/<laneRef>` is current (#2231).
  * @param {string} [o.manifest='.lane-manifest.json']
  * @param {string} [o.message]          commit-tree message (defaults to a "drain: rebase … drop manifest" line).
  * @param {string} [o.tmpIndex]         temp index path for GIT_INDEX_FILE (default `.git/rebase-drop-index`).
@@ -100,6 +103,8 @@ export function rebaseDropManifest({
   laneRef,
   base = 'origin/main',
   remote = 'origin',
+  readRef,
+  fetch = true,
   manifest = LANE_MANIFEST,
   message,
   tmpIndex = '.git/rebase-drop-index',
@@ -107,7 +112,18 @@ export function rebaseDropManifest({
 } = {}) {
   if (!laneRef) return { action: 'error', reason: 'no laneRef given' };
 
-  const mt = run('git', ['merge-tree', '--write-tree', base, laneRef]);
+  // #2231 — in the isolated-clone drain model (#2197) the lane branch exists ONLY as the remote-tracking ref
+  // `<remote>/<laneRef>`; the bare `<laneRef>` name does not resolve, so `merge-tree`/`commit-tree` given the
+  // bare name fail with "not something we can merge" and the whole auto-rebase is inert. Fetch the lane ref
+  // first (so the remote-tracking ref is current), then feed the RESOLVED `<remote>/<laneRef>` to the merge
+  // inputs. The PUSH still targets the bare `refs/heads/<laneRef>` (that part was always correct).
+  const mergeRef = readRef || `${remote}/${laneRef}`;
+  if (fetch) {
+    const f = run('git', ['fetch', remote, laneRef]);
+    if (f.status !== 0) return { action: 'error', reason: `fetch ${laneRef} failed (${(f.stderr || '').split('\n')[0]})` };
+  }
+
+  const mt = run('git', ['merge-tree', '--write-tree', base, mergeRef]);
   const parsed = parseMergeTree(mt.stdout, mt.status);
   if (!parsed.tree) return { action: 'error', reason: `merge-tree produced no tree (${(mt.stderr || '').split('\n')[0]})` };
 
@@ -125,7 +141,7 @@ export function rebaseDropManifest({
   if (wt.status !== 0 || !resolvedTree) return { action: 'error', reason: `write-tree failed (${(wt.stderr || '').split('\n')[0]})` };
 
   const msg = message || `drain: rebase ${laneRef} onto ${base}, drop transient ${manifest}`;
-  const ct = run('git', ['commit-tree', resolvedTree, '-p', base, '-p', laneRef, '-m', msg]);
+  const ct = run('git', ['commit-tree', resolvedTree, '-p', base, '-p', mergeRef, '-m', msg]);
   const newCommit = String(ct.stdout || '').trim();
   if (ct.status !== 0 || !newCommit) return { action: 'error', reason: `commit-tree failed (${(ct.stderr || '').split('\n')[0]})` };
 

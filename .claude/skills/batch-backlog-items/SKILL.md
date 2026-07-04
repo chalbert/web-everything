@@ -230,9 +230,22 @@ to the `Workflow` tool, which enforces the non-negotiables above deterministical
 ```
 const r = Workflow({
   scriptPath: ".claude/skills/batch-backlog-items/parallel-execute.workflow.js",
-  args: { batchSlug, budgetPoints, primaryRoot, items: [ { num, slug, file, locus, cost, declaredFiles, blockedBy } … ] },
+  args: { batchSlug, budgetPoints, primaryRoot, items: [
+    { num, slug, file, locus, cost, declaredFiles, blockedBy }, // an EXISTING backlog item — claimed in-lane
+    { slug, seed: { kind, size, title, digest, blockedBy, parent } }, // a NEW item — scaffolded in-lane (#2215)
+  ] },
 })
 ```
+
+**Publishing NEW items — scaffold-in-lane, NEVER scaffold+push to `main` (#2215/#2203).** A lane claims an
+item that already exists on `origin/main`, so a batch of items that **don't exist yet** must reach `main`
+first. Do **not** do that by `backlog.mjs scaffold` in the primary + a `git push` to `main` — that is the exact
+#2203 primary-write the strict lock forbids (and the guard now blocks). Instead pass each new item as a `seed`
+(`{ kind, size, title, digest, blockedBy?, parent? }`, **no `num`/`file`**); its lane scaffolds it **in its own
+clone** (`backlog.mjs scaffold --session`, born active+owned #670), works it, and it **rides that lane's own
+PR** — no pre-publish to `main` at all. Cross-lane NNN collisions are healed at land by `pr-land` (#2071/#2213,
+the incoming file yields). *(Alternative not taken: a gated pre-publish PR that lands before dispatch — one
+extra PR-cycle of latency; the in-lane seed avoids it and keeps the primary read-only end-to-end.)*
 
 **Lane execution model (the orchestrator decides — you don't pass one).** Lane work runs on **Sonnet by
 default**; the probe emits a per-item `complex` flag and the orchestrator escalates only that lane to **Opus**

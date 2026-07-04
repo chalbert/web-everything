@@ -7,7 +7,27 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand } from '../pr-land.mjs';
+import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, isPostLandTreeDirty, postLandSkips } from '../pr-land.mjs';
+
+describe('pr-land post-land dirty-probe (#2225 — deps-symlinked clone must still heal/regen)', () => {
+  it('a tree whose ONLY dirt is the untracked node_modules symlink is NOT blocking-dirty', () => {
+    // `git status --porcelain --untracked-files=no` already hides it; the extra guard covers a tracked symlink.
+    expect(isPostLandTreeDirty('?? node_modules\n')).toBe(false);
+    expect(isPostLandTreeDirty(' M node_modules\n')).toBe(false);
+    expect(isPostLandTreeDirty('')).toBe(false);
+  });
+  it('a genuinely TRACKED-dirty file blocks (a detached checkout could sweep it into the post-land commit)', () => {
+    expect(isPostLandTreeDirty(' M .claude/skills/batch-backlog-items/claims.json\n')).toBe(true);
+    expect(isPostLandTreeDirty(' M src/_data/blocks.json\n?? node_modules\n')).toBe(true);
+  });
+  it('postLandSkips lists only the steps that actually skipped (loud-skip surfacing)', () => {
+    expect(postLandSkips({ skipped: true }, { done: [], failed: [] })).toEqual(['heal']);
+    expect(postLandSkips({ healed: false }, { skipped: true })).toEqual(['regen']);
+    expect(postLandSkips({ skipped: true }, { skipped: true })).toEqual(['heal', 'regen']);
+    expect(postLandSkips({ healed: true }, { done: ['x'] })).toEqual([]);
+    expect(postLandSkips(null, null)).toEqual([]);
+  });
+});
 
 describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
   it('maps merge methods to gh flags (default = --merge, the no-ff history the drain wants)', () => {
@@ -51,13 +71,17 @@ describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
     expect(buildMergeArgs({ pr: 7, method: 'squash' })).not.toContain('--auto'); // drain owns ordering
   });
 
-  it('builds the post-land id-collision heal with NO --base-ref (the single-land case, #2071)', () => {
-    // The batch integrator passes --base-ref to shield ids inherited from a shared pre-claim base; a single
-    // land runs on post-merge main where every duplicate NNN is a real allocation collision, so the base
-    // guard is deliberately OMITTED (with it, a genuine collision would be wrongly skipped).
+  it('omits --onto-ref when no pre-merge main sha is known (falls back to the git-ordinal heuristic, #2071)', () => {
     expect(buildRenumberHealArgs()).toEqual(['scripts/backlog-renumber-collisions.mjs', '--json']);
-    expect(buildRenumberHealArgs().some((a) => a.startsWith('--base-ref'))).toBe(false);
+    expect(buildRenumberHealArgs({}).some((a) => a.startsWith('--onto-ref'))).toBe(false);
     expect(buildRenumberHealArgs()).not.toContain('--force');
+  });
+
+  it('passes --onto-ref=<pre-merge-main sha> so a published id is never yielded (resume-land fix, #2213)', () => {
+    // Files already on the branch being landed ONTO are immutable keepers: only the INCOMING lane's new file
+    // may yield — otherwise a lagging lane authored first, landing last, would renumber a live main item.
+    const sha = 'a'.repeat(40);
+    expect(buildRenumberHealArgs({ ontoRef: sha })).toEqual(['scripts/backlog-renumber-collisions.mjs', '--json', `--onto-ref=${sha}`]);
   });
 
   it('returns the derived-artifact regen command set in lock-step with the drain (gen:inventory + gen:reference-index, #2182)', () => {

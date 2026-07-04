@@ -69,6 +69,8 @@ const manifest = buildManifest({
   repos,
   blockedBy,
   mergeRiskFiles,
+  // #2171 — count of pre-PR review findings the lane dismissed (the drain escalation rubric's strongest signal).
+  ...(flags.dismissed != null ? { dismissedFindings: Number(flags.dismissed) } : {}),
 });
 const v = validateManifest(manifest);
 if (!v.ok) emit({ ok: false, item, detail: `refusing to write an invalid manifest: ${v.errors.join('; ')}` }, 3);

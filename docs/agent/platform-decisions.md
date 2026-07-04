@@ -2476,6 +2476,26 @@ topic `pr-flow-rollout-mechanism`); enforcement ladder specced by #1998 (Forks 1
 with the #1153 branch guard and the removed never-push default (both unchanged). Visual harness files under
 #1933 / #1167 / #1552.
 
+**Rider — close-out is not a direct-`main` write path; session-meta is the one sanctioned-direct carve-out
+(#2191, under the #2203 strict lock).** Post-#2183/#2203 **every edit-shaped change already landed via a
+lane→PR during the session**, so a session's close-out must not re-open a direct-to-`main` path for it:
+- **Close-out auto-commit is edit-work-free.** The `closing-session` clean auto-commit **no-ops on already-PR'd
+  work** (the common case now — nothing edit-shaped is left uncommitted at close). Anything genuinely
+  uncommitted-and-finished that IS edit-action work (source, content, a backlog item/resolve) routes through
+  the **lane→PR** helper (`we:scripts/pr-land.mjs`), never a `git commit` on `main`. The serial `/batch` and
+  `/workflow` producers already close this way (they land as open ready-to-merge PRs and touch no `main`).
+- **Agent-memory *content* rides a lane→PR — it is not the carve-out.** Substantive **agent-memory** writes
+  (`we:.claude/agent-memory/**`) are durable content, so under the lane machinery they **land via a lane→PR**
+  (each candidate red-teamed first; the survivors ride the one PR the close opens) — never an agent
+  direct-`main` commit. **The sanctioned-direct carve-out is `claims.json`-class *local signals* ONLY**
+  (`claims.json`/`queued.json`/`reservations.json`): these are session bookkeeping the #2138-Fork-4 rider
+  already treats as a direct *local* signal (read offline, Rule #105), written to disk for the local checkout
+  and never pushed. The carve-out is **local signals only**; it never widens to memory content, source, content,
+  or backlog edits (all of which take the lane→PR path).
+- **No other close-out path direct-commits edit work.** `/batch` close, `calibrate`, and the cost-on-card splice
+  either fold into an already-PR'd lane commit or are session-meta under this carve-out. The `check:health` /
+  closeout audit reports any residual uncommitted edit work for awareness — it does not auto-commit it to `main`.
+
 **Rider — solo/interactive sessions lane uniformly (#2123, ratified 2026-07-02).** The "every automated
 writing session" scope above covers **solo** agent sessions too — a lone `/next` build, a `/prepare`, a
 `resolve` — not just `/workflow`: the writer in an agent session *is* the agent, so the human-writes-`main`

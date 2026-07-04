@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -160,6 +160,52 @@ describe('merge-ai-prs — parseWatchOpts (#2194 /drain watch)', () => {
   it('max-idle=0 is honoured (exit on the first idle pass), a bad value → unbounded', () => {
     expect(parseWatchOpts({ watch: true, maxIdle: '0' }).maxIdle).toBe(0);
     expect(parseWatchOpts({ watch: true, maxIdle: 'x' }).maxIdle).toBe(null);
+  });
+});
+
+describe('shouldLabelOnGreen (#2216 — post-CI reconcile labels a stranded green PR)', () => {
+  const labelled = (extra = {}) => aiPr({ labels: [{ name: 'ready-to-merge' }], ...extra });
+  it('green + AI-generated + UNLABELLED → label it (the label-on-green timeout stranded it)', () => {
+    expect(shouldLabelOnGreen(aiPr(), {})).toBe(true);
+  });
+  it('already carries the label → do NOT re-label', () => {
+    expect(shouldLabelOnGreen(labelled(), {})).toBe(false);
+  });
+  it('a human orphan (a commit lacks the Claude trailer) → never labelled', () => {
+    expect(shouldLabelOnGreen(aiPr({ commits: [claudeCommit(), humanCommit] }), {})).toBe(false);
+  });
+  it('required check not green (still pending/red) → not yet', () => {
+    expect(shouldLabelOnGreen(aiPr({ statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }] }), {})).toBe(false);
+    expect(shouldLabelOnGreen(aiPr({ statusCheckRollup: [] }), {})).toBe(false);
+  });
+  it('no label configured → no-op', () => {
+    expect(shouldLabelOnGreen(aiPr(), { label: null })).toBe(false);
+  });
+  it('BEHIND-but-green is still labelled (mergeability is the drain\'s rebase-drop job, not the label gate)', () => {
+    expect(shouldLabelOnGreen(aiPr({ mergeStateStatus: 'BEHIND', mergeable: 'UNKNOWN' }), {})).toBe(true);
+  });
+});
+
+describe('shouldRepollForLabelLag (#2230 — absorb the ready-to-merge index-propagation lag)', () => {
+  it('zero labelled candidates on a label-scoped one-shot → re-poll once', () => {
+    expect(shouldRepollForLabelLag({ label: 'ready-to-merge', found: 0, retried: false })).toBe(true);
+  });
+  it('already found ≥1 → do NOT re-poll (queue is genuinely non-empty)', () => {
+    expect(shouldRepollForLabelLag({ label: 'ready-to-merge', found: 1, retried: false })).toBe(false);
+  });
+  it('already retried once → never re-poll again (no busy-loop; a still-empty re-poll is a real empty queue)', () => {
+    expect(shouldRepollForLabelLag({ label: 'ready-to-merge', found: 0, retried: true })).toBe(false);
+  });
+  it('no label (the bare /merge orphan sweep) → never re-poll (the lag only bites the labelled drain)', () => {
+    expect(shouldRepollForLabelLag({ label: null, found: 0, retried: false })).toBe(false);
+  });
+  it('--expect=N: fewer than N found → re-poll; N-or-more → done', () => {
+    expect(shouldRepollForLabelLag({ label: 'ready-to-merge', found: 1, expect: 2, retried: false })).toBe(true);
+    expect(shouldRepollForLabelLag({ label: 'ready-to-merge', found: 2, expect: 2, retried: false })).toBe(false);
+  });
+  it('a non-positive / non-numeric --expect falls back to threshold 1 (any candidate suffices)', () => {
+    expect(shouldRepollForLabelLag({ label: 'ready-to-merge', found: 1, expect: 0, retried: false })).toBe(false);
+    expect(shouldRepollForLabelLag({ label: 'ready-to-merge', found: 0, expect: 'x', retried: false })).toBe(true);
   });
 });
 
