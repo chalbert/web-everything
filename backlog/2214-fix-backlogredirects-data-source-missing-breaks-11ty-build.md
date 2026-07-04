@@ -1,7 +1,8 @@
 ---
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-07-03"
+dateResolved: "2026-07-04"
 relatedTo: ["075"]
 tags: [11ty, build, backlog, redirects, footgun, ci]
 ---
