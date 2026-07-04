@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+# #2217 — pre-push strict-lock backstop (LAYER 3 of the #2203 lock). Rejects any push whose refspec targets
+# `main` unless MAIN_PUSH_OK=1 — mirroring we:scripts/guard-bash.mjs, but firing on EVERY push regardless of
+# how it was invoked. Catches a SCRIPT-internal push (pr-land's execFileSync fallback/heal/regen) the Bash-tool
+# guard can't see, completing the "nothing reaches main ungated" guarantee. Wired via `core.hooksPath .githooks`
+# (set by the `prepare` npm script). Bypass (rare/sanctioned): `MAIN_PUSH_OK=1 git push …` or `git push --no-verify`.
+#
+# git pipes the ref list (`<localRef> <localSha> <remoteRef> <remoteSha>` per line) on stdin and passes the
+# remote name + url as $1/$2; the guard reads stdin and ignores the args. A non-zero exit aborts the push.
+node scripts/guard-git-push.mjs "$@" || exit $?

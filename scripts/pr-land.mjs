@@ -252,6 +252,11 @@ if (IS_CLI) runCli();
 
 function runCli() {
   const gitC = (args) => execFileSync('git', args, { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  // #2217 — pr-land is a SANCTIONED main-writer (fallback-git merge, post-land heal/regen). Those pushes go to
+  // `main`, so they must carry the MAIN_PUSH_OK=1 override the new pre-push hook (guard-git-push.mjs) checks —
+  // otherwise the strict-lock hook would block pr-land's own legitimate landing. Scoped to THESE calls only, so
+  // any OTHER (rogue/buggy) push to main stays blocked. The initial lane/* push does NOT use this (not main).
+  const gitPushMain = (args) => execFileSync('git', ['push', ...args], { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MAIN_PUSH_OK: '1' } }).toString().trim();
   const tryGit = (args) => { try { return gitC(args); } catch { return null; } };
   const ghC = (args) => execFileSync('gh', args, { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
@@ -424,7 +429,7 @@ function runCli() {
       tryGit(['fetch', REMOTE, `${REF}`, '--quiet']);
       gitC(['checkout', BASE]);
       gitC(['merge', '--no-ff', `${REMOTE}/${REF}`, '-m', `merge ${REF} (pr-land git fallback)`]);
-      gitC(['push', REMOTE, `${BASE}:${BASE}`]);
+      gitPushMain([REMOTE, `${BASE}:${BASE}`]);
       const heal = HEAL ? runHeal() : null;
       if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
       const regen = REGEN ? runRegen() : null;
@@ -469,7 +474,7 @@ function runCli() {
     try {
       gitC(['add', ...changed]);
       gitC(['commit', '-m', `backlog: heal new-item id collision(s) on land (${tag}) (#2071)`]);
-      gitC(['push', REMOTE, `HEAD:${BASE}`]);
+      gitPushMain([REMOTE, `HEAD:${BASE}`]);
     } catch (e) { return { healed: false, renumbered, warning: `id collision healed + committed but push to ${BASE} failed (${firstLine(e)}) — re-run pr-land or push by hand (no force-push)` }; }
     return { healed: true, renumbered };
   }
@@ -501,7 +506,7 @@ function runCli() {
     try {
       gitC(['add', ...changed]);
       gitC(['commit', '-m', `chore: regen derived artifacts post-land (#2182) [${done.map((c) => c.replace('npm run ', '')).join(', ')}]`]);
-      gitC(['push', REMOTE, `HEAD:${BASE}`]);
+      gitPushMain([REMOTE, `HEAD:${BASE}`]);
     } catch (e) { return { done, failed, warning: `derived-artifact regen committed but push to ${BASE} failed (${firstLine(e)}) — re-run gen:inventory + gen:reference-index on ${BASE} by hand` }; }
     return { done, failed };
   }
