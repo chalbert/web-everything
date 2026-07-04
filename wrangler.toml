@@ -6,7 +6,10 @@
 # that fronts the Eleventy `_site/` build served through the ASSETS binding, instead of a Pages Function.
 # Same behaviour, same later-phase story (KV for phase-3 per-person codes, etc.).
 #
-# Deploy is git-integration (Workers Builds): build `npm run build:docs` → `_site`, deploy `npx wrangler deploy`.
+# Deploy is a GitHub Action (.github/workflows/deploy.yml) that PUSHES to Cloudflare on every push to main:
+# it checks out the FUI sibling, `build:tools` → `build:docs` → `_site`, then `wrangler deploy`. Cloudflare's
+# own git-integration (Workers Builds) is intentionally NOT used — a single-repo CF checkout can't reach the
+# `../frontierui` sibling `build:docs` needs, so it was disconnected in the dashboard; the Action is the sole deployer.
 
 name = "web-everything"
 main = "worker.js"
