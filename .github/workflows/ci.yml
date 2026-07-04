@@ -179,6 +179,10 @@ jobs:
         run: npm run check:visual
         env:
           WE_ELEVENTY_PORT: "8080"
+          # The site is pre-built and served statically on :8080 by the step above, so skip Playwright's
+          # :3000 dev-server boot (playwright.config.ts webServer[0]) — it's unused by the visual specs and
+          # times out in CI, failing the job. #2221.
+          WE_PREBUILT_SITE: "1"
 
       - name: Upload Playwright report
         if: failure()
