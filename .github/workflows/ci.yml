@@ -72,6 +72,16 @@ jobs:
         working-directory: web-everything
         run: npm ci
 
+      # Deploy smoke (#2220): `build:docs` is the exact artifact the Cloudflare deploy publishes, but it
+      # otherwise only runs in the unrequired `visual` job and post-merge `deploy.yml`. Branch protection
+      # gates on `test` alone, so before this step a broken docs build (e.g. the #2184 transforms.cjs
+      # mis-wire) merged green and silently broke the deploy. FUI's pinned component-render CLI is already
+      # built above, so this needs no extra setup; ~15s. Keep it fast (build only, no serve/visual — that
+      # stays in the `visual` job) so the required check stays cheap.
+      - name: Build WE docs (deploy smoke)
+        working-directory: web-everything
+        run: npm run build:docs
+
       - name: Unit suite + coverage (80% bar, #2082)
         working-directory: web-everything
         run: npm run test:coverage
