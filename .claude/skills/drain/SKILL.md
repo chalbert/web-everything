@@ -45,15 +45,26 @@ serially, in a later session, under the same self-approved PR transport the prod
 
 ## Run it (the label lander — #2194)
 
-`/drain` now drives the ONE label lander `scripts/merge-ai-prs.mjs --label=ready-to-merge`, **not**
+`/drain` now drives the ONE label lander `scripts/merge-ai-prs.mjs --label=ready-to-merge --all-repos`, **not**
 `lane-drain.mjs`. It sweeps the open `ready-to-merge` PRs and merges each as it becomes eligible (green +
 mergeable), in cross-item `blockedBy` order (each PR's `.lane-manifest.json`, read off its head ref, supplies
 the edges — the #2188 convergence).
 
+> **One skill, all 3 repos (#2257).** `--all-repos` makes this single lander sweep **every** constellation repo
+> — web-everything **+ frontierui + plateau-app** — in ONE global `blockedBy` cascade. This is why `/drain`
+> stays a single skill instead of a copy per repo (#2244/#2245 superseded): the backlog is WE-global, so a
+> frontierui PR can be `blockedBy` a WE item, and only a single cross-repo sequencer can order that. Every `gh`
+> call is `--repo`-scoped; git-side work (manifest read via `git show`, rebase-drop, local-`main` sync) stays on
+> the LOCAL clone, so a remote-repo PR reads its manifest via the GitHub API and, if CONFLICTING/BEHIND, is left
+> for its author (rebase-drop needs a clone of that repo — a follow-up). **Landing a frontierui/plateau PR still
+> needs that repo's own required `test` check + branch protection (#2242/#2243/#2246)** or GitHub blocks the
+> merge; until those land, those PRs surface here as `skip (required check "test" is not green)` rather than
+> silently vanishing. Drop `--all-repos` (or pass `--repos=owner/a,owner/b`) to scope the sweep.
+
 ```
-node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run            # plan only — print the blockedBy-ordered merge order + deferred set, merge NOTHING
-node scripts/merge-ai-prs.mjs --label=ready-to-merge                       # /drain (bare): ONE cascade pass — land every ready labelled PR, exit
-node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --interval=30 # /drain watch: keep polling; land each PR the instant it goes green (--max-idle=N bounds it; Ctrl-C stops)
+node scripts/merge-ai-prs.mjs --label=ready-to-merge --all-repos --dry-run            # plan only — print the blockedBy-ordered merge order (across all 3 repos) + deferred set, merge NOTHING
+node scripts/merge-ai-prs.mjs --label=ready-to-merge --all-repos                       # /drain (bare): ONE cascade pass across all 3 repos — land every ready labelled PR, exit
+node scripts/merge-ai-prs.mjs --label=ready-to-merge --all-repos --watch --interval=30 # /drain watch: keep polling; land each PR the instant it goes green (--max-idle=N bounds it; Ctrl-C stops)
 ```
 
 **Always dry-run first** to show the merge plan, then run bare (one-shot) or `--watch` (follow). Prefer the

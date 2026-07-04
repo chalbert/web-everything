@@ -54,6 +54,19 @@
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge # the /drain role: scope to producer-completed PRs, merge in blockedBy order
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run # print the blockedBy-ordered merge plan, merge NOTHING
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --interval=30 # the /drain-watch monitor: poll + land as PRs go green (--max-idle=N bounds it)
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --all-repos # #2257 — the ONE /drain sweeps ALL 3 constellation repos (WE+frontierui+plateau-app), one global blockedBy cascade
+ *   node scripts/merge-ai-prs.mjs --repos=chalbert/frontierui,chalbert/plateau-app # sweep an explicit repo set (comma-separated owner/name slugs)
+ *
+ * MULTI-REPO (#2257 — the single /drain lander sweeps all 3 constellation repos). `--all-repos` expands to the
+ * constellation (self's owner × web-everything/frontierui/plateau-app); `--repos=a,b` is an explicit set;
+ * neither → the single-repo default (the cwd repo, behaviour unchanged). Every `gh pr list/view/edit/merge` is
+ * `--repo`-scoped and candidates from ALL repos merge in ONE global `blockedBy` cascade — REQUIRED, not
+ * optional: the backlog is WE-global, so a frontierui PR can be `blockedBy` a WE item, and independent per-repo
+ * drains could not sequence that. Git-side ops (manifest read via `git show`, rebase-drop, local-main sync) stay
+ * scoped to the LOCAL clone; a remote-repo PR reads its manifest via the GitHub API and, if CONFLICTING/BEHIND,
+ * is left for its author (rebase-drop needs a clone of that repo — a follow-up). Landing a frontierui/plateau
+ * PR still needs that repo's own required `test` check + branch protection (#2242/#2243/#2246) or GitHub blocks
+ * the merge.
  *
  * Exit codes: 0 = swept (merged 0+ qualifying PRs, none failed); 2 = at least one merge attempt FAILED
  * (surfaced); 3 = bad input / `gh` unavailable.
@@ -254,6 +267,36 @@ export function shouldRepollForLabelLag({ label, found, expect, retried } = {}) 
   return Number(found) < threshold;
 }
 
+/**
+ * #2257 — resolve the set of repos this ONE lander sweeps. Pure. The single `/drain` skill stays one skill;
+ * this makes its lander repo-aware instead of copying the transport into each repo (the rejected #2244/#2245
+ * approach). Independent per-repo drains CANNOT sequence cross-repo `blockedBy` — the backlog is WE-global, so
+ * a frontierui PR can be blocked by a WE item — so a single global cascade over all repos is required, not
+ * optional. Resolution:
+ *   - `--repos=owner/a,owner/b` → those exact slugs (explicit override).
+ *   - `--all-repos` → the constellation: self's owner × {web-everything, frontierui, plateau-app}, **self
+ *     FIRST** so the local clone (rebase-drop, local-main sync) is the primary repo.
+ *   - neither → `[null]`: the single-repo default. `null` = "the cwd repo, NO `--repo` flag", so the
+ *     established single-repo path (and every existing behaviour/test) is byte-for-byte unchanged.
+ * A slug entry routes every gh call through `--repo`; a `null`-or-self entry keeps using local git for the
+ * manifest read / rebase-drop / sync. `self` is the cwd repo slug "owner/name" (derived from origin).
+ * @param {{repos?:string|null, allRepos?:boolean, self?:string|null}} o
+ * @returns {Array<string|null>}
+ */
+export function resolveRepos({ repos, allRepos, self } = {}) {
+  if (typeof repos === 'string' && repos.trim()) {
+    const list = repos.split(',').map((s) => s.trim()).filter(Boolean);
+    return list.length ? list : [null];
+  }
+  if (allRepos) {
+    const owner = self && self.includes('/') ? self.split('/')[0] : null;
+    if (!owner) return [null]; // can't derive the constellation without an owner → stay single-repo (safe)
+    const slugs = ['web-everything', 'frontierui', 'plateau-app'].map((n) => `${owner}/${n}`);
+    return [...new Set([self, ...slugs.filter((s) => s !== self)])]; // self first (the local clone), then the rest
+  }
+  return [null];
+}
+
 /** Synchronous sleep (the CLI is fully synchronous — execFileSync throughout — so the watch loop blocks here
  *  between polls without an event loop). Uses Atomics.wait so it spawns nothing. */
 function sleepSync(ms) {
@@ -294,6 +337,21 @@ function runCli() {
   const REVIEW_ESCALATION = label && !flags['no-review-escalation'];
   const SAMPLE_NTH = Number.isFinite(Number(flags['sample-nth'])) && Number(flags['sample-nth']) > 0 ? Number(flags['sample-nth']) : undefined;
 
+  // #2257 — the ONE /drain lander sweeps all 3 constellation repos. Derive the local repo slug from origin
+  // (used to keep git-side ops — manifest read, rebase-drop, local-main sync — scoped to the local clone), then
+  // resolve the repo set: `--all-repos` (constellation) / `--repos=a,b` (explicit) / neither (single-repo default).
+  const localSlug = (() => {
+    try {
+      const url = execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const m = url.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
+      return m ? m[1] : null;
+    } catch { return null; }
+  })();
+  const REPOS = resolveRepos({ repos: typeof flags.repos === 'string' ? flags.repos : null, allRepos: !!flags['all-repos'], self: localSlug });
+  const repoFlag = (repo) => (repo ? ['--repo', repo] : []);      // a slug → scope the gh call; null → cwd repo
+  const isLocalRepo = (repo) => repo == null || repo === localSlug; // git-side ops only run against the local clone
+  const repoTag = (repo) => (repo && repo !== localSlug ? `${repo.split('/').pop()}#` : '#'); // display prefix per PR
+
   const fail = (reason, detail, code) => {
     if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, reason, detail }) + '\n');
     else process.stderr.write(`merge-ai-prs ✗ ${reason}: ${detail}\n`);
@@ -303,8 +361,18 @@ function runCli() {
   // Read a PR's `.lane-manifest.json` off its head ref (#2188). Only a WE PR carries one (the producer writes
   // it into the WE lane commit); an orphan/impl PR has none → { item:null, blockedBy:[] } → always ready (the
   // legacy unordered behaviour). Best-effort: a fetch/parse miss degrades to no-manifest, never throws.
-  const readPrManifest = (headRef) => {
+  const readPrManifest = (repo, headRef) => {
     if (!headRef) return null;
+    if (!isLocalRepo(repo)) {
+      // #2257 — a remote-repo PR has no local clone to `git show`; read the manifest off its head ref via the
+      // GitHub API (`gh api …/contents/.lane-manifest.json?ref=<headRef>` → base64 `.content`). Best-effort:
+      // an impl/orphan PR carries no manifest → null → always ready (the legacy unordered behaviour).
+      try {
+        const b64 = execFileSync('gh', ['api', `repos/${repo}/contents/.lane-manifest.json`, '-f', `ref=${headRef}`, '-q', '.content'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        if (b64) { const m = JSON.parse(Buffer.from(b64, 'base64').toString('utf8')); if (m && m.item != null) return m; }
+      } catch { /* no manifest on this ref */ }
+      return null;
+    }
     try { execFileSync('git', ['fetch', 'origin', headRef, '--quiet'], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* ref may be local */ }
     for (const rev of ['FETCH_HEAD', `origin/${headRef}`, headRef]) {
       try {
@@ -320,19 +388,19 @@ function runCli() {
   // a `pr-land --label-on-green` timeout left stranded. Lists open PRs unfiltered by label, filters to the cheap
   // signals (unlabelled + required check green), confirms producer authorship per-candidate (commits), then adds
   // the label. Best-effort — a gh miss never fails the drain. Returns the labelled PR numbers.
-  const reconcileGreenLabels = () => {
+  const reconcileGreenLabels = (repo) => {
     if (!RECONCILE) return [];
     let open;
-    try { open = JSON.parse(execFileSync('gh', ['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,title,labels,statusCheckRollup'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '[]'); }
+    try { open = JSON.parse(execFileSync('gh', ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100', '--json', 'number,title,labels,statusCheckRollup'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '[]'); }
     catch { return []; } // reconcile is best-effort; the real sweep below still hard-fails on a bad env
     const cheap = open.filter((p) => !hasLabel(p, label) && isRequiredCheckGreen(p, REQUIRED)); // green + unlabelled
     const labelled = [];
     for (const p of cheap) {
       let commits = [];
-      try { commits = JSON.parse(execFileSync('gh', ['pr', 'view', String(p.number), '--json', 'commits'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').commits || []; } catch { continue; }
+      try { commits = JSON.parse(execFileSync('gh', ['pr', 'view', String(p.number), ...repoFlag(repo), '--json', 'commits'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').commits || []; } catch { continue; }
       if (!shouldLabelOnGreen({ ...p, commits }, { requiredCheck: REQUIRED, label })) continue;
-      if (DRY_RUN) { labelled.push(p.number); if (!AS_JSON) process.stderr.write(`  🏷 #${p.number} would label "${label}" (required check green, was unlabelled)\n`); continue; }
-      try { execFileSync('gh', ['pr', 'edit', String(p.number), '--add-label', label], { stdio: ['ignore', 'ignore', 'pipe'] }); labelled.push(p.number); if (!AS_JSON) process.stderr.write(`  🏷 #${p.number} labelled "${label}" (post-CI reconcile — required check went green after a label-on-green timeout)\n`); }
+      if (DRY_RUN) { labelled.push(p.number); if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} would label "${label}" (required check green, was unlabelled)\n`); continue; }
+      try { execFileSync('gh', ['pr', 'edit', String(p.number), ...repoFlag(repo), '--add-label', label], { stdio: ['ignore', 'ignore', 'pipe'] }); labelled.push(p.number); if (!AS_JSON) process.stderr.write(`  🏷 ${repoTag(repo)}${p.number} labelled "${label}" (post-CI reconcile — required check went green after a label-on-green timeout)\n`); }
       catch { /* a label race/permission miss is non-fatal — the next pass retries */ }
     }
     return labelled;
@@ -341,38 +409,45 @@ function runCli() {
   // ── ONE sweep pass — reconcile labels → list → classify → cascade-merge → sync. Returns the pass result (no
   // emit/exit), so the watch loop can call it repeatedly. A gh-list failure still hard-fails (bad env).
   const sweepOnce = () => {
-  const reconciledLabels = reconcileGreenLabels(); // #2216 — label green-but-unlabelled producer PRs first
-  // List open PRs WITHOUT commits (commits×authors×limit overflows GitHub's GraphQL node cap), then fetch each
-  // candidate's commits per-PR — the rollup + mergeable come from the list; commits (the AI gate) come per PR.
-  const listArgs = ['pr', 'list', '--state', 'open', '--limit', '100',
-    '--json', 'number,title,headRefName,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels'];
-  if (base) listArgs.push('--base', base);
-  if (label) listArgs.push('--label', label);
-  let prs;
-  try { prs = JSON.parse(execFileSync('gh', listArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '[]'); }
-  catch (e) { fail('gh-error', `gh pr list failed (${String(e.message || e).split('\n')[0]}) — is gh authenticated?`, 3); }
+  // #2257 — collect + classify across EVERY repo in the sweep set into ONE global candidate list. PR numbers
+  // are per-repo (WE #10 ≠ FUI #10), so each verdict carries its own `repo` + head ref instead of a
+  // number-keyed cross-repo map. The single list is what lets the cascade honour cross-repo `blockedBy`.
+  const reconciledLabels = [];
+  const verdicts = [];
+  for (const repo of REPOS) {
+    reconciledLabels.push(...reconcileGreenLabels(repo)); // #2216 — label green-but-unlabelled producer PRs first
+    // List open PRs WITHOUT commits (commits×authors×limit overflows GitHub's GraphQL node cap), then fetch each
+    // candidate's commits per-PR — the rollup + mergeable come from the list; commits (the AI gate) come per PR.
+    const listArgs = ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100',
+      '--json', 'number,title,headRefName,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels'];
+    if (base) listArgs.push('--base', base);
+    if (label) listArgs.push('--label', label);
+    let prs;
+    try { prs = JSON.parse(execFileSync('gh', listArgs, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '[]'); }
+    catch (e) { fail('gh-error', `gh pr list${repo ? ` --repo ${repo}` : ''} failed (${String(e.message || e).split('\n')[0]}) — is gh authenticated?`, 3); }
 
-  if (onlyPr) prs = prs.filter((p) => String(p.number) === onlyPr);
-  // Attach each PR's commits (per-PR fetch avoids the node-cap overflow of asking for them in the list).
-  for (const p of prs) {
-    try { p.commits = JSON.parse(execFileSync('gh', ['pr', 'view', String(p.number), '--json', 'commits'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').commits || []; }
-    catch { p.commits = []; } // no commits ⇒ isAiGeneratedPr → false → skipped (never merged on missing data)
-  }
-  const verdicts = prs.map((p) => classifyPr(p, { requiredCheck: REQUIRED }));
-  // #2188: attach each PR's manifest (backlog `item` + cross-item `blockedBy`) so the merge order honours
-  // dependencies. Only WE PRs carry one; the rest degrade to no-manifest → always ready (legacy order).
-  const refByNum = new Map(prs.map((p) => [String(p.number), p.headRefName]));
-  const prByNum = new Map(prs.map((p) => [String(p.number), p]));
-  for (const v of verdicts) {
-    const m = readPrManifest(refByNum.get(String(v.num)));
-    v.item = m && m.item != null ? Number(m.item) : null;
-    v.blockedBy = m && Array.isArray(m.blockedBy) ? m.blockedBy.map(Number) : [];
-    v.hasManifest = m != null; // #2183 — carries the transient manifest on its head → must be stripped before merge
-    // #2171 review-escalation signals off the manifest: a cross-repo couple (>1 repo) and the count of pre-PR
-    // review findings the lane dismissed (the strongest signal). Absent manifest → both benign defaults.
-    v.crossRepo = m && Array.isArray(m.repos) ? m.repos.length > 1 : false;
-    v.dismissedFindings = m && Number.isFinite(Number(m.dismissedFindings)) ? Number(m.dismissedFindings) : 0;
-    v.prLabels = prByNum.get(String(v.num))?.labels || [];
+    if (onlyPr) prs = prs.filter((p) => String(p.number) === onlyPr);
+    // Attach each PR's commits (per-PR fetch avoids the node-cap overflow of asking for them in the list).
+    for (const p of prs) {
+      try { p.commits = JSON.parse(execFileSync('gh', ['pr', 'view', String(p.number), ...repoFlag(repo), '--json', 'commits'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').commits || []; }
+      catch { p.commits = []; } // no commits ⇒ isAiGeneratedPr → false → skipped (never merged on missing data)
+    }
+    for (const p of prs) {
+      const v = classifyPr(p, { requiredCheck: REQUIRED });
+      v.repo = repo;               // null (local clone) or a slug — routes the merge/view/edit + the git-side gate
+      v.headRef = p.headRefName;
+      // #2188: attach the manifest (backlog `item` + cross-item `blockedBy`) so the GLOBAL cascade honours
+      // cross-repo dependencies. Only a WE lane carries one; the rest degrade to no-manifest → always ready.
+      const m = readPrManifest(repo, p.headRefName);
+      v.item = m && m.item != null ? Number(m.item) : null;
+      v.blockedBy = m && Array.isArray(m.blockedBy) ? m.blockedBy.map(Number) : [];
+      v.hasManifest = m != null; // #2183 — carries the transient manifest on its head → must be stripped before merge
+      // #2171 review-escalation signals off the manifest: cross-repo couple (>1 repo) + dismissed pre-PR findings.
+      v.crossRepo = m && Array.isArray(m.repos) ? m.repos.length > 1 : false;
+      v.dismissedFindings = m && Number.isFinite(Number(m.dismissedFindings)) ? Number(m.dismissedFindings) : 0;
+      v.prLabels = p.labels || [];
+      verdicts.push(v);
+    }
   }
   // #2198 — rebase-drop the transient manifest so a certified+green PR that is only CONFLICTING/BEHIND on the
   // shared `.lane-manifest.json` path lands instead of walling the whole queue. Per candidate: merge-tree
@@ -386,11 +461,18 @@ function runCli() {
       // landable but still CARRIES the manifest on its head (#2183 first-lander leak — a clean merge would
       // otherwise commit the transient file to `main`). Both cases route through the same plumbing.
       if (!isRebaseDropCandidate(v) && !needsManifestStripBeforeMerge(v)) continue;
-      const laneRef = refByNum.get(String(v.num));
+      const laneRef = v.headRef;
       if (!laneRef) continue;
+      // #2257 — rebase-drop is pure LOCAL git plumbing (merge-tree/commit-tree/push), so it can only run against
+      // the local clone. A remote-repo PR that is CONFLICTING/BEHIND is left as a skip with a clear pointer —
+      // rebasing it needs a clone of THAT repo (a follow-up; #2244/#2245 prereqs land its CI first anyway).
+      if (!isLocalRepo(v.repo)) {
+        if (isRebaseDropCandidate(v)) { v.rebaseDrop = 'skipped-remote'; if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} needs rebase in a ${v.repo} clone (remote repo — rebase-drop is local-only); left for its author\n`); }
+        continue;
+      }
       if (DRY_RUN) {
         v.rebaseDrop = 'would-attempt';
-        if (!AS_JSON) process.stderr.write(`  ↻ #${v.num} would rebase-drop manifest (state ${v.state}/${v.mergeable}) then merge\n`);
+        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} would rebase-drop manifest (state ${v.state}/${v.mergeable}) then merge\n`);
         continue;
       }
       const r = rebaseDropManifest({ laneRef, base: 'origin/main', run: gitRunner });
@@ -399,9 +481,9 @@ function runCli() {
         v.decision = 'merge';
         v.reason = `rebased onto main${r.dropped ? ' (dropped manifest)' : ''}, required check green — landable`;
         rebased.push(v.num);
-        if (!AS_JSON) process.stderr.write(`  ↻ #${v.num} rebased onto main${r.dropped ? ' (manifest dropped)' : ''} → ${r.newCommit.slice(0, 9)}\n`);
+        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} rebased onto main${r.dropped ? ' (manifest dropped)' : ''} → ${r.newCommit.slice(0, 9)}\n`);
       } else if (!AS_JSON) {
-        process.stderr.write(`  ↻ #${v.num} left skipped: ${r.reason}\n`);
+        process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} left skipped: ${r.reason}\n`);
       }
     }
   }
@@ -420,7 +502,7 @@ function runCli() {
       let changedFiles = [];
       let diffLines = 0;
       try {
-        const files = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), '--json', 'files'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').files || [];
+        const files = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'files'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').files || [];
         changedFiles = files.map((f) => f.path).filter(Boolean);
         diffLines = files.reduce((s, f) => s + (Number(f.additions) || 0) + (Number(f.deletions) || 0), 0);
       } catch { /* signal-fetch miss → score on the manifest signals alone */ }
@@ -431,11 +513,11 @@ function runCli() {
       if (gate.action === 'park' || gate.action === 'wait-author') {
         v.decision = 'skip';
         v.reason = gate.reason + (score.reasons.length ? ` [${score.reasons.join('; ')}]` : '');
-        if (gate.applyLabel && !DRY_RUN) { try { execFileSync('gh', ['pr', 'edit', String(v.num), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ } }
+        if (gate.applyLabel && !DRY_RUN) { try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ } }
         parked.push(v.num);
-        if (!AS_JSON) process.stderr.write(`  ⏸ #${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}): ${score.reasons.join('; ')}\n`);
+        if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}): ${score.reasons.join('; ')}\n`);
       } else if (score.escalate && !AS_JSON) {
-        process.stderr.write(`  ✓ #${v.num} escalation cleared (${gate.reason})\n`);
+        process.stderr.write(`  ✓ ${repoTag(v.repo)}${v.num} escalation cleared (${gate.reason})\n`);
       }
     }
   }
@@ -444,7 +526,7 @@ function runCli() {
   const skipped = verdicts.filter((v) => v.decision === 'skip');
 
   if (!AS_JSON) {
-    for (const v of verdicts) process.stderr.write(`  ${v.decision === 'merge' ? '→ merge' : '· skip '} #${v.num} ${v.item ? `(#${v.item}${v.blockedBy.length ? ` ⤳ ${v.blockedBy.join(',')}` : ''}) ` : ''}${v.decision === 'skip' ? `(${v.reason})` : ''} — ${v.title}\n`);
+    for (const v of verdicts) process.stderr.write(`  ${v.decision === 'merge' ? '→ merge' : '· skip '} ${repoTag(v.repo)}${v.num} ${v.item ? `(#${v.item}${v.blockedBy.length ? ` ⤳ ${v.blockedBy.join(',')}` : ''}) ` : ''}${v.decision === 'skip' ? `(${v.reason})` : ''} — ${v.title}\n`);
     process.stderr.write(`${DRY_RUN ? 'DRY-RUN: ' : ''}${toMerge.length} AI PR(s) to merge${label ? ` (label "${label}")` : ''}, ${skipped.length} skipped.\n`);
   }
 
@@ -457,7 +539,7 @@ function runCli() {
     const plan = planLabelDrain(verdicts);
     deferred = plan.deferred;
     if (!AS_JSON) {
-      process.stderr.write(`  merge order: ${plan.ready.map((c) => '#' + c.num + (c.item ? `→${c.item}` : '')).join(' → ') || '(none ready)'}\n`);
+      process.stderr.write(`  merge order: ${plan.ready.map((c) => repoTag(c.repo) + c.num + (c.item ? `→${c.item}` : '')).join(' → ') || '(none ready)'}\n`);
       if (deferred.length) process.stderr.write(`  deferred (blockedBy unlanded): ${deferred.map((d) => `#${d.num}→[${d.waitOn.join(',')}]`).join(', ')}\n`);
     }
   } else {
@@ -465,6 +547,9 @@ function runCli() {
     // dependents next pass (mirrors the lane-drain cascade). A merge FAILURE (red/behind) marks the PR `skip`
     // so it keeps blocking its dependents — never land past a broken blocker.
     let remaining = verdicts.map((v) => ({ ...v }));
+    // #2257 — an item is unique per (repo, PR#): match/remove candidates on both so a WE #10 and a FUI #10 never
+    // collide in the cascade bookkeeping.
+    const sameCand = (a, b) => a.num === b.num && a.repo === b.repo;
     for (;;) {
       const plan = planLabelDrain(remaining);
       deferred = plan.deferred;
@@ -472,22 +557,22 @@ function runCli() {
       let progressed = false;
       for (const c of plan.ready) {
         try {
-          execFileSync('gh', ['pr', 'merge', String(c.num), '--merge', '--delete-branch'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-          merged.push(c.num); progressed = true;
-          remaining = remaining.filter((x) => x.num !== c.num); // merged → item leaves the open set (frees dependents)
-          if (!AS_JSON) process.stderr.write(`  ✓ merged #${c.num}${c.item ? ` (#${c.item})` : ''}\n`);
+          execFileSync('gh', ['pr', 'merge', String(c.num), ...repoFlag(c.repo), '--merge', '--delete-branch'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+          merged.push({ num: c.num, repo: c.repo }); progressed = true;
+          remaining = remaining.filter((x) => !sameCand(x, c)); // merged → item leaves the open set (frees dependents)
+          if (!AS_JSON) process.stderr.write(`  ✓ merged ${repoTag(c.repo)}${c.num}${c.item ? ` (#${c.item})` : ''}\n`);
         } catch (e) {
           const detail = String(e.message || e).split('\n')[0];
-          const cc = remaining.find((x) => x.num === c.num); if (cc) cc.decision = 'skip'; // stays blocking its dependents; not retried this pass
+          const cc = remaining.find((x) => sameCand(x, c)); if (cc) cc.decision = 'skip'; // stays blocking its dependents; not retried this pass
           // #2198 — a PR we JUST rebuilt (rebase-drop) has a new head, so CI (`test`) is re-running; an immediate
           // merge is EXPECTED to bounce on pending checks. That is not a hard failure — the watch re-sweeps and
           // lands it the next pass once green. Only a merge failure on a PR we did NOT just touch is a real fault.
           if (c.rebaseDrop === 'rebased') {
             pendingRebased.push(c.num);
-            if (!AS_JSON) process.stderr.write(`  ↻ #${c.num} rebuilt onto main — awaiting re-run of checks; will land on a later pass\n`);
+            if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(c.repo)}${c.num} rebuilt onto main — awaiting re-run of checks; will land on a later pass\n`);
           } else {
-            failedMerges.push({ num: c.num, detail });
-            if (!AS_JSON) process.stderr.write(`  ✗ #${c.num} merge failed: ${detail}\n`);
+            failedMerges.push({ num: c.num, repo: c.repo, detail });
+            if (!AS_JSON) process.stderr.write(`  ✗ ${repoTag(c.repo)}${c.num} merge failed: ${detail}\n`);
           }
         }
       }
@@ -504,15 +589,17 @@ function runCli() {
   // `--autostash` sets the dirty edits aside, fast-forwards, then reapplies them — so main advances AND local
   // edits are preserved. Still ff-only (never rebases/force — a genuine divergence aborts and is reported). The
   // rare case where a reapplied edit overlaps an incoming change surfaces a normal stash-pop conflict for the
-  // human, rather than silently leaving main behind. Only when something actually merged.
+  // human, rather than silently leaving main behind. Only when something actually merged. #2257 — the local
+  // pull only makes sense for the LOCAL clone's repo, so it fires only when a LOCAL-repo PR merged (a remote-
+  // repo merge advanced that repo's origin, which this clone doesn't track).
   let localSynced = false;
-  if (!DRY_RUN && merged.length) {
+  if (!DRY_RUN && merged.some((m) => isLocalRepo(m.repo))) {
     try { execFileSync('git', ['pull', '--ff-only', '--autostash'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); localSynced = true; }
     catch { localSynced = false; }
     if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ local main fast-forwarded to origin (autostash preserved local edits)\n` : `  · local main NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`);
   }
 
-  const result = { ok: true, dryRun: DRY_RUN, label, considered: verdicts.length, toMerge: toMerge.map((v) => v.num), merged, failed: failedMerges, rebased, pendingRebased, deferred, localSynced, reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}) })) };
+  const result = { ok: true, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, deferred, localSynced, reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}) })) };
   return { result, merged, failedMerges, pendingRebased, deferred };
   }; // end sweepOnce
 
