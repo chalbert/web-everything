@@ -18,6 +18,13 @@ diversions: an item named in the invocation **skips selection** (step 0); the ba
 `decision`/`review` runs **decision-mode** — surface the one highest-leverage *call to make*, not a
 build (step 0b). All modes share the same claim → sync → close-out tail (steps 4–8).
 
+> **Working an item edits the tree → enter a lane FIRST (#2123).** Once you've picked an item to *build*
+> (not just surface), the work runs in an **isolated lane clone**, never the shared primary checkout —
+> `we:scripts/guard-lane.mjs` blocks a primary `Edit` otherwise. Provision/enter a lane before you start
+> editing: `node we:scripts/lane-pool.mjs status --json` → pick a clean lane → work + `resolve` there →
+> land via PR. (How the claim/`resolve` frontmatter lifecycle composes with lane isolation is being
+> reconciled — **#2219**.)
+
 ## The loop
 
 **0. Item named in the invocation → skip selection.** When the caller passes an item (a bare `NNN`
