@@ -46,8 +46,20 @@ export const meta = {
 // (git, lane-pool.mjs, backlog.mjs, pr-land.mjs, gh, npm gates) happen INSIDE agents via Bash; the script only
 // does control flow.
 //
+// NEW-ITEM PUBLISH (#2215). Lanes claim items that exist on origin/main, so a batch of items that DON'T exist
+// yet must reach main first. The old setup did that as a `backlog.mjs scaffold` in the PRIMARY + a direct
+// `git push` to main — the exact #2203 primary-write the strict lock now forbids. Fixed by SCAFFOLD-IN-LANE:
+// an item may carry a `seed` ({ kind, size, title, digest, blockedBy?, parent? }); its lane scaffolds it in its
+// OWN clone (`backlog.mjs scaffold --session`, born active+owned), works it, and it rides that lane's PR — no
+// pre-publish to main at all. Cross-lane NNN collisions are healed at land by pr-land (#2071/#2213). An item
+// WITHOUT a seed is an existing backlog item, claimed-in-lane as before. (Alternative not taken: a gated
+// pre-publish PR that lands before dispatch — one extra PR-cycle of latency; the in-lane seed avoids it.)
+//
 // args (passed by the main loop after the conversational pack/plan/"go"):
-//   { batchSlug, budgetPoints, primaryRoot, items: [ { num, slug, file, locus, cost, declaredFiles, blockedBy } … ],
+//   { batchSlug, budgetPoints, primaryRoot,
+//     items: [ { num, slug, file, locus, cost, declaredFiles, blockedBy,
+//                seed? /* #2215: {kind,size,title,digest?,blockedBy?,parent?} → this is a NEW item scaffolded
+//                         in-lane; num/file are absent until the lane allocates them */ } … ],
 //     laneModel? }  — laneModel (e.g. 'sonnet') downgrades ONLY the per-item lane work agents; the probe and
 //   the report steps stay on the inherited model. Omit → all agents inherit the session model. (deferredDrain
 //   from #2174 is GONE — under #2183 defer-and-decouple is the ONLY mode; there is no inline fallback.)
@@ -184,10 +196,16 @@ function affectedReposOf(entry) {
 function isCrossRepo(entry) {
   return affectedReposOf(entry).some((r) => r !== 'we');
 }
-// The lane/* ref an item pushes — namespaced under lane/ (the #1934 guard carve-out) and scoped by slug + num
-// so concurrent batches never collide. The SAME name is used in each affected repo's own origin.
-function laneRefFor(num) {
-  return `lane/${batchSlug}-${num}`;
+// A stable, num-independent key for an item's lane ref. An EXISTING item keys by its NNN; a NEW (seeded) item
+// has no NNN until its lane scaffolds it in-lane (#2215), so it keys by `new-<slug>` — deterministic and
+// collision-free across a batch (slugs are unique in a pack), and independent of which NNN the scaffold lands.
+function laneKeyOf(it) {
+  return it && it.seed ? `new-${it.slug}` : String(it.num);
+}
+// The lane/* ref an item pushes — namespaced under lane/ (the #1934 guard carve-out) and scoped by slug/num so
+// concurrent batches never collide. The SAME name is used in each affected repo's own origin.
+function laneRefFor(it) {
+  return `lane/${batchSlug}-${laneKeyOf(it)}`;
 }
 // Per-repo lane assignment: for each repo, the items touching it form an ordered list; an item's lane index in
 // that repo = its position. So we provision exactly as many lanes per repo as items touch it, and item↔lane is
@@ -220,8 +238,10 @@ const probedRaw = await parallel(items.map((it) => () =>
     [
       RETURN_HYGIENE,
       ``,
-      `You are scoping backlog item #${it.num} ("${it.slug}") for a PARALLEL batch. Read we:backlog/${it.file}`,
-      `and any files it references. Report ONLY which NON-WE constellation repos (#96) this item's impl SPANS:`,
+      it.seed
+        ? `You are scoping a NEW backlog item to be scaffolded ("${it.slug}") for a PARALLEL batch. It has no file yet — scope it from its seed: ${JSON.stringify({ kind: it.seed.kind, title: it.seed.title || it.slug, digest: it.seed.digest })}.`
+        : `You are scoping backlog item #${it.num} ("${it.slug}") for a PARALLEL batch. Read we:backlog/${it.file} and any files it references.`,
+      `Report ONLY which NON-WE constellation repos (#96) this item's impl SPANS:`,
       `frontierui and/or plateau-app. The backlog item + its resolve ALWAYS live in WE, so WE is implicit and`,
       `you do NOT list it. Most items are WE-only → return an empty extraRepos. List a non-WE repo ONLY when the`,
       `body clearly reaches into it (e.g. a standard authored in WE but implemented in frontierui, or surfaced`,
@@ -327,15 +347,21 @@ function laneDirsForItem(it) {
 }
 
 function laneItemPrompt(it, laneDirs) {
-  const ref = laneRefFor(it.num);
+  const ref = laneRefFor(it);
   const repos = affectedReposOf(it); // impl-first, WE last
   const weDir = laneDirs.we || '';
   const implRepos = repos.filter((r) => r !== 'we');
   const reposManifest = repos.map((r) => ({ repo: r, ref, carriesResolve: r === 'we' }));
+  const seed = it.seed || null; // #2215 — a NEW item scaffolded IN-LANE (no NNN yet), vs an existing claimed item.
+  // The token used to name the item in every step below: an existing item's NNN, or the literal placeholder
+  // `NUM` for a seeded new item — the lane reads the id the in-lane scaffold allocated and substitutes the
+  // real number for NUM in each command (NOT a shell variable — shell state does not survive across the lane's
+  // separate Bash calls, so a `$NUM` capture would be empty by step 5).
+  const N = seed ? 'NUM' : String(it.num);
   const lines = [
     RETURN_HYGIENE,
     ``,
-    `You are PARALLEL batch item #${it.num} ("${it.slug}") running in your OWN persistent lane CLONES (each has`,
+    `You are PARALLEL batch item ${seed ? `"${it.slug}" (a NEW item you will SCAFFOLD in-lane — it has no NNN yet)` : `#${it.num} ("${it.slug}")`} running in your OWN persistent lane CLONES (each has`,
     `its own HEAD — the git-branch/lane guard never fires on it). This item spans these repos: ${repos.join(', ')}.`,
     `Lane clones: ${JSON.stringify(laneDirs)}. Do EXACTLY this, in order. The PRODUCER CONTRACT (#2183): you`,
     `open a READY-TO-MERGE PR per repo and STOP — you NEVER merge, NEVER push main, NEVER commit to main, and`,
@@ -351,13 +377,31 @@ function laneItemPrompt(it, laneDirs) {
   lines.push(
     `   Ensure deps in each clone (the pool installed them; if node_modules is missing run \`npm ci\` there).`,
     ``,
-    `2. CLAIM-IN-LANE (#2183 — the claim rides the PR, it is NOT pre-committed to main). In the WE clone run`,
-    `   \`node scripts/backlog.mjs claim ${it.num} --session=${batchSlug}\` (open→active + dateStarted). If it`,
-    `   ERRORS because #${it.num} is already active/queued (another session owns it), STOP: report`,
-    `   status:"carried" drop:"taken", open NO PR. Do NOT --force.`,
+    seed
+      // #2215 (preferred fix) — SCAFFOLD-IN-LANE: a new item is born in THIS lane and rides THIS lane's PR, so
+      // it never needs a direct scaffold+push to main (the #2203 primary-write the strict lock forbids). Two
+      // lanes may allocate the same NNN off origin/main; the pr-land id-collision heal (#2071/#2213) yields the
+      // later-landing one at land — never a pre-publish barrier.
+      ? [
+          `2. SCAFFOLD-IN-LANE (#2215 — the new item is BORN in this lane and rides its PR; it is NEVER scaffolded`,
+          `   on main, so no direct push to main is ever needed). In the WE clone run:`,
+          `   \`node scripts/backlog.mjs scaffold --kind=${seed.kind} --size=${seed.size ?? ''} --title=${JSON.stringify(seed.title || it.slug)}${seed.digest ? ` --digest=${JSON.stringify(seed.digest)}` : ''}${seed.blockedBy && seed.blockedBy.length ? ` --blocked-by=${seed.blockedBy.join(',')}` : ''}${seed.parent ? ` --parent=${seed.parent}` : ''} --session=${batchSlug} --json\``,
+          `   — \`--session\` makes it born active+owned (#670), so the claim already rode with the scaffold. The`,
+          `   command prints \`{ "num": <id>, "file": "<NNN>-<slug>.md", … }\`. READ the allocated id and, in EVERY`,
+          `   command below, SUBSTITUTE that real number wherever these steps write NUM (do NOT use a shell`,
+          `   variable — the lane's Bash calls don't share state). Two lanes can allocate the same NNN off`,
+          `   origin/main; that is EXPECTED — the pr-land id-collision heal (#2071/#2213) yields the later-landing`,
+          `   one at land. If the scaffold FAILED, STOP: report status:"dropped" drop:"scaffold-failed", open NO PR.`,
+        ].join('\n')
+      : [
+          `2. CLAIM-IN-LANE (#2183 — the claim rides the PR, it is NOT pre-committed to main). In the WE clone run`,
+          `   \`node scripts/backlog.mjs claim ${it.num} --session=${batchSlug}\` (open→active + dateStarted). If it`,
+          `   ERRORS because #${it.num} is already active/queued (another session owns it), STOP: report`,
+          `   status:"carried" drop:"taken", open NO PR. Do NOT --force.`,
+        ].join('\n'),
     ``,
-    `3. WORK the item across its repos — the full single-item arc MINUS the claim (just done). Edit ONLY this`,
-    `   item's own files in each clone: its WE impl/code + its own we:backlog/${it.file} in the WE clone, and`,
+    `3. WORK the item across its repos — the full single-item arc MINUS the ${seed ? 'scaffold' : 'claim'} (just done). Edit ONLY this`,
+    `   item's own files in each clone: its WE impl/code + ${seed ? `its own new backlog file (the scaffold created \`backlog/$NUM-*.md\`)` : `its own we:backlog/${it.file}`} in the WE clone, and`,
     `   its own impl files in ${implRepos.length ? implRepos.join('/') : '(no other repos)'}. Per-entry registry`,
     `   files (src/_data/<reg>/<id>.json) are your own; do NOT splice a monolithic shared registry — if the item`,
     `   genuinely needs that, STOP, report status:"dropped" drop:"outgrew".`,
@@ -370,12 +414,12 @@ function laneItemPrompt(it, laneDirs) {
     `   their own repo's gate in their clone; their final authority is the PR's own required \`test\` check on GitHub.`,
     ``,
     `5. RESOLVE (only after the WE fast-fail is green). In the WE clone: \`node scripts/backlog.mjs resolve`,
-    `   ${it.num} [--graduated-to=…] [--codified-to=…]\` (a kind:decision resolve REQUIRES --codified-to, #911).`,
+    `   ${N} [--graduated-to=…] [--codified-to=…]\` (a kind:decision resolve REQUIRES --codified-to, #911).`,
     `   Then COMMIT each repo's own files (git add <explicit paths>; NEVER -A; NEVER stage another item's files).`,
-    `   Commit message per repo: \`backlog: resolve #${it.num} — ${it.slug}\`.`,
+    `   Commit message per repo: \`backlog: resolve #${N} — ${it.slug}\`.`,
     ``,
     `6. WRITE THE MANIFEST (the drain reads it to land the couple in order). In the WE clone, AFTER the resolve`,
-    `   commit: \`node scripts/lane-manifest-write.mjs --item=${it.num} --repos='${JSON.stringify(reposManifest)}'${it.blockedBy && it.blockedBy.length ? ` --blocked-by=${it.blockedBy.join(',')}` : ''} --batch-slug=${batchSlug}\``,
+    `   commit: \`node scripts/lane-manifest-write.mjs --item=${N} --repos='${JSON.stringify(reposManifest)}'${it.blockedBy && it.blockedBy.length ? ` --blocked-by=${it.blockedBy.join(',')}` : ''} --batch-slug=${batchSlug}\``,
     `   then \`git add .lane-manifest.json && git commit --amend --no-edit\` (ONE commit carries work + resolve +`,
     `   manifest — a one-sided ADD keeps the WE-lane merge conflict-free). Only the WE clone writes the manifest.`,
     ``,
@@ -392,8 +436,8 @@ function laneItemPrompt(it, laneDirs) {
     `   lands it). This makes ready-to-merge mean "every required check is green", not "a local lint passed"; a`,
     `   PR whose CI ends up red is thus never labelled (the lane already fixed it in step 4, so this is a backstop).`,
     `   Compose the PR body from your dismissed findings first: \`node scripts/lane-review.mjs body`,
-    `   --base=origin/main > /tmp/pr-body-${it.num}.md\` (best-effort; if it fails, skip --body-file).`,
-    `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --label-on-green --body-file=/tmp/pr-body-${it.num}.md --json\``,
+    `   --base=origin/main > /tmp/pr-body-${laneKeyOf(it)}.md\` (best-effort; if it fails, skip --body-file).`,
+    `   • WE PR (run from ${weDir}): \`node scripts/pr-land.mjs --ref=${ref} --label-on-green --body-file=/tmp/pr-body-${laneKeyOf(it)}.md --json\``,
     `     (publishes your HEAD → the lane ref, opens the PR, waits for required checks, labels when green — no merge).`,
     `     Parse the PR number (\`pr\`) and \`labelApplied\` from its JSON. reason:"labelled-on-green" = labelled OK;`,
     `     reason:"check-red"/"check-timeout" = PR open but UNLABELLED (carried for labelling — the lane's CI wasn't green).`,
@@ -408,10 +452,10 @@ function laneItemPrompt(it, laneDirs) {
     `   If a repo's pr-land FAILS (push/gh error), report that repo WITHOUT a pr number (the item is carried for`,
     `   that repo; the others may still have opened). A WE PR that fails to open ⇒ status:"carried".`,
     ``,
-    `Report: num, status ("pr-open" if the WE PR opened, else "carried"/"dropped"), cost, prs (one {repo, ref,`,
-    `pr, url, labelled} per repo you opened a PR in), resolveCommit (git rev-parse HEAD in the WE clone after`,
-    `the manifest commit), changedFiles (REPO-QUALIFIED "<repo>:<path>"), dismissedFindings, gate (green/red).`,
-    `Return ONLY the structured object.`,
+    `Report: num (${seed ? 'the NNN the in-lane scaffold ALLOCATED — the real number, not the placeholder' : `${it.num}`}), status ("pr-open" if the WE PR opened, else`,
+    `"carried"/"dropped"), cost, prs (one {repo, ref, pr, url, labelled} per repo you opened a PR in),`,
+    `resolveCommit (git rev-parse HEAD in the WE clone after the manifest commit), changedFiles (REPO-QUALIFIED`,
+    `"<repo>:<path>"), dismissedFindings, gate (green/red). Return ONLY the structured object.`,
   );
   return lines.join('\n');
 }
@@ -425,19 +469,21 @@ log(`Working ${workItems.length} item(s) concurrently — each opens its own rea
 let itemsDone = 0;
 const results = await parallel(workItems.map((it) => () => {
   const laneDirs = laneDirsForItem(it);
+  // A seeded new item has no NNN until it scaffolds in-lane (#2215) — display by its lane key (`new-<slug>`).
+  const disp = it.seed ? laneKeyOf(it) : `#${it.num}`;
   if (!laneDirs.we) {
     itemsDone++;
-    log(`  ✗ #${it.num} (${itemsDone}/${workItems.length}): no WE lane clone available → skipped [${it.slug}]`);
+    log(`  ✗ ${disp} (${itemsDone}/${workItems.length}): no WE lane clone available → skipped [${it.slug}]`);
     return Promise.resolve(null);
   }
-  return agent(laneItemPrompt(it, laneDirs), { label: `lane:#${it.num}`, phase: 'Lanes', schema: ITEM_RESULT_SCHEMA, model: laneModelFor(it) })
+  return agent(laneItemPrompt(it, laneDirs), { label: `lane:${disp}`, phase: 'Lanes', schema: ITEM_RESULT_SCHEMA, model: laneModelFor(it) })
     .then((r) => {
       itemsDone++;
       const prN = r && Array.isArray(r.prs) ? r.prs.filter((p) => p && p.pr).length : 0;
-      log(`  ${r && r.status === 'pr-open' && prN > 0 ? '✓' : '~'} #${it.num} (${itemsDone}/${workItems.length}): ${r ? r.status + ', gate ' + r.gate + (prN ? `, ${prN} PR(s) opened` : ', no PR') : 'no result'} [${it.slug}]`);
-      return r ? { ...r, num: r.num || String(it.num), _item: it } : null;
+      log(`  ${r && r.status === 'pr-open' && prN > 0 ? '✓' : '~'} ${r && r.num ? '#' + r.num : disp} (${itemsDone}/${workItems.length}): ${r ? r.status + ', gate ' + r.gate + (prN ? `, ${prN} PR(s) opened` : ', no PR') : 'no result'} [${it.slug}]`);
+      return r ? { ...r, num: r.num || (it.seed ? undefined : String(it.num)), _item: it } : null;
     })
-    .catch(() => { itemsDone++; log(`  ✗ #${it.num} (${itemsDone}/${workItems.length}) died → carried [${it.slug}]`); return null; });
+    .catch(() => { itemsDone++; log(`  ✗ ${disp} (${itemsDone}/${workItems.length}) died → carried [${it.slug}]`); return null; });
 }));
 
 // ── Phase 4 — Finalize: build the ledger + write the local don't-re-offer signal (NO integrate, NO drain) ──
@@ -450,15 +496,17 @@ const toQueue = []; // { num, weRef } — items with an open WE PR (get a local 
 for (let i = 0; i < results.length; i++) {
   const cr = results[i];
   const it = workItems[i];
-  const num = String((cr && cr.num) || it.num);
+  // A seeded item's real NNN is only known from the lane result; fall back to its lane key when it carried/died.
+  const num = String((cr && cr.num) || it.num || laneKeyOf(it));
+  const laneLabel = it.seed ? laneKeyOf(it) : `#${it.num}`;
   const prs = cr && Array.isArray(cr.prs) ? cr.prs.filter((p) => p && p.repo && p.ref) : [];
   const wePr = prs.find((p) => p.repo === 'we' && p.pr);
   for (const p of prs) if (p.url) prUrls.push(p.url);
   if (cr && cr.status === 'pr-open' && wePr) {
     toQueue.push({ num, weRef: wePr.ref });
-    ledger.push({ num, status: 'pr-open', cost: cr.cost, lane: `#${it.num}`, repos: prs.map((p) => p.repo), prs, resolveCommit: cr.resolveCommit, changedFiles: cr.changedFiles });
+    ledger.push({ num, status: 'pr-open', cost: cr.cost, lane: laneLabel, repos: prs.map((p) => p.repo), prs, resolveCommit: cr.resolveCommit, changedFiles: cr.changedFiles });
   } else {
-    ledger.push({ num, status: 'carried', drop: cr ? (cr.drop || 'no-we-pr') : 'no-result', cost: cr && cr.cost, lane: `#${it.num}` });
+    ledger.push({ num, status: 'carried', drop: cr ? (cr.drop || 'no-we-pr') : 'no-result', cost: cr && cr.cost, lane: laneLabel });
   }
 }
 
