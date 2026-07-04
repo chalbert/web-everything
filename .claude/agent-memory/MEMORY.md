@@ -11,7 +11,7 @@
 - 51. Hookable vs Judgment Rule — script-decidable→hook (deterministic); judgment stays in context; footguns first
 - 9. Memory-Management Policy — index=TREE: always-loaded map+core-invariants; rules live in category sub-indexes; #1517/#1868
 - 43. Enforce Shared Gate At Write-Time — PreToolUse(Edit|Write) hook scans content + denies the write; #883
-- 104. Commit On Current Branch — commit on checked-out branch, never branch-first; `checkout -b` corrupts sessions; (never-push REMOVED 2026-06-29 → [[never-push-guard-removed]])
+- 104. Edit-Work Runs In A Lane Clone — edits land via lane-clone → ready-to-merge PR, NEVER direct to main (#2183/#2190); never branch a shared checkout; [[single-session-should-use-a-lane]]
 - 105. Claim Ignores Git State — backlog ownership=status:active NOT the working tree; uncommitted edits never a drop-reason
 
 <!-- categories: everything else, recall-gated — open the sub-index whose keywords match the task -->

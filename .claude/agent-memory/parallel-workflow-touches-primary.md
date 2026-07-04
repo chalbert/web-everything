@@ -1,0 +1,25 @@
+---
+name: parallel-workflow-touches-primary
+description: "/workflow (parallel) batch makes primary-checkout writes that violate \"all changes via lanes→PRs\" — new items must reach origin/main before lanes can claim them"
+metadata: 
+  node_type: memory
+  type: feedback
+  originSessionId: e9b47075-174d-4038-a5a5-012037ccbbeb
+---
+
+Running a **seeded parallel `/workflow`** on freshly-carved backlog items forced two primary-checkout mutations that break the "primary stays clean; all changes flow lanes→PRs→main, never a direct push" rule (user, 2026-07-03):
+
+1. **Item publish needs a direct `main` push.** Lanes reset each clone to `origin/main` and `claim` there, so a newly-`scaffold`ed item is INVISIBLE to lanes until it's on origin/main. I scaffolded #2210/#2211/#2212 in the primary tree and `git push`ed them to main directly — the actual rule violation. (Also hit an NNN collision: origin had advanced and grabbed my numbers → had to `yield` to fresh ones after un-committing.)
+2. **Finalize writes to primary.** The workflow's finalize step writes `queued.json` (+ `claims.json`/`reservations.json`) into the PRIMARY `.claude/skills/batch-backlog-items/` as the drain signal — more uncommitted primary state.
+
+**Also found — green-gate is on the LABEL, not lane-closure.** `pr-land --label-on-green` labels `ready-to-merge` only after required checks pass (solid), but on `check-timeout` the lane CLOSES with the PR open-but-unlabelled (carried-for-labelling). So "PR passes before lane closes" holds only on the happy path.
+
+**Why:** the PR-fan-out model (#2183) assumes items already EXIST on main; it has no lane→PR path for *publishing the tracker item itself*, so item-creation batches leak into primary.
+
+**How to apply:** for a batch that must CREATE its own items, route the item publish through a lane/PR too (or scaffold inside a lane), don't direct-push to main. Relates to [[single-session-should-use-a-lane]], [[shared-index-commit-race]], [[pr-land-dogfood-mechanics]].
+
+**Drain-time findings when landing this batch (2026-07-03, `/drain`):**
+- **First-lander manifest LEAK — FIXED.** The lane commits `.lane-manifest.json` to its PR tip (transport, read by the drain); the drain's rebase-drop (#2198) only sheds it for CONFLICTING/BEHIND PRs, so the FIRST cleanly-mergeable PR of a batch merged and carried the manifest onto `main` (WE #79 leaked it). Fixed by `needsManifestStripBeforeMerge()` in `we:scripts/merge-ai-prs.mjs` — strip the manifest before EVERY manifest-carrying merge, conflict or not (PR #83, 4 unit tests). Tradeoff: a clean first-lander is now rebuilt→CI-re-runs→lands next pass, so a **bare** one-shot `/drain` needs one extra pass for it; `--watch` is seamless.
+- **Drain rebase-drop can't resolve a bare `lane/…` ref in a fresh clone.** `rebaseDropManifest` runs `git merge-tree origin/main <headRefName>` where headRefName is `lane/…` (no `origin/` prefix); a fresh drain clone only has `origin/lane/…`, so it errors `not something we can merge` and every BEHIND/CONFLICTING lane PR is left skipped. Had to rebuild tips by hand (merge-tree → commit-tree → push lane ref). Still-open gap for the improvements session.
+- **BEHIND treadmill.** Branch protection is strict-up-to-date, so each main advance flips open lane PRs to BEHIND and every rebuild re-runs `test` — with concurrent sessions landing, a batch's PRs need rebuild-then-merge-fast (or `--watch`).
+- **My op mistake:** ran `git reset --hard origin/main` in a lane clone to get a fresh scaffold NNN — it WIPED uncommitted edits in that clone. Commit (or stash) before any reset in a working clone.

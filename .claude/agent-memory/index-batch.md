@@ -1,8 +1,10 @@
 ---
 name: index-batch
-description: Batch execution and commit/git discipline: claim before coding, points-budget is the sole stop, batch conflict avoidance via per-item claim, gate-red stop scoped to own files, commit per finished piece with tight pathspec, never push, never git add -A, concurrent staged-index sweep, concurrent resolve revert (verify it persisted), commit on the current branch. Recall when batching items or committing work.
+description: "Batch execution and commit/git discipline: claim before coding, points-budget is the sole stop, batch conflict avoidance via per-item claim, gate-red stop scoped to own files, commit per finished piece with tight pathspec, never push, never git add -A, concurrent staged-index sweep, concurrent resolve revert (verify it persisted), commit on the current branch. Recall when batching items or committing work."
 metadata:
+  node_type: memory
   type: reference
+  originSessionId: e9b47075-174d-4038-a5a5-012037ccbbeb
 ---
 
 Batch · Commit · Git Hygiene cluster — open a leaf with `node scripts/memory-resolve.mjs <N>` (or `--cat`):
@@ -13,7 +15,7 @@ Batch · Commit · Git Hygiene cluster — open a leaf with `node scripts/memory
 - 101. Commit Each Finished Piece, Never Push — commit per closed item, staging ONLY that piece's files; never push/`add -A`
 - 102. Concurrent Sessions Sweep Staged Index — others' `git add -A` can swallow my staged work; commit tightly; #1147
 - 103. Concurrent Resolve Revert — concurrent write can revert `resolve` pre-commit; verify it persisted; #1742
-- 104. Commit On Current Branch — commit on checked-out branch, never branch-first; `checkout -b` corrupts sessions; never-push
+- 104. Edit-Work Runs In A Lane Clone — edits land via lane-clone → ready-to-merge PR, NEVER direct to main (#2183/#2190); never branch a shared checkout; [[single-session-should-use-a-lane]]
 - 122. Batch Conflict Avoidance — per-item claim (status:active) dodges races, NOT git-status; splice data edits
 - [Monolith-split vs partition for parallel capacity](monolith-split-vs-partition-capacity.md) — only entry-COLLECTIONS split; for docs/matrices/sweeps the lever is a precise pairwise partition + optimistic merge, not splitting; #1949
 - [Parallel /workflow works incl cross-repo](parallel-workflow-blocked-by-git-guard.md) — clone model + lane/* push carve-out; 2026-07-01 16/18, cross-repo couples merged green; primaryRoot moot
@@ -32,3 +34,6 @@ Batch · Commit · Git Hygiene cluster — open a leaf with `node scripts/memory
 - [Batch item can silently reverse a codified rule](batch-item-can-silently-reverse-codified-rule.md) — a story can reverse a rule codified only in code; grep it, reclassify to decision; #2149/#1952
 - [No work EVER in the primary checkout](no-work-ever-in-primary-all-repos.md) — the EDIT itself runs in a lane clone (every repo: WE/plateau-app/FUI), no carve-out; #2203 blocks the push, this blocks the touch
 - [Backlog id-storm buffer + lane→PR](backlog-id-storm-buffer-and-lane-pr.md) — hand-picked max+1 ids collide under concurrent sessions (dup id → CI red); buffer max+~6, verify no dup, land via lane→PR
+- [Parallel /workflow touches primary](parallel-workflow-touches-primary.md) — new-item batch needs items on origin/main before lanes claim → direct push + queued.json write break lanes-only-via-PRs; first-lander manifest LEAK fixed #83; drain rebase-drop can't resolve bare lane/… ref in a fresh clone
+- [Lane guard bypass only for personal config](lane-guard-only-bypass-for-personal-config.md) — LANE_GUARD_OFF is ONLY for gitignored use config (settings.local.json, ~/.claude/*); tracked project files → lane + PR, never bypass; `git check-ignore` to decide
+- [guard-bash matches the push substring](guard-bash-matches-push-substring.md) — the Bash guard denies ANY command whose text contains the literal push phrase (even a grep/echo/comment), not just a real invocation; reword the search, don't override
