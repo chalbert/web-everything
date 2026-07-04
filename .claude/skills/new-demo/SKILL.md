@@ -10,6 +10,11 @@ This skill is a **trigger and pointer** — the method lives in
 don't duplicate it here — if the process changes, edit that doc. Building a flagship exercise app? Also read
 [exercise-app-workflow.md](../../../docs/agent/exercise-app-workflow.md).
 
+> **Runs in a lane — set it up FIRST (#2123).** Scaffolding a demo edits the tree, so work in an
+> **isolated lane clone**, never the shared primary checkout (`we:scripts/guard-lane.mjs` blocks a primary
+> `Edit` otherwise): `node we:scripts/lane-pool.mjs status --json` → pick a clean lane → author there →
+> land via PR. Full rule: *backlog-workflow.md → Working an item*.
+
 When invoked:
 
 1. Read *demo-workflow.md → full doc* end-to-end. Honor the platform-first rule (consume active standards,
