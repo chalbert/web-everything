@@ -1,0 +1,22 @@
+{
+  "id": "constellation-visual-language-and-color-architecture",
+  "title": "Constellation visual language + brand-color architecture — flat vs dimensional, umbrella vs monochrome",
+  "status": "open",
+  "summary": "Grounds decisions #2249 (system-wide visual language: flat-minimal vs rich-dimensional) and #2250 (WE mark system: multi-color umbrella vs strict monochrome), both children of the branding-execution epic #2256 and amendments to the prepared branding-system decision #2209. AXIS A (flat vs rich): surveys the 2013-2026 flat->depth pendulum — iOS 7 flat (2013), the neumorphism accessibility failure (~2020), Apple Liquid Glass + Material 3 Expressive reintroducing depth (2025), and the 2025-26 NN/g legibility backlash that settled the consensus on 'skeuomorphic minimalism' (selective soft depth, not full skeuomorphism). The decisive constraints for a team-of-one hand-authoring SVG whose highest-frequency surface is a 16px favicon: small-size guidance rules out gradient-as-depth and glass (muddy on downscale), a convincing SVG glass effect exceeds the hand-authoring craft ceiling, flat recolors trivially across light/dark at near-zero weight, and both depth revivals show depth-encoded meaning failing WCAG contrast. Recommendation: default flat-minimal for the marks (grounded on brand-character fit — a standards layer reads principled/bedrock/timeless, where glossy depth reads as consumer-product flashiness), reserving a restrained soft-light/subtle-shadow treatment (the plateau rich-a probe: radial glow + soft feDropShadow + edge highlight, NOT full 3D) for large-rendered surfaces only via a size-gated, script-decidable floor. AXIS B (umbrella vs monochrome): surveys master vs sub-brand color architecture. JetBrains (a smooth multi-stop umbrella GRADIENT over 2-color product squares) and NBC's collective-family peacock are precedents for 'the parent spans the family palette; each child a subset' — but JetBrains' umbrella is a gradient, not overlapping color regions, so the precedent authorizes a palette-spanning gradient (which the one-gradient rule already permits), NOT a Venn. Adobe and Google/Material run the INVERSE (restrained parent, color pushed down to products). The 'union of colors = we contain everything' trope is legitimate as meaning but the overlapping-translucent-circles FORM is a worn cliche that fails the ownability test ('could be Mastercard's subsidiary'); our own WE Venn probes (we-venn-lumin.svg, weB-venn-constellation.svg) use exactly the mix-blend-mode:screen translucent-circle construction the prior art flags as muddy and generic, and a tri-hue union legible at 16px collides with #2209 Fork 2's ratified mono-W favicon. Recommendation: deliver 'everything unified' via a constellation-spanning multi-stop gradient WITHIN the one-gradient rule (JetBrains-actual, not a Venn); the overlapping-region Venn is banned; strict monochrome is the lower-risk fallback. Full survey + sources in reports/2026-07-04-constellation-visual-language-and-color-architecture.md; visual candidates at plateau:branding.html#journeys and plateau:branding-proposals/loop/.",
+  "dateOpened": "2026-07-04",
+  "lastReviewed": "2026-07-04",
+  "reviewHorizon": "P6M",
+  "tags": [
+    "branding",
+    "design",
+    "visual-language",
+    "flat-design",
+    "dimensional",
+    "color",
+    "brand-architecture",
+    "favicon",
+    "design-review"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": []
+}
