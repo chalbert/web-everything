@@ -2,8 +2,10 @@
 kind: story
 size: 2
 relatedTo: ["2193", "2194", "2199"]
-status: open
+status: resolved
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-04"
+dateResolved: "2026-07-04"
 tags: [lane, pr-flow, merge-queue, drain, git]
 ---
 

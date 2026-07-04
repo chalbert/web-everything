@@ -228,6 +228,20 @@ export function parseWatchOpts({ watch, interval, maxIdle } = {}) {
   return { watch: on, intervalSec: iv, maxIdle: mi };
 }
 
+/** #2230 — should a `--label`-scoped ONE-SHOT drain re-poll once before concluding the queue is empty? GitHub's
+ *  `gh pr list --label` index lags the `gh pr edit --add-label` write by a few seconds, so a drain fired
+ *  immediately after a producer labels can read the just-labelled PR as ABSENT ("0 to merge") and strand it.
+ *  Re-poll ONCE when the labelled set found is smaller than expected — default threshold 1 (any at all), or
+ *  `--expect=N`. Only for a label-scoped sweep (the race bites the bare one-shot; `--watch` self-heals on its
+ *  next interval) and only once (never a busy-loop). Pure. `found` = the count of labelled PRs the sweep saw.
+ *  @param {{label:string|null, found:number, expect?:number|null, retried:boolean}} o
+ */
+export function shouldRepollForLabelLag({ label, found, expect, retried } = {}) {
+  if (!label || retried) return false;
+  const threshold = Number.isFinite(Number(expect)) && Number(expect) > 0 ? Number(expect) : 1;
+  return Number(found) < threshold;
+}
+
 /** Synchronous sleep (the CLI is fully synchronous — execFileSync throughout — so the watch loop blocks here
  *  between polls without an event loop). Uses Atomics.wait so it spawns nothing. */
 function sleepSync(ms) {
@@ -253,6 +267,9 @@ function runCli() {
   const { watch: WATCH, intervalSec: INTERVAL, maxIdle: MAX_IDLE } = parseWatchOpts({ watch: flags.watch, interval: flags.interval, maxIdle: flags['max-idle'] });
   // #2198 — rebase-drop the shared `.lane-manifest.json` on land (ON by default; `--no-rebase-drop` disables).
   const REBASE_DROP = flags['no-rebase-drop'] ? false : true;
+  // #2230 — re-poll the label-scoped one-shot once to absorb the `ready-to-merge` index-propagation lag.
+  const EXPECT = flags.expect != null && Number.isFinite(Number(flags.expect)) ? Number(flags.expect) : null;
+  const REPOLL_SEC = Number.isFinite(Number(flags['repoll-delay'])) && Number(flags['repoll-delay']) >= 0 ? Number(flags['repoll-delay']) : 4;
 
   const fail = (reason, detail, code) => {
     if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, reason, detail }) + '\n');
@@ -415,7 +432,15 @@ function runCli() {
 
   // ── Driver — one sweep (the /drain one-shot + /merge bare), or the `--watch` monitor (`/drain watch`) ──────
   if (!WATCH) {
-    const { result, failedMerges } = sweepOnce();
+    let { result, failedMerges } = sweepOnce();
+    // #2230 — the label index lags the producer's label write, so a one-shot fired right after labelling can see
+    // the just-labelled PR as absent. Re-poll ONCE after a short delay before concluding the queue is empty.
+    // Fail-soft: a still-empty re-poll is a legitimate empty queue, not an error.
+    if (shouldRepollForLabelLag({ label, found: result.considered, expect: EXPECT, retried: false })) {
+      if (!AS_JSON) process.stderr.write(`  · ${result.considered} labelled candidate(s)${EXPECT ? ` (< expected ${EXPECT})` : ''} — re-polling once in ${REPOLL_SEC}s (label index may lag the producer's label write)…\n`);
+      sleepSync(REPOLL_SEC * 1000);
+      ({ result, failedMerges } = sweepOnce());
+    }
     if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
     process.exit(failedMerges.length ? 2 : 0);
   }
