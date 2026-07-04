@@ -1,0 +1,37 @@
+---
+kind: task
+status: active
+dateOpened: "2026-07-04"
+tags: []
+---
+
+# Required `test` check doesn't build the docs, so a broken deploy lands green
+
+Branch protection on `main` requires exactly one status check: `test` (`gh api
+repos/chalbert/web-everything/branches/main/protection/required_status_checks` → `contexts: ["test"]`).
+The `test` job in we:.github/workflows/ci.yml runs the unit suite, the repo health gate, and the
+Playwright interaction lane — but it never runs `npm run build:docs`. The docs build only runs in the
+**unrequired** `visual` job (we:.github/workflows/ci.yml) and in the post-merge
+we:.github/workflows/deploy.yml workflow.
+
+Consequence: any change that breaks `build:docs` passes the merge gate and lands on `main`, silently
+breaking the Cloudflare deploy until someone notices. This is not hypothetical — #2184's
+we:.eleventy.js fragment split mis-wired a `require` in we:eleventy/transforms.cjs (imported
+`spliceDataTables` from we:scripts/lib/component-render-build-hook.cjs instead of
+we:scripts/lib/data-table-build-hook.cjs). Every `weDataTableSSR` transform threw `spliceDataTables is
+not a function`, failing `build:docs`. PR #61 merged green anyway (`test` passed; `visual` and Workers
+Builds both failed and gated nothing), and `main`'s deploy stayed broken for ~6 hours until fixed in
+PR #85.
+
+## Fix
+
+Fold the deploy-gating build into the required check: add a `Build WE docs (deploy smoke)` step to the
+`test` job in we:.github/workflows/ci.yml, right after the `Install` step. The job already checks out the
+FUI sibling and runs `build:tools`, so the pinned component-render CLI that `build:docs` shells out to is
+already present — no extra setup. Cost is ~15s on a ~2m30s job. Because the parallel-lane `pr-land`
+transport already waits on the `test` check before merging, folding the build into `test` closes the gap
+with zero automation change — no new required context to register, no drain reorder.
+
+Deliberately NOT making `visual` a required check: its value is the visual-regression assertion, which is
+comparatively flaky, and it carries a ~2–3 min build. The build-succeeds signal is the deploy-critical
+half; a plain `build:docs` step in `test` captures exactly that without importing the flakiness.
