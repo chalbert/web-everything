@@ -1,0 +1,152 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+  The <a href="/research/custom-node-registry/">#2074 <code>customNodes</code></a> recipe model can express a
+  region's <strong>open</strong> marker (<code>{{#if}}</code>, a <code>children:'inert'</code> recipe) and its
+  <strong>close</strong> (<code>{{/if}}</code>, the name-echoed <code>regionClose</code>) — but it has
+  <strong>no axis for the MID-region marker</strong> (<code>{{else}}</code>) that divides a region body into an
+  if-segment and an else-segment. The gap was confirmed, not guessed, by the
+  <a href="/backlog/2094-framework-flavored-delimiter-bundles/">#2094 delimiter-bundle</a> program: Handlebars
+  <code>{{else}}</code> (#2114), Liquid/Jinja <code>{% else %}</code>/<code>{% elsif %}</code> (#2115), and
+  Svelte <code>{:else}</code>/<code>{:else if}</code> (#2118) each scored the same structural gap. This is prep
+  for decision <a href="/backlog/2201-mid-region-marker-else-decision-card/">#2201</a>: <em>how should the recipe
+  model express the mid-marker?</em>
+</p>
+
+<h2>Code ground truth — the model has a binary region contract</h2>
+<p>
+  A region recipe materializes onto a <strong>single</strong> <code>&lt;template&gt;</code> host whose
+  <code>.content</code> holds the whole region body
+  (<code>fui:plugs/webnodes/recipes/RegionNode.ts:66</code>;
+  <code>fui:plugs/webnodes/CustomNodeRegistry.ts:670</code>). The region walk is a <strong>binary
+  match-stack</strong>: it pairs the open marker <code>{#each</code> (name-echo needle
+  <code>open + regionName</code>) against exactly one close <code>{/each}</code>, balancing nesting depth
+  (<code>fui:plugs/webnodes/CustomNodeRegistry.ts:714</code>). There is <strong>no third in-region token</strong>
+  and no way to split <code>.content</code> into labelled sub-fragments — a <code>{{else}}</code> inside the body
+  lands as inert literal text. The IDL axes are <code>static open</code>/<code>close</code>/<code>value</code>/<code>children</code>/<code>regionName</code>/<code>regionClose</code>
+  (<code>we:src/_includes/spec-descriptions/plugs/customnoderegistry.njk:85-97</code>;
+  <code>we:docs/agent/block-standard.md:578-584</code>) — and <code>children</code> is a <em>scalar enum of
+  body-scan modes</em> (<code>'inert'</code>/<code>'live'</code>/<code>'raw'</code>), not a segment/program map.
+  That absence is exactly the axis #2201 must decide.
+</p>
+
+<h2>Prior art — how mainstream engines model the mid-marker</h2>
+<p>
+  We surveyed the primary AST sources of the major template/markup systems. The result is decisive: the mainstream
+  models a conditional block as <strong>one node carrying multiple <em>named body programs</em></strong>, and the
+  mid-marker is merely the parse-time delimiter that decides which named program subsequent statements accumulate
+  into. It is neither a scalar field nor a node in the output tree.
+</p>
+<table>
+  <thead>
+    <tr><th>System</th><th>Mid-marker</th><th>AST representation</th><th>Model</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Handlebars</strong></td>
+      <td><code>{{else}}</code> / <code>{{else if}}</code></td>
+      <td><code>BlockStatement</code> with <code>program</code> (if-body) + <code>inverse</code> (else-body);
+        <code>{{else if}}</code> nests a <code>BlockStatement</code> inside <code>inverse</code>
+        (<a href="https://github.com/handlebars-lang/handlebars.js/blob/master/docs/compiler-api.md">compiler-api.md</a>)</td>
+      <td>named programs</td>
+    </tr>
+    <tr>
+      <td><strong>Mustache</strong></td>
+      <td><em>(none)</em></td>
+      <td>No <code>else</code> — the negative branch is a <strong>separate</strong> inverted section
+        <code>{{^name}}…{{/name}}</code>
+        (<a href="https://github.com/mustache/spec/blob/master/specs/inverted.yml">inverted.yml</a>)</td>
+      <td>separate section</td>
+    </tr>
+    <tr>
+      <td><strong>Svelte 5</strong></td>
+      <td><code>{:else}</code> / <code>{:else if}</code></td>
+      <td><code>IfBlock</code>: <code>consequent</code> + <code>alternate</code> (Fragment|null) +
+        <code>elseif</code> flag
+        (<a href="https://github.com/sveltejs/svelte/blob/main/packages/svelte/src/compiler/types/template.d.ts">template.d.ts</a>)</td>
+      <td>named programs</td>
+    </tr>
+    <tr>
+      <td><strong>Jinja2</strong></td>
+      <td><code>{% else %}</code> / <code>{% elif %}</code></td>
+      <td><code>class If</code>, <code>fields = ("test","body","elif_","else_")</code>
+        (<a href="https://github.com/pallets/jinja/blob/main/src/jinja2/nodes.py">nodes.py</a>)</td>
+      <td>named programs</td>
+    </tr>
+    <tr>
+      <td><strong>Nunjucks</strong></td>
+      <td><code>{% else %}</code> / <code>{% elif %}</code></td>
+      <td><code>If</code>, <code>fields: ['cond','body','else_']</code>
+        (<a href="https://github.com/mozilla/nunjucks/blob/master/nunjucks/src/nodes.js">nodes.js</a>)</td>
+      <td>named programs</td>
+    </tr>
+    <tr>
+      <td><strong>Liquid</strong></td>
+      <td><code>{% else %}</code> / <code>{% elsif %}</code></td>
+      <td><code>If</code> holds a flat <code>@blocks</code> list of <code>Condition</code> objects;
+        <code>else</code> = an <code>ElseCondition</code> sibling
+        (<a href="https://github.com/Shopify/liquid/blob/main/lib/liquid/tags/if.rb">if.rb</a>)</td>
+      <td>flat sibling list</td>
+    </tr>
+    <tr>
+      <td><strong>estree</strong> (JS)</td>
+      <td><code>else</code></td>
+      <td><code>IfStatement { test; consequent; alternate }</code>; <code>else if</code> →
+        <code>alternate</code> is an <code>IfStatement</code>
+        (<a href="https://github.com/estree/estree/blob/master/es5.md">es5.md</a>)</td>
+      <td>named programs</td>
+    </tr>
+    <tr>
+      <td><strong>HTML named slots</strong></td>
+      <td><code>slot="name"</code> ↔ <code>&lt;slot name&gt;</code></td>
+      <td>One host divided into multiple labelled named regions
+        (<a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/slot">MDN &lt;slot&gt;</a>)</td>
+      <td>named regions (analogue)</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>The negative result — two options with zero prior art</h2>
+<p>
+  Two shapes a naive design might reach for appear in <strong>no</strong> surveyed engine — and they are exactly
+  the #2201 card's original Fork 1 and Fork 2:
+</p>
+<ul>
+  <li><strong>A scalar <code>mid</code> field</strong> on the block node — no engine carries the mid-marker as a
+    property; it is always a parse-time boundary between named programs.</li>
+  <li><strong>A degenerate nested region</strong> (<code>{{#else}}…{{/else}}</code>) — no engine models the
+    else-body as a child region of the if-region, and it does not reproduce real grammars (Handlebars' authored
+    <code>{{else}}</code> is not <code>{{#else}}</code>).</li>
+</ul>
+
+<h2>Synthesis — the fourth design option</h2>
+<p>
+  The evidence yields a distinct, prior-art-grounded recipe shape the #2201 card's original three forks miss:
+</p>
+<blockquote>
+  <strong>Labelled-segment bodies.</strong> A region is a <em>sequence of labelled segments split at
+  mid-markers</em>. Instead of a single <code>.content</code>, the block node exposes a map of named body
+  programs — <code>programs: { main, inverse }</code> (or <code>{ body, else }</code>) — where the mid-marker
+  (<code>{{else}}</code>) is a parse-time delimiter that partitions the body, and is neither a scalar field nor a
+  node in the output tree. Chained mid-markers (<code>{{else if}}</code>) are modelled by the trailing program
+  containing a single nested block of the same kind (recursion), exactly as Handlebars <code>inverse</code>,
+  Svelte <code>alternate</code>, Jinja <code>else_</code>, and estree <code>alternate</code> all do.
+</blockquote>
+<p>
+  This is the canonical model, and it is what the recipe format should adopt over a <code>mid</code> scalar
+  (zero prior art) or a nested <code>{{#else}}</code> region (zero prior art). The one true divergence — Liquid's
+  flat <code>@blocks</code> list — is elegant for the n-way <code>elsif</code> chain but loses the distinct
+  named-role clarity (an if-body and an else-body are different roles, not two instances of one). Adopting the
+  named-programs model is a <strong>standard-layer contract change</strong> (a region's single <code>.content</code>
+  becomes a named-program map), so #2201 should take it as a reversible #2074 model extension with lineage — not
+  keep parking.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Decision this prepares: <a href="/backlog/2201-mid-region-marker-else-decision-card/">#2201</a> — mid-region-marker card.</li>
+  <li>Parent model: <a href="/research/custom-node-registry/">custom-node-registry</a> (the #2074 recipe model).</li>
+  <li>Sibling topic: <a href="/research/reserved-delimiter-family-policy/">reserved-delimiter-family-policy</a> (#2112).</li>
+  <li>Confirming bundles: Handlebars (#2114), Liquid/Jinja (#2115), Svelte (#2118) — the latter two resolved 2026-07-03.</li>
+</ul>
+{% endraw %}
