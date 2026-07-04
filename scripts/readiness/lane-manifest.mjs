@@ -66,6 +66,9 @@ export function buildManifest(input) {
     repos,
     blockedBy: (input.blockedBy ?? []).map((n) => Number(n)).filter((n) => Number.isFinite(n)),
     mergeRiskFiles: (input.mergeRiskFiles ?? []).map((f) => String(f)),
+    // #2171 — the count of pre-PR review findings the lane DISMISSED (#2170). The drain's escalation rubric
+    // reads it as its strongest signal (a lane judging its own reviewer's findings away → a second look). 0 default.
+    dismissedFindings: Number.isFinite(Number(input.dismissedFindings)) ? Math.max(0, Number(input.dismissedFindings)) : 0,
   };
 }
 

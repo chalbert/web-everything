@@ -62,6 +62,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
+import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from './lib/review-escalation.mjs';
 
 const argv = process.argv.slice(2);
 const flags = {};
@@ -286,6 +287,12 @@ function runCli() {
   // `--no-reconcile-labels` disables. Under `--watch` this re-labels each interval — the label applies the
   // moment CI goes green, with no human step.
   const RECONCILE = label && !flags['no-reconcile-labels'];
+  // #2171 — DETERMINISTIC review-escalation rubric: before merging a ready PR, score it (blast radius, size,
+  // dismissed pre-PR findings, cross-repo couple, 1-in-N sampling); an escalated PR PARKS ALIVE (labelled
+  // review:pending, SKIPPED — non-blocking, the queue keeps flowing) until a reviewer applies review:accepted.
+  // ON by default for a label-scoped drain; `--no-review-escalation` disables. `--sample-nth=N` tunes the floor.
+  const REVIEW_ESCALATION = label && !flags['no-review-escalation'];
+  const SAMPLE_NTH = Number.isFinite(Number(flags['sample-nth'])) && Number(flags['sample-nth']) > 0 ? Number(flags['sample-nth']) : undefined;
 
   const fail = (reason, detail, code) => {
     if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, reason, detail }) + '\n');
@@ -355,11 +362,17 @@ function runCli() {
   // #2188: attach each PR's manifest (backlog `item` + cross-item `blockedBy`) so the merge order honours
   // dependencies. Only WE PRs carry one; the rest degrade to no-manifest → always ready (legacy order).
   const refByNum = new Map(prs.map((p) => [String(p.number), p.headRefName]));
+  const prByNum = new Map(prs.map((p) => [String(p.number), p]));
   for (const v of verdicts) {
     const m = readPrManifest(refByNum.get(String(v.num)));
     v.item = m && m.item != null ? Number(m.item) : null;
     v.blockedBy = m && Array.isArray(m.blockedBy) ? m.blockedBy.map(Number) : [];
     v.hasManifest = m != null; // #2183 — carries the transient manifest on its head → must be stripped before merge
+    // #2171 review-escalation signals off the manifest: a cross-repo couple (>1 repo) and the count of pre-PR
+    // review findings the lane dismissed (the strongest signal). Absent manifest → both benign defaults.
+    v.crossRepo = m && Array.isArray(m.repos) ? m.repos.length > 1 : false;
+    v.dismissedFindings = m && Number.isFinite(Number(m.dismissedFindings)) ? Number(m.dismissedFindings) : 0;
+    v.prLabels = prByNum.get(String(v.num))?.labels || [];
   }
   // #2198 — rebase-drop the transient manifest so a certified+green PR that is only CONFLICTING/BEHIND on the
   // shared `.lane-manifest.json` path lands instead of walling the whole queue. Per candidate: merge-tree
@@ -389,6 +402,40 @@ function runCli() {
         if (!AS_JSON) process.stderr.write(`  ↻ #${v.num} rebased onto main${r.dropped ? ' (manifest dropped)' : ''} → ${r.newCommit.slice(0, 9)}\n`);
       } else if (!AS_JSON) {
         process.stderr.write(`  ↻ #${v.num} left skipped: ${r.reason}\n`);
+      }
+    }
+  }
+
+  // #2171 — REVIEW-ESCALATION PASS. Before merging, score each ready candidate against the deterministic rubric.
+  // An escalated PR PARKS ALIVE — labelled review:pending and SKIPPED (non-blocking: the cascade keeps landing
+  // the rest) — until a reviewer applies review:accepted. review:changes → the author lane fixes + re-pushes.
+  // Every candidate is STAMPED with the rule outcome (escalated yes/no + reasons). Couples: any WE-PR carrying
+  // the manifest already fails-strict via crossRepo, so an escalated impl half keeps its WE half from landing
+  // through the existing blockedBy ordering. Signals: blast radius (diff files), size, dismissed findings +
+  // cross-repo (manifest), 1-in-N sampling. Best-effort per candidate; a signal-fetch miss defaults to no-escalate.
+  const parked = [];
+  if (REVIEW_ESCALATION) {
+    for (const v of verdicts) {
+      if (v.decision !== 'merge') continue;
+      let changedFiles = [];
+      let diffLines = 0;
+      try {
+        const files = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), '--json', 'files'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').files || [];
+        changedFiles = files.map((f) => f.path).filter(Boolean);
+        diffLines = files.reduce((s, f) => s + (Number(f.additions) || 0) + (Number(f.deletions) || 0), 0);
+      } catch { /* signal-fetch miss → score on the manifest signals alone */ }
+      const score = scoreEscalation({ changedFiles, diffLines, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, prNum: Number(v.num), thresholds: SAMPLE_NTH ? { sampleNth: SAMPLE_NTH } : {} });
+      const gate = decideReviewGate({ escalate: score.escalate, labels: v.prLabels, parkedSinceMs: null });
+      v.escalated = score.escalate ? 'yes' : 'no';
+      v.escalateReasons = score.reasons;
+      if (gate.action === 'park' || gate.action === 'wait-author') {
+        v.decision = 'skip';
+        v.reason = gate.reason + (score.reasons.length ? ` [${score.reasons.join('; ')}]` : '');
+        if (gate.applyLabel && !DRY_RUN) { try { execFileSync('gh', ['pr', 'edit', String(v.num), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ } }
+        parked.push(v.num);
+        if (!AS_JSON) process.stderr.write(`  ⏸ #${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}): ${score.reasons.join('; ')}\n`);
+      } else if (score.escalate && !AS_JSON) {
+        process.stderr.write(`  ✓ #${v.num} escalation cleared (${gate.reason})\n`);
       }
     }
   }
@@ -465,7 +512,7 @@ function runCli() {
     if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ local main fast-forwarded to origin (autostash preserved local edits)\n` : `  · local main NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`);
   }
 
-  const result = { ok: true, dryRun: DRY_RUN, label, considered: verdicts.length, toMerge: toMerge.map((v) => v.num), merged, failed: failedMerges, rebased, pendingRebased, deferred, localSynced, reconciledLabels, skipped: skipped.map((v) => ({ num: v.num, reason: v.reason })) };
+  const result = { ok: true, dryRun: DRY_RUN, label, considered: verdicts.length, toMerge: toMerge.map((v) => v.num), merged, failed: failedMerges, rebased, pendingRebased, deferred, localSynced, reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}) })) };
   return { result, merged, failedMerges, pendingRebased, deferred };
   }; // end sweepOnce
 

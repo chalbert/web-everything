@@ -1,11 +1,12 @@
 ---
 kind: story
 size: 8
-status: open
+status: resolved
 dateOpened: "2026-07-02"
 tags: [lane, pr-flow, review, merge-queue, integrator, session-tooling]
-blockedBy: ["2162", "2170"]
-relatedTo: ["2153", "2138", "2123"]
+dateStarted: "2026-07-04"
+dateResolved: "2026-07-04"
+relatedTo: ["2153", "2138", "2123", "2162", "2170"]
 ---
 
 # Drain review-escalation rubric + non-blocking watch window: park escalated lanes alive until review accepts
