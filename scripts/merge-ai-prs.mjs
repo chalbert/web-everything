@@ -176,6 +176,20 @@ export function isRebaseDropCandidate(v) {
 }
 
 /**
+ * #2183 first-lander leak fix — must an already-landable PR be rebuilt to DROP its `.lane-manifest.json`
+ * BEFORE it merges? Every lane commits the transient manifest to its OWN tip so the drain can read cross-item
+ * ordering off the ref; the rebase-drop (#2198) sheds it, but `isRebaseDropCandidate` only fires on a
+ * CONFLICTING/BEHIND/DIRTY PR — so the FIRST PR of a batch (nothing to conflict with) merged CLEAN and carried
+ * the manifest onto `main` (observed 2026-07-03: #79 leaked `.lane-manifest.json`). Any manifest-carrying PR
+ * that is otherwise landable must therefore be stripped first, conflict or not. Pure — `v.hasManifest` is set
+ * from the same `readPrManifest` probe that supplies the merge ordering. `--no-rebase-drop` still disables the
+ * whole mechanism.
+ */
+export function needsManifestStripBeforeMerge(v) {
+  return !!v && v.decision === 'merge' && !!v.hasManifest;
+}
+
+/**
  * Order a set of merge candidates for ONE cascade pass, honouring cross-item `blockedBy` (#2188). Pure.
  * This is the drain↔/merge convergence: the `ready-to-merge` label bounds the set, and each PR's
  * `.lane-manifest.json` (read off its head ref) supplies its backlog `item` + `blockedBy` items. A PR is
@@ -289,6 +303,7 @@ function runCli() {
     const m = readPrManifest(refByNum.get(String(v.num)));
     v.item = m && m.item != null ? Number(m.item) : null;
     v.blockedBy = m && Array.isArray(m.blockedBy) ? m.blockedBy.map(Number) : [];
+    v.hasManifest = m != null; // #2183 — carries the transient manifest on its head → must be stripped before merge
   }
   // #2198 — rebase-drop the transient manifest so a certified+green PR that is only CONFLICTING/BEHIND on the
   // shared `.lane-manifest.json` path lands instead of walling the whole queue. Per candidate: merge-tree
@@ -298,7 +313,10 @@ function runCli() {
   const rebased = [];
   if (REBASE_DROP) {
     for (const v of verdicts) {
-      if (!isRebaseDropCandidate(v)) continue;
+      // Rebuild-to-drop the manifest when the PR is BLOCKED on it (CONFLICTING/BEHIND) OR when it is already
+      // landable but still CARRIES the manifest on its head (#2183 first-lander leak — a clean merge would
+      // otherwise commit the transient file to `main`). Both cases route through the same plumbing.
+      if (!isRebaseDropCandidate(v) && !needsManifestStripBeforeMerge(v)) continue;
       const laneRef = refByNum.get(String(v.num));
       if (!laneRef) continue;
       if (DRY_RUN) {
