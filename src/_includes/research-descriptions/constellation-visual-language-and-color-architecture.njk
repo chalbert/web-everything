@@ -1,0 +1,88 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds two branding decisions under the execution epic
+  <a href="/backlog/2256-constellation-branding-and-website-design/">#2256</a>, both amendments to the
+  prepared branding-system decision
+  <a href="/backlog/2209-ratify-the-constellation-branding-system-naming-marks-icon-r/">#2209</a>:
+  <a href="/backlog/2249-decide-the-system-wide-visual-language-flat-vs-rich-dimensi/">#2249</a>
+  (the system-wide visual language &mdash; flat-minimal vs rich-dimensional) and
+  <a href="/backlog/2250-we-mark-system-multi-color-umbrella-vs-monochrome/">#2250</a>
+  (the Web&nbsp;Everything mark system &mdash; multi-color umbrella vs strict monochrome). The full
+  survey and source list are in the session report
+  (<code>reports/2026-07-04-constellation-visual-language-and-color-architecture.md</code>); the visual
+  candidates render at <code>plateau:branding.html#journeys</code> and in
+  <code>plateau:branding-proposals/loop/</code>.
+</p>
+
+<h2>Axis A &mdash; flat-minimal vs rich-dimensional</h2>
+<p>
+  The industry pendulum swung from iOS&nbsp;7 flat (2013) through the neumorphism accessibility failure
+  (~2020) back to depth in 2025 &mdash; Apple <strong>Liquid Glass</strong> (WWDC 2025, iOS&nbsp;26)
+  and Google <strong>Material&nbsp;3 Expressive</strong> &mdash; but a 2025&ndash;26 usability backlash
+  (NN/g measured contrast as low as 1.5:1; iOS&nbsp;26.1 added a Clear/Tinted toggle) settled the
+  consensus on <em>skeuomorphic minimalism</em>: selective <em>soft</em> depth, not full skeuomorphism.
+</p>
+<p>
+  For a team-of-one hand-authoring SVG whose highest-frequency surface is a 16px favicon, the decisive
+  constraints all point one way: small-size guidance rules out gradient-as-depth and glass (they muddy on
+  downscale); a convincing SVG glass effect (stacked <code>feGaussianBlur</code> /
+  <code>feDisplacementMap</code> / <code>feSpecularLighting</code>) exceeds the hand-authoring craft
+  ceiling; a flat mark recolors trivially across light and dark at near-zero weight; and both depth
+  revivals showed depth-encoded meaning failing WCAG contrast even at Apple/Google scale. Leaders put
+  depth in UI chrome and marketing while keeping the <em>core mark flat</em>, at most conceding a
+  gradient or dual-tone (Stripe, Figma, Instagram) &mdash; never inner-shadow or glass.
+</p>
+<p>
+  <strong>Recommendation:</strong> default flat-minimal for the marks &mdash; grounded on brand-character
+  fit (a standards layer reads <em>principled / bedrock / timeless</em>, where glossy depth reads as
+  consumer-product flashiness), with the 16px-physics and craft-ceiling arguments demoted to a
+  <em>size-gated</em> rule both branches must honour. Restrained depth (the
+  <code>plateau:branding-proposals/loop/plateau-rich-a.svg</code> probe &mdash; radial glow highlight + a
+  soft <code>feDropShadow</code> + an edge-highlight stroke, not full 3D) is permitted only on
+  large-rendered surfaces (&ge;128px) via a script-decidable floor; glass / full-3D is banned at every
+  size.
+</p>
+
+<h2>Axis B &mdash; multi-color umbrella vs strict monochrome</h2>
+<p>
+  Master-brand vs sub-brand color architecture divides on a real fault line.
+  <strong>JetBrains</strong> (a smooth multi-stop umbrella <em>gradient</em> square spanning the family
+  palette, over per-product 2-color squares) and <strong>NBCUniversal</strong>'s "collective
+  contributions of the corporate family" peacock are precedents for <em>the parent spans the family
+  palette; each child a subset</em>. But JetBrains' umbrella is a <em>gradient</em>, not overlapping
+  color regions &mdash; so the precedent authorizes a palette-spanning gradient, which the "one gradient"
+  rule <em>already permits</em>, not a Venn. <strong>Adobe</strong> (monochrome red parent, colored
+  per-product tiles) and Google Cloud / Material product icons run the <em>inverse</em> &mdash; restrained
+  parent, color pushed down to products for wayfinding.
+</p>
+<p>
+  The "union of colors = we contain everything" trope is legitimate as <em>meaning</em> but its default
+  <em>form</em> &mdash; overlapping translucent circles &mdash; is a worn cliche that fails the
+  ownability test ("would this work just as well for another company? &mdash; Mastercard owns overlapping
+  circles; everyone else looks like a subsidiary"). Our own WE Venn probes
+  (<code>we-venn-lumin.svg</code>, <code>weB-venn-constellation.svg</code>) are built with
+  <code>mix-blend-mode:screen</code> over translucent radial circles &mdash; exactly the muddy-blend,
+  floating-Venn construction the prior art flags &mdash; and a tri-hue union legible at 16px collides
+  with #2209 Fork 2's ratified mono-W favicon.
+</p>
+<p>
+  <strong>Recommendation:</strong> deliver the "everything unified" meaning <em>within</em> the
+  one-gradient rule, via a <strong>constellation-spanning multi-stop gradient</strong>
+  (indigo&rarr;cyan&rarr;violet) &mdash; a 3-stop gradient is still "one gradient," matches JetBrains'
+  actual umbrella construction, downscales cleanly at 16px, and stays compatible with #2209 Fork 2. The
+  overlapping-color-region Venn is banned; strict monochrome is the lower-risk fallback. The final-mark
+  execution is <a href="/backlog/2256-constellation-branding-and-website-design/">#2251</a>'s job.
+</p>
+
+<h2>Relationship to the branding program</h2>
+<p>
+  This topic extends the earlier
+  <a href="/research/#constellation-branding-system">constellation branding system</a> research (which
+  grounds #2209's six forks). Together they form the knowledge base the design-AI reviewer
+  (<a href="/backlog/2207-train-the-design-ai-reviewer-for-branding-and-ui-guidance-gr/">#2207</a>)
+  trains against and the design-intelligence-watch program
+  (<a href="/backlog/2208-program-design-intelligence-watch-keep-the-brand-system-and-/">#2208</a>)
+  keeps current; the ratified picks become labeled ground truth.
+</p>
+{% endraw %}
