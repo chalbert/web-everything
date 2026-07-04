@@ -203,6 +203,29 @@ export function buildRegenArgs() {
   ];
 }
 
+/** #2225 — the post-land heal/regen dirty-probe. Both steps `git checkout --detach origin/main` and operate
+ *  on POST-MERGE main, so untracked / git-ignored noise is irrelevant to their correctness — but a
+ *  deps-symlinked lane clone (#2123, now the default solo-lane path) always carries an untracked `node_modules`
+ *  SYMLINK (`.gitignore` has `node_modules/`, which matches a directory, not the symlink), so a bare
+ *  `git status --porcelain` read as dirty and SKIPPED heal + regen on EVERY land from such a clone. Count only
+ *  TRACKED modifications (which a detached checkout can carry over and wrongly sweep into the post-land commit);
+ *  ignore untracked entries and any `node_modules` line. Feed it `git status --porcelain --untracked-files=no`.
+ *  Pure. */
+export function isPostLandTreeDirty(porcelainUntrackedNo) {
+  return String(porcelainUntrackedNo || '')
+    .split('\n')
+    .some((l) => l.trim() !== '' && !/(^|[\s/])node_modules(\/|$|\s)/.test(l));
+}
+
+/** #2225 secondary hardening — which post-land steps genuinely SKIPPED (so a real skip can't read as "did
+ *  everything"). A step's result carries `skipped: true` when its dirty-probe bailed. Pure. */
+export function postLandSkips(heal, regen) {
+  const s = [];
+  if (heal && heal.skipped) s.push('heal');
+  if (regen && regen.skipped) s.push('regen');
+  return s;
+}
+
 /**
  * Classify `gh pr checks --json state,bucket` output (array of check rows) into a merge decision. Pure.
  *  - `pending` — at least one check still running/queued → wait.
@@ -361,6 +384,8 @@ function runCli() {
   if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
   const regen = REGEN ? runRegen() : null;
   if (regen && regen.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${regen.warning}\n`);
+  const skipped = postLandSkips(heal, regen);
+  if (skipped.length) process.stderr.write(`pr-land [${REPO}] ⚠⚠ POST-LAND ${skipped.join(' + ')} SKIPPED (tracked-dirty tree) — ${BASE} may carry an unhealed id collision / stale derived artifacts; run the steps by hand.\n`);
   emit({
     repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD, label: LABEL, labelApplied, localSynced,
     healed: heal && heal.healed ? heal.renumbered : [],
@@ -368,6 +393,7 @@ function runCli() {
     regenDone: regen ? regen.done : [],
     regenFailed: regen ? regen.failed : [],
     ...(regen && regen.warning ? { regenWarning: regen.warning } : {}),
+    ...(skipped.length ? { skipped } : {}),
     detail: `merged PR #${prNum} (${REF}) into ${BASE} via self-approved PR (${METHOD}), deleted the ref`
       + (heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : '')
       + (regen && regen.done.length > 0 ? `; regenerated: ${regen.done.join(', ')}` : '')
@@ -395,7 +421,9 @@ function runCli() {
       if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
       const regen = REGEN ? runRegen() : null;
       if (regen && regen.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${regen.warning}\n`);
-      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), regenDone: regen ? regen.done : [], regenFailed: regen ? regen.failed : [], ...(regen && regen.warning ? { regenWarning: regen.warning } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : ''}${regen && regen.done.length > 0 ? `; regenerated: ${regen.done.join(', ')}` : ''}${regen && regen.failed.length > 0 ? `; regen failed (non-fatal): ${regen.failed.map((f) => f.cmd).join(', ')}` : ''}` }, 0);
+      const skipped = postLandSkips(heal, regen);
+      if (skipped.length) process.stderr.write(`pr-land [${REPO}] ⚠⚠ POST-LAND ${skipped.join(' + ')} SKIPPED (tracked-dirty tree) — ${BASE} may carry an unhealed id collision / stale derived artifacts; run the steps by hand.\n`);
+      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), regenDone: regen ? regen.done : [], regenFailed: regen ? regen.failed : [], ...(regen && regen.warning ? { regenWarning: regen.warning } : {}), ...(skipped.length ? { skipped } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : ''}${regen && regen.done.length > 0 ? `; regenerated: ${regen.done.join(', ')}` : ''}${regen && regen.failed.length > 0 ? `; regen failed (non-fatal): ${regen.failed.map((f) => f.cmd).join(', ')}` : ''}` }, 0);
     } catch (e) {
       emit({ repo: REPO, merged: false, reason: 'fallback-failed', detail: `${detail}; git-merge fallback ALSO failed (${String(e.message || e).split('\n')[0]}) — ${BASE} left untouched` }, 3);
     }
@@ -410,8 +438,9 @@ function runCli() {
   // surfaced residual a human resolves, exactly as the batch integrator's heal step behaves.
   function runHeal() {
     const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
-    const dirty = tryGit(['status', '--porcelain']);
-    if (dirty && dirty.trim()) return { warning: `skipped id-collision heal — the checkout at ${REPO} has local changes (won't reset a dirty working tree); if the gate flags "ids must be unique", run scripts/backlog-renumber-collisions.mjs on ${BASE} by hand` };
+    // #2225 — ignore untracked/git-ignored noise (the deps-symlinked clone's `node_modules` symlink); skip only
+    // on a genuinely TRACKED-dirty tree (a detached checkout could carry those edits into the heal commit).
+    if (isPostLandTreeDirty(tryGit(['status', '--porcelain', '--untracked-files=no']))) return { skipped: true, warning: `skipped id-collision heal — the checkout at ${REPO} has TRACKED local changes (won't reset a dirty working tree); if the gate flags "ids must be unique", run scripts/backlog-renumber-collisions.mjs on ${BASE} by hand` };
     try {
       gitC(['fetch', REMOTE, BASE, '--quiet']);
       gitC(['checkout', '--detach', `${REMOTE}/${BASE}`]);
@@ -445,9 +474,9 @@ function runCli() {
   function runRegen() {
     const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
     // Sync to post-merge main so we regenerate against the LANDED tree (same tree the drain regen targets).
-    // Skip if dirty — a dirty tree means we'd be generating against uncommitted input, which is wrong.
-    const dirty = tryGit(['status', '--porcelain']);
-    if (dirty && dirty.trim()) return { done: [], failed: [], warning: `skipped derived-artifact regen — the checkout at ${REPO} has local changes; run npm run gen:inventory && npm run gen:reference-index on ${BASE} by hand` };
+    // Skip only if TRACKED-dirty (#2225) — untracked noise like the deps-symlinked clone's `node_modules`
+    // symlink is irrelevant; a tracked-dirty tree could be generating against uncommitted input, which is wrong.
+    if (isPostLandTreeDirty(tryGit(['status', '--porcelain', '--untracked-files=no']))) return { done: [], failed: [], skipped: true, warning: `skipped derived-artifact regen — the checkout at ${REPO} has TRACKED local changes; run npm run gen:inventory && npm run gen:reference-index on ${BASE} by hand` };
     try {
       gitC(['fetch', REMOTE, BASE, '--quiet']);
       gitC(['checkout', '--detach', `${REMOTE}/${BASE}`]);

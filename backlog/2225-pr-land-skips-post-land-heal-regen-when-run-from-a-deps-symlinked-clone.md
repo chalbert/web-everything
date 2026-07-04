@@ -1,8 +1,10 @@
 ---
 kind: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-04"
+dateResolved: "2026-07-04"
 relatedTo: ["2182", "2071", "2123", "2200"]
 tags: [pr-flow, pr-land, land, regen, self-heal, footgun, lane]
 ---
