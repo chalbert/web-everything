@@ -30,3 +30,5 @@ Batch · Commit · Git Hygiene cluster — open a leaf with `node scripts/memory
 - [Lane refresh wipes unmapped lanes](lane-refresh-wipes-unmapped-lanes.md) — map/own a lane before editing; refresher hard-resets idle clean lanes to origin/main mid-work
 - [Producer opens PR, drain reviews](producer-opens-pr-drain-reviews.md) — DECIDED 2026-07-02: lanes open draft PRs, drain reviews+merges; drop self-approve
 - [Batch item can silently reverse a codified rule](batch-item-can-silently-reverse-codified-rule.md) — a story can reverse a rule codified only in code; grep it, reclassify to decision; #2149/#1952
+- [No work EVER in the primary checkout](no-work-ever-in-primary-all-repos.md) — the EDIT itself runs in a lane clone (every repo: WE/plateau-app/FUI), no carve-out; #2203 blocks the push, this blocks the touch
+- [Backlog id-storm buffer + lane→PR](backlog-id-storm-buffer-and-lane-pr.md) — hand-picked max+1 ids collide under concurrent sessions (dup id → CI red); buffer max+~6, verify no dup, land via lane→PR
