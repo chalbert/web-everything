@@ -43,6 +43,7 @@
  *   node scripts/pr-land.mjs --ref=lane/… --fallback-git                  # on gh failure / unmergeable, local git-merge + push instead
  *   node scripts/pr-land.mjs --ref=lane/… --no-heal                       # skip the post-land id-collision self-heal (#2071)
  *   node scripts/pr-land.mjs --ref=lane/… --no-regen                      # skip the post-land derived-artifact regen (#2182)
+ *   node scripts/pr-land.mjs --ref=lane/… --no-sync-primary               # skip the post-land ff-sync of the user's PRIMARY checkout to origin/main
  *   node scripts/pr-land.mjs --ref=lane/… --no-label                      # do NOT apply the ready-to-merge label (#2196) — e.g. a PR that must stay human-reviewed
  *   node scripts/pr-land.mjs --ref=lane/… --label=<name>                  # apply a different label than the default `ready-to-merge`
  *   node scripts/pr-land.mjs --ref=lane/… --json                          # machine-readable result
@@ -61,7 +62,7 @@
  * pass --fallback-git). A non-zero exit means `main` was left UNTOUCHED.
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -107,6 +108,11 @@ const HEAL = !flags['no-heal'];
 // manually-landed change whose inputs feed a derived artifact never leaves `main` with stale output.
 // Gate behind `--no-regen` to allow opt-out (mirrors `--no-heal`). Never runs on --dry-run / --no-wait.
 const REGEN = !flags['no-regen'];
+// Post-land primary-checkout sync. pr-land runs in a LANE clone; `syncLocalMain` only ff-syncs THAT checkout,
+// so the user's PRIMARY checkout (a separate directory) drifts behind origin/main on every land. After a clean
+// merge, fast-forward the primary too so it never lags what we just landed. Gate behind `--no-sync-primary`
+// (mirrors --no-heal/--no-regen). Best-effort, never fails a land.
+const SYNC_PRIMARY = !flags['no-sync-primary'];
 // The producer-certified `ready-to-merge` label (#2196) — applied to every opened PR so the label lander
 // (/drain) can collect ALL AI-generated work, whatever session opened it. `--no-label` opts out; `--label=<n>`
 // overrides the name. Default on.
@@ -300,6 +306,7 @@ function runCli() {
         PLAN.mergeWhenGreen ? `gh ${mergeArgsPreview.join(' ')}` : '(label-on-green: STOP after labelling — the drain lands it)',
         HEAL ? 'post-land: id-collision heal (backlog-renumber-collisions.mjs --json)' : '(--no-heal: skip id-collision heal)',
         REGEN ? `post-land: derived-artifact regen (${buildRegenArgs().map((c) => c.join(' ')).join(', ')})` : '(--no-regen: skip derived-artifact regen)',
+        SYNC_PRIMARY ? `post-land: ff-sync primary checkout to ${REMOTE}/${BASE} (git -C <primary> pull --ff-only --autostash)` : '(--no-sync-primary: skip primary ff-sync)',
         FALLBACK_GIT ? `fallback on failure: git merge --no-ff ${REMOTE}/${REF} + push ${REMOTE} ${BASE}` : null,
       ].filter(Boolean),
       detail: `would land ${SRC} (${refSha.slice(0, 8)}) onto ${BASE} via a self-approved PR from ${REF}`,
@@ -392,6 +399,7 @@ function runCli() {
   // genuine divergence aborts and is reported, never force/rebase). Best-effort: a failure degrades to a note
   // and NEVER fails the land (the merge already succeeded).
   const localSynced = syncLocalMain();
+  const primarySynced = SYNC_PRIMARY ? syncPrimaryMain() : null;
 
   const heal = HEAL ? runHeal() : null;
   if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
@@ -401,6 +409,7 @@ function runCli() {
   if (skipped.length) process.stderr.write(`pr-land [${REPO}] ⚠⚠ POST-LAND ${skipped.join(' + ')} SKIPPED (tracked-dirty tree) — ${BASE} may carry an unhealed id collision / stale derived artifacts; run the steps by hand.\n`);
   emit({
     repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD, label: LABEL, labelApplied, localSynced,
+    ...(primarySynced !== null ? { primarySynced } : {}),
     healed: heal && heal.healed ? heal.renumbered : [],
     ...(heal && heal.warning ? { healWarning: heal.warning } : {}),
     regenDone: regen ? regen.done : [],
@@ -422,6 +431,35 @@ function runCli() {
     catch { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · local ${BASE} NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`); return false; }
   }
 
+  // ff-sync the user's PRIMARY checkout after a merge. `syncLocalMain` only touches REPO (the lane clone we run
+  // in); the primary is a SEPARATE directory that otherwise drifts behind origin/main on every land (the "N
+  // behind" a human then has to pull by hand). The lane→primary link is the clone's git alternates: a lane is
+  // `git clone --reference <primary>`, so `<REPO>/.git/objects/info/alternates` points at `<primary>/.git/objects`
+  // — strip the two trailing segments to get the primary root. Returns:
+  //   null  — nothing to sync (REPO is not a lane clone, or IS the primary: syncLocalMain already handled it)
+  //   true  — primary fast-forwarded (or already up-to-date)
+  //   false — skipped/failed (primary not on BASE, or a genuine divergence) — REPORTED, never fatal.
+  // ff-only + --autostash: advance main, preserve the user's dirty/session-state edits, never force/rebase.
+  function syncPrimaryMain() {
+    let primary;
+    try {
+      const alt = readFileSync(resolve(REPO, '.git/objects/info/alternates'), 'utf8').trim().split('\n')[0];
+      if (!alt) return null;                       // no alternates content
+      primary = resolve(alt, '..', '..');          // <primary>/.git/objects → <primary>
+    } catch { return null; }                       // no alternates file → REPO is not a lane clone
+    try { if (realpathSync(primary) === realpathSync(REPO)) return null; } // running FROM the primary — already synced
+    catch { return null; }
+    const atPrimary = (args) => execFileSync('git', ['-C', primary, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    // Only fast-forward a primary that is actually on BASE — never yank a detached / feature checkout out from under the user.
+    let branch = null; try { branch = atPrimary(['rev-parse', '--abbrev-ref', 'HEAD']); } catch { /* unknown */ }
+    if (branch !== BASE) {
+      if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · primary checkout (${primary}) not on ${BASE} (on ${branch || 'unknown'}) — skipped primary ff-sync; pull it by hand\n`);
+      return false;
+    }
+    try { atPrimary(['pull', '--ff-only', '--autostash']); return true; }
+    catch { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · primary ${BASE} (${primary}) NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — pull it by hand\n`); return false; }
+  }
+
   // Fallback path (#2138 Fork 5 (a)): local git merge + push when gh is the problem.
   function ghFailed(detail) {
     if (!FALLBACK_GIT) emit({ repo: REPO, merged: false, reason: 'gh-error', detail: `${detail} — pass --fallback-git for the local git-merge fallback` }, 3);
@@ -430,6 +468,7 @@ function runCli() {
       gitC(['checkout', BASE]);
       gitC(['merge', '--no-ff', `${REMOTE}/${REF}`, '-m', `merge ${REF} (pr-land git fallback)`]);
       gitPushMain([REMOTE, `${BASE}:${BASE}`]);
+      if (SYNC_PRIMARY) syncPrimaryMain(); // ff-sync the user's primary checkout too (the lane's local BASE is already merged)
       const heal = HEAL ? runHeal() : null;
       if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
       const regen = REGEN ? runRegen() : null;
