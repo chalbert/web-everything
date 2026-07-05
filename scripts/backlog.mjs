@@ -119,6 +119,45 @@ function openChildrenOf(padded) {
   return open;
 }
 
+/**
+ * Diagnose a not-found item before dying. A missing local file has two very different causes — the item
+ * genuinely doesn't exist, or your checkout is simply behind origin (the common case for an item that was
+ * just scaffolded and landed on `main` in another session/PR). The flat "not on disk" error conflated the
+ * two and sent the caller down a wrong-premise path instead of a `git pull`, so on the FAILURE path only we
+ * probe origin and, if the item exists there, say so.
+ *
+ * This is NOT a Rule #105 violation: #105 forbids a git *ownership* check on the happy path (a dirty tree is
+ * never a drop-reason), and this stays true — the happy path resolves purely from local `files()`, fully
+ * offline. This is a distinct *existence/freshness* probe that fires only when there is no local match, so
+ * the network cost lands solely on the rare not-found death, never on a successful claim/resolve/release.
+ * Best-effort throughout: any git hiccup (offline, no remote, timeout) falls back to the original plain message.
+ */
+function missingItemMessage(padded) {
+  const plain = `no backlog item #${padded} on disk`;
+  // The probe only ENRICHES an interactive error. `--json` (machine) mode's contract is a fast, offline,
+  // deterministic error, so skip the network entirely there — never make a machine consumer block on a fetch.
+  if (JSON_MODE) return plain;
+  try {
+    // Bounded + non-interactive: a stalled remote or a credential prompt must not hang the death path
+    // (this also runs unattended in the drain). timeout → SIGTERM → the catch below returns `plain`.
+    const gitEnv = { cwd: ROOT, timeout: 5000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } };
+    execFileSync('git', ['fetch', '--quiet', 'origin', 'main'], { ...gitEnv, stdio: 'ignore' });
+    const onOrigin = execFileSync('git', ['ls-tree', '--name-only', 'FETCH_HEAD', 'backlog/'], { ...gitEnv, encoding: 'utf8' })
+      .split('\n')
+      .some((p) => p.startsWith(`backlog/${padded}-`));
+    if (!onOrigin) return plain;
+    // Advice is context-agnostic ON PURPOSE: this CLI runs both in a primary checkout (on `main`, where
+    // `git pull --ff-only` is right) AND in `lane/*` clones (#104), where a bare pull can't fast-forward a
+    // diverged lane branch and a HEAD..origin/main count would be inflated. So point at the GOAL — sync to
+    // origin/main — and name the right move per context, rather than prescribing one command / a wrong count.
+    return `#${padded} exists on origin/main but not your checkout — sync to origin/main and retry (a stale-checkout `
+      + `miss, not a missing item): \`git pull --ff-only\` on a primary checkout, or refresh the lane `
+      + `(\`node scripts/lane-pool.mjs refresh --lane=N\`).`;
+  } catch {
+    return plain; // offline / no remote / timed out — can't diagnose, keep the plain error
+  }
+}
+
 /** Resolve a bare NNN (or NNN-slug) to its current filename, or die if it's missing/ambiguous. */
 function resolveFile(ref) {
   if (!ref) die('missing <NNN> — e.g. `backlog.mjs claim 122`');
@@ -126,7 +165,7 @@ function resolveFile(ref) {
   if (!num) die(`"${ref}" is not a valid NNN reference`);
   const padded = num.padStart(3, '0');
   const matches = files().filter((f) => f.startsWith(`${padded}-`));
-  if (matches.length === 0) die(`no backlog item #${padded} on disk`);
+  if (matches.length === 0) die(missingItemMessage(padded));
   if (matches.length > 1) die(`#${padded} is ambiguous: ${matches.join(', ')}`);
   return matches[0];
 }
