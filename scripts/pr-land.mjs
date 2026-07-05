@@ -65,6 +65,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -235,6 +236,32 @@ export function postLandSkips(heal, regen) {
 }
 
 /**
+ * #2218 — build the post-land heal/regen report SUFFIX for the success line, safely. Pure. The merge has
+ * already SUCCEEDED, so this must NEVER throw: `regen`/`heal` are `null` on the `--no-heal`/`--no-regen` opt-out
+ * and, on a dirty-checkout skip, carry `{ skipped: true }` with empty `done`. Reading `regen.done.length`
+ * unguarded there threw a TypeError that misreported a completed land as a failure (surfaced landing #75). Every
+ * read is optional-chained and a skipped step reports "skipped" (not a crash) / a no-op reports "none".
+ * @param {null|{skipped?:boolean, healed?:boolean, renumbered?:{oldNum,newNum}[]}} heal
+ * @param {null|{skipped?:boolean, done?:string[], failed?:{cmd:string}[]}} regen
+ * @returns {string} e.g. `; healed id collision(s): #2219→#2220; regenerated: none` (or `''` when nothing to say)
+ */
+export function postLandReport(heal, regen) {
+  const parts = [];
+  if (heal?.skipped) parts.push('id-collision heal: skipped (tracked-dirty tree)');
+  else if (heal?.healed && heal.renumbered?.length) parts.push(`healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}`);
+
+  if (regen?.skipped) parts.push('derived-artifact regen: skipped (tracked-dirty tree)');
+  else if (regen) {
+    const done = regen.done?.length ?? 0;
+    const failed = regen.failed?.length ?? 0;
+    if (done > 0) parts.push(`regenerated: ${regen.done.join(', ')}`);
+    else if (failed === 0) parts.push('regenerated: none');
+    if (failed > 0) parts.push(`regen failed (non-fatal): ${regen.failed.map((f) => f.cmd).join(', ')}`);
+  }
+  return parts.length ? `; ${parts.join('; ')}` : '';
+}
+
+/**
  * Classify `gh pr checks --json state,bucket` output (array of check rows) into a merge decision. Pure.
  *  - `pending` — at least one check still running/queued → wait.
  *  - `failed`  — at least one check failed/cancelled/timed-out → ABORT (never merge a red PR).
@@ -299,6 +326,7 @@ function runCli() {
       repo: REPO, merged: false, reason: 'dry-run', ref: REF, base: BASE, method: METHOD,
       plan: [
         `git push ${REMOTE} ${SRC}:refs/heads/${REF}   # publish the lane clone's ${SRC} (${refSha.slice(0, 8)}) to the lane ref`,
+        HEAL ? `pre-check: id-collision heal (renumber a lane new-item that reuses a ${BASE} id to a free GAP id, rebuild ${REF}) (#2222)` : '(--no-heal: skip pre-check id-collision heal)',
         `gh ${createArgs.join(' ')}`,
         PLAN.waitForChecks ? 'poll: gh pr view <pr> mergeStateStatus + gh pr checks <pr> --required  (wait until green; abort on red)' : '(--no-wait: skip check-wait, leave for a later drain pass)',
         // #2199 — the label is applied ONLY after the required checks are green, never eagerly at open.
@@ -316,6 +344,23 @@ function runCli() {
   // 2. Publish the source commit to the lane ref on origin (guard-safe: lane/*). Never force, no local branch.
   try { gitC(['push', REMOTE, `${SRC}:refs/heads/${REF}`]); }
   catch (e) { emit({ repo: REPO, merged: false, reason: 'push-failed', detail: `git push ${REMOTE} ${SRC}:refs/heads/${REF} failed (${String(e.message || e).split('\n')[0]})` }, 3); }
+
+  // 2b. PRE-CHECK id-collision self-heal (#2222). BEFORE the required check runs, detect that this lane's NEW
+  //     backlog item reuses an id already on `${BASE}` (the same-num allocation storm) and rebuild the lane tip
+  //     with it renumbered to a free GAP id — so the FIRST CI run is already on the healed tip and goes green,
+  //     instead of the merge blocking on `ids must be unique` (which would strand the post-merge heal, #2276).
+  //     Pure plumbing on the lane ref (no checkout). Best-effort: a heal error is surfaced but never blocks the
+  //     land (the same non-fatal contract as the post-merge heal). Gated by `--no-heal`.
+  let precheckHealed = [];
+  if (HEAL) {
+    const h = healNnnCollision({ laneRef: REF, base: `${REMOTE}/${BASE}`, remote: REMOTE });
+    if (h.action === 'rebased') {
+      precheckHealed = h.renumbered || [];
+      if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] ↻ pre-check: renumbered new-item id collision(s) on ${REF} (${precheckHealed.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}) — CI runs on the healed tip\n`);
+    } else if (h.action === 'error' && !AS_JSON) {
+      process.stderr.write(`pr-land [${REPO}] ⚠ pre-check id-collision heal could not run (${h.reason}) — if the required check flags "ids must be unique", renumber the new item by hand\n`);
+    }
+  }
 
   // 3. Find an existing open PR for this head, else create a self-approved one.
   let prNum = null;
@@ -381,7 +426,7 @@ function runCli() {
 
   // label-on-green: the producer's job ends here — the PR is green + labelled; the drain lands it. No merge.
   if (!PLAN.mergeWhenGreen) {
-    emit({ repo: REPO, merged: false, reason: 'labelled-on-green', pr: Number(prNum), ref: REF, label: LABEL, labelApplied, detail: `PR #${prNum} (${REF}) required checks green${labelApplied ? ` — labelled ${LABEL}` : ''}; left for the drain to land` }, 0);
+    emit({ repo: REPO, merged: false, reason: 'labelled-on-green', pr: Number(prNum), ref: REF, label: LABEL, labelApplied, ...(precheckHealed.length ? { precheckHealed } : {}), detail: `PR #${prNum} (${REF}) required checks green${labelApplied ? ` — labelled ${LABEL}` : ''}${precheckHealed.length ? `; pre-check healed id collision(s): ${precheckHealed.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : ''}; left for the drain to land` }, 0);
   }
 
   // #2213 — capture PRE-merge `${BASE}` sha before the merge advances origin: every id already published there
@@ -410,6 +455,7 @@ function runCli() {
   emit({
     repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD, label: LABEL, labelApplied, localSynced,
     ...(primarySynced !== null ? { primarySynced } : {}),
+    ...(precheckHealed.length ? { precheckHealed } : {}),
     healed: heal && heal.healed ? heal.renumbered : [],
     ...(heal && heal.warning ? { healWarning: heal.warning } : {}),
     regenDone: regen ? regen.done : [],
@@ -417,9 +463,7 @@ function runCli() {
     ...(regen && regen.warning ? { regenWarning: regen.warning } : {}),
     ...(skipped.length ? { skipped } : {}),
     detail: `merged PR #${prNum} (${REF}) into ${BASE} via self-approved PR (${METHOD}), deleted the ref`
-      + (heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : '')
-      + (regen && regen.done.length > 0 ? `; regenerated: ${regen.done.join(', ')}` : '')
-      + (regen && regen.failed.length > 0 ? `; regen failed (non-fatal): ${regen.failed.map((f) => f.cmd).join(', ')}` : ''),
+      + postLandReport(heal, regen),
   }, 0);
 
   // #2205 — ff-sync local `main` to the just-advanced `origin/main` after a merge (parity with the drain,
@@ -475,7 +519,7 @@ function runCli() {
       if (regen && regen.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${regen.warning}\n`);
       const skipped = postLandSkips(heal, regen);
       if (skipped.length) process.stderr.write(`pr-land [${REPO}] ⚠⚠ POST-LAND ${skipped.join(' + ')} SKIPPED (tracked-dirty tree) — ${BASE} may carry an unhealed id collision / stale derived artifacts; run the steps by hand.\n`);
-      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), regenDone: regen ? regen.done : [], regenFailed: regen ? regen.failed : [], ...(regen && regen.warning ? { regenWarning: regen.warning } : {}), ...(skipped.length ? { skipped } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${heal && heal.healed ? `; healed id collision(s): ${heal.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : ''}${regen && regen.done.length > 0 ? `; regenerated: ${regen.done.join(', ')}` : ''}${regen && regen.failed.length > 0 ? `; regen failed (non-fatal): ${regen.failed.map((f) => f.cmd).join(', ')}` : ''}` }, 0);
+      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), regenDone: regen ? regen.done : [], regenFailed: regen ? regen.failed : [], ...(regen && regen.warning ? { regenWarning: regen.warning } : {}), ...(skipped.length ? { skipped } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${postLandReport(heal, regen)}` }, 0);
     } catch (e) {
       emit({ repo: REPO, merged: false, reason: 'fallback-failed', detail: `${detail}; git-merge fallback ALSO failed (${String(e.message || e).split('\n')[0]}) — ${BASE} left untouched` }, 3);
     }
