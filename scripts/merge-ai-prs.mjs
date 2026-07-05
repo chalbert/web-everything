@@ -72,10 +72,17 @@
  * (surfaced); 3 = bad input / `gh` unavailable.
  */
 import { execFileSync } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from './lib/review-escalation.mjs';
+import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
+
+// #2262 — the local, machine-scoped park-age clock the review-escalation watch-window gate reads its
+// `parkedSinceMs` from (see review-park-state.mjs for why losing/corrupting this file is safe). Resolved
+// against cwd (the drain always runs from the target repo's root).
+const REVIEW_PARK_STATE_PATH = resolve(process.cwd(), '.claude/skills/drain/review-park-state.json');
 
 const argv = process.argv.slice(2);
 const flags = {};
@@ -336,6 +343,12 @@ function runCli() {
   // ON by default for a label-scoped drain; `--no-review-escalation` disables. `--sample-nth=N` tunes the floor.
   const REVIEW_ESCALATION = label && !flags['no-review-escalation'];
   const SAMPLE_NTH = Number.isFinite(Number(flags['sample-nth'])) && Number(flags['sample-nth']) > 0 ? Number(flags['sample-nth']) : undefined;
+  // #2262 — `--review-window-minutes=N` tunes the park timeout (default from review-escalation.mjs); the park
+  // AGE itself is tracked in REVIEW_PARK_STATE_PATH (see import above) so a sampled PR times out to
+  // merge-anyway instead of re-parking forever with no reviewer daemon to accept it.
+  const REVIEW_WINDOW_MS = Number.isFinite(Number(flags['review-window-minutes'])) && Number(flags['review-window-minutes']) > 0
+    ? Number(flags['review-window-minutes']) * 60_000
+    : undefined;
 
   // #2257 — the ONE /drain lander sweeps all 3 constellation repos. Derive the local repo slug from origin
   // (used to keep git-side ops — manifest read, rebase-drop, local-main sync — scoped to the local clone), then
@@ -351,6 +364,10 @@ function runCli() {
   const repoFlag = (repo) => (repo ? ['--repo', repo] : []);      // a slug → scope the gh call; null → cwd repo
   const isLocalRepo = (repo) => repo == null || repo === localSlug; // git-side ops only run against the local clone
   const repoTag = (repo) => (repo && repo !== localSlug ? `${repo.split('/').pop()}#` : '#'); // display prefix per PR
+  // #2262 — under `--watch`, `sweepOnce()` (below) runs every `--interval`s FOREVER; memoize which (repo, label)
+  // pairs this process has already ensured exist so a long-lived watch doesn't `gh label create` the same
+  // review:* labels every single pass (wasted round-trips on an idempotent one-time mint).
+  const ensuredLabels = new Set();
 
   const fail = (reason, detail, code) => {
     if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, reason, detail }) + '\n');
@@ -497,6 +514,35 @@ function runCli() {
   // cross-repo (manifest), 1-in-N sampling. Best-effort per candidate; a signal-fetch miss defaults to no-escalate.
   const parked = [];
   if (REVIEW_ESCALATION) {
+    // #2262 fix (1/2) — the `review:*` verdict labels are never minted anywhere (unlike `ready-to-merge`,
+    // which `pr-land.mjs` `gh label create`s before first use), so `gate.applyLabel` below silently no-ops:
+    // `gh` returns "not found" and the catch swallows it — the park applies NO visible label. Mint all three
+    // (idempotent — an existing label errors harmlessly), memoized per (repo, label) via `ensuredLabels` so a
+    // long-lived `--watch` mints each one ONCE per process rather than every single pass (same convention as
+    // `pr-land.mjs`'s one-time `ready-to-merge` mint).
+    if (!DRY_RUN) {
+      const labelColors = { [REVIEW_LABELS.pending]: 'FBCA04', [REVIEW_LABELS.accepted]: '0E8A16', [REVIEW_LABELS.changes]: 'D93F0B' };
+      // #2257 — a multi-repo sweep scores candidates from several repos in one pass; a label lives per-repo on
+      // GitHub, so mint it in EVERY repo actually carrying a candidate this pass (not just the local repo).
+      const escalationRepos = new Set(verdicts.filter((v) => v.decision === 'merge').map((v) => v.repo || null));
+      for (const repo of escalationRepos) {
+        for (const name of Object.values(REVIEW_LABELS)) {
+          const ensureKey = `${repo || 'cwd'}::${name}`;
+          if (ensuredLabels.has(ensureKey)) continue;
+          ensuredLabels.add(ensureKey);
+          try { execFileSync('gh', ['label', 'create', name, '--color', labelColors[name] || 'ededed', '--description', 'Deterministic drain review-escalation verdict (#2171)', ...repoFlag(repo)], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* already exists — fine */ }
+        }
+      }
+    }
+    // #2262 fix (2/2) — a deterministically-sampled PR (1-in-N floor, keyed on PR number) re-scores `escalate`
+    // on EVERY pass; with no reviewer daemon to apply `review:accepted`, it must not park forever. Read the
+    // durable park-age clock (review-park-state.mjs) so `decideReviewGate`'s already-tested timeout branch can
+    // actually fire: once a PR has sat parked (no verdict) past the window, it merges anyway rather than being
+    // permanently stranded. Best-effort, tolerant read — a missing/corrupt file just starts every PR's clock now.
+    let parkState = emptyParkState();
+    try { parkState = parseParkState(readFileSync(REVIEW_PARK_STATE_PATH, 'utf8')); } catch { /* no file yet — fresh clocks */ }
+    const nowMs = Date.now();
+    let parkStateChanged = false;
     for (const v of verdicts) {
       if (v.decision !== 'merge') continue;
       let changedFiles = [];
@@ -507,7 +553,8 @@ function runCli() {
         diffLines = files.reduce((s, f) => s + (Number(f.additions) || 0) + (Number(f.deletions) || 0), 0);
       } catch { /* signal-fetch miss → score on the manifest signals alone */ }
       const score = scoreEscalation({ changedFiles, diffLines, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, prNum: Number(v.num), thresholds: SAMPLE_NTH ? { sampleNth: SAMPLE_NTH } : {} });
-      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, parkedSinceMs: null });
+      const parkedSinceMs = getParkedSinceMs(parkState, { repo: v.repo, num: v.num });
+      const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, parkedSinceMs, nowMs, ...(REVIEW_WINDOW_MS ? { windowMs: REVIEW_WINDOW_MS } : {}) });
       v.escalated = score.escalate ? 'yes' : 'no';
       v.humanRequired = !!score.humanRequired; // #2285 v1 — gate-self conflict of interest: an agent may NOT auto-review this; a human must
       v.escalateReasons = score.reasons;
@@ -515,14 +562,34 @@ function runCli() {
         v.decision = 'skip';
         v.reason = gate.reason + (score.reasons.length ? ` [${score.reasons.join('; ')}]` : '');
         if (gate.applyLabel && !DRY_RUN) { try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ } }
+        // #2262 — track the park age so the watch-window can time out; a review:changes verdict ends the clock.
+        if (gate.action === 'park') { if (!DRY_RUN) { parkState = recordParked(parkState, { repo: v.repo, num: v.num }, nowMs); parkStateChanged = true; } }
+        else if (!DRY_RUN) { const cleared = clearParked(parkState, { repo: v.repo, num: v.num }); if (cleared !== parkState) { parkState = cleared; parkStateChanged = true; } }
         // #2285 v1 — the skill's auto-review step consumes this: humanRequired PRs are left for the operator,
         // the rest are eligible for a fresh-context adversarial review subagent.
         parked.push({ num: v.num, repo: v.repo || localSlug, humanRequired: !!score.humanRequired, reasons: score.reasons });
         if (!AS_JSON) process.stderr.write(`  ⏸ ${repoTag(v.repo)}${v.num} parked for review (${gate.action}${gate.applyLabel ? `, labelled ${gate.applyLabel}` : ''}${score.humanRequired ? ', HUMAN required' : ', agent-reviewable'}): ${score.reasons.join('; ')}\n`);
+      } else if (gate.action === 'merge-anyway') {
+        // #2262 — the review window expired with no reviewer verdict: merge NOW (decision stays 'merge', its
+        // default) rather than re-park forever, but never SILENTLY drop the owed review — auto-file it as a
+        // durable PR comment (best-effort) so the obligation stays visible after the PR closes.
+        v.escalated = 'yes';
+        v.escalateReasons = score.reasons;
+        v.reviewTimedOut = true;
+        if (!DRY_RUN) {
+          const cleared = clearParked(parkState, { repo: v.repo, num: v.num });
+          if (cleared !== parkState) { parkState = cleared; parkStateChanged = true; }
+          // Note: this comment fires BEFORE the merge attempt below (same pass) — the merge can still bounce
+          // (e.g. a check regressed since scoring) and retry next pass, so the wording describes the DECISION
+          // (proceeding to merge), not a confirmed outcome.
+          try { execFileSync('gh', ['pr', 'comment', String(v.num), ...repoFlag(v.repo), '--body', `⏱ review-escalation window expired with no reviewer verdict — proceeding to merge per the #2171 rubric (never permanently stranding an escalated PR). The review is still owed: ${score.reasons.join('; ')}.`], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* auto-file best-effort */ }
+        }
+        if (!AS_JSON) process.stderr.write(`  ⏱ ${repoTag(v.repo)}${v.num} review window expired — merging anyway (unfinished review auto-filed): ${score.reasons.join('; ')}\n`);
       } else if (score.escalate && !AS_JSON) {
         process.stderr.write(`  ✓ ${repoTag(v.repo)}${v.num} escalation cleared (${gate.reason})\n`);
       }
     }
+    if (parkStateChanged && !DRY_RUN) { try { writeFileSync(REVIEW_PARK_STATE_PATH, serializeParkState(parkState)); } catch { /* best-effort local cache — a write miss just re-parks fresh next pass */ } }
   }
 
   const toMerge = verdicts.filter((v) => v.decision === 'merge');
