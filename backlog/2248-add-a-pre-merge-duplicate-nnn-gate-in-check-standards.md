@@ -9,6 +9,8 @@ tags: [backlog, gate, merge-queue, git]
 
 # Add a pre-merge duplicate-NNN gate in `check:standards`
 
+> **Reframed under epic #2289 (2026-07-05).** Under #2291 this becomes a **tripwire**, not a heal-triggering gate: once numbers are assigned just-in-time (#2288) a duplicate NNN is unrepresentable, so this assertion should never fire — if it does, it signals a JIT allocation bug and should alert rather than silently trigger a heal.
+
 `check:standards` has **no** rule that errors when two `we:backlog/NNN-*.md` files share an NNN — the loader's
 `byNum` (`we:src/_data/backlog.js`) is a last-wins `Map`, so a collision **silently drops one item** rather
 than failing the gate. NNN collisions are handled only by the **post-merge renumber *heal*** (#2071,
