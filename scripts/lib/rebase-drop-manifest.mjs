@@ -75,9 +75,11 @@ export function manifestConflictDisposition(parsed, manifest = LANE_MANIFEST) {
 }
 
 /** The default real git runner — `spawnSync` (NOT execFileSync) so a non-zero exit (merge-tree on conflict
- *  is exit 1, expected) is returned, not thrown. `opts.env` is merged over `process.env`. */
-export function gitRunner(cmd, args, { env } = {}) {
-  const r = spawnSync(cmd, args, { encoding: 'utf8', env: env ? { ...process.env, ...env } : process.env });
+ *  is exit 1, expected) is returned, not thrown. `opts.env` is merged over `process.env`. `opts.cwd` (#2263)
+ *  routes the git invocation at a SIBLING clone directory instead of `process.cwd()`, so the SAME plumbing
+ *  can rebuild a remote-repo (frontierui/plateau-app) lane tip through that repo's own clone. */
+export function gitRunner(cmd, args, { env, cwd } = {}) {
+  const r = spawnSync(cmd, args, { encoding: 'utf8', env: env ? { ...process.env, ...env } : process.env, ...(cwd ? { cwd } : {}) });
   return { status: r.status == null ? 1 : r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
@@ -102,6 +104,10 @@ export function gitRunner(cmd, args, { env } = {}) {
  *                                       tip (reusing #2222's `applyCollisionHealToIndex`), so the rebuild that
  *                                       already runs to shed the manifest also clears an `ids must be unique` dup
  *                                       against `<base>` — otherwise the rebuilt tip stays red and never merges.
+ * @param {string} [o.cwd]              run every git invocation in THIS directory instead of `process.cwd()`
+ *                                       (#2263) — routes the plumbing through a SIBLING clone (e.g. `../frontierui`)
+ *                                       for a remote-repo candidate, so the local-only rebase-drop can rebuild a
+ *                                       non-local lane tip too, given that repo's own clone is provisioned.
  * @param {(cmd:string,args:string[],opts?:object)=>{status:number,stdout:string,stderr:string}} [o.run] injected runner.
  */
 export function rebaseDropManifest({
@@ -114,6 +120,7 @@ export function rebaseDropManifest({
   message,
   tmpIndex = '.git/rebase-drop-index',
   healCollision = false,
+  cwd,
   run = gitRunner,
 } = {}) {
   if (!laneRef) return { action: 'error', reason: 'no laneRef given' };
@@ -125,11 +132,11 @@ export function rebaseDropManifest({
   // inputs. The PUSH still targets the bare `refs/heads/<laneRef>` (that part was always correct).
   const mergeRef = readRef || `${remote}/${laneRef}`;
   if (fetch) {
-    const f = run('git', ['fetch', remote, laneRef]);
+    const f = run('git', ['fetch', remote, laneRef], { cwd });
     if (f.status !== 0) return { action: 'error', reason: `fetch ${laneRef} failed (${(f.stderr || '').split('\n')[0]})` };
   }
 
-  const mt = run('git', ['merge-tree', '--write-tree', base, mergeRef]);
+  const mt = run('git', ['merge-tree', '--write-tree', base, mergeRef], { cwd });
   const parsed = parseMergeTree(mt.stdout, mt.status);
   if (!parsed.tree) return { action: 'error', reason: `merge-tree produced no tree (${(mt.stderr || '').split('\n')[0]})` };
 
@@ -138,10 +145,10 @@ export function rebaseDropManifest({
 
   // Build a resolved, manifest-free tree in a TEMP index — never touches HEAD or the working tree.
   const env = { GIT_INDEX_FILE: tmpIndex };
-  const read = run('git', ['read-tree', parsed.tree], { env });
+  const read = run('git', ['read-tree', parsed.tree], { env, cwd });
   if (read.status !== 0) return { action: 'error', reason: `read-tree failed (${(read.stderr || '').split('\n')[0]})` };
   // Drop the manifest if present (--ignore-unmatch: a clean merge with no manifest in the tree is fine).
-  run('git', ['rm', '--cached', '--ignore-unmatch', manifest], { env });
+  run('git', ['rm', '--cached', '--ignore-unmatch', manifest], { env, cwd });
   // #2276 — in the SAME rebuilt tip, renumber a colliding new backlog item against `<base>` (reusing #2222's
   // apply-to-index), so a rebuild that already runs to shed the manifest also clears an `ids must be unique`
   // dup. `parsed.tree` (the merged tree) already seeds this index, so the heal reads/stages against it. A heal
@@ -152,18 +159,18 @@ export function rebaseDropManifest({
     const h = applyCollisionHealToIndex({ run, env, tree: parsed.tree, base });
     if (h.ok) healed = h.healed;
   }
-  const wt = run('git', ['write-tree'], { env });
+  const wt = run('git', ['write-tree'], { env, cwd });
   const resolvedTree = String(wt.stdout || '').trim();
   if (wt.status !== 0 || !resolvedTree) return { action: 'error', reason: `write-tree failed (${(wt.stderr || '').split('\n')[0]})` };
 
   const healTag = healed.length ? `, renumber ${healed.map((r) => `#${r.oldNum}→#${r.newNum}`).join('/')}` : '';
   const msg = message || `drain: rebase ${laneRef} onto ${base}, drop transient ${manifest}${healTag}`;
-  const ct = run('git', ['commit-tree', resolvedTree, '-p', base, '-p', mergeRef, '-m', msg]);
+  const ct = run('git', ['commit-tree', resolvedTree, '-p', base, '-p', mergeRef, '-m', msg], { cwd });
   const newCommit = String(ct.stdout || '').trim();
   if (ct.status !== 0 || !newCommit) return { action: 'error', reason: `commit-tree failed (${(ct.stderr || '').split('\n')[0]})` };
 
   // Fast-forward push (newCommit descends from laneRef) to the guard-safe lane/* ref — no checkout.
-  const push = run('git', ['push', remote, `${newCommit}:refs/heads/${laneRef}`]);
+  const push = run('git', ['push', remote, `${newCommit}:refs/heads/${laneRef}`], { cwd });
   if (push.status !== 0) return { action: 'error', reason: `push to ${laneRef} failed (${(push.stderr || '').split('\n')[0]})` };
 
   return { action: 'rebased', newCommit, dropped: disp === 'manifest-only', healed, base, laneRef };
