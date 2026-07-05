@@ -8,6 +8,7 @@ import {
   REVIEW_LABELS,
   DEFAULT_THRESHOLDS,
   isBlastRadiusPath,
+  isGateSelfPath,
   scoreEscalation,
   coupleEscalation,
   hasReviewLabel,
@@ -28,6 +29,21 @@ describe('isBlastRadiusPath', () => {
   it('does NOT flag a leaf edit (a backlog file, a demo, a component)', () => {
     for (const p of ['backlog/2171-x.md', 'demos/declarative-spa.html', 'src/_data/other.json']) {
       expect(isBlastRadiusPath(p)).toBe(false);
+    }
+  });
+});
+
+describe('isGateSelfPath — the auto-review trust chain (#2285 v1)', () => {
+  it('flags ONLY the gate rubric + the lander (the code that decides the gate)', () => {
+    expect(isGateSelfPath('scripts/lib/review-escalation.mjs')).toBe(true);
+    expect(isGateSelfPath('scripts/merge-ai-prs.mjs')).toBe(true);
+    // a repo-prefixed / nested clone path still matches (the drain reads paths off head refs)
+    expect(isGateSelfPath('frontierui/scripts/merge-ai-prs.mjs')).toBe(true);
+  });
+  it('does NOT flag other blast-radius code — those stay agent-reviewable', () => {
+    for (const p of ['scripts/pr-land.mjs', 'scripts/lane-pool.mjs', '.claude/skills/drain/SKILL.md',
+                     'docs/agent/platform-decisions.md', 'src/_data/blocks.json', 'scripts/lib/rebase-drop-manifest.mjs']) {
+      expect(isGateSelfPath(p)).toBe(false);
     }
   });
 });
@@ -66,6 +82,19 @@ describe('scoreEscalation', () => {
     const r = scoreEscalation({ changedFiles: ['scripts/x.mjs'], diffLines: 500, dismissedFindings: 2, crossRepo: true, prNum: 10 });
     expect(r.reasons.length).toBe(5);
   });
+  it('humanRequired only when the diff edits the gate\'s own code (#2285 v1)', () => {
+    // a gate-self file → escalate AND humanRequired
+    const gate = scoreEscalation({ changedFiles: ['scripts/merge-ai-prs.mjs'], prNum: 3 });
+    expect(gate.escalate).toBe(true);
+    expect(gate.humanRequired).toBe(true);
+    expect(gate.reasons.join(' ')).toMatch(/gate-self/);
+    // other blast-radius → escalates but agent-reviewable (NOT humanRequired)
+    const other = scoreEscalation({ changedFiles: ['scripts/pr-land.mjs'], prNum: 3 });
+    expect(other.escalate).toBe(true);
+    expect(other.humanRequired).toBe(false);
+    // a plain leaf → neither
+    expect(scoreEscalation({ changedFiles: ['backlog/x.md'], prNum: 3 }).humanRequired).toBe(false);
+  });
 });
 
 describe('coupleEscalation — the strictest member wins', () => {
@@ -76,6 +105,11 @@ describe('coupleEscalation — the strictest member wins', () => {
   });
   it('no member escalates → couple does not', () => {
     expect(coupleEscalation([{ escalate: false }, { escalate: false }]).escalate).toBe(false);
+  });
+  it('humanRequired inherits too — one gate-self half makes the whole couple human (#2285 v1)', () => {
+    const r = coupleEscalation([{ escalate: true, humanRequired: false }, { escalate: true, humanRequired: true }]);
+    expect(r.humanRequired).toBe(true);
+    expect(coupleEscalation([{ escalate: true, humanRequired: false }, { escalate: false }]).humanRequired).toBe(false);
   });
   it('de-dupes shared reasons across members', () => {
     const r = coupleEscalation([{ escalate: true, reasons: ['cross-repo impl+WE couple'] }, { escalate: true, reasons: ['cross-repo impl+WE couple'] }]);
@@ -106,6 +140,22 @@ describe('decideReviewGate — the non-blocking watch window', () => {
   it('a just-escalated PR with no park timestamp parks (does not instantly time out)', () => {
     expect(decideReviewGate({ escalate: true, parkedSinceMs: null }).action).toBe('park');
   });
+
+  // #2285 v1 — the human-required conflict-of-interest gate.
+  it('humanRequired → parks under review:human (an agent may not clear a gate-self edit)', () => {
+    const g = decideReviewGate({ escalate: true, humanRequired: true, parkedSinceMs: null });
+    expect(g.action).toBe('park');
+    expect(g.applyLabel).toBe(REVIEW_LABELS.human);
+    expect(g.humanRequired).toBe(true);
+  });
+  it('humanRequired NEVER times out to merge-anyway — even past the window (the essential safety property)', () => {
+    const g = decideReviewGate({ escalate: true, humanRequired: true, parkedSinceMs: 0, nowMs: 999 * 60_000, windowMs: 30 * 60_000 });
+    expect(g.action).toBe('park');
+    expect(g.applyLabel).toBe(REVIEW_LABELS.human);
+  });
+  it('humanRequired + review:accepted → merge (a human verdict still wins)', () => {
+    expect(decideReviewGate({ escalate: true, humanRequired: true, labels: [REVIEW_LABELS.accepted] }).action).toBe('merge');
+  });
 });
 
 describe('hasReviewLabel + REVIEW_LABELS', () => {
@@ -114,8 +164,8 @@ describe('hasReviewLabel + REVIEW_LABELS', () => {
     expect(hasReviewLabel([{ name: 'review:pending' }], REVIEW_LABELS.pending)).toBe(true);
     expect(hasReviewLabel([], REVIEW_LABELS.accepted)).toBe(false);
   });
-  it('exposes the three ratified verdict labels + tuning knobs', () => {
-    expect(REVIEW_LABELS).toEqual({ pending: 'review:pending', accepted: 'review:accepted', changes: 'review:changes' });
+  it('exposes the ratified verdict labels (+ the #2285 human gate) + tuning knobs', () => {
+    expect(REVIEW_LABELS).toEqual({ pending: 'review:pending', accepted: 'review:accepted', changes: 'review:changes', human: 'review:human' });
     expect(DEFAULT_THRESHOLDS.diffLines).toBeGreaterThan(0);
   });
 });
