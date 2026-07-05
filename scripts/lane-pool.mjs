@@ -21,8 +21,8 @@
  * frontierui / plateau-app — the constellation) reuses this unchanged via `--repo=<checkout-path>`.
  *
  * Usage:
- *   node scripts/lane-pool.mjs provision --count=N [--no-install]   # ensure N lanes exist (clone missing) + refresh all + ensure deps + ensure the WE pool's FUI render-sibling (#2166)
- *   node scripts/lane-pool.mjs refresh           [--no-install]     # fetch + hard-reset existing lanes to origin/main (no creation)
+ *   node scripts/lane-pool.mjs provision --count=N [--no-install] [--force]   # ensure N lanes exist (clone missing) + refresh all + ensure deps + ensure the WE pool's FUI render-sibling (#2166)
+ *   node scripts/lane-pool.mjs refresh           [--no-install] [--force]     # fetch + hard-reset existing lanes to origin/main (no creation)
  *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps
  *   node scripts/lane-pool.mjs list    [--json]                     # existing lane paths (for the orchestrator to dispatch into)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
@@ -37,6 +37,15 @@
  *   --name=<slug>        pool key under the root (default: derived from the origin URL basename)
  *   --branch=<ref>       integration branch (default: detected origin/HEAD, else `main`)
  *   env LANE_POOL_ROOT   pool root (default: ~/workspace/.lanes)
+ *
+ * SAFETY (#2267): a lane is safe scratch ONLY for work that is clean-and-up-to-date, or that this guard
+ * has skipped. `refresh`/`provision` never silently discard a lane that is DIRTY (uncommitted edits) or
+ * AHEAD of origin/<branch> (locally-committed-but-unpushed commits) — such a lane is SKIPPED (left
+ * untouched) and reported, because `reset --hard` + `clean -fd` would otherwise destroy that work with no
+ * recovery. Pass --force to restore the old unconditional reset-everything behavior. The only state a
+ * lane can rely on surviving a concurrent refresh/provision is what has ALREADY been pushed to origin
+ * (i.e. landed via `pr-land` onto its `lane/*` ref, per #1934) — treat anything else as ephemeral and
+ * push early.
  */
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync, readlinkSync, symlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -273,11 +282,34 @@ function cloneLane(repo, n) {
   tryGit(['checkout', '--quiet', '-B', repo.branch, `origin/${repo.branch}`], dest);
 }
 
-function refreshLane(repo, n) {
+// Dirty-or-ahead guard (#2267 — data-loss guard): a lane's ONLY durable state is what has already been
+// PUSHED to origin (i.e. landed via pr-land); anything else (uncommitted edits, or commits made locally
+// but not yet pushed to its `lane/*` ref) lives nowhere else and is destroyed by `reset --hard` + `clean
+// -fd`. Compute this AFTER the fetch (so "ahead" reflects the latest origin/<branch>) but BEFORE any
+// destructive git call.
+function laneDirtyOrAhead(dir, branch) {
+  const porcelain = tryGit(['status', '--porcelain'], dir);
+  const uncommitted = porcelain ? porcelain.split('\n').filter(Boolean).length : 0;
+  const aheadRaw = tryGit(['rev-list', '--count', `origin/${branch}..HEAD`], dir);
+  const ahead = aheadRaw === null ? 0 : Number(aheadRaw);
+  return { dirty: uncommitted > 0, uncommitted, ahead };
+}
+
+// Returns { skipped: boolean, dirty, uncommitted, ahead } so callers can tell an actually-reset lane
+// (safe to unmap its stale item mapping, #2139) from a skipped one (still serving its in-flight item).
+function refreshLane(repo, n, { force = false } = {}) {
   const dir = laneDir(repo, n);
   git(['fetch', 'origin', '--prune', '--quiet'], dir);
+  if (!force) {
+    const { dirty, uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
+    if (dirty || ahead > 0) {
+      log(`  lane-${n}: SKIPPED (dirty/ahead — ${uncommitted} uncommitted, ${ahead} ahead) — use --force to override`);
+      return { skipped: true, dirty, uncommitted, ahead };
+    }
+  }
   git(['reset', '--hard', `origin/${repo.branch}`, '--quiet'], dir);
   git(['clean', '-fd', '--quiet'], dir); // remove untracked, KEEP ignored (node_modules) — no -x
+  return { skipped: false, dirty: false, uncommitted: 0, ahead: 0 };
 }
 
 function laneStatus(repo, n) {
@@ -312,14 +344,17 @@ function cmdProvision(repo) {
   if (!Number.isInteger(count) || count < 1) fail('provision needs --count=<positive integer>');
   mkdirSync(repo.poolDir, { recursive: true });
   log(`provisioning ${count} lane(s) for "${repo.name}" under ${repo.poolDir} (branch ${repo.branch})`);
-  unmapLanes(repo, Array.from({ length: count }, (_, i) => i + 1)); // refreshed lanes lose stale mappings (#2139)
+  const force = !!flags.force;
+  const resetLanes = []; // only lanes actually reset lose their stale mapping — a skipped lane still serves it
   for (let n = 1; n <= count; n++) {
     if (!existsSync(laneDir(repo, n))) cloneLane(repo, n);
     else log(`  lane-${n} exists`);
-    refreshLane(repo, n);
+    const result = refreshLane(repo, n, { force });
+    if (!result.skipped) resetLanes.push(n);
     writeLaneEnv(repo, n);
     if (!flags['no-install']) ensureDeps(laneDir(repo, n));
   }
+  unmapLanes(repo, resetLanes); // refreshed lanes lose stale mappings (#2139); skipped lanes keep theirs
   ensureFuiSibling(repo); // one FUI sibling at the pool root serves every WE lane (#2166)
   printStatus(repo);
 }
@@ -328,12 +363,15 @@ function cmdRefresh(repo) {
   const lanes = existingLanes(repo);
   if (lanes.length === 0) fail(`no lanes to refresh under ${repo.poolDir} (run provision first)`);
   log(`refreshing ${lanes.length} lane(s) for "${repo.name}" → origin/${repo.branch}`);
-  unmapLanes(repo, lanes); // a reset lane no longer renders its old item (#2139)
+  const force = !!flags.force;
+  const resetLanes = []; // only lanes actually reset lose their stale mapping — a skipped lane still serves it
   for (const n of lanes) {
-    refreshLane(repo, n);
+    const result = refreshLane(repo, n, { force });
+    if (!result.skipped) resetLanes.push(n);
     writeLaneEnv(repo, n);
     if (!flags['no-install']) ensureDeps(laneDir(repo, n));
   }
+  unmapLanes(repo, resetLanes); // a reset lane no longer renders its old item (#2139); a skipped one still does
   ensureFuiSibling(repo); // keep the WE pool's FUI sibling current on refresh too (#2166)
   printStatus(repo);
 }
@@ -438,7 +476,7 @@ if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   if (cmd && cmd !== 'help' && cmd !== '--help') process.stderr.write(`unknown command: ${cmd}\n`);
   process.stderr.write(
     'usage: lane-pool.mjs <provision|refresh|status|list|path|remove|map|unmap> [--count=N] [--lane=N] [--all] ' +
-      '[--item=NNN[,NNN…]] [--repo=<path>] [--origin=<url>] [--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--json]\n',
+      '[--item=NNN[,NNN…]] [--repo=<path>] [--origin=<url>] [--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json]\n',
   );
   process.exit(cmd && COMMANDS[cmd] === undefined && cmd !== 'help' ? 1 : 0);
 }
