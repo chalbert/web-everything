@@ -77,6 +77,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
+import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from './lib/review-escalation.mjs';
 import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
 
@@ -332,6 +333,12 @@ function runCli() {
   const { watch: WATCH, intervalSec: INTERVAL, maxIdle: MAX_IDLE } = parseWatchOpts({ watch: flags.watch, interval: flags.interval, maxIdle: flags['max-idle'] });
   // #2198 — rebase-drop the shared `.lane-manifest.json` on land (ON by default; `--no-rebase-drop` disables).
   const REBASE_DROP = flags['no-rebase-drop'] ? false : true;
+  // #2222 — pre-check id-collision self-heal (ON by default; `--no-heal-collision` disables). Before merging, a
+  // certified PR whose NEW backlog item reuses an id already on main fails the required `test` check (`ids must
+  // be unique`) — the merge blocks, so the post-merge heal (#2071) never runs. This renumbers the incoming new
+  // item to a free GAP id and rebuilds the lane tip, so CI re-runs green and it lands on a later pass. Local
+  // repos only (pure git plumbing needs the local clone).
+  const HEAL_COLLISION = flags['no-heal-collision'] ? false : true;
   // #2230 — re-poll the label-scoped one-shot once to absorb the `ready-to-merge` index-propagation lag.
   const EXPECT = flags.expect != null && Number.isFinite(Number(flags.expect)) ? Number(flags.expect) : null;
   const REPOLL_SEC = Number.isFinite(Number(flags['repoll-delay'])) && Number(flags['repoll-delay']) >= 0 ? Number(flags['repoll-delay']) : 4;
@@ -470,6 +477,43 @@ function runCli() {
       verdicts.push(v);
     }
   }
+  // #2222 — PRE-CHECK id-collision self-heal. A certified PR whose NEW backlog item reuses an id already on main
+  // fails the required `test` check (`ids must be unique`), so it never becomes landable and the merge blocks the
+  // post-merge heal. Detect it cheaply (base vs lane backlog names) and, only on a real collision, rebuild the
+  // lane tip with the new item renumbered to a free GAP id — CI re-runs green and it lands on a later pass.
+  // Local-repo candidates only (pure git plumbing needs the local clone); best-effort, never fatal. Dry-run
+  // annotates without pushing.
+  const healed = [];
+  if (HEAL_COLLISION) {
+    for (const v of verdicts) {
+      // Only a certified candidate that is NOT already landable is worth healing — a red required check is the
+      // symptom of the collision. A landable PR has no collision (it passed `ids must be unique`); skip it.
+      const certified = !!(v.certifyLabel || v.aiGenerated);
+      if (!certified || v.decision === 'merge') continue;
+      if (!isLocalRepo(v.repo) || !v.headRef) continue;
+      // #2276 — a rebase-drop candidate (stale-green + BEHIND/CONFLICTING) is healed INSIDE the rebase-drop
+      // rebuild below (one rebuilt tip drops the manifest AND renumbers), so skip it here to avoid a double
+      // rebuild. The standalone rebuild then only covers a collision-RED PR that is not a rebase-drop candidate.
+      if (REBASE_DROP && isRebaseDropCandidate(v)) continue;
+      if (DRY_RUN) {
+        // Cheap detect only (no push) so the dry-run plan can flag a collision without mutating anything.
+        const probe = healNnnCollision({ laneRef: v.headRef, base: 'origin/main', run: (cmd, args, opts) => (args[0] === 'push' || args[0] === 'commit-tree' || args[0] === 'update-index' || args[0] === 'write-tree' || args[0] === 'read-tree' || args[0] === 'hash-object' || args[0] === 'cat-file' ? { status: 0, stdout: '' } : gitRunner(cmd, args, opts)) });
+        if (probe.action === 'error' && !AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} could not probe id collision (${probe.reason})\n`);
+        continue;
+      }
+      const h = healNnnCollision({ laneRef: v.headRef, base: 'origin/main' });
+      if (h.action === 'rebased') {
+        v.collisionHealed = h.renumbered;
+        healed.push(v.num);
+        // The tip advanced; its `test` check is re-running on the renumbered tree, so it lands on a later pass
+        // (mirrors the rebase-drop pending-rebuild contract). Leave it skipped this pass.
+        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} renumbered new-item id collision (${h.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}) → ${h.newCommit.slice(0, 9)}; awaiting re-run of checks\n`);
+      } else if (h.action === 'error' && !AS_JSON) {
+        process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} id-collision heal skipped (${h.reason})\n`);
+      }
+    }
+  }
+
   // #2198 — rebase-drop the transient manifest so a certified+green PR that is only CONFLICTING/BEHIND on the
   // shared `.lane-manifest.json` path lands instead of walling the whole queue. Per candidate: merge-tree
   // main×lane; if the ONLY conflict is the manifest, rebuild its tip onto main (manifest dropped) via pure
@@ -496,13 +540,15 @@ function runCli() {
         if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} would rebase-drop manifest (state ${v.state}/${v.mergeable}) then merge\n`);
         continue;
       }
-      const r = rebaseDropManifest({ laneRef, base: 'origin/main', run: gitRunner });
+      const r = rebaseDropManifest({ laneRef, base: 'origin/main', healCollision: HEAL_COLLISION, run: gitRunner });
       v.rebaseDrop = r.action;
       if (r.action === 'rebased') {
         v.decision = 'merge';
-        v.reason = `rebased onto main${r.dropped ? ' (dropped manifest)' : ''}, required check green — landable`;
+        const healTag = r.healed && r.healed.length ? ` (renumbered ${r.healed.map((h) => `#${h.oldNum}→#${h.newNum}`).join('/')})` : '';
+        v.reason = `rebased onto main${r.dropped ? ' (dropped manifest)' : ''}${healTag}, required check green — landable`;
+        if (r.healed && r.healed.length) v.collisionHealed = r.healed;
         rebased.push(v.num);
-        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} rebased onto main${r.dropped ? ' (manifest dropped)' : ''} → ${r.newCommit.slice(0, 9)}\n`);
+        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} rebased onto main${r.dropped ? ' (manifest dropped)' : ''}${healTag} → ${r.newCommit.slice(0, 9)}\n`);
       } else if (!AS_JSON) {
         process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} left skipped: ${r.reason}\n`);
       }
@@ -673,8 +719,11 @@ function runCli() {
     if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ local main fast-forwarded to origin (autostash preserved local edits)\n` : `  · local main NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`);
   }
 
-  const result = { ok: true, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, deferred, localSynced, reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
-  return { result, merged, failedMerges, pendingRebased, deferred };
+  // #2222 — a healed tip is a PENDING rebuild (CI re-running on the renumbered tree), so it counts as progress
+  // for the watch's idle accounting exactly like a rebase-drop rebuild — it lands on a later pass.
+  const pendingAll = [...pendingRebased, ...healed];
+  const result = { ok: true, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
+  return { result, merged, failedMerges, pendingRebased: pendingAll, deferred };
   }; // end sweepOnce
 
   // ── Driver — one sweep (the /drain one-shot + /merge bare), or the `--watch` monitor (`/drain watch`) ──────

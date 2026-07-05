@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, isPostLandTreeDirty, postLandSkips } from '../pr-land.mjs';
+import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, isPostLandTreeDirty, postLandSkips, postLandReport } from '../pr-land.mjs';
 
 describe('pr-land post-land dirty-probe (#2225 — deps-symlinked clone must still heal/regen)', () => {
   it('a tree whose ONLY dirt is the untracked node_modules symlink is NOT blocking-dirty', () => {
@@ -26,6 +26,35 @@ describe('pr-land post-land dirty-probe (#2225 — deps-symlinked clone must sti
     expect(postLandSkips({ skipped: true }, { skipped: true })).toEqual(['heal', 'regen']);
     expect(postLandSkips({ healed: true }, { done: ['x'] })).toEqual([]);
     expect(postLandSkips(null, null)).toEqual([]);
+  });
+});
+
+describe('postLandReport — the success line never throws when regen/heal is skipped or unset (#2218)', () => {
+  it('SKIPPED regen (dirty checkout) reports "skipped", it does NOT read regen.done.length and crash', () => {
+    // The reported bug: `regen` is `{ skipped:true, done:[], failed:[] }` (or unset) on the dirty-checkout /
+    // --no-regen path; the old `regen.done.length` read threw a TypeError and misreported a successful land.
+    const regen = { skipped: true, done: [], failed: [], warning: 'skipped derived-artifact regen — …' };
+    expect(() => postLandReport(null, regen)).not.toThrow();
+    expect(postLandReport(null, regen)).toBe('; derived-artifact regen: skipped (tracked-dirty tree)');
+  });
+  it('--no-regen / --no-heal (both null) → empty suffix, no throw', () => {
+    expect(postLandReport(null, null)).toBe('');
+  });
+  it('a regen that ran but changed nothing reports "regenerated: none" (not a crash, not silence)', () => {
+    expect(postLandReport(null, { done: [], failed: [] })).toBe('; regenerated: none');
+  });
+  it('reports the healed collisions and the regenerated artifacts on the happy path', () => {
+    const heal = { healed: true, renumbered: [{ oldNum: '2219', newNum: '2220' }] };
+    const regen = { done: ['npm run gen:inventory'], failed: [] };
+    expect(postLandReport(heal, regen)).toBe('; healed id collision(s): #2219→#2220; regenerated: npm run gen:inventory');
+  });
+  it('a skipped heal reports skipped; a non-fatal regen failure is surfaced', () => {
+    expect(postLandReport({ skipped: true }, { done: [], failed: [{ cmd: 'npm run gen:reference-index' }] }))
+      .toBe('; id-collision heal: skipped (tracked-dirty tree); regen failed (non-fatal): npm run gen:reference-index');
+  });
+  it('tolerates a regen object missing its arrays entirely (optional-chained reads)', () => {
+    expect(() => postLandReport({}, {})).not.toThrow();
+    expect(postLandReport({}, {})).toBe('; regenerated: none');
   });
 });
 
