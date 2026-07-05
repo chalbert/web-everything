@@ -176,4 +176,51 @@ describe('rebaseDropManifest', () => {
     expect(calls.some((c) => c.args[0] === 'fetch')).toBe(false);
     expect(calls.find((c) => c.args[0] === 'merge-tree').args[3]).toBe('origin/lane/x-2231');
   });
+
+  // #2276 — the rebuild ALSO renumbers a colliding new item in the same tip (healCollision), so it clears the
+  // manifest AND the id dup in one commit-tree, instead of shedding the manifest but staying red on `ids unique`.
+  it('healCollision:true renumbers a base-colliding new item inside the rebuilt tree', () => {
+    const { run, calls } = scriptedRun({
+      ...MERGE_TREE_CLEAN,
+      ...RESOLVED_PLUMBING,
+      // base has #2219 (a different item) + a 2220 hole; the merged tree carries the lane's own #2219.
+      'ls-tree': (args) => ({ status: 0, stdout: args.includes('origin/main')
+        ? 'backlog/2218-a.md\nbacklog/2219-existing.md\nbacklog/2221-c.md\n'
+        : 'backlog/2219-drain-finding.md\n' }),
+      'cat-file': { status: 0, stdout: '---\nkind: story\n---\n# drain-finding\n' },
+      'hash-object': { status: 0, stdout: 'b'.repeat(40) + '\n' },
+      'update-index': { status: 0 },
+    });
+    const r = rebaseDropManifest({ laneRef: 'lane/x-2276', healCollision: true, run });
+    expect(r.action).toBe('rebased');
+    expect(r.healed).toEqual([{ oldNum: '2219', newNum: '2220', oldName: '2219-drain-finding.md', newName: '2220-drain-finding.md' }]);
+    // the renumbered blob was staged into the SAME temp index the rebuild write-trees.
+    const up = calls.find((c) => c.args[0] === 'update-index');
+    expect(up.env?.GIT_INDEX_FILE).toBeTruthy();
+    // exactly ONE commit-tree / push (a single rebuilt tip), not a second rebuild.
+    expect(calls.filter((c) => c.args[0] === 'commit-tree')).toHaveLength(1);
+    expect(calls.filter((c) => c.args[0] === 'push')).toHaveLength(1);
+  });
+
+  it('healCollision:true with no collision leaves the tip untouched (healed:[])', () => {
+    const { run } = scriptedRun({
+      ...MERGE_TREE_CLEAN,
+      ...RESOLVED_PLUMBING,
+      'ls-tree': (args) => ({ status: 0, stdout: args.includes('origin/main')
+        ? 'backlog/2218-a.md\nbacklog/2219-b.md\n'
+        : 'backlog/2230-fresh.md\n' }), // fresh id, no clash
+    });
+    const r = rebaseDropManifest({ laneRef: 'lane/x-nofix', healCollision: true, run });
+    expect(r.action).toBe('rebased');
+    expect(r.healed).toEqual([]);
+  });
+
+  it('healCollision defaults OFF — no ls-tree/cat-file heal probing on the legacy path', () => {
+    const { run, calls } = scriptedRun({ ...MERGE_TREE_CLEAN, ...RESOLVED_PLUMBING });
+    const r = rebaseDropManifest({ laneRef: 'lane/x-legacy', run });
+    expect(r.action).toBe('rebased');
+    expect(r.healed).toEqual([]);
+    expect(calls.some((c) => c.args[0] === 'ls-tree')).toBe(false);
+    expect(calls.some((c) => c.args[0] === 'cat-file')).toBe(false);
+  });
 });
