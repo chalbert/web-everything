@@ -11,6 +11,8 @@ tags: [workflow, orchestrator, parallel-batch, session-tooling, decision]
 
 # Parallel orchestrator: exclude self-modifying items from concurrent lanes (or move lane tooling to an editable locus)
 
+> **Related but orthogonal to epic #2289 (2026-07-05).** That epic concerns NNN *id allocation* (the drain-only + JIT-numbering prevention). This item concerns concurrent edits to the *running tooling* — a different failure mode. Kept independent; neither blocks the other.
+
 No standing rule exists yet for **self-modifying items** — items whose touch-set includes the `/workflow` run's *own* executing tooling. The two forks below are grounded in a prior-art survey (research topic `self-modifying-run-tooling-exclusion`; session report linked via `relatedReport`), each with a recommended default in **bold**. The driving incident is closed (#2071/#2072/#2073 all landed later, serially) — this item sets the rule for the *next* self-modifying item, and there is one open right now (#2149 edits `we:scripts/readiness/lane-partition.mjs` + the inline mirror in the orchestrator file; its own text carves the orchestrator-script case to this item).
 
 **Which layer:** agent-workflow / session-tooling (same plane as #2123/#2138) — nothing crosses the WE↔FUI standard boundary or touches a registry. Codifies as session house rules, not standard vocabulary.
