@@ -1,8 +1,11 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-07-04"
+dateStarted: "2026-07-05"
+dateResolved: "2026-07-05"
+graduatedTo: none
 relatedTo: ["2219", "1933", "2139"]
 tags: [lane-pool, infra, data-loss, footgun]
 ---
