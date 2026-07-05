@@ -3,13 +3,19 @@
 <head>
   <meta charset="utf-8">
   <title>Interaction fixture · Items tab (home-display.js)</title>
+  <!-- #2280: pull in the REAL shipped stylesheet (served from the repo root by tests/interaction/serve.mjs)
+       so the selected-chip TINT is under test, not just the pressed-state class/aria. The dropped-active-state
+       bug lived purely in CSS — the tint keyed on the SSR `selected` attribute (stuck on every chip) instead
+       of the `fui-filter-chip--selected` class the JS maintains — so a behaviour-only fixture with a throwaway
+       stylesheet could never catch it. With the real CSS loaded, a computed-background assertion does. -->
+  <link rel="stylesheet" href="/src/css/style.css">
   <style>
-    /* Only what the filter mechanism needs to be observable. home-display.js hides cards by adding
-       `.is-filtered-out`, and switches density by toggling `.home-list-view` on the section. No FUI styles —
-       these specs assert BEHAVIOUR (which cards are filtered, chip pressed-state, persisted view), not looks. */
+    /* Only what the filter MECHANISM needs to be observable on top of the shipped stylesheet: home-display.js
+       hides cards via `.is-filtered-out` and toggles `.home-list-view` for density. The selected-chip look
+       now comes from style.css above (do NOT re-declare `.fui-filter-chip--selected` here — that would mask
+       the very rule under test). */
     body { font-family: system-ui, sans-serif; margin: 1rem; }
     .is-filtered-out { display: none; }
-    .fui-filter-chip--selected { font-weight: 700; }
     .project-card { border: 1px solid #ccc; padding: 0.5rem; margin: 0.25rem 0; }
   </style>
 </head>
@@ -48,7 +54,9 @@
         <div class="status-filter" role="group" aria-label="Filter by status">
           <we-filter-chip data-status-chip="open" selected>Open</we-filter-chip>
           <we-filter-chip data-status-chip="active" selected>Active</we-filter-chip>
-          <we-filter-chip data-status-chip="resolved" selected>Resolved</we-filter-chip>
+          <!-- #2280: resolved is default-OFF (home-display.js defaultExclude), so — like the shipped njk — it
+               carries neither `selected` nor the selected class; its SSR baseline reads unpressed. -->
+          <we-filter-chip data-status-chip="resolved">Resolved</we-filter-chip>
         </div>
         <div class="status-filter" role="group" aria-label="Filter by kind">
           <we-filter-chip data-kind-chip="story" selected>Story</we-filter-chip>

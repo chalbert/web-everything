@@ -1870,7 +1870,14 @@ we-filter-chip,
   --chip-selected-fg: var(--accent, #1d4ed8);
   --chip-selected-border: color-mix(in srgb, var(--accent, #1d4ed8) 45%, #fff);
 }
-we-filter-chip[selected] {
+/* #2280: the selected tint must track a chip's REAL pressed state, which home-display.js and
+   backlog-table-sort.js drive via the `fui-filter-chip--selected` CLASS (+ aria-pressed) — NOT the
+   SSR `selected` attribute, which is hard-coded on every default-on chip and never removed. Keying
+   this rule on `[selected]` therefore lit EVERY chip (even an unpressed Resolved) with the accent
+   tint, so the active/inactive distinction was invisible until the FUI host upgraded the pills.
+   The class is set by both scripts on the pre-upgrade <we-filter-chip> AND survives onto the upgraded
+   .fui-filter-chip <button>, so a single class selector styles the selected state in every load state. */
+.fui-filter-chip--selected {
   background: var(--chip-selected-bg);
   color: var(--chip-selected-fg);
   border-color: var(--chip-selected-border);
