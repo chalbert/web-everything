@@ -54,12 +54,13 @@
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge # the /drain role: scope to producer-completed PRs, merge in blockedBy order
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run # print the blockedBy-ordered merge plan, merge NOTHING
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --interval=30 # the /drain-watch monitor: poll + land as PRs go green (--max-idle=N bounds it)
- *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --all-repos # #2257 — the ONE /drain sweeps ALL 3 constellation repos (WE+frontierui+plateau-app), one global blockedBy cascade
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge # #2257/#2287 — the ONE /drain sweeps ALL 3 constellation repos BY DEFAULT (WE+frontierui+plateau-app), one global blockedBy cascade
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --this-repo # #2287 — opt OUT: scope to the cwd repo only (a deliberately single-repo drain)
  *   node scripts/merge-ai-prs.mjs --repos=chalbert/frontierui,chalbert/plateau-app # sweep an explicit repo set (comma-separated owner/name slugs)
  *
- * MULTI-REPO (#2257 — the single /drain lander sweeps all 3 constellation repos). `--all-repos` expands to the
- * constellation (self's owner × web-everything/frontierui/plateau-app); `--repos=a,b` is an explicit set;
- * neither → the single-repo default (the cwd repo, behaviour unchanged). Every `gh pr list/view/edit/merge` is
+ * MULTI-REPO (#2257/#2287 — the single /drain lander sweeps all 3 constellation repos BY DEFAULT). Neither
+ * `--repos` nor `--this-repo` → the constellation (self's owner × web-everything/frontierui/plateau-app, self
+ * first); `--repos=a,b` is an explicit set; `--this-repo` scopes to the cwd repo only. Every `gh pr list/view/edit/merge` is
  * `--repo`-scoped and candidates from ALL repos merge in ONE global `blockedBy` cascade — REQUIRED, not
  * optional: the backlog is WE-global, so a frontierui PR can be `blockedBy` a WE item, and independent per-repo
  * drains could not sequence that. Git-side ops (manifest read via `git show`, rebase-drop, local-main sync) stay
@@ -279,29 +280,31 @@ export function shouldRepollForLabelLag({ label, found, expect, retried } = {}) 
  * this makes its lander repo-aware instead of copying the transport into each repo (the rejected #2244/#2245
  * approach). Independent per-repo drains CANNOT sequence cross-repo `blockedBy` — the backlog is WE-global, so
  * a frontierui PR can be blocked by a WE item — so a single global cascade over all repos is required, not
- * optional. Resolution:
+ * optional — so it is the DEFAULT (#2287), not an opt-in flag. Resolution:
  *   - `--repos=owner/a,owner/b` → those exact slugs (explicit override).
- *   - `--all-repos` → the constellation: self's owner × {web-everything, frontierui, plateau-app}, **self
- *     FIRST** so the local clone (rebase-drop, local-main sync) is the primary repo.
- *   - neither → `[null]`: the single-repo default. `null` = "the cwd repo, NO `--repo` flag", so the
- *     established single-repo path (and every existing behaviour/test) is byte-for-byte unchanged.
+ *   - neither `--repos` nor `--this-repo` → the constellation: self's owner × {web-everything, frontierui,
+ *     plateau-app}, **self FIRST** so the local clone (rebase-drop, local-main sync) is the primary repo.
+ *     This is the default (#2287). (`--all-repos` is accepted as a harmless no-op alias of the default.)
+ *   - `--this-repo` (`singleRepo`) → `[null]`: a deliberately scoped single-repo drain. `null` = "the cwd
+ *     repo, NO `--repo` flag" (the established single-repo git path). An underivable owner (no `self` slug)
+ *     also falls back to `[null]` — safe.
  * A slug entry routes every gh call through `--repo`; a `null`-or-self entry keeps using local git for the
  * manifest read / rebase-drop / sync. `self` is the cwd repo slug "owner/name" (derived from origin).
- * @param {{repos?:string|null, allRepos?:boolean, self?:string|null}} o
+ * @param {{repos?:string|null, singleRepo?:boolean, self?:string|null}} o
  * @returns {Array<string|null>}
  */
-export function resolveRepos({ repos, allRepos, self } = {}) {
+export function resolveRepos({ repos, singleRepo, self } = {}) {
   if (typeof repos === 'string' && repos.trim()) {
     const list = repos.split(',').map((s) => s.trim()).filter(Boolean);
-    return list.length ? list : [null];
+    if (list.length) return list;
   }
-  if (allRepos) {
-    const owner = self && self.includes('/') ? self.split('/')[0] : null;
-    if (!owner) return [null]; // can't derive the constellation without an owner → stay single-repo (safe)
-    const slugs = ['web-everything', 'frontierui', 'plateau-app'].map((n) => `${owner}/${n}`);
-    return [...new Set([self, ...slugs.filter((s) => s !== self)])]; // self first (the local clone), then the rest
-  }
-  return [null];
+  // #2287 — the constellation is the DEFAULT (the backlog is WE-global, so cross-repo blockedBy needs one
+  // global cascade). Opt OUT with `--this-repo` for a deliberately scoped single-repo drain.
+  if (singleRepo) return [null];
+  const owner = self && self.includes('/') ? self.split('/')[0] : null;
+  if (!owner) return [null]; // can't derive the constellation without an owner → stay single-repo (safe)
+  const slugs = ['web-everything', 'frontierui', 'plateau-app'].map((n) => `${owner}/${n}`);
+  return [...new Set([self, ...slugs.filter((s) => s !== self)])]; // self first (the local clone), then the rest
 }
 
 /** Synchronous sleep (the CLI is fully synchronous — execFileSync throughout — so the watch loop blocks here
@@ -352,7 +355,8 @@ function runCli() {
 
   // #2257 — the ONE /drain lander sweeps all 3 constellation repos. Derive the local repo slug from origin
   // (used to keep git-side ops — manifest read, rebase-drop, local-main sync — scoped to the local clone), then
-  // resolve the repo set: `--all-repos` (constellation) / `--repos=a,b` (explicit) / neither (single-repo default).
+  // resolve the repo set: `--repos=a,b` (explicit) / `--this-repo` (scoped single-repo) / neither → the
+  // constellation (the #2287 default; `--all-repos` is accepted as a harmless no-op alias of the default).
   const localSlug = (() => {
     try {
       const url = execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
@@ -360,7 +364,7 @@ function runCli() {
       return m ? m[1] : null;
     } catch { return null; }
   })();
-  const REPOS = resolveRepos({ repos: typeof flags.repos === 'string' ? flags.repos : null, allRepos: !!flags['all-repos'], self: localSlug });
+  const REPOS = resolveRepos({ repos: typeof flags.repos === 'string' ? flags.repos : null, singleRepo: !!flags['this-repo'], self: localSlug });
   const repoFlag = (repo) => (repo ? ['--repo', repo] : []);      // a slug → scope the gh call; null → cwd repo
   const isLocalRepo = (repo) => repo == null || repo === localSlug; // git-side ops only run against the local clone
   const repoTag = (repo) => (repo && repo !== localSlug ? `${repo.split('/').pop()}#` : '#'); // display prefix per PR

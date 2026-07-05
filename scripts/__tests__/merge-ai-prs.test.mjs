@@ -240,33 +240,37 @@ describe('isRebaseDropCandidate (#2198 — the manifest-wall rescue gate)', () =
   });
 });
 
-describe('resolveRepos (#2257 — the single /drain lander sweeps all 3 constellation repos)', () => {
-  it('neither flag → single-repo default [null] (the cwd repo, no --repo — behaviour unchanged)', () => {
-    expect(resolveRepos()).toEqual([null]);
-    expect(resolveRepos({})).toEqual([null]);
-    expect(resolveRepos({ allRepos: false })).toEqual([null]);
-  });
-  it('--all-repos → the constellation, SELF FIRST (local clone is the primary repo)', () => {
-    expect(resolveRepos({ allRepos: true, self: 'chalbert/web-everything' }))
+describe('resolveRepos (#2257/#2287 — the single /drain lander sweeps all 3 constellation repos BY DEFAULT)', () => {
+  it('neither flag (+ self) → the constellation IS the default (#2287), SELF FIRST', () => {
+    expect(resolveRepos({ self: 'chalbert/web-everything' }))
       .toEqual(['chalbert/web-everything', 'chalbert/frontierui', 'chalbert/plateau-app']);
   });
-  it('--all-repos derives the owner from self and dedupes (self is not listed twice)', () => {
-    const r = resolveRepos({ allRepos: true, self: 'acme/frontierui' });
+  it('--this-repo → single-repo [null] (deliberately scoped; the cwd repo, no --repo)', () => {
+    expect(resolveRepos({ singleRepo: true, self: 'chalbert/web-everything' })).toEqual([null]);
+  });
+  it('default derives the owner from self and dedupes (self is not listed twice)', () => {
+    const r = resolveRepos({ self: 'acme/frontierui' });
     expect(r[0]).toBe('acme/frontierui');                        // self first
     expect(r).toEqual(['acme/frontierui', 'acme/web-everything', 'acme/plateau-app']);
     expect(new Set(r).size).toBe(r.length);                      // no dupes
   });
-  it('--all-repos with an underivable owner (no self, or self without a slash) stays single-repo', () => {
-    expect(resolveRepos({ allRepos: true })).toEqual([null]);
-    expect(resolveRepos({ allRepos: true, self: 'noslug' })).toEqual([null]);
+  it('an underivable owner (no self, or self without a slash) falls back to single-repo [null] — safe', () => {
+    expect(resolveRepos()).toEqual([null]);
+    expect(resolveRepos({})).toEqual([null]);
+    expect(resolveRepos({ self: 'noslug' })).toEqual([null]);
   });
   it('--repos=a,b → exactly those slugs (explicit override, trims + drops blanks)', () => {
     expect(resolveRepos({ repos: 'chalbert/frontierui, chalbert/plateau-app' }))
       .toEqual(['chalbert/frontierui', 'chalbert/plateau-app']);
     expect(resolveRepos({ repos: ' , chalbert/frontierui , ' })).toEqual(['chalbert/frontierui']);
   });
-  it('--repos wins over --all-repos when both are given', () => {
-    expect(resolveRepos({ repos: 'x/y', allRepos: true, self: 'a/web-everything' })).toEqual(['x/y']);
+  it('--repos wins over the default/--this-repo when given', () => {
+    expect(resolveRepos({ repos: 'x/y', self: 'a/web-everything' })).toEqual(['x/y']);
+    expect(resolveRepos({ repos: 'x/y', singleRepo: true, self: 'a/web-everything' })).toEqual(['x/y']);
+  });
+  it('`--all-repos` is a harmless no-op alias of the default (unknown key ignored → still constellation)', () => {
+    expect(resolveRepos({ allRepos: true, self: 'chalbert/web-everything' }))
+      .toEqual(['chalbert/web-everything', 'chalbert/frontierui', 'chalbert/plateau-app']);
   });
   it('an empty/whitespace --repos falls back to the single-repo default', () => {
     expect(resolveRepos({ repos: '' })).toEqual([null]);
