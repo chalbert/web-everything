@@ -1,10 +1,13 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 relatedTo: ["2171", "2162", "2216"]
 tags: [lane, pr-flow, drain, review, merge-queue, footgun]
 dateOpened: "2026-07-04"
+dateStarted: "2026-07-05"
+dateResolved: "2026-07-05"
+graduatedTo: none
 ---
 
 # Review-escalation park must create the `review:*` labels and cannot permanently strand a sampled PR
