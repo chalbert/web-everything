@@ -3,12 +3,16 @@
 <head>
   <meta charset="utf-8">
   <title>Interaction fixture · Prioritisation table</title>
+  <!-- #2279: load the REAL shipped stylesheet (served from the repo root by tests/interaction/serve.mjs) so
+       the selected-chip TINT is under test. The dropped-active-state bug was pure CSS (the tint keyed on the
+       stuck SSR `selected` attribute instead of the `fui-filter-chip--selected` class the JS maintains), so a
+       stylesheet-free fixture could never catch it; a computed-background assertion against style.css can. -->
+  <link rel="stylesheet" href="/src/css/style.css">
   <style>
-    /* Minimal styles so `display:none` (the filter mechanism) and visibility are observable, and the
-       mock chip looks like a button. No FUI styles — the test asserts behaviour, not appearance. */
+    /* Minimal styles so `display:none` (the filter mechanism) and visibility are observable, on top of the
+       shipped stylesheet above. Do NOT re-declare `.fui-filter-chip--selected` here — that would mask the
+       selected-tint rule under test. */
     body { font-family: system-ui, sans-serif; margin: 1rem; }
-    .fui-filter-chip { cursor: pointer; }
-    .fui-filter-chip--selected { font-weight: 700; }
     table { border-collapse: collapse; }
     th, td { border: 1px solid #ccc; padding: 0.25rem 0.5rem; }
   </style>

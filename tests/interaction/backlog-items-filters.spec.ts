@@ -27,6 +27,11 @@ async function visibleCardNums(page: Page): Promise<string[]> {
 const countBadge = (page: Page) =>
   page.locator('[data-count-target]').innerText().then((t) => t.trim());
 
+/** Computed background colour of a chip — the SELECTED TINT under test (#2279). The fixture loads the
+ *  real src/css/style.css, so this reads the shipped look, not a stub. */
+const chipBg = (page: Page, selector: string) =>
+  page.locator(selector).first().evaluate((el) => getComputedStyle(el as HTMLElement).backgroundColor);
+
 // Wait until the mock chips have upgraded to <button> — the regression surface (delegated handlers only).
 async function waitForChipUpgrade(page: Page) {
   await expect(page.locator('button[data-status-chip="open"]')).toBeVisible();
@@ -100,4 +105,38 @@ test('filters persist across a reload (per-section localStorage)', async ({ page
   // The persisted kind subset re-applies: still only the epic, chip still pressed.
   expect(await visibleCardNums(page)).toEqual(['205']);
   await expect(page.locator('button[data-kind-chip="epic"]')).toHaveAttribute('aria-pressed', 'true');
+});
+
+// ── #2279: the SELECTED TINT must track real pressed state, not the SSR `selected` attribute ──
+// The dropped-active-state bug: the CSS lit the accent tint on `we-filter-chip[selected]`, but that
+// attribute is hard-coded on every default-on chip and never removed — the JS drives real state via the
+// `fui-filter-chip--selected` CLASS + aria-pressed. So every chip stayed lit and pressed/unpressed looked
+// identical. These specs load the REAL style.css (via the fixture) and assert the RENDERED background — the
+// gap that let a pure-CSS regression ship past a suite that only ever checked the class/aria attributes.
+
+test('at load, a pressed chip carries the accent tint and an unpressed one does not (#2279)', async ({ page }) => {
+  const openBg = await chipBg(page, 'button[data-status-chip="open"]');        // default-on
+  const resolvedBg = await chipBg(page, 'button[data-status-chip="resolved"]'); // default-off
+  // Pre-fix these were byte-identical (both lit by the stuck `selected` attribute).
+  expect(openBg).not.toBe(resolvedBg);
+  await expect(page.locator('button[data-status-chip="open"]')).toHaveClass(/fui-filter-chip--selected/);
+  await expect(page.locator('button[data-status-chip="resolved"]')).not.toHaveClass(/fui-filter-chip--selected/);
+});
+
+test('toggling a chip OFF strips its tint even though the SSR `selected` attribute survives (#2279 core)', async ({ page }) => {
+  // This is the definitive guard: soloing Epic turns Story OFF. The JS removes Story's `--selected` class
+  // (and aria-pressed) but NEVER its hard-coded `selected` attribute — so a CSS rule keyed on `[selected]`
+  // (the bug) would keep Story lit identically to the pressed Epic. Keyed on the class (the fix), Story goes
+  // neutral and its background diverges from Epic's. Robust regardless of the SSR markup.
+  await page.click('button[data-kind-chip="epic"]');
+
+  const epicBg = await chipBg(page, 'button[data-kind-chip="epic"]');
+  const storyBg = await chipBg(page, 'button[data-kind-chip="story"]');
+  expect(epicBg).not.toBe(storyBg);
+
+  // Story is logically off but still carries the inert SSR attribute — proving the tint no longer reads it.
+  await expect(page.locator('button[data-kind-chip="story"]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('button[data-kind-chip="story"]')).not.toHaveClass(/fui-filter-chip--selected/);
+  await expect(page.locator('button[data-kind-chip="story"]')).toHaveAttribute('selected', '');
+  await expect(page.locator('button[data-kind-chip="epic"]')).toHaveClass(/fui-filter-chip--selected/);
 });

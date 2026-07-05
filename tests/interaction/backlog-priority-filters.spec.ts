@@ -29,6 +29,11 @@ async function visibleRowNums(page: Page): Promise<string[]> {
 const shownCount = (page: Page) =>
   page.locator('[data-ptable-count]').innerText().then((t) => Number(t.trim()));
 
+/** Computed background colour of a chip — the SELECTED TINT under test (#2279). The fixture loads the real
+ *  src/css/style.css, so this reads the shipped look, not a stub. */
+const chipBg = (page: Page, selector: string) =>
+  page.locator(selector).first().evaluate((el) => getComputedStyle(el as HTMLElement).backgroundColor);
+
 // Wait until the mock chips have upgraded to <button> — the regression surface. After this, the original
 // custom elements are gone and only delegated handlers can still drive the filters.
 async function waitForChipUpgrade(page: Page) {
@@ -187,4 +192,24 @@ test('clicking a column header re-sorts the rows in place', async ({ page }) => 
     ),
   );
   expect(order[0]).toBe('105');
+});
+
+// ── #2279: the readiness chips' SELECTED TINT must track real pressed state, not the SSR attribute ──
+// Same root cause as the Tracked-work chips: the tint keyed on `we-filter-chip[selected]`, hard-coded on
+// every default-on chip and never removed, so an OFF chip stayed lit identically to an ON one. The fixture
+// now loads the real style.css; this asserts the RENDERED background diverges once a chip toggles off.
+test('toggling a readiness chip OFF strips its tint though the SSR `selected` attribute survives (#2279)', async ({ page }) => {
+  // All readiness chips start pressed (default-on). Turn "batchable" off; "agentready" stays on.
+  await page.click('button[data-pready="batchable"]');
+
+  const offBg = await chipBg(page, 'button[data-pready="batchable"]');
+  const onBg = await chipBg(page, 'button[data-pready="agentready"]');
+  // Pre-fix these were identical — both lit by the stuck `selected` attribute regardless of aria-pressed.
+  expect(offBg).not.toBe(onBg);
+
+  const off = page.locator('button[data-pready="batchable"]');
+  await expect(off).toHaveAttribute('aria-pressed', 'false');
+  await expect(off).not.toHaveClass(/fui-filter-chip--selected/);
+  await expect(off).toHaveAttribute('selected', '');   // the inert SSR attribute the tint must NOT read
+  await expect(page.locator('button[data-pready="agentready"]')).toHaveClass(/fui-filter-chip--selected/);
 });
