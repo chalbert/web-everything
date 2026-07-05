@@ -62,19 +62,21 @@
  * neither → the single-repo default (the cwd repo, behaviour unchanged). Every `gh pr list/view/edit/merge` is
  * `--repo`-scoped and candidates from ALL repos merge in ONE global `blockedBy` cascade — REQUIRED, not
  * optional: the backlog is WE-global, so a frontierui PR can be `blockedBy` a WE item, and independent per-repo
- * drains could not sequence that. Git-side ops (manifest read via `git show`, rebase-drop, local-main sync) stay
- * scoped to the LOCAL clone; a remote-repo PR reads its manifest via the GitHub API and, if CONFLICTING/BEHIND,
- * is left for its author (rebase-drop needs a clone of that repo — a follow-up). Landing a frontierui/plateau
- * PR still needs that repo's own required `test` check + branch protection (#2242/#2243/#2246) or GitHub blocks
- * the merge.
+ * drains could not sequence that. A remote-repo PR reads its manifest via the GitHub API (never a local clone).
+ * REBASE-DROP (#2198) still needs pure LOCAL git plumbing (merge-tree/commit-tree/push) — for the local clone's
+ * own repo it runs in `process.cwd()`; for a remote constellation repo (frontierui/plateau-app) it routes
+ * through that repo's SIBLING clone (`../frontierui`, `../plateau-app`, provisioned by the drain-clone setup —
+ * #2263) when one exists, so a CONFLICTING/BEHIND non-local lane tip can be rebuilt too. No sibling clone
+ * provisioned ⇒ left for its author, unchanged. Landing a frontierui/plateau PR still needs that repo's own
+ * required `test` check + branch protection (#2242/#2243/#2246) or GitHub blocks the merge.
  *
  * Exit codes: 0 = swept (merged 0+ qualifying PRs, none failed); 2 = at least one merge attempt FAILED
  * (surfaced); 3 = bad input / `gh` unavailable.
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from './lib/review-escalation.mjs';
 import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
@@ -274,6 +276,11 @@ export function shouldRepollForLabelLag({ label, found, expect, retried } = {}) 
   return Number(found) < threshold;
 }
 
+// #2257/#2263 — the constellation's short repo names, SINGLE SOURCE for both `resolveRepos` (`--all-repos`
+// expansion) and `siblingCloneName` (#2263 sibling-clone routing) — a duplicated literal in each would drift
+// silently if the constellation ever grows a 4th repo.
+const CONSTELLATION_REPO_NAMES = ['web-everything', 'frontierui', 'plateau-app'];
+
 /**
  * #2257 — resolve the set of repos this ONE lander sweeps. Pure. The single `/drain` skill stays one skill;
  * this makes its lander repo-aware instead of copying the transport into each repo (the rejected #2244/#2245
@@ -298,10 +305,25 @@ export function resolveRepos({ repos, allRepos, self } = {}) {
   if (allRepos) {
     const owner = self && self.includes('/') ? self.split('/')[0] : null;
     if (!owner) return [null]; // can't derive the constellation without an owner → stay single-repo (safe)
-    const slugs = ['web-everything', 'frontierui', 'plateau-app'].map((n) => `${owner}/${n}`);
+    const slugs = CONSTELLATION_REPO_NAMES.map((n) => `${owner}/${n}`);
     return [...new Set([self, ...slugs.filter((s) => s !== self)])]; // self first (the local clone), then the rest
   }
   return [null];
+}
+
+/**
+ * #2263 — the sibling-clone DIRECTORY NAME for a constellation repo slug (e.g. `chalbert/frontierui` →
+ * `frontierui`), so the local-only rebase-drop plumbing (#2198) can be routed through THAT repo's own clone
+ * instead of being left as a `skipped-remote` skip. Pure. `null` for a repo outside the known constellation
+ * (nothing to route to — unchanged legacy skip). Whether that sibling clone actually EXISTS is a runtime
+ * filesystem check (`siblingCloneDir` below), kept separate so this stays pure/unit-testable.
+ * @param {string|null} repo
+ * @returns {string|null}
+ */
+export function siblingCloneName(repo) {
+  if (!repo || !repo.includes('/')) return null;
+  const name = repo.split('/').pop();
+  return CONSTELLATION_REPO_NAMES.includes(name) ? name : null;
 }
 
 /** Synchronous sleep (the CLI is fully synchronous — execFileSync throughout — so the watch loop blocks here
@@ -368,6 +390,19 @@ function runCli() {
   // pairs this process has already ensured exist so a long-lived watch doesn't `gh label create` the same
   // review:* labels every single pass (wasted round-trips on an idempotent one-time mint).
   const ensuredLabels = new Set();
+
+  // #2263 — a SIBLING clone of a non-local constellation repo (`../frontierui`, `../plateau-app` next to this
+  // WE clone) lets the rebase-drop plumbing rebuild THAT repo's lane tip too, instead of leaving every
+  // CONFLICTING/BEHIND frontierui/plateau-app PR for its author. Best-effort + read-only-check: a repo whose
+  // sibling directory is missing (not provisioned) or isn't a git working copy falls back to the prior skip —
+  // nothing here clones on the fly (provisioning is the drain-clone setup's job, see skills-src/drain/SKILL.md).
+  const siblingCloneDir = (repo) => {
+    if (isLocalRepo(repo)) return null;
+    const name = siblingCloneName(repo);
+    if (!name) return null;
+    const dir = resolve(process.cwd(), '..', name);
+    try { return existsSync(join(dir, '.git')) ? dir : null; } catch { return null; }
+  };
 
   const fail = (reason, detail, code) => {
     if (AS_JSON) process.stdout.write(JSON.stringify({ ok: false, reason, detail }) + '\n');
@@ -480,25 +515,28 @@ function runCli() {
       if (!isRebaseDropCandidate(v) && !needsManifestStripBeforeMerge(v)) continue;
       const laneRef = v.headRef;
       if (!laneRef) continue;
-      // #2257 — rebase-drop is pure LOCAL git plumbing (merge-tree/commit-tree/push), so it can only run against
-      // the local clone. A remote-repo PR that is CONFLICTING/BEHIND is left as a skip with a clear pointer —
-      // rebasing it needs a clone of THAT repo (a follow-up; #2244/#2245 prereqs land its CI first anyway).
-      if (!isLocalRepo(v.repo)) {
-        if (isRebaseDropCandidate(v)) { v.rebaseDrop = 'skipped-remote'; if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} needs rebase in a ${v.repo} clone (remote repo — rebase-drop is local-only); left for its author\n`); }
+      // #2198/#2263 — rebase-drop is pure git plumbing (merge-tree/commit-tree/push): for the LOCAL clone's
+      // repo it runs in `process.cwd()` unchanged; for a REMOTE constellation repo (frontierui/plateau-app) it
+      // routes through that repo's own SIBLING clone (`../frontierui`, `../plateau-app`) when one is provisioned
+      // — the fetch/merge-tree/push all resolve against that clone's own `origin`. No sibling clone found ⇒ the
+      // prior "left for its author" skip (rebasing it needs a clone of that repo).
+      const cloneDir = isLocalRepo(v.repo) ? undefined : siblingCloneDir(v.repo);
+      if (!isLocalRepo(v.repo) && !cloneDir) {
+        if (isRebaseDropCandidate(v)) { v.rebaseDrop = 'skipped-remote'; if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} needs rebase in a ${v.repo} clone (no sibling clone provisioned — rebase-drop is local-only); left for its author\n`); }
         continue;
       }
       if (DRY_RUN) {
         v.rebaseDrop = 'would-attempt';
-        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} would rebase-drop manifest (state ${v.state}/${v.mergeable}) then merge\n`);
+        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} would rebase-drop manifest (state ${v.state}/${v.mergeable})${cloneDir ? ` via ${cloneDir}` : ''} then merge\n`);
         continue;
       }
-      const r = rebaseDropManifest({ laneRef, base: 'origin/main', run: gitRunner });
+      const r = rebaseDropManifest({ laneRef, base: 'origin/main', run: gitRunner, cwd: cloneDir });
       v.rebaseDrop = r.action;
       if (r.action === 'rebased') {
         v.decision = 'merge';
         v.reason = `rebased onto main${r.dropped ? ' (dropped manifest)' : ''}, required check green — landable`;
         rebased.push(v.num);
-        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} rebased onto main${r.dropped ? ' (manifest dropped)' : ''} → ${r.newCommit.slice(0, 9)}\n`);
+        if (!AS_JSON) process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} rebased onto main${r.dropped ? ' (manifest dropped)' : ''}${cloneDir ? ` (via ${cloneDir})` : ''} → ${r.newCommit.slice(0, 9)}\n`);
       } else if (!AS_JSON) {
         process.stderr.write(`  ↻ ${repoTag(v.repo)}${v.num} left skipped: ${r.reason}\n`);
       }

@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -271,6 +271,23 @@ describe('resolveRepos (#2257 — the single /drain lander sweeps all 3 constell
   it('an empty/whitespace --repos falls back to the single-repo default', () => {
     expect(resolveRepos({ repos: '' })).toEqual([null]);
     expect(resolveRepos({ repos: '   ' })).toEqual([null]);
+  });
+});
+
+describe('siblingCloneName (#2263 — sibling-clone routing for remote-repo rebase-drop)', () => {
+  it('a known constellation repo slug → its short directory name', () => {
+    expect(siblingCloneName('chalbert/frontierui')).toBe('frontierui');
+    expect(siblingCloneName('chalbert/plateau-app')).toBe('plateau-app');
+    expect(siblingCloneName('chalbert/web-everything')).toBe('web-everything');
+  });
+  it('a repo outside the known constellation → null (nothing to route to)', () => {
+    expect(siblingCloneName('chalbert/some-other-repo')).toBeNull();
+  });
+  it('null/malformed input → null', () => {
+    expect(siblingCloneName(null)).toBeNull();
+    expect(siblingCloneName(undefined)).toBeNull();
+    expect(siblingCloneName('noslug')).toBeNull();
+    expect(siblingCloneName('')).toBeNull();
   });
 });
 
