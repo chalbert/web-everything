@@ -1,0 +1,17 @@
+---
+kind: story
+size: 5
+status: open
+dateOpened: "2026-07-04"
+tags: [lane, pr-flow, merge-queue, drain, session-tooling]
+---
+
+# `/pr` self-merge races a live drain — default to producer handoff (`--label-on-green`)
+
+`/pr` (we:scripts/pr-land.mjs) defaults to SELF-MERGE: it opens the PR, waits for the required `test` check to go green, then `gh pr merge`s. But branch protection (#2152) is strict-up-to-date, so when a drain (we:scripts/merge-ai-prs.mjs / lane-drain) is actively landing PRs, `main` advances during pr-land's multi-minute CI wait and the merge fails `behind main (strict up-to-date)` — every retry re-loses the race because each rebase triggers a fresh CI wait during which `main` moves again (hit live 2026-07-04: a trivial one-line `.gitignore` PR took 3 failed self-merge attempts before it was manually labeled `ready-to-merge` and handed to the drain, which rebases-then-merges as the serialized lander). The producer→drain model that avoids this is ALREADY decided and built — `producer-opens-pr-drain-reviews` (2026-07-02: lanes open PRs, the drain merges; drop self-approve), #2174 (producer stops at push), #2196 (every AI-edit path applies `ready-to-merge`), #2153 (drain lands labeled lanes) — but `/pr`'s DEFAULT never switched to it, so a human racing a live drain still loses. FIX: make `/pr`/pr-land **default to `--label-on-green`** (open + wait-for-green + label `ready-to-merge`, then hand merging to the drain) whenever a drain will collect the PR; keep self-merge only as the explicit no-drain fallback so a solo `/pr` with no running drain still lands. Detection options: a live-drain probe (recent `drain:` commits / a drain lockfile), or simply invert the default (producer-handoff unless `--self-merge`/`--no-drain` is passed). Net: the common case (drain running) stops burning CI on un-winnable self-merge races.
+
+TWO coupled residuals surfaced the same session, both in scope here:
+
+(1) **The producer handoff itself bails on behind-main.** `pr-land --label-on-green` currently refuses to even apply the label when the PR is `BEHIND` (strict-up-to-date) — so a churning main defeats the handoff path *too*, not just self-merge (hit live: #145's `--label-on-green` land exited non-zero on "behind main" and had to be labeled by hand once green). The drain rebases behind PRs before merging anyway, so a green-but-behind PR is perfectly landable — the handoff must **label a green PR regardless of behind-ness** (behind-ness is the drain's job to resolve, not a labeling precondition).
+
+(2) **The drain path never ff-syncs the user's PRIMARY checkout.** `syncPrimaryMain` (#140) only fires when *pr-land itself* does the merge. Once `/pr` defaults to drain-handoff (the fix above), the **drain** (we:scripts/merge-ai-prs.mjs) becomes the primary lander — and it syncs only its own clone, not the user's separate primary, so the primary silently drifts behind during drain activity (observed live 2026-07-04: primary sat **11 commits behind** origin/main after the drain landed a PR, until a concurrent process pulled it). The drain must run the same alternates-resolved `git -C <primary> pull --ff-only --autostash` that `syncPrimaryMain` does after each land, or the "keep the primary current after every merge" invariant (`keep-local-main-current-after-merge`, and the reason #140 exists) holds for `/pr` self-lands but breaks for the far more common drain lands. Fixing only the handoff default without this leaves the primary drifting exactly as it does today.
