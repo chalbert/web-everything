@@ -108,6 +108,43 @@ export function allocateFreeNum(usedNums, allocated, baseNums) {
 }
 
 /**
+ * Allocate a free GAP id BELOW the `max+1` allocation frontier (#2222). Where `allocateFreeNum` hands out
+ * `max+1` — the SAME id a concurrent `backlog.mjs scaffold` computes, so two heals/scaffolds racing on the
+ * same base can immediately re-collide — this instead takes the HIGHEST free id below `max` (the hole nearest
+ * the frontier, i.e. a recently-freed slot from a prior yield). A concurrent scaffold takes `max+1`, so a slot
+ * below `max` can never re-collide with it. Scanning DOWN from the frontier (not up from the min) is deliberate:
+ * the backlog carries ancient low ids (single-digit legacy items) with a vast empty range beneath the active
+ * frontier, so an upward scan would hand out an absurd id like `#3`; the nearest-the-frontier hole is the only
+ * sensible gap. Falls back to `allocateFreeNum` (the frontier) only when the top of the range is fully dense
+ * (no hole below `max`) — the unavoidable edge. Zero-padded to the widest input so the `NNN` convention holds.
+ * @param {Set<string>} usedNums   every id currently in use (lane corpus ∪ base)
+ * @param {Set<string>} allocated  ids this plan already handed to earlier yielders (never re-used)
+ * @param {Set<string>} baseNums   ids present on the merge base (never re-used — a live item owns each)
+ */
+export function allocateGapId(usedNums, allocated = new Set(), baseNums = new Set()) {
+  let max = 0;
+  let min = Infinity;
+  let width = 3;
+  for (const s of [...usedNums, ...allocated, ...baseNums]) {
+    const n = Number(s);
+    if (Number.isFinite(n)) { max = Math.max(max, n); min = Math.min(min, n); }
+    width = Math.max(width, String(s).length);
+  }
+  const taken = (n) => {
+    const p = String(n).padStart(width, '0');
+    return usedNums.has(p) || allocated.has(p) || baseNums.has(p) ||
+      usedNums.has(String(n)) || allocated.has(String(n)) || baseNums.has(String(n));
+  };
+  // Take the highest free slot below `max` (the hole nearest the frontier). `>= max+1` is the frontier a
+  // concurrent scaffold owns (the re-collision we avoid); `<= min` would be an absurd ancient-range id.
+  for (let cand = max - 1; cand > min; cand--) {
+    if (!taken(cand)) return String(cand).padStart(width, '0');
+  }
+  // The top of the range is dense — no hole below `max`; fall back to the frontier allocator (max+1).
+  return allocateFreeNum(usedNums, allocated, baseNums);
+}
+
+/**
  * Rewrite every inbound reference to the YIELDING item so it points at `newNum`, across one file's text.
  * Covers the four reference shapes the acceptance enumerates:
  *   • `#NNN` short-refs (id-bounded so `#2068` never matches inside `#20680`)

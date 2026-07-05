@@ -2,8 +2,10 @@
 kind: story
 size: 3
 relatedTo: ["2231", "2219", "2198", "2197", "2123"]
-status: open
+status: resolved
 dateOpened: "2026-07-03"
+dateStarted: "2026-07-05"
+dateResolved: "2026-07-05"
 tags: [lane, pr-flow, merge-queue, drain, backlog, self-heal]
 ---
 
