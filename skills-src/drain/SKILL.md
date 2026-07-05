@@ -91,6 +91,42 @@ one-shot unless the user wants a long-lived monitor waiting for producers still 
 5. After anything merged, fast-forwards **the clone's** local `main` to the advanced `origin/main`
    (`git pull --ff-only --autostash`, best-effort) — in the isolated clone, never the primary checkout.
 
+## Auto-review the parked PRs (#2285 v1)
+
+The #2171/#2262 review-escalation gate **parks** a blast-radius PR (`review:pending`) and waits for an
+independent reviewer to apply `review:accepted`/`review:changes` — otherwise every escalated PR stalls the
+queue until a human gets to it. **v1 makes the drain run that independent review itself, via a subagent** — for
+the PRs where an agent reviewer is genuinely independent of the *producer*. The one invariant it preserves:
+**a landed PR was accepted by an agent that did not author it.**
+
+The lander classifies each parked PR (see `we:scripts/lib/review-escalation.mjs` `isGateSelfPath`) and emits it
+in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons }`:
+
+- **`humanRequired: true` → `review:human`.** The diff edits the **auto-review trust chain itself**
+  (`we:scripts/lib/review-escalation.mjs` or `we:scripts/merge-ai-prs.mjs`) — the code that decides whether the
+  gate fires and what clears it. An agent reviewing this would be policing a change to its own leash (conflict
+  of interest), so a **human** review is essential. The drain applies `review:human` and this PR **never times
+  out** to `merge-anyway`. **Leave it for the operator** — never auto-apply `review:accepted` to a
+  `review:human` PR. Surface it clearly.
+- **`humanRequired: false` → agent-reviewable.** Escalated (blast-radius / size / dismissed-findings / sampling)
+  but independent of the producer. **Auto-review it:**
+  1. Get the diff: `gh pr diff <num> --repo <repo>` (and `gh pr view <num> --repo <repo> --json title,body,files`).
+  2. Spawn a **fresh-context adversarial review subagent** (the `Agent` tool, e.g. `general-purpose`) that sees
+     ONLY the diff + PR description — not this session's context — and returns a verdict: **accept** (correct,
+     safe, no blocking issue) or **changes** (a concrete blocking problem, cited).
+  3. Apply the verdict as a label: accept → `gh pr edit <num> --repo <repo> --add-label review:accepted`;
+     changes → `--add-label review:changes` (which routes the fix back to the **author lane**, not the drain —
+     v1 does **no** drain-side editing; that convergence loop is v2, epic #2285).
+  4. **Re-run the drain** (a bare pass) — a PR now carrying `review:accepted` clears the gate and lands.
+
+> **The label must exist.** `review:human` is provisioned like the other `review:*` labels (see #2262/#2279);
+> if it is missing, `gh pr edit --add-label review:human` silently no-ops. Ensure it exists once:
+> `gh label create review:human --description "conflict-of-interest: gate-self edit, a human must review" --color B60205 --force`.
+
+**v2/v3 (later, under epic #2285):** v2 replaces the author-bounce with an editor↔reviewer **negotiation loop**
+(auto-fix that converges, N-round cap → `review:human`); v3 adds a **multi-mandate reviewer panel** (correctness
+/ security / simplicity / standards — unanimous accept lands, mandate conflict → `review:human`).
+
 ## Exit codes (surface these)
 
 - `0` = swept clean (merged 0+ qualifying PRs, none failed) or a dry-run.
