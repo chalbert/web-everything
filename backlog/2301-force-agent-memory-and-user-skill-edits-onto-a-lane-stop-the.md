@@ -61,13 +61,15 @@ under `.claude` → prompts on every write → breaks the loop. **Memory must li
    lane's `agent-memory-src` diff and opens a `ready-to-merge` PR on the standard transport
    (`we:scripts/pr-land.mjs` + the drain) — the agent never runs `/pr` for memory.
 
-## Open sub-fork (settle before build)
+## Sub-fork — SETTLED: one machine-global memory-lane
 
-Only the memory-lane's **lifecycle** remains: one **machine-global** memory-lane shared by all sessions
-(simplest; serializes memory writes — tiny + infrequent, low collision) vs **per-session** memory-lanes (no
-sharing, but the single global symlink can't repoint per-session without racing concurrent sessions).
-Recommendation: **one machine-global dedicated memory-lane**, committed frequently. If it needs a real
-decision, split it out as a `type:decision` card.
+The memory-lane is **one machine-global, persistent dedicated lane** shared by all sessions — the symlink
+always points here and is **never repointed**. Rejected: **per-session** memory-lanes — the memory symlink
+is a *single global path*, so two concurrent sessions repointing it would race and land writes in the wrong
+lane; per-session provisioning/teardown adds cost for no gain. The global lane's only downside — a shared
+working tree where concurrent uncommitted writes could interleave — is neutralised by **commit-on-write**
+(memory edits are tiny + infrequent → negligible collision), which the part-3 hook does anyway. So the fixed
+symlink target never races, and the autonomous loop needs zero per-session setup.
 
 ## Definition of done
 
