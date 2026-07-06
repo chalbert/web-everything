@@ -1,10 +1,10 @@
 ---
-kind: story
-size: 5
+kind: epic
 status: open
 blockedBy: ["2267"]
 relatedTo: ["2219", "2077", "1933", "1945", "2162"]
 dateOpened: "2026-07-04"
+relatedReport: reports/2026-07-05-2275-split-analysis.md
 tags: [lane-pool, infra, pr-flow, productization]
 ---
 
@@ -31,39 +31,26 @@ This kills two current warts:
   (held ⇒ off-limits to refresh/recycle) fixes it use-agnostically, protecting a drain lease exactly like a
   batch lease.
 
-## Scope (this story)
+## Slices (sliced 2026-07-06 — `relatedReport`)
 
-1. **Lease semantics in the allocator (`we:scripts/lane-pool.mjs`).** Add `acquire`/`release` with an
-   **exclusive hold**: a leased lane is skipped by `provision`'s refresh/`reset --hard` and by any other
-   session's acquire, for the lease's duration. Build on the guard #2267 lands (its option (b) lease),
-   rather than inventing a parallel mechanism.
-2. **A lane may sit on `main`.** Confirm/allow the drain's `reset --hard origin/main` shape (guard-compatible
-   — no branch creation) as a first-class lease state alongside the `lane/*`-producing shape.
-3. **Migrate `/drain` + `/merge` off the bespoke clone.** The skills + `we:scripts/merge-ai-prs.mjs` acquire
-   a lease instead of `git clone --local … ../we-drain-clean`; delete the hand-rolled recipe and the
-   `we-drain-clean` special-casing from the skill docs.
-4. **Checkout root is allocator config, not a hardcoded path.** No skill embeds `../we-drain-clean` or the
-   `.lanes/…` root literally; the root comes from the allocator so it can move (see follow-on).
+Umbrella for making the pool a use-agnostic leased-checkout allocator, sliced along a real foundational seam:
 
-## Status — scope (1)+(2) delivered 2026-07-05; (3)+(4) remain
+1. **#2301 — Lease primitive (`acquire`/`release` exclusive hold). ✓ RESOLVED** (delivered via PR #167).
+   Scope (1)+(2): `we:scripts/lane-pool.mjs` `acquire` (atomic `O_EXCL` claim of a `.git/.lane-lease` marker
+   — lowest free lane or `--lane=N`, then `reset --hard origin/<branch>` so a leased lane may sit on `main`)
+   + `release`; `refresh`/`provision` skip a live-leased lane (#2267); pure unit-tested
+   `we:scripts/lib/lane-lease.mjs`. Consumer contract: `LANE_SESSION`/`--session` ties `acquire`↔`release`.
+2. **#2302 — Allocator provisions writable `frontierui` + `plateau-app` sibling clones** (foundational for
+   the migration). The pool root provides only a `frontierui` **symlink** today (render artifact) and no
+   `plateau-app`; the drain's cross-repo rebase-drop needs **pushable** sibling clones. Extends the
+   `ensureFuiSibling` pattern (`we:scripts/lane-pool.mjs:165-199`).
+3. **#2303 — Migrate `/drain` + `/merge` onto the leased allocator (+ config root).** `blockedBy #2302`.
+   Scope (3)+(4): the skills + `we:scripts/merge-ai-prs.mjs` `acquire → work → release` instead of
+   `git clone --local … ../we-drain-clean`; delete the bespoke recipe; make the checkout root allocator
+   config (no hardcoded `../we-drain-clean` / `.lanes` path).
 
-**Done (the lease primitive — the ownership fix):** `we:scripts/lane-pool.mjs` gains **`acquire`** (exclusive,
-atomic `O_EXCL` claim of a `.git/.lane-lease` marker — auto-picks the lowest free lane or honors `--lane=N`,
-then `reset --hard origin/<branch>` so the leased lane sits on `main` per scope (2)) and **`release`**
-(ownership-guarded, `--force`/`--all`). `refresh`/`provision` now **skip a live-leased lane** exactly like a
-dirty/ahead one (#2267), so a held lane is never reset out from under its consumer; `status` surfaces the
-lease. Decision logic is the pure, unit-tested `we:scripts/lib/lane-lease.mjs` (TTL staleness + reclaim,
-acquirability, lowest-index choice). **Consumer contract:** set `LANE_SESSION=<slug>` (inherited by every
-child process) or pass `--session` so `acquire` and the later `release` share one identity — a per-process
-pid/ppid is *not* stable across separate CLI calls (learned live).
-
-**Remaining — (3) migrate `/drain` + `/merge` off the bespoke `../we-drain-clean` clone, and (4) config
-root.** Deferred as a separate careful pass because it touches the live merge queue and has a real subtlety:
-the drain's cross-repo rebase-drop needs **writable sibling clones** of `frontierui` *and* `plateau-app` at
-the checkout root, but the pool root today provides only a `frontierui` **symlink** (a render artifact, not a
-pushable clone) and no `plateau-app` at all — so a naive `acquire`-and-`cd` migration would *regress*
-cross-repo rebase-drop. The migration must first teach the allocator to provision those sibling clones (or
-have the drain provision them into the leased lane's parent). Track (3)+(4) as the next slice of this item.
+DAG: `#2267 (✓) → #2301 (✓)`; `#2302` (free); `#2301 + #2302 → #2303`. Incremental delivery — each slice
+lands valid on its own.
 
 ## Out of scope (follow-on — file separately if pursued)
 
