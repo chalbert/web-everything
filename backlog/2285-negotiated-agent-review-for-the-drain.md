@@ -28,14 +28,14 @@ Sliced into three stages, each adding one axis, invariant intact at every step:
 - **v1 — #2286 (this epic's foundation).** Deterministic `review:human` conflict-of-interest classifier
   (`GATE_SELF_PATHS` = the gate's own decision code) + single-reviewer auto-review in the `/drain` ceremony:
   `accept` → land, else `review:changes` → author lane. No drain-side editing yet. Gates the rest.
-- **v2 — #2293 (editor↔reviewer negotiation loop).** "Auto-fix" as a convergence cycle: an editor agent and a
+- **v2 — #2311 (editor↔reviewer negotiation loop).** "Auto-fix" as a convergence cycle: an editor agent and a
   reviewer agent iterate (propose → critique → revise) until the reviewer accepts. Bounded by an N-round cap;
   non-convergence escalates to `review:human`. The final state is reviewer-approved, so the invariant holds.
-- **v3 — #2294 (multi-mandate reviewer panel).** Distinct mandated reviewers (correctness / security /
+- **v3 — #2310 (multi-mandate reviewer panel).** Distinct mandated reviewers (correctness / security /
   simplicity / standards-conformance — the `/code-review` lenses) must **jointly** agree. Unanimous accept →
   land; mandate conflict (security wants X, simplicity wants not-X) or non-convergence → `review:human`, because
   a tradeoff between mandates is human judgment by definition.
 
 Composes onto tools we already have: the **Workflow orchestrator** (deterministic loop-until-agreement,
-fan-out reviewers) and `/code-review`'s dimensions (the mandate lenses). v2 (#2293) is `blockedBy` #2286; v3
-(#2294) is `blockedBy` #2293. Sliced 2026-07-05 (`relatedReport`).
+fan-out reviewers) and `/code-review`'s dimensions (the mandate lenses). v2 (#2311) is `blockedBy` #2286; v3
+(#2310) is `blockedBy` #2311. Sliced 2026-07-05 (`relatedReport`).
