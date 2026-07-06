@@ -332,12 +332,16 @@ describe('regenDerivedOnLand — the drain owns post-land WE derived regen (#229
     return { exec, calls };
   };
   const REGEN = [['npm', 'run', 'gen:inventory'], ['npm', 'run', 'gen:reference-index']];
+  const PATHS = ['AGENTS.md', 'src/_data/referenceIndex.json'];
+  // The change-detection diff is now SCOPED to the derived-output paths (`-- <paths>`), not a bare tree diff —
+  // so the fake-exec key carries the pathspec.
+  const DIFF_KEY = `git diff --name-only -- ${PATHS.join(' ')}`;
   const ran = (calls) => calls.filter((c) => c.cmd === 'npm').map((c) => c.args.join(' '));
   const did = (calls, cmd, sub) => calls.some((c) => c.cmd === cmd && c.args[0] === sub);
 
   it('a successful land runs BOTH generators, then commits + pushes the diff to main (as the drain)', () => {
-    const { exec, calls } = fakeExec({ 'git diff --name-only': { stdout: 'AGENTS.md\nsrc/_data/referenceIndex.json\n' } });
-    const r = regenDerivedOnLand({ exec, cwd: '/repo', landed: true, dryRun: false, regenSet: REGEN });
+    const { exec, calls } = fakeExec({ [DIFF_KEY]: { stdout: 'AGENTS.md\nsrc/_data/referenceIndex.json\n' } });
+    const r = regenDerivedOnLand({ exec, cwd: '/repo', landed: true, dryRun: false, regenSet: REGEN, outputPaths: PATHS });
     expect(ran(calls)).toEqual(['run gen:inventory', 'run gen:reference-index']); // both generators invoked
     expect(did(calls, 'git', 'add')).toBe(true);
     const commit = calls.find((c) => c.cmd === 'git' && c.args[0] === 'commit');
@@ -363,8 +367,8 @@ describe('regenDerivedOnLand — the drain owns post-land WE derived regen (#229
   });
 
   it('generators ran but produced NO diff → no commit, no push (idempotent land)', () => {
-    const { exec, calls } = fakeExec({ 'git diff --name-only': { stdout: '' } });
-    const r = regenDerivedOnLand({ exec, cwd: '/repo', landed: true, regenSet: REGEN });
+    const { exec, calls } = fakeExec({ [DIFF_KEY]: { stdout: '' } });
+    const r = regenDerivedOnLand({ exec, cwd: '/repo', landed: true, regenSet: REGEN, outputPaths: PATHS });
     expect(ran(calls)).toHaveLength(2);
     expect(did(calls, 'git', 'commit')).toBe(false);
     expect(did(calls, 'git', 'push')).toBe(false);
@@ -372,10 +376,25 @@ describe('regenDerivedOnLand — the drain owns post-land WE derived regen (#229
   });
 
   it('a push failure is best-effort — reported in `warning`, never thrown (the couples already landed)', () => {
-    const { exec } = fakeExec({ 'git diff --name-only': { stdout: 'AGENTS.md\n' }, 'git push origin HEAD:main': { throw: 'remote rejected' } });
-    const r = regenDerivedOnLand({ exec, cwd: '/repo', landed: true, regenSet: REGEN });
+    const { exec } = fakeExec({ [DIFF_KEY]: { stdout: 'AGENTS.md\n' }, 'git push origin HEAD:main': { throw: 'remote rejected' } });
+    const r = regenDerivedOnLand({ exec, cwd: '/repo', landed: true, regenSet: REGEN, outputPaths: PATHS });
     expect(r.committed).toBe(false);
     expect(r.pushed).toBe(false);
     expect(r.warning).toMatch(/regen committed\/pushed FAILED/);
+  });
+
+  it('NEVER sweeps a foreign dirty file into the regen commit — scopes strictly to the derived-output paths', () => {
+    // Regression for the drain-in-a-dirty-primary bug: a concurrent session left `backlog/2095-*.md` dirty
+    // (an in-flight claim). The change-detect must intersect with the derived-output paths and commit ONLY
+    // those — the foreign backlog edit must never ride the derived-artifacts commit onto main.
+    const FOREIGN = 'backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v.md';
+    // Even if git's pathspec were somehow bypassed and returned the foreign path, the `.filter(outputPaths)`
+    // guard drops it — assert the belt-and-suspenders by canning a diff that INCLUDES the foreign file.
+    const { exec, calls } = fakeExec({ [DIFF_KEY]: { stdout: `AGENTS.md\n${FOREIGN}\n` } });
+    const r = regenDerivedOnLand({ exec, cwd: '/repo', landed: true, regenSet: REGEN, outputPaths: PATHS });
+    const add = calls.find((c) => c.cmd === 'git' && c.args[0] === 'add');
+    expect(add.args).toEqual(['add', 'AGENTS.md']);        // ONLY the derived output — never the foreign file
+    expect(add.args).not.toContain(FOREIGN);
+    expect(r).toMatchObject({ ran: true, committed: true, pushed: true });
   });
 });
