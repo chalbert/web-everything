@@ -23,9 +23,11 @@
  * Usage:
  *   node scripts/lane-pool.mjs provision --count=N [--no-install] [--force]   # ensure N lanes exist (clone missing) + refresh all + ensure deps + ensure the WE pool's FUI render-sibling (#2166)
  *   node scripts/lane-pool.mjs refresh           [--no-install] [--force]     # fetch + hard-reset existing lanes to origin/main (no creation)
- *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps
+ *   node scripts/lane-pool.mjs status  [--json]                     # per-lane: path / head / clean / behind origin/main / deps / lease
  *   node scripts/lane-pool.mjs list    [--json]                     # existing lane paths (for the orchestrator to dispatch into)
  *   node scripts/lane-pool.mjs path    --lane=N                     # print one lane's absolute path
+ *   node scripts/lane-pool.mjs acquire [--purpose=<slug>] [--session=<slug>] [--lane=N] [--ttl-minutes=N] [--no-reset] [--json]  # #2275 lease a free lane (exclusive) + reset to origin/main; stdout = its path
+ *   node scripts/lane-pool.mjs release (--lane=N | --all) [--session=<slug>] [--force]   # #2275 hand a leased lane back to the pool (own lease, or --force)
  *   node scripts/lane-pool.mjs remove  (--lane=N | --all)           # tear down lane(s)
  *   node scripts/lane-pool.mjs map     --lane=N --item=NNN[,NNN…]   # register item(s) → lane page-port (#2139 proxy)
  *   node scripts/lane-pool.mjs unmap   (--item=NNN[,…] | --lane=N | --all)   # drop lane-ports registry entries
@@ -50,8 +52,17 @@
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync, readlinkSync, symlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { join, basename, resolve, dirname } from 'node:path';
+import {
+  LEASE_FILENAME,
+  DEFAULT_LEASE_TTL_MINUTES,
+  isLeaseStale,
+  chooseFreeLane,
+  leaseBody,
+  describeLease,
+  leaseOwnedBy,
+} from './lib/lane-lease.mjs';
 
 // ── tiny arg parsing ──────────────────────────────────────────────────────────────────────────────
 const [, , cmd, ...rest] = process.argv;
@@ -273,6 +284,39 @@ function ensureDeps(dir) {
   return 'installed';
 }
 
+// ── lease (#2275) — an exclusive hold so a lane is never recycled or double-acquired while in use ─────
+// The marker lives INSIDE `.git` (like DEPS_MARKER) so it is never tracked, never `git clean`-ed, and
+// never seen by `git status --porcelain` (so it doesn't itself make a lane look dirty). A held lane is
+// off-limits to `refresh`/`provision`'s `reset --hard` AND to another session's `acquire`, until `release`
+// (or TTL-reclaim). See scripts/lib/lane-lease.mjs for the pure decision logic.
+const LEASE_MARKER = (dir) => join(dir, '.git', LEASE_FILENAME);
+function readLease(dir) {
+  const file = LEASE_MARKER(dir);
+  if (!existsSync(file)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null; // a corrupt marker is treated as no live lease (isLeaseStale also fails-open)
+  }
+}
+const ttlMinutesFromFlags = () =>
+  flags['ttl-minutes'] !== undefined && Number.isFinite(Number(flags['ttl-minutes']))
+    ? Number(flags['ttl-minutes'])
+    : DEFAULT_LEASE_TTL_MINUTES;
+const ttlMsFromFlags = () => ttlMinutesFromFlags() * 60_000;
+// A lane holds a LIVE lease when a marker exists and hasn't outlived its TTL (owner presumed alive).
+function liveLease(dir, nowMs, ttlMs) {
+  const lease = readLease(dir);
+  return lease && !isLeaseStale(lease, nowMs, ttlMs) ? lease : null;
+}
+// Session identity must be STABLE across a consumer's separate `acquire` then `release` invocations, yet
+// DISTINCT between concurrent sessions on one host (the whole point — session B must not release session A's
+// lane). A per-process pid is unstable (each CLI call is a new pid); a bare hostname collides across
+// sessions. So: an explicit `--session` (what every flow should pass) wins; else `LANE_SESSION` env; else
+// the parent shell's pid (`ppid` — the same shell drives a flow's acquire+release, and differs per session).
+const defaultSession = () => flags.session || process.env.LANE_SESSION || `${hostname()}:${process.ppid}`;
+
 // ── core ops ──────────────────────────────────────────────────────────────────────────────────────
 function cloneLane(repo, n) {
   const dest = laneDir(repo, n);
@@ -301,6 +345,13 @@ function refreshLane(repo, n, { force = false } = {}) {
   const dir = laneDir(repo, n);
   git(['fetch', 'origin', '--prune', '--quiet'], dir);
   if (!force) {
+    // #2275 — a LIVE lease makes a lane off-limits to recycle, exactly like dirty/ahead work: a consumer
+    // (drain/merge/batch/solo) holds it and a `reset --hard` mid-use would yank its tree. `--force` overrides.
+    const lease = liveLease(dir, Date.now(), ttlMsFromFlags());
+    if (lease) {
+      log(`  lane-${n}: SKIPPED (${describeLease(lease)}) — use --force to override`);
+      return { skipped: true, leased: true, dirty: false, uncommitted: 0, ahead: 0 };
+    }
     const { dirty, uncommitted, ahead } = laneDirtyOrAhead(dir, repo.branch);
     if (dirty || ahead > 0) {
       log(`  lane-${n}: SKIPPED (dirty/ahead — ${uncommitted} uncommitted, ${ahead} ahead) — use --force to override`);
@@ -319,6 +370,7 @@ function laneStatus(repo, n) {
   const branch = tryGit(['rev-parse', '--abbrev-ref', 'HEAD'], dir);
   const porcelain = tryGit(['status', '--porcelain'], dir);
   const behind = tryGit(['rev-list', '--count', `HEAD..origin/${repo.branch}`], dir);
+  const lease = readLease(dir);
   return {
     lane: n,
     path: dir,
@@ -328,6 +380,10 @@ function laneStatus(repo, n) {
     clean: porcelain === '',
     behind: behind === null ? '?' : Number(behind),
     deps: depsReady(dir),
+    // #2275 — surface the hold so a picker can filter (and a human sees who owns a lane). `leased` is only
+    // true for a LIVE lease; a stale marker reads as free (reclaimable), matching acquire's own logic.
+    lease: lease || null,
+    leased: lease ? !isLeaseStale(lease, Date.now(), ttlMsFromFlags()) : false,
   };
 }
 
@@ -376,6 +432,119 @@ function cmdRefresh(repo) {
   printStatus(repo);
 }
 
+// ── acquire / release (#2275) — the exclusive-lease allocator any flow consumes ─────────────────────
+// A consumer (`/drain`, `/merge`, `/batch`, solo `#2123`, `/prepare`, `/decision`) does:
+//   export LANE_SESSION=<slug>                                                  # ties acquire↔release together
+//   LANE=$(node scripts/lane-pool.mjs acquire --purpose=drain) && cd "$LANE"    # leased, reset to origin/main
+//   …work, land its PR…
+//   node scripts/lane-pool.mjs release --lane=<n>                              # hand it back to the pool
+// The lease is what lets a use-agnostic pool lane safely stand in for the hand-rolled `../we-drain-clean`
+// clone: held ⇒ refresh/provision won't reset it out from under the drain (item 2's "a lane may sit on main"
+// is just the reset-to-origin/main state below, now protected by the hold).
+
+// Try to claim a specific lane's marker atomically (O_EXCL). Returns true iff THIS call created the marker.
+// A live lease owned by someone else ⇒ false (taken). A stale marker ⇒ reclaimed (rm + retry, the small
+// documented race). Own live lease ⇒ true (idempotent re-acquire by the same session).
+function tryClaimLane(dir, session, nowMs, ttlMs, { force = false } = {}) {
+  const body = JSON.stringify(
+    leaseBody({ session, purpose: flags.purpose, acquiredAt: new Date(nowMs).toISOString(), ttlMinutes: ttlMinutesFromFlags(), host: hostname(), pid: process.pid }),
+    null, 2,
+  ) + '\n';
+  const file = LEASE_MARKER(dir);
+  try {
+    writeFileSync(file, body, { flag: 'wx' }); // atomic create-or-fail — the race-free happy path
+    return true;
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+  }
+  const existing = readLease(dir);
+  if (leaseOwnedBy(existing, session)) { writeFileSync(file, body); return true; } // refresh our own hold
+  if (force || isLeaseStale(existing, nowMs, ttlMs)) {
+    rmSync(file, { force: true });                 // reclaim a stale/forced lease (unlink→create race: acceptable)
+    try { writeFileSync(file, body, { flag: 'wx' }); return true; } catch { return false; }
+  }
+  return false; // a live lease held by another session — this lane is taken
+}
+
+function cmdAcquire(repo) {
+  const session = defaultSession();
+  const nowMs = Date.now();
+  const ttlMs = ttlMsFromFlags();
+  const lanes = existingLanes(repo);
+  if (lanes.length === 0) fail(`no lanes provisioned for "${repo.name}" — run \`provision --count=N\` first`);
+
+  // Candidate infos from LOCAL refs (no per-lane fetch): `dirty` is live (working tree), `ahead` is vs the
+  // last-known origin — conservative (over-protects an ahead lane). We fetch+reset only the winner.
+  const infoFor = (n) => {
+    const dir = laneDir(repo, n);
+    if (!existsSync(dir)) return { lane: n, exists: false };
+    return { lane: n, exists: true, dirtyOrAhead: laneDirtyOrAhead(dir, repo.branch), lease: readLease(dir) };
+  };
+
+  let chosen = null;
+  if (flags.lane !== undefined) {
+    // Explicit lane: honor it or fail loudly (don't silently divert to another).
+    const n = Number(flags.lane);
+    const dir = laneDir(repo, n);
+    if (!existsSync(dir)) fail(`lane-${n} does not exist (${dir})`);
+    if (!tryClaimLane(dir, session, nowMs, ttlMs, { force: !!flags.force }))
+      fail(`lane-${n} is ${describeLease(readLease(dir)) || 'held'} — pick another or pass --force`);
+    chosen = n;
+  } else {
+    // Auto-pick: lowest acquirable, then atomically claim; on a lost race retry the next candidate.
+    const excluded = new Set();
+    while (chosen === null) {
+      const infos = lanes.filter((n) => !excluded.has(n)).map(infoFor);
+      const pick = chooseFreeLane(infos, nowMs, ttlMs);
+      if (pick === null) fail(`no free lane in pool "${repo.name}" (${lanes.length} all held/dirty) — release one or \`provision\` more`);
+      if (tryClaimLane(laneDir(repo, pick), session, nowMs, ttlMs, { force: !!flags.force })) chosen = pick;
+      else excluded.add(pick); // a concurrent acquire won this one — try the next
+    }
+  }
+
+  // Ready the leased lane: land on origin/<branch> (item 2 — a lane may sit on main), regen env + deps so it
+  // is immediately gate-able, exactly like a provisioned lane. `--no-reset` keeps HEAD.
+  const dir = laneDir(repo, chosen);
+  if (!flags['no-reset']) {
+    git(['fetch', 'origin', '--prune', '--quiet'], dir);
+    git(['reset', '--hard', `origin/${repo.branch}`, '--quiet'], dir);
+    git(['clean', '-fd', '--quiet'], dir);
+    unmapLanes(repo, [chosen]); // a reset lane no longer renders its old item (#2139)
+  }
+  writeLaneEnv(repo, chosen);
+  if (!flags['no-install']) ensureDeps(dir);
+  // NOTE: do NOT re-run ensureFuiSibling here. It resolves the primary FUI from the *reference* checkout's
+  // parent — correct only when run from the primary; run from INSIDE a lane (a consumer's cwd) it mis-points
+  // the shared pool-root `frontierui` symlink at itself. The pool-root sibling is a provision/refresh concern;
+  // a leased lane borrows a pool those already set up. (Regressed a live acquire until caught — #2275.)
+  log(`acquired lane-${chosen} for ${session}${flags.purpose ? ` (${flags.purpose})` : ''} → ${dir}`);
+  if (flags.json) process.stdout.write(JSON.stringify({ lane: chosen, path: dir, session, purpose: flags.purpose || null, branch: repo.branch }, null, 2) + '\n');
+  else process.stdout.write(dir + '\n'); // stdout = path only, so `LANE=$(… acquire)` captures it clean
+}
+
+function cmdRelease(repo) {
+  const session = defaultSession();
+  const force = !!flags.force;
+  let targets;
+  if (flags.all) targets = existingLanes(repo).filter((n) => readLease(laneDir(repo, n))); // every held lane
+  else if (flags.lane !== undefined) targets = [Number(flags.lane)];
+  else return fail('release needs --lane=N or --all');
+  let released = 0;
+  for (const n of targets) {
+    const dir = laneDir(repo, n);
+    const lease = readLease(dir);
+    if (!lease) { log(`  lane-${n}: no lease to release`); continue; }
+    if (!force && !leaseOwnedBy(lease, session)) {
+      log(`  lane-${n}: ${describeLease(lease)} — not yours; pass --force to break`);
+      continue;
+    }
+    rmSync(LEASE_MARKER(dir), { force: true });
+    log(`  released lane-${n} (was ${describeLease(lease)})`);
+    released++;
+  }
+  if (flags.json) process.stdout.write(JSON.stringify({ released, targets }, null, 2) + '\n');
+}
+
 function printStatus(repo) {
   const rows = existingLanes(repo).map((n) => laneStatus(repo, n));
   if (flags.json) {
@@ -390,7 +559,8 @@ function printStatus(repo) {
   for (const r of rows) {
     log(
       `  lane-${r.lane}: ${r.head} [${r.branch}] ${r.clean ? 'clean' : 'DIRTY'}` +
-        ` · ${r.behind === 0 ? 'up-to-date' : `${r.behind} behind`} · deps ${r.deps}`,
+        ` · ${r.behind === 0 ? 'up-to-date' : `${r.behind} behind`} · deps ${r.deps}` +
+        (r.leased ? ` · ${describeLease(r.lease)}` : ''),
     );
   }
 }
@@ -467,6 +637,8 @@ const COMMANDS = {
   status: printStatus,
   list: cmdList,
   path: cmdPath,
+  acquire: cmdAcquire,
+  release: cmdRelease,
   remove: cmdRemove,
   map: cmdMap,
   unmap: cmdUnmap,
@@ -475,8 +647,9 @@ const COMMANDS = {
 if (!cmd || cmd === 'help' || cmd === '--help' || !COMMANDS[cmd]) {
   if (cmd && cmd !== 'help' && cmd !== '--help') process.stderr.write(`unknown command: ${cmd}\n`);
   process.stderr.write(
-    'usage: lane-pool.mjs <provision|refresh|status|list|path|remove|map|unmap> [--count=N] [--lane=N] [--all] ' +
-      '[--item=NNN[,NNN…]] [--repo=<path>] [--origin=<url>] [--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json]\n',
+    'usage: lane-pool.mjs <provision|refresh|status|list|path|acquire|release|remove|map|unmap> [--count=N] [--lane=N] [--all] ' +
+      '[--item=NNN[,NNN…]] [--purpose=<slug>] [--session=<slug>] [--ttl-minutes=N] [--no-reset] [--repo=<path>] [--origin=<url>] ' +
+      '[--reference=<path>] [--name=<slug>] [--branch=<ref>] [--no-install] [--force] [--json]\n',
   );
   process.exit(cmd && COMMANDS[cmd] === undefined && cmd !== 'help' ? 1 : 0);
 }

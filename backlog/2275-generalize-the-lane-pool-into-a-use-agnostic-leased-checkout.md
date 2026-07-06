@@ -1,10 +1,10 @@
 ---
-kind: story
-size: 5
+kind: epic
 status: open
 blockedBy: ["2267"]
 relatedTo: ["2219", "2077", "1933", "1945", "2162"]
 dateOpened: "2026-07-04"
+relatedReport: reports/2026-07-05-2275-split-analysis.md
 tags: [lane-pool, infra, pr-flow, productization]
 ---
 
@@ -31,19 +31,26 @@ This kills two current warts:
   (held ⇒ off-limits to refresh/recycle) fixes it use-agnostically, protecting a drain lease exactly like a
   batch lease.
 
-## Scope (this story)
+## Slices (sliced 2026-07-06 — `relatedReport`)
 
-1. **Lease semantics in the allocator (`we:scripts/lane-pool.mjs`).** Add `acquire`/`release` with an
-   **exclusive hold**: a leased lane is skipped by `provision`'s refresh/`reset --hard` and by any other
-   session's acquire, for the lease's duration. Build on the guard #2267 lands (its option (b) lease),
-   rather than inventing a parallel mechanism.
-2. **A lane may sit on `main`.** Confirm/allow the drain's `reset --hard origin/main` shape (guard-compatible
-   — no branch creation) as a first-class lease state alongside the `lane/*`-producing shape.
-3. **Migrate `/drain` + `/merge` off the bespoke clone.** The skills + `we:scripts/merge-ai-prs.mjs` acquire
-   a lease instead of `git clone --local … ../we-drain-clean`; delete the hand-rolled recipe and the
-   `we-drain-clean` special-casing from the skill docs.
-4. **Checkout root is allocator config, not a hardcoded path.** No skill embeds `../we-drain-clean` or the
-   `.lanes/…` root literally; the root comes from the allocator so it can move (see follow-on).
+Umbrella for making the pool a use-agnostic leased-checkout allocator, sliced along a real foundational seam:
+
+1. **#2283 — Lease primitive (`acquire`/`release` exclusive hold). ✓ RESOLVED** (delivered via PR #167).
+   Scope (1)+(2): `we:scripts/lane-pool.mjs` `acquire` (atomic `O_EXCL` claim of a `.git/.lane-lease` marker
+   — lowest free lane or `--lane=N`, then `reset --hard origin/<branch>` so a leased lane may sit on `main`)
+   + `release`; `refresh`/`provision` skip a live-leased lane (#2267); pure unit-tested
+   `we:scripts/lib/lane-lease.mjs`. Consumer contract: `LANE_SESSION`/`--session` ties `acquire`↔`release`.
+2. **#2282 — Allocator provisions writable `frontierui` + `plateau-app` sibling clones** (foundational for
+   the migration). The pool root provides only a `frontierui` **symlink** today (render artifact) and no
+   `plateau-app`; the drain's cross-repo rebase-drop needs **pushable** sibling clones. Extends the
+   `ensureFuiSibling` pattern (`we:scripts/lane-pool.mjs:165-199`).
+3. **#2303 — Migrate `/drain` + `/merge` onto the leased allocator (+ config root).** `blockedBy #2282`.
+   Scope (3)+(4): the skills + `we:scripts/merge-ai-prs.mjs` `acquire → work → release` instead of
+   `git clone --local … ../we-drain-clean`; delete the bespoke recipe; make the checkout root allocator
+   config (no hardcoded `../we-drain-clean` / `.lanes` path).
+
+DAG: `#2267 (✓) → #2283 (✓)`; `#2282` (free); `#2283 + #2282 → #2303`. Incremental delivery — each slice
+lands valid on its own.
 
 ## Out of scope (follow-on — file separately if pursued)
 
