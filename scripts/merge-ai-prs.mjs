@@ -93,7 +93,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from './lib/review-escalation.mjs';
 import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
 import { mergePr } from './lib/pr-merge-gate.mjs';
-import { DERIVED_REGEN } from './lane-drain.mjs';
+import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS } from './lane-drain.mjs';
 
 // #2262 — the local, machine-scoped park-age clock the review-escalation watch-window gate reads its
 // `parkedSinceMs` from (see review-park-state.mjs for why losing/corrupting this file is safe). Resolved
@@ -357,7 +357,7 @@ export function siblingCloneName(repo) {
  * @param {{exec:Function, cwd?:string, landed?:boolean, dryRun?:boolean, remote?:string, base?:string, regenSet?:Array}} o
  * @returns {{ran:boolean, done:string[], failed:{cmd:string,detail:string}[], committed:boolean, pushed:boolean, warning?:string}}
  */
-export function regenDerivedOnLand({ exec, cwd = process.cwd(), landed = false, dryRun = false, remote = 'origin', base = 'main', regenSet = DERIVED_REGEN } = {}) {
+export function regenDerivedOnLand({ exec, cwd = process.cwd(), landed = false, dryRun = false, remote = 'origin', base = 'main', regenSet = DERIVED_REGEN, outputPaths = DERIVED_OUTPUT_PATHS } = {}) {
   const skip = { ran: false, done: [], failed: [], committed: false, pushed: false };
   if (!landed || dryRun || typeof exec !== 'function') return skip;
   const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
@@ -368,14 +368,19 @@ export function regenDerivedOnLand({ exec, cwd = process.cwd(), landed = false, 
     catch (e) { failed.push({ cmd: [cmd, ...args].join(' '), detail: firstLine(e) }); }
   }
   if (done.length === 0) return { ran: true, done, failed, committed: false, pushed: false, warning: failed.length ? `derived-artifact regen failed (non-fatal): ${failed.map((f) => f.cmd).join(', ')}` : undefined };
-  // What did the deterministic generators change? (tracked mods only — the same read pr-land's runRegen used.)
-  let changed = [];
-  try { changed = String(exec('git', ['diff', '--name-only'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '').split('\n').filter(Boolean); }
-  catch { changed = []; }
-  if (changed.length === 0) return { ran: true, done, failed, committed: false, pushed: false }; // regen was a no-op (inputs didn't change)
+  // What did the deterministic generators change? SCOPE strictly to the known derived-output paths — the drain
+  // can run in a checkout carrying UNRELATED dirty tracked files (a concurrent session's in-flight claim), so a
+  // bare `git diff --name-only` would sweep those foreign edits into this commit and publish them (the same
+  // shared-index hazard `finalizeLand` guards with an explicit pathspec). Intersecting with `outputPaths` means
+  // the commit provably carries ONLY `AGENTS.md` / `referenceIndex.json`, whatever else is dirty in the tree.
+  let dirty = [];
+  try { dirty = String(exec('git', ['diff', '--name-only', '--', ...outputPaths], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '').split('\n').filter(Boolean); }
+  catch { dirty = []; }
+  const changed = dirty.filter((f) => outputPaths.includes(f));
+  if (changed.length === 0) return { ran: true, done, failed, committed: false, pushed: false }; // regen was a no-op (derived inputs didn't change)
   try {
-    // Explicit pathspec (never `git add -A` — the shared-index guard blocks it, and only these derived files
-    // should ride this commit). Mirror pr-land's runRegen commit message + gated main push exactly (#2182).
+    // Explicit pathspec — only these derived files ride the commit (never `git add -A`, and never the broad
+    // `git diff` sweep). Mirror pr-land's runRegen commit message + gated main push exactly (#2182).
     exec('git', ['add', ...changed], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     exec('git', ['commit', '-m', `chore: regen derived artifacts post-land (#2182) [${done.map((c) => c.replace('npm run ', '')).join(', ')}]`], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     exec('git', ['push', remote, `HEAD:${base}`], { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MAIN_PUSH_OK: '1' } });
