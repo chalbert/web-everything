@@ -58,7 +58,7 @@ describe('manifestConflictDisposition', () => {
 function scriptedRun(script) {
   const calls = [];
   const run = (cmd, args, opts) => {
-    calls.push({ cmd, args, env: opts?.env });
+    calls.push({ cmd, args, env: opts?.env, cwd: opts?.cwd });
     const key = args[0]; // git subcommand
     const handler = script[key];
     const res = typeof handler === 'function' ? handler(args, opts) : handler;
@@ -97,6 +97,19 @@ describe('rebaseDropManifest', () => {
     // push is a fast-forward of the lane/* ref (no checkout).
     const push = calls.find((c) => c.args[0] === 'push');
     expect(push.args).toEqual(['push', 'origin', `newCommitSha`.padEnd(40, '0') + ':refs/heads/lane/x-2198']);
+  });
+
+  it('#2263 — a given `cwd` routes EVERY git invocation through a sibling clone, not process.cwd()', () => {
+    const { run, calls } = scriptedRun({
+      'merge-tree': { status: 1, stdout: conflictOut([LANE_MANIFEST]) },
+      ...RESOLVED_PLUMBING,
+    });
+    const r = rebaseDropManifest({ laneRef: 'lane/x-2263', run, cwd: '/repos/frontierui' });
+    expect(r.action).toBe('rebased');
+    // fetch, merge-tree, read-tree, rm, write-tree, commit-tree, push — every step honours the sibling cwd.
+    for (const subcmd of ['fetch', 'merge-tree', 'read-tree', 'rm', 'write-tree', 'commit-tree', 'push']) {
+      expect(calls.find((c) => c.args[0] === subcmd)?.cwd).toBe('/repos/frontierui');
+    }
   });
 
   it('a clean merge (behind only) → still rebuilds to fast-forward, dropped=false', () => {

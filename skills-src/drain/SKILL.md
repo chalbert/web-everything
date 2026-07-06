@@ -32,12 +32,24 @@ serially, in a later session, under the same self-approved PR transport the prod
   git clone --local <primary> ../we-drain-clean && cd ../we-drain-clean
   git remote set-url origin <origin-url>           # push PRs to the real remote
   git reset --hard <origin/main sha>               # land on the true main (the local clone may be stale)
-  ln -s <primary>/node_modules node_modules        # generators/gates need deps (+ a sibling ../frontierui)
+  ln -s <primary>/node_modules node_modules        # generators/gates need deps (+ siblings ../frontierui, ../plateau-app)
   ```
 
-  A clone sibling of `webeverything` keeps `../frontierui` resolvable (cross-repo artifact builds need it). The
-  branch guard blocks `checkout -B`/`worktree add` even in a clone, so move `main` with `git reset --hard`, not
-  a checkout. **Never `git pull` in the primary** — the sync below runs in the clone only.
+  A clone sibling of `webeverything` keeps `../frontierui` resolvable (cross-repo artifact builds need it).
+  **Provision `../frontierui` and `../plateau-app` too (#2263)** — real clones next to `we-drain-clean`, same
+  pattern as the WE clone itself:
+
+  ```
+  git clone <frontierui-origin-url> ../frontierui && (cd ../frontierui && git reset --hard origin/main)
+  git clone <plateau-app-origin-url> ../plateau-app && (cd ../plateau-app && git reset --hard origin/main)
+  ```
+
+  With those present, `--all-repos`'s rebase-drop (#2198) can rebuild a CONFLICTING/BEHIND frontierui/
+  plateau-app lane tip too — routed through the matching sibling clone, not just the local WE one. Missing a
+  sibling clone is a graceful degrade, not an error: that repo's rebase-drop candidates fall back to `left for
+  its author`, exactly as before #2263. The branch guard blocks `checkout -B`/`worktree add` even in a clone,
+  so move `main` with `git reset --hard`, not a checkout. **Never `git pull` in the primary** — the sync below
+  runs in the clone only.
 - `gh` is authenticated (`gh auth status`) — landing is the same self-approved `gh pr merge` (0 required
   reviewers + the required `test` check) `/pr` uses. See [`/pr`](../pr/SKILL.md) for the transport.
 - The clone's tree is clean: the post-merge sync (`git pull --ff-only --autostash`, in the clone) is a pure
@@ -54,14 +66,16 @@ the edges — the #2188 convergence).
 > — web-everything **+ frontierui + plateau-app** — in ONE global `blockedBy` cascade, with **no flag needed**
 > (#2287 made all-repos the default). This is why `/drain` stays a single skill instead of a copy per repo
 > (#2244/#2245 superseded): the backlog is WE-global, so a frontierui PR can be `blockedBy` a WE item, and only
-> a single cross-repo sequencer can order that. Every `gh` call is `--repo`-scoped; git-side work (manifest read
-> via `git show`, rebase-drop, local-`main` sync) stays on the LOCAL clone, so a remote-repo PR reads its
-> manifest via the GitHub API and, if CONFLICTING/BEHIND, is left for its author (rebase-drop needs a clone of
-> that repo — a follow-up). **Landing a frontierui/plateau PR still needs that repo's own required `test` check
-> + branch protection (#2242/#2243/#2246)** or GitHub blocks the merge; until those land, those PRs surface here
-> as `skip (required check "test" is not green)` rather than silently vanishing. Pass `--this-repo` to scope to
-> the cwd repo only, or `--repos=owner/a,owner/b` for an explicit set. (`--all-repos` is still accepted — it's a
-> no-op alias of the default now.)
+> a single cross-repo sequencer can order that. Every `gh` call is `--repo`-scoped; a remote-repo PR reads its
+> manifest via the GitHub API (never a local clone). The rebase-drop (#2198) still needs local git plumbing
+> (merge-tree/commit-tree/push): for the LOCAL clone's own repo it runs in place; for a remote repo it routes
+> through that repo's **sibling clone** (`../frontierui`, `../plateau-app`) when the precondition above
+> provisioned one (#2263) — so a CONFLICTING/BEHIND non-local lane tip gets rebuilt too, not just left for its
+> author. No sibling clone provisioned ⇒ unchanged legacy skip. **Landing a frontierui/plateau PR still needs
+> that repo's own required `test` check + branch protection (#2242/#2243/#2246)** or GitHub blocks the merge;
+> until those land, those PRs surface here as `skip (required check "test" is not green)` rather than silently
+> vanishing. Pass `--this-repo` to scope to the cwd repo only, or `--repos=owner/a,owner/b` for an explicit set.
+> (`--all-repos` is still accepted — it's a no-op alias of the default now.)
 
 ```
 node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run            # plan only — print the blockedBy-ordered merge order (across ALL 3 repos, the default) + deferred set, merge NOTHING
