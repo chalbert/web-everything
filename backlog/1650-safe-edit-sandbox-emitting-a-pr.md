@@ -1,16 +1,20 @@
 ---
-kind: decision
+kind: story
+size: 13
 parent: "142"
 status: open
 priority: low
+relatedTo: ["2095"]
 locus: plateau-app
 dateOpened: "2026-06-23"
 preparedDate: "2026-06-23"
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
-tags: [dev-browser, safe-edit, pr, change-safety, ai-generated, validation, decision]
+tags: [dev-browser, safe-edit, pr, change-safety, ai-generated, accepted-on-merit, dissolved]
 ---
 
 # Safe-edit sandbox emitting a PR
+
+> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) merit-conceded dissolve test). The merit is **conceded** — the standard-based emit angle is genuinely differentiating — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger:** the #095 standard-gated emit path is settled (already resolved → `we:scripts/autofix/engine.mjs` + `npm run autofix`); this is the heaviest build in the family, so it is ordered by normal burndown priority. Everything below is retained as the **settled** merit rationale (the concession), not an open question.
 
 ## Digest
 
@@ -58,4 +62,4 @@ The moat (per #142): a WE app is **self-describing**, so the edit and its emitte
 - **Un-gate trigger (concrete):** promote to a build story when **(1)** #095's standard-gated emit/verify path has shipped a usable form, AND **(2)** a flagship exercise-app workflow shows a real "tweak live → PR" loop that the framework-specific editors cannot serve because the app is multi-stack or relies on declared rules — evidence the stack-agnostic angle pays off.
 - **Skeptic:** "Onlook and Builder.io already do live-edit-to-PR — this is a me-too." *Refuted on the delta, not novelty:* those tools emit *framework-specific generated code* with no conformance gate; the WE sandbox edits in the **standard's declared form**, is **gated by the standard**, and emits a **stack-agnostic** PR — which a React/Tailwind code generator structurally cannot do without the declared model. The residual the skeptic is right about is **cost/scope and prerequisite** — hence not-yet, and the lowest confidence in the set.
 
-*If you'd rather decide go now (open a build story immediately) or no (drop the candidate), say so — the verdict is the thing on the table.*
+*~~If you'd rather decide go now (open a build story immediately) or no (drop the candidate), say so — the verdict is the thing on the table.~~ (Superseded: dissolved to accepted-on-merit per #2095 — the verdict is settled, not open.)*

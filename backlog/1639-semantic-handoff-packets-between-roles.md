@@ -1,17 +1,22 @@
 ---
-kind: decision
+kind: story
+size: 5
 parent: "142"
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "adoptionSignal: a shared capture substrate exists (post-#1631/#1663)"
 priority: low
 locus: plateau-app
 dateOpened: "2026-06-23"
 preparedDate: "2026-06-23"
-relatedTo: ["1631", "1635", "1638"]
+relatedTo: ["1631", "1635", "1638", "2095"]
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
-tags: [dev-browser, handoff, packet, collaboration, ai-generated, validation, decision]
+tags: [dev-browser, handoff, packet, collaboration, ai-generated, accepted-on-merit, dissolved]
 ---
 
 # Semantic handoff packets between roles
+
+> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) merit-conceded dissolve test). The merit is **conceded** — the generalization is real and on-moat — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger:** #1631 proves the concrete handoff shape (already resolved → #1663) **and** a shared capture substrate exists. Everything below is retained as the **settled** merit rationale (the concession), not an open question.
 
 ## Digest
 
@@ -61,4 +66,4 @@ The moat (per #142): a WE app is **self-describing and ownership-aware**, so a h
 - **Un-gate trigger (concrete):** promote to a build story when **(1)** [#1631](/backlog/1631-shareable-full-context-repro-bundle-for-the-dev-browser/) (the debugging packet) has shipped and validated the bundle shape, **AND (2)** a real exercise-app run surfaces a *second* hand-off type (design or review) that wants the same envelope — i.e. the generalization is pulled by a second concrete instance, not pushed speculatively.
 - **Skeptic:** "Figma Dev Mode + Loom + Jam already cover designer→dev and bug hand-offs — this is reinventing them." *Refuted on the delta, not on novelty:* each incumbent is one direction carrying a *recording or a spec*; none carries declared state + rules + ownership as a *typed, self-routing* packet across all three role transitions, because none has the self-describing model. The residual the skeptic is right about is **premature abstraction** — hence not-yet, gated on #1631 proving the shape first, not go.
 
-*If you'd rather decide go now or no (drop it), say so — the verdict is the thing on the table.*
+*~~If you'd rather decide go now or no (drop it), say so — the verdict is the thing on the table.~~ (Superseded: dissolved to accepted-on-merit per #2095 — the verdict is settled, not open.)*

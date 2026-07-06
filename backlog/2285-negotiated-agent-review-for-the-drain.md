@@ -4,7 +4,7 @@ status: open
 relatedTo: ["2171", "2262", "2162", "2279"]
 tags: [lane, drain, review, merge-queue, multi-agent, agent]
 dateOpened: "2026-07-04"
-relatedReport: reports/2026-07-05-backlog-split-analysis.md
+relatedReport: reports/2026-07-05-backlog-split-analysis-2285.md
 ---
 
 # Negotiated agent review for the drain — auto-review → editor negotiation → mandate panel

@@ -1,17 +1,22 @@
 ---
-kind: decision
+kind: story
+size: 5
 parent: "142"
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "adoptionSignal: the declared-rule model is populated with a test-to-rule mapping substrate"
 priority: low
 locus: plateau-app
 dateOpened: "2026-06-23"
 preparedDate: "2026-06-23"
-relatedTo: ["1640"]
+relatedTo: ["1640", "2095"]
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
-tags: [dev-browser, coverage, conformance, testing, ai-generated, validation, decision]
+tags: [dev-browser, coverage, conformance, testing, ai-generated, accepted-on-merit, dissolved]
 ---
 
 # Declared-rule to test-coverage gap surfacer
+
+> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) merit-conceded dissolve test). The merit is **conceded** — the delta is uncontested (no tool measures declared-rule coverage) — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger:** the declared-rule model is populated **and** a test→rule mapping substrate exists. Everything below is retained as the **settled** merit rationale (the concession), not an open question.
 
 ## Digest
 
@@ -56,4 +61,4 @@ The moat (per #142): a WE app **declares its own rules**, so coverage can be mea
 - **Un-gate trigger (concrete):** promote to a build story when **(1)** the declared-rule model is populated for at least one flagship app, **AND (2)** a mechanism exists (or is being built for [#1640](/backlog/1640-standard-aware-review-assistant/)) to attribute a test to the declared rule it exercises — so the rule↔test gap is computable, not guessed.
 - **Skeptic:** "Codecov already gates coverage and Stryker already proves test strength — coverage is solved." *Refuted on the delta, not on novelty:* both measure **code** (lines, mutations); a page can be 100% line-covered and mutation-strong while a declared rule has *zero* covering tests — they can't see the rule. WE measures coverage against the declared rule itself, which is exactly the gap they're blind to. The residual the skeptic is right about is **readiness** (the rule→test mapping doesn't exist yet) — hence not-yet, not go.
 
-*If you'd rather decide go now or no (drop it), say so — the verdict is the thing on the table.*
+*~~If you'd rather decide go now or no (drop it), say so — the verdict is the thing on the table.~~ (Superseded: dissolved to accepted-on-merit per #2095 — the verdict is settled, not open.)*

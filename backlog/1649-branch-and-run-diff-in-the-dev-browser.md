@@ -1,17 +1,22 @@
 ---
-kind: decision
+kind: story
+size: 8
 parent: "142"
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "adoptionSignal: a shared capture/introspection substrate exists (co-built #1631/#1646)"
 priority: low
 locus: plateau-app
 dateOpened: "2026-06-23"
 preparedDate: "2026-06-23"
-relatedTo: ["1631", "1646"]
+relatedTo: ["1631", "1646", "2095"]
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
-tags: [dev-browser, diff, change-safety, ai-generated, validation, decision]
+tags: [dev-browser, diff, change-safety, ai-generated, accepted-on-merit, dissolved]
 ---
 
 # Branch and run diff in the dev browser
+
+> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) merit-conceded dissolve test). The merit is **conceded** — real (clean delta, on-moat) — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger:** a shared capture/introspection substrate exists (co-built with #1631/#1646). Everything below is retained as the **settled** merit rationale (the concession), not an open question.
 
 ## Digest
 
@@ -59,4 +64,4 @@ The moat (per #142): a WE app is **self-describing**, so the diff can be *semant
 
 Beyond the static "snapshot A vs snapshot B" diff, the target experience is a **live mirrored dual-run**: both branches running simultaneously in the dev browser, every input event **fan-routed to both** instances, with **differential highlighters** lighting up divergence in real time across the three layers (declared state, rendered output, declared rules). This is the most vivid expression of the semantic-diff moat — and it raises the capture requirement from offline snapshot/replay to **live event-mirroring + dual concurrent render**. Parked at `priority: low`; recorded here so the framing isn't lost when the card un-gates.
 
-*If you'd rather decide go now (open a build story immediately) or no (drop the candidate), say so — the verdict is the thing on the table.*
+*~~If you'd rather decide go now (open a build story immediately) or no (drop the candidate), say so — the verdict is the thing on the table.~~ (Superseded: dissolved to accepted-on-merit per #2095 — the verdict is settled, not open.)*

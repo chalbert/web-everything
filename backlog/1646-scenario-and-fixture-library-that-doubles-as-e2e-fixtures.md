@@ -1,17 +1,22 @@
 ---
-kind: decision
+kind: story
+size: 5
 parent: "142"
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "adoptionSignal: a shared capture substrate exists (co-built #1631/#1649)"
 priority: low
 locus: plateau-app
 dateOpened: "2026-06-23"
 preparedDate: "2026-06-23"
-relatedTo: ["1631", "1647", "1649"]
+relatedTo: ["1631", "1647", "1649", "2095"]
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
-tags: [dev-browser, scenarios, fixtures, testing, ai-generated, validation, decision]
+tags: [dev-browser, scenarios, fixtures, testing, ai-generated, accepted-on-merit, dissolved]
 ---
 
 # Scenario and fixture library that doubles as E2E fixtures
+
+> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) merit-conceded dissolve test). The merit is **conceded** — real (clean delta, on-moat) — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger:** a shared capture substrate exists (co-built with #1631/#1649) **and** dual-use (scenario + E2E fixture) demand is shown. Everything below is retained as the **settled** merit rationale (the concession), not an open question.
 
 ## Digest
 
@@ -57,4 +62,4 @@ The moat (per #142): a WE app is **self-describing**, so a captured scenario is 
 - **Un-gate trigger (concrete):** promote to a build story when **(1)** the #142 trace/replay capture artifact has shipped in some form, AND **(2)** a flagship exercise-app run produces at least one captured scenario that gets *re-used as a passing CI fixture* — proving the dual identity carries real value, not speculation.
 - **Skeptic:** "Playwright codegen already records tests — this is reinventing a recorder." *Refuted on the delta, not on novelty:* codegen records selectors and clicks, yielding DOM-bound, brittle tests; the WE scenario records **declared state + action + rules**, so the fixture asserts meaning and reloads into the *semantic* context — a thing a selector recorder structurally cannot do without the declared model. The residual the skeptic is right about is **timing/demand** — hence not-yet, not go.
 
-*If you'd rather decide go now (open a build story immediately) or no (drop the candidate), say so — the verdict is the thing on the table.*
+*~~If you'd rather decide go now (open a build story immediately) or no (drop the candidate), say so — the verdict is the thing on the table.~~ (Superseded: dissolved to accepted-on-merit per #2095 — the verdict is settled, not open.)*

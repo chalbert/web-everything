@@ -1,16 +1,21 @@
 ---
-kind: decision
-blockedBy: ["1930"]
-status: open
+kind: story
+size: 5
+relatedTo: ["2095"]
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "adoptionSignal: a named dynamic-host consumer (plugin host / user-dashboard / multi-tenant) that must register intents at runtime"
 dateOpened: "2026-06-28"
 dateStarted: "2026-06-29"
 preparedDate: "2026-06-29"
 relatedReport: reports/2026-06-28-app-authored-custom-intents-meta-schema-registry.md
 relatedProject: webintents
-tags: [intents, custom-intents, runtime-registration, demand-gated, validation-gate]
+tags: [intents, custom-intents, runtime-registration, demand-gated, accepted-on-merit, dissolved]
 ---
 
 # Runtime register-API for custom intents (demand-gated)
+
+> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) merit-conceded dissolve test). The merit is **conceded** — the shape is ratified upstream (#1913 + CSS `@property`); no design choice remains, only timing — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger:** a named dynamic-host consumer appears (a plugin host / user-dashboard / multi-tenant app that must register intents at runtime) — parked `maturityGated` until then (its upstream #1930 is already resolved). Everything below is retained as the **settled** merit rationale (the concession), not an open question.
 
 Demand-gated follow-up from #1913 ([custom-intents-namespace-by-ownership](../docs/agent/platform-decisions.md)):
 a **runtime** register-API for custom intents, *vs* the ratified **build-time declarative manifest** (the
