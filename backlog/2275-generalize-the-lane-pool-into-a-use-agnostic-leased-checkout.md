@@ -35,21 +35,21 @@ This kills two current warts:
 
 Umbrella for making the pool a use-agnostic leased-checkout allocator, sliced along a real foundational seam:
 
-1. **#2301 — Lease primitive (`acquire`/`release` exclusive hold). ✓ RESOLVED** (delivered via PR #167).
+1. **#2283 — Lease primitive (`acquire`/`release` exclusive hold). ✓ RESOLVED** (delivered via PR #167).
    Scope (1)+(2): `we:scripts/lane-pool.mjs` `acquire` (atomic `O_EXCL` claim of a `.git/.lane-lease` marker
    — lowest free lane or `--lane=N`, then `reset --hard origin/<branch>` so a leased lane may sit on `main`)
    + `release`; `refresh`/`provision` skip a live-leased lane (#2267); pure unit-tested
    `we:scripts/lib/lane-lease.mjs`. Consumer contract: `LANE_SESSION`/`--session` ties `acquire`↔`release`.
-2. **#2302 — Allocator provisions writable `frontierui` + `plateau-app` sibling clones** (foundational for
+2. **#2282 — Allocator provisions writable `frontierui` + `plateau-app` sibling clones** (foundational for
    the migration). The pool root provides only a `frontierui` **symlink** today (render artifact) and no
    `plateau-app`; the drain's cross-repo rebase-drop needs **pushable** sibling clones. Extends the
    `ensureFuiSibling` pattern (`we:scripts/lane-pool.mjs:165-199`).
-3. **#2303 — Migrate `/drain` + `/merge` onto the leased allocator (+ config root).** `blockedBy #2302`.
+3. **#2303 — Migrate `/drain` + `/merge` onto the leased allocator (+ config root).** `blockedBy #2282`.
    Scope (3)+(4): the skills + `we:scripts/merge-ai-prs.mjs` `acquire → work → release` instead of
    `git clone --local … ../we-drain-clean`; delete the bespoke recipe; make the checkout root allocator
    config (no hardcoded `../we-drain-clean` / `.lanes` path).
 
-DAG: `#2267 (✓) → #2301 (✓)`; `#2302` (free); `#2301 + #2302 → #2303`. Incremental delivery — each slice
+DAG: `#2267 (✓) → #2283 (✓)`; `#2282` (free); `#2283 + #2282 → #2303`. Incremental delivery — each slice
 lands valid on its own.
 
 ## Out of scope (follow-on — file separately if pursued)
