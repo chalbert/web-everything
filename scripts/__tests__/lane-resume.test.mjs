@@ -102,61 +102,67 @@ const RESOLVE_PLUMBING = {
   'git push': { status: 0 }, 'gh pr': undefined /* set per-test */,
 };
 
-describe('lane-resume — land (#2202, reuses the #2198 helper)', () => {
-  it('a clean PR → gh pr merge directly (no rebuild)', () => {
+describe('lane-resume — land (#2202/#2290: enqueue + trigger the drain, never merges directly)', () => {
+  const hasLabelEdit = (calls) => calls.some((c) => c.cmd === 'gh' && c.args[1] === 'edit' && c.args.includes('--add-label'));
+  const hasDrainTrigger = (calls) => calls.some((c) => c.cmd === 'node' && c.args.some((a) => String(a).startsWith('--only=')));
+  const hasGhMerge = (calls) => calls.some((c) => c.cmd === 'gh' && c.args[1] === 'merge');
+
+  it('a clean PR → enqueue (label ready-to-merge) + trigger a single-couple drain; NEVER gh pr merge', () => {
     const { run, calls } = scriptedRun({ ...prView(), 'git merge-tree': { status: 0, stdout: 'x' } });
-    // fetch order: gh pr view (info), then straight to gh pr merge — no merge-tree/commit-tree.
     const v = land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] } });
-    expect(v).toMatchObject({ action: 'merged', merged: true, rebased: false });
-    expect(calls.some((c) => c.args[0] === 'commit-tree')).toBe(false);
-    expect(calls.find((c) => c.cmd === 'gh' && c.args[0] === 'pr' && c.args[1] === 'merge')).toBeTruthy();
+    expect(v).toMatchObject({ action: 'enqueued', merged: false, rebased: false });
+    expect(calls.some((c) => c.args[0] === 'commit-tree')).toBe(false); // no rebuild needed
+    expect(hasLabelEdit(calls)).toBe(true);
+    expect(hasDrainTrigger(calls)).toBe(true);
+    expect(hasGhMerge(calls)).toBe(false); // #2290 — lane-resume is not a writer to main
   });
 
-  it('a manifest-only conflict → rebase-drop, then merge (dropped + landed)', () => {
+  it('a manifest-only conflict → rebase-drop, THEN enqueue + trigger the drain (dropped, not merged here)', () => {
     const { run, calls } = scriptedRun({
       'git merge-tree': { status: 1, stdout: mergeTreeConflict(['.lane-manifest.json']) },
       ...RESOLVE_PLUMBING,
       'gh pr': { status: 0 },
     });
     const v = land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] } });
-    expect(v).toMatchObject({ action: 'merged', merged: true, rebased: true });
+    expect(v).toMatchObject({ action: 'rebuilt-enqueued', merged: false, rebased: true });
     expect(calls.some((c) => c.args[0] === 'commit-tree')).toBe(true);
     expect(calls.some((c) => c.args[0] === 'push')).toBe(true);
-    expect(calls.some((c) => c.cmd === 'gh' && c.args[1] === 'merge')).toBe(true);
+    expect(hasLabelEdit(calls)).toBe(true);
+    expect(hasDrainTrigger(calls)).toBe(true);
+    expect(hasGhMerge(calls)).toBe(false);
   });
 
-  it('a real (non-manifest) conflict → skip, never merges', () => {
+  it('a real (non-manifest) conflict → skip, never enqueues or merges', () => {
     const { run, calls } = scriptedRun({ 'git merge-tree': { status: 1, stdout: mergeTreeConflict(['.lane-manifest.json', 'src/app.ts']) } });
     const v = land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] } });
     expect(v.action).toBe('skip');
     expect(v.merged).toBe(false);
-    expect(calls.some((c) => c.cmd === 'gh' && c.args[1] === 'merge')).toBe(false);
+    expect(hasGhMerge(calls)).toBe(false);
+    expect(hasDrainTrigger(calls)).toBe(false); // repaired code first — nothing enqueued
   });
 
-  it('a red `test` → never lands (no merge-tree, no merge)', () => {
+  it('a red `test` → never enqueues (no merge-tree, no label, no trigger)', () => {
     const { run, calls } = scriptedRun({});
     const v = land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [{ name: 'test', conclusion: 'FAILURE' }] } });
     expect(v.action).toBe('red');
     expect(calls.length).toBe(0); // decided from signals alone, touches nothing
   });
 
-  it('dry-run reports the plan without touching git/gh', () => {
+  it('dry-run reports the enqueue plan without touching git/gh', () => {
     const { run, calls } = scriptedRun({});
     const v = land({ prNum: 5, run, dryRun: true, prInfo: { headRefName: 'lane/x-2202', mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] } });
     expect(v.merged).toBe(false);
     expect(v.reason).toMatch(/dry-run/);
+    expect(v.reason).toMatch(/enqueue|drain/);
     expect(calls.length).toBe(0);
   });
 
-  it('after a rebuild, a bounced merge (CI re-running) is soft, not a hard failure', () => {
-    const { run } = scriptedRun({
-      'git merge-tree': { status: 1, stdout: mergeTreeConflict(['.lane-manifest.json']) },
-      ...RESOLVE_PLUMBING,
-      'gh pr': { status: 1, stderr: 'Pull request is not mergeable: the base branch requires all checks to pass' },
-    });
-    const v = land({ prNum: 5, run, prInfo: { headRefName: 'lane/x-2202', mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] } });
-    expect(v.action).toBe('rebuilt-awaiting-ci');
-    expect(v.merged).toBe(false);
-    expect(v.rebased).toBe(true);
+  it('triggerDrain:false enqueues (labels) but does NOT shell the drain — for a batch closeout', () => {
+    const { run, calls } = scriptedRun({ ...prView() });
+    const v = land({ prNum: 5, run, triggerDrain: false, prInfo: { headRefName: 'lane/x-2202', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }] } });
+    expect(v.action).toBe('enqueued');
+    expect(hasLabelEdit(calls)).toBe(true);
+    expect(hasDrainTrigger(calls)).toBe(false);
+    expect(hasGhMerge(calls)).toBe(false);
   });
 });

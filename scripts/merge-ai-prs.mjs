@@ -2,6 +2,15 @@
 /**
  * merge-ai-prs.mjs — sweep OPEN pull requests and merge the AI-generated ones that are safe to land.
  *
+ * SOLE WRITER TO MAIN (#2290). This drain is now the ONLY route that runs `gh pr merge` — /pr (pr-land) and
+ * /finish (lane-resume) stop merging directly and instead enqueue (`ready-to-merge`) + trigger a single-couple
+ * drain pass here (`--only=<pr>`). The one merge call routes through the shared gate (`scripts/lib/pr-merge-gate.mjs`,
+ * caller 'drain'); every other route is REJECTED by that gate unless the documented `WE_MERGE_BREAK_GLASS=1`
+ * admin override is set. A single serialized writer is the prerequisite for JIT NNN numbering. Because it is the
+ * sole writer, the drain also OWNS the post-land WE derived-artifact regen (#2182/#2173, `regenDerivedOnLand`):
+ * after a pass that lands ≥1 WE couple it reproduces `gen:inventory` + `gen:reference-index` and commits+pushes
+ * any change to main (pr-land can no longer do this — it does not merge). Reuses lane-drain's `DERIVED_REGEN`.
+ *
  * WHY: under #2183 every producer completes by opening a ready-to-merge PR; a lander merges them. This is that
  * lander. It lists open PRs, keeps only the ones that are UNAMBIGUOUSLY AI-generated (EVERY commit co-authored
  * by Claude), and merges the ones whose required `test` check is green and that GitHub reports cleanly
@@ -50,6 +59,7 @@
  *   node scripts/merge-ai-prs.mjs --dry-run --json     # machine-readable verdicts
  *   node scripts/merge-ai-prs.mjs                       # merge every qualifying AI PR (green + cleanly mergeable)
  *   node scripts/merge-ai-prs.mjs --pr=12               # consider ONLY PR #12 (still subject to every gate)
+ *   node scripts/merge-ai-prs.mjs --only=12 --label=ready-to-merge --this-repo # #2290 single-couple FAST DRAIN (what /pr + /finish shell to stay instant)
  *   node scripts/merge-ai-prs.mjs --base=main           # restrict to PRs targeting <base> (default: any)
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge # the /drain role: scope to producer-completed PRs, merge in blockedBy order
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run # print the blockedBy-ordered merge plan, merge NOTHING
@@ -82,6 +92,8 @@ import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from './lib/review-escalation.mjs';
 import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
+import { mergePr } from './lib/pr-merge-gate.mjs';
+import { DERIVED_REGEN } from './lane-drain.mjs';
 
 // #2262 — the local, machine-scoped park-age clock the review-escalation watch-window gate reads its
 // `parkedSinceMs` from (see review-park-state.mjs for why losing/corrupting this file is safe). Resolved
@@ -330,6 +342,49 @@ export function siblingCloneName(repo) {
   return CONSTELLATION_REPO_NAMES.includes(name) ? name : null;
 }
 
+/**
+ * #2290 — POST-LAND WE DERIVED-ARTIFACT REGEN, now owned by the drain (the sole writer to main). Under #2183
+ * lanes never commit the derived artifacts (`gen:inventory` → the AGENTS.md inventory block; `gen:reference-index`
+ * → src/_data/referenceIndex.json). pr-land used to regen+commit+push them after its own merge (#2182), but
+ * pr-land no longer merges — and a non-drain push to main is blocked by the pre-push hook — so the regen MUST run
+ * INSIDE the drain. Reuses lane-drain's `DERIVED_REGEN` (imported, lock-step — never a copied array). After a
+ * sweep pass that LANDED ≥1 WE (local/cwd) couple, reproduce the artifacts ONCE and, if they changed, commit +
+ * push them to main AS THE DRAIN (the push carries `MAIN_PUSH_OK=1`, the same override pr-land's sanctioned
+ * main-writes used). WE-only: it skips entirely unless a LOCAL-repo couple landed (a pure frontierui/plateau land
+ * regenerates nothing here — those repos have their own artifacts). Best-effort/non-fatal: a generator/commit/push
+ * failure is REPORTED, never thrown (the couples already landed). `exec(cmd,args,opts)` is injectable (default the
+ * real execFileSync) so this is unit-testable without shelling — the git/npm calls are the I/O boundary.
+ * @param {{exec:Function, cwd?:string, landed?:boolean, dryRun?:boolean, remote?:string, base?:string, regenSet?:Array}} o
+ * @returns {{ran:boolean, done:string[], failed:{cmd:string,detail:string}[], committed:boolean, pushed:boolean, warning?:string}}
+ */
+export function regenDerivedOnLand({ exec, cwd = process.cwd(), landed = false, dryRun = false, remote = 'origin', base = 'main', regenSet = DERIVED_REGEN } = {}) {
+  const skip = { ran: false, done: [], failed: [], committed: false, pushed: false };
+  if (!landed || dryRun || typeof exec !== 'function') return skip;
+  const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
+  const done = [];
+  const failed = [];
+  for (const [cmd, ...args] of regenSet) {
+    try { exec(cmd, args, { cwd, stdio: ['ignore', 'ignore', 'pipe'] }); done.push([cmd, ...args].join(' ')); }
+    catch (e) { failed.push({ cmd: [cmd, ...args].join(' '), detail: firstLine(e) }); }
+  }
+  if (done.length === 0) return { ran: true, done, failed, committed: false, pushed: false, warning: failed.length ? `derived-artifact regen failed (non-fatal): ${failed.map((f) => f.cmd).join(', ')}` : undefined };
+  // What did the deterministic generators change? (tracked mods only — the same read pr-land's runRegen used.)
+  let changed = [];
+  try { changed = String(exec('git', ['diff', '--name-only'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '').split('\n').filter(Boolean); }
+  catch { changed = []; }
+  if (changed.length === 0) return { ran: true, done, failed, committed: false, pushed: false }; // regen was a no-op (inputs didn't change)
+  try {
+    // Explicit pathspec (never `git add -A` — the shared-index guard blocks it, and only these derived files
+    // should ride this commit). Mirror pr-land's runRegen commit message + gated main push exactly (#2182).
+    exec('git', ['add', ...changed], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    exec('git', ['commit', '-m', `chore: regen derived artifacts post-land (#2182) [${done.map((c) => c.replace('npm run ', '')).join(', ')}]`], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    exec('git', ['push', remote, `HEAD:${base}`], { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, MAIN_PUSH_OK: '1' } });
+    return { ran: true, done, failed, committed: true, pushed: true };
+  } catch (e) {
+    return { ran: true, done, failed, committed: false, pushed: false, warning: `derived-artifact regen committed/pushed FAILED (${firstLine(e)}) — run gen:inventory + gen:reference-index on ${base} + push by hand (no force-push)` };
+  }
+}
+
 /** Synchronous sleep (the CLI is fully synchronous — execFileSync throughout — so the watch loop blocks here
  *  between polls without an event loop). Uses Atomics.wait so it spawns nothing. */
 function sleepSync(ms) {
@@ -344,7 +399,10 @@ function runCli() {
   const AS_JSON = !!flags.json;
   const DRY_RUN = !!flags['dry-run'];
   const REQUIRED = typeof flags.check === 'string' ? flags.check : 'test';
-  const onlyPr = flags.pr != null ? String(flags.pr) : null;
+  // #2290 — `--only=<pr>` (alias `--couple=<pr>`, and the legacy `--pr=<pr>`) scopes the sweep to ONE PR: the
+  // single-couple FAST DRAIN that /pr (pr-land) and /finish (lane-resume) shell so they still feel instant
+  // while the drain stays the sole writer to main. Same gated land path as a full sweep, just number-filtered.
+  const onlyPr = flags.only != null ? String(flags.only) : (flags.couple != null ? String(flags.couple) : (flags.pr != null ? String(flags.pr) : null));
   const base = typeof flags.base === 'string' ? flags.base : null;
   // #2188 — the drain↔/merge convergence: `--label ready-to-merge` scopes the sweep to producer-completed PRs
   // (the F1 signal), so this ONE lander serves both `/merge` (bare = every AI PR) and `/drain` (label-scoped +
@@ -715,7 +773,10 @@ function runCli() {
       let progressed = false;
       for (const c of plan.ready) {
         try {
-          execFileSync('gh', ['pr', 'merge', String(c.num), ...repoFlag(c.repo), '--merge', '--delete-branch'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+          // #2290 — the drain is the SOLE writer to main: the one `gh pr merge` now routes through the shared
+          // gate (caller 'drain' — the only caller the gate permits). Behaviour is identical to the prior
+          // inline call (`gh pr merge <n> [--repo …] --merge --delete-branch`, throw on a non-zero gh exit).
+          mergePr({ pr: c.num, repo: c.repo, method: 'merge', caller: 'drain' });
           merged.push({ num: c.num, repo: c.repo }); progressed = true;
           remaining = remaining.filter((x) => !sameCand(x, c)); // merged → item leaves the open set (frees dependents)
           if (!AS_JSON) process.stderr.write(`  ✓ merged ${repoTag(c.repo)}${c.num}${c.item ? ` (#${c.item})` : ''}\n`);
@@ -751,16 +812,31 @@ function runCli() {
   // pull only makes sense for the LOCAL clone's repo, so it fires only when a LOCAL-repo PR merged (a remote-
   // repo merge advanced that repo's origin, which this clone doesn't track).
   let localSynced = false;
-  if (!DRY_RUN && merged.some((m) => isLocalRepo(m.repo))) {
+  const landedLocal = !DRY_RUN && merged.some((m) => isLocalRepo(m.repo));
+  if (landedLocal) {
     try { execFileSync('git', ['pull', '--ff-only', '--autostash'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); localSynced = true; }
     catch { localSynced = false; }
     if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ local main fast-forwarded to origin (autostash preserved local edits)\n` : `  · local main NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`);
   }
 
+  // #2290 — the drain is the sole writer to main, so the WE derived-artifact regen (#2182/#2173) moves INTO the
+  // drain: after a pass that landed ≥1 WE (local) couple, reproduce the artifacts ONCE and, if changed, commit +
+  // push them to main as the drain (pr-land can no longer do this — it does not merge). Best-effort/non-fatal.
+  let derived = { ran: false, done: [], failed: [], committed: false, pushed: false };
+  if (landedLocal) {
+    if (!AS_JSON) process.stderr.write(`  ↻ regenerating WE derived artifacts once (${DERIVED_REGEN.map((c) => c.join(' ')).join(', ')})…\n`);
+    derived = regenDerivedOnLand({ exec: execFileSync, cwd: process.cwd(), landed: true, dryRun: DRY_RUN });
+    if (!AS_JSON) {
+      if (derived.committed) process.stderr.write(`  ✓ derived artifacts regenerated + pushed to main (${derived.done.join(', ')})\n`);
+      else if (derived.ran && !derived.warning) process.stderr.write(`  · derived regen: no change (inputs unchanged)\n`);
+      if (derived.warning) process.stderr.write(`  ⚠ ${derived.warning}\n`);
+    }
+  }
+
   // #2222 — a healed tip is a PENDING rebuild (CI re-running on the renumbered tree), so it counts as progress
   // for the watch's idle accounting exactly like a rebase-drop rebuild — it lands on a later pass.
   const pendingAll = [...pendingRebased, ...healed];
-  const result = { ok: true, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
+  const result = { ok: true, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred };
   }; // end sweepOnce
 

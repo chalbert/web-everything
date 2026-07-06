@@ -14,19 +14,23 @@
  *   node scripts/lane-resume.mjs discover [--json]     # classify + blockedBy-order every stuck lane
  *   node scripts/lane-resume.mjs land <pr> [--dry-run] [--json]   # land ONE stuck lane PR (#2202)
  *
- * LAND (#2202) — the durable, tested version of the 2026-07-03 scratchpad plumbing. Reuses the ONE #2198
+ * LAND (#2202, #2290) — the durable, tested version of the 2026-07-03 scratchpad plumbing. Reuses the ONE #2198
  * rebase-drop-manifest helper (`scripts/lib/rebase-drop-manifest.mjs`, shared with the label lander): for a PR
  * whose required `test` is green but which is only CONFLICTING/BEHIND, it rebuilds the tip onto main (manifest
- * dropped) via pure plumbing — no branch checkout — then `gh pr merge`s it. A red `test` (a real bug) or a real
- * (non-manifest) conflict is NOT landed — the finisher repairs code first. `UNSTABLE` + `test=pass` IS mergeable
- * (only `test` is required; `cla`/Workers-Builds are non-required). So `/resume` = discover-then-repair-then-
- * `land` (or hand a now-clean PR to `/drain`, which shares the same helper).
+ * dropped) via pure plumbing — no branch checkout. #2290: lane-resume NO LONGER merges directly — the drain is
+ * the sole writer to main. Instead it ENQUEUES (ensures the `ready-to-merge` label) and TRIGGERS a single-couple
+ * drain pass (`merge-ai-prs.mjs --only=<pr>`) that lands the recovered lane through the shared gate. A red `test`
+ * (a real bug) or a real (non-manifest) conflict is NOT enqueued — the finisher repairs code first. `UNSTABLE` +
+ * `test=pass` IS mergeable (only `test` is required; `cla`/Workers-Builds are non-required). So `/finish` =
+ * discover-then-repair-then-`land` (enqueue + trigger the drain, which shares the same helper).
  *
  * Guard-safe: read-only `discover` (git show / gh list); `land` only pushes to a `lane/*` ref (the #1934
- * carve-out) + `gh pr merge` — never a branch checkout. Fails soft — a PR whose manifest can't be read is
+ * carve-out) + labels/triggers the drain — never a branch checkout, never a direct `gh pr merge` (any such
+ * merge would be rejected by `scripts/lib/pr-merge-gate.mjs`). Fails soft — a PR whose manifest can't be read is
  * reported as `unknown`, never crashes the plan.
  */
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 
 const READY_LABEL = 'ready-to-merge';
@@ -108,12 +112,16 @@ export function landDecision({ mergeable, mergeState, testConclusion } = {}) {
 }
 
 /**
- * Land ONE stuck lane PR (#2202): the durable version of the 2026-07-03 scratchpad plumbing. Reuses the #2198
- * `rebaseDropManifest` helper. `run(cmd,args,opts)->{status,stdout,stderr}` and `prInfo` are injectable so this
- * is unit-testable without a live repo/GitHub. Returns a verdict object (never throws on a git/gh non-zero).
+ * Land ONE stuck lane PR (#2202, #2290): repair-then-ENQUEUE. Reuses the #2198 `rebaseDropManifest` helper.
+ * #2290 — lane-resume no longer merges directly (the drain is the sole writer to main): after any needed
+ * rebase-drop rebuild, it ensures the `ready-to-merge` label and triggers a single-couple drain pass
+ * (`node <drainScript> --only=<pr>`) that lands the couple through the shared merge gate. Best-effort trigger —
+ * a park/failure just leaves the PR labelled for the standalone drain. `run(cmd,args,opts)->{status,stdout,stderr}`,
+ * `prInfo`, and `drainScript` are injectable so this is unit-testable without a live repo/GitHub. Returns a
+ * verdict object (never throws on a git/gh non-zero).
  * @returns {{action:string, pr:(number|string), merged:boolean, reason:string, rebased?:boolean}}
  */
-export function land({ prNum, run = gitRunner, prInfo = null, base = 'origin/main', dryRun = false } = {}) {
+export function land({ prNum, run = gitRunner, prInfo = null, base = 'origin/main', dryRun = false, label = READY_LABEL, triggerDrain = true, drainScript = 'scripts/merge-ai-prs.mjs' } = {}) {
   if (prNum == null) return { action: 'error', merged: false, reason: 'no PR number (usage: lane-resume.mjs land <pr>)' };
   if (!prInfo) {
     const v = run('gh', ['pr', 'view', String(prNum), '--json', 'number,headRefName,mergeable,mergeStateStatus,statusCheckRollup']);
@@ -126,7 +134,7 @@ export function land({ prNum, run = gitRunner, prInfo = null, base = 'origin/mai
   if (decision.action === 'red') return { action: 'red', pr: prNum, merged: false, reason: decision.reason };
   if (decision.action === 'not-green') return { action: 'not-green', pr: prNum, merged: false, reason: decision.reason };
   if (!laneRef) return { action: 'error', pr: prNum, merged: false, reason: 'the PR has no head ref (gh pr view returned none)' };
-  if (dryRun) return { action: decision.action, pr: prNum, merged: false, laneRef, reason: `dry-run: would ${decision.action === 'rebuild' ? 'rebase-drop the manifest then merge' : 'merge'} #${prNum} (${laneRef})` };
+  if (dryRun) return { action: decision.action, pr: prNum, merged: false, laneRef, reason: `dry-run: would ${decision.action === 'rebuild' ? 'rebase-drop the manifest then ' : ''}enqueue #${prNum} (${laneRef}) — label ${label} + trigger a single-couple drain` };
 
   let rebased = false;
   if (decision.action === 'rebuild') {
@@ -135,13 +143,12 @@ export function land({ prNum, run = gitRunner, prInfo = null, base = 'origin/mai
     if (r.action === 'error') return { action: 'error', pr: prNum, merged: false, reason: r.reason };
     rebased = true;
   }
-  const mv = run('gh', ['pr', 'merge', String(prNum), '--merge', '--delete-branch']);
-  if (mv.status !== 0) {
-    // After a rebuild the tip changed and `test` is re-running, so an immediate merge bounce is EXPECTED —
-    // land on a later `/drain` pass (the shared helper's watch behaviour), not a hard failure.
-    return { action: rebased ? 'rebuilt-awaiting-ci' : 'merge-failed', pr: prNum, merged: false, rebased, reason: (String(mv.stderr || '').split('\n')[0] || 'gh pr merge failed') };
-  }
-  return { action: 'merged', pr: prNum, merged: true, rebased, reason: rebased ? 'rebased onto main (manifest dropped) + merged' : 'merged (clean)' };
+  // #2290 — ENQUEUE instead of merging: ensure the ready-to-merge label, then trigger a single-couple drain (the
+  // sole writer to main lands it via the shared gate). Both are best-effort — a label race or a park/failure just
+  // leaves the PR labelled for the standalone drain; lane-resume never itself calls `gh pr merge`.
+  run('gh', ['pr', 'edit', String(prNum), '--add-label', label]);
+  if (triggerDrain) run('node', [drainScript, `--only=${prNum}`, '--label', label, '--this-repo']);
+  return { action: rebased ? 'rebuilt-enqueued' : 'enqueued', pr: prNum, merged: false, rebased, reason: rebased ? 'rebased onto main (manifest dropped), labelled + single-couple drain triggered' : 'labelled ready-to-merge + single-couple drain triggered' };
 }
 
 // ─────────────────────────────────── IO helpers ───────────────────────────────────
@@ -216,11 +223,13 @@ if (IS_CLI) {
     const prNum = positional[1];
     if (prNum == null) { process.stderr.write('usage: lane-resume.mjs land <pr> [--dry-run] [--json]\n'); process.exit(2); }
     execFileSync('git', ['fetch', 'origin', '--quiet'], { stdio: 'ignore' });
-    const verdict = land({ prNum, dryRun: argv.includes('--dry-run') });
+    // #2290 — resolve the drain script off this module's dir so `--only` works from any cwd.
+    const drainScript = fileURLToPath(new URL('./merge-ai-prs.mjs', import.meta.url));
+    const verdict = land({ prNum, dryRun: argv.includes('--dry-run'), drainScript });
     if (asJson) process.stdout.write(JSON.stringify(verdict, null, 2) + '\n');
     else process.stderr.write(`lane-resume land #${verdict.pr}: ${verdict.merged ? '✓ merged' : verdict.action} — ${verdict.reason}\n`);
-    // 0 = merged / dry-run / clean; rebuilt-awaiting-ci is soft (land later); red/skip/error/merge-failed = 2.
-    const soft = ['merged', 'clean', 'rebuild', 'rebuilt-awaiting-ci', 'not-green'];
+    // 0 = enqueued / dry-run / clean / not-green (soft — the drain lands later); red/skip/error = 2.
+    const soft = ['enqueued', 'rebuilt-enqueued', 'clean', 'rebuild', 'rebuilt-awaiting-ci', 'not-green'];
     process.exit(verdict.merged || soft.includes(verdict.action) ? 0 : 2);
   }
   else { process.stderr.write(`unknown subcommand: ${cmd}\nusage: lane-resume.mjs discover [--json] | land <pr> [--dry-run] [--json]\n`); process.exit(2); }

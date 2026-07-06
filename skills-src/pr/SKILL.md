@@ -7,9 +7,12 @@ description: Open a self-approved pull request for the current committed work an
 
 The whole mechanism lives in **[scripts/pr-land.mjs](../../../scripts/pr-land.mjs)** — this skill
 is the trigger + the ceremony around one invocation, so there is nothing to keep in sync here. The
-flow is identical to what the `/workflow` integrator + the #2162 drain use to land a lane: a
-**self-approved** PR (`gh pr create`, **0 required reviewers** + the required `test` check, #2151/#2152),
-author merges their own PR once CI is green. GitHub's native merge queue stays OFF.
+flow is identical to what the `/workflow` integrator uses: a **self-approved** PR (`gh pr create`,
+**0 required reviewers** + the required `test` check, #2151/#2152). **#2290 — pr-land no longer merges:
+the drain is the SOLE writer to `main`.** `/pr` opens the PR, waits for green, labels it `ready-to-merge`,
+and **triggers a single-couple fast drain** (`merge-ai-prs.mjs --only=<pr>`) that lands it — so `/pr` still
+feels instant while a single serialized writer owns every merge (the prerequisite for JIT NNN numbering).
+GitHub's native merge queue stays OFF.
 
 ## Preconditions
 
@@ -35,13 +38,18 @@ author merges their own PR once CI is green. GitHub's native merge queue stays O
    drops into an interactive body prompt that **fails headless** (there is no `--fill` fallback for a
    remote-only `lane/*` head). So a bodyless run errors on create. Compose the body (the change summary,
    plus any `/review` findings/dismissals audit trail) to a file first.
-4. **Open + land** (self-approved, wait for the `test` check, merge, delete the ref):
+4. **Open + hand off** (self-approved, wait for the `test` check, label green, trigger the drain — #2290
+   pr-land NEVER merges):
    ```
    node scripts/pr-land.mjs --ref=lane/<slug> --sha=HEAD --base=main --body-file=<path>
    ```
-   - `--label-on-green` is the **producer hand-off** mode (#2199): open the PR, **wait for the required
-     checks, apply `ready-to-merge` only once they are green**, then STOP — the drain lands it. Use this
-     (not `--no-wait`) when you want the drain to merge; the label then truly means "fully checked".
+   - **Default:** open → wait for required checks → label `ready-to-merge` when green → **trigger a
+     single-couple fast drain** (`merge-ai-prs.mjs --only=<pr> --this-repo`) that lands it. The trigger is
+     best-effort: if review parks the PR (or the drain hiccups), `/pr` still exits success with the PR
+     labelled and the standalone drain lands it later. **No `gh pr merge` runs from pr-land.**
+   - `--label-on-green` is the **batch producer** mode (#2199): open the PR, **wait for the required
+     checks, apply `ready-to-merge` only once they are green**, then STOP — does NOT trigger a drain (a
+     `/workflow` or `/batch` closeout runs the standalone drain over the whole set).
    - `--no-wait` opens the self-approved PR **UNLABELLED** and leaves it (CI unconfirmed — the label lander
      won't collect it until something labels it). Use only when the user just wants the PR raised now and
      will land it themselves.
@@ -49,15 +57,18 @@ author merges their own PR once CI is green. GitHub's native merge queue stays O
      eagerly at open, so a red PR never enters the drain's queue. In the default land path (above) and the
      `--label-on-green` path `pr-land` applies it once CI passes. Pass `--no-label` to opt out; `--label=<name>`
      overrides the name.
-   - `--fallback-git` degrades to a local `git merge --no-ff` + push when `gh` is unavailable.
+   - `--fallback-git` degrades to a local `git merge --no-ff` + push. **#2290 — this is a write to `main`,
+     so it is routed through the shared merge gate (`scripts/lib/pr-merge-gate.mjs`, caller `pr-land`) and is
+     BLOCKED unless the documented `WE_MERGE_BREAK_GLASS=1` emergency admin override is set (which logs a loud
+     audit line).** Normal landing goes through the drain, never `--fallback-git`.
    - If `pr-land` still fails on create, the manual equivalent is `gh pr create --base main
-     --head lane/<slug> --title "…" --body-file <path>` then `gh pr merge <n> --merge --delete-branch`
-     once the required `test` check is green (only `test` is required on `main`; a failing `cla` check
-     is non-blocking).
-5. **Sync the local checkout** — after a clean merge `pr-land` **auto ff-syncs local `main`** to the
-   advanced `origin/main` (`git pull --ff-only --autostash`, best-effort, #2205) — the same post-merge sync
-   the drain runs, so no land route leaves the checkout it ran in behind. If you landed from a lane clone,
-   also reset that lane back to `origin/main` so the pool stays reusable.
+     --head lane/<slug> --title "…" --body-file <path>` then **label it** `gh pr edit <n> --add-label
+     ready-to-merge` and run the drain (`node scripts/merge-ai-prs.mjs --only=<n> --this-repo`) — never
+     `gh pr merge` yourself (the gate rejects any non-drain merge).
+5. **Sync the local checkout** — the drain (which lands the PR) ff-syncs the lane clone's local `main` to the
+   advanced `origin/main`; pr-land best-effort ff-syncs the user's PRIMARY checkout too (`git pull --ff-only
+   --autostash`, #2205). If you landed from a lane clone, also reset that lane back to `origin/main` so the
+   pool stays reusable.
 
 ## Exit codes (surface these, never merge a red PR)
 
