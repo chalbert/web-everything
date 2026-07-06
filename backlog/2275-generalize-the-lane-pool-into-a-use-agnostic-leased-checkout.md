@@ -45,6 +45,26 @@ This kills two current warts:
 4. **Checkout root is allocator config, not a hardcoded path.** No skill embeds `../we-drain-clean` or the
    `.lanes/…` root literally; the root comes from the allocator so it can move (see follow-on).
 
+## Status — scope (1)+(2) delivered 2026-07-05; (3)+(4) remain
+
+**Done (the lease primitive — the ownership fix):** `we:scripts/lane-pool.mjs` gains **`acquire`** (exclusive,
+atomic `O_EXCL` claim of a `.git/.lane-lease` marker — auto-picks the lowest free lane or honors `--lane=N`,
+then `reset --hard origin/<branch>` so the leased lane sits on `main` per scope (2)) and **`release`**
+(ownership-guarded, `--force`/`--all`). `refresh`/`provision` now **skip a live-leased lane** exactly like a
+dirty/ahead one (#2267), so a held lane is never reset out from under its consumer; `status` surfaces the
+lease. Decision logic is the pure, unit-tested `we:scripts/lib/lane-lease.mjs` (TTL staleness + reclaim,
+acquirability, lowest-index choice). **Consumer contract:** set `LANE_SESSION=<slug>` (inherited by every
+child process) or pass `--session` so `acquire` and the later `release` share one identity — a per-process
+pid/ppid is *not* stable across separate CLI calls (learned live).
+
+**Remaining — (3) migrate `/drain` + `/merge` off the bespoke `../we-drain-clean` clone, and (4) config
+root.** Deferred as a separate careful pass because it touches the live merge queue and has a real subtlety:
+the drain's cross-repo rebase-drop needs **writable sibling clones** of `frontierui` *and* `plateau-app` at
+the checkout root, but the pool root today provides only a `frontierui` **symlink** (a render artifact, not a
+pushable clone) and no `plateau-app` at all — so a naive `acquire`-and-`cd` migration would *regress*
+cross-repo rebase-drop. The migration must first teach the allocator to provision those sibling clones (or
+have the drain provision them into the leased lane's parent). Track (3)+(4) as the next slice of this item.
+
 ## Out of scope (follow-on — file separately if pursued)
 
 - **Managed root outside the workspace.** Point the allocator root at an OS-standard data/state dir
