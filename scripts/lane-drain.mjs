@@ -172,6 +172,14 @@ export const DERIVED_REGEN = [
   ['npm', 'run', 'gen:reference-index'],
 ];
 
+// The exact files those generators write — the ONLY paths a post-land regen commit may carry. A regen commit
+// must be scoped to these by an explicit pathspec, NEVER a bare `git diff --name-only` sweep: the drain runs in
+// a checkout that can carry unrelated dirty tracked files (a concurrent session's in-flight claim), and a broad
+// diff would sweep those FOREIGN edits into the "derived artifacts" commit and publish them (the shared-index
+// commit race — same hazard `finalizeLand`'s explicit pathspec guards against). Kept in lock-step with
+// DERIVED_REGEN above: one entry per generator's output.
+export const DERIVED_OUTPUT_PATHS = ['AGENTS.md', 'src/_data/referenceIndex.json'];
+
 /**
  * Decide the post-drain reconcile for a couple, from a drain-one result (#2175 reopen-on-fail). Pure — the
  * git/backlog actions are the CLI boundary. Returns `{ deleteManifest, reopen }`:

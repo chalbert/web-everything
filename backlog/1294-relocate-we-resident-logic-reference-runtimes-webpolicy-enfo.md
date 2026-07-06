@@ -53,8 +53,20 @@ vectors. Webpolicy is the first slice; the remaining #1078 subsystems follow.
 - **webcompliance — CARVED.** Next ready facts→verdict engine, 5-story cascade C1–C5: #1808 (extract
   contract) → #1814 (relocate runtime) → #1809 (binding+vectors) → #1810 (docs page) → #1815 (delete
   runtime).
-- **process, webtraits** (engines, non-facts→verdict) and **webcases** (mixed tooling, #1566) — could
-  not split: need a per-subsystem conformance-shape / placement read first.
-- **reliability, intl, analytics, webtheme** (non-engine planes) — gated on the conformance-model
-  decision **#1816** (filed `priority: low`: the #899 verdict-vector model doesn't fit formatting /
-  aggregation / token-projection / provider-strategy).
+- **reliability, intl, analytics, webtheme** (non-engine planes) — CARVED + resolved once the
+  conformance-model decision **#1816** ratified (closed matcher vocabulary `{exact · deep-equal ·
+  parts-structure · predicate}`, codified `we:docs/agent/platform-decisions.md#non-verdict-conformance-matcher`).
+- **process — CARVED** (per `we:reports/2026-07-05-backlog-split-analysis.md`). The `webprocess`
+  self-driven-artefact runtime (`we:process/{driver,registry,provider,index}.ts`) is delivery impl; both
+  old gates cleared. 5-slice cascade P1–P5: #2293 (publish contract entry) → #2294 (relocate runtime→FUI) →
+  #2295 (binding+vectors) → #2296 (plateau-iframe docs page) → #2297 (delete WE runtime).
+- **webtraits — partial descope + parked fork.** `we:webtraits/intentProfileResolver.ts` (#776) is
+  ratified WE-resident (the `#custom-intents-namespace-by-ownership` decision / #1948 names it "the #776 WE
+  resolver", FUI's `fui:tools/intent-resolver/` merely invokes it) → **descoped**. `we:webtraits/surfaceIntentResolver.ts`
+  (#1911) buries a definition-vs-impl placement fork (its `surfaceCss()` emits a CSS string like webtheme's
+  relocated `compileToCss`) → filed as decision **#2298** (open · `priority: low`).
+- **webcases — descope 3 + 2 parked forks.** `we:webcases/requirementValidator.ts`,
+  `we:webcases/compileRequirement.ts`, `we:webcases/caseToVector.ts` are validate-scripts / deterministic
+  codegen → **descoped** (legitimately WE per rule #6). `we:webcases/driftCheck.ts` (verifier placement,
+  #334-vs-#1566) → decision **#2299** (open · `priority: low`); `we:webcases/generateCase.ts` (WE authoring
+  loop vs Plateau generation product, #475) → decision **#2300** (open · `priority: low`).
