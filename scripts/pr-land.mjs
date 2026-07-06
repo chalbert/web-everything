@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 /**
- * pr-land.mjs — land a lane ref onto `main` via a SELF-APPROVED pull request (#2138 Fork 5, #2153).
+ * pr-land.mjs — the `/pr` PRODUCER: open a self-approved PR, wait for green, label it, and hand the merge to
+ * the drain (#2138 Fork 5, #2153; #2290).
+ *
+ * SOLE WRITER TO MAIN (#2290). pr-land NO LONGER merges: the drain is the only route that runs `gh pr merge`.
+ * The default path opens the self-approved PR, waits for required checks, labels it `ready-to-merge` when green,
+ * then triggers a single-couple FAST DRAIN (`merge-ai-prs.mjs --only=<pr>`) so `/pr` still feels instant — the
+ * drain lands it. The trigger is best-effort: if it can't land (e.g. review parks the PR), pr-land still exits
+ * success with the PR labelled and the standalone drain picks it up later. The retained `--fallback-git` local
+ * merge is ALSO a write to main, so it now routes through the shared gate (`scripts/lib/pr-merge-gate.mjs`,
+ * caller 'pr-land') and is BLOCKED unless the documented `WE_MERGE_BREAK_GLASS=1` admin override is set.
  *
  * WHY: #2138 (ruled) moves lane landing onto PRs as the review/CI surface — each ready lane opens a
  * self-approved PR (`gh pr create`, 0 required reviewers + a required CI check, #2151/#2152) and the
@@ -64,8 +73,10 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
+import { assertMayMerge } from './lib/pr-merge-gate.mjs';
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -109,10 +120,10 @@ const HEAL = !flags['no-heal'];
 // manually-landed change whose inputs feed a derived artifact never leaves `main` with stale output.
 // Gate behind `--no-regen` to allow opt-out (mirrors `--no-heal`). Never runs on --dry-run / --no-wait.
 const REGEN = !flags['no-regen'];
-// Post-land primary-checkout sync. pr-land runs in a LANE clone; `syncLocalMain` only ff-syncs THAT checkout,
-// so the user's PRIMARY checkout (a separate directory) drifts behind origin/main on every land. After a clean
-// merge, fast-forward the primary too so it never lags what we just landed. Gate behind `--no-sync-primary`
-// (mirrors --no-heal/--no-regen). Best-effort, never fails a land.
+// Post-land primary-checkout sync. pr-land runs in a LANE clone; the drain that lands the PR ff-syncs THAT
+// clone's local main, but the user's PRIMARY checkout (a separate directory) drifts behind origin/main on every
+// land. After a land, fast-forward the primary too so it never lags what we just landed. Gate behind
+// `--no-sync-primary` (mirrors --no-heal/--no-regen). Best-effort, never fails a land.
 const SYNC_PRIMARY = !flags['no-sync-primary'];
 // The producer-certified `ready-to-merge` label (#2196) — applied to every opened PR so the label lander
 // (/drain) can collect ALL AI-generated work, whatever session opened it. `--no-label` opts out; `--label=<n>`
@@ -129,18 +140,21 @@ const LABEL_ON_GREEN = !!flags['label-on-green'];
 // ── PURE helpers (unit-tested in scripts/__tests__/pr-land.test.mjs) ──────────────────────────────────
 
 /**
- * Resolve the producer's land plan from the wait/label flags (#2199). Pure. The label is NEVER applied before
- * the required checks are green — so the three modes are:
- *   - `label-on-green` (`--label-on-green`): wait for required checks → label when green → STOP (drain merges).
+ * Resolve the producer's land plan from the wait/label flags (#2199, #2290). Pure. pr-land NEVER merges any
+ * more — the drain is the sole writer to main — so `mergeWhenGreen` is always false; the label is NEVER applied
+ * before the required checks are green. The three modes:
+ *   - `land`           (default): wait for required checks → label when green → TRIGGER a single-couple fast
+ *     drain (`triggerDrain`) so /pr feels instant. Does NOT merge here.
+ *   - `label-on-green` (`--label-on-green`): wait → label when green → STOP. Pure producer: does not trigger a
+ *     drain (a batch/workflow closeout runs the standalone drain over the whole set).
  *   - `open-only`      (`--no-wait`, no label-on-green): open, do NOT wait, do NOT label → left for a drain
  *     that re-checks (an UNLABELLED PR — the label lander won't collect it until something labels it).
- *   - `land`           (default): wait for required checks → label when green → merge here.
- * @returns {{waitForChecks:boolean, labelWhenGreen:boolean, mergeWhenGreen:boolean, mode:string}}
+ * @returns {{waitForChecks:boolean, labelWhenGreen:boolean, mergeWhenGreen:boolean, triggerDrain:boolean, mode:string}}
  */
 export function planPrLand({ wait, labelOnGreen } = {}) {
-  if (labelOnGreen) return { waitForChecks: true, labelWhenGreen: true, mergeWhenGreen: false, mode: 'label-on-green' };
-  if (!wait) return { waitForChecks: false, labelWhenGreen: false, mergeWhenGreen: false, mode: 'open-only' };
-  return { waitForChecks: true, labelWhenGreen: true, mergeWhenGreen: true, mode: 'land' };
+  if (labelOnGreen) return { waitForChecks: true, labelWhenGreen: true, mergeWhenGreen: false, triggerDrain: false, mode: 'label-on-green' };
+  if (!wait) return { waitForChecks: false, labelWhenGreen: false, mergeWhenGreen: false, triggerDrain: false, mode: 'open-only' };
+  return { waitForChecks: true, labelWhenGreen: true, mergeWhenGreen: false, triggerDrain: true, mode: 'land' };
 }
 
 /** The `gh pr merge` method flag for a merge method (default merge = --no-ff history the drain wants). */
@@ -293,10 +307,29 @@ function runCli() {
   const tryGit = (args) => { try { return gitC(args); } catch { return null; } };
   const ghC = (args) => execFileSync('gh', args, { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
+  // #2290 — the single-couple FAST DRAIN pr-land shells after labelling green so /pr still feels instant. The
+  // drain is the sole writer to main; scoping it to this ONE PR (+ --this-repo) lands the couple immediately
+  // instead of waiting for a full standalone sweep. Resolved off this module's own dir so it works from any cwd.
+  const DRAIN_SCRIPT = resolve(fileURLToPath(new URL('./merge-ai-prs.mjs', import.meta.url)));
+  // Best-effort: a non-zero drain (e.g. review parks the PR, or gh hiccups) NEVER fails the land — the PR is
+  // already labelled `ready-to-merge`, so the standalone drain lands it on a later pass. Inherits stderr so the
+  // drain's own land/park narration surfaces under /pr.
+  const triggerSingleCoupleDrain = (prNum) => {
+    if (!LABEL) return { triggered: false, reason: 'no label (nothing for the drain to collect)' };
+    try {
+      execFileSync('node', [DRAIN_SCRIPT, `--only=${prNum}`, `--label=${LABEL}`, '--this-repo'], { cwd: REPO, stdio: ['ignore', 'inherit', 'inherit'] });
+      return { triggered: true };
+    } catch (e) {
+      if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · single-couple drain for #${prNum} did not land it (${String(e.message || e).split('\n')[0]}) — it stays labelled ${LABEL}; the standalone drain lands it later\n`);
+      return { triggered: true, landed: false, detail: String(e.message || e).split('\n')[0] };
+    }
+  };
+
   function emit(result, exitCode) {
     if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
     else {
-      const tag = result.merged ? '✓ merged' : result.reason === 'dry-run' ? '· dry-run' : result.reason === 'opened' ? '· opened (no-wait)' : '✗ not merged';
+      const tag = result.merged ? '✓ merged' : result.reason === 'dry-run' ? '· dry-run' : result.reason === 'opened' ? '· opened (no-wait)'
+        : result.reason === 'enqueued' ? '✓ enqueued (drain lands it)' : result.reason === 'labelled-on-green' ? '✓ labelled (drain lands it)' : '✗ not merged';
       process.stderr.write(`pr-land [${result.repo}] ${tag}: ${result.detail}\n`);
     }
     process.exit(exitCode);
@@ -319,7 +352,6 @@ function runCli() {
   // source has multiple commits, its own HEAD subject is the natural PR title.
   const derivedTitle = TITLE ?? (tryGit(['log', '-1', '--format=%s', SRC]) || `land ${REF}`);
   const createArgs = buildCreateArgs({ base: BASE, head: REF, title: derivedTitle, body: BODY });
-  const mergeArgsPreview = buildMergeArgs({ pr: '<pr>', method: METHOD });
 
   if (DRY_RUN) {
     emit({
@@ -331,13 +363,14 @@ function runCli() {
         PLAN.waitForChecks ? 'poll: gh pr view <pr> mergeStateStatus + gh pr checks <pr> --required  (wait until green; abort on red)' : '(--no-wait: skip check-wait, leave for a later drain pass)',
         // #2199 — the label is applied ONLY after the required checks are green, never eagerly at open.
         LABEL && PLAN.labelWhenGreen ? `gh pr edit <pr> --add-label ${LABEL}   # #2196 label — applied ONLY once required checks pass (#2199)` : (PLAN.mode === 'open-only' ? '(--no-wait: PR opened UNLABELLED — CI not confirmed green; use --label-on-green)' : '(--no-label)'),
-        PLAN.mergeWhenGreen ? `gh ${mergeArgsPreview.join(' ')}` : '(label-on-green: STOP after labelling — the drain lands it)',
-        HEAL ? 'post-land: id-collision heal (backlog-renumber-collisions.mjs --json)' : '(--no-heal: skip id-collision heal)',
-        REGEN ? `post-land: derived-artifact regen (${buildRegenArgs().map((c) => c.join(' ')).join(', ')})` : '(--no-regen: skip derived-artifact regen)',
-        SYNC_PRIMARY ? `post-land: ff-sync primary checkout to ${REMOTE}/${BASE} (git -C <primary> pull --ff-only --autostash)` : '(--no-sync-primary: skip primary ff-sync)',
-        FALLBACK_GIT ? `fallback on failure: git merge --no-ff ${REMOTE}/${REF} + push ${REMOTE} ${BASE}` : null,
+        // #2290 — pr-land NEVER merges (the drain is the sole writer to main). The default path triggers a
+        // single-couple fast drain so /pr stays instant; --label-on-green stops (a standalone drain lands it).
+        PLAN.triggerDrain
+          ? `node scripts/merge-ai-prs.mjs --only=<pr> --label=${LABEL || 'ready-to-merge'} --this-repo   # #2290 single-couple FAST DRAIN (the drain lands it — pr-land never merges)`
+          : '(label-on-green: STOP after labelling — the standalone drain lands it; no direct merge here)',
+        FALLBACK_GIT ? `fallback on failure (BREAK-GLASS only, WE_MERGE_BREAK_GLASS=1): git merge --no-ff ${REMOTE}/${REF} + push ${REMOTE} ${BASE}` : null,
       ].filter(Boolean),
-      detail: `would land ${SRC} (${refSha.slice(0, 8)}) onto ${BASE} via a self-approved PR from ${REF}`,
+      detail: `would open+label ${SRC} (${refSha.slice(0, 8)}) as a self-approved PR from ${REF}${PLAN.triggerDrain ? ' and trigger a single-couple drain' : ''} — the drain lands it onto ${BASE}`,
     }, 0);
   }
 
@@ -424,63 +457,35 @@ function runCli() {
   // Required checks are GREEN — NOW apply the producer-certified label (#2199: never before this point).
   if (PLAN.labelWhenGreen) applyLabel();
 
-  // label-on-green: the producer's job ends here — the PR is green + labelled; the drain lands it. No merge.
-  if (!PLAN.mergeWhenGreen) {
-    emit({ repo: REPO, merged: false, reason: 'labelled-on-green', pr: Number(prNum), ref: REF, label: LABEL, labelApplied, ...(precheckHealed.length ? { precheckHealed } : {}), detail: `PR #${prNum} (${REF}) required checks green${labelApplied ? ` — labelled ${LABEL}` : ''}${precheckHealed.length ? `; pre-check healed id collision(s): ${precheckHealed.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : ''}; left for the drain to land` }, 0);
+  // #2290 — pr-land NEVER merges: the drain is the SOLE writer to main. In the DEFAULT (land) mode, trigger a
+  // single-couple FAST DRAIN so /pr still feels instant — the drain lands THIS labelled PR immediately. Then
+  // best-effort ff-sync the user's PRIMARY checkout to the just-advanced origin/main (a no-op if the drain
+  // parked the PR instead of landing it). `--label-on-green` skips the trigger (a batch/workflow closeout runs
+  // the standalone drain over the whole set). The trigger NEVER fails the land — the PR is labelled either way.
+  let drainTrigger = null;
+  let primarySynced = null;
+  if (PLAN.triggerDrain) {
+    drainTrigger = triggerSingleCoupleDrain(prNum);
+    if (SYNC_PRIMARY) primarySynced = syncPrimaryMain();
   }
-
-  // #2213 — capture PRE-merge `${BASE}` sha before the merge advances origin: every id already published there
-  // is an immutable heal base, so the post-land collision heal yields only the INCOMING lane's new file, never
-  // a landed item (the resume-land direction bug). Resolved to a raw sha so it still resolves after runHeal
-  // re-fetches origin/main to its post-merge tip. Best-effort — a miss just falls back to the ordinal heuristic.
-  const preMergeBaseSha = tryGit(['rev-parse', `${REMOTE}/${BASE}`]) || null;
-
-  try { ghC(buildMergeArgs({ pr: prNum, method: METHOD })); }
-  catch (e) { return ghFailed(`gh pr merge #${prNum} failed (${String(e.message || e).split('\n')[0]}) — likely not-mergeable (branch behind ${BASE}); rebase the ref + re-run`); }
-
-  // #2205 — the merge advanced origin/main but NOT this local checkout, so ff-sync local main to it (parity with
-  // the drain's post-merge sync in merge-ai-prs.mjs). `--autostash` keeps it reliable: it sets any dirty edits
-  // aside, fast-forwards, then reapplies them — so main advances AND local edits survive. Still ff-only (a
-  // genuine divergence aborts and is reported, never force/rebase). Best-effort: a failure degrades to a note
-  // and NEVER fails the land (the merge already succeeded).
-  const localSynced = syncLocalMain();
-  const primarySynced = SYNC_PRIMARY ? syncPrimaryMain() : null;
-
-  const heal = HEAL ? runHeal() : null;
-  if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
-  const regen = REGEN ? runRegen() : null;
-  if (regen && regen.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${regen.warning}\n`);
-  const skipped = postLandSkips(heal, regen);
-  if (skipped.length) process.stderr.write(`pr-land [${REPO}] ⚠⚠ POST-LAND ${skipped.join(' + ')} SKIPPED (tracked-dirty tree) — ${BASE} may carry an unhealed id collision / stale derived artifacts; run the steps by hand.\n`);
   emit({
-    repo: REPO, merged: true, reason: 'merged', pr: Number(prNum), ref: REF, method: METHOD, label: LABEL, labelApplied, localSynced,
+    repo: REPO, merged: false, reason: PLAN.triggerDrain ? 'enqueued' : 'labelled-on-green',
+    pr: Number(prNum), ref: REF, label: LABEL, labelApplied,
+    ...(drainTrigger ? { drainTriggered: !!drainTrigger.triggered } : {}),
     ...(primarySynced !== null ? { primarySynced } : {}),
     ...(precheckHealed.length ? { precheckHealed } : {}),
-    healed: heal && heal.healed ? heal.renumbered : [],
-    ...(heal && heal.warning ? { healWarning: heal.warning } : {}),
-    regenDone: regen ? regen.done : [],
-    regenFailed: regen ? regen.failed : [],
-    ...(regen && regen.warning ? { regenWarning: regen.warning } : {}),
-    ...(skipped.length ? { skipped } : {}),
-    detail: `merged PR #${prNum} (${REF}) into ${BASE} via self-approved PR (${METHOD}), deleted the ref`
-      + postLandReport(heal, regen),
+    detail: `PR #${prNum} (${REF}) required checks green${labelApplied ? ` — labelled ${LABEL}` : ''}`
+      + (precheckHealed.length ? `; pre-check healed id collision(s): ${precheckHealed.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : '')
+      + (PLAN.triggerDrain ? '; triggered a single-couple drain (the drain lands it — pr-land never merges)' : '; left for the drain to land'),
   }, 0);
 
-  // #2205 — ff-sync local `main` to the just-advanced `origin/main` after a merge (parity with the drain,
-  // merge-ai-prs.mjs). ff-only + --autostash (advance main, preserve dirty edits, never force/rebase).
-  // Best-effort: returns true on a clean ff, false (with a note) on a diverged/conflicting reapply — NEVER
-  // throws, so it can never fail a land whose merge already succeeded.
-  function syncLocalMain() {
-    try { gitC(['pull', '--ff-only', '--autostash']); return true; }
-    catch { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · local ${BASE} NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`); return false; }
-  }
-
-  // ff-sync the user's PRIMARY checkout after a merge. `syncLocalMain` only touches REPO (the lane clone we run
-  // in); the primary is a SEPARATE directory that otherwise drifts behind origin/main on every land (the "N
-  // behind" a human then has to pull by hand). The lane→primary link is the clone's git alternates: a lane is
-  // `git clone --reference <primary>`, so `<REPO>/.git/objects/info/alternates` points at `<primary>/.git/objects`
-  // — strip the two trailing segments to get the primary root. Returns:
-  //   null  — nothing to sync (REPO is not a lane clone, or IS the primary: syncLocalMain already handled it)
+  // ff-sync the user's PRIMARY checkout after a land. The drain (a separate process, shelled by the trigger, or
+  // the fallback-git merge below) advanced origin/main; the primary is a SEPARATE directory that otherwise
+  // drifts behind origin/main on every land (the "N behind" a human then has to pull by hand). The lane→primary
+  // link is the clone's git alternates: a lane is `git clone --reference <primary>`, so
+  // `<REPO>/.git/objects/info/alternates` points at `<primary>/.git/objects` — strip the two trailing segments
+  // to get the primary root. Returns:
+  //   null  — nothing to sync (REPO is not a lane clone, or IS the primary)
   //   true  — primary fast-forwarded (or already up-to-date)
   //   false — skipped/failed (primary not on BASE, or a genuine divergence) — REPORTED, never fatal.
   // ff-only + --autostash: advance main, preserve the user's dirty/session-state edits, never force/rebase.
@@ -504,16 +509,23 @@ function runCli() {
     catch { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · primary ${BASE} (${primary}) NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — pull it by hand\n`); return false; }
   }
 
-  // Fallback path (#2138 Fork 5 (a)): local git merge + push when gh is the problem.
+  // Fallback path (#2138 Fork 5 (a)): local git merge + push when gh is the problem. #2290 — this is ALSO a
+  // write to main, so it routes through the shared gate as caller 'pr-land': the gate BLOCKS it (throws) unless
+  // the documented `WE_MERGE_BREAK_GLASS=1` admin override is armed. i.e. --fallback-git is now break-glass-only
+  // (the drain is the sole normal-path writer to main); the gate's throw surfaces as a `fallback-failed` emit.
   function ghFailed(detail) {
     if (!FALLBACK_GIT) emit({ repo: REPO, merged: false, reason: 'gh-error', detail: `${detail} — pass --fallback-git for the local git-merge fallback` }, 3);
     try {
+      // #2290 — assert this route may write to main BEFORE touching git (blocked unless break-glass, and a
+      // break-glass use emits the loud audit line). Capture the pre-merge base sha for the heal's onto-ref.
+      assertMayMerge({ caller: 'pr-land', pr: null, repo: REPO });
+      const preMergeBaseSha = tryGit(['rev-parse', `${REMOTE}/${BASE}`]) || null;
       tryGit(['fetch', REMOTE, `${REF}`, '--quiet']);
       gitC(['checkout', BASE]);
       gitC(['merge', '--no-ff', `${REMOTE}/${REF}`, '-m', `merge ${REF} (pr-land git fallback)`]);
       gitPushMain([REMOTE, `${BASE}:${BASE}`]);
       if (SYNC_PRIMARY) syncPrimaryMain(); // ff-sync the user's primary checkout too (the lane's local BASE is already merged)
-      const heal = HEAL ? runHeal() : null;
+      const heal = HEAL ? runHeal({ ontoRef: preMergeBaseSha }) : null;
       if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
       const regen = REGEN ? runRegen() : null;
       if (regen && regen.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${regen.warning}\n`);
@@ -532,7 +544,7 @@ function runCli() {
   // yields. If it renumbered, gate the healed tree, then commit + push the fix (never force-pushed). A heal
   // problem is REPORTED but NEVER fails the land — the merge already succeeded; the worst case is a loudly-
   // surfaced residual a human resolves, exactly as the batch integrator's heal step behaves.
-  function runHeal() {
+  function runHeal({ ontoRef = null } = {}) {
     const firstLine = (e) => String((e && e.message) || e).split('\n')[0];
     // #2225 — ignore untracked/git-ignored noise (the deps-symlinked clone's `node_modules` symlink); skip only
     // on a genuinely TRACKED-dirty tree (a detached checkout could carry those edits into the heal commit).
@@ -543,7 +555,7 @@ function runCli() {
     } catch (e) { return { warning: `skipped id-collision heal — could not sync to ${REMOTE}/${BASE} (${firstLine(e)})` }; }
     let plan;
     try {
-      const out = execFileSync('node', buildRenumberHealArgs({ ontoRef: preMergeBaseSha }), { cwd: REPO, encoding: 'utf8' });
+      const out = execFileSync('node', buildRenumberHealArgs({ ontoRef }), { cwd: REPO, encoding: 'utf8' });
       plan = JSON.parse((out.trim().split('\n').filter(Boolean).pop()) || '{}');
     } catch (e) { return { warning: `id-collision heal could not run renumber-collisions (${firstLine(e)}) — if the gate flags "ids must be unique", run it by hand on ${BASE}` }; }
     const renumbered = Array.isArray(plan.renumbered) ? plan.renumbered : [];

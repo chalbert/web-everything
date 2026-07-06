@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -316,5 +316,66 @@ describe('needsManifestStripBeforeMerge (#2183 — first-lander manifest-leak fi
   it('null / missing is not a candidate', () => {
     expect(needsManifestStripBeforeMerge(null)).toBe(false);
     expect(needsManifestStripBeforeMerge({ decision: 'merge' })).toBe(false);
+  });
+});
+
+describe('regenDerivedOnLand — the drain owns post-land WE derived regen (#2290/#2182)', () => {
+  // A capturing fake exec: records every call, and lets a test script canned-return per `cmd argv-join`.
+  const fakeExec = (script = {}) => {
+    const calls = [];
+    const exec = (cmd, args, opts) => {
+      calls.push({ cmd, args, opts, key: `${cmd} ${args.join(' ')}` });
+      const h = script[`${cmd} ${args.join(' ')}`];
+      if (h && h.throw) throw new Error(h.throw);
+      return h && 'stdout' in h ? h.stdout : '';
+    };
+    return { exec, calls };
+  };
+  const REGEN = [['npm', 'run', 'gen:inventory'], ['npm', 'run', 'gen:reference-index']];
+  const ran = (calls) => calls.filter((c) => c.cmd === 'npm').map((c) => c.args.join(' '));
+  const did = (calls, cmd, sub) => calls.some((c) => c.cmd === cmd && c.args[0] === sub);
+
+  it('a successful land runs BOTH generators, then commits + pushes the diff to main (as the drain)', () => {
+    const { exec, calls } = fakeExec({ 'git diff --name-only': { stdout: 'AGENTS.md\nsrc/_data/referenceIndex.json\n' } });
+    const r = regenDerivedOnLand({ exec, cwd: '/repo', landed: true, dryRun: false, regenSet: REGEN });
+    expect(ran(calls)).toEqual(['run gen:inventory', 'run gen:reference-index']); // both generators invoked
+    expect(did(calls, 'git', 'add')).toBe(true);
+    const commit = calls.find((c) => c.cmd === 'git' && c.args[0] === 'commit');
+    expect(commit.args.join(' ')).toMatch(/chore: regen derived artifacts post-land \(#2182\) \[gen:inventory, gen:reference-index\]/);
+    const push = calls.find((c) => c.cmd === 'git' && c.args[0] === 'push');
+    expect(push.args).toEqual(['push', 'origin', 'HEAD:main']);
+    expect(push.opts.env.MAIN_PUSH_OK).toBe('1'); // gated main write, as the drain
+    expect(r).toMatchObject({ ran: true, committed: true, pushed: true });
+  });
+
+  it('a no-op sweep (nothing landed) does NOT run the generators or touch git', () => {
+    const { exec, calls } = fakeExec();
+    const r = regenDerivedOnLand({ exec, cwd: '/repo', landed: false, regenSet: REGEN });
+    expect(calls.length).toBe(0);
+    expect(r).toMatchObject({ ran: false, committed: false, pushed: false });
+  });
+
+  it('a dry-run never regenerates', () => {
+    const { exec, calls } = fakeExec();
+    const r = regenDerivedOnLand({ exec, cwd: '/repo', landed: true, dryRun: true, regenSet: REGEN });
+    expect(calls.length).toBe(0);
+    expect(r.ran).toBe(false);
+  });
+
+  it('generators ran but produced NO diff → no commit, no push (idempotent land)', () => {
+    const { exec, calls } = fakeExec({ 'git diff --name-only': { stdout: '' } });
+    const r = regenDerivedOnLand({ exec, cwd: '/repo', landed: true, regenSet: REGEN });
+    expect(ran(calls)).toHaveLength(2);
+    expect(did(calls, 'git', 'commit')).toBe(false);
+    expect(did(calls, 'git', 'push')).toBe(false);
+    expect(r).toMatchObject({ ran: true, committed: false, pushed: false });
+  });
+
+  it('a push failure is best-effort — reported in `warning`, never thrown (the couples already landed)', () => {
+    const { exec } = fakeExec({ 'git diff --name-only': { stdout: 'AGENTS.md\n' }, 'git push origin HEAD:main': { throw: 'remote rejected' } });
+    const r = regenDerivedOnLand({ exec, cwd: '/repo', landed: true, regenSet: REGEN });
+    expect(r.committed).toBe(false);
+    expect(r.pushed).toBe(false);
+    expect(r.warning).toMatch(/regen committed\/pushed FAILED/);
   });
 });

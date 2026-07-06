@@ -32,8 +32,8 @@ couple to the normal drain transport.
 ```
 node scripts/lane-resume.mjs discover            # classify every stuck ready-to-merge lane + why, blockedBy-ordered
 node scripts/lane-resume.mjs discover --json     # same, machine-readable (the plan the skill iterates)
-node scripts/lane-resume.mjs land <pr> --dry-run # plan the land of ONE repaired lane PR (merge vs rebase-drop vs skip)
-node scripts/lane-resume.mjs land <pr>           # land it: rebase-drop the manifest if only it conflicts, then gh pr merge
+node scripts/lane-resume.mjs land <pr> --dry-run # plan the enqueue of ONE repaired lane PR (enqueue vs rebase-drop vs skip)
+node scripts/lane-resume.mjs land <pr>           # #2290: rebase-drop the manifest if only it conflicts, then ENQUEUE (label + trigger a single-couple drain) — never merges directly
 ```
 
 **Always `discover` first.** It buckets the labelled PRs into `ready` (not stuck — `/drain` takes them),
@@ -56,10 +56,11 @@ lanes so none precedes one it is `blockedBy`.
    - Run the **full** scoped gate/tests (not the file-scoped fast-fail) — the lane owns a CI-green PR (#2199).
    - **drop the transient `.lane-manifest.json`**, commit, `git push origin HEAD:refs/heads/<laneRef>`, and
      confirm the required `test` check goes green.
-4. **Land** the repaired couple. Either hand the now-clean PR to `/drain` (`node scripts/merge-ai-prs.mjs
-   --label=ready-to-merge`), or land ONE PR directly with `node scripts/lane-resume.mjs land <pr>` (#2202) —
-   both share the ONE #2198 rebase-drop-manifest helper, so a lane that only conflicts on the manifest lands
-   without a human. Impl-first/WE-last, `blockedBy` order.
+4. **Land** the repaired couple. **#2290 — the drain is the sole writer to `main`.** Either hand the now-clean
+   PR to `/drain` (`node scripts/merge-ai-prs.mjs --label=ready-to-merge`), or run `node
+   scripts/lane-resume.mjs land <pr>` (#2202), which **enqueues** it (labels `ready-to-merge` + triggers a
+   single-couple drain) rather than merging directly — both share the ONE #2198 rebase-drop-manifest helper, so
+   a lane that only conflicts on the manifest lands without a human. Impl-first/WE-last, `blockedBy` order.
 
 ### The one knob — how autonomous on a red test
 

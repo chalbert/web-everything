@@ -153,23 +153,30 @@ describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
   });
 });
 
-describe('planPrLand — label only after CI green (#2199)', () => {
-  it('default (land): wait for checks → label when green → merge here', () => {
-    expect(planPrLand({ wait: true, labelOnGreen: false })).toEqual({ waitForChecks: true, labelWhenGreen: true, mergeWhenGreen: true, mode: 'land' });
+describe('planPrLand — label only after CI green (#2199), never merges (#2290)', () => {
+  it('default (land): wait → label when green → TRIGGER a single-couple drain; NEVER merges here (#2290)', () => {
+    expect(planPrLand({ wait: true, labelOnGreen: false })).toEqual({ waitForChecks: true, labelWhenGreen: true, mergeWhenGreen: false, triggerDrain: true, mode: 'land' });
   });
-  it('--label-on-green (producer): wait → label when green → STOP (drain merges), never merges here', () => {
+  it('no mode EVER merges (the drain is the sole writer to main, #2290)', () => {
+    for (const w of [true, false]) for (const g of [true, false]) {
+      expect(planPrLand({ wait: w, labelOnGreen: g }).mergeWhenGreen).toBe(false);
+    }
+  });
+  it('--label-on-green (producer): wait → label when green → STOP; no merge, no drain trigger (standalone drain lands it)', () => {
     const p = planPrLand({ wait: true, labelOnGreen: true });
     expect(p.mode).toBe('label-on-green');
     expect(p.waitForChecks).toBe(true);
     expect(p.labelWhenGreen).toBe(true);
     expect(p.mergeWhenGreen).toBe(false);
+    expect(p.triggerDrain).toBe(false);
   });
-  it('bare --no-wait (open-only): NEVER labels (CI unconfirmed) and never waits/merges', () => {
+  it('bare --no-wait (open-only): NEVER labels (CI unconfirmed) and never waits/merges/triggers', () => {
     const p = planPrLand({ wait: false, labelOnGreen: false });
     expect(p.mode).toBe('open-only');
     expect(p.waitForChecks).toBe(false);
     expect(p.labelWhenGreen).toBe(false); // the #2199 fix: no label before green
     expect(p.mergeWhenGreen).toBe(false);
+    expect(p.triggerDrain).toBe(false);
   });
   it('--label-on-green forces the wait even alongside --no-wait (the label REQUIRES a green confirmation)', () => {
     expect(planPrLand({ wait: false, labelOnGreen: true }).mode).toBe('label-on-green');
@@ -215,8 +222,8 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     // Skips a dirty tree, and gates the healed tree before the (non-force) push.
     expect(src).toMatch(/skipped id-collision heal/);
     expect(src).toMatch(/check:standards/);
-    // The heal runs only after a successful merge (its call sites sit after the gh/ git-fallback merges).
-    expect(src.indexOf('function runHeal')).toBeGreaterThan(src.indexOf('buildMergeArgs({ pr: prNum'));
+    // #2290 — the heal now runs only in the (break-glass-gated) --fallback-git path, after its local merge.
+    expect(src.indexOf('const heal = HEAL ? runHeal')).toBeGreaterThan(src.indexOf("gitC(['merge', '--no-ff'"));
   });
   it('regenerates derived artifacts AFTER the merge (and after heal), without ever failing the land (#2182)', () => {
     expect(src).toMatch(/function runRegen/);                       // the regen step exists
@@ -233,14 +240,20 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     // Never force-pushes the regen commit.
     expect(src).not.toMatch(/--force/);
   });
-  it('ff-syncs local main AFTER a merge, best-effort, never failing the land (#2205)', () => {
-    expect(src).toMatch(/function syncLocalMain/);                 // the sync step exists
-    // ff-only + autostash (parity with merge-ai-prs) — never a plain reset/force.
+  it('#2290: pr-land NEVER merges on the default path — the drain is the sole writer to main', () => {
+    // No `gh pr merge` (or buildMergeArgs invocation) anywhere in the runCli land flow.
+    expect(src).not.toMatch(/ghC\(buildMergeArgs/);
+    // The default path triggers a single-couple fast drain instead of merging.
+    expect(src).toMatch(/triggerSingleCoupleDrain/);
+    expect(src).toMatch(/merge-ai-prs\.mjs/);
+    expect(src).toMatch(/--only=/);
+  });
+  it('#2290: the --fallback-git local merge is routed through the shared gate (break-glass only)', () => {
+    // fallback-git is a write to main → it must assert the caller may merge (blocked unless break-glass).
+    expect(src).toMatch(/assertMayMerge\(\{ caller: 'pr-land'/);
+    // still ff-syncs the user's primary checkout, best-effort, after a land.
+    expect(src).toMatch(/function syncPrimaryMain/);
     expect(src).toMatch(/'pull', '--ff-only', '--autostash'/);
-    // called on the gh-merge success path, AFTER the merge (before/around the emit).
-    expect(src).toMatch(/const localSynced = syncLocalMain\(\)/);
-    expect(src.indexOf('syncLocalMain()')).toBeGreaterThan(src.indexOf('buildMergeArgs({ pr: prNum'));
-    // best-effort: it catches and degrades to a note, so a failed sync can't fail a completed land.
     expect(src).toMatch(/NOT fast-forwarded/);
   });
 });
