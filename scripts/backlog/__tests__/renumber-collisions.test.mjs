@@ -169,6 +169,24 @@ describe('planRenumber', () => {
     expect(plan.collisions[0].oldName).toBe('2068-b.md'); // later-landing yields, as before
   });
 
+  it('EDGE-CLOBBER GUARD (#2316): a published file\'s unrelated blockedBy edge to the same num is left alone', () => {
+    // #2294 is PUBLISHED (already on main, immutable keeper) and a real, unrelated item #2295 legitimately
+    // depends on it (`blockedBy: [2294]`), authored long before this batch. An incoming lane item ALSO landed
+    // as #2294 and must yield — but the rewrite must never follow #2295's real edge to the yielder's new id.
+    const files = [
+      mk('2294', 'published-keeper', 'the real, long-standing item'),
+      { name: '2295-dependent.md', ordinal: 5, text: 'depends on the keeper\nblockedBy: [2294]\n' },
+      mk('2294', 'incoming-newcomer', 'lands late, collides', 500), // the incoming lane's new item — yields
+    ];
+    const plan = planRenumber(files, { ontoNames: ['2294-published-keeper.md', '2295-dependent.md'] });
+    expect(plan.collisions).toHaveLength(1);
+    const mv = plan.collisions[0];
+    expect(mv.oldNum).toBe('2294');
+    expect(mv.oldName).toBe('2294-incoming-newcomer.md');
+    // the published #2295's real edge to the keeper #2294 is NOT rewritten — it is untouched entirely.
+    expect(plan.writes.map((w) => w.name)).not.toContain('2295-dependent.md');
+  });
+
   it('two independent collisions in one run get distinct fresh ids (no re-collision)', () => {
     const files = [
       mk('2068', 'a', '', 10), mk('2068', 'b', '', 20),

@@ -74,6 +74,28 @@ describe('planBaseCollisionHeal — collision on base ⇒ renumber-to-gap', () =
     expect(plan.writes.map((w) => w.name)).toContain('2220-drain-finding.md');
   });
 
+  it('EDGE-CLOBBER GUARD (#2316): a base-owned file\'s unrelated blockedBy edge is left alone', () => {
+    // The base carries #2293 (real keeper) and #2294 (an unrelated real item that legitimately
+    // `blockedBy: [2293]`, authored long before this lane) — both inherited into laneFiles unmodified. The
+    // lane's OWN new item also landed as #2293 and must yield to a gap id — but the sweep must never follow
+    // #2294's real, pre-existing edge to the yielder's new id; that edge means the base keeper, not the lane.
+    const laneFiles = [
+      mk('2293', 'base-keeper', 'the real, long-standing item'),          // base-owned, unmodified
+      { name: '2294-dependent.md', text: 'depends on the keeper\nblockedBy: [2293]\n' }, // base-owned, unmodified
+      mk('2293', 'lane-new-item', 'the lane authored this and it collides'), // lane's own new file — yields
+    ];
+    const plan = planBaseCollisionHeal(laneFiles, {
+      baseNums: ['2290', '2293', '2294'],
+      baseNames: ['2290-x.md', '2293-base-keeper.md', '2294-dependent.md'],
+    });
+    expect(plan.collisions).toHaveLength(1);
+    const mv = plan.collisions[0];
+    expect(mv.oldNum).toBe('2293');
+    expect(mv.oldName).toBe('2293-lane-new-item.md');
+    // the base-owned #2294's real edge to the keeper #2293 is NOT touched at all.
+    expect(plan.writes.map((w) => w.name)).not.toContain('2294-dependent.md');
+  });
+
   it('two incoming collisions get distinct gap ids (no re-collision within the plan)', () => {
     const laneFiles = [mk('2219', 'a'), mk('2221', 'b')];
     const plan = planBaseCollisionHeal(laneFiles, {
