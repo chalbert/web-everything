@@ -1,17 +1,22 @@
 ---
-kind: decision
+kind: story
+size: 5
 parent: "142"
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "adoptionSignal: a stable semantic node-identity scheme exists to anchor threads"
 priority: low
 locus: plateau-app
 dateOpened: "2026-06-23"
 preparedDate: "2026-06-23"
-relatedTo: ["1635", "1639"]
+relatedTo: ["1635", "1639", "2095"]
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
-tags: [dev-browser, annotation, collaboration, ai-generated, validation, decision]
+tags: [dev-browser, annotation, collaboration, ai-generated, accepted-on-merit, dissolved]
 ---
 
 # In-context annotation and discussion threads on semantic nodes
+
+> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) merit-conceded dissolve test). The merit is **conceded** — the durable-anchor delta is the whole point (real, on-moat) — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger:** a stable semantic node-identity scheme exists to anchor threads to, **and** demand for in-context discussion is shown. Everything below is retained as the **settled** merit rationale (the concession), not an open question.
 
 ## Digest
 
@@ -57,4 +62,4 @@ The moat (per #142): a WE app is **self-describing**, so a thread anchors to the
 - **Un-gate trigger (concrete):** promote to a build story when **(1)** the self-describing model exposes a stable per-node identity threads can pin to, **AND (2)** a real multi-role exercise-app run produces feedback that a pixel/coordinate tool would have orphaned across a redesign (evidence the semantic anchor earns its keep).
 - **Skeptic:** "Figma + Vercel preview comments already let you comment on the running thing — solved." *Refuted on the delta, not on novelty:* both anchor to **coordinates/DOM on one snapshot**, so the comment orphans the moment the layout or render changes; WE anchors to the semantic node's identity, so it persists across redesigns and viewports — a thing they structurally can't do without the declared model. The residual the skeptic is right about is **timing/identity readiness** — hence not-yet, not go.
 
-*If you'd rather decide go now or no (drop it), say so — the verdict is the thing on the table.*
+*~~If you'd rather decide go now or no (drop it), say so — the verdict is the thing on the table.~~ (Superseded: dissolved to accepted-on-merit per #2095 — the verdict is settled, not open.)*

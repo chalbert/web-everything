@@ -6,12 +6,25 @@ priority: low
 locus: plateau-app
 dateOpened: "2026-06-23"
 preparedDate: "2026-06-23"
-relatedTo: ["1632"]
+relatedTo: ["1632", "2095"]
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
 tags: [dev-browser, privacy, pii, data-flow, ai-generated, validation, decision]
 ---
 
 # PII and sensitive-data flow map
+
+> **KEPT as a validation gate — reshaped per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/) (the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) dissolve test).** Unlike its ten #142 siblings, this candidate's merit is **conditional, not conceded**, so it does *not* dissolve — it stays a live go/no/not-yet call. The gate leads with the merit unknown below.
+
+## The decision — does the declared state model carry the facets to derive from?
+
+**This is the one thing being decided.** The whole moat ("derive the map from the app's *declared* state/seam model, not a heuristic scan") is real **only if** the declared state model actually classifies each state node with **visibility** (private/shared), **persistence** (written to storage), and **egress** (sent to a network destination) facets. If it does not, this feature is a heuristic scanner with **no WE advantage** — and the real prerequisite is *that classification*, which may not exist today (the webstates state model — [#1089](/backlog/1089-webstates-completion-change-tracking-storage-protocols-recon/) family, persistence facet [#1106](/backlog/1106-webstates-storage-contract-types-storagepersistence/)) does not obviously carry them yet.
+
+So the ratify question is, in order:
+
+1. **Do the declared state facets exist (or are they specced)?** No → the decision is *not this feature yet*; file the **facet classification** as the real prerequisite and gate on it. Yes → continue.
+2. **Given the facets, is the derive-from-declared delta worth building** over #1632's seam model, and on what demand trigger? (the not-yet gate below).
+
+The rest of this card (digest, prior-art, dependencies) is the **merit case** for step 2; step 1 is the gate that must clear first.
 
 ## Digest
 

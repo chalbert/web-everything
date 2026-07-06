@@ -1,17 +1,21 @@
 ---
-kind: decision
+kind: story
+size: 5
+blockedBy: ["1635"]
 parent: "142"
 status: open
 priority: low
 locus: plateau-app
 dateOpened: "2026-06-23"
 preparedDate: "2026-06-23"
-relatedTo: ["1635", "166", "564"]
+relatedTo: ["1635", "166", "564", "2095"]
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
-tags: [dev-browser, ownership, task-queue, ai-generated, validation, decision]
+tags: [dev-browser, ownership, task-queue, ai-generated, accepted-on-merit, dissolved]
 ---
 
 # Capability-matched task queue
+
+> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) merit-conceded dissolve test). The merit is **conceded** — the capability-matched-queue delta is real and on-moat — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger:** [#1635](/backlog/1635-ownership-aware-routing-in-context/) has shipped and its routing value is proven (`blockedBy: 1635`). Everything below is retained as the **settled** merit rationale (the concession), not an open question.
 
 ## Digest
 
@@ -58,4 +62,4 @@ The moat (per #142): a WE app knows **who owns each semantic piece and (via the 
 - **Un-gate trigger (concrete):** promote to a build story when **(1)** [#1635](/backlog/1635-ownership-aware-routing-in-context/) has shipped and routing is in real use, **AND (2)** the persona model carries capability/expertise (not just ownership), **AND (3)** a real workload shows owner-only routing under-serving (e.g. several valid owners, no way to pick the best-matched). All three, because the cost of the match-engine only pays off past simple routing.
 - **Skeptic:** "Linear/Jira already auto-assign and Projects auto-route — a queue is solved." *Refuted on the delta, not on novelty:* their "match" is a field rule or round-robin, which by design ignores *fit*; WE matches on semantic capability against the actual owned nodes — a thing they can't do without the self-describing ownership+persona model. The residual the skeptic is right about is **over-build risk** — this is the deepest feature in the thread — hence not-yet with a hard three-part gate, not go.
 
-*If you'd rather decide go now or no (drop it), say so — the verdict is the thing on the table.*
+*~~If you'd rather decide go now or no (drop it), say so — the verdict is the thing on the table.~~ (Superseded: dissolved to accepted-on-merit per #2095 — the verdict is settled, not open.)*

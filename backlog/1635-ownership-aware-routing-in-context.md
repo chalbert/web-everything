@@ -1,17 +1,22 @@
 ---
-kind: decision
+kind: story
+size: 5
 parent: "142"
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "adoptionSignal: the ownership/persona roster is populated"
 priority: low
 locus: plateau-app
 dateOpened: "2026-06-23"
 preparedDate: "2026-06-23"
-relatedTo: ["1637", "1639", "166", "564"]
+relatedTo: ["1637", "1639", "166", "564", "2095"]
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
-tags: [dev-browser, ownership, routing, ai-generated, validation, decision]
+tags: [dev-browser, ownership, routing, ai-generated, accepted-on-merit, dissolved]
 ---
 
 # Ownership-aware routing in context
+
+> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-validation-gate-not-yet-verdicts-vs-the-not-a-prioritization/) merit-conceded dissolve test). The merit is **conceded** — the ownership-model delta is real and on-moat (a clean delta, and a keystone the rest of the cluster routes through) — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger:** the ownership/persona roster is populated, so a real owner model exists to route against. Everything below is retained as the **settled** merit rationale (the concession), not an open question.
 
 ## Digest
 
@@ -57,4 +62,4 @@ The moat (per #142): a WE app is **self-describing and knows who owns each piece
 - **Un-gate trigger (concrete):** promote to a build story when **(1)** the persona/ownership roster (#166/#564) is populated with per-node ownership for at least one flagship app, **AND (2)** a real exercise-app run produces a bug/review that a triage queue demonstrably mis-routes (evidence the auto-route would have helped).
 - **Skeptic:** "CODEOWNERS + Sentry suspect-commits already auto-route — this is reinventing routing." *Refuted on the delta, not on novelty:* both route by **file/commit heuristic**; neither can answer "who owns *this declared rule* / *this component instance* / *this state*" because they have no semantic model of the piece. WE owns by semantic node — that's exactly what makes the route correct from inside the running app, and what they structurally can't emit. The residual the skeptic is right about is **readiness** (no model to route on yet) — hence not-yet, not go.
 
-*If you'd rather decide go now (open a build story) or no (drop it), say so — the verdict is the thing on the table.*
+*~~If you'd rather decide go now (open a build story) or no (drop it), say so — the verdict is the thing on the table.~~ (Superseded: dissolved to accepted-on-merit per #2095 — the verdict is settled, not open.)*
