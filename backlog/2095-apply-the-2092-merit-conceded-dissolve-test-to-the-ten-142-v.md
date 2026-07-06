@@ -1,8 +1,12 @@
 ---
 kind: decision
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-06"
+dateResolved: "2026-07-06"
+graduatedTo: none
+codifiedIn: one-off
 relatedTo: ["2091", "2092", "142"]
 preparedDate: "2026-07-04"
 tags: [validation-gate, dissolve-test, batch-confirm, decision]

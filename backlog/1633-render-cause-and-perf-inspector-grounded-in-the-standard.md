@@ -1,16 +1,22 @@
 ---
-kind: decision
+kind: story
+size: 8
 parent: "142"
-status: open
+status: parked
+parkedReason: maturityGated
+maturityTrigger: "adoptionSignal: the #142 trace/introspection substrate emits semantic action/state transitions with a render-correlation hook"
 priority: low
+relatedTo: ["2095"]
 locus: plateau-app
 dateOpened: "2026-06-23"
 preparedDate: "2026-06-23"
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "#141 dev browser — natural home surface" }
-tags: [dev-browser, render-cause, perf, ai-generated, validation, decision]
+tags: [dev-browser, render-cause, perf, ai-generated, accepted-on-merit, dissolved]
 ---
 
 # Render-cause and perf inspector grounded in the standard
+
+> **DISSOLVED → accepted on merit** (batch-confirmed per [#2095](/backlog/2095-apply-the-2092-merit-conceded-dissolve-test-to-the-ten-142-v/), applying the [#2092](/backlog/2092-a-merit-conceded-not-yet-is-not-a-decision-it-dissolves-to-a/) merit-conceded dissolve test). The merit is **conceded** — the portability delta is real and on-moat — so this is **no longer an open go/no/not-yet decision**; it is an accepted build gated on its trigger. **Trigger:** the #142 trace/introspection substrate emits semantic action/state transitions **and** a render-correlation hook, **and** a flagship app hits a real redundant/expensive-render case the framework's own profiler can't name semantically. Everything below is retained as the **settled** merit rationale (the concession), not an open question.
 
 ## Digest
 
@@ -55,4 +61,4 @@ The moat (per #142): a WE app declares its actions/state and emits a semantic tr
 - **Un-gate trigger (concrete):** promote to a build story when **(1)** the #142 trace/introspection substrate emits semantic action/state transitions AND a render-correlation hook to map them to render work, AND **(2)** a flagship exercise-app hits a real redundant/expensive-render problem where the framework's own profiler couldn't name the *semantic* cause — evidence, not speculation.
 - **Skeptic:** "React DevTools Profiler already answers 'why did this render'." *Refuted on the delta, not on novelty:* the Profiler answers in React's reconciler terms and only for React; the WE inspector names the *semantic* cause (intent/declared-state transition) in a model that's the same across stacks — a portable, standard-grounded answer no framework-welded tool can produce. The residual the skeptic is right about is **substrate readiness** — hence not-yet, not go.
 
-*If you'd rather decide go now (open a build story immediately) or no (drop the candidate), say so — the verdict is the thing on the table.*
+*~~If you'd rather decide go now (open a build story immediately) or no (drop the candidate), say so — the verdict is the thing on the table.~~ (Superseded: dissolved to accepted-on-merit per #2095 — the verdict is settled, not open.)*
