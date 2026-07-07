@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, isPostLandTreeDirty, postLandSkips, postLandReport } from '../pr-land.mjs';
+import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport } from '../pr-land.mjs';
 
 describe('pr-land post-land dirty-probe (#2225 — deps-symlinked clone must still heal/regen)', () => {
   it('a tree whose ONLY dirt is the untracked node_modules symlink is NOT blocking-dirty', () => {
@@ -150,6 +150,37 @@ describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
     expect(classifyChecks([{ bucket: 'pending' }, { bucket: 'fail' }]).status).toBe('failed');
     // tolerates the raw `state` field when `bucket` is absent.
     expect(classifyChecks([{ state: 'in_progress' }]).status).toBe('pending');
+  });
+});
+
+describe('pollVerdict — producer labels a BEHIND-but-green PR, never aborts (#2284 residual 1)', () => {
+  const green = { checkStatus: 'passed', requiredCount: 1 };
+  it('CLEAN/UNSTABLE + green → label (either mode)', () => {
+    expect(pollVerdict({ state: 'CLEAN', ...green, labelWhenGreen: true })).toBe('label');
+    expect(pollVerdict({ state: 'UNSTABLE', ...green, labelWhenGreen: false })).toBe('label');
+  });
+  it('BEHIND + green in PRODUCER mode → label & hand off (the fix — was previously aborting)', () => {
+    expect(pollVerdict({ state: 'BEHIND', ...green, labelWhenGreen: true })).toBe('label');
+  });
+  it('BEHIND in a non-producer (merge) path → abort behind (up-to-date still required to merge)', () => {
+    expect(pollVerdict({ state: 'BEHIND', ...green, labelWhenGreen: false })).toBe('behind');
+  });
+  it('BEHIND + EMPTY required set → wait, never a premature label (empty-set green races a not-yet-registered check)', () => {
+    expect(pollVerdict({ state: 'BEHIND', checkStatus: 'passed', requiredCount: 0, labelWhenGreen: true })).toBe('wait');
+  });
+  it('BEHIND + checks pending → wait', () => {
+    expect(pollVerdict({ state: 'BEHIND', checkStatus: 'pending', requiredCount: 1, labelWhenGreen: true })).toBe('wait');
+  });
+  it('a red required check → red, in every state/mode', () => {
+    expect(pollVerdict({ state: 'BEHIND', checkStatus: 'failed', requiredCount: 1, labelWhenGreen: true })).toBe('red');
+    expect(pollVerdict({ state: 'CLEAN', checkStatus: 'failed', requiredCount: 1, labelWhenGreen: true })).toBe('red');
+  });
+  it('CONFLICTING / DIRTY → conflict (dominates)', () => {
+    expect(pollVerdict({ state: 'CLEAN', ...green, labelWhenGreen: true, conflicting: true })).toBe('conflict');
+    expect(pollVerdict({ state: 'DIRTY', ...green, labelWhenGreen: true })).toBe('conflict');
+  });
+  it('BLOCKED / pending → wait', () => {
+    expect(pollVerdict({ state: 'BLOCKED', checkStatus: 'pending', requiredCount: 1, labelWhenGreen: true })).toBe('wait');
   });
 });
 

@@ -1,8 +1,11 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-07-04"
+dateStarted: "2026-07-07"
+dateResolved: "2026-07-07"
+graduatedTo: none
 tags: [lane, pr-flow, merge-queue, drain, session-tooling]
 ---
 

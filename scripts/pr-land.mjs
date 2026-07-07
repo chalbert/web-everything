@@ -157,6 +157,34 @@ export function planPrLand({ wait, labelOnGreen } = {}) {
   return { waitForChecks: true, labelWhenGreen: true, mergeWhenGreen: false, triggerDrain: true, mode: 'land' };
 }
 
+/**
+ * #2284 — the producer's per-poll verdict on an open PR's merge state. Pure (unit-tested transition table).
+ * pr-land NO LONGER merges (the drain is the sole writer and rebases a behind PR before merging), so a
+ * BEHIND-but-green PR is landable: the producer LABELS it and hands off rather than aborting — behind-ness is
+ * the drain's job, never a labelling precondition (the bug that defeated the handoff live: #145 / the
+ * 2026-07-06 pipeline batch, where a churning main left every re-land BEHIND and pr-land refused to label a
+ * green PR). Verdicts:
+ *   'conflict' — CONFLICTING / DIRTY → abort (rebase or --fallback-git).
+ *   'red'      — a required check failed → abort.
+ *   'behind'   — BEHIND but this path actually MERGES (non-producer; only the break-glass git-merge) → abort.
+ *   'label'    — ready to apply the producer label + hand off: CLEAN/UNSTABLE+passed, OR (producer) BEHIND with
+ *                a NON-EMPTY passed required set (never the empty-set 'passed', which for a not-yet-registered
+ *                check would race a premature label on a behind PR — CLEAN/UNSTABLE is guarded by GitHub state).
+ *   'wait'     — not ready yet (checks pending / BLOCKED) → keep polling.
+ * @param {{state:string, checkStatus:string, requiredCount:number, labelWhenGreen:boolean, conflicting?:boolean}} o
+ * @returns {'conflict'|'red'|'behind'|'label'|'wait'}
+ */
+export function pollVerdict({ state, checkStatus, requiredCount = 0, labelWhenGreen = false, conflicting = false } = {}) {
+  if (conflicting || state === 'DIRTY') return 'conflict';
+  if (checkStatus === 'failed') return 'red';
+  if (state === 'BEHIND') {
+    if (!labelWhenGreen) return 'behind';
+    return requiredCount > 0 && checkStatus === 'passed' ? 'label' : 'wait';
+  }
+  if ((state === 'CLEAN' || state === 'UNSTABLE') && checkStatus === 'passed') return 'label';
+  return 'wait';
+}
+
 /** The `gh pr merge` method flag for a merge method (default merge = --no-ff history the drain wants). */
 export function mergeMethodFlag(method) {
   switch (method) {
@@ -444,12 +472,12 @@ function runCli() {
     const reqVerdict = classifyChecks(required);
     const state = view.mergeStateStatus || 'UNKNOWN';
 
-    if (view.mergeable === 'CONFLICTING' || state === 'DIRTY') emit({ repo: REPO, merged: false, reason: 'conflict', pr: Number(prNum), detail: `PR #${prNum} has merge conflicts with ${BASE} — ${BASE} left untouched (rebase the ref + re-run, or --fallback-git)` }, 3);
-    if (reqVerdict.status === 'failed') emit({ repo: REPO, merged: false, reason: 'check-red', pr: Number(prNum), detail: `PR #${prNum} required check RED — ${reqVerdict.reason}; ${BASE} left untouched (fix + re-run)` }, 2);
-    if (state === 'BEHIND') emit({ repo: REPO, merged: false, reason: 'behind', pr: Number(prNum), detail: `PR #${prNum} is behind ${BASE} (strict up-to-date) — rebase the ref onto ${BASE} + re-run` }, 3);
-    // Ready: GitHub says mergeable AND every REQUIRED check has passed (empty required set only counts as
-    // passed once GitHub itself is no longer BLOCKED — i.e. state is CLEAN/UNSTABLE, closing the race).
-    if ((state === 'CLEAN' || state === 'UNSTABLE') && reqVerdict.status === 'passed') break;
+    const verdict = pollVerdict({ state, checkStatus: reqVerdict.status, requiredCount: required.length, labelWhenGreen: !!PLAN.labelWhenGreen, conflicting: view.mergeable === 'CONFLICTING' });
+    if (verdict === 'conflict') emit({ repo: REPO, merged: false, reason: 'conflict', pr: Number(prNum), detail: `PR #${prNum} has merge conflicts with ${BASE} — ${BASE} left untouched (rebase the ref + re-run, or --fallback-git)` }, 3);
+    if (verdict === 'red') emit({ repo: REPO, merged: false, reason: 'check-red', pr: Number(prNum), detail: `PR #${prNum} required check RED — ${reqVerdict.reason}; ${BASE} left untouched (fix + re-run)` }, 2);
+    if (verdict === 'behind') emit({ repo: REPO, merged: false, reason: 'behind', pr: Number(prNum), detail: `PR #${prNum} is behind ${BASE} (strict up-to-date) — rebase the ref onto ${BASE} + re-run` }, 3);
+    if (verdict === 'label') break; // ready: green (for BEHIND, a NON-EMPTY green set) → apply the producer label
+    // verdict === 'wait' → not ready yet (checks pending / BLOCKED); keep polling until the timeout.
     if (Date.now() > deadlineMs) emit({ repo: REPO, merged: false, reason: 'check-timeout', pr: Number(prNum), detail: `PR #${prNum} not ready past timeout (mergeStateStatus=${state}); leaving for a later drain pass` }, 3);
     execFileSync('sleep', ['20']);
   }
