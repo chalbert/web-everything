@@ -923,49 +923,29 @@ function runCli() {
     }
   }
 
-  // #2318 — POST-LAND DUPLICATE-NNN TRIPWIRE. JIT numbering (#2288) makes two lanes racing to one birth-NNN
-  // structurally rare, but a bug on ANY land path could still put two files at one numeric id on main — exactly
-  // the #2316 double-land, where two individually-green PRs both passed `ids must be unique` against a main that
-  // did not YET hold #2316, both landed in one pass, and — with NO post-land duplicate detection on this merge
-  // path — the duplicate sat SILENTLY on main and turned every open PR's required `test` check red globally
-  // (the root cause: the pre-merge `healNnnCollision` only heals a NOT-yet-landable/red PR, so two green
-  // siblings slip past it). Make it impossible-or-LOUD: after the land + numbering, re-detect duplicate ids;
-  // if any, run the sanctioned post-land heal ONCE (renumber-collisions, #2071) and re-detect; if a dup SURVIVES
-  // the heal, surface it LOUDLY and fail the pass (non-zero / the watch reports it) rather than leave it on main.
+  // #2318 — POST-LAND DUPLICATE-NNN TRIPWIRE (LOUD-ONLY, #xsyia6k). JIT numbering (#2288) makes two lanes racing
+  // to one birth-NNN structurally rare, but a bug on ANY land path could still put two files at one numeric id on
+  // main — exactly the #2316 double-land, where two individually-green PRs both passed `ids must be unique` against
+  // a main that did not YET hold #2316, both landed in one pass, and the duplicate sat SILENTLY on main and turned
+  // every open PR's required `test` check red globally (root cause: the pre-merge `healNnnCollision` only heals a
+  // NOT-yet-landable/red PR, so two green siblings slip past it).
+  //
+  // This tripwire's charter is impossible-or-LOUD: DETECT the duplicate and surface it, NOT auto-fix it. It does
+  // NOT run the renumber heal here, deliberately (#xsyia6k). A post-land heal that yields one of the two colliding
+  // files rewrites `#NNN`/`blockedBy` refs corpus-wide, and — with no `--onto-ref` to scope it (the healer's #2316
+  // edge-clobber guard reads `ontoSet`, which is empty post-land) — that sweep can clobber a SURVIVING main item's
+  // legitimate edge (the exact #2314 corruption). Passing `--onto-ref=main` can't rescue it either: both colliding
+  // files then count as published, so `planRenumber` yields nothing and the heal is a no-op. So we detect → exit 3
+  // → a human runs the guarded `backlog-renumber-collisions.mjs` (with the right onto-ref) by hand. Given how rare
+  // a post-land dup now is, trading a silent dup for a possible silent edge-clobber is the wrong bargain.
+  //
   // Runs on EVERY non-dry pass (not only one that landed a local couple) so a duplicate lingering on main from a
   // prior failed land is caught too — the detect is a cheap fs read, so a standing invariant is strictly stronger.
   let duplicateIdsOnMain = [];
   if (!DRY_RUN) {
-    const backlogDir = join(process.cwd(), 'backlog');
-    let dups = findDuplicateIds(backlogDir);
-    if (dups.length) {
-      if (!AS_JSON) process.stderr.write(`  ⚠ POST-LAND duplicate id(s) on main: ${summarizeDuplicates(dups)} — running the post-land heal (#2071)…\n`);
-      // CRITICAL: renumber-collisions writes the healed files to the LOCAL dir BEFORE we gate/commit/push, so a
-      // fresh re-detect would read "clean" even when the gate throws or the push fails — leaving the duplicate on
-      // origin/main but the tripwire SILENT. So only TRUST a re-detect once the heal actually PUBLISHED to main;
-      // otherwise keep the original `dups` as surviving so the tripwire fires loud (the whole point of #2318).
-      let healPublished = false;
-      try {
-        const out = execFileSync('node', ['scripts/backlog-renumber-collisions.mjs', '--json'], { cwd: process.cwd(), encoding: 'utf8' });
-        const plan = JSON.parse((out.trim().split('\n').filter(Boolean).pop()) || '{}');
-        if (Array.isArray(plan.renumbered) && plan.renumbered.length) {
-          const tag = plan.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ');
-          execFileSync('npm', ['run', 'check:standards'], { cwd: process.cwd(), stdio: 'ignore' }); // never push a red heal
-          execFileSync('git', ['add', '-A', '--', 'backlog'], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
-          execFileSync('git', ['commit', '-m', `backlog: heal post-land duplicate id(s) (${tag}) (#2071/#2318)`, '--', 'backlog'], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
-          execFileSync('git', ['push', 'origin', 'HEAD:main'], { env: { ...process.env, MAIN_PUSH_OK: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
-          healPublished = true; // gate + commit + push all succeeded → main is genuinely healed
-          if (!AS_JSON) process.stderr.write(`  ✓ healed post-land duplicate id(s) (${tag}, ${plan.renumbered.length} collision(s)) + pushed to main (#2318)\n`);
-        }
-      } catch (e) {
-        if (!AS_JSON) process.stderr.write(`  ⚠ post-land duplicate-id heal FAILED (${String(e.message || e).split('\n')[0]}) — run scripts/backlog-renumber-collisions.mjs by hand on main\n`);
-      }
-      // Trust a fresh scan ONLY if the heal reached main; else the local dir may be healed-but-unpushed → keep dups.
-      dups = healPublished ? findDuplicateIds(backlogDir) : dups;
-    }
-    duplicateIdsOnMain = dups;
+    duplicateIdsOnMain = findDuplicateIds(join(process.cwd(), 'backlog'));
     if (duplicateIdsOnMain.length && !AS_JSON) {
-      process.stderr.write(`\n  ✗✗ TRIPWIRE (#2318): duplicate id(s) SURVIVE on main after heal — ${summarizeDuplicates(duplicateIdsOnMain)}. The merge queue stays RED until this is resolved by hand; NOT left silent.\n\n`);
+      process.stderr.write(`\n  ✗✗ TRIPWIRE (#2318): duplicate id(s) on main — ${summarizeDuplicates(duplicateIdsOnMain)}. The merge queue stays RED (exit 3) until this is resolved by hand: run \`node scripts/backlog-renumber-collisions.mjs --onto-ref=<pre-dup main sha>\` on main. NOT auto-healed (an unguarded sweep can clobber a surviving edge, #2314); NOT left silent.\n\n`);
     }
   }
 
