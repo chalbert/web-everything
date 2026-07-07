@@ -94,6 +94,7 @@ import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META } f
 import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
 import { mergePr } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes } from './lane-drain.mjs';
+import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
 
 // #2262 — the local, machine-scoped park-age clock the review-escalation watch-window gate reads its
 // `parkedSinceMs` from (see review-park-state.mjs for why losing/corrupting this file is safe). Resolved
@@ -922,6 +923,52 @@ function runCli() {
     }
   }
 
+  // #2318 — POST-LAND DUPLICATE-NNN TRIPWIRE. JIT numbering (#2288) makes two lanes racing to one birth-NNN
+  // structurally rare, but a bug on ANY land path could still put two files at one numeric id on main — exactly
+  // the #2316 double-land, where two individually-green PRs both passed `ids must be unique` against a main that
+  // did not YET hold #2316, both landed in one pass, and — with NO post-land duplicate detection on this merge
+  // path — the duplicate sat SILENTLY on main and turned every open PR's required `test` check red globally
+  // (the root cause: the pre-merge `healNnnCollision` only heals a NOT-yet-landable/red PR, so two green
+  // siblings slip past it). Make it impossible-or-LOUD: after the land + numbering, re-detect duplicate ids;
+  // if any, run the sanctioned post-land heal ONCE (renumber-collisions, #2071) and re-detect; if a dup SURVIVES
+  // the heal, surface it LOUDLY and fail the pass (non-zero / the watch reports it) rather than leave it on main.
+  // Runs on EVERY non-dry pass (not only one that landed a local couple) so a duplicate lingering on main from a
+  // prior failed land is caught too — the detect is a cheap fs read, so a standing invariant is strictly stronger.
+  let duplicateIdsOnMain = [];
+  if (!DRY_RUN) {
+    const backlogDir = join(process.cwd(), 'backlog');
+    let dups = findDuplicateIds(backlogDir);
+    if (dups.length) {
+      if (!AS_JSON) process.stderr.write(`  ⚠ POST-LAND duplicate id(s) on main: ${summarizeDuplicates(dups)} — running the post-land heal (#2071)…\n`);
+      // CRITICAL: renumber-collisions writes the healed files to the LOCAL dir BEFORE we gate/commit/push, so a
+      // fresh re-detect would read "clean" even when the gate throws or the push fails — leaving the duplicate on
+      // origin/main but the tripwire SILENT. So only TRUST a re-detect once the heal actually PUBLISHED to main;
+      // otherwise keep the original `dups` as surviving so the tripwire fires loud (the whole point of #2318).
+      let healPublished = false;
+      try {
+        const out = execFileSync('node', ['scripts/backlog-renumber-collisions.mjs', '--json'], { cwd: process.cwd(), encoding: 'utf8' });
+        const plan = JSON.parse((out.trim().split('\n').filter(Boolean).pop()) || '{}');
+        if (Array.isArray(plan.renumbered) && plan.renumbered.length) {
+          const tag = plan.renumbered.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ');
+          execFileSync('npm', ['run', 'check:standards'], { cwd: process.cwd(), stdio: 'ignore' }); // never push a red heal
+          execFileSync('git', ['add', '-A', '--', 'backlog'], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
+          execFileSync('git', ['commit', '-m', `backlog: heal post-land duplicate id(s) (${tag}) (#2071/#2318)`, '--', 'backlog'], { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] });
+          execFileSync('git', ['push', 'origin', 'HEAD:main'], { env: { ...process.env, MAIN_PUSH_OK: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+          healPublished = true; // gate + commit + push all succeeded → main is genuinely healed
+          if (!AS_JSON) process.stderr.write(`  ✓ healed post-land duplicate id(s) (${tag}, ${plan.renumbered.length} collision(s)) + pushed to main (#2318)\n`);
+        }
+      } catch (e) {
+        if (!AS_JSON) process.stderr.write(`  ⚠ post-land duplicate-id heal FAILED (${String(e.message || e).split('\n')[0]}) — run scripts/backlog-renumber-collisions.mjs by hand on main\n`);
+      }
+      // Trust a fresh scan ONLY if the heal reached main; else the local dir may be healed-but-unpushed → keep dups.
+      dups = healPublished ? findDuplicateIds(backlogDir) : dups;
+    }
+    duplicateIdsOnMain = dups;
+    if (duplicateIdsOnMain.length && !AS_JSON) {
+      process.stderr.write(`\n  ✗✗ TRIPWIRE (#2318): duplicate id(s) SURVIVE on main after heal — ${summarizeDuplicates(duplicateIdsOnMain)}. The merge queue stays RED until this is resolved by hand; NOT left silent.\n\n`);
+    }
+  }
+
   // #2290 — the drain is the sole writer to main, so the WE derived-artifact regen (#2182/#2173) moves INTO the
   // drain: after a pass that landed ≥1 WE (local) couple, reproduce the artifacts ONCE and, if changed, commit +
   // push them to main as the drain (pr-land can no longer do this — it does not merge). Best-effort/non-fatal.
@@ -939,23 +986,25 @@ function runCli() {
   // #2222 — a healed tip is a PENDING rebuild (CI re-running on the renumbered tree), so it counts as progress
   // for the watch's idle accounting exactly like a rebase-drop rebuild — it lands on a later pass.
   const pendingAll = [...pendingRebased, ...healed];
-  const result = { ok: true, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
-  return { result, merged, failedMerges, pendingRebased: pendingAll, deferred };
+  const result = { ok: duplicateIdsOnMain.length === 0, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), ...(duplicateIdsOnMain.length ? { duplicateIdsOnMain } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
+  return { result, merged, failedMerges, pendingRebased: pendingAll, deferred, duplicateIdsOnMain };
   }; // end sweepOnce
 
   // ── Driver — one sweep (the /drain one-shot + /merge bare), or the `--watch` monitor (`/drain watch`) ──────
   if (!WATCH) {
-    let { result, failedMerges } = sweepOnce();
+    let { result, failedMerges, duplicateIdsOnMain } = sweepOnce();
     // #2230 — the label index lags the producer's label write, so a one-shot fired right after labelling can see
     // the just-labelled PR as absent. Re-poll ONCE after a short delay before concluding the queue is empty.
     // Fail-soft: a still-empty re-poll is a legitimate empty queue, not an error.
     if (shouldRepollForLabelLag({ label, found: result.considered, expect: EXPECT, retried: false })) {
       if (!AS_JSON) process.stderr.write(`  · ${result.considered} labelled candidate(s)${EXPECT ? ` (< expected ${EXPECT})` : ''} — re-polling once in ${REPOLL_SEC}s (label index may lag the producer's label write)…\n`);
       sleepSync(REPOLL_SEC * 1000);
-      ({ result, failedMerges } = sweepOnce());
+      ({ result, failedMerges, duplicateIdsOnMain } = sweepOnce());
     }
     if (AS_JSON) process.stdout.write(JSON.stringify(result) + '\n');
-    process.exit(failedMerges.length ? 2 : 0);
+    // #2318 — a duplicate id surviving on main is a LOUD failure (exit 3), distinct from a merge failure (exit 2):
+    // main is in a globally-red state until it is resolved by hand, so the drain must never exit 0 over it.
+    process.exit((duplicateIdsOnMain && duplicateIdsOnMain.length) ? 3 : (failedMerges.length ? 2 : 0));
   }
 
   // WATCH: re-sweep on a fixed interval, landing PRs as they become eligible, until `--max-idle` consecutive
@@ -965,12 +1014,20 @@ function runCli() {
   const allMerged = [];
   let idle = 0;
   let lastFailed = [];
+  let lastDup = [];
   for (let pass = 1; ; pass++) {
     if (!AS_JSON) process.stderr.write(`── pass ${pass} ──\n`);
-    const { result, merged, failedMerges, pendingRebased, deferred } = sweepOnce();
+    const { result, merged, failedMerges, pendingRebased, deferred, duplicateIdsOnMain } = sweepOnce();
     passes.push(result);
     allMerged.push(...merged);
     lastFailed = failedMerges;
+    lastDup = duplicateIdsOnMain || [];
+    // #2318 — a duplicate id on main is a hard, LOUD stop: polling won't clear it (main is globally red), so
+    // break the watch immediately and surface it rather than spinning idle passes over a broken main.
+    if (lastDup.length) {
+      if (!AS_JSON) process.stderr.write(`watch: STOPPING — duplicate id(s) survive on main (${summarizeDuplicates(lastDup)}); resolve by hand then re-run the drain.\n`);
+      break;
+    }
     // A pass that rebuilt a tip (pendingRebased) made progress — keep polling so it lands once CI re-runs.
     const idlePass = merged.length === 0 && deferred.length === 0 && pendingRebased.length === 0;
     idle = idlePass ? idle + 1 : 0;
@@ -979,6 +1036,6 @@ function runCli() {
     sleepSync(INTERVAL * 1000);
   }
   if (!AS_JSON) process.stderr.write(`watch: stopped after ${passes.length} pass(es); merged ${allMerged.length} PR(s) total.\n`);
-  if (AS_JSON) process.stdout.write(JSON.stringify({ ok: true, watch: true, label, interval: INTERVAL, maxIdle: MAX_IDLE, passes: passes.length, merged: allMerged, lastFailed }) + '\n');
-  process.exit(lastFailed.length ? 2 : 0);
+  if (AS_JSON) process.stdout.write(JSON.stringify({ ok: lastDup.length === 0, watch: true, label, interval: INTERVAL, maxIdle: MAX_IDLE, passes: passes.length, merged: allMerged, lastFailed, ...(lastDup.length ? { duplicateIdsOnMain: lastDup } : {}) }) + '\n');
+  process.exit(lastDup.length ? 3 : (lastFailed.length ? 2 : 0));
 }

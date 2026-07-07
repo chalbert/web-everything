@@ -78,6 +78,7 @@ import { homedir } from 'node:os';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { assertMayMerge } from './lib/pr-merge-gate.mjs';
 import { numberPendingHashes } from './lane-drain.mjs'; // JIT numbering, shared single source (#2288/#xzxc92d)
+import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs'; // post-land dup-NNN tripwire (#2318)
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -568,7 +569,13 @@ function runCli() {
       if (regen && regen.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${regen.warning}\n`);
       const skipped = postLandSkips(heal, regen);
       if (skipped.length) process.stderr.write(`pr-land [${REPO}] ⚠⚠ POST-LAND ${skipped.join(' + ')} SKIPPED (tracked-dirty tree) — ${BASE} may carry an unhealed id collision / stale derived artifacts; run the steps by hand.\n`);
-      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), ...(numbered && numbered.assigned && numbered.assigned.length ? { numbered: numbered.assigned } : {}), regenDone: regen ? regen.done : [], regenFailed: regen ? regen.failed : [], ...(regen && regen.warning ? { regenWarning: regen.warning } : {}), ...(skipped.length ? { skipped } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${numbered && numbered.assigned && numbered.assigned.length ? `; JIT-numbered ${numbered.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')}` : ''}${postLandReport(heal, regen)}` }, 0);
+      // #2318 — post-land DUPLICATE-NNN tripwire. runHeal above renumbers an intra-corpus collision, but if a
+      // duplicate SURVIVES (heal skipped on a dirty tree, or a mode the healer can't resolve), it must be LOUD,
+      // never silent on main. Re-detect after the heal and surface it so the fallback-git land can't leave a
+      // duplicate id sitting on ${BASE} (the #2316 double-land failure mode).
+      const residualDups = findDuplicateIds(resolve(REPO, 'backlog'));
+      if (residualDups.length) process.stderr.write(`pr-land [${REPO}] ✗✗ TRIPWIRE (#2318): duplicate id(s) on ${BASE} after heal — ${summarizeDuplicates(residualDups)}; resolve by hand (${BASE}'s standards gate will stay RED until then).\n`);
+      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), ...(numbered && numbered.assigned && numbered.assigned.length ? { numbered: numbered.assigned } : {}), regenDone: regen ? regen.done : [], regenFailed: regen ? regen.failed : [], ...(regen && regen.warning ? { regenWarning: regen.warning } : {}), ...(skipped.length ? { skipped } : {}), ...(residualDups.length ? { duplicateIdsOnMain: residualDups } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${numbered && numbered.assigned && numbered.assigned.length ? `; JIT-numbered ${numbered.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')}` : ''}${residualDups.length ? `; ⚠ DUPLICATE ids survive: ${summarizeDuplicates(residualDups)}` : ''}${postLandReport(heal, regen)}` }, 0);
     } catch (e) {
       emit({ repo: REPO, merged: false, reason: 'fallback-failed', detail: `${detail}; git-merge fallback ALSO failed (${String(e.message || e).split('\n')[0]}) — ${BASE} left untouched` }, 3);
     }
