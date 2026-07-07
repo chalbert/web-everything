@@ -37,6 +37,7 @@ import {
   validateBlockComposesTraits, COMPOSE_TRAITS_ENFORCED,
   scanRepoLocusPrefixes,
   validateTemplateA11y, NAV_ACTIVE_STATE_ENFORCED,
+  duplicateBacklogNums,
   lintBacklogItemRendering,
   detectClassificationCollapse,
   computeNativeFirstConformance,
@@ -1692,5 +1693,31 @@ describe('validateUntrackedDerivedArtifacts — local-vs-CI divergence guard (#2
     const untracked = raw.split('\n').filter(Boolean);
     const { errors } = validateUntrackedDerivedArtifacts(untracked);
     expect(errors).toEqual([]);
+  });
+});
+
+describe('duplicateBacklogNums — the #2248 NNN-collision tripwire (pure detector)', () => {
+  it('two files sharing an NNN → one error naming both', () => {
+    const errs = duplicateBacklogNums([
+      { num: '2316', id: '2316-frontierui-ci' },
+      { num: '2316', id: '2316-renumber-fix' },
+    ]);
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toMatch(/#2316 is used by both/);
+    expect(errs[0]).toMatch(/2316-frontierui-ci/);
+    expect(errs[0]).toMatch(/2316-renumber-fix/);
+  });
+  it('distinct NNNs → clean (no errors)', () => {
+    expect(duplicateBacklogNums([{ num: '001', id: 'a' }, { num: '002', id: 'b' }, { num: '003', id: 'c' }])).toEqual([]);
+  });
+  it('one error per colliding NNN (multiple distinct collisions)', () => {
+    const errs = duplicateBacklogNums([
+      { num: '010', id: 'a' }, { num: '010', id: 'b' },
+      { num: '020', id: 'c' }, { num: '020', id: 'd' },
+    ]);
+    expect(errs).toHaveLength(2);
+  });
+  it('items missing a num are skipped (a separate missing-prefix check owns those)', () => {
+    expect(duplicateBacklogNums([{ id: 'no-num' }, { num: '005', id: 'e' }])).toEqual([]);
   });
 });

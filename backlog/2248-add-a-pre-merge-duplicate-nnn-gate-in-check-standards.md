@@ -2,8 +2,11 @@
 kind: story
 size: 3
 relatedTo: ["2213", "2071"]
-status: open
+status: resolved
 dateOpened: "2026-07-04"
+dateStarted: "2026-07-07"
+dateResolved: "2026-07-07"
+graduatedTo: none
 tags: [backlog, gate, merge-queue, git]
 ---
 
