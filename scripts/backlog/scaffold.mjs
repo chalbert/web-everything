@@ -12,13 +12,23 @@
 export const pad3 = (n) => String(n).padStart(3, '0');
 
 /**
- * The next free `NNN`, as a padded string: highest existing + 1 (never reuses a gap below the max, to
- * match "allocate highest + 1" — gap reuse is allowed by the rules but highest+1 is the safe default).
+ * A free `NNN` for a NEW item, as a padded string. #2292 (interim, under #2289) — allocate a RANDOM free
+ * number within the EXISTING range (a gap below the max) instead of deterministic max+1, so two lanes
+ * branching off the same main rarely pick the same NNN (a low-probability birthday collision over the free
+ * gaps) rather than DETERMINISTICALLY colliding on max+1 (the exact race that double-landed #2316 on
+ * 2026-07-06). It fills existing gaps rather than creating big new numbers; only when the range is gap-free
+ * does it fall back to max+1. `rng` (a [0,1) source, default Math.random) is injected so the choice is
+ * unit-testable. INTERIM — superseded by #2288 JIT numbering, which makes a duplicate NNN unrepresentable.
  * @param {string[]} existingNums  Every current item's `num` (e.g. `['001','002','254']`).
+ * @param {() => number} rng  a [0,1) random source (default Math.random)
  */
-export function nextNum(existingNums) {
+export function nextNum(existingNums, rng = Math.random) {
+  const used = new Set(existingNums.map((n) => Number(n) || 0));
   const max = existingNums.reduce((m, n) => Math.max(m, Number(n) || 0), 0);
-  return pad3(max + 1);
+  const free = [];
+  for (let n = 1; n < max; n++) if (!used.has(n)) free.push(n); // gaps strictly below the max
+  if (free.length === 0) return pad3(max + 1);                  // gap-free range → deterministic next
+  return pad3(free[Math.floor(rng() * free.length)]);
 }
 
 /** kebab-case a free-text title into a slug (lowercase, spaces/punct → single dashes). */
