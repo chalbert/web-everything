@@ -57,8 +57,9 @@ serially, in a later session, under the same self-approved PR transport the prod
 
 ## Run it (the label lander — #2194)
 
-`/drain` now drives the ONE label lander `scripts/merge-ai-prs.mjs --label=ready-to-merge --all-repos`, **not**
-`lane-drain.mjs`. It sweeps the open `ready-to-merge` PRs and merges each as it becomes eligible (green +
+`/drain` now drives the ONE label lander `scripts/merge-ai-prs.mjs --label=ready-to-merge`, **not**
+`lane-drain.mjs` (the constellation sweep is the default since #2287 — no `--all-repos` needed; pass
+`--this-repo` to scope to the cwd repo only). It sweeps the open `ready-to-merge` PRs and merges each as it becomes eligible (green +
 mergeable), in cross-item `blockedBy` order (each PR's `.lane-manifest.json`, read off its head ref, supplies
 the edges — the #2188 convergence).
 

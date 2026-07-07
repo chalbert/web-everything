@@ -1,10 +1,13 @@
 ---
 kind: story
 size: 2
-status: open
+status: resolved
 relatedTo: ["2257", "2162"]
 tags: [lane, drain, merge-queue, cross-repo]
 dateOpened: "2026-07-05"
+dateStarted: "2026-07-07"
+dateResolved: "2026-07-07"
+graduatedTo: none
 ---
 
 # `/drain` sweeps all constellation repos by DEFAULT (all-repos, opt out with `--this-repo`)
