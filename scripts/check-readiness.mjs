@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { computeReadiness, computeSelection, computeBatchPack, buildReadinessReport, spliceStaleEdges } from './readiness/engine.mjs';
 import { parseReservations, emptyState, foreignHolds, deprioritizeReserved } from './readiness/reservations.mjs';
+import { parseHolds, emptyHoldState, heldNums } from './readiness/prepare-hold-state.mjs';
 import { LOCI } from './check-standards-rules.mjs';
 import { checkMainStaleness } from './lib/main-staleness.mjs';
 
@@ -56,6 +57,16 @@ function loadReservations() {
   try { return parseReservations(readFileSync(RESERVATIONS_PATH, 'utf8')); }
   catch { return emptyState(); }
 }
+
+// Prepare-hold HARD exclusion (#2219 (b) flow / #2264). Unlike a soft reservation (deprioritize), a prepare-
+// held item is being prepared in a lane and is EXCLUDED from every selection surface — it must not be offered
+// or packed while its hold is live. Lease/time-dependent, so — like reservations — it lives at this CLI
+// boundary, never inside the byte-deterministic `computeSelection` core. Read the local token offline (#105).
+const PREPARE_HOLD_PATH = join(ROOT, '.claude/skills/batch-backlog-items/prepare-hold.json');
+function loadHolds() {
+  try { return parseHolds(readFileSync(PREPARE_HOLD_PATH, 'utf8')); }
+  catch { return emptyHoldState(); }
+}
 const MY_SESSION = (() => {
   const m = process.argv.find((a) => a.startsWith('--session='));
   return m ? m.slice('--session='.length) : undefined;
@@ -88,6 +99,20 @@ if (!process.argv.includes('--no-fetch')) {
 const items = typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog;
 const report = computeReadiness(items);
 const selection = computeSelection(items); // the deterministic ranked view (same source as the Prioritisation tab)
+
+// Apply the prepare-hold HARD exclusion: drop every live-held item from the selection surfaces so a held item
+// is neither offered (--select) nor packed (batch). Excluded, not deprioritized — the strengthened #2219 (b)
+// replacement for the soft `reserve`. `computeSelection` stays the pure projection; only this CLI view removes.
+const heldSet = new Set(heldNums(loadHolds(), Date.now()));
+const dropHeld = (list) => (list || []).filter((it) => !heldSet.has(String(it.num).padStart(3, '0')));
+if (heldSet.size) {
+  selection.tierA = dropHeld(selection.tierA);
+  selection.batchable = dropHeld(selection.batchable);
+  selection.sliceable = dropHeld(selection.sliceable);
+  selection.tierB = dropHeld(selection.tierB);
+  selection.filler = dropHeld(selection.filler);
+}
+
 const capacity = loadCapacity();
 const budget = BUDGET_OVERRIDE ?? capacity.budget;
 
@@ -141,6 +166,7 @@ if (SELECT) {
   console.log(`${BLD}${c.open} open${RST} · ${GRN}${c.agentReady} agent-ready${RST} (${CYA}${c.batchable} batchable${RST})${c.sliceable ? ` · ${CYA}${c.sliceable} epics${RST}${DIM} (${c.epicActionable} need action)${RST}` : ''} · ${YEL}${c.tierB} Tier B (decisions${c.tierBPrepared ? `, ${GRN}${c.tierBPrepared} prepared${YEL}` : ''})${RST} · ${DIM}${c.tierC} Tier C${RST}${c.inFlight ? ` · ${DIM}${c.inFlight} in flight${RST}` : ''}\n`);
 
   if (foreign.size) console.log(`${DIM}${foreign.size} item(s) soft-held by another session${MY_SESSION ? ` (yours: ${MY_SESSION}, not penalized)` : ''} — deprioritized below, not excluded (#083).${RST}`);
+  if (heldSet.size) console.log(`${DIM}${heldSet.size} item(s) prepare-held (#2219 (b)) — HARD-excluded from the pool below (a session is preparing them in a lane); the drain-free hold clears on \`backlog.mjs prepare-release\`.${RST}`);
   // Legible-stop (#083): when the pool is thin/empty but items are in flight elsewhere, say so — a
   // batch's "no eligible Tier-A left" stop then reads as "drained by a concurrent session, re-run
   // shortly," not "backlog empty." Derived live from `status: active`, so it's never a stale signal.

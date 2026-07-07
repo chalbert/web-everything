@@ -13,8 +13,9 @@ you never create the `resolved-epic-with-open-child` contradiction the gate woul
 > what forces a lane. But if you reached `resolve` as the tail of *building* an item, that build's edits
 > already had to happen in a lane clone, and the commit/land here belongs to the same lane→PR flow (direct
 > `main` writes are blocked by `we:scripts/guard-bash.mjs`, #2203) — do not run the build in the primary
-> checkout and then resolve on top of it. How the splice/commit lifecycle composes with lane isolation is
-> being reconciled — **#2219**.
+> checkout and then resolve on top of it. Per the #2219 (b) ruling (shipped #2264), the splice/commit rides
+> the lane→PR — and `resolve` is already a `we:scripts/guard-bash.mjs` backlog-mutation (blocked from a
+> primary cwd, #2302), so run it in the lane. The prepare path now gets the same guard via `prepare-stamp`.
 
 Do exactly this, in order:
 
