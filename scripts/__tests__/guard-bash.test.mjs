@@ -8,10 +8,10 @@ import { decide, reason, isBacklogMutation, isPrimaryCwd } from '../guard-bash.m
 
 describe('guard-bash — primary-cwd backlog-mutation block (#2302)', () => {
   const P = ['/ws/webeverything', '/ws/frontierui'];
-  it('isBacklogMutation matches the item-mutation verbs, not the session-state verbs', () => {
-    for (const v of ['claim', 'resolve', 'scaffold', 'settle', 'retype', 'yield'])
+  it('isBacklogMutation matches EVERY item-mutation verb (incl. release/cost), not the session-state verbs', () => {
+    for (const v of ['claim', 'resolve', 'release', 'scaffold', 'settle', 'retype', 'yield', 'cost'])
       expect(isBacklogMutation(`node scripts/backlog.mjs ${v} 2279`)).toBe(true);
-    for (const v of ['reserve', 'unreserve', 'queue']) // lane-agnostic session/label state → not blocked
+    for (const v of ['reserve', 'unreserve', 'queue', 'unqueue', 'calibrate']) // don't touch an item .md → not blocked
       expect(isBacklogMutation(`node scripts/backlog.mjs ${v} 2279 --session=s`)).toBe(false);
     expect(isBacklogMutation('echo backlog.mjs claim 1')).toBe(false); // a mention, not a `node` invocation
   });
@@ -26,6 +26,12 @@ describe('guard-bash — primary-cwd backlog-mutation block (#2302)', () => {
     expect(reason(cmd, { primaryCwd: true })).toMatch(/must run in a LANE clone/);
     expect(reason(cmd, { primaryCwd: false })).toBeNull();      // in a lane → allowed
     expect(reason(cmd)).toBeNull();                              // default ctx (no cwd known) → allow
+  });
+  it('release + cost are blocked from primary too (same writeBacklogMd path — #2302 PR review)', () => {
+    for (const v of ['release', 'cost']) {
+      expect(reason(`node scripts/backlog.mjs ${v} 2287`, { primaryCwd: true })).toMatch(/must run in a LANE clone/);
+      expect(reason(`node scripts/backlog.mjs ${v} 2287`, { primaryCwd: false })).toBeNull(); // in a lane → allowed
+    }
   });
   it('the BACKLOG_MUTATE_OK=1 override passes through even from primary', () => {
     expect(reason('BACKLOG_MUTATE_OK=1 node scripts/backlog.mjs resolve 2287', { primaryCwd: true })).toBeNull();

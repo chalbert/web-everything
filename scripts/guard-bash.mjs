@@ -24,11 +24,14 @@ import { resolve, dirname, join } from 'node:path';
 
 const BACKLOG_MD = /(?:^|[\s'"=(])(?:\.\/)?backlog\/(\d+)-[^\s'")]*\.md/;
 const CORPUS_MD = /(?:^|[\s'"=(])(?:\.\/)?(?:backlog|reports)\/[^\s'")]*\.md/;
-// #2302 — a `node …/backlog.mjs <sub>` invocation that MUTATES an item's file/state (as opposed to the
-// session-state verbs reserve/unreserve/queue, which are lane-agnostic). Run from the PRIMARY checkout it
-// slips past guard-lane (a Bash call, not an Edit/Write) and stamps the item on primary — the exact hole
-// guard-lane closes for the file tools. Blocked only when cwd is a primary (see isPrimaryCwd).
-const BACKLOG_MUTATION = /\bnode\s+\S*backlog\.mjs\s+(?:claim|resolve|scaffold|settle|retype|yield)\b/;
+// #2302 — a `node …/backlog.mjs <sub>` invocation that MUTATES an item's file/frontmatter (as opposed to the
+// session/label-state verbs reserve/unreserve/queue/unqueue/calibrate, which don't touch an item's .md). Run
+// from the PRIMARY checkout it slips past guard-lane (a Bash call, not an Edit/Write) and stamps the item on
+// primary — the exact hole guard-lane closes for the file tools. Blocked only when cwd is a primary (see
+// isPrimaryCwd). The verb set is EVERY subcommand that reaches writeBacklogMd: claim/resolve/RELEASE (all
+// three via transition), retype, yield, scaffold, settle, and COST (accrual write) — release+cost added per
+// the #2302 PR review (they took the same on-disk mutation path but were omitted).
+const BACKLOG_MUTATION = /\bnode\s+\S*backlog\.mjs\s+(?:claim|resolve|release|scaffold|settle|retype|yield|cost)\b/;
 
 /** Does this segment INVOKE a backlog item-mutation subcommand? Pure (unit-tested). */
 export function isBacklogMutation(segment) { return BACKLOG_MUTATION.test(String(segment || '')); }
