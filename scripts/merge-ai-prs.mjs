@@ -125,13 +125,46 @@ export function isAiAuthor(author) {
  * loudly). PURE except the alternates read, injected as `readAlt` for the unit test.
  */
 export function resolvePrimaryPath(cwd, { flag, env } = {}, readAlt = (p) => readFileSync(p, 'utf8')) {
-  if (typeof flag === 'string' && flag.trim()) return resolve(flag.trim());
-  if (typeof env === 'string' && env.trim()) return resolve(env.trim());
+  if (typeof flag === 'string' && flag.trim()) return resolve(cwd, flag.trim()); // relative --primary → against cwd, not process.cwd()
+  if (typeof env === 'string' && env.trim()) return resolve(cwd, env.trim());
   try {
     const alt = readAlt(resolve(cwd, '.git/objects/info/alternates')).trim().split('\n')[0];
     if (alt) return resolve(alt, '..', '..');            // <primary>/.git/objects → <primary>
   } catch { /* no alternates file → not locatable this way */ }
   return null;
+}
+
+/**
+ * Decide + perform the post-land ff-sync of the user's PRIMARY checkout (#xwokc1n). PURE except the injected
+ * `exec` (git spawner) and `isCwd` (self-check) — so every branch is unit-testable (the sync lived untested in
+ * the CLI before). Returns `{ synced, reason, warn }`:
+ *   - `synced:true`  → a pure `git pull --ff-only` succeeded.
+ *   - `synced:false` → deliberately skipped; `reason` ∈ from-primary | not-located | not-a-repo | not-on-main |
+ *     dirty | status-failed | diverged. `warn` gates the log: LOUD for an actionable skip (a bad `--primary`,
+ *     a dirty/diverged primary), QUIET for the benign ones (cwd IS the primary — already ff-synced by the
+ *     `localSynced` pull above; or unlocatable with NO flag/env hint, the common single-checkout run).
+ *
+ * Two review fixes (#xwokc1n, PR #202) baked in:
+ *   1. The dirty guard uses `--untracked-files=no` — only TRACKED uncommitted work blocks the sync. Untracked
+ *      scratch/build cruft (near-universal on a real primary) must NOT perpetually skip it (that would re-rot
+ *      the very thing this exists to fix); `git pull --ff-only` is already safe against clobbering untracked
+ *      files (it aborts, caught as `diverged`). The strand being guarded against was an autostash-pop over
+ *      TRACKED work — untracked files were never the hazard.
+ *   2. `not-located` warns ONLY when a `--primary`/`WE_PRIMARY` hint was given but resolved to nothing (a
+ *      typo, worth shouting about). With NO hint, cwd is almost certainly the primary itself (already synced),
+ *      so it stays quiet instead of nagging "pass --primary" on every single-checkout land.
+ * No `--autostash` anywhere (the 2026-07-03 strand). Best-effort; the caller never fails a land on this.
+ */
+export function syncPrimaryOnLand({ exec, primary, hinted = false, isCwd = () => false }) {
+  if (!primary) return { synced: false, reason: 'not-located', warn: !!hinted };
+  try { if (isCwd(primary)) return { synced: false, reason: 'from-primary', warn: false }; } catch { return { synced: false, reason: 'from-primary', warn: false }; }
+  const at = (a) => String(exec(['-C', primary, ...a]) ?? '').trim();
+  let branch; try { branch = at(['rev-parse', '--abbrev-ref', 'HEAD']); } catch { return { synced: false, reason: 'not-a-repo', warn: true }; }
+  if (branch !== 'main') return { synced: false, reason: 'not-on-main', warn: true, branch: branch || 'unknown' };
+  let dirty; try { dirty = at(['status', '--porcelain', '--untracked-files=no']); } catch { return { synced: false, reason: 'status-failed', warn: true }; }
+  if (dirty) return { synced: false, reason: 'dirty', warn: true };
+  try { at(['pull', '--ff-only']); return { synced: true, reason: 'synced', warn: false }; }
+  catch { return { synced: false, reason: 'diverged', warn: true }; }
 }
 
 /** A commit is AI if ANY of its authors (author + Co-Authored-By co-authors) is an AI identity. */
@@ -848,27 +881,27 @@ function runCli() {
   // #2284 residual (2) / #xwokc1n — the pull above ff-syncs the drain's OWN cwd. But when the drain runs from a
   // LANE CLONE (the #2123 isolated-clone rule) rather than the user's primary checkout, that primary (a SEPARATE
   // directory) still drifts behind on every land (observed 75 commits behind origin/main). Locate the primary
-  // ROBUSTLY via `resolvePrimaryPath` — `--primary=<path>` flag, else `WE_PRIMARY` env, else git alternates —
-  // so a `--local` clone (which has NO alternates) still syncs primary instead of silently rotting it. ff-sync
-  // ONLY when it's a DIFFERENT dir, on main, AND its tree is CLEAN: a pure `git pull --ff-only`, NEVER
-  // `--autostash` (an autostash-pop over a peer session's uncommitted work stranded the primary half-merged on
-  // 2026-07-03). A dirty / diverged / unlocatable primary is left UNTOUCHED and loudly logged — never silent,
-  // never stranded. Best-effort, never fatal.
+  // ROBUSTLY via `resolvePrimaryPath` (`--primary=<path>` → `WE_PRIMARY` → git alternates) so a `--local` clone
+  // (which has NO alternates) still syncs it, then `syncPrimaryOnLand` decides + performs the ff-sync (pure,
+  // tested). Sync ONLY a DIFFERENT dir, on main, with a TRACKED-clean tree: a pure `git pull --ff-only`, no
+  // `--autostash` (the 2026-07-03 strand). Untracked cruft does NOT block; a bad `--primary`/dirty/diverged is
+  // left UNTOUCHED and loudly logged; a hint-less unlocatable (cwd IS the primary, already synced) stays quiet.
   let primarySynced = null;
   if (landedLocal) {
-    primarySynced = (() => {
-      const primary = resolvePrimaryPath(process.cwd(), { flag: flags.primary, env: process.env.WE_PRIMARY });
-      if (!primary) { if (!AS_JSON) process.stderr.write(`  · user primary checkout not located (pass --primary=<path> or set WE_PRIMARY — a --local clone has no git alternates) — skipped primary ff-sync\n`); return null; }
-      try { if (realpathSync(primary) === realpathSync(process.cwd())) return null; } catch { return null; } // running FROM primary
-      const atPrimary = (a) => execFileSync('git', ['-C', primary, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-      let branch = null; try { branch = atPrimary(['rev-parse', '--abbrev-ref', 'HEAD']); } catch { if (!AS_JSON) process.stderr.write(`  · user primary (${primary}) is not a readable git repo — skipped primary ff-sync\n`); return false; }
-      if (branch !== 'main') { if (!AS_JSON) process.stderr.write(`  · user primary (${primary}) not on main (on ${branch || 'unknown'}) — skipped primary ff-sync; pull it by hand\n`); return false; }
-      // Dirty guard (#xwokc1n): NEVER touch a primary carrying uncommitted work — no autostash, no strand.
-      let dirty = 'unknown'; try { dirty = atPrimary(['status', '--porcelain']); } catch { /* keep 'unknown' → safe-skip */ }
-      if (dirty) { if (!AS_JSON) process.stderr.write(`  · user primary (${primary}) has uncommitted changes — left UNTOUCHED (no autostash); pull it by hand when clean\n`); return false; }
-      try { atPrimary(['pull', '--ff-only']); if (!AS_JSON) process.stderr.write(`  ✓ user primary checkout fast-forwarded to origin/main\n`); return true; }
-      catch { if (!AS_JSON) process.stderr.write(`  · user primary (${primary}) NOT fast-forwarded (diverged) — pull it by hand\n`); return false; }
-    })();
+    const primary = resolvePrimaryPath(process.cwd(), { flag: flags.primary, env: process.env.WE_PRIMARY });
+    const hinted = (typeof flags.primary === 'string' && flags.primary.trim()) || (typeof process.env.WE_PRIMARY === 'string' && process.env.WE_PRIMARY.trim());
+    const gitAt = (a) => execFileSync('git', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const isCwd = (p) => { try { return realpathSync(p) === realpathSync(process.cwd()); } catch { return false; } };
+    const r = syncPrimaryOnLand({ exec: gitAt, primary, hinted: !!hinted, isCwd });
+    // null = benign no-op (cwd is the primary, or hint-less unlocatable); true = synced; false = actionable skip.
+    primarySynced = r.synced ? true : (r.warn ? false : null);
+    if (!AS_JSON) {
+      if (r.synced) process.stderr.write(`  ✓ user primary checkout fast-forwarded to origin/main\n`);
+      else if (r.warn) {
+        const why = { 'not-located': `not located (pass --primary=<path> or set WE_PRIMARY)`, 'not-a-repo': `${primary} is not a readable git repo`, 'not-on-main': `${primary} not on main (on ${r.branch})`, 'status-failed': `${primary} git status failed`, dirty: `${primary} has uncommitted TRACKED changes — left UNTOUCHED (no autostash)`, diverged: `${primary} NOT fast-forwarded (diverged)` }[r.reason] || r.reason;
+        process.stderr.write(`  · user primary ${why} — skipped primary ff-sync; pull it by hand\n`);
+      }
+    }
   }
 
   // JIT numbering (#2288) — the drain is the sole serial writer to main, so THIS land path (the /pr fast drain
