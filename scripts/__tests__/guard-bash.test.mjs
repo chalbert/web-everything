@@ -4,7 +4,42 @@
  *   sanctioned `MAIN_PUSH_OK=1` escape passes through. The stdin/JSON I/O is the boundary; `decide` is pure.
  */
 import { describe, it, expect } from 'vitest';
-import { decide, reason } from '../guard-bash.mjs';
+import { decide, reason, isBacklogMutation, isPrimaryCwd } from '../guard-bash.mjs';
+
+describe('guard-bash — primary-cwd backlog-mutation block (#2302)', () => {
+  const P = ['/ws/webeverything', '/ws/frontierui'];
+  it('isBacklogMutation matches EVERY item-mutation verb (incl. release/cost), not the session-state verbs', () => {
+    for (const v of ['claim', 'resolve', 'release', 'scaffold', 'settle', 'retype', 'yield', 'cost'])
+      expect(isBacklogMutation(`node scripts/backlog.mjs ${v} 2279`)).toBe(true);
+    for (const v of ['reserve', 'unreserve', 'queue', 'unqueue', 'calibrate']) // don't touch an item .md → not blocked
+      expect(isBacklogMutation(`node scripts/backlog.mjs ${v} 2279 --session=s`)).toBe(false);
+    expect(isBacklogMutation('echo backlog.mjs claim 1')).toBe(false); // a mention, not a `node` invocation
+  });
+  it('isPrimaryCwd: a primary root is primary, a lane clone is not', () => {
+    expect(isPrimaryCwd('/ws/webeverything', P)).toBe(true);
+    expect(isPrimaryCwd('/ws/webeverything/scripts', P)).toBe(true);
+    expect(isPrimaryCwd('/ws/.lanes/pipeline-2302/lane-1', P)).toBe(false); // lane clone → allowed
+    expect(isPrimaryCwd('/ws/some-other-repo', P)).toBe(false);
+  });
+  it('denies a claim/resolve/scaffold ONLY when cwd is primary', () => {
+    const cmd = 'node scripts/backlog.mjs resolve 2287';
+    expect(reason(cmd, { primaryCwd: true })).toMatch(/must run in a LANE clone/);
+    expect(reason(cmd, { primaryCwd: false })).toBeNull();      // in a lane → allowed
+    expect(reason(cmd)).toBeNull();                              // default ctx (no cwd known) → allow
+  });
+  it('release + cost are blocked from primary too (same writeBacklogMd path — #2302 PR review)', () => {
+    for (const v of ['release', 'cost']) {
+      expect(reason(`node scripts/backlog.mjs ${v} 2287`, { primaryCwd: true })).toMatch(/must run in a LANE clone/);
+      expect(reason(`node scripts/backlog.mjs ${v} 2287`, { primaryCwd: false })).toBeNull(); // in a lane → allowed
+    }
+  });
+  it('the BACKLOG_MUTATE_OK=1 override passes through even from primary', () => {
+    expect(reason('BACKLOG_MUTATE_OK=1 node scripts/backlog.mjs resolve 2287', { primaryCwd: true })).toBeNull();
+  });
+  it('a session-state verb (reserve) is allowed from primary', () => {
+    expect(reason('node scripts/backlog.mjs reserve 2279 --session=s', { primaryCwd: true })).toBeNull();
+  });
+});
 
 describe('guard-bash — direct-push-to-main block (#2203)', () => {
   const blocked = (c) => expect(decide(c), c).toMatch(/direct push to `main` is blocked/);
