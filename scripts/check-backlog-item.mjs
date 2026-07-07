@@ -36,7 +36,8 @@ if (!target) {
   console.error('usage: check-backlog-item <NNN | NNN-slug>   (the backlog item to lint)');
   process.exit(2);
 }
-const num = target.match(/^(\d{1,4})/)?.[1];
+// A ref is a numeric NNN (landed) or an `xNNNNNN` hash (provisional, #2288) — accept either.
+const num = target.match(/^(\d{1,4}|x[0-9a-z]{6})/)?.[1];
 
 // The loader (#430) derives each item's record (title/summary from the body, num, batchable, …). Use it
 // so the scoped lint sees exactly what the gate sees — but fall back to a raw gray-matter parse when the
@@ -100,8 +101,10 @@ if (item.blockedBy !== undefined) {
   if (!Array.isArray(item.blockedBy)) {
     errors.push(`Backlog item "${id}" blockedBy must be an array of NNN ids (e.g. ["079", "092"])`);
   } else {
+    // A known id is a landed NNN or a provisional `xNNNNNN` hash (#2288) — an in-flight sibling can be a
+    // valid blockedBy target while both are still hash-keyed in the lane.
     const knownNums = new Set(
-      readdirSync(BACKLOG).filter((f) => f.endsWith('.md')).map((f) => f.match(/^(\d{1,4})-/)?.[1]).filter(Boolean),
+      readdirSync(BACKLOG).filter((f) => f.endsWith('.md')).map((f) => f.match(/^(\d{1,4}|x[0-9a-z]{6})-/)?.[1]).filter(Boolean),
     );
     for (const raw of item.blockedBy) {
       const t = String(raw);

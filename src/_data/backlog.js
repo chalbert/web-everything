@@ -221,11 +221,15 @@ module.exports = function backlog() {
     .filter((f) => f.endsWith('.md'))
     .map((file) => {
       const id = file.replace(/\.md$/, '');
-      // Filenames are `NNN-slug.md`: `num` (the leading NNN) is the stable unique id shown as
-      // "#042" and used for short references; `slug` is the human-readable text. `id` stays the
+      // Filenames lead with EITHER a numeric `NNN` (a LANDED item) or a provisional `xNNNNNN` hash (an
+      // in-flight item the drain has not numbered yet — #2288 JIT numbering). `num` is that leading
+      // token; a hash is a valid unique key, so everything keyed off `num` works unchanged and a
+      // provisional item shows as "#x7k2q9a" until it lands. `slug` is the human text; `id` stays the
       // full filename stem so it remains the route key (permalink = /backlog/<id>/).
-      const num = (id.match(/^(\d+)-/) || [])[1];
-      const slug = id.replace(/^\d+-/, '');
+      // NOTE: this pattern mirrors `scripts/backlog/id.mjs` ID_TOKEN_RE (CJS can't import that ESM
+      // module) — keep the two in sync.
+      const num = (id.match(/^(\d{1,4}|x[0-9a-z]{6})-/) || [])[1];
+      const slug = id.replace(/^(\d{1,4}|x[0-9a-z]{6})-/, '');
       let data, content;
       try {
         ({ data, content } = matter(readFileSync(join(BACKLOG_DIR, file), 'utf8')));

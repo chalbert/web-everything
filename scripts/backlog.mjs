@@ -33,6 +33,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyTransition, readField, setFrontmatterField, accrueCost } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
+import { nextHash, normalizeId, idFromName, isHash } from './backlog/id.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize, sessionForNum } from './readiness/reservations.mjs';
 import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, recordTouch, mostRecentSession, porcelainFiles } from './readiness/claimScope.mjs';
 import { parseQueued, emptyQueuedState, isQueued, queuedNums, addQueued, removeQueued, serializeQueued } from './readiness/queued-state.mjs';
@@ -116,7 +117,7 @@ function openChildrenOf(padded) {
     const parent = readField(content, 'parent');
     if (parent !== padded) continue;
     const status = readField(content, 'status') || 'open';
-    if (status !== 'resolved') open.push({ num: f.match(/^\d+/)[0], status });
+    if (status !== 'resolved') open.push({ num: idFromName(f), status });
   }
   return open;
 }
@@ -160,12 +161,12 @@ function missingItemMessage(padded) {
   }
 }
 
-/** Resolve a bare NNN (or NNN-slug) to its current filename, or die if it's missing/ambiguous. */
+/** Resolve a bare ref (NNN or the provisional hash `xNNNNNN`, ± -slug) to its current filename, or die. */
 function resolveFile(ref) {
   if (!ref) die('missing <NNN> — e.g. `backlog.mjs claim 122`');
-  const num = (String(ref).match(/^(\d+)/) || [])[1];
-  if (!num) die(`"${ref}" is not a valid NNN reference`);
-  const padded = num.padStart(3, '0');
+  const id = idFromName(ref); // numeric NNN (landed) or an `xNNNNNN` hash (provisional, #2288)
+  if (!id) die(`"${ref}" is not a valid item reference (NNN or xNNNNNN)`);
+  const padded = normalizeId(id); // pad a number, leave a hash untouched
   const matches = files().filter((f) => f.startsWith(`${padded}-`));
   if (matches.length === 0) die(missingItemMessage(padded));
   if (matches.length > 1) die(`#${padded} is ambiguous: ${matches.join(', ')}`);
@@ -190,7 +191,7 @@ function transition(v) {
   // OFFLINE (Rule #105 — no tree read, no ls-remote) and refuse both: a queued item is neither claimable
   // nor abandoned. `--force` overrides for the rare deliberate case (e.g. abandoning a stuck queue entry).
   if ((v === 'claim' || v === 'release') && !argv.includes('--force')) {
-    const num = file.match(/^\d+/)[0];
+    const num = idFromName(file);
     if (isQueued(loadQueued(), num)) {
       die(v === 'claim'
         ? `#${num} is queued (ready-to-merge, #2138 Fork 4) — a lane is pushed and waiting for the drain; it is not claimable. The drain unqueues it at landing; pass --force only to deliberately steal a stuck queue entry.`
@@ -222,21 +223,21 @@ function transition(v) {
     let dirty = '';
     try { dirty = execFileSync('git', ['status', '--porcelain', '--', rel], { cwd: ROOT, encoding: 'utf8' }).trim(); }
     catch { /* best-effort — never block a claim on a git/IO hiccup */ }
-    if (dirty) die(`#${file.match(/^\d+/)[0]} — ${rel} has uncommitted edits; a claim must be the first action on an item (ground / edit / present AFTER claiming, next turn). Commit, stash, or revert those edits and re-claim — or pass --force if this is deliberate (e.g. a freshly-scaffolded item).`);
+    if (dirty) die(`#${idFromName(file)} — ${rel} has uncommitted edits; a claim must be the first action on an item (ground / edit / present AFTER claiming, next turn). Commit, stash, or revert those edits and re-claim — or pass --force if this is deliberate (e.g. a freshly-scaffolded item).`);
   }
   // No-open-slice guard (#658): an epic can't close while live work sits under it. Enumerate children by
   // the `parent:` EDGE (not the body's stale "N children" listing) and refuse BEFORE writing — so the
   // `resolved-epic-with-open-child` contradiction is never created, not just caught later by the gate.
   // `--force` overrides for the rare deliberate mid-re-parent case (prints what it stepped over).
   if (v === 'resolve' && readField(before, 'kind') === 'epic') {
-    const padded = file.match(/^\d+/)[0];
+    const padded = idFromName(file);
     const openKids = openChildrenOf(padded);
     if (openKids.length && !argv.includes('--force'))
       die(`#${padded} is an epic with ${openKids.length} open child slice(s) — resolve or re-parent them first, or pass --force:\n${openKids.map((k) => `    #${k.num} — ${k.status}`).join('\n')}`);
     if (openKids.length) console.error(`${YEL}warning:${RST} ${DIM}--force: resolving epic #${padded} over ${openKids.length} open child(ren): ${openKids.map((k) => `#${k.num}`).join(', ')}${RST}`);
   }
   const res = applyTransition(before, v, { today: today(), graduatedTo: flag('graduated-to'), codifiedTo: flag('codified-to'), as });
-  if (res.error) die(`#${file.match(/^\d+/)[0]} — ${res.error}`);
+  if (res.error) die(`#${idFromName(file)} — ${res.error}`);
   writeBacklogMd(abs, rel, res.content);
   const id = file.replace(/\.md$/, '');
   const slug = id; // the rename slug is the full id (NNN-slug)
@@ -244,7 +245,7 @@ function transition(v) {
     // Clear-on-claim (#083 invariant 2): a hard claim supersedes any soft reservation on this item —
     // drop it so the now-`active` item never lingers as a stale hold against another session. Read the
     // reservation's session BEFORE dropping it, so the baseline below can recover it (#1723).
-    const num = file.match(/^\d+/)[0];
+    const num = idFromName(file);
     const reservationsAtClaim = loadReservations();
     saveReservations(removeNums(reservationsAtClaim, [num]));
     // Gate-attribution baseline (#952, #949 Fork 2-A): snapshot the files ALREADY dirty (everyone else's
@@ -390,23 +391,23 @@ function prepareRelease() {
  * landing). Idempotent. The lane-push/drain call-sites are wired by the drain command (#2162).
  */
 function queue() {
-  const nums = positional.map((p) => (String(p).match(/^(\d+)/) || [])[1]).filter(Boolean);
+  const nums = positional.map((p) => idFromName(p)).filter(Boolean);
   if (!nums.length) die('queue needs one or more <NNN> to mark ready-to-merge');
   for (const n of nums) resolveFile(n); // a typo must not queue a phantom item
   const state = addQueued(loadQueued(), nums, new Date().toISOString(), { lane: flag('lane'), batchSlug: flag('session') });
   saveQueued(state);
-  const padded = nums.map((n) => n.padStart(3, '0'));
+  const padded = nums.map(normalizeId);
   ok({ verb: 'queue', queued: padded },
     `${GRN}✓ queued${RST} #${padded.join(', #')} ${DIM}→ ready-to-merge (claim/release refuse it until the drain lands + unqueues it)${RST}`);
 }
 function unqueue() {
-  const nums = positional.map((p) => (String(p).match(/^(\d+)/) || [])[1]).filter(Boolean);
+  const nums = positional.map((p) => idFromName(p)).filter(Boolean);
   if (!nums.length) die('unqueue needs one or more <NNN> to clear');
   const before = queuedNums(loadQueued()).length;
   const state = removeQueued(loadQueued(), nums);
   saveQueued(state);
   const cleared = before - queuedNums(state).length;
-  ok({ verb: 'unqueue', nums: nums.map((n) => n.padStart(3, '0')), cleared },
+  ok({ verb: 'unqueue', nums: nums.map(normalizeId), cleared },
     `${GRN}✓ unqueued${RST} ${DIM}— cleared ${cleared} ready-to-merge mark(s); ${queuedNums(state).length} still queued${RST}`);
 }
 
@@ -419,12 +420,12 @@ function unqueue() {
 function reserve() {
   const session = flag('session');
   if (!session) die('reserve needs --session=<batch-slug> — the session that holds these (e.g. batch-2026-06-12-083)');
-  const nums = positional.map((p) => (String(p).match(/^(\d+)/) || [])[1]).filter(Boolean);
+  const nums = positional.map((p) => idFromName(p)).filter(Boolean);
   if (!nums.length) die('reserve needs one or more <NNN> to soft-hold');
   for (const n of nums) resolveFile(n); // a typo must not hold a phantom item
   const state = addHolds(pruneExpired(loadReservations(), Date.now()), nums, session, new Date().toISOString());
   saveReservations(state);
-  const padded = nums.map((n) => n.padStart(3, '0'));
+  const padded = nums.map(normalizeId);
   ok({ verb: 'reserve', session, held: padded, ttlMinutes: state.ttlMinutes },
     `${GRN}✓ reserved${RST} #${padded.join(', #')} ${DIM}→ soft-held by ${session} (deprioritized for other sessions; advisory, TTL ${state.ttlMinutes}m)${RST}\n${DIM}clear on stop: ${RST}node scripts/backlog.mjs unreserve --session=${session}`);
 }
@@ -436,7 +437,7 @@ function reserve() {
  */
 function unreserve() {
   const session = flag('session');
-  const nums = positional.map((p) => (String(p).match(/^(\d+)/) || [])[1]).filter(Boolean);
+  const nums = positional.map((p) => idFromName(p)).filter(Boolean);
   if (!session && !nums.length) die('unreserve needs --session=<slug> (clear a whole session) and/or one or more <NNN>');
   let state = loadReservations();
   const before = state.held.length;
@@ -445,7 +446,7 @@ function unreserve() {
   state = pruneExpired(state, Date.now());
   saveReservations(state);
   const cleared = before - state.held.length;
-  ok({ verb: 'unreserve', session: session ?? null, nums: nums.map((n) => n.padStart(3, '0')), cleared },
+  ok({ verb: 'unreserve', session: session ?? null, nums: nums.map(normalizeId), cleared },
     `${GRN}✓ unreserved${RST} ${DIM}— released ${cleared} hold(s)${session ? ` for ${session}` : ''}; ${state.held.length} still held${RST}`);
 }
 
@@ -465,17 +466,20 @@ function scaffold() {
   if (!title) die('scaffold needs --title="…"');
   if (kind === 'story' && !Number.isFinite(size)) die('a story needs --size=<Fibonacci>');
   const slug = flag('slug') || slugify(title);
-  const blockedBy = (flag('blocked-by') || '').split(',').map((s) => s.trim()).filter(Boolean).map((n) => n.padStart(3, '0'));
-  const parent = flag('parent') ? flag('parent').padStart(3, '0') : undefined;
+  // Cross-refs may point at a landed item (NNN) or an in-flight sibling (hash) — normalize each, never
+  // blindly zero-pad (padding a hash would corrupt it). #2288.
+  const blockedBy = (flag('blocked-by') || '').split(',').map((s) => s.trim()).filter(Boolean).map(normalizeId);
+  const parent = flag('parent') ? normalizeId(flag('parent')) : undefined;
 
-  const existing = files().map((f) => (f.match(/^(\d+)/) || [])[1]).filter(Boolean);
-  const num = nextNum(existing);
-  const fileName = `${num}-${slug}.md`;
-  const abs = join(DIR, fileName);
-  // Re-glob immediately before write to win the id race; if taken, bump once.
-  let finalNum = num, finalName = fileName, finalAbs = abs;
-  if (files().some((f) => f.startsWith(`${num}-`))) {
-    finalNum = nextNum([...existing, num]);
+  // JIT numbering (#2288): a new item is born with a collision-free HASH id, NOT `max+1`. Parallel lanes
+  // can no longer race on the next number — the drain (sole serial writer to main, #2290) rewrites the
+  // hash to the real sequential NNN at land. The re-glob guards the astronomically-unlikely hash clash.
+  const existing = files().map((f) => idFromName(f)).filter(Boolean);
+  let finalNum = nextHash(existing);
+  let finalName = `${finalNum}-${slug}.md`;
+  let finalAbs = join(DIR, finalName);
+  if (files().some((f) => f.startsWith(`${finalNum}-`))) {
+    finalNum = nextHash([...existing, finalNum]);
     finalName = `${finalNum}-${slug}.md`;
     finalAbs = join(DIR, finalName);
   }
@@ -505,7 +509,7 @@ function scaffold() {
 function settle() {
   const id = positional[0];
   if (!id) die('settle needs <NNN> — the born-active scaffold to publish (→ open)');
-  const padded = String(id).padStart(3, '0');
+  const padded = normalizeId(id); // a born-active scaffold is hash-keyed (#2288) — pad a number, leave a hash
   const file = files().find((f) => f.startsWith(`${padded}-`));
   if (!file) die(`settle: no backlog item #${padded}`);
   const abs = join(DIR, file);
@@ -616,7 +620,7 @@ function retype() {
   if (!toKind && toSize === undefined && !toStatus) die('retype needs at least one of --to=<kind> / --size=N / --status=<s>');
   if (toKind && !['story', 'epic', 'task', 'decision'].includes(toKind)) die(`--to must be story|epic|task|decision (got "${toKind}")`);
   const curStatus = readField(src, 'status') || 'open';
-  if (curStatus === 'resolved' && !argv.includes('--force')) die(`#${file.match(/^\d+/)[0]} is resolved — retyping a closed item is almost certainly a mistake; pass --force if deliberate`);
+  if (curStatus === 'resolved' && !argv.includes('--force')) die(`#${idFromName(file)} is resolved — retyping a closed item is almost certainly a mistake; pass --force if deliberate`);
   const changes = [];
   if (toKind) { src = setFrontmatterField(src, 'kind', toKind, { after: [] }); changes.push(`kind→${toKind}`); }
   if (toSize !== undefined) {
@@ -628,7 +632,7 @@ function retype() {
   writeBacklogMd(abs, rel, src);
   const id = file.replace(/\.md$/, '');
   ok({ verb: 'retype', id, file: rel, changes },
-    `${GRN}✓ retyped${RST} ${BLD}#${file.match(/^\d+/)[0]}${RST} ${DIM}${changes.join(', ')}${RST}`);
+    `${GRN}✓ retyped${RST} ${BLD}#${idFromName(file)}${RST} ${DIM}${changes.join(', ')}${RST}`);
 }
 
 /**
@@ -679,12 +683,12 @@ function cost() {
   const abs = join(DIR, file);
   const before = readFileSync(abs, 'utf8');
   const after = accrueCost(before, usd, Number.isFinite(sessions) ? { sessions } : {});
-  if (after == null) die(`#${file.match(/^\d+/)[0]} — could not splice frontmatter (no frontmatter block?)`);
+  if (after == null) die(`#${idFromName(file)} — could not splice frontmatter (no frontmatter block?)`);
   writeBacklogMd(abs, rel, after);
   const total = readField(after, 'costUsd');
   const n = readField(after, 'costSessions');
-  ok({ verb: 'cost', num: file.match(/^\d+/)[0], added: usd, costUsd: Number(total), costSessions: Number(n) },
-    `${GRN}✓ cost${RST} ${DIM}— +$${usd.toFixed(2)} → $${total} over ${n} session(s) on #${file.match(/^\d+/)[0]}${RST}`);
+  ok({ verb: 'cost', num: idFromName(file), added: usd, costUsd: Number(total), costSessions: Number(n) },
+    `${GRN}✓ cost${RST} ${DIM}— +$${usd.toFixed(2)} → $${total} over ${n} session(s) on #${idFromName(file)}${RST}`);
 }
 
 switch (verb) {

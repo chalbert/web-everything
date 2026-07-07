@@ -28,6 +28,22 @@ describe('lane-drain planDrain (#2172 / #2162)', () => {
     expect(plan.steps.find((s) => s.repo === 'we').carriesResolve).toBe(true);
   });
 
+  it('accepts a PROVISIONAL hash-keyed couple and its hash blockedBy (#2288 JIT numbering)', () => {
+    // Before landing, an item is hash-keyed everywhere — manifest item, queue token, cross-item blockedBy.
+    const m = buildManifest({ item: 'x7k2q9a', blockedBy: ['xbb000a'], repos: [
+      { repo: 'we', ref: 'lane/x7k2q9a-we' },
+      { repo: 'frontierui', ref: 'lane/x7k2q9a-fui' },
+    ] });
+    expect(m.item).toBe('x7k2q9a');           // hash preserved, not coerced to NaN
+    expect(m.blockedBy).toEqual(['xbb000a']);  // hash edge preserved
+    // Blocker still queued → defer; blocker gone from queue → ready.
+    expect(planDrain(m, { queued: [{ num: 'x7k2q9a' }, { num: 'xbb000a' }] }).ready).toBe(false);
+    const readyPlan = planDrain(m, { queued: [{ num: 'x7k2q9a' }] });
+    expect(readyPlan.ok).toBe(true);
+    expect(readyPlan.ready).toBe(true);
+    expect(readyPlan.steps.map((s) => s.repo)).toEqual(['frontierui', 'we']);
+  });
+
   it('a WE-only couple plans a single WE step', () => {
     const m = buildManifest({ item: 2172, repos: [{ repo: 'we', ref: 'lane/2172-we' }] });
     const plan = planDrain(m, queued(2172));

@@ -57,12 +57,13 @@
  * failed (couple stopped, main left as far as it got); 3 = bad input (no manifest, invalid, not queued).
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir, tmpdir } from 'node:os';
 import { parseQueued, isQueued, queuedNums } from './readiness/queued-state.mjs';
 import { parseManifest, validateManifest, orderedRepos, MANIFEST_FILENAME } from './readiness/lane-manifest.mjs';
+import { isHash, isNum, idFromName, applyLedger } from './backlog/id.mjs';
 
 // ── flag parsing (mirrors pr-land.mjs / lane-review.mjs) ──────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -319,8 +320,12 @@ function runDrainOne() {
   // SUCCESS reconcile (#2175): sync local main to the merged origin/main, then unqueue + delete the manifest it
   // carried, in one commit, and publish (the single clear point + main-cleanup, all post-land).
   const fin = finalizeLand(CWD, num);
+  // The couple's own assigned NNN (if it was a provisional hash) + any leftover hashes numbered alongside.
+  const numberedList = (fin.numbered && fin.numbered.committed) ? fin.numbered.assigned : [];
+  const assigned = (numberedList.find((a) => a.hash === num) || {}).nnn || null;
+  const alsoNumbered = numberedList.filter((a) => a.hash !== num);
 
-  emit({ landed: true, reason: 'landed', num, landedRepos: landed, unqueued: fin.unqueued, manifestDeleted: fin.manifestDeleted, mainPushed: fin.pushed, resolveReachable, detail: `landed #${num} across ${landed.join(' → ')} (impl-first/WE-last)${fin.unqueued ? ', unqueued' : ' (unqueue failed — clear it manually)'}${fin.manifestDeleted ? ', manifest cleaned' : ''}${fin.pushed ? ', main published' : ''}` }, 0);
+  emit({ landed: true, reason: 'landed', num, assignedNum: assigned, alsoNumbered, landedRepos: landed, unqueued: fin.unqueued, manifestDeleted: fin.manifestDeleted, mainPushed: fin.pushed, resolveReachable, detail: `landed #${num}${assigned ? ` → #${assigned} (JIT numbered)` : ''} across ${landed.join(' → ')} (impl-first/WE-last)${fin.unqueued ? ', unqueued' : ' (unqueue failed — clear it manually)'}${fin.manifestDeleted ? ', manifest cleaned' : ''}${alsoNumbered.length ? `, +${alsoNumbered.length} leftover(s) numbered (${alsoNumbered.map((a) => '#' + a.nnn).join(', ')})` : ''}${fin.pushed ? ', main published' : ''}` }, 0);
 }
 
 // ── watch/drain — the outer monitor loop (#2173) ───────────────────────────────────────────────────────
@@ -387,6 +392,113 @@ function quietGit(CWD, a) {
 }
 
 const QUEUED_REL = '.claude/skills/batch-backlog-items/queued.json';
+// The hash→NNN ledger (#2288): the drain's local record of every hash it has already numbered, so a LATER
+// couple that references an already-landed blocker by its old hash still resolves to the real number. Lives
+// alongside the queued token — LOCAL-ONLY, gitignored drain state (Rule #105, like queued.json): it
+// persists in the drain's checkout across invocations but never lands on main. APPEND-ONLY — it is never
+// reset (a still-in-flight lane may reference a hash long before it is queued, so a queue-empty reset would
+// drop a mapping a dependent still needs); entries are tiny, so unbounded growth is negligible.
+const LEDGER_REL = '.claude/skills/batch-backlog-items/id-ledger.json';
+
+/**
+ * JIT numbering (#2288) — the one place a backlog id is minted. Numbers EVERY provisional (hash-keyed)
+ * backlog file now present on main, not just the couple's own id: a landed lane can carry LEFTOVER items
+ * scaffolded during close-out (born hash-keyed), and those need numbering too. A hash file only reaches
+ * main via a landed lane (the sole-writer path), so sweeping all hash files touches only already-landed
+ * content — never an item still in flight in another lane. Assigns DETERMINISTIC contiguous `max+1` in
+ * topological (blockedBy) order — the drain is the sole SERIAL writer to main (#2290), so unlike scaffold's
+ * randomized gap-fill (#2292, which only exists to stop PARALLEL births colliding) there is no collision to
+ * avoid; max+1 keeps numbers contiguous (the #2288 "no burned gap numbers" goal). Records each `hash→NNN`
+ * in the ledger, then blind-replaces EVERY ledgered hash across all `backlog/*.md` (filenames + contents) —
+ * numbering each item AND repairing any cross-lane `blockedBy`/`parent`/`#ref` that still points at an
+ * already-numbered blocker by its old hash. Commits the rename+rewrites in ONE scoped commit; the caller
+ * publishes. Best-effort like the rest of the reconcile: a failure is reported, the land stands.
+ */
+export function numberPendingHashes(CWD) {
+  const BL = join(CWD, 'backlog');
+  let stems;
+  try { stems = readdirSync(BL).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, '')); }
+  catch { return { assigned: [], committed: false, error: 'cannot read backlog/' }; }
+  // Number only TRACKED hash files — a hash file reaches main solely via a landed lane, so it is committed.
+  // An UNTRACKED hash `.md` in the checkout is local cruft (an uncommitted scaffold), NOT a landed item:
+  // including it would make `git rm` fail and abort numbering for the real landed couple (PR #194 review).
+  const trackedStems = new Set((quietGit(CWD, ['ls-files', 'backlog/*.md']) || '')
+    .split('\n').filter(Boolean).map((f) => f.replace(/^backlog\//, '').replace(/\.md$/, '')));
+  const pending = stems.filter((s) => isHash(idFromName(s)) && trackedStems.has(s)); // tracked hash files = landed in-flight items to number
+  if (pending.length === 0) return { assigned: [], committed: false };
+
+  const files = stems.map((name) => ({ name, content: readFileSync(join(BL, `${name}.md`), 'utf8') }));
+  const contentByName = new Map(files.map((f) => [f.name, f.content]));
+
+  // Order the pending hashes TOPOLOGICALLY: a pending item whose blockedBy names ANOTHER pending hash is
+  // numbered AFTER it (referenced item first, #2288). Cosmetic for correctness (applyLedger repairs every
+  // ref regardless) but keeps assignment deterministic + contiguous by dependency depth. Grab blockedBy
+  // hash tokens whether the YAML is flow-style (`[…]`) or block-style (`\n  - x…`) — the token pattern is
+  // the same either way.
+  const pendingHashes = new Set(pending.map(idFromName));
+  const blockersOf = (stem) => {
+    const m = contentByName.get(stem).match(/^blockedBy:\s*(\[[^\]]*\]|(?:\n[ \t]*-[ \t]*.+)+)/m);
+    return m ? (m[1].match(/x[0-9a-z]{6}/g) || []).filter((h) => pendingHashes.has(h)) : [];
+  };
+  const ordered = [];
+  const done = new Set();
+  const remaining = [...pending].sort(); // stable base order
+  while (remaining.length) {
+    const i = remaining.findIndex((s) => blockersOf(s).every((h) => done.has(h)));
+    const [stem] = i >= 0 ? remaining.splice(i, 1) : remaining.splice(0, 1); // cycle → break by taking the first
+    ordered.push(stem); done.add(idFromName(stem));
+  }
+
+  // Assign contiguous max+1 in that order; record in the LOCAL ledger.
+  let maxNum = stems.map(idFromName).filter(isNum).reduce((m, n) => Math.max(m, Number(n)), 0);
+  const ledgerAbs = join(CWD, LEDGER_REL);
+  let ledger = {};
+  try { ledger = JSON.parse(readFileSync(ledgerAbs, 'utf8')) || {}; } catch { ledger = {}; }
+  const assigned = [];
+  for (const stem of ordered) {
+    const hash = idFromName(stem);
+    maxNum += 1;
+    const nnn = String(maxNum).padStart(3, '0');
+    ledger[hash] = nnn;
+    assigned.push({ hash, nnn });
+  }
+
+  const { renames, rewrites } = applyLedger(files, ledger);
+  const rewriteByName = new Map(rewrites.map((r) => [r.name, r.content]));
+  const renameFroms = new Set(renames.map((r) => r.from));
+  // A rename is `git rm OLD` + write-to-NEW (NOT `git mv`): a scoped `git commit -- <paths>` is pathspec
+  // mode (it errors on a rename staged in the index / the now-absent old path), but it DOES commit a
+  // `git rm` deletion — the pattern finalizeLand uses for the manifest. `toAdd` = paths that EXIST on disk
+  // (a `git add` of an already-rm'd old path errors and aborts the whole add); `commitPaths` also carries
+  // the deleted old paths so the pathspec commit records the deletion (already staged by `git rm`).
+  const toAdd = [];
+  const commitPaths = [];
+  for (const { name, content } of rewrites) {
+    if (renameFroms.has(name)) continue; // a renamed file's content is written to its NEW path below
+    writeFileSync(join(BL, `${name}.md`), content);
+    toAdd.push(`backlog/${name}.md`); commitPaths.push(`backlog/${name}.md`);
+  }
+  for (const { from, to } of renames) {
+    const content = rewriteByName.has(from) ? rewriteByName.get(from) : readFileSync(join(BL, `${from}.md`), 'utf8');
+    writeFileSync(join(BL, `${to}.md`), content);
+    if (quietGit(CWD, ['rm', '--quiet', `backlog/${from}.md`]) == null)
+      return { assigned, committed: false, error: `git rm ${from} failed` };
+    toAdd.push(`backlog/${to}.md`);
+    commitPaths.push(`backlog/${from}.md`, `backlog/${to}.md`);
+  }
+  // APPEND-ONLY — never reset. A lane can reference a hash while merely IN-FLIGHT (being worked), long
+  // before it is queued, so resetting when the ready-to-merge queue drains would drop the mapping a
+  // still-in-flight dependent needs → its edge would land as a dangling hash (PR #194 review, blocking).
+  // Entries are tiny (`hash→NNN`); the ledger is LOCAL-ONLY, gitignored, machine-disposable drain
+  // bookkeeping (Rule #105) that never lands on main, so unbounded growth is negligible (a TTL prune is a
+  // possible future refinement, not a correctness need).
+  writeFileSync(ledgerAbs, JSON.stringify(ledger, null, 2) + '\n');
+  quietGit(CWD, ['add', '--', ...new Set(toAdd)]); // stage rewrites + new renamed files (deletions already staged by git rm; ledger stays untracked)
+  const paths = [...new Set(commitPaths)];
+  const summary = assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ');
+  const committed = quietGit(CWD, ['commit', '-m', `drain: JIT-number ${summary} at land (#2288)`, '--', ...paths]) != null;
+  return { assigned, committed, renamed: renames.map((r) => r.to), changedPaths: paths };
+}
 
 // Sync local main to the merged origin/main via a LOCAL fast-forward (never a work-merge — the couple's work
 // is landed by pr-land, #2172 contract). `pull --ff-only` fetches + ff's the current branch; a non-ff / dirty
@@ -418,8 +530,14 @@ function finalizeLand(CWD, num) {
   // `git rm` deletion + the unqueue edit), ignoring the rest of the index — never `git add -A`.
   const commitPaths = manifestDeleted ? [QUEUED_REL, MANIFEST_FILENAME] : [QUEUED_REL];
   let pushed = false;
-  if (quietGit(CWD, ['commit', '-m', `drain: unqueue + cleanup #${num} lane manifest post-land (#2175)`, '--', ...commitPaths]) != null) pushed = publishMain(CWD);
-  return { unqueued, manifestDeleted, pushed };
+  const unqueueCommitted = quietGit(CWD, ['commit', '-m', `drain: unqueue + cleanup #${num} lane manifest post-land (#2175)`, '--', ...commitPaths]) != null;
+  // JIT numbering (#2288): AFTER unqueue (so the ledger-reset check sees the emptied queue), number every
+  // provisional hash file the couple landed — the couple's own hash AND any leftover items scaffolded in
+  // its lane during close-out. A couple that carried no hash files (a legacy numeric item) is a no-op. The
+  // single publish below pushes the unqueue commit and the numbering commit to main together.
+  const numbered = numberPendingHashes(CWD);
+  if (unqueueCommitted || numbered.committed) pushed = publishMain(CWD);
+  return { unqueued, manifestDeleted, pushed, numbered };
 }
 
 // FAILURE reconcile (#2175 reopen-on-fail): a couple that failed to land leaves the WE item STRANDED `active`
