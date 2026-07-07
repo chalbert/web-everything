@@ -25,6 +25,12 @@
  *
  * This module is PURE — no fs, no process, no `Date` reads. The CLI / drain owns the fs at its boundary.
  */
+import { isHash } from '../backlog/id.mjs';
+
+/** An item/edge id is a numeric NNN (landed) or an `xNNNNNN` hash (provisional, #2288) — keep a hash as a
+ * string, coerce a number to Number (backward compat with pre-#2288 numeric manifests). */
+const asItemId = (v) => (isHash(String(v)) ? String(v) : Number(v));
+const isItemId = (v) => isHash(String(v)) || Number.isFinite(Number(v));
 
 /** The manifest filename — a NEW file in the WE lane commit (one-sided add; drain deletes at landing). */
 export const MANIFEST_FILENAME = '.lane-manifest.json';
@@ -51,7 +57,7 @@ function orderRank(repo) {
  * @param {{item:number|string, batchSlug?:string, repos:Array<{repo:string, ref:string, carriesResolve?:boolean}>, blockedBy?:Array<number|string>, mergeRiskFiles?:string[]}} input
  */
 export function buildManifest(input) {
-  const item = Number(input.item);
+  const item = asItemId(input.item); // NNN or provisional hash (#2288)
   const repos = (input.repos ?? [])
     .map((r) => ({
       repo: String(r.repo),
@@ -64,7 +70,7 @@ export function buildManifest(input) {
     item,
     ...(input.batchSlug ? { batchSlug: String(input.batchSlug) } : {}),
     repos,
-    blockedBy: (input.blockedBy ?? []).map((n) => Number(n)).filter((n) => Number.isFinite(n)),
+    blockedBy: (input.blockedBy ?? []).map(asItemId).filter(isItemId),
     mergeRiskFiles: (input.mergeRiskFiles ?? []).map((f) => String(f)),
     // #2171 — the count of pre-PR review findings the lane DISMISSED (#2170). The drain's escalation rubric
     // reads it as its strongest signal (a lane judging its own reviewer's findings away → a second look). 0 default.
@@ -83,7 +89,7 @@ export function buildManifest(input) {
 export function validateManifest(m) {
   const errors = [];
   if (!m || typeof m !== 'object') return { ok: false, errors: ['manifest is not an object'] };
-  if (!Number.isFinite(m.item)) errors.push('item must be a finite number');
+  if (!isItemId(m.item)) errors.push('item must be a numeric NNN or an xNNNNNN hash');
   const repos = Array.isArray(m.repos) ? m.repos : [];
   if (repos.length === 0) errors.push('repos must be a non-empty array');
   for (const r of repos) {
