@@ -31,14 +31,24 @@ import { parseBacklogFilename, rewriteRefs, allocateGapId } from '../backlog/ren
  * Pure — no fs, no git. Unlike `planRenumber` (which detects INTRA-corpus duplicates), this detects a lane file
  * whose num is present on the BASE under a different file: the base file is the immutable keeper, the lane's new
  * file yields to a free GAP id (below `max+1`, #2222). Every inbound reference to the yielded id is rewritten
- * across the lane corpus (only lane-authored refs — a base file's `#NNN` points at the keeper and is left alone
- * by construction: base files are NOT in `laneFiles`).
+ * across the NON-base-owned files in the lane corpus only (only lane-authored refs — a base-owned file's `#NNN`
+ * points at the keeper and is left alone by construction, #2316: see the EDGE-CLOBBER GUARD note below).
  *
  * @param {{ name: string, text: string }[]} laneFiles  every `backlog/*.md` on the lane tip (basename + content)
  * @param {{ baseNums?: string[], baseNames?: string[] }} [opts]
  *   baseNums  — every NNN present on the merge base (a lane file reusing one is a collision).
  *   baseNames — every `NNN-slug.md` basename on the merge base (a lane file that IS one is the base file itself,
  *               unchanged — never yielded; only a lane file NOT among these that reuses a base num yields).
+ *
+ * EDGE-CLOBBER GUARD (#2316). `laneFiles` is the FULL lane-tip corpus, not just the lane's own new/edited
+ * files — it includes every BASE file the lane inherited unmodified (main's surviving items). Those files'
+ * `#NNN`/`blockedBy` edges predate the collision entirely: they were authored against whatever already held
+ * `oldNum` on the base (the KEEPER), never against the incoming yielder (which didn't exist yet when they were
+ * written). So the reference sweep below only rewrites files NOT named in `baseNames` — a base-owned file's
+ * ambiguous refs are left alone by construction, even though its num-bearing text may still say `oldNum`.
+ * Without this, a same-named base file with an unrelated legitimate edge to `oldNum` (e.g. some OTHER item's
+ * `blockedBy: [oldNum]` pointing at the real base keeper) gets its edge silently retargeted at the yielder's
+ * new id — corrupting a real dependency graph edge that has nothing to do with this collision.
  * @returns {{
  *   collisions: { oldNum, newNum, oldName, newName, slug }[],
  *   writes: { name: string, text: string }[],   // the yielded file (new name) + every ref-rewritten file
@@ -73,11 +83,14 @@ export function planBaseCollisionHeal(laneFiles, { baseNums = [], baseNames = []
   }
 
   // Rewrite every inbound reference to each yielded id across the lane corpus, then re-file the yielded files.
+  // #2316 — NEVER rewrite inside a base-owned file (`baseNameSet`): its refs predate the collision and can
+  // only mean the base's own real item (the keeper), never the incoming yielder.
   const contentByName = new Map(files.map((f) => [f.name, f.text]));
   const renamed = new Map(moves.map((m) => [m.oldName, m.newName]));
   const touched = new Set();
   for (const mv of moves) {
     for (const [name, text] of contentByName) {
+      if (baseNameSet.has(name)) continue;
       const next = rewriteRefs(text, mv.oldNum, mv.newNum, mv.slug);
       if (next !== text) { contentByName.set(name, next); touched.add(name); }
     }
