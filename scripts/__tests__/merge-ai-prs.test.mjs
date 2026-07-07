@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -396,5 +396,119 @@ describe('regenDerivedOnLand — the drain owns post-land WE derived regen (#229
     expect(add.args).toEqual(['add', 'AGENTS.md']);        // ONLY the derived output — never the foreign file
     expect(add.args).not.toContain(FOREIGN);
     expect(r).toMatchObject({ ran: true, committed: true, pushed: true });
+  });
+});
+
+describe('resolvePrimaryPath — robust primary locator, independent of clone mode (#xwokc1n)', () => {
+  const noAlt = () => { throw new Error('ENOENT'); };            // a --local clone: no alternates file
+
+  it('an explicit --primary=<path> flag wins over everything', () => {
+    expect(resolvePrimaryPath('/clone', { flag: '/Users/me/primary' }, () => '/Users/me/primary/.git/objects\n'))
+      .toBe('/Users/me/primary');
+  });
+
+  it('falls back to WE_PRIMARY env when no flag', () => {
+    expect(resolvePrimaryPath('/clone', { env: '/env/primary' }, noAlt)).toBe('/env/primary');
+  });
+
+  it('flag beats env beats alternates (precedence order)', () => {
+    expect(resolvePrimaryPath('/clone', { flag: '/flag', env: '/env' }, () => '/alt/.git/objects\n')).toBe('/flag');
+    expect(resolvePrimaryPath('/clone', { env: '/env' }, () => '/alt/.git/objects\n')).toBe('/env');
+  });
+
+  it('falls back to the git alternates file (the legacy --reference/--shared clone)', () => {
+    // alternates points at <primary>/.git/objects → resolves up two levels to <primary>.
+    expect(resolvePrimaryPath('/clone', {}, () => '/Users/me/primary/.git/objects\n')).toBe('/Users/me/primary');
+  });
+
+  it('returns null when unlocatable — a --local clone with no flag/env/alternates (the #xwokc1n rot cause)', () => {
+    expect(resolvePrimaryPath('/clone', {}, noAlt)).toBeNull();
+  });
+
+  it('a bare --primary (true, no value) is ignored, not coerced to a path', () => {
+    expect(resolvePrimaryPath('/clone', { flag: true }, noAlt)).toBeNull();
+    expect(resolvePrimaryPath('/clone', { flag: '  ' }, noAlt)).toBeNull(); // whitespace-only too
+  });
+
+  it('a RELATIVE --primary/env resolves against the passed cwd, not process.cwd()', () => {
+    expect(resolvePrimaryPath('/work/clone', { flag: '../primary' }, noAlt)).toBe('/work/primary');
+    expect(resolvePrimaryPath('/work/clone', { env: './peer' }, noAlt)).toBe('/work/clone/peer');
+    expect(resolvePrimaryPath('/work/clone', { flag: '/abs/primary' }, noAlt)).toBe('/abs/primary'); // absolute unaffected
+  });
+});
+
+describe('syncPrimaryOnLand — post-land primary ff-sync decision (#xwokc1n, PR #202 review)', () => {
+  // Fake git spawner: records calls, cans output by `args.join(' ')`, or throws.
+  const fakeGit = (script = {}) => {
+    const calls = [];
+    const exec = (args) => {
+      const key = args.join(' ');
+      calls.push(key);
+      const h = script[key];
+      if (h && h.throw) throw new Error(h.throw);
+      return h && 'stdout' in h ? h.stdout : '';
+    };
+    return { exec, calls, pulled: () => calls.some((k) => k.includes(' pull ')) };
+  };
+  const P = '/Users/me/primary';
+  const onMain = { [`-C ${P} rev-parse --abbrev-ref HEAD`]: { stdout: 'main' } };
+
+  it('a clean tracked tree → pure `git pull --ff-only`, synced', () => {
+    const g = fakeGit({ ...onMain, [`-C ${P} status --porcelain --untracked-files=no`]: { stdout: '' } });
+    const r = syncPrimaryOnLand({ exec: g.exec, primary: P });
+    expect(r).toMatchObject({ synced: true });
+    expect(g.calls).toContain(`-C ${P} pull --ff-only`);
+    expect(g.calls.some((k) => k.includes('--autostash'))).toBe(false); // NEVER autostash
+  });
+
+  it('UNTRACKED-only cruft does NOT block the sync (the PR #202 fix) — status uses --untracked-files=no', () => {
+    // With --untracked-files=no the porcelain output is empty even though scratch files exist → sync proceeds.
+    const g = fakeGit({ ...onMain, [`-C ${P} status --porcelain --untracked-files=no`]: { stdout: '' } });
+    const r = syncPrimaryOnLand({ exec: g.exec, primary: P });
+    expect(r.synced).toBe(true);
+    expect(g.calls).toContain(`-C ${P} status --porcelain --untracked-files=no`); // the guard is untracked-blind
+  });
+
+  it('TRACKED uncommitted work → skipped UNTOUCHED (no autostash, no pull), loud', () => {
+    const g = fakeGit({ ...onMain, [`-C ${P} status --porcelain --untracked-files=no`]: { stdout: ' M scripts/x.mjs' } });
+    const r = syncPrimaryOnLand({ exec: g.exec, primary: P });
+    expect(r).toMatchObject({ synced: false, reason: 'dirty', warn: true });
+    expect(g.pulled()).toBe(false);
+  });
+
+  it('running FROM the primary (isCwd true) → benign quiet skip, no git touched', () => {
+    const g = fakeGit(onMain);
+    const r = syncPrimaryOnLand({ exec: g.exec, primary: P, isCwd: () => true });
+    expect(r).toMatchObject({ synced: false, reason: 'from-primary', warn: false });
+    expect(g.calls).toHaveLength(0);
+  });
+
+  it('unlocatable WITH a --primary/env hint → loud (a typo worth shouting about)', () => {
+    const r = syncPrimaryOnLand({ exec: () => '', primary: null, hinted: true });
+    expect(r).toMatchObject({ synced: false, reason: 'not-located', warn: true });
+  });
+
+  it('unlocatable WITHOUT a hint → quiet (cwd is the primary, already synced — no --primary nag)', () => {
+    const r = syncPrimaryOnLand({ exec: () => '', primary: null, hinted: false });
+    expect(r).toMatchObject({ synced: false, reason: 'not-located', warn: false });
+  });
+
+  it('primary not on main → skipped, loud, reports the branch', () => {
+    const g = fakeGit({ [`-C ${P} rev-parse --abbrev-ref HEAD`]: { stdout: 'lane/x' } });
+    const r = syncPrimaryOnLand({ exec: g.exec, primary: P });
+    expect(r).toMatchObject({ synced: false, reason: 'not-on-main', warn: true, branch: 'lane/x' });
+    expect(g.pulled()).toBe(false);
+  });
+
+  it('a diverged primary (ff-only pull throws) → skipped, loud, never force-updated', () => {
+    const g = fakeGit({ ...onMain, [`-C ${P} status --porcelain --untracked-files=no`]: { stdout: '' }, [`-C ${P} pull --ff-only`]: { throw: 'not possible to fast-forward' } });
+    const r = syncPrimaryOnLand({ exec: g.exec, primary: P });
+    expect(r).toMatchObject({ synced: false, reason: 'diverged', warn: true });
+  });
+
+  it('an unreadable primary (rev-parse throws) → not-a-repo, loud', () => {
+    const g = fakeGit({ [`-C ${P} rev-parse --abbrev-ref HEAD`]: { throw: 'not a git repo' } });
+    const r = syncPrimaryOnLand({ exec: g.exec, primary: P });
+    expect(r).toMatchObject({ synced: false, reason: 'not-a-repo', warn: true });
   });
 });
