@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -396,5 +396,37 @@ describe('regenDerivedOnLand — the drain owns post-land WE derived regen (#229
     expect(add.args).toEqual(['add', 'AGENTS.md']);        // ONLY the derived output — never the foreign file
     expect(add.args).not.toContain(FOREIGN);
     expect(r).toMatchObject({ ran: true, committed: true, pushed: true });
+  });
+});
+
+describe('resolvePrimaryPath — robust primary locator, independent of clone mode (#xwokc1n)', () => {
+  const noAlt = () => { throw new Error('ENOENT'); };            // a --local clone: no alternates file
+
+  it('an explicit --primary=<path> flag wins over everything', () => {
+    expect(resolvePrimaryPath('/clone', { flag: '/Users/me/primary' }, () => '/Users/me/primary/.git/objects\n'))
+      .toBe('/Users/me/primary');
+  });
+
+  it('falls back to WE_PRIMARY env when no flag', () => {
+    expect(resolvePrimaryPath('/clone', { env: '/env/primary' }, noAlt)).toBe('/env/primary');
+  });
+
+  it('flag beats env beats alternates (precedence order)', () => {
+    expect(resolvePrimaryPath('/clone', { flag: '/flag', env: '/env' }, () => '/alt/.git/objects\n')).toBe('/flag');
+    expect(resolvePrimaryPath('/clone', { env: '/env' }, () => '/alt/.git/objects\n')).toBe('/env');
+  });
+
+  it('falls back to the git alternates file (the legacy --reference/--shared clone)', () => {
+    // alternates points at <primary>/.git/objects → resolves up two levels to <primary>.
+    expect(resolvePrimaryPath('/clone', {}, () => '/Users/me/primary/.git/objects\n')).toBe('/Users/me/primary');
+  });
+
+  it('returns null when unlocatable — a --local clone with no flag/env/alternates (the #xwokc1n rot cause)', () => {
+    expect(resolvePrimaryPath('/clone', {}, noAlt)).toBeNull();
+  });
+
+  it('a bare --primary (true, no value) is ignored, not coerced to a path', () => {
+    expect(resolvePrimaryPath('/clone', { flag: true }, noAlt)).toBeNull();
+    expect(resolvePrimaryPath('/clone', { flag: '  ' }, noAlt)).toBeNull(); // whitespace-only too
   });
 });

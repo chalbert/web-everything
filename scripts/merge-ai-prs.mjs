@@ -115,6 +115,25 @@ export function isAiAuthor(author) {
   return /\bclaude\b/.test(name) || email.includes('anthropic.com') || email.includes('noreply@anthropic');
 }
 
+/**
+ * Locate the user's primary checkout to ff-sync after a land, INDEPENDENT of how the drain clone was made
+ * (#xwokc1n). Resolution order: an explicit `--primary=<path>` (wins), else the `WE_PRIMARY` env, else the
+ * clone's git alternates file (`.git/objects/info/alternates` → `<primary>/.git/objects` → `<primary>`) — the
+ * legacy `git clone --reference/--shared` case. A `--local` clone (the drain skill's own provisioning) has NO
+ * alternates, so without the flag/env the old alternates-only finder silently returned null and the primary
+ * rotted unseen (observed 75 commits behind). Returns an absolute path or null (the caller skips + logs
+ * loudly). PURE except the alternates read, injected as `readAlt` for the unit test.
+ */
+export function resolvePrimaryPath(cwd, { flag, env } = {}, readAlt = (p) => readFileSync(p, 'utf8')) {
+  if (typeof flag === 'string' && flag.trim()) return resolve(flag.trim());
+  if (typeof env === 'string' && env.trim()) return resolve(env.trim());
+  try {
+    const alt = readAlt(resolve(cwd, '.git/objects/info/alternates')).trim().split('\n')[0];
+    if (alt) return resolve(alt, '..', '..');            // <primary>/.git/objects → <primary>
+  } catch { /* no alternates file → not locatable this way */ }
+  return null;
+}
+
 /** A commit is AI if ANY of its authors (author + Co-Authored-By co-authors) is an AI identity. */
 export function isAiCommit(commit) {
   const authors = Array.isArray(commit?.authors) ? commit.authors : [];
@@ -826,26 +845,28 @@ function runCli() {
     if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ local main fast-forwarded to origin (autostash preserved local edits)\n` : `  · local main NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`);
   }
 
-  // #2284 residual (2) — the pull above ff-syncs the drain's OWN cwd. But when the drain runs from a LANE CLONE
-  // rather than the user's primary checkout, that primary (a SEPARATE directory) still drifts behind on every
-  // land (observed 2026-07-04: primary sat 11 commits behind origin/main after a drain land, until a concurrent
-  // process pulled it). A lane is `git clone --reference <primary>`, so its git alternates point at the primary's
-  // objects — resolve that to the primary root and ff-sync it too (same ff-only + autostash as pr-land's
-  // syncPrimaryMain). Only when it's a DIFFERENT dir actually on main; best-effort, never fatal.
+  // #2284 residual (2) / #xwokc1n — the pull above ff-syncs the drain's OWN cwd. But when the drain runs from a
+  // LANE CLONE (the #2123 isolated-clone rule) rather than the user's primary checkout, that primary (a SEPARATE
+  // directory) still drifts behind on every land (observed 75 commits behind origin/main). Locate the primary
+  // ROBUSTLY via `resolvePrimaryPath` — `--primary=<path>` flag, else `WE_PRIMARY` env, else git alternates —
+  // so a `--local` clone (which has NO alternates) still syncs primary instead of silently rotting it. ff-sync
+  // ONLY when it's a DIFFERENT dir, on main, AND its tree is CLEAN: a pure `git pull --ff-only`, NEVER
+  // `--autostash` (an autostash-pop over a peer session's uncommitted work stranded the primary half-merged on
+  // 2026-07-03). A dirty / diverged / unlocatable primary is left UNTOUCHED and loudly logged — never silent,
+  // never stranded. Best-effort, never fatal.
   let primarySynced = null;
   if (landedLocal) {
     primarySynced = (() => {
-      let primary;
-      try {
-        const alt = readFileSync(resolve(process.cwd(), '.git/objects/info/alternates'), 'utf8').trim().split('\n')[0];
-        if (!alt) return null;                       // no alternates content
-        primary = resolve(alt, '..', '..');          // <primary>/.git/objects → <primary>
-      } catch { return null; }                       // no alternates file → cwd is the primary (already pulled above)
+      const primary = resolvePrimaryPath(process.cwd(), { flag: flags.primary, env: process.env.WE_PRIMARY });
+      if (!primary) { if (!AS_JSON) process.stderr.write(`  · user primary checkout not located (pass --primary=<path> or set WE_PRIMARY — a --local clone has no git alternates) — skipped primary ff-sync\n`); return null; }
       try { if (realpathSync(primary) === realpathSync(process.cwd())) return null; } catch { return null; } // running FROM primary
       const atPrimary = (a) => execFileSync('git', ['-C', primary, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-      let branch = null; try { branch = atPrimary(['rev-parse', '--abbrev-ref', 'HEAD']); } catch { /* unknown */ }
+      let branch = null; try { branch = atPrimary(['rev-parse', '--abbrev-ref', 'HEAD']); } catch { if (!AS_JSON) process.stderr.write(`  · user primary (${primary}) is not a readable git repo — skipped primary ff-sync\n`); return false; }
       if (branch !== 'main') { if (!AS_JSON) process.stderr.write(`  · user primary (${primary}) not on main (on ${branch || 'unknown'}) — skipped primary ff-sync; pull it by hand\n`); return false; }
-      try { atPrimary(['pull', '--ff-only', '--autostash']); if (!AS_JSON) process.stderr.write(`  ✓ user primary checkout fast-forwarded to origin/main\n`); return true; }
+      // Dirty guard (#xwokc1n): NEVER touch a primary carrying uncommitted work — no autostash, no strand.
+      let dirty = 'unknown'; try { dirty = atPrimary(['status', '--porcelain']); } catch { /* keep 'unknown' → safe-skip */ }
+      if (dirty) { if (!AS_JSON) process.stderr.write(`  · user primary (${primary}) has uncommitted changes — left UNTOUCHED (no autostash); pull it by hand when clean\n`); return false; }
+      try { atPrimary(['pull', '--ff-only']); if (!AS_JSON) process.stderr.write(`  ✓ user primary checkout fast-forwarded to origin/main\n`); return true; }
       catch { if (!AS_JSON) process.stderr.write(`  · user primary (${primary}) NOT fast-forwarded (diverged) — pull it by hand\n`); return false; }
     })();
   }

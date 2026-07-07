@@ -79,14 +79,23 @@ the edges — the #2188 convergence).
 > (`--all-repos` is still accepted — it's a no-op alias of the default now.)
 
 ```
-node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run            # plan only — print the blockedBy-ordered merge order (across ALL 3 repos, the default) + deferred set, merge NOTHING
-node scripts/merge-ai-prs.mjs --label=ready-to-merge                       # /drain (bare): ONE cascade pass across all 3 repos — land every ready labelled PR, exit
-node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --interval=30 # /drain watch: keep polling; land each PR the instant it goes green (--max-idle=N bounds it; Ctrl-C stops)
-node scripts/merge-ai-prs.mjs --label=ready-to-merge --this-repo           # opt OUT: scope to the cwd repo only (a deliberately single-repo drain)
+node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run                          # plan only — print the blockedBy-ordered merge order (across ALL 3 repos, the default) + deferred set, merge NOTHING
+node scripts/merge-ai-prs.mjs --label=ready-to-merge --primary=<primary>                 # /drain (bare): ONE cascade pass across all 3 repos — land every ready labelled PR, exit
+node scripts/merge-ai-prs.mjs --label=ready-to-merge --primary=<primary> --watch --interval=30 # /drain watch: keep polling; land each PR the instant it goes green (--max-idle=N bounds it; Ctrl-C stops)
+node scripts/merge-ai-prs.mjs --label=ready-to-merge --this-repo                         # opt OUT: scope to the cwd repo only (a deliberately single-repo drain)
 ```
 
 **Always dry-run first** to show the merge plan, then run bare (one-shot) or `--watch` (follow). Prefer the
 one-shot unless the user wants a long-lived monitor waiting for producers still opening PRs.
+
+> **Pass `--primary=<primary>` so the post-land sync can find your primary checkout (#xwokc1n).** After each
+> land the drain fast-forwards the user's primary checkout to the advanced `origin/main` so it never rots. It
+> locates that primary via `--primary=<path>` (or the `WE_PRIMARY` env), falling back to the clone's git
+> alternates. The provisioning above uses `git clone --local`, which creates **no** alternates file — so
+> **without `--primary`/`WE_PRIMARY` the primary is never synced and silently drifts** (observed 75 commits
+> behind). The sync is a pure `git pull --ff-only` and **only touches a primary that is on `main` with a clean
+> tree** — a dirty primary (a peer session's uncommitted work) is left UNTOUCHED and logged, never autostashed
+> or stranded (the 2026-07-03 incident). Omit the flag deliberately if you do NOT want your primary advanced.
 
 ## How it works (per pass)
 
