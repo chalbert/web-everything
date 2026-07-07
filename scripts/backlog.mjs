@@ -36,6 +36,7 @@ import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize, sessionForNum } from './readiness/reservations.mjs';
 import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, recordTouch, mostRecentSession, porcelainFiles } from './readiness/claimScope.mjs';
 import { parseQueued, emptyQueuedState, isQueued, queuedNums, addQueued, removeQueued, serializeQueued } from './readiness/queued-state.mjs';
+import { parseHolds, emptyHoldState, isHeld, heldBy, heldNums, addHold, removeHold, pruneExpired as pruneHolds, leaseUntilIso, serializeHolds, DEFAULT_LEASE_MINUTES } from './readiness/prepare-hold-state.mjs';
 import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
 import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
 
@@ -45,6 +46,7 @@ const CAPACITY_PATH = join(ROOT, '.claude/skills/batch-backlog-items/capacity.js
 const RESERVATIONS_PATH = join(ROOT, '.claude/skills/batch-backlog-items/reservations.json');
 const CLAIMS_PATH = join(ROOT, '.claude/skills/batch-backlog-items/claims.json');
 const QUEUED_PATH = join(ROOT, '.claude/skills/batch-backlog-items/queued.json');
+const PREPARE_HOLD_PATH = join(ROOT, '.claude/skills/batch-backlog-items/prepare-hold.json');
 const RED = '\x1b[31m', GRN = '\x1b[32m', YEL = '\x1b[33m', DIM = '\x1b[2m', BLD = '\x1b[1m', RST = '\x1b[0m';
 
 const argv = process.argv.slice(2);
@@ -195,6 +197,18 @@ function transition(v) {
         : `#${num} is queued (ready-to-merge, #2138 Fork 4) — it is waiting to be drained, NOT abandoned; releasing it to open would drop its ready-to-merge state and re-offer it. Let the drain land + unqueue it; pass --force only to deliberately abandon the queued lane.`);
     }
   }
+  // Prepare-hold guard (#2219 (b) flow / #2264): while a session prepares a fork in a lane the item is still
+  // `status: open`, so a naive claim could steal it mid-prep. A LIVE prepare-hold (lease-valid) HARD-refuses a
+  // claim — the strengthened replacement for the soft `reserve` deprioritize. Read the LOCAL token OFFLINE
+  // (Rule #105). `--force` overrides to deliberately steal a stuck hold; the holder drops it with prepare-release.
+  if (v === 'claim' && !argv.includes('--force')) {
+    const num = file.match(/^\d+/)[0];
+    const holds = loadHolds();
+    if (isHeld(holds, num, Date.now())) {
+      const by = heldBy(holds, num, Date.now());
+      die(`#${num} is prepare-held${by ? ` by ${by}` : ''} (#2219 (b) flow) — a session is preparing it in a lane; it is not claimable until the prepare-hold is released (\`backlog.mjs prepare-release ${num}\`). Pass --force only to deliberately steal a stuck hold.`);
+    }
+  }
   // Claim-first guard: a claim must be the FIRST action on an item — grounding, editing, and presenting
   // its substance all come AFTER the flip (next turn). The status transition alone can't catch a session
   // that read + edited the body BEFORE claiming: claim would silently bundle those pre-claim edits into the
@@ -303,6 +317,70 @@ function loadQueued() {
 /** Write the queued registry. */
 function saveQueued(state) {
   writeFileSync(QUEUED_PATH, serializeQueued(state));
+}
+
+/** Read the prepare-hold registry (#2219 (b) flow / #2264); a missing/unreadable file degrades to empty so
+ *  the select/claim path never wedges on a corrupt token. Self-prunes expired holds on each read+write. */
+function loadHolds() {
+  try { return parseHolds(readFileSync(PREPARE_HOLD_PATH, 'utf8')); }
+  catch { return emptyHoldState(); }
+}
+/** Write the prepare-hold registry, dropping any expired hold (housekeeping). */
+function saveHolds(state) {
+  writeFileSync(PREPARE_HOLD_PATH, serializeHolds(pruneHolds(state, Date.now())));
+}
+
+/**
+ * prepare-hold <NNN> [--session=<slug>] [--lease=<minutes>] — place/refresh a HARD local hold while a
+ * session prepares a fork in a lane (#2219 (b) flow). `--select` skips a held item and `claim` refuses it,
+ * unlike the soft `reserve` deprioritize. Idempotent: re-holding extends the lease (refresh across a long
+ * prepare). The token is LOCAL-only (never pushed; read offline per Rule #105) — it is NOT a backlog
+ * mutation, so it may run from anywhere. Release with `prepare-release <NNN>` once the one lane→PR lands.
+ */
+function prepareHold() {
+  const num = (String(positional[0] || '').match(/^(\d+)/) || [])[1];
+  if (!num) die('prepare-hold needs a <NNN> to hold');
+  resolveFile(num); // a typo must not hold a phantom item
+  const holder = flag('session') || process.env.LANE_SESSION || null;
+  const leaseMin = Number.isFinite(Number(flag('lease'))) ? Number(flag('lease')) : DEFAULT_LEASE_MINUTES;
+  const until = leaseUntilIso(Date.now(), leaseMin);
+  saveHolds(addHold(loadHolds(), num, holder, until));
+  const padded = num.padStart(3, '0');
+  ok({ verb: 'prepare-hold', num: padded, holder, leaseUntil: until },
+    `${GRN}✓ prepare-held${RST} #${padded} ${DIM}→ hard-excluded from --select + claim until released (lease ${leaseMin}min${holder ? `, holder ${holder}` : ''}). Enter a lane, author + prepare-stamp, land one PR, then \`prepare-release ${padded}\`.${RST}`);
+}
+
+/**
+ * prepare-stamp <NNN> — write `status: open` + `preparedDate: <today>` into the item's frontmatter (the
+ * one flag readiness ranks as `✓ ready to ratify`). Authored IN the lane and landed via the one PR — never
+ * a primary-tree splice: like the other item-file mutations it is blocked from a primary cwd (guard-bash
+ * #2302) and allowed in a `.lanes/` clone. Idempotent (status:open is a no-op on an already-open item).
+ */
+function prepareStamp() {
+  const file = resolveFile(positional[0]);
+  const rel = `backlog/${file}`;
+  const abs = join(DIR, file);
+  const before = readFileSync(abs, 'utf8');
+  let after = setFrontmatterField(before, 'status', 'open', { after: ['kind', 'size'] });
+  if (after == null) die(`#${file.match(/^\d+/)[0]} — could not splice frontmatter (no frontmatter block?)`);
+  const today = new Date().toISOString().slice(0, 10);
+  after = setFrontmatterField(after, 'preparedDate', `"${today}"`, { after: ['status', 'dateStarted', 'dateOpened'] });
+  writeBacklogMd(abs, rel, after);
+  ok({ verb: 'prepare-stamp', num: file.match(/^\d+/)[0], preparedDate: today },
+    `${GRN}✓ prepare-stamped${RST} #${file.match(/^\d+/)[0]} ${DIM}→ preparedDate ${today} (status: open; readiness now ranks it ✓ ready to ratify). Commit this item file + land the lane PR.${RST}`);
+}
+
+/** prepare-release <NNN> — drop the prepare-hold (the preparer's clear point once the one lane→PR lands).
+ *  Local-only token write; idempotent. */
+function prepareRelease() {
+  const num = (String(positional[0] || '').match(/^(\d+)/) || [])[1];
+  if (!num) die('prepare-release needs a <NNN> to release');
+  const before = heldNums(loadHolds(), Date.now()).length;
+  const state = removeHold(loadHolds(), [num]);
+  saveHolds(state);
+  const padded = num.padStart(3, '0');
+  ok({ verb: 'prepare-release', num: padded, cleared: before - heldNums(state, Date.now()).length },
+    `${GRN}✓ prepare-released${RST} #${padded} ${DIM}— hold dropped; the item is claimable again.${RST}`);
 }
 
 /**
@@ -621,6 +699,9 @@ switch (verb) {
   case 'unreserve': unreserve(); break;
   case 'queue': queue(); break;
   case 'unqueue': unqueue(); break;
+  case 'prepare-hold': prepareHold(); break;
+  case 'prepare-stamp': prepareStamp(); break;
+  case 'prepare-release': prepareRelease(); break;
   default:
     console.error(`${BLD}backlog.mjs${RST} — mechanical backlog-status CLI\n` +
       `  ${GRN}claim${RST} <NNN> [--as=preparing] [--force]   open → active (or preparing, /prepare) + dateStarted; refuses on a dirty item file (claim-first), --force overrides\n` +
@@ -636,6 +717,9 @@ switch (verb) {
       `  ${GRN}unreserve${RST} [--session=<slug>] [<NNN...>]  release soft holds (clear a session, or specific items)\n` +
       `  ${GRN}queue${RST} <NNN...> [--lane=<ref>] [--session=<slug>]   mark ready-to-merge (#2138 Fork 4); claim/release refuse a queued item until the drain lands it\n` +
       `  ${GRN}unqueue${RST} <NNN...>            clear the ready-to-merge mark (the drain's clear point at landing)\n` +
+      `  ${GRN}prepare-hold${RST} <NNN> [--session=<slug>] [--lease=<min>]   HARD local hold while preparing a fork in a lane (#2219 (b)); --select skips + claim refuses it (vs the soft reserve)\n` +
+      `  ${GRN}prepare-stamp${RST} <NNN>         write status:open + preparedDate=<today> into the item (in-lane, landed via the one PR; blocked from a primary cwd)\n` +
+      `  ${GRN}prepare-release${RST} <NNN>       drop the prepare-hold (clear point once the lane PR lands)\n` +
       `  (add --json for machine output)`);
     process.exit(verb ? 1 : 0);
 }

@@ -2596,9 +2596,16 @@ TTL-expiry, and cross-clone double-prepare gaps are real, not hand-waved). **Dow
 prepare-hold → provision/enter lane → author body + research + `status`/`preparedDate` in-lane → land the one
 PR → release the hold*; the item-file `status` splice drops. Anchored on **#2123's defer-clause** (which hands
 the claim-locus mechanics to this line) + **#2138 Fork 4** (the queued-token precedent); #2191's carve-out is
-the general backlog-edit-scope authority. **Build arm:** #2264 (the three verbs + the `guard-lane` carve + the
-close-out rewrites) — the (b-plain) fallback runs as the interim until it ships. Same lifecycle applies,
-weaker-form, to solo `/next` (`resolve`). Report `we:reports/2026-07-02-deferred-merge-queue-substrate.md`.
+the general backlog-edit-scope authority. **Build arm:** #2264 (**shipped 2026-07-07**) delivers the token
+(`we:scripts/readiness/prepare-hold-state.mjs` — a lease-bearing, offline, self-pruning hold), the three
+lane-run verbs (`we:scripts/backlog.mjs` `prepare-hold`/`prepare-stamp`/`prepare-release`), the selection
+HARD-exclusion (`we:scripts/check-readiness.mjs` drops a live-held item from every `--select` surface) + the
+`claim` refusal, and the guard classification — `prepare-stamp` (the in-lane `status`/`preparedDate` splice)
+joins the `we:scripts/guard-bash.mjs` primary-mutation set (blocked from a primary cwd, allowed in a lane —
+the actual gate for a CLI splice, since `guard-lane` only sees the Edit/Write tools), while
+`prepare-hold`/`prepare-release` write only the local token and stay unguarded. The bare `reserve` (b-plain)
+soft-hold is retired as the named interim. Same lifecycle applies, weaker-form, to solo `/next` (`resolve`).
+Report `we:reports/2026-07-02-deferred-merge-queue-substrate.md`.
 
 ---
 

@@ -9,9 +9,9 @@ import { decide, reason, isBacklogMutation, isPrimaryCwd } from '../guard-bash.m
 describe('guard-bash — primary-cwd backlog-mutation block (#2302)', () => {
   const P = ['/ws/webeverything', '/ws/frontierui'];
   it('isBacklogMutation matches EVERY item-mutation verb (incl. release/cost), not the session-state verbs', () => {
-    for (const v of ['claim', 'resolve', 'release', 'scaffold', 'settle', 'retype', 'yield', 'cost'])
+    for (const v of ['claim', 'resolve', 'release', 'scaffold', 'settle', 'retype', 'yield', 'cost', 'prepare-stamp'])
       expect(isBacklogMutation(`node scripts/backlog.mjs ${v} 2279`)).toBe(true);
-    for (const v of ['reserve', 'unreserve', 'queue', 'unqueue', 'calibrate']) // don't touch an item .md → not blocked
+    for (const v of ['reserve', 'unreserve', 'queue', 'unqueue', 'calibrate', 'prepare-hold', 'prepare-release']) // don't touch an item .md → not blocked
       expect(isBacklogMutation(`node scripts/backlog.mjs ${v} 2279 --session=s`)).toBe(false);
     expect(isBacklogMutation('echo backlog.mjs claim 1')).toBe(false); // a mention, not a `node` invocation
   });
@@ -38,6 +38,12 @@ describe('guard-bash — primary-cwd backlog-mutation block (#2302)', () => {
   });
   it('a session-state verb (reserve) is allowed from primary', () => {
     expect(reason('node scripts/backlog.mjs reserve 2279 --session=s', { primaryCwd: true })).toBeNull();
+  });
+  it('prepare-stamp is blocked from primary (item-file splice); prepare-hold/release are local-only → allowed', () => {
+    expect(reason('node scripts/backlog.mjs prepare-stamp 2264', { primaryCwd: true })).toMatch(/must run in a LANE clone/);
+    expect(reason('node scripts/backlog.mjs prepare-stamp 2264', { primaryCwd: false })).toBeNull(); // in a lane → allowed
+    for (const v of ['prepare-hold', 'prepare-release'])
+      expect(reason(`node scripts/backlog.mjs ${v} 2264`, { primaryCwd: true })).toBeNull(); // local token, not a mutation
   });
 });
 
