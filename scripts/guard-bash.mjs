@@ -25,13 +25,14 @@ import { resolve, dirname, join } from 'node:path';
 const BACKLOG_MD = /(?:^|[\s'"=(])(?:\.\/)?backlog\/(\d+)-[^\s'")]*\.md/;
 const CORPUS_MD = /(?:^|[\s'"=(])(?:\.\/)?(?:backlog|reports)\/[^\s'")]*\.md/;
 // #2302 — a `node …/backlog.mjs <sub>` invocation that MUTATES an item's file/frontmatter (as opposed to the
-// session/label-state verbs reserve/unreserve/queue/unqueue/calibrate, which don't touch an item's .md). Run
-// from the PRIMARY checkout it slips past guard-lane (a Bash call, not an Edit/Write) and stamps the item on
-// primary — the exact hole guard-lane closes for the file tools. Blocked only when cwd is a primary (see
-// isPrimaryCwd). The verb set is EVERY subcommand that reaches writeBacklogMd: claim/resolve/RELEASE (all
-// three via transition), retype, yield, scaffold, settle, and COST (accrual write) — release+cost added per
-// the #2302 PR review (they took the same on-disk mutation path but were omitted).
-const BACKLOG_MUTATION = /\bnode\s+\S*backlog\.mjs\s+(?:claim|resolve|release|scaffold|settle|retype|yield|cost)\b/;
+// session/label-state verbs reserve/unreserve/queue/unqueue/calibrate AND the local prepare-hold/prepare-release
+// tokens, which don't touch an item's .md). Run from the PRIMARY checkout it slips past guard-lane (a Bash call,
+// not an Edit/Write) and stamps the item on primary — the exact hole guard-lane closes for the file tools.
+// Blocked only when cwd is a primary (see isPrimaryCwd). The verb set is EVERY subcommand that reaches
+// writeBacklogMd: claim/resolve/RELEASE (all three via transition), retype, yield, scaffold, settle, COST
+// (accrual write), and PREPARE-STAMP (#2264 — the (b)-flow status:open+preparedDate splice, authored in a lane
+// and landed via the one PR, never a primary splice). prepare-hold/prepare-release write only the local token.
+const BACKLOG_MUTATION = /\bnode\s+\S*backlog\.mjs\s+(?:claim|resolve|release|scaffold|settle|retype|yield|cost|prepare-stamp)\b/;
 
 /** Does this segment INVOKE a backlog item-mutation subcommand? Pure (unit-tested). */
 export function isBacklogMutation(segment) { return BACKLOG_MUTATION.test(String(segment || '')); }
@@ -59,7 +60,7 @@ export function reason(segment, { primaryCwd = false } = {}) {
   // re-run in the lane). Deny it and steer to a lane — the same invariant guard-lane enforces for Edit/Write.
   // Only fires when cwd is a primary (a lane clone is allowed). Sanctioned override: prefix BACKLOG_MUTATE_OK=1.
   if (primaryCwd && isBacklogMutation(s) && !/\bBACKLOG_MUTATE_OK=1\b/.test(s))
-    return 'Backlog item-mutations (claim/resolve/scaffold/settle/retype/yield) must run in a LANE clone, not the primary checkout — running backlog.mjs here mutates the item on primary and bypasses lane isolation (#2302/#104). cd into your lane clone (~/workspace/.lanes/<repo>/lane-N) and run it there. Sanctioned override (rare): prefix `BACKLOG_MUTATE_OK=1`.';
+    return 'Backlog item-mutations (claim/resolve/scaffold/settle/retype/yield/prepare-stamp) must run in a LANE clone, not the primary checkout — running backlog.mjs here mutates the item on primary and bypasses lane isolation (#2302/#104). cd into your lane clone (~/workspace/.lanes/<repo>/lane-N) and run it there. Sanctioned override (rare): prefix `BACKLOG_MUTATE_OK=1`.';
   // The command word(s) of this segment, after stripping leading env-assignments / sudo — so we match
   // actual INVOCATIONS (anchored at command position), not mentions buried in a quoted arg like a commit
   // message. `git commit -m "...pkill vite..."` has command `git`, so the pkill rule no longer fires.

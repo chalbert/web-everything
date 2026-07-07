@@ -93,7 +93,7 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META } from './lib/review-escalation.mjs';
 import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
 import { mergePr } from './lib/pr-merge-gate.mjs';
-import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS } from './lane-drain.mjs';
+import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes } from './lane-drain.mjs';
 
 // #2262 — the local, machine-scoped park-age clock the review-escalation watch-window gate reads its
 // `parkedSinceMs` from (see review-park-state.mjs for why losing/corrupting this file is safe). Resolved
@@ -113,6 +113,58 @@ export function isAiAuthor(author) {
   const name = String(author.name || '').toLowerCase();
   const email = String(author.email || '').toLowerCase();
   return /\bclaude\b/.test(name) || email.includes('anthropic.com') || email.includes('noreply@anthropic');
+}
+
+/**
+ * Locate the user's primary checkout to ff-sync after a land, INDEPENDENT of how the drain clone was made
+ * (#xwokc1n). Resolution order: an explicit `--primary=<path>` (wins), else the `WE_PRIMARY` env, else the
+ * clone's git alternates file (`.git/objects/info/alternates` → `<primary>/.git/objects` → `<primary>`) — the
+ * legacy `git clone --reference/--shared` case. A `--local` clone (the drain skill's own provisioning) has NO
+ * alternates, so without the flag/env the old alternates-only finder silently returned null and the primary
+ * rotted unseen (observed 75 commits behind). Returns an absolute path or null (the caller skips + logs
+ * loudly). PURE except the alternates read, injected as `readAlt` for the unit test.
+ */
+export function resolvePrimaryPath(cwd, { flag, env } = {}, readAlt = (p) => readFileSync(p, 'utf8')) {
+  if (typeof flag === 'string' && flag.trim()) return resolve(cwd, flag.trim()); // relative --primary → against cwd, not process.cwd()
+  if (typeof env === 'string' && env.trim()) return resolve(cwd, env.trim());
+  try {
+    const alt = readAlt(resolve(cwd, '.git/objects/info/alternates')).trim().split('\n')[0];
+    if (alt) return resolve(alt, '..', '..');            // <primary>/.git/objects → <primary>
+  } catch { /* no alternates file → not locatable this way */ }
+  return null;
+}
+
+/**
+ * Decide + perform the post-land ff-sync of the user's PRIMARY checkout (#xwokc1n). PURE except the injected
+ * `exec` (git spawner) and `isCwd` (self-check) — so every branch is unit-testable (the sync lived untested in
+ * the CLI before). Returns `{ synced, reason, warn }`:
+ *   - `synced:true`  → a pure `git pull --ff-only` succeeded.
+ *   - `synced:false` → deliberately skipped; `reason` ∈ from-primary | not-located | not-a-repo | not-on-main |
+ *     dirty | status-failed | diverged. `warn` gates the log: LOUD for an actionable skip (a bad `--primary`,
+ *     a dirty/diverged primary), QUIET for the benign ones (cwd IS the primary — already ff-synced by the
+ *     `localSynced` pull above; or unlocatable with NO flag/env hint, the common single-checkout run).
+ *
+ * Two review fixes (#xwokc1n, PR #202) baked in:
+ *   1. The dirty guard uses `--untracked-files=no` — only TRACKED uncommitted work blocks the sync. Untracked
+ *      scratch/build cruft (near-universal on a real primary) must NOT perpetually skip it (that would re-rot
+ *      the very thing this exists to fix); `git pull --ff-only` is already safe against clobbering untracked
+ *      files (it aborts, caught as `diverged`). The strand being guarded against was an autostash-pop over
+ *      TRACKED work — untracked files were never the hazard.
+ *   2. `not-located` warns ONLY when a `--primary`/`WE_PRIMARY` hint was given but resolved to nothing (a
+ *      typo, worth shouting about). With NO hint, cwd is almost certainly the primary itself (already synced),
+ *      so it stays quiet instead of nagging "pass --primary" on every single-checkout land.
+ * No `--autostash` anywhere (the 2026-07-03 strand). Best-effort; the caller never fails a land on this.
+ */
+export function syncPrimaryOnLand({ exec, primary, hinted = false, isCwd = () => false }) {
+  if (!primary) return { synced: false, reason: 'not-located', warn: !!hinted };
+  try { if (isCwd(primary)) return { synced: false, reason: 'from-primary', warn: false }; } catch { return { synced: false, reason: 'from-primary', warn: false }; }
+  const at = (a) => String(exec(['-C', primary, ...a]) ?? '').trim();
+  let branch; try { branch = at(['rev-parse', '--abbrev-ref', 'HEAD']); } catch { return { synced: false, reason: 'not-a-repo', warn: true }; }
+  if (branch !== 'main') return { synced: false, reason: 'not-on-main', warn: true, branch: branch || 'unknown' };
+  let dirty; try { dirty = at(['status', '--porcelain', '--untracked-files=no']); } catch { return { synced: false, reason: 'status-failed', warn: true }; }
+  if (dirty) return { synced: false, reason: 'dirty', warn: true };
+  try { at(['pull', '--ff-only']); return { synced: true, reason: 'synced', warn: false }; }
+  catch { return { synced: false, reason: 'diverged', warn: true }; }
 }
 
 /** A commit is AI if ANY of its authors (author + Co-Authored-By co-authors) is an AI identity. */
@@ -826,28 +878,48 @@ function runCli() {
     if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ local main fast-forwarded to origin (autostash preserved local edits)\n` : `  · local main NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`);
   }
 
-  // #2284 residual (2) — the pull above ff-syncs the drain's OWN cwd. But when the drain runs from a LANE CLONE
-  // rather than the user's primary checkout, that primary (a SEPARATE directory) still drifts behind on every
-  // land (observed 2026-07-04: primary sat 11 commits behind origin/main after a drain land, until a concurrent
-  // process pulled it). A lane is `git clone --reference <primary>`, so its git alternates point at the primary's
-  // objects — resolve that to the primary root and ff-sync it too (same ff-only + autostash as pr-land's
-  // syncPrimaryMain). Only when it's a DIFFERENT dir actually on main; best-effort, never fatal.
+  // #2284 residual (2) / #xwokc1n — the pull above ff-syncs the drain's OWN cwd. But when the drain runs from a
+  // LANE CLONE (the #2123 isolated-clone rule) rather than the user's primary checkout, that primary (a SEPARATE
+  // directory) still drifts behind on every land (observed 75 commits behind origin/main). Locate the primary
+  // ROBUSTLY via `resolvePrimaryPath` (`--primary=<path>` → `WE_PRIMARY` → git alternates) so a `--local` clone
+  // (which has NO alternates) still syncs it, then `syncPrimaryOnLand` decides + performs the ff-sync (pure,
+  // tested). Sync ONLY a DIFFERENT dir, on main, with a TRACKED-clean tree: a pure `git pull --ff-only`, no
+  // `--autostash` (the 2026-07-03 strand). Untracked cruft does NOT block; a bad `--primary`/dirty/diverged is
+  // left UNTOUCHED and loudly logged; a hint-less unlocatable (cwd IS the primary, already synced) stays quiet.
   let primarySynced = null;
   if (landedLocal) {
-    primarySynced = (() => {
-      let primary;
+    const primary = resolvePrimaryPath(process.cwd(), { flag: flags.primary, env: process.env.WE_PRIMARY });
+    const hinted = (typeof flags.primary === 'string' && flags.primary.trim()) || (typeof process.env.WE_PRIMARY === 'string' && process.env.WE_PRIMARY.trim());
+    const gitAt = (a) => execFileSync('git', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const isCwd = (p) => { try { return realpathSync(p) === realpathSync(process.cwd()); } catch { return false; } };
+    const r = syncPrimaryOnLand({ exec: gitAt, primary, hinted: !!hinted, isCwd });
+    // null = benign no-op (cwd is the primary, or hint-less unlocatable); true = synced; false = actionable skip.
+    primarySynced = r.synced ? true : (r.warn ? false : null);
+    if (!AS_JSON) {
+      if (r.synced) process.stderr.write(`  ✓ user primary checkout fast-forwarded to origin/main\n`);
+      else if (r.warn) {
+        const why = { 'not-located': `not located (pass --primary=<path> or set WE_PRIMARY)`, 'not-a-repo': `${primary} is not a readable git repo`, 'not-on-main': `${primary} not on main (on ${r.branch})`, 'status-failed': `${primary} git status failed`, dirty: `${primary} has uncommitted TRACKED changes — left UNTOUCHED (no autostash)`, diverged: `${primary} NOT fast-forwarded (diverged)` }[r.reason] || r.reason;
+        process.stderr.write(`  · user primary ${why} — skipped primary ff-sync; pull it by hand\n`);
+      }
+    }
+  }
+
+  // JIT numbering (#2288) — the drain is the sole serial writer to main, so THIS land path (the /pr fast drain
+  // + /merge sweep) is also where a provisional (hash-keyed) item gets its real sequential NNN. After a WE
+  // couple lands on cwd's main, number every hash file now present (the couple's own item + any leftover
+  // scaffolded in its lane) and push. Runs BEFORE the derived regen so the inventory reflects the final numbers.
+  // Shares lane-drain's `numberPendingHashes` (single source, never a fork). Best-effort/non-fatal.
+  let numbered = { assigned: [], committed: false };
+  if (landedLocal && !DRY_RUN) {
+    numbered = numberPendingHashes(process.cwd());
+    if (numbered.committed) {
       try {
-        const alt = readFileSync(resolve(process.cwd(), '.git/objects/info/alternates'), 'utf8').trim().split('\n')[0];
-        if (!alt) return null;                       // no alternates content
-        primary = resolve(alt, '..', '..');          // <primary>/.git/objects → <primary>
-      } catch { return null; }                       // no alternates file → cwd is the primary (already pulled above)
-      try { if (realpathSync(primary) === realpathSync(process.cwd())) return null; } catch { return null; } // running FROM primary
-      const atPrimary = (a) => execFileSync('git', ['-C', primary, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-      let branch = null; try { branch = atPrimary(['rev-parse', '--abbrev-ref', 'HEAD']); } catch { /* unknown */ }
-      if (branch !== 'main') { if (!AS_JSON) process.stderr.write(`  · user primary (${primary}) not on main (on ${branch || 'unknown'}) — skipped primary ff-sync; pull it by hand\n`); return false; }
-      try { atPrimary(['pull', '--ff-only', '--autostash']); if (!AS_JSON) process.stderr.write(`  ✓ user primary checkout fast-forwarded to origin/main\n`); return true; }
-      catch { if (!AS_JSON) process.stderr.write(`  · user primary (${primary}) NOT fast-forwarded (diverged) — pull it by hand\n`); return false; }
-    })();
+        execFileSync('git', ['push', 'origin', 'HEAD:main'], { env: { ...process.env, MAIN_PUSH_OK: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+        if (!AS_JSON) process.stderr.write(`  ✓ JIT-numbered ${numbered.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')} + pushed to main (#2288)\n`);
+      } catch (e) {
+        if (!AS_JSON) process.stderr.write(`  ⚠ JIT numbering committed locally but push FAILED (${String(e.message || e).split('\n')[0]}) — push main by hand\n`);
+      }
+    }
   }
 
   // #2290 — the drain is the sole writer to main, so the WE derived-artifact regen (#2182/#2173) moves INTO the
@@ -867,7 +939,7 @@ function runCli() {
   // #2222 — a healed tip is a PENDING rebuild (CI re-running on the renumbered tree), so it counts as progress
   // for the watch's idle accounting exactly like a rebase-drop rebuild — it lands on a later pass.
   const pendingAll = [...pendingRebased, ...healed];
-  const result = { ok: true, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
+  const result = { ok: true, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), ...(numbered.assigned.length ? { jitNumbered: numbered.assigned } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred };
   }; // end sweepOnce
 

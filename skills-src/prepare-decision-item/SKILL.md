@@ -21,8 +21,9 @@ tags it `✓ ready to ratify` (vs `○ needs prep`).
 > checkout — `we:scripts/guard-lane.mjs` will hard-block a primary `Edit` mid-flow otherwise, forcing a
 > re-home after you've already spent the research budget. So provision/enter a lane **before** step 3's
 > authoring: `node we:scripts/lane-pool.mjs status --json` → pick a clean lane → do all authoring there →
-> land via PR. (The primary-checkout claim/release/`preparedDate` lifecycle in *Close out* below still
-> assumes one tree; how it composes under isolation is being reconciled — **#2219**.)
+> land via PR. The concurrency guarantee is the **hard local prepare-hold** (#2219 (b), shipped #2264):
+> `prepare-hold` before you start, `prepare-stamp` the `preparedDate` **in the lane**, land one PR, then
+> `prepare-release`. No `preparedDate`/`status` splice ever touches primary — see *Close out*.
 
 ## Quick path — the loop in commands
 
@@ -36,11 +37,13 @@ tags it `✓ ready to ratify` (vs `○ needs prep`).
    3–5, one-line rationale + leverage each) with two links per item ([live] · [md]) and your
    recommended pick. Prep is a real token spend (a prior-art survey + a `/research/` topic + authoring),
    so get one "go" on which item before burning it — *not* a multiple-choice; planning-as-discussion.
-3. **Claim it.** `node scripts/backlog.mjs claim <NNN> --as=preparing` (race-safe `open → preparing`
-   + `dateStarted`; refuses if dirty or already taken). The `preparing` status drops it from selection
-   exactly like `active`, but reads distinctly on the `/backlog/` board — a decision being *researched*,
-   not a story mid-build (#375). Emit the rename slug. Claiming guards against a concurrent session
-   preparing the same fork.
+3. **Prepare-hold it (hard local lock), then enter the lane.** `node scripts/backlog.mjs prepare-hold <NNN>
+   --session=<slug>` — a HARD local hold (#2219 (b) / #2264): `--select` skips it and `claim` refuses it
+   until you `prepare-release`, so a concurrent session can't select or steal the fork you're researching.
+   Unlike the old `claim --as=preparing`, it writes **no** frontmatter to primary — the item stays `open`,
+   the hold is a local, lease-bearing token (refresh by re-holding across a long prepare). Emit the rename
+   slug. Then work entirely in your lane clone (the lane-note above); the `preparedDate` gets stamped
+   in-lane at *Close out*, never spliced onto primary.
 
 ## Doing the prep — the passes, in order (standing test first)
 
@@ -157,9 +160,10 @@ output is the rewritten body, not a message:
    separately-prioritized build). The screen is mandatory on every fork — no leverage exception — because
    these two framing flaws are what a same-session skeptic is structurally blind to.
 
-## Close out — mark prepared, release back to open
+## Close out — stamp prepared in-lane, land one PR, release the hold
 
-A prepared decision is **still open** — the call hasn't been made. So `release`, don't `resolve`:
+A prepared decision is **still open** — the call hasn't been made. So `prepare-stamp` (not `resolve`) and
+land the `preparedDate` via the lane→PR; `resolve` is the *decision* turn's job, not prep's:
 
 1. **Gate before stamping — every fork must actually be at DoR, *including* the one you'd rather leave
    "for the human."** Prep's whole job is to bring the human-judgment fork to options + tradeoffs + a
@@ -190,13 +194,17 @@ A prepared decision is **still open** — the call hasn't been made. So `release
    fixed fork-labeling convention** (*backlog-workflow.md → the
    prepared-decision shape*): numbered `## Fork N` section headings, lowercase `(a)`/`(b)`/`(c)` options
    referenced as "Fork N (a)", a second-level choice as a "Fork N sub-fork" — never `## Fork (a)` or
-   `A1`/`B2` aliases. Then set `preparedDate: "YYYY-MM-DD"` (today) in the item's frontmatter
-   via an Edit — the one flag that makes readiness rank it `✓ ready to ratify`, so stamping a
-   half-prepared item is a false "ready" the next decision turn will trust.
+   `A1`/`B2` aliases. Then stamp `preparedDate` **in the lane** with `node scripts/backlog.mjs prepare-stamp
+   <NNN>` (writes `status: open` + `preparedDate: <today>` into the lane's item file — the one flag that
+   makes readiness rank it `✓ ready to ratify`, so stamping a half-prepared item is a false "ready" the next
+   decision turn will trust). `prepare-stamp` is blocked from a primary cwd and allowed in the lane, so this
+   splice lands via the one PR, never onto primary — do **not** hand-Edit `preparedDate`.
 2. **Gate:** `npm run check:standards` green (and the new `/research/` topic renders — confirm the
    `researchTopics.json` entry + `.njk` write-up parsed). Confirm a `relatedReport` link exists.
-3. **Release the claim:** `node scripts/backlog.mjs release <NNN>` (`preparing → open`; stamps untouched,
-   so `preparedDate` survives). Do not `resolve` — resolving is the *decision* turn's job, not prep's.
+3. **Land the one PR, then release the hold.** Commit the item file + `/research/` topic in the lane and
+   land it via `we:scripts/pr-land.mjs` (the standard transport). Once the PR is open/landing, drop the
+   hold: `node scripts/backlog.mjs prepare-release <NNN>` — the item is `open` + prepared and claimable
+   again. Do not `resolve` — resolving is the *decision* turn's job, not prep's.
 4. Close with a one-line net-flow note (item `#NNN` now `✓ ready to ratify`, research topic published)
    and point at `/next decision` to make the call when ready.
 

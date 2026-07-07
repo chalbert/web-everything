@@ -35,5 +35,7 @@ tests/visual/review/
 skills-src/batch-backlog-items/claims.json
 skills-src/batch-backlog-items/queued.json
 skills-src/batch-backlog-items/reservations.json
+skills-src/batch-backlog-items/prepare-hold.json
+skills-src/batch-backlog-items/id-ledger.json
 # Review-escalation park-age clock (#2262) — local, machine-scoped, safe to lose (a PR just re-parks fresh)
 .claude/skills/drain/review-park-state.json

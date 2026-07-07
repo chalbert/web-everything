@@ -30,6 +30,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { idFromName } from './backlog/id.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BACKLOG = join(ROOT, 'backlog');
@@ -73,10 +74,10 @@ function daysBetween(aIso, bDate) {
 }
 
 // --- Load every backlog item once ---------------------------------------------------------------
-const files = readdirSync(BACKLOG).filter((f) => /^\d+.*\.md$/.test(f));
+const files = readdirSync(BACKLOG).filter((f) => f.endsWith('.md') && idFromName(f)); // two-form id (#2288): NNN or xNNNNNN
 const items = files.map((f) => {
   const text = readFileSync(join(BACKLOG, f), 'utf8');
-  const num = f.match(/^(\d+)/)[1];
+  const num = idFromName(f);
   const title = (text.match(/^#\s+(.+)$/m) || [, ''])[1].trim();
   return { num, file: f, title, text, fm: parseFrontmatter(text) };
 });

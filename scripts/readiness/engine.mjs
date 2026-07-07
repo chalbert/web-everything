@@ -35,6 +35,7 @@
  * fixture in tests.
  */
 import { buildReport, source as reportSource, section as reportSection, score as reportScore } from '../lib/buildReport.mjs';
+import { slugFromName } from '../backlog/id.mjs';
 
 /** Numeric-stable ascending sort by the leading NNN id, so output never depends on load order. */
 const byNum = (a, b) => Number(a.num) - Number(b.num);
@@ -305,13 +306,13 @@ export function spliceStaleEdges(content, dropNums) {
 export function buildReadinessReport(selection, batchPack, budget) {
   const rankedScores = selection.tierA.map((it) => reportScore({
     id: `tierA/${it.num}`,
-    label: `#${it.num} ${it.id.replace(/^\d+-/, '')}`,
+    label: `#${it.num} ${slugFromName(it.id)}`,
     value: it.leverageScore ?? 0,
     unit: 'leverage',
   }));
   const packScores = batchPack.picked.map((it) => reportScore({
     id: `pack/${it.num}`,
-    label: `#${it.num} ${it.id.replace(/^\d+-/, '')} (${it.locus ?? 'webeverything'})`,
+    label: `#${it.num} ${slugFromName(it.id)} (${it.locus ?? 'webeverything'})`,
     value: it.batchCost,
     max: budget,
     unit: 'pts',

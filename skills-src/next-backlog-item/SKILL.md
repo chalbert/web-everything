@@ -22,8 +22,8 @@ build (step 0b). All modes share the same claim → sync → close-out tail (ste
 > (not just surface), the work runs in an **isolated lane clone**, never the shared primary checkout —
 > `we:scripts/guard-lane.mjs` blocks a primary `Edit` otherwise. Provision/enter a lane before you start
 > editing: `node we:scripts/lane-pool.mjs status --json` → pick a clean lane → work + `resolve` there →
-> land via PR. (How the claim/`resolve` frontmatter lifecycle composes with lane isolation is being
-> reconciled — **#2219**.)
+> land via PR. The claim/`resolve` frontmatter splice rides that same lane→PR (never a primary write) —
+> the #2219 (b) lifecycle, shipped #2264 (which also adds the `prepare-hold` hard lock for the prepare path).
 
 ## The loop
 
