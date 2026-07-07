@@ -22,6 +22,20 @@ export const REVIEW_LABELS = {
   human: 'review:human',       // #2285 v1 — conflict of interest: the diff edits the auto-review trust chain; only a HUMAN may clear it (an agent must not auto-accept)
 };
 
+/**
+ * Provisioning metadata for the verdict labels (#2279) — the SINGLE SOURCE OF TRUTH for each label's
+ * GitHub color + description, so the drain's on-demand upsert (and any bootstrap provisioner) derive
+ * from here and never drift from the names above. Keyed by label name (a REVIEW_LABELS value) and
+ * covering EVERY label incl. review:human (#2285), so no label is minted with a placeholder color.
+ * Colors are 6-hex, no leading '#'.
+ */
+export const REVIEW_LABEL_META = {
+  [REVIEW_LABELS.pending]:  { color: 'FBCA04', description: 'Drain parked this PR — an independent review is owed before it merges (#2171)' },
+  [REVIEW_LABELS.accepted]: { color: '0E8A16', description: 'Reviewer accepted — the drain may merge (#2171)' },
+  [REVIEW_LABELS.changes]:  { color: 'D93F0B', description: 'Reviewer wants changes — the author lane fixes hot-context and re-pushes (#2171)' },
+  [REVIEW_LABELS.human]:    { color: 'B60205', description: 'Conflict of interest: the diff edits the auto-review trust chain — only a human may clear it (#2285)' },
+};
+
 /** Default rubric thresholds (tuning knobs — loose to start). */
 export const DEFAULT_THRESHOLDS = {
   diffLines: 400,   // a PR changing ≥ this many lines escalates on size alone
