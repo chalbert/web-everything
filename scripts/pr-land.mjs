@@ -77,6 +77,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { assertMayMerge } from './lib/pr-merge-gate.mjs';
+import { numberPendingHashes } from './lane-drain.mjs'; // JIT numbering, shared single source (#2288/#xzxc92d)
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -551,6 +552,14 @@ function runCli() {
       tryGit(['fetch', REMOTE, `${REF}`, '--quiet']);
       gitC(['checkout', BASE]);
       gitC(['merge', '--no-ff', `${REMOTE}/${REF}`, '-m', `merge ${REF} (pr-land git fallback)`]);
+      // JIT numbering (#2288 / #xzxc92d): the fallback-git merge is a LAND path too — the last one #2288 left
+      // un-numbered. Number every provisional hash file the merge just brought onto BASE BEFORE the push, so
+      // no hash strands on main (this is the exact route that stranded #xzxc92d itself). Shares lane-drain's
+      // `numberPendingHashes` (single source, never a fork); it commits the rename+rewrite locally, so the push
+      // below carries the numbering to main together with the merge. Best-effort — a numbering error is
+      // surfaced but never unwinds the successful merge (the post-land heal is the collision backstop).
+      const numbered = numberPendingHashes(REPO);
+      if (numbered && numbered.error) process.stderr.write(`pr-land [${REPO}] ⚠ JIT numbering skipped (${numbered.error}) — a provisional hash may reach ${BASE} un-numbered; run the drain's numbering by hand\n`);
       gitPushMain([REMOTE, `${BASE}:${BASE}`]);
       if (SYNC_PRIMARY) syncPrimaryMain(); // ff-sync the user's primary checkout too (the lane's local BASE is already merged)
       const heal = HEAL ? runHeal({ ontoRef: preMergeBaseSha }) : null;
@@ -559,7 +568,7 @@ function runCli() {
       if (regen && regen.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${regen.warning}\n`);
       const skipped = postLandSkips(heal, regen);
       if (skipped.length) process.stderr.write(`pr-land [${REPO}] ⚠⚠ POST-LAND ${skipped.join(' + ')} SKIPPED (tracked-dirty tree) — ${BASE} may carry an unhealed id collision / stale derived artifacts; run the steps by hand.\n`);
-      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), regenDone: regen ? regen.done : [], regenFailed: regen ? regen.failed : [], ...(regen && regen.warning ? { regenWarning: regen.warning } : {}), ...(skipped.length ? { skipped } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${postLandReport(heal, regen)}` }, 0);
+      emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), ...(numbered && numbered.assigned && numbered.assigned.length ? { numbered: numbered.assigned } : {}), regenDone: regen ? regen.done : [], regenFailed: regen ? regen.failed : [], ...(regen && regen.warning ? { regenWarning: regen.warning } : {}), ...(skipped.length ? { skipped } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${numbered && numbered.assigned && numbered.assigned.length ? `; JIT-numbered ${numbered.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')}` : ''}${postLandReport(heal, regen)}` }, 0);
     } catch (e) {
       emit({ repo: REPO, merged: false, reason: 'fallback-failed', detail: `${detail}; git-merge fallback ALSO failed (${String(e.message || e).split('\n')[0]}) — ${BASE} left untouched` }, 3);
     }

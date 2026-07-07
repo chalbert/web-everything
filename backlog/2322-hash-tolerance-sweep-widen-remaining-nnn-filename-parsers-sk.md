@@ -1,9 +1,11 @@
 ---
 kind: task
 parent: "2289"
-status: open
+status: resolved
 blockedBy: ["2288"]
 dateOpened: "2026-07-07"
+dateStarted: "2026-07-07"
+dateResolved: "2026-07-07"
 tags: []
 ---
 

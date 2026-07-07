@@ -142,7 +142,7 @@ if (isMain) {
         '--type=idea', '--workitem=story', '--size=2', `--parent=${EPIC}`,
         `--title=${a.title}`, `--digest=${a.digest}`,
       ], { cwd: ROOT, encoding: 'utf8' });
-      const id = (out.match(/#(\d+)/) || [])[1];
+      const id = (out.match(/#(\d{1,5}|x[0-9a-z]{6})/) || [])[1]; // two-form id (#2288): scaffold now births a hash
       console.log(`  ✓ filed #${id} for ${a.url}`);
       filed++;
     }

@@ -192,7 +192,7 @@ function agentItemNum(p) {
     const ev = JSON.parse(nl === -1 ? text : text.slice(0, nl));
     const c = ev && ev.message && ev.message.content;
     const s = typeof c === 'string' ? c : JSON.stringify(c || '');
-    const m = s.match(/#(\d{2,4})\b/);
+    const m = s.match(/#(\d{2,5}|x[0-9a-z]{6})\b/); // two-form id (#2288): NNN or a provisional hash
     if (m) num = m[1];
   } catch { /* unreadable / partial head — leave unlabelled */ }
   AGENT_NUM_CACHE.set(p, num);

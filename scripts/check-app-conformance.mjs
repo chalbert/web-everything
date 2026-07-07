@@ -32,6 +32,7 @@ import { buildConformanceReport } from './lib/conformanceReport.mjs';
 import { loadBlocks } from './lib/blocks-loader.cjs';
 import { loadIntents } from './lib/intents-loader.cjs';
 import { loadProtocols } from './lib/protocols-loader.cjs';
+import { idFromName } from './backlog/id.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -61,7 +62,7 @@ const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, asse
 const intents = loadIntents(); // per-intent specs src/_data/intents/<id>.json, assembled (#1145)
 const protocols = loadProtocols(); // per-protocol specs src/_data/protocols/<id>.json, assembled (#1146)
 const byId = (arr, id) => arr.find((x) => x.id === id);
-const backlogIds = new Set(readdirSync(join(ROOT, 'backlog')).map((f) => (f.match(/^(\d{3})-/) || [])[1]).filter(Boolean));
+const backlogIds = new Set(readdirSync(join(ROOT, 'backlog')).map((f) => idFromName(f)).filter(Boolean)); // two-form id (#2288): NNN (any width) or xNNNNNN
 
 /** Resolve a standard id to {found, kind, status, available}. available = shipping (status active). */
 function resolveStandard(id) {

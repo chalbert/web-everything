@@ -27,19 +27,19 @@ export const HASH_RE = /^x[0-9a-z]{6}$/;
  * The leading id TOKEN of a backlog filename stem or ref — numeric `NNN` (landed) OR `xNNNNNN` hash
  * (provisional). Anchored, followed by a `-` (before the slug) or end-of-string (a bare ref).
  */
-export const ID_TOKEN_RE = /^(\d{1,4}|x[0-9a-z]{6})(?=-|$)/;
+export const ID_TOKEN_RE = /^(\d{1,5}|x[0-9a-z]{6})(?=-|$)/;
 
 /** True for a provisional hash id (`x7k2q9a`). */
 export const isHash = (id) => HASH_RE.test(String(id));
 
 /** True for a landed numeric id (`2288`). */
-export const isNum = (id) => /^\d{1,4}$/.test(String(id));
+export const isNum = (id) => /^\d{1,5}$/.test(String(id));
 
 /** Extract the id token from a filename stem or `NNN`/`xNNNNNN[-slug]` ref; undefined if none. */
 export const idFromName = (name) => (String(name).match(ID_TOKEN_RE) || [])[1];
 
 /** The slug portion of a filename stem (leading id token + dash stripped). */
-export const slugFromName = (stem) => String(stem).replace(/^(\d{1,4}|x[0-9a-z]{6})-/, '');
+export const slugFromName = (stem) => String(stem).replace(/^(\d{1,5}|x[0-9a-z]{6})-/, '');
 
 /**
  * Normalise a caller-supplied item ref to its canonical id: pad a numeric ref to 3 digits (`7` →

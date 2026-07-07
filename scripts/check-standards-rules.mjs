@@ -406,7 +406,7 @@ export const FORK_HEADING_TERMS = [
 // carve/delegate/resolve/settle/blockedBy/decision language. NB: match `blockedby`/`blocked by`, NOT
 // bare "block" — a live fork can be *about* whether to build a block (#369), which must still warn.
 const FORK_SETTLED_RX = /(carv|deleg|resolv|settl|blocked\s?by|decision)/i;
-const ITEM_REF_RX = /#\d{1,4}\b/;
+const ITEM_REF_RX = /#(?:\d{1,5}|x[0-9a-z]{6})\b/; // two-form id (#2288): a prose ref to a landed NNN or a provisional hash
 
 /**
  * Find fork-shaped section headings in a backlog markdown body that are NOT already settled (carved to

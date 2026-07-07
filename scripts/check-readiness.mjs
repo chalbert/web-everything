@@ -26,6 +26,7 @@ import { parseReservations, emptyState, foreignHolds, deprioritizeReserved } fro
 import { parseHolds, emptyHoldState, heldNums } from './readiness/prepare-hold-state.mjs';
 import { LOCI } from './check-standards-rules.mjs';
 import { checkMainStaleness } from './lib/main-staleness.mjs';
+import { slugFromName } from './backlog/id.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -159,7 +160,7 @@ if (SELECT) {
   // A foreign-held item carries `reservedBy` (deprioritize, not exclude — #083): tag it so the human
   // sees it was sunk because another session planned it, not skipped.
   const resv = (it) => (it.reservedBy ? ` ${YEL}⊘ held by ${it.reservedBy}${RST}` : '');
-  const line = (it, mark) => console.log(`  ${mark} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}—${RST} ${eff(it)} ${lev(it)}${resv(it)}`);
+  const line = (it, mark) => console.log(`  ${mark} #${it.num} ${slugFromName(it.id)} ${DIM}—${RST} ${eff(it)} ${lev(it)}${resv(it)}`);
 
   console.log(`${DIM}check:readiness --select — deterministic ranking (same source as /backlog/ Prioritisation tab)${RST}`);
   const c = selection.counts;
@@ -203,7 +204,7 @@ if (SELECT) {
       // Repo-LOCUS (#498/#500): the pack is locus-agnostic; flag each cross-repo item with its gate home so
       // close-out runs THAT locus's gate (LOCI registry), never this repo's by default. WE items stay unmarked.
       const locusTag = lc !== 'webeverything' ? ` · ${YEL}⌂ ${lc}${RST}${DIM}` : '';
-      console.log(`  ${CYA}＋${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— ${eff(it)} · cost ${it.batchCost} · running ${run}/${budget}${locusTag}${RST}`);
+      console.log(`  ${CYA}＋${RST} #${it.num} ${slugFromName(it.id)} ${DIM}— ${eff(it)} · cost ${it.batchCost} · running ${run}/${budget}${locusTag}${RST}`);
     });
     console.log(`  ${DIM}= ${batchPack.spent}/${budget} pts packed across ${batchPack.picked.length} item(s). Pre-flight each body for a buried fork; the count is whatever fills the budget.${RST}`);
     // Per-locus gate legend — for each cross-repo locus in the pack, show the gate the loop must run to
@@ -245,13 +246,13 @@ if (SELECT) {
   // above but listed here so a drained pool is legibly "in flight elsewhere," not "nothing to do."
   if (selection.inFlight.length) {
     console.log(`\n${DIM}${BLD}In flight — batch-shaped items being worked elsewhere (status: active)${RST}`);
-    selection.inFlight.forEach((it) => console.log(`  ${YEL}▶${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— ${eff(it)}${RST}`));
+    selection.inFlight.forEach((it) => console.log(`  ${YEL}▶${RST} #${it.num} ${slugFromName(it.id)} ${DIM}— ${eff(it)}${RST}`));
   }
 
   console.log(`\n${YEL}${BLD}Tier B — decisions (prepared-first, then by leverage; discuss, don't auto-build)${RST}`);
   if (selection.tierB.length) selection.tierB.forEach((it) => {
     const tag = it.prepared ? `${GRN}✓ ready to ratify${RST}` : `${DIM}○ needs prep${RST}`;
-    console.log(`  ${YEL}◐${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}—${RST} ${eff(it)} ${tag} ${lev(it)}`);
+    console.log(`  ${YEL}◐${RST} #${it.num} ${slugFromName(it.id)} ${DIM}—${RST} ${eff(it)} ${tag} ${lev(it)}`);
   });
   else console.log(`${DIM}  none.${RST}`);
 
@@ -260,7 +261,7 @@ if (SELECT) {
   // nothing better exists. Demote-not-hide: it's "not now," never "rejected" and never a park.
   if (selection.filler && selection.filler.length) {
     console.log(`\n${DIM}${BLD}Filler — \`priority: low\` (not in the auto-pack; pick up when nothing better is open)${RST}`);
-    selection.filler.forEach((it) => console.log(`  ${DIM}·${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— ${eff(it)}${RST}`));
+    selection.filler.forEach((it) => console.log(`  ${DIM}·${RST} #${it.num} ${slugFromName(it.id)} ${DIM}— ${eff(it)}${RST}`));
   }
 
   // D3-READINESS (#608) — open builds the loader DEMOTED out of Tier A because their `relatedProject` is
@@ -269,7 +270,7 @@ if (SELECT) {
   const pending = items.filter((it) => it.projectPending);
   if (pending.length) {
     console.log(`\n${YEL}${BLD}Held — project pending (D3-readiness): the relatedProject is \`concept\` with no shipped surface; the standard must exist first${RST}`);
-    pending.forEach((it) => console.log(`  ${YEL}⊗${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— relatedProject \`${it.relatedProject}\` (${it.relatedProjectStatus}); demoted to Tier C until the project ships${RST}`));
+    pending.forEach((it) => console.log(`  ${YEL}⊗${RST} #${it.num} ${slugFromName(it.id)} ${DIM}— relatedProject \`${it.relatedProject}\` (${it.relatedProjectStatus}); demoted to Tier C until the project ships${RST}`));
   }
 
   // HUMAN GATE (#1137) — open items demoted out of Tier A because their only residual is a human-only
@@ -282,7 +283,7 @@ if (SELECT) {
     gated.forEach((it) => {
       const g = it.humanGate || {};
       const kind = `${g.kind || '?'}${(g.kind && !it.humanGateKnownKind) ? ' (unknown kind)' : ''}`;
-      console.log(`  ${YEL}⊗${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— human-gate \`${kind}\`: ${g.what || 'no action recorded'}${RST}`);
+      console.log(`  ${YEL}⊗${RST} #${it.num} ${slugFromName(it.id)} ${DIM}— human-gate \`${kind}\`: ${g.what || 'no action recorded'}${RST}`);
     });
   }
 

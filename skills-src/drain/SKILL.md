@@ -19,6 +19,13 @@ serially, in a later session, under the same self-approved PR transport the prod
 > `queued.json` / `scripts/lane-drain.mjs` couple-drain is retired to a legacy no-op fallback (see below) — new
 > producer output lands via the label lander.
 
+> **Two-form ids — the drain numbers hashes at land (#2288).** A queued item's files may lead with EITHER a
+> landed numeric `NNN` or a provisional `xNNNNNN` **hash** (born hash-keyed so parallel lanes never race on
+> `max+1`). The drain is the **sole serial writer to main**, so it assigns the real sequential `NNN` at land
+> (`numberPendingHashes`, blind-rewriting the hash → number across the filename, the item's frontmatter/body,
+> and every other item's edges) — you never hand-assign one. Both the primary lander (`merge-ai-prs.mjs`) and
+> the `pr-land --fallback-git` route number, so no land path strands a hash on main (#xzxc92d).
+
 ## Preconditions
 
 - **Run from an isolated clean clone on `main` — NEVER the shared primary checkout (#2197 / ratified #2123).**

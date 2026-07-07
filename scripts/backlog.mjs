@@ -33,7 +33,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyTransition, readField, setFrontmatterField, accrueCost } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
-import { nextHash, normalizeId, idFromName, isHash } from './backlog/id.mjs';
+import { nextHash, normalizeId, idFromName, isHash, slugFromName } from './backlog/id.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize, sessionForNum } from './readiness/reservations.mjs';
 import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, recordTouch, mostRecentSession, porcelainFiles } from './readiness/claimScope.mjs';
 import { parseQueued, emptyQueuedState, isQueued, queuedNums, addQueued, removeQueued, serializeQueued } from './readiness/queued-state.mjs';
@@ -203,7 +203,7 @@ function transition(v) {
   // claim — the strengthened replacement for the soft `reserve` deprioritize. Read the LOCAL token OFFLINE
   // (Rule #105). `--force` overrides to deliberately steal a stuck hold; the holder drops it with prepare-release.
   if (v === 'claim' && !argv.includes('--force')) {
-    const num = file.match(/^\d+/)[0];
+    const num = idFromName(file); // two-form id (#2288): numeric NNN or an `xNNNNNN` hash — never a bare `^\d+`
     const holds = loadHolds();
     if (isHeld(holds, num, Date.now())) {
       const by = heldBy(holds, num, Date.now());
@@ -339,14 +339,14 @@ function saveHolds(state) {
  * mutation, so it may run from anywhere. Release with `prepare-release <NNN>` once the one lane→PR lands.
  */
 function prepareHold() {
-  const num = (String(positional[0] || '').match(/^(\d+)/) || [])[1];
+  const num = idFromName(String(positional[0] || '')); // NNN or `xNNNNNN` (#2288)
   if (!num) die('prepare-hold needs a <NNN> to hold');
   resolveFile(num); // a typo must not hold a phantom item
   const holder = flag('session') || process.env.LANE_SESSION || null;
   const leaseMin = Number.isFinite(Number(flag('lease'))) ? Number(flag('lease')) : DEFAULT_LEASE_MINUTES;
   const until = leaseUntilIso(Date.now(), leaseMin);
   saveHolds(addHold(loadHolds(), num, holder, until));
-  const padded = num.padStart(3, '0');
+  const padded = normalizeId(num); // pad a number, leave a hash untouched
   ok({ verb: 'prepare-hold', num: padded, holder, leaseUntil: until },
     `${GRN}✓ prepare-held${RST} #${padded} ${DIM}→ hard-excluded from --select + claim until released (lease ${leaseMin}min${holder ? `, holder ${holder}` : ''}). Enter a lane, author + prepare-stamp, land one PR, then \`prepare-release ${padded}\`.${RST}`);
 }
@@ -363,23 +363,23 @@ function prepareStamp() {
   const abs = join(DIR, file);
   const before = readFileSync(abs, 'utf8');
   let after = setFrontmatterField(before, 'status', 'open', { after: ['kind', 'size'] });
-  if (after == null) die(`#${file.match(/^\d+/)[0]} — could not splice frontmatter (no frontmatter block?)`);
+  if (after == null) die(`#${idFromName(file)} — could not splice frontmatter (no frontmatter block?)`);
   const today = new Date().toISOString().slice(0, 10);
   after = setFrontmatterField(after, 'preparedDate', `"${today}"`, { after: ['status', 'dateStarted', 'dateOpened'] });
   writeBacklogMd(abs, rel, after);
-  ok({ verb: 'prepare-stamp', num: file.match(/^\d+/)[0], preparedDate: today },
-    `${GRN}✓ prepare-stamped${RST} #${file.match(/^\d+/)[0]} ${DIM}→ preparedDate ${today} (status: open; readiness now ranks it ✓ ready to ratify). Commit this item file + land the lane PR.${RST}`);
+  ok({ verb: 'prepare-stamp', num: idFromName(file), preparedDate: today },
+    `${GRN}✓ prepare-stamped${RST} #${idFromName(file)} ${DIM}→ preparedDate ${today} (status: open; readiness now ranks it ✓ ready to ratify). Commit this item file + land the lane PR.${RST}`);
 }
 
 /** prepare-release <NNN> — drop the prepare-hold (the preparer's clear point once the one lane→PR lands).
  *  Local-only token write; idempotent. */
 function prepareRelease() {
-  const num = (String(positional[0] || '').match(/^(\d+)/) || [])[1];
+  const num = idFromName(String(positional[0] || '')); // NNN or `xNNNNNN` (#2288)
   if (!num) die('prepare-release needs a <NNN> to release');
   const before = heldNums(loadHolds(), Date.now()).length;
   const state = removeHold(loadHolds(), [num]);
   saveHolds(state);
-  const padded = num.padStart(3, '0');
+  const padded = normalizeId(num); // pad a number, leave a hash untouched
   ok({ verb: 'prepare-release', num: padded, cleared: before - heldNums(state, Date.now()).length },
     `${GRN}✓ prepare-released${RST} #${padded} ${DIM}— hold dropped; the item is claimable again.${RST}`);
 }
@@ -656,7 +656,7 @@ function yieldNum() {
   try { execFileSync('git', ['ls-files', '--error-unmatch', rel], { cwd: ROOT, stdio: 'pipe' }); }
   catch { tracked = false; }
   if (tracked && !argv.includes('--force')) die(`${rel} is git-tracked — NNN is immutable, a committed item never renumbers. yield only moves a LOCAL-ONLY (untracked) collision. (If this really is a dup to reconcile, that's a manual call.)`);
-  const slug = file.replace(/^\d+-/, '').replace(/\.md$/, '');
+  const slug = slugFromName(file.replace(/\.md$/, '')); // two-form id (#2288): strip NNN- or xNNNNNN-
   const existing = files().map((f) => (f.match(/^(\d+)/) || [])[1]).filter(Boolean);
   const newNum = nextNum(existing);
   const newName = `${newNum}-${slug}.md`;
