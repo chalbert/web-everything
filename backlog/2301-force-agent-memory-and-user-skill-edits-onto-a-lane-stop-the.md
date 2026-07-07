@@ -84,3 +84,7 @@ symlink target never races, and the autonomous loop needs zero per-session setup
 
 May slice (symlink/provisioning · guard deny · auto-land hook are separable) — re-run `/slice 2301` if it
 sizes above the batch bar once scoped against the real `we:scripts/lane-pool.mjs` + hook surface.
+
+## Pre-flight note (2026-07-07, deferred — supervised only)
+
+Skimmed while batching #2264's cluster; **left unbuilt on purpose.** High blast radius: part 1 **repoints the live machine-global `~/.claude/…/memory` symlink** that the *running session doing the work* writes memory through — a mis-step (e.g. pointing at a pooled lane that `refresh` later `reset --hard`s) **wipes uncommitted memory**, the exact footgun the item's own #2267 context describes. Parts 2+3 are interdependent with part 1: shipping the `guard-lane` deny (part 2) **without** part 1's repoint would deny **every** memory write while the symlink still resolves to primary — breaking the autonomous loop (the item's own "why the naïve fixes fail" #2). So it can't be safely part-landed as-is; the three parts move together (or a genuine slice — the Note above). Recommend **supervised** (a human watching the symlink repoint + a memory round-trip test), not an autonomous batch land. Not blocked by anything external — purely a risk/blast-radius call.
