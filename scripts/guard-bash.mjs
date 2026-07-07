@@ -18,16 +18,48 @@
  * Input: PreToolUse JSON on stdin. Output: a deny decision (JSON) when blocked; nothing otherwise.
  * Fails open on unparseable input. The pure `reason`/`decide` are unit-tested (guard-bash.test.mjs).
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { resolve, dirname, join } from 'node:path';
 
 const BACKLOG_MD = /(?:^|[\s'"=(])(?:\.\/)?backlog\/(\d+)-[^\s'")]*\.md/;
 const CORPUS_MD = /(?:^|[\s'"=(])(?:\.\/)?(?:backlog|reports)\/[^\s'")]*\.md/;
+// #2302 — a `node …/backlog.mjs <sub>` invocation that MUTATES an item's file/frontmatter (as opposed to the
+// session/label-state verbs reserve/unreserve/queue/unqueue/calibrate, which don't touch an item's .md). Run
+// from the PRIMARY checkout it slips past guard-lane (a Bash call, not an Edit/Write) and stamps the item on
+// primary — the exact hole guard-lane closes for the file tools. Blocked only when cwd is a primary (see
+// isPrimaryCwd). The verb set is EVERY subcommand that reaches writeBacklogMd: claim/resolve/RELEASE (all
+// three via transition), retype, yield, scaffold, settle, and COST (accrual write) — release+cost added per
+// the #2302 PR review (they took the same on-disk mutation path but were omitted).
+const BACKLOG_MUTATION = /\bnode\s+\S*backlog\.mjs\s+(?:claim|resolve|release|scaffold|settle|retype|yield|cost)\b/;
 
-/** Return a deny reason for one shell segment, or null to allow. Pure. */
-export function reason(segment) {
+/** Does this segment INVOKE a backlog item-mutation subcommand? Pure (unit-tested). */
+export function isBacklogMutation(segment) { return BACKLOG_MUTATION.test(String(segment || '')); }
+
+/**
+ * Is `cwd` a constellation PRIMARY checkout (not a lane clone)? Pure. A lane clone lives under `/.lanes/` so
+ * it is always allowed; otherwise cwd must sit at/under one of the `primaries` roots. `primaries` is injected
+ * (the CLI derives + realpaths them from this script's location) so the test stays pure/unit-testable.
+ */
+export function isPrimaryCwd(cwd, primaries = []) {
+  if (!cwd) return false;
+  const c = String(cwd);
+  if (c.includes('/.lanes/')) return false;                         // a lane clone → always allowed
+  return primaries.some((p) => p && (c === p || c.startsWith(p.endsWith('/') ? p : p + '/')));
+}
+
+/** Return a deny reason for one shell segment, or null to allow. Pure. `ctx.primaryCwd` = the Bash cwd is a
+ *  constellation primary checkout (computed by the CLI via isPrimaryCwd) — gates the #2302 backlog-mutation rule. */
+export function reason(segment, { primaryCwd = false } = {}) {
   const s = segment.trim();
   if (!s) return null;
+
+  // #2302 — a backlog item-mutation (claim/resolve/scaffold/…) run from the PRIMARY checkout stamps the item on
+  // primary and bypasses lane isolation (found working #2095: a primary `claim` flipped open→active, reverted +
+  // re-run in the lane). Deny it and steer to a lane — the same invariant guard-lane enforces for Edit/Write.
+  // Only fires when cwd is a primary (a lane clone is allowed). Sanctioned override: prefix BACKLOG_MUTATE_OK=1.
+  if (primaryCwd && isBacklogMutation(s) && !/\bBACKLOG_MUTATE_OK=1\b/.test(s))
+    return 'Backlog item-mutations (claim/resolve/scaffold/settle/retype/yield) must run in a LANE clone, not the primary checkout — running backlog.mjs here mutates the item on primary and bypasses lane isolation (#2302/#104). cd into your lane clone (~/workspace/.lanes/<repo>/lane-N) and run it there. Sanctioned override (rare): prefix `BACKLOG_MUTATE_OK=1`.';
   // The command word(s) of this segment, after stripping leading env-assignments / sudo — so we match
   // actual INVOCATIONS (anchored at command position), not mentions buried in a quoted arg like a commit
   // message. `git commit -m "...pkill vite..."` has command `git`, so the pkill rule no longer fires.
@@ -72,11 +104,12 @@ export function reason(segment) {
   return null;
 }
 
-/** First deny reason across a command's `&&`/`|`/`;`-separated segments, or null. Pure. */
-export function decide(command) {
+/** First deny reason across a command's `&&`/`|`/`;`-separated segments, or null. Pure. `ctx` is passed to
+ *  each `reason` call (carries `primaryCwd` for the #2302 rule). */
+export function decide(command, ctx = {}) {
   if (!command) return null;
   for (const seg of String(command).split(/(?:&&|\|\||[;&|]|\n)+/)) {
-    const r = reason(seg);
+    const r = reason(seg, ctx);
     if (r) return r;
   }
   return null;
@@ -86,8 +119,21 @@ export function decide(command) {
 const IS_CLI = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (IS_CLI) {
   let cmd = '';
-  try { cmd = (JSON.parse(readFileSync(0, 'utf8')).tool_input || {}).command || ''; } catch { process.exit(0); }
-  const r = decide(cmd);
+  let primaryCwd = false;
+  try {
+    const ev = JSON.parse(readFileSync(0, 'utf8'));
+    cmd = (ev.tool_input || {}).command || '';
+    // #2302 — the Bash cwd decides primary-vs-lane. Derive the constellation primary roots from THIS script's
+    // location (<workspace>/<repo>/scripts/guard-bash.mjs) and realpath both sides so a symlinked workspace
+    // still matches. Fail-OPEN (leave primaryCwd=false) on any error — a guard bug must never wedge the agent.
+    const rp = (p) => { try { return realpathSync(p); } catch { return p; } };
+    const cwd = rp(ev.cwd || process.cwd());
+    const weRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+    const workspace = dirname(weRoot);
+    const primaries = ['webeverything', 'web-everything', 'frontierui', 'plateau-app'].map((r) => rp(join(workspace, r)));
+    primaryCwd = isPrimaryCwd(cwd, primaries);
+  } catch { process.exit(0); }
+  const r = decide(cmd, { primaryCwd });
   if (r) {
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Blocked: ' + r },
