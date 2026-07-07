@@ -85,7 +85,7 @@
  * (surfaced); 3 = bad input / `gh` unavailable.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, join } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
@@ -826,6 +826,30 @@ function runCli() {
     if (!AS_JSON) process.stderr.write(localSynced ? `  ✓ local main fast-forwarded to origin (autostash preserved local edits)\n` : `  · local main NOT fast-forwarded (diverged, or a reapplied local edit conflicts) — reconcile by hand\n`);
   }
 
+  // #2284 residual (2) — the pull above ff-syncs the drain's OWN cwd. But when the drain runs from a LANE CLONE
+  // rather than the user's primary checkout, that primary (a SEPARATE directory) still drifts behind on every
+  // land (observed 2026-07-04: primary sat 11 commits behind origin/main after a drain land, until a concurrent
+  // process pulled it). A lane is `git clone --reference <primary>`, so its git alternates point at the primary's
+  // objects — resolve that to the primary root and ff-sync it too (same ff-only + autostash as pr-land's
+  // syncPrimaryMain). Only when it's a DIFFERENT dir actually on main; best-effort, never fatal.
+  let primarySynced = null;
+  if (landedLocal) {
+    primarySynced = (() => {
+      let primary;
+      try {
+        const alt = readFileSync(resolve(process.cwd(), '.git/objects/info/alternates'), 'utf8').trim().split('\n')[0];
+        if (!alt) return null;                       // no alternates content
+        primary = resolve(alt, '..', '..');          // <primary>/.git/objects → <primary>
+      } catch { return null; }                       // no alternates file → cwd is the primary (already pulled above)
+      try { if (realpathSync(primary) === realpathSync(process.cwd())) return null; } catch { return null; } // running FROM primary
+      const atPrimary = (a) => execFileSync('git', ['-C', primary, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      let branch = null; try { branch = atPrimary(['rev-parse', '--abbrev-ref', 'HEAD']); } catch { /* unknown */ }
+      if (branch !== 'main') { if (!AS_JSON) process.stderr.write(`  · user primary (${primary}) not on main (on ${branch || 'unknown'}) — skipped primary ff-sync; pull it by hand\n`); return false; }
+      try { atPrimary(['pull', '--ff-only', '--autostash']); if (!AS_JSON) process.stderr.write(`  ✓ user primary checkout fast-forwarded to origin/main\n`); return true; }
+      catch { if (!AS_JSON) process.stderr.write(`  · user primary (${primary}) NOT fast-forwarded (diverged) — pull it by hand\n`); return false; }
+    })();
+  }
+
   // #2290 — the drain is the sole writer to main, so the WE derived-artifact regen (#2182/#2173) moves INTO the
   // drain: after a pass that landed ≥1 WE (local) couple, reproduce the artifacts ONCE and, if changed, commit +
   // push them to main as the drain (pr-land can no longer do this — it does not merge). Best-effort/non-fatal.
@@ -843,7 +867,7 @@ function runCli() {
   // #2222 — a healed tip is a PENDING rebuild (CI re-running on the renumbered tree), so it counts as progress
   // for the watch's idle accounting exactly like a rebase-drop rebuild — it lands on a later pass.
   const pendingAll = [...pendingRebased, ...healed];
-  const result = { ok: true, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
+  const result = { ok: true, dryRun: DRY_RUN, label, repos: REPOS.map((r) => r || localSlug || 'cwd'), considered: verdicts.length, toMerge: toMerge.map((v) => ({ num: v.num, repo: v.repo || localSlug })), merged, failed: failedMerges, rebased, pendingRebased, healed, deferred, localSynced, ...(primarySynced !== null ? { primarySynced } : {}), derivedRegenerated: derived.done, derivedFailed: derived.failed, ...(derived.warning ? { derivedWarning: derived.warning } : {}), reconciledLabels, parked, skipped: skipped.map((v) => ({ num: v.num, repo: v.repo || localSlug, reason: v.reason, ...(v.escalated ? { escalated: v.escalated } : {}), ...(v.humanRequired ? { humanRequired: true } : {}) })) };
   return { result, merged, failedMerges, pendingRebased: pendingAll, deferred };
   }; // end sweepOnce
 
