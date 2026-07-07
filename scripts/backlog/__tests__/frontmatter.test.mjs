@@ -199,8 +199,9 @@ describe('quoteScalar — quotes iff a YAML-significant char is present (#603)',
 });
 
 describe('scaffold helpers', () => {
-  it('nextNum is highest + 1, zero-padded', () => {
-    expect(nextNum(['001', '002', '254'])).toBe('255');
+  it('nextNum picks a random free gap below max (#2292), max+1 only when gap-free', () => {
+    expect(nextNum(['001', '002', '254'], () => 0)).toBe('003');  // first free gap below 254 (not max+1=255)
+    expect(nextNum(['001', '002', '003'], () => 0.5)).toBe('004'); // gap-free range → deterministic max+1
     expect(nextNum([])).toBe('001');
   });
 
