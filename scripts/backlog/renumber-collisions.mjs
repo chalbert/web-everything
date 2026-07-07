@@ -255,9 +255,16 @@ export function planRenumber(files, { baseNums = [], ontoNames = [] } = {}) {
     moves.push({ oldNum: group.num, newNum, oldName: yielder.name, newName, slug: yielder.slug });
   }
 
-  // Apply the reference sweep. Every move rewrites refs to its oldNum across EVERY file (including the
-  // yielded file's own content, then re-filed under the new name). Writes are keyed by CURRENT name so
-  // stacked moves compose; the yielded file's writes are re-keyed to its new name at the end.
+  // Apply the reference sweep. Every move rewrites refs to its oldNum across every NON-published file
+  // (including the yielded file's own content, then re-filed under the new name). Writes are keyed by
+  // CURRENT name so stacked moves compose; the yielded file's writes are re-keyed to its new name at the end.
+  //
+  // #2316 — EDGE-CLOBBER GUARD: a file named in `ontoNames` is a PUBLISHED/immutable item (the RESUME-LAND
+  // keeper set) whose content predates this batch entirely. Any `#NNN`/`blockedBy` edge inside it was authored
+  // against whatever already held that num on the published branch — never against an incoming, not-yet-landed
+  // yielder — so it must never be rewritten here, even when its num happens to equal some OTHER group's oldNum
+  // (e.g. main's `#2295` legitimately `blockedBy: [2294]` pointing at the real keeper #2294 must stay put, even
+  // though this run also yields a DIFFERENT, unrelated new item away from #2294).
   const contentByName = new Map(files.map((f) => [f.name, f.text]));
   const renamed = new Map(); // oldName -> newName (for the yielded files)
   for (const mv of moves) renamed.set(mv.oldName, mv.newName);
@@ -265,6 +272,7 @@ export function planRenumber(files, { baseNums = [], ontoNames = [] } = {}) {
   const touched = new Set();
   for (const mv of moves) {
     for (const [name, text] of contentByName) {
+      if (ontoSet.has(name)) continue;
       const next = rewriteRefs(text, mv.oldNum, mv.newNum, mv.slug);
       if (next !== text) {
         contentByName.set(name, next);
