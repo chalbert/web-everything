@@ -28,6 +28,12 @@ const md = new MarkdownIt({ html: true, linkify: true, typographer: true });
 const BACKLOG_DIR = join(__dirname, '../../backlog');
 const ROOT = join(__dirname, '../..');
 
+// The leading id token of a backlog filename stem — a landed numeric `NNN` (any width up to 5) OR a
+// provisional `xNNNNNN` hash (#2288 JIT numbering). Held as ONE source string so the num/slug pair below
+// can't drift (#xzxc92d note b). Mirrors `scripts/backlog/id.mjs` ID_TOKEN_RE — CJS can't import that ESM
+// module, so keep the two in sync by hand.
+const ID_TOKEN = '\\d{1,5}|x[0-9a-z]{6}';
+
 const toDateString = (v) =>
   v instanceof Date ? v.toISOString().slice(0, 10) : v;
 
@@ -226,10 +232,11 @@ module.exports = function backlog() {
       // token; a hash is a valid unique key, so everything keyed off `num` works unchanged and a
       // provisional item shows as "#x7k2q9a" until it lands. `slug` is the human text; `id` stays the
       // full filename stem so it remains the route key (permalink = /backlog/<id>/).
-      // NOTE: this pattern mirrors `scripts/backlog/id.mjs` ID_TOKEN_RE (CJS can't import that ESM
-      // module) — keep the two in sync.
-      const num = (id.match(/^(\d{1,4}|x[0-9a-z]{6})-/) || [])[1];
-      const slug = id.replace(/^(\d{1,4}|x[0-9a-z]{6})-/, '');
+      // NOTE: `ID_TOKEN` mirrors `scripts/backlog/id.mjs` ID_TOKEN_RE (CJS can't import that ESM
+      // module) — keep the two in sync. Extracted to ONE constant here (#xzxc92d note b) so the
+      // num/slug pair can't drift against each other.
+      const num = (id.match(new RegExp(`^(${ID_TOKEN})-`)) || [])[1];
+      const slug = id.replace(new RegExp(`^(${ID_TOKEN})-`), '');
       let data, content;
       try {
         ({ data, content } = matter(readFileSync(join(BACKLOG_DIR, file), 'utf8')));

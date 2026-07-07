@@ -71,6 +71,7 @@ import { execFileSync } from 'node:child_process';
 import { parseClaims, claimedIdsFor, partitionById } from './readiness/claimScope.mjs';
 import { loadDataRegistry } from './lib/registry-loader.cjs';
 import { isExecKind, isEntityGraduation } from './check-standards-rules.mjs';
+import { idFromName, isNum } from './backlog/id.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BL = join(ROOT, 'backlog');
@@ -91,9 +92,9 @@ function parseFrontmatter(src) {
   return { fm, body: src.slice(m[0].length) };
 }
 const norm = s => (s == null ? s : String(parseInt(s, 10)));      // strip leading zeros: "064" -> "64"
-const num = f => norm((f.match(/^(\d+)/) || [])[1]);
+const num = f => { const t = idFromName(f); return isNum(t) ? norm(t) : t; }; // two-form id (#2288): normalize numeric, leave a hash
 
-const files = readdirSync(BL).filter(f => /^\d+-.*\.md$/.test(f));
+const files = readdirSync(BL).filter(f => f.endsWith('.md') && idFromName(f));
 const items = new Map();          // id -> {id, file, type, status, fm, body}
 for (const f of files) {
   const src = readFileSync(join(BL, f), 'utf8');
@@ -507,7 +508,7 @@ if (scopeSession) {
   } else {
     // claims.json stamps the full item slug (`964-check-…`); health findings are numeric-id keyed (`964`).
     // Normalize both to the leading number so attribution joins across the two id formats.
-    const mineNums = new Set([...mineIds].map(s => (String(s).match(/^\d+/) || [])[0]).filter(Boolean));
+    const mineNums = new Set([...mineIds].map(s => idFromName(String(s))).filter(Boolean)); // two-form id (#2288)
     let externalTotal = 0;
     for (const k of Object.keys(flags)) {
       // D3 is project-keyed (no owning item id) → partitionById keeps it as `mine` (fail-safe).

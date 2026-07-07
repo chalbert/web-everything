@@ -18,6 +18,13 @@ describe('id token parsing (#2288)', () => {
     expect(idFromName('notanid')).toBeUndefined();
   });
 
+  it('parses a 5-digit NNN (#xzxc92d note a — headroom past 9999)', () => {
+    expect(idFromName('12345-big-item')).toBe('12345');
+    expect(isNum('12345')).toBe(true);
+    expect(slugFromName('12345-big-item')).toBe('big-item');
+    expect(idFromName('123456-too-wide')).toBeUndefined(); // 6 digits is not a valid id token
+  });
+
   it('distinguishes numeric from hash', () => {
     expect(isNum('2288')).toBe(true);
     expect(isNum('x7k2q9a')).toBe(false);

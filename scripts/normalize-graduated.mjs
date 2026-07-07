@@ -34,6 +34,7 @@ import { loadIntents } from './lib/intents-loader.cjs';
 import { loadProtocols } from './lib/protocols-loader.cjs';
 import { loadDemos } from './lib/demos-loader.cjs';
 import { loadAdapterItems } from './lib/adapters-loader.cjs';
+import { idFromName, isNum } from './backlog/id.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BL = join(ROOT, 'backlog');
@@ -149,7 +150,7 @@ function run() {
   const write = process.argv.includes('--write');
   const asJson = process.argv.includes('--json');
   const registries = loadRegistries();
-  const files = readdirSync(BL).filter((f) => /^\d+-.*\.md$/.test(f));
+  const files = readdirSync(BL).filter((f) => f.endsWith('.md') && idFromName(f)); // two-form id (#2288)
   const buckets = {};
   const fixes = [];
   for (const f of files) {
@@ -157,7 +158,7 @@ function run() {
     const content = readFileSync(path, 'utf8');
     const raw = readField(content, 'graduatedTo');
     if (raw === undefined) continue;
-    const id = String(parseInt(f.match(/^(\d+)/)[1], 10));
+    const tok = idFromName(f); const id = isNum(tok) ? String(parseInt(tok, 10)) : tok; // two-form id (#2288)
     const c = classifyGraduated(raw, registries);
     // an explicit per-item disambiguation overrides an ambiguous (multi-registry) classification
     if (c.cls === 'review-ambiguous' && DISAMBIGUATION[id]) { c.cls = 'fix-bare'; c.canonical = DISAMBIGUATION[id]; }

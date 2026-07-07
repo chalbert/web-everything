@@ -18,9 +18,11 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { idFromName } from './backlog/id.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const BACKLOG_RE = /(?:^|\/)backlog\/(\d+)-[^/]+\.md$/;
+// two-form id (#2288): a landed NNN or a provisional `xNNNNNN` hash — keep in sync with id.mjs ID_TOKEN_RE.
+const BACKLOG_RE = /(?:^|\/)backlog\/(\d{1,5}|x[0-9a-z]{6})-[^/]+\.md$/;
 
 /** Split a markdown doc into { fm, body } on a leading --- … --- frontmatter block. */
 function split(text) {
@@ -98,7 +100,7 @@ if (fmField(fm, 'kind') === 'story' && fmField(fm, 'size')) {
   let hasChild = false;
   try {
     for (const f of readdirSync(join(ROOT, 'backlog'))) {
-      if (!f.endsWith('.md') || (f.match(/^(\d+)-/) || [])[1] === num) continue;
+      if (!f.endsWith('.md') || idFromName(f) === num) continue;
       if (new RegExp(`^parent:\\s*["']?${num}\\b`, 'm').test(readFileSync(join(ROOT, 'backlog', f), 'utf8'))) {
         hasChild = true;
         break;
