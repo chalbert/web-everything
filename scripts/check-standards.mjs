@@ -53,6 +53,7 @@ import {
   scanRepoLocusPrefixes, REPO_LOCUS_PREFIX_ENFORCED,
   classifySurfacePaths,
   validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
+  duplicateBacklogNums,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -492,16 +493,14 @@ dupCheck(backlog, 'backlog/');
 // Backlog filenames are `NNN-slug.md`: NNN (item.num) is the stable unique id used in the URL.
 // Enforce the prefix and that numbers don't collide, so authoring a new item can't silently reuse
 // or drop an id. See docs/agent/backlog-workflow.md → "Authoring an item".
-const seenNums = new Map();
 for (const item of backlog) {
-  if (!item.num) {
-    err(`Backlog item "${item.id}" is missing the NNN- id prefix — rename to "<NNN>-${item.id}.md"`);
-  } else if (seenNums.has(item.num)) {
-    err(`Backlog id #${item.num} is used by both "${seenNums.get(item.num)}" and "${item.id}" — ids must be unique`);
-  } else {
-    seenNums.set(item.num, item.id);
-  }
+  if (!item.num) err(`Backlog item "${item.id}" is missing the NNN- id prefix — rename to "<NNN>-${item.id}.md"`);
 }
+// #2248 — the duplicate-NNN tripwire, now a pure unit-tested detector (was inline). A collision silently drops
+// one item from the loader's last-wins byNum Map, so it must ERROR (caught on the second colliding PR's CI).
+for (const msg of duplicateBacklogNums(backlog)) err(msg);
+// Every item's num — for `blockedBy`/parent resolution below (the dup check above owns collision reporting).
+const seenNums = new Set(backlog.map((i) => i.num).filter(Boolean));
 
 // graduatedTo value resolution (#247): the kind → {registry id-set, source file} table. A graduatedTo
 // written in the compact `kind:slug` ref form is resolved against the matching registry, so a typo'd
@@ -522,7 +521,7 @@ const graduatedKinds = buildGraduatedKinds({ blocks, intents, protocols, project
 const backlogCtx = {
   projectById,
   graduatedKinds,
-  knownNums: new Set(seenNums.keys()), // every item's num — for parent resolution
+  knownNums: new Set(backlog.map((i) => i.num).filter(Boolean)), // every item's num — for parent resolution
   reportExists: (rel) => existsSync(join(ROOT, rel)),
 };
 for (const item of backlog) {

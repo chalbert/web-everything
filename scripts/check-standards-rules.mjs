@@ -2055,6 +2055,31 @@ export function classifySurfacePaths(paths) {
  * Each error is keyed to the directory (not the individual file) so `--scope` / `--local` can
  * attribute it: the check is local to the developer who left files untracked, not a cross-lane concern.
  */
+/**
+ * #2248 (tripwire under #2289/#2291) — backlog NNN collision detector. Two `backlog/NNN-*.md` files sharing an
+ * NNN silently DROP one item from the loader's last-wins `byNum` Map (`src/_data/backlog.js`), so this must
+ * ERROR at the gate: two lanes each adding the same NNN then fail the SECOND PR's required `test` check instead
+ * of colliding on `main` (the #2316 double-land, 2026-07-06). Pure + unit-tested (the #256 pattern), replacing
+ * the previously-inline loop. Framing (#2291): once numbers are assigned just-in-time (#2288) a duplicate NNN
+ * is UNREPRESENTABLE, so a fire here signals an ALLOCATION BUG to alert on — not a routine heal trigger.
+ * @param {Array<{num?:string,id?:string}>} items  loaded backlog items
+ * @returns {string[]} one error message per colliding NNN (empty when all unique). Items with no `num` are
+ *   skipped here — the missing-prefix error is a separate check.
+ */
+export function duplicateBacklogNums(items = []) {
+  const seen = new Map();
+  const errors = [];
+  for (const item of items) {
+    if (!item || !item.num) continue;
+    if (seen.has(item.num)) {
+      errors.push(`Backlog id #${item.num} is used by both "${seen.get(item.num)}" and "${item.id}" — ids must be unique (a duplicate NNN silently drops one item from the loader; #2248 tripwire — under JIT numbering #2288 this is unrepresentable, so a fire signals an allocation bug, not a routine heal)`);
+    } else {
+      seen.set(item.num, item.id);
+    }
+  }
+  return errors;
+}
+
 export const DERIVED_ARTIFACT_DIRS = [
   'reports/',
   'src/_data/researchTopics/',
