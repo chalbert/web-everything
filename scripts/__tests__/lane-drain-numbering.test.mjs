@@ -56,8 +56,26 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     expect(readFileSync(join(repo, 'backlog/2201-referrer.md'), 'utf8')).toContain('blockedBy: ["2202"]');
     // A real commit landed the rename+rewrites (working tree clean afterwards).
     expect(git('status', '--porcelain').trim()).toBe('');
-    // Queue was empty → ledger reset to {}.
-    expect(JSON.parse(readFileSync(join(repo, LEDGER_REL), 'utf8'))).toEqual({});
+    // APPEND-ONLY ledger: retained even though the queue is empty (a still-in-flight lane may reference it).
+    expect(JSON.parse(readFileSync(join(repo, LEDGER_REL), 'utf8'))).toEqual({ xhash01: '2202' });
+  });
+
+  it('does NOT drop a ledger entry on queue-empty — a later dependent still resolves the blocker (PR #194)', () => {
+    // Blocker A lands and EMPTIES the queue while dependent B is still in-flight (unqueued, not on main).
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xblkr01-a.md', '---\nkind: story\nstatus: resolved\n---\n# Blocker A\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] })); // queue empty at A's land — B not queued yet
+    git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+    const a = numberPendingHashes(repo);
+    expect(a.assigned).toEqual([{ hash: 'xblkr01', nnn: '2201' }]);
+    // Ledger must STILL carry xblkr01 (pre-fix it reset to {} here and stranded B's edge).
+    expect(JSON.parse(readFileSync(join(repo, LEDGER_REL), 'utf8'))).toEqual({ xblkr01: '2201' });
+
+    // Later: B lands referencing A by its OLD hash → its edge is repaired from the retained ledger.
+    write('backlog/xdepb02-b.md', '---\nkind: story\nblockedBy: ["xblkr01"]\n---\n# Dependent B\n');
+    git('add', 'backlog'); git('commit', '-qm', 'B lands');
+    numberPendingHashes(repo);
+    expect(readFileSync(join(repo, 'backlog/2202-b.md'), 'utf8')).toContain('blockedBy: ["2201"]');
   });
 
   it('keeps the ledger entry when other couples are still queued (cross-lane repair later)', () => {
@@ -105,5 +123,20 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     // The leftover's blockedBy edge to the couple is repaired to the couple's assigned number.
     expect(readFileSync(join(repo, 'backlog/2202-followup.md'), 'utf8')).toContain('blockedBy: ["2201"]');
     expect(git('status', '--porcelain').trim()).toBe('');
+  });
+
+  it('skips an UNTRACKED hash file (local cruft) instead of aborting the tracked couple (PR #194)', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');
+    write('backlog/xland01-item.md', '---\nkind: story\nstatus: resolved\n---\n# Landed item\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+    // An uncommitted scaffold sits in the checkout — NOT a landed item; a git rm on it would abort the pass.
+    write('backlog/xcruft1-wip.md', '---\nkind: task\n---\n# Uncommitted work-in-progress\n');
+
+    const res = numberPendingHashes(repo);
+    // Only the tracked hash is numbered; the untracked one is left untouched, not aborted.
+    expect(res.assigned).toEqual([{ hash: 'xland01', nnn: '2201' }]);
+    expect(backlogNames()).toContain('2201-item.md');
+    expect(backlogNames()).toContain('xcruft1-wip.md'); // untracked cruft left as-is
   });
 });

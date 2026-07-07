@@ -54,6 +54,11 @@ export const normalizeId = (ref) => {
  * Mint a fresh collision-free hash id (`x` + 6 base36). Retries against `existingIds` (any ids already
  * in use — landed nums can't collide with a hash, but passing them all is cheap and harmless). Plain
  * `Math.random` is fine here: this runs in a node CLI, not a workflow script.
+ *
+ * NOTE: `existingIds` only sees the LOCAL checkout, so two concurrent lanes that can't see each other could
+ * in principle mint the SAME hash (~1 in 2.2e9 with a 36^6 space). That mode is corrupting, not detected —
+ * the drain would rename both to one NNN and blind-replace the shared token in both. Accepted given the
+ * odds; a stronger guard would seed the taken-set from a shared source (the drain's ledger/queue).
  * @param {Iterable<string>} existingIds
  */
 export function nextHash(existingIds = []) {
