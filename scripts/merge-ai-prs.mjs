@@ -90,7 +90,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve, join } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
-import { scoreEscalation, decideReviewGate, REVIEW_LABELS } from './lib/review-escalation.mjs';
+import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META } from './lib/review-escalation.mjs';
 import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
 import { mergePr } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS } from './lane-drain.mjs';
@@ -667,21 +667,23 @@ function runCli() {
   if (REVIEW_ESCALATION) {
     // #2262 fix (1/2) — the `review:*` verdict labels are never minted anywhere (unlike `ready-to-merge`,
     // which `pr-land.mjs` `gh label create`s before first use), so `gate.applyLabel` below silently no-ops:
-    // `gh` returns "not found" and the catch swallows it — the park applies NO visible label. Mint all three
-    // (idempotent — an existing label errors harmlessly), memoized per (repo, label) via `ensuredLabels` so a
-    // long-lived `--watch` mints each one ONCE per process rather than every single pass (same convention as
-    // `pr-land.mjs`'s one-time `ready-to-merge` mint).
+    // `gh` returns "not found" and the catch swallows it — the park applies NO visible label. Mint every
+    // label (idempotent — an existing label errors harmlessly), memoized per (repo, label) via `ensuredLabels`
+    // so a long-lived `--watch` mints each one ONCE per process rather than every single pass (same convention
+    // as `pr-land.mjs`'s one-time `ready-to-merge` mint).
+    // #2279 — color + description are single-sourced from REVIEW_LABEL_META (review-escalation.mjs) so the
+    // provisioner and the applier never drift, and EVERY verdict label (incl. review:human, #2285) is minted
+    // with its real color/description, not a placeholder — no label silently no-ops on a fresh repo.
     if (!DRY_RUN) {
-      const labelColors = { [REVIEW_LABELS.pending]: 'FBCA04', [REVIEW_LABELS.accepted]: '0E8A16', [REVIEW_LABELS.changes]: 'D93F0B' };
       // #2257 — a multi-repo sweep scores candidates from several repos in one pass; a label lives per-repo on
       // GitHub, so mint it in EVERY repo actually carrying a candidate this pass (not just the local repo).
       const escalationRepos = new Set(verdicts.filter((v) => v.decision === 'merge').map((v) => v.repo || null));
       for (const repo of escalationRepos) {
-        for (const name of Object.values(REVIEW_LABELS)) {
+        for (const [name, meta] of Object.entries(REVIEW_LABEL_META)) {
           const ensureKey = `${repo || 'cwd'}::${name}`;
           if (ensuredLabels.has(ensureKey)) continue;
           ensuredLabels.add(ensureKey);
-          try { execFileSync('gh', ['label', 'create', name, '--color', labelColors[name] || 'ededed', '--description', 'Deterministic drain review-escalation verdict (#2171)', ...repoFlag(repo)], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* already exists — fine */ }
+          try { execFileSync('gh', ['label', 'create', name, '--color', meta.color, '--description', meta.description, ...repoFlag(repo)], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* already exists — fine */ }
         }
       }
     }

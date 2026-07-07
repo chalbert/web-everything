@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   REVIEW_LABELS,
+  REVIEW_LABEL_META,
   DEFAULT_THRESHOLDS,
   isBlastRadiusPath,
   isGateSelfPath,
@@ -167,5 +168,19 @@ describe('hasReviewLabel + REVIEW_LABELS', () => {
   it('exposes the ratified verdict labels (+ the #2285 human gate) + tuning knobs', () => {
     expect(REVIEW_LABELS).toEqual({ pending: 'review:pending', accepted: 'review:accepted', changes: 'review:changes', human: 'review:human' });
     expect(DEFAULT_THRESHOLDS.diffLines).toBeGreaterThan(0);
+  });
+});
+
+describe('REVIEW_LABEL_META — single source of truth for provisioning (#2279)', () => {
+  it('carries valid color + description for EVERY REVIEW_LABELS value (no label mints with a placeholder)', () => {
+    const names = Object.values(REVIEW_LABELS);
+    // exact 1:1 coverage — no label missing (the review:human gap #2279 fixed) and no orphan meta key
+    expect(new Set(Object.keys(REVIEW_LABEL_META))).toEqual(new Set(names));
+    for (const name of names) {
+      const meta = REVIEW_LABEL_META[name];
+      expect(meta.color).toMatch(/^[0-9A-Fa-f]{6}$/); // GitHub 6-hex, no leading '#'
+      expect(typeof meta.description).toBe('string');
+      expect(meta.description.length).toBeGreaterThan(0);
+    }
   });
 });
