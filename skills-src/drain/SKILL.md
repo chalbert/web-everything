@@ -149,10 +149,11 @@ queue until a human gets to it. **v1 makes the drain run that independent review
 the PRs where an agent reviewer is genuinely independent of the *producer*. The one invariant it preserves:
 **a landed PR was accepted by an agent that did not author it.**
 
-> The `{findings, verdict}` shape below (accept/changes, #2285's `humanRequired` → `review:human`) is the
-> canonical contract in `we:scripts/lib/review-core.mjs` (#2325) — the same one `/code-review`-shaped
-> reviewers and the future `/review` skill render into. This section still spawns its own raw `Agent` call
-> prose (the re-point onto the shared core rides `#2326`, which also deletes this duplicate description).
+> **One engine (#2326).** The `{findings, verdict}` contract is single-sourced in `we:scripts/lib/review-core.mjs`
+> (#2325): `buildMandate()` renders the judge-only instruction the review subagent is seeded with (it bakes in
+> the #2336 diff-only, **no-checkout** clause), `normalizeFindings()` shapes what it returns, and
+> `deriveVerdict()` maps findings → `accept`/`changes`/`needs-human`. The drain review below and the
+> [`/review`](../review/SKILL.md) human-verdict skill BOTH render through it — no hand-rolled reviewer prose.
 
 The lander classifies each parked PR (see `we:scripts/lib/review-escalation.mjs` `isGateSelfPath`) and emits it
 in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons }`:
@@ -161,21 +162,23 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
   (`we:scripts/lib/review-escalation.mjs` or `we:scripts/merge-ai-prs.mjs`) — the code that decides whether the
   gate fires and what clears it. An agent reviewing this would be policing a change to its own leash (conflict
   of interest), so a **human** review is essential. The drain applies `review:human` and this PR **never times
-  out** to `merge-anyway`. **Leave it for the operator** — never auto-apply `review:accepted` to a
-  `review:human` PR. Surface it clearly.
+  out** to `merge-anyway`. It is **not agent-clearable** — never auto-apply `review:accepted` to a `review:human`
+  PR.
+  **New (#2326) — still run an ADVISORY AI review.** Don't leave it dark: run the shared core on the
+  `review:human` diff too (seed a fresh-context subagent with `buildMandate()`; shape via `normalizeFindings()`
+  + `deriveVerdict()`) and **post its take as a PR comment clearly marked `🤖 advisory AI review (non-clearing)`**
+  — findings + verdict, to inform the human. It **must not** apply any `review:*` label (the conflict-of-interest
+  invariant is unchanged); it only informs. Then surface the PR for the operator, who clears it with
+  [`/review <PR>`](../review/SKILL.md).
 - **`humanRequired: false` → agent-reviewable.** Escalated (blast-radius / size / dismissed-findings / sampling)
-  but independent of the producer. **Auto-review it:**
+  but independent of the producer. **Auto-review it through the core:**
   1. Get the diff: `gh pr diff <num> --repo <repo>` (and `gh pr view <num> --repo <repo> --json title,body,files`).
-  2. Spawn a **fresh-context adversarial review subagent** (the `Agent` tool, e.g. `general-purpose`) that sees
-     ONLY the diff + PR description — not this session's context — and returns a verdict: **accept** (correct,
-     safe, no blocking issue) or **changes** (a concrete blocking problem, cited).
-     **Seed it diff-only — NEVER let it checkout the PR branch (#2336).** The subagent runs inside the drain's
-     shared primary checkout, so its seed must **mandate review from the `gh pr diff` text alone** and forbid
-     `git checkout`/`git switch`/`git fetch`+checkout onto the PR branch (that moves the shared HEAD, violates the
-     never-branch-a-shared-checkout guard, and briefly blocks the drain's primary ff-sync — observed 2026-07-08
-     on the drain of #227). If it genuinely needs to run tests/repro, it must do so in a **throwaway `git clone`**
-     under a temp dir, never a checkout here. `we:scripts/lib/review-core.mjs` `buildMandate()` bakes this
-     no-checkout clause into the single-sourced instruction string (#2326 routes this seed through it).
+  2. Spawn a **fresh-context adversarial review subagent** (the `Agent` tool, e.g. `general-purpose`) seeded with
+     `we:scripts/lib/review-core.mjs` `buildMandate()` — it sees ONLY the diff + PR description, not this
+     session's context, and (per the mandate) **never checks out the PR branch** in the shared tree (#2336; any
+     test/repro runs in a throwaway clone). Shape its answer with `normalizeFindings()` and reduce it to a
+     verdict with `deriveVerdict()`: **accept** (empty/non-blocking findings) or **changes** (a concrete blocking
+     finding, cited).
   3. Apply the verdict as a label: accept → `gh pr edit <num> --repo <repo> --add-label review:accepted`;
      changes → `--add-label review:changes` (which routes the fix back to the **author lane**, not the drain —
      v1 does **no** drain-side editing; that convergence loop is v2, epic #2285).
