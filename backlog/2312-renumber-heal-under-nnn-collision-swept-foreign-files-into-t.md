@@ -2,8 +2,10 @@
 kind: story
 size: 3
 relatedTo: ["2289", "2288", "2181", "2213", "2222", "2276", "2248"]
-status: open
+status: resolved
 dateOpened: "2026-07-06"
+dateStarted: "2026-07-08"
+dateResolved: "2026-07-08"
 tags: [drain, self-heal, nnn-collision, data-integrity]
 ---
 

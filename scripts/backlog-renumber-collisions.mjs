@@ -166,6 +166,12 @@ function planSummary(plan) {
     renumbered: plan.collisions.map((c) => ({ oldNum: c.oldNum, newNum: c.newNum, oldName: c.oldName, newName: c.newName })),
     writes: plan.writes.length,
     deletes: plan.deletes.length,
+    // #2312 — the EXPLICIT `backlog/*.md` basenames this run touched (every write + delete), so a caller that
+    // commits the heal on-disk (pr-land.mjs's `runHeal`) can scope its `git add` pathspec to exactly these
+    // paths instead of a bare `git diff --name-only` — which would sweep in ANY OTHER dirty tracked file the
+    // checkout happens to carry (a concurrent session's in-flight work in the same primary checkout, #2301).
+    writePaths: plan.writes.map((w) => w.name),
+    deletePaths: plan.deletes.slice(),
     noop: false,
   };
 }
