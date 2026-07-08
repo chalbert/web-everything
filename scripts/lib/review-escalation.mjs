@@ -129,6 +129,23 @@ export function scoreEscalation({
 }
 
 /**
+ * #2307 — the deterministic review label the PRODUCER (`pr-land.mjs`) applies at PR-OPEN, from the SAME
+ * `scoreEscalation` verdict the drain scores later — so a PR that will need review carries `review:human` /
+ * `review:pending` from the start, never only after a drain happens to sweep it (#2281's rule applied to the
+ * review dimension). Pure — a producer-time simplification of `decideReviewGate`: at open there is no prior
+ * park state / reviewer verdict / timeout to weigh yet (nothing has been parked), so the outcome collapses to
+ * the rubric's own escalate/humanRequired verdict. `null` means no review label to apply (a plain `merge`
+ * PR — `ready-to-merge` alone is enough).
+ * @param {{escalate:boolean, humanRequired?:boolean}} score
+ * @returns {string|null}
+ */
+export function producerReviewLabel({ escalate, humanRequired = false } = {}) {
+  if (humanRequired) return REVIEW_LABELS.human;
+  if (escalate) return REVIEW_LABELS.pending;
+  return null;
+}
+
+/**
  * Couples inherit the STRICTEST member (#2171 / #2138 Fork 5): if EITHER PR of an impl+WE couple escalates,
  * BOTH wait — impl-first/WE-last order cannot tolerate half a couple merging. `humanRequired` inherits the same
  * way (#2285 v1): if either half edits the gate's own code, the whole couple needs a human. Pure.
@@ -145,6 +162,22 @@ export function coupleEscalation(memberScores) {
 /** Does this PR (or couple) carry a given review label? `labels` is the observed label-name array. Pure. */
 export function hasReviewLabel(labels, label) {
   return Array.isArray(labels) && labels.some((l) => (typeof l === 'string' ? l : l && l.name) === label);
+}
+
+/**
+ * #2307 — should a caller (producer OR drain) actually ISSUE the `gh pr edit --add-label` call for a verdict
+ * label? Pure. `false` when there is no label to apply, or the PR already carries it — the producer applies the
+ * label at open, so a LATER drain pass re-scoring the same PR must treat it as already-scored and never
+ * double-apply (GitHub's add-label is idempotent either way, but a skipped call keeps the drain's own action
+ * log honest: this pass did nothing new). This is the ONE gate both `pr-land.mjs` (producer, first-applier) and
+ * `merge-ai-prs.mjs` (drain, idempotent backstop/reconcile) share, so they can never drift on what "already
+ * labelled" means.
+ * @param {string|null|undefined} label - the verdict label the current rubric verdict implies (e.g. `gate.applyLabel`)
+ * @param {Array} currentLabels - the PR's OBSERVED labels (string or `{name}` shape, per `hasReviewLabel`)
+ * @returns {boolean}
+ */
+export function shouldApplyReviewLabel(label, currentLabels) {
+  return !!label && !hasReviewLabel(currentLabels, label);
 }
 
 /**
