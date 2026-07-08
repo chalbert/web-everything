@@ -3,14 +3,14 @@ kind: story
 size: 3
 parent: "2285"
 status: open
-blockedBy: ["xr3htj4"]
+blockedBy: ["2325"]
 dateOpened: "2026-07-07"
 tags: [review, drain, skill, agent]
 ---
 
 # /review human-verdict skill + drain reuses the review core (advisory AI take even on review:human)
 
-Builds on the shared review core (`#xr3htj4`). Two deliverables, one contract.
+Builds on the shared review core (`#2325`). Two deliverables, one contract.
 
 ## 1. `/review <PR>` — the human-verdict skill
 
@@ -18,7 +18,7 @@ The one review flow with no skill today is the **human** clearing a parked PR (e
 by hand). Add `/review <PR>`:
 
 1. Pull the parked PR (diff + the drain's escalation `reasons`).
-2. Run the shared core (`#xr3htj4`) → findings + verdict.
+2. Run the shared core (`#2325`) → findings + verdict.
 3. Present findings + the escalation reason to the operator.
 4. On operator OK, record the verdict as a **label**: `review:human`/`review:pending` → `review:accepted`
    (or `review:changes`, which routes the fix back to the author lane).
