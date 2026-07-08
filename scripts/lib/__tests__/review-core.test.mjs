@@ -86,6 +86,13 @@ describe('buildMandate', () => {
     expect(text).toMatch(/Judge only/);
   });
 
+  it('forbids checking out the PR branch in the shared tree (#2336)', () => {
+    // The seed runs inside the drain's shared primary checkout; it must never move HEAD onto the PR branch.
+    const text = buildMandate();
+    expect(text).toMatch(/do NOT `git checkout`/);
+    expect(text).toMatch(/throwaway `git clone`/);
+  });
+
   it('joins a multi-mandate array (the #2285 v3 reviewer-panel shape)', () => {
     const text = buildMandate({ mandate: ['correctness', 'security', 'simplicity'] });
     expect(text).toContain('correctness, security, simplicity');
