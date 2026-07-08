@@ -1,7 +1,9 @@
 ---
 kind: task
-status: open
+status: resolved
 dateOpened: "2026-07-07"
+dateStarted: "2026-07-08"
+dateResolved: "2026-07-08"
 relatedTo: ["2307", "2286"]
 tags: [review, drain, gate-self]
 ---
