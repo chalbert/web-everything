@@ -1,9 +1,12 @@
 ---
 kind: task
 parent: "2275"
-status: open
-relatedTo: ["2267"]
+status: resolved
+relatedTo: ["2267", "2337"]
 dateOpened: "2026-07-08"
+dateStarted: "2026-07-08"
+dateResolved: "2026-07-08"
+graduatedTo: none
 tags: [lane-pool, infra, footgun, verify]
 ---
 
@@ -48,3 +51,28 @@ dirty (`uncommitted > 0`) and the lane *should* be skipped. It wasn't. Two candi
 The *lesson* ("the only durable lane state is the pushed `lane/*` ref; hand-author in an isolated clone and push
 fast") is already captured on-disk in #2267 — this task is specifically the **fresh evidence that the guard let
 an un-leased untracked lane get reset**, owned by the lane-pool (#2275), not a re-statement of the lesson.
+
+## Verification finding (2026-07-08)
+
+Reproduced against the real `we:scripts/lane-pool.mjs` CLI (throwaway origin + reference + pool, no network) —
+three new tests in `we:scripts/__tests__/lane-pool-refresh-guard.test.mjs`:
+
+1. **The un-forced guard DOES protect untracked-only work.** A lane whose only change is an *untracked*
+   (never-`git add`ed) file is `SKIPPED (dirty/ahead)` by a non-forced `refresh` and the file survives —
+   `laneDirtyOrAhead`'s `git status --porcelain` (no `--untracked-files=no`) counts it as `uncommitted > 0`, as
+   the item's own reading predicted. **Candidate root cause 1 as stated ("the porcelain skip missed untracked
+   work") is disproven.**
+2. **`acquire` leaves a live lease that `refresh` honors.** After `acquire`, a non-forced `refresh` is
+   `SKIPPED` on the lease alone (before it even reaches the dirty/ahead check) and untracked work survives —
+   lease-on-acquire works.
+3. **`--force` is the data-loss path (characterized).** `refresh --force` overrides BOTH the lease skip AND the
+   dirty/ahead skip and silently discards a leased lane's untracked work. This is the only path (besides a lease
+   that expired past its TTL, `DEFAULT_LEASE_TTL_MINUTES=240`, or a lane acquired with no lease) that reproduces
+   the 2026-07-07 loss. The observed `leased: false` afterward is consistent with an **expired/absent lease**,
+   not the un-forced guard failing.
+
+**Conclusion:** the #2267 guard holds for the un-forced path; no fix is owed *here*. The residual — should
+`--force` (and a concurrent `--force` acquire) still be allowed to silently eat a **leased/just-acquired** lane's
+untracked work, or should the porcelain skip also gate the forced path for a *live-leased* lane? — is a genuine
+policy call, split to its own decision item (see relatedTo). Test 3 pins the current behaviour as that decision's
+baseline.

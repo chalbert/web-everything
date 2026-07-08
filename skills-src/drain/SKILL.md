@@ -89,11 +89,27 @@ the edges — the #2188 convergence).
 node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run                          # plan only — print the blockedBy-ordered merge order (across ALL 3 repos, the default) + deferred set, merge NOTHING
 node scripts/merge-ai-prs.mjs --label=ready-to-merge --primary=<primary>                 # /drain (bare): ONE cascade pass across all 3 repos — land every ready labelled PR, exit
 node scripts/merge-ai-prs.mjs --label=ready-to-merge --primary=<primary> --watch --interval=30 # /drain watch: keep polling; land each PR the instant it goes green (--max-idle=N bounds it; Ctrl-C stops)
+node scripts/merge-ai-prs.mjs --label=ready-to-merge --primary=<primary> --watch --until-batches-idle # /drain watch that SELF-TERMINATES when the active batch is fully delivered (#2330)
 node scripts/merge-ai-prs.mjs --label=ready-to-merge --this-repo                         # opt OUT: scope to the cwd repo only (a deliberately single-repo drain)
 ```
 
 **Always dry-run first** to show the merge plan, then run bare (one-shot) or `--watch` (follow). Prefer the
 one-shot unless the user wants a long-lived monitor waiting for producers still opening PRs.
+
+**`--until-batches-idle` — a batch-aware exit for a drain launched to land a batch (#2330).** `--max-idle=N` is
+UNSAFE for a live batch: items take minutes, so the watch goes idle *between* PRs and `--max-idle` would exit
+mid-batch. `--until-batches-idle` instead exits only when the safe conjunction holds — **no `kind:batch
+status:running` run remains** AND the **ready-to-merge queue is empty** AND **nothing is deferred** — debounced
+over `--batch-idle-debounce` passes (default 2). It reads the running-batch signal from the active-progress feed
+(`_site/active-progress.json`, written by `scripts/dev/active-progress-watch.mjs`); an **absent/stale feed ⇒
+keep watching, never a false stop**. The feed only exists while that dev watcher runs, so for a drain-only
+session point `--batch-feed=<path>` at the primary checkout's copy (else the drain harmlessly runs unbounded —
+it now prints a one-time note when the feed is absent so the inert degrade is visible). Before honoring the
+exit the drain **re-polls once** to confirm the ready-to-merge queue is genuinely empty (the last PR's label
+can lag the producer's resolve — the #2230 defense, so the final PR is never dropped). Keep
+`--batch-feed-stale-sec` (default 30s) comfortably above the watcher's ~4s write cadence.
+*(Design note carried from the #2330 review: the feed is a dev-only, website-facing artifact — a later
+refinement should read the batch journals directly to drop that coupling; the exit contract above is unchanged.)*
 
 > **Pass `--primary=<primary>` so the post-land sync can find your primary checkout (#xwokc1n).** After each
 > land the drain fast-forwards the user's primary checkout to the advanced `origin/main` so it never rots. It

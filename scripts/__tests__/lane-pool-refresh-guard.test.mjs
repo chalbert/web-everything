@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -111,6 +111,68 @@ describe('lane-pool refresh/provision dirty-or-ahead guard (#2267)', () => {
     expect(r.code).toBe(0);
     expect(r.out + r.err).not.toMatch(/SKIPPED/);
     expect(readFileSync(join(lane, 'file.txt'), 'utf8')).toBe('v1\n');
+  });
+
+  // #2329 — the incident that triggered this verification was purely UNTRACKED work (freshly scaffolded
+  // backlog files, never `git add`ed), not a modification of a tracked file. `laneDirtyOrAhead` runs
+  // `git status --porcelain` WITHOUT `--untracked-files=no`, so untracked files count (uncommitted > 0) and
+  // the un-forced refresh MUST skip. This pins that the un-forced guard genuinely protects untracked-only work.
+  it('SKIPS a lane whose ONLY change is UNTRACKED (never git-added) work (#2329)', () => {
+    const lane = provisionOne();
+    writeFileSync(join(lane, 'scaffolded-untracked.md'), '# not yet added\n');
+
+    const r = runPool(
+      ['refresh', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest', '--branch=main', '--no-install'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(r.code).toBe(0);
+    expect(r.out + r.err).toMatch(/SKIPPED \(dirty\/ahead/);
+    expect(readFileSync(join(lane, 'scaffolded-untracked.md'), 'utf8')).toContain('not yet added');
+  });
+
+  // #2329 / #2275 — a LIVE lease (what `acquire` stamps) is the primary protection: a non-forced refresh must
+  // skip a leased lane BEFORE it even looks at dirty/ahead, so a consumer's untracked work is safe for the
+  // lease TTL. Verifies acquire leaves a live lease that refresh honors (candidate root-cause 1 in the item).
+  it('SKIPS a LEASED lane on a non-forced refresh, untracked work survives (acquire left a live lease)', () => {
+    provisionOne();
+    const acq = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest', '--branch=main', '--no-install', '--no-reset'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(acq.code).toBe(0);
+    const lane = acq.out.trim().split('\n').pop();
+    writeFileSync(join(lane, 'untracked-during-lease.txt'), 'consumer work\n');
+
+    const r = runPool(
+      ['refresh', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest', '--branch=main', '--no-install'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(r.code).toBe(0);
+    expect(r.out + r.err).toMatch(/SKIPPED/);
+    expect(readFileSync(join(lane, 'untracked-during-lease.txt'), 'utf8')).toContain('consumer work');
+  });
+
+  // #2329 — CHARACTERIZATION of the residual data-loss path (the item's open decision): `--force` overrides
+  // BOTH the lease skip AND the dirty/ahead skip, so it silently eats a LEASED lane's untracked work. This
+  // locks the CURRENT behaviour as the baseline the follow-up policy decision moves against — it is the only
+  // path (besides an expired/absent lease) that reproduces the 2026-07-07 loss; the un-forced path is safe.
+  it('--force DOES eat a leased lane\'s untracked work (the residual policy gap, characterized)', () => {
+    provisionOne();
+    const acq = runPool(
+      ['acquire', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest', '--branch=main', '--no-install', '--no-reset'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(acq.code).toBe(0);
+    const lane = acq.out.trim().split('\n').pop();
+    writeFileSync(join(lane, 'untracked-eaten.txt'), 'lost on --force\n');
+
+    const r = runPool(
+      ['refresh', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=guardtest', '--branch=main', '--no-install', '--force'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
+    expect(r.code).toBe(0);
+    expect(r.out + r.err).not.toMatch(/SKIPPED/);
+    expect(existsSync(join(lane, 'untracked-eaten.txt'))).toBe(false); // silently discarded — the known gap
   });
 
   it('provision also honors the guard for an already-existing dirty lane', () => {
