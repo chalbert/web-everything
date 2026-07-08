@@ -2,9 +2,12 @@
 kind: story
 size: 3
 parent: "2005"
-status: open
+status: resolved
 blockedBy: ["2065"]
 dateOpened: "2026-07-01"
+dateStarted: "2026-07-07"
+dateResolved: "2026-07-07"
+graduatedTo: "fui:plugs/webdirectives/CustomCommentRegistry.ts"
 tags: []
 ---
 
