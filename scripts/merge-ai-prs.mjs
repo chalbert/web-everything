@@ -64,6 +64,7 @@
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge # the /drain role: scope to producer-completed PRs, merge in blockedBy order
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --dry-run # print the blockedBy-ordered merge plan, merge NOTHING
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --interval=30 # the /drain-watch monitor: poll + land as PRs go green (--max-idle=N bounds it)
+ *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --watch --until-batches-idle  # self-terminate when the active batch is fully delivered (#2330; reads the active-progress feed — --batch-feed=<path> to point at the primary's copy)
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge # #2257/#2287 — the ONE /drain sweeps ALL 3 constellation repos BY DEFAULT (WE+frontierui+plateau-app), one global blockedBy cascade
  *   node scripts/merge-ai-prs.mjs --label=ready-to-merge --this-repo # #2287 — opt OUT: scope to the cwd repo only (a deliberately single-repo drain)
  *   node scripts/merge-ai-prs.mjs --repos=chalbert/frontierui,chalbert/plateau-app # sweep an explicit repo set (comma-separated owner/name slugs)
@@ -85,9 +86,9 @@
  * (surfaced); 3 = bad input / `gh` unavailable.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, realpathSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel } from './lib/review-escalation.mjs';
@@ -315,12 +316,54 @@ export function planLabelDrain(candidates) {
 }
 
 /** Bound a `--watch --interval=N` poll count. `--max-idle=N` (optional) exits after N consecutive idle passes
- *  (a pass that merged nothing AND has nothing deferred waiting); omitted → unbounded (until Ctrl-C). Pure. */
-export function parseWatchOpts({ watch, interval, maxIdle } = {}) {
+ *  (a pass that merged nothing AND has nothing deferred waiting); omitted → unbounded (until Ctrl-C). Pure.
+ *  #2330 — `--until-batches-idle` adds a BATCH-AWARE exit (a drain launched to land a batch self-terminates
+ *  once that batch is fully delivered): it reads the active-progress feed and exits only when no
+ *  `kind:batch status:running` run remains AND the ready-to-merge queue is empty AND nothing is deferred —
+ *  debounced over `--batch-idle-debounce` (default 2) consecutive passes. Unlike `--max-idle` this is SAFE for
+ *  a live batch (items take minutes, so the watch goes idle *between* PRs — `--max-idle` would exit mid-batch). */
+export function parseWatchOpts({ watch, interval, maxIdle, untilBatchesIdle, batchIdleDebounce } = {}) {
   const on = !!watch;
   const iv = Number.isFinite(Number(interval)) && Number(interval) > 0 ? Number(interval) : 30;
   const mi = Number.isFinite(Number(maxIdle)) && Number(maxIdle) >= 0 ? Number(maxIdle) : null;
-  return { watch: on, intervalSec: iv, maxIdle: mi };
+  const untilBatches = !!untilBatchesIdle;
+  const debounce = Number.isFinite(Number(batchIdleDebounce)) && Number(batchIdleDebounce) >= 1 ? Number(batchIdleDebounce) : 2;
+  return { watch: on, intervalSec: iv, maxIdle: mi, untilBatchesIdle: untilBatches, batchIdleDebounce: debounce };
+}
+
+/** #2330 — the running-batch entries in an active-progress feed object. Pure (takes the parsed JSON). A batch
+ *  is "still producing" iff it has a `runs[]` entry with `kind:'batch'` and a non-terminal `status:'running'`. */
+export function pickRunningBatches(feed) {
+  const runs = feed && Array.isArray(feed.runs) ? feed.runs : [];
+  return runs.filter((r) => r && r.kind === 'batch' && r.status === 'running');
+}
+
+/** #2330 — read the active-progress feed and report the running batches, or `known:false` when the signal is
+ *  UNSAFE to trust (absent / unparseable / STALE — the feed only exists while the dev watcher runs, and 404s on
+ *  a static publish). A `known:false` read must make the caller KEEP WATCHING, never stop (a missing feed can
+ *  never trigger a false exit). `fs`/`now` injected so the classify logic is unit-testable without a real file.
+ *  @returns {{known:boolean, running:Array, reason?:string}} */
+export function readBatchFeed(path, { now = Date.now(), staleMs = 30_000, fs = { existsSync, readFileSync, statSync } } = {}) {
+  try {
+    if (!path || !fs.existsSync(path)) return { known: false, running: [], reason: 'feed-absent' };
+    const ageMs = now - fs.statSync(path).mtimeMs;
+    if (ageMs > staleMs) return { known: false, running: [], reason: 'feed-stale' };
+    const feed = JSON.parse(fs.readFileSync(path, 'utf8'));
+    return { known: true, running: pickRunningBatches(feed) };
+  } catch {
+    return { known: false, running: [], reason: 'feed-unreadable' };
+  }
+}
+
+/** #2330 — should a `--until-batches-idle` watch EXIT now? Pure. The safe conjunction (all must hold):
+ *  the pass was idle (merged/deferred/rebuilt nothing), the ready-to-merge queue is empty (`considered===0`,
+ *  NOT "all nums resolved" — a dropped/parked item never lands and would hang the drain forever), and the
+ *  batch feed has been observed KNOWN-and-non-running for `debounce` consecutive passes (absorbs feed lag). */
+export function decideBatchesIdleExit({ enabled = false, idlePass = false, considered = 0, batchNonRunningStreak = 0, debounce = 2 } = {}) {
+  if (!enabled) return false;
+  if (!idlePass) return false;        // still landing / rebuilding a tip → keep going
+  if (considered > 0) return false;   // queue not empty → keep going
+  return batchNonRunningStreak >= debounce;
 }
 
 /** #2216 — should this OPEN PR be labelled now because its required check went green? Pure. Closes the lane-
@@ -535,7 +578,14 @@ function runCli() {
   const label = typeof flags.label === 'string' ? flags.label : null;
   // #2194 — /drain converges onto this lander: `--watch` turns the one-shot sweep into the long-lived monitor
   // (`/drain watch`), re-sweeping on `--interval=N`s and landing each PR the instant it goes green.
-  const { watch: WATCH, intervalSec: INTERVAL, maxIdle: MAX_IDLE } = parseWatchOpts({ watch: flags.watch, interval: flags.interval, maxIdle: flags['max-idle'] });
+  const { watch: WATCH, intervalSec: INTERVAL, maxIdle: MAX_IDLE, untilBatchesIdle: UNTIL_BATCHES_IDLE, batchIdleDebounce: BATCH_DEBOUNCE } =
+    parseWatchOpts({ watch: flags.watch, interval: flags.interval, maxIdle: flags['max-idle'], untilBatchesIdle: flags['until-batches-idle'], batchIdleDebounce: flags['batch-idle-debounce'] });
+  // #2330 — the active-progress feed the batch-aware exit reads. The feed is a dev-only artifact the website's
+  // Active-work tab reads; it lives at <repo>/_site/active-progress.json and is written by
+  // `scripts/dev/active-progress-watch.mjs` (which must be running for the signal to exist — a drain-only
+  // session should point `--batch-feed` at the primary checkout's copy). Absent/stale ⇒ the watch keeps polling.
+  const BATCH_FEED = typeof flags['batch-feed'] === 'string' ? flags['batch-feed'] : join(resolve(dirname(fileURLToPath(import.meta.url)), '..'), '_site', 'active-progress.json');
+  const BATCH_FEED_STALE_MS = (Number.isFinite(Number(flags['batch-feed-stale-sec'])) && Number(flags['batch-feed-stale-sec']) > 0 ? Number(flags['batch-feed-stale-sec']) : 30) * 1000;
   // #2198 — rebase-drop the shared `.lane-manifest.json` on land (ON by default; `--no-rebase-drop` disables).
   const REBASE_DROP = flags['no-rebase-drop'] ? false : true;
   // #2222 — pre-check id-collision self-heal (ON by default; `--no-heal-collision` disables). Before merging, a
@@ -1141,10 +1191,13 @@ function runCli() {
 
   // WATCH: re-sweep on a fixed interval, landing PRs as they become eligible, until `--max-idle` consecutive
   // idle passes (merged nothing AND nothing deferred waiting) — or forever if `--max-idle` is unset (Ctrl-C).
-  if (!AS_JSON) process.stderr.write(`watch: polling ${label ? `label "${label}" ` : ''}every ${INTERVAL}s${MAX_IDLE != null ? ` (exit after ${MAX_IDLE} idle pass${MAX_IDLE === 1 ? '' : 'es'})` : ' (Ctrl-C to stop)'}…\n`);
+  const exitBound = MAX_IDLE != null ? `exit after ${MAX_IDLE} idle pass${MAX_IDLE === 1 ? '' : 'es'}`
+    : UNTIL_BATCHES_IDLE ? `exit when the active batch is idle (debounce ${BATCH_DEBOUNCE})` : 'Ctrl-C to stop';
+  if (!AS_JSON) process.stderr.write(`watch: polling ${label ? `label "${label}" ` : ''}every ${INTERVAL}s (${exitBound})…\n`);
   const passes = [];
   const allMerged = [];
   let idle = 0;
+  let batchNonRunningStreak = 0; // #2330 — consecutive passes the feed is KNOWN and reports no running batch
   let lastFailed = [];
   let lastDup = [];
   for (let pass = 1; ; pass++) {
@@ -1164,7 +1217,17 @@ function runCli() {
     const idlePass = merged.length === 0 && deferred.length === 0 && pendingRebased.length === 0;
     idle = idlePass ? idle + 1 : 0;
     if (MAX_IDLE != null && idle >= MAX_IDLE) break;
-    if (!AS_JSON) process.stderr.write(`  … pass ${pass}: merged ${merged.length}, deferred ${deferred.length}${idlePass ? ` (idle ${idle}${MAX_IDLE != null ? `/${MAX_IDLE}` : ''})` : ''} — next poll in ${INTERVAL}s\n`);
+    // #2330 — batch-aware exit: stop once the active batch is fully delivered. Only trust a KNOWN, non-running
+    // feed; an absent/stale feed leaves the streak at 0 so it can never trigger a false stop (keep watching).
+    if (UNTIL_BATCHES_IDLE) {
+      const feed = readBatchFeed(BATCH_FEED, { staleMs: BATCH_FEED_STALE_MS });
+      batchNonRunningStreak = feed.known && feed.running.length === 0 ? batchNonRunningStreak + 1 : 0;
+      if (decideBatchesIdleExit({ enabled: true, idlePass, considered: result.considered, batchNonRunningStreak, debounce: BATCH_DEBOUNCE })) {
+        if (!AS_JSON) process.stderr.write(`watch: STOPPING — active batch idle (no running batch for ${batchNonRunningStreak} pass(es), queue empty) — batch fully delivered.\n`);
+        break;
+      }
+    }
+    if (!AS_JSON) process.stderr.write(`  … pass ${pass}: merged ${merged.length}, deferred ${deferred.length}${idlePass ? ` (idle ${idle}${MAX_IDLE != null ? `/${MAX_IDLE}` : ''})` : ''}${UNTIL_BATCHES_IDLE ? ` [batch-idle ${batchNonRunningStreak}/${BATCH_DEBOUNCE}]` : ''} — next poll in ${INTERVAL}s\n`);
     sleepSync(INTERVAL * 1000);
   }
   if (!AS_JSON) process.stderr.write(`watch: stopped after ${passes.length} pass(es); merged ${allMerged.length} PR(s) total.\n`);
