@@ -167,7 +167,7 @@ const ITEM_RESULT_SCHEMA = {
       type: 'array', items: { type: 'string' },
       description: 'EVERY file this item changed, REPO-QUALIFIED as "<repo>:<repo-relative-path>" (e.g. "we:backlog/2189.md", "frontierui:src/foo.ts").',
     },
-    gate: { type: 'string', enum: ['green', 'red'], description: 'the WE lane FULL-suite result (#2199: check:standards whole-repo + npm test, run before push — not the file-scoped fast-fail). green = clean (or n/a); red = a real error the lane could not fix → NO PR opened.' },
+    gate: { type: 'string', enum: ['green', 'red'], description: 'the WE lane FULL-suite result (#2199: check:standards whole-repo + `npm test -- run` (vitest RUN mode, never bare `npm test` which is watch and hangs — #2327), run before push — not the file-scoped fast-fail). green = clean (or n/a); red = a real error the lane could not fix → NO PR opened.' },
     dismissedFindings: {
       type: 'array',
       items: {
@@ -408,7 +408,8 @@ function laneItemPrompt(it, laneDirs) {
     ``,
     `4. LANE FULL-SUITE GATE (#2199 — run every check the PR runs, BEFORE pushing). In the WE clone run the FULL`,
     `   locally-runnable suite — \`npm run check:standards\` (whole-repo, NOT the \`--local --files\` fast-fail) AND`,
-    `   \`npm test\` (the unit suite the PR's required \`test\` check runs) — BEFORE the resolve/push. A red result`,
+    `   \`npm test -- run\` (vitest RUN mode — NEVER bare \`npm test\`, which is watch mode and hangs the lane`,
+    `   forever, #2327; the unit suite the PR's required \`test\` check runs) — BEFORE the resolve/push. A red result`,
     `   is a bug YOU authored: FIX it in THIS lane now (cheapest — full context in hand); NEVER push known-broken`,
     `   work. Only if it is genuinely un-fixable here → gate:"red", status:"carried", open NO PR. Impl repos run`,
     `   their own repo's gate in their clone; their final authority is the PR's own required \`test\` check on GitHub.`,
