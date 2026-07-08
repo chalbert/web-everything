@@ -1,0 +1,12 @@
+---
+kind: story
+size: 1
+parent: "2285"
+status: open
+dateOpened: "2026-07-08"
+tags: []
+---
+
+# Drain auto-review subagent must not checkout the PR branch in the shared primary tree — seed it diff-only or clone-scoped
+
+The #2285-v1 drain auto-review spawns a fresh-context subagent to judge a parked PR's diff. Observed 2026-07-08 (drain of #227): a review subagent seeded with 'run the tests if useful' resolved that by git-checking-out the PR branch inside the SHARED primary checkout to run vitest, moving the primary's HEAD onto the lane branch (it restored to main cleanly afterward, but this violates the never-branch-a-shared-checkout guard and briefly blocked the drain's primary ff-sync). Fix: the auto-review subagent seed (in we:scripts/merge-ai-prs.mjs and we:skills-src/drain/SKILL.md) must MANDATE diff-only review via gh pr diff with no checkout, or, when it genuinely needs to run tests, do so in a throwaway clone — never a checkout in the shared primary tree.
