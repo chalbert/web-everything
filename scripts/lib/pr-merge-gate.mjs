@@ -35,6 +35,18 @@ function breakGlassArmed(env = process.env) {
 }
 
 /**
+ * #2324 — every PR that lands must carry a non-empty description: PR #206 merged with an EMPTY body even
+ * though `we:skills-src/pr/SKILL.md` already says a `--body-file` is required and `pr-land.mjs` never drops
+ * a body — the rule existed as skill prose, never as an enforced gate. Shared here (not duplicated in
+ * `pr-land.mjs` and `merge-ai-prs.mjs`) so BOTH land paths — the producer (`pr-land.mjs`, gates before
+ * labelling) and the label lander (`merge-ai-prs.mjs`'s `classifyPr`, gates before merging) — refuse the
+ * same class of bodyless PR the same way. Pure: true iff `body` has non-whitespace content.
+ */
+export function hasNonEmptyBody(body) {
+  return typeof body === 'string' && body.trim().length > 0;
+}
+
+/**
  * Assert this caller MAY write to main, WITHOUT shelling a merge (used by non-gh write-to-main intents such as
  * pr-land's `--fallback-git` local `git merge`). `caller === 'drain'` always passes. Any other route THROWS
  * unless break-glass is armed — in which case it passes and emits the loud audit line. Returns
