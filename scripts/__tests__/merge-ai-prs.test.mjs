@@ -12,7 +12,9 @@ const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageB
 const claudeCommit = (extra = {}) => ({ authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }, { name: 'Claude Opus 4.8 (1M context)', email: 'noreply@anthropic.com' }], ...extra });
 const humanCommit = { authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 const greenRollup = [{ name: 'test', conclusion: 'SUCCESS' }, { name: 'cla', conclusion: 'FAILURE' }];
-const aiPr = (extra = {}) => ({ number: 1, title: 't', commits: [claudeCommit(), claudeCommit()], statusCheckRollup: greenRollup, mergeable: 'MERGEABLE', mergeStateStatus: 'UNSTABLE', ...extra });
+// body defaults to a non-empty description (#2324) so every pre-existing 'merge' expectation below stays true
+// without threading a body through each call; the empty-body gate has its own dedicated tests.
+const aiPr = (extra = {}) => ({ number: 1, title: 't', body: 'what changed and why', commits: [claudeCommit(), claudeCommit()], statusCheckRollup: greenRollup, mergeable: 'MERGEABLE', mergeStateStatus: 'UNSTABLE', ...extra });
 
 describe('merge-ai-prs — AI detection', () => {
   it('recognizes a Claude author by name or anthropic email', () => {
@@ -68,6 +70,20 @@ describe('merge-ai-prs — classifyPr verdict', () => {
   it('SKIPS a not-mergeable PR (conflicts)', () => {
     const v = classifyPr(aiPr({ mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }));
     expect(v.decision).toBe('skip'); expect(v.reason).toMatch(/not mergeable/);
+  });
+  // #2324 — refuse to land a PR with an empty/whitespace description (PR #206 landed bodyless).
+  it('SKIPS a PR with an empty description', () => {
+    const v = classifyPr(aiPr({ body: '' }));
+    expect(v.decision).toBe('skip'); expect(v.reason).toMatch(/empty\/whitespace description/);
+  });
+  it('SKIPS a PR with a whitespace-only description', () => {
+    expect(classifyPr(aiPr({ body: '   \n\t  ' })).decision).toBe('skip');
+  });
+  it('SKIPS a PR with no body field at all', () => {
+    expect(classifyPr(aiPr({ body: undefined })).decision).toBe('skip');
+  });
+  it('MERGES a PR with a real description', () => {
+    expect(classifyPr(aiPr({ body: 'fixes the thing because reasons' })).decision).toBe('merge');
   });
 });
 
