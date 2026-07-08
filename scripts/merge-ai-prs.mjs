@@ -367,6 +367,16 @@ export function buildDrainReasonComment(kind, reasonText) {
   return `${drainReasonMarker(kind)}\n${heading}\n\n${reasonText}`;
 }
 
+/**
+ * #2333 — should a PARK stamp its escalation reason as a PR comment (#2313)? ONLY for a NON-human
+ * (agent-reviewable) park. A `review:human` park already states the SAME reason IN THE PR BODY via #2324's
+ * escalation-reason block, so a park comment there would just duplicate it (harmless but redundant). The
+ * humanRequired case is surfaced by the body-block alone; this comment path fires for agent-reviewable parks
+ * (and genuine skips post their own comment on a separate path). Pure. */
+export function shouldPostParkReasonComment({ humanRequired } = {}) {
+  return !humanRequired;
+}
+
 /** Has this exact (kind, reasonText) already been stamped on the PR? Pure. `comments` is the raw
  *  `gh pr view --json comments` array (tolerant of a missing/odd shape). */
 export function hasDrainReasonComment(comments, kind, reasonText) {
@@ -870,8 +880,13 @@ function runCli() {
             try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
           }
           // #2313 — stamp the WHY + what-to-look-for onto the PR itself, not only this log line below.
-          const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason);
-          if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} escalation reason stamped on PR\n`);
+          // #2333 — but ONLY for a NON-human (agent-reviewable) park: a review:human park already carries the
+          // same reason in its PR body (#2324's block, written below), so a park comment there would duplicate
+          // it. Fire the comment in the `else` of humanRequired.
+          if (shouldPostParkReasonComment({ humanRequired: gate.humanRequired })) {
+            const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason);
+            if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} escalation reason stamped on PR\n`);
+          }
         }
         // #2324 (guarantee 2) — a `review:human` park must STATE the escalation reason IN THE PR BODY, so the
         // operator opening it sees why a human is required without re-deriving it from the rubric. Augment
