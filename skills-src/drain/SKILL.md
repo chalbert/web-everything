@@ -153,6 +153,13 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
   2. Spawn a **fresh-context adversarial review subagent** (the `Agent` tool, e.g. `general-purpose`) that sees
      ONLY the diff + PR description — not this session's context — and returns a verdict: **accept** (correct,
      safe, no blocking issue) or **changes** (a concrete blocking problem, cited).
+     **Seed it diff-only — NEVER let it checkout the PR branch (#2336).** The subagent runs inside the drain's
+     shared primary checkout, so its seed must **mandate review from the `gh pr diff` text alone** and forbid
+     `git checkout`/`git switch`/`git fetch`+checkout onto the PR branch (that moves the shared HEAD, violates the
+     never-branch-a-shared-checkout guard, and briefly blocks the drain's primary ff-sync — observed 2026-07-08
+     on the drain of #227). If it genuinely needs to run tests/repro, it must do so in a **throwaway `git clone`**
+     under a temp dir, never a checkout here. `we:scripts/lib/review-core.mjs` `buildMandate()` bakes this
+     no-checkout clause into the single-sourced instruction string (#2326 routes this seed through it).
   3. Apply the verdict as a label: accept → `gh pr edit <num> --repo <repo> --add-label review:accepted`;
      changes → `--add-label review:changes` (which routes the fix back to the **author lane**, not the drain —
      v1 does **no** drain-side editing; that convergence loop is v2, epic #2285).
