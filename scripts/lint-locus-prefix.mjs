@@ -65,6 +65,18 @@ function stagedCorpusFiles() {
   return out.split('\n').map((s) => s.trim()).filter((f) => f && CORPUS_RE.test(f));
 }
 
+/** Corpus files changed across a git commit RANGE (e.g. `origin/main..HEAD`), read from disk at the current
+ *  tip. The #2331 producer path: the #2170 pre-PR review can edit an item body AFTER the author's write-time
+ *  gate ran, via a route the PostToolUse hook does not see — so the producer (pr-land) re-lints the lane's OWN
+ *  committed corpus changes before opening the PR, catching a bare ref that would otherwise only go red in CI. */
+function rangeCorpusFiles(range) {
+  const out = execFileSync('git', ['diff', '--name-only', '--diff-filter=ACMR', range], {
+    cwd: ROOT,
+    encoding: 'utf8',
+  });
+  return out.split('\n').map((s) => s.trim()).filter((f) => f && CORPUS_RE.test(f));
+}
+
 /** Whole backlog/ + reports/ corpus, relative to repo root. */
 function allCorpusFiles() {
   return ['backlog', 'reports']
@@ -112,6 +124,16 @@ if (argv.includes('--pre')) {
 if (argv.includes('--staged') || argv.includes('--all')) {
   const files = argv.includes('--staged') ? stagedCorpusFiles() : allCorpusFiles();
   report(scanRepoLocusPrefixes(files.map(readDoc).filter(Boolean)));
+}
+
+// ── Range mode — the #2331 producer sweep: lint the corpus files a commit range changed ──────────
+// `--range=<gitrange>` (e.g. `--range=origin/main..HEAD`). pr-land runs this before opening the PR so the
+// #2170 review-append leak is caught by the producer, not CI. Clean range (no corpus change) → exit 0.
+const rangeFlag = argv.find((a) => a === '--range' || a.startsWith('--range='));
+if (rangeFlag) {
+  const range = rangeFlag.includes('=') ? rangeFlag.slice('--range='.length) : argv[argv.indexOf('--range') + 1];
+  if (!range) process.exit(0); // no range given — nothing to lint (fail open)
+  report(scanRepoLocusPrefixes(rangeCorpusFiles(range).map(readDoc).filter(Boolean)));
 }
 
 // ── Single-file mode — the PostToolUse hook + manual run ─────────────────────────
