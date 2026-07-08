@@ -90,9 +90,9 @@ import { fileURLToPath } from 'node:url';
 import { resolve, join } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
-import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META } from './lib/review-escalation.mjs';
+import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason } from './lib/review-escalation.mjs';
 import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
-import { mergePr } from './lib/pr-merge-gate.mjs';
+import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes } from './lane-drain.mjs';
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs';
 
@@ -214,8 +214,9 @@ export function isRequiredCheckGreen(pr, requiredCheck = 'test') {
 /**
  * Classify one PR into a merge/skip verdict. Pure — no gh calls. Returns
  *   { num, title, decision: 'merge'|'skip', reason, aiGenerated, certifyLabel, testGreen, state, mergeable }.
- * `decision === 'merge'` requires ALL of: producer-certified, required check green, mergeable, and a landable
- * mergeStateStatus (CLEAN or UNSTABLE). Anything else is a `skip` with the first failing reason.
+ * `decision === 'merge'` requires ALL of: producer-certified, required check green, mergeable, a landable
+ * mergeStateStatus (CLEAN or UNSTABLE), and a non-empty/whitespace description (#2324). Anything else is a
+ * `skip` with the first failing reason.
  *
  * PRODUCER CERTIFICATION (#2195, blockedBy #2196). "Certified" is EITHER of two independent signals:
  *   - the `trustLabel` (`ready-to-merge`) is present — the producer step (#2196: every AI-edit path applies it
@@ -244,6 +245,10 @@ export function classifyPr(pr, { requiredCheck = 'test', trustLabel = 'ready-to-
   else if (!testGreen) { decision = 'skip'; reason = `required check "${requiredCheck}" is not green`; }
   else if (mergeable !== 'MERGEABLE') { decision = 'skip'; reason = `not mergeable (mergeable=${mergeable || 'UNKNOWN'})`; }
   else if (!landableState) { decision = 'skip'; reason = `merge state ${state || 'UNKNOWN'} (BEHIND⇒needs rebase, DIRTY/BLOCKED/DRAFT⇒not landable) — left for its author`; }
+  // #2324 — refuse to land a PR with an empty/whitespace description, same rule pr-land.mjs enforces before
+  // labelling (PR #206 landed bodyless). Checked LAST so the earlier, more actionable reasons (uncertified /
+  // red / unmergeable) still win when several are true at once.
+  else if (!hasNonEmptyBody(pr?.body)) { decision = 'skip'; reason = 'empty/whitespace description — refusing to land it (add a real summary of what changed and why; #2324)'; }
   return { num, title, decision, reason, aiGenerated, certifyLabel, testGreen, state, mergeable };
 }
 
@@ -598,7 +603,7 @@ function runCli() {
     // List open PRs WITHOUT commits (commits×authors×limit overflows GitHub's GraphQL node cap), then fetch each
     // candidate's commits per-PR — the rollup + mergeable come from the list; commits (the AI gate) come per PR.
     const listArgs = ['pr', 'list', ...repoFlag(repo), '--state', 'open', '--limit', '100',
-      '--json', 'number,title,headRefName,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels'];
+      '--json', 'number,title,body,headRefName,baseRefName,mergeable,mergeStateStatus,statusCheckRollup,labels'];
     if (base) listArgs.push('--base', base);
     if (label) listArgs.push('--label', label);
     let prs;
@@ -768,6 +773,24 @@ function runCli() {
         v.decision = 'skip';
         v.reason = gate.reason + (score.reasons.length ? ` [${score.reasons.join('; ')}]` : '');
         if (gate.applyLabel && !DRY_RUN) { try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ } }
+        // #2324 (guarantee 2) — a `review:human` park must STATE the escalation reason IN THE PR BODY, so the
+        // operator opening it sees why a human is required without re-deriving it from the rubric. Augment
+        // (never replace) the live body with the marked block at park time, then verify the write landed —
+        // best-effort (a write/verify miss is surfaced, never fatal: the label already carries the signal).
+        if (gate.humanRequired && !DRY_RUN) {
+          let liveBody = '';
+          try { liveBody = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'body'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').body || ''; } catch { /* fetch miss — augment from empty, still best-effort */ }
+          if (!bodyHasEscalationReason(liveBody)) {
+            const newBody = liveBody + buildEscalationReasonBlock(score.reasons);
+            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--body', newBody], { stdio: ['ignore', 'ignore', 'pipe'] }); }
+            catch { if (!AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} could not write the review:human escalation reason into the PR body (#2324) — add it by hand: ${score.reasons.join('; ')}\n`); }
+            // Verify the write actually landed (never trust the edit call's exit code alone — gh can succeed
+            // against a stale body if two edits race). A miss is loud, not silent.
+            let verified = false;
+            try { verified = bodyHasEscalationReason(JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'body'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').body || ''); } catch { /* verify miss — reported below as unverified */ }
+            if (!verified && !AS_JSON) process.stderr.write(`  ⚠ ${repoTag(v.repo)}${v.num} review:human body still missing the escalation reason after the write (#2324) — verify by hand: ${score.reasons.join('; ')}\n`);
+          }
+        }
         // #2262 — track the park age so the watch-window can time out; a review:changes verdict ends the clock.
         if (gate.action === 'park') { if (!DRY_RUN) { parkState = recordParked(parkState, { repo: v.repo, num: v.num }, nowMs); parkStateChanged = true; } }
         else if (!DRY_RUN) { const cleared = clearParked(parkState, { repo: v.repo, num: v.num }); if (cleared !== parkState) { parkState = cleared; parkStateChanged = true; } }

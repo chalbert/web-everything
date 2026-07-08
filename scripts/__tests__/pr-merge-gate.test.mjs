@@ -6,7 +6,7 @@
  *   a loud audit line). The gh shell is injected (never actually called).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { mergePr, assertMayMerge, buildGateMergeArgs, mergeMethodFlag } from '../lib/pr-merge-gate.mjs';
+import { mergePr, assertMayMerge, buildGateMergeArgs, mergeMethodFlag, hasNonEmptyBody } from '../lib/pr-merge-gate.mjs';
 
 // A capturing fake gh exec + a capturing stderr sink, so nothing shells out and the audit line is observable.
 const fakeExec = () => { const calls = []; const exec = (cmd, args, opts) => { calls.push({ cmd, args, opts }); return { ok: true }; }; return { exec, calls }; };
@@ -60,6 +60,20 @@ describe('pr-merge-gate — mergePr caller invariant (#2290)', () => {
     expect(calls[0].args).toContain('--repo');
     expect(lines.join('')).toMatch(/BREAK-GLASS merge by route=pr-land pr=42 repo=chalbert\/plateau-app — off the normal path/);
     expect(r).toEqual({ ok: true });
+  });
+});
+
+describe('pr-merge-gate — hasNonEmptyBody (#2324 shared by pr-land.mjs + merge-ai-prs.mjs)', () => {
+  it('rejects null/undefined/non-string, empty, and whitespace-only bodies', () => {
+    expect(hasNonEmptyBody(null)).toBe(false);
+    expect(hasNonEmptyBody(undefined)).toBe(false);
+    expect(hasNonEmptyBody(42)).toBe(false);
+    expect(hasNonEmptyBody('')).toBe(false);
+    expect(hasNonEmptyBody('   \n\t  ')).toBe(false);
+  });
+  it('accepts a real description', () => {
+    expect(hasNonEmptyBody('fixes the thing because reasons')).toBe(true);
+    expect(hasNonEmptyBody('  padded but real  ')).toBe(true);
   });
 });
 

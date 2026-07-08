@@ -148,6 +148,28 @@ export function hasReviewLabel(labels, label) {
 }
 
 /**
+ * #2324 (guarantee 2) — a `review:human` PR must STATE why a human is required, so the operator opening it
+ * sees the escalation reason without re-deriving it from the rubric. The drain writes/augments the PR body
+ * with this marked block at park time (`buildEscalationReasonBlock`); the gate then verifies it is there
+ * (`bodyHasEscalationReason`) before trusting the park is self-explanatory. Pure — a stable, greppable marker.
+ */
+export const ESCALATION_REASON_MARKER = '## Escalation reason';
+
+/** Build the body block embedding the escalation reason(s) — APPENDED to the existing PR body at park time,
+ *  never replacing it. Pure. Empty/absent `reasons` → `''` (nothing to append). */
+export function buildEscalationReasonBlock(reasons) {
+  const list = (Array.isArray(reasons) ? reasons : []).filter(Boolean);
+  if (!list.length) return '';
+  return `\n\n${ESCALATION_REASON_MARKER}\n\n${list.map((r) => `- ${r}`).join('\n')}\n`;
+}
+
+/** Does this PR body already carry the escalation-reason marker (#2324)? Pure — the cheap presence check the
+ *  gate verifies without re-deriving the reasons itself. */
+export function bodyHasEscalationReason(body) {
+  return typeof body === 'string' && body.includes(ESCALATION_REASON_MARKER);
+}
+
+/**
  * The NON-BLOCKING watch-window gate (#2171). Given a PR's escalation verdict, its observed review labels, and
  * how long it has been parked, decide what the drain does THIS pass. Pure — the drain never blocks: an escalated
  * PR is SKIPPED (parked alive) and re-evaluated next pass, so other PRs keep flowing.

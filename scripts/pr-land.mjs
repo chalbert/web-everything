@@ -67,8 +67,9 @@
  * opts a PR out; label-apply is best-effort and never fails the land.
  *
  * Exit codes: 0 = merged (or opened --no-wait / labelled-on-green / dry-run OK); 2 = required check RED (nothing merged);
- * 3 = unmergeable / gh error / push failed (nothing merged; recoverable — rebase the ref and re-run, or
- * pass --fallback-git). A non-zero exit means `main` was left UNTOUCHED.
+ * 3 = unmergeable / gh error / push failed / EMPTY DESCRIPTION (#2324 — nothing merged; recoverable — rebase the
+ * ref and re-run, or pass --fallback-git; an empty-body refusal is fixed by editing the PR body and re-running).
+ * A non-zero exit means `main` was left UNTOUCHED.
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
@@ -76,7 +77,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
-import { assertMayMerge } from './lib/pr-merge-gate.mjs';
+import { assertMayMerge, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { numberPendingHashes } from './lane-drain.mjs'; // JIT numbering, shared single source (#2288/#xzxc92d)
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs'; // post-land dup-NNN tripwire (#2318)
 
@@ -482,6 +483,19 @@ function runCli() {
     // verdict === 'wait' → not ready yet (checks pending / BLOCKED); keep polling until the timeout.
     if (Date.now() > deadlineMs) emit({ repo: REPO, merged: false, reason: 'check-timeout', pr: Number(prNum), detail: `PR #${prNum} not ready past timeout (mergeStateStatus=${state}); leaving for a later drain pass` }, 3);
     execFileSync('sleep', ['20']);
+  }
+
+  // Required checks are GREEN — before labelling, refuse to land a PR carrying an empty/whitespace description
+  // (#2324: PR #206 landed bodyless even though a body is nominally required — enforce it here, loud, not as
+  // unenforced skill prose). Read the PR's LIVE body (not just the `--body`/`--body-file` this invocation
+  // passed) since an already-open PR found via `gh pr list --head` may predate this run; a fetch miss falls
+  // back to the body this invocation supplied, defaulting to "no body confirmed" (fail-safe, never fail-open).
+  if (PLAN.labelWhenGreen) {
+    let liveBody = BODY;
+    try { const v = JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'body'])); if (typeof v.body === 'string') liveBody = v.body; } catch { /* gh miss — fall back to the body this invocation supplied, if any */ }
+    if (!hasNonEmptyBody(liveBody)) {
+      emit({ repo: REPO, merged: false, reason: 'empty-body', pr: Number(prNum), detail: `PR #${prNum} has an empty/whitespace description — refusing to land it (pass --body-file with a real summary of what changed and why; #2324); ${BASE} left untouched` }, 3);
+    }
   }
 
   // Required checks are GREEN — NOW apply the producer-certified label (#2199: never before this point).
