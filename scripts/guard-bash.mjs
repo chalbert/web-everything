@@ -61,6 +61,40 @@ export function isLaneCwd(cwd) {
   return !!cwd && String(cwd).includes('/.lanes/');
 }
 
+// #2335 — the harness resets the reported Bash cwd to the PRIMARY checkout between tool calls, so the
+// standard lane invocation `cd <lane> && node …/backlog.mjs claim` reports cwd=primary and gets misclassified
+// as a primary mutation (denied) AND makes the #2323 git call run in the primary (a false "behind" count).
+// Recover the cwd the command will ACTUALLY run in by honouring a leading `cd <target>` — resolving a
+// `cd "$LANE"` against a literal `LANE=/abs` assignment earlier in the same command (the exact lane idiom).
+// Pure + unit-tested. Fails safe: an unresolvable target (unknown var, command-subst) → the reported cwd,
+// i.e. today's behaviour (an override is still needed, never a wrong ALLOW of a real primary mutation).
+export function resolveEffectiveCwd(command, reportedCwd, resolvePath = resolve) {
+  const cmd = String(command || '');
+  if (!cmd) return reportedCwd;
+  // Collect simple literal `VAR=value` / `export VAR=value` assignments (no command-subst/globs) in order.
+  const vars = Object.create(null);
+  for (const stmt of cmd.split(/(?:&&|\|\||[;&|]|\n)+/)) {
+    const m = stmt.trim().match(/^(?:export\s+)?([A-Za-z_]\w*)=(.+)$/);
+    if (!m) continue;
+    let val = m[2].trim();
+    if (/[`$(]/.test(val)) continue;                          // command-subst / nested expansion → skip
+    val = val.replace(/^(['"])(.*)\1$/, '$2');                // strip matching surrounding quotes
+    if (!/\s/.test(val)) vars[m[1]] = val;                    // single-token literal only
+  }
+  // First `cd <target>` statement wins (that is where the command lands before the mutation runs).
+  for (const stmt of cmd.split(/(?:&&|\|\||[;&|]|\n)+/)) {
+    const cd = stmt.trim().match(/^cd\s+(.+)$/);
+    if (!cd) continue;
+    let target = cd[1].trim().split(/\s+/)[0];                // first arg only (ignore trailing redirs/opts)
+    target = target.replace(/^(['"])(.*)\1$/, '$2');          // strip surrounding quotes
+    const v = target.match(/^\$\{?([A-Za-z_]\w*)\}?$/);       // whole target is $VAR / ${VAR}
+    if (v) target = vars[v[1]] ?? '';
+    if (!target || /[`$(*?]/.test(target)) return reportedCwd; // still unexpanded / globby → fail safe
+    return target.startsWith('/') ? target : resolvePath(reportedCwd || '.', target);
+  }
+  return reportedCwd;
+}
+
 /** Return a deny reason for one shell segment, or null to allow. Pure. `ctx.primaryCwd` = the Bash cwd is a
  *  constellation primary checkout (computed by the CLI via isPrimaryCwd) — gates the #2302 backlog-mutation rule.
  *  `ctx.staleBehind` = how many commits the lane's HEAD sits behind its upstream (computed by the CLI via a git
@@ -164,7 +198,9 @@ if (IS_CLI) {
     // location (<workspace>/<repo>/scripts/guard-bash.mjs) and realpath both sides so a symlinked workspace
     // still matches. Fail-OPEN (leave primaryCwd=false) on any error — a guard bug must never wedge the agent.
     const rp = (p) => { try { return realpathSync(p); } catch { return p; } };
-    const cwd = rp(ev.cwd || process.cwd());
+    // #2335 — the reported cwd resets to the primary between calls; honour a leading `cd <lane>` so a genuine
+    // lane mutation isn't misread as a primary one (and the #2323 git call runs in the lane, not the primary).
+    const cwd = rp(resolveEffectiveCwd(cmd, ev.cwd || process.cwd()));
     const weRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
     const workspace = dirname(weRoot);
     const primaries = ['webeverything', 'web-everything', 'frontierui', 'plateau-app'].map((r) => rp(join(workspace, r)));

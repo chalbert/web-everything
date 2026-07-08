@@ -4,7 +4,7 @@
  *   sanctioned `MAIN_PUSH_OK=1` escape passes through. The stdin/JSON I/O is the boundary; `decide` is pure.
  */
 import { describe, it, expect } from 'vitest';
-import { decide, reason, isBacklogMutation, isPrimaryCwd, isLaneCwd } from '../guard-bash.mjs';
+import { decide, reason, isBacklogMutation, isPrimaryCwd, isLaneCwd, resolveEffectiveCwd } from '../guard-bash.mjs';
 
 describe('guard-bash — primary-cwd backlog-mutation block (#2302)', () => {
   const P = ['/ws/webeverything', '/ws/frontierui'];
@@ -73,6 +73,40 @@ describe('guard-bash — stale-lane backlog-mutation block (#2323)', () => {
   });
   it('the STALE_LANE_OK=1 override passes a stale-lane mutation through', () => {
     expect(reason('STALE_LANE_OK=1 node scripts/backlog.mjs claim 2323', { primaryCwd: false, staleBehind: 19 })).toBeNull();
+  });
+});
+
+describe('guard-bash — resolveEffectiveCwd honours a leading `cd` (#2335)', () => {
+  const PRIMARY = '/ws/webeverything';
+  const LANE = '/ws/.lanes/web-everything/lane-5';
+
+  it('resolves a literal `cd <abs-lane>` regardless of the reported (reset-to-primary) cwd', () => {
+    expect(resolveEffectiveCwd(`cd ${LANE} && node scripts/backlog.mjs claim 2335`, PRIMARY)).toBe(LANE);
+  });
+  it('resolves `cd "$LANE"` against a literal LANE=/abs assignment in the same command (the lane idiom)', () => {
+    const cmd = `LANE=${LANE}\ncd "$LANE" && STALE_LANE_OK=1 node scripts/backlog.mjs claim 2335`;
+    expect(resolveEffectiveCwd(cmd, PRIMARY)).toBe(LANE);
+  });
+  it('resolves `cd ${LANE}` brace form too', () => {
+    expect(resolveEffectiveCwd(`LANE=${LANE}; cd \${LANE} && ls`, PRIMARY)).toBe(LANE);
+  });
+  it('falls back to the reported cwd with no cd, or an unresolvable ($VAR unknown / command-subst) target', () => {
+    expect(resolveEffectiveCwd('node scripts/backlog.mjs claim 2335', PRIMARY)).toBe(PRIMARY);
+    expect(resolveEffectiveCwd('cd "$UNSET" && ls', PRIMARY)).toBe(PRIMARY);
+    expect(resolveEffectiveCwd('cd "$(mktemp -d)" && ls', PRIMARY)).toBe(PRIMARY);
+  });
+  it('a genuine primary mutation (no cd, or cd into the primary) still resolves to the primary → stays denied', () => {
+    const P = [PRIMARY];
+    const eff1 = resolveEffectiveCwd('node scripts/backlog.mjs resolve 2335', PRIMARY);
+    expect(reason('node scripts/backlog.mjs resolve 2335', { primaryCwd: isPrimaryCwd(eff1, P) })).toMatch(/must run in a LANE clone/);
+    const eff2 = resolveEffectiveCwd(`cd ${PRIMARY} && node scripts/backlog.mjs resolve 2335`, '/somewhere');
+    expect(reason('node scripts/backlog.mjs resolve 2335', { primaryCwd: isPrimaryCwd(eff2, P) })).toMatch(/must run in a LANE clone/);
+  });
+  it('the lane mutation is ALLOWED once the effective cwd is the lane (no override needed)', () => {
+    const eff = resolveEffectiveCwd(`cd ${LANE} && node scripts/backlog.mjs claim 2335`, PRIMARY);
+    expect(isPrimaryCwd(eff, [PRIMARY])).toBe(false);
+    expect(isLaneCwd(eff)).toBe(true);
+    expect(reason('node scripts/backlog.mjs claim 2335', { primaryCwd: false })).toBeNull();
   });
 });
 
