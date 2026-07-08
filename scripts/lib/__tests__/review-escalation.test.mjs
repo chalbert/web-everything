@@ -14,6 +14,8 @@ import {
   coupleEscalation,
   hasReviewLabel,
   decideReviewGate,
+  producerReviewLabel,
+  shouldApplyReviewLabel,
 } from '../review-escalation.mjs';
 
 describe('isBlastRadiusPath', () => {
@@ -168,6 +170,43 @@ describe('hasReviewLabel + REVIEW_LABELS', () => {
   it('exposes the ratified verdict labels (+ the #2285 human gate) + tuning knobs', () => {
     expect(REVIEW_LABELS).toEqual({ pending: 'review:pending', accepted: 'review:accepted', changes: 'review:changes', human: 'review:human' });
     expect(DEFAULT_THRESHOLDS.diffLines).toBeGreaterThan(0);
+  });
+});
+
+describe('producerReviewLabel — #2307 the label the PRODUCER applies at PR-open (no prior park state)', () => {
+  it('humanRequired → review:human (a gate-self edit always wins over a plain escalation)', () => {
+    expect(producerReviewLabel({ escalate: true, humanRequired: true })).toBe(REVIEW_LABELS.human);
+  });
+  it('escalate but not humanRequired → review:pending', () => {
+    expect(producerReviewLabel({ escalate: true, humanRequired: false })).toBe(REVIEW_LABELS.pending);
+  });
+  it('no escalation → null (ready-to-merge alone is enough, no review label to apply)', () => {
+    expect(producerReviewLabel({ escalate: false })).toBe(null);
+    expect(producerReviewLabel()).toBe(null);
+  });
+});
+
+describe('shouldApplyReviewLabel — #2307 the shared no-double-apply gate (producer AND drain)', () => {
+  it('no label implied → never apply', () => {
+    expect(shouldApplyReviewLabel(null, [])).toBe(false);
+    expect(shouldApplyReviewLabel(undefined, [REVIEW_LABELS.pending])).toBe(false);
+  });
+  it('a label implied but not yet on the PR → apply it (the producer at open, or the drain backstop for an older/human-pushed producer)', () => {
+    expect(shouldApplyReviewLabel(REVIEW_LABELS.pending, [])).toBe(true);
+    expect(shouldApplyReviewLabel(REVIEW_LABELS.human, ['some-other-label'])).toBe(true);
+  });
+  it('a label implied that the PR ALREADY carries → do not re-apply (no double-apply)', () => {
+    expect(shouldApplyReviewLabel(REVIEW_LABELS.pending, [REVIEW_LABELS.pending])).toBe(false);
+    expect(shouldApplyReviewLabel(REVIEW_LABELS.human, [{ name: REVIEW_LABELS.human }])).toBe(false);
+  });
+  it('a PRE-LABELLED PR is still treated as already-scored by decideReviewGate (the park is honoured, just not re-applied)', () => {
+    // The producer already applied review:pending at open; a later drain pass re-scores fresh (the idempotent
+    // backstop) and decideReviewGate STILL parks it (the verdict doesn't change just because it's labelled) —
+    // but shouldApplyReviewLabel says there is nothing new to DO about it.
+    const gate = decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.pending], parkedSinceMs: null });
+    expect(gate.action).toBe('park');
+    expect(gate.applyLabel).toBe(REVIEW_LABELS.pending);
+    expect(shouldApplyReviewLabel(gate.applyLabel, [REVIEW_LABELS.pending])).toBe(false);
   });
 });
 

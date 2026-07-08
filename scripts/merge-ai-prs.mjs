@@ -90,7 +90,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve, join } from 'node:path';
 import { rebaseDropManifest, gitRunner } from './lib/rebase-drop-manifest.mjs';
 import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
-import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason } from './lib/review-escalation.mjs';
+import { scoreEscalation, decideReviewGate, REVIEW_LABELS, REVIEW_LABEL_META, buildEscalationReasonBlock, bodyHasEscalationReason, shouldApplyReviewLabel } from './lib/review-escalation.mjs';
 import { emptyParkState, parseParkState, serializeParkState, getParkedSinceMs, recordParked, clearParked } from './lib/review-park-state.mjs';
 import { mergePr, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { DERIVED_REGEN, DERIVED_OUTPUT_PATHS, numberPendingHashes } from './lane-drain.mjs';
@@ -860,8 +860,15 @@ function runCli() {
       if (gate.action === 'park' || gate.action === 'wait-author') {
         v.decision = 'skip';
         v.reason = gate.reason + (score.reasons.length ? ` [${score.reasons.join('; ')}]` : '');
+        // #2307 — a PR the PRODUCER already labelled at PR-open (or a prior drain pass already caught) is
+        // already-scored: this pass is an idempotent backstop/reconcile, not the first applier, so skip the
+        // redundant `gh pr edit --add-label` call when the verdict label is already present (never a
+        // double-apply). `shouldApplyReviewLabel` is the SAME shared gate `pr-land.mjs` uses at open, so
+        // producer- and drain-applied verdicts can never drift on what "already labelled" means.
         if (gate.applyLabel && !DRY_RUN) {
-          try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+          if (shouldApplyReviewLabel(gate.applyLabel, v.prLabels)) {
+            try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+          }
           // #2313 — stamp the WHY + what-to-look-for onto the PR itself, not only this log line below.
           const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason);
           if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} escalation reason stamped on PR\n`);
