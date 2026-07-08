@@ -2,8 +2,11 @@
 kind: story
 size: 5
 parent: "2285"
-status: open
+status: resolved
 dateOpened: "2026-07-07"
+dateStarted: "2026-07-08"
+dateResolved: "2026-07-08"
+graduatedTo: "we:scripts/lib/review-core.mjs"
 tags: [review, drain, dry, agent]
 ---
 
@@ -44,3 +47,20 @@ allowed to clear what — that policy stays with each caller (the drain owns its
   `/code-review` re-point.
 
 Blocks: `#2326`.
+
+## Resolution note (2026-07-08)
+
+Landed the canonical contract in `we:scripts/lib/review-core.mjs` (`Finding` shape, `VERDICTS`,
+`normalizeFinding(s)`, `deriveVerdict`, `buildMandate`) — unit-tested on fixtures in
+`we:scripts/lib/__tests__/review-core.test.mjs`. `deriveVerdict` is the accept/changes/needs-human
+derivation the drain needs (superset of `/code-review`'s findings-only output today); `humanRequired` always
+wins (mirrors the `#2285` conflict-of-interest invariant in `we:scripts/lib/review-escalation.mjs`, which is
+otherwise untouched — policy stays with the caller).
+
+Scope note on the `/code-review` re-point bullet: `/code-review` is Claude Code's own built-in review skill
+with **no source in this repo** — there is nothing here to import the module into or "re-point." What's
+wired instead: `we:docs/agent/platform-decisions.md`'s pre-PR-review rider (the in-repo seam that already
+documents itself as "the `/code-review` model") now cites this module as the canonical shape every reviewer
+here renders into, and `we:skills-src/drain/SKILL.md`'s auto-review section carries a cross-reference to it
+(its actual re-point + prose deletion still rides `#2326`, unchanged from the original scope). `/review`
+(`#2326`) and the drain re-point (`#2326`) are the first real callers.
