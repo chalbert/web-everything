@@ -2080,6 +2080,30 @@ export function duplicateBacklogNums(items = []) {
   return errors;
 }
 
+/**
+ * #2319 — hash-on-main invariant. Under JIT numbering (#2288) a new item is born with a provisional hash id
+ * (`xNNNNNN`) and the drain mints its real NNN AT LAND (`numberPendingHashes`). So a `backlog/<id>-*.md` on
+ * `origin/main` whose leading id is NON-numeric means a land route bypassed numbering (e.g. `pr-land
+ * --fallback-git`'s local-merge degrade, per #2322) and stranded a hash. This is DISTINCT from the duplicate-NNN
+ * detector (`duplicateBacklogNums`, #2248/#2291): a LONE unique hash is not a collision, so that check misses it
+ * entirely. Pure + unit-tested — takes the `backlog/*.md` paths present ON MAIN (a git ls-tree, so in-lane
+ * pre-land hashes that live only on a `lane/*` branch never false-trip). Fix a fire with
+ * `node scripts/backlog.mjs number-stranded`.
+ * @param {string[]} mainBacklogPaths  `backlog/<id>-slug.md` paths tracked on origin/main
+ * @returns {string[]} one error per stranded hash (empty when every id on main is numeric)
+ */
+export function strandedHashesOnMain(mainBacklogPaths = []) {
+  const errors = [];
+  for (const p of mainBacklogPaths) {
+    const m = String(p).match(/(?:^|\/)backlog\/([^/]+?)-[^/]*\.md$/);
+    if (!m) continue;
+    const lead = m[1];
+    if (!/^\d+$/.test(lead))
+      errors.push(`Backlog file "${p}" is on main with a NON-NUMERIC leading id "${lead}" — a land route bypassed JIT numbering (#2288) and stranded a hash (#2319). Number it: \`node scripts/backlog.mjs number-stranded\` (distinct from a duplicate NNN — a lone hash isn't a collision).`);
+  }
+  return errors;
+}
+
 export const DERIVED_ARTIFACT_DIRS = [
   'reports/',
   'src/_data/researchTopics/',

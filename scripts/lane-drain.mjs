@@ -414,7 +414,7 @@ const LEDGER_REL = '.claude/skills/batch-backlog-items/id-ledger.json';
  * already-numbered blocker by its old hash. Commits the rename+rewrites in ONE scoped commit; the caller
  * publishes. Best-effort like the rest of the reconcile: a failure is reported, the land stands.
  */
-export function numberPendingHashes(CWD) {
+export function numberPendingHashes(CWD, { dryRun = false } = {}) {
   const BL = join(CWD, 'backlog');
   let stems;
   try { stems = readdirSync(BL).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, '')); }
@@ -464,6 +464,8 @@ export function numberPendingHashes(CWD) {
   }
 
   const { renames, rewrites } = applyLedger(files, ledger);
+  // #2319 — `number-stranded --dry-run`: report the planned mapping + renames without touching the tree/index.
+  if (dryRun) return { assigned, committed: false, dryRun: true, renamed: renames.map((r) => r.to), wouldRename: renames.map((r) => ({ from: r.from, to: r.to })) };
   const rewriteByName = new Map(rewrites.map((r) => [r.name, r.content]));
   const renameFroms = new Set(renames.map((r) => r.from));
   // A rename is `git rm OLD` + write-to-NEW (NOT `git mv`): a scoped `git commit -- <paths>` is pathspec
