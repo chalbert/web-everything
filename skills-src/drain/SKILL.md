@@ -133,6 +133,11 @@ queue until a human gets to it. **v1 makes the drain run that independent review
 the PRs where an agent reviewer is genuinely independent of the *producer*. The one invariant it preserves:
 **a landed PR was accepted by an agent that did not author it.**
 
+> The `{findings, verdict}` shape below (accept/changes, #2285's `humanRequired` → `review:human`) is the
+> canonical contract in `we:scripts/lib/review-core.mjs` (#2325) — the same one `/code-review`-shaped
+> reviewers and the future `/review` skill render into. This section still spawns its own raw `Agent` call
+> prose (the re-point onto the shared core rides `#2326`, which also deletes this duplicate description).
+
 The lander classifies each parked PR (see `we:scripts/lib/review-escalation.mjs` `isGateSelfPath`) and emits it
 in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons }`:
 
