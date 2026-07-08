@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -526,5 +526,43 @@ describe('syncPrimaryOnLand — post-land primary ff-sync decision (#xwokc1n, PR
     const g = fakeGit({ [`-C ${P} rev-parse --abbrev-ref HEAD`]: { throw: 'not a git repo' } });
     const r = syncPrimaryOnLand({ exec: g.exec, primary: P });
     expect(r).toMatchObject({ synced: false, reason: 'not-a-repo', warn: true });
+  });
+});
+
+describe('drain reason comment (#2313 — stamp park/skip reasons onto the PR, not only the log)', () => {
+  it('buildDrainReasonComment prefixes a kind-specific marker the dedupe check can find', () => {
+    const body = buildDrainReasonComment('park', 'blast-radius (scripts/foo.mjs)');
+    expect(body.startsWith(drainReasonMarker('park'))).toBe(true);
+    expect(body).toContain('blast-radius (scripts/foo.mjs)');
+    expect(body).toContain('Parked for review');
+  });
+
+  it('skip comments use a distinct marker from park comments', () => {
+    expect(drainReasonMarker('skip')).not.toBe(drainReasonMarker('park'));
+    const body = buildDrainReasonComment('skip', 'not mergeable (mergeable=CONFLICTING)');
+    expect(body.startsWith(drainReasonMarker('skip'))).toBe(true);
+    expect(body).toContain('Skipped by the drain');
+  });
+
+  it('hasDrainReasonComment finds an identical prior post (dedup — a --watch loop never reposts unchanged)', () => {
+    const reason = 'required check "test" is not green';
+    const comments = [{ body: buildDrainReasonComment('skip', reason) }];
+    expect(hasDrainReasonComment(comments, 'skip', reason)).toBe(true);
+  });
+
+  it('hasDrainReasonComment is false when the reason text changed (posts fresh)', () => {
+    const comments = [{ body: buildDrainReasonComment('skip', 'not mergeable (mergeable=CONFLICTING)') }];
+    expect(hasDrainReasonComment(comments, 'skip', 'required check "test" is not green')).toBe(false);
+  });
+
+  it('hasDrainReasonComment is false across kinds (a park comment does not dedupe a skip comment)', () => {
+    const reason = 'escalated — awaiting an independent review (review:pending)';
+    const comments = [{ body: buildDrainReasonComment('park', reason) }];
+    expect(hasDrainReasonComment(comments, 'skip', reason)).toBe(false);
+  });
+
+  it('hasDrainReasonComment tolerates a missing/odd comments shape', () => {
+    expect(hasDrainReasonComment(undefined, 'park', 'x')).toBe(false);
+    expect(hasDrainReasonComment([{ body: null }], 'park', 'x')).toBe(false);
   });
 });

@@ -2,8 +2,9 @@
 kind: story
 size: 2
 relatedTo: ["2285", "2262", "2171"]
-status: open
+status: resolved
 dateOpened: "2026-07-06"
+dateResolved: "2026-07-08"
 tags: [drain, review-escalation, human-review, surfacing]
 ---
 
