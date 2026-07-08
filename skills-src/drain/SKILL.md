@@ -103,7 +103,11 @@ status:running` run remains** AND the **ready-to-merge queue is empty** AND **no
 over `--batch-idle-debounce` passes (default 2). It reads the running-batch signal from the active-progress feed
 (`_site/active-progress.json`, written by `scripts/dev/active-progress-watch.mjs`); an **absent/stale feed ⇒
 keep watching, never a false stop**. The feed only exists while that dev watcher runs, so for a drain-only
-session point `--batch-feed=<path>` at the primary checkout's copy (else the drain harmlessly runs unbounded).
+session point `--batch-feed=<path>` at the primary checkout's copy (else the drain harmlessly runs unbounded —
+it now prints a one-time note when the feed is absent so the inert degrade is visible). Before honoring the
+exit the drain **re-polls once** to confirm the ready-to-merge queue is genuinely empty (the last PR's label
+can lag the producer's resolve — the #2230 defense, so the final PR is never dropped). Keep
+`--batch-feed-stale-sec` (default 30s) comfortably above the watcher's ~4s write cadence.
 *(Design note carried from the #2330 review: the feed is a dev-only, website-facing artifact — a later
 refinement should read the batch journals directly to drop that coupling; the exit contract above is unchanged.)*
 

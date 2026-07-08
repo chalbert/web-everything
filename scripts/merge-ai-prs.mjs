@@ -585,6 +585,10 @@ function runCli() {
   // `scripts/dev/active-progress-watch.mjs` (which must be running for the signal to exist — a drain-only
   // session should point `--batch-feed` at the primary checkout's copy). Absent/stale ⇒ the watch keeps polling.
   const BATCH_FEED = typeof flags['batch-feed'] === 'string' ? flags['batch-feed'] : join(resolve(dirname(fileURLToPath(import.meta.url)), '..'), '_site', 'active-progress.json');
+  // #2330 review (3) — `--batch-feed-stale-sec` should comfortably EXCEED the dev watcher's write cadence
+  // (active-progress-watch writes ~every 4s) so a fresh-but-quiet feed never reads as stale (that direction is
+  // safe — it keeps watching — but defeats the exit). The 30s default clears the 4s cadence with wide margin;
+  // it is independent of `--interval` (they merely share a 30s default value).
   const BATCH_FEED_STALE_MS = (Number.isFinite(Number(flags['batch-feed-stale-sec'])) && Number(flags['batch-feed-stale-sec']) > 0 ? Number(flags['batch-feed-stale-sec']) : 30) * 1000;
   // #2198 — rebase-drop the shared `.lane-manifest.json` on land (ON by default; `--no-rebase-drop` disables).
   const REBASE_DROP = flags['no-rebase-drop'] ? false : true;
@@ -1198,6 +1202,7 @@ function runCli() {
   const allMerged = [];
   let idle = 0;
   let batchNonRunningStreak = 0; // #2330 — consecutive passes the feed is KNOWN and reports no running batch
+  let batchFeedAbsentWarned = false; // #2330 — emit the "feed absent ⇒ inert" note at most once
   let lastFailed = [];
   let lastDup = [];
   for (let pass = 1; ; pass++) {
@@ -1221,10 +1226,39 @@ function runCli() {
     // feed; an absent/stale feed leaves the streak at 0 so it can never trigger a false stop (keep watching).
     if (UNTIL_BATCHES_IDLE) {
       const feed = readBatchFeed(BATCH_FEED, { staleMs: BATCH_FEED_STALE_MS });
+      // #2330 review (2) — a drain-only session usually has NO feed at the default path (it lives in the primary),
+      // so `--until-batches-idle` is silently inert (runs unbounded). Surface that ONCE so the degrade is visible.
+      if (!feed.known && !batchFeedAbsentWarned && !AS_JSON) {
+        batchFeedAbsentWarned = true;
+        process.stderr.write(`  · batch feed ${feed.reason || 'unavailable'} at ${BATCH_FEED} — --until-batches-idle is INERT (running unbounded until Ctrl-C). Point --batch-feed at the primary checkout's _site/active-progress.json.\n`);
+      }
       batchNonRunningStreak = feed.known && feed.running.length === 0 ? batchNonRunningStreak + 1 : 0;
       if (decideBatchesIdleExit({ enabled: true, idlePass, considered: result.considered, batchNonRunningStreak, debounce: BATCH_DEBOUNCE })) {
-        if (!AS_JSON) process.stderr.write(`watch: STOPPING — active batch idle (no running batch for ${batchNonRunningStreak} pass(es), queue empty) — batch fully delivered.\n`);
-        break;
+        // #2330 review (1) — the queue-empty signal (`considered === 0`) rides the SAME lagging label index
+        // #2230 guards: after the producer resolves the LAST item its reservation drops (feed → non-running)
+        // promptly, but that item's `ready-to-merge` label can stay invisible to `gh pr list --label` for
+        // minutes. Without a confirm, the debounced streak + a stale-empty queue would exit and DROP the batch's
+        // final PR. So re-poll ONCE (same defense as the one-shot path) and only exit if the queue is STILL empty.
+        if (!AS_JSON) process.stderr.write(`  · batch idle + queue empty — confirming in ${REPOLL_SEC}s (label index may lag the final PR's label)…\n`);
+        sleepSync(REPOLL_SEC * 1000);
+        const confirm = sweepOnce();
+        passes.push(confirm.result);
+        allMerged.push(...confirm.merged);
+        lastFailed = confirm.failedMerges;
+        lastDup = confirm.duplicateIdsOnMain || [];
+        if (lastDup.length) {
+          if (!AS_JSON) process.stderr.write(`watch: STOPPING — duplicate id(s) survive on main (${summarizeDuplicates(lastDup)}); resolve by hand then re-run the drain.\n`);
+          break;
+        }
+        const confirmedEmpty = confirm.result.considered === 0 && confirm.merged.length === 0 && confirm.deferred.length === 0 && confirm.pendingRebased.length === 0;
+        if (confirmedEmpty) {
+          if (!AS_JSON) process.stderr.write(`watch: STOPPING — active batch idle, queue confirmed empty after repoll — batch fully delivered.\n`);
+          break;
+        }
+        // The repoll surfaced late work (a lagging label became visible / a PR landed) — do NOT exit; the label
+        // lag has cleared, so reset the streak and keep watching so the final PR gets landed on a later pass.
+        batchNonRunningStreak = 0;
+        if (!AS_JSON) process.stderr.write(`  · repoll surfaced ${confirm.result.considered} candidate(s), merged ${confirm.merged.length} — label lag cleared; continuing watch.\n`);
       }
     }
     if (!AS_JSON) process.stderr.write(`  … pass ${pass}: merged ${merged.length}, deferred ${deferred.length}${idlePass ? ` (idle ${idle}${MAX_IDLE != null ? `/${MAX_IDLE}` : ''})` : ''}${UNTIL_BATCHES_IDLE ? ` [batch-idle ${batchNonRunningStreak}/${BATCH_DEBOUNCE}]` : ''} — next poll in ${INTERVAL}s\n`);
