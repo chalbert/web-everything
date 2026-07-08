@@ -214,7 +214,9 @@ export function mergeMethodFlag(method) {
  *  HEADLESS-SAFE (#2176): the argv must NEVER be title-only. A bare `gh pr create --title …` (no `--body`,
  *  no `--fill`) drops into an interactive body prompt and, run headless, errors "Command failed". So when a
  *  title is present but no body is given, we pass an explicit empty `--body ""` — never `--fill` (unusable
- *  for a remote-only lane/* head). Result: the create is always non-interactive. */
+ *  for a remote-only lane/* head). Result: the create is always non-interactive. (#2332: the CLI create path
+ *  now REFUSES a bodyless open upstream via `prCreateBodyGuard`, so this empty-body branch is only ever
+ *  reached by the dry-run plan render, never by a real `gh pr create`.) */
 export function buildCreateArgs({ base, head, title, body }) {
   const args = ['pr', 'create', '--base', base, '--head', head];
   if (title != null) args.push('--title', title);
@@ -223,6 +225,20 @@ export function buildCreateArgs({ base, head, title, body }) {
   else if (title != null) args.push('--body', '');
   if (title == null && body == null) args.push('--fill');
   return args;
+}
+
+/**
+ * #2332 — producer fail-fast: NEVER open a bodyless PR. An empty-body PR passes the producer, but the #2324
+ * drain-side gate then REFUSES to LAND it, stalling the queue until a human hand-fills the body (observed
+ * 2026-07-08: #2226/PR #222 opened bodyless, blocking the drain). #2324 fixed only the consumer-side refusal;
+ * this is the missing producer-side prevention. The producer requires a non-empty `--body-file`/`--body` AT
+ * OPEN and fails fast where the omission is — never emitting a PR that stalls a later drain and needs manual
+ * repair. Guards the CREATE path ONLY: a re-run against an already-open PR is exempt (its body already exists).
+ * Pure decision; the CLI turns `ok:false` into a fail-fast emit BEFORE `gh pr create`. */
+export function prCreateBodyGuard(body) {
+  return hasNonEmptyBody(body)
+    ? { ok: true }
+    : { ok: false, reason: 'refusing to open a bodyless PR — pass --body-file=<path> (or --body) with a non-empty body (#2332: the #2324 drain gate rejects an empty body at land, stalling the queue)' };
 }
 
 /** Build the `gh pr merge` args — the drain merges ONE PR (not --auto on a native queue), deleting the
@@ -448,7 +464,7 @@ function runCli() {
       plan: [
         `git push ${REMOTE} ${SRC}:refs/heads/${REF}   # publish the lane clone's ${SRC} (${refSha.slice(0, 8)}) to the lane ref`,
         HEAL ? `pre-check: id-collision heal (renumber a lane new-item that reuses a ${BASE} id to a free GAP id, rebuild ${REF}) (#2222)` : '(--no-heal: skip pre-check id-collision heal)',
-        `gh ${createArgs.join(' ')}`,
+        prCreateBodyGuard(BODY).ok ? `gh ${createArgs.join(' ')}` : `REFUSE (if no PR exists yet): ${prCreateBodyGuard(BODY).reason}  # #2332 fail-fast — an existing PR for this head is exempt`,
         PLAN.waitForChecks ? 'poll: gh pr view <pr> mergeStateStatus + gh pr checks <pr> --required  (wait until green; abort on red)' : '(--no-wait: skip check-wait, leave for a later drain pass)',
         // #2199 — the label is applied ONLY after the required checks are green, never eagerly at open.
         LABEL && PLAN.labelWhenGreen ? `gh pr edit <pr> --add-label ${LABEL}   # #2196 label — applied ONLY once required checks pass (#2199)` : (PLAN.mode === 'open-only' ? '(--no-wait: PR opened UNLABELLED — CI not confirmed green; use --label-on-green)' : '(--no-label)'),
@@ -491,6 +507,10 @@ function runCli() {
   let prNum = null;
   try { prNum = JSON.parse(ghC(['pr', 'list', '--head', REF, '--state', 'open', '--json', 'number']))?.[0]?.number ?? null; } catch { /* gh may be absent */ }
   if (prNum == null) {
+    // #2332 — fail fast BEFORE creating: never open a bodyless PR (the #2324 drain gate would refuse to land
+    // it, stalling the queue for a human to hand-fill the body). Create-path only — an existing PR is exempt.
+    const bodyGuard = prCreateBodyGuard(BODY);
+    if (!bodyGuard.ok) emit({ repo: REPO, merged: false, reason: 'empty-body', detail: `${bodyGuard.reason} (head ${REF})` }, 3);
     try { const out = ghC(createArgs); prNum = (out.match(/\/pull\/(\d+)/) || [])[1] ?? null; }
     catch (e) { return ghFailed(`gh pr create failed (${String(e.message || e).split('\n')[0]})`); }
   }
