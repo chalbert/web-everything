@@ -14,11 +14,17 @@
  *   • `git push` to a constellation `main` branch — strict lane-only enforcement (#2203): every change
  *     reaches main through a `lane/*` ref → PR → CI, so a DIRECT push bypasses the gate (observed
  *     2026-07-03: an ungated direct push landed a check:standards error on main). Escape: `MAIN_PUSH_OK=1`.
+ *   • a backlog item-mutation (claim/scaffold/…) run in a lane clone whose HEAD is BEHIND origin/main —
+ *     a stale checkout runs stale `scripts/` against a stale backlog view (observed 2026-07-07: a lane
+ *     19 commits behind ran the pre-#2288 "next free NNN" allocator and minted a colliding/low-gap
+ *     number, #2323). Refuse and tell the caller to refresh (`git fetch && git reset --hard origin/main
+ *     && git clean -fd`) rather than silently proceeding. Escape: `STALE_LANE_OK=1`.
  *
  * Input: PreToolUse JSON on stdin. Output: a deny decision (JSON) when blocked; nothing otherwise.
  * Fails open on unparseable input. The pure `reason`/`decide` are unit-tested (guard-bash.test.mjs).
  */
 import { readFileSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname, join } from 'node:path';
 
@@ -49,9 +55,17 @@ export function isPrimaryCwd(cwd, primaries = []) {
   return primaries.some((p) => p && (c === p || c.startsWith(p.endsWith('/') ? p : p + '/')));
 }
 
+/** Is `cwd` inside a pool lane clone (`~/workspace/.lanes/<repo>/lane-N/…`)? Pure — string test only, no
+ *  git call (the CLI does the actual "how far behind" git call and passes the count in via ctx). */
+export function isLaneCwd(cwd) {
+  return !!cwd && String(cwd).includes('/.lanes/');
+}
+
 /** Return a deny reason for one shell segment, or null to allow. Pure. `ctx.primaryCwd` = the Bash cwd is a
- *  constellation primary checkout (computed by the CLI via isPrimaryCwd) — gates the #2302 backlog-mutation rule. */
-export function reason(segment, { primaryCwd = false } = {}) {
+ *  constellation primary checkout (computed by the CLI via isPrimaryCwd) — gates the #2302 backlog-mutation rule.
+ *  `ctx.staleBehind` = how many commits the lane's HEAD sits behind its upstream (computed by the CLI via a git
+ *  call — kept out of this pure function so it stays unit-testable with a plain number) — gates the #2323 rule. */
+export function reason(segment, { primaryCwd = false, staleBehind = 0 } = {}) {
   const s = segment.trim();
   if (!s) return null;
 
@@ -61,6 +75,13 @@ export function reason(segment, { primaryCwd = false } = {}) {
   // Only fires when cwd is a primary (a lane clone is allowed). Sanctioned override: prefix BACKLOG_MUTATE_OK=1.
   if (primaryCwd && isBacklogMutation(s) && !/\bBACKLOG_MUTATE_OK=1\b/.test(s))
     return 'Backlog item-mutations (claim/resolve/scaffold/settle/retype/yield/prepare-stamp) must run in a LANE clone, not the primary checkout — running backlog.mjs here mutates the item on primary and bypasses lane isolation (#2302/#104). cd into your lane clone (~/workspace/.lanes/<repo>/lane-N) and run it there. Sanctioned override (rare): prefix `BACKLOG_MUTATE_OK=1`.';
+
+  // #2323 — a backlog item-mutation run in a lane clone that is BEHIND its upstream runs STALE `scripts/`
+  // against a STALE backlog view: a pool lane handed out N commits behind origin/main once ran the pre-#2288
+  // "next free NNN" allocator and minted a colliding/low-gap number. Only fires when cwd is a lane (never a
+  // primary — that path is already denied above) AND the CLI found it behind. Sanctioned override: STALE_LANE_OK=1.
+  if (!primaryCwd && staleBehind > 0 && isBacklogMutation(s) && !/\bSTALE_LANE_OK=1\b/.test(s))
+    return `This lane clone is ${staleBehind} commit(s) behind origin/main — a mutation here would run STALE scripts/ against a STALE backlog view and can mint a colliding/wrong NNN (#2323). Refresh first: \`git fetch origin --prune && git reset --hard origin/main && git clean -fd\`. Sanctioned override (rare): prefix \`STALE_LANE_OK=1\`.`;
   // The command word(s) of this segment, after stripping leading env-assignments / sudo — so we match
   // actual INVOCATIONS (anchored at command position), not mentions buried in a quoted arg like a commit
   // message. `git commit -m "...pkill vite..."` has command `git`, so the pkill rule no longer fires.
@@ -106,7 +127,7 @@ export function reason(segment, { primaryCwd = false } = {}) {
 }
 
 /** First deny reason across a command's `&&`/`|`/`;`-separated segments, or null. Pure. `ctx` is passed to
- *  each `reason` call (carries `primaryCwd` for the #2302 rule). */
+ *  each `reason` call (carries `primaryCwd` for the #2302 rule and `staleBehind` for the #2323 rule). */
 export function decide(command, ctx = {}) {
   if (!command) return null;
   for (const seg of String(command).split(/(?:&&|\|\||[;&|]|\n)+/)) {
@@ -116,11 +137,26 @@ export function decide(command, ctx = {}) {
   return null;
 }
 
+// #2323 — how many commits is `cwd`'s HEAD behind its upstream (`@{u}`)? Impure (a git call), so it lives in
+// the CLI section, not the pure `reason`/`decide` — those stay unit-testable with a plain ctx.staleBehind
+// number. A lane clone's local branch tracks `origin/<branch>` from its initial `checkout -B` (lane-pool.mjs
+// cloneLane), so `@{u}` resolves there without hardcoding a branch name. Fails OPEN (0) on any error — no
+// upstream configured, not a git repo, network hiccup on the fetch this reads (stale local knowledge is still
+// informative, we don't fetch here) — a guard bug or an unusual checkout must never wedge the agent.
+function commitsBehindUpstream(cwd) {
+  try {
+    return Number(execFileSync('git', ['rev-list', '--count', 'HEAD..@{u}'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 // ── CLI: read the PreToolUse event, emit a deny decision when blocked ──────────────────────────────────
 const IS_CLI = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (IS_CLI) {
   let cmd = '';
   let primaryCwd = false;
+  let staleBehind = 0;
   try {
     const ev = JSON.parse(readFileSync(0, 'utf8'));
     cmd = (ev.tool_input || {}).command || '';
@@ -133,8 +169,11 @@ if (IS_CLI) {
     const workspace = dirname(weRoot);
     const primaries = ['webeverything', 'web-everything', 'frontierui', 'plateau-app'].map((r) => rp(join(workspace, r)));
     primaryCwd = isPrimaryCwd(cwd, primaries);
+    // #2323 — only pay for the git call when it could possibly matter: a lane cwd about to run a
+    // backlog-mutation command. Every other Bash call (the overwhelming majority) skips it entirely.
+    if (!primaryCwd && isLaneCwd(cwd) && isBacklogMutation(cmd)) staleBehind = commitsBehindUpstream(cwd);
   } catch { process.exit(0); }
-  const r = decide(cmd, { primaryCwd });
+  const r = decide(cmd, { primaryCwd, staleBehind });
   if (r) {
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Blocked: ' + r },

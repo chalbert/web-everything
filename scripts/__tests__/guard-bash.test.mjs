@@ -4,7 +4,7 @@
  *   sanctioned `MAIN_PUSH_OK=1` escape passes through. The stdin/JSON I/O is the boundary; `decide` is pure.
  */
 import { describe, it, expect } from 'vitest';
-import { decide, reason, isBacklogMutation, isPrimaryCwd } from '../guard-bash.mjs';
+import { decide, reason, isBacklogMutation, isPrimaryCwd, isLaneCwd } from '../guard-bash.mjs';
 
 describe('guard-bash — primary-cwd backlog-mutation block (#2302)', () => {
   const P = ['/ws/webeverything', '/ws/frontierui'];
@@ -44,6 +44,35 @@ describe('guard-bash — primary-cwd backlog-mutation block (#2302)', () => {
     expect(reason('node scripts/backlog.mjs prepare-stamp 2264', { primaryCwd: false })).toBeNull(); // in a lane → allowed
     for (const v of ['prepare-hold', 'prepare-release'])
       expect(reason(`node scripts/backlog.mjs ${v} 2264`, { primaryCwd: true })).toBeNull(); // local token, not a mutation
+  });
+});
+
+describe('guard-bash — stale-lane backlog-mutation block (#2323)', () => {
+  it('isLaneCwd: a `.lanes/` path is a lane clone; a primary or unrelated path is not', () => {
+    expect(isLaneCwd('/ws/.lanes/web-everything/lane-1')).toBe(true);
+    expect(isLaneCwd('/ws/.lanes/web-everything/lane-12/scripts')).toBe(true);
+    expect(isLaneCwd('/ws/webeverything')).toBe(false);
+    expect(isLaneCwd('/ws/some-other-repo')).toBe(false);
+    expect(isLaneCwd(undefined)).toBe(false);
+  });
+  it('denies a claim/resolve/scaffold in a lane whose HEAD is behind its upstream', () => {
+    const cmd = 'node scripts/backlog.mjs claim 2323';
+    expect(reason(cmd, { primaryCwd: false, staleBehind: 19 })).toMatch(/19 commit\(s\) behind origin\/main/);
+    expect(reason(cmd, { primaryCwd: false, staleBehind: 1 })).toMatch(/behind origin\/main/);
+  });
+  it('allows the same mutation once the lane is caught up (staleBehind: 0, the default)', () => {
+    expect(reason('node scripts/backlog.mjs claim 2323', { primaryCwd: false, staleBehind: 0 })).toBeNull();
+    expect(reason('node scripts/backlog.mjs claim 2323', { primaryCwd: false })).toBeNull(); // default ctx
+  });
+  it('never fires from a primary cwd — that path is already denied by the #2302 rule instead', () => {
+    // primaryCwd:true wins the #2302 message even if a stale count were (incorrectly) supplied.
+    expect(reason('node scripts/backlog.mjs claim 2323', { primaryCwd: true, staleBehind: 19 })).toMatch(/must run in a LANE clone/);
+  });
+  it('does not fire on a non-mutation verb, even when stale', () => {
+    expect(reason('node scripts/backlog.mjs reserve 2323 --session=s', { primaryCwd: false, staleBehind: 19 })).toBeNull();
+  });
+  it('the STALE_LANE_OK=1 override passes a stale-lane mutation through', () => {
+    expect(reason('STALE_LANE_OK=1 node scripts/backlog.mjs claim 2323', { primaryCwd: false, staleBehind: 19 })).toBeNull();
   });
 });
 
