@@ -53,7 +53,8 @@
   var table = document.querySelector('table.sortable');
   if (!table) return;
   var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
-  // Live accessors — always re-query so post-upgrade <button> elements are included.
+  // Live accessors — the #2028 persistent-host base (#2122) also copies data-p* attrs onto the wrapped
+  // inner <button>, so document.querySelectorAll matches both host and child under the same selector.
   function readyChips() { return Array.prototype.slice.call(document.querySelectorAll('[data-pready]')); }
   function kindChips()  { return Array.prototype.slice.call(document.querySelectorAll('[data-pkind]')); }
   // `splittable` is an ORTHOGONAL facet, not a readiness value — a split candidate (story · size > 8) is
@@ -66,8 +67,7 @@
   // decision, epics…), not just Tier-A filler — and decrement each summary pill's count (see updateCounts
   // in apply()). AND-composes with the facet chips.
   function fillerChip() { return document.querySelector('[data-pfiller]'); }
-  // Live accessor — the summary pills are <we-filter-chip> too, so they self-replace with a <button> on
-  // upgrade; a cached reference goes stale (its listeners and our style writes hit a detached node).
+  // Live accessor — the summary pills are <we-filter-chip> too (see readyChips above).
   function splitSummaryEl() { return document.querySelector('[data-psplitfilter]'); }
   var search = document.querySelector('[data-ptable-search]');
   var countEl = document.querySelector('[data-ptable-count]');
@@ -205,7 +205,6 @@
 
   // Summary count chips (data-pfilter) are one-click shortcuts that drive the readiness filter. Manually
   // touching a filter chip / search clears their "active" highlight so it never lies about the state.
-  // Live accessor (not a cached array) for the same upgrade-survives reason as the readiness chips.
   function summaryChips() { return Array.prototype.slice.call(document.querySelectorAll('[data-pfilter]')); }
   function clearSummary() {
     summaryChips().forEach(function (s) { s.setAttribute('aria-pressed', 'false'); s.style.boxShadow = ''; });
@@ -224,10 +223,9 @@
     // Only an explicit full clear (the empty-state "Clear filters") resets it; see that handler.
   }
 
-  // Delegate click to document so the handler survives the we-filter-chip transient upgrade:
-  // FilterChipElement replaces itself with a native <button>, which would drop direct per-chip
-  // listeners. A delegated handler on document catches clicks on both the original element and
-  // the upgraded <button> (they share the same data-* attribute).
+  // Delegate click to document (one listener for every chip, present or future) rather than wiring each
+  // chip individually. A click on the wrapped inner <button> still matches here: the #2028 persistent-host
+  // base copies data-p* attrs onto that child too, so closest() finds a match at the click target itself.
   document.addEventListener('click', function (e) {
     var t = e.target.closest('[data-pready],[data-pkind],[data-psplit],[data-pfiller]');
     if (!t) return;
@@ -238,10 +236,7 @@
   if (search) search.addEventListener('input', function () { clearSummary(); apply(); });
 
   // The summary pills (data-pfilter shortcuts and the data-psplitfilter "N to split" pill) are
-  // <we-filter-chip>s that self-replace with a <button> on upgrade, so per-element listeners attached up
-  // front would die the moment the FUI module loads — that's why clicking a count pill stopped filtering.
-  // Delegate on document (like the readiness/kind/split chips) so the handler catches both the original
-  // element and its upgraded <button>.
+  // <we-filter-chip>s too — delegate on document (same reason as the readiness/kind/split chips above).
   document.addEventListener('click', function (e) {
     // The "N to split" summary pill — reset the groups to "all", then turn the split toggle on so the
     // table isolates exactly the split candidates (any tier). Clicking it again clears.
@@ -284,17 +279,4 @@
 
   restore();
   apply();
-
-  // Re-sync after we-filter-chip elements upgrade to <button> (FilterChipElement transient self-replace).
-  // The upgrade fires asynchronously (after the FUI cross-origin module loads), resetting aria-pressed to
-  // the static HTML default (decorate() derives it from the `selected` attr, ignoring any JS-set value).
-  // The observer detects the new <button> nodes and re-runs restore()+apply() so localStorage state wins.
-  (new MutationObserver(function (mutations) {
-    var hasChipChange = mutations.some(function (m) {
-      return Array.prototype.some.call(m.addedNodes, function (n) {
-        return n.nodeType === 1 && (n.hasAttribute('data-pready') || n.hasAttribute('data-pkind') || n.hasAttribute('data-psplit') || n.hasAttribute('data-pfiller'));
-      });
-    });
-    if (hasChipChange) { restore(); apply(); }
-  })).observe(document.body, { childList: true, subtree: true });
 })();

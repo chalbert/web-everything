@@ -105,10 +105,9 @@
         }
 
         function wireChips(chips, attr, storageKey, allValues, defaultExclude, activeFn) {
-            // Delegate click to the section so the handler survives the we-filter-chip transient
-            // upgrade: FilterChipElement replaces itself with a native <button>, which would drop
-            // direct per-chip listeners. A delegated listener on the stable section container
-            // catches clicks on both the original we-filter-chip and the upgraded <button>.
+            // Delegate click to the section (one listener per category, not one per chip). A click on the
+            // wrapped inner <button> still matches: the #2028 persistent-host base (#2122) copies data-*-chip
+            // onto that child too, so closest() finds a match at the click target itself.
             var dataAttr = 'data-' + attr.replace(/([A-Z])/g, function (c) { return '-' + c.toLowerCase(); });
             var delegateKey = '__homeDelegate_' + attr;
             if (section[delegateKey]) return;   // already wired (hot-reload guard)
@@ -138,10 +137,7 @@
                     if (set.has(chipVal)) { set.delete(chipVal); } else { set.add(chipVal); }
                 }
                 try { localStorage.setItem(storageKey, JSON.stringify(Array.from(set))); } catch (e2) { /* ignore */ }
-                // Re-query chips live so the sync hits the upgraded <button> elements (not the
-                // stale pre-upgrade we-filter-chip references captured at init time).
-                var liveChips = Array.from(section.querySelectorAll('[' + dataAttr + ']'));
-                syncChips(liveChips, attr, activeFn);
+                syncChips(chips, attr, activeFn);
                 applyFilter();
             });
         }
@@ -215,32 +211,13 @@
             }
         }
 
-        // Re-apply the saved state on every run (first load and hot-reload).
-        function reSync() {
-            // Re-query live so we hit the upgraded <button> elements (post we-filter-chip upgrade).
-            var liveStatus = Array.from(section.querySelectorAll('[data-status-chip]'));
-            var liveKind   = Array.from(section.querySelectorAll('[data-kind-chip]'));
-            var liveSize   = Array.from(section.querySelectorAll('[data-size-chip]'));
-            var liveTier   = Array.from(section.querySelectorAll('[data-tier-chip]'));
-            syncChips(liveStatus, 'statusChip', activeStatuses);
-            syncChips(liveKind,   'kindChip',   activeKinds);
-            syncChips(liveSize,   'sizeChip',   activeSizes);
-            syncChips(liveTier,   'tierChip',   activeTiers);
-            applyFilter();
-        }
-        reSync();
-        // Observe the section for DOM mutations: when we-filter-chip elements upgrade to <button>
-        // (via FilterChipElement's transient self-replace), re-sync so the upgraded buttons carry
-        // the correct aria-pressed + fui-filter-chip--selected state from localStorage.
-        var chipObs = new MutationObserver(function (mutations) {
-            var hasChipChange = mutations.some(function (m) {
-                return Array.prototype.some.call(m.addedNodes, function (n) {
-                    return n.nodeType === 1 && (n.hasAttribute('data-status-chip') || n.hasAttribute('data-kind-chip') || n.hasAttribute('data-size-chip') || n.hasAttribute('data-tier-chip'));
-                });
-            });
-            if (hasChipChange) reSync();
-        });
-        chipObs.observe(section, { childList: true, subtree: true });
+        // Re-apply the saved state on every run (first load and hot-reload — initToolbar itself re-runs
+        // and recaptures statusChips/kindChips/etc fresh each time, so this always syncs the live set).
+        syncChips(statusChips, 'statusChip', activeStatuses);
+        syncChips(kindChips,   'kindChip',   activeKinds);
+        syncChips(sizeChips,   'sizeChip',   activeSizes);
+        syncChips(tierChips,   'tierChip',   activeTiers);
+        applyFilter();
 
         let savedView = 'grid';
         try { savedView = localStorage.getItem(viewKey) || 'grid'; } catch (e) { /* ignore */ }

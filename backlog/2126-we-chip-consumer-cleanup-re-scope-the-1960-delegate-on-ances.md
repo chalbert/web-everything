@@ -1,10 +1,12 @@
 ---
 kind: task
 parent: "2015"
-status: open
+status: resolved
 locus: webeverything
 blockedBy: ["2122"]
 dateOpened: "2026-07-02"
+dateStarted: "2026-07-07"
+dateResolved: "2026-07-07"
 tags: []
 ---
 
