@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, parseNumstat, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, pickRunningBatches, readBatchFeed, decideBatchesIdleExit, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, parseNumstat, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -159,12 +159,21 @@ describe('merge-ai-prs — planLabelDrain blockedBy ordering (#2188)', () => {
 });
 
 describe('merge-ai-prs — parseWatchOpts (#2194 /drain watch)', () => {
-  it('defaults: watch off, 30s interval, unbounded (no max-idle)', () => {
-    expect(parseWatchOpts()).toEqual({ watch: false, intervalSec: 30, maxIdle: null });
+  it('defaults: watch off, 30s interval, unbounded (no max-idle), batch-idle off (debounce 2)', () => {
+    expect(parseWatchOpts()).toEqual({ watch: false, intervalSec: 30, maxIdle: null, untilBatchesIdle: false, batchIdleDebounce: 2 });
   });
 
   it('--watch on with a custom interval + max-idle', () => {
-    expect(parseWatchOpts({ watch: true, interval: '10', maxIdle: '3' })).toEqual({ watch: true, intervalSec: 10, maxIdle: 3 });
+    expect(parseWatchOpts({ watch: true, interval: '10', maxIdle: '3' })).toEqual({ watch: true, intervalSec: 10, maxIdle: 3, untilBatchesIdle: false, batchIdleDebounce: 2 });
+  });
+
+  it('--until-batches-idle on, custom debounce (#2330)', () => {
+    const o = parseWatchOpts({ watch: true, untilBatchesIdle: true, batchIdleDebounce: '3' });
+    expect(o.untilBatchesIdle).toBe(true);
+    expect(o.batchIdleDebounce).toBe(3);
+    // a bad/low debounce falls back to the safe default 2
+    expect(parseWatchOpts({ untilBatchesIdle: true, batchIdleDebounce: '0' }).batchIdleDebounce).toBe(2);
+    expect(parseWatchOpts({ untilBatchesIdle: true, batchIdleDebounce: 'x' }).batchIdleDebounce).toBe(2);
   });
 
   it('a non-positive / non-numeric interval falls back to the 30s default', () => {
@@ -176,6 +185,51 @@ describe('merge-ai-prs — parseWatchOpts (#2194 /drain watch)', () => {
   it('max-idle=0 is honoured (exit on the first idle pass), a bad value → unbounded', () => {
     expect(parseWatchOpts({ watch: true, maxIdle: '0' }).maxIdle).toBe(0);
     expect(parseWatchOpts({ watch: true, maxIdle: 'x' }).maxIdle).toBe(null);
+  });
+});
+
+describe('merge-ai-prs — batch-aware --until-batches-idle exit (#2330)', () => {
+  const feedOf = (runs) => ({ runs });
+
+  it('pickRunningBatches selects only kind:batch status:running runs', () => {
+    const feed = feedOf([
+      { kind: 'batch', status: 'running', nums: [1, 2] },
+      { kind: 'batch', status: 'completed', nums: [3] },   // terminal → not producing
+      { kind: 'workflow', status: 'running' },             // not a batch
+      { kind: 'batch', status: 'running', nums: [4] },
+    ]);
+    expect(pickRunningBatches(feed).map((r) => r.nums)).toEqual([[1, 2], [4]]);
+    expect(pickRunningBatches(null)).toEqual([]);
+    expect(pickRunningBatches({})).toEqual([]);
+  });
+
+  it('readBatchFeed: absent / stale / unparseable → known:false (keep watching); fresh → known:true', () => {
+    const now = 1_000_000;
+    const mk = (opts) => readBatchFeed('/feed.json', { now, staleMs: 30_000, fs: opts });
+    // absent
+    expect(mk({ existsSync: () => false, readFileSync: () => '', statSync: () => ({}) }))
+      .toEqual({ known: false, running: [], reason: 'feed-absent' });
+    // stale (mtime older than staleMs)
+    expect(mk({ existsSync: () => true, statSync: () => ({ mtimeMs: now - 60_000 }), readFileSync: () => '{"runs":[]}' }).known).toBe(false);
+    // unparseable
+    expect(mk({ existsSync: () => true, statSync: () => ({ mtimeMs: now }), readFileSync: () => 'not json' }).known).toBe(false);
+    // fresh + running batch
+    const fresh = mk({ existsSync: () => true, statSync: () => ({ mtimeMs: now - 1_000 }), readFileSync: () => JSON.stringify(feedOf([{ kind: 'batch', status: 'running', nums: [9] }])) });
+    expect(fresh.known).toBe(true);
+    expect(fresh.running).toHaveLength(1);
+  });
+
+  it('decideBatchesIdleExit: the safe conjunction (idle + empty queue + debounced non-running)', () => {
+    // disabled → never
+    expect(decideBatchesIdleExit({ enabled: false, idlePass: true, considered: 0, batchNonRunningStreak: 5 })).toBe(false);
+    // not idle → keep going
+    expect(decideBatchesIdleExit({ enabled: true, idlePass: false, considered: 0, batchNonRunningStreak: 5 })).toBe(false);
+    // queue not empty → keep going (a labelled PR is still in flight)
+    expect(decideBatchesIdleExit({ enabled: true, idlePass: true, considered: 1, batchNonRunningStreak: 5 })).toBe(false);
+    // batch not debounced yet (streak < debounce) → keep going
+    expect(decideBatchesIdleExit({ enabled: true, idlePass: true, considered: 0, batchNonRunningStreak: 1, debounce: 2 })).toBe(false);
+    // all conditions met → exit
+    expect(decideBatchesIdleExit({ enabled: true, idlePass: true, considered: 0, batchNonRunningStreak: 2, debounce: 2 })).toBe(true);
   });
 });
 
