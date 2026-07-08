@@ -80,6 +80,11 @@ import { healNnnCollision } from './lib/nnn-collision-heal.mjs';
 import { assertMayMerge, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
 import { numberPendingHashes } from './lane-drain.mjs'; // JIT numbering, shared single source (#2288/#xzxc92d)
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs'; // post-land dup-NNN tripwire (#2318)
+import { parseNumstat } from './merge-ai-prs.mjs'; // net two-dot diff parser, shared single source (#1821)
+import {
+  scoreEscalation, producerReviewLabel, shouldApplyReviewLabel, REVIEW_LABEL_META,
+  buildEscalationReasonBlock, bodyHasEscalationReason,
+} from './lib/review-escalation.mjs'; // #2307 — deterministic review-escalation label AT PR-OPEN
 
 // ── flag parsing (mirrors push-if-green.mjs) ──────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -324,6 +329,27 @@ export function classifyChecks(rows) {
   return { status: 'passed', reason: 'all required checks passed' };
 }
 
+/**
+ * #2307 — resolve the review-escalation label pr-land should apply AT PR-OPEN (deterministically, never
+ * lazily left to a later drain sweep — #2281's rule applied to the review dimension), from signals the
+ * producer already has: the net two-dot diff (`changedFiles`/`diffLines`), the lane's `.lane-manifest.json`
+ * (`dismissedFindings`/`crossRepo`), and the PR number. Pure — wraps the shared rubric
+ * (`scoreEscalation` → `producerReviewLabel`) plus the shared double-apply guard (`shouldApplyReviewLabel`),
+ * the SAME two the drain (`merge-ai-prs.mjs`) reads back later, so producer- and drain-applied verdicts can
+ * never drift. `currentLabels` is normally empty at open (a fresh PR) but is honoured either way — re-running
+ * pr-land against an already-labelled PR (e.g. a retried `--label-on-green`) must not double-apply.
+ * @param {{changedFiles?:string[], diffLines?:number, dismissedFindings?:number, crossRepo?:boolean,
+ *          prNum?:number, currentLabels?:Array}} o
+ * @returns {{label:string|null, apply:boolean, reasons:string[], humanRequired:boolean}}
+ */
+export function resolveProducerReviewLabel({
+  changedFiles = [], diffLines = 0, dismissedFindings = 0, crossRepo = false, prNum = 0, currentLabels = [],
+} = {}) {
+  const score = scoreEscalation({ changedFiles, diffLines, dismissedFindings, crossRepo, prNum });
+  const label = producerReviewLabel(score);
+  return { label, apply: shouldApplyReviewLabel(label, currentLabels), reasons: score.reasons, humanRequired: !!score.humanRequired };
+}
+
 // Allow importing the pure helpers without running the CLI (the test file imports this module).
 const IS_CLI = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
 if (IS_CLI) runCli();
@@ -394,6 +420,9 @@ function runCli() {
         PLAN.waitForChecks ? 'poll: gh pr view <pr> mergeStateStatus + gh pr checks <pr> --required  (wait until green; abort on red)' : '(--no-wait: skip check-wait, leave for a later drain pass)',
         // #2199 — the label is applied ONLY after the required checks are green, never eagerly at open.
         LABEL && PLAN.labelWhenGreen ? `gh pr edit <pr> --add-label ${LABEL}   # #2196 label — applied ONLY once required checks pass (#2199)` : (PLAN.mode === 'open-only' ? '(--no-wait: PR opened UNLABELLED — CI not confirmed green; use --label-on-green)' : '(--no-label)'),
+        // #2307 — score the SAME deterministic rubric the drain uses and apply review:human/review:pending
+        // AT OPEN when it escalates, so a PR needing review is never indistinguishable from a plain ready PR.
+        PLAN.labelWhenGreen ? 'score scoreEscalation(net-diff, .lane-manifest.json, pr#) → gh pr edit <pr> --add-label review:human|review:pending (#2307, only when it escalates)' : null,
         // #2290 — pr-land NEVER merges (the drain is the sole writer to main). The default path triggers a
         // single-couple fast drain so /pr stays instant; --label-on-green stops (a standalone drain lands it).
         PLAN.triggerDrain
@@ -446,6 +475,44 @@ function runCli() {
     try { ghC(['label', 'create', LABEL, '--color', '0E8A16', '--description', 'Producer-certified: required checks green, safe for the label lander (/drain) to merge']); } catch { /* already exists — fine */ }
     try { ghC(addLabelArgs); labelApplied = true; }
     catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply label "${LABEL}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — land continues\n`); }
+  };
+
+  // #2307 — the deterministic REVIEW-ESCALATION label, applied AT PRODUCER TIME (never left for a later drain
+  // sweep to be the first to apply it — #2281's rule applied to the review dimension). Scores the SAME rubric
+  // the drain reads back later (`scoreEscalation`, shared module — see `resolveProducerReviewLabel` above) off
+  // signals the producer already has once checks are green: the net two-dot diff (origin/BASE..refSha — the
+  // content actually landing, not a stale PR `files` list), the lane's `.lane-manifest.json`
+  // (dismissedFindings / cross-repo couple shape), and the PR number (sampling floor). Best-effort: a
+  // signal-fetch miss degrades to no-escalate — never blocks a green land over a scoring hiccup, and the
+  // drain's own idempotent backstop pass still catches an unlabelled-but-should-be PR later.
+  const applyReviewEscalationLabel = () => {
+    tryGit(['fetch', REMOTE, BASE, '--quiet']);
+    let changedFiles = [];
+    let diffLines = 0;
+    const diffOut = tryGit(['diff', '--numstat', `${REMOTE}/${BASE}`, refSha]);
+    if (diffOut != null) ({ changedFiles, diffLines } = parseNumstat(diffOut));
+    let manifest = null;
+    const manifestRaw = tryGit(['show', `${refSha}:.lane-manifest.json`]);
+    if (manifestRaw) { try { manifest = JSON.parse(manifestRaw); } catch { /* malformed — degrade to no manifest signal */ } }
+    const crossRepo = manifest && Array.isArray(manifest.repos) ? manifest.repos.length > 1 : false;
+    const dismissedFindings = manifest && Number.isFinite(Number(manifest.dismissedFindings)) ? Number(manifest.dismissedFindings) : 0;
+    let currentLabels = [];
+    try { currentLabels = (JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'labels'])).labels || []).map((l) => l.name); } catch { /* fresh PR — no labels yet */ }
+    const verdict = resolveProducerReviewLabel({ changedFiles, diffLines, dismissedFindings, crossRepo, prNum: Number(prNum), currentLabels });
+    if (verdict.label && verdict.apply) {
+      const meta = REVIEW_LABEL_META[verdict.label];
+      try { ghC(['label', 'create', verdict.label, '--color', meta.color, '--description', meta.description]); } catch { /* already exists — fine */ }
+      try { ghC(['pr', 'edit', String(prNum), '--add-label', verdict.label]); }
+      catch (e) { if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · could not apply review label "${verdict.label}" to #${prNum} (${String(e.message || e).split('\n')[0]}) — land continues\n`); }
+      // Stamp the WHY into the PR body (mirrors the drain's #2324 guarantee) so an operator sees it without
+      // re-deriving the rubric. Best-effort + idempotent (bodyHasEscalationReason guards a re-append).
+      try {
+        let liveBody = '';
+        try { liveBody = JSON.parse(ghC(['pr', 'view', String(prNum), '--json', 'body'])).body || ''; } catch { /* fetch miss — augment from empty */ }
+        if (!bodyHasEscalationReason(liveBody)) ghC(['pr', 'edit', String(prNum), '--body', liveBody + buildEscalationReasonBlock(verdict.reasons)]);
+      } catch { /* best-effort — the label already carries the signal */ }
+    }
+    return verdict;
   };
 
   // open-only (`--no-wait`, no `--label-on-green`): open WITHOUT the label (nothing has confirmed it green) and
@@ -501,6 +568,11 @@ function runCli() {
   // Required checks are GREEN — NOW apply the producer-certified label (#2199: never before this point).
   if (PLAN.labelWhenGreen) applyLabel();
 
+  // #2307 — and the deterministic review-escalation label (review:human / review:pending), alongside
+  // ready-to-merge — a green producer PR IS ready; the review label is the *landing gate*, which the drain
+  // already honours (a couple with a human-required half withholds via the existing blockedBy/crossRepo path).
+  const reviewVerdict = PLAN.labelWhenGreen ? applyReviewEscalationLabel() : { label: null, apply: false, reasons: [], humanRequired: false };
+
   // #2290 — pr-land NEVER merges: the drain is the SOLE writer to main. In the DEFAULT (land) mode, trigger a
   // single-couple FAST DRAIN so /pr still feels instant — the drain lands THIS labelled PR immediately. Then
   // best-effort ff-sync the user's PRIMARY checkout to the just-advanced origin/main (a no-op if the drain
@@ -515,10 +587,12 @@ function runCli() {
   emit({
     repo: REPO, merged: false, reason: PLAN.triggerDrain ? 'enqueued' : 'labelled-on-green',
     pr: Number(prNum), ref: REF, label: LABEL, labelApplied,
+    ...(reviewVerdict.label ? { reviewLabel: reviewVerdict.label, reviewLabelApplied: reviewVerdict.apply, escalateReasons: reviewVerdict.reasons, humanRequired: reviewVerdict.humanRequired } : {}),
     ...(drainTrigger ? { drainTriggered: !!drainTrigger.triggered } : {}),
     ...(primarySynced !== null ? { primarySynced } : {}),
     ...(precheckHealed.length ? { precheckHealed } : {}),
     detail: `PR #${prNum} (${REF}) required checks green${labelApplied ? ` — labelled ${LABEL}` : ''}`
+      + (reviewVerdict.label ? `${reviewVerdict.apply ? ' — labelled' : ' — already labelled'} ${reviewVerdict.label} (${reviewVerdict.reasons.join('; ')})` : '')
       + (precheckHealed.length ? `; pre-check healed id collision(s): ${precheckHealed.map((r) => `#${r.oldNum}→#${r.newNum}`).join(', ')}` : '')
       + (PLAN.triggerDrain ? '; triggered a single-couple drain (the drain lands it — pr-land never merges)' : '; left for the drain to land'),
   }, 0);
