@@ -40,6 +40,7 @@ import { parseQueued, emptyQueuedState, isQueued, queuedNums, addQueued, removeQ
 import { parseHolds, emptyHoldState, isHeld, heldBy, heldNums, addHold, removeHold, pruneExpired as pruneHolds, leaseUntilIso, serializeHolds, DEFAULT_LEASE_MINUTES } from './readiness/prepare-hold-state.mjs';
 import { fitAffineCost, budgetFromFit, impliedCapacity, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
 import { scanRepoLocusPrefixes } from './check-standards-rules.mjs';
+import { numberPendingHashes } from './lane-drain.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
@@ -691,8 +692,24 @@ function cost() {
     `${GRN}✓ cost${RST} ${DIM}— +$${usd.toFixed(2)} → $${total} over ${n} session(s) on #${idFromName(file)}${RST}`);
 }
 
+// #2319 — a one-shot repair: number every TRACKED hash-id backlog file in this checkout (a hash that reached
+// main via a numbering-bypassing land route, e.g. pr-land --fallback-git). Reuses the drain's numberPendingHashes
+// (the same JIT-numbering engine, #2288) so refs (blockedBy/parent/short-refs) are rewritten identically.
+// `--dry-run` reports the planned mapping without touching the tree. Run in the checkout carrying the stray
+// (the drain does this at land automatically; this verb is the manual backstop for one already on main).
+function numberStranded() {
+  const dryRun = argv.includes('--dry-run');
+  const r = numberPendingHashes(ROOT, { dryRun });
+  if (r.error) die(`number-stranded: ${r.error}`);
+  if (!r.assigned || r.assigned.length === 0) { console.log('number-stranded: no stranded hash-id files — nothing to number.'); return; }
+  const summary = r.assigned.map((a) => `${a.hash} → #${a.nnn}`).join(', ');
+  if (dryRun) console.log(`number-stranded (dry-run): would number ${r.assigned.length} — ${summary}`);
+  else console.log(`number-stranded: numbered ${r.assigned.length} (${r.committed ? 'committed' : 'NOT committed'}) — ${summary}`);
+}
+
 switch (verb) {
   case 'claim': case 'resolve': case 'release': transition(verb); break;
+  case 'number-stranded': numberStranded(); break;
   case 'retype': retype(); break;
   case 'yield': yieldNum(); break;
   case 'scaffold': scaffold(); break;
@@ -713,6 +730,7 @@ switch (verb) {
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
       `  ${GRN}retype${RST} <NNN> [--to=story|epic|task|decision] [--size=N] [--status=parked]   sanctioned pack-phase flag-fix (no LANE_GUARD_OFF); frontmatter-only\n` +
       `  ${GRN}yield${RST} <NNN-slug>            move a LOCAL-ONLY NNN collision to the next free number (refuses a git-tracked item; NNN is immutable)\n` +
+      `  ${GRN}number-stranded${RST} [--dry-run]      number every TRACKED hash-id backlog file in this checkout (a hash that reached main via a numbering-bypassing land; #2319/#2288)\n` +
       `  ${GRN}scaffold${RST} --kind=story|epic|task|decision --size= --title= [--digest=] [--blocked-by=] [--parent=] [--session=<slug>]   --session ⇒ born active+owned (#670), publish with settle\n` +
       `  ${GRN}settle${RST} <NNN>               born-active scaffold (--session) → open (publish once authored)\n` +
       `  ${GRN}calibrate${RST} --points= --context-pct= [--stop-reason=budget|context|empty-pool|fork|gate|outgrew|manual|abort]   fold a session into the batch point-budget estimate\n` +
