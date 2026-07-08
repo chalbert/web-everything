@@ -462,6 +462,7 @@ function runCli() {
     emit({
       repo: REPO, merged: false, reason: 'dry-run', ref: REF, base: BASE, method: METHOD,
       plan: [
+        `node scripts/lint-locus-prefix.mjs --range=${REMOTE}/${BASE}..${refSha}   # #2331 producer locus-prefix re-check (fail fast on the #2170 review-append leak) — CI is not the first to catch it`,
         `git push ${REMOTE} ${SRC}:refs/heads/${REF}   # publish the lane clone's ${SRC} (${refSha.slice(0, 8)}) to the lane ref`,
         HEAL ? `pre-check: id-collision heal (renumber a lane new-item that reuses a ${BASE} id to a free GAP id, rebuild ${REF}) (#2222)` : '(--no-heal: skip pre-check id-collision heal)',
         prCreateBodyGuard(BODY).ok ? `gh ${createArgs.join(' ')}` : `REFUSE (if no PR exists yet): ${prCreateBodyGuard(BODY).reason}  # #2332 fail-fast — an existing PR for this head is exempt`,
@@ -480,6 +481,19 @@ function runCli() {
       ].filter(Boolean),
       detail: `would open+label ${SRC} (${refSha.slice(0, 8)}) as a self-approved PR from ${REF}${PLAN.triggerDrain ? ' and trigger a single-couple drain' : ''} — the drain lands it onto ${BASE}`,
     }, 0);
+  }
+
+  // 1c. #2331 — PRODUCER locus-prefix re-check. The #2170 pre-PR review can edit an item body AFTER the
+  //     author's write-time gate ran (and via a route the PostToolUse hook does not see), leaking a bare
+  //     code-path ref (#883) that only CI would catch — going red AFTER the PR is open. Re-lint THIS lane's
+  //     OWN committed corpus changes (${REMOTE}/${BASE}..SRC) before publishing, so the producer fails fast,
+  //     never CI. A real leak (linter exit 2) is a hard stop; any other failure (git/node infra) is
+  //     best-effort — CI still backstops it — never a false block.
+  const LOCUS_LINT = resolve(fileURLToPath(new URL('./lint-locus-prefix.mjs', import.meta.url)));
+  try { execFileSync('node', [LOCUS_LINT, `--range=${REMOTE}/${BASE}..${refSha}`], { cwd: REPO, stdio: ['ignore', 'inherit', 'inherit'] }); }
+  catch (e) {
+    if (e && e.status === 2) emit({ repo: REPO, merged: false, reason: 'locus-prefix', detail: `bare code-path ref(s) without a <repo>: prefix in this lane's corpus changes (#883/#2331 — the #2170 review-append leak) — prefix them (e.g. "foo.ts" → "we:foo.ts"), \`git commit --amend\`, and re-run; refusing to open a PR CI would fail` }, 3);
+    if (!AS_JSON) process.stderr.write(`pr-land [${REPO}] · locus-prefix range sweep could not run (${String(e.message || e).split('\n')[0]}) — CI still backstops it\n`);
   }
 
   // 2. Publish the source commit to the lane ref on origin (guard-safe: lane/*). Never force, no local branch.
