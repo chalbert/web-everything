@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, parseNumstat } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -308,6 +308,32 @@ describe('siblingCloneName (#2263 — sibling-clone routing for remote-repo reba
     expect(siblingCloneName(undefined)).toBeNull();
     expect(siblingCloneName('noslug')).toBeNull();
     expect(siblingCloneName('')).toBeNull();
+  });
+});
+
+describe('parseNumstat (#1821 — net two-dot diff for the review-escalation backstop)', () => {
+  it('parses `<added>\\t<deleted>\\t<path>` lines into changedFiles + total diffLines', () => {
+    const out = parseNumstat('3\t1\tscripts/merge-ai-prs.mjs\n0\t5\tbacklog/1821-foo.md\n');
+    expect(out.changedFiles).toEqual(['scripts/merge-ai-prs.mjs', 'backlog/1821-foo.md']);
+    expect(out.diffLines).toBe(9);
+  });
+  it('a net-unchanged file (already landed upstream) simply does not appear — nothing to parse for it', () => {
+    // the whole point of #1821: the caller diffs `origin/main` vs the PR head directly, so a file whose
+    // content is identical on both sides never shows up in `--numstat` output in the first place (unlike the
+    // GitHub PR `files` list, which is a three-dot/merge-base diff and would still list it).
+    const out = parseNumstat('2\t0\tscripts/only-real-change.mjs\n');
+    expect(out.changedFiles).toEqual(['scripts/only-real-change.mjs']);
+    expect(out.changedFiles).not.toContain('scripts/merge-ai-prs.mjs');
+  });
+  it('binary files use `-\\t-\\t<path>` — counted as 0 lines, path still included', () => {
+    const out = parseNumstat('-\t-\tsrc/assets/logo.png\n1\t1\tREADME.md');
+    expect(out.changedFiles).toEqual(['src/assets/logo.png', 'README.md']);
+    expect(out.diffLines).toBe(2);
+  });
+  it('blank/empty input → empty result', () => {
+    expect(parseNumstat('')).toEqual({ changedFiles: [], diffLines: 0 });
+    expect(parseNumstat(null)).toEqual({ changedFiles: [], diffLines: 0 });
+    expect(parseNumstat(undefined)).toEqual({ changedFiles: [], diffLines: 0 });
   });
 });
 

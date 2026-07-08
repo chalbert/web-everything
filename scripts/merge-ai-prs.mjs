@@ -401,6 +401,28 @@ export function siblingCloneName(repo) {
 }
 
 /**
+ * #1821 — parse `git diff --numstat <base> <head>` output into the escalation rubric's `{changedFiles,
+ * diffLines}` shape. Pure. This is the NET TWO-DOT diff (content that actually differs between the two
+ * snapshots) — deliberately NOT the GitHub PR `files` list, which is a three-dot / merge-base diff and so
+ * still lists a file from an earlier stacked-pipeline stage that has since landed on `main` (net-identical),
+ * even though the PR's real diff no longer touches it. Each line is `<added>\t<deleted>\t<path>` (`-` for a
+ * binary file's counts). Unparseable/blank lines are skipped.
+ * @param {string} numstat
+ * @returns {{changedFiles:string[], diffLines:number}}
+ */
+export function parseNumstat(numstat) {
+  const changedFiles = [];
+  let diffLines = 0;
+  for (const line of String(numstat || '').split('\n')) {
+    const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
+    if (!m) continue;
+    diffLines += (m[1] === '-' ? 0 : Number(m[1])) + (m[2] === '-' ? 0 : Number(m[2]));
+    changedFiles.push(m[3]);
+  }
+  return { changedFiles, diffLines };
+}
+
+/**
  * #2290 — POST-LAND WE DERIVED-ARTIFACT REGEN, now owned by the drain (the sole writer to main). Under #2183
  * lanes never commit the derived artifacts (`gen:inventory` → the AGENTS.md inventory block; `gen:reference-index`
  * → src/_data/referenceIndex.json). pr-land used to regen+commit+push them after its own merge (#2182), but
@@ -758,11 +780,32 @@ function runCli() {
       if (v.decision !== 'merge') continue;
       let changedFiles = [];
       let diffLines = 0;
-      try {
-        const files = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'files'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').files || [];
-        changedFiles = files.map((f) => f.path).filter(Boolean);
-        diffLines = files.reduce((s, f) => s + (Number(f.additions) || 0) + (Number(f.deletions) || 0), 0);
-      } catch { /* signal-fetch miss → score on the manifest signals alone */ }
+      // #1821 — score off the NET two-dot diff vs current `main` (`git diff --numstat origin/main <head>`),
+      // NOT the GitHub PR `files` list: that list is a three-dot/merge-base diff, so a stacked-pipeline PR
+      // whose earlier stage already landed on `main` still lists that stage's files even though the PR's real
+      // (net) diff no longer touches them — spuriously tripping `isGateSelfPath`/blast-radius (observed live
+      // on PR #187). Best-effort local git read (needs the local clone or a provisioned sibling clone);
+      // falls back to the old GitHub files-list read if neither is available.
+      const escCwd = isLocalRepo(v.repo) ? undefined : siblingCloneDir(v.repo);
+      let netScored = false;
+      if (v.headRef && (isLocalRepo(v.repo) || escCwd)) {
+        try { execFileSync('git', ['fetch', 'origin', 'main', v.headRef, '--quiet'], { cwd: escCwd, stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* ref may already be local/up to date */ }
+        for (const rev of [`origin/${v.headRef}`, 'FETCH_HEAD', v.headRef]) {
+          try {
+            const out = execFileSync('git', ['diff', '--numstat', 'origin/main', rev], { cwd: escCwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+            ({ changedFiles, diffLines } = parseNumstat(out));
+            netScored = true;
+            break;
+          } catch { /* try next rev */ }
+        }
+      }
+      if (!netScored) {
+        try {
+          const files = JSON.parse(execFileSync('gh', ['pr', 'view', String(v.num), ...repoFlag(v.repo), '--json', 'files'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}').files || [];
+          changedFiles = files.map((f) => f.path).filter(Boolean);
+          diffLines = files.reduce((s, f) => s + (Number(f.additions) || 0) + (Number(f.deletions) || 0), 0);
+        } catch { /* signal-fetch miss → score on the manifest signals alone */ }
+      }
       const score = scoreEscalation({ changedFiles, diffLines, dismissedFindings: v.dismissedFindings, crossRepo: v.crossRepo, prNum: Number(v.num), thresholds: SAMPLE_NTH ? { sampleNth: SAMPLE_NTH } : {} });
       const parkedSinceMs = getParkedSinceMs(parkState, { repo: v.repo, num: v.num });
       const gate = decideReviewGate({ escalate: score.escalate, humanRequired: score.humanRequired, labels: v.prLabels, parkedSinceMs, nowMs, ...(REVIEW_WINDOW_MS ? { windowMs: REVIEW_WINDOW_MS } : {}) });
