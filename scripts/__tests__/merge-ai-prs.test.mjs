@@ -5,7 +5,7 @@
  *   the merge/skip verdict (AI-gate + green-gate + mergeable-gate) is decided here and unit-tested.
  */
 import { describe, it, expect } from 'vitest';
-import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, parseNumstat, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment } from '../merge-ai-prs.mjs';
+import { isAiAuthor, isAiCommit, isAiGeneratedPr, isMechanicalMergeCommit, isRequiredCheckGreen, hasLabel, classifyPr, planLabelDrain, parseWatchOpts, isRebaseDropCandidate, needsManifestStripBeforeMerge, shouldRepollForLabelLag, shouldLabelOnGreen, resolveRepos, siblingCloneName, regenDerivedOnLand, resolvePrimaryPath, syncPrimaryOnLand, parseNumstat, drainReasonMarker, buildDrainReasonComment, hasDrainReasonComment, shouldPostParkReasonComment } from '../merge-ai-prs.mjs';
 
 const mechMerge = { messageHeadline: "Merge branch 'main' into lane/x", messageBody: '', authors: [{ name: 'Nicolas Gilbert', email: 'nic@x.com' }] };
 
@@ -590,5 +590,13 @@ describe('drain reason comment (#2313 — stamp park/skip reasons onto the PR, n
   it('hasDrainReasonComment tolerates a missing/odd comments array', () => {
     expect(hasDrainReasonComment(undefined, 'skip', 'x')).toBe(false);
     expect(hasDrainReasonComment([{}, { body: null }], 'skip', 'x')).toBe(false);
+  });
+
+  it('#2333 shouldPostParkReasonComment — an agent-reviewable park stamps a comment; a review:human park does NOT', () => {
+    // Non-human (agent-reviewable) park → the #2313 park comment fires.
+    expect(shouldPostParkReasonComment({ humanRequired: false })).toBe(true);
+    expect(shouldPostParkReasonComment({})).toBe(true); // absent flag defaults to agent-reviewable
+    // review:human park → NO park comment (the #2324 body-block already states the same reason — no dup).
+    expect(shouldPostParkReasonComment({ humanRequired: true })).toBe(false);
   });
 });
