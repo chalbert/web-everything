@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel } from '../pr-land.mjs';
+import { mergeMethodFlag, buildCreateArgs, prCreateBodyGuard, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel } from '../pr-land.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
@@ -123,6 +123,18 @@ describe('pr-land pure helpers (#2138 Fork 5 / #2153)', () => {
     expect(titleOnly).toContain('--body');                    // a body is always present…
     expect(titleOnly[titleOnly.indexOf('--body') + 1]).toBe(''); // …an explicit empty body (non-interactive)
     expect(titleOnly).not.toContain('--fill');                // never --fill for a lane/* head
+  });
+
+  it('#2332 prCreateBodyGuard — refuses a bodyless create, allows a non-empty body (producer fail-fast)', () => {
+    // A real, non-empty body → ok (the create proceeds).
+    expect(prCreateBodyGuard('## Real body\n- x').ok).toBe(true);
+    expect(prCreateBodyGuard('## Real body\n- x').reason).toBeUndefined();
+    // The bodyless cases the #2324 drain gate would later refuse to LAND — the producer must fail fast now.
+    for (const empty of [null, undefined, '', '   ', '\n\t ']) {
+      const g = prCreateBodyGuard(empty);
+      expect(g.ok).toBe(false);            // refused at open…
+      expect(g.reason).toMatch(/bodyless/); // …with a reason naming the omission (#2332)
+    }
   });
 
   it('builds a one-PR merge that deletes the lane ref (not --auto on a native queue)', () => {
