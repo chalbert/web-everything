@@ -1,0 +1,10 @@
+---
+kind: task
+status: open
+dateOpened: "2026-07-08"
+tags: []
+---
+
+# guard-bash primary-cwd check false-positives on lane clones (harness resets cwd between tool calls)
+
+we:scripts/guard-bash.mjs's #2302 primary-cwd backlog-mutation guard reads the harness's persisted Bash cwd, which resets to the primary checkout between tool calls. So the standard lane invocation — cd into the lane clone, then run a backlog mutation (claim/resolve/scaffold) in the same compound command — is misclassified as a PRIMARY mutation and DENIED, forcing a BACKLOG_MUTATE_OK=1 override on every legitimate lane mutation (every lane subagent in batch-2026-07-07-1821-2325 hit this and had to override). The guard should either detect the leading in-command cd target and evaluate isPrimaryCwd against THAT, or key the primary-vs-lane decision off the resolved backlog file's repo path rather than the reported cwd — so a genuine lane mutation is allowed without the override while a real primary mutation is still denied. relatedTo #2302, #2323.
