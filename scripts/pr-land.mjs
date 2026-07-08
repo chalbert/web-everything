@@ -563,6 +563,11 @@ function runCli() {
       if (numbered && numbered.error) process.stderr.write(`pr-land [${REPO}] ⚠ JIT numbering skipped (${numbered.error}) — a provisional hash may reach ${BASE} un-numbered; run the drain's numbering by hand\n`);
       gitPushMain([REMOTE, `${BASE}:${BASE}`]);
       if (SYNC_PRIMARY) syncPrimaryMain(); // ff-sync the user's primary checkout too (the lane's local BASE is already merged)
+      // #xsyia6k — snapshot the duplicate set on BASE BEFORE the heal mutates the local tree. gitPushMain above
+      // just published the merged tree to ${BASE}, so this reflects what actually sits on BASE; the tripwire below
+      // falls back to it when the heal healed-but-didn't-publish (else it would read the healed-but-unpushed local
+      // dir as clean — the read-local-tree hazard the drain's tripwire guards with `healPublished`).
+      const preHealDups = findDuplicateIds(resolve(REPO, 'backlog'));
       const heal = HEAL ? runHeal({ ontoRef: preMergeBaseSha }) : null;
       if (heal && heal.warning) process.stderr.write(`pr-land [${REPO}] ⚠ ${heal.warning}\n`);
       const regen = REGEN ? runRegen() : null;
@@ -573,7 +578,11 @@ function runCli() {
       // duplicate SURVIVES (heal skipped on a dirty tree, or a mode the healer can't resolve), it must be LOUD,
       // never silent on main. Re-detect after the heal and surface it so the fallback-git land can't leave a
       // duplicate id sitting on ${BASE} (the #2316 double-land failure mode).
-      const residualDups = findDuplicateIds(resolve(REPO, 'backlog'));
+      // #xsyia6k — but runHeal WRITES the renumber to the local tree before it gates/commits/pushes, so a heal that
+      // healed-but-didn't-publish (gate red, or push failed → `renumbered.length && !healed`) leaves the local dir
+      // clean while ${BASE} still holds the dup. Trust the fresh scan only then; otherwise report the pre-heal set.
+      const healUnpublished = !!(heal && Array.isArray(heal.renumbered) && heal.renumbered.length && !heal.healed);
+      const residualDups = healUnpublished ? preHealDups : findDuplicateIds(resolve(REPO, 'backlog'));
       if (residualDups.length) process.stderr.write(`pr-land [${REPO}] ✗✗ TRIPWIRE (#2318): duplicate id(s) on ${BASE} after heal — ${summarizeDuplicates(residualDups)}; resolve by hand (${BASE}'s standards gate will stay RED until then).\n`);
       emit({ repo: REPO, merged: true, reason: 'merged-git-fallback', ref: REF, healed: heal && heal.healed ? heal.renumbered : [], ...(heal && heal.warning ? { healWarning: heal.warning } : {}), ...(numbered && numbered.assigned && numbered.assigned.length ? { numbered: numbered.assigned } : {}), regenDone: regen ? regen.done : [], regenFailed: regen ? regen.failed : [], ...(regen && regen.warning ? { regenWarning: regen.warning } : {}), ...(skipped.length ? { skipped } : {}), ...(residualDups.length ? { duplicateIdsOnMain: residualDups } : {}), detail: `${detail}; landed ${REF} onto ${BASE} via the local git-merge fallback${numbered && numbered.assigned && numbered.assigned.length ? `; JIT-numbered ${numbered.assigned.map((a) => `${a.hash}→#${a.nnn}`).join(', ')}` : ''}${residualDups.length ? `; ⚠ DUPLICATE ids survive: ${summarizeDuplicates(residualDups)}` : ''}${postLandReport(heal, regen)}` }, 0);
     } catch (e) {
