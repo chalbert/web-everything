@@ -38,6 +38,7 @@ import {
   scanRepoLocusPrefixes,
   validateTemplateA11y, NAV_ACTIVE_STATE_ENFORCED,
   duplicateBacklogNums,
+  strandedHashesOnMain,
   lintBacklogItemRendering,
   detectClassificationCollapse,
   computeNativeFirstConformance,
@@ -1719,5 +1720,24 @@ describe('duplicateBacklogNums — the #2248 NNN-collision tripwire (pure detect
   });
   it('items missing a num are skipped (a separate missing-prefix check owns those)', () => {
     expect(duplicateBacklogNums([{ id: 'no-num' }, { num: '005', id: 'e' }])).toEqual([]);
+  });
+});
+
+describe('strandedHashesOnMain — the #2319 hash-on-main invariant (pure detector)', () => {
+  it('all-numeric ids on main → clean', () => {
+    expect(strandedHashesOnMain(['backlog/001-a.md', 'backlog/2322-b-slug.md', 'backlog/12345-c.md'])).toEqual([]);
+  });
+  it('a hash id on main → one error naming the file + the fix', () => {
+    const errs = strandedHashesOnMain(['backlog/001-a.md', 'backlog/xbvktb4-should-force-eat.md']);
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toMatch(/xbvktb4-should-force-eat\.md/);
+    expect(errs[0]).toMatch(/NON-NUMERIC leading id "xbvktb4"/);
+    expect(errs[0]).toMatch(/number-stranded/);
+  });
+  it('one error per stranded hash (multiple)', () => {
+    expect(strandedHashesOnMain(['backlog/x111111-a.md', 'backlog/x222222-b.md', 'backlog/003-ok.md'])).toHaveLength(2);
+  });
+  it('ignores non-backlog paths and non-.md files', () => {
+    expect(strandedHashesOnMain(['scripts/xabcdef-thing.mjs', 'backlog/README', 'reports/xabcdef-r.md'])).toEqual([]);
   });
 });

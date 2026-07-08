@@ -60,6 +60,27 @@ describe('numberPendingHashes — drain JIT numbering wire (#2288)', () => {
     expect(JSON.parse(readFileSync(join(repo, LEDGER_REL), 'utf8'))).toEqual({ xhash01: '2202' });
   });
 
+  it('--dry-run (#2319 number-stranded) reports the plan but leaves the tree + ledger untouched', () => {
+    write('backlog/2200-legacy.md', '---\nkind: story\nstatus: resolved\n---\n# Legacy\n');
+    write('backlog/xhash01-alpha.md', '---\nkind: story\nstatus: resolved\n---\n# Alpha\n\nBody mentions xhash01.\n');
+    write('backlog/2201-referrer.md', '---\nkind: story\nblockedBy: ["xhash01"]\n---\n# Referrer\n');
+    write(QUEUED_REL, JSON.stringify({ queued: [] }));
+    git('add', 'backlog', '.claude', '.gitignore'); git('commit', '-qm', 'seed');
+
+    const res = numberPendingHashes(repo, { dryRun: true });
+
+    expect(res.dryRun).toBe(true);
+    expect(res.committed).toBe(false);
+    expect(res.assigned).toEqual([{ hash: 'xhash01', nnn: '2202' }]);
+    expect(res.wouldRename).toEqual([{ from: 'xhash01-alpha', to: '2202-alpha' }]);
+    // Nothing on disk changed: the hash file is still there, no rename, no commit, no ledger written.
+    const names = backlogNames();
+    expect(names).toContain('xhash01-alpha.md');
+    expect(names).not.toContain('2202-alpha.md');
+    expect(git('status', '--porcelain').trim()).toBe(''); // no working-tree churn
+    expect(() => readFileSync(join(repo, LEDGER_REL), 'utf8')).toThrow(); // ledger not written
+  });
+
   it('does NOT drop a ledger entry on queue-empty — a later dependent still resolves the blocker (PR #194)', () => {
     // Blocker A lands and EMPTIES the queue while dependent B is still in-flight (unqueued, not on main).
     write('backlog/2200-legacy.md', '---\nkind: story\n---\n# Legacy\n');

@@ -54,6 +54,7 @@ import {
   classifySurfacePaths,
   validateUntrackedDerivedArtifacts, DERIVED_ARTIFACT_DIRS,
   duplicateBacklogNums,
+  strandedHashesOnMain,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -499,6 +500,15 @@ for (const item of backlog) {
 // #2248 — the duplicate-NNN tripwire, now a pure unit-tested detector (was inline). A collision silently drops
 // one item from the loader's last-wins byNum Map, so it must ERROR (caught on the second colliding PR's CI).
 for (const msg of duplicateBacklogNums(backlog)) err(msg);
+// #2319 — hash-on-main invariant: a backlog file on origin/main with a non-numeric leading id means a land route
+// bypassed JIT numbering (#2288) and stranded a hash. Read the MAIN tree (not the working tree) so in-lane
+// pre-land hashes on a lane/* branch don't false-trip. Fail-SOFT: origin/main unresolvable (fresh/offline
+// clone) → skip, never wedge the gate on a git hiccup.
+try {
+  const mainBacklog = execFileSync('git', ['ls-tree', '-r', '--name-only', 'origin/main', '--', 'backlog/'], { cwd: ROOT, encoding: 'utf8' })
+    .split('\n').filter(Boolean);
+  for (const msg of strandedHashesOnMain(mainBacklog)) err(msg);
+} catch { /* origin/main not resolvable here — the drain's post-land assert still guards the land path */ }
 // Every item's num — for `blockedBy`/parent resolution below (the dup check above owns collision reporting).
 const seenNums = new Set(backlog.map((i) => i.num).filter(Boolean));
 
