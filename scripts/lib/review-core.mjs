@@ -123,6 +123,11 @@ export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT
   return [
     `You are reviewing a diff against this mandate: ${mandateLine}.`,
     isolationLine,
+    // #2336 — a review subagent runs inside the drain's shared primary checkout; it must NEVER `git checkout`
+    // the PR branch there (that moves the shared HEAD and violates the never-branch-a-shared-checkout guard).
+    'Work from the diff text alone — do NOT `git checkout`, `git switch`, `git fetch`+checkout, or otherwise',
+    'move HEAD onto the PR branch: you are running inside a shared checkout and that would derail the drain. If',
+    'you genuinely must run the code (tests, a repro), do it in a throwaway `git clone` under a temp dir, never here.',
     'Judge only: report concrete findings (file, one-sentence summary, the failure scenario it causes) and',
     'nothing about labels, merge policy, or who may clear this change — that is the caller\'s decision, not yours.',
     'Report an empty findings list if nothing survives scrutiny; do not pad with stylistic nitpicks.',
