@@ -7,7 +7,38 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths } from '../pr-land.mjs';
+import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel } from '../pr-land.mjs';
+import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
+
+describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
+  it('a gate-self diff (edits the auto-review trust chain) → review:human, applied', () => {
+    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/merge-ai-prs.mjs'], diffLines: 10, prNum: 3 });
+    expect(v.label).toBe(REVIEW_LABELS.human);
+    expect(v.apply).toBe(true);
+    expect(v.humanRequired).toBe(true);
+    expect(v.reasons.join(' ')).toMatch(/gate-self/);
+  });
+  it('an escalating non-gate-self diff (blast-radius) → review:pending, applied', () => {
+    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10, prNum: 3 });
+    expect(v.label).toBe(REVIEW_LABELS.pending);
+    expect(v.apply).toBe(true);
+    expect(v.humanRequired).toBe(false);
+  });
+  it('a leaf diff with no escalation signal → no review label at all', () => {
+    const v = resolveProducerReviewLabel({ changedFiles: ['backlog/2307-x.md'], diffLines: 10, prNum: 3 });
+    expect(v.label).toBe(null);
+    expect(v.apply).toBe(false);
+  });
+  it('cross-repo + dismissed-findings signals off the manifest also escalate (review:pending)', () => {
+    expect(resolveProducerReviewLabel({ crossRepo: true, prNum: 3 }).label).toBe(REVIEW_LABELS.pending);
+    expect(resolveProducerReviewLabel({ dismissedFindings: 2, prNum: 3 }).label).toBe(REVIEW_LABELS.pending);
+  });
+  it('a PR that already carries the verdict label is NOT re-applied (idempotent — never a double-apply)', () => {
+    const v = resolveProducerReviewLabel({ changedFiles: ['scripts/pr-land.mjs'], diffLines: 10, prNum: 3, currentLabels: [REVIEW_LABELS.pending] });
+    expect(v.label).toBe(REVIEW_LABELS.pending);
+    expect(v.apply).toBe(false);
+  });
+});
 
 describe('pr-land post-land dirty-probe (#2225 — deps-symlinked clone must still heal/regen)', () => {
   it('a tree whose ONLY dirt is the untracked node_modules symlink is NOT blocking-dirty', () => {
