@@ -2,8 +2,10 @@
 kind: story
 size: 3
 parent: "2241"
-status: open
+status: resolved
 dateOpened: "2026-07-07"
+dateStarted: "2026-07-08"
+dateResolved: "2026-07-08"
 tags: []
 ---
 
