@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, resolveProducerReviewLabel } from '../pr-land.mjs';
+import { mergeMethodFlag, buildCreateArgs, buildMergeArgs, buildRenumberHealArgs, buildRegenArgs, buildAddLabelArgs, classifyChecks, planPrLand, pollVerdict, isPostLandTreeDirty, postLandSkips, postLandReport, scopeHealChangedPaths, resolveProducerReviewLabel } from '../pr-land.mjs';
 import { REVIEW_LABELS } from '../lib/review-escalation.mjs';
 
 describe('resolveProducerReviewLabel — #2307 deterministic review-escalation label AT PR-OPEN', () => {
@@ -286,6 +286,50 @@ describe('pr-land contract guards (source-level, mirrors gated-push-wiring)', ()
     expect(src).toMatch(/check:standards/);
     // #2290 — the heal now runs only in the (break-glass-gated) --fallback-git path, after its local merge.
     expect(src.indexOf('const heal = HEAL ? runHeal')).toBeGreaterThan(src.indexOf("gitC(['merge', '--no-ff'"));
+    // #2312 — `runHeal` must scope its commit to the renumber's OWN files (`scopeHealChangedPaths`), never a
+    // bare `git diff --name-only` (that swept foreign checkout state into the healed commit, observed live,
+    // PR #168): the bare diff is only ever fed straight into the scoping helper, never straight into `git add`.
+    expect(src).toMatch(/scopeHealChangedPaths\(plan, allChanged\)/);
+    expect(src).toMatch(/if \(foreign\.length\) return \{ healed: false, renumbered, warning:/);
+    expect(src.indexOf("gitC(['add', ...changed])")).toBeGreaterThan(src.indexOf('scopeHealChangedPaths'));
+  });
+  it('#2312 — reproduces the leaky heal: a foreign dirty tracked file must never ride the renumber commit', () => {
+    // The exact incident shape (PR #168, 2026-07-06): a clean single-file backlog renumber ran in a checkout
+    // that ALSO carried unrelated uncommitted tracked work (agent-memory + skill + script edits from other
+    // in-flight items) — a bare `git diff --name-only` would report ALL of it as "changed".
+    const plan = { writePaths: ['2283-file.md'], deletePaths: ['2301-file.md'] };
+    const allChanged = [
+      'backlog/2283-file.md',
+      'backlog/2301-file.md',
+      'agent-memory-src/index-meta.md',
+      'backlog/2301-force-agent-memory.md',
+      'scripts/merge-ai-prs.mjs',
+      'scripts/lane-drain.mjs',
+      'scripts/__tests__/lane-drain.test.mjs',
+      'skills-src/closing-session/SKILL.md',
+    ];
+    const { changed, foreign } = scopeHealChangedPaths(plan, allChanged);
+    // BUG (pre-fix behaviour, if `changed` were just `allChanged`): all 8 paths would ride the heal commit.
+    // FIX: only the renumber's own two paths are "changed"; every unrelated path is flagged "foreign" so the
+    // caller aborts instead of committing them.
+    expect(changed).toEqual(['backlog/2283-file.md', 'backlog/2301-file.md']);
+    expect(foreign).toEqual([
+      'agent-memory-src/index-meta.md',
+      'backlog/2301-force-agent-memory.md',
+      'scripts/merge-ai-prs.mjs',
+      'scripts/lane-drain.mjs',
+      'scripts/__tests__/lane-drain.test.mjs',
+      'skills-src/closing-session/SKILL.md',
+    ]);
+  });
+  it('#2312 — a checkout with ONLY the renumber\'s own diff has no foreign paths (the common, safe case)', () => {
+    const plan = { writePaths: ['2283-file.md'], deletePaths: ['2301-file.md'] };
+    const allChanged = ['backlog/2283-file.md', 'backlog/2301-file.md'];
+    expect(scopeHealChangedPaths(plan, allChanged)).toEqual({ changed: allChanged, foreign: [] });
+  });
+  it('#2312 — tolerates a plan missing writePaths/deletePaths (older CLI output) without throwing', () => {
+    expect(scopeHealChangedPaths({}, ['backlog/2283-file.md'])).toEqual({ changed: [], foreign: ['backlog/2283-file.md'] });
+    expect(scopeHealChangedPaths(null, [])).toEqual({ changed: [], foreign: [] });
   });
   it('regenerates derived artifacts AFTER the merge (and after heal), without ever failing the land (#2182)', () => {
     expect(src).toMatch(/function runRegen/);                       // the regen step exists

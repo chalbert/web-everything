@@ -251,6 +251,38 @@ export function buildRenumberHealArgs({ ontoRef } = {}) {
   return args;
 }
 
+/**
+ * #2312 — scope a heal's `git diff --name-only` output to ONLY the renumber plan's own touched paths, so
+ * `runHeal` never builds its commit from the ambient checkout state. `plan` is the parsed JSON that
+ * `backlog-renumber-collisions.mjs --json` prints (carries `writePaths`/`deletePaths`, the exact
+ * `backlog/*.md` basenames this renumber wrote/deleted); `allChanged` is every path `git diff --name-only`
+ * reports in the checkout AFTER running that CLI. Pure — no fs, no git.
+ *
+ * Splits `allChanged` into:
+ *   - `changed` — the subset that IS one of the renumber's own expected paths (safe for `git add`).
+ *   - `foreign` — anything else (a dirty tracked file the heal must NEVER commit — e.g. a concurrent
+ *     session's in-flight edits sitting uncommitted in the SAME primary checkout, the #2301 "primary leak"
+ *     class). A non-empty `foreign` means the checkout wasn't clean beyond the renumber's own writes; the
+ *     caller must ABORT the heal rather than either (a) silently commit the foreign paths too (the bug this
+ *     fixes — observed live, PR #168, #2312) or (b) silently drop them from `changed` and proceed (that
+ *     would report `healed:true` while a real foreign edit is left half-adopted by a detached-HEAD checkout).
+ * @param {{writePaths?:string[], deletePaths?:string[]}} plan
+ * @param {string[]} allChanged
+ * @returns {{changed:string[], foreign:string[]}}
+ */
+export function scopeHealChangedPaths(plan, allChanged) {
+  const expected = new Set([
+    ...(Array.isArray(plan?.writePaths) ? plan.writePaths : []),
+    ...(Array.isArray(plan?.deletePaths) ? plan.deletePaths : []),
+  ].map((name) => `backlog/${name}`));
+  const changed = [];
+  const foreign = [];
+  for (const f of Array.isArray(allChanged) ? allChanged : []) {
+    if (expected.has(f)) changed.push(f); else foreign.push(f);
+  }
+  return { changed, foreign };
+}
+
 /** The set of derived-artifact regen commands to run after a clean merge (#2182). Mirrors the drain's
  *  `DERIVED_REGEN` exactly — kept in lock-step so every land route (this CLI, `/pr`, `/drain` which reuses
  *  this) regenerates the same artifact set that the drain's Phase-4c step has always regenerated. Pure —
@@ -705,7 +737,18 @@ function runCli() {
     // A collision was healed on disk — full-gate the healed tree before committing (never push a red heal).
     try { execFileSync('npm', ['run', 'check:standards'], { cwd: REPO, stdio: 'ignore' }); }
     catch { return { healed: false, renumbered, warning: `id collision healed (${tag}) but check:standards is RED on the healed tree — NOT pushed; fix on ${BASE} by hand` }; }
-    const changed = (tryGit(['diff', '--name-only']) || '').split('\n').filter(Boolean);
+    // #2312 — SCOPE the commit to the renumber's OWN file set (`plan.writePaths`/`deletePaths`), never a bare
+    // `git diff --name-only`. This checkout is often the user's PRIMARY (REPO defaults to `process.cwd()`, and
+    // the detached checkout above deliberately never resets a local branch so an accidental
+    // `--repo=<primary-with-work>` isn't yanked out from under the user, see the comment above `runHeal`) — it
+    // can carry OTHER dirty tracked files from a concurrent session's in-flight work (the exact #2301 "primary
+    // leak" class: agent-memory/skill/script edits sitting uncommitted). A bare unscoped diff would sweep those
+    // straight into this heal's commit and land them on `${BASE}` (observed live, PR #168, #2312). If the diff
+    // carries anything OUTSIDE the renumber's own paths, ABORT loud rather than silently drop or silently land
+    // foreign content — mirrors the #2290 regen fix's `outputPaths` discipline.
+    const allChanged = (tryGit(['diff', '--name-only']) || '').split('\n').filter(Boolean);
+    const { changed, foreign } = scopeHealChangedPaths(plan, allChanged);
+    if (foreign.length) return { healed: false, renumbered, warning: `id collision healed on disk but the checkout at ${REPO} also carries FOREIGN tracked change(s) outside the renumber's own file set (${foreign.join(', ')}) — ABORTING the heal (nothing committed/pushed) to avoid landing foreign content; reset this checkout to a clean ${BASE} and re-run, or run scripts/backlog-renumber-collisions.mjs on ${BASE} by hand` };
     if (changed.length === 0) return { healed: false, renumbered };
     try {
       gitC(['add', ...changed]);
