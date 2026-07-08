@@ -2,7 +2,7 @@
 kind: task
 parent: "2275"
 status: resolved
-relatedTo: ["2267", "xbvktb4"]
+relatedTo: ["2267", "2337"]
 dateOpened: "2026-07-08"
 dateStarted: "2026-07-08"
 dateResolved: "2026-07-08"
