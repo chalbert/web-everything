@@ -348,6 +348,36 @@ export function shouldRepollForLabelLag({ label, found, expect, retried } = {}) 
   return Number(found) < threshold;
 }
 
+/**
+ * #2313 — the drain STAMPS a park/skip reason onto the PR itself (a `gh pr comment`), not only its own
+ * ephemeral log (`we:scripts/merge-ai-prs.mjs`, previously ~715-722) — the log lives in whoever ran the drain's
+ * terminal; the PR is where the human reviewer actually is. Pure builder + pure dedupe check (the `gh` I/O lives
+ * in the CLI-only `postDrainReasonComment` wrapper below); unit-tested in `merge-ai-prs.test.mjs`.
+ *   `kind`  — 'park' (review-escalation parked it, #2171) or 'skip' (a real non-manifest conflict / red check).
+ *   Dedup   — marker-prefixed body; a `--watch` loop re-scores the SAME PR every pass, so `hasDrainReasonComment`
+ *             finds an existing comment carrying both the marker AND the exact same reason text and the caller
+ *             skips re-posting. A CHANGED reason (escalation reasons shifted, a different check went red) has no
+ *             matching prior comment, so it posts fresh — no external state needed beyond the PR's own comments.
+ */
+export function drainReasonMarker(kind) { return `<!-- drain-${kind}-reason -->`; }
+
+/** Build the comment body for a park/skip reason. Pure. */
+export function buildDrainReasonComment(kind, reasonText) {
+  const heading = kind === 'park' ? '⏸ **Parked for review by the drain**' : '· **Skipped by the drain**';
+  return `${drainReasonMarker(kind)}\n${heading}\n\n${reasonText}`;
+}
+
+/** Has this exact (kind, reasonText) already been stamped on the PR? Pure. `comments` is the raw
+ *  `gh pr view --json comments` array (tolerant of a missing/odd shape). */
+export function hasDrainReasonComment(comments, kind, reasonText) {
+  const marker = drainReasonMarker(kind);
+  const text = String(reasonText || '');
+  return (Array.isArray(comments) ? comments : []).some((c) => {
+    const body = String(c?.body || '');
+    return body.startsWith(marker) && body.includes(text);
+  });
+}
+
 // #2257/#2263 — the constellation's short repo names, SINGLE SOURCE for both `resolveRepos` (`--all-repos`
 // expansion) and `siblingCloneName` (#2263 sibling-clone routing) — a duplicated literal in each would drift
 // silently if the constellation ever grows a 4th repo.
@@ -556,6 +586,21 @@ function runCli() {
     if (!name) return null;
     const dir = resolve(process.cwd(), '..', name);
     try { return existsSync(join(dir, '.git')) ? dir : null; } catch { return null; }
+  };
+
+  // #2313 — post (or skip, if already posted) a drain reason comment on a PR. Best-effort: a `gh` miss never
+  // fails the sweep. Reads the PR's existing comments once per call (only called for park/skip verdicts, not
+  // every open PR) so a `--watch` loop dedupes on the SAME (kind, reason) with no extra state to maintain.
+  const postDrainReasonComment = (repo, num, kind, reasonText) => {
+    if (DRY_RUN || !reasonText) return false;
+    let comments = [];
+    try {
+      const data = JSON.parse(execFileSync('gh', ['pr', 'view', String(num), ...repoFlag(repo), '--json', 'comments'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim() || '{}');
+      comments = Array.isArray(data.comments) ? data.comments : [];
+    } catch { /* best-effort read; fall through and attempt the post anyway */ }
+    if (hasDrainReasonComment(comments, kind, reasonText)) return false;
+    try { execFileSync('gh', ['pr', 'comment', String(num), ...repoFlag(repo), '--body', buildDrainReasonComment(kind, reasonText)], { stdio: ['ignore', 'ignore', 'pipe'] }); return true; }
+    catch { return false; }
   };
 
   const fail = (reason, detail, code) => {
@@ -815,7 +860,12 @@ function runCli() {
       if (gate.action === 'park' || gate.action === 'wait-author') {
         v.decision = 'skip';
         v.reason = gate.reason + (score.reasons.length ? ` [${score.reasons.join('; ')}]` : '');
-        if (gate.applyLabel && !DRY_RUN) { try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ } }
+        if (gate.applyLabel && !DRY_RUN) {
+          try { execFileSync('gh', ['pr', 'edit', String(v.num), ...repoFlag(v.repo), '--add-label', gate.applyLabel], { stdio: ['ignore', 'ignore', 'pipe'] }); } catch { /* label best-effort */ }
+          // #2313 — stamp the WHY + what-to-look-for onto the PR itself, not only this log line below.
+          const posted = postDrainReasonComment(v.repo, v.num, 'park', v.reason);
+          if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} escalation reason stamped on PR\n`);
+        }
         // #2324 (guarantee 2) — a `review:human` park must STATE the escalation reason IN THE PR BODY, so the
         // operator opening it sees why a human is required without re-deriving it from the rubric. Augment
         // (never replace) the live body with the marked block at park time, then verify the write landed —
@@ -866,6 +916,20 @@ function runCli() {
 
   const toMerge = verdicts.filter((v) => v.decision === 'merge');
   const skipped = verdicts.filter((v) => v.decision === 'skip');
+
+  // #2313 — stamp the *why* onto every OTHER final skip too (a real non-manifest conflict, a red required
+  // check, an unlandable merge state, …), not only the review-escalation park path above. Excludes: verdicts
+  // already commented via the park path (`v.escalated === 'yes'`, kind 'park' above); a collision-heal in
+  // flight (`v.collisionHealed` — self-fixing, CI is re-running on the renumbered tip, nothing for a human to
+  // act on yet); an uncertified PR (not a producer PR the drain owns — never comment on an unrelated human PR).
+  if (!DRY_RUN) {
+    for (const v of skipped) {
+      if (v.escalated === 'yes' || v.collisionHealed) continue;
+      if (!(v.certifyLabel || v.aiGenerated)) continue;
+      const posted = postDrainReasonComment(v.repo, v.num, 'skip', v.reason);
+      if (posted && !AS_JSON) process.stderr.write(`  💬 ${repoTag(v.repo)}${v.num} skip reason stamped on PR\n`);
+    }
+  }
 
   if (!AS_JSON) {
     for (const v of verdicts) process.stderr.write(`  ${v.decision === 'merge' ? '→ merge' : '· skip '} ${repoTag(v.repo)}${v.num} ${v.item ? `(#${v.item}${v.blockedBy.length ? ` ⤳ ${v.blockedBy.join(',')}` : ''}) ` : ''}${v.decision === 'skip' ? `(${v.reason})` : ''} — ${v.title}\n`);
