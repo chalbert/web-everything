@@ -1,9 +1,12 @@
 ---
 kind: story
 size: 3
-status: open
+status: resolved
 relatedTo: ["2281", "2285", "2286", "2262", "2171"]
 dateOpened: "2026-07-06"
+dateStarted: "2026-07-08"
+dateResolved: "2026-07-08"
+graduatedTo: none
 tags: [review, deterministic-labels, pr-lifecycle]
 ---
 
