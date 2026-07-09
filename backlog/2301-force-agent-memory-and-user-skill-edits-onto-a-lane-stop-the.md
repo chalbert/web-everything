@@ -1,8 +1,8 @@
 ---
-kind: story
-size: 5
+kind: epic
 status: open
 dateOpened: "2026-07-06"
+relatedReport: reports/2026-07-09-backlog-split-analysis-2301.md
 tags: [agent-memory, lane, guard-lane, primary-checkout, self-improving-loop, "2266"]
 ---
 
