@@ -159,6 +159,32 @@ describe('decideReviewGate — the non-blocking watch window', () => {
   it('humanRequired + review:accepted → merge (a human verdict still wins)', () => {
     expect(decideReviewGate({ escalate: true, humanRequired: true, labels: [REVIEW_LABELS.accepted] }).action).toBe('merge');
   });
+
+  // #2362 — the review:human LABEL is a STICKY veto: a PR ALREADY carrying it must never merge even when this
+  // pass's fresh score no longer classifies it human-required (the #289 regression: a gate-self file dropped
+  // out of the diff on rebase, so the re-score returned humanRequired:false and it rode the window to land).
+  it('review:human LABEL vetoes merge even when the fresh score is humanRequired:false', () => {
+    const g = decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human], parkedSinceMs: null });
+    expect(g.action).toBe('park');
+    expect(g.applyLabel).toBe(REVIEW_LABELS.human);
+    expect(g.humanRequired).toBe(true);
+  });
+  it('review:human LABEL NEVER times out to merge-anyway even past the window (the #289 hole, closed)', () => {
+    const g = decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human], parkedSinceMs: 0, nowMs: 999 * 60_000, windowMs: 30 * 60_000 });
+    expect(g.action).toBe('park');
+  });
+  it('review:human LABEL vetoes even a DE-ESCALATED PR (escalate:false, no gate-self signal left)', () => {
+    // diff narrowed so far it no longer escalates — the sticky label must still block the !escalate fast-merge.
+    const g = decideReviewGate({ escalate: false, humanRequired: false, labels: [REVIEW_LABELS.human] });
+    expect(g.action).toBe('park');
+    expect(g.applyLabel).toBe(REVIEW_LABELS.human);
+  });
+  it('review:human LABEL + review:accepted → merge (a human explicitly cleared the gate, still wins first)', () => {
+    expect(decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human, REVIEW_LABELS.accepted] }).action).toBe('merge');
+  });
+  it('review:human LABEL + review:changes → wait-author (a reviewer bounce still routes to the author lane)', () => {
+    expect(decideReviewGate({ escalate: true, humanRequired: false, labels: [REVIEW_LABELS.human, REVIEW_LABELS.changes] }).action).toBe('wait-author');
+  });
 });
 
 describe('hasReviewLabel + REVIEW_LABELS', () => {
