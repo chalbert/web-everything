@@ -75,6 +75,63 @@ would yield.
 
 ---
 
+# Appendix — focused run `/slice 2359` (recursion into a language sub-epic)
+
+Slice A above (**#2354** — language-neutral vector export + cross-language harness contract) landed and is
+**resolved**, so each language sub-epic is now unblocked and its contract is *scoped*. #2359 is the first to
+recurse into. The question here is one level down: does the **Python renderer sub-epic** slice into
+stories, or is it atomic?
+
+## Candidate
+
+**#2359 — Native Python SSR renderer for directive regions** (`kind: epic`, no `size`, `parent: 2069`,
+`blockedBy: [2354]` — now resolved, unsliced — no children). *Not* a roadmap epic: its natural children
+are the layers of **one** renderer, not multiple subsystems — so its slices would be **stories/tasks**,
+graded against the story-form rubric (2)–(5).
+
+## Work-investigation pass — the frozen oracle is the whole spec
+
+The Python surface does not exist yet (no `.py` in `frontierui:plugs/webdirectives/`), but — unlike an
+un-investigable item — the scope is **fully knowable** by reading the frozen contract it re-derives:
+
+- **The oracle:** `frontierui:plugs/webdirectives/ssr/nodeReferenceRenderer.ts` (266 lines) — the reference
+  renderer, built as **one story** (#2064). Its internal shape is the Python port's spec: a driver
+  (parse `<template is="…">` source → iterate top-level directives → wrap in space-padded markers → join),
+  shared path/mustache resolution (`resolvePath`, `interpolate`), the 7 directive expanders (for-each
+  keyed+empty, if, switch/case, resource:loader, defer — ~10–35 lines each), and the state-token layer
+  (`djb2KeyHash`, for-each `count`/`key-hash`, if `condition`, switch `value`).
+- **The seam:** `frontierui:plugs/webdirectives/ssr/ServerRenderer.ts:33` — a pure `(source, data) → bytes`
+  function.
+- **The graders:** the 7 WE golden vectors + `assertSsrWireSuite`, exported as language-neutral JSON by
+  #2354. Conformance is byte-exact.
+- **Key portability fact (from the oracle's own header, lines 6–15):** the Node renderer gets byte-exact
+  serialization *for free* by reusing `happy-dom`'s serializer — and that win is **JS-only, does NOT port**.
+  A Python native must **hand-roll the parse + a byte-exact serializer** (attribute insertion order,
+  double-quoting, `data-key` injection, marker padding) to match the goldens. That hand-rolled
+  serializer is the bulk of the effort and risk.
+
+## Verdict — could NOT split (atomic; build as one unit)
+
+| Attempted seam | Rubric result |
+|---|---|
+| **By layer** (parse/serialize → expanders → state tokens) | **Fails (5).** No intermediate layer passes *any* vector — every one of the 7 goldens exercises a directive, so a driver-without-expanders emits markers with empty bodies and grades red across the board. A half-renderer is the "half an algorithm" broken-intermediate state the DoD forbids. |
+| **By directive** (A: parser+serializer+for-each; then if / switch / loader+defer as tails) | **Mechanically legal, but a fat-head/thin-tail chain — fails the spirit of (4).** Slice A carries ~85% of the effort/risk (the entire hand-rolled byte-exact parser+serializer) and passes the for-each vectors; B/C/D are ~`size·1` additions of ~10-line expanders, each `blockedBy: A`. Splitting one coherent `size·8` port into one dominant slice + three trivial tails fragments a deliverable the reference built whole, for marginal parallelism — the exact "needless split" the conservative instinct refuses. |
+| **Renderer vs conformance-harness** | **Fails (4)/(5) — mutually dependent.** The renderer can't be demoed without the harness that grades it; the harness has nothing to grade without the renderer. Registry-with-no-consumer → ships together. |
+
+All three decompositions fail. **#2359 is one atomic, coherent deliverable:** a pure port re-deriving frozen
+bytes, provable only when the renderer + its conformance harness ship together, with no intermediate slice
+leaving a passing-vector state. Estimated **`size · 8`** (large, batchable ceiling — the hand-rolled
+serializer is the weight; could be `5` if a Python HTML lib reproduces byte-exact output). At `8` it is *at*
+the batchable ceiling, **not over it** — not even a size-driven split candidate.
+
+## Resolution — reclassified epic → `story · 8`
+
+There is nothing to unblock: the design is a resolved black box (#2030), the contract is frozen, #2354 is
+resolved. #2359 is simply **ready to build as a single item**, so it stops being an empty roadmap-placeholder
+`epic` (a state from before its contract was scoped) and becomes a **`story · 8` under #2069** — directly
+batchable/buildable. The five sibling language sub-epics (#2355–2358, #2360) will each collapse the same way
+when sliced: same frozen oracle, same atomic shape.
+
 ## `/slice 2356` — Native Go SSR renderer for directive regions (focused, appended 2026-07-09)
 
 **#2356** (`kind: epic`, `parent: 2069`, `blockedBy: [2354]`, unsliced — no children). One of the
