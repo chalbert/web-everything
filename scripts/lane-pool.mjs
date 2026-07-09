@@ -49,7 +49,7 @@
  * (i.e. landed via `pr-land` onto its `lane/*` ref, per #1934) — treat anything else as ephemeral and
  * push early.
  */
-import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync, readlinkSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, lstatSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
@@ -145,7 +145,7 @@ function writeLaneEnv(repo, n) {
   writeFileSync(join(laneDir(repo, n), '.env.local'), contents);
 }
 
-// ── FUI sibling for the WE pool (#2166) — the unconditional SSR component-render dependency ─────────
+// ── constellation sibling clones for the WE pool (#2166 → #2282 → #2349) ─────────────────────────────
 // Every WE grid page SSRs through the pinned FUI build-artifact, resolved by
 // `scripts/lib/component-render-build-hook.cjs` at the FIXED relative path `../frontierui/dist/tools/
 // component-render/cli.mjs` — i.e. a `frontierui` checkout SIBLING of the WE repo root. In the primary
@@ -154,59 +154,123 @@ function writeLaneEnv(repo, n) {
 // verification HARD-FAILS in a solo/interactive WE lane ("pinned FUI artifact missing"). The #1943
 // orchestrator only provisions per-repo pools for items whose *impl* spans FUI; this render dependency is
 // UNCONDITIONAL (independent of whether the edited item touches FUI), so it can't be gated behind that
-// affected-repo detection — the pool itself must carry the sibling.
+// affected-repo detection — the pool itself must carry the sibling. A plain `plateau-app` sibling similarly
+// un-breaks a lane's Vite dev-panel import (`vite.config.mts` → `../plateau-app/…`).
 //
-// Fix (#2166): on provision/refresh of the WE pool, ensure `<poolDir>/frontierui` is a symlink to the
-// primary checkout's real `frontierui` sibling (built via its `npm run build:tools`). One symlink at the
-// pool root serves EVERY lane (each `lane-N`'s `../frontierui` resolves to it), replacing the hand-run
-// `ln -sfn ~/workspace/frontierui ~/workspace/.lanes/web-everything/frontierui` documented in
-// docs/agent/testing.md. Idempotent: a correct existing link is left untouched; a stale/wrong link is
-// repointed. Only the WE pool (identified by a PORT_BANDS entry — the same signal that marks the
-// env-driven dev band) provisions a sibling; other pools no-op.
+// Original fix (#2166): a SYMLINK at `<poolDir>/frontierui` to the primary checkout's real `frontierui`
+// sibling. Ratified in #2282 (docs/agent/platform-decisions.md#pool-siblings-real-built-clones) and
+// generalized here (#2349): the pool-root sibling is now a REAL, PUSHABLE git clone, not a symlink — one
+// clone per sibling repo serves BOTH consumers at the same `../<name>` path a lane resolves — WE-lane
+// render reads its BUILT `dist/`, and the drain's cross-repo rebase-drop (`merge-ai-prs.mjs`
+// `siblingCloneDir`, unchanged — it already resolves `../<name>`) fetches/pushes its `origin`. Safe to
+// share: rebase-drop is pure git plumbing (merge-tree → commit-tree → push, no checkout), so it only
+// mutates git objects/refs — disjoint from render's `dist/` reads. The symlink's one lost behavior: render
+// no longer reflects the primary checkout's uncommitted FUI WIP, only its committed `main` — freshness
+// ownership moves to this provisioner, which rebuilds `dist/` (via the sibling's own `build:tools`, where
+// it has one — frontierui does, plateau-app doesn't) on every provision/refresh.
 //
-// The sibling is a SYMLINK, not a clone: the artifact is a locked build output the human keeps built in
-// their primary FUI checkout, and pointing every lane at that one real tree avoids N stale FUI clones and
-// N `build:tools` runs. If the primary sibling is absent we WARN (not fail) — the pool is still usable for
-// non-render work, and the warning tells the human to build FUI.
-function primaryFuiSibling(repo) {
-  // FUI is the sibling of the PRIMARY WE checkout (the pool's reference repo), e.g.
-  // ~/workspace/webeverything → ~/workspace/frontierui.
-  return join(dirname(repo.referencePath), 'frontierui');
+// Idempotent: a clean, up-to-date clone is fetched + fast-forwarded + rebuilt (cheap — ~1.2s for FUI); a
+// missing clone is created (`--reference` the primary sibling for fast local object-sharing, same pattern
+// as `cloneLane`); a legacy pre-#2282 symlink is replaced with a real clone; a DIRTY or AHEAD clone (like a
+// lane, #2267) is left untouched rather than reset-away, since it is now real, pushable, mutable state.
+// Only the WE pool (identified by a PORT_BANDS entry — the same signal that marks the env-driven dev band)
+// provisions siblings; other pools no-op. If the primary sibling is absent (no local checkout to derive an
+// origin URL from) we WARN (not fail) — the pool is still usable for non-render work.
+const SIBLING_REPO_NAMES = ['frontierui', 'plateau-app'];
+
+function primarySiblingPath(repo, name) {
+  // A sibling repo is the sibling of the PRIMARY WE checkout (the pool's reference repo), e.g.
+  // ~/workspace/webeverything → ~/workspace/frontierui / ~/workspace/plateau-app.
+  return join(dirname(repo.referencePath), name);
 }
-function ensureFuiSibling(repo) {
-  if (!PORT_BANDS[repo.name]) return; // not the WE pool → no unconditional render dependency
-  const source = primaryFuiSibling(repo);
-  const link = join(repo.poolDir, 'frontierui');
-  if (!existsSync(source)) {
-    log(
-      `  ⚠ FUI sibling source ${source} not found — WE lane build:docs/dev-serve will fail until FUI is ` +
-        `present & built (\`cd ${source} && npm run build:tools\`). Skipping symlink.`,
-    );
-    return;
+
+function siblingHasBuildTools(dir) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+    return !!(pkg && pkg.scripts && pkg.scripts['build:tools']);
+  } catch {
+    return false;
   }
-  // Already a symlink? Repoint only if it targets the wrong place (idempotent).
+}
+
+function buildSibling(dir, name) {
+  if (!siblingHasBuildTools(dir)) return; // e.g. plateau-app — a plain clone is enough (#2282)
+  log(`  building ${name} sibling (npm run build:tools) …`);
+  try {
+    execFileSync('npm', ['run', 'build:tools'], { cwd: dir, stdio: 'inherit' });
+  } catch (e) {
+    log(`  ⚠ ${name} sibling build:tools failed — WE-lane render may see a stale/missing dist/ (${e.message})`);
+  }
+}
+
+function ensureOneSibling(repo, name, { force = false } = {}) {
+  const dest = join(repo.poolDir, name);
+  const primary = primarySiblingPath(repo, name);
+
+  // Replace a pre-#2282 render-only symlink (or any other symlink) with a real clone.
   let existing = null;
   try {
-    existing = lstatSync(link);
+    existing = lstatSync(dest);
   } catch {
     existing = null;
   }
   if (existing && existing.isSymbolicLink()) {
-    let target = null;
-    try {
-      target = readlinkSync(link);
-    } catch {
-      target = null;
-    }
-    if (target && resolve(dirname(link), target) === resolve(source)) return; // correct link → leave it
-    rmSync(link, { force: true });
-  } else if (existing) {
-    // A real dir/file squats the sibling path — don't clobber a non-symlink; warn and bail.
-    log(`  ⚠ ${link} exists and is not a symlink — leaving it; FUI sibling not (re)linked.`);
+    rmSync(dest, { force: true });
+    existing = null;
+    log(`  replacing legacy ${dest} symlink with a real pushable clone (#2282)`);
+  }
+
+  if (existing && !existsSync(join(dest, '.git'))) {
+    // A real dir/file squats the sibling path that isn't a git repo — don't clobber it.
+    log(`  ⚠ ${dest} exists and is not a git clone — leaving it; ${name} sibling not (re)provisioned.`);
     return;
   }
-  symlinkSync(source, link);
-  log(`  linked FUI sibling ${link} → ${source} (#2166)`);
+
+  if (!existing) {
+    const originUrl = existsSync(primary) ? tryGit(['remote', 'get-url', 'origin'], primary) : null;
+    if (!originUrl) {
+      log(
+        `  ⚠ ${name} sibling source ${primary} not found/has no origin — WE lane build:docs/dev-serve or ` +
+          `the drain's cross-repo rebase-drop will skip ${name} until it is present.`,
+      );
+      return;
+    }
+    log(`  clone ${name} sibling ← ${originUrl} (--reference ${primary}) …`);
+    try {
+      gitQuiet(['clone', '--quiet', '--reference', primary, originUrl, dest]);
+    } catch (e) {
+      // Unlike the old symlink (pure filesystem, no network), this is a real `git clone` of `originUrl` —
+      // best-effort: a network blip / auth failure / moved remote must WARN and move on, not crash the
+      // whole provision/refresh (which would otherwise abort AFTER every WE lane already succeeded, #2349).
+      log(`  ⚠ ${name} sibling clone failed — WE lane build:docs/dev-serve or the drain's cross-repo ` + `rebase-drop will skip ${name} until it is provisioned (${e.message})`);
+      rmSync(dest, { recursive: true, force: true }); // don't leave a partial/broken clone behind
+      return;
+    }
+  }
+
+  const branchRef = tryGit(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], dest);
+  const branch = branchRef ? branchRef.replace(/^origin\//, '') : 'main';
+  tryGit(['fetch', 'origin', '--prune', '--quiet'], dest);
+
+  if (!force) {
+    // #2267-style data-loss guard, now load-bearing here too: this clone is real & pushable (unlike the
+    // #2166 symlink it replaces), so an unconditional reset/clean could destroy in-flight local state.
+    const { dirty, ahead } = laneDirtyOrAhead(dest, branch);
+    if (dirty || ahead > 0) {
+      log(`  ${name} sibling: SKIPPED reset (dirty/ahead) — use --force to override; skipping rebuild too`);
+      return;
+    }
+  }
+
+  tryGit(['checkout', '--quiet', '-B', branch, `origin/${branch}`], dest);
+  tryGit(['reset', '--hard', `origin/${branch}`, '--quiet'], dest);
+  tryGit(['clean', '-fd', '--quiet'], dest);
+  buildSibling(dest, name);
+}
+
+function ensureRepoSiblings(repo, opts = {}) {
+  if (!PORT_BANDS[repo.name]) return; // not the WE pool → no unconditional sibling dependency
+  for (const name of SIBLING_REPO_NAMES) ensureOneSibling(repo, name, opts);
 }
 
 // ── lane-ports registry (#2139) — item → lane page-port mapping for the main-checkout proxy ─────────
@@ -411,7 +475,7 @@ function cmdProvision(repo) {
     if (!flags['no-install']) ensureDeps(laneDir(repo, n));
   }
   unmapLanes(repo, resetLanes); // refreshed lanes lose stale mappings (#2139); skipped lanes keep theirs
-  ensureFuiSibling(repo); // one FUI sibling at the pool root serves every WE lane (#2166)
+  ensureRepoSiblings(repo, { force }); // pushable+built constellation siblings at the pool root (#2166/#2282/#2349)
   printStatus(repo);
 }
 
@@ -428,7 +492,7 @@ function cmdRefresh(repo) {
     if (!flags['no-install']) ensureDeps(laneDir(repo, n));
   }
   unmapLanes(repo, resetLanes); // a reset lane no longer renders its old item (#2139); a skipped one still does
-  ensureFuiSibling(repo); // keep the WE pool's FUI sibling current on refresh too (#2166)
+  ensureRepoSiblings(repo, { force }); // keep the WE pool's constellation siblings current on refresh too
   printStatus(repo);
 }
 
@@ -513,10 +577,10 @@ function cmdAcquire(repo) {
   }
   writeLaneEnv(repo, chosen);
   if (!flags['no-install']) ensureDeps(dir);
-  // NOTE: do NOT re-run ensureFuiSibling here. It resolves the primary FUI from the *reference* checkout's
-  // parent — correct only when run from the primary; run from INSIDE a lane (a consumer's cwd) it mis-points
-  // the shared pool-root `frontierui` symlink at itself. The pool-root sibling is a provision/refresh concern;
-  // a leased lane borrows a pool those already set up. (Regressed a live acquire until caught — #2275.)
+  // NOTE: do NOT re-run ensureRepoSiblings here. It resolves each sibling's primary from the *reference*
+  // checkout's parent — correct only when run from the primary; run from INSIDE a lane (a consumer's cwd) it
+  // mis-points the shared pool-root sibling clones at itself. The pool-root siblings are a provision/refresh
+  // concern; a leased lane borrows a pool those already set up. (Regressed a live acquire until caught — #2275.)
   log(`acquired lane-${chosen} for ${session}${flags.purpose ? ` (${flags.purpose})` : ''} → ${dir}`);
   if (flags.json) process.stdout.write(JSON.stringify({ lane: chosen, path: dir, session, purpose: flags.purpose || null, branch: repo.branch }, null, 2) + '\n');
   else process.stdout.write(dir + '\n'); // stdout = path only, so `LANE=$(… acquire)` captures it clean
