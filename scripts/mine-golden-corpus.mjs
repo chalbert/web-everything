@@ -199,7 +199,7 @@ function mineLocusFixtures() {
 function buildGuardBashFixtures() {
   const scenarios = [
     { id: 'backlog-mutation-primary-cwd', cmd: 'node scripts/backlog.mjs claim 2270', ctx: { primaryCwd: true }, basis: '#2302' },
-    { id: 'backlog-mutation-primary-cwd-override', cmd: 'BACKLOG_MUTATE_OK=1 node scripts/backlog.mjs claim 2270', ctx: { primaryCwd: true }, basis: '#2302 escape hatch' },
+    { id: 'backlog-mutation-primary-cwd-override', cmd: 'BACKLOG_MUTATE_OK=1 node scripts/backlog.mjs claim 2270', ctx: { primaryCwd: true }, basis: '#2339 — override removed, still denied' },
     { id: 'backlog-mutation-stale-lane', cmd: 'node scripts/backlog.mjs resolve 2270', ctx: { primaryCwd: false, staleBehind: 5 }, basis: '#2323' },
     { id: 'backlog-mutation-stale-lane-override', cmd: 'STALE_LANE_OK=1 node scripts/backlog.mjs resolve 2270', ctx: { primaryCwd: false, staleBehind: 5 }, basis: '#2323 escape hatch' },
     { id: 'backlog-mutation-fresh-lane', cmd: 'node scripts/backlog.mjs resolve 2270', ctx: { primaryCwd: false, staleBehind: 0 }, basis: 'allowed baseline' },

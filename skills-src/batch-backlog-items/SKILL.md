@@ -33,11 +33,13 @@ the per-item chat-rename — a batch labels the session **once**.
      projection (only `blockedBy`-resolved items appear — don't re-grep blockers; never read `git status`
      for eligibility, a dirty tree is the baseline and `claim` ignores it). Clean pack → go; look one cluster
      deeper only if the skim surfaces a fork.
-   - **Mis-flagged item → fix the flag via the sanctioned CLI, don't skip it** — run
+   - **Mis-flagged item → fix the flag via the sanctioned CLI, in a lane, don't skip it** — run
      `node scripts/backlog.mjs retype <NNN> [--to=decision] [--size=13] [--status=parked]` to retype it
      (→ Tier B), bump its `size` to `13` (drops it from the pool), or park it. This is the sanctioned pack-phase
-     splice — do **not** raw-Edit the item's `.md` in the primary tree (the lane guard blocks it) and do **not**
-     reach for `LANE_GUARD_OFF`; the CLI does the same frontmatter-only change, guard-clean and locus-scanned. A
+     splice — do **not** raw-Edit the item's `.md` in the primary tree (the lane guard blocks it), and do **not**
+     reach for `LANE_GUARD_OFF` or `BACKLOG_MUTATE_OK` (removed, #2339). `retype` is a frontmatter-only,
+     locus-scanned change, but it still lands via the **lane→PR** like every other backlog mutation — `we:scripts/guard-bash.mjs`
+     denies it unconditionally from a primary cwd (#2302/#2219), no override. A
      local-only **NNN collision** (two files share a number) is fixed with `node scripts/backlog.mjs yield
      <NNN-slug>`, which moves the untracked one to the next free number (it refuses a git-tracked item — NNN is
      immutable). Or — when the only residual is a
