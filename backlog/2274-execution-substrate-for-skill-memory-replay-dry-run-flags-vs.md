@@ -1,8 +1,12 @@
 ---
 kind: decision
 parent: "2268"
-status: open
+status: resolved
 dateOpened: "2026-07-04"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
+graduatedTo: none
+codifiedIn: "docs/agent/platform-decisions.md#skill-memory-replay-substrate"
 preparedDate: "2026-07-09"
 tags: [validation-suite, replay, worktree, tiering]
 ---
@@ -48,6 +52,15 @@ tags: [validation-suite, replay, worktree, tiering]
   "Faithful dry-run" is self-contradictory for a mutating op. And the parent epic already excluded A ("worktree-
   replay *rather than* a per-skill `--dry-run` retrofit", `we:backlog/2268-validation-suite-for-skills-and-memory.md`),
   so the *live* question is **throwaway-clone vs lane-pool**, and A is settled context.
+- **Testing the lane machinery itself needs NO real lanes — the substrate recurses (ratify-turn finding).** The
+  hardest case for the default ("how do you replay lane work without lanes?") is already solved by the shipped
+  pattern: `we:scripts/__tests__/lane-pool-refresh-guard.test.mjs` fabricates an entire ephemeral world per test
+  under one `mkdtemp` dir — a throwaway bare `origin.git`, a seeded reference checkout, and a throwaway **pool
+  root** it hands to the real `we:scripts/lane-pool.mjs` via `LANE_POOL_ROOT` in `extraEnv` — then spawns the
+  real `provision`/`acquire`/`refresh --force` CLI against it and `rmSync`s in teardown. The suite never touches
+  `~/workspace/.lanes/`. This is also *why* the rejected "use the production pool as the substrate" branch is
+  broken: the real pool can't be seeded, force-resets the fixture, and strands leases, whereas a fabricated
+  `LANE_POOL_ROOT` has none of those. So even lane-tooling replay uses a disposable root, never allocated lanes.
 - **The tiering is already ratified.** `we:scripts/lib/invariant-catalogue.json` (resolved #2271) encodes
   `tiers.A` (deterministic script/hook layer, CI-able snapshot) and `tiers.B` (judgment skills, session-run),
   with 43 invariants tagged (37 A / 6 B). This decision routes each tier to a substrate; it does not define the
@@ -151,9 +164,12 @@ merit, not effort — a dry-run cannot perform the mutation it must assert on, i
 
 *"The skill/memory validation suite replays mutating cases inside an **ephemeral throwaway clone**
 (`mkdtempSync` + `git init`/`git clone`, discarded via `rmSync`), asserting on the resulting tree — **never the
-shared lane pool** (which is CI-broken, fixture-hostile, and lease-bearing). `--dry-run` remains an
-operator-preview feature, never the suite's fidelity substrate. Driving an LLM *judgment* skill deterministically
-is a separate #2272 problem, unaddressed by the substrate choice."*
+shared lane pool** (which is CI-broken, fixture-hostile, and lease-bearing). This holds even when the case under
+test *is* the lane tooling: point the real `we:scripts/lane-pool.mjs` at a fabricated `LANE_POOL_ROOT` under a
+`mkdtemp` dir (a throwaway origin + reference + pool), never at allocated production lanes — the pattern already
+shipping in `we:scripts/__tests__/lane-pool-refresh-guard.test.mjs`. `--dry-run` remains an operator-preview
+feature, never the suite's fidelity substrate. Driving an LLM *judgment* skill deterministically is a separate
+#2272 problem, unaddressed by the substrate choice."*
 
 ---
 

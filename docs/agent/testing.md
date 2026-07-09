@@ -165,6 +165,8 @@ If a sibling's primary checkout is missing entirely, provision warns and skips t
 
 > **Visual-regression substrate is self-hosted Playwright, in-repo committed `-linux` PNG baselines — no hosted SaaS** (decision #2233, ratified 2026-07-09). The governing rule + rationale + evidence-gated escape hatches (Argos-as-review-UI-only #2233 fork 2; graduate-baselines-off-PNG #1967) live in [platform-decisions.md#visual-regression-substrate](./platform-decisions.md#visual-regression-substrate).
 
+> **Skill/memory replay substrate is an ephemeral throwaway clone (`mkdtemp` + `git init`, `rmSync`), never the shared lane pool** (decision #2274, ratified 2026-07-09). Even testing the lane tooling itself uses a fabricated `LANE_POOL_ROOT` under a temp dir, never allocated production lanes; `--dry-run` is never the fidelity substrate. Full rule + rationale in [platform-decisions.md#skill-memory-replay-substrate](./platform-decisions.md#skill-memory-replay-substrate).
+
 ## Web Cases — protocol conformance fixtures
 "Web Cases" are the source of truth for protocol conformity: live documentation examples **and** input fixtures for E2E conformance testing.
 - **Directory**: `src/cases/<protocol-id>/`
