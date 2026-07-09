@@ -1,0 +1,12 @@
+{
+  "id": "backlog-mutation-stale-lane",
+  "cmd": "node scripts/backlog.mjs resolve 2270",
+  "ctx": {
+    "primaryCwd": false,
+    "staleBehind": 5
+  },
+  "basis": "#2323",
+  "expect": {
+    "reason": "This lane clone is 5 commit(s) behind origin/main — a mutation here would run STALE scripts/ against a STALE backlog view and can mint a colliding/wrong NNN (#2323). Refresh first: `git fetch origin --prune && git reset --hard origin/main && git clean -fd`. Sanctioned override (rare): prefix `STALE_LANE_OK=1`."
+  }
+}

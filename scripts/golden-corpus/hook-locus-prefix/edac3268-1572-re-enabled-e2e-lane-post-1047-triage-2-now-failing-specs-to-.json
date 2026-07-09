@@ -1,0 +1,11 @@
+{
+  "sha": "edac326892a443204a8d164627d1a4bcf7efac1d",
+  "date": "2026-06-22",
+  "file": "backlog/1572-re-enabled-e2e-lane-post-1047-triage-2-now-failing-specs-to-.md",
+  "before": "---\nkind: task\nstatus: open\ndateOpened: \"2026-06-22\"\ntags: []\n---\n\n# Re-enabled e2e lane (post-#1047): triage 2 now-failing specs to green\n\nRemoving the #1047-dead service-worker webServer/project from playwright.config.ts (done in #1207) unblocked the chromium e2e lane, which had not run since plugs/ was deleted. Two specs now run and fail, both unrelated to interpolation: blocks/__tests__/e2e/source-toggle.spec.ts (/blocks/for-each/ JSX pane is build-generated — needs the build artifact present) and tests/content/rendered-backlog-content.spec.ts (rendered /backlog/ row count 83 vs loader 82 — stale 11ty render / live-data drift). Triage each to green or mark deliberately skipped.\n",
+  "after": "---\nkind: task\nstatus: open\ndateOpened: \"2026-06-22\"\ntags: []\n---\n\n# Re-enabled e2e lane (post-#1047): triage 2 now-failing specs to green\n\nRemoving the #1047-dead service-worker webServer/project from `we:playwright.config.ts` (done in #1207) unblocked the chromium e2e lane, which had not run since the local plugs tree was deleted. Two specs now run and fail, both unrelated to interpolation: `we:blocks/__tests__/e2e/source-toggle.spec.ts` (/blocks/for-each/ JSX pane is build-generated — needs the build artifact present) and `we:tests/content/rendered-backlog-content.spec.ts` (rendered /backlog/ row count 83 vs loader 82 — stale 11ty render / live-data drift). Triage each to green or mark deliberately skipped.\n",
+  "expect": {
+    "findingsBefore": 1,
+    "findingsAfter": 0
+  }
+}

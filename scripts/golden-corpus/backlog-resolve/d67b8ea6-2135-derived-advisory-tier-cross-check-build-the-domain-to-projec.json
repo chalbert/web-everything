@@ -1,0 +1,12 @@
+{
+  "sha": "d67b8ea6f4d4f3f91dadd762050d8feaead82cd0",
+  "date": "2026-07-03",
+  "file": "backlog/2135-derived-advisory-tier-cross-check-build-the-domain-to-projec.md",
+  "verb": "resolve",
+  "opts": {
+    "today": "2026-07-03",
+    "graduatedTo": "we:scripts/check-standards-rules.mjs"
+  },
+  "before": "---\nkind: story\nsize: 5\nstatus: active\nblockedBy: [\"2132\"]\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ntags: []\n---\n\n# Derived advisory tier cross-check: build the domain-to-project evidence join\n\nFuture enhancement demoted from #2088 Fork 3: a warn-only cross-check flagging an exploratory project whose domain shows benchmark demand. Blocked in substance on an evidence join that does not exist - we:src/_data/benchmarkCoverage.json is capability-to-entity keyed with no domain-to-project edge (projects list no intents/blocks, only protocols carry ownedByProject) - so this story is mostly building that join. Advisory only: it never owns the tier value (stamped per #2088).\n",
+  "after": "---\nkind: story\nsize: 5\nstatus: resolved\nblockedBy: [\"2132\"]\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ndateResolved: \"2026-07-03\"\ngraduatedTo: \"we:scripts/check-standards-rules.mjs\"\ntags: []\n---\n\n# Derived advisory tier cross-check: build the domain-to-project evidence join\n\nFuture enhancement demoted from #2088 Fork 3: a warn-only cross-check flagging an exploratory project whose domain shows benchmark demand. Blocked in substance on an evidence join that does not exist - we:src/_data/benchmarkCoverage.json is capability-to-entity keyed with no domain-to-project edge (projects list no intents/blocks, only protocols carry ownedByProject) - so this story is mostly building that join. Advisory only: it never owns the tier value (stamped per #2088).\n"
+}

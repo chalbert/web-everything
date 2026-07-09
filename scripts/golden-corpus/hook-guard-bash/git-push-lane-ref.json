@@ -1,0 +1,9 @@
+{
+  "id": "git-push-lane-ref",
+  "cmd": "git push origin HEAD:refs/heads/lane/batch-example-1",
+  "ctx": {},
+  "basis": "allowed: lane ref",
+  "expect": {
+    "reason": null
+  }
+}

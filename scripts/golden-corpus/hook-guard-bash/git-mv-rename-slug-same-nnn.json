@@ -1,0 +1,9 @@
+{
+  "id": "git-mv-rename-slug-same-nnn",
+  "cmd": "git mv backlog/100-foo.md backlog/100-bar.md",
+  "ctx": {},
+  "basis": "allowed: slug-only rename",
+  "expect": {
+    "reason": null
+  }
+}

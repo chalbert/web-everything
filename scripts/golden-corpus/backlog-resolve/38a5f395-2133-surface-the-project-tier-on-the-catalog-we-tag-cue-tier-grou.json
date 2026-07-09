@@ -1,0 +1,12 @@
+{
+  "sha": "38a5f3957da35a0bb9089c653e44bb749204892f",
+  "date": "2026-07-02",
+  "file": "backlog/2133-surface-the-project-tier-on-the-catalog-we-tag-cue-tier-grou.md",
+  "verb": "resolve",
+  "opts": {
+    "today": "2026-07-03",
+    "graduatedTo": "we:scripts/lib/component-render-build-hook.cjs"
+  },
+  "before": "---\nkind: story\nsize: 3\nstatus: active\nblockedBy: [\"2132\"]\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ntags: []\n---\n\n# Surface the project tier on the catalog: we-tag cue, tier grouping, heading reword\n\nRender ratified #2088 Fork 4 in-place surfacing: a we-tag tier cue on every project card and detail page via the weProjectGrid SSR seam (we:.eleventy.js) per the by-intent statute (we-badge stays the status pill), group each grid core then contextual then exploratory, and reword the we:src/index.njk Core Standards heading so core is unambiguous tier vocabulary. UI change: carries the before/after visual check + committed interaction test obligations.\n",
+  "after": "---\nkind: story\nsize: 3\nstatus: resolved\nblockedBy: [\"2132\"]\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ndateResolved: \"2026-07-03\"\ngraduatedTo: \"we:scripts/lib/component-render-build-hook.cjs\"\ntags: []\n---\n\n# Surface the project tier on the catalog: we-tag cue, tier grouping, heading reword\n\nRender ratified #2088 Fork 4 in-place surfacing: a we-tag tier cue on every project card and detail page via the weProjectGrid SSR seam (we:.eleventy.js) per the by-intent statute (we-badge stays the status pill), group each grid core then contextual then exploratory, and reword the we:src/index.njk Core Standards heading so core is unambiguous tier vocabulary. UI change: carries the before/after visual check + committed interaction test obligations.\n"
+}

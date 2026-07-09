@@ -1,0 +1,11 @@
+{
+  "sha": "6316d2877104120f77f2cb7ff7d484e57692ed68",
+  "date": "2026-07-02",
+  "file": "backlog/2108-add-the-invisible-directive-marker-recipe-rendered-false-obs.md",
+  "verb": "resolve",
+  "opts": {
+    "today": "2026-07-03"
+  },
+  "before": "---\nkind: story\nsize: 3\nparent: \"2093\"\nstatus: active\nblockedBy: [\"2104\"]\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ntags: []\n---\n\n# Add the invisible directive marker recipe ({@ rendered:false + observedAttributes)\n\nAdd the marker-nature directive recipe ({@portal target=\"#m\" disabled} — neither value nor children, rendered:false, Comment host): observedAttributes ride the open marker with change-reaction via the #1986 rule-4 observer pattern (fui:plugs/webdirectives/CustomTemplateTypeRegistry.ts:56-246 precedent); portal-style fixture + tests.\n",
+  "after": "---\nkind: story\nsize: 3\nparent: \"2093\"\nstatus: resolved\nblockedBy: [\"2104\"]\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ndateResolved: \"2026-07-03\"\ntags: []\n---\n\n# Add the invisible directive marker recipe ({@ rendered:false + observedAttributes)\n\nAdd the marker-nature directive recipe ({@portal target=\"#m\" disabled} — neither value nor children, rendered:false, Comment host): observedAttributes ride the open marker with change-reaction via the #1986 rule-4 observer pattern (fui:plugs/webdirectives/CustomTemplateTypeRegistry.ts:56-246 precedent); portal-style fixture + tests.\n"
+}

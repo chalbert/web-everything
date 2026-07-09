@@ -1,0 +1,11 @@
+{
+  "id": "backlog-mutation-primary-cwd",
+  "cmd": "node scripts/backlog.mjs claim 2270",
+  "ctx": {
+    "primaryCwd": true
+  },
+  "basis": "#2302",
+  "expect": {
+    "reason": "Backlog item-mutations (claim/resolve/scaffold/settle/retype/yield/prepare-stamp) must run in a LANE clone, not the primary checkout — running backlog.mjs here mutates the item on primary and bypasses lane isolation (#2302/#104). cd into your lane clone (~/workspace/.lanes/<repo>/lane-N) and run it there. Sanctioned override (rare): prefix `BACKLOG_MUTATE_OK=1`."
+  }
+}

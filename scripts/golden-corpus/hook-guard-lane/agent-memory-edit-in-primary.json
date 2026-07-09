@@ -1,0 +1,8 @@
+{
+  "id": "agent-memory-edit-in-primary",
+  "filePathTemplate": "{{PRIMARY_ROOT}}/webeverything/.claude/agent-memory/example.md",
+  "expect": {
+    "decision": "allow"
+  },
+  "basis": "agent-memory carve-out (#2266)"
+}

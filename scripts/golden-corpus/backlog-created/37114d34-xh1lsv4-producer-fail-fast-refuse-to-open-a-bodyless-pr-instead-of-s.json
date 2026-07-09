@@ -1,0 +1,8 @@
+{
+  "sha": "37114d340d68b6a6581c1cb1b071ad802f684be8",
+  "date": "2026-07-08",
+  "file": "backlog/xh1lsv4-producer-fail-fast-refuse-to-open-a-bodyless-pr-instead-of-s.md",
+  "verb": "created",
+  "before": null,
+  "after": "---\nkind: story\nsize: 2\nstatus: open\ndateOpened: \"2026-07-08\"\ntags: []\n---\n\n# Producer fail-fast: refuse to open a bodyless PR instead of stalling the drain on the #2324 gate\n\nWhen a producer (batch closeout / we:scripts/pr-land.mjs) opens a PR with an EMPTY body, the #2324 drain-side gate correctly refuses to LAND it — but only at drain time, stalling the queue until a human fills the body (observed 2026-07-08: #2226/PR #222 opened bodyless, blocking the drain until the body was hand-filled by the drain operator). #2324 resolved the consumer-side refusal only; the producer-side prevention is missing. Fix: the producer must require a non-empty --body-file at PR-open and fail fast where the omission happens, rather than emitting a PR that stalls a later drain and needs manual repair.\n"
+}

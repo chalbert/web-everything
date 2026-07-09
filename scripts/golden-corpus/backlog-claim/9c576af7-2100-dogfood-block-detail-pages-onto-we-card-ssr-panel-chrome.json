@@ -1,0 +1,11 @@
+{
+  "sha": "9c576af7892de57729c3c49cfd44a2cf5cc34209",
+  "date": "2026-07-02",
+  "file": "backlog/2100-dogfood-block-detail-pages-onto-we-card-ssr-panel-chrome.md",
+  "verb": "claim",
+  "opts": {
+    "today": "2026-07-03"
+  },
+  "before": "---\nkind: story\nsize: 3\nparent: \"2021\"\nstatus: open\nblockedBy: [\"2098\"]\ndateOpened: \"2026-07-02\"\ntags: []\n---\n\n# Dogfood block detail pages onto we-card (SSR panel chrome)\n\nConvert the 10+ hand-rolled section-card fui-card panels across both tiers of we:src/block-pages.njk (e.g. we:src/block-pages.njk:49,55,64,84 — Overview, Live example, Quick start, API reference, Common patterns, WE Standards overlay, implementer panels) to SSR we-card via the #2098 primitive. data-table surfaces untouched: presentational doc tables are already in their ratified #1964 end-state (plain table.data-table). JS-off correct; Playwright before/after; 0 console errors.\n",
+  "after": "---\nkind: story\nsize: 3\nparent: \"2021\"\nstatus: active\nblockedBy: [\"2098\"]\ndateOpened: \"2026-07-02\"\ndateStarted: \"2026-07-03\"\ntags: []\n---\n\n# Dogfood block detail pages onto we-card (SSR panel chrome)\n\nConvert the 10+ hand-rolled section-card fui-card panels across both tiers of we:src/block-pages.njk (e.g. we:src/block-pages.njk:49,55,64,84 — Overview, Live example, Quick start, API reference, Common patterns, WE Standards overlay, implementer panels) to SSR we-card via the #2098 primitive. data-table surfaces untouched: presentational doc tables are already in their ratified #1964 end-state (plain table.data-table). JS-off correct; Playwright before/after; 0 console errors.\n"
+}
