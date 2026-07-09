@@ -222,7 +222,11 @@ export function decideReviewGate({ escalate, humanRequired = false, labels = [],
   // FIRST so it overrides even the sticky human gate below: review:accepted IS the human clearing the gate →
   // merge; review:changes → the author lane fixes + re-pushes.
   if (hasReviewLabel(labels, REVIEW_LABELS.accepted)) return { action: 'merge', reason: 'review:accepted — reviewer accepted, merge' };
-  if (hasReviewLabel(labels, REVIEW_LABELS.changes)) return { action: 'wait-author', reason: 'review:changes — author lane fixes + re-pushes' };
+  // wait-author STILL carries humanRequired: a gate-self PR (fresh score OR a sticky review:human label) that
+  // also carries review:changes must NOT be reported to the caller as humanRequired:false — the caller keys the
+  // drain's auto-review routing on this field (#2365), and false there lets an agent panel clear a gate-self edit
+  // that a human bounced. Since this branch precedes the human gate below, propagate the human signal here too.
+  if (hasReviewLabel(labels, REVIEW_LABELS.changes)) return { action: 'wait-author', reason: 'review:changes — author lane fixes + re-pushes', humanRequired: humanRequired || hasReviewLabel(labels, REVIEW_LABELS.human) };
   // #2285 v1 + #2362 — the human gate is STICKY on the LABEL, not only this pass's fresh score. Park under
   // review:human and NEVER time out. Honour humanRequired (fresh gate-self score) OR an already-applied
   // review:human label: the fresh score can flip to false if the diff NARROWED after the label was stamped
