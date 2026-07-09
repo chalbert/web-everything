@@ -6,7 +6,7 @@
   <title>Webprocess Conformance Demo - Web Everything</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/demos/playground.css">
-  <link rel="stylesheet" href="/demos/webprocess-conformance-demo.css">
+  <link rel="stylesheet" href="/demos/conformance-demo.css">
 </head>
 <body>
   <div class="demo-header">
@@ -24,25 +24,34 @@
     <header class="play-intro">
       <h1>Webprocess Conformance Demo</h1>
       <p>
-        The runnable proof of the Self-Driven Project Artefact <strong>contract + runtime</strong>
-        (<a href="/backlog/1070-webprocess-canonical-contract-self-driven-artefact-meta-sch/">#1070</a>
-        contract,
-        <a href="/backlog/1071-webprocess-runtime-driving-loop-meta-schema-registries-defa/">#1071</a>
-        runtime). The application knows only the contract surface — <code>Step</code> /
-        <code>ProcessRecipe</code> / <code>ArtefactRef</code> plus the driving loop — while the OPEN
-        meta-schema registries, default-recipe resolution, the dependency-graph frontier, and the
-        tolerance&rarr;autonomy throttle are exercised live below.
+        The runnable proof that the Self-Driven Project Artefact <code>Step</code> / <code>ProcessRecipe</code>
+        / <code>ArtefactRef</code> contract
+        (<a href="/backlog/1070-webprocess-contract-self-driven-artefact-contract-types-in-w/">#1070</a>)
+        and its driving loop are <strong>conformant</strong>. The runtime — the meta-schema registries,
+        default-recipe resolution, the dependency-graph frontier, and the tolerance&rarr;autonomy throttle —
+        is <strong>relocated to Frontier UI</strong>
+        (<a href="/backlog/2294-relocate-the-webprocess-runtime-to-fui/">#2294</a>; WE holds zero executable,
+        #1282). Its conformance runs through the <strong>plateau-hosted conformance runner</strong>
+        (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a> /
+        <a href="/backlog/1790-fui-origin-conformance-runner-mode-c-bundle-end-to-end-smoke/">#1790</a>),
+        which drives the WE-owned webprocess vector suite
+        (<a href="/backlog/2295-author-the-we-webprocess-conformance-binding-and-vector-corp/">#2295</a>:
+        dependency-graph frontier, run completion, throttled ceiling, the OPEN autonomy ladder, and the
+        trust-crossing seam guard) against the FUI binding and reports pass/fail.
       </p>
       <p class="play-caveat">
-        WE's own backlog is <em>one dogfooded recipe</em> — a consumer of the standard, never the spec.
-        The section below asserts each contract invariant against the live <code>we:process/</code> runtime.
+        The pass/fail panel below is rendered <strong>at plateau-origin inside an iframe</strong> — the
+        cross-origin runtime boundary (<a href="/backlog/1788-home-of-the-generic-conformance-runner-given-the-fui-origin-/">#1788</a>
+        ratified (b)) that reaches the shared, neutral runner with no implementer&rarr;runner edge. WE owns
+        only the build-agnostic vectors and the contract; the driving-loop impl is FUI's, the runner is
+        plateau's. WE's own backlog is <em>one dogfooded recipe</em> — a consumer of the standard, never
+        the spec. A green result proves conformance independent of how the runtime is built (#899).
       </p>
     </header>
 
     <div id="play-root">Loading demo&hellip;</div>
   </main>
 
-  <!-- Unplugged: the demo imports the webprocess runtime as a plain library (no global patch). -->
   <script type="module" src="/demos/webprocess-conformance-demo.ts"></script>
 </body>
 </html>
