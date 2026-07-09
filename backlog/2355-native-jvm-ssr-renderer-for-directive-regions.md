@@ -2,7 +2,7 @@
 kind: epic
 parent: "2069"
 status: open
-blockedBy: ["xkyyza1"]
+blockedBy: ["2354"]
 dateOpened: "2026-07-09"
 tags: []
 ---
