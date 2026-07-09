@@ -1,0 +1,67 @@
+{% raw %}
+<h2>The question</h2>
+<p>
+    Three pieces of WE-resident logic — the surface resolver
+    (<a href="/backlog/2298-webtraits-surface-resolver-definition-stays-we-or-impl-reloc/">#2298</a>), the
+    mock-vs-real drift check
+    (<a href="/backlog/2299-webcases-driftcheck-placement-we-334-vs-plateau-verifier-156/">#2299</a>), and the
+    conformance-case generator
+    (<a href="/backlog/2300-webcases-generatecase-placement-we-authoring-loop-or-plateau/">#2300</a>) — each
+    reads as <em>definition</em> under a purity reading, yet each <strong>produces or judges a runtime
+    artifact</strong>. All three are children of the
+    <a href="/backlog/1294-relocate-we-resident-logic-reference-runtimes-webpolicy-enfo/">#1294</a> relocation
+    epic, and all three turn on one axis: <strong>is purity the WE/FUI test?</strong>
+</p>
+
+<h2>The decisive finding — purity is not the test</h2>
+<p>
+    <code>resolveTokens</code> and <code>compileToCss</code> are <em>both</em> pure and <em>both</em> relocated
+    to Frontier UI (<code>fui:webtheme/tokens.ts</code>, <code>fui:webtheme/compile.ts</code>); WE's
+    <code>we:webtheme/contract.ts</code> is <strong>types only</strong>. The codified test
+    (<code>{#constellation-placement}</code>, <code>we:docs/agent/platform-decisions.md:84-89</code>) routes
+    <em>"artifact-producing / running handler / <strong>native-default strategies</strong> &rarr; Frontier
+    UI"</em> and holds <strong>WE zero-implementation — not even a reference implementation.</strong> So each
+    surface is tested against <em>what it delivers</em>, not whether it is pure.
+</p>
+
+<h2>Recommendations (to ratify in each decision)</h2>
+<ol>
+    <li><strong>#2298 — relocate the whole surface mapping runtime to FUI.</strong>
+        <code>resolveSurface()</code> bakes in native-default strategies (the elevation&rarr;box-shadow ramp
+        <code>we:webtraits/surfaceIntentResolver.ts:71</code>, <code>blur(12px)</code>, the
+        <code>translateY(-2px)</code> lift) that <code>:86</code> sends to FUI explicitly. WE keeps the
+        <code>SurfaceProfile</code>/<code>ResolvedSurface</code>/<code>CssDeclaration</code> <strong>types</strong>
+        + the <code>surface</code> intent + a to-author vector corpus; <code>resolveSurface</code> +
+        <code>elevationShadow</code> + <code>declarationsToCss</code> + <code>surfaceCss</code> move beside
+        webtheme. This <strong>corrects #1911's over-hold</strong> — it mis-kept the map on a purity test #1282
+        withdrew, on a false parity claim with <code>intentProfileResolver</code> (which emits <em>no</em> CSS).</li>
+    <li><strong>#2299 — relocate the executable verifier; WE keeps the drift contract.</strong>
+        <code>detectDrift()</code> judges a recorded real-service response — an implementation's runtime output;
+        <a href="/backlog/1566-decision-we-renderer-conformance-mechanism-after-the-backend/">#1566</a>
+        <strong>overturned</strong> the "reads output as data &rarr; stays WE" pattern and its WE carve-out
+        (WE's own artifacts, no external implementation) is one a drift-vs-current-reality check fails. WE keeps the
+        <code>DriftFinding</code> taxonomy + types + structural-not-value rule + the #331 mock corpus; the
+        verifier goes to FUI (co-located with the #332 record transport) or Plateau (strict #1566 neutrality).
+        The <strong>live counter</strong>: the recorded backend is not a WE-standard implementer, so a decider
+        may judge #1566's scope doesn't reach this genre and
+        <a href="/backlog/334-mock-vs-real-drift-check-webcases/">#334</a> stands — the crux.</li>
+    <li><strong>#2300 — stays WE (contract-derived), plus one build residue.</strong> <code>generateCase()</code>
+        is a valid <a href="/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/">#475</a>
+        no-leakage client: the AI proposer is injected (no SDK import), and the deterministic WE
+        <code>validateRequirement</code> + <code>compileRequirement</code> produce the artifact. The
+        two-confusion screen found the injected seam erases every merit axis versus a Plateau home, so it is
+        <strong>not a genuine fork</strong>. Residue (a build task, not a fork): relocate
+        <code>heuristicProposer</code> (a proposer impl shipped from the WE production module, test-only
+        consumer) to a test fixture.</li>
+</ol>
+
+<h2>Method</h2>
+<p>
+    A hostile skeptic pass <strong>refuted the two naive defaults</strong> (#2298's surfaceCss-only split;
+    #2299's stays-WE) and amended #2300; a fresh-context two-confusion screen scored #2298/#2299
+    <strong>CLEAR</strong> and #2300 <strong>FLAGGED(prio)&rarr;dissolved</strong>. All three reconcile a prior
+    ruling (#1911 / #334 / #475) rather than colliding with it. Full grounding, with verified
+    <code>file:line</code> citations, in
+    <code>we:reports/2026-07-09-webtraits-webcases-placement-cascade.md</code>.
+</p>
+{% endraw %}
