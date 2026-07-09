@@ -26,6 +26,7 @@ import { parseReservations, emptyState, foreignHolds, deprioritizeReserved } fro
 import { parseHolds, emptyHoldState, heldNums } from './readiness/prepare-hold-state.mjs';
 import { LOCI } from './check-standards-rules.mjs';
 import { checkMainStaleness } from './lib/main-staleness.mjs';
+import { openPrItemNums } from './lib/open-pr-items.mjs';
 import { slugFromName } from './backlog/id.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -89,12 +90,24 @@ const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', DIM = '\x1b[2m', CYA
 
 // #2204 — fetch-first staleness guard: the ranker picks/orders against local backlog files, so a local `main`
 // behind `origin/main` ranks against WRONG item state (missing/resolved-looking/clobbered-looking ids). Fetch
-// first and either fast-forward a clean checkout (so the load below reads fresh) or warn loudly. Fail-soft:
-// offline → silent skip; a dirty/diverged tree is warned about, never touched. `--no-fetch` opts out (CI/tests).
+// first and autostash-fast-forward any non-diverged tree (dirty or clean, so the load below reads fresh) or
+// warn loudly. Fail-soft: offline → silent skip; a diverged tree (or a failed ff) is warned about, never
+// touched. `--no-fetch` opts out (CI/tests).
+//
+// A residual warning means the tree is still STALE (diverged, or the autostash-ff failed). For a passive read
+// view that is only a warning, but `--select`/`--json` are *decision surfaces* a batch packs from — ranking a
+// stale tree is exactly the mis-pick this guard exists to stop — so there we HARD-STOP (non-zero) unless the
+// caller explicitly opted out of the fetch. `--allow-stale` forces past it (escape hatch for a known-offline
+// or deliberately-diverged run).
 if (!process.argv.includes('--no-fetch')) {
   const st = checkMainStaleness({ autoFf: true });
-  if (st.warning) console.error(`${YEL}${BLD}⚠ ${st.warning}${RST}`);
-  else if (st.synced) console.error(`${DIM}· fetched — local main fast-forwarded ${st.behind} commit(s) to origin/main before ranking${RST}`);
+  if (st.warning) {
+    console.error(`${YEL}${BLD}⚠ ${st.warning}${RST}`);
+    if ((SELECT || JSON_MODE) && !process.argv.includes('--allow-stale')) {
+      console.error(`${RED}${BLD}✗ refusing to rank/select against a stale tree — sync then retry, or pass --allow-stale to override.${RST}`);
+      process.exit(3);
+    }
+  } else if (st.synced) console.error(`${DIM}· fetched — local main fast-forwarded ${st.behind} commit(s) to origin/main before ranking${RST}`);
 }
 
 const items = typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog;
@@ -112,6 +125,28 @@ if (heldSet.size) {
   selection.sliceable = dropHeld(selection.sliceable);
   selection.tierB = dropHeld(selection.tierB);
   selection.filler = dropHeld(selection.filler);
+}
+
+// Active-PR HARD exclusion: an item with an OPEN pull request is producer-complete (its lane resolved it and
+// is waiting on the drain to land) — offering it re-hands a batch work that is already done, often already
+// merged+closed by the time a human looks (this session's mis-pack). So drop every open-PR item from the
+// selection surfaces, exactly like `dropHeld`. Fail-soft + boundary-only (needs `gh` + network, so it lives
+// here, never in the byte-deterministic `computeSelection`): no gh/offline → skip silently. `--no-pr-scan`
+// opts out (CI/tests / a deliberately PR-blind run); skipped under `--no-fetch` (that flag = "no network").
+if (!process.argv.includes('--no-pr-scan') && !process.argv.includes('--no-fetch')) {
+  const pr = openPrItemNums();
+  const prSet = new Set(pr.nums);
+  if (prSet.size) {
+    const dropPr = (list) => (list || []).filter((it) => !prSet.has(String(it.num).padStart(3, '0')));
+    selection.tierA = dropPr(selection.tierA);
+    selection.batchable = dropPr(selection.batchable);
+    selection.sliceable = dropPr(selection.sliceable);
+    selection.tierB = dropPr(selection.tierB);
+    selection.filler = dropPr(selection.filler);
+    console.error(`${DIM}· excluded ${prSet.size} item(s) with an open PR from selection: ${[...prSet].map((n) => '#' + n).join(', ')}${RST}`);
+  } else if (pr.unavailable) {
+    console.error(`${DIM}· open-PR exclusion skipped (${pr.reason}) — pass --no-pr-scan to silence${RST}`);
+  }
 }
 
 const capacity = loadCapacity();
