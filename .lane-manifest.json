@@ -1,0 +1,15 @@
+{
+  "_doc": "Durable lane manifest for the #2138 deferred merge queue (Fork 2). A NEW file in the WE lane commit (one-sided add — preserves the #1869 conflict-free WE-lane merge, stays out of the resolve diff). Carries this queued item's cross-repo shape so a LATER drain session can land it: `repos` in impl-first/WE-last merge order (WE `carriesResolve`, lands last), cross-item `blockedBy` (do not drain until those land), and `mergeRiskFiles` for Fork 3's whitelisted-additive check. The drain DELETES this file at landing (co-located with the lane/* ref deletion). Written/deleted by the drain command (#2162); built/validated by this module (#2163). Pairs with the ready-to-merge token (#2161).",
+  "item": 2272,
+  "batchSlug": "batch-2026-07-09",
+  "repos": [
+    {
+      "repo": "we",
+      "ref": "lane/batch-2026-07-09-2272",
+      "carriesResolve": true
+    }
+  ],
+  "blockedBy": [],
+  "mergeRiskFiles": [],
+  "dismissedFindings": 0
+}

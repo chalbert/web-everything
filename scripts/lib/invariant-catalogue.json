@@ -307,7 +307,7 @@
       "tier": "B",
       "subject": "batch / drain / finish / next-backlog-item / review-program (all judgment skills)",
       "statement": "every judgment-skill run operates from an isolated lane/drain clone, never the shared primary checkout — a concurrent session's or the user's own dev server must never be disturbed by a Tier-B skill's edits.",
-      "howChecked": "stated precondition in each skill's SKILL.md (e.g. .claude/skills/drain/SKILL.md 'Preconditions'); backstopped mechanically at the file-edit layer by guard-lane.mjs (Tier A), but the SKILL-level choice of clone is currently judgment, not hook-enforced",
+      "howChecked": "stated precondition in each skill's SKILL.md (e.g. .claude/skills/drain/SKILL.md 'Preconditions'); backstopped mechanically at the file-edit layer by guard-lane.mjs (Tier A), but the SKILL-level choice of clone is currently judgment, not hook-enforced. Since #2272, `scripts/session-replay.mjs check` asserts (for the batch skill, v1 scope) that the replay's own work dir is a throwaway substrate disjoint from the primary checkout / real lane roots — a structural sanity check on the harness, not yet a hook on a live skill run.",
       "status": "judgment-only"
     },
     {
@@ -315,7 +315,7 @@
       "tier": "B",
       "subject": "batch / a producer lane (the #2183 producer contract)",
       "statement": "a producing lane opens a ready-to-merge PR and stops — it never merges, never pushes main, and never launches a drain itself; landing is exclusively the drain's job.",
-      "howChecked": "stated in the #2183 producer contract (repeated in every batch/lane task brief); backstopped at the git layer by guard-bash.mjs's direct-main-push denial (Tier A), but the 'stop after PR' discipline itself is currently judgment, not hook-enforced",
+      "howChecked": "stated in the #2183 producer contract (repeated in every batch/lane task brief); backstopped at the git layer by guard-bash.mjs's direct-main-push denial (Tier A), but the 'stop after PR' discipline itself is currently judgment, not hook-enforced. Since #2272, `scripts/session-replay.mjs check` asserts (for the batch skill, v1 scope) that a session replayed inside the ephemeral substrate never moved the fabricated origin's `main` ref — a real, git-observable proxy for this invariant inside the harness.",
       "status": "judgment-only"
     },
     {
@@ -347,7 +347,7 @@
       "tier": "B",
       "subject": "batch-backlog-items",
       "statement": "a batch run has a hard stop that guarantees the session ends (never loops indefinitely across items), with a validation gate at every seam between items.",
-      "howChecked": "stated in .claude/skills/batch-backlog-items/SKILL.md",
+      "howChecked": "stated in .claude/skills/batch-backlog-items/SKILL.md. Since #2272, `scripts/session-replay.mjs check` asserts the replayed session stamped a terminal marker (`stoppedAt` + `itemsProcessed`) in `.replay-session.json` — self-reported evidence of termination, not an independent proof from the tree alone (a hung/looping session simply never stamps it, which the check correctly reports as FAIL).",
       "status": "judgment-only"
     }
   ]
