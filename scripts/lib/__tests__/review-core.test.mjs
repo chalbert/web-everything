@@ -2,15 +2,21 @@
  * @file review-core.test.mjs — proof of the #2325 shared review-verdict core: the canonical `Finding` shape
  *   normalization, the `{findings, verdict}` derivation (humanRequired always wins; outstanding findings vs
  *   resolved-by-outcome), and the mandate-text builder every "read a diff, judge it" caller renders from.
+ *   Also proves #2311's v2 editor↔reviewer negotiation-loop primitives: the editor mandate builder and the
+ *   round-cap outcome derivation (continue / land / escalate).
  */
 import { describe, it, expect } from 'vitest';
 import {
   VERDICTS,
   DEFAULT_MANDATE,
+  NEGOTIATION_ROUND_CAP,
+  NEGOTIATION_OUTCOMES,
   normalizeFinding,
   normalizeFindings,
   deriveVerdict,
   buildMandate,
+  buildEditorMandate,
+  deriveNegotiationOutcome,
 } from '../review-core.mjs';
 
 describe('normalizeFinding', () => {
@@ -102,5 +108,57 @@ describe('buildMandate', () => {
     const text = buildMandate({ contextIsolation: 'diff+pr-description' });
     expect(text).toContain('Context isolation: diff+pr-description');
     expect(text).not.toContain('ONLY the diff');
+  });
+});
+
+describe('buildEditorMandate (#2311)', () => {
+  it('lists each finding with file + summary + failure scenario', () => {
+    const text = buildEditorMandate({
+      round: 1,
+      findings: [{ file: 'a.mjs', summary: 'off-by-one', failure_scenario: 'index 0 skipped' }],
+    });
+    expect(text).toContain('a.mjs: off-by-one — index 0 skipped');
+    expect(text).toMatch(/round 1\/3/);
+  });
+
+  it('defaults the round cap to NEGOTIATION_ROUND_CAP and reflects a custom one', () => {
+    expect(buildEditorMandate({ round: 2, findings: [{ summary: 'x' }] })).toMatch(`round 2/${NEGOTIATION_ROUND_CAP}`);
+    expect(buildEditorMandate({ round: 2, roundCap: 5, findings: [{ summary: 'x' }] })).toMatch('round 2/5');
+  });
+
+  it('forbids editing in the shared checkout — isolated clone, push back to the same branch', () => {
+    const text = buildEditorMandate({ findings: [{ summary: 'x' }] });
+    expect(text).toMatch(/ISOLATED THROWAWAY CLONE/);
+    expect(text).toMatch(/push back to the SAME/);
+  });
+
+  it('degrades gracefully when called with an empty findings list', () => {
+    const text = buildEditorMandate({ findings: [] });
+    expect(text).toContain('(none —');
+  });
+});
+
+describe('deriveNegotiationOutcome (#2311)', () => {
+  it('lands once the reviewer accepts, regardless of round', () => {
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.ACCEPT, round: 1 })).toBe(NEGOTIATION_OUTCOMES.LAND);
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.ACCEPT, round: NEGOTIATION_ROUND_CAP })).toBe(NEGOTIATION_OUTCOMES.LAND);
+  });
+
+  it('continues on changes while under the round cap', () => {
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: 1 })).toBe(NEGOTIATION_OUTCOMES.CONTINUE);
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: NEGOTIATION_ROUND_CAP - 1 })).toBe(NEGOTIATION_OUTCOMES.CONTINUE);
+  });
+
+  it('escalates on changes once the round cap is reached — non-convergence', () => {
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: NEGOTIATION_ROUND_CAP })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: NEGOTIATION_ROUND_CAP + 1 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+  });
+
+  it('escalates on needs-human at ANY round — no budget saves a conflict-of-interest revision', () => {
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.NEEDS_HUMAN, round: 1 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+  });
+
+  it('honors a caller-supplied roundCap instead of the default', () => {
+    expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: 1, roundCap: 1 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
   });
 });
