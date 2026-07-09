@@ -1,0 +1,23 @@
+{
+  "id": "webtraits-webcases-placement-cascade",
+  "title": "webtraits / webcases placement cascade — three surfaces tested against the zero-impl line",
+  "status": "open",
+  "summary": "Grounds three #1294-child placement decisions (#2298 surfaceIntentResolver, #2299 driftCheck, #2300 generateCase) that each look like WE-resident 'definition' under a purity reading but each PRODUCES or JUDGES a runtime artifact. The unifying finding from the statute survey: purity is NOT the WE/FUI test — resolveTokens and compileToCss are both pure and both relocated to FUI (fui:webtheme/tokens.ts + fui:webtheme/compile.ts; WE's we:webtheme/contract.ts is types-only), because {#constellation-placement} (we:docs/agent/platform-decisions.md:84-89) routes 'artifact-producing / native-default strategies -> Frontier UI' and holds WE zero-implementation. Applied per surface: (#2298) resolveSurface() bakes in native-default strategies (the elevation->box-shadow ramp we:webtraits/surfaceIntentResolver.ts:71, blur(12px), translateY lift) that :86 sends to FUI explicitly, so the whole surface mapping runtime relocates (WE keeps the profile/declaration TYPES + surface intent + a to-author vector corpus) — correcting #1911's over-hold, which mis-kept the map on a purity test #1282 withdrew and on a false parity claim with intentProfileResolver (which emits NO CSS). (#2299) detectDrift() judges a recorded real-service response = an implementation's runtime output; #1566 explicitly OVERTURNED the 'reads output as data -> stays WE' pattern and the WE carve-out is narrow (WE's own artifacts, no external implementation) which drift-vs-current-reality fails — so the executable verifier relocates (FUI co-located with the #332 record transport, or Plateau by strict #1566 neutrality) while WE keeps the DriftFinding taxonomy + types + structural-not-value rule + #331 mock corpus; the live counter is genre-exemption (the recorded backend is not a WE-standard implementer, so #1566 may not reach it and #334 stands) — the decider's crux. (#2300) generateCase is a valid #475 no-leakage client (AI proposer injected, no SDK import, deterministic WE validate+compile produce the artifact); the two-confusion screen found the injected seam erases every merit axis vs a Plateau home, so it dissolves to a contract-derived ruling STAYS WE plus one build residue: relocate heuristicProposer (a proposer impl shipped from the WE production module, test-only consumer) to a test fixture. Skeptic pass refuted the two naive defaults (#2298 surfaceCss-only split; #2299 stays-WE) and amended #2300; the fresh-context screen scored #2298/#2299 CLEAR and #2300 FLAGGED(prio)->dissolved. All three reconcile a prior ruling (#1911 / #334 / #475) rather than colliding with it. Full grounding in reports/2026-07-09-webtraits-webcases-placement-cascade.md.",
+  "dateOpened": "2026-07-09",
+  "lastReviewed": "2026-07-09",
+  "reviewHorizon": "P12M",
+  "tags": [
+    "constellation-placement",
+    "zero-impl",
+    "webtraits",
+    "webcases",
+    "surface",
+    "drift-check",
+    "conformance",
+    "no-leakage",
+    "decision-prep"
+  ],
+  "relatedBlocks": [],
+  "relatedPlugs": [],
+  "relatedProject": "webcases"
+}
