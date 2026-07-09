@@ -16,7 +16,7 @@
  * Usage:
  *   node scripts/dev/visual-baseline-review.mjs [--snapshot=<name>]
  *
- *   --snapshot=<name>   only scaffold this specific snapshot (e.g. home-chromium-darwin.png).
+ *   --snapshot=<name>   only scaffold this specific snapshot (e.g. home-chromium-linux.png).
  *                       Defaults to ALL snapshots that currently have a diff on disk.
  */
 

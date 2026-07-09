@@ -9,7 +9,11 @@ name: Update visual baselines (linux)
 #   GitHub UI → Actions → "Update visual baselines (linux)" → Run workflow → choose branch.
 #   The workflow commits the refreshed -linux PNGs to the same branch via a bot commit.
 #
-# This is the CI-linux equivalent of `npm run check:visual:update` (local darwin refresh).
+# Linux-in-container is the SOLE baseline target (#2235; a prior darwin set was dropped once rendering
+# was pinned to this container, #2234) — a bare local `npm run check:visual:update` on a non-linux host
+# writes `-chromium-<host platform>.png` files that do NOT match these committed baselines and must never
+# be committed; this workflow (or an equivalent local run of the pinned container image below) is the
+# only supported way to refresh them.
 #
 # Runs inside the same version-locked `mcr.microsoft.com/playwright:vX.Y.Z-jammy` container as the
 # ci.yml `visual` job (#2234) — the refresh MUST render on the exact same pinned image the check compares

@@ -119,7 +119,7 @@ const verdicts = loadVerdicts();
 const failures = [];
 
 for (const snapshotPath of snapshotFiles) {
-  const snapshotName = basename(snapshotPath); // e.g. home-chromium-darwin.png
+  const snapshotName = basename(snapshotPath); // e.g. home-chromium-linux.png
 
   // Find a matching verdict: snapshot field must match the filename, verdict must be "approved".
   const matching = verdicts.filter(
