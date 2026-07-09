@@ -13,10 +13,15 @@ describe('classifyStaleness', () => {
   it('behind + clean + not diverged + autoFf → auto-ff', () => {
     expect(classifyStaleness({ behind: 5, ahead: 0, dirty: false, autoFf: true }).action).toBe('auto-ff');
   });
-  it('behind + dirty → warn (never touch a dirty tree)', () => {
+  it('behind + dirty + not diverged → auto-ff (autostash carries the dirty tree)', () => {
     const c = classifyStaleness({ behind: 5, ahead: 0, dirty: true, autoFf: true });
+    expect(c.action).toBe('auto-ff');
+    expect(c.dirty).toBe(true);
+  });
+  it('behind + dirty + diverged → warn (a diverged tree can not fast-forward)', () => {
+    const c = classifyStaleness({ behind: 5, ahead: 2, dirty: true, autoFf: true });
     expect(c.action).toBe('warn');
-    expect(c.warning).toMatch(/dirty tree/);
+    expect(c.warning).toMatch(/diverged/);
   });
   it('behind + diverged (ahead>0) → warn, not auto-ff', () => {
     const c = classifyStaleness({ behind: 5, ahead: 1, dirty: false, autoFf: true });
@@ -57,18 +62,28 @@ describe('checkMainStaleness (fail-soft IO)', () => {
     expect(r).toMatchObject({ synced: true, behind: 7 });
     expect(calls.find((a) => a[0] === 'pull')).toEqual(['pull', '--ff-only', '--autostash']);
   });
-  it('behind + dirty → warn, NEVER pulls', () => {
+  it('behind + dirty + not diverged → autostash fast-forwards (pull --ff-only --autostash)', () => {
     const calls = [];
     const run = scripted({
       fetch: { status: 0 },
       'rev-parse': (a) => ({ stdout: a[1] === 'main' ? 'localsha\n' : 'originsha\n' }),
       'rev-list': (a) => ({ stdout: a[2].startsWith('main..') ? '3\n' : '0\n' }),
-      status: { stdout: ' M claims.json\n' }, // dirty
+      status: { stdout: ' M claims.json\n' }, // dirty, but not diverged
+      pull: { status: 0 },
     }, calls);
     const r = checkMainStaleness({ run });
-    expect(r.action).toBe('warn');
-    expect(r.behind).toBe(3);
-    expect(calls.some((a) => a[0] === 'pull')).toBe(false);
+    expect(r).toMatchObject({ synced: true, behind: 3 });
+    expect(calls.find((a) => a[0] === 'pull')).toEqual(['pull', '--ff-only', '--autostash']);
+  });
+  it('behind + dirty + a failed autostash-ff → warn (fail-soft, e.g. stash-pop conflict)', () => {
+    const run = scripted({
+      fetch: { status: 0 },
+      'rev-parse': (a) => ({ stdout: a[1] === 'main' ? 'l\n' : 'o\n' }),
+      'rev-list': (a) => ({ stdout: a[2].startsWith('main..') ? '3\n' : '0\n' }),
+      status: { stdout: ' M claims.json\n' },
+      pull: { status: 1, stderr: 'conflict in claims.json' },
+    });
+    expect(checkMainStaleness({ run }).action).toBe('warn');
   });
   it('behind + auto-ff fails → warn (still fail-soft)', () => {
     const run = scripted({
