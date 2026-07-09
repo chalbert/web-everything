@@ -3,7 +3,9 @@
  *   normalization, the `{findings, verdict}` derivation (humanRequired always wins; outstanding findings vs
  *   resolved-by-outcome), and the mandate-text builder every "read a diff, judge it" caller renders from.
  *   Also proves #2311's v2 editor↔reviewer negotiation-loop primitives: the editor mandate builder and the
- *   round-cap outcome derivation (continue / land / escalate).
+ *   round-cap outcome derivation (continue / land / escalate). Also proves #2310's v3 multi-mandate panel
+ *   reduction: per-lens mandate text, the lens-tagged findings merge, and the panel→single-verdict derivation
+ *   (unanimous mandatory-lens accept lands; a genuine conflict or the global humanRequired flag escalates).
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -11,12 +13,20 @@ import {
   DEFAULT_MANDATE,
   NEGOTIATION_ROUND_CAP,
   NEGOTIATION_OUTCOMES,
+  MANDATE_LENSES,
+  MANDATORY_LENSES,
+  ADVISORY_LENSES,
+  PANEL_LENSES,
   normalizeFinding,
   normalizeFindings,
   deriveVerdict,
   buildMandate,
   buildEditorMandate,
   deriveNegotiationOutcome,
+  buildPanelMandate,
+  buildPanelFindings,
+  derivePanelVerdict,
+  renderPanelVerdictTable,
 } from '../review-core.mjs';
 
 describe('normalizeFinding', () => {
@@ -160,5 +170,120 @@ describe('deriveNegotiationOutcome (#2311)', () => {
 
   it('honors a caller-supplied roundCap instead of the default', () => {
     expect(deriveNegotiationOutcome({ verdict: VERDICTS.CHANGES, round: 1, roundCap: 1 })).toBe(NEGOTIATION_OUTCOMES.ESCALATE);
+  });
+});
+
+describe('MANDATE_LENSES / MANDATORY_LENSES / ADVISORY_LENSES / PANEL_LENSES (#2310)', () => {
+  it('splits the four /code-review lenses into a mandatory pair and an advisory pair', () => {
+    expect(MANDATORY_LENSES).toEqual([MANDATE_LENSES.CORRECTNESS, MANDATE_LENSES.SECURITY]);
+    expect(ADVISORY_LENSES).toEqual([MANDATE_LENSES.SIMPLICITY, MANDATE_LENSES.STANDARDS]);
+  });
+
+  it('PANEL_LENSES is the mandatory + advisory union, mandatory first', () => {
+    expect(PANEL_LENSES).toEqual([...MANDATORY_LENSES, ...ADVISORY_LENSES]);
+    expect(PANEL_LENSES).toHaveLength(4);
+  });
+});
+
+describe('buildPanelMandate (#2310)', () => {
+  it('renders the lens into the base buildMandate text', () => {
+    const text = buildPanelMandate({ lens: MANDATE_LENSES.SECURITY });
+    expect(text).toContain('reviewing a diff against this mandate: security');
+  });
+
+  it('frames the reviewer as one of several independent lenses, told not to soften its verdict', () => {
+    const text = buildPanelMandate({ lens: MANDATE_LENSES.CORRECTNESS });
+    expect(text).toMatch(/ONE of several independent mandate reviewers/);
+    expect(text).toMatch(/do not soften or withhold your/);
+  });
+
+  it('throws on an unknown lens rather than silently building a bogus mandate', () => {
+    expect(() => buildPanelMandate({ lens: 'vibes' })).toThrow(/unknown lens/);
+  });
+});
+
+describe('buildPanelFindings (#2310)', () => {
+  it('flattens per-lens findings into one list, tagging category with the originating lens', () => {
+    const merged = buildPanelFindings({
+      correctness: [{ summary: 'off-by-one', category: 'bug' }],
+      simplicity: [{ summary: 'nested ternary' }],
+    });
+    expect(merged).toEqual([
+      { summary: 'off-by-one', category: 'correctness/bug' },
+      { summary: 'nested ternary', category: 'simplicity' },
+    ]);
+  });
+
+  it('degrades to an empty list when called with no lenses', () => {
+    expect(buildPanelFindings()).toEqual([]);
+  });
+
+  it('drops unusable raw findings the same way normalizeFindings does', () => {
+    expect(buildPanelFindings({ security: [{ file: 'a.mjs' }, { summary: 'real one' }] })).toEqual([
+      { summary: 'real one', category: 'security' },
+    ]);
+  });
+});
+
+describe('derivePanelVerdict (#2310)', () => {
+  const allAccept = { correctness: VERDICTS.ACCEPT, security: VERDICTS.ACCEPT, simplicity: VERDICTS.ACCEPT, 'standards-conformance': VERDICTS.ACCEPT };
+
+  it('lands only once every MANDATORY lens unanimously accepts', () => {
+    expect(derivePanelVerdict({ lensVerdicts: allAccept })).toBe(VERDICTS.ACCEPT);
+  });
+
+  it('an outstanding ADVISORY-lens verdict never blocks the mandatory-unanimous accept', () => {
+    const verdicts = { ...allAccept, simplicity: VERDICTS.CHANGES, 'standards-conformance': VERDICTS.CHANGES };
+    expect(derivePanelVerdict({ lensVerdicts: verdicts })).toBe(VERDICTS.ACCEPT);
+  });
+
+  it('a single MANDATORY lens wanting changes yields changes, not an immediate escalate', () => {
+    const verdicts = { ...allAccept, security: VERDICTS.CHANGES };
+    expect(derivePanelVerdict({ lensVerdicts: verdicts })).toBe(VERDICTS.CHANGES);
+  });
+
+  it('a MANDATORY lens returning needs-human escalates the whole panel', () => {
+    const verdicts = { ...allAccept, correctness: VERDICTS.NEEDS_HUMAN };
+    expect(derivePanelVerdict({ lensVerdicts: verdicts })).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('the global humanRequired conflict-of-interest flag always wins, same as deriveVerdict', () => {
+    expect(derivePanelVerdict({ lensVerdicts: allAccept, humanRequired: true })).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('a caller-flagged genuine mandate conflict escalates even when every lens individually accepted', () => {
+    expect(derivePanelVerdict({ lensVerdicts: allAccept, conflict: true })).toBe(VERDICTS.NEEDS_HUMAN);
+  });
+
+  it('throws if a mandatory lens has no verdict at all, rather than silently treating it as accept', () => {
+    expect(() => derivePanelVerdict({ lensVerdicts: { correctness: VERDICTS.ACCEPT } })).toThrow(/missing verdict/);
+  });
+
+  it('honors a caller-supplied mandatoryLenses set instead of the default pair', () => {
+    expect(derivePanelVerdict({
+      lensVerdicts: { simplicity: VERDICTS.ACCEPT },
+      mandatoryLenses: [MANDATE_LENSES.SIMPLICITY],
+    })).toBe(VERDICTS.ACCEPT);
+  });
+
+  it('throws on an empty mandatoryLenses set rather than vacuously accepting (Array#every trap)', () => {
+    expect(() => derivePanelVerdict({ lensVerdicts: allAccept, mandatoryLenses: [] })).toThrow(/must be non-empty/);
+  });
+});
+
+describe('renderPanelVerdictTable (#2310)', () => {
+  it('renders one row per lens, tagged mandatory/advisory, with each verdict', () => {
+    const table = renderPanelVerdictTable({
+      lensVerdicts: { correctness: VERDICTS.ACCEPT, security: VERDICTS.CHANGES, simplicity: VERDICTS.ACCEPT, 'standards-conformance': VERDICTS.ACCEPT },
+    });
+    expect(table).toContain('| correctness | mandatory | accept |');
+    expect(table).toContain('| security | mandatory | changes |');
+    expect(table).toContain('| simplicity | advisory | accept |');
+    expect(table).toContain('| standards-conformance | advisory | accept |');
+  });
+
+  it('renders a placeholder for a lens with no verdict yet, instead of throwing', () => {
+    const table = renderPanelVerdictTable({ lensVerdicts: {} });
+    expect(table).toContain('| correctness | mandatory | (no verdict) |');
   });
 });
