@@ -157,7 +157,11 @@ author-bounce with a bounded editor↔reviewer negotiation loop** (below). The o
 > [`/review`](../review/SKILL.md) human-verdict skill BOTH render through it — no hand-rolled reviewer prose.
 > **#2311 (v2)** adds `buildEditorMandate()` (seeds the editor subagent's revision round) and
 > `deriveNegotiationOutcome()` (the ONE deterministic `continue`/`land`/`escalate` derivation from a round's
-> verdict + the round cap) — same module, same single-sourcing discipline.
+> verdict + the round cap) — same module, same single-sourcing discipline. **#2310 (v3)** adds the
+> `MANDATE_LENSES`/`MANDATORY_LENSES`/`ADVISORY_LENSES` panel, `buildPanelMandate()` (seeds one reviewer per
+> lens), `derivePanelVerdict()` (reduces the panel's per-lens verdicts to the ONE combined verdict
+> `deriveNegotiationOutcome` already consumes — the round loop itself is unchanged) and
+> `renderPanelVerdictTable()` (the operator-facing split-verdict surface).
 
 The lander classifies each parked PR (see `we:scripts/lib/review-escalation.mjs` `isGateSelfPath`) and emits it
 in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons }`:
@@ -175,33 +179,49 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
   invariant is unchanged); it only informs. Then surface the PR for the operator, who clears it with
   [`/review <PR>`](../review/SKILL.md).
 - **`humanRequired: false` → agent-reviewable.** Escalated (blast-radius / size / dismissed-findings / sampling)
-  but independent of the producer. **v2 (#2311) runs a bounded editor↔reviewer NEGOTIATION LOOP** — instead of
-  v1's one-shot review + author-bounce, the drain itself drives up to `NEGOTIATION_ROUND_CAP` (3) rounds of
-  propose → critique → revise, in-session, before escalating:
-  1. **Round 1 review.** Get the diff (`gh pr diff <num> --repo <repo>`, `gh pr view <num> --repo <repo> --json
-     title,body,files`). Spawn a **fresh-context adversarial review subagent** (the `Agent` tool) seeded with
-     `buildMandate()` — diff-only, never checks out the PR branch (#2336). Shape its reply with
-     `normalizeFindings()`, reduce to a verdict with `deriveVerdict()`.
-  2. **Decide what's next** — `deriveNegotiationOutcome({ verdict, round, roundCap })` (pure; the round-cap
-     decision is deterministic, not a judgment call):
-     - **`land`** (verdict `accept`) → apply `review:accepted` (`gh pr edit <num> --repo <repo> --add-label
-       review:accepted`) and **re-run the drain** (a bare pass) — the invariant holds: a non-author reviewer
-       accepted the FINAL diff.
-     - **`escalate`** (verdict `needs-human`, OR `changes` with `round >= roundCap`) → apply `review:human`
-       (never `review:changes`/author-bounce — that path is retired by v2) and post the full round-by-round
-       findings history as a PR comment so the human sees what was tried, same as the v1 conflict-of-interest
-       advisory-review comment. This is the **only** escalation shape agents produce; the operator clears it
-       with [`/review <PR>`](../review/SKILL.md).
-     - **`continue`** (verdict `changes`, `round < roundCap`) → step 3.
-  3. **Editor round.** Spawn a **fresh-context editor subagent** seeded with `buildEditorMandate({ findings,
-     round, roundCap })` — it sees the diff + this round's findings (not the reviewer's identity or reasoning),
-     and does its writing in an **isolated throwaway clone of the PR branch** (never the drain's shared
-     checkout — the #2336 constraint applies to the editor too), then **pushes back to the SAME PR branch**
-     (the PR updates in place; no new PR opens). It must fix each finding or explicitly dismiss it with a
-     stated reason (never drop one silently).
-  4. **Next round.** Re-fetch the now-updated diff and spawn a **fresh-context reviewer subagent** (same
-     `buildMandate()` seed — it has no memory of the prior round, judging only what it sees now) → back to
-     step 2 with `round + 1`.
+  but independent of the producer. **v3 (#2310) runs a bounded MULTI-MANDATE PANEL↔editor NEGOTIATION LOOP** —
+  v2's single reviewer fans out into a panel of distinct mandated reviewers (`PANEL_LENSES`: `correctness` /
+  `security` / `simplicity` / `standards-conformance`, the `/code-review` lenses), driven up to
+  `NEGOTIATION_ROUND_CAP` (3) rounds of propose → critique → revise, in-session, before escalating:
+  1. **Round 1 panel review.** Get the diff (`gh pr diff <num> --repo <repo>`, `gh pr view <num> --repo <repo>
+     --json title,body,files`). Spawn ONE **fresh-context adversarial review subagent per lens** (the `Agent`
+     tool, fanned out in parallel via the Workflow orchestrator), each seeded with `buildPanelMandate({ lens
+     })` — same diff-only, no-checkout isolation as v2 (#2336), but judging only its own lens and blind to the
+     other lenses' reviewers. Shape each reply with `normalizeFindings()`, reduce each to its own verdict with
+     `deriveVerdict()` — you now have one `{ lens: verdict }` map (`lensVerdicts`) and, via
+     `buildPanelFindings()`, one lens-tagged findings list.
+  2. **Reduce the panel to one verdict** — `derivePanelVerdict({ lensVerdicts, humanRequired, conflict,
+     mandatoryLenses })`. `MANDATORY_LENSES` (`correctness`, `security` — real invariants with no other gate)
+     must **unanimously accept** to land; `ADVISORY_LENSES` (`simplicity`, `standards-conformance` —
+     `standards-conformance` already has a deterministic backstop in `check:standards`, #2199; `simplicity` is
+     genuine stylistic judgment) are always surfaced but never block on their own. `conflict` is a **judgment
+     call, not a mechanical one** (#51): read the mandatory lenses' findings — if they are a genuine
+     MUTUALLY-EXCLUSIVE tradeoff (e.g. security's fix directly undoes simplicity's, or vice versa within the
+     mandatory pair), pass `conflict: true`; a merely-unlucky pair of independent "changes" verdicts is not a
+     conflict, it is ordinary non-convergence and follows the round-cap path below.
+  3. **Decide what's next** — `deriveNegotiationOutcome({ verdict, round, roundCap })` on the REDUCED panel
+     verdict from step 2 (pure; the round-cap decision is deterministic, not a judgment call):
+     - **`land`** (verdict `accept` — every mandatory lens unanimously accepted) → apply `review:accepted`
+       (`gh pr edit <num> --repo <repo> --add-label review:accepted`) and **re-run the drain** (a bare pass) —
+       the invariant holds: non-author reviewers accepted the FINAL diff.
+     - **`escalate`** (verdict `needs-human` — a genuine mandate `conflict` or the global `humanRequired`
+       conflict-of-interest flag — OR `changes` with `round >= roundCap`) → apply `review:human` (never
+       `review:changes`/author-bounce — that path is retired by v2) and post BOTH the round-by-round findings
+       history AND `renderPanelVerdictTable({ lensVerdicts, mandatoryLenses })` (the per-lens
+       mandatory/advisory/verdict breakdown) as a PR comment, so the human sees exactly which lens(es)
+       disagreed and whether via non-convergence or a genuine mandate conflict. This is the **only** escalation
+       shape agents produce; the operator clears it with [`/review <PR>`](../review/SKILL.md).
+     - **`continue`** (verdict `changes`, `round < roundCap`) → step 4.
+  4. **Editor round.** Spawn a **fresh-context editor subagent** seeded with `buildEditorMandate({ findings,
+     round, roundCap })`, where `findings` is `buildPanelFindings(lensFindings)` — the WHOLE panel's
+     lens-tagged findings merged into one list (not just one lens) — so the editor sees every mandate's
+     concerns in one pass. It does its writing in an **isolated throwaway clone of the PR branch** (never the
+     drain's shared checkout — the #2336 constraint applies to the editor too), then **pushes back to the SAME
+     PR branch** (the PR updates in place; no new PR opens). It must fix each finding or explicitly dismiss it
+     with a stated reason (never drop one silently) — a dismissal of a MANDATORY lens's finding is exactly what
+     the next round's reviewer for that lens re-checks.
+  5. **Next round.** Re-fetch the now-updated diff and re-spawn the full panel (fresh-context, one subagent per
+     lens, same `buildPanelMandate()` seed — no memory of the prior round) → back to step 2 with `round + 1`.
 
   The pushed revision re-runs the PR's required `test` check — a round's editor commit is a normal PR update,
   not a merge, so a red check simply blocks that round's land/continue decision until it goes green, same as
@@ -210,9 +230,6 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
 > **The label must exist.** `review:human` is provisioned like the other `review:*` labels (see #2262/#2279);
 > if it is missing, `gh pr edit --add-label review:human` silently no-ops. Ensure it exists once:
 > `gh label create review:human --description "conflict-of-interest: gate-self edit, a human must review" --color B60205 --force`.
-
-**v3 (later, under epic #2285, blocked by v2/#2311):** adds a **multi-mandate reviewer panel** (correctness /
-security / simplicity / standards — unanimous accept lands, mandate conflict → `review:human`).
 
 ## Exit codes (surface these)
 
