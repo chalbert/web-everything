@@ -195,6 +195,15 @@ function siblingHasBuildTools(dir) {
 
 function buildSibling(dir, name) {
   if (!siblingHasBuildTools(dir)) return; // e.g. plateau-app — a plain clone is enough (#2282)
+  // A sibling with a `build:tools` needs its OWN `node_modules` first: the clone is `--reference`d
+  // (shared git objects, NOT node_modules) and FUI's build-tools.mjs statically `import esbuild` + runs
+  // `npx tsc`, so on a fresh clone it throws ERR_MODULE_NOT_FOUND before it can emit `dist/`. Install deps
+  // exactly as WE lanes do (idempotent via the .git deps marker → no reinstall on a warm refresh, #2349).
+  try {
+    ensureDeps(dir);
+  } catch (e) {
+    log(`  ⚠ ${name} sibling deps install failed — build:tools will likely fail too (${e.message})`);
+  }
   log(`  building ${name} sibling (npm run build:tools) …`);
   try {
     execFileSync('npm', ['run', 'build:tools'], { cwd: dir, stdio: 'inherit' });

@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync, symlinkSync, lstatSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, symlinkSync, lstatSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -28,15 +28,35 @@ function runPool(args, extraEnv = {}) {
 
 let base, originDir, referenceDir, poolRoot;
 
+// A tiny dependency-free package published at a `file:` path under `base`, so `npm ci`/`npm install`
+// resolves it fully OFFLINE (no registry). A `requiresDeps` build:tools `require`s it, so the build can
+// ONLY succeed if the provisioner installed the clone's node_modules first — the regression this guards.
+function makeLocalDep() {
+  const dir = join(base, 'localdep');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'localdep', version: '1.0.0', main: 'index.js' }) + '\n');
+  writeFileSync(join(dir, 'index.js'), 'module.exports = 42;\n');
+  return dir;
+}
+
 // Creates a bare origin + a checkout SIBLING of `referenceDir` (i.e. under `base`, matching
 // `primarySiblingPath`'s `dirname(repo.referencePath)` resolution), with an optional `build:tools` script.
-function makeSiblingPrimary(name, { withBuildTools } = {}) {
+// `requiresDeps` (only meaningful with `withBuildTools`) makes the build depend on an installed module, so
+// it fails on a fresh clone unless the provisioner ran `npm ci`/`install` on the clone first (#2349).
+function makeSiblingPrimary(name, { withBuildTools, requiresDeps } = {}) {
   const originBare = join(base, `${name}-origin.git`);
   const checkout = join(base, name); // sibling of referenceDir (both live directly under base)
   git(['init', '--quiet', '--bare', '--initial-branch=main', originBare]);
   git(['clone', '--quiet', originBare, checkout]);
   const pkg = { name, version: '0.0.0', scripts: {} };
-  if (withBuildTools) {
+  if (withBuildTools && requiresDeps) {
+    // `require('localdep')` resolves ONLY if node_modules was installed on the fresh clone — a build with
+    // no deps throws ERR_MODULE_NOT_FOUND (mirrors FUI's static `import esbuild` / `npx tsc`), so the
+    // dist/ marker never appears and the build-produces-dist assertion fails if npm ci was skipped.
+    pkg.dependencies = { localdep: `file:${makeLocalDep()}` };
+    pkg.scripts['build:tools'] =
+      'node -e "require(\'localdep\');require(\'fs\').mkdirSync(\'dist\',{recursive:true});require(\'fs\').writeFileSync(\'dist/marker.txt\',\'built\\n\')"';
+  } else if (withBuildTools) {
     // Pure-node script — no deps needed, so `npm run build:tools` works with no node_modules.
     pkg.scripts['build:tools'] =
       'node -e "require(\'fs\').mkdirSync(\'dist\',{recursive:true});require(\'fs\').writeFileSync(\'dist/marker.txt\',\'built\\n\')"';
@@ -93,13 +113,25 @@ describe('lane-pool constellation sibling clones (#2166 → #2282 → #2349)', (
     expect(git(['remote', 'get-url', 'origin'], fuiDir)).toBe(join(base, 'frontierui-origin.git'));
   });
 
-  it('rebuilds a sibling via its own build:tools where it has one, and skips it where it does not', () => {
-    const r = provisionWePool();
+  it('installs the clone deps then rebuilds a sibling via its own build:tools (skips where it has none)', () => {
+    // frontierui's build:tools `require`s a dep that exists ONLY after the provisioner installs the fresh
+    // clone's node_modules — so this asserts the #2349 `ensureDeps`-before-build:tools step really runs
+    // (`--reference` shares git objects, NOT node_modules), not just that some build:tools was invoked.
+    makeSiblingPrimary('frontierui', { withBuildTools: true, requiresDeps: true });
+    makeSiblingPrimary('plateau-app', { withBuildTools: false });
+    const r = runPool(
+      ['provision', '--count=1', `--origin=${originDir}`, `--reference=${referenceDir}`, '--name=web-everything', '--branch=main', '--no-install'],
+      { LANE_POOL_ROOT: poolRoot },
+    );
     expect(r.code).toBe(0);
-    const fuiMarker = join(poolRoot, 'web-everything', 'frontierui', 'dist', 'marker.txt');
+    const fuiDir = join(poolRoot, 'web-everything', 'frontierui');
+    // Deps were installed on the clone (the direct proof the provisioner didn't skip npm ci/install).
+    expect(existsSync(join(fuiDir, 'node_modules', 'localdep'))).toBe(true);
+    // And the build — which imports that dep — produced its dist/ artifact (fails if deps were skipped).
+    const fuiMarker = join(fuiDir, 'dist', 'marker.txt');
     expect(existsSync(fuiMarker)).toBe(true);
     expect(readFileSync(fuiMarker, 'utf8')).toBe('built\n');
-    // plateau-app has no build:tools script — no dist/ should appear from this provisioner.
+    // plateau-app has no build:tools script — no dist/ (and no deps install) from this provisioner.
     expect(existsSync(join(poolRoot, 'web-everything', 'plateau-app', 'dist'))).toBe(false);
   });
 
