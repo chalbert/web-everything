@@ -77,7 +77,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { assertMayMerge, hasNonEmptyBody } from './lib/pr-merge-gate.mjs';
-import { numberPendingHashes } from './lane-drain.mjs'; // JIT numbering, shared single source (#2288/#xzxc92d)
+import { numberPendingHashes, isPostLandTreeDirty } from './lane-drain.mjs'; // JIT numbering + dirty-probe, shared single source (#2288/#xzxc92d/#2348)
+export { isPostLandTreeDirty }; // re-exported for backward compat — callers/tests still import it off pr-land.mjs
 import { findDuplicateIds, summarizeDuplicates } from './lib/duplicate-id-tripwire.mjs'; // post-land dup-NNN tripwire (#2318)
 import { parseNumstat } from './merge-ai-prs.mjs'; // net two-dot diff parser, shared single source (#1821)
 import {
@@ -307,20 +308,6 @@ export function buildRegenArgs() {
     ['npm', 'run', 'gen:inventory'],
     ['npm', 'run', 'gen:reference-index'],
   ];
-}
-
-/** #2225 — the post-land heal/regen dirty-probe. Both steps `git checkout --detach origin/main` and operate
- *  on POST-MERGE main, so untracked / git-ignored noise is irrelevant to their correctness — but a
- *  deps-symlinked lane clone (#2123, now the default solo-lane path) always carries an untracked `node_modules`
- *  SYMLINK (`.gitignore` has `node_modules/`, which matches a directory, not the symlink), so a bare
- *  `git status --porcelain` read as dirty and SKIPPED heal + regen on EVERY land from such a clone. Count only
- *  TRACKED modifications (which a detached checkout can carry over and wrongly sweep into the post-land commit);
- *  ignore untracked entries and any `node_modules` line. Feed it `git status --porcelain --untracked-files=no`.
- *  Pure. */
-export function isPostLandTreeDirty(porcelainUntrackedNo) {
-  return String(porcelainUntrackedNo || '')
-    .split('\n')
-    .some((l) => l.trim() !== '' && !/(^|[\s/])node_modules(\/|$|\s)/.test(l));
 }
 
 /** #2225 secondary hardening — which post-land steps genuinely SKIPPED (so a real skip can't read as "did

@@ -391,6 +391,22 @@ function quietGit(CWD, a) {
   catch { return null; }
 }
 
+/** #2225 — the post-land heal/regen/numbering dirty-probe. These steps `git checkout --detach origin/main`
+ *  and operate on POST-MERGE main, so untracked / git-ignored noise is irrelevant to their correctness — but
+ *  a deps-symlinked lane clone (#2123, now the default solo-lane path) always carries an untracked
+ *  `node_modules` SYMLINK (`.gitignore` has `node_modules/`, which matches a directory, not the symlink), so
+ *  a bare `git status --porcelain` read as dirty and SKIPPED heal + regen on EVERY land from such a clone.
+ *  Count only TRACKED modifications (which a detached checkout can carry over and wrongly sweep into the
+ *  post-land commit); ignore untracked entries and any `node_modules` line. Feed it
+ *  `git status --porcelain --untracked-files=no`. Pure. Shared single source (#2348) — pr-land.mjs
+ *  re-exports this rather than forking its own copy; merge-ai-prs.mjs's JIT-numbering resync (below) uses it
+ *  too, both via lane-drain.mjs (never a duplicate implementation, never a cross-import cycle). */
+export function isPostLandTreeDirty(porcelainUntrackedNo) {
+  return String(porcelainUntrackedNo || '')
+    .split('\n')
+    .some((l) => l.trim() !== '' && !/(^|[\s/])node_modules(\/|$|\s)/.test(l));
+}
+
 const QUEUED_REL = '.claude/skills/batch-backlog-items/queued.json';
 // The hash→NNN ledger (#2288): the drain's local record of every hash it has already numbered, so a LATER
 // couple that references an already-landed blocker by its old hash still resolves to the real number. Lives
