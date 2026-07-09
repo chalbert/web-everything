@@ -22,6 +22,14 @@
  * allowed to clear what — that policy stays with each caller (the drain owns its leash; see
  * `we:scripts/lib/review-escalation.mjs`'s `decideReviewGate`, which is unaffected by this module).
  *
+ * #2311 (v2, under epic #2285) adds the editor↔reviewer NEGOTIATION LOOP that replaces v1's author-bounce:
+ * `buildEditorMandate()` seeds a fresh-context editor subagent with the reviewer's findings + the diff-only,
+ * no-checkout isolation `buildMandate()` already established, and `deriveNegotiationOutcome()` is the ONE
+ * deterministic round-cap decision (`continue` / `land` / `escalate`) every caller derives from — the
+ * hookable half of the loop (#51: script-decidable stays a pure function; the judgment — proposing a fix,
+ * critiquing it — stays with the subagents). The round cap itself (`NEGOTIATION_ROUND_CAP`) is a tuning knob,
+ * not a magic number scattered per caller.
+ *
  * Pure, unit-tested in `we:scripts/lib/__tests__/review-core.test.mjs`.
  */
 
@@ -132,4 +140,69 @@ export function buildMandate({ contextIsolation = 'diff-only', mandate = DEFAULT
     'nothing about labels, merge policy, or who may clear this change — that is the caller\'s decision, not yours.',
     'Report an empty findings list if nothing survives scrutiny; do not pad with stylistic nitpicks.',
   ].join(' ');
+}
+
+/**
+ * The negotiation round cap (#2311, v2 under epic #2285) — settled at spec: 3 rounds. Bounded so a
+ * non-converging editor↔reviewer cycle costs at most 3 review passes before it escalates to `review:human`,
+ * not an unbounded loop. A tuning knob (exported, not hardcoded per caller) — raise it if 3 proves too tight
+ * in practice, but any caller that needs a DIFFERENT cap should say so explicitly, not silently drift.
+ */
+export const NEGOTIATION_ROUND_CAP = 3;
+
+/**
+ * Build the canonical mandate handed to the EDITOR subagent in the v2 negotiation loop (#2311) — the
+ * counterpart to `buildMandate()` (which seeds the reviewer). Same diff-only, no-checkout isolation and the
+ * same #2336 constraint (never move HEAD in the shared tree — the editor does its writing in an isolated
+ * throwaway clone of the PR branch, then pushes back to that SAME branch so the existing PR is what updates,
+ * not a new one). The editor sees the reviewer's findings from the round that just ran and must either fix
+ * each one or explicitly dismiss it with a stated reason (the same dismissedFindings audit-trail shape used
+ * elsewhere in this repo) — it may not silently drop a finding.
+ * @param {{findings?: Array<object>, round?: number, roundCap?: number}} [o]
+ * @returns {string}
+ */
+export function buildEditorMandate({ findings = [], round = 1, roundCap = NEGOTIATION_ROUND_CAP } = {}) {
+  const list = normalizeFindings(findings);
+  const findingLines = list.length
+    ? list.map((f, i) => `  ${i + 1}. ${f.file ? `${f.file}: ` : ''}${f.summary}${f.failure_scenario ? ` — ${f.failure_scenario}` : ''}`).join('\n')
+    : '  (none — the reviewer reported no findings; this mandate should not be built in that case)';
+  return [
+    `You are the EDITOR in round ${round}/${roundCap} of a bounded editor↔reviewer negotiation over a PR diff.`,
+    'A reviewer subagent (independent of you and of the PR\'s original author) reported these findings:',
+    findingLines,
+    'Revise the diff to address each finding: either fix it, or if you judge it not a real problem, state your',
+    'dismissal reason explicitly in your reply (never drop a finding silently — it becomes the audit trail).',
+    'Do your writing in an ISOLATED THROWAWAY CLONE of the PR branch, never in the drain\'s shared checkout',
+    '(the #2336 never-move-shared-HEAD constraint applies to you too) — commit there and push back to the SAME',
+    'PR branch so this PR updates in place rather than a new one being opened.',
+    'A fresh-context reviewer will re-review your revised diff next round; you will not see their internal',
+    'reasoning, only their next findings list (or acceptance).',
+  ].join(' ');
+}
+
+/** The three negotiation-loop outcomes deriveNegotiationOutcome() can return (#2311). */
+export const NEGOTIATION_OUTCOMES = Object.freeze({
+  CONTINUE: 'continue',
+  LAND: 'land',
+  ESCALATE: 'escalate',
+});
+
+/**
+ * Derive what the v2 negotiation loop (#2311) does next after a reviewer round. Pure — the ONE deterministic
+ * round-cap decision every caller shares (mirrors `deriveVerdict`'s single-sourcing of the verdict itself):
+ *
+ *   - the round's verdict is `needs-human` → `escalate`, ALWAYS (a revision that itself touches the
+ *     auto-review trust chain is the v1 conflict-of-interest case — no round budget saves it).
+ *   - `accept` → `land` (the invariant holds: the final diff was accepted by a non-author reviewer).
+ *   - `changes` and `round < roundCap` → `continue` (another editor↔reviewer round).
+ *   - `changes` and `round >= roundCap` → `escalate` (non-convergence; surfaced to `review:human` same as v1's
+ *     conflict-of-interest path, so the operator sees ONE escalation shape regardless of why it escalated).
+ *
+ * @param {{verdict: 'accept'|'changes'|'needs-human', round: number, roundCap?: number}} o
+ * @returns {'continue'|'land'|'escalate'}
+ */
+export function deriveNegotiationOutcome({ verdict, round, roundCap = NEGOTIATION_ROUND_CAP }) {
+  if (verdict === VERDICTS.NEEDS_HUMAN) return NEGOTIATION_OUTCOMES.ESCALATE;
+  if (verdict === VERDICTS.ACCEPT) return NEGOTIATION_OUTCOMES.LAND;
+  return round < roundCap ? NEGOTIATION_OUTCOMES.CONTINUE : NEGOTIATION_OUTCOMES.ESCALATE;
 }

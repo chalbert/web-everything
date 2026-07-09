@@ -141,12 +141,13 @@ refinement should read the batch journals directly to drop that coupling; the ex
 5. After anything merged, fast-forwards **the clone's** local `main` to the advanced `origin/main`
    (`git pull --ff-only --autostash`, best-effort) — in the isolated clone, never the primary checkout.
 
-## Auto-review the parked PRs (#2285 v1)
+## Auto-review the parked PRs (#2285 v1 + v2)
 
 The #2171/#2262 review-escalation gate **parks** a blast-radius PR (`review:pending`) and waits for an
 independent reviewer to apply `review:accepted`/`review:changes` — otherwise every escalated PR stalls the
 queue until a human gets to it. **v1 makes the drain run that independent review itself, via a subagent** — for
-the PRs where an agent reviewer is genuinely independent of the *producer*. The one invariant it preserves:
+the PRs where an agent reviewer is genuinely independent of the *producer*. **v2 (#2311) replaces v1's
+author-bounce with a bounded editor↔reviewer negotiation loop** (below). The one invariant BOTH preserve:
 **a landed PR was accepted by an agent that did not author it.**
 
 > **One engine (#2326).** The `{findings, verdict}` contract is single-sourced in `we:scripts/lib/review-core.mjs`
@@ -154,6 +155,9 @@ the PRs where an agent reviewer is genuinely independent of the *producer*. The 
 > the #2336 diff-only, **no-checkout** clause), `normalizeFindings()` shapes what it returns, and
 > `deriveVerdict()` maps findings → `accept`/`changes`/`needs-human`. The drain review below and the
 > [`/review`](../review/SKILL.md) human-verdict skill BOTH render through it — no hand-rolled reviewer prose.
+> **#2311 (v2)** adds `buildEditorMandate()` (seeds the editor subagent's revision round) and
+> `deriveNegotiationOutcome()` (the ONE deterministic `continue`/`land`/`escalate` derivation from a round's
+> verdict + the round cap) — same module, same single-sourcing discipline.
 
 The lander classifies each parked PR (see `we:scripts/lib/review-escalation.mjs` `isGateSelfPath`) and emits it
 in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons }`:
@@ -171,26 +175,44 @@ in the `--json` output's `parked` array as `{ num, repo, humanRequired, reasons 
   invariant is unchanged); it only informs. Then surface the PR for the operator, who clears it with
   [`/review <PR>`](../review/SKILL.md).
 - **`humanRequired: false` → agent-reviewable.** Escalated (blast-radius / size / dismissed-findings / sampling)
-  but independent of the producer. **Auto-review it through the core:**
-  1. Get the diff: `gh pr diff <num> --repo <repo>` (and `gh pr view <num> --repo <repo> --json title,body,files`).
-  2. Spawn a **fresh-context adversarial review subagent** (the `Agent` tool, e.g. `general-purpose`) seeded with
-     `we:scripts/lib/review-core.mjs` `buildMandate()` — it sees ONLY the diff + PR description, not this
-     session's context, and (per the mandate) **never checks out the PR branch** in the shared tree (#2336; any
-     test/repro runs in a throwaway clone). Shape its answer with `normalizeFindings()` and reduce it to a
-     verdict with `deriveVerdict()`: **accept** (empty/non-blocking findings) or **changes** (a concrete blocking
-     finding, cited).
-  3. Apply the verdict as a label: accept → `gh pr edit <num> --repo <repo> --add-label review:accepted`;
-     changes → `--add-label review:changes` (which routes the fix back to the **author lane**, not the drain —
-     v1 does **no** drain-side editing; that convergence loop is v2, epic #2285).
-  4. **Re-run the drain** (a bare pass) — a PR now carrying `review:accepted` clears the gate and lands.
+  but independent of the producer. **v2 (#2311) runs a bounded editor↔reviewer NEGOTIATION LOOP** — instead of
+  v1's one-shot review + author-bounce, the drain itself drives up to `NEGOTIATION_ROUND_CAP` (3) rounds of
+  propose → critique → revise, in-session, before escalating:
+  1. **Round 1 review.** Get the diff (`gh pr diff <num> --repo <repo>`, `gh pr view <num> --repo <repo> --json
+     title,body,files`). Spawn a **fresh-context adversarial review subagent** (the `Agent` tool) seeded with
+     `buildMandate()` — diff-only, never checks out the PR branch (#2336). Shape its reply with
+     `normalizeFindings()`, reduce to a verdict with `deriveVerdict()`.
+  2. **Decide what's next** — `deriveNegotiationOutcome({ verdict, round, roundCap })` (pure; the round-cap
+     decision is deterministic, not a judgment call):
+     - **`land`** (verdict `accept`) → apply `review:accepted` (`gh pr edit <num> --repo <repo> --add-label
+       review:accepted`) and **re-run the drain** (a bare pass) — the invariant holds: a non-author reviewer
+       accepted the FINAL diff.
+     - **`escalate`** (verdict `needs-human`, OR `changes` with `round >= roundCap`) → apply `review:human`
+       (never `review:changes`/author-bounce — that path is retired by v2) and post the full round-by-round
+       findings history as a PR comment so the human sees what was tried, same as the v1 conflict-of-interest
+       advisory-review comment. This is the **only** escalation shape agents produce; the operator clears it
+       with [`/review <PR>`](../review/SKILL.md).
+     - **`continue`** (verdict `changes`, `round < roundCap`) → step 3.
+  3. **Editor round.** Spawn a **fresh-context editor subagent** seeded with `buildEditorMandate({ findings,
+     round, roundCap })` — it sees the diff + this round's findings (not the reviewer's identity or reasoning),
+     and does its writing in an **isolated throwaway clone of the PR branch** (never the drain's shared
+     checkout — the #2336 constraint applies to the editor too), then **pushes back to the SAME PR branch**
+     (the PR updates in place; no new PR opens). It must fix each finding or explicitly dismiss it with a
+     stated reason (never drop one silently).
+  4. **Next round.** Re-fetch the now-updated diff and spawn a **fresh-context reviewer subagent** (same
+     `buildMandate()` seed — it has no memory of the prior round, judging only what it sees now) → back to
+     step 2 with `round + 1`.
+
+  The pushed revision re-runs the PR's required `test` check — a round's editor commit is a normal PR update,
+  not a merge, so a red check simply blocks that round's land/continue decision until it goes green, same as
+  any other PR.
 
 > **The label must exist.** `review:human` is provisioned like the other `review:*` labels (see #2262/#2279);
 > if it is missing, `gh pr edit --add-label review:human` silently no-ops. Ensure it exists once:
 > `gh label create review:human --description "conflict-of-interest: gate-self edit, a human must review" --color B60205 --force`.
 
-**v2/v3 (later, under epic #2285):** v2 replaces the author-bounce with an editor↔reviewer **negotiation loop**
-(auto-fix that converges, N-round cap → `review:human`); v3 adds a **multi-mandate reviewer panel** (correctness
-/ security / simplicity / standards — unanimous accept lands, mandate conflict → `review:human`).
+**v3 (later, under epic #2285, blocked by v2/#2311):** adds a **multi-mandate reviewer panel** (correctness /
+security / simplicity / standards — unanimous accept lands, mandate conflict → `review:human`).
 
 ## Exit codes (surface these)
 
