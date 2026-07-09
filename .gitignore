@@ -38,4 +38,6 @@ skills-src/batch-backlog-items/reservations.json
 skills-src/batch-backlog-items/prepare-hold.json
 skills-src/batch-backlog-items/id-ledger.json
 # Review-escalation park-age clock (#2262) — local, machine-scoped, safe to lose (a PR just re-parks fresh)
+# Both the built skill dir and the skills-src/ source dir the drain writes from (the source path leaked to the primary).
 .claude/skills/drain/review-park-state.json
+skills-src/drain/review-park-state.json
