@@ -1,10 +1,11 @@
 ---
 kind: story
 size: 5
-status: open
+status: resolved
 blockedBy: ["1994"]
 dateOpened: "2026-06-30"
-dateStarted: "2026-07-01"
+dateStarted: "2026-07-09"
+dateResolved: "2026-07-09"
 tags: [webportals, webdirectives, directive-form, migration, customized-built-in, fui]
 ---
 
